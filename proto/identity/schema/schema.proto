@@ -1,0 +1,321 @@
+// Identity Service — EntDB Schema
+//
+// Defines all node types and edge types used by the identity service.
+// Proto field numbers correspond to EntDB field_ids on disk — they are
+// STABLE and must never be renumbered.
+//
+// Generate with:
+//   entdb generate proto/identity/schema.proto --go ...
+//   entdb generate proto/identity/schema.proto --python ...
+
+syntax = "proto3";
+
+package identity.schema;
+
+option go_package = "github.com/elloloop/identity/gen/go/identity/schema";
+
+import "entdb/entdb_options.proto";
+
+// ═══════════════════════════════════════════════════════════════════════
+// Node Types
+// ═══════════════════════════════════════════════════════════════════════
+
+// ─── User (type_id 1) ──────────────────────────────────────────────────
+
+message User {
+    option (entdb.node) = {
+        type_id: 1
+        data_policy: DATA_POLICY_PERSONAL
+        subject_field: "id"
+        description: "A user in the system"
+    };
+
+    string email              = 1  [(entdb.field) = { required: true, unique: true, searchable: true, pii: true }];
+    string name               = 2  [(entdb.field) = { required: true, searchable: true, pii: true }];
+    string role               = 3  [(entdb.field) = { enum_values: "admin,member,guest", default_value: "member", pii_false: true }];
+    string avatar_url         = 4  [(entdb.field) = { pii: true }];
+    int64  created_at         = 5  [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  updated_at         = 6  [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    string password_hash      = 7  [(entdb.field) = { pii_false: true, description: "bcrypt hash — never exposed via RPC" }];
+    bool   totp_required      = 8  [(entdb.field) = { indexed: true, pii_false: true }];
+    int64  failed_login_count = 9  [(entdb.field) = { pii_false: true }];
+    int64  locked_until       = 10 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    string status             = 11 [(entdb.field) = { enum_values: "active,invited,deactivated,suspended", indexed: true, pii_false: true }];
+    string recovery_email     = 12 [(entdb.field) = { pii: true }];
+    string invited_by         = 13 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    int64  invited_at         = 14 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  quota_bytes        = 15 [(entdb.field) = { pii_false: true }];
+    int64  deactivated_at     = 16 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  last_login_at      = 17 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+}
+
+// ─── WorkingGroup (type_id 2) ──────────────────────────────────────────
+
+message WorkingGroup {
+    option (entdb.node) = {
+        type_id: 2
+        tenant_visible: true
+        data_policy: DATA_POLICY_BUSINESS
+        description: "A working group (team/department) within a tenant"
+    };
+
+    string name        = 1 [(entdb.field) = { required: true, searchable: true }];
+    string description = 2 [(entdb.field) = { searchable: true }];
+    string created_by  = 3 [(entdb.field) = { kind: "ref", ref_type_id: 1 }];
+    int64  created_at  = 4 [(entdb.field) = { kind: "timestamp" }];
+    int64  updated_at  = 5 [(entdb.field) = { kind: "timestamp" }];
+}
+
+// ─── RefreshToken (type_id 5) ──────────────────────────────────────────
+
+message RefreshToken {
+    option (entdb.node) = {
+        type_id: 5
+        data_policy: DATA_POLICY_EPHEMERAL
+        subject_field: "user_id"
+        description: "A hashed refresh token bound to a user session"
+    };
+
+    string token_hash   = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string user_id      = 2 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    string device_info  = 3 [(entdb.field) = { pii: true }];
+    int64  expires_at   = 4 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  created_at   = 5 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    string device_name  = 6 [(entdb.field) = { pii: true }];
+    string ip_address   = 7 [(entdb.field) = { pii: true }];
+    string user_agent   = 8 [(entdb.field) = { pii: true }];
+    int64  last_used_at = 9 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+}
+
+// ─── PasswordResetToken (type_id 19) ───────────────────────────────────
+
+message PasswordResetToken {
+    option (entdb.node) = {
+        type_id: 19
+        data_policy: DATA_POLICY_EPHEMERAL
+        subject_field: "user_id"
+        description: "A short-lived token for password reset flows"
+    };
+
+    string token_hash = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string user_id    = 2 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    int64  expires_at = 3 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  created_at = 4 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+}
+
+// ─── PasskeyCredential (type_id 20) ────────────────────────────────────
+
+message PasskeyCredential {
+    option (entdb.node) = {
+        type_id: 20
+        data_policy: DATA_POLICY_PERSONAL
+        subject_field: "user_id"
+        description: "A WebAuthn/FIDO2 passkey credential registered by a user"
+    };
+
+    string credential_id = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string user_id       = 2 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    string public_key    = 3 [(entdb.field) = { required: true, pii_false: true }];
+    int64  sign_count    = 4 [(entdb.field) = { pii_false: true }];
+    string device_name   = 5 [(entdb.field) = { pii: true }];
+    string aaguid        = 6 [(entdb.field) = { pii_false: true, description: "Authenticator Attestation GUID" }];
+    string transports    = 7 [(entdb.field) = { pii_false: true, description: "Comma-separated transport hints (usb, ble, nfc, internal)" }];
+    int64  created_at    = 8 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  last_used_at  = 9 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+}
+
+// ─── PasskeyChallenge (type_id 21) ─────────────────────────────────────
+
+message PasskeyChallenge {
+    option (entdb.node) = {
+        type_id: 21
+        data_policy: DATA_POLICY_EPHEMERAL
+        description: "A short-lived WebAuthn challenge for registration or authentication"
+    };
+
+    string challenge      = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string user_id        = 2 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string challenge_type = 3 [(entdb.field) = { enum_values: "registration,authentication", pii_false: true }];
+    int64  expires_at     = 4 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  created_at     = 5 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+}
+
+// ─── QrLoginSession (type_id 22) ───────────────────────────────────────
+
+message QrLoginSession {
+    option (entdb.node) = {
+        type_id: 22
+        data_policy: DATA_POLICY_EPHEMERAL
+        description: "A cross-device QR login session"
+    };
+
+    string session_id             = 1  [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string status                 = 2  [(entdb.field) = { enum_values: "pending,approved,rejected,expired,consumed", indexed: true, pii_false: true }];
+    string user_id                = 3  [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string new_device_info        = 4  [(entdb.field) = { pii: true }];
+    string new_device_ip          = 5  [(entdb.field) = { pii: true }];
+    string new_device_user_agent  = 6  [(entdb.field) = { pii: true }];
+    string approved_device_info   = 7  [(entdb.field) = { pii: true }];
+    int64  expires_at             = 8  [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  created_at             = 9  [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  updated_at             = 10 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+}
+
+// ─── TotpCredential (type_id 23) ───────────────────────────────────────
+
+message TotpCredential {
+    option (entdb.node) = {
+        type_id: 23
+        data_policy: DATA_POLICY_PERSONAL
+        subject_field: "user_id"
+        description: "A TOTP (time-based one-time password) credential for 2FA"
+    };
+
+    string user_id          = 1 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    string secret_encrypted = 2 [(entdb.field) = { required: true, pii_false: true, description: "AES-encrypted TOTP secret" }];
+    bool   verified         = 3 [(entdb.field) = { indexed: true, pii_false: true }];
+    int64  created_at       = 4 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  last_used_at     = 5 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+}
+
+// ─── RecoveryCode (type_id 24) ─────────────────────────────────────────
+
+message RecoveryCode {
+    option (entdb.node) = {
+        type_id: 24
+        data_policy: DATA_POLICY_PERSONAL
+        subject_field: "user_id"
+        description: "A one-time recovery code for 2FA backup access"
+    };
+
+    string user_id    = 1 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    string code_hash  = 2 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    bool   used       = 3 [(entdb.field) = { indexed: true, pii_false: true }];
+    int64  created_at = 4 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  used_at    = 5 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+}
+
+// ─── LoginChallenge (type_id 25) ───────────────────────────────────────
+
+message LoginChallenge {
+    option (entdb.node) = {
+        type_id: 25
+        data_policy: DATA_POLICY_EPHEMERAL
+        description: "A pending login challenge awaiting 2FA verification"
+    };
+
+    string challenge_id = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string user_id      = 2 [(entdb.field) = { required: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    int64  expires_at   = 3 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  created_at   = 4 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+}
+
+// ─── AuditEvent (type_id 26) ───────────────────────────────────────────
+
+message AuditEvent {
+    option (entdb.node) = {
+        type_id: 26
+        data_policy: DATA_POLICY_AUDIT
+        subject_field: "actor_user_id"
+        description: "An immutable security audit log entry"
+    };
+
+    string event_type      = 1 [(entdb.field) = { enum_values: "login_success,login_failure,logout,password_changed,password_reset,totp_enabled,totp_disabled,totp_verified,passkey_added,passkey_removed,passkey_used,session_revoked,user_invited,user_deactivated,user_reactivated,admin_reset_password,oauth_login,qr_login_approved,qr_login_rejected", indexed: true, pii_false: true }];
+    string actor_user_id   = 2 [(entdb.field) = { indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    string target_user_id  = 3 [(entdb.field) = { indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    string ip_address      = 4 [(entdb.field) = { pii: true }];
+    string user_agent      = 5 [(entdb.field) = { pii: true }];
+    bool   success         = 6 [(entdb.field) = { indexed: true, pii_false: true }];
+    string details         = 7 [(entdb.field) = { kind: "json", pii_false: true, description: "JSON blob with event-specific data" }];
+    int64  created_at      = 8 [(entdb.field) = { kind: "timestamp", indexed: true, pii_false: true }];
+}
+
+// ─── UserInvitation (type_id 27) ───────────────────────────────────────
+
+message UserInvitation {
+    option (entdb.node) = {
+        type_id: 27
+        data_policy: DATA_POLICY_EPHEMERAL
+        description: "An admin-issued invitation for a new user to join the tenant"
+    };
+
+    string token_hash  = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string email       = 2 [(entdb.field) = { required: true, unique: true, indexed: true, searchable: true, pii: true }];
+    string user_id     = 3 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string invited_by  = 4 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string role        = 5 [(entdb.field) = { enum_values: "admin,member,guest", pii_false: true }];
+    int64  expires_at  = 6 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  accepted_at = 7 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  created_at  = 8 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+}
+
+// ─── AdminHelpRequest (type_id 28) ─────────────────────────────────────
+
+message AdminHelpRequest {
+    option (entdb.node) = {
+        type_id: 28
+        data_policy: DATA_POLICY_BUSINESS
+        description: "A help request from a user who cannot log in, resolved by an admin"
+    };
+
+    string email            = 1 [(entdb.field) = { required: true, searchable: true, indexed: true, pii: true }];
+    string reason           = 2 [(entdb.field) = { searchable: true, pii_false: true }];
+    string source_ip        = 3 [(entdb.field) = { pii: true }];
+    string user_agent       = 4 [(entdb.field) = { pii: true }];
+    string status           = 5 [(entdb.field) = { enum_values: "pending,resolved,rejected", indexed: true, pii_false: true }];
+    string resolved_by      = 6 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string resolution_notes = 7 [(entdb.field) = { pii_false: true }];
+    int64  resolved_at      = 8 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  created_at       = 9 [(entdb.field) = { kind: "timestamp", indexed: true, pii_false: true }];
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Types
+// ═══════════════════════════════════════════════════════════════════════
+
+// ─── MemberOf (edge_id 101): User → WorkingGroup ───────────────────────
+
+message MemberOf {
+    option (entdb.edge) = {
+        edge_id: 101
+        name: "MEMBER_OF"
+        description: "User belongs to a working group"
+    };
+}
+
+// ─── UserPasskey (edge_id 216): User → PasskeyCredential ───────────────
+
+message UserPasskey {
+    option (entdb.edge) = {
+        edge_id: 216
+        name: "USER_PASSKEY"
+        data_policy: DATA_POLICY_PERSONAL
+        on_subject_exit: SUBJECT_EXIT_FROM
+        description: "User owns a passkey credential"
+    };
+}
+
+// ─── UserTotp (edge_id 217): User → TotpCredential ────────────────────
+
+message UserTotp {
+    option (entdb.edge) = {
+        edge_id: 217
+        name: "USER_TOTP"
+        unique_per_from: true
+        data_policy: DATA_POLICY_PERSONAL
+        on_subject_exit: SUBJECT_EXIT_FROM
+        description: "User has a TOTP credential (at most one per user)"
+    };
+}
+
+// ─── UserRecoveryCode (edge_id 218): User → RecoveryCode ──────────────
+
+message UserRecoveryCode {
+    option (entdb.edge) = {
+        edge_id: 218
+        name: "USER_RECOVERY_CODE"
+        data_policy: DATA_POLICY_PERSONAL
+        on_subject_exit: SUBJECT_EXIT_FROM
+        description: "User owns a set of recovery codes"
+    };
+}

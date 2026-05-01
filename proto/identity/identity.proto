@@ -1,0 +1,717 @@
+syntax = "proto3";
+
+package identity;
+
+option go_package = "github.com/elloloop/identity/gen/go/identity;identity";
+
+import "google/protobuf/timestamp.proto";
+
+// ─── User ────────────────────────────────────────────────────────────
+
+enum UserStatus {
+  USER_STATUS_UNSPECIFIED = 0;
+  USER_STATUS_ACTIVE = 1;
+  USER_STATUS_INVITED = 2;
+  USER_STATUS_DEACTIVATED = 3;
+  USER_STATUS_SUSPENDED = 4;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string avatar_url = 4;
+  string role = 5;                      // "admin", "member", "guest"
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+  bool totp_required = 8;               // true if the user has enrolled a TOTP credential
+  UserStatus status = 9;
+  string recovery_email = 10;
+  int64 quota_bytes = 11;
+  int64 last_login_at_ms = 12;
+}
+
+message CreateUserRequest {
+  string email = 1;
+  string name = 2;
+  string avatar_url = 3;
+  string role = 4;
+  string tenant_id = 5;
+}
+
+message CreateUserResponse {
+  User user = 1;
+}
+
+message GetUserRequest {
+  string user_id = 1;
+  string tenant_id = 2;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message UpdateUserRequest {
+  string user_id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string avatar_url = 4;
+  string role = 5;
+}
+
+message UpdateUserResponse {
+  User user = 1;
+}
+
+message DeleteUserRequest {
+  string user_id = 1;
+  string tenant_id = 2;
+}
+
+message DeleteUserResponse {}
+
+// Admin-only paginated user listing.
+//   Requires the caller's JWT to carry role=admin.
+//   Supports filtering by status and substring search on email/name.
+message ListUsersRequest {
+  string tenant_id = 1;
+  string cursor = 2;
+  int32 limit = 3;
+  UserStatus status_filter = 4;     // USER_STATUS_UNSPECIFIED = no filter
+  string search = 5;                // optional substring match on email/name
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+  string next_cursor = 2;
+  int32 total_count = 3;
+}
+
+// ─── Group (formerly WorkingGroup) ──────────────────────────────────
+// Note: the underlying graph DB node type is still ``WorkingGroup`` (type_id 2).
+// Only the proto / RPC names have been renamed for clarity.
+
+message Group {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message CreateGroupRequest {
+  string name = 1;
+  string description = 2;
+  string tenant_id = 3;
+  string created_by = 4;                // user_id of creator
+}
+
+message CreateGroupResponse {
+  Group group = 1;
+}
+
+message UpdateGroupRequest {
+  string group_id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string description = 4;
+}
+
+message UpdateGroupResponse {
+  Group group = 1;
+}
+
+message DeleteGroupRequest {
+  string group_id = 1;
+  string tenant_id = 2;
+}
+
+message DeleteGroupResponse {}
+
+message ListGroupsRequest {
+  string tenant_id = 1;
+  string cursor = 2;
+  int32 limit = 3;
+  string name_filter = 4;           // optional substring match on group name
+}
+
+message ListGroupsResponse {
+  repeated Group groups = 1;
+  string next_cursor = 2;
+}
+
+// ─── Membership (edges: User ←MEMBER_OF→ Group) ──────────────
+
+message AddGroupMemberRequest {
+  string group_id = 1;
+  string user_id = 2;
+  string tenant_id = 3;
+}
+
+message AddGroupMemberResponse {}
+
+message RemoveGroupMemberRequest {
+  string group_id = 1;
+  string user_id = 2;
+  string tenant_id = 3;
+}
+
+message RemoveGroupMemberResponse {}
+
+message ListGroupMembersRequest {
+  string group_id = 1;
+  string tenant_id = 2;
+}
+
+message ListGroupMembersResponse {
+  repeated User members = 1;
+}
+
+// ─── Auth Messages ──────────────────────────────────────────────────
+
+message OAuthLoginRequest {
+  string code          = 1;
+  string redirect_uri  = 2;
+  string provider      = 3;  // "google" or "microsoft"
+  string code_verifier = 4;  // PKCE (optional)
+  string tenant        = 5;  // Microsoft tenant ID (optional)
+}
+
+message OAuthLoginResponse {
+  User user             = 1;
+  string access_token   = 2;  // Backend-issued JWT
+  reserved 3;                  // was id_token (removed)
+  string refresh_token  = 4;  // For token rotation (send in RefreshToken RPC body)
+  int32 expires_in      = 5;  // Access token lifetime in seconds
+}
+
+message PasswordSignupRequest {
+  string email    = 1;
+  string password = 2;
+  string recovery_email = 3;  // Optional: used for password reset flow
+}
+
+message PasswordSignupResponse {
+  string id_token      = 1;  // deprecated, kept for backward compat
+  User user            = 2;
+  string access_token  = 3;
+  string refresh_token = 4;
+  int32 expires_in     = 5;
+}
+
+message PasswordLoginRequest {
+  string email    = 1;
+  string password = 2;
+}
+
+message PasswordLoginResponse {
+  string id_token = 1;       // Legacy local format (deprecated)
+  User user       = 2;
+  string access_token  = 3;  // Backend-issued JWT (empty when totp_required=true)
+  string refresh_token = 4;  // For token rotation (empty when totp_required=true)
+  int32 expires_in     = 5;  // Access token lifetime in seconds
+  bool totp_required      = 6;  // true when the user has TOTP enabled; client must call VerifyTotp
+  string login_challenge_id = 7;  // id of the pending LoginChallenge; pass to VerifyTotp
+}
+
+// ─── Session / Token Auth ───────────────────────────────────────────
+
+message GetCurrentUserRequest {}
+
+message GetCurrentUserResponse {
+  User user = 1;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+}
+
+message LogoutRequest {
+  string refresh_token = 1;
+}
+
+message LogoutResponse {}
+
+// ─── Self-Service Profile ────────────────────────────────────────────
+
+message UpdateProfileRequest {
+  // Omitted (empty-string) fields are unchanged.
+  string name = 1;
+  string avatar_url = 2;
+}
+
+message UpdateProfileResponse {
+  User user = 1;
+}
+
+// ─── Password Management ────────────────────────────────────────────
+
+message ChangePasswordRequest {
+  string current_password = 1;
+  string new_password     = 2;
+}
+
+message ChangePasswordResponse {}
+
+// Recovery-email-driven password reset (replaces the deprecated self-serve
+// ForgotPassword flow). The reset link is sent to the recovery_email on file —
+// or, if none is set, the request silently succeeds (no enumeration).
+message RequestPasswordResetRequest {
+  string email = 1;
+}
+
+message RequestPasswordResetResponse {
+  // Always returns success (no enumeration).
+}
+
+// ─── Admin Help Flow ────────────────────────────────────────────────
+// Replaces the self-serve ForgotPassword flow. End users who can't log in
+// raise a ticket; admins resolve it via the dashboard.
+
+enum HelpRequestStatus {
+  HELP_REQUEST_STATUS_UNSPECIFIED = 0;
+  HELP_REQUEST_STATUS_PENDING = 1;
+  HELP_REQUEST_STATUS_RESOLVED = 2;
+  HELP_REQUEST_STATUS_REJECTED = 3;
+}
+
+message AdminHelpRequest {
+  string id = 1;
+  string email = 2;
+  string reason = 3;
+  string source_ip = 4;
+  string user_agent = 5;
+  HelpRequestStatus status = 6;
+  string resolved_by = 7;
+  string resolution_notes = 8;
+  google.protobuf.Timestamp resolved_at = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message RequestAdminHelpRequest {
+  string email = 1;
+  string reason = 2;  // Optional — what the user is having trouble with
+}
+
+message RequestAdminHelpResponse {
+  // Always success — no enumeration
+}
+
+message ListHelpRequestsRequest {
+  HelpRequestStatus status_filter = 1;  // 0 = all
+  string cursor = 2;
+  int32 limit = 3;
+}
+
+message ListHelpRequestsResponse {
+  repeated AdminHelpRequest requests = 1;
+  string next_cursor = 2;
+  int32 pending_count = 3;
+}
+
+message ResolveHelpRequestRequest {
+  string request_id = 1;
+  bool reject = 2;         // false = resolve, true = reject
+  string resolution_notes = 3;
+}
+
+message ResolveHelpRequestResponse {
+  AdminHelpRequest request = 1;
+}
+
+// ─── Passkey Messages ───────────────────────────────────────────
+
+message PasskeyCredentialInfo {
+  string credential_id = 1;
+  string device_name = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp last_used_at = 4;
+}
+
+// Registration (requires authenticated session)
+message BeginPasskeyRegistrationRequest {
+  string device_name = 1;
+}
+
+message BeginPasskeyRegistrationResponse {
+  // JSON string of PublicKeyCredentialCreationOptions (frontend passes to navigator.credentials.create)
+  string options_json = 1;
+  string challenge_id = 2;
+}
+
+message CompletePasskeyRegistrationRequest {
+  string challenge_id = 1;
+  // JSON string of the PublicKeyCredential returned by navigator.credentials.create
+  string credential_json = 2;
+  string device_name = 3;
+}
+
+message CompletePasskeyRegistrationResponse {
+  PasskeyCredentialInfo credential = 1;
+}
+
+// Authentication (no session required)
+message BeginPasskeyLoginRequest {
+  string email = 1;  // optional — if empty, allows discoverable credentials (resident keys)
+}
+
+message BeginPasskeyLoginResponse {
+  string options_json = 1;
+  string challenge_id = 2;
+}
+
+message CompletePasskeyLoginRequest {
+  string challenge_id = 1;
+  string credential_json = 2;
+}
+
+message CompletePasskeyLoginResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  int32 expires_in = 4;
+}
+
+// Management
+message ListPasskeysRequest {}
+
+message ListPasskeysResponse {
+  repeated PasskeyCredentialInfo credentials = 1;
+}
+
+message DeletePasskeyRequest {
+  string credential_id = 1;
+}
+
+message DeletePasskeyResponse {}
+
+// ─── QR Login ───────────────────────────────────────────────────────
+
+enum QrLoginStatus {
+  QR_LOGIN_STATUS_UNSPECIFIED = 0;
+  QR_LOGIN_STATUS_PENDING     = 1;
+  QR_LOGIN_STATUS_APPROVED    = 2;
+  QR_LOGIN_STATUS_REJECTED    = 3;
+  QR_LOGIN_STATUS_EXPIRED     = 4;
+  QR_LOGIN_STATUS_CONSUMED    = 5;
+}
+
+// Step 1: New device (unauthenticated) initiates a QR login.
+message InitiateQrLoginRequest {
+  string device_info = 1;  // e.g. "Pixel 8 Pro"
+  string user_agent  = 2;
+}
+
+message InitiateQrLoginResponse {
+  string session_id = 1;  // opaque token for polling
+  string qr_url     = 2;  // URL to encode in the QR code
+  int32  expires_in = 3;  // seconds until session expires
+}
+
+// Step 2a: Authenticated device looks up session details for display.
+message GetQrLoginSessionRequest {
+  string session_id = 1;
+}
+
+message GetQrLoginSessionResponse {
+  QrLoginStatus status                 = 1;
+  string new_device_info               = 2;
+  string new_device_ip                 = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+// Step 2b: Authenticated device approves (or rejects) the new device.
+message ApproveQrLoginRequest {
+  string session_id = 1;
+  bool   approve    = 2;
+}
+
+message ApproveQrLoginResponse {
+  QrLoginStatus status = 1;
+}
+
+// Step 3: New device polls for completion.
+message PollQrLoginRequest {
+  string session_id = 1;
+}
+
+message PollQrLoginResponse {
+  QrLoginStatus status = 1;
+  // Populated only when status == QR_LOGIN_STATUS_APPROVED.
+  User   user          = 2;
+  string access_token  = 3;
+  string refresh_token = 4;
+  int32  expires_in    = 5;
+}
+
+// ─── 2FA TOTP ────────────────────────────────────────────────────────
+
+message BeginTotpSetupRequest {}
+
+message BeginTotpSetupResponse {
+  string secret = 1;                    // Base32 (shown to user once)
+  string qr_code_uri = 2;               // otpauth://totp/Glassa:user@example.com?secret=...&issuer=Glassa
+  repeated string recovery_codes = 3;   // 10 one-time recovery codes (shown once)
+}
+
+message VerifyTotpSetupRequest {
+  string code = 1;
+}
+
+message VerifyTotpSetupResponse {
+  bool verified = 1;
+}
+
+message DisableTotpRequest {
+  string password = 1;                  // Require password confirmation to disable
+}
+
+message DisableTotpResponse {}
+
+message VerifyTotpRequest {
+  string login_challenge_id = 1;        // From a pending login
+  string code = 2;                      // TOTP code OR recovery code
+}
+
+message VerifyTotpResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  int32 expires_in = 4;
+}
+
+message RegenerateRecoveryCodesRequest {
+  string password = 1;
+}
+
+message RegenerateRecoveryCodesResponse {
+  repeated string recovery_codes = 1;
+}
+
+// ─── Session Management ─────────────────────────────────────────────
+
+message Session {
+  string session_id = 1;                // refresh token node id (NOT the raw token)
+  string device_name = 2;
+  string ip_address = 3;
+  string user_agent = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp last_used_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+  bool current = 8;                     // is this the session making the request
+}
+
+message ListMySessionsRequest {}
+
+message ListMySessionsResponse {
+  repeated Session sessions = 1;
+}
+
+message RevokeSessionRequest {
+  string session_id = 1;
+}
+
+message RevokeSessionResponse {}
+
+message RevokeAllSessionsRequest {
+  string password = 1;                  // Require password to revoke all
+}
+
+message RevokeAllSessionsResponse {
+  int32 revoked_count = 1;
+}
+
+message SignOutEverywhereRequest {
+  string password = 1;                  // Require password confirmation
+}
+
+message SignOutEverywhereResponse {
+  int32 revoked_count = 1;
+}
+
+// ─── Audit Log ──────────────────────────────────────────────────────
+
+message AuditEvent {
+  string id = 1;
+  string event_type = 2;                // see AuditEventType enum values in schema.yaml
+  string actor_user_id = 3;
+  string target_user_id = 4;
+  string ip_address = 5;
+  string user_agent = 6;
+  bool success = 7;
+  string details = 8;                   // JSON blob for event-specific data
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message ListAuditEventsRequest {
+  string actor_user_id = 1;             // optional filter
+  string target_user_id = 2;            // optional filter
+  string event_type = 3;                // optional filter
+  int64 start_time_ms = 4;              // optional: events >= this ms epoch
+  int64 end_time_ms = 5;                // optional: events <= this ms epoch
+  int32 limit = 6;                      // default 50, max 500
+  string cursor = 7;                    // opaque pagination cursor (offset-based)
+}
+
+message ListAuditEventsResponse {
+  repeated AuditEvent events = 1;
+  string next_cursor = 2;
+}
+
+// ─── Admin User Management ──────────────────────────────────────────
+// Google Workspace-style admin RPCs. ALL RPCs in this section require the
+// caller's JWT to carry role=admin (enforced in the servicer per-method).
+
+message InviteUserRequest {
+  string email = 1;
+  string name = 2;
+  string role = 3;                   // "admin", "member", "guest"
+  string recovery_email = 4;
+  int64 quota_bytes = 5;
+  // If false: create a pending invitation; the user completes signup via AcceptInvitation.
+  // If true: create a fully-active user and return a temporary password to the admin.
+  bool create_immediately = 6;
+}
+
+message InviteUserResponse {
+  User user = 1;
+  string invitation_token = 2;       // One-time setup token (shown to admin once, emailed in prod)
+  string setup_url = 3;              // Full URL with token embedded
+  string temporary_password = 4;     // Only set when create_immediately = true
+}
+
+message AcceptInvitationRequest {
+  string invitation_token = 1;
+  string password = 2;
+  string name = 3;
+}
+
+message AcceptInvitationResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  int32 expires_in = 4;
+}
+
+message DeactivateUserRequest {
+  string user_id = 1;
+  string reason = 2;
+}
+
+message DeactivateUserResponse {}
+
+message ReactivateUserRequest {
+  string user_id = 1;
+}
+
+message ReactivateUserResponse {}
+
+message ResetUserPasswordRequest {
+  string user_id = 1;
+  // If true: generate a random temp password and return it to the admin.
+  // If false: create a reset token the admin hands off to the user.
+  bool generate_temp_password = 2;
+}
+
+message ResetUserPasswordResponse {
+  string temporary_password = 1;     // Only set when generate_temp_password = true
+  string reset_token = 2;            // Only set when generate_temp_password = false
+}
+
+message SetUserQuotaRequest {
+  string user_id = 1;
+  int64 quota_bytes = 2;
+}
+
+message SetUserQuotaResponse {}
+
+// ─── Service ─────────────────────────────────────────────────────────
+
+service IdentityService {
+  // Authentication
+  rpc OAuthLogin(OAuthLoginRequest) returns (OAuthLoginResponse);
+  rpc PasswordSignup(PasswordSignupRequest) returns (PasswordSignupResponse);
+  rpc PasswordLogin(PasswordLoginRequest) returns (PasswordLoginResponse);
+
+  // Session / Token Auth
+  rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+
+  // Self-service profile
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+
+  // Password Management
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+  rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse);
+
+  // Admin help (replaces self-serve ForgotPassword)
+  rpc RequestAdminHelp(RequestAdminHelpRequest) returns (RequestAdminHelpResponse);
+  rpc ListHelpRequests(ListHelpRequestsRequest) returns (ListHelpRequestsResponse);
+  rpc ResolveHelpRequest(ResolveHelpRequestRequest) returns (ResolveHelpRequestResponse);
+
+  // Passkey / WebAuthn
+  rpc BeginPasskeyRegistration(BeginPasskeyRegistrationRequest) returns (BeginPasskeyRegistrationResponse);
+  rpc CompletePasskeyRegistration(CompletePasskeyRegistrationRequest) returns (CompletePasskeyRegistrationResponse);
+  rpc BeginPasskeyLogin(BeginPasskeyLoginRequest) returns (BeginPasskeyLoginResponse);
+  rpc CompletePasskeyLogin(CompletePasskeyLoginRequest) returns (CompletePasskeyLoginResponse);
+  rpc ListPasskeys(ListPasskeysRequest) returns (ListPasskeysResponse);
+  rpc DeletePasskey(DeletePasskeyRequest) returns (DeletePasskeyResponse);
+
+  // QR Login (cross-device authorization)
+  rpc InitiateQrLogin(InitiateQrLoginRequest) returns (InitiateQrLoginResponse);
+  rpc GetQrLoginSession(GetQrLoginSessionRequest) returns (GetQrLoginSessionResponse);
+  rpc ApproveQrLogin(ApproveQrLoginRequest) returns (ApproveQrLoginResponse);
+  rpc PollQrLogin(PollQrLoginRequest) returns (PollQrLoginResponse);
+
+  // 2FA TOTP
+  rpc BeginTotpSetup(BeginTotpSetupRequest) returns (BeginTotpSetupResponse);
+  rpc VerifyTotpSetup(VerifyTotpSetupRequest) returns (VerifyTotpSetupResponse);
+  rpc DisableTotp(DisableTotpRequest) returns (DisableTotpResponse);
+  rpc VerifyTotp(VerifyTotpRequest) returns (VerifyTotpResponse);
+  rpc RegenerateRecoveryCodes(RegenerateRecoveryCodesRequest) returns (RegenerateRecoveryCodesResponse);
+
+  // Session management
+  rpc ListMySessions(ListMySessionsRequest) returns (ListMySessionsResponse);
+  rpc RevokeSession(RevokeSessionRequest) returns (RevokeSessionResponse);
+  rpc RevokeAllSessions(RevokeAllSessionsRequest) returns (RevokeAllSessionsResponse);
+  rpc SignOutEverywhere(SignOutEverywhereRequest) returns (SignOutEverywhereResponse);
+
+  // Audit log
+  rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse);
+
+  // Users
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+  // Admin-only paginated user listing — supports filters and search.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+
+  // Groups (formerly WorkingGroup — graph DB type still WorkingGroup)
+  rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse);
+  rpc UpdateGroup(UpdateGroupRequest) returns (UpdateGroupResponse);
+  rpc DeleteGroup(DeleteGroupRequest) returns (DeleteGroupResponse);
+  rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
+
+  // Membership (graph edges)
+  rpc AddGroupMember(AddGroupMemberRequest) returns (AddGroupMemberResponse);
+  rpc RemoveGroupMember(RemoveGroupMemberRequest) returns (RemoveGroupMemberResponse);
+  rpc ListGroupMembers(ListGroupMembersRequest) returns (ListGroupMembersResponse);
+
+  // Admin user management (caller must have role=admin). Enforced in the
+  // servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
+  rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
+  rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse);
+  rpc DeactivateUser(DeactivateUserRequest) returns (DeactivateUserResponse);
+  rpc ReactivateUser(ReactivateUserRequest) returns (ReactivateUserResponse);
+  rpc ResetUserPassword(ResetUserPasswordRequest) returns (ResetUserPasswordResponse);
+  rpc SetUserQuota(SetUserQuotaRequest) returns (SetUserQuotaResponse);
+}

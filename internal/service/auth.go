@@ -1,0 +1,623 @@
+// Package service implements the business logic for the identity service.
+//
+// The AuthService sits between the Connect-Go handler layer and the EntDB
+// persistence layer. It contains all authentication, token management, and
+// 2FA logic. It does NOT import Connect/protobuf types -- it uses plain Go
+// structs and returns errors that the handler translates to gRPC codes.
+//
+// Security invariants:
+//   - Passwords, secrets, and tokens are NEVER logged.
+//   - Failed login lockout: 5 attempts, 15-min lock (configurable).
+//   - TOTP challenges: 5-min expiry, single-use.
+//   - QR login sessions: 5-min expiry, consumed after token issuance.
+//   - Refresh tokens: rotated on every use (old token deleted, new one issued).
+//   - All security events are audit-logged via the audit.Logger.
+package service
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/passkeys"
+	"github.com/elloloop/identity/pkg/passwords"
+	"github.com/elloloop/identity/pkg/totp"
+)
+
+// ── Domain types ───────────────────────────────────────────────────────
+
+// User represents a user in the identity system.
+type User struct {
+	ID               string
+	Email            string
+	Name             string
+	AvatarURL        string
+	Role             string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	TotpRequired     bool
+	Status           string // "active", "invited", "deactivated", "suspended"
+	RecoveryEmail    string
+	QuotaBytes       int64
+	LastLoginAtMs    int64
+	PasswordHash     string // never exposed via RPC
+	FailedLoginCount int
+	LockedUntil      int64 // epoch ms; 0 = not locked
+}
+
+// PasskeyInfo holds display-safe passkey credential metadata.
+type PasskeyInfo struct {
+	CredentialID string
+	DeviceName   string
+	CreatedAt    time.Time
+	LastUsedAt   time.Time
+}
+
+// LoginResult is returned by password/OAuth login when successful.
+type LoginResult struct {
+	User             *User
+	AccessToken      string
+	RefreshToken     string
+	ExpiresIn        int32
+	TotpRequired     bool
+	LoginChallengeID string
+}
+
+// QrSessionInfo holds the public details of a QR login session.
+type QrSessionInfo struct {
+	Status        string
+	NewDeviceInfo string
+	NewDeviceIP   string
+	ExpiresAt     time.Time
+}
+
+// PollQrResult holds the result of polling a QR login session.
+type PollQrResult struct {
+	Status       string
+	User         *User
+	AccessToken  string
+	RefreshToken string
+	ExpiresIn    int32
+}
+
+// ── Repository interface ───────────────────────────────────────────────
+// All EntDB operations are behind this interface so the service layer
+// is testable without a live gRPC connection.
+
+// Repository abstracts all persistence operations for the auth service.
+type Repository interface {
+	// Users
+	FindUserByEmail(ctx context.Context, email string) (*User, error)
+	GetUser(ctx context.Context, userID string) (*User, error)
+	CreateUser(ctx context.Context, u *User) (string, error) // returns node ID
+	UpdateUser(ctx context.Context, userID string, fields map[string]any) error
+
+	// Refresh tokens
+	FindRefreshTokenByHash(ctx context.Context, hash string) (*RefreshTokenRecord, error)
+	CreateRefreshToken(ctx context.Context, r *RefreshTokenRecord) (string, error)
+	DeleteRefreshToken(ctx context.Context, nodeID string) error
+	DeleteRefreshTokensForUser(ctx context.Context, userID string) error
+
+	// Passkey credentials
+	ListPasskeyCredentials(ctx context.Context, userID string) ([]*PasskeyCredRecord, error)
+	GetPasskeyCredentialByCredID(ctx context.Context, credentialID string) (*PasskeyCredRecord, error)
+	CreatePasskeyCredential(ctx context.Context, r *PasskeyCredRecord) (string, error)
+	UpdatePasskeyCredential(ctx context.Context, nodeID string, fields map[string]any) error
+
+	// Passkey challenges
+	GetPasskeyChallenge(ctx context.Context, nodeID string) (*PasskeyChallengeRecord, error)
+	CreatePasskeyChallenge(ctx context.Context, r *PasskeyChallengeRecord) (string, error)
+	DeletePasskeyChallenge(ctx context.Context, nodeID string) error
+
+	// QR login sessions
+	FindQrLoginSession(ctx context.Context, sessionID string) (*QrLoginSessionRecord, error)
+	CreateQrLoginSession(ctx context.Context, r *QrLoginSessionRecord) (string, error)
+	UpdateQrLoginSession(ctx context.Context, nodeID string, fields map[string]any) error
+
+	// TOTP credentials
+	GetTotpCredential(ctx context.Context, userID string) (*TotpCredRecord, error)
+	CreateTotpCredential(ctx context.Context, r *TotpCredRecord) (string, error)
+	UpdateTotpCredential(ctx context.Context, nodeID string, fields map[string]any) error
+	DeleteTotpCredential(ctx context.Context, nodeID string) error
+	DeleteTotpCredentialsForUser(ctx context.Context, userID string) error
+
+	// Recovery codes
+	CreateRecoveryCode(ctx context.Context, r *RecoveryCodeRecord) (string, error)
+	FindRecoveryCodeByHash(ctx context.Context, userID, hash string) (*RecoveryCodeRecord, error)
+	UpdateRecoveryCode(ctx context.Context, nodeID string, fields map[string]any) error
+	DeleteRecoveryCodesForUser(ctx context.Context, userID string) error
+
+	// Login challenges (TOTP 2FA step)
+	CreateLoginChallenge(ctx context.Context, r *LoginChallengeRecord) (string, error)
+	GetLoginChallengeByChallengeID(ctx context.Context, challengeID string) (*LoginChallengeRecord, error)
+	DeleteLoginChallenge(ctx context.Context, nodeID string) error
+
+	// User invitations
+	FindInvitationByHash(ctx context.Context, tokenHash string) (*InvitationRecord, error)
+	UpdateInvitation(ctx context.Context, nodeID string, fields map[string]any) error
+}
+
+// ── Record types for persistence ───────────────────────────────────────
+
+// RefreshTokenRecord represents a stored refresh token.
+type RefreshTokenRecord struct {
+	NodeID     string
+	TokenHash  string
+	UserID     string
+	DeviceInfo string
+	DeviceName string
+	IPAddress  string
+	UserAgent  string
+	ExpiresAt  int64 // epoch ms
+	CreatedAt  int64
+	LastUsedAt int64
+}
+
+// PasskeyCredRecord represents a stored passkey credential.
+type PasskeyCredRecord struct {
+	NodeID       string
+	CredentialID string
+	UserID       string
+	PublicKey    string
+	SignCount    int64
+	DeviceName   string
+	AAGUID       string
+	Transports   string
+	CreatedAt    int64
+	LastUsedAt   int64
+}
+
+// PasskeyChallengeRecord represents a stored passkey challenge.
+type PasskeyChallengeRecord struct {
+	NodeID        string
+	Challenge     string // base64url
+	UserID        string
+	ChallengeType string // "registration" or "authentication"
+	ExpiresAt     int64
+	CreatedAt     int64
+}
+
+// QrLoginSessionRecord represents a stored QR login session.
+type QrLoginSessionRecord struct {
+	NodeID              string
+	SessionID           string
+	Status              string
+	UserID              string
+	NewDeviceInfo       string
+	NewDeviceIP         string
+	NewDeviceUserAgent  string
+	ApprovedDeviceInfo  string
+	ExpiresAt           int64
+	CreatedAt           int64
+	UpdatedAt           int64
+}
+
+// TotpCredRecord represents a stored TOTP credential.
+type TotpCredRecord struct {
+	NodeID          string
+	UserID          string
+	SecretEncrypted string
+	Verified        bool
+	CreatedAt       int64
+	LastUsedAt      int64
+}
+
+// RecoveryCodeRecord represents a stored recovery code.
+type RecoveryCodeRecord struct {
+	NodeID    string
+	UserID    string
+	CodeHash  string
+	Used      bool
+	CreatedAt int64
+	UsedAt    int64
+}
+
+// LoginChallengeRecord represents a pending 2FA login challenge.
+type LoginChallengeRecord struct {
+	NodeID      string
+	ChallengeID string
+	UserID      string
+	ExpiresAt   int64
+	CreatedAt   int64
+}
+
+// InvitationRecord represents a user invitation.
+type InvitationRecord struct {
+	NodeID     string
+	TokenHash  string
+	Email      string
+	UserID     string
+	InvitedBy  string
+	Role       string
+	ExpiresAt  int64
+	AcceptedAt int64
+	CreatedAt  int64
+}
+
+// ── Sentinel errors ────────────────────────────────────────────────────
+
+var (
+	ErrUnauthenticated   = errors.New("unauthenticated")
+	ErrPermissionDenied  = errors.New("permission denied")
+	ErrInvalidArgument   = errors.New("invalid argument")
+	ErrNotFound          = errors.New("not found")
+	ErrAlreadyExists     = errors.New("already exists")
+	ErrAccountLocked     = errors.New("account locked")
+	ErrNoPasswordSet     = errors.New("no password set for this account")
+	ErrAccountNotActive  = errors.New("account is not active")
+	ErrInvitationPending = errors.New("account has not completed invitation")
+	ErrWeakPassword      = errors.New("password does not meet strength requirements")
+	ErrTotpRequired      = errors.New("totp required")
+	ErrTokenExpired      = errors.New("token expired")
+	ErrInvalidTotpCode   = errors.New("invalid totp code")
+	ErrQrLoginExpired    = errors.New("qr login session expired")
+	ErrQrLoginNotPending = errors.New("qr login session is not pending")
+	ErrInvitationUsed    = errors.New("invitation has already been accepted")
+	ErrInvitationExpired = errors.New("invitation has expired")
+	ErrLocalAuthDisabled = errors.New("local auth disabled")
+)
+
+// ── AuthService ────────────────────────────────────────────────────────
+
+// AuthService implements authentication and token management business logic.
+type AuthService struct {
+	repo     Repository
+	tenantID string
+	keyRing  *jwt.KeyRing
+	passkeys *passkeys.WebAuthnService
+	audit    *audit.Logger
+	cfg      *config.Config
+	totpKey  []byte
+	logger   *zap.Logger
+	nowFunc  func() time.Time // overridable for testing
+}
+
+// NewAuthService creates an AuthService with all required dependencies.
+func NewAuthService(
+	repo Repository,
+	cfg *config.Config,
+	keyRing *jwt.KeyRing,
+	passkeysSvc *passkeys.WebAuthnService,
+	auditLogger *audit.Logger,
+	totpKey []byte,
+	logger *zap.Logger,
+) *AuthService {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &AuthService{
+		repo:     repo,
+		tenantID: cfg.DefaultTenantID,
+		keyRing:  keyRing,
+		passkeys: passkeysSvc,
+		audit:    auditLogger,
+		cfg:      cfg,
+		totpKey:  totpKey,
+		logger:   logger,
+		nowFunc:  time.Now,
+	}
+}
+
+// ── Internal helpers ───────────────────────────────────────────────────
+
+func (s *AuthService) nowMs() int64 { return s.nowFunc().UnixMilli() }
+
+// generateRefreshToken creates a cryptographically random refresh token
+// and its SHA-256 hash. Returns (rawToken, hash).
+func generateRefreshToken() (string, string) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+	raw := hex.EncodeToString(b)
+	h := sha256.Sum256([]byte(raw))
+	return raw, hex.EncodeToString(h[:])
+}
+
+// hashRefreshToken returns the SHA-256 hex digest of a raw refresh token.
+func hashRefreshToken(raw string) string {
+	h := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(h[:])
+}
+
+// hashInvitationToken returns the SHA-256 hex digest of a raw invitation token.
+func hashInvitationToken(raw string) string {
+	h := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(h[:])
+}
+
+func generateSessionID() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func generateChallengeID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// issueTokens creates a JWT access token and a refresh token stored in the repo.
+func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
+	claims := jwt.Claims{
+		Sub:       user.ID,
+		Email:     user.Email,
+		Name:      user.Name,
+		Role:      user.Role,
+		Tenant:    s.tenantID,
+		AvatarURL: user.AvatarURL,
+	}
+	accessToken, err := jwt.CreateAccessToken(claims, s.keyRing, s.cfg.JWTExpiry())
+	if err != nil {
+		return "", "", fmt.Errorf("creating access token: %w", err)
+	}
+
+	rawRefresh, refreshHash := generateRefreshToken()
+	now := s.nowMs()
+	devName := friendlyDeviceName(userAgent)
+
+	_, err = s.repo.CreateRefreshToken(ctx, &RefreshTokenRecord{
+		TokenHash:  refreshHash,
+		UserID:     user.ID,
+		DeviceInfo: devName,
+		DeviceName: devName,
+		IPAddress:  ipAddr,
+		UserAgent:  truncate(userAgent, 512),
+		ExpiresAt:  now + int64(s.cfg.RefreshExpirySeconds)*1000,
+		CreatedAt:  now,
+		LastUsedAt: now,
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("storing refresh token: %w", err)
+	}
+	return accessToken, rawRefresh, nil
+}
+
+// recordFailedLogin increments the failed login counter and locks if threshold reached.
+func (s *AuthService) recordFailedLogin(ctx context.Context, user *User) {
+	failed := user.FailedLoginCount + 1
+	now := s.nowMs()
+	fields := map[string]any{"failed_login_count": failed, "updated_at": now}
+	if failed >= s.cfg.LoginMaxFailedAttempts {
+		fields["locked_until"] = now + int64(s.cfg.LoginLockoutSeconds)*1000
+		fields["failed_login_count"] = 0
+		s.logger.Warn("account_locked",
+			zap.String("user_id", user.ID),
+			zap.Int("lockout_seconds", s.cfg.LoginLockoutSeconds),
+		)
+	}
+	if err := s.repo.UpdateUser(ctx, user.ID, fields); err != nil {
+		s.logger.Warn("failed_login_update_failed", zap.String("user_id", user.ID), zap.Error(err))
+	}
+}
+
+// resetFailedLogin clears the failed login counter on successful auth.
+func (s *AuthService) resetFailedLogin(ctx context.Context, user *User) {
+	if user.FailedLoginCount == 0 && user.LockedUntil == 0 {
+		return
+	}
+	err := s.repo.UpdateUser(ctx, user.ID, map[string]any{
+		"failed_login_count": 0,
+		"locked_until":       int64(0),
+		"updated_at":         s.nowMs(),
+	})
+	if err != nil {
+		s.logger.Warn("failed_login_reset_failed", zap.String("user_id", user.ID), zap.Error(err))
+	}
+}
+
+// updateLastLogin sets last_login_at for admin visibility (best-effort).
+func (s *AuthService) updateLastLogin(ctx context.Context, userID string) {
+	now := s.nowMs()
+	if err := s.repo.UpdateUser(ctx, userID, map[string]any{
+		"last_login_at": now, "updated_at": now,
+	}); err != nil {
+		s.logger.Warn("last_login_update_failed", zap.String("user_id", userID), zap.Error(err))
+	}
+}
+
+// issueLoginChallenge creates a pending 2FA login challenge.
+func (s *AuthService) issueLoginChallenge(ctx context.Context, userID string) (string, error) {
+	now := s.nowMs()
+	challengeID := generateChallengeID()
+	_, err := s.repo.CreateLoginChallenge(ctx, &LoginChallengeRecord{
+		ChallengeID: challengeID,
+		UserID:      userID,
+		ExpiresAt:   now + int64(s.cfg.LoginChallengeExpirySeconds)*1000,
+		CreatedAt:   now,
+	})
+	if err != nil {
+		return "", fmt.Errorf("creating login challenge: %w", err)
+	}
+	return challengeID, nil
+}
+
+// consumeLoginChallenge validates and deletes a pending login challenge.
+func (s *AuthService) consumeLoginChallenge(ctx context.Context, challengeID string) (*LoginChallengeRecord, error) {
+	record, err := s.repo.GetLoginChallengeByChallengeID(ctx, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	if record == nil {
+		return nil, fmt.Errorf("%w: invalid or expired login challenge", ErrUnauthenticated)
+	}
+	if record.ExpiresAt < s.nowMs() {
+		_ = s.repo.DeleteLoginChallenge(ctx, record.NodeID)
+		return nil, fmt.Errorf("%w: login challenge expired", ErrUnauthenticated)
+	}
+	// Single-use: delete before returning success.
+	if err := s.repo.DeleteLoginChallenge(ctx, record.NodeID); err != nil {
+		s.logger.Warn("login_challenge_delete_failed", zap.String("challenge_id", challengeID))
+	}
+	return record, nil
+}
+
+// storeRecoveryCodes deletes existing codes for a user and stores fresh hashes.
+func (s *AuthService) storeRecoveryCodes(ctx context.Context, userID string, codes []string) error {
+	if err := s.repo.DeleteRecoveryCodesForUser(ctx, userID); err != nil {
+		return fmt.Errorf("deleting old recovery codes: %w", err)
+	}
+	now := s.nowMs()
+	for _, code := range codes {
+		_, err := s.repo.CreateRecoveryCode(ctx, &RecoveryCodeRecord{
+			UserID:    userID,
+			CodeHash:  totp.HashRecoveryCode(code),
+			Used:      false,
+			CreatedAt: now,
+		})
+		if err != nil {
+			return fmt.Errorf("creating recovery code: %w", err)
+		}
+	}
+	return nil
+}
+
+// ensureMailbox auto-provisions an email mailbox for new users. Best-effort.
+func (s *AuthService) ensureMailbox(_ context.Context, _ string, _ string, _ string) {
+	// Placeholder -- email service client not yet wired.
+}
+
+// validatePasswordStrength checks password requirements and returns an error if weak.
+func validatePasswordStrength(pw string) error {
+	issues := passwords.ValidateStrength(pw)
+	if len(issues) > 0 {
+		return fmt.Errorf("%w: %s", ErrWeakPassword, strings.Join(issues, "; "))
+	}
+	return nil
+}
+
+// friendlyDeviceName collapses a User-Agent string into a short display name.
+func friendlyDeviceName(userAgent string) string {
+	if userAgent == "" {
+		return "Unknown device"
+	}
+	low := strings.ToLower(userAgent)
+	browser := "Browser"
+	switch {
+	case strings.Contains(low, "edg/"):
+		browser = "Edge"
+	case strings.Contains(low, "chrome/") && strings.Contains(low, "safari/") && !strings.Contains(low, "edg/"):
+		browser = "Chrome"
+	case strings.Contains(low, "firefox/"):
+		browser = "Firefox"
+	case strings.Contains(low, "safari/") && !strings.Contains(low, "chrome/"):
+		browser = "Safari"
+	case strings.Contains(low, "postman"):
+		browser = "Postman"
+	case strings.Contains(low, "curl/"):
+		browser = "curl"
+	}
+	osName := "Unknown OS"
+	switch {
+	case strings.Contains(low, "iphone") || strings.Contains(low, "ipad") || strings.Contains(low, "ipod"):
+		osName = "iOS"
+	case strings.Contains(low, "android"):
+		osName = "Android"
+	case strings.Contains(low, "windows nt"):
+		osName = "Windows"
+	case strings.Contains(low, "mac os x") || strings.Contains(low, "macintosh"):
+		osName = "macOS"
+	case strings.Contains(low, "linux"):
+		osName = "Linux"
+	}
+	return browser + " on " + osName
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
+}
+
+// ── GetCurrentUser ─────────────────────────────────────────────────────
+
+// GetCurrentUser returns the user record for the given user ID.
+func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*User, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("%w: missing user ID", ErrUnauthenticated)
+	}
+	user, err := s.repo.GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	return user, nil
+}
+
+// ── RefreshToken ───────────────────────────────────────────────────────
+
+// RefreshToken validates a refresh token, rotates it, and returns new tokens.
+func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr, userAgent string) (*User, string, string, error) {
+	if rawRefreshToken == "" {
+		return nil, "", "", fmt.Errorf("%w: missing refresh token", ErrUnauthenticated)
+	}
+	tokenHash := hashRefreshToken(rawRefreshToken)
+
+	record, err := s.repo.FindRefreshTokenByHash(ctx, tokenHash)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("querying refresh token: %w", err)
+	}
+	if record == nil {
+		return nil, "", "", fmt.Errorf("%w: invalid refresh token", ErrUnauthenticated)
+	}
+
+	if record.ExpiresAt < s.nowMs() {
+		_ = s.repo.DeleteRefreshToken(ctx, record.NodeID)
+		return nil, "", "", fmt.Errorf("%w: refresh token expired", ErrTokenExpired)
+	}
+
+	// Rotation: delete old token.
+	_ = s.repo.DeleteRefreshToken(ctx, record.NodeID)
+
+	user, err := s.repo.GetUser(ctx, record.UserID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if user == nil {
+		return nil, "", "", fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+
+	accessToken, newRefresh, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return user, accessToken, newRefresh, nil
+}
+
+// ── Logout ─────────────────────────────────────────────────────────────
+
+// Logout deletes the refresh token identified by the raw token value.
+func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error {
+	if rawRefreshToken == "" {
+		return nil
+	}
+	tokenHash := hashRefreshToken(rawRefreshToken)
+	record, err := s.repo.FindRefreshTokenByHash(ctx, tokenHash)
+	if err != nil {
+		return fmt.Errorf("querying refresh token: %w", err)
+	}
+	if record == nil {
+		return nil
+	}
+	userID := record.UserID
+	_ = s.repo.DeleteRefreshToken(ctx, record.NodeID)
+
+	if userID != "" {
+		s.audit.Log(ctx, audit.EventLogout, audit.WithActor(userID))
+	}
+	return nil
+}

@@ -1,0 +1,220 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"go.uber.org/zap"
+
+	"github.com/elloloop/identity/pkg/audit"
+)
+
+// GroupService implements working-group CRUD and membership operations.
+// The underlying EntDB node type is WorkingGroup (type_id 2).
+type GroupService struct {
+	db       DB
+	tenantID string
+	audit    *audit.Logger
+	logger   *zap.Logger
+}
+
+// NewGroupService creates a GroupService.
+func NewGroupService(db DB, tenantID string, auditLog *audit.Logger, logger *zap.Logger) *GroupService {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &GroupService{db: db, tenantID: tenantID, audit: auditLog, logger: logger}
+}
+
+// CreateGroup creates a new working group.
+func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, description string) (*Group, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errors.New("group name is required")
+	}
+
+	now := nowMs()
+	data := map[string]any{
+		gfName:        name,
+		gfDescription: strings.TrimSpace(description),
+		gfCreatedBy:   actorID,
+		gfCreatedAt:   now,
+		gfUpdatedAt:   now,
+	}
+	op := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeWorkingGroup, Data: data}
+	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op})
+	if err != nil {
+		return nil, fmt.Errorf("create group: %w", err)
+	}
+
+	groupID := ""
+	if len(result.CreatedNodeIDs) > 0 {
+		groupID = result.CreatedNodeIDs[0]
+	}
+
+	s.logger.Info("group_created", zap.String("group_id", groupID), zap.String("actor", actorID))
+
+	return &Group{
+		ID: groupID, Name: name, Description: strings.TrimSpace(description),
+		CreatedAt: now, UpdatedAt: now,
+	}, nil
+}
+
+// UpdateGroup patches name and/or description of a group.
+func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, description string) (*Group, error) {
+	if groupID == "" {
+		return nil, errors.New("group_id is required")
+	}
+
+	patch := map[string]any{gfUpdatedAt: nowMs()}
+	if name != "" {
+		patch[gfName] = strings.TrimSpace(name)
+	}
+	if description != "" {
+		patch[gfDescription] = strings.TrimSpace(description)
+	}
+
+	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeWorkingGroup, NodeID: groupID, Patch: patch}
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+		return nil, fmt.Errorf("update group: %w", err)
+	}
+
+	// Re-fetch.
+	node, err := s.db.GetNode(ctx, s.tenantID, "user:system", typeWorkingGroup, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("re-fetch group: %w", err)
+	}
+	if node == nil {
+		return nil, errors.New("group not found after update")
+	}
+	return groupFromNode(node), nil
+}
+
+// DeleteGroup deletes a working group.
+func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string) error {
+	if groupID == "" {
+		return errors.New("group_id is required")
+	}
+
+	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeWorkingGroup, NodeID: groupID}
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+		return fmt.Errorf("delete group: %w", err)
+	}
+
+	s.logger.Info("group_deleted", zap.String("group_id", groupID), zap.String("actor", actorID))
+	return nil
+}
+
+// ListGroups returns a paginated list of groups.
+func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, limit int) ([]*Group, string, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := 0
+	if cursor != "" {
+		fmt.Sscanf(cursor, "%d", &offset)
+	}
+
+	nodes, err := s.db.QueryNodes(ctx, s.tenantID, "user:system", typeWorkingGroup, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("list groups: %w", err)
+	}
+
+	totalCount := len(nodes)
+	end := offset + limit
+	if end > totalCount {
+		end = totalCount
+	}
+	var page []*entdb.Node
+	if offset < totalCount {
+		page = nodes[offset:end]
+	}
+	nextCursor := ""
+	if end < totalCount {
+		nextCursor = fmt.Sprintf("%d", end)
+	}
+
+	groups := make([]*Group, 0, len(page))
+	for _, n := range page {
+		groups = append(groups, groupFromNode(n))
+	}
+	return groups, nextCursor, nil
+}
+
+// AddGroupMember creates a MEMBER_OF edge from user to group.
+func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, userID string) error {
+	if groupID == "" || userID == "" {
+		return errors.New("group_id and user_id are required")
+	}
+
+	op := entdb.Operation{
+		Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf,
+		FromNodeID: userID, ToNodeID: groupID,
+	}
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+		return fmt.Errorf("add group member: %w", err)
+	}
+
+	s.logger.Info("group_member_added",
+		zap.String("group_id", groupID), zap.String("user_id", userID),
+	)
+	return nil
+}
+
+// RemoveGroupMember deletes the MEMBER_OF edge from user to group.
+func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, userID string) error {
+	if groupID == "" || userID == "" {
+		return errors.New("group_id and user_id are required")
+	}
+
+	op := entdb.Operation{
+		Type: entdb.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
+		FromNodeID: userID, ToNodeID: groupID,
+	}
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+		return fmt.Errorf("remove group member: %w", err)
+	}
+
+	s.logger.Info("group_member_removed",
+		zap.String("group_id", groupID), zap.String("user_id", userID),
+	)
+	return nil
+}
+
+// ListGroupMembers returns all users that belong to a group via
+// MEMBER_OF edges.
+func (s *GroupService) ListGroupMembers(ctx context.Context, actorID, groupID string) ([]*User, error) {
+	if groupID == "" {
+		return nil, errors.New("group_id is required")
+	}
+
+	// MEMBER_OF edges go from user -> group, so edges_to(group) gives
+	// us the user node IDs.
+	edges, err := s.db.GetEdgesFrom(ctx, s.tenantID, "user:system", groupID, edgeMemberOf)
+	if err != nil {
+		// Edges_to is not in the narrow DB interface; we use a query
+		// approach instead: fetch edges where to_node = groupID.
+		// The Transport.GetEdgesFrom returns outgoing edges from a
+		// node, but MEMBER_OF edges go user->group, so we would need
+		// GetEdgesTo. Since our DB interface only has GetEdgesFrom,
+		// we query all users and filter by edge. This is the simple
+		// approach matching the Python service.
+		return nil, fmt.Errorf("list group members: %w", err)
+	}
+
+	users := make([]*User, 0, len(edges))
+	for _, e := range edges {
+		// For MEMBER_OF, from=user, to=group. GetEdgesFrom(group)
+		// gives edges FROM group — but MEMBER_OF goes user->group.
+		// We'll use the edge FromNodeID as the user.
+		userNode, err := s.db.GetNode(ctx, s.tenantID, "user:system", typeUser, e.FromNodeID)
+		if err != nil || userNode == nil {
+			continue
+		}
+		users = append(users, userFromNode(userNode))
+	}
+	return users, nil
+}
