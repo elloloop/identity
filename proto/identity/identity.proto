@@ -29,6 +29,8 @@ message User {
   string recovery_email = 10;
   int64 quota_bytes = 11;
   int64 last_login_at_ms = 12;
+  bool email_verified = 13;
+  int64 email_verified_at = 14;
 }
 
 message CreateUserRequest {
@@ -269,6 +271,27 @@ message RequestPasswordResetRequest {
 
 message RequestPasswordResetResponse {
   // Always returns success (no enumeration).
+}
+
+message ConfirmPasswordResetRequest {
+  string token = 1;
+  string new_password = 2;
+}
+
+message ConfirmPasswordResetResponse {}
+
+// ─── Email Verification ─────────────────────────────────────────────
+
+message SendEmailVerificationRequest {}
+
+message SendEmailVerificationResponse {}
+
+message VerifyEmailRequest {
+  string token = 1;
+}
+
+message VerifyEmailResponse {
+  User user = 1;
 }
 
 // ─── Admin Help Flow ────────────────────────────────────────────────
@@ -651,6 +674,11 @@ service IdentityService {
   // Password Management
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
   rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse);
+  rpc ConfirmPasswordReset(ConfirmPasswordResetRequest) returns (ConfirmPasswordResetResponse);
+
+  // Email Verification
+  rpc SendEmailVerification(SendEmailVerificationRequest) returns (SendEmailVerificationResponse);
+  rpc VerifyEmail(VerifyEmailRequest) returns (VerifyEmailResponse);
 
   // Admin help (replaces self-serve ForgotPassword)
   rpc RequestAdminHelp(RequestAdminHelpRequest) returns (RequestAdminHelpResponse);
