@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -11,6 +12,30 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
 )
+
+// dummyPasswordHash is a precomputed bcrypt hash used to equalize the
+// timing of PasswordLogin when the email is not found. Without it,
+// the user-not-found path returns immediately while the wrong-password
+// path runs bcrypt (~250ms at cost 12) — a textbook email-enumeration
+// timing oracle. We bcrypt the dummy hash exactly once per process.
+var (
+	dummyPasswordHash     string
+	dummyPasswordHashOnce sync.Once
+)
+
+func getDummyPasswordHash() string {
+	dummyPasswordHashOnce.Do(func() {
+		h, err := passwords.Hash("dummy-fixed-password-for-timing-equalization")
+		if err != nil {
+			// Fallback: a static, well-formed bcrypt hash. Verify will still
+			// run constant-time bcrypt against this value.
+			dummyPasswordHash = "$2a$12$0000000000000000000000000000000000000000000000000000O"
+			return
+		}
+		dummyPasswordHash = h
+	})
+	return dummyPasswordHash
+}
 
 // ── PasswordSignup ─────────────────────────────────────────────────────
 
@@ -116,6 +141,12 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return nil, err
 	}
 	if user == nil {
+		// Run a dummy bcrypt verification so the response time for an
+		// unknown email is comparable to the wrong-password path. This
+		// closes the email-enumeration timing oracle (the bcrypt cost
+		// dominates wall time; without this, the no-user path returns in
+		// microseconds while the wrong-password path takes ~250ms).
+		_ = passwords.Verify(password, getDummyPasswordHash())
 		s.logger.Info("local_login_failed", zap.String("reason", "user_not_found"))
 		s.audit.Log(ctx, audit.EventLoginFailure,
 			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
