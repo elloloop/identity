@@ -59,6 +59,15 @@ const (
 	// IdentityServiceRequestPasswordResetProcedure is the fully-qualified name of the IdentityService's
 	// RequestPasswordReset RPC.
 	IdentityServiceRequestPasswordResetProcedure = "/identity.IdentityService/RequestPasswordReset"
+	// IdentityServiceConfirmPasswordResetProcedure is the fully-qualified name of the IdentityService's
+	// ConfirmPasswordReset RPC.
+	IdentityServiceConfirmPasswordResetProcedure = "/identity.IdentityService/ConfirmPasswordReset"
+	// IdentityServiceSendEmailVerificationProcedure is the fully-qualified name of the
+	// IdentityService's SendEmailVerification RPC.
+	IdentityServiceSendEmailVerificationProcedure = "/identity.IdentityService/SendEmailVerification"
+	// IdentityServiceVerifyEmailProcedure is the fully-qualified name of the IdentityService's
+	// VerifyEmail RPC.
+	IdentityServiceVerifyEmailProcedure = "/identity.IdentityService/VerifyEmail"
 	// IdentityServiceRequestAdminHelpProcedure is the fully-qualified name of the IdentityService's
 	// RequestAdminHelp RPC.
 	IdentityServiceRequestAdminHelpProcedure = "/identity.IdentityService/RequestAdminHelp"
@@ -198,6 +207,10 @@ type IdentityServiceClient interface {
 	// Password Management
 	ChangePassword(context.Context, *connect.Request[identity.ChangePasswordRequest]) (*connect.Response[identity.ChangePasswordResponse], error)
 	RequestPasswordReset(context.Context, *connect.Request[identity.RequestPasswordResetRequest]) (*connect.Response[identity.RequestPasswordResetResponse], error)
+	ConfirmPasswordReset(context.Context, *connect.Request[identity.ConfirmPasswordResetRequest]) (*connect.Response[identity.ConfirmPasswordResetResponse], error)
+	// Email Verification
+	SendEmailVerification(context.Context, *connect.Request[identity.SendEmailVerificationRequest]) (*connect.Response[identity.SendEmailVerificationResponse], error)
+	VerifyEmail(context.Context, *connect.Request[identity.VerifyEmailRequest]) (*connect.Response[identity.VerifyEmailResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[identity.RequestAdminHelpRequest]) (*connect.Response[identity.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[identity.ListHelpRequestsRequest]) (*connect.Response[identity.ListHelpRequestsResponse], error)
@@ -316,6 +329,24 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceRequestPasswordResetProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("RequestPasswordReset")),
+			connect.WithClientOptions(opts...),
+		),
+		confirmPasswordReset: connect.NewClient[identity.ConfirmPasswordResetRequest, identity.ConfirmPasswordResetResponse](
+			httpClient,
+			baseURL+IdentityServiceConfirmPasswordResetProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ConfirmPasswordReset")),
+			connect.WithClientOptions(opts...),
+		),
+		sendEmailVerification: connect.NewClient[identity.SendEmailVerificationRequest, identity.SendEmailVerificationResponse](
+			httpClient,
+			baseURL+IdentityServiceSendEmailVerificationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SendEmailVerification")),
+			connect.WithClientOptions(opts...),
+		),
+		verifyEmail: connect.NewClient[identity.VerifyEmailRequest, identity.VerifyEmailResponse](
+			httpClient,
+			baseURL+IdentityServiceVerifyEmailProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("VerifyEmail")),
 			connect.WithClientOptions(opts...),
 		),
 		requestAdminHelp: connect.NewClient[identity.RequestAdminHelpRequest, identity.RequestAdminHelpResponse](
@@ -578,6 +609,9 @@ type identityServiceClient struct {
 	updateProfile               *connect.Client[identity.UpdateProfileRequest, identity.UpdateProfileResponse]
 	changePassword              *connect.Client[identity.ChangePasswordRequest, identity.ChangePasswordResponse]
 	requestPasswordReset        *connect.Client[identity.RequestPasswordResetRequest, identity.RequestPasswordResetResponse]
+	confirmPasswordReset        *connect.Client[identity.ConfirmPasswordResetRequest, identity.ConfirmPasswordResetResponse]
+	sendEmailVerification       *connect.Client[identity.SendEmailVerificationRequest, identity.SendEmailVerificationResponse]
+	verifyEmail                 *connect.Client[identity.VerifyEmailRequest, identity.VerifyEmailResponse]
 	requestAdminHelp            *connect.Client[identity.RequestAdminHelpRequest, identity.RequestAdminHelpResponse]
 	listHelpRequests            *connect.Client[identity.ListHelpRequestsRequest, identity.ListHelpRequestsResponse]
 	resolveHelpRequest          *connect.Client[identity.ResolveHelpRequestRequest, identity.ResolveHelpRequestResponse]
@@ -664,6 +698,21 @@ func (c *identityServiceClient) ChangePassword(ctx context.Context, req *connect
 // RequestPasswordReset calls identity.IdentityService.RequestPasswordReset.
 func (c *identityServiceClient) RequestPasswordReset(ctx context.Context, req *connect.Request[identity.RequestPasswordResetRequest]) (*connect.Response[identity.RequestPasswordResetResponse], error) {
 	return c.requestPasswordReset.CallUnary(ctx, req)
+}
+
+// ConfirmPasswordReset calls identity.IdentityService.ConfirmPasswordReset.
+func (c *identityServiceClient) ConfirmPasswordReset(ctx context.Context, req *connect.Request[identity.ConfirmPasswordResetRequest]) (*connect.Response[identity.ConfirmPasswordResetResponse], error) {
+	return c.confirmPasswordReset.CallUnary(ctx, req)
+}
+
+// SendEmailVerification calls identity.IdentityService.SendEmailVerification.
+func (c *identityServiceClient) SendEmailVerification(ctx context.Context, req *connect.Request[identity.SendEmailVerificationRequest]) (*connect.Response[identity.SendEmailVerificationResponse], error) {
+	return c.sendEmailVerification.CallUnary(ctx, req)
+}
+
+// VerifyEmail calls identity.IdentityService.VerifyEmail.
+func (c *identityServiceClient) VerifyEmail(ctx context.Context, req *connect.Request[identity.VerifyEmailRequest]) (*connect.Response[identity.VerifyEmailResponse], error) {
+	return c.verifyEmail.CallUnary(ctx, req)
 }
 
 // RequestAdminHelp calls identity.IdentityService.RequestAdminHelp.
@@ -886,6 +935,10 @@ type IdentityServiceHandler interface {
 	// Password Management
 	ChangePassword(context.Context, *connect.Request[identity.ChangePasswordRequest]) (*connect.Response[identity.ChangePasswordResponse], error)
 	RequestPasswordReset(context.Context, *connect.Request[identity.RequestPasswordResetRequest]) (*connect.Response[identity.RequestPasswordResetResponse], error)
+	ConfirmPasswordReset(context.Context, *connect.Request[identity.ConfirmPasswordResetRequest]) (*connect.Response[identity.ConfirmPasswordResetResponse], error)
+	// Email Verification
+	SendEmailVerification(context.Context, *connect.Request[identity.SendEmailVerificationRequest]) (*connect.Response[identity.SendEmailVerificationResponse], error)
+	VerifyEmail(context.Context, *connect.Request[identity.VerifyEmailRequest]) (*connect.Response[identity.VerifyEmailResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[identity.RequestAdminHelpRequest]) (*connect.Response[identity.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[identity.ListHelpRequestsRequest]) (*connect.Response[identity.ListHelpRequestsResponse], error)
@@ -1000,6 +1053,24 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceRequestPasswordResetProcedure,
 		svc.RequestPasswordReset,
 		connect.WithSchema(identityServiceMethods.ByName("RequestPasswordReset")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceConfirmPasswordResetHandler := connect.NewUnaryHandler(
+		IdentityServiceConfirmPasswordResetProcedure,
+		svc.ConfirmPasswordReset,
+		connect.WithSchema(identityServiceMethods.ByName("ConfirmPasswordReset")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceSendEmailVerificationHandler := connect.NewUnaryHandler(
+		IdentityServiceSendEmailVerificationProcedure,
+		svc.SendEmailVerification,
+		connect.WithSchema(identityServiceMethods.ByName("SendEmailVerification")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceVerifyEmailHandler := connect.NewUnaryHandler(
+		IdentityServiceVerifyEmailProcedure,
+		svc.VerifyEmail,
+		connect.WithSchema(identityServiceMethods.ByName("VerifyEmail")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceRequestAdminHelpHandler := connect.NewUnaryHandler(
@@ -1268,6 +1339,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceChangePasswordHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestPasswordResetProcedure:
 			identityServiceRequestPasswordResetHandler.ServeHTTP(w, r)
+		case IdentityServiceConfirmPasswordResetProcedure:
+			identityServiceConfirmPasswordResetHandler.ServeHTTP(w, r)
+		case IdentityServiceSendEmailVerificationProcedure:
+			identityServiceSendEmailVerificationHandler.ServeHTTP(w, r)
+		case IdentityServiceVerifyEmailProcedure:
+			identityServiceVerifyEmailHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestAdminHelpProcedure:
 			identityServiceRequestAdminHelpHandler.ServeHTTP(w, r)
 		case IdentityServiceListHelpRequestsProcedure:
@@ -1393,6 +1470,18 @@ func (UnimplementedIdentityServiceHandler) ChangePassword(context.Context, *conn
 
 func (UnimplementedIdentityServiceHandler) RequestPasswordReset(context.Context, *connect.Request[identity.RequestPasswordResetRequest]) (*connect.Response[identity.RequestPasswordResetResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.RequestPasswordReset is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ConfirmPasswordReset(context.Context, *connect.Request[identity.ConfirmPasswordResetRequest]) (*connect.Response[identity.ConfirmPasswordResetResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.ConfirmPasswordReset is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) SendEmailVerification(context.Context, *connect.Request[identity.SendEmailVerificationRequest]) (*connect.Response[identity.SendEmailVerificationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.SendEmailVerification is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) VerifyEmail(context.Context, *connect.Request[identity.VerifyEmailRequest]) (*connect.Response[identity.VerifyEmailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.VerifyEmail is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) RequestAdminHelp(context.Context, *connect.Request[identity.RequestAdminHelpRequest]) (*connect.Response[identity.RequestAdminHelpResponse], error) {
