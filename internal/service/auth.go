@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -280,7 +281,27 @@ type AuthService struct {
 	totpKey  []byte
 	logger   *zap.Logger
 	nowFunc  func() time.Time // overridable for testing
+
+	// consumedRefresh tracks recently rotated refresh-token hashes so the
+	// service can detect a refresh-token replay attack: if a token that
+	// has already been rotated is presented again, OAuth 2.1 §4.13
+	// mandates revoking ALL of that user's active refresh tokens. Entries
+	// are kept for a short window (consumedRefreshTTL) and cleaned up
+	// lazily on access.
+	consumedRefreshMu sync.Mutex
+	consumedRefresh   map[string]consumedRefreshEntry // tokenHash -> entry
 }
+
+type consumedRefreshEntry struct {
+	UserID   string
+	ExpireAt int64 // epoch ms; entry is dropped after this
+}
+
+// consumedRefreshTTLSeconds is how long a rotated refresh-token hash is
+// retained for replay detection. Should comfortably exceed the lifetime
+// of a refresh token, since a stolen token can be replayed at any point
+// before its original expiry.
+const consumedRefreshTTLSeconds = 7 * 24 * 60 * 60 // 7 days
 
 // NewAuthService creates an AuthService with all required dependencies.
 func NewAuthService(
@@ -296,16 +317,51 @@ func NewAuthService(
 		logger = zap.NewNop()
 	}
 	return &AuthService{
-		repo:     repo,
-		tenantID: cfg.DefaultTenantID,
-		keyRing:  keyRing,
-		passkeys: passkeysSvc,
-		audit:    auditLogger,
-		cfg:      cfg,
-		totpKey:  totpKey,
-		logger:   logger,
-		nowFunc:  time.Now,
+		repo:            repo,
+		tenantID:        cfg.DefaultTenantID,
+		keyRing:         keyRing,
+		passkeys:        passkeysSvc,
+		audit:           auditLogger,
+		cfg:             cfg,
+		totpKey:         totpKey,
+		logger:          logger,
+		nowFunc:         time.Now,
+		consumedRefresh: make(map[string]consumedRefreshEntry),
 	}
+}
+
+// markRefreshConsumed records a freshly rotated refresh-token hash so a
+// subsequent presentation of the same token can be detected as a replay.
+func (s *AuthService) markRefreshConsumed(tokenHash, userID string) {
+	now := s.nowMs()
+	expire := now + int64(consumedRefreshTTLSeconds)*1000
+	s.consumedRefreshMu.Lock()
+	defer s.consumedRefreshMu.Unlock()
+	// Lazy cleanup of expired entries while we have the lock.
+	for h, e := range s.consumedRefresh {
+		if e.ExpireAt < now {
+			delete(s.consumedRefresh, h)
+		}
+	}
+	s.consumedRefresh[tokenHash] = consumedRefreshEntry{UserID: userID, ExpireAt: expire}
+}
+
+// lookupConsumedRefresh returns the userID associated with a rotated
+// refresh-token hash if it is still within the replay-detection window.
+// Returns ("", false) otherwise.
+func (s *AuthService) lookupConsumedRefresh(tokenHash string) (string, bool) {
+	now := s.nowMs()
+	s.consumedRefreshMu.Lock()
+	defer s.consumedRefreshMu.Unlock()
+	entry, ok := s.consumedRefresh[tokenHash]
+	if !ok {
+		return "", false
+	}
+	if entry.ExpireAt < now {
+		delete(s.consumedRefresh, tokenHash)
+		return "", false
+	}
+	return entry.UserID, true
 }
 
 // ── Internal helpers ───────────────────────────────────────────────────
@@ -572,6 +628,23 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", fmt.Errorf("querying refresh token: %w", err)
 	}
 	if record == nil {
+		// Refresh-token reuse detection (OAuth 2.1 §4.13): if this hash
+		// was rotated within the replay window, treat as a stolen token
+		// and revoke ALL refresh tokens for that user. This bounds the
+		// blast radius of a token leak: even if the legitimate user is
+		// still online, they will be forced to re-authenticate.
+		if userID, replayed := s.lookupConsumedRefresh(tokenHash); replayed {
+			s.logger.Warn("refresh_token_replay_detected", zap.String("user_id", userID))
+			if delErr := s.repo.DeleteRefreshTokensForUser(ctx, userID); delErr != nil {
+				s.logger.Warn("refresh_token_replay_revoke_failed",
+					zap.String("user_id", userID), zap.Error(delErr))
+			}
+			s.audit.Log(ctx, audit.EventLoginFailure,
+				audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+				audit.WithSuccess(false),
+				audit.WithDetails(map[string]any{"reason": "refresh_token_replay"}),
+			)
+		}
 		return nil, "", "", fmt.Errorf("%w: invalid refresh token", ErrUnauthenticated)
 	}
 
@@ -580,8 +653,10 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", fmt.Errorf("%w: refresh token expired", ErrTokenExpired)
 	}
 
-	// Rotation: delete old token.
+	// Rotation: delete old token and remember its hash so a replay of the
+	// rotated token is detected on its next presentation.
 	_ = s.repo.DeleteRefreshToken(ctx, record.NodeID)
+	s.markRefreshConsumed(tokenHash, record.UserID)
 
 	user, err := s.repo.GetUser(ctx, record.UserID)
 	if err != nil {
