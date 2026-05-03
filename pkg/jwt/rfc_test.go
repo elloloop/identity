@@ -93,7 +93,7 @@ func TestRFC7519_ExpiredTokenRejected(t *testing.T) {
 	tokenStr, err := CreateAccessToken(claims, kr, -5*time.Second)
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(tokenStr, kr)
+	_, err = VerifyAccessToken(tokenStr, kr, "")
 	require.Error(t, err, "expired token must be rejected")
 }
 
@@ -127,7 +127,7 @@ func TestRFC7519_FutureIat_StillVerifies(t *testing.T) {
 
 	// This may succeed or fail depending on library skew tolerance.
 	// The test documents the behavior.
-	_, _ = VerifyAccessToken(string(signed), kr)
+	_, _ = VerifyAccessToken(string(signed), kr, "")
 }
 
 // ── Claims extraction correctness ──────────────────────────────────────
@@ -147,7 +147,7 @@ func TestRFC7519_ClaimsExtraction_AllCustomFields(t *testing.T) {
 	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
 	require.NoError(t, err)
 
-	got, err := VerifyAccessToken(tokenStr, kr)
+	got, err := VerifyAccessToken(tokenStr, kr, "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "user-extract", got.Sub)
@@ -185,7 +185,7 @@ func TestRFC7519_KeyRotation_OldTokenStillVerifies(t *testing.T) {
 	require.NoError(t, err)
 
 	// Token signed with k1 must still verify with kr2
-	got, err := VerifyAccessToken(tokenStr, kr2)
+	got, err := VerifyAccessToken(tokenStr, kr2, "")
 	require.NoError(t, err)
 	assert.Equal(t, "user-rot", got.Sub)
 }
@@ -313,7 +313,7 @@ func TestRFC7519_EmptySubReturnsError(t *testing.T) {
 	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
 	if err == nil {
 		// Verify it round-trips
-		got, err := VerifyAccessToken(tokenStr, kr)
+		got, err := VerifyAccessToken(tokenStr, kr, "")
 		require.NoError(t, err)
 		assert.Equal(t, "", got.Sub)
 	}
@@ -345,6 +345,6 @@ func TestRFC7519_TokenNotValidBefore(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr)
+	_, err = VerifyAccessToken(string(signed), kr, "")
 	require.Error(t, err, "token with future nbf should be rejected")
 }

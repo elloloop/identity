@@ -51,7 +51,7 @@ func TestAuthMiddleware_ExemptPath_NoToken_Passes(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, "")(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
 	rec := httptest.NewRecorder()
@@ -69,7 +69,7 @@ func TestAuthMiddleware_ExemptPath_WithToken_InjectsUserID(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, "")(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -87,7 +87,7 @@ func TestAuthMiddleware_ExemptPath_InvalidToken_StillPasses(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, "")(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/RefreshToken", nil)
 	req.Header.Set("Authorization", "Bearer invalid-token-here")
@@ -105,7 +105,7 @@ func TestAuthMiddleware_RequiredPath_NoToken_Returns401(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, "")(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
 	rec := httptest.NewRecorder()
@@ -122,7 +122,7 @@ func TestAuthMiddleware_RequiredPath_InvalidToken_Returns401(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, "")(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer not-a-real-token")
@@ -141,7 +141,7 @@ func TestAuthMiddleware_RequiredPath_ValidToken_InjectsUserID(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, "")(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -162,7 +162,7 @@ func TestAuthMiddleware_RequiredPath_ExpiredToken_Returns401(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, "")(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -210,7 +210,7 @@ func TestAuthMiddleware_HealthPath_ExemptNoToken(t *testing.T) {
 	var called bool
 	var userID string
 
-	handler := AuthMiddleware(kr)(echoHandler(&called, &userID))
+	handler := AuthMiddleware(kr, "")(echoHandler(&called, &userID))
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
