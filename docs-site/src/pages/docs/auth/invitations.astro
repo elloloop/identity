@@ -1,81 +1,87 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="Invitations">
   <h1>Invitations</h1>
-  <p>Admins can invite users without exposing self-serve signup. The invitation flow is implemented end-to-end: an admin calls <code>InviteUser</code>, the invitee uses the returned token to call <code>AcceptInvitation</code>, and the result is a fully active user with a fresh session.</p>
+  <p>
+    Admins create users in two modes: <em>invite</em> (the user finishes
+    signup themselves) or <em>create immediately</em> (the admin gets a
+    temporary password to hand off). Both flows are admin-only and audit
+    logged.
+  </p>
 
-  <h2>Two modes</h2>
-  <p>Set <code>create_immediately</code> on <code>InviteUserRequest</code>:</p>
-  <ul>
-    <li><strong>false</strong> &mdash; creates a pending User (<code>status=invited</code>) and returns a one-time <code>invitation_token</code> + <code>setup_url</code>. The user finishes signup via <code>AcceptInvitation</code>.</li>
-    <li><strong>true</strong> &mdash; creates a fully active User and returns a <code>temporary_password</code> the admin hands off. Useful for offline onboarding.</li>
-  </ul>
-
-  <h2>Invite (deferred)</h2>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/InviteUser \
-  -H "Authorization: Bearer $ADMIN_ACCESS" \
-  -H "Content-Type: application/json" \
+  <h2>Invite mode</h2>
+  <p>
+    <code>InviteUser</code> with <code>create_immediately: false</code>
+    creates a <em>pending</em> user (status <code>USER_STATUS_INVITED</code>)
+    and returns an <code>invitation_token</code> that must be delivered to
+    the user — typically as an email link of the form
+    <code>https://app.example.com/accept?token=&lt;invitation_token&gt;</code>.
+  </p>
+  <Code code={`curl -sX POST http://localhost/identity.IdentityService/InviteUser \\
+  -H "Authorization: Bearer $ADMIN_TOKEN" \\
+  -H 'Content-Type: application/json' \\
   -d '{
-    "email": "newperson@example.com",
-    "name": "New Person",
+    "email": "bob@example.com",
+    "name": "Bob",
     "role": "member",
-    "recovery_email": "newperson-backup@example.com",
-    "create_immediately": false
-  }'</code></pre>
-  <pre is:raw><code class="language-json">{
-  "user": {
-    "id": "user_01HX...",
-    "email": "newperson@example.com",
-    "status": "USER_STATUS_INVITED",
-    "role": "member"
-  },
+    "createImmediately": false
+  }'`} lang="bash" />
+  <Code code={`{
+  "user":            { "id": "user_...", "status": "USER_STATUS_INVITED", ... },
   "invitationToken": "inv_...",
-  "setupUrl": "https://app.example.com/accept-invite?token=inv_..."
-}</code></pre>
-  <p>The invitee opens <code>setup_url</code>, picks a password, and the frontend calls:</p>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/AcceptInvitation \
-  -H "Content-Type: application/json" \
+  "setupUrl":        "https://app.example.com/accept?token=inv_..."
+}`} lang="json" />
+  <p>
+    The user opens the link, picks a password, and calls
+    <code>AcceptInvitation</code>. Identity hashes the password, marks the
+    user <code>USER_STATUS_ACTIVE</code>, retires the invitation token,
+    and returns a fresh access + refresh pair.
+  </p>
+  <Code code={`curl -sX POST http://localhost/identity.IdentityService/AcceptInvitation \\
+  -H 'Content-Type: application/json' \\
   -d '{
-    "invitation_token": "inv_...",
-    "password": "Their5tronger#Pass",
-    "name": "New Person"
-  }'
-# &rarr; { user (now status=active), accessToken, refreshToken, expiresIn }</code></pre>
-  <p><code>AcceptInvitation</code> is auth-exempt, so it works with no prior session. The user is logged in immediately on success.</p>
+    "invitationToken": "inv_...",
+    "password": "their chosen pass phrase",
+    "name": "Bob Robertson"
+  }'`} lang="bash" />
 
-  <h2>Invite (immediate)</h2>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/InviteUser \
-  -H "Authorization: Bearer $ADMIN_ACCESS" \
-  -H "Content-Type: application/json" \
+  <h2>Create-immediately mode</h2>
+  <p>
+    <code>InviteUser</code> with <code>create_immediately: true</code>
+    creates a fully-active user with a randomly-generated temporary
+    password, returned to the admin in the response. The admin hands the
+    password off out of band; the user signs in and is expected to change
+    it.
+  </p>
+  <Code code={`curl -sX POST http://localhost/identity.IdentityService/InviteUser \\
+  -H "Authorization: Bearer $ADMIN_TOKEN" \\
+  -H 'Content-Type: application/json' \\
   -d '{
-    "email": "newperson@example.com",
-    "name": "New Person",
-    "role": "member",
-    "create_immediately": true
-  }'</code></pre>
-  <pre is:raw><code class="language-json">{
-  "user": { "id": "user_01HX...", "status": "USER_STATUS_ACTIVE" },
-  "temporaryPassword": "Tmp-q9wK7s5N..."
-}</code></pre>
-  <p>The temporary password is shown to the admin <em>once</em>. Hand it to the user out-of-band; they should change it on first login via <code>ChangePassword</code>.</p>
+    "email": "carol@example.com",
+    "name": "Carol",
+    "role": "guest",
+    "createImmediately": true
+  }'`} lang="bash" />
+  <Code code={`{
+  "user":              { "id": "user_...", "status": "USER_STATUS_ACTIVE", ... },
+  "temporaryPassword": "Tn7-pass-..."
+}`} lang="json" />
 
-  <Callout type="warning" title="Admin role required">
-    All invitation RPCs (<code>InviteUser</code>, <code>DeactivateUser</code>, <code>ReactivateUser</code>, <code>ResetUserPassword</code>, <code>SetUserQuota</code>) require the calling JWT to have <code>role=admin</code>. The <code>AdminService.requireAdmin</code> helper enforces this; non-admin callers get <code>permission_denied</code> with no effect on the target.
-  </Callout>
+  <h2>Reset password (admin)</h2>
+  <p>
+    <code>ResetUserPassword</code> is the post-bootstrap version of the
+    create-immediately path. With <code>generate_temp_password: true</code>
+    the admin gets a temporary password; with <code>false</code> the admin
+    gets a one-time reset token they can deliver themselves.
+  </p>
 
-  <h2>Audit events</h2>
-  <ul>
-    <li><code>user_invited</code> &mdash; emitted on every <code>InviteUser</code> call. Includes target user ID, role, and whether the immediate-create path was used.</li>
-    <li><code>login_success</code> &mdash; emitted when the invitee completes <code>AcceptInvitation</code>, with <code>method=invitation</code>.</li>
-  </ul>
-
-  <h2>Token characteristics</h2>
-  <ul>
-    <li>Generated as a random opaque string by the server.</li>
-    <li>Single-use &mdash; consumed atomically by <code>AcceptInvitation</code>.</li>
-    <li>Stored hashed alongside the User node so the raw token can't be recovered server-side.</li>
-  </ul>
+  <h2>Audit trail</h2>
+  <p>
+    Every admin action above writes an <code>AuditEvent</code> with the
+    actor's user ID, the target user ID, and the IP / user-agent of the
+    request. See <a href="/identity/docs/operations/audit-logging">Audit Logging</a>.
+  </p>
 </DocsLayout>

@@ -1,49 +1,89 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="OAuth">
-  <h1>OAuth Login</h1>
-  <p>Identity supports Google and Microsoft as OAuth providers. The deployed model is "frontend SDK + backend trust": the browser/app uses the provider's JS SDK, gets a verified ID token, and hands the resulting user info to Identity's <code>OAuthLogin</code> RPC.</p>
+  <h1>OAuth</h1>
+  <p>
+    Identity supports Google and Microsoft as upstream OAuth providers. The
+    flow is "browser does the dance, server consumes the result": the
+    front-end SDK (e.g. Google Identity Services) handles the redirect and
+    delivers a verified user identity to Identity's <code>OAuthLogin</code>
+    RPC, which upserts the user and issues access + refresh tokens.
+  </p>
 
-  <Callout type="warning" title="Server-side code-exchange is planned, not implemented">
-    The proto carries <code>code</code>, <code>redirect_uri</code>, and <code>code_verifier</code> fields, and the source comments call <code>OAuthLogin</code> "a placeholder for the OAuth code exchange flow." The current implementation expects the email and display name to already be verified by the caller; it does not itself contact Google or Microsoft to redeem an authorization code. Treat <code>code</code>-based flows as a planned extension.
-  </Callout>
-
-  <h2>What's implemented today</h2>
-  <p><code>OAuthLogin</code> takes a verified email + provider tag and:</p>
-  <ol>
-    <li>Looks up or creates a User by email.</li>
-    <li>Updates display name and avatar if changed.</li>
-    <li>Issues access + refresh tokens (same lifetime as password login).</li>
-    <li>Records an <code>oauth_login</code> audit event with provider, IP, and UA.</li>
-  </ol>
-
-  <h2>RPC surface</h2>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/OAuthLogin \
-  -H "Content-Type: application/json" \
-  -d '{
-    "code": "<from frontend>",
-    "redirect_uri": "https://app.example.com/oauth/callback",
-    "provider": "google",
-    "code_verifier": "<PKCE verifier, optional>",
-    "tenant": ""
-  }'</code></pre>
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+    <strong>Implementation status.</strong> The post-validation half
+    (user upsert + token issuance) is implemented in
+    <code>internal/service/auth_login.go</code>. The OAuth code-exchange
+    step is currently a placeholder — the source comment reads
+    "<em>The actual OIDC token exchange and validation would be injected
+    as a dependency; this method handles the post-validation user upsert +
+    token issuance.</em>" In production wire your own validator into the
+    handler before exposing this RPC.
+  </div>
 
   <h2>Configuration</h2>
-  <table>
-    <tr><th>Var</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_GOOGLE_CLIENT_ID</code></td><td>Used by the frontend SDK; Identity reads it to validate audience claims.</td></tr>
-    <tr><td><code>GATEWAY_GOOGLE_CLIENT_SECRET</code></td><td>Required for server-side code exchange (planned).</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_ID</code></td><td>Microsoft / Entra application ID.</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_SECRET</code></td><td>Required for code exchange (planned).</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_TENANT_ID</code></td><td>Optional &mdash; restricts logins to a specific Entra tenant.</td></tr>
-  </table>
+  <p>Configure each provider you intend to support:</p>
+  <Code code={`-e GATEWAY_GOOGLE_CLIENT_ID=...
+-e GATEWAY_GOOGLE_CLIENT_SECRET=...
+-e GATEWAY_MICROSOFT_CLIENT_ID=...
+-e GATEWAY_MICROSOFT_CLIENT_SECRET=...
+-e GATEWAY_MICROSOFT_TENANT_ID=common`} lang="bash" />
 
-  <h2>User lifecycle</h2>
-  <p>An OAuth login that finds no existing user creates one with <code>role=member</code>, <code>status=active</code>, and no password set. Subsequent <code>PasswordLogin</code> attempts on that user will fail with <code>ErrUnauthenticated</code> ("no password set") &mdash; OAuth-only users must continue to log in via OAuth, or have a password set later via the admin <code>ResetUserPassword</code> flow.</p>
+  <h2>Request shape</h2>
+  <Code code={`message OAuthLoginRequest {
+  string code          = 1;  // authorization code from provider
+  string redirect_uri  = 2;
+  string provider      = 3;  // "google" or "microsoft"
+  string code_verifier = 4;  // PKCE (optional)
+  string tenant        = 5;  // Microsoft tenant ID (optional)
+}`} lang="proto" />
 
-  <h2>Audit</h2>
-  <p>Every successful OAuth login emits an <code>oauth_login</code> event with the provider name in the details JSON.</p>
+  <h2>Response</h2>
+  <Code code={`message OAuthLoginResponse {
+  User user             = 1;
+  string access_token   = 2;  // backend-issued JWT
+  string refresh_token  = 4;
+  int32 expires_in      = 5;
+}`} lang="proto" />
+
+  <h2>Upsert semantics</h2>
+  <p>
+    On a successful OAuth verification, Identity looks up the user by
+    email:
+  </p>
+  <ul>
+    <li>
+      <strong>Existing user, active.</strong> Tokens are issued; profile
+      fields (<code>name</code>, <code>avatar_url</code>) are updated from
+      the OAuth claims.
+    </li>
+    <li>
+      <strong>Existing user, invited.</strong> The login is rejected with
+      <code>invitation_pending</code> until they accept the invitation.
+    </li>
+    <li>
+      <strong>Existing user, deactivated/suspended.</strong> Rejected with
+      <code>account_not_active</code>.
+    </li>
+    <li>
+      <strong>New user.</strong> Created with status
+      <code>USER_STATUS_ACTIVE</code> and role <code>member</code> (or
+      <code>admin</code> if they are the first user in the deployment).
+      No password hash is stored — subsequent <code>PasswordLogin</code>
+      attempts return <code>no password set for this account</code> until
+      they set one.
+    </li>
+  </ul>
+
+  <h2>OAuth + password coexistence</h2>
+  <p>
+    A user created via OAuth has no password hash, but can opt in by going
+    through <code>RequestPasswordReset</code> → email link →
+    <code>AcceptInvitation</code>-style setup, or by an admin's
+    <code>ResetUserPassword</code>. After that they can log in with either
+    provider.
+  </p>
 </DocsLayout>

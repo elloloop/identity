@@ -1,80 +1,88 @@
 ---
 import DocsLayout from "../../layouts/DocsLayout.astro";
-import Callout from "../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="Quick Start">
   <h1>Quick Start</h1>
-  <p>Boot Identity, hit the health endpoint, sign up a user, log them back in. About five minutes.</p>
+  <p>Run Identity locally against an EntDB container, then sign up a user and verify the access token.</p>
 
-  <h2>1. Start an EntDB instance</h2>
-  <p>Identity needs an EntDB endpoint. The simplest option is a dev container:</p>
-  <pre is:raw><code class="language-bash">docker run -d --name entdb -p 50051:50051 \
-  ghcr.io/elloloop/entdb:latest</code></pre>
+  <h2>1. Start EntDB</h2>
+  <p>
+    Identity needs an EntDB instance. The fastest way is the EntDB demo
+    container (in-memory WAL, single tenant):
+  </p>
+  <Code code={`docker run -d --name entdb -p 50051:50051 ghcr.io/elloloop/entdb:latest`} lang="bash" />
 
-  <h2>2. Run Identity</h2>
-  <p>The image is published to GitHub Container Registry. The minimum env you need is the EntDB address and a tenant ID.</p>
-  <pre is:raw><code class="language-bash">docker run -d --name identity \
-  -p 80:80 -p 9090:9090 \
-  -e GATEWAY_ENTDB_ADDRESS=host.docker.internal:50051 \
-  -e GATEWAY_DEFAULT_TENANT_ID=quickstart \
-  -e GATEWAY_AUTH_ALLOW_LOCAL=true \
-  ghcr.io/elloloop/identity:latest</code></pre>
+  <h2>2. Start Identity</h2>
+  <Code code={`docker run -d --name identity \\
+  -p 80:80 -p 9090:9090 \\
+  --link entdb \\
+  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \\
+  -e GATEWAY_DEFAULT_TENANT_ID=local \\
+  -e GATEWAY_PASSKEY_RP_ID=localhost \\
+  -e GATEWAY_PASSKEY_ORIGIN=http://localhost \\
+  -e GATEWAY_AUTH_ALLOW_LOCAL=true \\
+  ghcr.io/elloloop/identity:0.1.0`} lang="bash" title="docker run" />
+  <p>
+    With no <code>GATEWAY_JWT_KEYS</code> set, Identity auto-generates a
+    throwaway RSA key on startup and logs <code>auto_generating_dev_rsa_key</code>.
+    See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a> for production setup.
+  </p>
 
-  <Callout type="warning" title="Dev mode only">
-    With <code>GATEWAY_JWT_KEYS</code> unset, Identity auto-generates an ephemeral RSA signing key on boot and logs <code>auto_generating_dev_rsa_key</code>. That's fine for local work but useless in production &mdash; tokens become invalid the moment the container restarts. See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a> for the prod setup.
-  </Callout>
-
-  <h2>3. Health check</h2>
-  <pre is:raw><code class="language-bash">curl -s http://localhost/health
-# {"status":"ok"}</code></pre>
-
-  <h2>4. Sign up a user</h2>
-  <p>Connect-RPC speaks plain HTTP/JSON. The URL is the proto service path; the body is a JSON-encoded request message.</p>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/PasswordSignup \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "alice@example.com",
-    "password": "Sup3rStrong!Pass",
-    "recovery_email": "alice-backup@example.com"
-  }'</code></pre>
-  <p>Response:</p>
-  <pre is:raw><code class="language-json">{
+  <h2>3. Sign up a user</h2>
+  <p>
+    Connect-RPC accepts JSON over HTTP. Each RPC is a POST to
+    <code>/identity.IdentityService/&lt;Method&gt;</code> with the request
+    message as the body and <code>Content-Type: application/json</code>.
+  </p>
+  <Code code={`curl -sX POST http://localhost/identity.IdentityService/PasswordSignup \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"alice@example.com","password":"correct horse battery"}'`} lang="bash" />
+  <p>Response (truncated):</p>
+  <Code code={`{
   "user": {
-    "id": "user_01HX...",
+    "id": "user_...",
     "email": "alice@example.com",
-    "name": "alice",
-    "role": "member",
-    "status": "USER_STATUS_ACTIVE"
+    "status": "USER_STATUS_ACTIVE",
+    "role": "admin"
   },
-  "accessToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImRldiIs...",
+  "accessToken": "eyJhbGciOiJSUzI1NiIs...",
   "refreshToken": "rt_...",
   "expiresIn": 900
-}</code></pre>
+}`} lang="json" />
 
-  <h2>5. Log in</h2>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/PasswordLogin \
-  -H "Content-Type: application/json" \
-  -d '{"email":"alice@example.com","password":"Sup3rStrong!Pass"}'</code></pre>
-  <p>You'll get back a fresh <code>access_token</code> and a rotated <code>refresh_token</code>. The access token lasts 15 minutes by default; the refresh token lasts seven days.</p>
+  <h2>4. Call an authenticated RPC</h2>
+  <Code code={`TOKEN=$(curl -sX POST http://localhost/identity.IdentityService/PasswordLogin \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"alice@example.com","password":"correct horse battery"}' \\
+  | jq -r .accessToken)
 
-  <h2>6. Hit an authenticated RPC</h2>
-  <pre is:raw><code class="language-bash">ACCESS=&quot;eyJ...&quot;  # paste from step 5
-curl -s -X POST http://localhost/identity.IdentityService/GetCurrentUser \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{}'</code></pre>
+curl -sX POST http://localhost/identity.IdentityService/GetCurrentUser \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{}'`} lang="bash" />
 
-  <h2>7. Inspect the JWKS</h2>
-  <p>Downstream services verify tokens using the public keys at:</p>
-  <pre is:raw><code class="language-bash">curl -s http://localhost/.well-known/jwks.json | jq .</code></pre>
-  <p>That's the contract: any service in your stack can fetch this once, cache it, and verify Identity-issued tokens locally.</p>
+  <h2>5. Verify the token externally</h2>
+  <p>
+    Downstream services should fetch the JWKS and verify access tokens
+    locally rather than calling Identity on every request.
+  </p>
+  <Code code={`curl -s http://localhost/.well-known/jwks.json`} lang="bash" />
+  <Code code={`{
+  "keys": [
+    {"kty":"RSA","use":"sig","alg":"RS256","kid":"dev","n":"...","e":"AQAB"}
+  ]
+}`} lang="json" />
 
-  <h2>Next</h2>
+  <h2>6. Inspect metrics</h2>
+  <Code code={`curl -s http://localhost:9090/metrics | head`} lang="bash" />
+
+  <h2>Next steps</h2>
   <ul>
-    <li><a href="/identity/docs/installation/configuration">Full configuration reference</a></li>
-    <li><a href="/identity/docs/installation/jwt-keys">Set up persistent JWT keys</a></li>
-    <li><a href="/identity/docs/auth/password">Password flow details</a></li>
-    <li><a href="/identity/docs/api-reference/grpc">All RPC methods</a></li>
+    <li><a href="/identity/docs/installation/configuration">Configuration</a> — every environment variable</li>
+    <li><a href="/identity/docs/installation/jwt-keys">JWT Keys</a> — production key ring</li>
+    <li><a href="/identity/docs/auth/passkey">Passkey login</a></li>
+    <li><a href="/identity/docs/auth/totp">TOTP (2FA)</a></li>
   </ul>
 </DocsLayout>

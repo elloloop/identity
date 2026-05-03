@@ -1,75 +1,109 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="GitHub Actions">
-  <h1>GitHub Actions</h1>
-  <p>Identity is published as a public image at <code>ghcr.io/elloloop/identity</code>. Pulling it from a workflow is straightforward; you don't need credentials for the public tag.</p>
+  <h1>Deploying with GitHub Actions</h1>
+  <p>
+    The <a href="https://github.com/elloloop/identity"><code>elloloop/identity</code></a>
+    repository ships a release workflow that builds and pushes a
+    multi-arch container to GHCR on every <code>v*</code> tag. The
+    workflow is reusable as a reference template.
+  </p>
 
-  <h2>Pulling the image</h2>
-  <pre is:raw><code class="language-yaml">jobs:
-  smoke-test:
+  <h2>Release workflow</h2>
+  <p>
+    File: <code>.github/workflows/release.yml</code>. Triggered by a Git
+    tag matching <code>v*</code>. Pushes
+    <code>ghcr.io/elloloop/identity:&lt;version&gt;</code> for both
+    <code>linux/amd64</code> and <code>linux/arm64</code>.
+  </p>
+  <Code code={`name: Release
+on:
+  push:
+    tags: ['v*']
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: \${{ github.repository }}
+
+jobs:
+  build-and-push:
     runs-on: ubuntu-latest
-    services:
-      entdb:
-        image: ghcr.io/elloloop/entdb:latest
-        ports: ['50051:50051']
-
-      identity:
-        image: ghcr.io/elloloop/identity:0.1.0
-        env:
-          GATEWAY_ENTDB_ADDRESS: entdb:50051
-          GATEWAY_DEFAULT_TENANT_ID: ci-smoke
-          GATEWAY_AUTH_ALLOW_LOCAL: "true"
-        ports: ['80:80', '9090:9090']
-
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Wait for identity health
-        run: |
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost/health; then exit 0; fi
-            sleep 2
-          done
-          exit 1
-
-      - name: Smoke-test signup
-        run: |
-          curl -fsS -X POST http://localhost/identity.IdentityService/PasswordSignup \
-            -H 'Content-Type: application/json' \
-            -d '{"email":"ci@example.com","password":"Sup3rStrong!Pass"}'</code></pre>
-
-  <Callout type="info" title="Why no GHCR login?">
-    <code>ghcr.io/elloloop/identity</code> tags are published as public, so anonymous <code>docker pull</code> and the GitHub Actions <code>services:</code> block work without a <code>docker/login-action</code> step. Pin to a version tag (<code>0.1.0</code>) rather than <code>latest</code> in CI.
-  </Callout>
-
-  <h2>How tags are built</h2>
-  <p>The <code>release.yml</code> workflow in this repo builds and pushes on every <code>v*</code> git tag. It produces:</p>
-  <ul>
-    <li><code>0.1.0</code> &mdash; full semver</li>
-    <li><code>0.1</code> &mdash; major.minor</li>
-    <li><code>0</code> &mdash; major</li>
-    <li><code>latest</code> &mdash; only when the tag is not a prerelease</li>
-    <li><code>sha-&lt;commit&gt;</code> &mdash; per-commit pin</li>
-  </ul>
-  <p>The image is multi-arch (linux/amd64, linux/arm64) and ships with SBOM and provenance attestations.</p>
+      - run: |
+          VER="\${GITHUB_REF_NAME#v}"
+          echo "$VER" > VERSION
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: \${{ env.REGISTRY }}
+          username: \${{ github.actor }}
+          password: \${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: \${{ env.REGISTRY }}/\${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=\${{ !contains(github.ref, '-') }}
+            type=sha,prefix=sha-
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          target: server
+          tags: \${{ steps.meta.outputs.tags }}
+          labels: \${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          sbom: true
+          provenance: mode=max
+          build-args: |
+            VERSION=\${{ github.ref_name }}
+            COMMIT=\${{ github.sha }}`} lang="yaml" title=".github/workflows/release.yml" />
 
   <h2>Cutting a release</h2>
-  <pre is:raw><code class="language-bash">git tag v0.1.0
+  <Code code={`# Tag and push
+git tag v0.1.0
 git push origin v0.1.0
-# Workflow runs; image appears at ghcr.io/elloloop/identity:0.1.0</code></pre>
 
-  <h2>Pinning by digest</h2>
-  <p>For supply-chain integrity in production, pin by digest rather than tag:</p>
-  <pre is:raw><code class="language-bash">crane digest ghcr.io/elloloop/identity:0.1.0
-# sha256:abcd...
+# The workflow produces these tags on GHCR:
+#   ghcr.io/elloloop/identity:0.1.0
+#   ghcr.io/elloloop/identity:0.1
+#   ghcr.io/elloloop/identity:0
+#   ghcr.io/elloloop/identity:latest      (non-prerelease only)
+#   ghcr.io/elloloop/identity:sha-<commit>`} lang="bash" />
 
-docker run ghcr.io/elloloop/identity@sha256:abcd...</code></pre>
+  <h2>Supply chain</h2>
+  <p>The workflow asks Buildx for:</p>
+  <ul>
+    <li><strong>SBOM</strong> (<code>sbom: true</code>) — attached as an OCI artifact alongside the image.</li>
+    <li><strong>Provenance</strong> (<code>provenance: mode=max</code>) — attestation for the SLSA build.</li>
+  </ul>
+  <p>
+    The runtime base image is
+    <code>gcr.io/distroless/static-debian12:nonroot</code>, pinned by
+    digest. Bump the digest with
+    <code>crane digest gcr.io/distroless/static-debian12:nonroot</code> and
+    cut a new release.
+  </p>
 
-  <h2>Verifying provenance</h2>
-  <p>The release workflow attaches a SLSA-style provenance attestation. Verify with <code>cosign</code> or <code>gh attestation verify</code>:</p>
-  <pre is:raw><code class="language-bash">gh attestation verify \
-  oci://ghcr.io/elloloop/identity:0.1.0 \
-  --owner elloloop</code></pre>
+  <h2>Deploying the image</h2>
+  <p>
+    A typical CD pipeline pulls the image from GHCR and rolls it out via
+    <code>kubectl set image</code>, Argo CD, or Flux. The exact wiring is
+    out of scope for this repo, but
+    <a href="/identity/docs/deployment/kubernetes">Kubernetes</a> covers
+    a reference manifest.
+  </p>
 </DocsLayout>

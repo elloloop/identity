@@ -1,82 +1,69 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="Architecture">
   <h1>Architecture</h1>
+  <p>
+    Identity is a stateless Connect-RPC server. All durable state lives in
+    EntDB. The container does five things on startup, then serves requests.
+  </p>
 
-  <h2>Service shape</h2>
-  <p>Identity is a single Go binary. It runs two HTTP servers:</p>
+  <h2>Process layout</h2>
+  <Code code={`Browser / SDK
+     |
+     |  Connect-RPC over HTTP/JSON  (port 80)
+     v
++-------------------------------+        +--------+
+| Identity container            | -----> |        |
+|                               |        |        |
+|  Logging  -> CORS -> Health   |        | EntDB  |
+|     -> JWKS  -> Auth          |        |        |
+|     -> service.IdentityHandler|        |        |
++-------------------------------+        +--------+
+     |
+     |  Prometheus  (port 9090)
+     v
+  /metrics`} lang="plaintext" />
+
+  <h2>Layers</h2>
+  <p>
+    Concrete files live under <code>internal/</code> and <code>pkg/</code>.
+    Each layer has a single responsibility:
+  </p>
   <ul>
-    <li><strong>Connect server (port 80 by default)</strong> &mdash; the public API. Connect-RPC over HTTP/1.1 and HTTP/2, speaking JSON or proto-binary.</li>
-    <li><strong>Metrics server (port 9090 by default)</strong> &mdash; <code>/metrics</code> for Prometheus.</li>
-  </ul>
-  <p>The Connect server also serves three side-channel paths handled before the RPC router:</p>
-  <table>
-    <tr><th>Path</th><th>Purpose</th></tr>
-    <tr><td><code>/</code>, <code>/health</code>, <code>/healthz</code></td><td>Liveness probe (<code>&#123;"status":"ok"&#125;</code>)</td></tr>
-    <tr><td><code>/.well-known/jwks.json</code></td><td>JWKS for downstream services</td></tr>
-  </table>
-
-  <h2>Request pipeline</h2>
-  <p>Requests pass through this middleware chain (outermost first):</p>
-  <ol>
-    <li><strong>Logging</strong> &mdash; structured zap log per request</li>
-    <li><strong>CORS</strong> &mdash; configured via <code>GATEWAY_ALLOWED_ORIGINS</code></li>
-    <li><strong>Health</strong> &mdash; short-circuits <code>/health</code>, <code>/healthz</code>, <code>/</code></li>
-    <li><strong>JWKS</strong> &mdash; serves <code>/.well-known/jwks.json</code></li>
-    <li><strong>Auth</strong> &mdash; bearer-token verification on non-exempt paths</li>
-    <li><strong>Connect handler</strong> &mdash; routes to the IdentityService methods</li>
-  </ol>
-
-  <h2>Auth-exempt paths</h2>
-  <p>The auth middleware allows unauthenticated access to login, signup, and other public flows. From <code>internal/middleware/auth.go</code>:</p>
-  <ul>
-    <li><code>OAuthLogin</code>, <code>PasswordLogin</code>, <code>PasswordSignup</code></li>
-    <li><code>RefreshToken</code>, <code>Logout</code>, <code>GetCurrentUser</code></li>
-    <li><code>BeginPasskeyLogin</code>, <code>CompletePasskeyLogin</code></li>
-    <li><code>InitiateQrLogin</code>, <code>PollQrLogin</code></li>
-    <li><code>AcceptInvitation</code>, <code>RequestAdminHelp</code>, <code>VerifyTotp</code></li>
-    <li><code>/.well-known/jwks.json</code>, <code>/health</code>, <code>/healthz</code></li>
-  </ul>
-  <p>For exempt paths, if a token is present and valid, the middleware still extracts the <code>sub</code> claim into the <code>X-Authenticated-User-Id</code> request header so the handler can act on the caller identity (used for <code>GetCurrentUser</code>).</p>
-
-  <h2>Service layer</h2>
-  <p>The Connect handler is a thin shell. All business logic lives in <code>internal/service/</code>:</p>
-  <ul>
-    <li><code>AuthService</code> &mdash; signup, login, refresh, logout, OAuth, passkey, TOTP, QR login</li>
-    <li><code>AdminService</code> &mdash; invite, deactivate, reactivate, admin password reset, set quota</li>
-    <li><code>GroupService</code> &mdash; group CRUD and membership</li>
-    <li><code>HelpService</code> &mdash; admin help requests (replaces self-serve forgot-password)</li>
-    <li><code>ProfileService</code> &mdash; self-service profile and password changes</li>
-  </ul>
-  <p>Each service takes a <code>Repository</code> or <code>DB</code> interface so it's testable without a live EntDB connection. Errors are domain-typed (e.g. <code>ErrInvalidArgument</code>, <code>ErrAlreadyExists</code>) and translated to gRPC codes by the handler layer.</p>
-
-  <h2>Persistence</h2>
-  <p>Every persistent operation goes through EntDB. Identity reserves type IDs <code>1&ndash;99</code>:</p>
-  <table>
-    <tr><th>type_id</th><th>Node</th></tr>
-    <tr><td>1</td><td>User</td></tr>
-    <tr><td>2</td><td>Group (the proto name; the EntDB node type is still <code>WorkingGroup</code>)</td></tr>
-    <tr><td>5</td><td>RefreshToken</td></tr>
-    <tr><td>6</td><td>Passkey</td></tr>
-    <tr><td>7</td><td>TOTPSecret</td></tr>
-    <tr><td>8</td><td>AuditEvent</td></tr>
-  </table>
-  <p>Group membership is an EntDB edge (<code>User &larr;MEMBER_OF&rarr; Group</code>).</p>
-
-  <Callout type="info" title="Why EntDB?">
-    Tenant isolation is the load-bearing feature. Each product gets its own tenant; user data is stored in a per-tenant SQLite file under EntDB, with cryptographic shred-by-key support. Identity itself is stateless &mdash; it's safe to run multiple replicas behind a load balancer.
-  </Callout>
-
-  <h2>External dependencies</h2>
-  <ul>
-    <li><strong>EntDB</strong> &mdash; required, gRPC at <code>GATEWAY_ENTDB_ADDRESS</code></li>
-    <li><strong>Email service</strong> &mdash; optional, gRPC at <code>GATEWAY_EMAIL_SERVICE_HOST:GATEWAY_EMAIL_SERVICE_PORT</code> for sending password-reset and invitation emails</li>
-    <li><strong>Google / Microsoft</strong> &mdash; optional, only needed if OAuth is enabled</li>
+    <li><code>cmd/identity/main.go</code> — process bootstrap, key-ring loading, middleware chain, graceful shutdown.</li>
+    <li><code>internal/middleware/</code> — logging, CORS, health, JWKS endpoint, bearer-token auth.</li>
+    <li><code>internal/connect/</code> — Connect-RPC adapter that translates between proto types and the service-layer Go types.</li>
+    <li><code>internal/service/</code> — business logic. <code>AuthService</code>, <code>AdminService</code>, <code>GroupService</code>, <code>HelpService</code>, <code>ProfileService</code>. None of these import Connect or proto types.</li>
+    <li><code>internal/repo</code> — EntDB-backed implementations of the <code>service.Repository</code> and <code>service.DB</code> interfaces. The current build still wires <code>service.StubRepository</code> / <code>service.StubDB</code>; see <a href="/identity/docs/operations/observability">Observability</a> for the resulting <code>using_stub_persistence</code> warning.</li>
+    <li><code>pkg/jwt</code> — <code>KeyRing</code>, <code>SigningKey</code>, <code>CreateAccessToken</code>, <code>VerifyAccessToken</code>, JWKS marshalling.</li>
+    <li><code>pkg/passwords</code> — bcrypt hashing (cost 12) + a strength validator.</li>
+    <li><code>pkg/passkeys</code> — WebAuthn (<code>go-webauthn/webauthn</code>) wrapper.</li>
+    <li><code>pkg/totp</code> — RFC 6238 TOTP + AES-GCM encryption for secrets at rest.</li>
+    <li><code>pkg/audit</code> — append-only logger that writes <code>AuditEvent</code> nodes to EntDB.</li>
   </ul>
 
-  <h2>Stateless replicas</h2>
-  <p>Identity holds no in-memory state that must survive across instances. JWT signing keys come from an env var (the JSON key ring); refresh tokens, sessions, TOTP secrets, and challenges all live in EntDB. You can horizontally scale by running multiple replicas with the same <code>GATEWAY_JWT_KEYS</code>; downstream services don't care which replica issued a token because verification is local via JWKS.</p>
+  <h2>Middleware chain</h2>
+  <p>
+    The chain is built in <code>cmd/identity/main.go</code>. Outermost runs
+    first on the request path:
+  </p>
+  <Code code={`logging -> CORS -> health -> JWKS -> auth -> Connect handler`} lang="plaintext" />
+  <ul>
+    <li><strong>logging</strong> — structured zap logs with request ID, latency, status.</li>
+    <li><strong>CORS</strong> — comma-separated origins from <code>GATEWAY_ALLOWED_ORIGINS</code>.</li>
+    <li><strong>health</strong> — answers <code>/health</code> and <code>/healthz</code> before reaching the auth layer.</li>
+    <li><strong>JWKS</strong> — serves <code>/.well-known/jwks.json</code> straight from the in-memory <code>KeyRing</code>.</li>
+    <li><strong>auth</strong> — verifies bearer tokens and writes the user ID to <code>X-Authenticated-User-Id</code>. Skipped for the exempt-path list (signup, login, JWKS, health, etc.).</li>
+  </ul>
+
+  <h2>Graceful shutdown</h2>
+  <p>
+    On <code>SIGTERM</code> or <code>SIGINT</code>, the server stops accepting
+    new connections, waits up to 10 seconds for in-flight RPCs, then closes
+    the EntDB client. The metrics server runs in its own goroutine and is
+    cleaned up by process exit.
+  </p>
 </DocsLayout>

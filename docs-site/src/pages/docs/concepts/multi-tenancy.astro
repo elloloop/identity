@@ -1,67 +1,61 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="Multi-Tenancy">
   <h1>Multi-Tenancy</h1>
-  <p>Identity itself is single-tenant per deployment: one container, one product, one tenant ID. Multi-tenancy is provided by the data plane &mdash; <a href="https://github.com/elloloop/tenant-shard-db">EntDB</a> &mdash; which gives every tenant its own per-tenant SQLite database file.</p>
+  <p>
+    Identity is <strong>single-tenant per deployment</strong>. The model is:
+    one container, one user pool, one tenant ID. The
+    <code>tenant_id</code> field on RPC messages is a defence-in-depth check
+    against the configured default — not a tenant selector.
+  </p>
 
-  <h2>The deployment unit</h2>
-  <p>Each product is its own Identity deployment with its own tenant ID:</p>
-  <pre is:raw><code class="language-bash"># Product A
-docker run -d \
-  -e GATEWAY_DEFAULT_TENANT_ID=product-a \
-  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \
-  -e GATEWAY_PASSKEY_RP_ID=app.product-a.com \
-  -e GATEWAY_PASSKEY_ORIGIN=https://app.product-a.com \
-  ghcr.io/elloloop/identity:latest
-
-# Product B — same EntDB cluster, different tenant
-docker run -d \
-  -e GATEWAY_DEFAULT_TENANT_ID=product-b \
-  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \
-  -e GATEWAY_PASSKEY_RP_ID=app.product-b.com \
-  -e GATEWAY_PASSKEY_ORIGIN=https://app.product-b.com \
-  ghcr.io/elloloop/identity:latest</code></pre>
-
-  <Callout type="info" title="Why one container per product?">
-    Passkey relying-party IDs, OAuth client IDs, TOTP issuer names, and CORS origins are all per-product configuration. Trying to multiplex multiple products inside one Identity instance would require all of those to become per-request, which adds attack surface for marginal gain. Containers are cheap.
-  </Callout>
-
-  <h2>How EntDB delivers isolation</h2>
-  <p>Every Identity operation passes <code>GATEWAY_DEFAULT_TENANT_ID</code> to EntDB. EntDB shards data per tenant:</p>
+  <h2>Why per-product, not per-customer</h2>
+  <p>
+    The cost of a fresh container is small (0.25 vCPU, 256 MB), and EntDB is
+    already tenant-sharded. Running one Identity per product gives:
+  </p>
   <ul>
-    <li>Each tenant gets a separate SQLite database file</li>
-    <li>No cross-tenant queries; the tenant ID is part of every read and write</li>
-    <li>Optional per-tenant encryption (SQLCipher) lets you crypto-shred a tenant by destroying its data encryption key</li>
+    <li><strong>User-pool isolation</strong> — Alice in product A cannot accidentally see product B's user list.</li>
+    <li><strong>Independent JWT issuers</strong> — each product has its own <code>iss</code> claim, its own JWKS, its own key rotation cadence.</li>
+    <li><strong>Independent OAuth client credentials</strong> — each product can register its own Google / Microsoft client.</li>
+    <li><strong>Independent passkey RP ID</strong> — passkeys are scoped to a domain; products on different domains must have different RP IDs anyway.</li>
   </ul>
-  <p>Within a tenant, Identity uses these EntDB type IDs:</p>
-  <table>
-    <tr><th>type_id</th><th>Node</th></tr>
-    <tr><td>1</td><td>User</td></tr>
-    <tr><td>2</td><td>Group</td></tr>
-    <tr><td>5</td><td>RefreshToken</td></tr>
-    <tr><td>6</td><td>Passkey</td></tr>
-    <tr><td>7</td><td>TOTPSecret</td></tr>
-    <tr><td>8</td><td>AuditEvent</td></tr>
-  </table>
-  <p>Other services running against the same EntDB cluster must use type IDs <code>100+</code> to avoid collisions with Identity's reserved range.</p>
 
-  <h2>The tenant claim in JWTs</h2>
-  <p>Every access token Identity issues carries a <code>tenant</code> claim equal to <code>GATEWAY_DEFAULT_TENANT_ID</code>. Downstream services should verify both the signature and that the <code>tenant</code> claim matches their expected tenant before honoring the token.</p>
-  <pre is:raw><code class="language-json">{
-  "sub": "user_01HX...",
-  "email": "alice@product-a.com",
-  "tenant": "product-a",
-  "role": "member",
-  "iat": 1714750000,
-  "exp": 1714750900
-}</code></pre>
+  <h2>The <code>tenant_id</code> field</h2>
+  <p>
+    Many RPC messages carry <code>tenant_id</code> for compatibility with
+    multi-tenant graph DBs. Identity validates it equals
+    <code>GATEWAY_DEFAULT_TENANT_ID</code> and rejects the request
+    otherwise. There is no path that lets a caller specify an arbitrary
+    tenant.
+  </p>
 
-  <h2>Sharing an EntDB cluster between products</h2>
-  <p>Multiple Identity deployments can point at the same EntDB instance &mdash; the tenant ID keeps user pools fully separate. This is the recommended deployment model for an organisation running several products: one shared EntDB cluster, one Identity container per product.</p>
+  <h2>Sharing one EntDB across products</h2>
+  <p>
+    EntDB instances can host many tenants. Two Identity deployments
+    pointing at the same EntDB stay isolated as long as they use
+    distinct <code>GATEWAY_DEFAULT_TENANT_ID</code> values:
+  </p>
+  <Code code={`# Product A
+docker run ... \\
+  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \\
+  -e GATEWAY_DEFAULT_TENANT_ID=product-a \\
+  ghcr.io/elloloop/identity:0.1.0
 
-  <h2>Sharing JWKS between services within a tenant</h2>
-  <p>All services for a given product fetch JWKS from the same Identity deployment. SSO between two apps in the same product works out of the box: both verify against the same JWKS URL and accept the same <code>tenant</code> claim. See <a href="/identity/docs/examples/multi-app-sso">Multi-App SSO</a> for a worked example.</p>
+# Product B
+docker run ... \\
+  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \\
+  -e GATEWAY_DEFAULT_TENANT_ID=product-b \\
+  ghcr.io/elloloop/identity:0.1.0`} lang="bash" />
+
+  <h2>Type ID reservations</h2>
+  <p>
+    Identity reserves EntDB type IDs <code>1–99</code>. Other services
+    sharing the same EntDB must use type IDs <code>100+</code>. The
+    reservation is global (across tenants) because EntDB schemas are
+    cluster-wide.
+  </p>
 </DocsLayout>

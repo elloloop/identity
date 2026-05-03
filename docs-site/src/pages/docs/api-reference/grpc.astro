@@ -1,137 +1,144 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
-<DocsLayout title="gRPC / Connect Reference">
-  <h1>gRPC / Connect Reference</h1>
-  <p>One service: <code>identity.IdentityService</code>. Connect-RPC URL pattern: <code>POST /identity.IdentityService/&lt;Method&gt;</code>.</p>
+<DocsLayout title="gRPC Reference">
+  <h1>gRPC Reference</h1>
+  <p>
+    All RPCs live on the single service
+    <code>identity.IdentityService</code>. The wire transports is
+    Connect-RPC over HTTP/JSON; the underlying schema is plain protobuf.
+    Method paths take the shape
+    <code>/identity.IdentityService/&lt;Method&gt;</code>.
+  </p>
+  <p>
+    The canonical schema lives at
+    <a href="https://github.com/elloloop/identity/blob/main/proto/identity/identity.proto"><code>proto/identity/identity.proto</code></a>.
+    This page summarises the surface; consult the .proto for exact field
+    types and reservations.
+  </p>
 
-  <Callout type="info" title="Bearer auth">
-    Methods marked <strong>auth</strong> require an <code>Authorization: Bearer &lt;jwt&gt;</code> header. The middleware injects the verified user ID into <code>X-Authenticated-User-Id</code> for the handler. Methods marked <strong>public</strong> are auth-exempt.
-  </Callout>
-
-  <h2 id="auth">Authentication</h2>
+  <h2>Authentication</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>OAuthLogin</code></td><td>public</td><td>Issue tokens after OAuth provider verification.</td></tr>
-    <tr><td><code>PasswordSignup</code></td><td>public</td><td>Create user + issue tokens.</td></tr>
-    <tr><td><code>PasswordLogin</code></td><td>public</td><td>Verify password; if TOTP enabled, return login challenge.</td></tr>
-    <tr><td><code>VerifyTotp</code></td><td>public</td><td>Complete a pending login with a TOTP or recovery code.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>OAuthLogin</code></td><td>none</td><td>Upsert user from OAuth provider, issue tokens. <em>(post-validation half implemented; code-exchange is a placeholder)</em></td></tr>
+    <tr><td><code>PasswordSignup</code></td><td>none</td><td>Create user with email + password</td></tr>
+    <tr><td><code>PasswordLogin</code></td><td>none</td><td>Email + password → tokens (or TOTP challenge)</td></tr>
   </table>
 
-  <h2 id="session">Session / Token</h2>
+  <h2>Session / token</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>GetCurrentUser</code></td><td>public*</td><td>Returns the user identified by the bearer token if present.</td></tr>
-    <tr><td><code>RefreshToken</code></td><td>public</td><td>Rotate refresh token; issue new access token.</td></tr>
-    <tr><td><code>Logout</code></td><td>public</td><td>Revoke the supplied refresh token.</td></tr>
-    <tr><td><code>ListMySessions</code></td><td>auth</td><td>List active sessions for the caller.</td></tr>
-    <tr><td><code>RevokeSession</code></td><td>auth</td><td>Revoke a specific session by ID.</td></tr>
-    <tr><td><code>RevokeAllSessions</code></td><td>auth</td><td>Revoke all sessions except the current one. Requires password.</td></tr>
-    <tr><td><code>SignOutEverywhere</code></td><td>auth</td><td>Revoke every session including the current one. Requires password.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>GetCurrentUser</code></td><td>optional bearer</td><td>Return the caller's profile, or empty if unauthenticated</td></tr>
+    <tr><td><code>RefreshToken</code></td><td>none</td><td>Rotate a refresh token to fresh access + refresh</td></tr>
+    <tr><td><code>Logout</code></td><td>none</td><td>Revoke a single refresh token</td></tr>
+    <tr><td><code>UpdateProfile</code></td><td>bearer</td><td>Self-service name / avatar update</td></tr>
   </table>
 
-  <h2 id="profile">Profile &amp; Password</h2>
+  <h2>Password management</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>UpdateProfile</code></td><td>auth</td><td>Update name and/or avatar.</td></tr>
-    <tr><td><code>ChangePassword</code></td><td>auth</td><td>Change password with current-password confirmation.</td></tr>
-    <tr><td><code>RequestPasswordReset</code></td><td>public</td><td>Recovery-email-driven reset; never enumerates.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>ChangePassword</code></td><td>bearer</td><td>Old + new password</td></tr>
+    <tr><td><code>RequestPasswordReset</code></td><td>none</td><td>Send recovery-email reset link (no enumeration)</td></tr>
   </table>
 
-  <h2 id="help">Admin Help Requests</h2>
+  <h2>Admin help</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>RequestAdminHelp</code></td><td>public</td><td>End user raises a ticket when they can't log in.</td></tr>
-    <tr><td><code>ListHelpRequests</code></td><td>auth (admin)</td><td>Admin dashboard: list pending tickets.</td></tr>
-    <tr><td><code>ResolveHelpRequest</code></td><td>auth (admin)</td><td>Resolve or reject a help request.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>RequestAdminHelp</code></td><td>none</td><td>User raises a "can't log in" ticket</td></tr>
+    <tr><td><code>ListHelpRequests</code></td><td>admin</td><td>Paginated, filterable list</td></tr>
+    <tr><td><code>ResolveHelpRequest</code></td><td>admin</td><td>Resolve or reject a ticket</td></tr>
   </table>
 
-  <h2 id="passkey">Passkey / WebAuthn</h2>
+  <h2>Passkey</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>BeginPasskeyRegistration</code></td><td>auth</td><td>Get registration <code>options_json</code>.</td></tr>
-    <tr><td><code>CompletePasskeyRegistration</code></td><td>auth</td><td>Store the registered credential.</td></tr>
-    <tr><td><code>BeginPasskeyLogin</code></td><td>public</td><td>Get authentication <code>options_json</code>.</td></tr>
-    <tr><td><code>CompletePasskeyLogin</code></td><td>public</td><td>Verify assertion; issue tokens.</td></tr>
-    <tr><td><code>ListPasskeys</code></td><td>auth</td><td>List the caller's passkey credentials.</td></tr>
-    <tr><td><code>DeletePasskey</code></td><td>auth</td><td>Remove a credential.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>BeginPasskeyRegistration</code></td><td>bearer</td><td>Start enrollment (returns options + challenge)</td></tr>
+    <tr><td><code>CompletePasskeyRegistration</code></td><td>bearer</td><td>Persist the credential</td></tr>
+    <tr><td><code>BeginPasskeyLogin</code></td><td>none</td><td>Start authentication ceremony</td></tr>
+    <tr><td><code>CompletePasskeyLogin</code></td><td>none</td><td>Verify assertion, issue tokens</td></tr>
+    <tr><td><code>ListPasskeys</code></td><td>bearer</td><td>List the caller's passkeys</td></tr>
+    <tr><td><code>DeletePasskey</code></td><td>bearer</td><td>Remove a passkey by credential ID</td></tr>
   </table>
 
-  <h2 id="qr-login">QR Login</h2>
+  <h2>QR cross-device login</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>InitiateQrLogin</code></td><td>public</td><td>New device starts a QR session; returns session ID and QR URL.</td></tr>
-    <tr><td><code>GetQrLoginSession</code></td><td>auth</td><td>Authenticated device fetches session details.</td></tr>
-    <tr><td><code>ApproveQrLogin</code></td><td>auth</td><td>Approve or reject the new device.</td></tr>
-    <tr><td><code>PollQrLogin</code></td><td>public</td><td>New device polls; on approval, gets tokens.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>InitiateQrLogin</code></td><td>none</td><td>New device requests a session</td></tr>
+    <tr><td><code>GetQrLoginSession</code></td><td>bearer</td><td>Authenticated device looks up the session for display</td></tr>
+    <tr><td><code>ApproveQrLogin</code></td><td>bearer</td><td>Authenticated device approves or rejects</td></tr>
+    <tr><td><code>PollQrLogin</code></td><td>none</td><td>New device polls for completion (returns tokens once approved)</td></tr>
   </table>
 
-  <h2 id="totp">TOTP (2FA)</h2>
+  <h2>2FA / TOTP</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>BeginTotpSetup</code></td><td>auth</td><td>Generate secret + QR + recovery codes.</td></tr>
-    <tr><td><code>VerifyTotpSetup</code></td><td>auth</td><td>Confirm enrollment with first code.</td></tr>
-    <tr><td><code>DisableTotp</code></td><td>auth</td><td>Remove TOTP. Requires password.</td></tr>
-    <tr><td><code>RegenerateRecoveryCodes</code></td><td>auth</td><td>Issue a fresh set of 10 recovery codes. Requires password.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>BeginTotpSetup</code></td><td>bearer</td><td>Issue secret + recovery codes</td></tr>
+    <tr><td><code>VerifyTotpSetup</code></td><td>bearer</td><td>Confirm enrollment with a code</td></tr>
+    <tr><td><code>DisableTotp</code></td><td>bearer</td><td>Turn 2FA off (requires password)</td></tr>
+    <tr><td><code>VerifyTotp</code></td><td>none</td><td>Complete a pending login challenge</td></tr>
+    <tr><td><code>RegenerateRecoveryCodes</code></td><td>bearer</td><td>New batch of 10 (requires password)</td></tr>
   </table>
 
-  <h2 id="users">Users</h2>
+  <h2>Sessions</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>CreateUser</code></td><td>auth (admin)</td><td>Provision a user without invitation.</td></tr>
-    <tr><td><code>GetUser</code></td><td>auth</td><td>Fetch a user by ID.</td></tr>
-    <tr><td><code>UpdateUser</code></td><td>auth (admin)</td><td>Update name / role / avatar.</td></tr>
-    <tr><td><code>DeleteUser</code></td><td>auth (admin)</td><td>Hard-delete (use Deactivate for soft-delete).</td></tr>
-    <tr><td><code>ListUsers</code></td><td>auth (admin)</td><td>Paginated list with status filter and search.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>ListMySessions</code></td><td>bearer</td><td>List the caller's sessions</td></tr>
+    <tr><td><code>RevokeSession</code></td><td>bearer</td><td>Revoke one by ID</td></tr>
+    <tr><td><code>RevokeAllSessions</code></td><td>bearer + password</td><td>Revoke all the caller's sessions</td></tr>
+    <tr><td><code>SignOutEverywhere</code></td><td>bearer + password</td><td>Same as above; named for clarity in UIs</td></tr>
   </table>
 
-  <h2 id="groups">Groups &amp; Membership</h2>
+  <h2>Audit</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>CreateGroup</code></td><td>auth</td><td>Create a group node.</td></tr>
-    <tr><td><code>UpdateGroup</code></td><td>auth</td><td>Update name or description.</td></tr>
-    <tr><td><code>DeleteGroup</code></td><td>auth</td><td>Delete the group node and its membership edges.</td></tr>
-    <tr><td><code>ListGroups</code></td><td>auth</td><td>Paginated list with name substring filter.</td></tr>
-    <tr><td><code>AddGroupMember</code></td><td>auth</td><td>Add MEMBER_OF edge.</td></tr>
-    <tr><td><code>RemoveGroupMember</code></td><td>auth</td><td>Remove MEMBER_OF edge.</td></tr>
-    <tr><td><code>ListGroupMembers</code></td><td>auth</td><td>List users in a group.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>ListAuditEvents</code></td><td>admin</td><td>Cursor-paginated, filterable by actor / target / type / time range</td></tr>
   </table>
 
-  <h2 id="admin-user-mgmt">Admin User Management</h2>
+  <h2>Users</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>InviteUser</code></td><td>auth (admin)</td><td>Issue invitation token or temp password.</td></tr>
-    <tr><td><code>AcceptInvitation</code></td><td>public</td><td>Invitee completes signup; gets tokens.</td></tr>
-    <tr><td><code>DeactivateUser</code></td><td>auth (admin)</td><td>Suspend a user.</td></tr>
-    <tr><td><code>ReactivateUser</code></td><td>auth (admin)</td><td>Re-enable a deactivated user.</td></tr>
-    <tr><td><code>ResetUserPassword</code></td><td>auth (admin)</td><td>Generate temp password or reset token.</td></tr>
-    <tr><td><code>SetUserQuota</code></td><td>auth (admin)</td><td>Set <code>quota_bytes</code>.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>CreateUser</code></td><td>admin</td><td>Direct create</td></tr>
+    <tr><td><code>GetUser</code></td><td>admin</td><td>Fetch one</td></tr>
+    <tr><td><code>UpdateUser</code></td><td>admin</td><td>Edit name / avatar / role</td></tr>
+    <tr><td><code>DeleteUser</code></td><td>admin</td><td>Hard delete</td></tr>
+    <tr><td><code>ListUsers</code></td><td>admin</td><td>Paginated; filter and search</td></tr>
   </table>
 
-  <h2 id="audit">Audit</h2>
+  <h2>Groups + membership</h2>
   <table>
-    <tr><th>Method</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>ListAuditEvents</code></td><td>auth (admin)</td><td>Filter by actor, target, type, and time range.</td></tr>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>CreateGroup</code></td><td>admin</td><td></td></tr>
+    <tr><td><code>UpdateGroup</code></td><td>admin</td><td></td></tr>
+    <tr><td><code>DeleteGroup</code></td><td>admin</td><td></td></tr>
+    <tr><td><code>ListGroups</code></td><td>admin</td><td></td></tr>
+    <tr><td><code>AddGroupMember</code></td><td>admin</td><td></td></tr>
+    <tr><td><code>RemoveGroupMember</code></td><td>admin</td><td></td></tr>
+    <tr><td><code>ListGroupMembers</code></td><td>admin</td><td></td></tr>
   </table>
 
-  <h2>Common request envelope</h2>
-  <pre is:raw><code class="language-bash">POST /identity.IdentityService/&lt;Method&gt; HTTP/1.1
-Host: identity.example.com
-Content-Type: application/json
-Connect-Protocol-Version: 1
-Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+  <h2>Admin user management</h2>
+  <table>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>InviteUser</code></td><td>admin</td><td>Send invite, or create + return temp password</td></tr>
+    <tr><td><code>AcceptInvitation</code></td><td>none</td><td>User redeems invitation token</td></tr>
+    <tr><td><code>DeactivateUser</code></td><td>admin</td><td>Disable a user</td></tr>
+    <tr><td><code>ReactivateUser</code></td><td>admin</td><td>Re-enable</td></tr>
+    <tr><td><code>ResetUserPassword</code></td><td>admin</td><td>Temp password or reset token</td></tr>
+    <tr><td><code>SetUserQuota</code></td><td>admin</td><td>Set <code>quota_bytes</code></td></tr>
+  </table>
 
-{ ...JSON body matching the request proto... }</code></pre>
+  <h2>Calling Connect-RPC over JSON</h2>
+  <Code code={`# Generic shape — every RPC is a POST to /identity.IdentityService/<Method>
+curl -sX POST http://localhost/identity.IdentityService/PasswordLogin \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"alice@example.com","password":"..."}'`} lang="bash" />
 
-  <h2>Error format</h2>
-  <pre is:raw><code class="language-json">{
-  "code": "unauthenticated",
-  "message": "Invalid or expired access token"
-}</code></pre>
-  <p>Common Connect error codes: <code>invalid_argument</code>, <code>not_found</code>, <code>already_exists</code>, <code>permission_denied</code>, <code>unauthenticated</code>, <code>resource_exhausted</code> (lockout), <code>internal</code>.</p>
-
-  <h2>Proto source</h2>
-  <p>The canonical service definition is in <code>proto/identity/identity.proto</code>. Use <code>buf generate</code> against that file to generate clients in any language.</p>
+  <h2>Field naming</h2>
+  <p>
+    Connect's JSON codec uses camelCase by default:
+    <code>access_token</code> on the wire becomes
+    <code>accessToken</code> in JSON. Both forms are accepted on input.
+  </p>
 </DocsLayout>

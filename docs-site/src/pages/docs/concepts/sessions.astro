@@ -1,71 +1,85 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="Sessions">
   <h1>Sessions</h1>
-  <p>A "session" in Identity is a refresh-token node in EntDB. There's no server-side session store other than the rotating refresh tokens; access tokens are stateless JWTs.</p>
+  <p>
+    A session is a stored refresh token. Identity treats every refresh
+    token as a session row in EntDB, with metadata (device name, IP, user
+    agent, timestamps) attached for the user-facing session list.
+  </p>
 
-  <h2>Session lifecycle</h2>
+  <h2>Lifecycle</h2>
   <ol>
-    <li><strong>Created</strong> on successful login (password, OAuth, passkey, TOTP, QR), invitation acceptance, or signup. The server creates a <code>RefreshToken</code> node (type_id 5) carrying the SHA-256 hash of the issued refresh token and metadata.</li>
-    <li><strong>Used</strong> via the <code>RefreshToken</code> RPC. The old node is deleted and a fresh refresh token is issued, atomically.</li>
-    <li><strong>Revoked</strong> via <code>Logout</code>, <code>RevokeSession</code>, <code>RevokeAllSessions</code>, or <code>SignOutEverywhere</code>. The node is deleted; subsequent refresh attempts with that token fail.</li>
-    <li><strong>Expired</strong> automatically when the stored expiry timestamp passes. Default lifetime: 7 days.</li>
+    <li>
+      <strong>Issue.</strong> On successful login (password, OAuth, passkey,
+      QR-approved, TOTP-completed), Identity creates a
+      <code>RefreshToken</code> node (type_id 5). The raw token is returned
+      to the caller; only a hash is stored.
+    </li>
+    <li>
+      <strong>Use.</strong> Calling <code>RefreshToken(refreshToken)</code>
+      verifies the hash, deletes the old node, and issues a new
+      access/refresh pair. This is <strong>refresh-token rotation</strong>:
+      a stolen refresh token is invalidated the moment the legitimate
+      client uses theirs.
+    </li>
+    <li>
+      <strong>Revoke.</strong>
+      <code>Logout</code> deletes one session.
+      <code>RevokeSession</code> deletes a specific session by ID
+      (admin/self).
+      <code>RevokeAllSessions</code> and <code>SignOutEverywhere</code>
+      require password confirmation and delete all sessions for the user.
+    </li>
+    <li>
+      <strong>Expire.</strong> Sessions older than
+      <code>GATEWAY_REFRESH_EXPIRY_SECONDS</code> are rejected at refresh
+      time. There is no background expiry sweeper — expired rows linger
+      until the user touches them.
+    </li>
   </ol>
 
-  <h2>Tracked metadata</h2>
-  <p>Each session carries the data shown in the proto <code>Session</code> message:</p>
-  <table>
-    <tr><th>Field</th><th>Source</th></tr>
-    <tr><td><code>session_id</code></td><td>The refresh-token node ID (not the raw token)</td></tr>
-    <tr><td><code>device_name</code></td><td>Best-effort, derived from <code>User-Agent</code></td></tr>
-    <tr><td><code>ip_address</code></td><td>Client IP at session creation</td></tr>
-    <tr><td><code>user_agent</code></td><td>Raw User-Agent header</td></tr>
-    <tr><td><code>created_at</code></td><td>When the session started</td></tr>
-    <tr><td><code>last_used_at</code></td><td>Updated on each refresh</td></tr>
-    <tr><td><code>expires_at</code></td><td>Created-at + <code>GATEWAY_REFRESH_EXPIRY_SECONDS</code></td></tr>
-    <tr><td><code>current</code></td><td>True for the session belonging to the calling token</td></tr>
-  </table>
+  <h2>What's in a session row</h2>
+  <Code code={`Session {
+  string session_id     // refresh-token node id (NOT the raw token)
+  string device_name
+  string ip_address
+  string user_agent
+  Timestamp created_at
+  Timestamp last_used_at
+  Timestamp expires_at
+  bool current          // true on the session whose token made the request
+}`} lang="proto" />
 
   <h2>Listing sessions</h2>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/ListMySessions \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{}'</code></pre>
-  <p>Returns every active <code>RefreshToken</code> node belonging to the caller's user.</p>
+  <p>Authenticated user lists their own sessions:</p>
+  <Code code={`curl -sX POST http://localhost/identity.IdentityService/ListMySessions \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' -d '{}'`} lang="bash" />
 
-  <h2>Revoking a single session</h2>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/RevokeSession \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"node_01HX..."}'</code></pre>
-  <p>This deletes the refresh-token node. The corresponding access token (if any) keeps working until it expires &mdash; that's the price of stateless JWT verification.</p>
+  <h2>Revoking sessions</h2>
+  <Code code={`# Revoke one session (the user can do this without re-auth)
+curl -sX POST http://localhost/identity.IdentityService/RevokeSession \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"sessionId":"sess_01HZ..."}'
 
-  <Callout type="warning" title="Access tokens outlive revocation">
-    Because access tokens aren't checked against a revocation list, an access token issued just before revocation is valid for up to <code>GATEWAY_JWT_EXPIRY_SECONDS</code> (default 15 min) more. Keep that lifetime short and rely on refresh-token rotation for security &mdash; not access-token revocation.
-  </Callout>
+# Sign out everywhere — requires password confirmation
+curl -sX POST http://localhost/identity.IdentityService/SignOutEverywhere \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"password":"correct horse battery"}'`} lang="bash" />
 
-  <h2>Revoke all sessions</h2>
-  <p>Two RPCs do this, both of which require the user's password as confirmation:</p>
-  <ul>
-    <li><code>RevokeAllSessions</code> &mdash; revokes every session except the current one.</li>
-    <li><code>SignOutEverywhere</code> &mdash; revokes every session including the current one. The caller must sign in again.</li>
-  </ul>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/SignOutEverywhere \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{"password":"Sup3rStrong!Pass"}'
-# {"revoked_count":4}</code></pre>
-
-  <h2>Logout</h2>
-  <p>Sending the current refresh token to <code>Logout</code> revokes only that session:</p>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/Logout \
-  -H "Content-Type: application/json" \
-  -d '{"refresh_token":"rt_..."}'</code></pre>
-  <p><code>Logout</code> is auth-exempt &mdash; you can call it without a valid access token, which is useful when the client's access token has already expired.</p>
-
-  <h2>QR login as a session source</h2>
-  <p>QR cross-device login produces a session on the <em>new</em> device once an authenticated device approves it. The session metadata captures the new device's user agent and IP, not the approving device's.</p>
+  <h2>Access-token revocation</h2>
+  <p>
+    Revoking a session invalidates its <em>refresh</em> token. The associated
+    <em>access</em> token continues to verify until <code>exp</code> — up to
+    15 minutes by default. If you need instant kill, lower
+    <code>GATEWAY_JWT_EXPIRY_SECONDS</code>; there is intentionally no
+    distributed access-token blocklist (downstream services should not have
+    to talk to Identity on every request).
+  </p>
 </DocsLayout>

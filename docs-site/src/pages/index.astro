@@ -1,54 +1,71 @@
 ---
 import DocsLayout from "../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
-<DocsLayout title="Introduction">
+<DocsLayout title="Introduction" hidePrevNext>
   <h1>Identity</h1>
-  <p>A standalone authentication and user-management service. Deploys as a single container, points at an EntDB instance, exposes Connect-RPC over HTTP/JSON, and ships JWTs that downstream services verify via JWKS.</p>
+  <p>
+    Authentication and user-management as a single, deployable container.
+    Pull a pinned image, point it at an
+    <a href="https://github.com/elloloop/tenant-shard-db">EntDB</a> instance,
+    and you have email/password signup, passkeys, TOTP, OAuth, JWT issuance,
+    sessions, and an admin user-management surface — all over Connect-RPC
+    on HTTP/JSON.
+  </p>
 
-  <h2>What Identity gives you</h2>
+  <h2>What you get</h2>
   <ul>
-    <li><strong>Email + password</strong> &mdash; signup, login, change, lockout, recovery-email reset</li>
-    <li><strong>Passkeys (WebAuthn)</strong> &mdash; registration and login flows</li>
-    <li><strong>TOTP 2FA</strong> &mdash; setup, verify, recovery codes, regenerate</li>
-    <li><strong>OAuth login</strong> &mdash; Google and Microsoft (server consumes pre-verified tokens)</li>
-    <li><strong>QR cross-device login</strong> &mdash; new device proves itself via an already-signed-in device</li>
-    <li><strong>Sessions</strong> &mdash; list, revoke, sign-out-everywhere; refresh tokens rotated on every use</li>
-    <li><strong>JWT issuance</strong> &mdash; RS256 with key rotation, plus <code>/.well-known/jwks.json</code></li>
-    <li><strong>User and Group CRUD</strong> &mdash; admin RPCs, group membership edges</li>
-    <li><strong>Audit log</strong> &mdash; every security event written to EntDB</li>
-    <li><strong>Admin help requests</strong> &mdash; users who can't log in raise tickets, admins resolve them</li>
+    <li><strong>Email + password</strong> — signup, login, change, recovery-email reset, lockout</li>
+    <li><strong>Passkeys (WebAuthn)</strong> — registration and login flows</li>
+    <li><strong>TOTP (2FA)</strong> — setup, verify, recovery codes</li>
+    <li><strong>OAuth login</strong> — Google, Microsoft (server consumes pre-verified tokens from frontend SDKs)</li>
+    <li><strong>QR cross-device login</strong> — initiate on a new device, approve from a logged-in one</li>
+    <li><strong>JWT issuance</strong> with key rotation, plus <code>/.well-known/jwks.json</code> for downstream services</li>
+    <li><strong>Sessions</strong> — list, revoke, sign-out-everywhere</li>
+    <li><strong>Admin user management</strong> — invite, deactivate, reactivate, reset password, set quota</li>
+    <li><strong>Groups</strong> + membership edges (graph-backed)</li>
+    <li><strong>Audit log</strong> of all auth events</li>
   </ul>
 
-  <h2>Shape of the service</h2>
-  <pre is:raw><code>┌────────────────────────────────────────────────────────────┐
-│  Your apps  ─── Bearer JWT ─►  Downstream services         │
-│      │                            │                         │
-│      │  Connect-RPC / HTTP        │  verify via JWKS        │
-│      ▼                            ▼                         │
-│  ┌──────────────────────────────────────────┐               │
-│  │        identity (this service)           │               │
-│  │  • signs JWTs (RS256, key ring)          │               │
-│  │  • password / passkey / TOTP / OAuth     │               │
-│  │  • sessions, audit, user CRUD            │               │
-│  │  • /.well-known/jwks.json (port 80)      │               │
-│  │  • /metrics                  (port 9090) │               │
-│  └─────────────────┬────────────────────────┘               │
-│                    │  gRPC                                  │
-│                    ▼                                        │
-│              ┌──────────────┐                               │
-│              │    EntDB     │  per-tenant graph storage     │
-│              └──────────────┘                               │
-└────────────────────────────────────────────────────────────┘</code></pre>
+  <h2>How it deploys</h2>
+  <p>
+    One container, one image, one EntDB. Treat it like
+    <a href="https://github.com/elloloop/tenant-shard-db">tenant-shard-db</a>:
+    deploy it once per product, fully isolated user pool. The container
+    listens on <code>:80</code> for Connect-RPC, <code>:9090</code> for
+    Prometheus metrics.
+  </p>
 
-  <h2>Where it fits</h2>
-  <p>Identity is one image, deployed once per product. It treats EntDB as its data plane &mdash; users, groups, sessions, refresh tokens, passkeys, TOTP secrets, and audit events all live in EntDB nodes (type IDs <code>1&ndash;99</code>). Other services consuming the same EntDB instance use type IDs <code>100+</code> to avoid collisions.</p>
+  <Code code={`docker run -p 80:80 -p 9090:9090 \\
+  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \\
+  -e GATEWAY_DEFAULT_TENANT_ID=my-product \\
+  -e GATEWAY_PASSKEY_RP_ID=my-product.com \\
+  -e GATEWAY_PASSKEY_ORIGIN=https://my-product.com \\
+  -e GATEWAY_TOTP_ISSUER="My Product" \\
+  ghcr.io/elloloop/identity:0.1.0`} lang="bash" title="docker run" />
 
-  <h2>Get started</h2>
+  <h2>Storage layout</h2>
+  <p>
+    All persistent state lives in EntDB. Identity reserves the type IDs
+    <code>1–99</code> in the EntDB schema; other services consuming the same
+    EntDB instance must use type IDs <code>100+</code> to avoid collisions.
+  </p>
+  <table>
+    <tr><th>type_id</th><th>Node</th></tr>
+    <tr><td>1</td><td>User</td></tr>
+    <tr><td>2</td><td>Group</td></tr>
+    <tr><td>5</td><td>RefreshToken</td></tr>
+    <tr><td>6</td><td>Passkey</td></tr>
+    <tr><td>7</td><td>TOTPSecret</td></tr>
+    <tr><td>8</td><td>AuditEvent</td></tr>
+  </table>
+
+  <h2>Where to next</h2>
   <ul>
-    <li><a href="/identity/docs/introduction">What is Identity</a> &mdash; product overview</li>
-    <li><a href="/identity/docs/quickstart">Quick Start</a> &mdash; <code>docker run</code> &rarr; signup &rarr; login</li>
-    <li><a href="/identity/docs/concepts/architecture">Architecture</a> &mdash; how the pieces fit together</li>
-    <li><a href="/identity/docs/installation/configuration">Configuration Reference</a> &mdash; every env var</li>
+    <li><a href="/identity/docs/quickstart">Quick Start</a> — run the container and issue your first token</li>
+    <li><a href="/identity/docs/concepts/architecture">Architecture</a> — how the pieces fit together</li>
+    <li><a href="/identity/docs/installation/configuration">Configuration</a> — every <code>GATEWAY_*</code> variable</li>
+    <li><a href="/identity/docs/api-reference/grpc">gRPC Reference</a> — every RPC, every message</li>
   </ul>
 </DocsLayout>

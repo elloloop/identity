@@ -1,85 +1,100 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="TOTP (2FA)">
-  <h1>TOTP &mdash; Time-Based One-Time Passwords</h1>
-  <p>TOTP is the second-factor option for users who don't have a passkey. Identity issues an RFC-6238 secret, displays a QR code for the authenticator app, and verifies six-digit codes on every login.</p>
+  <h1>TOTP (2FA)</h1>
+  <p>
+    TOTP is a second factor on top of password (or OAuth) login. Identity
+    follows RFC 6238: 30-second window, SHA-1, 6 digits, ±1 step skew.
+    Secrets are encrypted at rest with AES-GCM using
+    <code>GATEWAY_TOTP_ENCRYPTION_KEY</code>.
+  </p>
 
   <h2>Configuration</h2>
-  <table>
-    <tr><th>Var</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_TOTP_ENCRYPTION_KEY</code></td><td>(dev fallback)</td><td>32 bytes, base64. AES-GCM-encrypts every TOTP secret at rest. Required in prod.</td></tr>
-    <tr><td><code>GATEWAY_TOTP_ISSUER</code></td><td><code>Glassa Work</code></td><td>Name shown in the user's authenticator app entry.</td></tr>
-    <tr><td><code>GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS</code></td><td><code>300</code></td><td>How long after password success the user has to submit a TOTP code.</td></tr>
-  </table>
-
-  <Callout type="warning" title="TOTP secrets are encrypted at rest">
-    The secret bytes stored on the <code>TOTPSecret</code> node (type_id 7) are AES-GCM-encrypted with the 32-byte key from <code>GATEWAY_TOTP_ENCRYPTION_KEY</code>. Lose that key and every enrolled user has to re-enroll.
-  </Callout>
+  <ul>
+    <li>
+      <code>GATEWAY_TOTP_ENCRYPTION_KEY</code> — base64-encoded 32-byte key.
+      <strong>Required in production.</strong> Without it the container
+      uses a fixed dev key and logs <code>using_dev_totp_encryption_key</code>.
+    </li>
+    <li>
+      <code>GATEWAY_TOTP_ISSUER</code> — string shown next to the account
+      in user authenticator apps.
+    </li>
+    <li>
+      <code>GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS</code> (default 300) —
+      how long after a successful password check the user has to complete
+      the TOTP step.
+    </li>
+  </ul>
+  <Code code={`# Generate a fresh 32-byte key
+openssl rand -base64 32`} lang="bash" />
 
   <h2>Enrollment</h2>
-  <pre is:raw><code class="language-bash"># 1. Begin enrollment
-curl -s -X POST http://localhost/identity.IdentityService/BeginTotpSetup \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" -d '{}'</code></pre>
-  <pre is:raw><code class="language-json">{
-  "secret": "JBSWY3DPEHPK3PXP",
-  "qrCodeUri": "otpauth://totp/Glassa%20Work:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Glassa%20Work",
-  "recoveryCodes": [
-    "a1b2-c3d4-e5f6",
-    "g7h8-i9j0-k1l2",
-    "..."
-  ]
-}</code></pre>
-  <p>Show the QR code to the user. The 10 recovery codes are shown <em>once</em>; each is single-use and can substitute for a TOTP code at <code>VerifyTotp</code> time.</p>
-  <pre is:raw><code class="language-bash"># 2. User enters their first code from the authenticator
-curl -s -X POST http://localhost/identity.IdentityService/VerifyTotpSetup \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{"code":"123456"}'
-# &rarr; { verified: true } and the user's totp_required flag is now true</code></pre>
-  <p>Audit event: <code>totp_enabled</code>.</p>
+  <p>The user must be authenticated. Two-step ceremony:</p>
+
+  <h3>1. Begin setup</h3>
+  <Code code={`curl -sX POST http://localhost/identity.IdentityService/BeginTotpSetup \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' -d '{}'`} lang="bash" />
+  <Code code={`{
+  "secret":         "JBSWY3DPEHPK3PXP",
+  "qrCodeUri":      "otpauth://totp/Acme:alice@example.com?secret=...&issuer=Acme",
+  "recoveryCodes":  ["abcd-efgh", "ijkl-mnop", ...]
+}`} lang="json" />
+  <p>
+    The client encodes <code>qr_code_uri</code> as a QR code for the user
+    to scan. <strong>The recovery codes are shown once.</strong> Save them
+    — there is no read-back endpoint.
+  </p>
+
+  <h3>2. Verify and enable</h3>
+  <p>
+    Enrollment is not active until the user proves they scanned the secret
+    correctly:
+  </p>
+  <Code code={`curl -sX POST http://localhost/identity.IdentityService/VerifyTotpSetup \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"code":"123456"}'`} lang="bash" />
+  <p>
+    On success, the user's <code>totp_required</code> flag flips to
+    <code>true</code>, and subsequent <code>PasswordLogin</code> calls
+    return a <code>login_challenge_id</code>.
+  </p>
 
   <h2>Login with TOTP</h2>
-  <p>Password login for a TOTP-enabled user returns no tokens; instead it returns a login challenge:</p>
-  <pre is:raw><code class="language-json">{
-  "user": { "id": "user_...", "totpRequired": true },
-  "totpRequired": true,
-  "loginChallengeId": "lc_..."
-}</code></pre>
-  <pre is:raw><code class="language-bash"># Submit the TOTP code (or a recovery code)
-curl -s -X POST http://localhost/identity.IdentityService/VerifyTotp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "login_challenge_id": "lc_...",
-    "code": "123456"
-  }'
-# &rarr; { user, accessToken, refreshToken, expiresIn }</code></pre>
-  <p>The challenge is single-use; consuming it deletes the node atomically. Audit event: <code>totp_verified</code>.</p>
+  <Code code={`# 1. Password check returns a challenge instead of tokens.
+LOGIN=$(curl -sX POST http://localhost/identity.IdentityService/PasswordLogin \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"alice@example.com","password":"correct horse battery"}')
+
+CHALLENGE=$(echo "$LOGIN" | jq -r .loginChallengeId)
+
+# 2. Submit the 6-digit TOTP (or a recovery code).
+curl -sX POST http://localhost/identity.IdentityService/VerifyTotp \\
+  -H 'Content-Type: application/json' \\
+  -d "{\\"loginChallengeId\\":\\"$CHALLENGE\\",\\"code\\":\\"123456\\"}"`} lang="bash" />
+  <p>
+    The challenge is single-use and expires after
+    <code>GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS</code>. Submitting a
+    recovery code consumes it (it cannot be reused).
+  </p>
 
   <h2>Recovery codes</h2>
-  <p>Stored as bcrypt hashes alongside the TOTP secret. Submitting a recovery code to <code>VerifyTotp</code> checks the hash list, marks the code as consumed, and issues tokens. To rotate the codes:</p>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/RegenerateRecoveryCodes \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{"password":"Sup3rStrong!Pass"}'
-# &rarr; { recoveryCodes: ["...new 10 codes..."] }</code></pre>
-  <p>Password confirmation is required so a stolen short-lived access token can't silently rotate the codes.</p>
-
-  <h2>Disable TOTP</h2>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/DisableTotp \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{"password":"Sup3rStrong!Pass"}'</code></pre>
-  <p>Deletes the <code>TOTPSecret</code> node and clears <code>totp_required</code> on the user. Audit event: <code>totp_disabled</code>.</p>
-
-  <h2>Algorithm details</h2>
   <ul>
-    <li>RFC 6238 TOTP, 30-second step, 6-digit code, SHA-1.</li>
-    <li>One-step skew tolerance (accepts the previous and next window) to handle clock drift.</li>
-    <li>Verification uses constant-time comparison (<code>subtle.ConstantTimeCompare</code>).</li>
-    <li>Re-using the same code within the same 30-second window is rejected to prevent replay.</li>
+    <li>10 codes are issued on enrollment.</li>
+    <li>Each is a one-time use; consumed codes are crossed off in the DB.</li>
+    <li><code>RegenerateRecoveryCodes</code> issues a fresh batch of 10 (requires password confirmation) and invalidates the old ones.</li>
   </ul>
+
+  <h2>Disabling TOTP</h2>
+  <p>
+    <code>DisableTotp</code> requires the user's password as
+    confirmation. On success, the encrypted secret is deleted, all
+    recovery codes are voided, and the user's <code>totp_required</code>
+    flag flips back to <code>false</code>.
+  </p>
 </DocsLayout>

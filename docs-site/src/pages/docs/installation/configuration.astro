@@ -1,99 +1,105 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="Configuration">
-  <h1>Configuration Reference</h1>
-  <p>All configuration is via environment variables with the <code>GATEWAY_</code> prefix. Defaults match local-development conventions; production deployments must override the secrets and the JWT key ring.</p>
+  <h1>Configuration</h1>
+  <p>
+    All configuration is via environment variables with the
+    <code>GATEWAY_</code> prefix. Defaults are tuned for local development;
+    production deployments must override at minimum the EntDB address, the
+    JWT key ring, the passkey RP ID/origin, and the TOTP encryption key.
+  </p>
 
-  <h2>Server</h2>
+  <h2>Server ports</h2>
   <table>
-    <tr><th>Var</th><th>Type</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_CONNECT_PORT</code></td><td>int</td><td><code>80</code></td><td>HTTP port for Connect-RPC, JWKS, health.</td></tr>
-    <tr><td><code>GATEWAY_METRICS_PORT</code></td><td>int</td><td><code>9090</code></td><td>HTTP port for Prometheus <code>/metrics</code>.</td></tr>
-    <tr><td><code>GATEWAY_GRPC_PORT</code></td><td>int</td><td><code>50051</code></td><td>Reserved; not used by the current binary.</td></tr>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_CONNECT_PORT</code></td><td><code>80</code></td><td>Connect-RPC HTTP listener</td></tr>
+    <tr><td><code>GATEWAY_GRPC_PORT</code></td><td><code>50051</code></td><td>Reserved for native gRPC (currently unused)</td></tr>
+    <tr><td><code>GATEWAY_METRICS_PORT</code></td><td><code>9090</code></td><td>Prometheus <code>/metrics</code></td></tr>
   </table>
 
   <h2>EntDB</h2>
   <table>
-    <tr><th>Var</th><th>Type</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_ENTDB_ADDRESS</code></td><td>string</td><td><code>entdb:50051</code></td><td>Required. host:port for the EntDB gRPC endpoint.</td></tr>
-    <tr><td><code>GATEWAY_DEFAULT_TENANT_ID</code></td><td>string</td><td><code>local</code></td><td>Required in prod. Used as the tenant for every EntDB op.</td></tr>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_ENTDB_ADDRESS</code></td><td><code>entdb:50051</code></td><td>EntDB gRPC endpoint</td></tr>
+    <tr><td><code>GATEWAY_DEFAULT_TENANT_ID</code></td><td><code>local</code></td><td>Tenant ID used for every operation; clients passing a different one are rejected</td></tr>
   </table>
 
   <h2>JWT</h2>
   <table>
-    <tr><th>Var</th><th>Type</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_JWT_KEYS</code></td><td>JSON</td><td>(empty)</td><td>JSON array of RSA keys. See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a>. Empty = auto-generate ephemeral dev key.</td></tr>
-    <tr><td><code>GATEWAY_JWT_EXPIRY_SECONDS</code></td><td>int</td><td><code>900</code></td><td>Access-token lifetime.</td></tr>
-    <tr><td><code>GATEWAY_REFRESH_EXPIRY_SECONDS</code></td><td>int</td><td><code>604800</code></td><td>Refresh-token lifetime (7 days).</td></tr>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_JWT_KEYS</code></td><td><em>(empty)</em></td><td>RSA key ring as JSON array. Empty = auto-generate dev key. See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a>.</td></tr>
+    <tr><td><code>GATEWAY_JWT_EXPIRY_SECONDS</code></td><td><code>900</code></td><td>Access-token lifetime (15 min)</td></tr>
+    <tr><td><code>GATEWAY_REFRESH_EXPIRY_SECONDS</code></td><td><code>604800</code></td><td>Refresh-token lifetime (7 days)</td></tr>
   </table>
 
   <h2>OAuth</h2>
   <table>
-    <tr><th>Var</th><th>Type</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_GOOGLE_CLIENT_ID</code></td><td>string</td><td>(empty)</td><td>OAuth client ID for Google.</td></tr>
-    <tr><td><code>GATEWAY_GOOGLE_CLIENT_SECRET</code></td><td>secret</td><td>(empty)</td><td>Google client secret.</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_ID</code></td><td>string</td><td>(empty)</td><td>OAuth client ID for Microsoft.</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_SECRET</code></td><td>secret</td><td>(empty)</td><td>Microsoft client secret.</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_TENANT_ID</code></td><td>string</td><td>(empty)</td><td>Microsoft tenant ID, if multi-tenant.</td></tr>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_GOOGLE_CLIENT_ID</code></td><td><em>(empty)</em></td><td>Google OAuth client ID</td></tr>
+    <tr><td><code>GATEWAY_GOOGLE_CLIENT_SECRET</code></td><td><em>(empty)</em></td><td>Google OAuth client secret</td></tr>
+    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_ID</code></td><td><em>(empty)</em></td><td>Microsoft / Entra ID client ID</td></tr>
+    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_SECRET</code></td><td><em>(empty)</em></td><td>Microsoft client secret</td></tr>
+    <tr><td><code>GATEWAY_MICROSOFT_TENANT_ID</code></td><td><em>(empty)</em></td><td>Microsoft tenant ID (or <code>common</code>)</td></tr>
   </table>
 
-  <h2>Password</h2>
+  <h2>Password / lockout</h2>
   <table>
-    <tr><th>Var</th><th>Type</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS</code></td><td>int</td><td><code>3600</code></td><td>Validity of password-reset tokens.</td></tr>
-    <tr><td><code>GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS</code></td><td>int</td><td><code>5</code></td><td>Failed logins before lockout.</td></tr>
-    <tr><td><code>GATEWAY_LOGIN_LOCKOUT_SECONDS</code></td><td>int</td><td><code>900</code></td><td>Lockout duration after the threshold is hit.</td></tr>
-    <tr><td><code>GATEWAY_AUTH_ALLOW_LOCAL</code></td><td>bool</td><td><code>true</code></td><td>Set to <code>false</code> to disable username/password (OAuth-only).</td></tr>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_AUTH_ALLOW_LOCAL</code></td><td><code>true</code></td><td>Set <code>false</code> to disable username/password and require OAuth</td></tr>
+    <tr><td><code>GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS</code></td><td><code>3600</code></td><td>Recovery-email reset link lifetime</td></tr>
+    <tr><td><code>GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS</code></td><td><code>5</code></td><td>Lockout threshold</td></tr>
+    <tr><td><code>GATEWAY_LOGIN_LOCKOUT_SECONDS</code></td><td><code>900</code></td><td>Lockout duration (15 min)</td></tr>
+    <tr><td><code>GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS</code></td><td><code>300</code></td><td>Window after password success to complete TOTP</td></tr>
   </table>
 
-  <h2>TOTP (2FA)</h2>
+  <h2>TOTP / 2FA</h2>
   <table>
-    <tr><th>Var</th><th>Type</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_TOTP_ENCRYPTION_KEY</code></td><td>base64</td><td>(dev fallback)</td><td>32 bytes base64-encoded. Encrypts TOTP secrets at rest. Required in prod.</td></tr>
-    <tr><td><code>GATEWAY_TOTP_ISSUER</code></td><td>string</td><td><code>Glassa Work</code></td><td>Display name in user authenticator apps.</td></tr>
-    <tr><td><code>GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS</code></td><td>int</td><td><code>300</code></td><td>How long after password success the user has to complete 2FA.</td></tr>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_TOTP_ENCRYPTION_KEY</code></td><td><em>(throwaway in dev)</em></td><td>Base64-encoded 32-byte AES-256 key for at-rest TOTP secret encryption. <strong>Required in prod.</strong></td></tr>
+    <tr><td><code>GATEWAY_TOTP_ISSUER</code></td><td><code>Glassa Work</code></td><td>Name shown in user authenticator apps</td></tr>
   </table>
 
   <h2>Passkeys / WebAuthn</h2>
   <table>
-    <tr><th>Var</th><th>Type</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td>string</td><td><code>localhost</code></td><td>Relying party ID. Must match the registrable domain of your origin.</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td>string</td><td><code>Glassa Work</code></td><td>Human-readable RP name shown by the authenticator.</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td>string</td><td><code>http://localhost:9002</code></td><td>Allowed origin for passkey ceremonies.</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS</code></td><td>int</td><td><code>300</code></td><td>Validity window for registration / login challenges.</td></tr>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td><code>localhost</code></td><td>WebAuthn relying-party ID — must match the registrable domain (e.g. <code>example.com</code>)</td></tr>
+    <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td><code>Glassa Work</code></td><td>Human-readable RP name</td></tr>
+    <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td><code>http://localhost:9002</code></td><td>Allowed origin for passkey ceremonies</td></tr>
+    <tr><td><code>GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS</code></td><td><code>300</code></td><td>Lifetime of registration / login challenges</td></tr>
   </table>
 
   <h2>QR cross-device login</h2>
   <table>
-    <tr><th>Var</th><th>Type</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_QR_LOGIN_BASE_URL</code></td><td>string</td><td><code>http://localhost:9002</code></td><td>Base URL embedded in the QR code.</td></tr>
-    <tr><td><code>GATEWAY_QR_LOGIN_EXPIRY_SECONDS</code></td><td>int</td><td><code>300</code></td><td>QR session validity.</td></tr>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_QR_LOGIN_BASE_URL</code></td><td><code>http://localhost:9002</code></td><td>Base URL embedded in the QR code</td></tr>
+    <tr><td><code>GATEWAY_QR_LOGIN_EXPIRY_SECONDS</code></td><td><code>300</code></td><td>QR session lifetime</td></tr>
   </table>
 
-  <h2>Email service (outbound)</h2>
+  <h2>CORS &amp; cookies</h2>
   <table>
-    <tr><th>Var</th><th>Type</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_EMAIL_SERVICE_HOST</code></td><td>string</td><td><code>email-service</code></td><td>gRPC host for sending password resets / invites.</td></tr>
-    <tr><td><code>GATEWAY_EMAIL_SERVICE_PORT</code></td><td>int</td><td><code>50053</code></td><td>gRPC port.</td></tr>
-    <tr><td><code>GATEWAY_DEFAULT_EMAIL_DOMAIN</code></td><td>string</td><td><code>glassa.work</code></td><td>Default domain for new accounts.</td></tr>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_ALLOWED_ORIGINS</code></td><td><code>http://localhost:9002,http://localhost:3000</code></td><td>Comma-separated CORS origins</td></tr>
+    <tr><td><code>GATEWAY_COOKIE_DOMAIN</code></td><td><em>(empty)</em></td><td>Cookie domain attribute (when cookies are used)</td></tr>
+    <tr><td><code>GATEWAY_COOKIE_SECURE</code></td><td><code>false</code></td><td>Set <code>true</code> in prod (HTTPS-only cookies)</td></tr>
+    <tr><td><code>GATEWAY_COOKIE_SAMESITE</code></td><td><code>Lax</code></td><td><code>Lax</code> / <code>Strict</code> / <code>None</code></td></tr>
   </table>
 
-  <h2>CORS and cookies</h2>
+  <h2>Misc</h2>
   <table>
-    <tr><th>Var</th><th>Type</th><th>Default</th><th>Notes</th></tr>
-    <tr><td><code>GATEWAY_ALLOWED_ORIGINS</code></td><td>csv</td><td><code>http://localhost:9002,http://localhost:3000</code></td><td>Comma-separated allowed origins.</td></tr>
-    <tr><td><code>GATEWAY_COOKIE_DOMAIN</code></td><td>string</td><td>(empty)</td><td>Optional cookie domain.</td></tr>
-    <tr><td><code>GATEWAY_COOKIE_SECURE</code></td><td>bool</td><td><code>false</code></td><td>Set to <code>true</code> in prod (HTTPS).</td></tr>
-    <tr><td><code>GATEWAY_COOKIE_SAMESITE</code></td><td>string</td><td><code>Lax</code></td><td><code>Lax</code> / <code>Strict</code> / <code>None</code>.</td></tr>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_DEFAULT_EMAIL_DOMAIN</code></td><td><code>glassa.work</code></td><td>Default email domain for new accounts</td></tr>
+    <tr><td><code>GATEWAY_EMAIL_SERVICE_HOST</code></td><td><code>email-service</code></td><td>Internal email service host</td></tr>
+    <tr><td><code>GATEWAY_EMAIL_SERVICE_PORT</code></td><td><code>50053</code></td><td>Internal email service port</td></tr>
   </table>
 
-  <Callout type="info" title="Boolean parsing">
-    Boolean env vars accept <code>true</code> / <code>1</code> / <code>yes</code> and <code>false</code> / <code>0</code> / <code>no</code> (case-insensitive). Anything else falls back to the default.
-  </Callout>
-
-  <h2>Logging</h2>
-  <p>Logging is via zap in production-JSON format. There is no env var to switch verbosity at runtime; verbose dev logging requires a code change.</p>
+  <h2>Boolean parsing</h2>
+  <p>
+    <code>GATEWAY_*</code> boolean variables accept (case-insensitive)
+    <code>true</code> / <code>1</code> / <code>yes</code> for true and
+    <code>false</code> / <code>0</code> / <code>no</code> for false. Any
+    other value falls back to the default.
+  </p>
 </DocsLayout>

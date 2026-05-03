@@ -1,77 +1,102 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="Auth Model">
   <h1>Auth Model</h1>
-  <p>Identity issues two kinds of tokens: short-lived <strong>access tokens</strong> (JWT, RS256) and long-lived <strong>refresh tokens</strong> (opaque, stored in EntDB). Downstream services verify access tokens locally via JWKS; refresh tokens are rotated on every use.</p>
+  <p>
+    Identity issues access tokens (short-lived JWTs) and refresh tokens
+    (opaque, server-side). Downstream services trust the JWT; only Identity
+    can mint or revoke one.
+  </p>
 
-  <h2>Access token</h2>
-  <p>The access token is a standard JWT signed with RS256. The active key in the key ring signs new tokens; verifiers use the <code>kid</code> header to pick the right public key.</p>
-  <pre is:raw><code class="language-json">{
-  "sub": "user_01HX...",
-  "email": "alice@example.com",
-  "name": "Alice",
-  "role": "member",
-  "tenant": "acme",
-  "avatar_url": "",
-  "iat": 1714750000,
-  "exp": 1714750900
-}</code></pre>
-  <p>Default lifetime: 900 seconds (15 minutes), configurable via <code>GATEWAY_JWT_EXPIRY_SECONDS</code>.</p>
+  <h2>Token roles</h2>
+  <table>
+    <tr><th>Token</th><th>Format</th><th>Lifetime</th><th>Purpose</th></tr>
+    <tr>
+      <td>Access token</td>
+      <td>RS256 JWT, <code>kid</code> header</td>
+      <td><code>GATEWAY_JWT_EXPIRY_SECONDS</code> (default <code>900</code> = 15 min)</td>
+      <td>Sent on every authenticated RPC as <code>Authorization: Bearer &lt;token&gt;</code>.</td>
+    </tr>
+    <tr>
+      <td>Refresh token</td>
+      <td>Opaque random string, hashed in DB</td>
+      <td><code>GATEWAY_REFRESH_EXPIRY_SECONDS</code> (default <code>604800</code> = 7 days)</td>
+      <td>Sent only to <code>RefreshToken</code> / <code>Logout</code>. Rotated on every use.</td>
+    </tr>
+  </table>
 
-  <Callout type="info" title="kid is mandatory">
-    Identity rejects tokens without a <code>kid</code> JWS header or with an unknown <code>kid</code>. This is what makes rotation safe: old tokens reference the old key by <code>kid</code> and continue to verify until the old key is removed from the ring.
-  </Callout>
+  <h2>Access token claims</h2>
+  <Code code={`{
+  "iss": "identity",
+  "sub": "user_01HZ...",       // user ID
+  "tenant": "my-product",       // GATEWAY_DEFAULT_TENANT_ID
+  "role": "admin",              // "admin" | "member" | "guest"
+  "iat": 1730000000,
+  "exp": 1730000900,
+  "jti": "..."
+}`} lang="json" />
+  <p>
+    <code>VerifyAccessToken</code> in <code>pkg/jwt</code> checks the
+    signature, <code>exp</code>, <code>iss</code>, and looks the
+    <code>kid</code> up in the active key ring. Tokens signed with a key
+    that has been rotated out (but is still in the ring) continue to verify
+    until they expire — see <a href="/identity/docs/installation/jwt-keys">JWT Keys</a>.
+  </p>
 
-  <h2>Refresh token</h2>
-  <p>Refresh tokens are opaque random strings. Each one is hashed (SHA-256) and stored as a <code>RefreshToken</code> node (type_id 5) in EntDB, linked to the user. On <code>RefreshToken</code> RPC the server:</p>
-  <ol>
-    <li>Hashes the presented token, looks up the node</li>
-    <li>Checks the expiry timestamp</li>
-    <li>Deletes the old node</li>
-    <li>Issues a fresh access + refresh token pair, storing the new refresh token</li>
-  </ol>
-  <p>Default lifetime: 604,800 seconds (7 days), via <code>GATEWAY_REFRESH_EXPIRY_SECONDS</code>.</p>
+  <h2>Bearer-token middleware</h2>
+  <p>
+    <code>internal/middleware/auth.go</code> verifies the bearer token on
+    every request whose path is not in <code>AuthExemptPaths</code>. On
+    success it sets <code>X-Authenticated-User-Id</code> on the request so
+    the Connect handler can read the caller without re-parsing the JWT.
+  </p>
 
-  <Callout type="warning" title="Token rotation breaks replay">
-    Because the old refresh token is deleted on every use, a stolen-then-rotated token becomes useless the moment the legitimate user makes their next refresh call. Clients must persist the latest refresh token from each <code>RefreshToken</code> response.
-  </Callout>
+  <h3>Exempt paths</h3>
+  <ul>
+    <li><code>OAuthLogin</code>, <code>PasswordLogin</code>, <code>PasswordSignup</code>, <code>RefreshToken</code>, <code>Logout</code>, <code>GetCurrentUser</code></li>
+    <li><code>BeginPasskeyLogin</code>, <code>CompletePasskeyLogin</code></li>
+    <li><code>InitiateQrLogin</code>, <code>PollQrLogin</code></li>
+    <li><code>AcceptInvitation</code>, <code>RequestAdminHelp</code>, <code>VerifyTotp</code></li>
+    <li><code>/.well-known/jwks.json</code>, <code>/health</code>, <code>/healthz</code></li>
+  </ul>
+  <p>
+    Even on exempt paths, the middleware still <em>parses</em> a bearer
+    token if one is supplied (so <code>GetCurrentUser</code> can return the
+    authenticated identity when called) — it just never rejects the request
+    for missing/invalid auth.
+  </p>
 
-  <h2>Key ring</h2>
-  <p>The key ring is loaded from <code>GATEWAY_JWT_KEYS</code> (a JSON array). Exactly one key is marked <code>active</code>; that key signs new tokens. All keys in the ring &mdash; active or not &mdash; are published in JWKS and used for verification, which is what makes rotation zero-downtime:</p>
-  <ol>
-    <li>Add a new key to the ring with <code>active: false</code>; deploy. New key is in JWKS, downstream caches will pick it up.</li>
-    <li>Flip the new key to <code>active: true</code> and the old key to <code>active: false</code>; deploy. New tokens are signed with the new key.</li>
-    <li>Wait one access-token lifetime (15 min) for old tokens to expire.</li>
-    <li>Remove the old key from the ring; deploy.</li>
-  </ol>
-  <p>See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a> for the exact JSON format and key generation, and <a href="/identity/docs/examples/key-rotation">Key Rotation</a> for a full worked example.</p>
+  <h2>Roles</h2>
+  <p>
+    The <code>role</code> claim is opaque to Identity except in two places:
+  </p>
+  <ul>
+    <li>
+      <strong>Admin RPCs</strong> require <code>role=admin</code>. The Connect
+      handler enforces this per-method and audit-logs the actor.
+    </li>
+    <li>
+      <strong>The first user</strong> created in a fresh deployment is
+      auto-promoted to <code>admin</code> so a freshly-deployed instance is
+      not lockable-out. Subsequent users default to <code>member</code>.
+    </li>
+  </ul>
+  <p>
+    Downstream services may interpret <code>role</code> however they want.
+    Identity does not authorize per-resource access; it authenticates and
+    declares a coarse role.
+  </p>
 
-  <h2>JWKS endpoint</h2>
-  <p>Identity publishes the public side of the ring at <code>/.well-known/jwks.json</code>:</p>
-  <pre is:raw><code class="language-json">{
-  "keys": [
-    {
-      "kty": "RSA",
-      "kid": "k1",
-      "alg": "RS256",
-      "use": "sig",
-      "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78L...",
-      "e": "AQAB"
-    }
-  ]
-}</code></pre>
-  <p>Downstream services should cache the JWKS for a few minutes and refresh on <code>kid</code>-not-found.</p>
-
-  <h2>Bearer token verification</h2>
-  <p>Identity accepts <code>Authorization: Bearer &lt;jwt&gt;</code> on non-exempt RPCs. On success the middleware injects <code>X-Authenticated-User-Id</code> into the request before invoking the handler. On failure the response is <code>HTTP 401</code> with body:</p>
-  <pre is:raw><code class="language-json">{"code":"unauthenticated","message":"Invalid or expired access token"}</code></pre>
-
-  <h2>Failed-login lockout</h2>
-  <p>The <code>PasswordLogin</code> RPC tracks failed attempts. After <code>GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS</code> failures (default 5), the account is locked for <code>GATEWAY_LOGIN_LOCKOUT_SECONDS</code> (default 900). Successful login resets the counter. The lockout state lives on the User node.</p>
-
-  <h2>Login challenge for 2FA</h2>
-  <p>When a user with TOTP enabled logs in with email + password, the response carries <code>totp_required: true</code> and a <code>login_challenge_id</code> rather than tokens. The client then calls <code>VerifyTotp</code> with the challenge ID and the TOTP code (or a recovery code). The challenge expires after <code>GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS</code> (default 300).</p>
+  <h2>Lockout</h2>
+  <p>
+    Failed-login lockout is configured by
+    <code>GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS</code> (default <code>5</code>) and
+    <code>GATEWAY_LOGIN_LOCKOUT_SECONDS</code> (default <code>900</code> = 15 min).
+    On the Nth failure within the window, <code>PasswordLogin</code>
+    returns <code>account temporarily locked</code> until the timer
+    expires; correct credentials reset the counter.
+  </p>
 </DocsLayout>

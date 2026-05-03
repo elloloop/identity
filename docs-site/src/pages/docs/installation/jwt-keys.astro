@@ -1,99 +1,89 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="JWT Keys">
   <h1>JWT Keys</h1>
-  <p>Identity signs every access token with RS256. The private keys live in <code>GATEWAY_JWT_KEYS</code>, a JSON array. The public side is published at <code>/.well-known/jwks.json</code> for downstream services to verify tokens.</p>
+  <p>
+    Identity signs access tokens with RS256. Production deployments must
+    supply a key ring through <code>GATEWAY_JWT_KEYS</code>. Without it the
+    container generates a throwaway key on every start and logs
+    <code>auto_generating_dev_rsa_key</code> as a warning.
+  </p>
 
   <h2>Format</h2>
-  <pre is:raw><code class="language-json">[
+  <p>
+    <code>GATEWAY_JWT_KEYS</code> is a JSON array. Each entry has a
+    <code>kid</code>, a PEM-encoded RSA private key, and an
+    <code>active</code> flag. Exactly one key may be active at a time —
+    that is the signing key. All keys (active or not) are published to
+    JWKS so previously-issued tokens continue to verify.
+  </p>
+  <Code code={`[
   {
-    "kid": "k1",
-    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----\n",
-    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIIBIj...\n-----END PUBLIC KEY-----\n",
+    "kid": "k-2026-05",
+    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\nMIIE...\\n-----END RSA PRIVATE KEY-----\\n",
     "active": true
+  },
+  {
+    "kid": "k-2026-04",
+    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\nMIIE...\\n-----END RSA PRIVATE KEY-----\\n",
+    "active": false
   }
-]</code></pre>
-  <table>
-    <tr><th>Field</th><th>Required</th><th>Notes</th></tr>
-    <tr><td><code>kid</code></td><td>yes</td><td>Stable key ID. Becomes the <code>kid</code> JWS header on signed tokens.</td></tr>
-    <tr><td><code>private_key_pem</code></td><td>yes</td><td>RSA private key in PEM. PKCS#1 or PKCS#8 both accepted.</td></tr>
-    <tr><td><code>public_key_pem</code></td><td>optional</td><td>Not strictly required &mdash; the public key is derived from the private key.</td></tr>
-    <tr><td><code>active</code></td><td>at least one</td><td>Exactly one key in the ring must be marked active. The active key signs new tokens; all keys verify.</td></tr>
-  </table>
-
-  <Callout type="warning" title="Embedding JSON in env vars">
-    The PEM newlines must be preserved as <code>\n</code> in the JSON. When passing via the shell, single-quote the entire JSON to stop the shell from eating the backslashes:
-    <pre is:raw><code class="language-bash">export GATEWAY_JWT_KEYS='[{"kid":"k1","private_key_pem":"-----BEGIN ...\n-----END...\n","active":true}]'</code></pre>
-  </Callout>
+]`} lang="json" title="GATEWAY_JWT_KEYS" />
+  <p>
+    The parser accepts both PKCS#1 (<code>-----BEGIN RSA PRIVATE KEY-----</code>)
+    and PKCS#8 (<code>-----BEGIN PRIVATE KEY-----</code>) — but only RSA keys.
+    See <code>parseKeyRingFromEnv</code> in <code>cmd/identity/main.go</code>.
+  </p>
 
   <h2>Generating a key</h2>
-  <pre is:raw><code class="language-bash"># 2048-bit RSA private key (PKCS#1)
-openssl genrsa -out k1.pem 2048
+  <Code code={`# 2048-bit RSA key, PKCS#1 PEM
+openssl genrsa -out k-2026-05.pem 2048
 
-# Optionally extract the public key
-openssl rsa -in k1.pem -pubout -out k1.pub.pem
+# Build the JSON value to set on the container
+PEM=$(awk '{printf "%s\\\\n", $0}' k-2026-05.pem)
+cat > keyring.json <<EOF
+[{"kid":"k-2026-05","private_key_pem":"$PEM","active":true}]
+EOF
 
-# Or generate with PKCS#8 (also accepted)
-openssl genpkey -algorithm RSA \
-  -pkeyopt rsa_keygen_bits:2048 \
-  -out k1.pem</code></pre>
+# Pass it through env (one line, no shell expansion of \\n)
+export GATEWAY_JWT_KEYS=$(cat keyring.json | jq -c .)`} lang="bash" />
 
-  <h2>Building the JSON</h2>
-  <p>The cleanest way is to assemble the array with <code>jq</code>:</p>
-  <pre is:raw><code class="language-bash">openssl genrsa -out k1.pem 2048
-openssl rsa -in k1.pem -pubout -out k1.pub.pem
+  <h2>JWKS endpoint</h2>
+  <p>
+    Identity exposes the public half of every key in the ring at
+    <code>/.well-known/jwks.json</code>. Downstream services should fetch
+    this once, cache it, and use it to verify access tokens locally.
+  </p>
+  <Code code={`curl -s http://identity/.well-known/jwks.json`} lang="bash" />
+  <Code code={`{
+  "keys": [
+    {"kty":"RSA","use":"sig","alg":"RS256","kid":"k-2026-05","n":"...","e":"AQAB"},
+    {"kty":"RSA","use":"sig","alg":"RS256","kid":"k-2026-04","n":"...","e":"AQAB"}
+  ]
+}`} lang="json" />
 
-jq -n --rawfile priv k1.pem --rawfile pub k1.pub.pem '
-  [{
-    kid: "k1",
-    private_key_pem: $priv,
-    public_key_pem: $pub,
-    active: true
-  }]
-' > keyring.json
-
-# Now feed it in
-docker run -e GATEWAY_JWT_KEYS="$(cat keyring.json)" ghcr.io/elloloop/identity:0.1.0 ...</code></pre>
-
-  <h2>Key rotation</h2>
-  <p>Rotation is zero-downtime because every key in the ring is published in JWKS, and the active flag controls which one signs new tokens. Procedure:</p>
+  <h2>Rotation</h2>
+  <p>
+    See <a href="/identity/docs/examples/key-rotation">Key Rotation</a> for
+    the full step-by-step. The short version:
+  </p>
   <ol>
-    <li><strong>Add</strong>: append a new key with <code>active: false</code>. Deploy. Both keys are in JWKS.</li>
-    <li><strong>Wait</strong> long enough for downstream JWKS caches to refresh (a few minutes).</li>
-    <li><strong>Promote</strong>: flip the new key to <code>active: true</code> and the old key to <code>active: false</code>. Deploy. New tokens carry the new <code>kid</code>; old tokens still verify.</li>
-    <li><strong>Wait</strong> one access-token lifetime (15 min by default) for old tokens to expire.</li>
-    <li><strong>Remove</strong>: drop the old key from the JSON. Deploy.</li>
+    <li>Generate a new key with a fresh <code>kid</code>.</li>
+    <li>Add it to the ring with <code>"active": false</code>; redeploy.</li>
+    <li>Wait long enough for downstream services to refresh JWKS.</li>
+    <li>Flip the new key to <code>active: true</code> and the old one to <code>active: false</code>; redeploy.</li>
+    <li>After every old token has expired (≥ <code>GATEWAY_JWT_EXPIRY_SECONDS</code>), drop the retired key from the ring.</li>
   </ol>
 
-  <pre is:raw><code class="language-json">// Step 1: introduce k2 alongside k1
-[
-  { "kid": "k1", "private_key_pem": "...", "active": true  },
-  { "kid": "k2", "private_key_pem": "...", "active": false }
-]
-
-// Step 3: promote k2
-[
-  { "kid": "k1", "private_key_pem": "...", "active": false },
-  { "kid": "k2", "private_key_pem": "...", "active": true  }
-]
-
-// Step 5: drop k1
-[
-  { "kid": "k2", "private_key_pem": "...", "active": true }
-]</code></pre>
-
-  <p>See <a href="/identity/docs/examples/key-rotation">Key Rotation</a> for the complete worked example with timeline.</p>
-
-  <h2>What happens on startup</h2>
-  <ul>
-    <li>If <code>GATEWAY_JWT_KEYS</code> is set: parsed into a <code>KeyRing</code>. Multiple keys with <code>active: true</code> &rarr; fatal error. No keys with <code>active: true</code> &rarr; the last key is promoted.</li>
-    <li>If <code>GATEWAY_JWT_KEYS</code> is empty: a fresh 2048-bit RSA key is generated in memory with <code>kid=dev</code>. The log line <code>auto_generating_dev_rsa_key</code> is your warning that this is dev-only.</li>
-  </ul>
-
-  <Callout type="danger" title="Don't lose the private keys">
-    Without the active private key, Identity can't sign new tokens. Without the public keys in JWKS, downstream services can't verify any outstanding tokens. Treat the keyring like a database password &mdash; rotate it on a schedule, store it in your secrets manager, audit access.
-  </Callout>
+  <h2>Verification</h2>
+  <p>
+    <code>VerifyAccessToken</code> in <code>pkg/jwt/token.go</code> reads the
+    <code>kid</code> header, looks the key up in the ring, then verifies the
+    signature, <code>exp</code>, and <code>iss</code>. Tokens with an
+    unknown <code>kid</code>, expired <code>exp</code>, or wrong issuer are
+    rejected.
+  </p>
 </DocsLayout>

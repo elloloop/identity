@@ -1,57 +1,51 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="Kubernetes">
   <h1>Kubernetes</h1>
-  <p>Identity is stateless and runs comfortably as a Deployment with two ports. The example below assumes you already have an EntDB Service running in the same namespace.</p>
+  <p>
+    Identity is a single stateless container; the Kubernetes object set is
+    minimal. This page is a reference manifest you can adapt — there is
+    no Helm chart in the repo, intentionally.
+  </p>
 
-  <h2>Secrets</h2>
-  <pre is:raw><code class="language-yaml">apiVersion: v1
+  <h2>Secret</h2>
+  <p>The JWT key ring and TOTP encryption key belong in a Secret:</p>
+  <Code code={`apiVersion: v1
 kind: Secret
 metadata:
   name: identity-secrets
   namespace: identity
 type: Opaque
 stringData:
-  # JWT key ring (see docs/installation/jwt-keys)
   GATEWAY_JWT_KEYS: |
-    [
-      {
-        "kid": "k1",
-        "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n",
-        "active": true
-      }
-    ]
-  # 32-byte base64 key for AES-GCM-encrypting TOTP secrets
-  GATEWAY_TOTP_ENCRYPTION_KEY: "<openssl rand -base64 32>"
-  # OAuth (only if you use it)
-  GATEWAY_GOOGLE_CLIENT_ID: ""
-  GATEWAY_GOOGLE_CLIENT_SECRET: ""
-  GATEWAY_MICROSOFT_CLIENT_ID: ""
-  GATEWAY_MICROSOFT_CLIENT_SECRET: ""</code></pre>
+    [{"kid":"k-2026-05","private_key_pem":"-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n","active":true}]
+  GATEWAY_TOTP_ENCRYPTION_KEY: "<base64 32-byte key>"
+  GATEWAY_GOOGLE_CLIENT_SECRET: "..."
+  GATEWAY_MICROSOFT_CLIENT_SECRET: "..."`} lang="yaml" title="secret.yaml" />
 
   <h2>ConfigMap</h2>
-  <pre is:raw><code class="language-yaml">apiVersion: v1
+  <Code code={`apiVersion: v1
 kind: ConfigMap
 metadata:
   name: identity-config
   namespace: identity
 data:
   GATEWAY_ENTDB_ADDRESS: "entdb.entdb.svc.cluster.local:50051"
-  GATEWAY_DEFAULT_TENANT_ID: "my-product"
-  GATEWAY_PASSKEY_RP_ID: "app.my-product.com"
-  GATEWAY_PASSKEY_RP_NAME: "My Product"
-  GATEWAY_PASSKEY_ORIGIN: "https://app.my-product.com"
-  GATEWAY_TOTP_ISSUER: "My Product"
-  GATEWAY_DEFAULT_EMAIL_DOMAIN: "my-product.com"
-  GATEWAY_ALLOWED_ORIGINS: "https://app.my-product.com,https://admin.my-product.com"
+  GATEWAY_DEFAULT_TENANT_ID: "acme"
+  GATEWAY_PASSKEY_RP_ID: "acme.example.com"
+  GATEWAY_PASSKEY_ORIGIN: "https://acme.example.com"
+  GATEWAY_TOTP_ISSUER: "Acme"
+  GATEWAY_ALLOWED_ORIGINS: "https://acme.example.com"
+  GATEWAY_AUTH_ALLOW_LOCAL: "true"
   GATEWAY_COOKIE_SECURE: "true"
-  GATEWAY_AUTH_ALLOW_LOCAL: "true"</code></pre>
+  GATEWAY_GOOGLE_CLIENT_ID: "..."
+  GATEWAY_MICROSOFT_CLIENT_ID: "..."`} lang="yaml" title="configmap.yaml" />
 
   <h2>Deployment</h2>
-  <pre is:raw><code class="language-yaml">apiVersion: apps/v1
+  <Code code={`apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: identity
@@ -64,83 +58,71 @@ spec:
     metadata:
       labels: { app: identity }
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 65532
-        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: identity
           image: ghcr.io/elloloop/identity:0.1.0
           ports:
-            - { name: http,    containerPort: 80 }
-            - { name: metrics, containerPort: 9090 }
+            - { containerPort: 80, name: http }
+            - { containerPort: 9090, name: metrics }
           envFrom:
             - configMapRef: { name: identity-config }
             - secretRef:    { name: identity-secrets }
-          livenessProbe:
-            httpGet: { path: /health, port: http }
-            initialDelaySeconds: 5
-            periodSeconds: 10
           readinessProbe:
-            httpGet: { path: /health, port: http }
-            initialDelaySeconds: 2
+            httpGet: { path: /healthz, port: 80 }
             periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 80 }
+            periodSeconds: 10
           resources:
-            requests: { cpu: 100m, memory: 128Mi }
-            limits:   { cpu: 500m, memory: 512Mi }
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }</code></pre>
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]`} lang="yaml" title="deployment.yaml" />
 
   <h2>Service</h2>
-  <pre is:raw><code class="language-yaml">apiVersion: v1
+  <Code code={`apiVersion: v1
 kind: Service
 metadata:
   name: identity
   namespace: identity
+  labels: { app: identity }
 spec:
-  type: ClusterIP
   selector: { app: identity }
   ports:
     - { name: http,    port: 80,   targetPort: http }
-    - { name: metrics, port: 9090, targetPort: metrics }</code></pre>
+    - { name: metrics, port: 9090, targetPort: metrics }`} lang="yaml" title="service.yaml" />
 
-  <h2>Ingress (example with cert-manager)</h2>
-  <pre is:raw><code class="language-yaml">apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: identity
-  namespace: identity
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-spec:
-  tls:
-    - hosts: [identity.my-product.com]
-      secretName: identity-tls
-  rules:
-    - host: identity.my-product.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service: { name: identity, port: { number: 80 } }</code></pre>
+  <h2>Scaling</h2>
+  <p>
+    The container is stateless — replicas are interchangeable. A single
+    <code>Deployment</code> with 2-3 replicas behind a <code>Service</code>
+    is sufficient for typical workloads. Vertical capacity is bounded by
+    bcrypt: at cost 12, a single core can hash about 4 passwords per
+    second. If signup rate is bursty, consider an HPA on CPU.
+  </p>
 
-  <Callout type="info" title="Replicas are safe">
-    Identity holds no per-instance state &mdash; refresh tokens, sessions, TOTP secrets, and challenges all live in EntDB. Run as many replicas as you like; downstream services don't care which replica issued a token because they verify locally via JWKS.
-  </Callout>
-
-  <h2>ServiceMonitor (Prometheus Operator)</h2>
-  <pre is:raw><code class="language-yaml">apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
+  <h2>Pod Disruption Budget</h2>
+  <Code code={`apiVersion: policy/v1
+kind: PodDisruptionBudget
 metadata:
   name: identity
   namespace: identity
 spec:
+  minAvailable: 1
   selector:
-    matchLabels: { app: identity }
-  endpoints:
-    - port: metrics
-      interval: 30s</code></pre>
+    matchLabels: { app: identity }`} lang="yaml" />
+
+  <h2>Ingress</h2>
+  <p>
+    Use whatever ingress the cluster has. The relevant facts:
+  </p>
+  <ul>
+    <li>Identity speaks HTTP/1.1 + HTTP/2 cleartext on <code>:80</code>.</li>
+    <li>The path namespace is <code>/identity.IdentityService/*</code> and <code>/.well-known/jwks.json</code> + <code>/health*</code>.</li>
+    <li>Make sure the ingress preserves <code>Host</code> + <code>Origin</code> headers — Connect uses them, and CORS / passkey RP-ID checks depend on them.</li>
+  </ul>
 </DocsLayout>

@@ -1,81 +1,107 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
-<DocsLayout title="Passkeys">
-  <h1>Passkeys (WebAuthn)</h1>
-  <p>Passkeys are first-class. Identity wraps the <code>go-webauthn</code> library and exposes registration and login as four RPCs (begin / complete for each) plus management RPCs.</p>
+<DocsLayout title="Passkey">
+  <h1>Passkey (WebAuthn)</h1>
+  <p>
+    Passkeys are a phishing-resistant first factor backed by
+    <a href="https://www.w3.org/TR/webauthn-3/">WebAuthn</a>. Identity
+    handles the server side of the ceremony with
+    <code>github.com/go-webauthn/webauthn</code>. The browser does the
+    actual public-key crypto via
+    <code>navigator.credentials.create()</code> and
+    <code>navigator.credentials.get()</code>.
+  </p>
 
-  <h2>Setup</h2>
-  <p>Three env vars must be correct for the browser to honor the ceremony:</p>
+  <h2>Configuration</h2>
+  <p>
+    The relying-party (RP) identifiers must match the domain users will
+    sign in from, or browsers will refuse the ceremony.
+  </p>
   <table>
-    <tr><th>Var</th><th>Example</th></tr>
-    <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td><code>app.example.com</code> &mdash; the registrable domain</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td><code>Example App</code> &mdash; what users see in their authenticator</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td><code>https://app.example.com</code> &mdash; exact origin the browser will assert</td></tr>
+    <tr><th>Variable</th><th>Example</th></tr>
+    <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td><code>example.com</code> — registrable domain, no scheme, no port</td></tr>
+    <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td><code>Example</code> — shown in the OS dialog</td></tr>
+    <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td><code>https://app.example.com</code> — full origin including scheme</td></tr>
   </table>
 
-  <Callout type="warning" title="RP ID must match origin">
-    The relying-party ID must be a registrable suffix of the origin's hostname. <code>RP_ID=example.com</code> works for both <code>app.example.com</code> and <code>admin.example.com</code>. Subdomains can't widen the RP ID upwards.
-  </Callout>
+  <h2>Registration</h2>
+  <p>
+    The user must already be authenticated (e.g. they signed in with
+    password). The flow is two RPCs.
+  </p>
 
-  <h2>Registration (authenticated user)</h2>
-  <pre is:raw><code class="language-bash"># 1. Begin — user is logged in, opts in to passkey enrollment
-curl -s -X POST http://localhost/identity.IdentityService/BeginPasskeyRegistration \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{"device_name":"Alice MacBook"}'</code></pre>
-  <pre is:raw><code class="language-json">{
-  "optionsJson": "{\"publicKey\":{\"challenge\":\"...\",\"rp\":...,\"user\":{...},\"pubKeyCredParams\":[...],\"timeout\":60000,\"attestation\":\"direct\"}}",
-  "challengeId": "pkc_..."
-}</code></pre>
-  <p>The frontend passes <code>options_json</code> directly to <code>navigator.credentials.create()</code>, then submits the result:</p>
-  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/CompletePasskeyRegistration \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "challenge_id": "pkc_...",
-    "credential_json": "<output of navigator.credentials.create>",
-    "device_name": "Alice MacBook"
-  }'</code></pre>
-  <p>Returns a <code>PasskeyCredentialInfo</code> with the new <code>credential_id</code>. The challenge is single-use and expires after <code>GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS</code> (default 300). Audit event: <code>passkey_added</code>.</p>
+  <h3>1. Begin</h3>
+  <Code code={`curl -sX POST http://localhost/identity.IdentityService/BeginPasskeyRegistration \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"deviceName":"Alice's MacBook"}'`} lang="bash" />
+  <Code code={`{
+  "optionsJson": "{\\"challenge\\":...,\\"rp\\":{\\"id\\":\\"example.com\\",...}}",
+  "challengeId": "ch_..."
+}`} lang="json" />
+  <p>
+    The browser passes <code>options_json</code> straight to
+    <code>navigator.credentials.create()</code> after JSON-parsing.
+  </p>
 
-  <h2>Login (no session needed)</h2>
-  <pre is:raw><code class="language-bash"># 1. Begin — email is optional; omit it to allow discoverable credentials
-curl -s -X POST http://localhost/identity.IdentityService/BeginPasskeyLogin \
-  -H "Content-Type: application/json" \
-  -d '{"email":"alice@example.com"}'
-# &rarr; { optionsJson, challengeId }
+  <h3>2. Complete</h3>
+  <Code code={`const options = JSON.parse(beginResponse.options_json);
+const credential = await navigator.credentials.create(options);
 
-# 2. Frontend invokes navigator.credentials.get(options); then:
-curl -s -X POST http://localhost/identity.IdentityService/CompletePasskeyLogin \
-  -H "Content-Type: application/json" \
-  -d '{
-    "challenge_id": "pkc_...",
-    "credential_json": "<output of navigator.credentials.get>"
-  }'</code></pre>
-  <p>Successful login returns the standard <code>&#123; user, accessToken, refreshToken, expiresIn &#125;</code>. Audit event: <code>passkey_used</code>.</p>
+await fetch("/identity.IdentityService/CompletePasskeyRegistration", {
+  method: "POST",
+  headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+  body: JSON.stringify({
+    challengeId: beginResponse.challenge_id,
+    credentialJson: JSON.stringify(credential),
+    deviceName: "Alice's MacBook",
+  }),
+});`} lang="javascript" />
 
-  <h2>Discoverable credentials</h2>
-  <p>If <code>email</code> is omitted from <code>BeginPasskeyLogin</code>, the browser is prompted to pick from any resident keys for the relying party. Useful for "Sign in with passkey" buttons that don't ask for an email first.</p>
+  <h2>Login</h2>
+  <p>
+    No prior session is needed.
+    <code>BeginPasskeyLogin</code> with an empty <code>email</code>
+    permits discoverable credentials (the browser shows whichever passkey
+    the user picks); supplying an email scopes the ceremony to that
+    user's keys.
+  </p>
+  <Code code={`// 1. Ask Identity for options
+const begin = await fetch("/identity.IdentityService/BeginPasskeyLogin", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ email: "" }),  // discoverable credentials
+}).then(r => r.json());
 
-  <h2>Management</h2>
-  <pre is:raw><code class="language-bash"># List the caller's passkeys
-curl -s -X POST http://localhost/identity.IdentityService/ListPasskeys \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" -d '{}'
+// 2. Browser does the ceremony
+const credential = await navigator.credentials.get(JSON.parse(begin.options_json));
 
-# Delete one
-curl -s -X POST http://localhost/identity.IdentityService/DeletePasskey \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{"credential_id":"<id from ListPasskeys>"}'</code></pre>
-  <p>Audit event for delete: <code>passkey_removed</code>.</p>
+// 3. Hand the assertion back to Identity
+const complete = await fetch("/identity.IdentityService/CompletePasskeyLogin", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    challengeId: begin.challenge_id,
+    credentialJson: JSON.stringify(credential),
+  }),
+}).then(r => r.json());
 
-  <h2>What's persisted</h2>
-  <p>Each passkey is stored as a <code>Passkey</code> node (type_id 6) carrying credential ID, public key, sign count, AAGUID, transports, and the user-supplied device name. The <code>last_used_at</code> timestamp is updated on every successful login.</p>
+// complete.access_token, complete.refresh_token, complete.user`} lang="javascript" />
 
-  <h2>QR-based cross-device login</h2>
-  <p>Passkeys synced via Apple/Google clouds work cross-device automatically. For physical second-device login (e.g. browsing on a TV, approving from a phone) Identity also offers <a href="/identity/docs/api-reference/grpc#qr-login">QR login</a> as an independent flow &mdash; a phone that's already signed in approves a new device and Identity issues a fresh session for it.</p>
+  <h2>Managing passkeys</h2>
+  <ul>
+    <li><code>ListPasskeys</code> — returns the credentials registered to the calling user, with <code>created_at</code> and <code>last_used_at</code>.</li>
+    <li><code>DeletePasskey</code> — removes a credential by ID. Audit-logged.</li>
+  </ul>
+
+  <h2>Storage</h2>
+  <p>
+    Passkey credentials are EntDB nodes (<code>type_id 6</code>) edge-linked
+    to their owning <code>User</code>. The stored fields are the
+    credential ID, the public key, the sign counter, and the user's
+    chosen device label — never any private material.
+  </p>
 </DocsLayout>

@@ -1,81 +1,112 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import Callout from "../../../components/Callout.astro";
+import { Code } from "astro-expressive-code/components";
 ---
 
 <DocsLayout title="Key Rotation">
-  <h1>Example: Rotating JWT Signing Keys With Zero Downtime</h1>
-  <p>Walk through a complete rotation: <code>k1</code> is currently active; introduce <code>k2</code>, promote it, retire <code>k1</code>. Outstanding tokens stay valid throughout.</p>
+  <h1>Key Rotation</h1>
+  <p>
+    Rotating the JWT signing key without breaking in-flight access tokens
+    is a four-step process. The whole point of the
+    <code>kid</code> claim and JWKS is that you can introduce a new key
+    while the old one still verifies.
+  </p>
 
-  <h2>Why this works</h2>
-  <p>Every key in <code>GATEWAY_JWT_KEYS</code> is published in <code>/.well-known/jwks.json</code> regardless of the <code>active</code> flag. Verification picks the right key by <code>kid</code>; only signing cares which key is active. So you can introduce a new key, let the world's caches absorb it, then flip which one signs &mdash; with no break in verification.</p>
+  <h2>Prerequisites</h2>
+  <ul>
+    <li>Production deployment uses <code>GATEWAY_JWT_KEYS</code> (not the auto-generated dev key).</li>
+    <li>Downstream services cache JWKS with a known refresh interval (e.g. 12 hours).</li>
+    <li>You know <code>GATEWAY_JWT_EXPIRY_SECONDS</code> for the deployment.</li>
+  </ul>
 
-  <h2>Starting state</h2>
-  <pre is:raw><code class="language-json">// keyring.json — k1 only
-[
+  <h2>Step 1 — Generate a new key</h2>
+  <Code code={`openssl genrsa -out k-2026-08.pem 2048`} lang="bash" />
+
+  <h2>Step 2 — Add the new key as inactive</h2>
+  <p>
+    Update <code>GATEWAY_JWT_KEYS</code> so the ring contains both the
+    current active key and the new one (inactive). After redeploy, the
+    new key appears in JWKS but is not yet used to sign anything.
+  </p>
+  <Code code={`[
   {
-    "kid": "k1",
-    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\n<k1>...\n-----END RSA PRIVATE KEY-----\n",
+    "kid": "k-2026-05",
+    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\n...current...\\n-----END RSA PRIVATE KEY-----\\n",
+    "active": true
+  },
+  {
+    "kid": "k-2026-08",
+    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\n...new...\\n-----END RSA PRIVATE KEY-----\\n",
+    "active": false
+  }
+]`} lang="json" title="GATEWAY_JWT_KEYS — pre-flip" />
+  <p>
+    Verify the new key is published:
+  </p>
+  <Code code={`curl -s https://auth.acme.com/.well-known/jwks.json | jq '.keys[].kid'
+# "k-2026-05"
+# "k-2026-08"`} lang="bash" />
+
+  <h2>Step 3 — Wait for downstream caches</h2>
+  <p>
+    Downstream services need to pick up the new key from JWKS before any
+    token signed by it reaches them. Wait at least one cache TTL — for
+    the recommended 12-hour interval, wait 24 hours to be safe.
+  </p>
+
+  <h2>Step 4 — Flip the active flag</h2>
+  <p>
+    Promote the new key. After redeploy, all newly-issued access tokens
+    are signed with <code>k-2026-08</code>. Tokens already in flight,
+    signed by <code>k-2026-05</code>, continue to verify because that key
+    is still in JWKS.
+  </p>
+  <Code code={`[
+  {
+    "kid": "k-2026-05",
+    "private_key_pem": "...",
+    "active": false
+  },
+  {
+    "kid": "k-2026-08",
+    "private_key_pem": "...",
     "active": true
   }
-]</code></pre>
-  <p>Identity signs every new JWT with <code>kid=k1</code>. Downstream services have <code>k1</code> cached.</p>
+]`} lang="json" title="GATEWAY_JWT_KEYS — post-flip" />
 
-  <h2>Generate the new key</h2>
-  <pre is:raw><code class="language-bash">openssl genrsa -out k2.pem 2048
-openssl rsa -in k2.pem -pubout -out k2.pub.pem</code></pre>
+  <h2>Step 5 — Retire the old key</h2>
+  <p>
+    Wait <code>GATEWAY_JWT_EXPIRY_SECONDS</code> (default 15 min) plus a
+    safety margin. After that point, no extant access token was signed by
+    <code>k-2026-05</code>, so it can be removed entirely.
+  </p>
+  <Code code={`[
+  {
+    "kid": "k-2026-08",
+    "private_key_pem": "...",
+    "active": true
+  }
+]`} lang="json" title="GATEWAY_JWT_KEYS — final" />
 
-  <h2>Step 1 — Add k2 with active=false</h2>
-  <pre is:raw><code class="language-json">[
-  { "kid": "k1", "private_key_pem": "...k1...", "active": true  },
-  { "kid": "k2", "private_key_pem": "...k2...", "active": false }
-]</code></pre>
-  <p>Deploy. Identity boots, logs <code>jwt_key_ring_loaded</code> with <code>key_count=2 active_kid=k1</code>. JWKS now publishes both public keys; signing still uses <code>k1</code>.</p>
-
-  <Callout type="info" title="Wait for caches">
-    Downstream services typically cache JWKS for ~5 minutes. Wait at least one cache lifetime before promoting <code>k2</code>, so every verifier already has the new public key when the first <code>kid=k2</code> token shows up.
-  </Callout>
-
-  <h2>Step 2 — Promote k2 (the cutover)</h2>
-  <pre is:raw><code class="language-json">[
-  { "kid": "k1", "private_key_pem": "...k1...", "active": false },
-  { "kid": "k2", "private_key_pem": "...k2...", "active": true  }
-]</code></pre>
-  <p>Deploy again. Identity now signs every new JWT with <code>kid=k2</code>; tokens already in flight (signed with <code>k1</code>) keep verifying because <code>k1</code> is still in the ring.</p>
-
-  <h2>Step 3 — Wait for old tokens to expire</h2>
-  <p>Access tokens last <code>GATEWAY_JWT_EXPIRY_SECONDS</code> (default 900). Wait at least that long &mdash; in practice, double it &mdash; so every <code>kid=k1</code> token has expired.</p>
-
-  <h2>Step 4 — Drop k1</h2>
-  <pre is:raw><code class="language-json">[
-  { "kid": "k2", "private_key_pem": "...k2...", "active": true }
-]</code></pre>
-  <p>Deploy. JWKS now publishes only <code>k2</code>. Any client still presenting a <code>kid=k1</code> token will fail verification with <code>unauthenticated</code> and is forced to refresh, which is exactly what you want at this point.</p>
-
-  <h2>Timeline</h2>
-  <pre is:raw><code>t=0          add k2  (active:false)        deploy
-t=10m        promote k2 (active:true)       deploy
-t=10m+15m    every k1 token has expired
-t=30m        drop k1                          deploy</code></pre>
-
-  <h2>What can go wrong</h2>
-  <table>
-    <tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
-    <tr><td><code>multiple active JWT keys</code> at startup</td><td>Two keys both have <code>active: true</code>.</td><td>Set exactly one to active, redeploy.</td></tr>
-    <tr><td><code>unauthenticated</code> spike right after promote</td><td>Downstream caches not yet refreshed.</td><td>Wait longer between Step 1 and Step 2; or trigger a manual JWKS refresh.</td></tr>
-    <tr><td><code>unauthenticated</code> spike after drop</td><td>Step 3 wait was too short; clients still hold k1 tokens.</td><td>Roll back: re-add <code>k1</code> with <code>active: false</code>, wait longer, drop again.</td></tr>
-    <tr><td>Cannot decode private key</td><td>PEM mangled when stuffing into env var.</td><td>Use <code>jq --rawfile</code> to embed the PEM with literal <code>\n</code> escapes.</td></tr>
-  </table>
-
-  <h2>Automation hint</h2>
-  <p>Treat <code>keyring.json</code> as a versioned secret in your secrets manager. A small script can take "current state + new key" and produce the three intermediate states automatically:</p>
-  <pre is:raw><code class="language-bash">jq --rawfile new k2.pem '
-  . + [{"kid":"k2","private_key_pem":$new,"active":false}]
-' current.json > step1.json
-
-jq 'map(if .kid == "k1" then .active=false elif .kid == "k2" then .active=true else . end)' \
-  step1.json > step2.json
-
-jq 'map(select(.kid != "k1"))' step2.json > step3.json</code></pre>
-  <p>Apply each step as its own deploy. Don't skip the wait between Step 2 and Step 3 &mdash; that's where the safety guarantee comes from.</p>
+  <h2>Emergency rotation</h2>
+  <p>
+    If a key is suspected compromised:
+  </p>
+  <ol>
+    <li>
+      Drop it from the ring entirely (don't bother with the inactive
+      step — every token signed by it should be rejected immediately).
+    </li>
+    <li>
+      Bring <code>GATEWAY_JWT_EXPIRY_SECONDS</code> very low (e.g. 60)
+      temporarily so existing access tokens expire fast.
+    </li>
+    <li>
+      Run <code>SignOutEverywhere</code> on every user (no admin RPC for
+      this; do it directly via EntDB to delete every refresh token).
+    </li>
+    <li>
+      Restore the normal JWT expiry once the kill is confirmed.
+    </li>
+  </ol>
 </DocsLayout>
