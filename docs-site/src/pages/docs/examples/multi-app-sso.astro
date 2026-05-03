@@ -1,0 +1,96 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import Callout from "../../../components/Callout.astro";
+---
+
+<DocsLayout title="Multi-App SSO">
+  <h1>Example: Multi-App SSO</h1>
+  <p>Two apps in the same product share an Identity deployment. Once a user signs in to one, they're signed in to the other &mdash; both verify the same access token against the same JWKS endpoint.</p>
+
+  <h2>The setup</h2>
+  <pre is:raw><code>┌─────────────┐         ┌─────────────┐
+│   App A     │         │   App B     │
+│ web.app.com │         │admin.app.com│
+└─────┬───────┘         └─────┬───────┘
+      │  Bearer JWT           │  Bearer JWT
+      │  (verify via JWKS)    │  (verify via JWKS)
+      └───────────┬───────────┘
+                  ▼
+          ┌──────────────┐
+          │   Identity   │
+          │ id.app.com   │
+          └──────┬───────┘
+                 │  GATEWAY_DEFAULT_TENANT_ID=app
+                 ▼
+              EntDB</code></pre>
+
+  <h2>Identity configuration</h2>
+  <pre is:raw><code class="language-bash">docker run -d --name identity \
+  -p 80:80 -p 9090:9090 \
+  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \
+  -e GATEWAY_DEFAULT_TENANT_ID=app \
+  -e GATEWAY_JWT_KEYS="$(cat keyring.json)" \
+  -e GATEWAY_PASSKEY_RP_ID=app.com \
+  -e GATEWAY_PASSKEY_ORIGIN=https://web.app.com \
+  -e GATEWAY_TOTP_ISSUER="My App" \
+  -e GATEWAY_ALLOWED_ORIGINS="https://web.app.com,https://admin.app.com" \
+  ghcr.io/elloloop/identity:0.1.0</code></pre>
+
+  <Callout type="info" title="One RP ID covers subdomains">
+    With <code>GATEWAY_PASSKEY_RP_ID=app.com</code>, passkeys registered on <code>web.app.com</code> work on <code>admin.app.com</code> automatically. The browser allows the RP ID to be a registrable suffix of the origin's host.
+  </Callout>
+
+  <h2>The walkthrough</h2>
+
+  <h3>1. User signs in via App A</h3>
+  <pre is:raw><code class="language-bash">curl -s -X POST https://id.app.com/identity.IdentityService/PasswordLogin \
+  -H "Content-Type: application/json" \
+  -d '{"email":"alice@example.com","password":"Sup3rStrong!Pass"}'</code></pre>
+  <pre is:raw><code class="language-json">{
+  "user": { "id": "user_01HX...", "email": "alice@example.com", "role": "member" },
+  "accessToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ1c2VyXzAxSFguLi4iLCJlbWFpbCI6ImFsaWNlQGV4YW1wbGUuY29tIiwicm9sZSI6Im1lbWJlciIsInRlbmFudCI6ImFwcCIsImlhdCI6MTcxNDc1MDAwMCwiZXhwIjoxNzE0NzUwOTAwfQ...",
+  "refreshToken": "rt_...",
+  "expiresIn": 900
+}</code></pre>
+  <p>App A's frontend stores the access token (memory) and the refresh token (HTTP-only cookie or secure storage).</p>
+
+  <h3>2. App A's backend hits its own RPC</h3>
+  <pre is:raw><code class="language-bash">curl -s https://api.web.app.com/posts \
+  -H "Authorization: Bearer $ACCESS"</code></pre>
+  <p>App A's backend verifies the token using JWKS from Identity:</p>
+  <pre is:raw><code class="language-go">// pseudo-code in App A
+jwksURL := "https://id.app.com/.well-known/jwks.json"
+keys := fetchJWKS(jwksURL)  // cache for 5 min, refresh on kid-not-found
+claims, err := verifyRS256(token, keys)
+if err != nil || claims["tenant"] != "app" { return 401 }
+userID := claims["sub"]</code></pre>
+
+  <h3>3. The user navigates to App B</h3>
+  <p>App B is at a different host, but the same browser. The frontend loads, finds no session, and the user clicks "Sign in". Two options:</p>
+  <ul>
+    <li><strong>Cookie-based bridge</strong>: Identity sets a refresh-token cookie on <code>.app.com</code> at login time (<code>GATEWAY_COOKIE_DOMAIN=.app.com</code>, <code>GATEWAY_COOKIE_SECURE=true</code>). App B reads the cookie and immediately calls <code>RefreshToken</code> to get a fresh access token without re-prompting.</li>
+    <li><strong>Cross-tab broadcast</strong>: App B opens a popup to <code>https://web.app.com/sso-handoff</code> which posts the access token back via <code>postMessage</code>.</li>
+  </ul>
+
+  <h3>4. App B verifies the same token</h3>
+  <p>App B fetches the same JWKS URL, verifies the same RS256 signature, accepts the same <code>tenant=app</code> claim, and serves the request. No coordination with App A or with Identity beyond the JWKS fetch.</p>
+
+  <h3>5. The user signs out everywhere</h3>
+  <pre is:raw><code class="language-bash">curl -s -X POST https://id.app.com/identity.IdentityService/SignOutEverywhere \
+  -H "Authorization: Bearer $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"password":"Sup3rStrong!Pass"}'
+# &rarr; { revoked_count: 4 }  (every refresh token deleted)</code></pre>
+  <p>Refresh attempts on either app fail; outstanding access tokens stay valid until they expire (max 15 min).</p>
+
+  <h2>What downstream services need</h2>
+  <ol>
+    <li>Fetch <code>https://id.app.com/.well-known/jwks.json</code> at startup; cache for 5 minutes.</li>
+    <li>Refresh the cache on <code>kid</code> not found.</li>
+    <li>Verify <code>alg=RS256</code>, the signature, <code>exp</code>, and that <code>tenant</code> matches the expected product.</li>
+    <li>Use <code>sub</code> as the user ID in your domain logic.</li>
+  </ol>
+
+  <h2>What about multiple products?</h2>
+  <p>If you run two distinct products, each gets its own Identity deployment with its own tenant ID. Tokens issued for product A won't carry <code>tenant=b</code> and vice-versa &mdash; the tenant claim acts as the audience scoping.</p>
+</DocsLayout>

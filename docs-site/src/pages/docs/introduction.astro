@@ -1,0 +1,62 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import Callout from "../../components/Callout.astro";
+---
+
+<DocsLayout title="What is Identity">
+  <h1>What is Identity</h1>
+  <p>Identity is a standalone authentication and user-management service for SaaS products that need a single trusted issuer of access tokens, plus the operational primitives that come with it: sessions, audit log, user/group management, password policies, 2FA.</p>
+
+  <h2>What problem it solves</h2>
+  <p>Most products end up reinventing the same set of flows: sign up by email, hash passwords, rotate JWT keys, issue refresh tokens, store passkey credentials, set up TOTP, audit who did what. Identity is that boilerplate, packaged as a single container, with its data plane delegated to <a href="https://github.com/elloloop/tenant-shard-db">EntDB</a> so user data stays tenant-isolated.</p>
+
+  <ul>
+    <li>One image: <code>ghcr.io/elloloop/identity:&lt;tag&gt;</code></li>
+    <li>One dependency: an EntDB instance</li>
+    <li>One contract: Connect-RPC + JWT + JWKS</li>
+  </ul>
+
+  <h2>Where it sits in your stack</h2>
+  <p>Frontends (web, mobile) talk to Identity over Connect-RPC for sign-in, profile updates, and session management. Once signed in, they hit your other services with the bearer token. Each downstream service verifies the token by fetching public keys from Identity's <code>/.well-known/jwks.json</code> &mdash; no shared secret, no central session store.</p>
+
+  <h2>Relationship to EntDB</h2>
+  <p>All persistent state lives in EntDB. Identity reserves type IDs <code>1&ndash;99</code> in the EntDB schema:</p>
+  <table>
+    <tr><th>type_id</th><th>Node</th></tr>
+    <tr><td>1</td><td>User</td></tr>
+    <tr><td>2</td><td>Group</td></tr>
+    <tr><td>5</td><td>RefreshToken</td></tr>
+    <tr><td>6</td><td>Passkey</td></tr>
+    <tr><td>7</td><td>TOTPSecret</td></tr>
+    <tr><td>8</td><td>AuditEvent</td></tr>
+  </table>
+  <p>Other services sharing the EntDB instance use type IDs <code>100+</code>. Tenant isolation is provided by EntDB &mdash; each product gets its own tenant ID, which Identity threads through every operation.</p>
+
+  <Callout type="info" title="One product = one tenant">
+    Identity reads <code>GATEWAY_DEFAULT_TENANT_ID</code> at startup and uses it for every operation. To run a second product, run a second container pointed at the same EntDB with a different tenant ID.
+  </Callout>
+
+  <h2>What's in this service</h2>
+  <ul>
+    <li><strong>Authentication</strong>: password, OAuth, passkey, TOTP, QR cross-device login</li>
+    <li><strong>Token management</strong>: RS256 JWT signing, key rotation, refresh token rotation, JWKS publication</li>
+    <li><strong>Session management</strong>: list, revoke, sign-out-everywhere</li>
+    <li><strong>User CRUD</strong>: self-service profile, admin invite/deactivate/reactivate, quota</li>
+    <li><strong>Groups</strong>: create, update, delete, membership edges</li>
+    <li><strong>Audit log</strong>: every security event written to EntDB with actor, IP, UA, success</li>
+    <li><strong>Admin help requests</strong>: users who can't recover raise tickets, admins resolve</li>
+  </ul>
+
+  <h2>What it is not</h2>
+  <ul>
+    <li>Not a federated identity provider for third-party apps to consume (no OAuth server flow yet).</li>
+    <li>Not an authorization service &mdash; tokens carry <code>role</code> but ABAC/RBAC enforcement is your application's job.</li>
+    <li>Not a notification service &mdash; password resets and invitation emails are pushed to a separate email service via gRPC.</li>
+  </ul>
+
+  <h2>Next</h2>
+  <ul>
+    <li><a href="/identity/docs/quickstart">Run your first container</a></li>
+    <li><a href="/identity/docs/concepts/architecture">Read the architecture</a></li>
+  </ul>
+</DocsLayout>

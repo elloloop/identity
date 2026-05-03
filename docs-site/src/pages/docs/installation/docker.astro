@@ -1,0 +1,86 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import Callout from "../../../components/Callout.astro";
+---
+
+<DocsLayout title="Docker">
+  <h1>Run with Docker</h1>
+  <p>Identity ships as a multi-arch image (linux/amd64, linux/arm64) at <code>ghcr.io/elloloop/identity</code>.</p>
+
+  <h2>Pull a release</h2>
+  <pre is:raw><code class="language-bash">docker pull ghcr.io/elloloop/identity:latest
+# Or pin a version
+docker pull ghcr.io/elloloop/identity:0.1.0</code></pre>
+  <p>Tags are produced from semver git tags (<code>v0.1.0</code>) by <code>.github/workflows/release.yml</code>:</p>
+  <ul>
+    <li><code>0.1.0</code> &mdash; full version</li>
+    <li><code>0.1</code> &mdash; major.minor</li>
+    <li><code>0</code> &mdash; major</li>
+    <li><code>latest</code> &mdash; only set for non-prerelease tags</li>
+    <li><code>sha-&lt;commit&gt;</code> &mdash; per-commit pin</li>
+  </ul>
+
+  <h2>Minimal run</h2>
+  <pre is:raw><code class="language-bash">docker run -d --name identity \
+  -p 80:80 -p 9090:9090 \
+  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \
+  -e GATEWAY_DEFAULT_TENANT_ID=my-product \
+  ghcr.io/elloloop/identity:latest</code></pre>
+  <p>Identity will boot with an auto-generated dev RSA key and log a warning. That works for kicking the tires; for anything real, supply <code>GATEWAY_JWT_KEYS</code>.</p>
+
+  <h2>Production run</h2>
+  <pre is:raw><code class="language-bash">docker run -d --name identity \
+  -p 80:80 -p 9090:9090 \
+  -e GATEWAY_ENTDB_ADDRESS=entdb.internal:50051 \
+  -e GATEWAY_DEFAULT_TENANT_ID=my-product \
+  -e GATEWAY_JWT_KEYS="$(cat keyring.json)" \
+  -e GATEWAY_PASSKEY_RP_ID=app.my-product.com \
+  -e GATEWAY_PASSKEY_ORIGIN=https://app.my-product.com \
+  -e GATEWAY_PASSKEY_RP_NAME="My Product" \
+  -e GATEWAY_TOTP_ISSUER="My Product" \
+  -e GATEWAY_TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+  -e GATEWAY_DEFAULT_EMAIL_DOMAIN=my-product.com \
+  -e GATEWAY_ALLOWED_ORIGINS="https://app.my-product.com,https://admin.my-product.com" \
+  -e GATEWAY_COOKIE_SECURE=true \
+  -e GATEWAY_AUTH_ALLOW_LOCAL=true \
+  ghcr.io/elloloop/identity:0.1.0</code></pre>
+
+  <Callout type="warning" title="TOTP encryption key must be 32 bytes base64">
+    On startup Identity decodes <code>GATEWAY_TOTP_ENCRYPTION_KEY</code> with base64 and expects exactly 32 bytes; anything else is a fatal error. <code>openssl rand -base64 32</code> produces a 32-byte key.
+  </Callout>
+
+  <h2>Ports</h2>
+  <table>
+    <tr><th>Port</th><th>Purpose</th><th>Env var</th></tr>
+    <tr><td>80</td><td>Connect-RPC + JWKS + health</td><td><code>GATEWAY_CONNECT_PORT</code></td></tr>
+    <tr><td>9090</td><td>Prometheus <code>/metrics</code></td><td><code>GATEWAY_METRICS_PORT</code></td></tr>
+  </table>
+  <p>The <code>EXPOSE</code> directive in the image declares both. The container runs as a non-root user (distroless <code>nonroot</code>).</p>
+
+  <h2>Image internals</h2>
+  <ul>
+    <li>Base: <code>gcr.io/distroless/static-debian12:nonroot</code> (pinned by digest)</li>
+    <li>Binary: <code>/bin/identity</code></li>
+    <li>Build flags: <code>CGO_ENABLED=0</code>, <code>-ldflags "-s -w"</code></li>
+    <li>Entrypoint: <code>/bin/identity</code> (no shell)</li>
+    <li>Multi-arch: linux/amd64, linux/arm64</li>
+    <li>SBOM and provenance attestations attached at release time</li>
+  </ul>
+
+  <h2>Health probes</h2>
+  <pre is:raw><code class="language-bash"># Liveness / readiness — same endpoint
+curl -fsS http://localhost/health
+# {"status":"ok"}</code></pre>
+
+  <h2>Verifying the image</h2>
+  <pre is:raw><code class="language-bash">docker pull ghcr.io/elloloop/identity:0.1.0
+docker image inspect ghcr.io/elloloop/identity:0.1.0 \
+  --format '{{.Os}}/{{.Architecture}} {{.Config.Entrypoint}}'</code></pre>
+
+  <h2>Next</h2>
+  <ul>
+    <li><a href="/identity/docs/installation/configuration">Full env-var reference</a></li>
+    <li><a href="/identity/docs/installation/jwt-keys">Generating the JWT key ring</a></li>
+    <li><a href="/identity/docs/deployment/kubernetes">Kubernetes manifest</a></li>
+  </ul>
+</DocsLayout>

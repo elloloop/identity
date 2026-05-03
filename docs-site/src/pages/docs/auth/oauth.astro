@@ -1,0 +1,49 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import Callout from "../../../components/Callout.astro";
+---
+
+<DocsLayout title="OAuth">
+  <h1>OAuth Login</h1>
+  <p>Identity supports Google and Microsoft as OAuth providers. The deployed model is "frontend SDK + backend trust": the browser/app uses the provider's JS SDK, gets a verified ID token, and hands the resulting user info to Identity's <code>OAuthLogin</code> RPC.</p>
+
+  <Callout type="warning" title="Server-side code-exchange is planned, not implemented">
+    The proto carries <code>code</code>, <code>redirect_uri</code>, and <code>code_verifier</code> fields, and the source comments call <code>OAuthLogin</code> "a placeholder for the OAuth code exchange flow." The current implementation expects the email and display name to already be verified by the caller; it does not itself contact Google or Microsoft to redeem an authorization code. Treat <code>code</code>-based flows as a planned extension.
+  </Callout>
+
+  <h2>What's implemented today</h2>
+  <p><code>OAuthLogin</code> takes a verified email + provider tag and:</p>
+  <ol>
+    <li>Looks up or creates a User by email.</li>
+    <li>Updates display name and avatar if changed.</li>
+    <li>Issues access + refresh tokens (same lifetime as password login).</li>
+    <li>Records an <code>oauth_login</code> audit event with provider, IP, and UA.</li>
+  </ol>
+
+  <h2>RPC surface</h2>
+  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/OAuthLogin \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "<from frontend>",
+    "redirect_uri": "https://app.example.com/oauth/callback",
+    "provider": "google",
+    "code_verifier": "<PKCE verifier, optional>",
+    "tenant": ""
+  }'</code></pre>
+
+  <h2>Configuration</h2>
+  <table>
+    <tr><th>Var</th><th>Notes</th></tr>
+    <tr><td><code>GATEWAY_GOOGLE_CLIENT_ID</code></td><td>Used by the frontend SDK; Identity reads it to validate audience claims.</td></tr>
+    <tr><td><code>GATEWAY_GOOGLE_CLIENT_SECRET</code></td><td>Required for server-side code exchange (planned).</td></tr>
+    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_ID</code></td><td>Microsoft / Entra application ID.</td></tr>
+    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_SECRET</code></td><td>Required for code exchange (planned).</td></tr>
+    <tr><td><code>GATEWAY_MICROSOFT_TENANT_ID</code></td><td>Optional &mdash; restricts logins to a specific Entra tenant.</td></tr>
+  </table>
+
+  <h2>User lifecycle</h2>
+  <p>An OAuth login that finds no existing user creates one with <code>role=member</code>, <code>status=active</code>, and no password set. Subsequent <code>PasswordLogin</code> attempts on that user will fail with <code>ErrUnauthenticated</code> ("no password set") &mdash; OAuth-only users must continue to log in via OAuth, or have a password set later via the admin <code>ResetUserPassword</code> flow.</p>
+
+  <h2>Audit</h2>
+  <p>Every successful OAuth login emits an <code>oauth_login</code> event with the provider name in the details JSON.</p>
+</DocsLayout>

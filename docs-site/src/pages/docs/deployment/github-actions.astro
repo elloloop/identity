@@ -1,0 +1,75 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import Callout from "../../../components/Callout.astro";
+---
+
+<DocsLayout title="GitHub Actions">
+  <h1>GitHub Actions</h1>
+  <p>Identity is published as a public image at <code>ghcr.io/elloloop/identity</code>. Pulling it from a workflow is straightforward; you don't need credentials for the public tag.</p>
+
+  <h2>Pulling the image</h2>
+  <pre is:raw><code class="language-yaml">jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    services:
+      entdb:
+        image: ghcr.io/elloloop/entdb:latest
+        ports: ['50051:50051']
+
+      identity:
+        image: ghcr.io/elloloop/identity:0.1.0
+        env:
+          GATEWAY_ENTDB_ADDRESS: entdb:50051
+          GATEWAY_DEFAULT_TENANT_ID: ci-smoke
+          GATEWAY_AUTH_ALLOW_LOCAL: "true"
+        ports: ['80:80', '9090:9090']
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait for identity health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost/health; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Smoke-test signup
+        run: |
+          curl -fsS -X POST http://localhost/identity.IdentityService/PasswordSignup \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"ci@example.com","password":"Sup3rStrong!Pass"}'</code></pre>
+
+  <Callout type="info" title="Why no GHCR login?">
+    <code>ghcr.io/elloloop/identity</code> tags are published as public, so anonymous <code>docker pull</code> and the GitHub Actions <code>services:</code> block work without a <code>docker/login-action</code> step. Pin to a version tag (<code>0.1.0</code>) rather than <code>latest</code> in CI.
+  </Callout>
+
+  <h2>How tags are built</h2>
+  <p>The <code>release.yml</code> workflow in this repo builds and pushes on every <code>v*</code> git tag. It produces:</p>
+  <ul>
+    <li><code>0.1.0</code> &mdash; full semver</li>
+    <li><code>0.1</code> &mdash; major.minor</li>
+    <li><code>0</code> &mdash; major</li>
+    <li><code>latest</code> &mdash; only when the tag is not a prerelease</li>
+    <li><code>sha-&lt;commit&gt;</code> &mdash; per-commit pin</li>
+  </ul>
+  <p>The image is multi-arch (linux/amd64, linux/arm64) and ships with SBOM and provenance attestations.</p>
+
+  <h2>Cutting a release</h2>
+  <pre is:raw><code class="language-bash">git tag v0.1.0
+git push origin v0.1.0
+# Workflow runs; image appears at ghcr.io/elloloop/identity:0.1.0</code></pre>
+
+  <h2>Pinning by digest</h2>
+  <p>For supply-chain integrity in production, pin by digest rather than tag:</p>
+  <pre is:raw><code class="language-bash">crane digest ghcr.io/elloloop/identity:0.1.0
+# sha256:abcd...
+
+docker run ghcr.io/elloloop/identity@sha256:abcd...</code></pre>
+
+  <h2>Verifying provenance</h2>
+  <p>The release workflow attaches a SLSA-style provenance attestation. Verify with <code>cosign</code> or <code>gh attestation verify</code>:</p>
+  <pre is:raw><code class="language-bash">gh attestation verify \
+  oci://ghcr.io/elloloop/identity:0.1.0 \
+  --owner elloloop</code></pre>
+</DocsLayout>

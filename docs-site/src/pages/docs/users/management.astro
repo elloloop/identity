@@ -1,0 +1,121 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import Callout from "../../../components/Callout.astro";
+---
+
+<DocsLayout title="User Management">
+  <h1>User &amp; Group Management</h1>
+  <p>Identity exposes user and group CRUD as Connect RPCs. Most write operations require <code>role=admin</code> on the calling JWT; self-service profile updates are available to any authenticated user.</p>
+
+  <h2>Self-service profile</h2>
+  <pre is:raw><code class="language-bash"># Get the caller's user
+curl -s -X POST http://localhost/identity.IdentityService/GetCurrentUser \
+  -H "Authorization: Bearer $ACCESS" \
+  -H "Content-Type: application/json" -d '{}'
+
+# Update name and avatar — empty fields mean "leave unchanged"
+curl -s -X POST http://localhost/identity.IdentityService/UpdateProfile \
+  -H "Authorization: Bearer $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Alice Doe","avatar_url":"https://cdn.example.com/a.png"}'</code></pre>
+
+  <h2>The User shape</h2>
+  <p>From the proto:</p>
+  <pre is:raw><code class="language-json">{
+  "id": "user_01HX...",
+  "email": "alice@example.com",
+  "name": "Alice Doe",
+  "avatarUrl": "https://...",
+  "role": "member",                // "admin" | "member" | "guest"
+  "status": "USER_STATUS_ACTIVE",  // ACTIVE | INVITED | DEACTIVATED | SUSPENDED
+  "totpRequired": false,
+  "recoveryEmail": "alice-backup@example.com",
+  "quotaBytes": "0",
+  "lastLoginAtMs": "1714750000000",
+  "createdAt": "2024-05-03T10:00:00Z",
+  "updatedAt": "2024-05-03T10:00:00Z"
+}</code></pre>
+
+  <h2>Admin user CRUD</h2>
+  <p>All of these require <code>role=admin</code>. The handler calls <code>AdminService.requireAdmin</code>, which loads the caller's User node and returns <code>permission_denied</code> if the role isn't admin.</p>
+
+  <h3>List users</h3>
+  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/ListUsers \
+  -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenant_id": "my-product",
+    "limit": 50,
+    "status_filter": "USER_STATUS_ACTIVE",
+    "search": "alice"
+  }'</code></pre>
+  <p>Returns up to <code>limit</code> users; pagination is cursor-based via <code>next_cursor</code>. The <code>search</code> field does a substring match against email and name. <code>total_count</code> is the unfiltered total for the tenant.</p>
+
+  <h3>Get / update / delete</h3>
+  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/GetUser ...
+curl -s -X POST http://localhost/identity.IdentityService/UpdateUser \
+  -d '{"user_id":"user_...","name":"...","role":"member","avatar_url":"..."}'
+curl -s -X POST http://localhost/identity.IdentityService/DeleteUser \
+  -d '{"user_id":"user_..."}'</code></pre>
+
+  <h3>Lifecycle: deactivate / reactivate</h3>
+  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/DeactivateUser \
+  -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -d '{"user_id":"user_...","reason":"left the company"}'
+# &rarr; user.status = DEACTIVATED; subsequent logins fail with ErrAccountDeactivated
+
+curl -s -X POST http://localhost/identity.IdentityService/ReactivateUser \
+  -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -d '{"user_id":"user_..."}'
+# &rarr; user.status = ACTIVE</code></pre>
+  <p>Audit events: <code>user_deactivated</code>, <code>user_reactivated</code>.</p>
+
+  <h3>Reset a user's password</h3>
+  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/ResetUserPassword \
+  -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -d '{"user_id":"user_...","generate_temp_password":true}'
+# &rarr; { temporaryPassword: "Tmp-..." }  (admin shows once, hands off to user)
+
+# Or, generate a one-time token the admin gives the user
+curl -s -X POST http://localhost/identity.IdentityService/ResetUserPassword \
+  -d '{"user_id":"user_...","generate_temp_password":false}'
+# &rarr; { resetToken: "rst_..." }</code></pre>
+  <p>Either path clears the failed-login lockout counter as a side effect. Audit event: <code>admin_reset_password</code>.</p>
+
+  <h3>Set quota</h3>
+  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/SetUserQuota \
+  -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -d '{"user_id":"user_...","quota_bytes":"107374182400"}'  // 100 GiB</code></pre>
+  <p>Identity stores the quota; enforcement is your application's responsibility.</p>
+
+  <h2>Groups</h2>
+  <p>Groups are EntDB nodes (proto name <code>Group</code>; the underlying type is still <code>WorkingGroup</code> for backward compatibility, type_id 2). Membership is an EntDB edge between User and Group.</p>
+
+  <pre is:raw><code class="language-bash"># Create a group
+curl -s -X POST http://localhost/identity.IdentityService/CreateGroup \
+  -H "Authorization: Bearer $ACCESS" \
+  -d '{
+    "tenant_id": "my-product",
+    "name": "engineering",
+    "description": "All engineers",
+    "created_by": "user_..."
+  }'
+
+# Add and remove members
+curl -s -X POST http://localhost/identity.IdentityService/AddGroupMember \
+  -d '{"group_id":"grp_...","user_id":"user_...","tenant_id":"my-product"}'
+curl -s -X POST http://localhost/identity.IdentityService/RemoveGroupMember \
+  -d '{"group_id":"grp_...","user_id":"user_...","tenant_id":"my-product"}'
+
+# List members of a group
+curl -s -X POST http://localhost/identity.IdentityService/ListGroupMembers \
+  -d '{"group_id":"grp_...","tenant_id":"my-product"}'
+
+# List groups (with optional name substring filter and cursor pagination)
+curl -s -X POST http://localhost/identity.IdentityService/ListGroups \
+  -d '{"tenant_id":"my-product","limit":50,"name_filter":"eng"}'</code></pre>
+
+  <Callout type="info" title="Group data model">
+    Groups carry name, description, and timestamps. Identity does not enforce group-based authorization &mdash; it tracks membership; your application decides what membership means.
+  </Callout>
+</DocsLayout>

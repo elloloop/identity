@@ -1,0 +1,81 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import Callout from "../../../components/Callout.astro";
+---
+
+<DocsLayout title="Passkeys">
+  <h1>Passkeys (WebAuthn)</h1>
+  <p>Passkeys are first-class. Identity wraps the <code>go-webauthn</code> library and exposes registration and login as four RPCs (begin / complete for each) plus management RPCs.</p>
+
+  <h2>Setup</h2>
+  <p>Three env vars must be correct for the browser to honor the ceremony:</p>
+  <table>
+    <tr><th>Var</th><th>Example</th></tr>
+    <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td><code>app.example.com</code> &mdash; the registrable domain</td></tr>
+    <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td><code>Example App</code> &mdash; what users see in their authenticator</td></tr>
+    <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td><code>https://app.example.com</code> &mdash; exact origin the browser will assert</td></tr>
+  </table>
+
+  <Callout type="warning" title="RP ID must match origin">
+    The relying-party ID must be a registrable suffix of the origin's hostname. <code>RP_ID=example.com</code> works for both <code>app.example.com</code> and <code>admin.example.com</code>. Subdomains can't widen the RP ID upwards.
+  </Callout>
+
+  <h2>Registration (authenticated user)</h2>
+  <pre is:raw><code class="language-bash"># 1. Begin — user is logged in, opts in to passkey enrollment
+curl -s -X POST http://localhost/identity.IdentityService/BeginPasskeyRegistration \
+  -H "Authorization: Bearer $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"device_name":"Alice MacBook"}'</code></pre>
+  <pre is:raw><code class="language-json">{
+  "optionsJson": "{\"publicKey\":{\"challenge\":\"...\",\"rp\":...,\"user\":{...},\"pubKeyCredParams\":[...],\"timeout\":60000,\"attestation\":\"direct\"}}",
+  "challengeId": "pkc_..."
+}</code></pre>
+  <p>The frontend passes <code>options_json</code> directly to <code>navigator.credentials.create()</code>, then submits the result:</p>
+  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/CompletePasskeyRegistration \
+  -H "Authorization: Bearer $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "challenge_id": "pkc_...",
+    "credential_json": "<output of navigator.credentials.create>",
+    "device_name": "Alice MacBook"
+  }'</code></pre>
+  <p>Returns a <code>PasskeyCredentialInfo</code> with the new <code>credential_id</code>. The challenge is single-use and expires after <code>GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS</code> (default 300). Audit event: <code>passkey_added</code>.</p>
+
+  <h2>Login (no session needed)</h2>
+  <pre is:raw><code class="language-bash"># 1. Begin — email is optional; omit it to allow discoverable credentials
+curl -s -X POST http://localhost/identity.IdentityService/BeginPasskeyLogin \
+  -H "Content-Type: application/json" \
+  -d '{"email":"alice@example.com"}'
+# &rarr; { optionsJson, challengeId }
+
+# 2. Frontend invokes navigator.credentials.get(options); then:
+curl -s -X POST http://localhost/identity.IdentityService/CompletePasskeyLogin \
+  -H "Content-Type: application/json" \
+  -d '{
+    "challenge_id": "pkc_...",
+    "credential_json": "<output of navigator.credentials.get>"
+  }'</code></pre>
+  <p>Successful login returns the standard <code>&#123; user, accessToken, refreshToken, expiresIn &#125;</code>. Audit event: <code>passkey_used</code>.</p>
+
+  <h2>Discoverable credentials</h2>
+  <p>If <code>email</code> is omitted from <code>BeginPasskeyLogin</code>, the browser is prompted to pick from any resident keys for the relying party. Useful for "Sign in with passkey" buttons that don't ask for an email first.</p>
+
+  <h2>Management</h2>
+  <pre is:raw><code class="language-bash"># List the caller's passkeys
+curl -s -X POST http://localhost/identity.IdentityService/ListPasskeys \
+  -H "Authorization: Bearer $ACCESS" \
+  -H "Content-Type: application/json" -d '{}'
+
+# Delete one
+curl -s -X POST http://localhost/identity.IdentityService/DeletePasskey \
+  -H "Authorization: Bearer $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"credential_id":"<id from ListPasskeys>"}'</code></pre>
+  <p>Audit event for delete: <code>passkey_removed</code>.</p>
+
+  <h2>What's persisted</h2>
+  <p>Each passkey is stored as a <code>Passkey</code> node (type_id 6) carrying credential ID, public key, sign count, AAGUID, transports, and the user-supplied device name. The <code>last_used_at</code> timestamp is updated on every successful login.</p>
+
+  <h2>QR-based cross-device login</h2>
+  <p>Passkeys synced via Apple/Google clouds work cross-device automatically. For physical second-device login (e.g. browsing on a TV, approving from a phone) Identity also offers <a href="/identity/docs/api-reference/grpc#qr-login">QR login</a> as an independent flow &mdash; a phone that's already signed in approves a new device and Identity issues a fresh session for it.</p>
+</DocsLayout>

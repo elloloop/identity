@@ -1,0 +1,54 @@
+---
+import DocsLayout from "../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="Introduction">
+  <h1>Identity</h1>
+  <p>A standalone authentication and user-management service. Deploys as a single container, points at an EntDB instance, exposes Connect-RPC over HTTP/JSON, and ships JWTs that downstream services verify via JWKS.</p>
+
+  <h2>What Identity gives you</h2>
+  <ul>
+    <li><strong>Email + password</strong> &mdash; signup, login, change, lockout, recovery-email reset</li>
+    <li><strong>Passkeys (WebAuthn)</strong> &mdash; registration and login flows</li>
+    <li><strong>TOTP 2FA</strong> &mdash; setup, verify, recovery codes, regenerate</li>
+    <li><strong>OAuth login</strong> &mdash; Google and Microsoft (server consumes pre-verified tokens)</li>
+    <li><strong>QR cross-device login</strong> &mdash; new device proves itself via an already-signed-in device</li>
+    <li><strong>Sessions</strong> &mdash; list, revoke, sign-out-everywhere; refresh tokens rotated on every use</li>
+    <li><strong>JWT issuance</strong> &mdash; RS256 with key rotation, plus <code>/.well-known/jwks.json</code></li>
+    <li><strong>User and Group CRUD</strong> &mdash; admin RPCs, group membership edges</li>
+    <li><strong>Audit log</strong> &mdash; every security event written to EntDB</li>
+    <li><strong>Admin help requests</strong> &mdash; users who can't log in raise tickets, admins resolve them</li>
+  </ul>
+
+  <h2>Shape of the service</h2>
+  <pre is:raw><code>┌────────────────────────────────────────────────────────────┐
+│  Your apps  ─── Bearer JWT ─►  Downstream services         │
+│      │                            │                         │
+│      │  Connect-RPC / HTTP        │  verify via JWKS        │
+│      ▼                            ▼                         │
+│  ┌──────────────────────────────────────────┐               │
+│  │        identity (this service)           │               │
+│  │  • signs JWTs (RS256, key ring)          │               │
+│  │  • password / passkey / TOTP / OAuth     │               │
+│  │  • sessions, audit, user CRUD            │               │
+│  │  • /.well-known/jwks.json (port 80)      │               │
+│  │  • /metrics                  (port 9090) │               │
+│  └─────────────────┬────────────────────────┘               │
+│                    │  gRPC                                  │
+│                    ▼                                        │
+│              ┌──────────────┐                               │
+│              │    EntDB     │  per-tenant graph storage     │
+│              └──────────────┘                               │
+└────────────────────────────────────────────────────────────┘</code></pre>
+
+  <h2>Where it fits</h2>
+  <p>Identity is one image, deployed once per product. It treats EntDB as its data plane &mdash; users, groups, sessions, refresh tokens, passkeys, TOTP secrets, and audit events all live in EntDB nodes (type IDs <code>1&ndash;99</code>). Other services consuming the same EntDB instance use type IDs <code>100+</code> to avoid collisions.</p>
+
+  <h2>Get started</h2>
+  <ul>
+    <li><a href="/identity/docs/introduction">What is Identity</a> &mdash; product overview</li>
+    <li><a href="/identity/docs/quickstart">Quick Start</a> &mdash; <code>docker run</code> &rarr; signup &rarr; login</li>
+    <li><a href="/identity/docs/concepts/architecture">Architecture</a> &mdash; how the pieces fit together</li>
+    <li><a href="/identity/docs/installation/configuration">Configuration Reference</a> &mdash; every env var</li>
+  </ul>
+</DocsLayout>

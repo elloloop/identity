@@ -1,0 +1,77 @@
+diff --git a/dist/astro-file-tree/index.ts b/dist/astro-file-tree/index.ts
+index bf43aa740a8a905efe3118a8d3e4fe24370a9ede..803debb822b480cb561290929aa6d6afbee588c3 100644
+--- a/dist/astro-file-tree/index.ts
++++ b/dist/astro-file-tree/index.ts
+@@ -1 +1 @@
+-export * from './astro-file-tree';
++export { default as FileTree } from './astro-file-tree.astro';
+diff --git a/dist/astro-icon-system/index.ts b/dist/astro-icon-system/index.ts
+index 9f12b6f34c03be75a404a7c10dcfac7dcbf85560..b86bc0ccf9805236ce4c79e43474e2bba3bf6e39 100644
+--- a/dist/astro-icon-system/index.ts
++++ b/dist/astro-icon-system/index.ts
+@@ -1 +1 @@
+-export * from './astro-icon-system';
++export { default as IconSystem } from './astro-icon-system.astro';
+diff --git a/dist/astro-theme/index.ts b/dist/astro-theme/index.ts
+index 336ce12bb9106afdf843063ee67c0c1970f70d37..99e540b57f06bb21c1f3ddc965ad9d48ada431ec 100644
+--- a/dist/astro-theme/index.ts
++++ b/dist/astro-theme/index.ts
+@@ -1 +1,2 @@
+-export {}
++export { default as ThemeScript } from './ThemeScript.astro'
++export { default as ThemeToggle } from './ThemeToggle.astro'
+diff --git a/dist/callout/index.ts b/dist/callout/index.ts
+index 6a4214ec78b68b9c597dba4f2d042210baf5e3d2..550d6e35b217f5c9665e1e0e34c3a3e780f110e6 100644
+--- a/dist/callout/index.ts
++++ b/dist/callout/index.ts
+@@ -1 +1 @@
+-export * from './callout';
+\ No newline at end of file
++export * from './callout.ts';
+\ No newline at end of file
+diff --git a/dist/code-block/index.ts b/dist/code-block/index.ts
+index 24bcbaa42e6da2ff22515375664cdc1dc9e1e18d..89e47cecae053211f39ae928878e203e33145a80 100644
+--- a/dist/code-block/index.ts
++++ b/dist/code-block/index.ts
+@@ -1 +1 @@
+-export * from './code-block';
++export * from './code-block.ts';
+diff --git a/dist/command-input/index.ts b/dist/command-input/index.ts
+index 4d35cf6c12e557541b32d541a299ed4d56e796d3..7c715d91d73f3e24455accb1209904584e32f2fc 100644
+--- a/dist/command-input/index.ts
++++ b/dist/command-input/index.ts
+@@ -1 +1 @@
+-export * from './command-input'
+\ No newline at end of file
++export * from './command-input.ts'
+\ No newline at end of file
+diff --git a/dist/payment/index.ts b/dist/payment/index.ts
+index b21362c2be910a5e801fd6ca6a6a6dfc59671509..8a4667d762073ea0097645eed6ae8db4b17a3c60 100644
+--- a/dist/payment/index.ts
++++ b/dist/payment/index.ts
+@@ -1 +1 @@
+-export * from './payment.js';
++export * from './payment.ts';
+diff --git a/dist/skip-to-content/index.ts b/dist/skip-to-content/index.ts
+index da4adaaf866f7f48cd8b6ac8d494d220f4e20160..f603a8ffe7d79f7a2ce9c43f04666ba5c33fda3d 100644
+--- a/dist/skip-to-content/index.ts
++++ b/dist/skip-to-content/index.ts
+@@ -1 +1 @@
+-export * from './skip-to-content';
++export * from './skip-to-content.ts';
+diff --git a/dist/steps/index.ts b/dist/steps/index.ts
+index e2ef25bfbd72cc33fd7ed1e1eb2f6dbf1c082f52..ce6eb388393c1d7f241feca4bf79717bc7239ad8 100644
+--- a/dist/steps/index.ts
++++ b/dist/steps/index.ts
+@@ -1 +1 @@
+-export * from './steps';
+\ No newline at end of file
++export * from './steps.ts';
+\ No newline at end of file
+diff --git a/dist/table-of-contents/index.ts b/dist/table-of-contents/index.ts
+index 2eaa8b2f61af1a22965013d57d0d779007c907d4..6efec6cc28b399ffb29e3517e36c83c9c1233f57 100644
+--- a/dist/table-of-contents/index.ts
++++ b/dist/table-of-contents/index.ts
+@@ -1 +1 @@
+-export * from './table-of-contents'
++export * from './table-of-contents.ts'

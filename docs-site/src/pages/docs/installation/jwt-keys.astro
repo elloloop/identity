@@ -1,0 +1,99 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import Callout from "../../../components/Callout.astro";
+---
+
+<DocsLayout title="JWT Keys">
+  <h1>JWT Keys</h1>
+  <p>Identity signs every access token with RS256. The private keys live in <code>GATEWAY_JWT_KEYS</code>, a JSON array. The public side is published at <code>/.well-known/jwks.json</code> for downstream services to verify tokens.</p>
+
+  <h2>Format</h2>
+  <pre is:raw><code class="language-json">[
+  {
+    "kid": "k1",
+    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----\n",
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIIBIj...\n-----END PUBLIC KEY-----\n",
+    "active": true
+  }
+]</code></pre>
+  <table>
+    <tr><th>Field</th><th>Required</th><th>Notes</th></tr>
+    <tr><td><code>kid</code></td><td>yes</td><td>Stable key ID. Becomes the <code>kid</code> JWS header on signed tokens.</td></tr>
+    <tr><td><code>private_key_pem</code></td><td>yes</td><td>RSA private key in PEM. PKCS#1 or PKCS#8 both accepted.</td></tr>
+    <tr><td><code>public_key_pem</code></td><td>optional</td><td>Not strictly required &mdash; the public key is derived from the private key.</td></tr>
+    <tr><td><code>active</code></td><td>at least one</td><td>Exactly one key in the ring must be marked active. The active key signs new tokens; all keys verify.</td></tr>
+  </table>
+
+  <Callout type="warning" title="Embedding JSON in env vars">
+    The PEM newlines must be preserved as <code>\n</code> in the JSON. When passing via the shell, single-quote the entire JSON to stop the shell from eating the backslashes:
+    <pre is:raw><code class="language-bash">export GATEWAY_JWT_KEYS='[{"kid":"k1","private_key_pem":"-----BEGIN ...\n-----END...\n","active":true}]'</code></pre>
+  </Callout>
+
+  <h2>Generating a key</h2>
+  <pre is:raw><code class="language-bash"># 2048-bit RSA private key (PKCS#1)
+openssl genrsa -out k1.pem 2048
+
+# Optionally extract the public key
+openssl rsa -in k1.pem -pubout -out k1.pub.pem
+
+# Or generate with PKCS#8 (also accepted)
+openssl genpkey -algorithm RSA \
+  -pkeyopt rsa_keygen_bits:2048 \
+  -out k1.pem</code></pre>
+
+  <h2>Building the JSON</h2>
+  <p>The cleanest way is to assemble the array with <code>jq</code>:</p>
+  <pre is:raw><code class="language-bash">openssl genrsa -out k1.pem 2048
+openssl rsa -in k1.pem -pubout -out k1.pub.pem
+
+jq -n --rawfile priv k1.pem --rawfile pub k1.pub.pem '
+  [{
+    kid: "k1",
+    private_key_pem: $priv,
+    public_key_pem: $pub,
+    active: true
+  }]
+' > keyring.json
+
+# Now feed it in
+docker run -e GATEWAY_JWT_KEYS="$(cat keyring.json)" ghcr.io/elloloop/identity:0.1.0 ...</code></pre>
+
+  <h2>Key rotation</h2>
+  <p>Rotation is zero-downtime because every key in the ring is published in JWKS, and the active flag controls which one signs new tokens. Procedure:</p>
+  <ol>
+    <li><strong>Add</strong>: append a new key with <code>active: false</code>. Deploy. Both keys are in JWKS.</li>
+    <li><strong>Wait</strong> long enough for downstream JWKS caches to refresh (a few minutes).</li>
+    <li><strong>Promote</strong>: flip the new key to <code>active: true</code> and the old key to <code>active: false</code>. Deploy. New tokens carry the new <code>kid</code>; old tokens still verify.</li>
+    <li><strong>Wait</strong> one access-token lifetime (15 min by default) for old tokens to expire.</li>
+    <li><strong>Remove</strong>: drop the old key from the JSON. Deploy.</li>
+  </ol>
+
+  <pre is:raw><code class="language-json">// Step 1: introduce k2 alongside k1
+[
+  { "kid": "k1", "private_key_pem": "...", "active": true  },
+  { "kid": "k2", "private_key_pem": "...", "active": false }
+]
+
+// Step 3: promote k2
+[
+  { "kid": "k1", "private_key_pem": "...", "active": false },
+  { "kid": "k2", "private_key_pem": "...", "active": true  }
+]
+
+// Step 5: drop k1
+[
+  { "kid": "k2", "private_key_pem": "...", "active": true }
+]</code></pre>
+
+  <p>See <a href="/identity/docs/examples/key-rotation">Key Rotation</a> for the complete worked example with timeline.</p>
+
+  <h2>What happens on startup</h2>
+  <ul>
+    <li>If <code>GATEWAY_JWT_KEYS</code> is set: parsed into a <code>KeyRing</code>. Multiple keys with <code>active: true</code> &rarr; fatal error. No keys with <code>active: true</code> &rarr; the last key is promoted.</li>
+    <li>If <code>GATEWAY_JWT_KEYS</code> is empty: a fresh 2048-bit RSA key is generated in memory with <code>kid=dev</code>. The log line <code>auto_generating_dev_rsa_key</code> is your warning that this is dev-only.</li>
+  </ul>
+
+  <Callout type="danger" title="Don't lose the private keys">
+    Without the active private key, Identity can't sign new tokens. Without the public keys in JWKS, downstream services can't verify any outstanding tokens. Treat the keyring like a database password &mdash; rotate it on a schedule, store it in your secrets manager, audit access.
+  </Callout>
+</DocsLayout>

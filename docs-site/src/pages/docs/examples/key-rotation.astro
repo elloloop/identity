@@ -1,0 +1,81 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import Callout from "../../../components/Callout.astro";
+---
+
+<DocsLayout title="Key Rotation">
+  <h1>Example: Rotating JWT Signing Keys With Zero Downtime</h1>
+  <p>Walk through a complete rotation: <code>k1</code> is currently active; introduce <code>k2</code>, promote it, retire <code>k1</code>. Outstanding tokens stay valid throughout.</p>
+
+  <h2>Why this works</h2>
+  <p>Every key in <code>GATEWAY_JWT_KEYS</code> is published in <code>/.well-known/jwks.json</code> regardless of the <code>active</code> flag. Verification picks the right key by <code>kid</code>; only signing cares which key is active. So you can introduce a new key, let the world's caches absorb it, then flip which one signs &mdash; with no break in verification.</p>
+
+  <h2>Starting state</h2>
+  <pre is:raw><code class="language-json">// keyring.json — k1 only
+[
+  {
+    "kid": "k1",
+    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\n<k1>...\n-----END RSA PRIVATE KEY-----\n",
+    "active": true
+  }
+]</code></pre>
+  <p>Identity signs every new JWT with <code>kid=k1</code>. Downstream services have <code>k1</code> cached.</p>
+
+  <h2>Generate the new key</h2>
+  <pre is:raw><code class="language-bash">openssl genrsa -out k2.pem 2048
+openssl rsa -in k2.pem -pubout -out k2.pub.pem</code></pre>
+
+  <h2>Step 1 — Add k2 with active=false</h2>
+  <pre is:raw><code class="language-json">[
+  { "kid": "k1", "private_key_pem": "...k1...", "active": true  },
+  { "kid": "k2", "private_key_pem": "...k2...", "active": false }
+]</code></pre>
+  <p>Deploy. Identity boots, logs <code>jwt_key_ring_loaded</code> with <code>key_count=2 active_kid=k1</code>. JWKS now publishes both public keys; signing still uses <code>k1</code>.</p>
+
+  <Callout type="info" title="Wait for caches">
+    Downstream services typically cache JWKS for ~5 minutes. Wait at least one cache lifetime before promoting <code>k2</code>, so every verifier already has the new public key when the first <code>kid=k2</code> token shows up.
+  </Callout>
+
+  <h2>Step 2 — Promote k2 (the cutover)</h2>
+  <pre is:raw><code class="language-json">[
+  { "kid": "k1", "private_key_pem": "...k1...", "active": false },
+  { "kid": "k2", "private_key_pem": "...k2...", "active": true  }
+]</code></pre>
+  <p>Deploy again. Identity now signs every new JWT with <code>kid=k2</code>; tokens already in flight (signed with <code>k1</code>) keep verifying because <code>k1</code> is still in the ring.</p>
+
+  <h2>Step 3 — Wait for old tokens to expire</h2>
+  <p>Access tokens last <code>GATEWAY_JWT_EXPIRY_SECONDS</code> (default 900). Wait at least that long &mdash; in practice, double it &mdash; so every <code>kid=k1</code> token has expired.</p>
+
+  <h2>Step 4 — Drop k1</h2>
+  <pre is:raw><code class="language-json">[
+  { "kid": "k2", "private_key_pem": "...k2...", "active": true }
+]</code></pre>
+  <p>Deploy. JWKS now publishes only <code>k2</code>. Any client still presenting a <code>kid=k1</code> token will fail verification with <code>unauthenticated</code> and is forced to refresh, which is exactly what you want at this point.</p>
+
+  <h2>Timeline</h2>
+  <pre is:raw><code>t=0          add k2  (active:false)        deploy
+t=10m        promote k2 (active:true)       deploy
+t=10m+15m    every k1 token has expired
+t=30m        drop k1                          deploy</code></pre>
+
+  <h2>What can go wrong</h2>
+  <table>
+    <tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+    <tr><td><code>multiple active JWT keys</code> at startup</td><td>Two keys both have <code>active: true</code>.</td><td>Set exactly one to active, redeploy.</td></tr>
+    <tr><td><code>unauthenticated</code> spike right after promote</td><td>Downstream caches not yet refreshed.</td><td>Wait longer between Step 1 and Step 2; or trigger a manual JWKS refresh.</td></tr>
+    <tr><td><code>unauthenticated</code> spike after drop</td><td>Step 3 wait was too short; clients still hold k1 tokens.</td><td>Roll back: re-add <code>k1</code> with <code>active: false</code>, wait longer, drop again.</td></tr>
+    <tr><td>Cannot decode private key</td><td>PEM mangled when stuffing into env var.</td><td>Use <code>jq --rawfile</code> to embed the PEM with literal <code>\n</code> escapes.</td></tr>
+  </table>
+
+  <h2>Automation hint</h2>
+  <p>Treat <code>keyring.json</code> as a versioned secret in your secrets manager. A small script can take "current state + new key" and produce the three intermediate states automatically:</p>
+  <pre is:raw><code class="language-bash">jq --rawfile new k2.pem '
+  . + [{"kid":"k2","private_key_pem":$new,"active":false}]
+' current.json > step1.json
+
+jq 'map(if .kid == "k1" then .active=false elif .kid == "k2" then .active=true else . end)' \
+  step1.json > step2.json
+
+jq 'map(select(.kid != "k1"))' step2.json > step3.json</code></pre>
+  <p>Apply each step as its own deploy. Don't skip the wait between Step 2 and Step 3 &mdash; that's where the safety guarantee comes from.</p>
+</DocsLayout>

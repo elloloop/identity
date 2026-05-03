@@ -1,0 +1,75 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import Callout from "../../../components/Callout.astro";
+---
+
+<DocsLayout title="Audit Logging">
+  <h1>Audit Logging</h1>
+  <p>Every security-significant event is written to EntDB as an <code>AuditEvent</code> node (type_id 8). Audit writes are best-effort: an EntDB outage must not break login, so failures are logged via zap but never propagated to the caller.</p>
+
+  <h2>Event types</h2>
+  <p>From <code>pkg/audit/logger.go</code>:</p>
+  <table>
+    <tr><th>Event</th><th>Emitted by</th></tr>
+    <tr><td><code>login_success</code></td><td>PasswordSignup, PasswordLogin, AcceptInvitation, OAuthLogin (also via signup)</td></tr>
+    <tr><td><code>login_failure</code></td><td>PasswordLogin (wrong password, deactivated, etc.)</td></tr>
+    <tr><td><code>logout</code></td><td>Logout</td></tr>
+    <tr><td><code>password_changed</code></td><td>ChangePassword</td></tr>
+    <tr><td><code>password_reset</code></td><td>RequestPasswordReset (when user exists and recovery email present)</td></tr>
+    <tr><td><code>totp_enabled</code></td><td>VerifyTotpSetup</td></tr>
+    <tr><td><code>totp_disabled</code></td><td>DisableTotp</td></tr>
+    <tr><td><code>totp_verified</code></td><td>VerifyTotp (login completion)</td></tr>
+    <tr><td><code>passkey_added</code></td><td>CompletePasskeyRegistration</td></tr>
+    <tr><td><code>passkey_removed</code></td><td>DeletePasskey</td></tr>
+    <tr><td><code>passkey_used</code></td><td>CompletePasskeyLogin</td></tr>
+    <tr><td><code>session_revoked</code></td><td>RevokeSession, RevokeAllSessions, SignOutEverywhere</td></tr>
+    <tr><td><code>oauth_login</code></td><td>OAuthLogin</td></tr>
+    <tr><td><code>qr_login_approved</code></td><td>ApproveQrLogin (approve=true)</td></tr>
+    <tr><td><code>qr_login_rejected</code></td><td>ApproveQrLogin (approve=false)</td></tr>
+    <tr><td><code>user_invited</code></td><td>InviteUser</td></tr>
+    <tr><td><code>user_deactivated</code></td><td>DeactivateUser</td></tr>
+    <tr><td><code>user_reactivated</code></td><td>ReactivateUser</td></tr>
+    <tr><td><code>admin_reset_password</code></td><td>ResetUserPassword</td></tr>
+    <tr><td><code>admin_help_requested</code></td><td>RequestAdminHelp</td></tr>
+    <tr><td><code>admin_help_resolved</code></td><td>ResolveHelpRequest</td></tr>
+  </table>
+
+  <h2>Recorded fields</h2>
+  <p>Stored on the <code>AuditEvent</code> node as field IDs 1&ndash;8:</p>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+    <tr><td><code>event_type</code></td><td>string</td><td>One of the values above. Validated against the canonical set.</td></tr>
+    <tr><td><code>actor_user_id</code></td><td>string</td><td>Who did the thing (signed-in user, admin, or empty for anonymous).</td></tr>
+    <tr><td><code>target_user_id</code></td><td>string</td><td>Who the thing was done to. Often equal to actor.</td></tr>
+    <tr><td><code>ip_address</code></td><td>string</td><td>Best-effort, from the request.</td></tr>
+    <tr><td><code>user_agent</code></td><td>string</td><td>Raw User-Agent header.</td></tr>
+    <tr><td><code>success</code></td><td>bool</td><td>Whether the underlying op succeeded.</td></tr>
+    <tr><td><code>details</code></td><td>JSON string</td><td>Event-specific extra data, JSON-encoded with sorted keys.</td></tr>
+    <tr><td><code>created_at</code></td><td>timestamp (ms)</td><td>Server time at emission.</td></tr>
+  </table>
+
+  <h2>Querying audit events</h2>
+  <pre is:raw><code class="language-bash">curl -s -X POST http://localhost/identity.IdentityService/ListAuditEvents \
+  -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "actor_user_id": "user_01HX...",
+    "event_type": "login_failure",
+    "start_time_ms": 1714000000000,
+    "end_time_ms":   1714999999999,
+    "limit": 100
+  }'</code></pre>
+  <p>Filters are AND-combined; an empty/zero filter is ignored. Default <code>limit</code> is 50, max 500. Pagination is cursor-based via <code>next_cursor</code>.</p>
+
+  <h2>Best-effort semantics</h2>
+  <Callout type="warning" title="Audit writes never block">
+    <code>audit.Logger.Log</code> swallows every error from EntDB. If the DB is down, the security event is logged via zap (with the structured payload) but not persisted. This is intentional &mdash; an EntDB outage must not break authentication. If you need stricter durability, mirror Identity logs to your central log pipeline.
+  </Callout>
+
+  <h2>What is &mdash; and isn't &mdash; logged</h2>
+  <ul>
+    <li><strong>Always logged</strong>: every event in the table above, even on failure (with <code>success=false</code> and reason in <code>details</code>).</li>
+    <li><strong>Never logged</strong>: passwords, TOTP secrets, refresh tokens, recovery codes, OAuth client secrets, the encryption keys.</li>
+    <li><strong>Best-effort details</strong>: IP and user-agent require the handler to thread them through &mdash; behind a load balancer that doesn't preserve the client IP, audit events will record the LB IP. Run Identity behind something that sets <code>X-Forwarded-For</code> properly.</li>
+  </ul>
+</DocsLayout>

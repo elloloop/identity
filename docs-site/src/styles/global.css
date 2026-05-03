@@ -1,0 +1,173 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Refraction-UI CSS variables (HSL triplets — see tailwind-config) */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 243 75% 59%;
+
+    /* docs-only */
+    --code-bg: 222 47% 11%;
+    --code-fg: 210 40% 98%;
+    --code-comment: 215 20% 65%;
+    --code-keyword: 316 73% 69%;
+    --code-string: 92 45% 60%;
+    --code-number: 30 80% 62%;
+    --code-type: 198 70% 65%;
+  }
+
+  .dark {
+    --background: 222 47% 5%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 7%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 7%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 234 89% 74%;
+    --primary-foreground: 222 47% 11%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 234 89% 74%;
+
+    --code-bg: 222 47% 3%;
+    --code-fg: 210 40% 98%;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-feature-settings: "cv11", "ss01", "ss03";
+    text-rendering: optimizeLegibility;
+  }
+}
+
+/* Content typography — full-contrast, readable, visually weighted */
+@layer components {
+  .prose {
+    @apply text-foreground text-[15px] leading-7;
+  }
+
+  /* Headings */
+  .prose h1 {
+    @apply mb-6 mt-2 text-4xl font-bold tracking-tight text-foreground;
+  }
+  .prose h2 {
+    @apply mb-4 mt-14 border-b border-border pb-3 text-2xl font-bold tracking-tight text-foreground;
+  }
+  .prose h3 {
+    @apply mb-3 mt-10 text-xl font-semibold tracking-tight text-foreground;
+  }
+  .prose h4 {
+    @apply mb-2 mt-6 text-base font-semibold text-foreground;
+  }
+
+  /* Body copy */
+  .prose p {
+    @apply mb-5 text-foreground leading-7;
+  }
+  .prose ul,
+  .prose ol {
+    @apply mb-5 ml-6 list-disc space-y-2 text-foreground;
+  }
+  .prose ol {
+    @apply list-decimal;
+  }
+  .prose li {
+    @apply leading-7;
+  }
+  .prose strong {
+    @apply font-semibold text-foreground;
+  }
+  .prose em {
+    @apply italic;
+  }
+  .prose a {
+    @apply font-medium text-primary underline decoration-primary/40 decoration-2 underline-offset-2 transition hover:decoration-primary;
+  }
+  .prose hr {
+    @apply my-10 border-border;
+  }
+
+  /* Inline code */
+  .prose :not(pre) > code {
+    @apply rounded-md border border-border bg-muted px-1.5 py-0.5 text-[0.875em] font-mono text-foreground;
+  }
+
+  /* Code blocks — dark chrome, sits forward of the page */
+  .prose pre {
+    @apply my-6 overflow-x-auto rounded-xl border border-border/60 p-5 text-[13px] leading-relaxed shadow-sm;
+    background-color: hsl(var(--code-bg));
+    color: hsl(var(--code-fg));
+  }
+  .prose pre code {
+    @apply border-0 bg-transparent p-0 font-mono text-[13px];
+    color: hsl(var(--code-fg));
+  }
+
+  /* Tables */
+  .prose table {
+    @apply my-6 w-full border-collapse overflow-hidden rounded-lg border border-border text-[14px];
+  }
+  .prose thead {
+    @apply bg-muted/60;
+  }
+  .prose th {
+    @apply border-b border-border px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground;
+  }
+  .prose td {
+    @apply border-b border-border/70 px-4 py-2.5 align-top text-foreground;
+  }
+  .prose tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .prose tbody tr:nth-child(even) {
+    @apply bg-muted/20;
+  }
+  .prose table code {
+    @apply whitespace-nowrap;
+  }
+
+  /* Blockquotes / callouts fallback */
+  .prose blockquote {
+    @apply my-6 rounded-r-lg border-l-4 border-primary bg-primary/5 px-5 py-4 text-foreground;
+  }
+  .prose blockquote p {
+    @apply mb-0;
+  }
+
+  /* Keep long code, long URLs, and long table rows from blowing the layout */
+  .prose pre,
+  .prose table,
+  .prose p {
+    max-width: 100%;
+  }
+}

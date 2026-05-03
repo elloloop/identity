@@ -1,0 +1,80 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import Callout from "../../../components/Callout.astro";
+---
+
+<DocsLayout title="Observability">
+  <h1>Observability</h1>
+  <p>Identity exposes structured logs, Prometheus metrics, and a single health endpoint. There's no built-in tracing yet.</p>
+
+  <h2>Health</h2>
+  <p>The <code>HealthMiddleware</code> short-circuits three paths on the Connect port and returns <code>&#123;"status":"ok"&#125;</code> with HTTP 200:</p>
+  <ul>
+    <li><code>/</code></li>
+    <li><code>/health</code></li>
+    <li><code>/healthz</code></li>
+  </ul>
+  <p>It does not check EntDB connectivity &mdash; the goal is a cheap liveness probe that doesn't fail when EntDB has a transient hiccup. For readiness, do an in-process verification (e.g. call <code>GetCurrentUser</code> with a known JWT) from your platform.</p>
+
+  <pre is:raw><code class="language-bash">curl -fsS http://localhost/health
+# {"status":"ok"}</code></pre>
+
+  <h2>Metrics</h2>
+  <p>Prometheus metrics are served on a separate HTTP server:</p>
+  <ul>
+    <li>Default port: <code>9090</code> (override via <code>GATEWAY_METRICS_PORT</code>).</li>
+    <li>Path: <code>/metrics</code>.</li>
+    <li>Handler: <code>promhttp.Handler()</code> &mdash; standard Go runtime metrics plus anything the application registers.</li>
+  </ul>
+  <pre is:raw><code class="language-bash">curl -s http://localhost:9090/metrics | head -20
+# go_gc_duration_seconds{quantile="0"} 0
+# process_cpu_seconds_total ...</code></pre>
+
+  <Callout type="info" title="Metrics surface">
+    Out of the box, Identity exposes Go runtime metrics (<code>go_*</code>, <code>process_*</code>). Application-level metrics (login rate, failed-login counters, JWT issuance) are reserved as a future extension; you can add them by registering counters with <code>prometheus/client_golang</code>.
+  </Callout>
+
+  <h2>Logs</h2>
+  <p>Logging is via <code>zap</code> in production-JSON mode. Each line is one JSON object with stable keys: <code>level</code>, <code>ts</code>, <code>msg</code>, plus structured fields per event. Notable startup and runtime messages:</p>
+  <table>
+    <tr><th>msg</th><th>When</th></tr>
+    <tr><td><code>identity_service_starting</code></td><td>Boot, before EntDB connect. Includes ports and tenant.</td></tr>
+    <tr><td><code>jwt_key_ring_loaded</code></td><td><code>GATEWAY_JWT_KEYS</code> parsed successfully. Includes key count and active KID.</td></tr>
+    <tr><td><code>auto_generating_dev_rsa_key</code></td><td>Warning: ephemeral key in use. Not safe for production.</td></tr>
+    <tr><td><code>using_dev_totp_encryption_key</code></td><td>Warning: deterministic dev TOTP key. Not safe for production.</td></tr>
+    <tr><td><code>using_stub_persistence</code></td><td>Warning: repository stubs are active &mdash; RPCs return "service unavailable" until the repo package is wired.</td></tr>
+    <tr><td><code>identity_service_started</code></td><td>Connect server listening.</td></tr>
+    <tr><td><code>local_signup_success</code></td><td>Successful PasswordSignup. Includes email and user ID.</td></tr>
+    <tr><td><code>oauth_login_success</code></td><td>Successful OAuthLogin. Includes provider.</td></tr>
+    <tr><td><code>identity_service_shutting_down</code></td><td>SIGTERM / SIGINT received.</td></tr>
+  </table>
+
+  <Callout type="info" title="Never logged">
+    Passwords, TOTP secrets and codes, refresh tokens, recovery codes, OAuth client secrets, and the JWT encryption keys are never written to logs. The audit trail goes to EntDB, not stdout.
+  </Callout>
+
+  <h2>Suggested Prometheus alerts</h2>
+  <pre is:raw><code class="language-yaml">groups:
+- name: identity
+  rules:
+  - alert: IdentityDown
+    expr: up{job="identity"} == 0
+    for: 2m
+    annotations:
+      summary: Identity service is unreachable.
+
+  - alert: IdentityHighGoroutines
+    expr: go_goroutines{job="identity"} > 5000
+    for: 10m
+    annotations:
+      summary: Identity goroutine count is unusually high.
+
+  - alert: IdentityHighMemory
+    expr: process_resident_memory_bytes{job="identity"} > 512 * 1024 * 1024
+    for: 15m
+    annotations:
+      summary: Identity RSS exceeds 512 MiB.</code></pre>
+
+  <h2>Tracing</h2>
+  <p>Distributed tracing (OpenTelemetry) is not built in today. Adding it would mean instrumenting the Connect handler chain and EntDB client; reach out if you need it.</p>
+</DocsLayout>
