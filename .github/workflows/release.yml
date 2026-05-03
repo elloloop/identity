@@ -7,11 +7,51 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  GO_VERSION: '1.25'
+
+permissions:
+  contents: read
 
 jobs:
+  # Re-run the same gates CI uses on PRs. A broken build must NOT publish a tag.
+  verify:
+    name: Verify (unit + smoke + integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test -race
+        run: go test -race -timeout=180s ./...
+
+      - name: go test -tags=smoke
+        run: |
+          if compgen -G "tests/smoke/*.go" > /dev/null; then
+            go test -tags=smoke -timeout=120s ./tests/smoke/...
+          else
+            echo "no smoke tests under tests/smoke — skipping"
+          fi
+
+      - name: go test -tags=integration
+        run: |
+          if compgen -G "tests/integration/*.go" > /dev/null; then
+            go test -tags=integration -race -timeout=180s ./tests/integration/...
+          else
+            echo "no integration tests under tests/integration — skipping"
+          fi
+
   build-and-push:
     name: Build and Push Image
     runs-on: ubuntu-latest
+    needs: [verify]
     permissions:
       contents: read
       packages: write
@@ -50,7 +90,7 @@ jobs:
             type=sha,prefix=sha-
 
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
