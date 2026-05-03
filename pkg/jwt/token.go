@@ -69,7 +69,15 @@ func CreateAccessToken(claims Claims, kr *KeyRing, expiry time.Duration) (string
 // VerifyAccessToken verifies an RS256 access token and returns its claims.
 // The token must carry a "kid" header that matches a key in the ring.
 // Tokens without "kid" or with an unknown "kid" are rejected.
-func VerifyAccessToken(tokenStr string, kr *KeyRing) (*Claims, error) {
+//
+// If expectedTenant is non-empty, the token's "tenant" claim must match it
+// exactly; otherwise the token is rejected. Passing an empty expectedTenant
+// disables the cross-tenant check (backward-compatible mode).
+//
+// Tokens with a missing or zero "exp" claim are explicitly rejected: the
+// underlying lestrrat-go jwt library treats an absent exp as "no expiration",
+// which would otherwise produce unbounded-lifetime tokens.
+func VerifyAccessToken(tokenStr string, kr *KeyRing, expectedTenant string) (*Claims, error) {
 	tokenBytes := []byte(tokenStr)
 
 	// Extract kid from JWS protected header before verification.
@@ -109,9 +117,20 @@ func VerifyAccessToken(tokenStr string, kr *KeyRing) (*Claims, error) {
 		return nil, fmt.Errorf("verifying token: %w", err)
 	}
 
+	// Explicit expiration check: lestrrat-go's WithValidate() treats a missing
+	// or zero exp claim as "no expiration set" rather than an expired token,
+	// so we enforce it ourselves.
+	exp := tok.Expiration()
+	if exp.IsZero() {
+		return nil, errors.New("token missing or zero expiration")
+	}
+	if time.Now().UTC().After(exp) {
+		return nil, errors.New("token expired")
+	}
+
 	claims := &Claims{}
 	claims.IssuedAt = tok.IssuedAt().Unix()
-	claims.ExpiresAt = tok.Expiration().Unix()
+	claims.ExpiresAt = exp.Unix()
 
 	if v, ok := tok.Get("sub"); ok {
 		claims.Sub, _ = v.(string)
@@ -130,6 +149,12 @@ func VerifyAccessToken(tokenStr string, kr *KeyRing) (*Claims, error) {
 	}
 	if v, ok := tok.Get("avatar_url"); ok {
 		claims.AvatarURL, _ = v.(string)
+	}
+
+	// Cross-tenant check: when the verifying service knows its expected
+	// tenant, reject tokens whose tenant claim does not match.
+	if expectedTenant != "" && claims.Tenant != expectedTenant {
+		return nil, fmt.Errorf("tenant mismatch: token tenant=%q expected=%q", claims.Tenant, expectedTenant)
 	}
 
 	return claims, nil

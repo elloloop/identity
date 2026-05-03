@@ -19,7 +19,7 @@ import (
 func chainHandler(t *testing.T, kr *jwtpkg.KeyRing, allowedOrigins string, inner http.Handler) http.Handler {
 	t.Helper()
 	h := inner
-	h = AuthMiddleware(kr)(h)
+	h = AuthMiddleware(kr, "")(h)
 	h = JWKSMiddleware(kr)(h)
 	h = HealthMiddleware(h)
 	h = CORSMiddleware(allowedOrigins)(h)

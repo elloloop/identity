@@ -164,7 +164,7 @@ func main() {
 	// Order (outermost runs first on request path):
 	//   logging → CORS → health → JWKS → auth → Connect handler
 	var chain http.Handler = mux
-	chain = middleware.AuthMiddleware(keyRing)(chain)
+	chain = middleware.AuthMiddleware(keyRing, cfg.DefaultTenantID)(chain)
 	chain = middleware.JWKSMiddleware(keyRing)(chain)
 	chain = middleware.HealthMiddleware(chain)
 	chain = middleware.CORSMiddleware(cfg.AllowedOrigins)(chain)

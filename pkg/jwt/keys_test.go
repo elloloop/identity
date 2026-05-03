@@ -241,7 +241,7 @@ func TestRotation(t *testing.T) {
 	assert.Equal(t, "k2", kr2.Active().KID)
 
 	// The token signed with k1 should still verify because k1 is in kr2.
-	got, err := VerifyAccessToken(tokenStr, kr2)
+	got, err := VerifyAccessToken(tokenStr, kr2, "")
 	require.NoError(t, err)
 	assert.Equal(t, "user-1", got.Sub)
 	assert.Equal(t, "user@example.com", got.Email)
