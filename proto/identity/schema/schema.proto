@@ -47,6 +47,8 @@ message User {
     int64  quota_bytes        = 15 [(entdb.field) = { pii_false: true }];
     int64  deactivated_at     = 16 [(entdb.field) = { kind: "timestamp", pii_false: true }];
     int64  last_login_at      = 17 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    bool   email_verified     = 18 [(entdb.field) = { default_value: "false", pii_false: true, indexed: true }];
+    int64  email_verified_at  = 19 [(entdb.field) = { pii_false: true }];
 }
 
 // ─── WorkingGroup (type_id 2) ──────────────────────────────────────────
@@ -267,6 +269,24 @@ message AdminHelpRequest {
     string resolution_notes = 7 [(entdb.field) = { pii_false: true }];
     int64  resolved_at      = 8 [(entdb.field) = { kind: "timestamp", pii_false: true }];
     int64  created_at       = 9 [(entdb.field) = { kind: "timestamp", indexed: true, pii_false: true }];
+}
+
+// ─── EmailVerificationToken (type_id 29) ───────────────────────────────
+
+message EmailVerificationToken {
+    option (entdb.node) = {
+        type_id: 29
+        data_policy: DATA_POLICY_PERSONAL
+        subject_field: "user_id"
+        description: "A short-lived token for email verification flows"
+    };
+
+    string token_hash  = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string user_id     = 2 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string email       = 3 [(entdb.field) = { required: true, indexed: true, pii: true }];
+    int64  expires_at  = 4 [(entdb.field) = { required: true, pii_false: true }];
+    int64  created_at  = 5 [(entdb.field) = { required: true, pii_false: true }];
+    int64  consumed_at = 6 [(entdb.field) = { pii_false: true }]; // 0 = unconsumed
 }
 
 // ═══════════════════════════════════════════════════════════════════════
