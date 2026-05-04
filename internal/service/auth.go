@@ -29,6 +29,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -54,6 +55,8 @@ type User struct {
 	PasswordHash     string // never exposed via RPC
 	FailedLoginCount int
 	LockedUntil      int64 // epoch ms; 0 = not locked
+	EmailVerified    bool
+	EmailVerifiedAt  int64 // epoch ms
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -146,6 +149,19 @@ type Repository interface {
 	// User invitations
 	FindInvitationByHash(ctx context.Context, tokenHash string) (*InvitationRecord, error)
 	UpdateInvitation(ctx context.Context, nodeID string, fields map[string]any) error
+
+	// Password-reset tokens
+	CreatePasswordResetToken(ctx context.Context, t *PasswordResetToken) error
+	FindPasswordResetTokenByHash(ctx context.Context, tokenHash string) (*PasswordResetToken, error)
+	MarkPasswordResetTokenConsumed(ctx context.Context, tokenID string, atMs int64) error
+
+	// Email-verification tokens
+	CreateEmailVerificationToken(ctx context.Context, t *EmailVerificationToken) error
+	FindEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (*EmailVerificationToken, error)
+	MarkEmailVerificationTokenConsumed(ctx context.Context, tokenID string, atMs int64) error
+
+	// User email-verified update
+	SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error
 }
 
 // ── Record types for persistence ───────────────────────────────────────
@@ -232,6 +248,27 @@ type LoginChallengeRecord struct {
 	CreatedAt   int64
 }
 
+// PasswordResetToken represents a stored password-reset token.
+type PasswordResetToken struct {
+	NodeID     string
+	TokenHash  string
+	UserID     string
+	ExpiresAt  int64 // epoch ms
+	CreatedAt  int64 // epoch ms
+	ConsumedAt int64 // epoch ms; 0 = unconsumed
+}
+
+// EmailVerificationToken represents a stored email-verification token.
+type EmailVerificationToken struct {
+	NodeID     string
+	TokenHash  string
+	UserID     string
+	Email      string
+	ExpiresAt  int64 // epoch ms
+	CreatedAt  int64 // epoch ms
+	ConsumedAt int64 // epoch ms; 0 = unconsumed
+}
+
 // InvitationRecord represents a user invitation.
 type InvitationRecord struct {
 	NodeID     string
@@ -279,6 +316,7 @@ type AuthService struct {
 	audit    *audit.Logger
 	cfg      *config.Config
 	totpKey  []byte
+	mailer   email.Transport
 	logger   *zap.Logger
 	nowFunc  func() time.Time // overridable for testing
 
@@ -304,6 +342,11 @@ type consumedRefreshEntry struct {
 const consumedRefreshTTLSeconds = 7 * 24 * 60 * 60 // 7 days
 
 // NewAuthService creates an AuthService with all required dependencies.
+//
+// mailer may be nil; if nil, a non-delivering log-only transport is
+// substituted so service code can always call s.mailer.Send without a
+// nil check. Email-side-effect failures are logged and do NOT fail the
+// surrounding RPC.
 func NewAuthService(
 	repo Repository,
 	cfg *config.Config,
@@ -311,10 +354,14 @@ func NewAuthService(
 	passkeysSvc *passkeys.WebAuthnService,
 	auditLogger *audit.Logger,
 	totpKey []byte,
+	mailer email.Transport,
 	logger *zap.Logger,
 ) *AuthService {
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+	if mailer == nil {
+		mailer = email.NewLogOnly(logger)
 	}
 	return &AuthService{
 		repo:            repo,
@@ -324,6 +371,7 @@ func NewAuthService(
 		audit:           auditLogger,
 		cfg:             cfg,
 		totpKey:         totpKey,
+		mailer:          mailer,
 		logger:          logger,
 		nowFunc:         time.Now,
 		consumedRefresh: make(map[string]consumedRefreshEntry),

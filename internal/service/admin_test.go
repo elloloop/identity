@@ -15,7 +15,7 @@ import (
 func newTestAdminService(db *fakeDB) *AdminService {
 	auditLog := audit.NewLogger(nil, "test-tenant", zap.NewNop())
 	cfg := config.Load()
-	return NewAdminService(db, "test-tenant", auditLog, cfg, zap.NewNop())
+	return NewAdminService(db, "test-tenant", auditLog, cfg, nil, zap.NewNop())
 }
 
 func TestAdminService_InviteUser_HappyPath(t *testing.T) {

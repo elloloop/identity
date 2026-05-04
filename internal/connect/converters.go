@@ -25,16 +25,18 @@ func userToProto(u *service.User) *identitypb.User {
 		return nil
 	}
 	pb := &identitypb.User{
-		Id:            u.ID,
-		Email:         u.Email,
-		Name:          u.Name,
-		AvatarUrl:     u.AvatarURL,
-		Role:          u.Role,
-		TotpRequired:  u.TotpRequired,
-		Status:        userStatusToProto(u.Status),
-		RecoveryEmail: u.RecoveryEmail,
-		QuotaBytes:    u.QuotaBytes,
-		LastLoginAtMs: u.LastLoginAtMs,
+		Id:              u.ID,
+		Email:           u.Email,
+		Name:            u.Name,
+		AvatarUrl:       u.AvatarURL,
+		Role:            u.Role,
+		TotpRequired:    u.TotpRequired,
+		Status:          userStatusToProto(u.Status),
+		RecoveryEmail:   u.RecoveryEmail,
+		QuotaBytes:      u.QuotaBytes,
+		LastLoginAtMs:   u.LastLoginAtMs,
+		EmailVerified:   u.EmailVerified,
+		EmailVerifiedAt: u.EmailVerifiedAt,
 	}
 	if !u.CreatedAt.IsZero() {
 		pb.CreatedAt = timestamppb.New(u.CreatedAt)

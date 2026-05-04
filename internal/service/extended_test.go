@@ -1677,11 +1677,11 @@ func TestNewServices_NilLoggerIsSafe(t *testing.T) {
 	cfg := testConfig()
 	kr := testKeyRing(t)
 
-	a := NewAuthService(repo, cfg, kr, nil, nil, testTotpKey(), nil)
+	a := NewAuthService(repo, cfg, kr, nil, nil, testTotpKey(), nil, nil)
 	assert.NotNil(t, a)
 
 	db := newFakeDB()
-	ad := NewAdminService(db, "t", nil, cfg, nil)
+	ad := NewAdminService(db, "t", nil, cfg, nil, nil)
 	assert.NotNil(t, ad)
 
 	g := NewGroupService(db, "t", nil, nil)

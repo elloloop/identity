@@ -2,7 +2,6 @@ package connect
 
 import (
 	"context"
-	"fmt"
 
 	"connectrpc.com/connect"
 
@@ -60,11 +59,11 @@ func (h *IdentityHandler) RequestPasswordReset(
 	ctx context.Context,
 	req *connect.Request[identitypb.RequestPasswordResetRequest],
 ) (*connect.Response[identitypb.RequestPasswordResetResponse], error) {
-	// RequestPasswordReset is not yet implemented in the service layer.
-	// It will be a method on ProfileService or AuthService that sends
-	// a reset email. For now, silently succeed per the anti-enumeration
-	// contract documented in the proto.
-	_ = req.Msg.Email
+	// RequestPasswordReset is intentionally enumeration-safe: even if
+	// the service layer reports an error (unknown email, transport
+	// failure, etc.), we always return success so the response cannot
+	// be used to confirm whether an account exists.
+	_ = h.auth.RequestPasswordReset(ctx, req.Msg.Email)
 	return connect.NewResponse(&identitypb.RequestPasswordResetResponse{}), nil
 }
 
@@ -254,31 +253,41 @@ func (h *IdentityHandler) SignOutEverywhere(
 }
 
 // ConfirmPasswordReset consumes a password-reset token and sets a new password.
-// Stub returns Unimplemented until the service layer is wired (next phase).
 func (h *IdentityHandler) ConfirmPasswordReset(
 	ctx context.Context,
 	req *connect.Request[identitypb.ConfirmPasswordResetRequest],
 ) (*connect.Response[identitypb.ConfirmPasswordResetResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("ConfirmPasswordReset: not yet wired"))
+	if err := h.auth.ConfirmPasswordReset(ctx, req.Msg.Token, req.Msg.NewPassword); err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.ConfirmPasswordResetResponse{}), nil
 }
 
 // SendEmailVerification sends a verification email to the authenticated user.
-// Stub returns Unimplemented until the service layer is wired (next phase).
 func (h *IdentityHandler) SendEmailVerification(
 	ctx context.Context,
 	req *connect.Request[identitypb.SendEmailVerificationRequest],
 ) (*connect.Response[identitypb.SendEmailVerificationResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("SendEmailVerification: not yet wired"))
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	if err := h.auth.SendEmailVerification(ctx, userID); err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.SendEmailVerificationResponse{}), nil
 }
 
 // VerifyEmail consumes an email-verification token and marks the email verified.
-// Stub returns Unimplemented until the service layer is wired (next phase).
 func (h *IdentityHandler) VerifyEmail(
 	ctx context.Context,
 	req *connect.Request[identitypb.VerifyEmailRequest],
 ) (*connect.Response[identitypb.VerifyEmailResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("VerifyEmail: not yet wired"))
+	user, err := h.auth.VerifyEmail(ctx, req.Msg.Token)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.VerifyEmailResponse{
+		User: userToProto(user),
+	}), nil
 }

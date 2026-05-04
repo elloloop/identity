@@ -18,7 +18,7 @@ import (
 func newAdminWithDB(db DB) *AdminService {
 	return NewAdminService(db, "test-tenant",
 		audit.NewLogger(nil, "test", zap.NewNop()),
-		config.Load(), zap.NewNop())
+		config.Load(), nil, zap.NewNop())
 }
 func newGroupWithDB(db DB) *GroupService {
 	return NewGroupService(db, "test-tenant",

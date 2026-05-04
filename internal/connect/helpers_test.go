@@ -88,15 +88,17 @@ func nextID() string { return fmt.Sprintf("n-%d", nodeIDSeq.Add(1)) }
 type fakeRepo struct {
 	mu sync.Mutex
 
-	users             map[string]*service.User
-	refreshTokens     map[string]*service.RefreshTokenRecord
-	passkeyCreds      map[string]*service.PasskeyCredRecord
-	passkeyChallenges map[string]*service.PasskeyChallengeRecord
-	qrSessions        map[string]*service.QrLoginSessionRecord
-	totpCreds         map[string]*service.TotpCredRecord
-	recoveryCodes     map[string]*service.RecoveryCodeRecord
-	loginChallenges   map[string]*service.LoginChallengeRecord
-	invitations       map[string]*service.InvitationRecord
+	users              map[string]*service.User
+	refreshTokens      map[string]*service.RefreshTokenRecord
+	passkeyCreds       map[string]*service.PasskeyCredRecord
+	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
+	qrSessions         map[string]*service.QrLoginSessionRecord
+	totpCreds          map[string]*service.TotpCredRecord
+	recoveryCodes      map[string]*service.RecoveryCodeRecord
+	loginChallenges    map[string]*service.LoginChallengeRecord
+	invitations        map[string]*service.InvitationRecord
+	passwordResets     map[string]*service.PasswordResetToken
+	emailVerifications map[string]*service.EmailVerificationToken
 
 	// Optional error injections for specific calls.
 	errFindUser   error
@@ -106,15 +108,17 @@ type fakeRepo struct {
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
-		users:             make(map[string]*service.User),
-		refreshTokens:     make(map[string]*service.RefreshTokenRecord),
-		passkeyCreds:      make(map[string]*service.PasskeyCredRecord),
-		passkeyChallenges: make(map[string]*service.PasskeyChallengeRecord),
-		qrSessions:        make(map[string]*service.QrLoginSessionRecord),
-		totpCreds:         make(map[string]*service.TotpCredRecord),
-		recoveryCodes:     make(map[string]*service.RecoveryCodeRecord),
-		loginChallenges:   make(map[string]*service.LoginChallengeRecord),
-		invitations:       make(map[string]*service.InvitationRecord),
+		users:              make(map[string]*service.User),
+		refreshTokens:      make(map[string]*service.RefreshTokenRecord),
+		passkeyCreds:       make(map[string]*service.PasskeyCredRecord),
+		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
+		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
+		totpCreds:          make(map[string]*service.TotpCredRecord),
+		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
+		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
+		invitations:        make(map[string]*service.InvitationRecord),
+		passwordResets:     make(map[string]*service.PasswordResetToken),
+		emailVerifications: make(map[string]*service.EmailVerificationToken),
 	}
 }
 
@@ -535,6 +539,84 @@ func (r *fakeRepo) UpdateInvitation(_ context.Context, nodeID string, fields map
 	return nil
 }
 
+func (r *fakeRepo) CreatePasswordResetToken(_ context.Context, t *service.PasswordResetToken) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := nextID()
+	t.NodeID = id
+	cp := *t
+	r.passwordResets[id] = &cp
+	return nil
+}
+
+func (r *fakeRepo) FindPasswordResetTokenByHash(_ context.Context, hash string) (*service.PasswordResetToken, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.passwordResets {
+		if t.TokenHash == hash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) MarkPasswordResetTokenConsumed(_ context.Context, id string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.passwordResets[id]
+	if !ok {
+		return fmt.Errorf("password reset token %s not found", id)
+	}
+	t.ConsumedAt = atMs
+	return nil
+}
+
+func (r *fakeRepo) CreateEmailVerificationToken(_ context.Context, t *service.EmailVerificationToken) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := nextID()
+	t.NodeID = id
+	cp := *t
+	r.emailVerifications[id] = &cp
+	return nil
+}
+
+func (r *fakeRepo) FindEmailVerificationTokenByHash(_ context.Context, hash string) (*service.EmailVerificationToken, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.emailVerifications {
+		if t.TokenHash == hash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) MarkEmailVerificationTokenConsumed(_ context.Context, id string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.emailVerifications[id]
+	if !ok {
+		return fmt.Errorf("email verification token %s not found", id)
+	}
+	t.ConsumedAt = atMs
+	return nil
+}
+
+func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.EmailVerified = true
+	u.EmailVerifiedAt = atMs
+	return nil
+}
+
 // seedUser inserts a user directly.
 func (r *fakeRepo) seedUser(u *service.User) *service.User {
 	r.mu.Lock()
@@ -879,8 +961,8 @@ func newHarness(t *testing.T) *testHarness {
 	auditLog := audit.NewLogger(nil, "test", zap.NewNop())
 	totpKey := []byte("01234567890123456789012345678901")
 
-	authSvc := service.NewAuthService(repo, cfg, kr, pkSvc, auditLog, totpKey, zap.NewNop())
-	adminSvc := service.NewAdminService(db, cfg.DefaultTenantID, auditLog, cfg, zap.NewNop())
+	authSvc := service.NewAuthService(repo, cfg, kr, pkSvc, auditLog, totpKey, nil, zap.NewNop())
+	adminSvc := service.NewAdminService(db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
