@@ -151,6 +151,54 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
+  # 5b. Integration tests against a real EntDB instance (gated by build tag).
+  # ---------------------------------------------------------------------------
+  realentdb:
+    name: Integration (real entdb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      entdb:
+        image: ghcr.io/elloloop/tenant-shard-db:0.5.1
+        env:
+          GRPC_BIND: "0.0.0.0:50051"
+          WAL_BACKEND: local
+          DATA_DIR: /var/lib/entdb
+        ports:
+          - 50051:50051
+        options: >-
+          --health-cmd "python -c \"import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)\""
+          --health-interval 5s
+          --health-timeout 8s
+          --health-retries 12
+          --health-start-period 5s
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Wait for entdb
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z localhost 50051; then echo "entdb up"; exit 0; fi
+            sleep 1
+          done
+          echo "entdb did not come up"; exit 1
+
+      - name: go test -tags=realentdb
+        env:
+          GATEWAY_ENTDB_ADDRESS: localhost:50051
+        run: |
+          if compgen -G "tests/integration/*_realentdb_test.go" > /dev/null; then
+            go test -tags=realentdb -race -timeout=300s ./tests/integration/...
+          else
+            echo "no realentdb tests yet — skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
   # 6. Fuzz smoke — quick fuzz on every PR.
   # ---------------------------------------------------------------------------
   fuzz:
@@ -218,7 +266,7 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    needs: [lint, vuln, test, smoke, integration, fuzz, docker]
+    needs: [lint, vuln, test, smoke, integration, realentdb, fuzz, docker]
     if: always()
     steps:
       - name: All required jobs succeeded
