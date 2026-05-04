@@ -163,6 +163,15 @@ type Repository interface {
 
 	// User email-verified update
 	SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error
+
+	// Email-change tokens (primary email rotation, double-opt-in)
+	CreateEmailChangeToken(ctx context.Context, t *EmailChangeToken) error
+	FindEmailChangeTokenByHash(ctx context.Context, tokenHash string) (*EmailChangeToken, error)
+	MarkEmailChangeTokenConsumed(ctx context.Context, tokenID string, atMs int64) error
+	// UpdateUserEmail sets the user's primary email and marks it verified
+	// (since the new address has just proven control via the consumed
+	// token). Implementations must also set updated_at = atMs.
+	UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error
 }
 
 // ── Record types for persistence ───────────────────────────────────────
@@ -265,6 +274,20 @@ type EmailVerificationToken struct {
 	TokenHash  string
 	UserID     string
 	Email      string
+	ExpiresAt  int64 // epoch ms
+	CreatedAt  int64 // epoch ms
+	ConsumedAt int64 // epoch ms; 0 = unconsumed
+}
+
+// EmailChangeToken represents a pending primary-email rotation.
+// The token is created at request time (after re-auth) and consumed
+// when the user clicks the verification link sent to the *new* address.
+type EmailChangeToken struct {
+	NodeID     string
+	TokenHash  string
+	UserID     string
+	OldEmail   string
+	NewEmail   string
 	ExpiresAt  int64 // epoch ms
 	CreatedAt  int64 // epoch ms
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
