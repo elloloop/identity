@@ -30,7 +30,7 @@ import (
 
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/config"
-	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/internal/repo"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
@@ -112,22 +112,13 @@ func main() {
 		logger.Warn("using_dev_totp_encryption_key")
 	}
 
-	// ── Repository (persistence adapter) ─────────────────────────────
-	// The AuthService accepts a service.Repository interface. The repo
-	// package will provide an EntDB-backed implementation. For now we
-	// use repo.NewEntDBRepository(db, cfg.DefaultTenantID) once the
-	// internal/repo package is implemented.
-	//
-	// TODO: replace stubs with real adapters:
-	//   authRepo = repo.NewEntDBRepository(db, cfg.DefaultTenantID)
-	//   dbAdapter = repo.NewDBAdapter(db)
-	_ = db // suppress unused warning; adapter will wrap this when repo package is implemented
-	var authRepo service.Repository = service.StubRepository{}
-	var dbAdapter service.DB = service.StubDB{}
-
-	logger.Warn("using_stub_persistence",
-		zap.String("note", "Repository and DB adapters are stubs; RPCs will return 'service unavailable' until the repo package is implemented"),
-	)
+	// ── Repository / DB adapters ─────────────────────────────────────
+	// Both wrap the same *entdb.DbClient: NewEntDBRepository provides
+	// the typed CRUD surface used by AuthService, NewDBAdapter provides
+	// the raw-node surface used by admin/groups/help/profile services
+	// and by the audit logger.
+	authRepo := repo.NewEntDBRepository(db, cfg.DefaultTenantID)
+	dbAdapter := repo.NewDBAdapter(db)
 
 	// ── Build HTTP handler via shared wiring ─────────────────────────
 	chain := app.New(app.Deps{
