@@ -1,0 +1,7 @@
+Hi {{.UserName}},
+
+Please confirm this is your email address by visiting the link below. The link expires in {{.ExpiresIn}}.
+
+{{.Link}}
+
+If you didn't create an account, you can safely ignore this email.
