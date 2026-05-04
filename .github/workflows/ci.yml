@@ -6,23 +6,231 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-progress runs for the same ref so PR pushes don't pile up.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25'
+  GOLANGCI_LINT_VERSION: 'v1.62.2'
+  GOVULNCHECK_VERSION: 'v1.1.4'
+
+permissions:
+  contents: read
+
 jobs:
-  test:
-    name: Build + Test
+  # ---------------------------------------------------------------------------
+  # 1. Lint — golangci-lint with the standard linter set.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: go vet
-        run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: >-
+            --timeout=5m
+            --enable=govet,errcheck,staticcheck,unused,gosimple,gosec,bodyclose,gocritic
+
+  # ---------------------------------------------------------------------------
+  # 2. Vulnerability scan — Go's official CVE checker.
+  # ---------------------------------------------------------------------------
+  vuln:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+
+      - name: govulncheck
+        run: govulncheck ./...
+
+  # ---------------------------------------------------------------------------
+  # 3. Build + unit tests + coverage gate.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Build + Test + Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
       - name: go build
         run: go build ./...
 
-      - name: go test
-        run: go test -race ./...
+      - name: go test (race + coverage)
+        run: |
+          go test -race -timeout=180s \
+            -coverprofile=cover.out \
+            -coverpkg=./internal/...,./pkg/...,./cmd/... \
+            ./...
+
+      - name: Coverage summary
+        run: go tool cover -func=cover.out | tail -n 30
+
+      - name: Coverage gate (>= 80% on internal/ and pkg/)
+        run: bash scripts/coverage-gate.sh cover.out 80 internal/ pkg/
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: cover.out
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # 4. Boot smoke — would have caught the proto descriptor panic.
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: Boot smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: go test -tags=smoke
+        run: |
+          if compgen -G "tests/smoke/*.go" > /dev/null; then
+            go test -tags=smoke -timeout=120s ./tests/smoke/...
+          else
+            echo "no smoke tests under tests/smoke — skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # 5. Integration tests — uses stub persistence; no external services.
+  # ---------------------------------------------------------------------------
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: go test -tags=integration
+        run: |
+          if compgen -G "tests/integration/*.go" > /dev/null; then
+            go test -tags=integration -race -timeout=180s ./tests/integration/...
+          else
+            echo "no integration tests under tests/integration — skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # 6. Fuzz smoke — quick fuzz on every PR.
+  # ---------------------------------------------------------------------------
+  fuzz:
+    name: Fuzz smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Discover and run fuzz targets (10s each)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Each fuzz target is its own `go test -fuzz=` invocation because
+          # `-fuzz` only accepts a single name.
+          mapfile -t targets < <(
+            grep -rEn --include='*_test.go' '^func (Fuzz[A-Za-z0-9_]+)\(' . \
+              | sed -E 's|^(.*)/[^/]+:[0-9]+:func (Fuzz[A-Za-z0-9_]+).*$|\1\t\2|' \
+              | sort -u
+          )
+          if [[ ${#targets[@]} -eq 0 ]]; then
+            echo "no fuzz targets — skipping"
+            exit 0
+          fi
+          for entry in "${targets[@]}"; do
+            dir="${entry%$'\t'*}"
+            name="${entry##*$'\t'}"
+            echo "::group::fuzz $name in $dir"
+            go test -run='^$' -fuzz="^${name}$" -fuzztime=10s "./$dir"
+            echo "::endgroup::"
+          done
+
+  # ---------------------------------------------------------------------------
+  # 7. Container build smoke — multi-arch base reachable, Dockerfile builds.
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Container build smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: docker build --target server
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: server
+          push: false
+          load: true
+          tags: identity:ci
+          cache-from: type=gha,scope=ci-docker
+          cache-to: type=gha,mode=max,scope=ci-docker
+
+  # ---------------------------------------------------------------------------
+  # Aggregate gate — easy single required check on `main`.
+  # ---------------------------------------------------------------------------
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    needs: [lint, vuln, test, smoke, integration, fuzz, docker]
+    if: always()
+    steps:
+      - name: All required jobs succeeded
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results"
+          echo "$results" | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          failed = [k for k, v in data.items() if v.get("result") != "success"]
+          if failed:
+            print("failed:", ", ".join(failed))
+            sys.exit(1)
+          print("all green")
+          '
