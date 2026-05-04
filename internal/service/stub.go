@@ -50,6 +50,9 @@ func (StubRepository) SetUserLockedUntil(context.Context, string, int64) error {
 func (StubRepository) FindRefreshTokenByHash(context.Context, string) (*RefreshTokenRecord, error) {
 	return nil, ErrServiceUnavailable
 }
+func (StubRepository) FindRefreshTokenByHashIncludingConsumed(context.Context, string) (*RefreshTokenRecord, error) {
+	return nil, ErrServiceUnavailable
+}
 func (StubRepository) CreateRefreshToken(context.Context, *RefreshTokenRecord) (string, error) {
 	return "", ErrServiceUnavailable
 }
@@ -57,6 +60,9 @@ func (StubRepository) DeleteRefreshToken(context.Context, string) error {
 	return ErrServiceUnavailable
 }
 func (StubRepository) DeleteRefreshTokensForUser(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+func (StubRepository) ConsumeRefreshTokenByHash(context.Context, string, int64) error {
 	return ErrServiceUnavailable
 }
 func (StubRepository) ListPasskeyCredentials(context.Context, string) ([]*PasskeyCredRecord, error) {

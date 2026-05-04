@@ -17,14 +17,11 @@ import (
 // invariants for refresh-token theft:
 //  1. The reused (already-rotated) token must be rejected on second use.
 //  2. When replay is detected, ALL active refresh tokens for that user
-//     should be invalidated (industry-standard "refresh token reuse
+//     are invalidated (industry-standard "refresh token reuse
 //     detection" — see OAuth 2.1 §4.13).
 //
-// (1) is asserted; (2) is asserted and CURRENTLY FAILS because
-// AuthService.RefreshToken does not implement reuse-detection cleanup
-// — DeleteRefreshTokensForUser exists on the repo interface but is never
-// called from the refresh path. This test stays failing to surface that
-// hardening gap.
+// Replay state is persisted on the RefreshToken row (consumed_at != 0)
+// so detection works across instances and across process restarts.
 func TestSecExt_RefreshTokenReplay_RevokesAllSessions(t *testing.T) {
 	t.Parallel()
 	repo := newFakeRepo()
@@ -51,14 +48,103 @@ func TestSecExt_RefreshTokenReplay_RevokesAllSessions(t *testing.T) {
 	require.Error(t, err, "rotated refresh token MUST not be reusable")
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 
-	// (2) On replay, all sessions for this user should be invalidated —
-	// the legitimate user's other refresh token must also be revoked.
+	// (2) On replay, all sessions for this user are invalidated — the
+	// legitimate user's other refresh token must also be revoked.
 	_, _, _, err = svc.RefreshToken(context.Background(), otherRefresh, "", "")
-	if err == nil {
-		t.Fatalf("BUG: refresh-token replay was detected but the user's other " +
-			"active refresh token was NOT invalidated; AuthService.RefreshToken " +
-			"does not call DeleteRefreshTokensForUser on replay (OAuth 2.1 §4.13 violation)")
+	require.Error(t, err, "replay must revoke ALL refresh tokens for the user (OAuth 2.1 §4.13)")
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
+}
+
+// TestRefresh_ConsumedTokensSurviveRestart asserts that replay detection
+// is durable: a token rotated by one AuthService instance is still
+// detected as a replay by a freshly constructed instance backed by the
+// same repository (i.e. it survives process restart and works across
+// replicas).
+func TestRefresh_ConsumedTokensSurviveRestart(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepo()
+	svc1 := newTestAuthService(t, repo)
+
+	// Sign up + first rotation on instance 1.
+	r1, err := svc1.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
+	require.NoError(t, err)
+	stolen := r1.RefreshToken
+
+	_, _, _, err = svc1.RefreshToken(context.Background(), stolen, "", "")
+	require.NoError(t, err)
+
+	// "Restart": throw svc1 away and build a fresh AuthService against
+	// the same repo. The new instance has no in-memory state.
+	svc2 := newTestAuthService(t, repo)
+
+	// Replay of the rotated token via the fresh instance must still be
+	// detected and must revoke all of the user's refresh tokens.
+	_, _, _, err = svc2.RefreshToken(context.Background(), stolen, "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated),
+		"replay detection must survive AuthService restart")
+
+	repo.mu.Lock()
+	remaining := 0
+	for _, rt := range repo.refreshTokens {
+		if rt.ConsumedAtMs == 0 {
+			remaining++
+		}
 	}
+	repo.mu.Unlock()
+	assert.Equal(t, 0, remaining,
+		"replay detected after restart must revoke all of user's active refresh tokens")
+}
+
+// TestRefresh_ConcurrentRotationRace asserts that when two goroutines
+// race to rotate the same refresh token, exactly one succeeds and the
+// other gets ErrUnauthenticated. The repository's
+// ConsumeRefreshTokenByHash is the serialization point.
+func TestRefresh_ConcurrentRotationRace(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+
+	r, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
+	require.NoError(t, err)
+	target := r.RefreshToken
+
+	const N = 16
+	type result struct {
+		ok  bool
+		err error
+	}
+	results := make([]result, N)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _, _, err := svc.RefreshToken(context.Background(), target, "", "")
+			results[i] = result{ok: err == nil, err: err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	successes := 0
+	for _, r := range results {
+		if r.ok {
+			successes++
+		} else {
+			require.Error(t, r.err)
+			assert.True(t, errors.Is(r.err, ErrUnauthenticated),
+				"concurrent loser must fail with ErrUnauthenticated, got: %v", r.err)
+		}
+	}
+	// The first goroutine to consume the token wins. Every later goroutine
+	// either sees the row already consumed (replay branch) or loses the
+	// ConsumeRefreshTokenByHash race — both produce ErrUnauthenticated.
+	assert.Equal(t, 1, successes,
+		"exactly one concurrent rotation of the same refresh token must succeed; got %d", successes)
 }
 
 // TestSecExt_LoginTiming_NoUserEnumeration asserts that a non-existent

@@ -443,6 +443,18 @@ func (r *MemRepo) FindRefreshTokenByHash(_ context.Context, hash string) (*servi
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, t := range r.refreshTokens {
+		if t.TokenHash == hash && t.ConsumedAtMs == 0 {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) FindRefreshTokenByHashIncludingConsumed(_ context.Context, hash string) (*service.RefreshTokenRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.refreshTokens {
 		if t.TokenHash == hash {
 			cp := *t
 			return &cp, nil
@@ -477,6 +489,24 @@ func (r *MemRepo) DeleteRefreshTokensForUser(_ context.Context, userID string) e
 		}
 	}
 	return nil
+}
+
+// ConsumeRefreshTokenByHash atomically marks the row consumed. Returns
+// service.ErrUnauthenticated if the row is missing or already consumed,
+// so concurrent rotations resolve to exactly one winner.
+func (r *MemRepo) ConsumeRefreshTokenByHash(_ context.Context, hash string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.refreshTokens {
+		if t.TokenHash == hash {
+			if t.ConsumedAtMs != 0 {
+				return service.ErrUnauthenticated
+			}
+			t.ConsumedAtMs = atMs
+			return nil
+		}
+	}
+	return service.ErrUnauthenticated
 }
 
 // ── Passkey Credentials ───────────────────────────────────────────

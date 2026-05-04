@@ -252,6 +252,18 @@ func (r *fakeRepo) FindRefreshTokenByHash(_ context.Context, hash string) (*serv
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, t := range r.refreshTokens {
+		if t.TokenHash == hash && t.ConsumedAtMs == 0 {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) FindRefreshTokenByHashIncludingConsumed(_ context.Context, hash string) (*service.RefreshTokenRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.refreshTokens {
 		if t.TokenHash == hash {
 			cp := *t
 			return &cp, nil
@@ -289,6 +301,21 @@ func (r *fakeRepo) DeleteRefreshTokensForUser(_ context.Context, userID string) 
 		}
 	}
 	return nil
+}
+
+func (r *fakeRepo) ConsumeRefreshTokenByHash(_ context.Context, hash string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.refreshTokens {
+		if t.TokenHash == hash {
+			if t.ConsumedAtMs != 0 {
+				return service.ErrUnauthenticated
+			}
+			t.ConsumedAtMs = atMs
+			return nil
+		}
+	}
+	return service.ErrUnauthenticated
 }
 
 func (r *fakeRepo) ListPasskeyCredentials(_ context.Context, userID string) ([]*service.PasskeyCredRecord, error) {

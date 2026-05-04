@@ -277,6 +277,18 @@ func (r *fakeRepo) FindRefreshTokenByHash(_ context.Context, hash string) (*Refr
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, t := range r.refreshTokens {
+		if t.TokenHash == hash && t.ConsumedAtMs == 0 {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) FindRefreshTokenByHashIncludingConsumed(_ context.Context, hash string) (*RefreshTokenRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.refreshTokens {
 		if t.TokenHash == hash {
 			cp := *t
 			return &cp, nil
@@ -311,6 +323,24 @@ func (r *fakeRepo) DeleteRefreshTokensForUser(_ context.Context, userID string) 
 		}
 	}
 	return nil
+}
+
+// ConsumeRefreshTokenByHash atomically marks the row consumed; returns
+// ErrUnauthenticated if the row is absent or already consumed so
+// concurrent rotations resolve to exactly one winner.
+func (r *fakeRepo) ConsumeRefreshTokenByHash(_ context.Context, hash string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.refreshTokens {
+		if t.TokenHash == hash {
+			if t.ConsumedAtMs != 0 {
+				return ErrUnauthenticated
+			}
+			t.ConsumedAtMs = atMs
+			return nil
+		}
+	}
+	return ErrUnauthenticated
 }
 
 // ── Passkey Credentials ────────────────────────────────────────────────
