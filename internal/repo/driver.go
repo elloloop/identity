@@ -80,7 +80,7 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
 		return &Built{
 			Repository: entdbrepo.NewRepository(cfg.EntDBClient, cfg.TenantID),
-			DB:         entdbrepo.NewDBAdapter(cfg.EntDBClient),
+			DB:         NewDBAdapter(cfg.EntDBClient),
 		}, nil
 	case DriverMemory:
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
@@ -125,8 +125,3 @@ func NewEntDBRepository(client *sdk.DbClient, tenantID string) service.Repositor
 	return entdbrepo.NewRepository(client, tenantID)
 }
 
-// NewDBAdapter keeps the legacy import path working. See note on
-// NewEntDBRepository.
-func NewDBAdapter(client *sdk.DbClient) service.DB {
-	return entdbrepo.NewDBAdapter(client)
-}
