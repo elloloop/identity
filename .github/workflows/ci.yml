@@ -199,6 +199,58 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
+  # 5c. Integration tests against a real Postgres instance (gated by build tag).
+  # ---------------------------------------------------------------------------
+  realpostgres:
+    name: Integration (real postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: identity
+          POSTGRES_PASSWORD: identity
+          POSTGRES_DB: identity
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U identity"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Wait for postgres
+        run: |
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1; then echo "postgres up"; exit 0; fi
+            sleep 1
+          done
+          echo "postgres did not come up"; exit 1
+
+      - name: go test -tags=realpostgres
+        env:
+          GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
+        run: |
+          if compgen -G "tests/integration/*_realpostgres_test.go" > /dev/null; then
+            go test -tags=realpostgres -race -timeout=300s ./tests/integration/...
+          else
+            echo "no realpostgres tests yet — skipping"
+          fi
+
+      - name: go test -tags=realpostgres internal/repo/postgres
+        env:
+          GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
+        run: go test -race -timeout=300s ./internal/repo/postgres/...
+
+  # ---------------------------------------------------------------------------
   # 6. Fuzz smoke — quick fuzz on every PR.
   # ---------------------------------------------------------------------------
   fuzz:
@@ -266,7 +318,7 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    needs: [lint, vuln, test, smoke, integration, realentdb, fuzz, docker]
+    needs: [lint, vuln, test, smoke, integration, realentdb, realpostgres, fuzz, docker]
     if: always()
     steps:
       - name: All required jobs succeeded
