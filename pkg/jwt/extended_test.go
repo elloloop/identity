@@ -36,7 +36,7 @@ func TestExtractKID_MalformedToken(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := VerifyAccessToken(tc.token, kr)
+			_, err := VerifyAccessToken(tc.token, kr, "")
 			require.Error(t, err)
 			// Either parse error or missing kid. Both are surfaced via the
 			// "parsing token headers" wrapper or the "missing kid" branch.
@@ -63,7 +63,7 @@ func TestVerify_OversizedToken(t *testing.T) {
 	t.Parallel()
 	kr := newTestKeyRing(t)
 	huge := strings.Repeat("A", 1<<16) + "." + strings.Repeat("B", 1<<16) + "." + strings.Repeat("C", 1<<16)
-	_, err := VerifyAccessToken(huge, kr)
+	_, err := VerifyAccessToken(huge, kr, "")
 	require.Error(t, err)
 }
 
@@ -78,7 +78,7 @@ func TestVerify_AlgNoneRejected(t *testing.T) {
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"x","exp":9999999999}`))
 	tokenStr := header + "." + payload + "."
 
-	_, err := VerifyAccessToken(tokenStr, kr)
+	_, err := VerifyAccessToken(tokenStr, kr, "")
 	require.Error(t, err)
 }
 
@@ -103,7 +103,7 @@ func TestVerify_HS256Rejected(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.HS256, hs))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr)
+	_, err = VerifyAccessToken(string(signed), kr, "")
 	require.Error(t, err)
 }
 
@@ -129,7 +129,7 @@ func TestVerify_FutureIssued(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr)
+	_, err = VerifyAccessToken(string(signed), kr, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "iat")
 }
@@ -178,19 +178,19 @@ func TestKeyRing_RotationChain(t *testing.T) {
 	require.Equal(t, "k2", kr2.Active().KID)
 
 	// Old token still verifies.
-	_, err = VerifyAccessToken(t1, kr2)
+	_, err = VerifyAccessToken(t1, kr2, "")
 	require.NoError(t, err)
 
 	// New token signed with k2 verifies.
 	t2, err := CreateAccessToken(claims, kr2, 15*time.Minute)
 	require.NoError(t, err)
-	_, err = VerifyAccessToken(t2, kr2)
+	_, err = VerifyAccessToken(t2, kr2, "")
 	require.NoError(t, err)
 
 	// Drop k1 from the ring; t1 must no longer verify.
 	kr3, err := NewKeyRing([]SigningKey{k2})
 	require.NoError(t, err)
-	_, err = VerifyAccessToken(t1, kr3)
+	_, err = VerifyAccessToken(t1, kr3, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown signing key")
 }
