@@ -79,10 +79,6 @@ func (r *entRepository) FindUserByEmail(ctx context.Context, email string) (*ser
 	if email == "" {
 		return nil, nil
 	}
-	// Upstream v0.5.1 server returns Unimplemented for the typed
-	// GetNodeByKey RPC — known regression documented in the SDK
-	// v0.2.0 release notes. Until that ships, fall back to the
-	// proto-name-keyed Query path; the returned shape is identical.
 	rows, err := r.client.query(ctx, systemActor, &schemapb.User{}, map[string]any{"email": email})
 	if err != nil {
 		return nil, fmt.Errorf("repo: FindUserByEmail: %w", err)

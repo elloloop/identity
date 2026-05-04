@@ -112,8 +112,16 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
-	authRepo := repo.NewEntDBRepository(client, tenantID)
-	dbAdapter := repo.NewDBAdapter(client)
+	built, err := repo.Build(context.Background(), repo.Config{
+		Driver:      repo.DriverEntDB,
+		EntDBClient: client,
+		TenantID:    tenantID,
+	}, nil)
+	if err != nil {
+		t.Fatalf("repo.Build: %v", err)
+	}
+	authRepo := built.Repository
+	dbAdapter := built.DB
 
 	cfg := &config.Config{
 		DefaultTenantID:               tenantID,

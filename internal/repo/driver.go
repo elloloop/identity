@@ -1,12 +1,12 @@
 // Package repo selects between concrete service.Repository / service.DB
-// drivers (entdb, postgres, memory) and re-exports the constructors
-// for the production binary's wiring code.
+// drivers (entdb, postgres, memory) for the production binary's wiring
+// code.
 //
-// The drivers themselves live under sub-packages — internal/repo/entdb
-// for the EntDB-backed driver, internal/repo/memory for the in-process
-// driver used by tests. A future internal/repo/postgres driver lands
-// there too. Splitting them keeps each driver's dependencies isolated
-// (the entdb driver pulls in the SDK; memory pulls in nothing).
+// Each driver lives in its own sub-package — internal/repo/entdb for
+// the EntDB-backed driver, internal/repo/postgres for the SQL driver,
+// internal/repo/memory for the in-process store used by tests. The
+// split keeps each driver's dependencies isolated (entdb pulls in the
+// SDK; postgres pulls in pgx; memory pulls in nothing).
 package repo
 
 import (
@@ -28,9 +28,7 @@ type Driver string
 const (
 	// DriverEntDB targets the EntDB gRPC server via the typed SDK.
 	DriverEntDB Driver = "entdb"
-	// DriverPostgres targets a Postgres database. The Postgres
-	// driver is being built by another team — Build returns a not-
-	// implemented error until that lands.
+	// DriverPostgres targets a Postgres database via pgx/v5.
 	DriverPostgres Driver = "postgres"
 	// DriverMemory targets a process-local in-memory store, useful
 	// for unit tests and local development.
@@ -61,10 +59,6 @@ type Built struct {
 }
 
 // Build returns a Built configured per cfg.Driver.
-//
-// The Postgres driver is left as a TODO — the Postgres agent owns
-// internal/repo/postgres and will implement Build for the postgres
-// driver in their PR.
 func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -118,10 +112,4 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 	}
 }
 
-// NewEntDBRepository keeps the legacy import path working for
-// callers that already wire the entdb driver explicitly. New code
-// should use Build with cfg.Driver = DriverEntDB.
-func NewEntDBRepository(client *sdk.DbClient, tenantID string) service.Repository {
-	return entdbrepo.NewRepository(client, tenantID)
-}
 
