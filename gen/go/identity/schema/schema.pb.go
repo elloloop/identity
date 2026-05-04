@@ -307,6 +307,7 @@ type RefreshToken struct {
 	IpAddress     string                 `protobuf:"bytes,7,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
 	UserAgent     string                 `protobuf:"bytes,8,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
 	LastUsedAt    int64                  `protobuf:"varint,9,opt,name=last_used_at,json=lastUsedAt,proto3" json:"last_used_at,omitempty"`
+	ConsumedAt    int64                  `protobuf:"varint,10,opt,name=consumed_at,json=consumedAt,proto3" json:"consumed_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -400,6 +401,13 @@ func (x *RefreshToken) GetUserAgent() string {
 func (x *RefreshToken) GetLastUsedAt() int64 {
 	if x != nil {
 		return x.LastUsedAt
+	}
+	return 0
+}
+
+func (x *RefreshToken) GetConsumedAt() int64 {
+	if x != nil {
+		return x.ConsumedAt
 	}
 	return 0
 }
@@ -1476,6 +1484,92 @@ func (x *EmailChangeToken) GetConsumedAt() int64 {
 	return 0
 }
 
+// ─── OAuthIdentity (type_id 31) ────────────────────────────────────────
+//
+// Records the linkage between a local User and a stable provider-side
+// identity (provider, provider_user_id). This is what lets OAuth login
+// keep the same human linked to the same local account when the
+// provider's email changes.
+//
+// Application code MUST enforce uniqueness on (provider, provider_user_id):
+// EntDB does not currently support composite unique constraints, so the
+// service layer is responsible for the duplicate check before insert.
+type OAuthIdentity struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	UserId          string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Provider        string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
+	ProviderUserId  string                 `protobuf:"bytes,3,opt,name=provider_user_id,json=providerUserId,proto3" json:"provider_user_id,omitempty"`
+	EmailAtLinkTime string                 `protobuf:"bytes,4,opt,name=email_at_link_time,json=emailAtLinkTime,proto3" json:"email_at_link_time,omitempty"`
+	CreatedAt       int64                  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *OAuthIdentity) Reset() {
+	*x = OAuthIdentity{}
+	mi := &file_identity_schema_schema_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthIdentity) ProtoMessage() {}
+
+func (x *OAuthIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_schema_schema_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthIdentity.ProtoReflect.Descriptor instead.
+func (*OAuthIdentity) Descriptor() ([]byte, []int) {
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *OAuthIdentity) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *OAuthIdentity) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *OAuthIdentity) GetProviderUserId() string {
+	if x != nil {
+		return x.ProviderUserId
+	}
+	return ""
+}
+
+func (x *OAuthIdentity) GetEmailAtLinkTime() string {
+	if x != nil {
+		return x.EmailAtLinkTime
+	}
+	return ""
+}
+
+func (x *OAuthIdentity) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
 type MemberOf struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1484,7 +1578,7 @@ type MemberOf struct {
 
 func (x *MemberOf) Reset() {
 	*x = MemberOf{}
-	mi := &file_identity_schema_schema_proto_msgTypes[15]
+	mi := &file_identity_schema_schema_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1496,7 +1590,7 @@ func (x *MemberOf) String() string {
 func (*MemberOf) ProtoMessage() {}
 
 func (x *MemberOf) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[15]
+	mi := &file_identity_schema_schema_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1509,7 +1603,7 @@ func (x *MemberOf) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberOf.ProtoReflect.Descriptor instead.
 func (*MemberOf) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{15}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{16}
 }
 
 type UserPasskey struct {
@@ -1520,7 +1614,7 @@ type UserPasskey struct {
 
 func (x *UserPasskey) Reset() {
 	*x = UserPasskey{}
-	mi := &file_identity_schema_schema_proto_msgTypes[16]
+	mi := &file_identity_schema_schema_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1532,7 +1626,7 @@ func (x *UserPasskey) String() string {
 func (*UserPasskey) ProtoMessage() {}
 
 func (x *UserPasskey) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[16]
+	mi := &file_identity_schema_schema_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1545,7 +1639,7 @@ func (x *UserPasskey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPasskey.ProtoReflect.Descriptor instead.
 func (*UserPasskey) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{16}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{17}
 }
 
 type UserTotp struct {
@@ -1556,7 +1650,7 @@ type UserTotp struct {
 
 func (x *UserTotp) Reset() {
 	*x = UserTotp{}
-	mi := &file_identity_schema_schema_proto_msgTypes[17]
+	mi := &file_identity_schema_schema_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1568,7 +1662,7 @@ func (x *UserTotp) String() string {
 func (*UserTotp) ProtoMessage() {}
 
 func (x *UserTotp) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[17]
+	mi := &file_identity_schema_schema_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1581,7 +1675,7 @@ func (x *UserTotp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTotp.ProtoReflect.Descriptor instead.
 func (*UserTotp) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{17}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{18}
 }
 
 type UserRecoveryCode struct {
@@ -1592,7 +1686,7 @@ type UserRecoveryCode struct {
 
 func (x *UserRecoveryCode) Reset() {
 	*x = UserRecoveryCode{}
-	mi := &file_identity_schema_schema_proto_msgTypes[18]
+	mi := &file_identity_schema_schema_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1604,7 +1698,7 @@ func (x *UserRecoveryCode) String() string {
 func (*UserRecoveryCode) ProtoMessage() {}
 
 func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[18]
+	mi := &file_identity_schema_schema_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1617,7 +1711,7 @@ func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserRecoveryCode.ProtoReflect.Descriptor instead.
 func (*UserRecoveryCode) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{18}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{19}
 }
 
 var File_identity_schema_schema_proto protoreflect.FileDescriptor
@@ -1661,7 +1755,7 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x04 \x01(\x03B\x0f\xb2\xbb\x18\v:\ttimestampR\tcreatedAt\x12.\n" +
 	"\n" +
-	"updated_at\x18\x05 \x01(\x03B\x0f\xb2\xbb\x18\v:\ttimestampR\tupdatedAt:=\xa2\xbb\x189\b\x02\x18\x010\x01R1A working group (team/department) within a tenant\"\xe3\x03\n" +
+	"updated_at\x18\x05 \x01(\x03B\x0f\xb2\xbb\x18\v:\ttimestampR\tupdatedAt:=\xa2\xbb\x189\b\x02\x18\x010\x01R1A working group (team/department) within a tenant\"\x97\x04\n" +
 	"\fRefreshToken\x12+\n" +
 	"\n" +
 	"token_hash\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\ttokenHash\x12*\n" +
@@ -1679,7 +1773,10 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"user_agent\x18\b \x01(\tB\x06\xb2\xbb\x18\x02 \x01R\tuserAgent\x123\n" +
 	"\flast_used_at\x18\t \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
-	"lastUsedAt:A\xa2\xbb\x18=\b\x050\x04:\auser_idR.A hashed refresh token bound to a user session\"\x92\x02\n" +
+	"lastUsedAt\x122\n" +
+	"\vconsumed_at\x18\n" +
+	" \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
+	"consumedAt:A\xa2\xbb\x18=\b\x050\x04:\auser_idR.A hashed refresh token bound to a user session\"\x92\x02\n" +
 	"\x12PasswordResetToken\x12+\n" +
 	"\n" +
 	"token_hash\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\ttokenHash\x12*\n" +
@@ -1750,11 +1847,11 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x03 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\texpiresAt\x120\n" +
 	"\n" +
-	"created_at\x18\x04 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt:=\xa2\xbb\x189\b\x190\x04R3A pending login challenge awaiting 2FA verification\"\xf3\x05\n" +
+	"created_at\x18\x04 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt:=\xa2\xbb\x189\b\x190\x04R3A pending login challenge awaiting 2FA verification\"\x8f\x06\n" +
 	"\n" +
-	"AuditEvent\x12\xc6\x02\n" +
+	"AuditEvent\x12\xe2\x02\n" +
 	"\n" +
-	"event_type\x18\x01 \x01(\tB\xa6\x02\xb2\xbb\x18\xa1\x02\x18\x012\x9a\x02login_success,login_failure,logout,password_changed,password_reset,totp_enabled,totp_disabled,totp_verified,passkey_added,passkey_removed,passkey_used,session_revoked,user_invited,user_deactivated,user_reactivated,admin_reset_password,oauth_login,qr_login_approved,qr_login_rejected`\x01R\teventType\x123\n" +
+	"event_type\x18\x01 \x01(\tB\xc2\x02\xb2\xbb\x18\xbd\x02\x18\x012\xb6\x02login_success,login_failure,login_locked,account_locked,logout,password_changed,password_reset,totp_enabled,totp_disabled,totp_verified,passkey_added,passkey_removed,passkey_used,session_revoked,user_invited,user_deactivated,user_reactivated,admin_reset_password,oauth_login,qr_login_approved,qr_login_rejected`\x01R\teventType\x123\n" +
 	"\ractor_user_id\x18\x02 \x01(\tB\x0f\xb2\xbb\x18\v\x18\x01:\x03ref@\x01`\x01R\vactorUserId\x125\n" +
 	"\x0etarget_user_id\x18\x03 \x01(\tB\x0f\xb2\xbb\x18\v\x18\x01:\x03ref@\x01`\x01R\ftargetUserId\x12%\n" +
 	"\n" +
@@ -1805,7 +1902,7 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x05 \x01(\x03B\b\xb2\xbb\x18\x04\b\x01`\x01R\tcreatedAt\x12'\n" +
 	"\vconsumed_at\x18\x06 \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\n" +
-	"consumedAt:A\xa2\xbb\x18=\b\x1d:\auser_idR0A short-lived token for email verification flows\"\xf6\x02\n" +
+	"consumedAt:A\xa2\xbb\x18=\b\x1d:\auser_idR0A short-lived token for email verification flows\"\xf8\x02\n" +
 	"\x10EmailChangeToken\x12+\n" +
 	"\n" +
 	"token_hash\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\ttokenHash\x12&\n" +
@@ -1817,7 +1914,14 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x06 \x01(\x03B\b\xb2\xbb\x18\x04\b\x01`\x01R\tcreatedAt\x12'\n" +
 	"\vconsumed_at\x18\a \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\n" +
-	"consumedAt:H\xa2\xbb\x18D\b\x1e:\auser_idR7A short-lived token for email change confirmation flows\">\n" +
+	"consumedAt:J\xa2\xbb\x18F\b\x1e0\x04:\auser_idR7A short-lived token for email change confirmation flows\"\xef\x03\n" +
+	"\rOAuthIdentity\x12*\n" +
+	"\auser_id\x18\x01 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x12G\n" +
+	"\bprovider\x18\x02 \x01(\tB+\xb2\xbb\x18'\b\x01\x10\x01\x18\x012\x1dgoogle,microsoft,github,apple`\x01R\bprovider\x12b\n" +
+	"\x10provider_user_id\x18\x03 \x01(\tB8\xb2\xbb\x184\b\x01\x18\x01 \x01R,Stable per-provider user id (e.g. OIDC sub).R\x0eproviderUserId\x12m\n" +
+	"\x12email_at_link_time\x18\x04 \x01(\tB@\xb2\xbb\x18< \x01R8Snapshot of provider email when first linked, for audit.R\x0femailAtLinkTime\x122\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt:b\xa2\xbb\x18^\b\x1f:\auser_idRQLinkage between a local User and a provider-side stable identity (provider, sub).\">\n" +
 	"\bMemberOf:2\xaa\xbb\x18.\be\x12\tMEMBER_OFJ\x1fUser belongs to a working group\"F\n" +
 	"\vUserPasskey:7\xaa\xbb\x183\b\xd8\x01\x12\fUSER_PASSKEY0\x01J\x1eUser owns a passkey credential\"U\n" +
 	"\bUserTotp:I\xaa\xbb\x18E\b\xd9\x01\x12\tUSER_TOTP \x010\x01J1User has a TOTP credential (at most one per user)\"T\n" +
@@ -1835,7 +1939,7 @@ func file_identity_schema_schema_proto_rawDescGZIP() []byte {
 	return file_identity_schema_schema_proto_rawDescData
 }
 
-var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_identity_schema_schema_proto_goTypes = []any{
 	(*User)(nil),                   // 0: identity.schema.User
 	(*WorkingGroup)(nil),           // 1: identity.schema.WorkingGroup
@@ -1852,10 +1956,11 @@ var file_identity_schema_schema_proto_goTypes = []any{
 	(*AdminHelpRequest)(nil),       // 12: identity.schema.AdminHelpRequest
 	(*EmailVerificationToken)(nil), // 13: identity.schema.EmailVerificationToken
 	(*EmailChangeToken)(nil),       // 14: identity.schema.EmailChangeToken
-	(*MemberOf)(nil),               // 15: identity.schema.MemberOf
-	(*UserPasskey)(nil),            // 16: identity.schema.UserPasskey
-	(*UserTotp)(nil),               // 17: identity.schema.UserTotp
-	(*UserRecoveryCode)(nil),       // 18: identity.schema.UserRecoveryCode
+	(*OAuthIdentity)(nil),          // 15: identity.schema.OAuthIdentity
+	(*MemberOf)(nil),               // 16: identity.schema.MemberOf
+	(*UserPasskey)(nil),            // 17: identity.schema.UserPasskey
+	(*UserTotp)(nil),               // 18: identity.schema.UserTotp
+	(*UserRecoveryCode)(nil),       // 19: identity.schema.UserRecoveryCode
 }
 var file_identity_schema_schema_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -1876,7 +1981,7 @@ func file_identity_schema_schema_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_identity_schema_schema_proto_rawDesc), len(file_identity_schema_schema_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
