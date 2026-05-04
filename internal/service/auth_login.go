@@ -165,14 +165,31 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return nil, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
-	// Lockout check.
+	// Lockout check. While locked, the account is blocked regardless of
+	// password correctness — emit a dedicated `login_locked` audit event
+	// so operators can distinguish "tried during lockout" from
+	// "threshold tripped".
 	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
-		s.audit.Log(ctx, audit.EventLoginFailure,
+		s.audit.Log(ctx, audit.EventLoginLocked,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"reason": "account_locked"}),
+			audit.WithDetails(map[string]any{
+				"reason":       "account_locked",
+				"locked_until": user.LockedUntil,
+			}),
 		)
 		return nil, fmt.Errorf("%w: account temporarily locked due to too many failed attempts", ErrAccountLocked)
+	}
+
+	// Lockout window has passed. Reset count + LockedUntil before
+	// proceeding so any subsequent failure starts a fresh count from 0.
+	if user.LockedUntil > 0 && user.LockedUntil <= s.nowMs() {
+		if err := s.repo.ResetFailedLoginCount(ctx, user.ID); err != nil {
+			s.logger.Warn("failed_login_reset_post_lockout_failed",
+				zap.String("user_id", user.ID), zap.Error(err))
+		}
+		user.FailedLoginCount = 0
+		user.LockedUntil = 0
 	}
 
 	// No password set (OAuth-only user).
@@ -186,7 +203,23 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	}
 
 	if !passwords.Verify(password, user.PasswordHash) {
-		s.recordFailedLogin(ctx, user)
+		// Record the failure. Errors propagate as ErrUnauthenticated so
+		// a DB outage during the increment cannot be used to bypass the
+		// lockout (fail-closed).
+		_, lockedNow, recErr := s.recordFailedLogin(ctx, user)
+		if recErr != nil {
+			return nil, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
+		}
+		if lockedNow {
+			s.audit.Log(ctx, audit.EventAccountLocked,
+				audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+				audit.WithSuccess(false),
+				audit.WithDetails(map[string]any{
+					"lockout_seconds": s.cfg.LoginLockoutSeconds,
+					"max_attempts":    s.cfg.LoginMaxFailedAttempts,
+				}),
+			)
+		}
 		s.audit.Log(ctx, audit.EventLoginFailure,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),

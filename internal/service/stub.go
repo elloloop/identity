@@ -38,6 +38,15 @@ func (StubRepository) CreateUser(context.Context, *User) (string, error) {
 func (StubRepository) UpdateUser(context.Context, string, map[string]any) error {
 	return ErrServiceUnavailable
 }
+func (StubRepository) IncrementFailedLoginCount(context.Context, string) (int32, error) {
+	return 0, ErrServiceUnavailable
+}
+func (StubRepository) ResetFailedLoginCount(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+func (StubRepository) SetUserLockedUntil(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
 func (StubRepository) FindRefreshTokenByHash(context.Context, string) (*RefreshTokenRecord, error) {
 	return nil, ErrServiceUnavailable
 }
