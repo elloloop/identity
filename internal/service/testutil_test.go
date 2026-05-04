@@ -15,6 +15,7 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -542,6 +543,18 @@ func testTotpKey() []byte {
 
 func newTestAuthService(t *testing.T, repo *fakeRepo) *AuthService {
 	t.Helper()
+	return newTestAuthServiceWithRegistry(t, repo, defaultTestOAuthRegistry())
+}
+
+// newTestAuthServiceNoOAuth builds an AuthService without an OAuth
+// registry — used to exercise the ErrOAuthDisabled path.
+func newTestAuthServiceNoOAuth(t *testing.T, repo *fakeRepo) *AuthService {
+	t.Helper()
+	return newTestAuthServiceWithRegistry(t, repo, nil)
+}
+
+func newTestAuthServiceWithRegistry(t *testing.T, repo *fakeRepo, reg *oauth.Registry) *AuthService {
+	t.Helper()
 	cfg := testConfig()
 	kr := testKeyRing(t)
 
@@ -551,7 +564,84 @@ func newTestAuthService(t *testing.T, repo *fakeRepo) *AuthService {
 		Origin: cfg.PasskeyOrigin,
 	})
 
-	return NewAuthService(repo, cfg, kr, passkeysSvc, audit.NewLogger(nil, "test", nil), testTotpKey(), email.NewLogOnly(zap.NewNop()), zap.NewNop())
+	return NewAuthServiceWithOAuth(
+		repo, cfg, kr, passkeysSvc,
+		audit.NewLogger(nil, "test", nil),
+		testTotpKey(), email.NewLogOnly(zap.NewNop()), zap.NewNop(),
+		reg,
+	)
+}
+
+// fakeOAuthExchanger is a deterministic Exchanger used in service-layer
+// tests. It encodes the desired Identity in the authorization code so
+// each test can express different scenarios without setting up an HTTP
+// fake. Codes can take these forms:
+//
+//	"ok|<email>|<name>|<avatar>|<provider>"  → success
+//	"err|<reason>"                            → returns ErrCodeExchangeFailed
+//	"unverified|<email>"                      → returns ErrEmailNotVerified
+type fakeOAuthExchanger struct {
+	provider string
+	calls    atomic.Int32
+}
+
+func (f *fakeOAuthExchanger) Exchange(_ context.Context, code, _ string) (*oauth.Identity, error) {
+	f.calls.Add(1)
+	parts := splitCode(code)
+	switch parts[0] {
+	case "ok":
+		return &oauth.Identity{
+			ProviderUserID: "sub-" + parts[1],
+			Email:          parts[1],
+			EmailVerified:  true,
+			Name:           parts[2],
+			AvatarURL:      parts[3],
+			Provider:       parts[4],
+		}, nil
+	case "unverified":
+		return nil, oauth.ErrEmailNotVerified
+	case "err":
+		return nil, oauth.ErrCodeExchangeFailed
+	default:
+		return nil, oauth.ErrCodeExchangeFailed
+	}
+}
+
+func splitCode(code string) []string {
+	out := []string{"", "", "", "", ""}
+	cur := 0
+	last := 0
+	for i := 0; i < len(code); i++ {
+		if code[i] == '|' {
+			if cur < len(out) {
+				out[cur] = code[last:i]
+				cur++
+				last = i + 1
+			}
+		}
+	}
+	if cur < len(out) {
+		out[cur] = code[last:]
+	}
+	return out
+}
+
+// defaultTestOAuthRegistry returns a registry pre-populated with a
+// fakeOAuthExchanger for "google", "microsoft", and "github" so the
+// existing test suite continues to work after the OAuthLogin signature
+// change.
+func defaultTestOAuthRegistry() *oauth.Registry {
+	r := oauth.NewRegistry()
+	for _, p := range []string{"google", "microsoft", "github"} {
+		r.Register(p, &fakeOAuthExchanger{provider: p})
+	}
+	return r
+}
+
+// fakeOAuthCode builds a code string matching fakeOAuthExchanger's
+// "ok" form. Helper for test readability.
+func fakeOAuthCode(email, name, avatar, provider string) string {
+	return "ok|" + email + "|" + name + "|" + avatar + "|" + provider
 }
 
 func newTestAuthServiceWithTime(t *testing.T, repo *fakeRepo, nowFn func() time.Time) *AuthService {

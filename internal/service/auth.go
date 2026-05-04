@@ -31,6 +31,7 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/identity/pkg/passwords"
 	"github.com/elloloop/identity/pkg/totp"
@@ -303,6 +304,7 @@ var (
 	ErrInvitationUsed    = errors.New("invitation has already been accepted")
 	ErrInvitationExpired = errors.New("invitation has expired")
 	ErrLocalAuthDisabled = errors.New("local auth disabled")
+	ErrOAuthDisabled     = errors.New("oauth login is not configured")
 )
 
 // ── AuthService ────────────────────────────────────────────────────────
@@ -318,7 +320,11 @@ type AuthService struct {
 	totpKey  []byte
 	mailer   email.Transport
 	logger   *zap.Logger
-	nowFunc  func() time.Time // overridable for testing
+	// oauthRegistry holds per-provider Exchangers. May be nil; in that
+	// case OAuthLogin returns ErrOAuthDisabled. A non-nil but empty
+	// registry has the same effect when looking up a specific provider.
+	oauthRegistry *oauth.Registry
+	nowFunc       func() time.Time // overridable for testing
 
 	// consumedRefresh tracks recently rotated refresh-token hashes so the
 	// service can detect a refresh-token replay attack: if a token that
@@ -357,6 +363,22 @@ func NewAuthService(
 	mailer email.Transport,
 	logger *zap.Logger,
 ) *AuthService {
+	return NewAuthServiceWithOAuth(repo, cfg, keyRing, passkeysSvc, auditLogger, totpKey, mailer, logger, nil)
+}
+
+// NewAuthServiceWithOAuth is the extended constructor that injects an
+// oauth.Registry. Pass nil to disable OAuth login.
+func NewAuthServiceWithOAuth(
+	repo Repository,
+	cfg *config.Config,
+	keyRing *jwt.KeyRing,
+	passkeysSvc *passkeys.WebAuthnService,
+	auditLogger *audit.Logger,
+	totpKey []byte,
+	mailer email.Transport,
+	logger *zap.Logger,
+	oauthRegistry *oauth.Registry,
+) *AuthService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -373,6 +395,7 @@ func NewAuthService(
 		totpKey:         totpKey,
 		mailer:          mailer,
 		logger:          logger,
+		oauthRegistry:   oauthRegistry,
 		nowFunc:         time.Now,
 		consumedRefresh: make(map[string]consumedRefreshEntry),
 	}
