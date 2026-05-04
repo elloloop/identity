@@ -13,6 +13,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
@@ -29,28 +30,32 @@ func nextNodeID() string {
 type fakeRepo struct {
 	mu sync.Mutex
 
-	users             map[string]*User
-	refreshTokens     map[string]*RefreshTokenRecord
-	passkeyCreds      map[string]*PasskeyCredRecord
-	passkeyChallenges map[string]*PasskeyChallengeRecord
-	qrSessions        map[string]*QrLoginSessionRecord
-	totpCreds         map[string]*TotpCredRecord
-	recoveryCodes     map[string]*RecoveryCodeRecord
-	loginChallenges   map[string]*LoginChallengeRecord
-	invitations       map[string]*InvitationRecord
+	users              map[string]*User
+	refreshTokens      map[string]*RefreshTokenRecord
+	passkeyCreds       map[string]*PasskeyCredRecord
+	passkeyChallenges  map[string]*PasskeyChallengeRecord
+	qrSessions         map[string]*QrLoginSessionRecord
+	totpCreds          map[string]*TotpCredRecord
+	recoveryCodes      map[string]*RecoveryCodeRecord
+	loginChallenges    map[string]*LoginChallengeRecord
+	invitations        map[string]*InvitationRecord
+	passwordResets     map[string]*PasswordResetToken
+	emailVerifications map[string]*EmailVerificationToken
 }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
-		users:             make(map[string]*User),
-		refreshTokens:     make(map[string]*RefreshTokenRecord),
-		passkeyCreds:      make(map[string]*PasskeyCredRecord),
-		passkeyChallenges: make(map[string]*PasskeyChallengeRecord),
-		qrSessions:        make(map[string]*QrLoginSessionRecord),
-		totpCreds:         make(map[string]*TotpCredRecord),
-		recoveryCodes:     make(map[string]*RecoveryCodeRecord),
-		loginChallenges:   make(map[string]*LoginChallengeRecord),
-		invitations:       make(map[string]*InvitationRecord),
+		users:              make(map[string]*User),
+		refreshTokens:      make(map[string]*RefreshTokenRecord),
+		passkeyCreds:       make(map[string]*PasskeyCredRecord),
+		passkeyChallenges:  make(map[string]*PasskeyChallengeRecord),
+		qrSessions:         make(map[string]*QrLoginSessionRecord),
+		totpCreds:          make(map[string]*TotpCredRecord),
+		recoveryCodes:      make(map[string]*RecoveryCodeRecord),
+		loginChallenges:    make(map[string]*LoginChallengeRecord),
+		invitations:        make(map[string]*InvitationRecord),
+		passwordResets:     make(map[string]*PasswordResetToken),
+		emailVerifications: make(map[string]*EmailVerificationToken),
 	}
 }
 
@@ -144,6 +149,17 @@ func applyUserFields(u *User, fields map[string]any) {
 			}
 		case "recovery_email":
 			u.RecoveryEmail = v.(string)
+		case "email_verified":
+			if b, ok := v.(bool); ok {
+				u.EmailVerified = b
+			}
+		case "email_verified_at":
+			switch x := v.(type) {
+			case int64:
+				u.EmailVerifiedAt = x
+			case int:
+				u.EmailVerifiedAt = int64(x)
+			}
 		}
 	}
 }
@@ -535,7 +551,7 @@ func newTestAuthService(t *testing.T, repo *fakeRepo) *AuthService {
 		Origin: cfg.PasskeyOrigin,
 	})
 
-	return NewAuthService(repo, cfg, kr, passkeysSvc, audit.NewLogger(nil, "test", nil), testTotpKey(), zap.NewNop())
+	return NewAuthService(repo, cfg, kr, passkeysSvc, audit.NewLogger(nil, "test", nil), testTotpKey(), email.NewLogOnly(zap.NewNop()), zap.NewNop())
 }
 
 func newTestAuthServiceWithTime(t *testing.T, repo *fakeRepo, nowFn func() time.Time) *AuthService {
@@ -584,4 +600,86 @@ func seedInvitation(repo *fakeRepo, inv *InvitationRecord) {
 	cp := *inv
 	repo.invitations[inv.NodeID] = &cp
 	repo.mu.Unlock()
+}
+
+// ── Password Reset Tokens ──────────────────────────────────────────────
+
+func (r *fakeRepo) CreatePasswordResetToken(_ context.Context, t *PasswordResetToken) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := nextNodeID()
+	t.NodeID = id
+	cp := *t
+	r.passwordResets[id] = &cp
+	return nil
+}
+
+func (r *fakeRepo) FindPasswordResetTokenByHash(_ context.Context, hash string) (*PasswordResetToken, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.passwordResets {
+		if t.TokenHash == hash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) MarkPasswordResetTokenConsumed(_ context.Context, id string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.passwordResets[id]
+	if !ok {
+		return fmt.Errorf("password reset token %s not found", id)
+	}
+	t.ConsumedAt = atMs
+	return nil
+}
+
+// ── Email Verification Tokens ──────────────────────────────────────────
+
+func (r *fakeRepo) CreateEmailVerificationToken(_ context.Context, t *EmailVerificationToken) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := nextNodeID()
+	t.NodeID = id
+	cp := *t
+	r.emailVerifications[id] = &cp
+	return nil
+}
+
+func (r *fakeRepo) FindEmailVerificationTokenByHash(_ context.Context, hash string) (*EmailVerificationToken, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.emailVerifications {
+		if t.TokenHash == hash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) MarkEmailVerificationTokenConsumed(_ context.Context, id string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.emailVerifications[id]
+	if !ok {
+		return fmt.Errorf("email verification token %s not found", id)
+	}
+	t.ConsumedAt = atMs
+	return nil
+}
+
+func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.EmailVerified = true
+	u.EmailVerifiedAt = atMs
+	return nil
 }
