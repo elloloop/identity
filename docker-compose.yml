@@ -49,6 +49,30 @@ services:
       retries: 12
       start_period: 5s
 
+  # Alternate persistence driver. The identity service can run on
+  # Postgres instead of EntDB by setting:
+  #
+  #   GATEWAY_REPO_DRIVER=postgres
+  #   GATEWAY_POSTGRES_DSN=postgres://identity:identity@postgres:5432/identity?sslmode=disable
+  #
+  # Pending migrations are applied automatically on first connect when
+  # GATEWAY_POSTGRES_AUTO_MIGRATE=true (the default).
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: identity
+      POSTGRES_PASSWORD: identity
+      POSTGRES_DB: identity
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U identity"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   identity:
     build:
       context: .
@@ -69,3 +93,4 @@ services:
 
 volumes:
   entdb-data:
+  postgres-data:

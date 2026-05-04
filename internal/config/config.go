@@ -109,6 +109,18 @@ type Config struct {
 
 	// How long an email-verification or password-reset token is valid for.
 	EmailTokenExpirySeconds int // GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS (default 86400)
+
+	// Postgres (alternate persistence driver). When PostgresDSN is set
+	// the application bootstrapper may prefer the Postgres-backed
+	// repository over EntDB; the actual driver selection lives in the
+	// internal/repo package.
+	//
+	//   GATEWAY_POSTGRES_DSN          e.g. "postgres://user:pass@host:5432/identity?sslmode=disable"
+	//   GATEWAY_POSTGRES_MAX_CONNS    pool size, default 25
+	//   GATEWAY_POSTGRES_AUTO_MIGRATE run pending migrations on connect, default true
+	PostgresDSN         string
+	PostgresMaxConns    int
+	PostgresAutoMigrate bool
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -177,6 +189,10 @@ func Load() *Config {
 
 		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
 		EmailTokenExpirySeconds: envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
+
+		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
+		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
+		PostgresAutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", true),
 	}
 }
 
