@@ -139,21 +139,15 @@ func TestSecExt_CrossTenant_TokenRejection(t *testing.T) {
 	svcB.cfg.DefaultTenantID = "tenant-b"
 	svcB.keyRing = svcA.keyRing // shared trust
 
-	// The token's claim says tenant-a; service B is tenant-b.
-	claims, err := jwt.VerifyAccessToken(tokenA, svcB.keyRing)
-	require.NoError(t, err, "token signature is valid (shared keys)")
-	require.Equal(t, "tenant-a", claims.Tenant)
+	// Service B verifying with its OWN expected tenant must REJECT the
+	// token (claim says tenant-a, expected tenant-b).
+	_, err = jwt.VerifyAccessToken(tokenA, svcB.keyRing, svcB.tenantID)
+	require.Error(t, err, "verifier must reject token whose tenant claim doesn't match expected tenant")
 
-	// At this point a tenant-aware service should reject the token.
-	// The current verification path returns the token's claim verbatim
-	// without comparing against svcB.tenantID — which is the bug.
-	if claims.Tenant == svcB.tenantID {
-		t.Fatalf("test setup wrong: tenants should differ")
-	}
-	t.Errorf("BUG: cross-tenant token accepted — JWT verification does not " +
-		"check the tenant claim against the verifying service's configured " +
-		"tenant. A token issued for tenant %q is accepted as-is by a service "+
-		"configured for tenant %q.", claims.Tenant, svcB.tenantID)
+	// Sanity: same token still verifies cleanly when expected tenant matches.
+	claims, err := jwt.VerifyAccessToken(tokenA, svcA.keyRing, "tenant-a")
+	require.NoError(t, err, "matching expected tenant must verify")
+	require.Equal(t, "tenant-a", claims.Tenant)
 }
 
 // TestSecExt_AccountLockout_NFailuresLockWithinWindow asserts that after
