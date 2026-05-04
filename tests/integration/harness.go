@@ -262,6 +262,7 @@ type MemRepo struct {
 	invitations        map[string]*service.InvitationRecord
 	passwordResets     map[string]*service.PasswordResetToken
 	emailVerifications map[string]*service.EmailVerificationToken
+	oauthIdentities    map[string]*service.OAuthIdentity
 }
 
 // NewMemRepo returns an empty MemRepo.
@@ -278,6 +279,7 @@ func NewMemRepo() *MemRepo {
 		invitations:        make(map[string]*service.InvitationRecord),
 		passwordResets:     make(map[string]*service.PasswordResetToken),
 		emailVerifications: make(map[string]*service.EmailVerificationToken),
+		oauthIdentities:    make(map[string]*service.OAuthIdentity),
 	}
 }
 
@@ -356,6 +358,8 @@ func applyUserFields(u *service.User, fields map[string]any) {
 		switch k {
 		case "name":
 			u.Name, _ = v.(string)
+		case "email":
+			u.Email, _ = v.(string)
 		case "avatar_url":
 			u.AvatarURL, _ = v.(string)
 		case "password_hash":
@@ -821,6 +825,52 @@ func (r *MemRepo) SetUserEmailVerified(_ context.Context, userID string, atMs in
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
 	return nil
+}
+
+// ── OAuth Identities ──────────────────────────────────────────────
+
+func (r *MemRepo) FindUserByProviderID(_ context.Context, provider, providerUserID string) (*service.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, oi := range r.oauthIdentities {
+		if oi.Provider == provider && oi.ProviderUserID == providerUserID {
+			u, ok := r.users[oi.UserID]
+			if !ok {
+				return nil, nil
+			}
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) CreateOAuthIdentity(_ context.Context, oi *service.OAuthIdentity) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.oauthIdentities {
+		if existing.Provider == oi.Provider && existing.ProviderUserID == oi.ProviderUserID {
+			return fmt.Errorf("oauth identity already linked: %s/%s", oi.Provider, oi.ProviderUserID)
+		}
+	}
+	id := r.nextID()
+	oi.NodeID = id
+	cp := *oi
+	r.oauthIdentities[id] = &cp
+	return nil
+}
+
+func (r *MemRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) ([]*service.OAuthIdentity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.OAuthIdentity
+	for _, oi := range r.oauthIdentities {
+		if oi.UserID == userID {
+			cp := *oi
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
 }
 
 // compile-time interface assertion

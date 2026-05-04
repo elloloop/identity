@@ -344,40 +344,47 @@ func (s *AuthService) mapOAuthError(err error) (*LoginResult, error) {
 	}
 }
 
-// upsertOAuthUser is the OAuth-aware variant of upsertUser. It marks
-// the user as email-verified (the provider asserted it) and copies
-// name / avatar from the Identity for new users.
+// upsertOAuthUser is the OAuth-aware variant of upsertUser. It resolves
+// the local User using a (provider, provider_user_id) lookup first so
+// that a returning user keeps the same local account even when the
+// provider's email has changed since their last login. If no link
+// exists yet it falls back to the email-based lookup (first-time link
+// to an existing local user) and finally creates a new user. In either
+// non-replay branch it persists an OAuthIdentity row so the next login
+// hits the fast path.
+//
+// Returns (user, isNewUser, error). isNewUser is true only when a new
+// User row was created (not when an existing user got a fresh provider
+// link).
 func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Identity, email string) (*User, bool, error) {
+	now := s.nowMs()
+
+	// 1. (provider, sub) lookup — survives provider-side email change.
+	if identity.ProviderUserID != "" {
+		linked, err := s.repo.FindUserByProviderID(ctx, identity.Provider, identity.ProviderUserID)
+		if err != nil {
+			return nil, false, err
+		}
+		if linked != nil {
+			s.applyOAuthProfileUpdates(ctx, linked, identity, email, now)
+			return linked, false, nil
+		}
+	}
+
+	// 2. Email-based lookup — first-time link of this provider to an
+	// existing local user (may have signed up via password or another
+	// provider).
 	existing, err := s.repo.FindUserByEmail(ctx, email)
 	if err != nil {
 		return nil, false, err
 	}
-	now := s.nowMs()
 	if existing != nil {
-		patch := make(map[string]any)
-		if identity.Name != "" && identity.Name != existing.Name {
-			patch["name"] = identity.Name
-			existing.Name = identity.Name
-		}
-		if identity.AvatarURL != "" && identity.AvatarURL != existing.AvatarURL {
-			patch["avatar_url"] = identity.AvatarURL
-			existing.AvatarURL = identity.AvatarURL
-		}
-		if !existing.EmailVerified {
-			patch["email_verified"] = true
-			patch["email_verified_at"] = now
-			existing.EmailVerified = true
-			existing.EmailVerifiedAt = now
-		}
-		if len(patch) > 0 {
-			patch["updated_at"] = now
-			if err := s.repo.UpdateUser(ctx, existing.ID, patch); err != nil {
-				s.logger.Warn("oauth_upsert_update_failed", zap.Error(err))
-			}
-		}
+		s.applyOAuthProfileUpdates(ctx, existing, identity, email, now)
+		s.linkOAuthIdentity(ctx, existing.ID, identity, email, now)
 		return existing, false, nil
 	}
 
+	// 3. New user.
 	displayName := identity.Name
 	if displayName == "" {
 		displayName = strings.Split(email, "@")[0]
@@ -408,12 +415,90 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		CreatedAt:       msToTime(now),
 		UpdatedAt:       msToTime(now),
 	}
+	s.linkOAuthIdentity(ctx, userID, identity, email, now)
 	s.logger.Info("oauth_user_provisioned",
 		zap.String("email", email),
 		zap.String("user_id", userID),
 		zap.String("provider", identity.Provider),
 	)
 	return user, true, nil
+}
+
+// applyOAuthProfileUpdates patches the local user record with any new
+// fields from the provider (name, avatar, email-verified flag, and the
+// email itself when the provider's email has changed since the link was
+// first created). Failures are logged but don't fail the login — we
+// already authenticated the user.
+func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, identity *oauth.Identity, email string, nowMs int64) {
+	patch := make(map[string]any)
+	if identity.Name != "" && identity.Name != u.Name {
+		patch["name"] = identity.Name
+		u.Name = identity.Name
+	}
+	if identity.AvatarURL != "" && identity.AvatarURL != u.AvatarURL {
+		patch["avatar_url"] = identity.AvatarURL
+		u.AvatarURL = identity.AvatarURL
+	}
+	if !u.EmailVerified {
+		patch["email_verified"] = true
+		patch["email_verified_at"] = nowMs
+		u.EmailVerified = true
+		u.EmailVerifiedAt = nowMs
+	}
+	// If the provider asserts a new (verified) email and we found this
+	// user via (provider, sub) — propagate the email change locally.
+	// We deliberately do NOT change email when the local user was
+	// resolved by FindUserByEmail (no change there by definition).
+	if email != "" && email != u.Email {
+		patch["email"] = email
+		patch["email_verified"] = true
+		patch["email_verified_at"] = nowMs
+		u.Email = email
+		u.EmailVerified = true
+		u.EmailVerifiedAt = nowMs
+	}
+	if len(patch) == 0 {
+		return
+	}
+	patch["updated_at"] = nowMs
+	if err := s.repo.UpdateUser(ctx, u.ID, patch); err != nil {
+		s.logger.Warn("oauth_upsert_update_failed", zap.Error(err))
+	}
+}
+
+// linkOAuthIdentity persists the (provider, sub) → user_id linkage and
+// emits an audit event. Best-effort: a failure is logged but does not
+// fail the login since the user has already been authenticated. On a
+// duplicate-link race the duplicate is treated as success — the next
+// login will simply hit the fast path.
+func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, identity *oauth.Identity, email string, nowMs int64) {
+	if identity.ProviderUserID == "" || identity.Provider == "" {
+		return
+	}
+	oi := &OAuthIdentity{
+		UserID:          userID,
+		Provider:        identity.Provider,
+		ProviderUserID:  identity.ProviderUserID,
+		EmailAtLinkTime: email,
+		CreatedAt:       nowMs,
+	}
+	if err := s.repo.CreateOAuthIdentity(ctx, oi); err != nil {
+		s.logger.Warn("oauth_identity_link_failed",
+			zap.String("user_id", userID),
+			zap.String("provider", identity.Provider),
+			zap.Error(err),
+		)
+		return
+	}
+	s.audit.Log(ctx, audit.EventType("oauth_identity_linked"),
+		audit.WithActor(userID),
+		audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{
+			"provider":           identity.Provider,
+			"provider_user_id":   identity.ProviderUserID,
+			"email_at_link_time": email,
+		}),
+	)
 }
 
 // upsertUser finds a user by email or creates one. Returns (user, isNew, error).

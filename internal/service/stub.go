@@ -143,6 +143,15 @@ func (StubRepository) MarkEmailVerificationTokenConsumed(context.Context, string
 func (StubRepository) SetUserEmailVerified(context.Context, string, int64) error {
 	return ErrServiceUnavailable
 }
+func (StubRepository) FindUserByProviderID(context.Context, string, string) (*User, error) {
+	return nil, ErrServiceUnavailable
+}
+func (StubRepository) CreateOAuthIdentity(context.Context, *OAuthIdentity) error {
+	return ErrServiceUnavailable
+}
+func (StubRepository) ListOAuthIdentitiesForUser(context.Context, string) ([]*OAuthIdentity, error) {
+	return nil, ErrServiceUnavailable
+}
 
 // ── StubDB ────────────────────────────────────────────────────────────
 
