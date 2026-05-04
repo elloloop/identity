@@ -18,6 +18,7 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -38,6 +39,13 @@ type Deps struct {
 	// transport from cfg via buildEmailTransport (so production code
 	// only needs to populate this when a test wants a custom recorder).
 	EmailTransport email.Transport
+
+	// OAuthRegistry holds the per-provider Exchangers used for OAuth
+	// login. May be nil — in that case OAuthLogin returns
+	// ErrOAuthDisabled. When nil, New builds a registry from the
+	// config's GATEWAY_*_CLIENT_ID/SECRET env vars (only providers
+	// with both credentials set are registered).
+	OAuthRegistry *oauth.Registry
 }
 
 // New builds the full HTTP handler stack: middleware chain wrapping
@@ -56,7 +64,16 @@ func New(deps Deps) http.Handler {
 		mailer = buildEmailTransport(deps.Config, logger)
 	}
 
-	authSvc := service.NewAuthService(deps.Repo, deps.Config, deps.KeyRing, deps.Passkeys, auditLog, deps.TOTPKey, mailer, logger)
+	oauthRegistry := deps.OAuthRegistry
+	if oauthRegistry == nil {
+		oauthRegistry = buildOAuthRegistry(deps.Config, logger)
+	}
+
+	authSvc := service.NewAuthServiceWithOAuth(
+		deps.Repo, deps.Config, deps.KeyRing, deps.Passkeys,
+		auditLog, deps.TOTPKey, mailer, logger,
+		oauthRegistry,
+	)
 	adminSvc := service.NewAdminService(deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
