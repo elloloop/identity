@@ -18,6 +18,7 @@ import (
 
 	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
 	memrepo "github.com/elloloop/identity/internal/repo/memory"
+	pgrepo "github.com/elloloop/identity/internal/repo/postgres"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -46,8 +47,10 @@ type Config struct {
 	EntDBClient *sdk.DbClient
 	TenantID    string
 
-	// Postgres-specific (TODO: postgres agent fills these in).
-	PostgresDSN string
+	// Postgres-specific.
+	PostgresDSN         string
+	PostgresMaxConns    int
+	PostgresAutoMigrate bool
 }
 
 // Built bundles the constructed Repository + DB pair so callers can
@@ -62,7 +65,7 @@ type Built struct {
 // The Postgres driver is left as a TODO — the Postgres agent owns
 // internal/repo/postgres and will implement Build for the postgres
 // driver in their PR.
-func Build(_ context.Context, cfg Config, logger *zap.Logger) (*Built, error) {
+func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -87,8 +90,29 @@ func Build(_ context.Context, cfg Config, logger *zap.Logger) (*Built, error) {
 			DB:         mem,
 		}, nil
 	case DriverPostgres:
-		// TODO(postgres-agent): wire internal/repo/postgres here.
-		return nil, fmt.Errorf("repo: Build: postgres driver not yet implemented")
+		if cfg.PostgresDSN == "" {
+			return nil, fmt.Errorf("repo: Build: postgres driver requires PostgresDSN (set GATEWAY_POSTGRES_DSN)")
+		}
+		if cfg.TenantID == "" {
+			return nil, fmt.Errorf("repo: Build: postgres driver requires TenantID")
+		}
+		pgRepo, err := pgrepo.New(ctx, pgrepo.Config{
+			DSN:         cfg.PostgresDSN,
+			MaxConns:    int32(cfg.PostgresMaxConns),
+			AutoMigrate: cfg.PostgresAutoMigrate,
+			TenantID:    cfg.TenantID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("repo: Build: postgres: %w", err)
+		}
+		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
+		// pgRepo satisfies service.Repository. The DB adapter for raw-node
+		// audit writes is not yet implemented for postgres — audit events
+		// route through the Repository's CreateAuditEvent path until then.
+		return &Built{
+			Repository: pgRepo,
+			DB:         nil,
+		}, nil
 	default:
 		return nil, fmt.Errorf("repo: Build: unknown driver %q", cfg.Driver)
 	}
