@@ -65,9 +65,9 @@ func TestApplyOrLogSchemaGap_LogsEveryDeclaredNodeType(t *testing.T) {
 
 	require.NoError(t, applyOrLogSchemaGap(context.Background(), nil, logger))
 
-	// Collect type_ids and names from schema_type_declared events.
+	// Collect type_ids and names from schema_loaded events.
 	declared := make(map[string]int32)
-	for _, e := range recorded.FilterMessage("schema_type_declared").All() {
+	for _, e := range recorded.FilterMessage("schema_loaded").All() {
 		fields := e.ContextMap()
 		name, _ := fields["name"].(string)
 		switch v := fields["type_id"].(type) {
@@ -82,7 +82,13 @@ func TestApplyOrLogSchemaGap_LogsEveryDeclaredNodeType(t *testing.T) {
 		"identity schema declared types diverged from expected set; update either schema.proto or the test")
 }
 
-func TestApplyOrLogSchemaGap_LogsRegistrationPendingWarning(t *testing.T) {
+// The previous "schema_registration_pending_upstream_api" warning
+// has been removed: EntDB's schema is client-side, so there is no
+// server-side registration to wait for. The schema_loaded info entries
+// covered by TestApplyOrLogSchemaGap_LogsEveryDeclaredNodeType are the
+// canonical observability signal now. A test that the warning is
+// ABSENT keeps regressions visible if anyone re-introduces it.
+func TestApplyOrLogSchemaGap_NoPendingWarning(t *testing.T) {
 	t.Parallel()
 
 	core, recorded := observer.New(zap.WarnLevel)
@@ -91,12 +97,7 @@ func TestApplyOrLogSchemaGap_LogsRegistrationPendingWarning(t *testing.T) {
 	require.NoError(t, applyOrLogSchemaGap(context.Background(), nil, logger))
 
 	hits := recorded.FilterMessage("schema_registration_pending_upstream_api").All()
-	require.Len(t, hits, 1, "exactly one upstream-gap warning expected")
-
-	fields := hits[0].ContextMap()
-	require.Equal(t, int64(len(expectedNodeTypes)), fields["declared_node_types"])
-	require.Contains(t, fields, "schema_file")
-	require.Contains(t, fields, "hint")
+	require.Len(t, hits, 0, "the wrong upstream-gap warning was re-introduced")
 }
 
 // Identity binaries should never ship with a schema descriptor that

@@ -1,4 +1,4 @@
-package repo
+package entdb
 
 // EntDB field-id constants for every node type the repo package
 // touches. Keys match proto/identity/schema/schema.proto field

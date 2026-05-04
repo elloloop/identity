@@ -11,8 +11,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 h1:NMZiJj8QnKe1LgsbDayM4UoHwbvwDRwnI3hwNaAHRnc=
 github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0/go.mod h1:ZXNYxsqcloTdSy/rNShjYzMhyjf0LaoftYK0p+A3h40=
-github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.1.0 h1:ejkOeqVyhDUj1geWv2EJyd/aVXszQuby/fcNip6m06s=
-github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.1.0/go.mod h1:3rY1lC+wQ25CcAtYML9lGmWc2lfx8F8/nPBqCgvbCd0=
+github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.7.0 h1:sg1ktlskX6xdfsgEDXd/epgUI4DqarrLhLnp1fBGDTs=
+github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.7.0/go.mod h1:3rY1lC+wQ25CcAtYML9lGmWc2lfx8F8/nPBqCgvbCd0=
 github.com/fxamacker/cbor/v2 v2.9.1 h1:2rWm8B193Ll4VdjsJY28jxs70IdDsHRWgQYAI80+rMQ=
 github.com/fxamacker/cbor/v2 v2.9.1/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
