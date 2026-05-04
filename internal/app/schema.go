@@ -1,30 +1,16 @@
-// Schema-apply (gap visibility).
+// Schema declaration listing.
 //
-// The identity service declares its EntDB node and edge types in
-// proto/identity/schema/schema.proto using the upstream
-// (entdb.node) / (entdb.edge) options. Eventually we want to push
-// that descriptor to the EntDB server at startup so the server can
-// enforce indexed/unique field constraints, retention, etc.
+// EntDB's schema is client-side: the SDK reads (entdb.node) /
+// (entdb.edge) options off the proto descriptor at every call site,
+// and the wire format is keyed by proto field id. There is no
+// server-side "register schema" step to wait for — the previous
+// "schema_registration_pending_upstream_api" warning was wrong about
+// the SDK contract.
 //
-// Reality (today): the upstream EntDB SDK does NOT expose a
-// RegisterSchema/ApplySchema method on *DbClient — see
-// /Users/arun/projects/opensource/tenant-shard-db-go/sdk/go/entdb/.
-// The server reads SCHEMA_FILE (yaml) at boot, but its
-// internal/schema/registry.go::LoadDescriptor is a stub. So neither
-// the SDK nor the server has a real schema-apply path yet.
-//
-// This file therefore makes the gap LOUD at startup by:
-//
-//  1. Loading the embedded FileDescriptor for identity's schema.
-//  2. Iterating every message that has an (entdb.node) option.
-//  3. Logging each one as schema_type_declared (so operators can see
-//     the contract identity expects from the database).
-//  4. Logging a single warning summarising the upstream gap.
-//
-// When the SDK eventually ships RegisterSchema (or whatever the
-// final API ends up being), flip applyOrLogSchemaGap from "log
-// gap" to "actually register" — the call site is marked with TODO
-// below.
+// This file therefore loads the embedded FileDescriptor for
+// identity's schema and emits one structured log line per declared
+// node type at startup, so operators can see the contract identity
+// runs against. It does no I/O.
 package app
 
 import (
@@ -50,26 +36,20 @@ import (
 var ErrSchemaMalformed = errors.New("identity schema descriptor is malformed")
 
 // applyOrLogSchemaGap inspects the embedded identity schema
-// descriptor and emits one structured log line per declared node type,
-// followed by a single summary warning describing the upstream
-// schema-apply gap.
-//
-// db is currently unused — it is part of the signature so the call
-// site does not need to change once the upstream SDK ships a real
-// Register/Apply method. Today there is nothing to call.
+// descriptor and emits one structured `schema_loaded` log entry per
+// declared node type. The db argument is reserved so the call site
+// stays stable for any future server-side schema-apply hook the SDK
+// might ship.
 //
 // Returns a non-nil error only when the embedded schema descriptor
 // itself is malformed (missing (entdb.node) on a declared message,
-// duplicate type_ids, etc.). A live database failure would be
-// reported here too once we wire actual RegisterSchema; for now,
-// connectivity errors are the EntDB client's responsibility, not
-// ours.
+// duplicate type_ids, etc.).
 func applyOrLogSchemaGap(ctx context.Context, db service.DB, logger *zap.Logger) error {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	_ = ctx
-	_ = db // reserved for upstream RegisterSchema call — see TODO below.
+	_ = db
 
 	fd := (&identityschema.User{}).ProtoReflect().Descriptor().ParentFile()
 	if fd == nil {
@@ -86,36 +66,13 @@ func applyOrLogSchemaGap(ctx context.Context, db service.DB, logger *zap.Logger)
 	}
 
 	for _, t := range declared {
-		logger.Info("schema_type_declared",
+		logger.Info("schema_loaded",
 			zap.Int32("type_id", t.TypeID),
 			zap.String("name", t.Name),
 			zap.String("data_policy", t.DataPolicy),
 			zap.String("subject_field", t.SubjectField),
 		)
 	}
-
-	logger.Warn("schema_registration_pending_upstream_api",
-		zap.Int("declared_node_types", len(declared)),
-		zap.String("schema_file", string(fd.Path())),
-		zap.String("hint",
-			"identity declares the node types listed above; entdb's SDK does not "+
-				"yet expose a Register/Apply method (server's internal "+
-				"LoadDescriptor is a stub). Operations work today via permissive "+
-				"defaults but indexed/unique fields and type-level validation "+
-				"depend on upstream completing the schema registry. Track in "+
-				"upstream tenant-shard-db-go repo."),
-	)
-
-	// TODO(upstream-schema-apply): when github.com/elloloop/tenant-shard-db
-	// ships a RegisterSchema (or ApplySchema) method on *entdb.DbClient, call
-	// it here with the FileDescriptorProto built from fd. Until then, this
-	// function only logs the contract identity expects.
-	//
-	//	if applier, ok := any(db).(interface {
-	//	        RegisterSchema(context.Context, *descriptorpb.FileDescriptorProto) error
-	//	}); ok {
-	//	        return applier.RegisterSchema(ctx, protodesc.ToFileDescriptorProto(fd))
-	//	}
 
 	return nil
 }

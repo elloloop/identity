@@ -1,11 +1,11 @@
-package repo
+package entdb
 
 import (
 	"context"
 	"fmt"
 	"time"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -18,24 +18,32 @@ const systemActor = "user:system"
 // entRepository is the EntDB-backed implementation of
 // service.Repository.
 type entRepository struct {
-	client   entdbClient
+	client   Client
 	tenantID string
 }
 
-// NewEntDBRepository constructs an EntDB-backed Repository using the
-// transport owned by *entdb.DbClient. Both the auth and admin code
-// paths share the same client so writes and reads are visible to
-// each other within the same gRPC connection.
-func NewEntDBRepository(client *entdb.DbClient, tenantID string) service.Repository {
+// NewRepository constructs an EntDB-backed Repository using the SDK's
+// public typed surface. Both the auth and admin code paths share the
+// same client so writes and reads are visible to each other within
+// the same gRPC connection.
+//
+// Internally every read/write goes through a Client adapter built on
+// top of the SDK's `Plan.Create(&schemapb.X{...})` /
+// `sdk.Get[*schemapb.X]` / `sdk.Query[*schemapb.X]` /
+// `sdk.GetByKey[T]` / `Scope.EdgesFrom` API — there is no `unsafe`,
+// no reflection of the SDK's private `transport` field. See
+// `transport.go` for the witness-table that maps the legacy numeric
+// type_id used by service.DB to a typed proto witness.
+func NewRepository(client *sdk.DbClient, tenantID string) service.Repository {
 	return &entRepository{
-		client:   extractTransport(client),
+		client:   NewSDKClient(client),
 		tenantID: tenantID,
 	}
 }
 
-// newEntRepositoryFromClient is the test seam: it accepts an
-// entdbClient interface so unit tests can drop in a fake.
-func newEntRepositoryFromClient(c entdbClient, tenantID string) *entRepository {
+// NewRepositoryWithClient is the test seam: it accepts a Client
+// interface so unit tests can drop in a fake.
+func NewRepositoryWithClient(c Client, tenantID string) service.Repository {
 	return &entRepository{client: c, tenantID: tenantID}
 }
 
@@ -89,7 +97,7 @@ func pb(p map[string]any, k string) bool {
 // nodeFromQuery returns the first node (or nil if none) from a
 // QueryNodes result. Callers that look up by a unique field rely on
 // at-most-one semantics.
-func firstNode(nodes []*entdb.Node) *entdb.Node {
+func firstNode(nodes []*sdk.Node) *sdk.Node {
 	if len(nodes) == 0 {
 		return nil
 	}
@@ -98,7 +106,7 @@ func firstNode(nodes []*entdb.Node) *entdb.Node {
 
 // ── Users ─────────────────────────────────────────────────────────
 
-func userFromNode(n *entdb.Node) *service.User {
+func userFromNode(n *sdk.Node) *service.User {
 	if n == nil {
 		return nil
 	}
@@ -196,7 +204,7 @@ func (r *entRepository) CreateUser(ctx context.Context, u *service.User) (string
 	}
 
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeUser, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typeUser, Data: data}})
 	if err != nil {
 		return "", fmt.Errorf("repo: CreateUser: %w", err)
 	}
@@ -217,7 +225,7 @@ func (r *entRepository) UpdateUser(ctx context.Context, userID string, fields ma
 		return nil
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "",
-		[]entdb.Operation{{Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: userID, Patch: patch}})
+		[]sdk.Operation{{Type: sdk.OpUpdateNode, TypeID: typeUser, NodeID: userID, Patch: patch}})
 	if err != nil {
 		return fmt.Errorf("repo: UpdateUser: %w", err)
 	}
@@ -288,8 +296,8 @@ func (r *entRepository) SetUserEmailVerified(ctx context.Context, userID string,
 		return fmt.Errorf("repo: SetUserEmailVerified: missing user id")
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "",
-		[]entdb.Operation{{
-			Type:   entdb.OpUpdateNode,
+		[]sdk.Operation{{
+			Type:   sdk.OpUpdateNode,
 			TypeID: typeUser,
 			NodeID: userID,
 			Patch: map[string]any{
@@ -306,7 +314,7 @@ func (r *entRepository) SetUserEmailVerified(ctx context.Context, userID string,
 
 // ── Refresh tokens ────────────────────────────────────────────────
 
-func refreshTokenFromNode(n *entdb.Node) *service.RefreshTokenRecord {
+func refreshTokenFromNode(n *sdk.Node) *service.RefreshTokenRecord {
 	if n == nil {
 		return nil
 	}
@@ -363,7 +371,7 @@ func (r *entRepository) ConsumeRefreshTokenByHash(ctx context.Context, hash stri
 		return service.ErrUnauthenticated
 	}
 	_, err = r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpUpdateNode, TypeID: typeRefreshToken, NodeID: rec.NodeID,
+		[]sdk.Operation{{Type: sdk.OpUpdateNode, TypeID: typeRefreshToken, NodeID: rec.NodeID,
 			Data: map[string]any{rfConsumedAt: atMs}}})
 	if err != nil {
 		return fmt.Errorf("repo: ConsumeRefreshTokenByHash: %w", err)
@@ -395,7 +403,7 @@ func (r *entRepository) CreateRefreshToken(ctx context.Context, t *service.Refre
 		data[rfUserAgent] = t.UserAgent
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(t.UserID), "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeRefreshToken, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typeRefreshToken, Data: data}})
 	if err != nil {
 		return "", fmt.Errorf("repo: CreateRefreshToken: %w", err)
 	}
@@ -412,7 +420,7 @@ func (r *entRepository) DeleteRefreshToken(ctx context.Context, nodeID string) e
 		return nil
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpDeleteNode, TypeID: typeRefreshToken, NodeID: nodeID}})
+		[]sdk.Operation{{Type: sdk.OpDeleteNode, TypeID: typeRefreshToken, NodeID: nodeID}})
 	if err != nil {
 		return fmt.Errorf("repo: DeleteRefreshToken: %w", err)
 	}
@@ -431,9 +439,9 @@ func (r *entRepository) DeleteRefreshTokensForUser(ctx context.Context, userID s
 	if len(nodes) == 0 {
 		return nil
 	}
-	ops := make([]entdb.Operation, 0, len(nodes))
+	ops := make([]sdk.Operation, 0, len(nodes))
 	for _, n := range nodes {
-		ops = append(ops, entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeRefreshToken, NodeID: n.NodeID})
+		ops = append(ops, sdk.Operation{Type: sdk.OpDeleteNode, TypeID: typeRefreshToken, NodeID: n.NodeID})
 	}
 	if _, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "", ops); err != nil {
 		return fmt.Errorf("repo: DeleteRefreshTokensForUser commit: %w", err)
@@ -443,7 +451,7 @@ func (r *entRepository) DeleteRefreshTokensForUser(ctx context.Context, userID s
 
 // ── Passkey credentials ───────────────────────────────────────────
 
-func passkeyCredFromNode(n *entdb.Node) *service.PasskeyCredRecord {
+func passkeyCredFromNode(n *sdk.Node) *service.PasskeyCredRecord {
 	if n == nil {
 		return nil
 	}
@@ -512,7 +520,7 @@ func (r *entRepository) CreatePasskeyCredential(ctx context.Context, c *service.
 		data[pkTransports] = c.Transports
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(c.UserID), "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typePasskeyCredential, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typePasskeyCredential, Data: data}})
 	if err != nil {
 		return "", fmt.Errorf("repo: CreatePasskeyCredential: %w", err)
 	}
@@ -543,7 +551,7 @@ func (r *entRepository) UpdatePasskeyCredential(ctx context.Context, nodeID stri
 		return nil
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpUpdateNode, TypeID: typePasskeyCredential, NodeID: nodeID, Patch: patch}})
+		[]sdk.Operation{{Type: sdk.OpUpdateNode, TypeID: typePasskeyCredential, NodeID: nodeID, Patch: patch}})
 	if err != nil {
 		return fmt.Errorf("repo: UpdatePasskeyCredential: %w", err)
 	}
@@ -552,7 +560,7 @@ func (r *entRepository) UpdatePasskeyCredential(ctx context.Context, nodeID stri
 
 // ── Passkey challenges ────────────────────────────────────────────
 
-func passkeyChallengeFromNode(n *entdb.Node) *service.PasskeyChallengeRecord {
+func passkeyChallengeFromNode(n *sdk.Node) *service.PasskeyChallengeRecord {
 	if n == nil {
 		return nil
 	}
@@ -592,7 +600,7 @@ func (r *entRepository) CreatePasskeyChallenge(ctx context.Context, c *service.P
 		data[pcUserID] = c.UserID
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(c.UserID), "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typePasskeyChallenge, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typePasskeyChallenge, Data: data}})
 	if err != nil {
 		return "", fmt.Errorf("repo: CreatePasskeyChallenge: %w", err)
 	}
@@ -609,7 +617,7 @@ func (r *entRepository) DeletePasskeyChallenge(ctx context.Context, nodeID strin
 		return nil
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpDeleteNode, TypeID: typePasskeyChallenge, NodeID: nodeID}})
+		[]sdk.Operation{{Type: sdk.OpDeleteNode, TypeID: typePasskeyChallenge, NodeID: nodeID}})
 	if err != nil {
 		return fmt.Errorf("repo: DeletePasskeyChallenge: %w", err)
 	}
@@ -618,7 +626,7 @@ func (r *entRepository) DeletePasskeyChallenge(ctx context.Context, nodeID strin
 
 // ── QR login sessions ─────────────────────────────────────────────
 
-func qrSessionFromNode(n *entdb.Node) *service.QrLoginSessionRecord {
+func qrSessionFromNode(n *sdk.Node) *service.QrLoginSessionRecord {
 	if n == nil {
 		return nil
 	}
@@ -677,7 +685,7 @@ func (r *entRepository) CreateQrLoginSession(ctx context.Context, s *service.QrL
 		data[qrApprovedDeviceInfo] = s.ApprovedDeviceInfo
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeQrLoginSession, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typeQrLoginSession, Data: data}})
 	if err != nil {
 		return "", fmt.Errorf("repo: CreateQrLoginSession: %w", err)
 	}
@@ -710,7 +718,7 @@ func (r *entRepository) UpdateQrLoginSession(ctx context.Context, nodeID string,
 		return nil
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpUpdateNode, TypeID: typeQrLoginSession, NodeID: nodeID, Patch: patch}})
+		[]sdk.Operation{{Type: sdk.OpUpdateNode, TypeID: typeQrLoginSession, NodeID: nodeID, Patch: patch}})
 	if err != nil {
 		return fmt.Errorf("repo: UpdateQrLoginSession: %w", err)
 	}
@@ -719,7 +727,7 @@ func (r *entRepository) UpdateQrLoginSession(ctx context.Context, nodeID string,
 
 // ── TOTP credentials ──────────────────────────────────────────────
 
-func totpCredFromNode(n *entdb.Node) *service.TotpCredRecord {
+func totpCredFromNode(n *sdk.Node) *service.TotpCredRecord {
 	if n == nil {
 		return nil
 	}
@@ -758,7 +766,7 @@ func (r *entRepository) CreateTotpCredential(ctx context.Context, c *service.Tot
 		tcLastUsedAt:      c.LastUsedAt,
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(c.UserID), "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeTotpCredential, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typeTotpCredential, Data: data}})
 	if err != nil {
 		return "", fmt.Errorf("repo: CreateTotpCredential: %w", err)
 	}
@@ -789,7 +797,7 @@ func (r *entRepository) UpdateTotpCredential(ctx context.Context, nodeID string,
 		return nil
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpUpdateNode, TypeID: typeTotpCredential, NodeID: nodeID, Patch: patch}})
+		[]sdk.Operation{{Type: sdk.OpUpdateNode, TypeID: typeTotpCredential, NodeID: nodeID, Patch: patch}})
 	if err != nil {
 		return fmt.Errorf("repo: UpdateTotpCredential: %w", err)
 	}
@@ -801,7 +809,7 @@ func (r *entRepository) DeleteTotpCredential(ctx context.Context, nodeID string)
 		return nil
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpDeleteNode, TypeID: typeTotpCredential, NodeID: nodeID}})
+		[]sdk.Operation{{Type: sdk.OpDeleteNode, TypeID: typeTotpCredential, NodeID: nodeID}})
 	if err != nil {
 		return fmt.Errorf("repo: DeleteTotpCredential: %w", err)
 	}
@@ -820,9 +828,9 @@ func (r *entRepository) DeleteTotpCredentialsForUser(ctx context.Context, userID
 	if len(nodes) == 0 {
 		return nil
 	}
-	ops := make([]entdb.Operation, 0, len(nodes))
+	ops := make([]sdk.Operation, 0, len(nodes))
 	for _, n := range nodes {
-		ops = append(ops, entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeTotpCredential, NodeID: n.NodeID})
+		ops = append(ops, sdk.Operation{Type: sdk.OpDeleteNode, TypeID: typeTotpCredential, NodeID: n.NodeID})
 	}
 	if _, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "", ops); err != nil {
 		return fmt.Errorf("repo: DeleteTotpCredentialsForUser commit: %w", err)
@@ -832,7 +840,7 @@ func (r *entRepository) DeleteTotpCredentialsForUser(ctx context.Context, userID
 
 // ── Recovery codes ────────────────────────────────────────────────
 
-func recoveryCodeFromNode(n *entdb.Node) *service.RecoveryCodeRecord {
+func recoveryCodeFromNode(n *sdk.Node) *service.RecoveryCodeRecord {
 	if n == nil {
 		return nil
 	}
@@ -861,7 +869,7 @@ func (r *entRepository) CreateRecoveryCode(ctx context.Context, c *service.Recov
 		data[rcUsedAt] = c.UsedAt
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(c.UserID), "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeRecoveryCode, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typeRecoveryCode, Data: data}})
 	if err != nil {
 		return "", fmt.Errorf("repo: CreateRecoveryCode: %w", err)
 	}
@@ -902,7 +910,7 @@ func (r *entRepository) UpdateRecoveryCode(ctx context.Context, nodeID string, f
 		return nil
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpUpdateNode, TypeID: typeRecoveryCode, NodeID: nodeID, Patch: patch}})
+		[]sdk.Operation{{Type: sdk.OpUpdateNode, TypeID: typeRecoveryCode, NodeID: nodeID, Patch: patch}})
 	if err != nil {
 		return fmt.Errorf("repo: UpdateRecoveryCode: %w", err)
 	}
@@ -921,9 +929,9 @@ func (r *entRepository) DeleteRecoveryCodesForUser(ctx context.Context, userID s
 	if len(nodes) == 0 {
 		return nil
 	}
-	ops := make([]entdb.Operation, 0, len(nodes))
+	ops := make([]sdk.Operation, 0, len(nodes))
 	for _, n := range nodes {
-		ops = append(ops, entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeRecoveryCode, NodeID: n.NodeID})
+		ops = append(ops, sdk.Operation{Type: sdk.OpDeleteNode, TypeID: typeRecoveryCode, NodeID: n.NodeID})
 	}
 	if _, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "", ops); err != nil {
 		return fmt.Errorf("repo: DeleteRecoveryCodesForUser commit: %w", err)
@@ -933,7 +941,7 @@ func (r *entRepository) DeleteRecoveryCodesForUser(ctx context.Context, userID s
 
 // ── Login challenges ──────────────────────────────────────────────
 
-func loginChallengeFromNode(n *entdb.Node) *service.LoginChallengeRecord {
+func loginChallengeFromNode(n *sdk.Node) *service.LoginChallengeRecord {
 	if n == nil {
 		return nil
 	}
@@ -958,7 +966,7 @@ func (r *entRepository) CreateLoginChallenge(ctx context.Context, c *service.Log
 		lcCreatedAt:   c.CreatedAt,
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(c.UserID), "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeLoginChallenge, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typeLoginChallenge, Data: data}})
 	if err != nil {
 		return "", fmt.Errorf("repo: CreateLoginChallenge: %w", err)
 	}
@@ -987,7 +995,7 @@ func (r *entRepository) DeleteLoginChallenge(ctx context.Context, nodeID string)
 		return nil
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpDeleteNode, TypeID: typeLoginChallenge, NodeID: nodeID}})
+		[]sdk.Operation{{Type: sdk.OpDeleteNode, TypeID: typeLoginChallenge, NodeID: nodeID}})
 	if err != nil {
 		return fmt.Errorf("repo: DeleteLoginChallenge: %w", err)
 	}
@@ -996,7 +1004,7 @@ func (r *entRepository) DeleteLoginChallenge(ctx context.Context, nodeID string)
 
 // ── User invitations ──────────────────────────────────────────────
 
-func invitationFromNode(n *entdb.Node) *service.InvitationRecord {
+func invitationFromNode(n *sdk.Node) *service.InvitationRecord {
 	if n == nil {
 		return nil
 	}
@@ -1043,7 +1051,7 @@ func (r *entRepository) UpdateInvitation(ctx context.Context, nodeID string, fie
 		return nil
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{Type: entdb.OpUpdateNode, TypeID: typeUserInvitation, NodeID: nodeID, Patch: patch}})
+		[]sdk.Operation{{Type: sdk.OpUpdateNode, TypeID: typeUserInvitation, NodeID: nodeID, Patch: patch}})
 	if err != nil {
 		return fmt.Errorf("repo: UpdateInvitation: %w", err)
 	}
@@ -1052,7 +1060,7 @@ func (r *entRepository) UpdateInvitation(ctx context.Context, nodeID string, fie
 
 // ── Password-reset tokens ─────────────────────────────────────────
 
-func passwordResetFromNode(n *entdb.Node) *service.PasswordResetToken {
+func passwordResetFromNode(n *sdk.Node) *service.PasswordResetToken {
 	if n == nil {
 		return nil
 	}
@@ -1081,7 +1089,7 @@ func (r *entRepository) CreatePasswordResetToken(ctx context.Context, t *service
 		data[prConsumedAt] = t.ConsumedAt
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(t.UserID), "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typePasswordResetToken, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typePasswordResetToken, Data: data}})
 	if err != nil {
 		return fmt.Errorf("repo: CreatePasswordResetToken: %w", err)
 	}
@@ -1110,8 +1118,8 @@ func (r *entRepository) MarkPasswordResetTokenConsumed(ctx context.Context, toke
 		return fmt.Errorf("repo: MarkPasswordResetTokenConsumed: missing token id")
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{
-			Type:   entdb.OpUpdateNode,
+		[]sdk.Operation{{
+			Type:   sdk.OpUpdateNode,
 			TypeID: typePasswordResetToken,
 			NodeID: tokenID,
 			Patch:  map[string]any{prConsumedAt: atMs},
@@ -1124,7 +1132,7 @@ func (r *entRepository) MarkPasswordResetTokenConsumed(ctx context.Context, toke
 
 // ── Email-verification tokens ─────────────────────────────────────
 
-func emailVerificationFromNode(n *entdb.Node) *service.EmailVerificationToken {
+func emailVerificationFromNode(n *sdk.Node) *service.EmailVerificationToken {
 	if n == nil {
 		return nil
 	}
@@ -1157,7 +1165,7 @@ func (r *entRepository) CreateEmailVerificationToken(ctx context.Context, t *ser
 		data[evConsumedAt] = t.ConsumedAt
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(t.UserID), "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeEmailVerificationToken, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typeEmailVerificationToken, Data: data}})
 	if err != nil {
 		return fmt.Errorf("repo: CreateEmailVerificationToken: %w", err)
 	}
@@ -1186,8 +1194,8 @@ func (r *entRepository) MarkEmailVerificationTokenConsumed(ctx context.Context, 
 		return fmt.Errorf("repo: MarkEmailVerificationTokenConsumed: missing token id")
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{
-			Type:   entdb.OpUpdateNode,
+		[]sdk.Operation{{
+			Type:   sdk.OpUpdateNode,
 			TypeID: typeEmailVerificationToken,
 			NodeID: tokenID,
 			Patch:  map[string]any{evConsumedAt: atMs},
@@ -1213,8 +1221,8 @@ func (r *entRepository) IncrementFailedLoginCount(ctx context.Context, userID st
 	}
 	newCount := int32(user.FailedLoginCount + 1)
 	_, err = r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "",
-		[]entdb.Operation{{
-			Type:   entdb.OpUpdateNode,
+		[]sdk.Operation{{
+			Type:   sdk.OpUpdateNode,
 			TypeID: typeUser,
 			NodeID: userID,
 			Patch:  map[string]any{ufFailedLoginCount: int64(newCount)},
@@ -1230,8 +1238,8 @@ func (r *entRepository) ResetFailedLoginCount(ctx context.Context, userID string
 		return fmt.Errorf("repo: ResetFailedLoginCount: missing user id")
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "",
-		[]entdb.Operation{{
-			Type:   entdb.OpUpdateNode,
+		[]sdk.Operation{{
+			Type:   sdk.OpUpdateNode,
 			TypeID: typeUser,
 			NodeID: userID,
 			Patch: map[string]any{
@@ -1250,8 +1258,8 @@ func (r *entRepository) SetUserLockedUntil(ctx context.Context, userID string, l
 		return fmt.Errorf("repo: SetUserLockedUntil: missing user id")
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "",
-		[]entdb.Operation{{
-			Type:   entdb.OpUpdateNode,
+		[]sdk.Operation{{
+			Type:   sdk.OpUpdateNode,
 			TypeID: typeUser,
 			NodeID: userID,
 			Patch:  map[string]any{ufLockedUntil: lockedUntilMs},
@@ -1264,7 +1272,7 @@ func (r *entRepository) SetUserLockedUntil(ctx context.Context, userID string, l
 
 // ── EmailChangeToken ──────────────────────────────────────────────
 
-func emailChangeFromNode(n *entdb.Node) *service.EmailChangeToken {
+func emailChangeFromNode(n *sdk.Node) *service.EmailChangeToken {
 	if n == nil {
 		return nil
 	}
@@ -1297,7 +1305,7 @@ func (r *entRepository) CreateEmailChangeToken(ctx context.Context, t *service.E
 		data[ecConsumedAt] = t.ConsumedAt
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(t.UserID), "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeEmailChangeToken, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typeEmailChangeToken, Data: data}})
 	if err != nil {
 		return fmt.Errorf("repo: CreateEmailChangeToken: %w", err)
 	}
@@ -1326,8 +1334,8 @@ func (r *entRepository) MarkEmailChangeTokenConsumed(ctx context.Context, tokenI
 		return fmt.Errorf("repo: MarkEmailChangeTokenConsumed: missing token id")
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
-		[]entdb.Operation{{
-			Type:   entdb.OpUpdateNode,
+		[]sdk.Operation{{
+			Type:   sdk.OpUpdateNode,
 			TypeID: typeEmailChangeToken,
 			NodeID: tokenID,
 			Patch:  map[string]any{ecConsumedAt: atMs},
@@ -1343,8 +1351,8 @@ func (r *entRepository) UpdateUserEmail(ctx context.Context, userID, newEmail st
 		return fmt.Errorf("repo: UpdateUserEmail: missing user id")
 	}
 	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "",
-		[]entdb.Operation{{
-			Type:   entdb.OpUpdateNode,
+		[]sdk.Operation{{
+			Type:   sdk.OpUpdateNode,
 			TypeID: typeUser,
 			NodeID: userID,
 			Patch: map[string]any{
@@ -1362,7 +1370,7 @@ func (r *entRepository) UpdateUserEmail(ctx context.Context, userID, newEmail st
 
 // ── OAuthIdentity ─────────────────────────────────────────────────
 
-func oauthIdentityFromNode(n *entdb.Node) *service.OAuthIdentity {
+func oauthIdentityFromNode(n *sdk.Node) *service.OAuthIdentity {
 	if n == nil {
 		return nil
 	}
@@ -1405,7 +1413,7 @@ func (r *entRepository) CreateOAuthIdentity(ctx context.Context, oi *service.OAu
 		oiCreatedAt:      oi.CreatedAt,
 	}
 	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(oi.UserID), "",
-		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeOAuthIdentity, Data: data}})
+		[]sdk.Operation{{Type: sdk.OpCreateNode, TypeID: typeOAuthIdentity, Data: data}})
 	if err != nil {
 		return fmt.Errorf("repo: CreateOAuthIdentity: %w", err)
 	}

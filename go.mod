@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	connectrpc.com/connect v1.19.2
-	github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.1.0
+	github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.7.0
 	github.com/go-webauthn/webauthn v0.17.0
 	github.com/lestrrat-go/jwx/v2 v2.1.6
 	github.com/pquerna/otp v1.5.0
@@ -51,4 +51,3 @@ require (
 	google.golang.org/grpc v1.80.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-

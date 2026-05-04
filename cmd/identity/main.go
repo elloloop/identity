@@ -113,12 +113,21 @@ func main() {
 	}
 
 	// ── Repository / DB adapters ─────────────────────────────────────
-	// Both wrap the same *entdb.DbClient: NewEntDBRepository provides
-	// the typed CRUD surface used by AuthService, NewDBAdapter provides
-	// the raw-node surface used by admin/groups/help/profile services
-	// and by the audit logger.
-	authRepo := repo.NewEntDBRepository(db, cfg.DefaultTenantID)
-	dbAdapter := repo.NewDBAdapter(db)
+	// repo.Build dispatches on cfg.RepoDriver and returns matching
+	// service.Repository + service.DB implementations. Both share a
+	// single *entdb.DbClient when the entdb driver is selected, so
+	// writes and reads in one process see each other.
+	built, err := repo.Build(context.Background(), repo.Config{
+		Driver:      repo.Driver(cfg.RepoDriver),
+		EntDBClient: db,
+		TenantID:    cfg.DefaultTenantID,
+		PostgresDSN: cfg.PostgresDSN,
+	}, logger)
+	if err != nil {
+		logger.Fatal("repo_build_failed", zap.Error(err))
+	}
+	authRepo := built.Repository
+	dbAdapter := built.DB
 
 	// ── Build HTTP handler via shared wiring ─────────────────────────
 	chain := app.New(app.Deps{

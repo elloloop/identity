@@ -21,8 +21,17 @@ type Config struct {
 	ConnectPort int
 	MetricsPort int
 
+	// Persistence driver. Selects which Repository / DB
+	// implementation the binary wires up — "entdb" (default), "memory"
+	// for an in-process store useful for local dev, or "postgres"
+	// once the Postgres driver lands. Driven by GATEWAY_REPO_DRIVER.
+	RepoDriver string
+
 	// EntDB
 	EntDBAddress string
+
+	// Postgres (TODO: postgres driver).
+	PostgresDSN string
 
 	// Tenant
 	DefaultTenantID string
@@ -119,7 +128,9 @@ func Load() *Config {
 		ConnectPort: envInt("GATEWAY_CONNECT_PORT", 80),
 		MetricsPort: envInt("GATEWAY_METRICS_PORT", 9090),
 
+		RepoDriver:   envStr("GATEWAY_REPO_DRIVER", "entdb"),
 		EntDBAddress: envStr("GATEWAY_ENTDB_ADDRESS", "entdb:50051"),
+		PostgresDSN:  envStr("GATEWAY_POSTGRES_DSN", ""),
 
 		DefaultTenantID: envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
 
