@@ -122,6 +122,27 @@ func (StubRepository) FindInvitationByHash(context.Context, string) (*Invitation
 func (StubRepository) UpdateInvitation(context.Context, string, map[string]any) error {
 	return ErrServiceUnavailable
 }
+func (StubRepository) CreatePasswordResetToken(context.Context, *PasswordResetToken) error {
+	return ErrServiceUnavailable
+}
+func (StubRepository) FindPasswordResetTokenByHash(context.Context, string) (*PasswordResetToken, error) {
+	return nil, ErrServiceUnavailable
+}
+func (StubRepository) MarkPasswordResetTokenConsumed(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
+func (StubRepository) CreateEmailVerificationToken(context.Context, *EmailVerificationToken) error {
+	return ErrServiceUnavailable
+}
+func (StubRepository) FindEmailVerificationTokenByHash(context.Context, string) (*EmailVerificationToken, error) {
+	return nil, ErrServiceUnavailable
+}
+func (StubRepository) MarkEmailVerificationTokenConsumed(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
+func (StubRepository) SetUserEmailVerified(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
 
 // ── StubDB ────────────────────────────────────────────────────────────
 
