@@ -25,7 +25,7 @@
 
 services:
   entdb:
-    image: ghcr.io/elloloop/tenant-shard-db:0.5.1
+    image: ghcr.io/elloloop/tenant-shard-db:1
     environment:
       GRPC_BIND: 0.0.0.0:50051
       WAL_BACKEND: local
