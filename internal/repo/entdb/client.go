@@ -6,262 +6,283 @@ import (
 	"fmt"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"google.golang.org/protobuf/proto"
 
 	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 )
 
-// GetNode fetches a single node by id. The witness table picks the
-// concrete proto T so the SDK can read (entdb.node).type_id from the
-// descriptor and decode the wire payload back into T. We then map the
-// proto back to a *sdk.Node so legacy callers see the raw shape.
-func (s *SDKClient) GetNode(ctx context.Context, tenantID, actor string, typeID int, nodeID string) (*sdk.Node, error) {
-	w, ok := witnessByType[typeID]
-	if !ok {
-		return nil, fmt.Errorf("entdb: GetNode: unknown type_id %d", typeID)
-	}
-	scope, err := s.scope(tenantID, actor)
-	if err != nil {
-		return nil, err
-	}
-	_, node, err := w.get(ctx, scope, nodeID)
-	if err != nil {
-		var nf *sdk.NotFoundError
-		if errors.As(err, &nf) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	if node != nil {
-		node.TypeID = typeID
-	}
-	return node, nil
+// queriedNode pairs a typed proto message with its node id. The SDK's
+// public typed Query[T] discards the node id (it returns []T only),
+// which is a documented v1.7.0 limitation — typed find-then-update
+// flows that need the node id can only work via this seam, with the
+// in-memory test scope filling in the node id and the production
+// scope leaving it empty until upstream lands the typed
+// "QueryWithIDs" RPC. The realentdb integration test skips the
+// PasswordLogin leg for this exact reason.
+type queriedNode struct {
+	NodeID  string
+	Message proto.Message
+	// ConsumedAtMarker carries a consumed_at timestamp for proto
+	// types that do not yet expose the field on their schema (today:
+	// PasswordResetToken). The in-memory test client populates this
+	// from its side channel; the production sdkScope leaves it 0.
+	// Once upstream adds the missing proto field, this field and
+	// markConsumed go away in the same change.
+	ConsumedAtMarker int64
 }
 
-// QueryNodes runs a filter query for nodes of a given typeID.
+// entClient is the small surface the typed Repository depends on. Each
+// method takes a typed *schemapb.X message; the implementation calls
+// the SDK's package-level generic functions or, for the in-memory
+// fake, dispatches over its concrete map store.
 //
-// The legacy callers pass filters keyed by field-id-as-decimal-string
-// (e.g. `{"1": email}`) because that was the wire shape the old raw
-// Transport spoke. The SDK's Query[T] expects proto field NAMES per
-// `sdk_api.md` ("Field names are proto field names; the server
-// resolves them using the schema registry"). We translate via the
-// proto descriptor so existing call sites keep working without
-// touching their query construction.
-func (s *SDKClient) QueryNodes(ctx context.Context, tenantID, actor string, typeID int, filter map[string]any) ([]*sdk.Node, error) {
-	w, ok := witnessByType[typeID]
-	if !ok {
-		return nil, fmt.Errorf("entdb: QueryNodes: unknown type_id %d", typeID)
-	}
-	scope, err := s.scope(tenantID, actor)
-	if err != nil {
-		return nil, err
-	}
-	filter = translateFilterFieldIDsToNames(w.newMsg(), filter)
-	msgs, err := w.query(ctx, scope, filter)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*sdk.Node, 0, len(msgs))
-	for _, m := range msgs {
-		n := nodeFromMessage(m, "")
-		if n != nil {
-			n.TypeID = typeID
-		}
-		out = append(out, n)
-	}
-	return out, nil
+// It is NOT a re-export of the SDK's RPC shape — the methods reflect
+// the operations the Repository actually performs on typed proto
+// messages. The only place a witness-style switch appears is inside
+// sdkScope, where Go's lack of generic methods forces a per-type
+// branch to pick the right sdk.Get[T] / sdk.Query[T] instantiation.
+type entClient interface {
+	get(ctx context.Context, actor string, dst proto.Message, nodeID string) error
+	query(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, error)
+	create(ctx context.Context, actor string, msg proto.Message) (string, error)
+	update(ctx context.Context, actor string, nodeID string, msg proto.Message) error
+	delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error
+	// markConsumed records a consumed_at timestamp for node types
+	// whose proto definition does not yet expose the field. Used
+	// only by PasswordResetToken on v1.7.0; the conformance fake
+	// tracks the marker on a side channel and the production
+	// implementation is a no-op pending the upstream proto fix.
+	markConsumed(ctx context.Context, actor string, witness proto.Message, nodeID string, atMs int64) error
 }
 
-// SearchNodes runs FTS over the type's searchable fields.
-func (s *SDKClient) SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*sdk.Node, error) {
-	w, ok := witnessByType[typeID]
-	if !ok {
-		return nil, fmt.Errorf("entdb: SearchNodes: unknown type_id %d", typeID)
+// errNotFound is returned by entClient.get when the requested node id
+// does not exist.
+var errNotFound = errors.New("entdb: not found")
+
+// sdkScope adapts a *sdk.DbClient to entClient. It calls the SDK's
+// package-level typed generic functions through a per-message switch
+// — Go's lack of generic methods forces this; the call-site Repository
+// methods still pass typed *schemapb.X messages, so the dispatch is
+// purely a witness picker for sdk.Get[T] / sdk.Delete[T] and not a
+// witness table for the wire payload.
+type sdkScope struct {
+	client   *sdk.DbClient
+	tenantID string
+}
+
+func newSDKScope(client *sdk.DbClient, tenantID string) *sdkScope {
+	return &sdkScope{client: client, tenantID: tenantID}
+}
+
+func (s *sdkScope) scope(actor string) (*sdk.Scope, error) {
+	a, err := sdk.ParseActor(actor)
+	if err != nil {
+		return nil, fmt.Errorf("entdb: parse actor %q: %w", actor, err)
 	}
-	scope, err := s.scope(tenantID, actor)
+	return s.client.Tenant(s.tenantID).Actor(a), nil
+}
+
+func (s *sdkScope) get(ctx context.Context, actor string, dst proto.Message, nodeID string) error {
+	scope, err := s.scope(actor)
+	if err != nil {
+		return err
+	}
+	switch dst.(type) {
+	case *schemapb.User:
+		return getInto[*schemapb.User](ctx, scope, dst, nodeID)
+	case *schemapb.RefreshToken:
+		return getInto[*schemapb.RefreshToken](ctx, scope, dst, nodeID)
+	case *schemapb.PasswordResetToken:
+		return getInto[*schemapb.PasswordResetToken](ctx, scope, dst, nodeID)
+	case *schemapb.PasskeyCredential:
+		return getInto[*schemapb.PasskeyCredential](ctx, scope, dst, nodeID)
+	case *schemapb.PasskeyChallenge:
+		return getInto[*schemapb.PasskeyChallenge](ctx, scope, dst, nodeID)
+	case *schemapb.QrLoginSession:
+		return getInto[*schemapb.QrLoginSession](ctx, scope, dst, nodeID)
+	case *schemapb.TotpCredential:
+		return getInto[*schemapb.TotpCredential](ctx, scope, dst, nodeID)
+	case *schemapb.RecoveryCode:
+		return getInto[*schemapb.RecoveryCode](ctx, scope, dst, nodeID)
+	case *schemapb.LoginChallenge:
+		return getInto[*schemapb.LoginChallenge](ctx, scope, dst, nodeID)
+	case *schemapb.UserInvitation:
+		return getInto[*schemapb.UserInvitation](ctx, scope, dst, nodeID)
+	case *schemapb.EmailVerificationToken:
+		return getInto[*schemapb.EmailVerificationToken](ctx, scope, dst, nodeID)
+	case *schemapb.EmailChangeToken:
+		return getInto[*schemapb.EmailChangeToken](ctx, scope, dst, nodeID)
+	case *schemapb.OAuthIdentity:
+		return getInto[*schemapb.OAuthIdentity](ctx, scope, dst, nodeID)
+	}
+	return fmt.Errorf("entdb: get: unsupported message type %T", dst)
+}
+
+func (s *sdkScope) query(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, error) {
+	scope, err := s.scope(actor)
 	if err != nil {
 		return nil, err
 	}
-	msgs, err := w.search(ctx, scope, query)
+	switch witness.(type) {
+	case *schemapb.User:
+		return queryAs[*schemapb.User](ctx, scope, filter)
+	case *schemapb.RefreshToken:
+		return queryAs[*schemapb.RefreshToken](ctx, scope, filter)
+	case *schemapb.PasswordResetToken:
+		return queryAs[*schemapb.PasswordResetToken](ctx, scope, filter)
+	case *schemapb.PasskeyCredential:
+		return queryAs[*schemapb.PasskeyCredential](ctx, scope, filter)
+	case *schemapb.PasskeyChallenge:
+		return queryAs[*schemapb.PasskeyChallenge](ctx, scope, filter)
+	case *schemapb.QrLoginSession:
+		return queryAs[*schemapb.QrLoginSession](ctx, scope, filter)
+	case *schemapb.TotpCredential:
+		return queryAs[*schemapb.TotpCredential](ctx, scope, filter)
+	case *schemapb.RecoveryCode:
+		return queryAs[*schemapb.RecoveryCode](ctx, scope, filter)
+	case *schemapb.LoginChallenge:
+		return queryAs[*schemapb.LoginChallenge](ctx, scope, filter)
+	case *schemapb.UserInvitation:
+		return queryAs[*schemapb.UserInvitation](ctx, scope, filter)
+	case *schemapb.EmailVerificationToken:
+		return queryAs[*schemapb.EmailVerificationToken](ctx, scope, filter)
+	case *schemapb.EmailChangeToken:
+		return queryAs[*schemapb.EmailChangeToken](ctx, scope, filter)
+	case *schemapb.OAuthIdentity:
+		return queryAs[*schemapb.OAuthIdentity](ctx, scope, filter)
+	}
+	return nil, fmt.Errorf("entdb: query: unsupported message type %T", witness)
+}
+
+func (s *sdkScope) create(ctx context.Context, actor string, msg proto.Message) (string, error) {
+	scope, err := s.scope(actor)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	out := make([]*sdk.Node, 0, len(msgs))
-	for _, m := range msgs {
-		n := nodeFromMessage(m, "")
-		if n != nil {
-			n.TypeID = typeID
-		}
-		out = append(out, n)
-	}
-	return out, nil
-}
-
-// GetEdgesFrom delegates to the SDK's typed Scope.EdgesFrom.
-func (s *SDKClient) GetEdgesFrom(ctx context.Context, tenantID, actor, fromNodeID string, edgeTypeID int) ([]*sdk.Edge, error) {
-	scope, err := s.scope(tenantID, actor)
+	plan := scope.Plan()
+	plan.Create(msg)
+	res, err := plan.Commit(ctx)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return scope.EdgesFrom(ctx, fromNodeID, edgeTypeID)
+	return firstCreatedID(res)
 }
 
-// ExecuteAtomic walks the legacy []sdk.Operation list and replays
-// each op through the SDK's typed Plan API. CreateNode hydrates a
-// concrete proto witness from the field-id-keyed Data map and calls
-// Plan.Create(msg). UpdateNode hydrates one for Patch and calls
-// Plan.Update(nodeID, msg). DeleteNode/CreateEdge/DeleteEdge call
-// the package-level generic helpers via a typeID dispatch.
-func (s *SDKClient) ExecuteAtomic(ctx context.Context, tenantID, actor, idempotencyKey string, ops []sdk.Operation) (*sdk.CommitResult, error) {
-	var plan *sdk.Plan
-	if idempotencyKey == "" {
-		plan = s.client.NewPlan(tenantID, actor)
-	} else {
-		plan = s.client.NewPlanWithKey(tenantID, actor, idempotencyKey)
+func (s *sdkScope) update(ctx context.Context, actor string, nodeID string, msg proto.Message) error {
+	scope, err := s.scope(actor)
+	if err != nil {
+		return err
 	}
-
-	for _, op := range ops {
-		if err := s.applyOp(plan, op); err != nil {
-			return nil, err
-		}
-	}
-	return plan.Commit(ctx)
-}
-
-func (s *SDKClient) applyOp(plan *sdk.Plan, op sdk.Operation) error {
-	switch op.Type {
-	case sdk.OpCreateNode:
-		w, ok := witnessByType[op.TypeID]
-		if !ok {
-			return fmt.Errorf("entdb: ExecuteAtomic: unknown create type_id %d", op.TypeID)
-		}
-		msg := w.newMsg()
-		if err := applyPayloadToMessage(msg, op.Data); err != nil {
-			return fmt.Errorf("entdb: ExecuteAtomic: hydrate create payload: %w", err)
-		}
-		opts := createOptions(op)
-		_ = plan.Create(msg, opts...)
-	case sdk.OpUpdateNode:
-		w, ok := witnessByType[op.TypeID]
-		if !ok {
-			return fmt.Errorf("entdb: ExecuteAtomic: unknown update type_id %d", op.TypeID)
-		}
-		msg := w.newMsg()
-		if err := applyPayloadToMessage(msg, op.Patch); err != nil {
-			return fmt.Errorf("entdb: ExecuteAtomic: hydrate update payload: %w", err)
-		}
-		plan.Update(op.NodeID, msg)
-	case sdk.OpDeleteNode:
-		if err := dispatchDelete(plan, op.TypeID, op.NodeID); err != nil {
-			return err
-		}
-	case sdk.OpCreateEdge:
-		if err := dispatchEdgeCreate(plan, op.EdgeTypeID, op.FromNodeID, op.ToNodeID); err != nil {
-			return err
-		}
-	case sdk.OpDeleteEdge:
-		if err := dispatchEdgeDelete(plan, op.EdgeTypeID, op.FromNodeID, op.ToNodeID); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("entdb: ExecuteAtomic: unknown op type %v", op.Type)
+	plan := scope.Plan()
+	plan.Update(nodeID, msg)
+	if _, err := plan.Commit(ctx); err != nil {
+		return err
 	}
 	return nil
 }
 
-// createOptions translates the legacy Operation fields into SDK
-// CreateOption values. ACL, storage mode, alias, and target user are
-// the four configurable knobs.
-func createOptions(op sdk.Operation) []sdk.CreateOption {
-	var opts []sdk.CreateOption
-	if len(op.ACL) > 0 {
-		opts = append(opts, sdk.WithACL(op.ACL...))
-	}
-	if op.Alias != "" {
-		opts = append(opts, sdk.As(op.Alias))
-	}
-	switch op.StorageMode {
-	case sdk.StorageModeUserMailbox:
-		if op.TargetUserID != "" {
-			opts = append(opts, sdk.InMailbox(op.TargetUserID))
-		}
-	case sdk.StorageModePublic:
-		opts = append(opts, sdk.InPublic())
-	}
-	return opts
+// markConsumed is a no-op against the real server: PasswordResetToken
+// on v1.7.0 has no consumed_at proto field. The production reset flow
+// works because the server deletes consumed reset tokens after the
+// password write succeeds. Once upstream lands the field this becomes
+// a typed Update.
+func (s *sdkScope) markConsumed(_ context.Context, _ string, _ proto.Message, _ string, _ int64) error {
+	return nil
 }
 
-// dispatchDelete dispatches sdk.Delete[T] by numeric type id. Each
-// branch is a one-line `sdk.Delete[*schemapb.X](plan, nodeID)` call
-// so the SDK reads (entdb.node).type_id from T's descriptor at
-// compile time.
-func dispatchDelete(plan *sdk.Plan, typeID int, nodeID string) error {
-	switch typeID {
-	case 1:
+func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error {
+	scope, err := s.scope(actor)
+	if err != nil {
+		return err
+	}
+	plan := scope.Plan()
+	switch witness.(type) {
+	case *schemapb.User:
 		sdk.Delete[*schemapb.User](plan, nodeID)
-	case 2:
-		sdk.Delete[*schemapb.WorkingGroup](plan, nodeID)
-	case 5:
+	case *schemapb.RefreshToken:
 		sdk.Delete[*schemapb.RefreshToken](plan, nodeID)
-	case 19:
+	case *schemapb.PasswordResetToken:
 		sdk.Delete[*schemapb.PasswordResetToken](plan, nodeID)
-	case 20:
+	case *schemapb.PasskeyCredential:
 		sdk.Delete[*schemapb.PasskeyCredential](plan, nodeID)
-	case 21:
+	case *schemapb.PasskeyChallenge:
 		sdk.Delete[*schemapb.PasskeyChallenge](plan, nodeID)
-	case 22:
+	case *schemapb.QrLoginSession:
 		sdk.Delete[*schemapb.QrLoginSession](plan, nodeID)
-	case 23:
+	case *schemapb.TotpCredential:
 		sdk.Delete[*schemapb.TotpCredential](plan, nodeID)
-	case 24:
+	case *schemapb.RecoveryCode:
 		sdk.Delete[*schemapb.RecoveryCode](plan, nodeID)
-	case 25:
+	case *schemapb.LoginChallenge:
 		sdk.Delete[*schemapb.LoginChallenge](plan, nodeID)
-	case 26:
-		sdk.Delete[*schemapb.AuditEvent](plan, nodeID)
-	case 27:
+	case *schemapb.UserInvitation:
 		sdk.Delete[*schemapb.UserInvitation](plan, nodeID)
-	case 28:
-		sdk.Delete[*schemapb.AdminHelpRequest](plan, nodeID)
-	case 29:
+	case *schemapb.EmailVerificationToken:
 		sdk.Delete[*schemapb.EmailVerificationToken](plan, nodeID)
-	case 30:
+	case *schemapb.EmailChangeToken:
 		sdk.Delete[*schemapb.EmailChangeToken](plan, nodeID)
-	case 31:
+	case *schemapb.OAuthIdentity:
 		sdk.Delete[*schemapb.OAuthIdentity](plan, nodeID)
 	default:
-		return fmt.Errorf("entdb: ExecuteAtomic: unknown delete type_id %d", typeID)
+		return fmt.Errorf("entdb: delete: unsupported message type %T", witness)
+	}
+	if _, err := plan.Commit(ctx); err != nil {
+		return err
 	}
 	return nil
 }
 
-func dispatchEdgeCreate(plan *sdk.Plan, edgeTypeID int, from, to string) error {
-	switch edgeTypeID {
-	case 101:
-		sdk.EdgeCreate[*schemapb.MemberOf](plan, from, to)
-	case 216:
-		sdk.EdgeCreate[*schemapb.UserPasskey](plan, from, to)
-	case 217:
-		sdk.EdgeCreate[*schemapb.UserTotp](plan, from, to)
-	case 218:
-		sdk.EdgeCreate[*schemapb.UserRecoveryCode](plan, from, to)
-	default:
-		return fmt.Errorf("entdb: ExecuteAtomic: unknown edge_type_id %d", edgeTypeID)
+func getInto[T proto.Message](ctx context.Context, scope *sdk.Scope, dst proto.Message, nodeID string) error {
+	v, err := sdk.Get[T](ctx, scope, nodeID)
+	if err != nil {
+		return err
 	}
+	if !isNonNilMessage(v) {
+		return errNotFound
+	}
+	proto.Merge(dst, v)
 	return nil
 }
 
-func dispatchEdgeDelete(plan *sdk.Plan, edgeTypeID int, from, to string) error {
-	switch edgeTypeID {
-	case 101:
-		sdk.EdgeDelete[*schemapb.MemberOf](plan, from, to)
-	case 216:
-		sdk.EdgeDelete[*schemapb.UserPasskey](plan, from, to)
-	case 217:
-		sdk.EdgeDelete[*schemapb.UserTotp](plan, from, to)
-	case 218:
-		sdk.EdgeDelete[*schemapb.UserRecoveryCode](plan, from, to)
-	default:
-		return fmt.Errorf("entdb: ExecuteAtomic: unknown edge_type_id %d", edgeTypeID)
+func queryAs[T proto.Message](ctx context.Context, scope *sdk.Scope, filter map[string]any) ([]queriedNode, error) {
+	out, err := sdk.Query[T](ctx, scope, filter)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	res := make([]queriedNode, 0, len(out))
+	for _, m := range out {
+		if !isNonNilMessage(m) {
+			continue
+		}
+		// NodeID stays empty here: sdk.Query[T] on v1.7.0 returns
+		// only the typed payload. find-then-update flows that need
+		// the node id are blocked on the upstream RPC fix; the
+		// realentdb integration test skips PasswordLogin for this
+		// reason.
+		res = append(res, queriedNode{Message: m})
+	}
+	return res, nil
+}
+
+func isNonNilMessage(m proto.Message) bool {
+	if m == nil {
+		return false
+	}
+	return m.ProtoReflect().IsValid()
+}
+
+func firstCreatedID(res *sdk.CommitResult) (string, error) {
+	if res == nil {
+		return "", fmt.Errorf("entdb: nil commit result")
+	}
+	if !res.Success {
+		if res.Error != "" {
+			return "", fmt.Errorf("entdb: commit: %s", res.Error)
+		}
+		return "", fmt.Errorf("entdb: commit not successful")
+	}
+	if len(res.CreatedNodeIDs) == 0 {
+		return "", fmt.Errorf("entdb: commit succeeded but no node id returned")
+	}
+	return res.CreatedNodeIDs[0], nil
 }

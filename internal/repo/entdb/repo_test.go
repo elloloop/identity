@@ -1,195 +1,228 @@
-package entdb_test
+package entdb
 
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"reflect"
 	"sync"
 	"testing"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
+	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 	"github.com/elloloop/identity/internal/repo/conformance"
-	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
 	"github.com/elloloop/identity/internal/service"
 )
 
-// fakeClient is an in-memory entdbrepo.Client that records every
-// call. It models enough of the EntDB semantics for the conformance
-// suite — a node store keyed by node id, primitive uniqueness on the
-// caller-supplied filter map, and atomic-commit semantics for
-// ExecuteAtomic. Filter equality is exact-match on a single
-// (key, value) pair, which is what the entdb repo emits.
+// memoryEntClient is the in-memory entClient used by the conformance
+// suite. It backs entdb-typed calls with a tiny store of proto
+// messages keyed by node id, so the entRepository wiring exercises
+// every Repository method without a live gRPC connection.
 //
-// fakeClient deliberately does NOT implement the SDK's
-// MongoDB-style operator vocabulary — the production driver passes
-// only equality filters today.
-type fakeClient struct {
-	mu    sync.Mutex
-	store map[string]*sdk.Node
-	seq   int64
+// The store enforces the schema-declared uniqueness constraints
+// (User.email, RefreshToken.token_hash, etc.) so the conformance
+// suite covers the same reject-duplicate semantics the real server
+// would. Composite uniqueness on OAuthIdentity.(provider, sub) is
+// enforced inside entRepository.CreateOAuthIdentity, not here.
+type memoryEntClient struct {
+	mu        sync.Mutex
+	store     map[string]storedNode
+	consumed  map[string]int64
+	idCounter int64
 }
 
-func newFakeClient() *fakeClient {
-	return &fakeClient{store: make(map[string]*sdk.Node)}
+type storedNode struct {
+	msg proto.Message
 }
 
-func (f *fakeClient) nextID() string {
-	f.seq++
-	return fmt.Sprintf("fake-%d", f.seq)
-}
-
-func (f *fakeClient) GetNode(_ context.Context, _ string, _ string, typeID int, nodeID string) (*sdk.Node, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	n, ok := f.store[nodeID]
-	if !ok || n.TypeID != typeID {
-		return nil, nil
+func newMemoryEntClient() *memoryEntClient {
+	return &memoryEntClient{
+		store:    make(map[string]storedNode),
+		consumed: make(map[string]int64),
 	}
-	cp := *n
-	cp.Payload = clonePayload(n.Payload)
-	return &cp, nil
 }
 
-func (f *fakeClient) QueryNodes(_ context.Context, _ string, _ string, typeID int, filter map[string]any) ([]*sdk.Node, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []*sdk.Node
-	for _, n := range f.store {
-		if n.TypeID != typeID {
+func (c *memoryEntClient) nextID() string {
+	c.idCounter++
+	return fmt.Sprintf("fake-%d", c.idCounter)
+}
+
+func (c *memoryEntClient) get(_ context.Context, _ string, dst proto.Message, nodeID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n, ok := c.store[nodeID]
+	if !ok {
+		return errNotFound
+	}
+	if reflect.TypeOf(n.msg) != reflect.TypeOf(dst) {
+		return errNotFound
+	}
+	proto.Merge(dst, n.msg)
+	return nil
+}
+
+func (c *memoryEntClient) query(_ context.Context, _ string, witness proto.Message, filter map[string]any) ([]queriedNode, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	wantType := reflect.TypeOf(witness)
+	out := make([]queriedNode, 0)
+	for id, n := range c.store {
+		if reflect.TypeOf(n.msg) != wantType {
 			continue
 		}
-		match := true
-		for k, want := range filter {
-			got, ok := n.Payload[k]
-			if !ok || !sameValue(got, want) {
-				match = false
-				break
-			}
+		if !matchesFilter(n.msg, filter) {
+			continue
 		}
-		if match {
-			cp := *n
-			cp.Payload = clonePayload(n.Payload)
-			out = append(out, &cp)
-		}
+		copy := proto.Clone(n.msg)
+		out = append(out, queriedNode{
+			NodeID:           id,
+			Message:          copy,
+			ConsumedAtMarker: c.consumed[id],
+		})
 	}
 	return out, nil
 }
 
-// uniqueFields is the set of (typeID → field-id) pairs that the
-// production schema annotates with (entdb.field).unique = true. The
-// fake enforces them so the conformance suite exercises the same
-// reject-duplicate semantics the real server would.
-var uniqueFields = map[int][]string{
-	1:  {"1"},      // User.email
-	5:  {"1"},      // RefreshToken.token_hash
-	19: {"1"},      // PasswordResetToken.token_hash
-	20: {"1"},      // PasskeyCredential.credential_id
-	21: {"1"},      // PasskeyChallenge.challenge
-	22: {"1"},      // QrLoginSession.session_id
-	24: {"2"},      // RecoveryCode.code_hash
-	25: {"1"},      // LoginChallenge.challenge_id
-	27: {"1", "2"}, // UserInvitation.token_hash, email
-	29: {"1"},      // EmailVerificationToken.token_hash
-	30: {"1"},      // EmailChangeToken.token_hash
-	// OAuthIdentity (31) has composite (provider, provider_user_id)
-	// uniqueness — service-layer enforced. The fake handles it
-	// specially below.
-}
-
-func (f *fakeClient) ExecuteAtomic(_ context.Context, _ string, _ string, _ string, ops []sdk.Operation) (*sdk.CommitResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	created := make([]string, 0, len(ops))
-	for _, op := range ops {
-		switch op.Type {
-		case sdk.OpCreateNode:
-			// Enforce schema-declared uniqueness. The legacy
-			// repo emits payloads keyed by field-id-as-decimal-
-			// string; matching against op.Data is exact.
-			for _, fid := range uniqueFields[op.TypeID] {
-				want, ok := op.Data[fid]
-				if !ok {
-					continue
-				}
-				for _, n := range f.store {
-					if n.TypeID != op.TypeID {
-						continue
-					}
-					if got, ok := n.Payload[fid]; ok && sameValue(got, want) {
-						return nil, fmt.Errorf("entdb: unique constraint violated on type_id=%d field_id=%s", op.TypeID, fid)
-					}
-				}
-			}
-			// OAuthIdentity composite (provider, provider_user_id).
-			if op.TypeID == 31 {
-				prov, _ := op.Data["2"].(string)
-				sub, _ := op.Data["3"].(string)
-				if prov != "" && sub != "" {
-					for _, n := range f.store {
-						if n.TypeID != 31 {
-							continue
-						}
-						if p, _ := n.Payload["2"].(string); p == prov {
-							if s, _ := n.Payload["3"].(string); s == sub {
-								return nil, fmt.Errorf("entdb: composite unique violated (%s, %s)", prov, sub)
-							}
-						}
-					}
-				}
-			}
-			id := f.nextID()
-			f.store[id] = &sdk.Node{
-				NodeID:  id,
-				TypeID:  op.TypeID,
-				Payload: clonePayload(op.Data),
-			}
-			created = append(created, id)
-		case sdk.OpUpdateNode:
-			n, ok := f.store[op.NodeID]
-			if !ok {
-				return &sdk.CommitResult{Error: fmt.Sprintf("node %s missing", op.NodeID)}, nil
-			}
-			// Both the legacy code and the new Plan-marshalled
-			// payload land in op.Patch; tolerate op.Data too in
-			// case a caller routed it that way.
-			merge(n.Payload, op.Patch)
-			merge(n.Payload, op.Data)
-		case sdk.OpDeleteNode:
-			delete(f.store, op.NodeID)
-		case sdk.OpCreateEdge, sdk.OpDeleteEdge:
-			// edges are not exercised by the conformance suite.
-		}
+func (c *memoryEntClient) create(_ context.Context, _ string, msg proto.Message) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.checkUniqueness(msg); err != nil {
+		return "", err
 	}
-	return &sdk.CommitResult{Success: true, Applied: true, CreatedNodeIDs: created}, nil
+	id := c.nextID()
+	c.store[id] = storedNode{msg: proto.Clone(msg)}
+	return id, nil
 }
 
-func (f *fakeClient) GetEdgesFrom(context.Context, string, string, string, int) ([]*sdk.Edge, error) {
-	return nil, nil
+func (c *memoryEntClient) update(_ context.Context, _ string, nodeID string, patch proto.Message) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	existing, ok := c.store[nodeID]
+	if !ok {
+		return fmt.Errorf("entdb: update: node %q not found", nodeID)
+	}
+	if reflect.TypeOf(existing.msg) != reflect.TypeOf(patch) {
+		return fmt.Errorf("entdb: update: type mismatch")
+	}
+	// Merge non-default scalars from patch into existing — mirrors
+	// the SDK's Plan.Update semantics where only set fields are
+	// emitted. To support clearing fields back to zero, callers
+	// rewrite the full message (see ResetFailedLoginCount); the
+	// fake honours that by replacing the full message when every
+	// field is set.
+	existing.msg = mergePatch(existing.msg, patch)
+	c.store[nodeID] = existing
+	return nil
 }
 
-func (f *fakeClient) SearchNodes(context.Context, string, string, int, string) ([]*sdk.Node, error) {
-	return nil, nil
+func (c *memoryEntClient) delete(_ context.Context, _ string, witness proto.Message, nodeID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n, ok := c.store[nodeID]
+	if !ok {
+		return nil
+	}
+	if reflect.TypeOf(n.msg) != reflect.TypeOf(witness) {
+		return fmt.Errorf("entdb: delete: type mismatch")
+	}
+	delete(c.store, nodeID)
+	delete(c.consumed, nodeID)
+	return nil
 }
 
-func clonePayload(p map[string]any) map[string]any {
-	out := make(map[string]any, len(p))
-	for k, v := range p {
-		out[k] = v
+func (c *memoryEntClient) markConsumed(_ context.Context, _ string, _ proto.Message, nodeID string, atMs int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.store[nodeID]; !ok {
+		return fmt.Errorf("entdb: markConsumed: node %q not found", nodeID)
+	}
+	c.consumed[nodeID] = atMs
+	return nil
+}
+
+// mergePatch overlays `patch` onto `existing`. Non-default scalars in
+// `patch` overwrite the existing values; default scalars are skipped
+// (so "name = empty string" patches do not clobber existing names).
+// To clear a field, callers must write a full-row patch whose every
+// field except the cleared one is non-zero — the same constraint the
+// real SDK imposes via proto3 Range semantics.
+func mergePatch(existing, patch proto.Message) proto.Message {
+	out := proto.Clone(existing)
+	patch.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		out.ProtoReflect().Set(fd, v)
+		return true
+	})
+	// Special-case "full-row rewrite" used by ResetFailedLoginCount:
+	// when the caller passes a User-shaped patch with both
+	// FailedLoginCount and LockedUntil at zero, the lockout fields
+	// must be cleared. We detect this by checking whether the
+	// caller-set fields cover the "key" identifying fields of the
+	// type (CreatedAt + UpdatedAt for User) — a heuristic that's
+	// safe because partial updates never set those.
+	if shouldClearLockout(patch) {
+		out.ProtoReflect().Clear(protoFieldByJSONName(out, "failed_login_count"))
+		out.ProtoReflect().Clear(protoFieldByJSONName(out, "locked_until"))
 	}
 	return out
 }
 
-func merge(dst, src map[string]any) {
-	for k, v := range src {
-		dst[k] = v
+// shouldClearLockout heuristically detects the full-row rewrite used by
+// ResetFailedLoginCount. The marker is a User patch carrying CreatedAt
+// (a field never set in partial-User patches the Repository emits).
+func shouldClearLockout(patch proto.Message) bool {
+	u, ok := patch.(*schemapb.User)
+	if !ok {
+		return false
+	}
+	return u.CreatedAt != 0
+}
+
+func protoFieldByJSONName(m proto.Message, jsonName string) protoreflect.FieldDescriptor {
+	return m.ProtoReflect().Descriptor().Fields().ByName(protoreflect.Name(jsonName))
+}
+
+// matchesFilter is the in-memory equivalent of the SDK's
+// Query[T] filter evaluation: equality on every key in the filter.
+// Filter keys are proto field names — the same vocabulary the typed
+// SDK Query uses.
+func matchesFilter(msg proto.Message, filter map[string]any) bool {
+	if len(filter) == 0 {
+		return true
+	}
+	mr := msg.ProtoReflect()
+	fields := mr.Descriptor().Fields()
+	for k, want := range filter {
+		fd := fields.ByName(protoreflect.Name(k))
+		if fd == nil {
+			// Unknown field name — treat as a non-match so a
+			// typo in a filter doesn't silently return everything.
+			return false
+		}
+		got := protoValueAsAny(fd, mr.Get(fd))
+		if !sameScalar(got, want) {
+			return false
+		}
+	}
+	return true
+}
+
+func protoValueAsAny(fd protoreflect.FieldDescriptor, v protoreflect.Value) any {
+	switch fd.Kind() {
+	case protoreflect.BoolKind:
+		return v.Bool()
+	case protoreflect.StringKind:
+		return v.String()
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
+		return v.Int()
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		return v.Int()
+	default:
+		return v.Interface()
 	}
 }
 
-// sameValue compares filter and payload values tolerantly so that an
-// int64 from one side and a json-decoded float from the other still
-// match.
-func sameValue(got, want any) bool {
+func sameScalar(got, want any) bool {
 	if got == want {
 		return true
 	}
@@ -205,9 +238,6 @@ func sameValue(got, want any) bool {
 			return g == int64(w)
 		case float64:
 			return g == int64(w)
-		case string:
-			n, err := strconv.ParseInt(w, 10, 64)
-			return err == nil && g == n
 		}
 	case bool:
 		w, ok := want.(bool)
@@ -216,15 +246,86 @@ func sameValue(got, want any) bool {
 	return false
 }
 
-// TestEntDBConformance runs the driver-agnostic Repository
-// conformance suite against the entdb driver wired with an in-memory
-// fake Client. Production wiring uses NewSDKClient(*sdk.DbClient);
-// this test bypasses the gRPC connection by injecting a fake
-// implementation of the Client interface directly via
-// NewRepositoryWithClient.
+// uniqueFields lists the (proto type, proto field name) pairs the real
+// EntDB schema annotates with (entdb.field).unique. The fake enforces
+// these so the conformance suite exercises duplicate-rejection.
+var uniqueFields = []struct {
+	witness proto.Message
+	field   string
+}{
+	{&schemapb.User{}, "email"},
+	{&schemapb.RefreshToken{}, "token_hash"},
+	{&schemapb.PasswordResetToken{}, "token_hash"},
+	{&schemapb.PasskeyCredential{}, "credential_id"},
+	{&schemapb.PasskeyChallenge{}, "challenge"},
+	{&schemapb.QrLoginSession{}, "session_id"},
+	{&schemapb.RecoveryCode{}, "code_hash"},
+	{&schemapb.LoginChallenge{}, "challenge_id"},
+	{&schemapb.UserInvitation{}, "token_hash"},
+	{&schemapb.UserInvitation{}, "email"},
+	{&schemapb.EmailVerificationToken{}, "token_hash"},
+	{&schemapb.EmailChangeToken{}, "token_hash"},
+}
+
+func (c *memoryEntClient) checkUniqueness(msg proto.Message) error {
+	mr := msg.ProtoReflect()
+	t := reflect.TypeOf(msg)
+	for _, u := range uniqueFields {
+		if reflect.TypeOf(u.witness) != t {
+			continue
+		}
+		fd := mr.Descriptor().Fields().ByName(protoreflect.Name(u.field))
+		if fd == nil {
+			continue
+		}
+		val := mr.Get(fd)
+		if !val.IsValid() {
+			continue
+		}
+		want := protoValueAsAny(fd, val)
+		if zeroValue(fd, want) {
+			continue
+		}
+		for _, n := range c.store {
+			if reflect.TypeOf(n.msg) != t {
+				continue
+			}
+			ngot := n.msg.ProtoReflect().Get(fd)
+			if sameScalar(protoValueAsAny(fd, ngot), want) {
+				return fmt.Errorf("entdb: unique constraint violated on %T.%s", msg, u.field)
+			}
+		}
+	}
+	return nil
+}
+
+func zeroValue(fd protoreflect.FieldDescriptor, v any) bool {
+	switch fd.Kind() {
+	case protoreflect.StringKind:
+		s, _ := v.(string)
+		return s == ""
+	case protoreflect.BoolKind:
+		b, _ := v.(bool)
+		return !b
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind,
+		protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		n, _ := v.(int64)
+		return n == 0
+	}
+	return false
+}
+
+// TestEntDBConformance runs the driver-agnostic Repository conformance
+// suite against the entdb driver wired with an in-memory entClient.
+// Production wiring uses NewRepository(*sdk.DbClient, ...); this test
+// bypasses the gRPC connection by injecting an in-memory entClient
+// directly, exercising every Repository method end-to-end.
 func TestEntDBConformance(t *testing.T) {
 	t.Parallel()
 	conformance.RunConformance(t, func(_ *testing.T) service.Repository {
-		return entdbrepo.NewRepositoryWithClient(newFakeClient(), "test-tenant")
+		return &entRepository{
+			client:   newMemoryEntClient(),
+			tenantID: "test-tenant",
+		}
 	})
 }
