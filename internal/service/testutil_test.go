@@ -11,6 +11,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
@@ -18,6 +20,63 @@ import (
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
+
+// recordingAuditWriter implements audit.NodeWriter and captures the
+// audit events emitted by the service so tests can assert on them.
+// Event type lives at field "1" of the Data map (see pkg/audit/logger.go).
+type recordingAuditWriter struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func newRecordingAuditWriter() *recordingAuditWriter {
+	return &recordingAuditWriter{}
+}
+
+func (w *recordingAuditWriter) ExecuteAtomic(
+	_ context.Context, _, _, _ string, ops []entdb.Operation,
+) (*entdb.CommitResult, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, op := range ops {
+		if et, ok := op.Data["1"].(string); ok {
+			w.events = append(w.events, et)
+		}
+	}
+	return &entdb.CommitResult{}, nil
+}
+
+func (w *recordingAuditWriter) countByEventType(eventType string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := 0
+	for _, et := range w.events {
+		if et == eventType {
+			n++
+		}
+	}
+	return n
+}
+
+// newTestAuthServiceWithAudit builds an AuthService whose audit logger
+// writes to the supplied recordingAuditWriter so tests can assert on
+// emitted audit events.
+func newTestAuthServiceWithAudit(t *testing.T, repo *fakeRepo, writer *recordingAuditWriter) *AuthService {
+	t.Helper()
+	cfg := testConfig()
+	kr := testKeyRing(t)
+	passkeysSvc, _ := passkeys.NewWebAuthnService(passkeys.Config{
+		RPID:   cfg.PasskeyRPID,
+		RPName: cfg.PasskeyRPName,
+		Origin: cfg.PasskeyOrigin,
+	})
+	return NewAuthServiceWithOAuth(
+		repo, cfg, kr, passkeysSvc,
+		audit.NewLogger(writer, "test-tenant", nil),
+		testTotpKey(), email.NewLogOnly(zap.NewNop()), zap.NewNop(),
+		defaultTestOAuthRegistry(),
+	)
+}
 
 // ── fakeRepo ───────────────────────────────────────────────────────────
 // In-memory implementation of Repository for testing.
@@ -30,6 +89,12 @@ func nextNodeID() string {
 
 type fakeRepo struct {
 	mu sync.Mutex
+
+	// incrementErrCount, when > 0, causes the next N
+	// IncrementFailedLoginCount calls to return an error. Set this
+	// from a test to exercise the fail-closed path; subsequent calls
+	// (after the counter decrements to 0) succeed normally.
+	incrementErrCount int
 
 	users              map[string]*User
 	refreshTokens      map[string]*RefreshTokenRecord
@@ -108,6 +173,47 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 		return fmt.Errorf("user %s not found", userID)
 	}
 	applyUserFields(u, fields)
+	return nil
+}
+
+// failOnceFailedLoginIncrement, when non-zero, makes the next N
+// IncrementFailedLoginCount calls return an error. Used by tests to
+// exercise the fail-closed path.
+func (r *fakeRepo) IncrementFailedLoginCount(_ context.Context, userID string) (int32, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.incrementErrCount > 0 {
+		r.incrementErrCount--
+		return 0, fmt.Errorf("simulated increment failure")
+	}
+	u, ok := r.users[userID]
+	if !ok {
+		return 0, fmt.Errorf("user %s not found", userID)
+	}
+	u.FailedLoginCount++
+	return int32(u.FailedLoginCount), nil
+}
+
+func (r *fakeRepo) ResetFailedLoginCount(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.FailedLoginCount = 0
+	u.LockedUntil = 0
+	return nil
+}
+
+func (r *fakeRepo) SetUserLockedUntil(_ context.Context, userID string, lockedUntilMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.LockedUntil = lockedUntilMs
 	return nil
 }
 
