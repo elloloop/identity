@@ -188,23 +188,25 @@ func (QrLoginStatus) EnumDescriptor() ([]byte, []int) {
 }
 
 type User struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Email           string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
-	Name            string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	AvatarUrl       string                 `protobuf:"bytes,4,opt,name=avatar_url,json=avatarUrl,proto3" json:"avatar_url,omitempty"`
-	Role            string                 `protobuf:"bytes,5,opt,name=role,proto3" json:"role,omitempty"` // "admin", "member", "guest"
-	CreatedAt       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	TotpRequired    bool                   `protobuf:"varint,8,opt,name=totp_required,json=totpRequired,proto3" json:"totp_required,omitempty"` // true if the user has enrolled a TOTP credential
-	Status          UserStatus             `protobuf:"varint,9,opt,name=status,proto3,enum=identity.UserStatus" json:"status,omitempty"`
-	RecoveryEmail   string                 `protobuf:"bytes,10,opt,name=recovery_email,json=recoveryEmail,proto3" json:"recovery_email,omitempty"`
-	QuotaBytes      int64                  `protobuf:"varint,11,opt,name=quota_bytes,json=quotaBytes,proto3" json:"quota_bytes,omitempty"`
-	LastLoginAtMs   int64                  `protobuf:"varint,12,opt,name=last_login_at_ms,json=lastLoginAtMs,proto3" json:"last_login_at_ms,omitempty"`
-	EmailVerified   bool                   `protobuf:"varint,13,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
-	EmailVerifiedAt int64                  `protobuf:"varint,14,opt,name=email_verified_at,json=emailVerifiedAt,proto3" json:"email_verified_at,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Email            string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	Name             string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	AvatarUrl        string                 `protobuf:"bytes,4,opt,name=avatar_url,json=avatarUrl,proto3" json:"avatar_url,omitempty"`
+	Role             string                 `protobuf:"bytes,5,opt,name=role,proto3" json:"role,omitempty"` // "admin", "member", "guest"
+	CreatedAt        *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt        *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	TotpRequired     bool                   `protobuf:"varint,8,opt,name=totp_required,json=totpRequired,proto3" json:"totp_required,omitempty"` // true if the user has enrolled a TOTP credential
+	Status           UserStatus             `protobuf:"varint,9,opt,name=status,proto3,enum=identity.UserStatus" json:"status,omitempty"`
+	RecoveryEmail    string                 `protobuf:"bytes,10,opt,name=recovery_email,json=recoveryEmail,proto3" json:"recovery_email,omitempty"`
+	QuotaBytes       int64                  `protobuf:"varint,11,opt,name=quota_bytes,json=quotaBytes,proto3" json:"quota_bytes,omitempty"`
+	LastLoginAtMs    int64                  `protobuf:"varint,12,opt,name=last_login_at_ms,json=lastLoginAtMs,proto3" json:"last_login_at_ms,omitempty"`
+	EmailVerified    bool                   `protobuf:"varint,13,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
+	EmailVerifiedAt  int64                  `protobuf:"varint,14,opt,name=email_verified_at,json=emailVerifiedAt,proto3" json:"email_verified_at,omitempty"`
+	FailedLoginCount int32                  `protobuf:"varint,15,opt,name=failed_login_count,json=failedLoginCount,proto3" json:"failed_login_count,omitempty"` // # of consecutive failed PasswordLogin attempts
+	LockedUntil      int64                  `protobuf:"varint,16,opt,name=locked_until,json=lockedUntil,proto3" json:"locked_until,omitempty"`                  // epoch ms; 0 = not locked, future = locked until
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
@@ -331,6 +333,20 @@ func (x *User) GetEmailVerified() bool {
 func (x *User) GetEmailVerifiedAt() int64 {
 	if x != nil {
 		return x.EmailVerifiedAt
+	}
+	return 0
+}
+
+func (x *User) GetFailedLoginCount() int32 {
+	if x != nil {
+		return x.FailedLoginCount
+	}
+	return 0
+}
+
+func (x *User) GetLockedUntil() int64 {
+	if x != nil {
+		return x.LockedUntil
 	}
 	return 0
 }
@@ -6229,7 +6245,7 @@ var File_identity_identity_proto protoreflect.FileDescriptor
 
 const file_identity_identity_proto_rawDesc = "" +
 	"\n" +
-	"\x17identity/identity.proto\x12\bidentity\x1a\x1fgoogle/protobuf/timestamp.proto\"\x80\x04\n" +
+	"\x17identity/identity.proto\x12\bidentity\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd1\x04\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
@@ -6249,7 +6265,9 @@ const file_identity_identity_proto_rawDesc = "" +
 	"quotaBytes\x12'\n" +
 	"\x10last_login_at_ms\x18\f \x01(\x03R\rlastLoginAtMs\x12%\n" +
 	"\x0eemail_verified\x18\r \x01(\bR\remailVerified\x12*\n" +
-	"\x11email_verified_at\x18\x0e \x01(\x03R\x0femailVerifiedAt\"\x8d\x01\n" +
+	"\x11email_verified_at\x18\x0e \x01(\x03R\x0femailVerifiedAt\x12,\n" +
+	"\x12failed_login_count\x18\x0f \x01(\x05R\x10failedLoginCount\x12!\n" +
+	"\flocked_until\x18\x10 \x01(\x03R\vlockedUntil\"\x8d\x01\n" +
 	"\x11CreateUserRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
