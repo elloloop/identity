@@ -34,6 +34,7 @@ import (
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
@@ -48,8 +49,46 @@ type Harness struct {
 	KeyRing *jwt.KeyRing
 	Repo    *MemRepo
 	Audit   *RecordingDB
+	Mailer  *RecordingMailer
 	Server  *httptest.Server
 }
+
+// RecordingMailer captures every email.Send call so tests can assert
+// on the messages the service would have dispatched. It satisfies
+// email.Transport.
+type RecordingMailer struct {
+	mu   sync.Mutex
+	sent []email.Message
+}
+
+// NewRecordingMailer returns an empty recorder.
+func NewRecordingMailer() *RecordingMailer { return &RecordingMailer{} }
+
+// Send captures the message and returns nil.
+func (m *RecordingMailer) Send(_ context.Context, msg email.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, msg)
+	return nil
+}
+
+// Sent returns a copy of every captured message in delivery order.
+func (m *RecordingMailer) Sent() []email.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]email.Message, len(m.sent))
+	copy(out, m.sent)
+	return out
+}
+
+// Reset clears the captured set. Useful between phases of a test.
+func (m *RecordingMailer) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = nil
+}
+
+var _ email.Transport = (*RecordingMailer)(nil)
 
 // StartServer spins up an in-process identity service backed by an
 // in-memory repository and returns a Harness for driving it. The
@@ -80,15 +119,17 @@ func StartServer(t *testing.T) *Harness {
 
 	repo := NewMemRepo()
 	auditDB := NewRecordingDB()
+	mailer := NewRecordingMailer()
 
 	handler := app.New(app.Deps{
-		Config:   cfg,
-		Logger:   zap.NewNop(),
-		KeyRing:  keyRing,
-		Repo:     repo,
-		DB:       auditDB, // captures audit-event ExecuteAtomic calls
-		Passkeys: pkSvc,
-		TOTPKey:  []byte("01234567890123456789012345678901"),
+		Config:         cfg,
+		Logger:         zap.NewNop(),
+		KeyRing:        keyRing,
+		Repo:           repo,
+		DB:             auditDB, // captures audit-event ExecuteAtomic calls
+		Passkeys:       pkSvc,
+		TOTPKey:        []byte("01234567890123456789012345678901"),
+		EmailTransport: mailer,
 	})
 
 	srv := httptest.NewServer(handler)
@@ -104,6 +145,7 @@ func StartServer(t *testing.T) *Harness {
 		KeyRing: keyRing,
 		Repo:    repo,
 		Audit:   auditDB,
+		Mailer:  mailer,
 		Server:  srv,
 	}
 }
@@ -165,6 +207,9 @@ func newTestConfig() *config.Config {
 		QRLoginExpirySeconds:          300,
 		TOTPIssuer:                    "Glassa Test",
 		AllowedOrigins:                "http://localhost:9002",
+		AppBaseURL:                    "https://app.test",
+		EmailTokenExpirySeconds:       3600,
+		SMTPFrom:                      "no-reply@test.local",
 	}
 }
 
@@ -185,30 +230,34 @@ func newTestConfig() *config.Config {
 type MemRepo struct {
 	mu sync.Mutex
 
-	seq               int64
-	users             map[string]*service.User
-	refreshTokens     map[string]*service.RefreshTokenRecord
-	passkeyCreds      map[string]*service.PasskeyCredRecord
-	passkeyChallenges map[string]*service.PasskeyChallengeRecord
-	qrSessions        map[string]*service.QrLoginSessionRecord
-	totpCreds         map[string]*service.TotpCredRecord
-	recoveryCodes     map[string]*service.RecoveryCodeRecord
-	loginChallenges   map[string]*service.LoginChallengeRecord
-	invitations       map[string]*service.InvitationRecord
+	seq                int64
+	users              map[string]*service.User
+	refreshTokens      map[string]*service.RefreshTokenRecord
+	passkeyCreds       map[string]*service.PasskeyCredRecord
+	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
+	qrSessions         map[string]*service.QrLoginSessionRecord
+	totpCreds          map[string]*service.TotpCredRecord
+	recoveryCodes      map[string]*service.RecoveryCodeRecord
+	loginChallenges    map[string]*service.LoginChallengeRecord
+	invitations        map[string]*service.InvitationRecord
+	passwordResets     map[string]*service.PasswordResetToken
+	emailVerifications map[string]*service.EmailVerificationToken
 }
 
 // NewMemRepo returns an empty MemRepo.
 func NewMemRepo() *MemRepo {
 	return &MemRepo{
-		users:             make(map[string]*service.User),
-		refreshTokens:     make(map[string]*service.RefreshTokenRecord),
-		passkeyCreds:      make(map[string]*service.PasskeyCredRecord),
-		passkeyChallenges: make(map[string]*service.PasskeyChallengeRecord),
-		qrSessions:        make(map[string]*service.QrLoginSessionRecord),
-		totpCreds:         make(map[string]*service.TotpCredRecord),
-		recoveryCodes:     make(map[string]*service.RecoveryCodeRecord),
-		loginChallenges:   make(map[string]*service.LoginChallengeRecord),
-		invitations:       make(map[string]*service.InvitationRecord),
+		users:              make(map[string]*service.User),
+		refreshTokens:      make(map[string]*service.RefreshTokenRecord),
+		passkeyCreds:       make(map[string]*service.PasskeyCredRecord),
+		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
+		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
+		totpCreds:          make(map[string]*service.TotpCredRecord),
+		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
+		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
+		invitations:        make(map[string]*service.InvitationRecord),
+		passwordResets:     make(map[string]*service.PasswordResetToken),
+		emailVerifications: make(map[string]*service.EmailVerificationToken),
 	}
 }
 
@@ -319,6 +368,17 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			}
 		case "recovery_email":
 			u.RecoveryEmail, _ = v.(string)
+		case "email_verified":
+			if b, ok := v.(bool); ok {
+				u.EmailVerified = b
+			}
+		case "email_verified_at":
+			switch x := v.(type) {
+			case int64:
+				u.EmailVerifiedAt = x
+			case int:
+				u.EmailVerifiedAt = int64(x)
+			}
 		}
 	}
 }
@@ -658,6 +718,88 @@ func (r *MemRepo) UpdateInvitation(_ context.Context, nodeID string, fields map[
 	if v, ok := fields["accepted_at"]; ok {
 		inv.AcceptedAt, _ = v.(int64)
 	}
+	return nil
+}
+
+// ── Password Reset Tokens ─────────────────────────────────────────
+
+func (r *MemRepo) CreatePasswordResetToken(_ context.Context, t *service.PasswordResetToken) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := r.nextID()
+	t.NodeID = id
+	cp := *t
+	r.passwordResets[id] = &cp
+	return nil
+}
+
+func (r *MemRepo) FindPasswordResetTokenByHash(_ context.Context, hash string) (*service.PasswordResetToken, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.passwordResets {
+		if t.TokenHash == hash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) MarkPasswordResetTokenConsumed(_ context.Context, id string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.passwordResets[id]
+	if !ok {
+		return fmt.Errorf("password reset token %s not found", id)
+	}
+	t.ConsumedAt = atMs
+	return nil
+}
+
+// ── Email Verification Tokens ─────────────────────────────────────
+
+func (r *MemRepo) CreateEmailVerificationToken(_ context.Context, t *service.EmailVerificationToken) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := r.nextID()
+	t.NodeID = id
+	cp := *t
+	r.emailVerifications[id] = &cp
+	return nil
+}
+
+func (r *MemRepo) FindEmailVerificationTokenByHash(_ context.Context, hash string) (*service.EmailVerificationToken, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.emailVerifications {
+		if t.TokenHash == hash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) MarkEmailVerificationTokenConsumed(_ context.Context, id string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.emailVerifications[id]
+	if !ok {
+		return fmt.Errorf("email verification token %s not found", id)
+	}
+	t.ConsumedAt = atMs
+	return nil
+}
+
+func (r *MemRepo) SetUserEmailVerified(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.EmailVerified = true
+	u.EmailVerifiedAt = atMs
 	return nil
 }
 
