@@ -68,6 +68,12 @@ const (
 	// IdentityServiceVerifyEmailProcedure is the fully-qualified name of the IdentityService's
 	// VerifyEmail RPC.
 	IdentityServiceVerifyEmailProcedure = "/identity.IdentityService/VerifyEmail"
+	// IdentityServiceRequestEmailChangeProcedure is the fully-qualified name of the IdentityService's
+	// RequestEmailChange RPC.
+	IdentityServiceRequestEmailChangeProcedure = "/identity.IdentityService/RequestEmailChange"
+	// IdentityServiceConfirmEmailChangeProcedure is the fully-qualified name of the IdentityService's
+	// ConfirmEmailChange RPC.
+	IdentityServiceConfirmEmailChangeProcedure = "/identity.IdentityService/ConfirmEmailChange"
 	// IdentityServiceRequestAdminHelpProcedure is the fully-qualified name of the IdentityService's
 	// RequestAdminHelp RPC.
 	IdentityServiceRequestAdminHelpProcedure = "/identity.IdentityService/RequestAdminHelp"
@@ -211,6 +217,9 @@ type IdentityServiceClient interface {
 	// Email Verification
 	SendEmailVerification(context.Context, *connect.Request[identity.SendEmailVerificationRequest]) (*connect.Response[identity.SendEmailVerificationResponse], error)
 	VerifyEmail(context.Context, *connect.Request[identity.VerifyEmailRequest]) (*connect.Response[identity.VerifyEmailResponse], error)
+	// Email Change (primary-email rotation, double-opt-in)
+	RequestEmailChange(context.Context, *connect.Request[identity.RequestEmailChangeRequest]) (*connect.Response[identity.RequestEmailChangeResponse], error)
+	ConfirmEmailChange(context.Context, *connect.Request[identity.ConfirmEmailChangeRequest]) (*connect.Response[identity.ConfirmEmailChangeResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[identity.RequestAdminHelpRequest]) (*connect.Response[identity.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[identity.ListHelpRequestsRequest]) (*connect.Response[identity.ListHelpRequestsResponse], error)
@@ -347,6 +356,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceVerifyEmailProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("VerifyEmail")),
+			connect.WithClientOptions(opts...),
+		),
+		requestEmailChange: connect.NewClient[identity.RequestEmailChangeRequest, identity.RequestEmailChangeResponse](
+			httpClient,
+			baseURL+IdentityServiceRequestEmailChangeProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RequestEmailChange")),
+			connect.WithClientOptions(opts...),
+		),
+		confirmEmailChange: connect.NewClient[identity.ConfirmEmailChangeRequest, identity.ConfirmEmailChangeResponse](
+			httpClient,
+			baseURL+IdentityServiceConfirmEmailChangeProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ConfirmEmailChange")),
 			connect.WithClientOptions(opts...),
 		),
 		requestAdminHelp: connect.NewClient[identity.RequestAdminHelpRequest, identity.RequestAdminHelpResponse](
@@ -612,6 +633,8 @@ type identityServiceClient struct {
 	confirmPasswordReset        *connect.Client[identity.ConfirmPasswordResetRequest, identity.ConfirmPasswordResetResponse]
 	sendEmailVerification       *connect.Client[identity.SendEmailVerificationRequest, identity.SendEmailVerificationResponse]
 	verifyEmail                 *connect.Client[identity.VerifyEmailRequest, identity.VerifyEmailResponse]
+	requestEmailChange          *connect.Client[identity.RequestEmailChangeRequest, identity.RequestEmailChangeResponse]
+	confirmEmailChange          *connect.Client[identity.ConfirmEmailChangeRequest, identity.ConfirmEmailChangeResponse]
 	requestAdminHelp            *connect.Client[identity.RequestAdminHelpRequest, identity.RequestAdminHelpResponse]
 	listHelpRequests            *connect.Client[identity.ListHelpRequestsRequest, identity.ListHelpRequestsResponse]
 	resolveHelpRequest          *connect.Client[identity.ResolveHelpRequestRequest, identity.ResolveHelpRequestResponse]
@@ -713,6 +736,16 @@ func (c *identityServiceClient) SendEmailVerification(ctx context.Context, req *
 // VerifyEmail calls identity.IdentityService.VerifyEmail.
 func (c *identityServiceClient) VerifyEmail(ctx context.Context, req *connect.Request[identity.VerifyEmailRequest]) (*connect.Response[identity.VerifyEmailResponse], error) {
 	return c.verifyEmail.CallUnary(ctx, req)
+}
+
+// RequestEmailChange calls identity.IdentityService.RequestEmailChange.
+func (c *identityServiceClient) RequestEmailChange(ctx context.Context, req *connect.Request[identity.RequestEmailChangeRequest]) (*connect.Response[identity.RequestEmailChangeResponse], error) {
+	return c.requestEmailChange.CallUnary(ctx, req)
+}
+
+// ConfirmEmailChange calls identity.IdentityService.ConfirmEmailChange.
+func (c *identityServiceClient) ConfirmEmailChange(ctx context.Context, req *connect.Request[identity.ConfirmEmailChangeRequest]) (*connect.Response[identity.ConfirmEmailChangeResponse], error) {
+	return c.confirmEmailChange.CallUnary(ctx, req)
 }
 
 // RequestAdminHelp calls identity.IdentityService.RequestAdminHelp.
@@ -939,6 +972,9 @@ type IdentityServiceHandler interface {
 	// Email Verification
 	SendEmailVerification(context.Context, *connect.Request[identity.SendEmailVerificationRequest]) (*connect.Response[identity.SendEmailVerificationResponse], error)
 	VerifyEmail(context.Context, *connect.Request[identity.VerifyEmailRequest]) (*connect.Response[identity.VerifyEmailResponse], error)
+	// Email Change (primary-email rotation, double-opt-in)
+	RequestEmailChange(context.Context, *connect.Request[identity.RequestEmailChangeRequest]) (*connect.Response[identity.RequestEmailChangeResponse], error)
+	ConfirmEmailChange(context.Context, *connect.Request[identity.ConfirmEmailChangeRequest]) (*connect.Response[identity.ConfirmEmailChangeResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[identity.RequestAdminHelpRequest]) (*connect.Response[identity.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[identity.ListHelpRequestsRequest]) (*connect.Response[identity.ListHelpRequestsResponse], error)
@@ -1071,6 +1107,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceVerifyEmailProcedure,
 		svc.VerifyEmail,
 		connect.WithSchema(identityServiceMethods.ByName("VerifyEmail")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRequestEmailChangeHandler := connect.NewUnaryHandler(
+		IdentityServiceRequestEmailChangeProcedure,
+		svc.RequestEmailChange,
+		connect.WithSchema(identityServiceMethods.ByName("RequestEmailChange")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceConfirmEmailChangeHandler := connect.NewUnaryHandler(
+		IdentityServiceConfirmEmailChangeProcedure,
+		svc.ConfirmEmailChange,
+		connect.WithSchema(identityServiceMethods.ByName("ConfirmEmailChange")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceRequestAdminHelpHandler := connect.NewUnaryHandler(
@@ -1345,6 +1393,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceSendEmailVerificationHandler.ServeHTTP(w, r)
 		case IdentityServiceVerifyEmailProcedure:
 			identityServiceVerifyEmailHandler.ServeHTTP(w, r)
+		case IdentityServiceRequestEmailChangeProcedure:
+			identityServiceRequestEmailChangeHandler.ServeHTTP(w, r)
+		case IdentityServiceConfirmEmailChangeProcedure:
+			identityServiceConfirmEmailChangeHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestAdminHelpProcedure:
 			identityServiceRequestAdminHelpHandler.ServeHTTP(w, r)
 		case IdentityServiceListHelpRequestsProcedure:
@@ -1482,6 +1534,14 @@ func (UnimplementedIdentityServiceHandler) SendEmailVerification(context.Context
 
 func (UnimplementedIdentityServiceHandler) VerifyEmail(context.Context, *connect.Request[identity.VerifyEmailRequest]) (*connect.Response[identity.VerifyEmailResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.VerifyEmail is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RequestEmailChange(context.Context, *connect.Request[identity.RequestEmailChangeRequest]) (*connect.Response[identity.RequestEmailChangeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.RequestEmailChange is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ConfirmEmailChange(context.Context, *connect.Request[identity.ConfirmEmailChangeRequest]) (*connect.Response[identity.ConfirmEmailChangeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.ConfirmEmailChange is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) RequestAdminHelp(context.Context, *connect.Request[identity.RequestAdminHelpRequest]) (*connect.Response[identity.RequestAdminHelpResponse], error) {
