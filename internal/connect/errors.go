@@ -62,7 +62,8 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrQrLoginNotPending):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
-	case errors.Is(err, service.ErrLocalAuthDisabled):
+	case errors.Is(err, service.ErrLocalAuthDisabled),
+		errors.Is(err, service.ErrOAuthDisabled):
 		return connect.NewError(connect.CodeUnavailable, err)
 	}
 

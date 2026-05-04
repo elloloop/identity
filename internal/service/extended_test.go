@@ -111,11 +111,11 @@ func TestPasswordLogin_ResetsFailedCount(t *testing.T) {
 
 // ── OAuthLogin edge cases ─────────────────────────────────────────────
 
-func TestOAuthLogin_EmptyEmailFails(t *testing.T) {
+func TestOAuthLogin_EmptyCodeFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.OAuthLogin(context.Background(), "", "Name", "", "google", "", "")
+	_, err := svc.OAuthLogin(context.Background(), "", "google", "https://app/cb", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -124,7 +124,8 @@ func TestOAuthLogin_DefaultsDisplayNameFromEmail(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.OAuthLogin(context.Background(), "carol@example.com", "", "", "google", "", "")
+	code := fakeOAuthCode("carol@example.com", "", "", "google")
+	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "carol", result.User.Name)
 }
@@ -134,7 +135,8 @@ func TestOAuthLogin_DeactivatedAccountFails(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	seedUser(repo, "deac-oauth@example.com", "", "deactivated")
 
-	_, err := svc.OAuthLogin(context.Background(), "deac-oauth@example.com", "X", "", "google", "", "")
+	code := fakeOAuthCode("deac-oauth@example.com", "X", "", "google")
+	_, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrAccountNotActive))
 }
@@ -145,7 +147,8 @@ func TestOAuthLogin_ExistingUserNoNameChangeNoUpdate(t *testing.T) {
 	seedUser(repo, "noupd@example.com", "", "active")
 
 	// Same display name and no avatar -- no patch should happen, but call must succeed.
-	_, err := svc.OAuthLogin(context.Background(), "noupd@example.com", "noupd", "", "google", "", "")
+	code := fakeOAuthCode("noupd@example.com", "noupd", "", "google")
+	_, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
 	require.NoError(t, err)
 }
 

@@ -79,7 +79,8 @@ func TestOAuthLogin_FindUserErrors(t *testing.T) {
 	r.failFindUserByEmail = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.OAuthLogin(context.Background(), "x@example.com", "X", "", "google", "", "")
+	code := fakeOAuthCode("x@example.com", "X", "", "google")
+	_, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
 	require.Error(t, err)
 }
 
@@ -88,7 +89,8 @@ func TestOAuthLogin_CreateUserErrors(t *testing.T) {
 	r.failCreateUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.OAuthLogin(context.Background(), "x@example.com", "X", "", "google", "", "")
+	code := fakeOAuthCode("x@example.com", "X", "", "google")
+	_, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
 	require.Error(t, err)
 }
 
@@ -97,7 +99,8 @@ func TestOAuthLogin_IssueTokensFails(t *testing.T) {
 	r.failCreateRefreshToken = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.OAuthLogin(context.Background(), "x@example.com", "X", "", "google", "", "")
+	code := fakeOAuthCode("x@example.com", "X", "", "google")
+	_, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
 	require.Error(t, err)
 }
 
@@ -569,7 +572,8 @@ func TestOAuthLogin_ExistingUserUpdateWarns(t *testing.T) {
 	svc := newTestAuthServiceErr(t, r)
 
 	// Should still succeed because the update failure is logged but not propagated.
-	res, err := svc.OAuthLogin(context.Background(), "ouw@example.com", "Different Name", "https://avatar.png", "google", "", "")
+	code := fakeOAuthCode("ouw@example.com", "Different Name", "https://avatar.png", "google")
+	res, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
 	require.NoError(t, err)
 	assert.NotNil(t, res)
 }

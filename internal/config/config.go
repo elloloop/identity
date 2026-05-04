@@ -40,12 +40,16 @@ type Config struct {
 	// Refresh tokens
 	RefreshExpirySeconds int
 
-	// OAuth providers
+	// OAuth providers. Identity does the code exchange for these
+	// providers itself — see pkg/oauth. A provider is enabled only
+	// when BOTH the ID and secret are non-empty.
 	GoogleClientID        string
 	GoogleClientSecret    string
 	MicrosoftClientID     string
 	MicrosoftClientSecret string
 	MicrosoftTenantID     string
+	GitHubClientID        string
+	GitHubClientSecret    string
 
 	// Password
 	PasswordResetExpirySeconds int
@@ -127,11 +131,13 @@ func Load() *Config {
 
 		RefreshExpirySeconds: envInt("GATEWAY_REFRESH_EXPIRY_SECONDS", 604800),
 
-		GoogleClientID:        envStr("GATEWAY_GOOGLE_CLIENT_ID", ""),
-		GoogleClientSecret:    envStr("GATEWAY_GOOGLE_CLIENT_SECRET", ""),
-		MicrosoftClientID:     envStr("GATEWAY_MICROSOFT_CLIENT_ID", ""),
-		MicrosoftClientSecret: envStr("GATEWAY_MICROSOFT_CLIENT_SECRET", ""),
+		GoogleClientID:        envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", envStr("GATEWAY_GOOGLE_CLIENT_ID", "")),
+		GoogleClientSecret:    envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", envStr("GATEWAY_GOOGLE_CLIENT_SECRET", "")),
+		MicrosoftClientID:     envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_ID", envStr("GATEWAY_MICROSOFT_CLIENT_ID", "")),
+		MicrosoftClientSecret: envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET", envStr("GATEWAY_MICROSOFT_CLIENT_SECRET", "")),
 		MicrosoftTenantID:     envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
+		GitHubClientID:        envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:    envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
 
 		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 3600),
 

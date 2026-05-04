@@ -13,6 +13,10 @@ import (
 // ─── Authentication RPCs ────────────────────────────────────────────────────
 
 // OAuthLogin exchanges an OAuth authorization code for backend-issued tokens.
+//
+// The service layer is responsible for the actual provider-side code
+// exchange and identity verification. The handler simply forwards the
+// authorization code, the user-selected provider, and the redirect URI.
 func (h *IdentityHandler) OAuthLogin(
 	ctx context.Context,
 	req *connect.Request[identitypb.OAuthLoginRequest],
@@ -20,15 +24,11 @@ func (h *IdentityHandler) OAuthLogin(
 	ipAddr := clientIP(req.Header())
 	userAgent := clientUserAgent(req.Header())
 
-	// The service-layer OAuthLogin is a post-validation method that takes
-	// already-decoded user info. The OAuth code exchange is not yet
-	// implemented; for now we pass the available proto fields.
 	result, err := h.auth.OAuthLogin(
 		ctx,
-		"",                // email — resolved after code exchange (not yet implemented)
-		"",                // displayName
-		"",                // avatarURL
+		req.Msg.Code,
 		req.Msg.Provider,
+		req.Msg.RedirectUri,
 		ipAddr,
 		userAgent,
 	)

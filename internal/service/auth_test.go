@@ -288,7 +288,8 @@ func TestOAuthLogin_CreatesNewUser(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.OAuthLogin(context.Background(), "oauth@example.com", "OAuth User", "https://img.example.com/pic.jpg", "google", "", "")
+	code := fakeOAuthCode("oauth@example.com", "OAuth User", "https://img.example.com/pic.jpg", "google")
+	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "oauth@example.com", result.User.Email)
 	assert.Equal(t, "OAuth User", result.User.Name)
@@ -300,7 +301,8 @@ func TestOAuthLogin_ExistingUserUpdatesProfile(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	seedUser(repo, "existing@example.com", "", "active")
 
-	result, err := svc.OAuthLogin(context.Background(), "existing@example.com", "New Name", "https://pic.url", "google", "", "")
+	code := fakeOAuthCode("existing@example.com", "New Name", "https://pic.url", "google")
+	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "existing@example.com", result.User.Email)
 }

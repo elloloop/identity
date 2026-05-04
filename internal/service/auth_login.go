@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -236,32 +238,72 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 
 // ── OAuthLogin ─────────────────────────────────────────────────────────
 
-// OAuthLogin is a placeholder for the OAuth code exchange flow.
-// The actual OIDC token exchange and validation would be injected as a
-// dependency; this method handles the post-validation user upsert + token issuance.
-func (s *AuthService) OAuthLogin(ctx context.Context, email, displayName, avatarURL, provider, ipAddr, userAgent string) (*LoginResult, error) {
-	if email == "" {
-		return nil, fmt.Errorf("%w: email is required from OAuth provider", ErrInvalidArgument)
+// OAuthLogin performs the full OAuth code-exchange flow: it looks up
+// the registered Exchanger for the provider, swaps the code for a
+// verified Identity, then upserts the local user and issues tokens.
+//
+// The frontend / gateway is NOT trusted to validate the user's
+// identity; identity does the exchange itself. Provider access /
+// refresh tokens are discarded — they are not persisted.
+func (s *AuthService) OAuthLogin(
+	ctx context.Context,
+	code, provider, redirectURI, ipAddr, userAgent string,
+) (*LoginResult, error) {
+	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
+		return nil, ErrOAuthDisabled
 	}
-	email = strings.TrimSpace(strings.ToLower(email))
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		return nil, fmt.Errorf("%w: provider is required", ErrInvalidArgument)
+	}
+	if strings.TrimSpace(code) == "" {
+		return nil, fmt.Errorf("%w: code is required", ErrInvalidArgument)
+	}
 
-	user, isNew, err := s.upsertUser(ctx, email, displayName, avatarURL)
+	exchanger, ok := s.oauthRegistry.Get(provider)
+	if !ok {
+		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
+	}
+
+	identity, err := exchanger.Exchange(ctx, code, redirectURI)
+	if err != nil {
+		s.logger.Info("oauth_login_failed",
+			zap.String("provider", provider), zap.Error(err),
+		)
+		s.audit.Log(ctx, audit.EventOAuthLogin,
+			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{
+				"provider": provider,
+				"reason":   "code_exchange_failed",
+			}),
+		)
+		return s.mapOAuthError(err)
+	}
+
+	email := strings.TrimSpace(strings.ToLower(identity.Email))
+	if email == "" {
+		return nil, fmt.Errorf("%w: provider returned no email", ErrUnauthenticated)
+	}
+
+	user, isNew, err := s.upsertOAuthUser(ctx, identity, email)
 	if err != nil {
 		return nil, err
 	}
 
-	// Enforce account status.
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
 		return nil, err
 	}
 
 	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info("oauth_login_success",
-		zap.String("email", email), zap.String("provider", provider), zap.String("user_id", user.ID),
+		zap.String("email", email),
+		zap.String("provider", provider),
+		zap.String("user_id", user.ID),
 	)
 
 	if isNew {
-		s.ensureMailbox(ctx, user.ID, email, displayName)
+		s.ensureMailbox(ctx, user.ID, email, identity.Name)
 	}
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
@@ -272,7 +314,11 @@ func (s *AuthService) OAuthLogin(ctx context.Context, email, displayName, avatar
 	s.audit.Log(ctx, audit.EventOAuthLogin,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(true),
-		audit.WithDetails(map[string]any{"provider": provider}),
+		audit.WithDetails(map[string]any{
+			"provider": provider,
+			"email":    email,
+			"new_user": isNew,
+		}),
 	)
 
 	return &LoginResult{
@@ -281,6 +327,93 @@ func (s *AuthService) OAuthLogin(ctx context.Context, email, displayName, avatar
 		RefreshToken: refreshToken,
 		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
 	}, nil
+}
+
+// mapOAuthError translates pkg/oauth sentinel errors into AuthService
+// sentinels so the connect handler emits the right RPC code.
+func (s *AuthService) mapOAuthError(err error) (*LoginResult, error) {
+	switch {
+	case errors.Is(err, oauth.ErrEmailNotVerified):
+		return nil, fmt.Errorf("%w: provider email is not verified", ErrUnauthenticated)
+	case errors.Is(err, oauth.ErrIdentityVerification):
+		return nil, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+	case errors.Is(err, oauth.ErrCodeExchangeFailed):
+		return nil, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+	default:
+		return nil, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+	}
+}
+
+// upsertOAuthUser is the OAuth-aware variant of upsertUser. It marks
+// the user as email-verified (the provider asserted it) and copies
+// name / avatar from the Identity for new users.
+func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Identity, email string) (*User, bool, error) {
+	existing, err := s.repo.FindUserByEmail(ctx, email)
+	if err != nil {
+		return nil, false, err
+	}
+	now := s.nowMs()
+	if existing != nil {
+		patch := make(map[string]any)
+		if identity.Name != "" && identity.Name != existing.Name {
+			patch["name"] = identity.Name
+			existing.Name = identity.Name
+		}
+		if identity.AvatarURL != "" && identity.AvatarURL != existing.AvatarURL {
+			patch["avatar_url"] = identity.AvatarURL
+			existing.AvatarURL = identity.AvatarURL
+		}
+		if !existing.EmailVerified {
+			patch["email_verified"] = true
+			patch["email_verified_at"] = now
+			existing.EmailVerified = true
+			existing.EmailVerifiedAt = now
+		}
+		if len(patch) > 0 {
+			patch["updated_at"] = now
+			if err := s.repo.UpdateUser(ctx, existing.ID, patch); err != nil {
+				s.logger.Warn("oauth_upsert_update_failed", zap.Error(err))
+			}
+		}
+		return existing, false, nil
+	}
+
+	displayName := identity.Name
+	if displayName == "" {
+		displayName = strings.Split(email, "@")[0]
+	}
+	userID, err := s.repo.CreateUser(ctx, &User{
+		Email:           email,
+		Name:            displayName,
+		AvatarURL:       identity.AvatarURL,
+		Role:            "member",
+		Status:          "active",
+		EmailVerified:   true,
+		EmailVerifiedAt: now,
+		CreatedAt:       msToTime(now),
+		UpdatedAt:       msToTime(now),
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("creating user: %w", err)
+	}
+	user := &User{
+		ID:              userID,
+		Email:           email,
+		Name:            displayName,
+		AvatarURL:       identity.AvatarURL,
+		Role:            "member",
+		Status:          "active",
+		EmailVerified:   true,
+		EmailVerifiedAt: now,
+		CreatedAt:       msToTime(now),
+		UpdatedAt:       msToTime(now),
+	}
+	s.logger.Info("oauth_user_provisioned",
+		zap.String("email", email),
+		zap.String("user_id", userID),
+		zap.String("provider", identity.Provider),
+	)
+	return user, true, nil
 }
 
 // upsertUser finds a user by email or creates one. Returns (user, isNew, error).

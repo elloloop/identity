@@ -209,5 +209,10 @@ func newTestAuthServiceErr(t *testing.T, repo *errorRepo) *AuthService {
 	passkeysSvc, _ := passkeys.NewWebAuthnService(passkeys.Config{
 		RPID: cfg.PasskeyRPID, RPName: cfg.PasskeyRPName, Origin: cfg.PasskeyOrigin,
 	})
-	return NewAuthService(repo, cfg, kr, passkeysSvc, audit.NewLogger(nil, "test", nil), testTotpKey(), nil, zap.NewNop())
+	return NewAuthServiceWithOAuth(
+		repo, cfg, kr, passkeysSvc,
+		audit.NewLogger(nil, "test", nil),
+		testTotpKey(), nil, zap.NewNop(),
+		defaultTestOAuthRegistry(),
+	)
 }
