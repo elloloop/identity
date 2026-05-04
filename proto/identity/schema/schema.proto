@@ -222,7 +222,7 @@ message AuditEvent {
         description: "An immutable security audit log entry"
     };
 
-    string event_type      = 1 [(entdb.field) = { enum_values: "login_success,login_failure,logout,password_changed,password_reset,totp_enabled,totp_disabled,totp_verified,passkey_added,passkey_removed,passkey_used,session_revoked,user_invited,user_deactivated,user_reactivated,admin_reset_password,oauth_login,qr_login_approved,qr_login_rejected", indexed: true, pii_false: true }];
+    string event_type      = 1 [(entdb.field) = { enum_values: "login_success,login_failure,login_locked,account_locked,logout,password_changed,password_reset,totp_enabled,totp_disabled,totp_verified,passkey_added,passkey_removed,passkey_used,session_revoked,user_invited,user_deactivated,user_reactivated,admin_reset_password,oauth_login,qr_login_approved,qr_login_rejected", indexed: true, pii_false: true }];
     string actor_user_id   = 2 [(entdb.field) = { indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
     string target_user_id  = 3 [(entdb.field) = { indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
     string ip_address      = 4 [(entdb.field) = { pii: true }];

@@ -214,6 +214,40 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 	return nil
 }
 
+func (r *fakeRepo) IncrementFailedLoginCount(_ context.Context, userID string) (int32, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return 0, fmt.Errorf("user %s not found", userID)
+	}
+	u.FailedLoginCount++
+	return int32(u.FailedLoginCount), nil
+}
+
+func (r *fakeRepo) ResetFailedLoginCount(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.FailedLoginCount = 0
+	u.LockedUntil = 0
+	return nil
+}
+
+func (r *fakeRepo) SetUserLockedUntil(_ context.Context, userID string, lockedUntilMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.LockedUntil = lockedUntilMs
+	return nil
+}
+
 func (r *fakeRepo) FindRefreshTokenByHash(_ context.Context, hash string) (*service.RefreshTokenRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -31,6 +31,8 @@ message User {
   int64 last_login_at_ms = 12;
   bool email_verified = 13;
   int64 email_verified_at = 14;
+  int32 failed_login_count = 15;          // # of consecutive failed PasswordLogin attempts
+  int64 locked_until = 16;                // epoch ms; 0 = not locked, future = locked until
 }
 
 message CreateUserRequest {

@@ -107,6 +107,14 @@ type Repository interface {
 	CreateUser(ctx context.Context, u *User) (string, error) // returns node ID
 	UpdateUser(ctx context.Context, userID string, fields map[string]any) error
 
+	// Lockout state. These are dedicated methods (rather than UpdateUser
+	// patches) so the persistence layer can implement them as single
+	// atomic writes — important for racing concurrent failed-login
+	// attempts on the same account.
+	IncrementFailedLoginCount(ctx context.Context, userID string) (newCount int32, err error)
+	ResetFailedLoginCount(ctx context.Context, userID string) error
+	SetUserLockedUntil(ctx context.Context, userID string, lockedUntilMs int64) error
+
 	// Refresh tokens
 	FindRefreshTokenByHash(ctx context.Context, hash string) (*RefreshTokenRecord, error)
 	CreateRefreshToken(ctx context.Context, r *RefreshTokenRecord) (string, error)
@@ -511,35 +519,45 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	return accessToken, rawRefresh, nil
 }
 
-// recordFailedLogin increments the failed login counter and locks if threshold reached.
-func (s *AuthService) recordFailedLogin(ctx context.Context, user *User) {
-	failed := user.FailedLoginCount + 1
-	now := s.nowMs()
-	fields := map[string]any{"failed_login_count": failed, "updated_at": now}
-	if failed >= s.cfg.LoginMaxFailedAttempts {
-		fields["locked_until"] = now + int64(s.cfg.LoginLockoutSeconds)*1000
-		fields["failed_login_count"] = 0
+// recordFailedLogin increments the failed login counter and, if the
+// configured threshold is now reached, locks the account for the
+// configured cooldown. Returns the new counter value (0 if increment
+// failed) and a "locked" flag indicating the threshold was tripped on
+// THIS call. Errors are returned so callers can fail closed: a silent
+// swallow here would let a database outage become a lockout-bypass.
+func (s *AuthService) recordFailedLogin(ctx context.Context, user *User) (newCount int32, lockedNow bool, err error) {
+	newCount, err = s.repo.IncrementFailedLoginCount(ctx, user.ID)
+	if err != nil {
+		s.logger.Warn("failed_login_increment_failed",
+			zap.String("user_id", user.ID), zap.Error(err))
+		return 0, false, err
+	}
+	if int(newCount) >= s.cfg.LoginMaxFailedAttempts {
+		now := s.nowMs()
+		lockedUntil := now + int64(s.cfg.LoginLockoutSeconds)*1000
+		if lockErr := s.repo.SetUserLockedUntil(ctx, user.ID, lockedUntil); lockErr != nil {
+			s.logger.Warn("set_locked_until_failed",
+				zap.String("user_id", user.ID), zap.Error(lockErr))
+			return newCount, false, lockErr
+		}
 		s.logger.Warn("account_locked",
 			zap.String("user_id", user.ID),
 			zap.Int("lockout_seconds", s.cfg.LoginLockoutSeconds),
 		)
+		return newCount, true, nil
 	}
-	if err := s.repo.UpdateUser(ctx, user.ID, fields); err != nil {
-		s.logger.Warn("failed_login_update_failed", zap.String("user_id", user.ID), zap.Error(err))
-	}
+	return newCount, false, nil
 }
 
-// resetFailedLogin clears the failed login counter on successful auth.
+// resetFailedLogin clears the failed login counter and any active
+// lockout on successful authentication. Best-effort: a failure to
+// clear is logged but not propagated, since the user has already
+// proven they hold the credentials.
 func (s *AuthService) resetFailedLogin(ctx context.Context, user *User) {
 	if user.FailedLoginCount == 0 && user.LockedUntil == 0 {
 		return
 	}
-	err := s.repo.UpdateUser(ctx, user.ID, map[string]any{
-		"failed_login_count": 0,
-		"locked_until":       int64(0),
-		"updated_at":         s.nowMs(),
-	})
-	if err != nil {
+	if err := s.repo.ResetFailedLoginCount(ctx, user.ID); err != nil {
 		s.logger.Warn("failed_login_reset_failed", zap.String("user_id", user.ID), zap.Error(err))
 	}
 }

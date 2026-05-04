@@ -37,6 +37,12 @@ func toConnectError(err error) *connect.Error {
 		return connect.NewError(connect.CodeInvalidArgument, err)
 
 	case errors.Is(err, service.ErrAccountLocked):
+		// CodeResourceExhausted: lockout is a per-account quota of failed
+		// attempts. ResourceExhausted matches gRPC's documented semantics
+		// for "the resource is exhausted" / rate-limit-style failures and
+		// signals to clients that the request itself is over-budget on
+		// this resource (the account), not a transient infra failure
+		// (which would be CodeUnavailable).
 		return connect.NewError(connect.CodeResourceExhausted, err)
 
 	case errors.Is(err, service.ErrTotpRequired):
