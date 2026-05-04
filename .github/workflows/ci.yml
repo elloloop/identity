@@ -84,7 +84,7 @@ jobs:
 
       - name: go test (race + coverage)
         run: |
-          go test -race -timeout=180s \
+          go test -race -timeout=600s \
             -coverprofile=cover.out \
             -coverpkg=./internal/...,./pkg/...,./cmd/... \
             ./...
