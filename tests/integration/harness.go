@@ -36,6 +36,7 @@ import (
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -94,7 +95,7 @@ var _ email.Transport = (*RecordingMailer)(nil)
 // in-memory repository and returns a Harness for driving it. The
 // server is torn down via t.Cleanup; callers do not need to close
 // it explicitly.
-func StartServer(t *testing.T) *Harness {
+func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 	t.Helper()
 
 	cfg := newTestConfig()
@@ -121,6 +122,11 @@ func StartServer(t *testing.T) *Harness {
 	auditDB := NewRecordingDB()
 	mailer := NewRecordingMailer()
 
+	hOpts := harnessOptions{}
+	for _, o := range opts {
+		o(&hOpts)
+	}
+
 	handler := app.New(app.Deps{
 		Config:         cfg,
 		Logger:         zap.NewNop(),
@@ -130,6 +136,7 @@ func StartServer(t *testing.T) *Harness {
 		Passkeys:       pkSvc,
 		TOTPKey:        []byte("01234567890123456789012345678901"),
 		EmailTransport: mailer,
+		OAuthRegistry:  hOpts.oauthRegistry,
 	})
 
 	srv := httptest.NewServer(handler)
@@ -148,6 +155,19 @@ func StartServer(t *testing.T) *Harness {
 		Mailer:  mailer,
 		Server:  srv,
 	}
+}
+
+// HarnessOption configures StartServer.
+type HarnessOption func(*harnessOptions)
+
+type harnessOptions struct {
+	oauthRegistry *oauth.Registry
+}
+
+// WithOAuthRegistry overrides the OAuth registry used by the harness.
+// Pass nil to leave OAuth disabled (the default).
+func WithOAuthRegistry(r *oauth.Registry) HarnessOption {
+	return func(o *harnessOptions) { o.oauthRegistry = r }
 }
 
 // AuthedClient returns a Connect client whose every request carries
