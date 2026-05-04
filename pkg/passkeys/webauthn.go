@@ -7,8 +7,17 @@ import (
 	"strings"
 
 	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/protocol/webauthncose"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
+
+// defaultCredParams is the set of cryptographic algorithms we accept during
+// registration. ES256 (ECDSA-P256) is the WebAuthn baseline and is supported
+// by every authenticator; RS256 covers older Windows Hello / TPM implementations.
+var defaultCredParams = []protocol.CredentialParameter{
+	{Type: protocol.PublicKeyCredentialType, Algorithm: webauthncose.AlgES256},
+	{Type: protocol.PublicKeyCredentialType, Algorithm: webauthncose.AlgRS256},
+}
 
 // Config for the WebAuthn relying party.
 type Config struct {
@@ -112,6 +121,7 @@ func (s *WebAuthnService) BeginRegistration(
 			ResidentKey:      protocol.ResidentKeyRequirementPreferred,
 			UserVerification: protocol.VerificationPreferred,
 		}),
+		webauthn.WithCredentialParameters(defaultCredParams),
 	}
 
 	creation, session, createErr := s.wa.BeginRegistration(user, opts...)
@@ -148,17 +158,22 @@ func (s *WebAuthnService) CompleteRegistration(
 		return nil, fmt.Errorf("passkeys: parsing credential creation response: %w", parseErr)
 	}
 
-	// Build a synthetic session with the expected challenge so we can use
-	// the library's verification. Challenge is already base64url-encoded.
-	session := webauthn.SessionData{
-		Challenge: expectedChallenge,
-	}
-
 	// We need a user object — the library only uses it to set credential
 	// ownership, not for challenge verification.
 	user := &WebAuthnUser{
 		ID:   []byte("registration-user"),
 		Name: "registration-user",
+	}
+
+	// Build a synthetic session with the expected challenge so we can use
+	// the library's verification. Challenge is already base64url-encoded.
+	// UserID must match user.WebAuthnID() — go-webauthn checks this.
+	// CredParams gates which COSE algorithms we accept on the credential's
+	// public key during attestation verification.
+	session := webauthn.SessionData{
+		Challenge:  expectedChallenge,
+		UserID:     user.ID,
+		CredParams: defaultCredParams,
 	}
 
 	credential, verifyErr := s.wa.CreateCredential(user, session, parsedResponse)
@@ -288,11 +303,6 @@ func (s *WebAuthnService) CompleteAuthentication(
 		return 0, fmt.Errorf("passkeys: parsing credential request response: %w", parseErr)
 	}
 
-	// Challenge is already base64url-encoded.
-	session := webauthn.SessionData{
-		Challenge: expectedChallenge,
-	}
-
 	// Build a user with the stored credential so the library can verify.
 	user := &WebAuthnUser{
 		ID:   []byte("auth-user"),
@@ -306,6 +316,13 @@ func (s *WebAuthnService) CompleteAuthentication(
 				},
 			},
 		},
+	}
+
+	// Challenge is already base64url-encoded. UserID must match user.WebAuthnID()
+	// for the library's user-handle verification path.
+	session := webauthn.SessionData{
+		Challenge: expectedChallenge,
+		UserID:    user.ID,
 	}
 
 	credential, loginErr := s.wa.ValidateLogin(user, session, parsedResponse)
