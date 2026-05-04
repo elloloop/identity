@@ -291,3 +291,42 @@ func (h *IdentityHandler) VerifyEmail(
 		User: userToProto(user),
 	}), nil
 }
+
+// ─── Email Change RPCs ──────────────────────────────────────────────────
+
+// RequestEmailChange begins the primary-email rotation flow. The caller
+// must already be authenticated (auth middleware enforces this) AND
+// supply their current password as a re-authentication step. The new
+// address is sent a verification link; the old address is sent a
+// security notice. The change takes effect only after ConfirmEmailChange.
+func (h *IdentityHandler) RequestEmailChange(
+	ctx context.Context,
+	req *connect.Request[identitypb.RequestEmailChangeRequest],
+) (*connect.Response[identitypb.RequestEmailChangeResponse], error) {
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	if err := h.auth.RequestEmailChange(ctx, userID, req.Msg.NewEmail, req.Msg.CurrentPassword); err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.RequestEmailChangeResponse{}), nil
+}
+
+// ConfirmEmailChange consumes a pending email-change token (sent to the
+// new address). This RPC is exempt from the auth middleware so a user
+// clicking the link from their inbox doesn't need to be currently
+// signed in. On success, the user's email is updated and ALL of their
+// refresh tokens are revoked, forcing re-authentication everywhere.
+func (h *IdentityHandler) ConfirmEmailChange(
+	ctx context.Context,
+	req *connect.Request[identitypb.ConfirmEmailChangeRequest],
+) (*connect.Response[identitypb.ConfirmEmailChangeResponse], error) {
+	user, err := h.auth.ConfirmEmailChange(ctx, req.Msg.Token)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.ConfirmEmailChangeResponse{
+		User: userToProto(user),
+	}), nil
+}

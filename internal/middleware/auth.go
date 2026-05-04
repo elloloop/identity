@@ -29,6 +29,9 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.IdentityService/RequestPasswordReset": true,
 	"/identity.IdentityService/ConfirmPasswordReset": true,
 	"/identity.IdentityService/VerifyEmail":          true,
+	// ConfirmEmailChange is consumed by clicking a link in the new
+	// email's inbox — the user may not be currently signed in.
+	"/identity.IdentityService/ConfirmEmailChange":   true,
 	"/.well-known/jwks.json":                         true,
 	"/health":                                        true,
 	"/healthz":                                       true,

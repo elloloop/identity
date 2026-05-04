@@ -158,6 +158,18 @@ func (StubRepository) MarkEmailVerificationTokenConsumed(context.Context, string
 func (StubRepository) SetUserEmailVerified(context.Context, string, int64) error {
 	return ErrServiceUnavailable
 }
+func (StubRepository) CreateEmailChangeToken(context.Context, *EmailChangeToken) error {
+	return ErrServiceUnavailable
+}
+func (StubRepository) FindEmailChangeTokenByHash(context.Context, string) (*EmailChangeToken, error) {
+	return nil, ErrServiceUnavailable
+}
+func (StubRepository) MarkEmailChangeTokenConsumed(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
+func (StubRepository) UpdateUserEmail(context.Context, string, string, int64) error {
+	return ErrServiceUnavailable
+}
 
 // ── StubDB ────────────────────────────────────────────────────────────
 

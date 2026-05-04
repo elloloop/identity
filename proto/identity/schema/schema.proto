@@ -290,6 +290,25 @@ message EmailVerificationToken {
     int64  consumed_at = 6 [(entdb.field) = { pii_false: true }]; // 0 = unconsumed
 }
 
+// ─── EmailChangeToken (type_id 30) ─────────────────────────────────────
+
+message EmailChangeToken {
+    option (entdb.node) = {
+        type_id: 30
+        data_policy: DATA_POLICY_PERSONAL
+        subject_field: "user_id"
+        description: "A short-lived token for email change confirmation flows"
+    };
+
+    string token_hash  = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string user_id     = 2 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string old_email   = 3 [(entdb.field) = { pii: true }];
+    string new_email   = 4 [(entdb.field) = { pii: true }];
+    int64  expires_at  = 5 [(entdb.field) = { required: true, pii_false: true }];
+    int64  created_at  = 6 [(entdb.field) = { required: true, pii_false: true }];
+    int64  consumed_at = 7 [(entdb.field) = { pii_false: true }]; // 0 = unconsumed
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Types
 // ═══════════════════════════════════════════════════════════════════════

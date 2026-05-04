@@ -17,6 +17,12 @@ const (
 	TemplatePasswordReset     = "password_reset"
 	TemplateEmailVerification = "email_verification"
 	TemplateInvitation        = "invitation"
+	// TemplateEmailChangeVerify is sent to the *new* address with the
+	// verification link to confirm the email change.
+	TemplateEmailChangeVerify = "email_change_verify"
+	// TemplateEmailChangeNotice is sent to the *old* address as a
+	// security notice that an email change has been requested.
+	TemplateEmailChangeNotice = "email_change_notice"
 )
 
 // Render returns the HTML and plain-text bodies for the given template name,

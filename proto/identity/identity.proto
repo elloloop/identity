@@ -296,6 +296,27 @@ message VerifyEmailResponse {
   User user = 1;
 }
 
+// ─── Email Change ───────────────────────────────────────────────────
+// Two-step primary-email change. The user must re-authenticate with their
+// current password to request the change; a verification link is sent to
+// the new address and a security notice to the old address. The swap only
+// takes effect after the verification token is consumed.
+
+message RequestEmailChangeRequest {
+  string new_email = 1;
+  string current_password = 2;
+}
+
+message RequestEmailChangeResponse {}
+
+message ConfirmEmailChangeRequest {
+  string token = 1;
+}
+
+message ConfirmEmailChangeResponse {
+  User user = 1;
+}
+
 // ─── Admin Help Flow ────────────────────────────────────────────────
 // Replaces the self-serve ForgotPassword flow. End users who can't log in
 // raise a ticket; admins resolve it via the dashboard.
@@ -681,6 +702,10 @@ service IdentityService {
   // Email Verification
   rpc SendEmailVerification(SendEmailVerificationRequest) returns (SendEmailVerificationResponse);
   rpc VerifyEmail(VerifyEmailRequest) returns (VerifyEmailResponse);
+
+  // Email Change (primary-email rotation, double-opt-in)
+  rpc RequestEmailChange(RequestEmailChangeRequest) returns (RequestEmailChangeResponse);
+  rpc ConfirmEmailChange(ConfirmEmailChangeRequest) returns (ConfirmEmailChangeResponse);
 
   // Admin help (replaces self-serve ForgotPassword)
   rpc RequestAdminHelp(RequestAdminHelpRequest) returns (RequestAdminHelpResponse);

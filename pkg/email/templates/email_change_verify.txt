@@ -1,0 +1,7 @@
+Hi {{.UserName}},
+
+We received a request to change the primary email on your account from {{.OldEmail}} to {{.NewEmail}}. Confirm this change by visiting the link below. The link expires in {{.ExpiresIn}}.
+
+{{.Link}}
+
+If you didn't request this change, you can safely ignore this email — your account email will not be changed unless this link is clicked.
