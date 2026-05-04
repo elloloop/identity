@@ -2,6 +2,7 @@ package connect
 
 import (
 	"context"
+	"fmt"
 
 	"connectrpc.com/connect"
 
@@ -250,4 +251,34 @@ func (h *IdentityHandler) SignOutEverywhere(
 		RevokedCount: int32(revokedCount),
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// ConfirmPasswordReset consumes a password-reset token and sets a new password.
+// Stub returns Unimplemented until the service layer is wired (next phase).
+func (h *IdentityHandler) ConfirmPasswordReset(
+	ctx context.Context,
+	req *connect.Request[identitypb.ConfirmPasswordResetRequest],
+) (*connect.Response[identitypb.ConfirmPasswordResetResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("ConfirmPasswordReset: not yet wired"))
+}
+
+// SendEmailVerification sends a verification email to the authenticated user.
+// Stub returns Unimplemented until the service layer is wired (next phase).
+func (h *IdentityHandler) SendEmailVerification(
+	ctx context.Context,
+	req *connect.Request[identitypb.SendEmailVerificationRequest],
+) (*connect.Response[identitypb.SendEmailVerificationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("SendEmailVerification: not yet wired"))
+}
+
+// VerifyEmail consumes an email-verification token and marks the email verified.
+// Stub returns Unimplemented until the service layer is wired (next phase).
+func (h *IdentityHandler) VerifyEmail(
+	ctx context.Context,
+	req *connect.Request[identitypb.VerifyEmailRequest],
+) (*connect.Response[identitypb.VerifyEmailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("VerifyEmail: not yet wired"))
 }
