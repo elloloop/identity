@@ -35,8 +35,10 @@ func userToProto(u *service.User) *identitypb.User {
 		RecoveryEmail:   u.RecoveryEmail,
 		QuotaBytes:      u.QuotaBytes,
 		LastLoginAtMs:   u.LastLoginAtMs,
-		EmailVerified:   u.EmailVerified,
-		EmailVerifiedAt: u.EmailVerifiedAt,
+		EmailVerified:    u.EmailVerified,
+		EmailVerifiedAt:  u.EmailVerifiedAt,
+		FailedLoginCount: int32(u.FailedLoginCount),
+		LockedUntil:      u.LockedUntil,
 	}
 	if !u.CreatedAt.IsZero() {
 		pb.CreatedAt = timestamppb.New(u.CreatedAt)
