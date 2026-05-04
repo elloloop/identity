@@ -6,6 +6,7 @@
 package app
 
 import (
+	"context"
 	"net/http"
 
 	"go.uber.org/zap"
@@ -55,6 +56,13 @@ func New(deps Deps) http.Handler {
 	logger := deps.Logger
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+
+	// Surface the EntDB schema-apply gap loudly at boot so operators
+	// see exactly which node types identity expects the database to
+	// know about. See internal/app/schema.go for why this only logs.
+	if err := applyOrLogSchemaGap(context.Background(), deps.DB, logger); err != nil {
+		logger.Error("schema_descriptor_invalid", zap.Error(err))
 	}
 
 	auditLog := audit.NewLogger(deps.DB, deps.Config.DefaultTenantID, logger)

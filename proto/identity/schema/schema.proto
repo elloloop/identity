@@ -293,20 +293,9 @@ message EmailVerificationToken {
 // ─── EmailChangeToken (type_id 30) ─────────────────────────────────────
 
 message EmailChangeToken {
-// ─── OAuthIdentity (type_id 30) ────────────────────────────────────────
-//
-// Records the linkage between a local User and a stable provider-side
-// identity (provider, provider_user_id). This is what lets OAuth login
-// keep the same human linked to the same local account when the
-// provider's email changes.
-//
-// Application code MUST enforce uniqueness on (provider, provider_user_id):
-// EntDB does not currently support composite unique constraints, so the
-// service layer is responsible for the duplicate check before insert.
-message OAuthIdentity {
     option (entdb.node) = {
         type_id: 30
-        data_policy: DATA_POLICY_PERSONAL
+        data_policy: DATA_POLICY_EPHEMERAL
         subject_field: "user_id"
         description: "A short-lived token for email change confirmation flows"
     };
@@ -318,6 +307,23 @@ message OAuthIdentity {
     int64  expires_at  = 5 [(entdb.field) = { required: true, pii_false: true }];
     int64  created_at  = 6 [(entdb.field) = { required: true, pii_false: true }];
     int64  consumed_at = 7 [(entdb.field) = { pii_false: true }]; // 0 = unconsumed
+}
+
+// ─── OAuthIdentity (type_id 31) ────────────────────────────────────────
+//
+// Records the linkage between a local User and a stable provider-side
+// identity (provider, provider_user_id). This is what lets OAuth login
+// keep the same human linked to the same local account when the
+// provider's email changes.
+//
+// Application code MUST enforce uniqueness on (provider, provider_user_id):
+// EntDB does not currently support composite unique constraints, so the
+// service layer is responsible for the duplicate check before insert.
+message OAuthIdentity {
+    option (entdb.node) = {
+        type_id: 31
+        data_policy: DATA_POLICY_PERSONAL
+        subject_field: "user_id"
         description: "Linkage between a local User and a provider-side stable identity (provider, sub)."
     };
 
