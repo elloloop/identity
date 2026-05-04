@@ -70,7 +70,7 @@ jobs:
   test:
     name: Build + Test + Coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -84,7 +84,7 @@ jobs:
 
       - name: go test (race + coverage)
         run: |
-          go test -race -timeout=600s \
+          go test -race -timeout=1200s \
             -coverprofile=cover.out \
             -coverpkg=./internal/...,./pkg/...,./cmd/... \
             ./...

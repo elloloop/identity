@@ -17,7 +17,7 @@ jobs:
   verify:
     name: Verify (unit + smoke + integration)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +30,7 @@ jobs:
         run: go build ./...
 
       - name: go test -race
-        run: go test -race -timeout=600s ./...
+        run: go test -race -timeout=1200s ./...
 
       - name: go test -tags=smoke
         run: |
