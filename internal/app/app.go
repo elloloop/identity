@@ -16,6 +16,7 @@ import (
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
@@ -32,6 +33,11 @@ type Deps struct {
 	DB       service.DB
 	Passkeys *passkeys.WebAuthnService
 	TOTPKey  []byte
+
+	// EmailTransport delivers outbound mail. If nil, New constructs a
+	// transport from cfg via buildEmailTransport (so production code
+	// only needs to populate this when a test wants a custom recorder).
+	EmailTransport email.Transport
 }
 
 // New builds the full HTTP handler stack: middleware chain wrapping
@@ -45,8 +51,13 @@ func New(deps Deps) http.Handler {
 
 	auditLog := audit.NewLogger(deps.DB, deps.Config.DefaultTenantID, logger)
 
-	authSvc := service.NewAuthService(deps.Repo, deps.Config, deps.KeyRing, deps.Passkeys, auditLog, deps.TOTPKey, logger)
-	adminSvc := service.NewAdminService(deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, logger)
+	mailer := deps.EmailTransport
+	if mailer == nil {
+		mailer = buildEmailTransport(deps.Config, logger)
+	}
+
+	authSvc := service.NewAuthService(deps.Repo, deps.Config, deps.KeyRing, deps.Passkeys, auditLog, deps.TOTPKey, mailer, logger)
+	adminSvc := service.NewAdminService(deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 	profileSvc := service.NewProfileService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
