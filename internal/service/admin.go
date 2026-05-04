@@ -12,6 +12,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -22,15 +23,23 @@ type AdminService struct {
 	tenantID string
 	audit    *audit.Logger
 	cfg      *config.Config
+	mailer   email.Transport
 	logger   *zap.Logger
 }
 
 // NewAdminService creates an AdminService.
-func NewAdminService(db DB, tenantID string, auditLog *audit.Logger, cfg *config.Config, logger *zap.Logger) *AdminService {
+//
+// mailer may be nil; if nil, a log-only transport is substituted so
+// invitation emails are at least visible in the logs during local dev.
+// Email-side-effect failures never block the surrounding RPC.
+func NewAdminService(db DB, tenantID string, auditLog *audit.Logger, cfg *config.Config, mailer email.Transport, logger *zap.Logger) *AdminService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &AdminService{db: db, tenantID: tenantID, audit: auditLog, cfg: cfg, logger: logger}
+	if mailer == nil {
+		mailer = email.NewLogOnly(logger)
+	}
+	return &AdminService{db: db, tenantID: tenantID, audit: auditLog, cfg: cfg, mailer: mailer, logger: logger}
 }
 
 // requireAdmin fetches the actor's user node and checks role=admin.
@@ -141,7 +150,16 @@ func (s *AdminService) InviteUser(
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
 
-	setupURL := fmt.Sprintf("https://app.glassa.work/auth/accept-invitation?token=%s", rawToken)
+	baseURL := strings.TrimRight(s.cfg.AppBaseURL, "/")
+	if baseURL == "" {
+		baseURL = "https://app.glassa.work"
+	}
+	setupURL := fmt.Sprintf("%s/auth/accept-invitation?token=%s", baseURL, rawToken)
+
+	// Best-effort: render and send the invitation email. Failures here
+	// never fail the RPC — the admin still gets the token in the
+	// response and can hand it off out-of-band.
+	s.sendInvitationEmail(ctx, email, name, role, setupURL)
 
 	s.audit.Log(ctx, audit.EventUserInvited,
 		audit.WithActor(actorID), audit.WithTarget(userID),
@@ -296,4 +314,32 @@ func (s *AdminService) ResetUserPassword(
 		audit.WithActor(actorID), audit.WithTarget(targetUserID), audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"method": method}))
 	return res, nil
+}
+
+// sendInvitationEmail renders and sends an invitation email. Failures
+// are logged but never propagated — the admin always gets the
+// invitation token back in the RPC response, so an email outage cannot
+// strand a user.
+func (s *AdminService) sendInvitationEmail(ctx context.Context, to, name, role, link string) {
+	html, text, err := email.Render(email.TemplateInvitation, map[string]any{
+		"UserName":    name,
+		"InviterName": "An administrator",
+		"OrgName":     s.cfg.TOTPIssuer,
+		"Role":        role,
+		"Link":        link,
+	})
+	if err != nil {
+		s.logger.Warn("invitation_email_render_failed", zap.String("to", to), zap.Error(err))
+		return
+	}
+	msg := email.Message{
+		To:      to,
+		From:    s.cfg.SMTPFrom,
+		Subject: "You're invited to " + s.cfg.TOTPIssuer,
+		HTML:    html,
+		Text:    text,
+	}
+	if err := s.mailer.Send(ctx, msg); err != nil {
+		s.logger.Warn("invitation_email_send_failed", zap.String("to", to), zap.Error(err))
+	}
 }

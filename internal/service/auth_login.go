@@ -101,6 +101,13 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	s.logger.Info("local_signup_success", zap.String("email", email), zap.String("user_id", userID))
 	s.ensureMailbox(ctx, userID, email, displayName)
 
+	// Best-effort: fire a verification email. Failures are logged but
+	// must never fail signup itself.
+	if err := s.SendEmailVerification(ctx, userID); err != nil {
+		s.logger.Warn("signup_verification_email_failed",
+			zap.String("user_id", userID), zap.Error(err))
+	}
+
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, "", "")
 	if err != nil {
 		return nil, err
