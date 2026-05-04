@@ -38,6 +38,14 @@ func (s *SDKClient) GetNode(ctx context.Context, tenantID, actor string, typeID 
 }
 
 // QueryNodes runs a filter query for nodes of a given typeID.
+//
+// The legacy callers pass filters keyed by field-id-as-decimal-string
+// (e.g. `{"1": email}`) because that was the wire shape the old raw
+// Transport spoke. The SDK's Query[T] expects proto field NAMES per
+// `sdk_api.md` ("Field names are proto field names; the server
+// resolves them using the schema registry"). We translate via the
+// proto descriptor so existing call sites keep working without
+// touching their query construction.
 func (s *SDKClient) QueryNodes(ctx context.Context, tenantID, actor string, typeID int, filter map[string]any) ([]*sdk.Node, error) {
 	w, ok := witnessByType[typeID]
 	if !ok {
@@ -47,6 +55,7 @@ func (s *SDKClient) QueryNodes(ctx context.Context, tenantID, actor string, type
 	if err != nil {
 		return nil, err
 	}
+	filter = translateFilterFieldIDsToNames(w.newMsg(), filter)
 	msgs, err := w.query(ctx, scope, filter)
 	if err != nil {
 		return nil, err

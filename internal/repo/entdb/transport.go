@@ -258,6 +258,42 @@ func scalarToGo(fd protoreflect.FieldDescriptor, v protoreflect.Value) any {
 	}
 }
 
+// translateFilterFieldIDsToNames rewrites a filter map so that any
+// keys that look like decimal field ids (the legacy raw-wire shape
+// the old repo spoke) are replaced with the proto field name from
+// witness's descriptor. Keys that are already proto field names —
+// or that begin with `$` (top-level operators like `$or`/`$and`) —
+// pass through untouched. Values are not transformed.
+func translateFilterFieldIDsToNames(witness proto.Message, filter map[string]any) map[string]any {
+	if witness == nil || len(filter) == 0 {
+		return filter
+	}
+	desc := witness.ProtoReflect().Descriptor()
+	fields := desc.Fields()
+	out := make(map[string]any, len(filter))
+	for k, v := range filter {
+		if k == "" || k[0] == '$' {
+			out[k] = v
+			continue
+		}
+		num, err := atoi(k)
+		if err != nil {
+			out[k] = v
+			continue
+		}
+		fd := fields.ByNumber(protoreflect.FieldNumber(num))
+		if fd == nil {
+			// Unknown field id — pass it through; the server
+			// will reject it with a clearer error than we
+			// could produce here.
+			out[k] = v
+			continue
+		}
+		out[string(fd.Name())] = v
+	}
+	return out
+}
+
 // applyPayloadToMessage hydrates a fresh proto message from a
 // field-id-keyed payload. Used by ExecuteAtomic to reconstruct the
 // proto witness Plan.Create / Plan.Update expects.
