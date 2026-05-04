@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	connectrpc.com/connect v1.19.2
-	github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.7.0
+	github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.9.0
 	github.com/go-webauthn/webauthn v0.17.0
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/jackc/pgx/v5 v5.9.2
