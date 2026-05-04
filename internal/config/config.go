@@ -86,6 +86,25 @@ type Config struct {
 
 	// Dev-only
 	AuthAllowLocal bool
+
+	// SMTP single-provider config (simple form). If SMTPProviders is set,
+	// that takes precedence.
+	SMTPHost string // GATEWAY_SMTP_HOST
+	SMTPPort int    // GATEWAY_SMTP_PORT (default 587)
+	SMTPUser string // GATEWAY_SMTP_USER
+	SMTPPass string // GATEWAY_SMTP_PASS
+	SMTPFrom string // GATEWAY_SMTP_FROM
+	SMTPTLS  bool   // GATEWAY_SMTP_TLS (default true)
+
+	// SMTP multi-provider JSON. If set, parsed as []email.SMTPConfig and
+	// used as a chain in order. Overrides the single-provider env vars.
+	SMTPProviders string // GATEWAY_SMTP_PROVIDERS
+
+	// Public app URLs used in email links.
+	AppBaseURL string // GATEWAY_APP_BASE_URL — e.g. "https://app.example.com"
+
+	// How long an email-verification or password-reset token is valid for.
+	EmailTokenExpirySeconds int // GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS (default 86400)
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -141,6 +160,17 @@ func Load() *Config {
 		CookieSameSite: envStr("GATEWAY_COOKIE_SAMESITE", "Lax"),
 
 		AuthAllowLocal: envBool("GATEWAY_AUTH_ALLOW_LOCAL", true),
+
+		SMTPHost:      envStr("GATEWAY_SMTP_HOST", ""),
+		SMTPPort:      envInt("GATEWAY_SMTP_PORT", 587),
+		SMTPUser:      envStr("GATEWAY_SMTP_USER", ""),
+		SMTPPass:      envStr("GATEWAY_SMTP_PASS", ""),
+		SMTPFrom:      envStr("GATEWAY_SMTP_FROM", ""),
+		SMTPTLS:       envBool("GATEWAY_SMTP_TLS", true),
+		SMTPProviders: envStr("GATEWAY_SMTP_PROVIDERS", ""),
+
+		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
+		EmailTokenExpirySeconds: envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
 	}
 }
 

@@ -50,6 +50,15 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"CookieSecure", cfg.CookieSecure, false},
 		{"CookieSameSite", cfg.CookieSameSite, "Lax"},
 		{"AuthAllowLocal", cfg.AuthAllowLocal, true},
+		{"SMTPHost", cfg.SMTPHost, ""},
+		{"SMTPPort", cfg.SMTPPort, 587},
+		{"SMTPUser", cfg.SMTPUser, ""},
+		{"SMTPPass", cfg.SMTPPass, ""},
+		{"SMTPFrom", cfg.SMTPFrom, ""},
+		{"SMTPTLS", cfg.SMTPTLS, true},
+		{"SMTPProviders", cfg.SMTPProviders, ""},
+		{"AppBaseURL", cfg.AppBaseURL, "http://localhost:9002"},
+		{"EmailTokenExpirySeconds", cfg.EmailTokenExpirySeconds, 86400},
 	}
 
 	for _, c := range checks {
@@ -123,6 +132,60 @@ func TestEnvTest_OverrideQRLoginExpiry(t *testing.T) {
 	cfg := Load()
 	if cfg.QRLoginExpirySeconds != 600 {
 		t.Errorf("QRLoginExpirySeconds: got %d, want 600", cfg.QRLoginExpirySeconds)
+	}
+}
+
+func TestEnvTest_OverrideSMTPHost(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_SMTP_HOST", "smtp.example.com")
+	cfg := Load()
+	if cfg.SMTPHost != "smtp.example.com" {
+		t.Errorf("SMTPHost: got %q, want smtp.example.com", cfg.SMTPHost)
+	}
+}
+
+func TestEnvTest_OverrideSMTPPort(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_SMTP_PORT", "465")
+	cfg := Load()
+	if cfg.SMTPPort != 465 {
+		t.Errorf("SMTPPort: got %d, want 465", cfg.SMTPPort)
+	}
+}
+
+func TestEnvTest_OverrideSMTPTLS(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_SMTP_TLS", "false")
+	cfg := Load()
+	if cfg.SMTPTLS {
+		t.Errorf("SMTPTLS: got true, want false")
+	}
+}
+
+func TestEnvTest_OverrideAppBaseURL(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_APP_BASE_URL", "https://identity.test")
+	cfg := Load()
+	if cfg.AppBaseURL != "https://identity.test" {
+		t.Errorf("AppBaseURL: got %q, want https://identity.test", cfg.AppBaseURL)
+	}
+}
+
+func TestEnvTest_OverrideEmailTokenExpiry(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", "7200")
+	cfg := Load()
+	if cfg.EmailTokenExpirySeconds != 7200 {
+		t.Errorf("EmailTokenExpirySeconds: got %d, want 7200", cfg.EmailTokenExpirySeconds)
+	}
+}
+
+func TestEnvTest_OverrideSMTPProviders(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_SMTP_PROVIDERS", `[{"Host":"a","Port":25}]`)
+	cfg := Load()
+	if cfg.SMTPProviders == "" {
+		t.Errorf("SMTPProviders: got empty, want non-empty")
 	}
 }
 
