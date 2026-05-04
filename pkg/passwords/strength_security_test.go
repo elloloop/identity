@@ -18,6 +18,14 @@ import (
 // must NOT be more than 2x faster than late-mismatch on average. This
 // guards against accidental short-circuit comparisons.
 func TestSec_VerifyConstantTime(t *testing.T) {
+	if raceEnabled {
+		// Race detector adds ~10x overhead and significant scheduling
+		// jitter; timing tests are unreliable under -race. The leak this
+		// guards against is a short-circuit byte compare which is orders
+		// of magnitude faster than bcrypt — race mode has nothing to
+		// usefully detect. Run this test in non-race CI passes.
+		t.Skip("skipping timing test under -race (unreliable; run separately without -race)")
+	}
 	correct := "TheC0rrect#PasswordValue!"
 	hash, err := Hash(correct)
 	if err != nil {
