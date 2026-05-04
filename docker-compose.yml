@@ -1,0 +1,71 @@
+# Local development stack for the identity service.
+#
+# Brings up two services:
+#   - entdb     : tenant-shard graph database (gRPC on :50051), backed by
+#                 an in-process WAL (no Kafka / S3 needed). Data is held
+#                 in a named volume so it survives container restarts but
+#                 is wiped by `docker compose down -v`.
+#   - identity  : the identity service itself, built from this repo.
+#                 Connect/HTTP on :8080, Prometheus metrics on :9090.
+#
+# Quick start:
+#   docker compose up -d --build
+#   curl http://localhost:8080/health
+#   curl http://localhost:8080/.well-known/jwks.json | jq .
+#   docker compose logs -f identity
+#   docker compose down -v        # stop and wipe the entdb volume
+#
+# Notes:
+#   - SMTP is intentionally unset; the service falls back to the LogOnly
+#     transport, so verification / reset emails appear in identity logs
+#     instead of being delivered.
+#   - OAuth providers are unset; OAuth RPCs return CodeUnavailable.
+#   - JWT signing key is auto-generated at boot for development. JWKS is
+#     served at /.well-known/jwks.json.
+
+services:
+  entdb:
+    image: ghcr.io/elloloop/tenant-shard-db:0.5.1
+    environment:
+      GRPC_BIND: 0.0.0.0:50051
+      WAL_BACKEND: local
+      DATA_DIR: /var/lib/entdb
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+    ports:
+      - "50051:50051"
+    volumes:
+      - entdb-data:/var/lib/entdb
+    healthcheck:
+      # The image ships with python+grpc on PATH; channel_ready_future
+      # blocks until the gRPC server is accepting RPCs (not just TCP up).
+      test:
+        - CMD
+        - python
+        - -c
+        - "import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)"
+      interval: 5s
+      timeout: 8s
+      retries: 12
+      start_period: 5s
+
+  identity:
+    build:
+      context: .
+      target: server
+    depends_on:
+      entdb:
+        condition: service_healthy
+    environment:
+      GATEWAY_ENTDB_ADDRESS: entdb:50051
+      GATEWAY_DEFAULT_TENANT_ID: local
+      GATEWAY_APP_BASE_URL: http://localhost:8080
+      # SMTP_* intentionally unset — falls back to LogOnly transport.
+      # OAuth provider configs intentionally unset — those RPCs return
+      # CodeUnavailable until you wire them up via env vars.
+    ports:
+      - "8080:80"
+      - "9090:9090"
+
+volumes:
+  entdb-data:
