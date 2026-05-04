@@ -99,6 +99,7 @@ type fakeRepo struct {
 	invitations        map[string]*service.InvitationRecord
 	passwordResets     map[string]*service.PasswordResetToken
 	emailVerifications map[string]*service.EmailVerificationToken
+	emailChanges       map[string]*service.EmailChangeToken
 
 	// Optional error injections for specific calls.
 	errFindUser   error
@@ -119,6 +120,7 @@ func newFakeRepo() *fakeRepo {
 		invitations:        make(map[string]*service.InvitationRecord),
 		passwordResets:     make(map[string]*service.PasswordResetToken),
 		emailVerifications: make(map[string]*service.EmailVerificationToken),
+		emailChanges:       make(map[string]*service.EmailChangeToken),
 	}
 }
 
@@ -614,6 +616,58 @@ func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID string, atMs i
 	}
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
+	return nil
+}
+
+func (r *fakeRepo) CreateEmailChangeToken(_ context.Context, t *service.EmailChangeToken) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := nextID()
+	t.NodeID = id
+	cp := *t
+	r.emailChanges[id] = &cp
+	return nil
+}
+
+func (r *fakeRepo) FindEmailChangeTokenByHash(_ context.Context, hash string) (*service.EmailChangeToken, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.emailChanges {
+		if t.TokenHash == hash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) MarkEmailChangeTokenConsumed(_ context.Context, id string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.emailChanges[id]
+	if !ok {
+		return fmt.Errorf("email change token %s not found", id)
+	}
+	t.ConsumedAt = atMs
+	return nil
+}
+
+func (r *fakeRepo) UpdateUserEmail(_ context.Context, userID, newEmail string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	for id, other := range r.users {
+		if id != userID && other.Email == newEmail {
+			return fmt.Errorf("email %q already in use", newEmail)
+		}
+	}
+	u.Email = newEmail
+	u.EmailVerified = true
+	u.EmailVerifiedAt = atMs
+	u.UpdatedAt = time.UnixMilli(atMs)
 	return nil
 }
 

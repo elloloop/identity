@@ -42,6 +42,7 @@ type fakeRepo struct {
 	invitations        map[string]*InvitationRecord
 	passwordResets     map[string]*PasswordResetToken
 	emailVerifications map[string]*EmailVerificationToken
+	emailChanges       map[string]*EmailChangeToken
 }
 
 func newFakeRepo() *fakeRepo {
@@ -57,6 +58,7 @@ func newFakeRepo() *fakeRepo {
 		invitations:        make(map[string]*InvitationRecord),
 		passwordResets:     make(map[string]*PasswordResetToken),
 		emailVerifications: make(map[string]*EmailVerificationToken),
+		emailChanges:       make(map[string]*EmailChangeToken),
 	}
 }
 
@@ -771,5 +773,59 @@ func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID string, atMs i
 	}
 	u.EmailVerified = true
 	u.EmailVerifiedAt = atMs
+	return nil
+}
+
+// ── Email Change Tokens ────────────────────────────────────────────────
+
+func (r *fakeRepo) CreateEmailChangeToken(_ context.Context, t *EmailChangeToken) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := nextNodeID()
+	t.NodeID = id
+	cp := *t
+	r.emailChanges[id] = &cp
+	return nil
+}
+
+func (r *fakeRepo) FindEmailChangeTokenByHash(_ context.Context, hash string) (*EmailChangeToken, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.emailChanges {
+		if t.TokenHash == hash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) MarkEmailChangeTokenConsumed(_ context.Context, id string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.emailChanges[id]
+	if !ok {
+		return fmt.Errorf("email change token %s not found", id)
+	}
+	t.ConsumedAt = atMs
+	return nil
+}
+
+func (r *fakeRepo) UpdateUserEmail(_ context.Context, userID, newEmail string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	for id, other := range r.users {
+		if id != userID && other.Email == newEmail {
+			return fmt.Errorf("email %q already in use", newEmail)
+		}
+	}
+	u.Email = newEmail
+	u.EmailVerified = true
+	u.EmailVerifiedAt = atMs
+	u.UpdatedAt = time.UnixMilli(atMs)
 	return nil
 }
