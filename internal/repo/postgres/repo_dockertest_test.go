@@ -27,14 +27,14 @@ import (
 )
 
 // TestPostgres_Container runs the smoke test against a freshly-spawned
-// postgres:16-alpine container. testcontainers handles container
+// postgres:16.13-alpine3.23 container. testcontainers handles container
 // lifecycle and port mapping; the test is fully hermetic.
 func TestPostgres_Container(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	pg, err := tcpg.Run(ctx,
-		"postgres:16-alpine",
+		"postgres:16.13-alpine3.23",
 		tcpg.WithDatabase("identity"),
 		tcpg.WithUsername("identity"),
 		tcpg.WithPassword("identity"),

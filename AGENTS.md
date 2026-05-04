@@ -103,7 +103,34 @@ touches an area with violations of these rules, fix the violations in
 that area as part of your change. Do not "preserve the existing
 pattern" when the existing pattern is wrong.
 
-## 10. When in doubt, prefer fewer lines, fewer files, fewer abstractions.
+## 10. Pin every external version exactly. No floating tags.
+
+Container images, language toolchains, lockfiles, every dependency that
+gets pulled at build/run time pins to a specific patch version (or
+better, a content digest):
+
+- `ghcr.io/elloloop/tenant-shard-db:1.7.0` — never `:1`, never `:latest`
+- `postgres:16.13-alpine3.23` — never `:16-alpine`, never `:alpine`
+- `GO_VERSION: '1.25.9'` — never `'1.25'`, never `'stable'`
+- `go-version: '1.25.9'` in `actions/setup-go` — never `'1.25.x'`
+- `golangci-lint@v1.62.2` — never `@latest`
+- `protoc-gen-go v1.36.11` — pinned in `go install …@v1.36.11`
+
+Why: builds must be reproducible. A floating tag means yesterday's
+green CI doesn't tell you anything about today's image. A bug in a
+patch release shows up as a "flaky test." A breaking change in a
+silently-rolled image shows up as a production incident.
+
+GitHub Actions are the one accepted exception: `actions/checkout@v4`,
+`actions/setup-go@v5` etc. follow the convention that a major-version
+tag is a stable line. Use major tags for actions; pin to a SHA only
+when you need stronger supply-chain guarantees.
+
+When upstream releases a new patch, **bump the pin in a deliberate
+commit** with a clear changelog reference. Renovate / Dependabot can
+open the PR; a human reviews and merges.
+
+## 11. When in doubt, prefer fewer lines, fewer files, fewer abstractions.
 
 The job is not to add code — it is to express the system clearly. If
 two paths are equally correct, pick the one that deletes more.
