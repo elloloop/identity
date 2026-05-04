@@ -23,6 +23,12 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.IdentityService/AcceptInvitation":     true,
 	"/identity.IdentityService/RequestAdminHelp":     true,
 	"/identity.IdentityService/VerifyTotp":           true,
+	// Email + reset flows are unauthenticated by design — the user is
+	// either anonymous (forgot password) or proving control of an
+	// inbox via a token rather than via a JWT.
+	"/identity.IdentityService/RequestPasswordReset": true,
+	"/identity.IdentityService/ConfirmPasswordReset": true,
+	"/identity.IdentityService/VerifyEmail":          true,
 	"/.well-known/jwks.json":                         true,
 	"/health":                                        true,
 	"/healthz":                                       true,
