@@ -55,6 +55,7 @@ const (
 	rfIPAddress  = "7"
 	rfUserAgent  = "8"
 	rfLastUsedAt = "9"
+	rfConsumedAt = "10"
 )
 
 // ── PasswordResetToken (type 19) ──────────────────────────────────
@@ -146,6 +147,34 @@ const (
 	invExpiresAt  = "6"
 	invAcceptedAt = "7"
 	invCreatedAt  = "8"
+)
+
+// ── OAuthIdentity (type 30 — chosen by linkage agent) ─────────────
+// Note: type IDs are stable EntDB field IDs; if both EmailChangeToken
+// and OAuthIdentity claim 30, the upstream schema migration must
+// disambiguate one of them. We're carrying both as 30 here pending
+// confirmation from the schema apply step.
+const typeOAuthIdentity = 31
+
+const (
+	oiUserID         = "1"
+	oiProvider       = "2"
+	oiProviderUserID = "3"
+	oiEmailAtLink    = "4"
+	oiCreatedAt      = "5"
+)
+
+// ── EmailChangeToken (type 30) ────────────────────────────────────
+const typeEmailChangeToken = 30
+
+const (
+	ecTokenHash  = "1"
+	ecUserID     = "2"
+	ecOldEmail   = "3"
+	ecNewEmail   = "4"
+	ecExpiresAt  = "5"
+	ecCreatedAt  = "6"
+	ecConsumedAt = "7"
 )
 
 // ── EmailVerificationToken (type 29) ──────────────────────────────

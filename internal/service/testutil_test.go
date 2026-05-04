@@ -108,6 +108,7 @@ type fakeRepo struct {
 	passwordResets     map[string]*PasswordResetToken
 	emailVerifications map[string]*EmailVerificationToken
 	emailChanges       map[string]*EmailChangeToken
+	oauthIdentities    map[string]*OAuthIdentity
 }
 
 func newFakeRepo() *fakeRepo {
@@ -124,6 +125,7 @@ func newFakeRepo() *fakeRepo {
 		passwordResets:     make(map[string]*PasswordResetToken),
 		emailVerifications: make(map[string]*EmailVerificationToken),
 		emailChanges:       make(map[string]*EmailChangeToken),
+		oauthIdentities:    make(map[string]*OAuthIdentity),
 	}
 }
 
@@ -224,6 +226,8 @@ func applyUserFields(u *User, fields map[string]any) {
 		switch k {
 		case "name":
 			u.Name = v.(string)
+		case "email":
+			u.Email = v.(string)
 		case "avatar_url":
 			u.AvatarURL = v.(string)
 		case "password_hash":
@@ -964,4 +968,51 @@ func (r *fakeRepo) UpdateUserEmail(_ context.Context, userID, newEmail string, a
 	u.EmailVerifiedAt = atMs
 	u.UpdatedAt = time.UnixMilli(atMs)
 	return nil
+}
+
+// ── OAuth Identities ───────────────────────────────────────────────────
+
+func (r *fakeRepo) FindUserByProviderID(_ context.Context, provider, providerUserID string) (*User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, oi := range r.oauthIdentities {
+		if oi.Provider == provider && oi.ProviderUserID == providerUserID {
+			u, ok := r.users[oi.UserID]
+			if !ok {
+				return nil, nil
+			}
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) CreateOAuthIdentity(_ context.Context, oi *OAuthIdentity) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Application-enforced uniqueness: (provider, provider_user_id).
+	for _, existing := range r.oauthIdentities {
+		if existing.Provider == oi.Provider && existing.ProviderUserID == oi.ProviderUserID {
+			return fmt.Errorf("oauth identity already linked: %s/%s", oi.Provider, oi.ProviderUserID)
+		}
+	}
+	id := nextNodeID()
+	oi.NodeID = id
+	cp := *oi
+	r.oauthIdentities[id] = &cp
+	return nil
+}
+
+func (r *fakeRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) ([]*OAuthIdentity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*OAuthIdentity
+	for _, oi := range r.oauthIdentities {
+		if oi.UserID == userID {
+			cp := *oi
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
 }

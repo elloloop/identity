@@ -312,29 +312,63 @@ func refreshTokenFromNode(n *entdb.Node) *service.RefreshTokenRecord {
 	}
 	p := n.Payload
 	return &service.RefreshTokenRecord{
-		NodeID:     n.NodeID,
-		TokenHash:  ps(p, rfTokenHash),
-		UserID:     ps(p, rfUserID),
-		DeviceInfo: ps(p, rfDeviceInfo),
-		DeviceName: ps(p, rfDeviceName),
-		IPAddress:  ps(p, rfIPAddress),
-		UserAgent:  ps(p, rfUserAgent),
-		ExpiresAt:  pi(p, rfExpiresAt),
-		CreatedAt:  pi(p, rfCreatedAt),
-		LastUsedAt: pi(p, rfLastUsedAt),
+		NodeID:       n.NodeID,
+		TokenHash:    ps(p, rfTokenHash),
+		UserID:       ps(p, rfUserID),
+		DeviceInfo:   ps(p, rfDeviceInfo),
+		DeviceName:   ps(p, rfDeviceName),
+		IPAddress:    ps(p, rfIPAddress),
+		UserAgent:    ps(p, rfUserAgent),
+		ExpiresAt:    pi(p, rfExpiresAt),
+		CreatedAt:    pi(p, rfCreatedAt),
+		LastUsedAt:   pi(p, rfLastUsedAt),
+		ConsumedAtMs: pi(p, rfConsumedAt),
 	}
 }
 
 func (r *entRepository) FindRefreshTokenByHash(ctx context.Context, hash string) (*service.RefreshTokenRecord, error) {
+	rec, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, hash)
+	if err != nil || rec == nil {
+		return rec, err
+	}
+	if rec.ConsumedAtMs > 0 {
+		// Caller wants only live tokens; consumed rows are surfaced via the
+		// "IncludingConsumed" variant for replay detection.
+		return nil, nil
+	}
+	return rec, nil
+}
+
+func (r *entRepository) FindRefreshTokenByHashIncludingConsumed(ctx context.Context, hash string) (*service.RefreshTokenRecord, error) {
 	if hash == "" {
 		return nil, nil
 	}
 	nodes, err := r.client.QueryNodes(ctx, r.tenantID, systemActor, typeRefreshToken,
 		map[string]any{rfTokenHash: hash})
 	if err != nil {
-		return nil, fmt.Errorf("repo: FindRefreshTokenByHash: %w", err)
+		return nil, fmt.Errorf("repo: FindRefreshTokenByHashIncludingConsumed: %w", err)
 	}
 	return refreshTokenFromNode(firstNode(nodes)), nil
+}
+
+func (r *entRepository) ConsumeRefreshTokenByHash(ctx context.Context, hash string, atMs int64) error {
+	rec, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, hash)
+	if err != nil {
+		return fmt.Errorf("repo: ConsumeRefreshTokenByHash: %w", err)
+	}
+	if rec == nil || rec.ConsumedAtMs > 0 {
+		// Missing or already consumed — service layer treats either as
+		// the rotation losing the race; return ErrUnauthenticated so the
+		// caller can detect replay.
+		return service.ErrUnauthenticated
+	}
+	_, err = r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
+		[]entdb.Operation{{Type: entdb.OpUpdateNode, TypeID: typeRefreshToken, NodeID: rec.NodeID,
+			Data: map[string]any{rfConsumedAt: atMs}}})
+	if err != nil {
+		return fmt.Errorf("repo: ConsumeRefreshTokenByHash: %w", err)
+	}
+	return nil
 }
 
 func (r *entRepository) CreateRefreshToken(ctx context.Context, t *service.RefreshTokenRecord) (string, error) {
@@ -1162,6 +1196,241 @@ func (r *entRepository) MarkEmailVerificationTokenConsumed(ctx context.Context, 
 		return fmt.Errorf("repo: MarkEmailVerificationTokenConsumed: %w", err)
 	}
 	return nil
+}
+
+// ── Lockout ───────────────────────────────────────────────────────
+
+func (r *entRepository) IncrementFailedLoginCount(ctx context.Context, userID string) (int32, error) {
+	if userID == "" {
+		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: missing user id")
+	}
+	user, err := r.GetUser(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: %w", err)
+	}
+	if user == nil {
+		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: user not found")
+	}
+	newCount := int32(user.FailedLoginCount + 1)
+	_, err = r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "",
+		[]entdb.Operation{{
+			Type:   entdb.OpUpdateNode,
+			TypeID: typeUser,
+			NodeID: userID,
+			Patch:  map[string]any{ufFailedLoginCount: int64(newCount)},
+		}})
+	if err != nil {
+		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: %w", err)
+	}
+	return newCount, nil
+}
+
+func (r *entRepository) ResetFailedLoginCount(ctx context.Context, userID string) error {
+	if userID == "" {
+		return fmt.Errorf("repo: ResetFailedLoginCount: missing user id")
+	}
+	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "",
+		[]entdb.Operation{{
+			Type:   entdb.OpUpdateNode,
+			TypeID: typeUser,
+			NodeID: userID,
+			Patch: map[string]any{
+				ufFailedLoginCount: int64(0),
+				ufLockedUntil:      int64(0),
+			},
+		}})
+	if err != nil {
+		return fmt.Errorf("repo: ResetFailedLoginCount: %w", err)
+	}
+	return nil
+}
+
+func (r *entRepository) SetUserLockedUntil(ctx context.Context, userID string, lockedUntilMs int64) error {
+	if userID == "" {
+		return fmt.Errorf("repo: SetUserLockedUntil: missing user id")
+	}
+	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "",
+		[]entdb.Operation{{
+			Type:   entdb.OpUpdateNode,
+			TypeID: typeUser,
+			NodeID: userID,
+			Patch:  map[string]any{ufLockedUntil: lockedUntilMs},
+		}})
+	if err != nil {
+		return fmt.Errorf("repo: SetUserLockedUntil: %w", err)
+	}
+	return nil
+}
+
+// ── EmailChangeToken ──────────────────────────────────────────────
+
+func emailChangeFromNode(n *entdb.Node) *service.EmailChangeToken {
+	if n == nil {
+		return nil
+	}
+	p := n.Payload
+	return &service.EmailChangeToken{
+		NodeID:     n.NodeID,
+		TokenHash:  ps(p, ecTokenHash),
+		UserID:     ps(p, ecUserID),
+		OldEmail:   ps(p, ecOldEmail),
+		NewEmail:   ps(p, ecNewEmail),
+		ExpiresAt:  pi(p, ecExpiresAt),
+		CreatedAt:  pi(p, ecCreatedAt),
+		ConsumedAt: pi(p, ecConsumedAt),
+	}
+}
+
+func (r *entRepository) CreateEmailChangeToken(ctx context.Context, t *service.EmailChangeToken) error {
+	if t == nil {
+		return fmt.Errorf("repo: CreateEmailChangeToken: nil record")
+	}
+	data := map[string]any{
+		ecTokenHash: t.TokenHash,
+		ecUserID:    t.UserID,
+		ecOldEmail:  t.OldEmail,
+		ecNewEmail:  t.NewEmail,
+		ecExpiresAt: t.ExpiresAt,
+		ecCreatedAt: t.CreatedAt,
+	}
+	if t.ConsumedAt != 0 {
+		data[ecConsumedAt] = t.ConsumedAt
+	}
+	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(t.UserID), "",
+		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeEmailChangeToken, Data: data}})
+	if err != nil {
+		return fmt.Errorf("repo: CreateEmailChangeToken: %w", err)
+	}
+	id, err := firstCreatedNodeID(res, "CreateEmailChangeToken")
+	if err != nil {
+		return err
+	}
+	t.NodeID = id
+	return nil
+}
+
+func (r *entRepository) FindEmailChangeTokenByHash(ctx context.Context, tokenHash string) (*service.EmailChangeToken, error) {
+	if tokenHash == "" {
+		return nil, nil
+	}
+	nodes, err := r.client.QueryNodes(ctx, r.tenantID, systemActor, typeEmailChangeToken,
+		map[string]any{ecTokenHash: tokenHash})
+	if err != nil {
+		return nil, fmt.Errorf("repo: FindEmailChangeTokenByHash: %w", err)
+	}
+	return emailChangeFromNode(firstNode(nodes)), nil
+}
+
+func (r *entRepository) MarkEmailChangeTokenConsumed(ctx context.Context, tokenID string, atMs int64) error {
+	if tokenID == "" {
+		return fmt.Errorf("repo: MarkEmailChangeTokenConsumed: missing token id")
+	}
+	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, systemActor, "",
+		[]entdb.Operation{{
+			Type:   entdb.OpUpdateNode,
+			TypeID: typeEmailChangeToken,
+			NodeID: tokenID,
+			Patch:  map[string]any{ecConsumedAt: atMs},
+		}})
+	if err != nil {
+		return fmt.Errorf("repo: MarkEmailChangeTokenConsumed: %w", err)
+	}
+	return nil
+}
+
+func (r *entRepository) UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error {
+	if userID == "" {
+		return fmt.Errorf("repo: UpdateUserEmail: missing user id")
+	}
+	_, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(userID), "",
+		[]entdb.Operation{{
+			Type:   entdb.OpUpdateNode,
+			TypeID: typeUser,
+			NodeID: userID,
+			Patch: map[string]any{
+				ufEmail:           newEmail,
+				ufEmailVerified:   true,
+				ufEmailVerifiedAt: atMs,
+				ufUpdatedAt:       atMs,
+			},
+		}})
+	if err != nil {
+		return fmt.Errorf("repo: UpdateUserEmail: %w", err)
+	}
+	return nil
+}
+
+// ── OAuthIdentity ─────────────────────────────────────────────────
+
+func oauthIdentityFromNode(n *entdb.Node) *service.OAuthIdentity {
+	if n == nil {
+		return nil
+	}
+	p := n.Payload
+	return &service.OAuthIdentity{
+		NodeID:          n.NodeID,
+		UserID:          ps(p, oiUserID),
+		Provider:        ps(p, oiProvider),
+		ProviderUserID:  ps(p, oiProviderUserID),
+		EmailAtLinkTime: ps(p, oiEmailAtLink),
+		CreatedAt:       pi(p, oiCreatedAt),
+	}
+}
+
+func (r *entRepository) FindUserByProviderID(ctx context.Context, provider, providerUserID string) (*service.User, error) {
+	if provider == "" || providerUserID == "" {
+		return nil, nil
+	}
+	nodes, err := r.client.QueryNodes(ctx, r.tenantID, systemActor, typeOAuthIdentity,
+		map[string]any{oiProvider: provider, oiProviderUserID: providerUserID})
+	if err != nil {
+		return nil, fmt.Errorf("repo: FindUserByProviderID: %w", err)
+	}
+	link := oauthIdentityFromNode(firstNode(nodes))
+	if link == nil {
+		return nil, nil
+	}
+	return r.GetUser(ctx, link.UserID)
+}
+
+func (r *entRepository) CreateOAuthIdentity(ctx context.Context, oi *service.OAuthIdentity) error {
+	if oi == nil {
+		return fmt.Errorf("repo: CreateOAuthIdentity: nil record")
+	}
+	data := map[string]any{
+		oiUserID:         oi.UserID,
+		oiProvider:       oi.Provider,
+		oiProviderUserID: oi.ProviderUserID,
+		oiEmailAtLink:    oi.EmailAtLinkTime,
+		oiCreatedAt:      oi.CreatedAt,
+	}
+	res, err := r.client.ExecuteAtomic(ctx, r.tenantID, actorStr(oi.UserID), "",
+		[]entdb.Operation{{Type: entdb.OpCreateNode, TypeID: typeOAuthIdentity, Data: data}})
+	if err != nil {
+		return fmt.Errorf("repo: CreateOAuthIdentity: %w", err)
+	}
+	id, err := firstCreatedNodeID(res, "CreateOAuthIdentity")
+	if err != nil {
+		return err
+	}
+	oi.NodeID = id
+	return nil
+}
+
+func (r *entRepository) ListOAuthIdentitiesForUser(ctx context.Context, userID string) ([]*service.OAuthIdentity, error) {
+	if userID == "" {
+		return nil, nil
+	}
+	nodes, err := r.client.QueryNodes(ctx, r.tenantID, systemActor, typeOAuthIdentity,
+		map[string]any{oiUserID: userID})
+	if err != nil {
+		return nil, fmt.Errorf("repo: ListOAuthIdentitiesForUser: %w", err)
+	}
+	out := make([]*service.OAuthIdentity, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, oauthIdentityFromNode(n))
+	}
+	return out, nil
 }
 
 // Compile-time check that entRepository satisfies the interface.

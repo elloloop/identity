@@ -100,6 +100,7 @@ type fakeRepo struct {
 	passwordResets     map[string]*service.PasswordResetToken
 	emailVerifications map[string]*service.EmailVerificationToken
 	emailChanges       map[string]*service.EmailChangeToken
+	oauthIdentities    map[string]*service.OAuthIdentity
 
 	// Optional error injections for specific calls.
 	errFindUser   error
@@ -121,6 +122,7 @@ func newFakeRepo() *fakeRepo {
 		passwordResets:     make(map[string]*service.PasswordResetToken),
 		emailVerifications: make(map[string]*service.EmailVerificationToken),
 		emailChanges:       make(map[string]*service.EmailChangeToken),
+		oauthIdentities:    make(map[string]*service.OAuthIdentity),
 	}
 }
 
@@ -179,6 +181,8 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 		switch k {
 		case "name":
 			u.Name = v.(string)
+		case "email":
+			u.Email = v.(string)
 		case "avatar_url":
 			u.AvatarURL = v.(string)
 		case "password_hash":
@@ -702,6 +706,22 @@ func (r *fakeRepo) FindEmailChangeTokenByHash(_ context.Context, hash string) (*
 	return nil, nil
 }
 
+func (r *fakeRepo) FindUserByProviderID(_ context.Context, provider, providerUserID string) (*service.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, oi := range r.oauthIdentities {
+		if oi.Provider == provider && oi.ProviderUserID == providerUserID {
+			u, ok := r.users[oi.UserID]
+			if !ok {
+				return nil, nil
+			}
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
 func (r *fakeRepo) MarkEmailChangeTokenConsumed(_ context.Context, id string, atMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -730,6 +750,34 @@ func (r *fakeRepo) UpdateUserEmail(_ context.Context, userID, newEmail string, a
 	u.EmailVerifiedAt = atMs
 	u.UpdatedAt = time.UnixMilli(atMs)
 	return nil
+}
+
+func (r *fakeRepo) CreateOAuthIdentity(_ context.Context, oi *service.OAuthIdentity) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.oauthIdentities {
+		if existing.Provider == oi.Provider && existing.ProviderUserID == oi.ProviderUserID {
+			return fmt.Errorf("oauth identity already linked: %s/%s", oi.Provider, oi.ProviderUserID)
+		}
+	}
+	id := nextID()
+	oi.NodeID = id
+	cp := *oi
+	r.oauthIdentities[id] = &cp
+	return nil
+}
+
+func (r *fakeRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) ([]*service.OAuthIdentity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.OAuthIdentity
+	for _, oi := range r.oauthIdentities {
+		if oi.UserID == userID {
+			cp := *oi
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
 }
 
 // seedUser inserts a user directly.

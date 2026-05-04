@@ -196,6 +196,12 @@ type Repository interface {
 	// (since the new address has just proven control via the consumed
 	// token). Implementations must also set updated_at = atMs.
 	UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error
+
+	// OAuth identities — links a (provider, provider_user_id) pair to a
+	// local User so OAuth login can survive provider-side email changes.
+	FindUserByProviderID(ctx context.Context, provider, providerUserID string) (*User, error)
+	CreateOAuthIdentity(ctx context.Context, oi *OAuthIdentity) error
+	ListOAuthIdentitiesForUser(ctx context.Context, userID string) ([]*OAuthIdentity, error)
 }
 
 // ── Record types for persistence ───────────────────────────────────────
@@ -316,6 +322,25 @@ type EmailChangeToken struct {
 	ExpiresAt  int64 // epoch ms
 	CreatedAt  int64 // epoch ms
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
+}
+
+// OAuthIdentity is the persisted link between a local User and a
+// provider-side stable identity (provider, provider_user_id).
+//
+// Lookups by (provider, provider_user_id) are what make OAuth login
+// resilient to a provider-side email change: the user keeps the same
+// local account even if their gmail address changes.
+//
+// Composite uniqueness on (provider, provider_user_id) is enforced at
+// the application layer — EntDB does not currently expose composite
+// unique constraints. CreateOAuthIdentity callers must lookup first.
+type OAuthIdentity struct {
+	NodeID          string
+	UserID          string
+	Provider        string
+	ProviderUserID  string
+	EmailAtLinkTime string
+	CreatedAt       int64 // epoch ms
 }
 
 // InvitationRecord represents a user invitation.

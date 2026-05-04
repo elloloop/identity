@@ -17,6 +17,17 @@ const (
 	typeAuditEvent      = 26
 	typeUserInvitation  = 27
 	typeAdminHelpReq    = 28
+	typeOAuthIdentity   = 30
+)
+
+// ── OAuthIdentity field IDs (type_id 30) ───────────────────────────
+
+const (
+	oifUserID          = "1"
+	oifProvider        = "2"
+	oifProviderUserID  = "3"
+	oifEmailAtLinkTime = "4"
+	oifCreatedAt       = "5"
 )
 
 // ── EntDB edge IDs (from schema.proto) ─────────────────────────────
