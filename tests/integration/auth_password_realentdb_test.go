@@ -200,32 +200,22 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	}
 	signupUserID := signup.Msg.GetUser().GetId()
 
-	// PasswordLogin currently depends on the upstream stub registry
-	// faithfully round-tripping password_hash through FindUserByEmail.
-	// We exercise it because it should keep working as upstream
-	// validation lands, but we only enforce the success-path: if the
-	// upstream stub returns ErrNoPasswordSet the test logs and falls
-	// back to the signup access token for the GetCurrentUser leg.
-	authToken := signup.Msg.AccessToken
-	login, loginErr := connectClient.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
+	login, err := connectClient.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
 		Email:    emailAddr,
 		Password: realEntDBPassword,
 	}))
-	switch {
-	case loginErr == nil:
-		if login.Msg.AccessToken == "" {
-			t.Fatalf("login returned empty access token")
-		}
-		if got := login.Msg.GetUser().GetId(); got != signupUserID {
-			t.Fatalf("login user id = %q, want %q", got, signupUserID)
-		}
-		authToken = login.Msg.AccessToken
-	default:
-		t.Logf("PasswordLogin path skipped against real entdb (upstream stub limitation): %v", loginErr)
+	if err != nil {
+		t.Fatalf("PasswordLogin: %v", err)
+	}
+	if login.Msg.AccessToken == "" {
+		t.Fatalf("login returned empty access token")
+	}
+	if got := login.Msg.GetUser().GetId(); got != signupUserID {
+		t.Fatalf("login user id = %q, want %q", got, signupUserID)
 	}
 
 	authedClient := identityconnectgen.NewIdentityServiceClient(
-		realEntDBBearerClient{base: httpClient, token: authToken},
+		realEntDBBearerClient{base: httpClient, token: login.Msg.AccessToken},
 		srv.URL,
 	)
 	cur, err := authedClient.GetCurrentUser(ctx, connect.NewRequest(&identitypb.GetCurrentUserRequest{}))
@@ -235,9 +225,7 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	if got := cur.Msg.GetUser().GetId(); got != signupUserID {
 		t.Fatalf("GetCurrentUser id = %q, want %q", got, signupUserID)
 	}
-	// Email field round-trip through entdb stub may be lossy for the
-	// permissive registry — log mismatch instead of failing.
-	if got := cur.Msg.GetUser().GetEmail(); got != "" && got != emailAddr {
-		t.Logf("GetCurrentUser email = %q, want %q (upstream stub round-trip)", got, emailAddr)
+	if got := cur.Msg.GetUser().GetEmail(); got != emailAddr {
+		t.Fatalf("GetCurrentUser email = %q, want %q", got, emailAddr)
 	}
 }

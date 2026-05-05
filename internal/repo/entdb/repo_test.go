@@ -10,6 +10,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+
 	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 	"github.com/elloloop/identity/internal/repo/conformance"
 	"github.com/elloloop/identity/internal/service"
@@ -82,6 +84,23 @@ func (c *memoryEntClient) query(_ context.Context, _ string, witness proto.Messa
 		})
 	}
 	return out, nil
+}
+
+func (c *memoryEntClient) findByKey(_ context.Context, _ string, key sdk.UniqueKey[string], value string, dst proto.Message) (string, int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	wantType := reflect.TypeOf(dst)
+	for id, n := range c.store {
+		if reflect.TypeOf(n.msg) != wantType {
+			continue
+		}
+		if !matchesFilter(n.msg, map[string]any{key.Name: value}) {
+			continue
+		}
+		proto.Merge(dst, n.msg)
+		return id, c.consumed[id], nil
+	}
+	return "", 0, errNotFound
 }
 
 func (c *memoryEntClient) create(_ context.Context, _ string, msg proto.Message) (string, error) {

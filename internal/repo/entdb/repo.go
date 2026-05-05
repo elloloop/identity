@@ -79,14 +79,15 @@ func (r *entRepository) FindUserByEmail(ctx context.Context, email string) (*ser
 	if email == "" {
 		return nil, nil
 	}
-	rows, err := r.client.query(ctx, systemActor, &schemapb.User{}, map[string]any{"email": email})
+	dst := &schemapb.User{}
+	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.UserEmail, email, dst)
+	if err == errNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("repo: FindUserByEmail: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return userFromProto(rows[0].NodeID, rows[0].Message.(*schemapb.User)), nil
+	return userFromProto(id, dst), nil
 }
 
 func (r *entRepository) GetUser(ctx context.Context, userID string) (*service.User, error) {
@@ -327,14 +328,15 @@ func (r *entRepository) FindRefreshTokenByHashIncludingConsumed(ctx context.Cont
 	if hash == "" {
 		return nil, nil
 	}
-	rows, err := r.client.query(ctx, systemActor, &schemapb.RefreshToken{}, map[string]any{"token_hash": hash})
+	dst := &schemapb.RefreshToken{}
+	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.RefreshTokenTokenHash, hash, dst)
+	if err == errNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("repo: FindRefreshTokenByHashIncludingConsumed: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return refreshTokenFromProto(rows[0].NodeID, rows[0].Message.(*schemapb.RefreshToken)), nil
+	return refreshTokenFromProto(id, dst), nil
 }
 
 func (r *entRepository) ConsumeRefreshTokenByHash(ctx context.Context, hash string, atMs int64) error {
@@ -441,14 +443,15 @@ func (r *entRepository) GetPasskeyCredentialByCredID(ctx context.Context, creden
 	if credentialID == "" {
 		return nil, nil
 	}
-	rows, err := r.client.query(ctx, systemActor, &schemapb.PasskeyCredential{}, map[string]any{"credential_id": credentialID})
+	dst := &schemapb.PasskeyCredential{}
+	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.PasskeyCredentialCredentialID, credentialID, dst)
+	if err == errNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("repo: GetPasskeyCredentialByCredID: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return passkeyCredFromProto(rows[0].NodeID, rows[0].Message.(*schemapb.PasskeyCredential)), nil
+	return passkeyCredFromProto(id, dst), nil
 }
 
 func (r *entRepository) CreatePasskeyCredential(ctx context.Context, c *service.PasskeyCredRecord) (string, error) {
@@ -586,14 +589,15 @@ func (r *entRepository) FindQrLoginSession(ctx context.Context, sessionID string
 	if sessionID == "" {
 		return nil, nil
 	}
-	rows, err := r.client.query(ctx, systemActor, &schemapb.QrLoginSession{}, map[string]any{"session_id": sessionID})
+	dst := &schemapb.QrLoginSession{}
+	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.QrLoginSessionSessionID, sessionID, dst)
+	if err == errNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("repo: FindQrLoginSession: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return qrSessionFromProto(rows[0].NodeID, rows[0].Message.(*schemapb.QrLoginSession)), nil
+	return qrSessionFromProto(id, dst), nil
 }
 
 func (r *entRepository) CreateQrLoginSession(ctx context.Context, s *service.QrLoginSessionRecord) (string, error) {
@@ -881,14 +885,15 @@ func (r *entRepository) GetLoginChallengeByChallengeID(ctx context.Context, chal
 	if challengeID == "" {
 		return nil, nil
 	}
-	rows, err := r.client.query(ctx, systemActor, &schemapb.LoginChallenge{}, map[string]any{"challenge_id": challengeID})
+	dst := &schemapb.LoginChallenge{}
+	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.LoginChallengeChallengeID, challengeID, dst)
+	if err == errNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("repo: GetLoginChallengeByChallengeID: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return loginChallengeFromProto(rows[0].NodeID, rows[0].Message.(*schemapb.LoginChallenge)), nil
+	return loginChallengeFromProto(id, dst), nil
 }
 
 func (r *entRepository) DeleteLoginChallenge(ctx context.Context, nodeID string) error {
@@ -924,14 +929,15 @@ func (r *entRepository) FindInvitationByHash(ctx context.Context, tokenHash stri
 	if tokenHash == "" {
 		return nil, nil
 	}
-	rows, err := r.client.query(ctx, systemActor, &schemapb.UserInvitation{}, map[string]any{"token_hash": tokenHash})
+	dst := &schemapb.UserInvitation{}
+	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.UserInvitationTokenHash, tokenHash, dst)
+	if err == errNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("repo: FindInvitationByHash: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return invitationFromProto(rows[0].NodeID, rows[0].Message.(*schemapb.UserInvitation)), nil
+	return invitationFromProto(id, dst), nil
 }
 
 func (r *entRepository) UpdateInvitation(ctx context.Context, nodeID string, fields map[string]any) error {
@@ -996,22 +1002,22 @@ func (r *entRepository) FindPasswordResetTokenByHash(ctx context.Context, tokenH
 	if tokenHash == "" {
 		return nil, nil
 	}
-	rows, err := r.client.query(ctx, systemActor, &schemapb.PasswordResetToken{}, map[string]any{"token_hash": tokenHash})
+	dst := &schemapb.PasswordResetToken{}
+	id, marker, err := r.client.findByKey(ctx, systemActor, schemapb.PasswordResetTokenTokenHash, tokenHash, dst)
+	if err == errNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("repo: FindPasswordResetTokenByHash: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	rec := passwordResetFromProto(rows[0].NodeID, rows[0].Message.(*schemapb.PasswordResetToken))
-	// PasswordResetToken proto on v1.7.0 schema does not yet expose
-	// consumed_at; the conformance suite checks ConsumedAt round-trip
-	// via the entClient's side-channel marker until upstream lands
-	// the field. The production server returns ConsumedAtMarker = 0,
-	// which is the same as "unconsumed" — correct for the production
-	// reset flow because consumed tokens are deleted server-side
-	// after the reset succeeds.
-	rec.ConsumedAt = rows[0].ConsumedAtMarker
+	rec := passwordResetFromProto(id, dst)
+	// PasswordResetToken proto does not yet expose consumed_at; the
+	// conformance suite checks ConsumedAt round-trip via the
+	// entClient's side-channel marker until upstream lands the field.
+	// Production server returns marker = 0 ("unconsumed") — correct
+	// for the production reset flow because consumed tokens are
+	// deleted server-side after the reset succeeds.
+	rec.ConsumedAt = marker
 	return rec, nil
 }
 
@@ -1071,14 +1077,15 @@ func (r *entRepository) FindEmailVerificationTokenByHash(ctx context.Context, to
 	if tokenHash == "" {
 		return nil, nil
 	}
-	rows, err := r.client.query(ctx, systemActor, &schemapb.EmailVerificationToken{}, map[string]any{"token_hash": tokenHash})
+	dst := &schemapb.EmailVerificationToken{}
+	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.EmailVerificationTokenTokenHash, tokenHash, dst)
+	if err == errNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("repo: FindEmailVerificationTokenByHash: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return emailVerificationFromProto(rows[0].NodeID, rows[0].Message.(*schemapb.EmailVerificationToken)), nil
+	return emailVerificationFromProto(id, dst), nil
 }
 
 func (r *entRepository) MarkEmailVerificationTokenConsumed(ctx context.Context, tokenID string, atMs int64) error {
@@ -1135,14 +1142,15 @@ func (r *entRepository) FindEmailChangeTokenByHash(ctx context.Context, tokenHas
 	if tokenHash == "" {
 		return nil, nil
 	}
-	rows, err := r.client.query(ctx, systemActor, &schemapb.EmailChangeToken{}, map[string]any{"token_hash": tokenHash})
+	dst := &schemapb.EmailChangeToken{}
+	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.EmailChangeTokenTokenHash, tokenHash, dst)
+	if err == errNotFound {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("repo: FindEmailChangeTokenByHash: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return emailChangeFromProto(rows[0].NodeID, rows[0].Message.(*schemapb.EmailChangeToken)), nil
+	return emailChangeFromProto(id, dst), nil
 }
 
 func (r *entRepository) MarkEmailChangeTokenConsumed(ctx context.Context, tokenID string, atMs int64) error {

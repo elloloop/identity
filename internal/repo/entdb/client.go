@@ -43,6 +43,18 @@ type queriedNode struct {
 // branch to pick the right sdk.Get[T] / sdk.Query[T] instantiation.
 type entClient interface {
 	get(ctx context.Context, actor string, dst proto.Message, nodeID string) error
+	// findByKey looks up a node by a typed unique-key token and reads
+	// the typed payload. Returns the assigned node id and any
+	// consumed-at marker (used by token types whose proto does not yet
+	// expose consumed_at — see markConsumed). Single logical operation
+	// against the SDK's GetByKey + Get pair, the only path that
+	// exercises the server's secondary unique-key index. Returns
+	// errNotFound when the key has no matching row.
+	findByKey(ctx context.Context, actor string, key sdk.UniqueKey[string], value string, dst proto.Message) (nodeID string, consumedAtMarker int64, err error)
+	// query returns nodes matching a non-unique filter. Used for list
+	// lookups (e.g. all RefreshTokens for a user). Unique-by-field
+	// lookups must go through findByKey, which exercises the secondary
+	// index.
 	query(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, error)
 	create(ctx context.Context, actor string, msg proto.Message) (string, error)
 	update(ctx context.Context, actor string, nodeID string, msg proto.Message) error
@@ -152,6 +164,30 @@ func (s *sdkScope) query(ctx context.Context, actor string, witness proto.Messag
 		return queryAs[*schemapb.OAuthIdentity](ctx, scope, filter)
 	}
 	return nil, fmt.Errorf("entdb: query: unsupported message type %T", witness)
+}
+
+// findByKey looks up a node via the typed unique-key index, then reads
+// the typed payload via Get. This is the only path that exercises the
+// server's secondary unique-key index — Query[T] with a name-keyed
+// filter goes through a different (and currently buggy) read path.
+func (s *sdkScope) findByKey(ctx context.Context, actor string, key sdk.UniqueKey[string], value string, dst proto.Message) (string, int64, error) {
+	scope, err := s.scope(actor)
+	if err != nil {
+		return "", 0, err
+	}
+	node, err := sdk.GetByKey(ctx, scope, key, value)
+	if err != nil {
+		return "", 0, err
+	}
+	if node == nil {
+		return "", 0, errNotFound
+	}
+	if err := s.get(ctx, actor, dst, node.NodeID); err != nil {
+		return "", 0, err
+	}
+	// Production server has no side-channel marker; consumed_at lives
+	// in the proto once upstream lands the field.
+	return node.NodeID, 0, nil
 }
 
 func (s *sdkScope) create(ctx context.Context, actor string, msg proto.Message) (string, error) {
