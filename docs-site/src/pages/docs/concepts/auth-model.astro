@@ -39,6 +39,11 @@ import { Code } from "astro-expressive-code/components";
   "jti": "..."
 }`} lang="json" />
   <p>
+    Access tokens intentionally carry identity and a coarse
+    <code>role</code> only. Identity does not embed per-group membership
+    or app-specific ACL decisions into the JWT.
+  </p>
+  <p>
     <code>VerifyAccessToken</code> in <code>pkg/jwt</code> checks the
     signature, <code>exp</code>, <code>iss</code>, and looks the
     <code>kid</code> up in the active key ring. Tokens signed with a key
@@ -89,6 +94,27 @@ import { Code } from "astro-expressive-code/components";
     Identity does not authorize per-resource access; it authenticates and
     declares a coarse role.
   </p>
+
+  <h2>Authorization boundary</h2>
+  <p>
+    Identity's authorization boundary is intentionally narrow:
+    authentication, JWT issuance, coarse roles, and group membership data.
+  </p>
+  <ul>
+    <li>
+      Identity itself enforces only coarse built-in checks such as
+      <code>role=admin</code> on admin and group-management RPCs.
+    </li>
+    <li>
+      Groups and memberships are identity data, not permissions. A group
+      membership does not grant access to any RPC or resource by itself.
+    </li>
+    <li>
+      If a product needs rules like "members of group X may access
+      resource Y", that ACL belongs in the calling app or a separate
+      permissions layer above Identity.
+    </li>
+  </ul>
 
   <h2>Lockout</h2>
   <p>

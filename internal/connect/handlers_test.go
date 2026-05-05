@@ -55,6 +55,7 @@ func TestToConnectError_SentinelMapping(t *testing.T) {
 		{"NoPasswordSet", service.ErrNoPasswordSet, connect.CodeFailedPrecondition},
 		{"AccountNotActive", service.ErrAccountNotActive, connect.CodeFailedPrecondition},
 		{"InvitationPending", service.ErrInvitationPending, connect.CodeFailedPrecondition},
+		{"SignupDisabled", service.ErrSignupDisabled, connect.CodeFailedPrecondition},
 		{"InvitationUsed", service.ErrInvitationUsed, connect.CodeFailedPrecondition},
 		{"InvitationExpired", service.ErrInvitationExpired, connect.CodeFailedPrecondition},
 		{"QrLoginNotPending", service.ErrQrLoginNotPending, connect.CodeFailedPrecondition},
@@ -157,7 +158,7 @@ func TestHeaderHelpers(t *testing.T) {
 }
 
 func TestNewIdentityHandler(t *testing.T) {
-	h := NewIdentityHandler(nil, nil, nil, nil, nil)
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil)
 	if h == nil {
 		t.Fatal("expected non-nil handler")
 	}
@@ -394,6 +395,37 @@ func TestPasswordSignupAndLogin(t *testing.T) {
 	}))
 	if connectCodeOf(err) != connect.CodeUnauthenticated && connectCodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("expected Unauth/NotFound for unknown user, got %v: %v", connectCodeOf(err), err)
+	}
+}
+
+func TestPasswordSignup_Disabled(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.PasswordSignupEnabled = false
+
+	_, err := h.client.PasswordSignup(context.Background(), connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email: "alice@example.com", Password: strongPW,
+	}))
+	if connectCodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("expected FailedPrecondition, got %v: %v", connectCodeOf(err), err)
+	}
+	if err == nil || !strings.Contains(err.Error(), service.ErrSignupDisabled.Error()) {
+		t.Fatalf("expected disabled-signup message, got %v", err)
+	}
+}
+
+func TestRequestPasswordReset_DisabledStillSucceeds(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.PasswordResetEnabled = false
+	u := h.repo.seedUser(&service.User{Email: "u@e.com", Status: "active", Role: "member"})
+
+	_, err := h.client.RequestPasswordReset(context.Background(), connect.NewRequest(&identitypb.RequestPasswordResetRequest{
+		Email: u.Email,
+	}))
+	if err != nil {
+		t.Fatalf("request pw reset: %v", err)
+	}
+	if got := len(h.repo.passwordResets); got != 0 {
+		t.Fatalf("expected 0 reset tokens, got %d", got)
 	}
 }
 
@@ -912,6 +944,12 @@ func TestGroupHandlers_Full(t *testing.T) {
 		}
 	}
 
+	if _, err := h.client.CreateGroup(ctx, authedReq(connect.NewRequest(&identitypb.CreateGroupRequest{
+		Name: "Denied",
+	}), "user-1")); connectCodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("non-admin CreateGroup expected PermissionDenied, got %v: %v", connectCodeOf(err), err)
+	}
+
 	// CreateGroup happy path.
 	cg, err := h.client.CreateGroup(ctx, authedReq(connect.NewRequest(&identitypb.CreateGroupRequest{
 		Name: "G1", Description: "desc",
@@ -952,8 +990,8 @@ func TestGroupHandlers_Full(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list members: %v", err)
 	}
-	if len(lm.Msg.Members) == 0 {
-		t.Log("members:", lm.Msg.Members)
+	if len(lm.Msg.Members) != 1 || lm.Msg.Members[0].GetId() != "user-1" {
+		t.Fatalf("members = %+v, want user-1 present", lm.Msg.Members)
 	}
 
 	// RemoveGroupMember.

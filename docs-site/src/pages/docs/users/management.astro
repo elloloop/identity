@@ -103,6 +103,12 @@ import { Code } from "astro-expressive-code/components";
     still <code>WorkingGroup</code> (type_id 2) for historical reasons;
     only the proto / RPC names use <code>Group</code>.
   </p>
+  <p>
+    Identity stores this membership data, but does not treat group
+    membership as an authorization rule. Group-management RPCs require an
+    admin caller; app-level ACL checks such as "only members of
+    group X may do Y" remain the calling application's responsibility.
+  </p>
   <ul>
     <li><code>CreateGroup</code>, <code>UpdateGroup</code>, <code>DeleteGroup</code>, <code>ListGroups</code></li>
     <li>Membership edges (<code>User -[MEMBER_OF]→ Group</code>):

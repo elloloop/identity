@@ -107,15 +107,20 @@ import { Code } from "astro-expressive-code/components";
   </table>
 
   <h2>Groups + membership</h2>
+  <p>
+    These RPCs manage identity-owned group and membership data. They do
+    not make group membership an authorization decision for other RPCs or
+    downstream resources.
+  </p>
   <table>
     <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>CreateGroup</code></td><td>admin</td><td></td></tr>
-    <tr><td><code>UpdateGroup</code></td><td>admin</td><td></td></tr>
-    <tr><td><code>DeleteGroup</code></td><td>admin</td><td></td></tr>
-    <tr><td><code>ListGroups</code></td><td>admin</td><td></td></tr>
-    <tr><td><code>AddGroupMember</code></td><td>admin</td><td></td></tr>
-    <tr><td><code>RemoveGroupMember</code></td><td>admin</td><td></td></tr>
-    <tr><td><code>ListGroupMembers</code></td><td>admin</td><td></td></tr>
+    <tr><td><code>CreateGroup</code></td><td>admin</td><td>Create a group record</td></tr>
+    <tr><td><code>UpdateGroup</code></td><td>admin</td><td>Edit a group's name or description</td></tr>
+    <tr><td><code>DeleteGroup</code></td><td>admin</td><td>Delete a group record</td></tr>
+    <tr><td><code>ListGroups</code></td><td>admin</td><td>Paginated list of groups</td></tr>
+    <tr><td><code>AddGroupMember</code></td><td>admin</td><td>Create a membership edge from user to group</td></tr>
+    <tr><td><code>RemoveGroupMember</code></td><td>admin</td><td>Delete a membership edge from user to group</td></tr>
+    <tr><td><code>ListGroupMembers</code></td><td>admin</td><td>List the users currently attached to a group</td></tr>
   </table>
 
   <h2>Admin user management</h2>

@@ -10,6 +10,7 @@ import (
 	"connectrpc.com/connect"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity"
+	"github.com/elloloop/identity/internal/config"
 )
 
 // goodPassword satisfies pkg/passwords.ValidateStrength: ≥8 chars,
@@ -116,6 +117,28 @@ func TestPassword_SignupWeakPasswordRejected(t *testing.T) {
 	}
 	if got := connect.CodeOf(err); got != connect.CodeInvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument (err=%v)", got, err)
+	}
+}
+
+func TestPassword_SignupDisabledRejected(t *testing.T) {
+	t.Parallel()
+	h := StartServer(t, WithConfig(func(cfg *config.Config) {
+		cfg.PasswordSignupEnabled = false
+	}))
+	ctx := context.Background()
+
+	_, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email:    "disabled@example.com",
+		Password: goodPassword,
+	}))
+	if err == nil {
+		t.Fatalf("expected disabled-signup rejection, got nil")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition (err=%v)", got, err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "signup is disabled for this deployment") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 }
 

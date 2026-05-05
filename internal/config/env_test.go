@@ -32,6 +32,8 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"MicrosoftClientID", cfg.MicrosoftClientID, ""},
 		{"MicrosoftClientSecret", cfg.MicrosoftClientSecret, ""},
 		{"MicrosoftTenantID", cfg.MicrosoftTenantID, ""},
+		{"PasswordSignupEnabled", cfg.PasswordSignupEnabled, true},
+		{"PasswordResetEnabled", cfg.PasswordResetEnabled, true},
 		{"PasswordResetExpirySeconds", cfg.PasswordResetExpirySeconds, 3600},
 		{"TOTPEncryptionKey", cfg.TOTPEncryptionKey, ""},
 		{"TOTPIssuer", cfg.TOTPIssuer, "Glassa Work"},
@@ -105,6 +107,24 @@ func TestEnvTest_OverridePasswordResetExpiry(t *testing.T) {
 	cfg := Load()
 	if cfg.PasswordResetExpirySeconds != 7200 {
 		t.Errorf("PasswordResetExpirySeconds: got %d, want 7200", cfg.PasswordResetExpirySeconds)
+	}
+}
+
+func TestEnvTest_OverridePasswordSignupEnabled(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_PASSWORD_SIGNUP_ENABLED", "false")
+	cfg := Load()
+	if cfg.PasswordSignupEnabled {
+		t.Errorf("PasswordSignupEnabled: got true, want false")
+	}
+}
+
+func TestEnvTest_OverridePasswordResetEnabled(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_PASSWORD_RESET_ENABLED", "false")
+	cfg := Load()
+	if cfg.PasswordResetEnabled {
+		t.Errorf("PasswordResetEnabled: got true, want false")
 	}
 }
 

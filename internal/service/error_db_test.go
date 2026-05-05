@@ -14,6 +14,7 @@ type errorDB struct {
 	failQueryNodes    bool
 	failExecuteAtomic bool
 	failGetEdgesFrom  bool
+	failGetEdgesTo    bool
 	failSearchNodes   bool
 	// failExecuteAfter triggers ExecuteAtomic to fail starting at the Nth call.
 	failExecuteAfter int
@@ -59,6 +60,13 @@ func (d *errorDB) GetEdgesFrom(ctx context.Context, t, a, fid string, eid int) (
 		return nil, errInjected
 	}
 	return d.fakeDB.GetEdgesFrom(ctx, t, a, fid, eid)
+}
+
+func (d *errorDB) GetEdgesTo(ctx context.Context, t, a, tid string, eid int) ([]*entdb.Edge, error) {
+	if d.failGetEdgesTo {
+		return nil, errInjected
+	}
+	return d.fakeDB.GetEdgesTo(ctx, t, a, tid, eid)
 }
 
 func (d *errorDB) SearchNodes(ctx context.Context, t, a string, tid int, q string) ([]*entdb.Node, error) {

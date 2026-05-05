@@ -50,6 +50,9 @@ func (h *IdentityHandler) PasswordSignup(
 	ctx context.Context,
 	req *connect.Request[identitypb.PasswordSignupRequest],
 ) (*connect.Response[identitypb.PasswordSignupResponse], error) {
+	if h.cfg != nil && !h.cfg.PasswordSignupEnabled {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, service.ErrSignupDisabled)
+	}
 	result, err := h.auth.PasswordSignup(
 		ctx,
 		req.Msg.Email,

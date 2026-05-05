@@ -247,17 +247,17 @@ type PasskeyChallengeRecord struct {
 
 // QrLoginSessionRecord represents a stored QR login session.
 type QrLoginSessionRecord struct {
-	NodeID              string
-	SessionID           string
-	Status              string
-	UserID              string
-	NewDeviceInfo       string
-	NewDeviceIP         string
-	NewDeviceUserAgent  string
-	ApprovedDeviceInfo  string
-	ExpiresAt           int64
-	CreatedAt           int64
-	UpdatedAt           int64
+	NodeID             string
+	SessionID          string
+	Status             string
+	UserID             string
+	NewDeviceInfo      string
+	NewDeviceIP        string
+	NewDeviceUserAgent string
+	ApprovedDeviceInfo string
+	ExpiresAt          int64
+	CreatedAt          int64
+	UpdatedAt          int64
 }
 
 // TotpCredRecord represents a stored TOTP credential.
@@ -378,6 +378,7 @@ var (
 	ErrInvitationExpired = errors.New("invitation has expired")
 	ErrLocalAuthDisabled = errors.New("local auth disabled")
 	ErrOAuthDisabled     = errors.New("oauth login is not configured")
+	ErrSignupDisabled    = errors.New("signup is disabled for this deployment")
 )
 
 // ── AuthService ────────────────────────────────────────────────────────
@@ -437,6 +438,12 @@ func NewAuthServiceWithOAuth(
 	}
 	if mailer == nil {
 		mailer = email.NewLogOnly(logger)
+	}
+	if !cfg.PasswordSignupEnabled {
+		logger.Warn("password_signup_disabled")
+	}
+	if !cfg.PasswordResetEnabled {
+		logger.Warn("password_reset_disabled")
 	}
 	return &AuthService{
 		repo:          repo,

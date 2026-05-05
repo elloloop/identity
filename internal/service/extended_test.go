@@ -1166,85 +1166,94 @@ func TestAdminService_ListUsers_SearchFilter(t *testing.T) {
 
 func TestGroupService_UpdateGroup_EmptyID(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	svc := newTestGroupService(db)
 
-	_, err := svc.UpdateGroup(context.Background(), "u", "", "n", "")
+	_, err := svc.UpdateGroup(context.Background(), "admin-1", "", "n", "")
 	require.Error(t, err)
 }
 
 func TestGroupService_UpdateGroup_DBErrorOnExecute(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.addGroup("grp-1", "G", "")
 	svc := newTestGroupService(db)
 	db.err = errors.New("boom")
 
-	_, err := svc.UpdateGroup(context.Background(), "u", "grp-1", "X", "")
+	_, err := svc.UpdateGroup(context.Background(), "admin-1", "grp-1", "X", "")
 	require.Error(t, err)
 }
 
 func TestGroupService_DeleteGroup_DBError(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.err = errors.New("boom")
 	svc := newTestGroupService(db)
 
-	err := svc.DeleteGroup(context.Background(), "u", "grp-1")
+	err := svc.DeleteGroup(context.Background(), "admin-1", "grp-1")
 	require.Error(t, err)
 }
 
 func TestGroupService_ListGroups_DefaultsLimit(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	for i := 0; i < 3; i++ {
 		db.addGroup("g"+string(rune('0'+i)), "G", "")
 	}
 	svc := newTestGroupService(db)
 
-	groups, _, err := svc.ListGroups(context.Background(), "u", "", 0)
+	groups, _, err := svc.ListGroups(context.Background(), "admin-1", "", 0)
 	require.NoError(t, err)
 	assert.Len(t, groups, 3)
 }
 
 func TestGroupService_AddGroupMember_DBError(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.err = errors.New("boom")
 	svc := newTestGroupService(db)
 
-	err := svc.AddGroupMember(context.Background(), "u", "g", "m")
+	err := svc.AddGroupMember(context.Background(), "admin-1", "g", "m")
 	require.Error(t, err)
 }
 
 func TestGroupService_RemoveGroupMember_MissingIDs(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	svc := newTestGroupService(db)
 
-	err := svc.RemoveGroupMember(context.Background(), "u", "", "m")
+	err := svc.RemoveGroupMember(context.Background(), "admin-1", "", "m")
 	require.Error(t, err)
-	err = svc.RemoveGroupMember(context.Background(), "u", "g", "")
+	err = svc.RemoveGroupMember(context.Background(), "admin-1", "g", "")
 	require.Error(t, err)
 }
 
 func TestGroupService_RemoveGroupMember_DBError(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.err = errors.New("boom")
 	svc := newTestGroupService(db)
 
-	err := svc.RemoveGroupMember(context.Background(), "u", "g", "m")
+	err := svc.RemoveGroupMember(context.Background(), "admin-1", "g", "m")
 	require.Error(t, err)
 }
 
 func TestGroupService_ListGroupMembers_EmptyGroupID(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	svc := newTestGroupService(db)
 
-	_, err := svc.ListGroupMembers(context.Background(), "u", "")
+	_, err := svc.ListGroupMembers(context.Background(), "admin-1", "")
 	require.Error(t, err)
 }
 
 func TestGroupService_ListGroupMembers_DBError(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.err = errors.New("boom")
 	svc := newTestGroupService(db)
 
-	_, err := svc.ListGroupMembers(context.Background(), "u", "g")
+	_, err := svc.ListGroupMembers(context.Background(), "admin-1", "g")
 	require.Error(t, err)
 }
 
@@ -1519,12 +1528,12 @@ func TestHelpService_RequireAdmin_ActorMissing(t *testing.T) {
 
 func TestFriendlyDeviceName_AllBranches(t *testing.T) {
 	cases := map[string]string{
-		"Mozilla/5.0 (Linux; Android 13)":                                    "Browser on Android",
-		"Mozilla/5.0 (iPad)":                                                 "Browser on iOS",
-		"Mozilla/5.0 (iPod)":                                                 "Browser on iOS",
-		"PostmanRuntime/7.32.2":                                              "Postman on Unknown OS",
-		"Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/120.0":       "Firefox on Linux",
-		"Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Edg/120.0":         "Edge on Windows",
+		"Mozilla/5.0 (Linux; Android 13)": "Browser on Android",
+		"Mozilla/5.0 (iPad)":              "Browser on iOS",
+		"Mozilla/5.0 (iPod)":              "Browser on iOS",
+		"PostmanRuntime/7.32.2":           "Postman on Unknown OS",
+		"Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/120.0": "Firefox on Linux",
+		"Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Edg/120.0":   "Edge on Windows",
 	}
 	for ua, want := range cases {
 		assert.Equal(t, want, friendlyDeviceName(ua), "ua=%q", ua)
@@ -1667,6 +1676,9 @@ func TestStubDB_AllMethodsReturnUnavailable(t *testing.T) {
 	}
 	if _, err := d.GetEdgesFrom(ctx, "", "", "", 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("GetEdgesFrom: %v", err)
+	}
+	if _, err := d.GetEdgesTo(ctx, "", "", "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("GetEdgesTo: %v", err)
 	}
 	if _, err := d.SearchNodes(ctx, "", "", 0, ""); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("SearchNodes: %v", err)

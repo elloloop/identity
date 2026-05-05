@@ -31,6 +31,9 @@ func NewGroupService(db DB, tenantID string, auditLog *audit.Logger, logger *zap
 
 // CreateGroup creates a new working group.
 func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, description string) (*Group, error) {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+		return nil, err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errors.New("group name is required")
@@ -65,6 +68,9 @@ func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, descripti
 
 // UpdateGroup patches name and/or description of a group.
 func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, description string) (*Group, error) {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+		return nil, err
+	}
 	if groupID == "" {
 		return nil, errors.New("group_id is required")
 	}
@@ -95,6 +101,9 @@ func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, 
 
 // DeleteGroup deletes a working group.
 func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string) error {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+		return err
+	}
 	if groupID == "" {
 		return errors.New("group_id is required")
 	}
@@ -110,6 +119,9 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string)
 
 // ListGroups returns a paginated list of groups.
 func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, limit int) ([]*Group, string, error) {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+		return nil, "", err
+	}
 	if limit <= 0 {
 		limit = 20
 	}
@@ -146,6 +158,9 @@ func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, l
 
 // AddGroupMember creates a MEMBER_OF edge from user to group.
 func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, userID string) error {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+		return err
+	}
 	if groupID == "" || userID == "" {
 		return errors.New("group_id and user_id are required")
 	}
@@ -166,6 +181,9 @@ func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, use
 
 // RemoveGroupMember deletes the MEMBER_OF edge from user to group.
 func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, userID string) error {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+		return err
+	}
 	if groupID == "" || userID == "" {
 		return errors.New("group_id and user_id are required")
 	}
@@ -187,29 +205,20 @@ func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, 
 // ListGroupMembers returns all users that belong to a group via
 // MEMBER_OF edges.
 func (s *GroupService) ListGroupMembers(ctx context.Context, actorID, groupID string) ([]*User, error) {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+		return nil, err
+	}
 	if groupID == "" {
 		return nil, errors.New("group_id is required")
 	}
 
-	// MEMBER_OF edges go from user -> group, so edges_to(group) gives
-	// us the user node IDs.
-	edges, err := s.db.GetEdgesFrom(ctx, s.tenantID, "user:system", groupID, edgeMemberOf)
+	edges, err := s.db.GetEdgesTo(ctx, s.tenantID, "user:system", groupID, edgeMemberOf)
 	if err != nil {
-		// Edges_to is not in the narrow DB interface; we use a query
-		// approach instead: fetch edges where to_node = groupID.
-		// The Transport.GetEdgesFrom returns outgoing edges from a
-		// node, but MEMBER_OF edges go user->group, so we would need
-		// GetEdgesTo. Since our DB interface only has GetEdgesFrom,
-		// we query all users and filter by edge. This is the simple
-		// approach matching the Python service.
 		return nil, fmt.Errorf("list group members: %w", err)
 	}
 
 	users := make([]*User, 0, len(edges))
 	for _, e := range edges {
-		// For MEMBER_OF, from=user, to=group. GetEdgesFrom(group)
-		// gives edges FROM group — but MEMBER_OF goes user->group.
-		// We'll use the edge FromNodeID as the user.
 		userNode, err := s.db.GetNode(ctx, s.tenantID, "user:system", typeUser, e.FromNodeID)
 		if err != nil || userNode == nil {
 			continue

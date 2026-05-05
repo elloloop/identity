@@ -18,6 +18,7 @@
 package connect
 
 import (
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -30,6 +31,7 @@ type IdentityHandler struct {
 	groups  *service.GroupService
 	help    *service.HelpService
 	profile *service.ProfileService
+	cfg     *config.Config
 }
 
 // NewIdentityHandler creates a new IdentityHandler wired to the service layer.
@@ -39,6 +41,7 @@ func NewIdentityHandler(
 	groups *service.GroupService,
 	help *service.HelpService,
 	profile *service.ProfileService,
+	cfg *config.Config,
 ) *IdentityHandler {
 	return &IdentityHandler{
 		auth:    auth,
@@ -46,6 +49,7 @@ func NewIdentityHandler(
 		groups:  groups,
 		help:    help,
 		profile: profile,
+		cfg:     cfg,
 	}
 }
 

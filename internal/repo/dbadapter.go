@@ -163,6 +163,14 @@ func (a *dbAdapter) GetEdgesFrom(ctx context.Context, tenantID, actor, fromNodeI
 	return scope.EdgesFrom(ctx, fromNodeID, edgeTypeID)
 }
 
+func (a *dbAdapter) GetEdgesTo(ctx context.Context, tenantID, actor, toNodeID string, edgeTypeID int) ([]*sdk.Edge, error) {
+	scope, err := a.scope(tenantID, actor)
+	if err != nil {
+		return nil, err
+	}
+	return scope.EdgesTo(ctx, toNodeID, edgeTypeID)
+}
+
 func (a *dbAdapter) SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*sdk.Node, error) {
 	scope, err := a.scope(tenantID, actor)
 	if err != nil {

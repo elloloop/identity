@@ -224,48 +224,52 @@ func TestAdminUpdateUser_RefetchReturnsNil(t *testing.T) {
 
 func TestGroupUpdateGroup_RefetchFails(t *testing.T) {
 	db := newErrorDB()
+	seedGroupAdmin(db.fakeDB)
 	db.fakeDB.addGroup("grp-1", "G", "")
 	db.failGetNode = true
 	svc := newGroupWithDB(db)
 
-	_, err := svc.UpdateGroup(context.Background(), "u", "grp-1", "X", "")
+	_, err := svc.UpdateGroup(context.Background(), "admin-1", "grp-1", "X", "")
 	require.Error(t, err)
 }
 
 func TestGroupUpdateGroup_RefetchReturnsNil(t *testing.T) {
 	db := newErrorDB()
+	seedGroupAdmin(db.fakeDB)
 	svc := newGroupWithDB(db)
 
 	// No group exists; update is a no-op, refetch returns nil.
-	_, err := svc.UpdateGroup(context.Background(), "u", "ghost", "X", "")
+	_, err := svc.UpdateGroup(context.Background(), "admin-1", "ghost", "X", "")
 	require.Error(t, err)
 }
 
 func TestGroupListGroups_QueryFails(t *testing.T) {
 	db := newErrorDB()
+	seedGroupAdmin(db.fakeDB)
 	db.failQueryNodes = true
 	svc := newGroupWithDB(db)
 
-	_, _, err := svc.ListGroups(context.Background(), "u", "", 10)
+	_, _, err := svc.ListGroups(context.Background(), "admin-1", "", 10)
 	require.Error(t, err)
 }
 
 func TestGroupListMembers_GetNodeMissingUserSkipped(t *testing.T) {
 	// Add an edge but no user node — GetNode returns nil; the user is skipped.
 	db := newErrorDB()
+	seedGroupAdmin(db.fakeDB)
 	db.fakeDB.addGroup("grp-1", "Team", "")
 	svc := newGroupWithDB(db)
 
-	// Inject an outgoing edge from grp-1 to a (nonexistent) user node.
+	// Inject an incoming membership edge to grp-1 from a nonexistent user node.
 	db.fakeDB.mu.Lock()
 	db.fakeDB.edges = append(db.fakeDB.edges, &entdb.Edge{
-		FromNodeID: "grp-1", ToNodeID: "ghost-user", EdgeTypeID: edgeMemberOf,
+		FromNodeID: "ghost-user", ToNodeID: "grp-1", EdgeTypeID: edgeMemberOf,
 	})
 	db.fakeDB.mu.Unlock()
 
-	members, err := svc.ListGroupMembers(context.Background(), "u", "grp-1")
+	members, err := svc.ListGroupMembers(context.Background(), "admin-1", "grp-1")
 	require.NoError(t, err)
-	_ = members
+	require.Len(t, members, 0)
 }
 
 // ── HelpService DB errors ──────────────────────────────────────────────

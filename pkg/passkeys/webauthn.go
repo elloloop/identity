@@ -103,8 +103,8 @@ func (s *WebAuthnService) BeginRegistration(
 			return "", "", fmt.Errorf("passkeys: decoding existing credential ID %q: %w", cidB64, decErr)
 		}
 		excludeCreds = append(excludeCreds, protocol.CredentialDescriptor{
-			Type:            protocol.PublicKeyCredentialType,
-			CredentialID:    raw,
+			Type:         protocol.PublicKeyCredentialType,
+			CredentialID: raw,
 		})
 	}
 
@@ -328,6 +328,9 @@ func (s *WebAuthnService) CompleteAuthentication(
 	credential, loginErr := s.wa.ValidateLogin(user, session, parsedResponse)
 	if loginErr != nil {
 		return 0, fmt.Errorf("passkeys: verifying authentication: %w", loginErr)
+	}
+	if credential.Authenticator.CloneWarning {
+		return 0, fmt.Errorf("passkeys: authenticator counter regression detected")
 	}
 
 	return credential.Authenticator.SignCount, nil

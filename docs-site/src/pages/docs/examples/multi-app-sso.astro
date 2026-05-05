@@ -111,7 +111,13 @@ func Authenticate(r *http.Request) (string, string, error) {
     (<code>admin</code> / <code>member</code> / <code>guest</code>).
     Per-resource authorization belongs to each service: the admin app
     might require <code>role=admin</code>, while the public app accepts
-    any authenticated user. Anything richer (e.g. ACL inheritance) lives
-    in EntDB.
+    any authenticated user.
+  </p>
+  <p>
+    The same boundary applies to groups: Identity can be the source of
+    truth for group and membership data, but checks like "user must be in
+    group X to access resource Y" still belong in the calling service or
+    a separate permissions layer. Identity does not evaluate or encode
+    those app-specific ACLs for you.
   </p>
 </DocsLayout>

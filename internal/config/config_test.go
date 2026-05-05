@@ -32,6 +32,12 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.JWTExpirySeconds != 900 {
 		t.Errorf("JWTExpirySeconds: want 900, got %d", cfg.JWTExpirySeconds)
 	}
+	if cfg.PasswordSignupEnabled != true {
+		t.Errorf("PasswordSignupEnabled: want true, got %v", cfg.PasswordSignupEnabled)
+	}
+	if cfg.PasswordResetEnabled != true {
+		t.Errorf("PasswordResetEnabled: want true, got %v", cfg.PasswordResetEnabled)
+	}
 	if cfg.RefreshExpirySeconds != 604800 {
 		t.Errorf("RefreshExpirySeconds: want 604800, got %d", cfg.RefreshExpirySeconds)
 	}
@@ -66,6 +72,8 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_DEFAULT_TENANT_ID", "prod-tenant")
 	t.Setenv("GATEWAY_JWT_EXPIRY_SECONDS", "1800")
 	t.Setenv("GATEWAY_AUTH_ALLOW_LOCAL", "false")
+	t.Setenv("GATEWAY_PASSWORD_SIGNUP_ENABLED", "false")
+	t.Setenv("GATEWAY_PASSWORD_RESET_ENABLED", "false")
 	t.Setenv("GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS", "10")
 	t.Setenv("GATEWAY_TOTP_ISSUER", "My Corp")
 
@@ -85,6 +93,12 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	}
 	if cfg.AuthAllowLocal != false {
 		t.Errorf("AuthAllowLocal: want false, got %v", cfg.AuthAllowLocal)
+	}
+	if cfg.PasswordSignupEnabled != false {
+		t.Errorf("PasswordSignupEnabled: want false, got %v", cfg.PasswordSignupEnabled)
+	}
+	if cfg.PasswordResetEnabled != false {
+		t.Errorf("PasswordResetEnabled: want false, got %v", cfg.PasswordResetEnabled)
 	}
 	if cfg.LoginMaxFailedAttempts != 10 {
 		t.Errorf("LoginMaxFailedAttempts: want 10, got %d", cfg.LoginMaxFailedAttempts)

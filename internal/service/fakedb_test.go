@@ -135,6 +135,21 @@ func (f *fakeDB) GetEdgesFrom(_ context.Context, _, _, fromNodeID string, edgeTy
 	return result, nil
 }
 
+func (f *fakeDB) GetEdgesTo(_ context.Context, _, _, toNodeID string, edgeTypeID int) ([]*entdb.Edge, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	var result []*entdb.Edge
+	for _, e := range f.edges {
+		if e.EdgeTypeID == edgeTypeID && e.ToNodeID == toNodeID {
+			result = append(result, e)
+		}
+	}
+	return result, nil
+}
+
 func (f *fakeDB) SearchNodes(_ context.Context, _, _ string, typeID int, query string) ([]*entdb.Node, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

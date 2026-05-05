@@ -126,6 +126,9 @@ func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 	for _, o := range opts {
 		o(&hOpts)
 	}
+	if hOpts.config != nil {
+		hOpts.config(cfg)
+	}
 
 	handler := app.New(app.Deps{
 		Config:         cfg,
@@ -162,12 +165,18 @@ type HarnessOption func(*harnessOptions)
 
 type harnessOptions struct {
 	oauthRegistry *oauth.Registry
+	config        func(*config.Config)
 }
 
 // WithOAuthRegistry overrides the OAuth registry used by the harness.
 // Pass nil to leave OAuth disabled (the default).
 func WithOAuthRegistry(r *oauth.Registry) HarnessOption {
 	return func(o *harnessOptions) { o.oauthRegistry = r }
+}
+
+// WithConfig mutates the test config before the service graph is built.
+func WithConfig(fn func(*config.Config)) HarnessOption {
+	return func(o *harnessOptions) { o.config = fn }
 }
 
 // AuthedClient returns a Connect client whose every request carries
@@ -214,6 +223,8 @@ func newTestConfig() *config.Config {
 	return &config.Config{
 		DefaultTenantID:               "test-tenant",
 		AuthAllowLocal:                true,
+		PasswordSignupEnabled:         true,
+		PasswordResetEnabled:          true,
 		JWTExpirySeconds:              900,
 		RefreshExpirySeconds:          604800,
 		LoginMaxFailedAttempts:        5,

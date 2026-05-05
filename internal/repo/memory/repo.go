@@ -790,6 +790,10 @@ func (r *Repo) GetEdgesFrom(context.Context, string, string, string, int) ([]*sd
 	return nil, nil
 }
 
+func (r *Repo) GetEdgesTo(context.Context, string, string, string, int) ([]*sdk.Edge, error) {
+	return nil, nil
+}
+
 func (r *Repo) SearchNodes(context.Context, string, string, int, string) ([]*sdk.Node, error) {
 	return nil, errMemoryDBUnsupported
 }

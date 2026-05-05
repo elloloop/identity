@@ -58,6 +58,8 @@ type Config struct {
 	GitHubClientSecret    string
 
 	// Password
+	PasswordSignupEnabled      bool
+	PasswordResetEnabled       bool
 	PasswordResetExpirySeconds int
 
 	// TOTP (2FA)
@@ -158,6 +160,8 @@ func Load() *Config {
 		GitHubClientID:        envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
 		GitHubClientSecret:    envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
 
+		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
+		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
 		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 3600),
 
 		TOTPEncryptionKey: envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),

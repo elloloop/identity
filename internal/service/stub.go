@@ -200,6 +200,9 @@ func (StubDB) ExecuteAtomic(context.Context, string, string, string, []entdb.Ope
 func (StubDB) GetEdgesFrom(context.Context, string, string, string, int) ([]*entdb.Edge, error) {
 	return nil, ErrServiceUnavailable
 }
+func (StubDB) GetEdgesTo(context.Context, string, string, string, int) ([]*entdb.Edge, error) {
+	return nil, ErrServiceUnavailable
+}
 func (StubDB) SearchNodes(context.Context, string, string, int, string) ([]*entdb.Node, error) {
 	return nil, ErrServiceUnavailable
 }

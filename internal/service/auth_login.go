@@ -46,6 +46,9 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
 	}
+	if !s.cfg.PasswordSignupEnabled {
+		return nil, ErrSignupDisabled
+	}
 	email = strings.TrimSpace(strings.ToLower(email))
 	if !strings.Contains(email, "@") {
 		return nil, fmt.Errorf("%w: invalid email", ErrInvalidArgument)

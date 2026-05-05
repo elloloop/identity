@@ -42,9 +42,8 @@ func NewAdminService(db DB, tenantID string, auditLog *audit.Logger, cfg *config
 	return &AdminService{db: db, tenantID: tenantID, audit: auditLog, cfg: cfg, mailer: mailer, logger: logger}
 }
 
-// requireAdmin fetches the actor's user node and checks role=admin.
-func (s *AdminService) requireAdmin(ctx context.Context, actorID string) (*User, error) {
-	node, err := s.db.GetNode(ctx, s.tenantID, actorStr(actorID), typeUser, actorID)
+func requireAdminActor(ctx context.Context, db DB, tenantID, actorID string) (*User, error) {
+	node, err := db.GetNode(ctx, tenantID, actorStr(actorID), typeUser, actorID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch actor: %w", err)
 	}
@@ -56,6 +55,11 @@ func (s *AdminService) requireAdmin(ctx context.Context, actorID string) (*User,
 		return nil, errors.New("admin role required")
 	}
 	return u, nil
+}
+
+// requireAdmin fetches the actor's user node and checks role=admin.
+func (s *AdminService) requireAdmin(ctx context.Context, actorID string) (*User, error) {
+	return requireAdminActor(ctx, s.db, s.tenantID, actorID)
 }
 
 // InviteUser creates a new user (invited or immediately active) and
@@ -176,7 +180,7 @@ func (s *AdminService) InviteUser(
 		ID: userID, Email: email, Name: strings.TrimSpace(name),
 		Role: role, Status: status,
 		RecoveryEmail: strings.TrimSpace(strings.ToLower(recoveryEmail)),
-		QuotaBytes: quotaBytes, CreatedAt: nowTime, UpdatedAt: nowTime,
+		QuotaBytes:    quotaBytes, CreatedAt: nowTime, UpdatedAt: nowTime,
 	}
 	return &InviteResult{
 		User: user, InvitationToken: rawToken,

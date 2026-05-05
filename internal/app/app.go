@@ -87,7 +87,7 @@ func New(deps Deps) http.Handler {
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 	profileSvc := service.NewProfileService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 
-	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc)
+	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, deps.Config)
 
 	mux := http.NewServeMux()
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler)

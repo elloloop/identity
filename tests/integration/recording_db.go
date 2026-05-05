@@ -99,6 +99,10 @@ func (d *RecordingDB) GetEdgesFrom(context.Context, string, string, string, int)
 	return nil, service.ErrServiceUnavailable
 }
 
+func (d *RecordingDB) GetEdgesTo(context.Context, string, string, string, int) ([]*entdb.Edge, error) {
+	return nil, service.ErrServiceUnavailable
+}
+
 func (d *RecordingDB) SearchNodes(context.Context, string, string, int, string) ([]*entdb.Node, error) {
 	return nil, service.ErrServiceUnavailable
 }

@@ -13,9 +13,14 @@ Treat this like [tenant-shard-db](https://github.com/elloloop/tenant-shard-db): 
 - **OAuth login** (Google, Microsoft — server consumes pre-verified ID tokens from frontend SDKs)
 - **Sessions** with revoke and sign-out-everywhere
 - **JWT issuance** with key rotation, plus `/.well-known/jwks.json` for downstream services
-- **User and Group CRUD**, group membership
+- **User and Group CRUD**, group membership data
 - **Audit log** of auth events
 - **Email and phone verification** flows
+
+Identity authenticates users, issues JWTs, and assigns coarse roles
+(`admin` / `member` / `guest`). It stores groups and memberships, but it
+does not enforce per-group or per-resource ACLs. Calling applications are
+responsible for authorization decisions built on that data.
 
 ## Storage
 

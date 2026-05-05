@@ -16,11 +16,16 @@ func newTestGroupService(db *fakeDB) *GroupService {
 	return NewGroupService(db, "test-tenant", auditLog, zap.NewNop())
 }
 
+func seedGroupAdmin(db *fakeDB) {
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+}
+
 func TestGroupService_CreateGroup_HappyPath(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	svc := newTestGroupService(db)
 
-	group, err := svc.CreateGroup(context.Background(), "user-1", "Engineering", "The eng team")
+	group, err := svc.CreateGroup(context.Background(), "admin-1", "Engineering", "The eng team")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,9 +42,10 @@ func TestGroupService_CreateGroup_HappyPath(t *testing.T) {
 
 func TestGroupService_CreateGroup_EmptyName(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	svc := newTestGroupService(db)
 
-	_, err := svc.CreateGroup(context.Background(), "user-1", "", "desc")
+	_, err := svc.CreateGroup(context.Background(), "admin-1", "", "desc")
 	if err == nil {
 		t.Fatal("expected error for empty name")
 	}
@@ -50,10 +56,11 @@ func TestGroupService_CreateGroup_EmptyName(t *testing.T) {
 
 func TestGroupService_UpdateGroup_HappyPath(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.addGroup("grp-1", "Old Name", "Old Desc")
 	svc := newTestGroupService(db)
 
-	group, err := svc.UpdateGroup(context.Background(), "user-1", "grp-1", "New Name", "New Desc")
+	group, err := svc.UpdateGroup(context.Background(), "admin-1", "grp-1", "New Name", "New Desc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -67,10 +74,11 @@ func TestGroupService_UpdateGroup_HappyPath(t *testing.T) {
 
 func TestGroupService_DeleteGroup_HappyPath(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.addGroup("grp-1", "ToDelete", "")
 	svc := newTestGroupService(db)
 
-	err := svc.DeleteGroup(context.Background(), "user-1", "grp-1")
+	err := svc.DeleteGroup(context.Background(), "admin-1", "grp-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,9 +92,10 @@ func TestGroupService_DeleteGroup_HappyPath(t *testing.T) {
 
 func TestGroupService_DeleteGroup_EmptyID(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	svc := newTestGroupService(db)
 
-	err := svc.DeleteGroup(context.Background(), "user-1", "")
+	err := svc.DeleteGroup(context.Background(), "admin-1", "")
 	if err == nil {
 		t.Fatal("expected error for empty group_id")
 	}
@@ -94,12 +103,13 @@ func TestGroupService_DeleteGroup_EmptyID(t *testing.T) {
 
 func TestGroupService_ListGroups_Pagination(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.addGroup("grp-1", "Alpha", "")
 	db.addGroup("grp-2", "Beta", "")
 	db.addGroup("grp-3", "Gamma", "")
 	svc := newTestGroupService(db)
 
-	groups, nextCursor, err := svc.ListGroups(context.Background(), "user-1", "", 2)
+	groups, nextCursor, err := svc.ListGroups(context.Background(), "admin-1", "", 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,7 +121,7 @@ func TestGroupService_ListGroups_Pagination(t *testing.T) {
 	}
 
 	// Fetch second page.
-	groups2, nextCursor2, err := svc.ListGroups(context.Background(), "user-1", nextCursor, 2)
+	groups2, nextCursor2, err := svc.ListGroups(context.Background(), "admin-1", nextCursor, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,6 +135,7 @@ func TestGroupService_ListGroups_Pagination(t *testing.T) {
 
 func TestGroupService_AddAndRemoveMember(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.addGroup("grp-1", "Team", "")
 	db.addUser("user-1", "alice@test.com", "Alice", "member", "active")
 	svc := newTestGroupService(db)
@@ -142,6 +153,7 @@ func TestGroupService_AddAndRemoveMember(t *testing.T) {
 
 func TestGroupService_AddGroupMember_MissingIDs(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	svc := newTestGroupService(db)
 
 	err := svc.AddGroupMember(context.Background(), "admin-1", "", "user-1")
@@ -156,35 +168,44 @@ func TestGroupService_AddGroupMember_MissingIDs(t *testing.T) {
 
 func TestGroupService_ListGroupMembers_HappyPath(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.addGroup("grp-1", "Team", "")
 	db.addUser("user-1", "alice@test.com", "Alice", "member", "active")
 	svc := newTestGroupService(db)
 
-	// Add a member edge manually via the fake DB.
 	_ = svc.AddGroupMember(context.Background(), "admin-1", "grp-1", "user-1")
 
-	// ListGroupMembers uses GetEdgesFrom with groupID as the from node.
-	// In our fake DB, we stored (from=user-1, to=grp-1). GetEdgesFrom
-	// for grp-1 won't find it — but let's test the method still works
-	// without panicking. The real transport would use GetEdgesTo.
 	members, err := svc.ListGroupMembers(context.Background(), "admin-1", "grp-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// In this test scenario, edges go user->group, and GetEdgesFrom(group)
-	// returns edges FROM group. Our fake stores (from=user, to=group),
-	// so querying GetEdgesFrom(grp-1) returns nothing.
-	// This is expected — the real transport needs GetEdgesTo.
-	_ = members
+	if len(members) != 1 || members[0].ID != "user-1" {
+		t.Fatalf("members = %+v, want user-1", members)
+	}
 }
 
 func TestGroupService_DBError(t *testing.T) {
 	db := newFakeDB()
+	seedGroupAdmin(db)
 	db.err = errors.New("db down")
 	svc := newTestGroupService(db)
 
-	_, err := svc.CreateGroup(context.Background(), "user-1", "Test", "")
+	_, err := svc.CreateGroup(context.Background(), "admin-1", "Test", "")
 	if err == nil {
 		t.Fatal("expected error when DB fails")
+	}
+}
+
+func TestGroupService_NonAdminDenied(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("member-1", "member@test.com", "Member", "member", "active")
+	svc := newTestGroupService(db)
+
+	_, err := svc.CreateGroup(context.Background(), "member-1", "Engineering", "The eng team")
+	if err == nil {
+		t.Fatal("expected non-admin denial")
+	}
+	if !strings.Contains(err.Error(), "admin role required") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

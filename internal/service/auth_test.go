@@ -81,6 +81,16 @@ func TestPasswordSignup_LocalAuthDisabledFails(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrLocalAuthDisabled))
 }
 
+func TestPasswordSignup_DisabledFails(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.PasswordSignupEnabled = false
+
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSignupDisabled))
+}
+
 // ── Login ───────────────────────────────────────────────────────────────
 
 func TestPasswordLogin_CorrectPasswordSucceeds(t *testing.T) {

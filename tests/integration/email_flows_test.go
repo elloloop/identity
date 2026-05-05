@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity"
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
 )
@@ -156,6 +157,37 @@ func TestEmail_RequestPasswordReset_UnknownEmail_NoEnumeration(t *testing.T) {
 	}
 	if got := len(h.Mailer.Sent()); got != 0 {
 		t.Errorf("unknown email: expected 0 sends, got %d", got)
+	}
+}
+
+func TestEmail_RequestPasswordReset_Disabled_NoEmailOrToken(t *testing.T) {
+	t.Parallel()
+	h := StartServer(t, WithConfig(func(cfg *config.Config) {
+		cfg.PasswordResetEnabled = false
+	}))
+	ctx := context.Background()
+
+	if _, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email:    "reset-disabled@test.com",
+		Password: "Sw0rdfish!42",
+	})); err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	h.Mailer.Reset()
+
+	if _, err := h.Client.RequestPasswordReset(ctx, connect.NewRequest(&identitypb.RequestPasswordResetRequest{
+		Email: "reset-disabled@test.com",
+	})); err != nil {
+		t.Fatalf("RequestPasswordReset: %v", err)
+	}
+	if got := len(h.Mailer.Sent()); got != 0 {
+		t.Fatalf("expected 0 reset emails, got %d", got)
+	}
+
+	h.Repo.mu.Lock()
+	defer h.Repo.mu.Unlock()
+	if got := len(h.Repo.passwordResets); got != 0 {
+		t.Fatalf("expected 0 reset tokens, got %d", got)
 	}
 }
 

@@ -147,6 +147,23 @@ func TestRequestPasswordReset_TransportFailureSwallowed(t *testing.T) {
 	}
 }
 
+func TestRequestPasswordReset_DisabledNoOps(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.cfg.PasswordResetEnabled = false
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	seedUser(repo, "alice@test.com", pwHash, "active")
+
+	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com"); err != nil {
+		t.Fatalf("expected nil when reset is disabled, got %v", err)
+	}
+	if len(rec.Sent()) != 0 {
+		t.Fatalf("expected 0 emails when reset is disabled, got %d", len(rec.Sent()))
+	}
+	if len(repo.passwordResets) != 0 {
+		t.Fatalf("expected 0 reset tokens when reset is disabled, got %d", len(repo.passwordResets))
+	}
+}
+
 // ── ConfirmPasswordReset ───────────────────────────────────────────────
 
 // requestAndExtractResetToken triggers RequestPasswordReset and pulls

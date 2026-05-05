@@ -126,6 +126,8 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	cfg := &config.Config{
 		DefaultTenantID:               tenantID,
 		AuthAllowLocal:                true,
+		PasswordSignupEnabled:         true,
+		PasswordResetEnabled:          true,
 		JWTExpirySeconds:              900,
 		RefreshExpirySeconds:          604800,
 		LoginMaxFailedAttempts:        5,

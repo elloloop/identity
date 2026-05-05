@@ -61,6 +61,10 @@ func formatExpiresIn(d time.Duration) string {
 // email-enumeration oracle. Errors during token persistence or email
 // dispatch are logged internally; the caller is told nothing.
 func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string) error {
+	if !s.cfg.PasswordResetEnabled {
+		s.logger.Info("password_reset_requested_while_disabled")
+		return nil
+	}
 	emailAddr = strings.TrimSpace(strings.ToLower(emailAddr))
 	if emailAddr == "" {
 		// Even the trivial "missing email" case is silent; the proto
@@ -325,4 +329,3 @@ func displayNameOrEmail(u *User) string {
 	}
 	return "there"
 }
-

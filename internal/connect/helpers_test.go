@@ -930,6 +930,21 @@ func (f *fakeDB) GetEdgesFrom(_ context.Context, _, _, fromNodeID string, edgeTy
 	return out, nil
 }
 
+func (f *fakeDB) GetEdgesTo(_ context.Context, _, _, toNodeID string, edgeTypeID int) ([]*entdb.Edge, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []*entdb.Edge
+	for _, e := range f.edges {
+		if e.EdgeTypeID == edgeTypeID && e.ToNodeID == toNodeID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeDB) SearchNodes(_ context.Context, _, _ string, typeID int, query string) ([]*entdb.Node, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1073,6 +1088,8 @@ func testConfig() *config.Config {
 	return &config.Config{
 		DefaultTenantID:               "test-tenant",
 		AuthAllowLocal:                true,
+		PasswordSignupEnabled:         true,
+		PasswordResetEnabled:          true,
 		JWTExpirySeconds:              900,
 		RefreshExpirySeconds:          604800,
 		LoginMaxFailedAttempts:        5,
@@ -1130,7 +1147,7 @@ func newHarness(t *testing.T) *testHarness {
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 
-	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc)
+	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, cfg)
 
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)

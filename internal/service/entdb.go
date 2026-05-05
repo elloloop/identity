@@ -214,6 +214,6 @@ type DB interface {
 	QueryNodes(ctx context.Context, tenantID, actor string, typeID int, filter map[string]any) ([]*entdb.Node, error)
 	ExecuteAtomic(ctx context.Context, tenantID, actor, idempotencyKey string, ops []entdb.Operation) (*entdb.CommitResult, error)
 	GetEdgesFrom(ctx context.Context, tenantID, actor, fromNodeID string, edgeTypeID int) ([]*entdb.Edge, error)
+	GetEdgesTo(ctx context.Context, tenantID, actor, toNodeID string, edgeTypeID int) ([]*entdb.Edge, error)
 	SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*entdb.Node, error)
 }
-

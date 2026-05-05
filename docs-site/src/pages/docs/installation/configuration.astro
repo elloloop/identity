@@ -49,11 +49,19 @@ import { Code } from "astro-expressive-code/components";
   <table>
     <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
     <tr><td><code>GATEWAY_AUTH_ALLOW_LOCAL</code></td><td><code>true</code></td><td>Set <code>false</code> to disable username/password and require OAuth</td></tr>
+    <tr><td><code>GATEWAY_PASSWORD_SIGNUP_ENABLED</code></td><td><code>true</code></td><td>Set <code>false</code> to disable self-serve <code>PasswordSignup</code>; admin-driven invitations still work</td></tr>
+    <tr><td><code>GATEWAY_PASSWORD_RESET_ENABLED</code></td><td><code>true</code></td><td>Set <code>false</code> to keep <code>RequestPasswordReset</code> enumeration-safe but make it a no-op; admin resets still work</td></tr>
     <tr><td><code>GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS</code></td><td><code>3600</code></td><td>Recovery-email reset link lifetime</td></tr>
     <tr><td><code>GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS</code></td><td><code>5</code></td><td>Lockout threshold</td></tr>
     <tr><td><code>GATEWAY_LOGIN_LOCKOUT_SECONDS</code></td><td><code>900</code></td><td>Lockout duration (15 min)</td></tr>
     <tr><td><code>GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS</code></td><td><code>300</code></td><td>Window after password success to complete TOTP</td></tr>
   </table>
+  <p>
+    When <code>GATEWAY_PASSWORD_RESET_ENABLED=false</code>,
+    <code>RequestPasswordReset</code> still returns success so callers cannot
+    use it to enumerate accounts, but Identity does not create a reset token
+    or send recovery email.
+  </p>
 
   <h2>TOTP / 2FA</h2>
   <table>

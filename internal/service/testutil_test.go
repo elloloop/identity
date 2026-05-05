@@ -651,6 +651,8 @@ func testConfig() *config.Config {
 	return &config.Config{
 		DefaultTenantID:               "test-tenant",
 		AuthAllowLocal:                true,
+		PasswordSignupEnabled:         true,
+		PasswordResetEnabled:          true,
 		JWTExpirySeconds:              900,
 		RefreshExpirySeconds:          604800,
 		LoginMaxFailedAttempts:        5,
