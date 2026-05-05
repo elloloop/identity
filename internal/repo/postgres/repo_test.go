@@ -47,7 +47,7 @@ func runRepositorySmoke(t *testing.T, dsn, tenantID string) {
 	}
 	repo, err := New(ctx, cfg)
 	require.NoError(t, err)
-	defer repo.(*pgRepository).Close()
+	defer repo.Close()
 
 	// CreateUser → GetUser → FindUserByEmail round-trip.
 	now := time.Now()
@@ -161,6 +161,7 @@ func truncateAll(ctx context.Context, dsn string) error {
 
 	const stmt = `
 		TRUNCATE TABLE
+			admin_help_requests,
 			login_challenges,
 			recovery_codes,
 			totp_secrets,

@@ -13,17 +13,13 @@ import (
 
 	"go.uber.org/zap"
 
-	"connectrpc.com/connect"
-
 	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passkeys"
-	"github.com/elloloop/identity/pkg/passwords"
 )
 
 const (
@@ -88,10 +84,10 @@ func newIssue3DB(repo *MemRepo, audit *RecordingDB) *issue3DB {
 	}
 }
 
-func StartIssue3Server(t *testing.T) *Harness {
+func StartIssue3Server(t *testing.T) *issue3Harness {
 	t.Helper()
 
-	cfg := newTestConfig()
+	cfg := newIssue3TestConfig()
 	cfg.PasswordResetExpirySeconds = 3600
 
 	signingKey, err := jwt.GenerateKey("issue-3-test-kid")
@@ -134,56 +130,12 @@ func StartIssue3Server(t *testing.T) *Harness {
 	httpClient := srv.Client()
 	client := identityconnectgen.NewIdentityServiceClient(httpClient, srv.URL)
 
-	return &Harness{
+	return &issue3Harness{
 		BaseURL: srv.URL,
 		Client:  client,
 		HTTP:    httpClient,
-		KeyRing: keyRing,
 		Repo:    repo,
-		Audit:   auditDB,
-		Mailer:  mailer,
-		Server:  srv,
 	}
-}
-
-func seedIssue3User(t *testing.T, h *Harness, id, email, name, role, status, plainPassword string) {
-	t.Helper()
-
-	passwordHash := ""
-	if plainPassword != "" {
-		var err error
-		passwordHash, err = passwords.Hash(plainPassword)
-		if err != nil {
-			t.Fatalf("hash password for %s: %v", email, err)
-		}
-	}
-
-	now := time.Now()
-	h.Repo.mu.Lock()
-	h.Repo.users[id] = &service.User{
-		ID:           id,
-		Email:        strings.ToLower(email),
-		Name:         name,
-		Role:         role,
-		Status:       status,
-		PasswordHash: passwordHash,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	h.Repo.mu.Unlock()
-}
-
-func loginViaPassword(t *testing.T, h *Harness, email, password string) *identitypb.PasswordLoginResponse {
-	t.Helper()
-
-	resp, err := h.Client.PasswordLogin(context.Background(), connect.NewRequest(&identitypb.PasswordLoginRequest{
-		Email:    email,
-		Password: password,
-	}))
-	if err != nil {
-		t.Fatalf("PasswordLogin(%s): %v", email, err)
-	}
-	return resp.Msg
 }
 
 func (d *issue3DB) GetNode(_ context.Context, _, _ string, typeID int, nodeID string) (*entdb.Node, error) {

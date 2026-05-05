@@ -1,4 +1,4 @@
-//go:build integration
+//go:build integration || realentdb || realpostgres
 
 package integration
 
@@ -16,12 +16,14 @@ func TestAdmin_InviteAcceptLogin_E2E(t *testing.T) {
 
 	h := StartIssue3Server(t)
 	ctx := context.Background()
+	adminEmail := issue3Email(t, "admin@example.com")
+	inviteeEmail := issue3Email(t, "invitee@example.com")
 
-	seedIssue3User(t, h, "admin-1", "admin@example.com", "Admin", "admin", "active", goodPassword)
-	admin := h.AuthedClient(loginViaPassword(t, h, "admin@example.com", goodPassword).AccessToken)
+	seedIssue3User(t, h, adminEmail, "Admin", "admin", "active", issue3Password)
+	admin := h.AuthedClient(loginViaPassword(t, h, adminEmail, issue3Password).AccessToken)
 
 	invite, err := admin.InviteUser(ctx, connect.NewRequest(&identitypb.InviteUserRequest{
-		Email: "invitee@example.com",
+		Email: inviteeEmail,
 		Name:  "Invitee",
 		Role:  "member",
 	}))
@@ -33,7 +35,7 @@ func TestAdmin_InviteAcceptLogin_E2E(t *testing.T) {
 	}
 
 	_, err = h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
-		Email:    "invitee@example.com",
+		Email:    inviteeEmail,
 		Password: "Invited!Pass9",
 	}))
 	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
@@ -48,15 +50,15 @@ func TestAdmin_InviteAcceptLogin_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcceptInvitation: %v", err)
 	}
-	if accepted.Msg.GetUser().GetEmail() != "invitee@example.com" {
-		t.Fatalf("accepted user email = %q, want invitee@example.com", accepted.Msg.GetUser().GetEmail())
+	if accepted.Msg.GetUser().GetEmail() != inviteeEmail {
+		t.Fatalf("accepted user email = %q, want %q", accepted.Msg.GetUser().GetEmail(), inviteeEmail)
 	}
 	if accepted.Msg.AccessToken == "" {
 		t.Fatalf("AcceptInvitation returned empty access token")
 	}
 
 	login, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
-		Email:    "invitee@example.com",
+		Email:    inviteeEmail,
 		Password: "Invited!Pass9",
 	}))
 	if err != nil {
@@ -72,28 +74,30 @@ func TestAdmin_DeactivateBlocksLogin(t *testing.T) {
 
 	h := StartIssue3Server(t)
 	ctx := context.Background()
+	adminEmail := issue3Email(t, "admin@example.com")
+	memberEmail := issue3Email(t, "member@example.com")
 
-	seedIssue3User(t, h, "admin-1", "admin@example.com", "Admin", "admin", "active", goodPassword)
-	seedIssue3User(t, h, "member-1", "member@example.com", "Member", "member", "active", goodPassword)
+	seedIssue3User(t, h, adminEmail, "Admin", "admin", "active", issue3Password)
+	memberID := seedIssue3User(t, h, memberEmail, "Member", "member", "active", issue3Password)
 
-	admin := h.AuthedClient(loginViaPassword(t, h, "admin@example.com", goodPassword).AccessToken)
+	admin := h.AuthedClient(loginViaPassword(t, h, adminEmail, issue3Password).AccessToken)
 	if _, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
-		Email:    "member@example.com",
-		Password: goodPassword,
+		Email:    memberEmail,
+		Password: issue3Password,
 	})); err != nil {
 		t.Fatalf("member login before deactivation: %v", err)
 	}
 
 	if _, err := admin.DeactivateUser(ctx, connect.NewRequest(&identitypb.DeactivateUserRequest{
-		UserId: "member-1",
+		UserId: memberID,
 		Reason: "end-to-end test",
 	})); err != nil {
 		t.Fatalf("DeactivateUser: %v", err)
 	}
 
 	_, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
-		Email:    "member@example.com",
-		Password: goodPassword,
+		Email:    memberEmail,
+		Password: issue3Password,
 	}))
 	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
 		t.Fatalf("login after deactivation code = %v, want FailedPrecondition (err=%v)", got, err)
@@ -105,13 +109,15 @@ func TestAdmin_ResetUserPassword_TempPassword(t *testing.T) {
 
 	h := StartIssue3Server(t)
 	ctx := context.Background()
+	adminEmail := issue3Email(t, "admin@example.com")
+	memberEmail := issue3Email(t, "member@example.com")
 
-	seedIssue3User(t, h, "admin-1", "admin@example.com", "Admin", "admin", "active", goodPassword)
-	seedIssue3User(t, h, "member-1", "member@example.com", "Member", "member", "active", goodPassword)
+	seedIssue3User(t, h, adminEmail, "Admin", "admin", "active", issue3Password)
+	memberID := seedIssue3User(t, h, memberEmail, "Member", "member", "active", issue3Password)
 
-	admin := h.AuthedClient(loginViaPassword(t, h, "admin@example.com", goodPassword).AccessToken)
+	admin := h.AuthedClient(loginViaPassword(t, h, adminEmail, issue3Password).AccessToken)
 	reset, err := admin.ResetUserPassword(ctx, connect.NewRequest(&identitypb.ResetUserPasswordRequest{
-		UserId:               "member-1",
+		UserId:               memberID,
 		GenerateTempPassword: true,
 	}))
 	if err != nil {
@@ -125,19 +131,19 @@ func TestAdmin_ResetUserPassword_TempPassword(t *testing.T) {
 	}
 
 	login, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
-		Email:    "member@example.com",
+		Email:    memberEmail,
 		Password: reset.Msg.TemporaryPassword,
 	}))
 	if err != nil {
 		t.Fatalf("login with temporary password: %v", err)
 	}
-	if login.Msg.GetUser().GetId() != "member-1" {
-		t.Fatalf("temp-password login user id = %q, want member-1", login.Msg.GetUser().GetId())
+	if login.Msg.GetUser().GetId() != memberID {
+		t.Fatalf("temp-password login user id = %q, want %q", login.Msg.GetUser().GetId(), memberID)
 	}
 
 	_, err = h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
-		Email:    "member@example.com",
-		Password: goodPassword,
+		Email:    memberEmail,
+		Password: issue3Password,
 	}))
 	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
 		t.Fatalf("old password after temp reset code = %v, want Unauthenticated (err=%v)", got, err)
@@ -149,13 +155,15 @@ func TestAdmin_ResetUserPassword_ResetToken(t *testing.T) {
 
 	h := StartIssue3Server(t)
 	ctx := context.Background()
+	adminEmail := issue3Email(t, "admin@example.com")
+	memberEmail := issue3Email(t, "member@example.com")
 
-	seedIssue3User(t, h, "admin-1", "admin@example.com", "Admin", "admin", "active", goodPassword)
-	seedIssue3User(t, h, "member-1", "member@example.com", "Member", "member", "active", goodPassword)
+	seedIssue3User(t, h, adminEmail, "Admin", "admin", "active", issue3Password)
+	memberID := seedIssue3User(t, h, memberEmail, "Member", "member", "active", issue3Password)
 
-	admin := h.AuthedClient(loginViaPassword(t, h, "admin@example.com", goodPassword).AccessToken)
+	admin := h.AuthedClient(loginViaPassword(t, h, adminEmail, issue3Password).AccessToken)
 	reset, err := admin.ResetUserPassword(ctx, connect.NewRequest(&identitypb.ResetUserPasswordRequest{
-		UserId:               "member-1",
+		UserId:               memberID,
 		GenerateTempPassword: false,
 	}))
 	if err != nil {
@@ -169,8 +177,8 @@ func TestAdmin_ResetUserPassword_ResetToken(t *testing.T) {
 	}
 
 	if _, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
-		Email:    "member@example.com",
-		Password: goodPassword,
+		Email:    memberEmail,
+		Password: issue3Password,
 	})); err != nil {
 		t.Fatalf("old password should still work before ConfirmPasswordReset: %v", err)
 	}
@@ -183,15 +191,15 @@ func TestAdmin_ResetUserPassword_ResetToken(t *testing.T) {
 	}
 
 	if _, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
-		Email:    "member@example.com",
+		Email:    memberEmail,
 		Password: "Reset!Pass42",
 	})); err != nil {
 		t.Fatalf("login with reset password: %v", err)
 	}
 
 	_, err = h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
-		Email:    "member@example.com",
-		Password: goodPassword,
+		Email:    memberEmail,
+		Password: issue3Password,
 	}))
 	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
 		t.Fatalf("old password after ConfirmPasswordReset code = %v, want Unauthenticated (err=%v)", got, err)
@@ -203,12 +211,17 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 
 	h := StartIssue3Server(t)
 	ctx := context.Background()
+	targetEmail := issue3Email(t, "target@example.com")
+	adminEmail := issue3Email(t, "admin@example.com")
+	memberEmail := issue3Email(t, "member@example.com")
+	newEmail := issue3Email(t, "new@example.com")
+	createEmail := issue3Email(t, "create@example.com")
 
-	seedIssue3User(t, h, "admin-1", "admin@example.com", "Admin", "admin", "active", goodPassword)
-	seedIssue3User(t, h, "member-1", "member@example.com", "Member", "member", "active", goodPassword)
-	seedIssue3User(t, h, "target-1", "target@example.com", "Target", "member", "active", goodPassword)
+	targetID := seedIssue3User(t, h, targetEmail, "Target", "member", "active", issue3Password)
+	seedIssue3User(t, h, adminEmail, "Admin", "admin", "active", issue3Password)
+	seedIssue3User(t, h, memberEmail, "Member", "member", "active", issue3Password)
 
-	member := h.AuthedClient(loginViaPassword(t, h, "member@example.com", goodPassword).AccessToken)
+	member := h.AuthedClient(loginViaPassword(t, h, memberEmail, issue3Password).AccessToken)
 
 	cases := []struct {
 		name string
@@ -218,7 +231,7 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 			name: "InviteUser",
 			call: func() error {
 				_, err := member.InviteUser(ctx, connect.NewRequest(&identitypb.InviteUserRequest{
-					Email: "new@example.com",
+					Email: newEmail,
 					Role:  "member",
 				}))
 				return err
@@ -234,7 +247,7 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 		{
 			name: "GetUser",
 			call: func() error {
-				_, err := member.GetUser(ctx, connect.NewRequest(&identitypb.GetUserRequest{UserId: "target-1"}))
+				_, err := member.GetUser(ctx, connect.NewRequest(&identitypb.GetUserRequest{UserId: targetID}))
 				return err
 			},
 		},
@@ -242,7 +255,7 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 			name: "UpdateUser",
 			call: func() error {
 				_, err := member.UpdateUser(ctx, connect.NewRequest(&identitypb.UpdateUserRequest{
-					UserId: "target-1",
+					UserId: targetID,
 					Name:   "Updated",
 				}))
 				return err
@@ -252,7 +265,7 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 			name: "DeactivateUser",
 			call: func() error {
 				_, err := member.DeactivateUser(ctx, connect.NewRequest(&identitypb.DeactivateUserRequest{
-					UserId: "target-1",
+					UserId: targetID,
 					Reason: "test",
 				}))
 				return err
@@ -262,7 +275,7 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 			name: "ReactivateUser",
 			call: func() error {
 				_, err := member.ReactivateUser(ctx, connect.NewRequest(&identitypb.ReactivateUserRequest{
-					UserId: "target-1",
+					UserId: targetID,
 				}))
 				return err
 			},
@@ -271,7 +284,7 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 			name: "ResetUserPassword",
 			call: func() error {
 				_, err := member.ResetUserPassword(ctx, connect.NewRequest(&identitypb.ResetUserPasswordRequest{
-					UserId:               "target-1",
+					UserId:               targetID,
 					GenerateTempPassword: true,
 				}))
 				return err
@@ -281,7 +294,7 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 			name: "SetUserQuota",
 			call: func() error {
 				_, err := member.SetUserQuota(ctx, connect.NewRequest(&identitypb.SetUserQuotaRequest{
-					UserId:     "target-1",
+					UserId:     targetID,
 					QuotaBytes: 1024,
 				}))
 				return err
@@ -291,7 +304,7 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 			name: "CreateUser",
 			call: func() error {
 				_, err := member.CreateUser(ctx, connect.NewRequest(&identitypb.CreateUserRequest{
-					Email: "create@example.com",
+					Email: createEmail,
 					Role:  "member",
 				}))
 				return err
@@ -301,7 +314,7 @@ func TestAdmin_NonAdminDenied(t *testing.T) {
 			name: "DeleteUser",
 			call: func() error {
 				_, err := member.DeleteUser(ctx, connect.NewRequest(&identitypb.DeleteUserRequest{
-					UserId: "target-1",
+					UserId: targetID,
 				}))
 				return err
 			},
