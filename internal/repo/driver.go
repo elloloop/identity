@@ -71,10 +71,14 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		if cfg.TenantID == "" {
 			return nil, fmt.Errorf("repo: Build: entdb driver requires TenantID")
 		}
+		dbAdapter, err := NewDBAdapter(cfg.EntDBClient)
+		if err != nil {
+			return nil, fmt.Errorf("repo: Build: entdb db adapter: %w", err)
+		}
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
 		return &Built{
 			Repository: entdbrepo.NewRepository(cfg.EntDBClient, cfg.TenantID),
-			DB:         NewDBAdapter(cfg.EntDBClient),
+			DB:         dbAdapter,
 		}, nil
 	case DriverMemory:
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
@@ -100,16 +104,11 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 			return nil, fmt.Errorf("repo: Build: postgres: %w", err)
 		}
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
-		// pgRepo satisfies service.Repository. The DB adapter for raw-node
-		// audit writes is not yet implemented for postgres — audit events
-		// route through the Repository's CreateAuditEvent path until then.
 		return &Built{
 			Repository: pgRepo,
-			DB:         nil,
+			DB:         pgRepo,
 		}, nil
 	default:
 		return nil, fmt.Errorf("repo: Build: unknown driver %q", cfg.Driver)
 	}
 }
-
-

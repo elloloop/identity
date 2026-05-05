@@ -14,8 +14,8 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-// pgRepository is the Postgres-backed implementation of
-// service.Repository. It is created via New().
+// pgRepository is the Postgres-backed implementation of identity's
+// persistence contracts. It is created via New().
 type pgRepository struct {
 	pool     *pgxpool.Pool
 	tenantID string
@@ -29,10 +29,10 @@ type pgRepository struct {
 //  3. Optionally run pending migrations (cfg.AutoMigrate=true).
 //  4. Ping to fail fast on a misconfigured DSN.
 //
-// The returned repository implements service.Repository. The caller is
-// responsible for keeping the *pgRepository alive for the lifetime of
-// the service; pool resources are released by Close().
-func New(ctx context.Context, cfg Config) (service.Repository, error) {
+// The returned store implements both service.Repository and service.DB.
+// The caller is responsible for keeping the *pgRepository alive for the
+// lifetime of the service; pool resources are released by Close().
+func New(ctx context.Context, cfg Config) (*pgRepository, error) {
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err

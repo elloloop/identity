@@ -1,4 +1,4 @@
-//go:build integration
+//go:build integration || realentdb || realpostgres
 
 package integration
 
@@ -16,9 +16,10 @@ func TestGroup_CRUDRoundTrip_E2E(t *testing.T) {
 
 	h := StartIssue3Server(t)
 	ctx := context.Background()
+	adminEmail := issue3Email(t, "admin@example.com")
 
-	seedIssue3User(t, h, "admin-1", "admin@example.com", "Admin", "admin", "active", goodPassword)
-	admin := h.AuthedClient(loginViaPassword(t, h, "admin@example.com", goodPassword).AccessToken)
+	seedIssue3User(t, h, adminEmail, "Admin", "admin", "active", issue3Password)
+	admin := h.AuthedClient(loginViaPassword(t, h, adminEmail, issue3Password).AccessToken)
 
 	created, err := admin.CreateGroup(ctx, connect.NewRequest(&identitypb.CreateGroupRequest{
 		Name:        "Engineering",
@@ -75,10 +76,12 @@ func TestGroup_MemberRoundTrip_E2E(t *testing.T) {
 
 	h := StartIssue3Server(t)
 	ctx := context.Background()
+	adminEmail := issue3Email(t, "admin@example.com")
+	memberEmail := issue3Email(t, "member@example.com")
 
-	seedIssue3User(t, h, "admin-1", "admin@example.com", "Admin", "admin", "active", goodPassword)
-	seedIssue3User(t, h, "member-1", "member@example.com", "Member", "member", "active", goodPassword)
-	admin := h.AuthedClient(loginViaPassword(t, h, "admin@example.com", goodPassword).AccessToken)
+	seedIssue3User(t, h, adminEmail, "Admin", "admin", "active", issue3Password)
+	memberID := seedIssue3User(t, h, memberEmail, "Member", "member", "active", issue3Password)
+	admin := h.AuthedClient(loginViaPassword(t, h, adminEmail, issue3Password).AccessToken)
 
 	created, err := admin.CreateGroup(ctx, connect.NewRequest(&identitypb.CreateGroupRequest{
 		Name:        "Operations",
@@ -91,7 +94,7 @@ func TestGroup_MemberRoundTrip_E2E(t *testing.T) {
 
 	if _, err := admin.AddGroupMember(ctx, connect.NewRequest(&identitypb.AddGroupMemberRequest{
 		GroupId: groupID,
-		UserId:  "member-1",
+		UserId:  memberID,
 	})); err != nil {
 		t.Fatalf("AddGroupMember: %v", err)
 	}
@@ -102,13 +105,13 @@ func TestGroup_MemberRoundTrip_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListGroupMembers after add: %v", err)
 	}
-	if len(members.Msg.Members) != 1 || members.Msg.Members[0].GetId() != "member-1" {
-		t.Fatalf("members after add = %+v, want member-1 present", members.Msg.Members)
+	if len(members.Msg.Members) != 1 || members.Msg.Members[0].GetId() != memberID {
+		t.Fatalf("members after add = %+v, want %q present", members.Msg.Members, memberID)
 	}
 
 	if _, err := admin.RemoveGroupMember(ctx, connect.NewRequest(&identitypb.RemoveGroupMemberRequest{
 		GroupId: groupID,
-		UserId:  "member-1",
+		UserId:  memberID,
 	})); err != nil {
 		t.Fatalf("RemoveGroupMember: %v", err)
 	}
@@ -134,13 +137,16 @@ func TestGroup_NonAdminDenied(t *testing.T) {
 
 	h := StartIssue3Server(t)
 	ctx := context.Background()
+	targetEmail := issue3Email(t, "target@example.com")
+	adminEmail := issue3Email(t, "admin@example.com")
+	memberEmail := issue3Email(t, "member@example.com")
 
-	seedIssue3User(t, h, "admin-1", "admin@example.com", "Admin", "admin", "active", goodPassword)
-	seedIssue3User(t, h, "member-1", "member@example.com", "Member", "member", "active", goodPassword)
-	seedIssue3User(t, h, "target-1", "target@example.com", "Target", "member", "active", goodPassword)
+	targetID := seedIssue3User(t, h, targetEmail, "Target", "member", "active", issue3Password)
+	seedIssue3User(t, h, adminEmail, "Admin", "admin", "active", issue3Password)
+	seedIssue3User(t, h, memberEmail, "Member", "member", "active", issue3Password)
 
-	admin := h.AuthedClient(loginViaPassword(t, h, "admin@example.com", goodPassword).AccessToken)
-	member := h.AuthedClient(loginViaPassword(t, h, "member@example.com", goodPassword).AccessToken)
+	admin := h.AuthedClient(loginViaPassword(t, h, adminEmail, issue3Password).AccessToken)
+	member := h.AuthedClient(loginViaPassword(t, h, memberEmail, issue3Password).AccessToken)
 
 	created, err := admin.CreateGroup(ctx, connect.NewRequest(&identitypb.CreateGroupRequest{
 		Name:        "SecOps",
@@ -181,7 +187,7 @@ func TestGroup_NonAdminDenied(t *testing.T) {
 			call: func() error {
 				_, err := member.AddGroupMember(ctx, connect.NewRequest(&identitypb.AddGroupMemberRequest{
 					GroupId: groupID,
-					UserId:  "target-1",
+					UserId:  targetID,
 				}))
 				return err
 			},
@@ -191,7 +197,7 @@ func TestGroup_NonAdminDenied(t *testing.T) {
 			call: func() error {
 				_, err := member.RemoveGroupMember(ctx, connect.NewRequest(&identitypb.RemoveGroupMemberRequest{
 					GroupId: groupID,
-					UserId:  "target-1",
+					UserId:  targetID,
 				}))
 				return err
 			},
