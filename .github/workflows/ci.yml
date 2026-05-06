@@ -41,6 +41,9 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
+          # only-new-issues blocks lint regressions on PR diffs while
+          # tolerating pre-existing debt on main (tracked separately).
+          only-new-issues: true
           args: >-
             --timeout=5m
             --default=standard
