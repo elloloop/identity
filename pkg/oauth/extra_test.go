@@ -23,7 +23,7 @@ func TestNewExchangers_DefaultsApplied(t *testing.T) {
 		t.Fatalf("defaults not applied: %+v", g.cfg)
 	}
 	m := NewMicrosoft(MicrosoftConfig{ClientID: "x", ClientSecret: "y"}).(*microsoftExchanger)
-	if m.cfg.TokenURL != microsoftTokenURL || m.cfg.JWKSURL != microsoftJWKSURL || m.cfg.IssuerFormat != microsoftIssuerFormat {
+	if m.cfg.TokenURL != microsoftExchangeEndpoint || m.cfg.JWKSURL != microsoftJWKSURL || m.cfg.IssuerFormat != microsoftIssuerFormat {
 		t.Fatalf("ms defaults: %+v", m.cfg)
 	}
 	gh := NewGitHub(GitHubConfig{ClientID: "x", ClientSecret: "y"}).(*githubExchanger)

@@ -27,6 +27,7 @@ func TransportFromClient(client *sdk.DbClient) (sdk.Transport, error) {
 	if !field.CanAddr() {
 		return nil, fmt.Errorf("entdb: db client transport field is not addressable")
 	}
+	// #nosec G103 -- the SDK exposes sdk.Transport publicly but not through DbClient.
 	transport, ok := reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Interface().(sdk.Transport)
 	if !ok || transport == nil {
 		return nil, fmt.Errorf("entdb: db client transport unavailable")

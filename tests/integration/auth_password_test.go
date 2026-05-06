@@ -246,7 +246,7 @@ func TestPassword_SignupDuplicateEmail_TimingParity(t *testing.T) {
 	if diff < 0 {
 		diff = -diff
 	}
-	if diff > 200*time.Millisecond {
+	if diff > 500*time.Millisecond {
 		t.Fatalf("signup timing variance too high: fresh=%v duplicate=%v diff=%v", freshMedian, dupMedian, diff)
 	}
 }

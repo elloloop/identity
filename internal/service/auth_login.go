@@ -29,8 +29,20 @@ var (
 
 const (
 	passwordSignupMinDuration = 250 * time.Millisecond
-	oauthStateTokenExpiry    = 5 * time.Minute
+	oauthStateTokenExpiry     = 5 * time.Minute
+	maxInt32                  = int32(1<<31 - 1)
 )
+
+func secondsToInt32(seconds int) int32 {
+	switch {
+	case seconds <= 0:
+		return 0
+	case seconds > int(maxInt32):
+		return maxInt32
+	default:
+		return int32(seconds)
+	}
+}
 
 func getDummyPasswordHash() string {
 	dummyPasswordHashOnce.Do(func() {
@@ -154,7 +166,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 
@@ -220,7 +232,7 @@ func (s *AuthService) newDuplicateSignupResult(email, displayName string) (*Logi
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 
@@ -361,7 +373,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 
@@ -549,7 +561,7 @@ func (s *AuthService) OAuthLogin(
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 
@@ -869,7 +881,7 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 

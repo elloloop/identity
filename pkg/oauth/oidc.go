@@ -11,10 +11,10 @@ import (
 
 type oidcDiscoveryDocument struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
-	Issuer           string `json:"issuer"`
-	TokenEndpoint    string `json:"token_endpoint"`
-	UserinfoEndpoint string `json:"userinfo_endpoint"`
-	JWKSURI          string `json:"jwks_uri"`
+	Issuer                string `json:"issuer"`
+	TokenEndpoint         string `json:"token_endpoint"`
+	UserinfoEndpoint      string `json:"userinfo_endpoint"`
+	JWKSURI               string `json:"jwks_uri"`
 }
 
 type oidcUserInfo struct {
@@ -40,7 +40,7 @@ func fetchOIDCDiscovery(ctx context.Context, client *http.Client, discoveryURL s
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCodeExchangeFailed, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -78,7 +78,7 @@ func fetchOIDCUserInfo(ctx context.Context, client *http.Client, userinfoURL, ac
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrIdentityVerification, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {

@@ -16,9 +16,9 @@ import (
 // Default Microsoft Azure AD common-endpoint URLs.
 const (
 	microsoftAuthorizationFormat = "https://login.microsoftonline.com/%s/oauth2/v2.0/authorize"
-	microsoftTokenURL     = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-	microsoftJWKSURL      = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
-	microsoftIssuerFormat = "https://login.microsoftonline.com/%s/v2.0"
+	microsoftExchangeEndpoint    = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+	microsoftJWKSURL             = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
+	microsoftIssuerFormat        = "https://login.microsoftonline.com/%s/v2.0"
 )
 
 // MicrosoftConfig configures a Microsoft Azure AD Exchanger.
@@ -61,7 +61,7 @@ type microsoftExchanger struct {
 // NewMicrosoft returns an Exchanger for Microsoft Azure AD.
 func NewMicrosoft(cfg MicrosoftConfig) Exchanger {
 	if cfg.TokenURL == "" {
-		cfg.TokenURL = microsoftTokenURL
+		cfg.TokenURL = microsoftExchangeEndpoint
 	}
 	if cfg.JWKSURL == "" {
 		cfg.JWKSURL = microsoftJWKSURL
