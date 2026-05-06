@@ -15,7 +15,7 @@ concurrency:
 
 env:
   GO_VERSION: '1.25.9'
-  GOLANGCI_LINT_VERSION: 'v1.62.2'
+  GOLANGCI_LINT_VERSION: 'v2.12.2'
   GOVULNCHECK_VERSION: 'v1.1.4'
 
 permissions:
@@ -37,13 +37,18 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
-          args: >-
-            --timeout=5m
-            --enable=govet,errcheck,staticcheck,unused,gosimple,gosec,bodyclose,gocritic
+        run: |
+          golangci-lint run \
+            --timeout=5m \
+            --default=standard \
+            --enable=gosec,bodyclose,gocritic
 
   # ---------------------------------------------------------------------------
   # 1b. go.mod / go.sum cleanliness — prevents drifted module graph.
@@ -212,14 +217,14 @@ jobs:
           done
           echo "entdb did not come up"; exit 1
 
-      - name: go test -tags=realentdb
+      - name: go test -tags=integration,realentdb
         env:
           GATEWAY_ENTDB_ADDRESS: localhost:50051
         run: |
-          if compgen -G "tests/integration/*_realentdb_test.go" > /dev/null; then
-            go test -tags=realentdb -race -timeout=300s ./tests/integration/...
+          if compgen -G "tests/integration/*.go" > /dev/null; then
+            go test -tags=integration,realentdb -race -timeout=300s ./tests/integration/...
           else
-            echo "no realentdb tests yet — skipping"
+            echo "no integration tests under tests/integration — skipping"
           fi
 
   # ---------------------------------------------------------------------------
@@ -259,14 +264,14 @@ jobs:
           done
           echo "postgres did not come up"; exit 1
 
-      - name: go test -tags=realpostgres
+      - name: go test -tags=integration,realpostgres
         env:
           GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
         run: |
-          if compgen -G "tests/integration/*_realpostgres_test.go" > /dev/null; then
-            go test -tags=realpostgres -race -timeout=300s ./tests/integration/...
+          if compgen -G "tests/integration/*.go" > /dev/null; then
+            go test -tags=integration,realpostgres -race -timeout=300s ./tests/integration/...
           else
-            echo "no realpostgres tests yet — skipping"
+            echo "no integration tests under tests/integration — skipping"
           fi
 
       - name: go test -tags=realpostgres internal/repo/postgres
