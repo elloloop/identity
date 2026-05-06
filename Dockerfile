@@ -7,7 +7,7 @@
 #   docker run -p 80:80 -p 9090:9090 -e GATEWAY_ENTDB_ADDRESS=entdb:50051 identity
 
 # go.mod requires go 1.25.0; GOTOOLCHAIN=auto fetches the right toolchain.
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
