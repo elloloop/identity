@@ -8,30 +8,80 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   GO_VERSION: '1.25.9'
+  GOLANGCI_LINT_VERSION: 'v1.62.2'
+  GOVULNCHECK_VERSION: 'v1.1.4'
 
 permissions:
   contents: read
 
 jobs:
-  # Re-run the same gates CI uses on PRs. A broken build must NOT publish a tag.
-  verify:
-    name: Verify (unit + smoke + integration)
+  # ---------------------------------------------------------------------------
+  # Re-run every gate `ci.yml` runs on PRs. A broken build must NOT publish.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: >-
+            --timeout=5m
+            --enable=govet,errcheck,staticcheck,unused,gosimple,gosec,bodyclose,gocritic
 
+  vuln:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+      - name: govulncheck
+        run: govulncheck ./...
+
+  test:
+    name: Build + Test + Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
       - name: go build
         run: go build ./...
+      - name: go test (race + coverage)
+        run: |
+          go test -race -timeout=1200s \
+            -coverprofile=cover.out \
+            -coverpkg=./internal/...,./pkg/...,./cmd/... \
+            ./...
+      - name: Coverage gate (>= 80% on internal/ and pkg/)
+        run: bash scripts/coverage-gate.sh cover.out 80 internal/ pkg/
 
-      - name: go test -race
-        run: go test -race -timeout=1200s ./...
-
+  smoke:
+    name: Boot smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
       - name: go test -tags=smoke
         run: |
           if compgen -G "tests/smoke/*.go" > /dev/null; then
@@ -40,6 +90,16 @@ jobs:
             echo "no smoke tests under tests/smoke — skipping"
           fi
 
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
       - name: go test -tags=integration
         run: |
           if compgen -G "tests/integration/*.go" > /dev/null; then
@@ -48,14 +108,137 @@ jobs:
             echo "no integration tests under tests/integration — skipping"
           fi
 
+  realentdb:
+    name: Integration (real entdb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      entdb:
+        image: ghcr.io/elloloop/tenant-shard-db:1.9.2
+        env:
+          GRPC_BIND: "0.0.0.0:50051"
+          WAL_BACKEND: local
+          DATA_DIR: /var/lib/entdb
+        ports:
+          - 50051:50051
+        options: >-
+          --health-cmd "python -c \"import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)\""
+          --health-interval 5s
+          --health-timeout 8s
+          --health-retries 12
+          --health-start-period 5s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Wait for entdb
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z localhost 50051; then echo "entdb up"; exit 0; fi
+            sleep 1
+          done
+          echo "entdb did not come up"; exit 1
+      - name: go test -tags=realentdb
+        env:
+          GATEWAY_ENTDB_ADDRESS: localhost:50051
+        run: |
+          if compgen -G "tests/integration/*_realentdb_test.go" > /dev/null; then
+            go test -tags=realentdb -race -timeout=300s ./tests/integration/...
+          else
+            echo "no realentdb tests yet — skipping"
+          fi
+
+  realpostgres:
+    name: Integration (real postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16.13-alpine3.23
+        env:
+          POSTGRES_USER: identity
+          POSTGRES_PASSWORD: identity
+          POSTGRES_DB: identity
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U identity"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Wait for postgres
+        run: |
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1; then echo "postgres up"; exit 0; fi
+            sleep 1
+          done
+          echo "postgres did not come up"; exit 1
+      - name: go test -tags=realpostgres (integration)
+        env:
+          GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
+        run: |
+          if compgen -G "tests/integration/*_realpostgres_test.go" > /dev/null; then
+            go test -tags=realpostgres -race -timeout=300s ./tests/integration/...
+          else
+            echo "no realpostgres integration tests yet — skipping"
+          fi
+      - name: go test -tags=realpostgres (repo)
+        env:
+          GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
+        run: go test -race -timeout=300s ./internal/repo/postgres/...
+
+  fuzz:
+    name: Fuzz smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Discover and run fuzz targets (10s each)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t targets < <(
+            grep -rEn --include='*_test.go' '^func (Fuzz[A-Za-z0-9_]+)\(' . \
+              | sed -E 's|^(.*)/[^/]+:[0-9]+:func (Fuzz[A-Za-z0-9_]+).*$|\1\t\2|' \
+              | sort -u
+          )
+          if [[ ${#targets[@]} -eq 0 ]]; then
+            echo "no fuzz targets — skipping"; exit 0
+          fi
+          for entry in "${targets[@]}"; do
+            dir="${entry%$'\t'*}"
+            name="${entry##*$'\t'}"
+            echo "::group::fuzz $name in $dir"
+            go test -run='^$' -fuzz="^${name}$" -fuzztime=10s "./$dir"
+            echo "::endgroup::"
+          done
+
+  # ---------------------------------------------------------------------------
+  # Build, push, sign, and scan the published image.
+  # ---------------------------------------------------------------------------
   build-and-push:
     name: Build and Push Image
     runs-on: ubuntu-latest
-    needs: [verify]
+    needs: [lint, vuln, test, smoke, integration, realentdb, realpostgres, fuzz]
     permissions:
       contents: read
       packages: write
-
+      id-token: write   # cosign keyless OIDC
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
     steps:
       - uses: actions/checkout@v4
 
@@ -90,6 +273,7 @@ jobs:
             type=sha,prefix=sha-
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -105,3 +289,60 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Sign published image (keyless OIDC)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          # Sign each tag's specific digest. cosign records the signature in the same registry.
+          for tag in $TAGS; do
+            cosign sign --yes "${tag}@${DIGEST}"
+          done
+
+  # ---------------------------------------------------------------------------
+  # Post-publish vulnerability scan. Tag is already published; this fails the
+  # release run if HIGH/CRITICAL CVEs are found in the image, so the operator
+  # is alerted before users pull it.
+  # ---------------------------------------------------------------------------
+  scan-image:
+    name: Scan published image (Trivy)
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick first tag for scanning
+        id: tag
+        env:
+          TAGS: ${{ needs.build-and-push.outputs.tags }}
+        run: |
+          # All tags point to the same digest; pick the first.
+          first_tag="$(echo "$TAGS" | head -n1)"
+          echo "image=${first_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.tag.outputs.image }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Upload Trivy SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-image
