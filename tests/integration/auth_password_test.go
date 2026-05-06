@@ -4,8 +4,10 @@ package integration
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -142,10 +144,11 @@ func TestPassword_SignupDisabledRejected(t *testing.T) {
 	}
 }
 
-// TestPassword_SignupDuplicateEmailRejected creates a user, then
-// tries to sign up again with the same email. The second call must
-// fail with AlreadyExists.
-func TestPassword_SignupDuplicateEmailRejected(t *testing.T) {
+// TestPassword_SignupDuplicateEmail_AntiEnumeration confirms duplicate
+// signup returns the same success envelope as a fresh signup, sends a
+// side-channel notice to the existing address, and does not mint a
+// real session for the caller.
+func TestPassword_SignupDuplicateEmail_AntiEnumeration(t *testing.T) {
 	t.Parallel()
 	h := StartServer(t)
 	ctx := context.Background()
@@ -157,16 +160,94 @@ func TestPassword_SignupDuplicateEmailRejected(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("first PasswordSignup: %v", err)
 	}
+	h.Mailer.Reset()
 
-	_, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+	dup, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
 		Email:    email,
 		Password: goodPassword,
 	}))
-	if err == nil {
-		t.Fatalf("duplicate signup: expected error, got nil")
+	if err != nil {
+		t.Fatalf("duplicate signup: %v", err)
 	}
-	if got := connect.CodeOf(err); got != connect.CodeAlreadyExists {
-		t.Fatalf("duplicate signup code = %v, want AlreadyExists (err=%v)", got, err)
+	if dup.Msg.AccessToken == "" || dup.Msg.RefreshToken == "" {
+		t.Fatalf("duplicate signup returned empty tokens: %+v", dup.Msg)
+	}
+	if got := dup.Msg.GetUser().GetEmail(); got != email {
+		t.Fatalf("duplicate signup email = %q, want %q", got, email)
+	}
+	if got := h.CountUsersByEmail(t, email); got != 1 {
+		t.Fatalf("duplicate signup created %d users, want 1", got)
+	}
+	if got := h.CountRefreshTokensForUser(t, h.FindUserIDByEmail(t, email)); got != 1 {
+		t.Fatalf("duplicate signup created %d refresh tokens, want 1 stored token", got)
+	}
+
+	sent := h.Mailer.Sent()
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 notice email, got %d", len(sent))
+	}
+	if sent[0].To != email {
+		t.Fatalf("notice email To = %q, want %q", sent[0].To, email)
+	}
+	if sent[0].Subject != "Someone tried to sign up with your email" {
+		t.Fatalf("notice email subject = %q", sent[0].Subject)
+	}
+
+	_, err = h.AuthedClient(dup.Msg.AccessToken).GetCurrentUser(ctx, connect.NewRequest(&identitypb.GetCurrentUserRequest{}))
+	if err == nil {
+		t.Fatalf("duplicate signup access token should not authenticate a user")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeNotFound {
+		t.Fatalf("duplicate signup access token code = %v, want NotFound (err=%v)", got, err)
+	}
+}
+
+func TestPassword_SignupDuplicateEmail_TimingParity(t *testing.T) {
+	h := StartServer(t)
+	ctx := context.Background()
+
+	measureSignup := func(email string) time.Duration {
+		start := time.Now()
+		resp, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+			Email:    email,
+			Password: goodPassword,
+		}))
+		if err != nil {
+			t.Fatalf("PasswordSignup(%s): %v", email, err)
+		}
+		if resp.Msg.AccessToken == "" || resp.Msg.RefreshToken == "" {
+			t.Fatalf("PasswordSignup(%s) returned empty tokens", email)
+		}
+		return time.Since(start)
+	}
+
+	freshDurations := make([]time.Duration, 0, 3)
+	dupDurations := make([]time.Duration, 0, 3)
+	for i := 0; i < 3; i++ {
+		freshDurations = append(freshDurations, measureSignup(
+			strings.ToLower("fresh-timing-"+time.Now().Format("150405.000000")+"-"+string(rune('a'+i))+"@example.com"),
+		))
+		email := strings.ToLower("dup-timing-" + time.Now().Format("150405.000000") + "-" + string(rune('a'+i)) + "@example.com")
+		if _, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+			Email:    email,
+			Password: goodPassword,
+		})); err != nil {
+			t.Fatalf("seed PasswordSignup(%s): %v", email, err)
+		}
+		h.Mailer.Reset()
+		dupDurations = append(dupDurations, measureSignup(email))
+	}
+
+	sort.Slice(freshDurations, func(i, j int) bool { return freshDurations[i] < freshDurations[j] })
+	sort.Slice(dupDurations, func(i, j int) bool { return dupDurations[i] < dupDurations[j] })
+	freshMedian := freshDurations[len(freshDurations)/2]
+	dupMedian := dupDurations[len(dupDurations)/2]
+	diff := freshMedian - dupMedian
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 200*time.Millisecond {
+		t.Fatalf("signup timing variance too high: fresh=%v duplicate=%v diff=%v", freshMedian, dupMedian, diff)
 	}
 }
 
@@ -187,7 +268,7 @@ func TestPassword_LoginWrongPasswordRejected_AuditEmitted(t *testing.T) {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
 
-	failuresBefore := h.Audit.CountByEventType("login_failure")
+	failuresBefore := h.CountAuditEventsByType(t, "login_failure")
 
 	_, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
 		Email:    email,
@@ -200,10 +281,42 @@ func TestPassword_LoginWrongPasswordRejected_AuditEmitted(t *testing.T) {
 		t.Fatalf("code = %v, want Unauthenticated (err=%v)", got, err)
 	}
 
-	failuresAfter := h.Audit.CountByEventType("login_failure")
+	failuresAfter := h.CountAuditEventsByType(t, "login_failure")
 	if failuresAfter <= failuresBefore {
 		t.Fatalf("expected login_failure audit event count to increase: before=%d after=%d",
 			failuresBefore, failuresAfter)
+	}
+}
+
+func TestPassword_LoginUnverifiedEmailAllowed(t *testing.T) {
+	t.Parallel()
+	h := StartServer(t)
+	ctx := context.Background()
+
+	const email = "unverified@example.com"
+	signup, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email:    email,
+		Password: goodPassword,
+	}))
+	if err != nil {
+		t.Fatalf("PasswordSignup: %v", err)
+	}
+	if signup.Msg.GetUser().GetEmailVerified() {
+		t.Fatalf("signup user unexpectedly marked verified")
+	}
+
+	login, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
+		Email:    email,
+		Password: goodPassword,
+	}))
+	if err != nil {
+		t.Fatalf("PasswordLogin: %v", err)
+	}
+	if login.Msg.AccessToken == "" || login.Msg.RefreshToken == "" {
+		t.Fatalf("PasswordLogin returned empty tokens: %+v", login.Msg)
+	}
+	if login.Msg.GetUser().GetEmailVerified() {
+		t.Fatalf("login user unexpectedly marked verified")
 	}
 }
 

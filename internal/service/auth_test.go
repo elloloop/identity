@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,16 +42,50 @@ func TestPasswordSignup_CreatesUserAndIssuesTokens(t *testing.T) {
 	assert.False(t, result.TotpRequired)
 }
 
-func TestPasswordSignup_DuplicateEmailFails(t *testing.T) {
-	repo := newFakeRepo()
-	svc := newTestAuthService(t, repo)
+func TestPasswordSignup_DuplicateEmail_NoEnumeration(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
 
-	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
+	fresh, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "")
+	require.NoError(t, err)
+	rec.Reset()
+
+	dup, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "")
+	require.NoError(t, err)
+	require.NotNil(t, dup)
+
+	assert.Equal(t, fresh.User.Email, dup.User.Email)
+	assert.Equal(t, fresh.User.Name, dup.User.Name)
+	assert.Equal(t, fresh.ExpiresIn, dup.ExpiresIn)
+	assert.False(t, dup.TotpRequired)
+	assert.NotEmpty(t, dup.User.ID)
+	assert.NotEmpty(t, dup.AccessToken)
+	assert.NotEmpty(t, dup.RefreshToken)
+
+	assert.Len(t, repo.users, 1, "duplicate signup must not create a second user")
+	assert.Len(t, repo.refreshTokens, 1, "duplicate signup must not mint a stored refresh token")
+
+	_, _, _, err = svc.RefreshToken(context.Background(), dup.RefreshToken, "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
+}
+
+func TestPasswordSignup_DuplicateEmail_SendsNoticeEmail(t *testing.T) {
+	svc, _, rec := newAuthSvcWithMailer(t)
+
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "")
+	require.NoError(t, err)
+	rec.Reset()
+
+	_, err = svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "")
 	require.NoError(t, err)
 
-	_, err = svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAlreadyExists))
+	sent := rec.Sent()
+	require.Len(t, sent, 1)
+	assert.Equal(t, "alice@example.com", sent[0].To)
+	assert.Equal(t, "Someone tried to sign up with your email", sent[0].Subject)
+	assert.Contains(t, sent[0].Text, "Someone tried to sign up with this email address.")
+	assert.Contains(t, sent[0].Text, "https://app.test")
+	assert.True(t, strings.Contains(strings.ToLower(sent[0].Text), "ignore"))
 }
 
 func TestPasswordSignup_WeakPasswordFails(t *testing.T) {
@@ -106,6 +141,23 @@ func TestPasswordLogin_CorrectPasswordSucceeds(t *testing.T) {
 	assert.NotEmpty(t, result.AccessToken)
 	assert.NotEmpty(t, result.RefreshToken)
 	assert.False(t, result.TotpRequired)
+}
+
+func TestPasswordLogin_UnverifiedEmailAllowed(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	pwHash := hashPW(t, strongPW)
+	user := seedUser(repo, "bob@example.com", pwHash, "active")
+	user.EmailVerified = false
+	user.EmailVerifiedAt = 0
+
+	result, err := svc.PasswordLogin(context.Background(), "bob@example.com", strongPW, "1.2.3.4", "TestAgent")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "bob@example.com", result.User.Email)
+	assert.False(t, result.User.EmailVerified)
+	assert.NotEmpty(t, result.AccessToken)
+	assert.NotEmpty(t, result.RefreshToken)
 }
 
 func TestPasswordLogin_WrongPasswordFails(t *testing.T) {
@@ -299,7 +351,7 @@ func TestOAuthLogin_CreatesNewUser(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	code := fakeOAuthCode("oauth@example.com", "OAuth User", "https://img.example.com/pic.jpg", "google")
-	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
+	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "oauth@example.com", result.User.Email)
 	assert.Equal(t, "OAuth User", result.User.Name)
@@ -312,7 +364,7 @@ func TestOAuthLogin_ExistingUserUpdatesProfile(t *testing.T) {
 	seedUser(repo, "existing@example.com", "", "active")
 
 	code := fakeOAuthCode("existing@example.com", "New Name", "https://pic.url", "google")
-	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
+	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "existing@example.com", result.User.Email)
 }

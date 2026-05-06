@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 )
@@ -78,12 +80,14 @@ var errNotFound = errors.New("entdb: not found")
 // purely a witness picker for sdk.Get[T] / sdk.Delete[T] and not a
 // witness table for the wire payload.
 type sdkScope struct {
-	client   *sdk.DbClient
-	tenantID string
+	client    *sdk.DbClient
+	tenantID  string
+	transport sdk.Transport
 }
 
 func newSDKScope(client *sdk.DbClient, tenantID string) *sdkScope {
-	return &sdkScope{client: client, tenantID: tenantID}
+	transport, _ := TransportFromClient(client)
+	return &sdkScope{client: client, tenantID: tenantID, transport: transport}
 }
 
 func (s *sdkScope) scope(actor string) (*sdk.Scope, error) {
@@ -131,6 +135,11 @@ func (s *sdkScope) get(ctx context.Context, actor string, dst proto.Message, nod
 }
 
 func (s *sdkScope) query(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, error) {
+	if s.transport != nil {
+		if rows, err, ok := s.queryViaTransport(ctx, actor, witness, filter); ok {
+			return rows, err
+		}
+	}
 	scope, err := s.scope(actor)
 	if err != nil {
 		return nil, err
@@ -201,7 +210,14 @@ func (s *sdkScope) create(ctx context.Context, actor string, msg proto.Message) 
 	if err != nil {
 		return "", err
 	}
-	return firstCreatedID(res)
+	id, err := firstCreatedID(res)
+	if err != nil {
+		return "", err
+	}
+	if err := s.waitForNodeVisible(ctx, actor, msg, id); err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 func (s *sdkScope) update(ctx context.Context, actor string, nodeID string, msg proto.Message) error {
@@ -214,7 +230,20 @@ func (s *sdkScope) update(ctx context.Context, actor string, nodeID string, msg 
 	if _, err := plan.Commit(ctx); err != nil {
 		return err
 	}
-	return nil
+	return s.waitForPatchVisible(ctx, actor, nodeID, msg)
+}
+
+func (s *sdkScope) rawUpdate(ctx context.Context, actor string, typeID int, nodeID string, patch map[string]any) error {
+	if s.transport == nil {
+		return fmt.Errorf("entdb: raw transport unavailable")
+	}
+	_, err := s.transport.ExecuteAtomic(ctx, s.tenantID, actor, "", []sdk.Operation{{
+		Type:   sdk.OpUpdateNode,
+		TypeID: typeID,
+		NodeID: nodeID,
+		Patch:  patch,
+	}})
+	return err
 }
 
 // markConsumed is a no-op against the real server: PasswordResetToken
@@ -265,7 +294,7 @@ func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Messa
 	if _, err := plan.Commit(ctx); err != nil {
 		return err
 	}
-	return nil
+	return s.waitForNodeDeleted(ctx, actor, witness, nodeID)
 }
 
 func getInto[T proto.Message](ctx context.Context, scope *sdk.Scope, dst proto.Message, nodeID string) error {
@@ -298,6 +327,174 @@ func queryAs[T proto.Message](ctx context.Context, scope *sdk.Scope, filter map[
 		res = append(res, queriedNode{Message: m})
 	}
 	return res, nil
+}
+
+func (s *sdkScope) queryViaTransport(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, error, bool) {
+	typeID, rawFilter, ok := rawQuerySpec(witness, filter)
+	if !ok {
+		return nil, nil, false
+	}
+	nodes, err := s.transport.QueryNodes(ctx, s.tenantID, actor, typeID, rawFilter)
+	if err != nil {
+		return nil, err, true
+	}
+	out := make([]queriedNode, 0, len(nodes))
+	for _, node := range nodes {
+		msg := newMessageLike(witness)
+		if err := s.get(ctx, actor, msg, node.NodeID); err != nil {
+			return nil, err, true
+		}
+		out = append(out, queriedNode{
+			NodeID:  node.NodeID,
+			Message: msg,
+		})
+	}
+	return out, nil, true
+}
+
+func rawQuerySpec(witness proto.Message, filter map[string]any) (int, map[string]any, bool) {
+	rawFilter := make(map[string]any, len(filter))
+	switch witness.(type) {
+	case *schemapb.User:
+		for k, v := range filter {
+			switch k {
+			case "email":
+				rawFilter["1"] = v
+			default:
+				return 0, nil, false
+			}
+		}
+		return 1, rawFilter, true
+	case *schemapb.RefreshToken:
+		for k, v := range filter {
+			switch k {
+			case "user_id":
+				rawFilter["2"] = v
+			default:
+				return 0, nil, false
+			}
+		}
+		return 5, rawFilter, true
+	case *schemapb.PasskeyCredential:
+		for k, v := range filter {
+			switch k {
+			case "user_id":
+				rawFilter["2"] = v
+			default:
+				return 0, nil, false
+			}
+		}
+		return 20, rawFilter, true
+	case *schemapb.TotpCredential:
+		for k, v := range filter {
+			switch k {
+			case "user_id":
+				rawFilter["1"] = v
+			default:
+				return 0, nil, false
+			}
+		}
+		return 23, rawFilter, true
+	case *schemapb.RecoveryCode:
+		for k, v := range filter {
+			switch k {
+			case "user_id":
+				rawFilter["1"] = v
+			case "code_hash":
+				rawFilter["2"] = v
+			default:
+				return 0, nil, false
+			}
+		}
+		return 24, rawFilter, true
+	case *schemapb.OAuthIdentity:
+		for k, v := range filter {
+			switch k {
+			case "user_id":
+				rawFilter["1"] = v
+			case "provider":
+				rawFilter["2"] = v
+			case "provider_user_id":
+				rawFilter["3"] = v
+			default:
+				return 0, nil, false
+			}
+		}
+		return 30, rawFilter, true
+	default:
+		return 0, nil, false
+	}
+}
+
+func newMessageLike(witness proto.Message) proto.Message {
+	return witness.ProtoReflect().New().Interface()
+}
+
+func (s *sdkScope) waitForNodeVisible(ctx context.Context, actor string, witness proto.Message, nodeID string) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		msg := newMessageLike(witness)
+		err := s.get(ctx, actor, msg, nodeID)
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (s *sdkScope) waitForPatchVisible(ctx context.Context, actor, nodeID string, patch proto.Message) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		msg := newMessageLike(patch)
+		err := s.get(ctx, actor, msg, nodeID)
+		if err == nil && patchApplied(patch.ProtoReflect(), msg.ProtoReflect()) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("entdb: patch visibility timeout for %s", nodeID)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (s *sdkScope) waitForNodeDeleted(ctx context.Context, actor string, witness proto.Message, nodeID string) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		msg := newMessageLike(witness)
+		err := s.get(ctx, actor, msg, nodeID)
+		if errors.Is(err, errNotFound) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("entdb: delete visibility timeout for %s", nodeID)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func patchApplied(want, got protoreflect.Message) bool {
+	set := true
+	want.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		if !got.Has(fd) {
+			set = false
+			return false
+		}
+		if got.Get(fd).Interface() != v.Interface() {
+			set = false
+			return false
+		}
+		return true
+	})
+	return set
 }
 
 func isNonNilMessage(m proto.Message) bool {

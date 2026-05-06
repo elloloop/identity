@@ -12,6 +12,7 @@ import (
 
 	identitypb "github.com/elloloop/identity/gen/go/identity"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
+	"github.com/elloloop/identity/internal/service"
 )
 
 func enrollTotp(
@@ -44,6 +45,9 @@ func enrollTotp(
 	if len(begin.Msg.RecoveryCodes) != 10 {
 		t.Fatalf("recovery code count = %d, want 10", len(begin.Msg.RecoveryCodes))
 	}
+	h.WaitForTotpCredential(t, signup.Msg.GetUser().GetId(), func(rec *service.TotpCredRecord) bool {
+		return !rec.Verified
+	})
 
 	verifyCode := generateTotpCodeAt(t, begin.Msg.Secret, time.Now())
 	verify, err := authed.VerifyTotpSetup(ctx, connect.NewRequest(&identitypb.VerifyTotpSetupRequest{
@@ -107,6 +111,9 @@ func TestTotp_EnrollVerifyAndDisable(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("DisableTotp: %v", err)
 	}
+	h.WaitForUser(t, "totp-disable@example.com", func(user *service.User) bool {
+		return !user.TotpRequired
+	})
 
 	postDisable, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
 		Email:    "totp-disable@example.com",

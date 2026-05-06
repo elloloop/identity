@@ -6,19 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"net/http/httptest"
 	"testing"
 	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/pquerna/otp"
 	otptotp "github.com/pquerna/otp/totp"
 
-	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
-	"github.com/elloloop/identity/internal/app"
-	"github.com/elloloop/identity/pkg/jwt"
-	"github.com/elloloop/identity/pkg/passkeys"
+	"github.com/elloloop/identity/internal/config"
 )
 
 const (
@@ -38,71 +32,11 @@ const (
 
 func startPasskeyVectorServer(t *testing.T) *Harness {
 	t.Helper()
-
-	cfg := newTestConfig()
-	cfg.PasskeyRPID = "example.org"
-	cfg.PasskeyRPName = "Example"
-	cfg.PasskeyOrigin = "https://example.org"
-
-	signingKey, err := jwt.GenerateKey("test-kid")
-	if err != nil {
-		t.Fatalf("generate signing key: %v", err)
-	}
-	keyRing, err := jwt.NewKeyRing([]jwt.SigningKey{signingKey})
-	if err != nil {
-		t.Fatalf("build key ring: %v", err)
-	}
-
-	pkSvc, err := passkeys.NewWebAuthnService(passkeys.Config{
-		RPID:   cfg.PasskeyRPID,
-		RPName: cfg.PasskeyRPName,
-		Origin: cfg.PasskeyOrigin,
-	})
-	if err != nil {
-		t.Fatalf("init webauthn: %v", err)
-	}
-
-	repo := NewMemRepo()
-	auditDB := NewRecordingDB()
-	mailer := NewRecordingMailer()
-
-	handler := app.New(app.Deps{
-		Config:         cfg,
-		Logger:         zap.NewNop(),
-		KeyRing:        keyRing,
-		Repo:           repo,
-		DB:             auditDB,
-		Passkeys:       pkSvc,
-		TOTPKey:        []byte("01234567890123456789012345678901"),
-		EmailTransport: mailer,
-	})
-
-	srv := httptest.NewServer(handler)
-	t.Cleanup(srv.Close)
-
-	httpClient := srv.Client()
-	client := identityconnectgen.NewIdentityServiceClient(httpClient, srv.URL)
-
-	return &Harness{
-		BaseURL: srv.URL,
-		Client:  client,
-		HTTP:    httpClient,
-		KeyRing: keyRing,
-		Repo:    repo,
-		Audit:   auditDB,
-		Mailer:  mailer,
-		Server:  srv,
-	}
-}
-
-func mustHex(t *testing.T, s string) []byte {
-	t.Helper()
-
-	decoded, err := hex.DecodeString(s)
-	if err != nil {
-		t.Fatalf("hex decode %q: %v", s, err)
-	}
-	return decoded
+	return StartServer(t, WithConfig(func(cfg *config.Config) {
+		cfg.PasskeyRPID = "example.org"
+		cfg.PasskeyRPName = "Example"
+		cfg.PasskeyOrigin = "https://example.org"
+	}))
 }
 
 func specPasskeyRegistrationChallenge(t *testing.T) string {
@@ -198,47 +132,14 @@ func buildPasskeyLoginRegistrationCredentialJSON(t *testing.T) string {
 	return string(encoded)
 }
 
-func setPasskeyChallengeValue(t *testing.T, repo *MemRepo, challengeID, challenge string) {
+func mustHex(t *testing.T, s string) []byte {
 	t.Helper()
 
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-
-	record, ok := repo.passkeyChallenges[challengeID]
-	if !ok {
-		t.Fatalf("passkey challenge %q not found", challengeID)
+	decoded, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatalf("hex decode %q: %v", s, err)
 	}
-	record.Challenge = challenge
-}
-
-func setPasskeyCredentialSignCount(t *testing.T, repo *MemRepo, credentialID string, signCount int64) {
-	t.Helper()
-
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-
-	for _, record := range repo.passkeyCreds {
-		if record.CredentialID == credentialID {
-			record.SignCount = signCount
-			return
-		}
-	}
-	t.Fatalf("passkey credential %q not found", credentialID)
-}
-
-func expireQrLoginSession(t *testing.T, repo *MemRepo, sessionID string) {
-	t.Helper()
-
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-
-	for _, session := range repo.qrSessions {
-		if session.SessionID == sessionID {
-			session.ExpiresAt = time.Now().Add(-time.Millisecond).UnixMilli()
-			return
-		}
-	}
-	t.Fatalf("qr session %q not found", sessionID)
+	return decoded
 }
 
 func generateTotpCodeAt(t *testing.T, secret string, at time.Time) string {

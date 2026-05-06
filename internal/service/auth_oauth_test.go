@@ -17,7 +17,7 @@ func TestOAuthLogin_Disabled_NoRegistry(t *testing.T) {
 
 	_, err := svc.OAuthLogin(context.Background(),
 		fakeOAuthCode("u@example.com", "U", "", "google"),
-		"google", "https://app/cb", "", "")
+		"google", "https://app/cb", "", "", "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrOAuthDisabled))
 }
@@ -28,9 +28,23 @@ func TestOAuthLogin_UnknownProvider(t *testing.T) {
 
 	_, err := svc.OAuthLogin(context.Background(),
 		fakeOAuthCode("u@example.com", "U", "", "yahoo"),
-		"yahoo", "https://app/cb", "", "")
+		"yahoo", "https://app/cb", "", "", "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
+}
+
+func TestBeginOAuthLogin_ReturnsServerOwnedState(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+
+	result, err := svc.BeginOAuthLogin(context.Background(), "google", "https://app/cb")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.NotEmpty(t, result.AuthorizationURL)
+	assert.NotEmpty(t, result.State)
+	assert.NotEmpty(t, result.StateToken)
+	assert.NotEmpty(t, result.CodeVerifier)
+	assert.Equal(t, int32(300), result.ExpiresIn)
 }
 
 func TestOAuthLogin_NewUserCreatedAndAudited(t *testing.T) {
@@ -38,7 +52,7 @@ func TestOAuthLogin_NewUserCreatedAndAudited(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	code := fakeOAuthCode("new-oauth@example.com", "Newcomer", "https://avatar/", "google")
-	res, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "10.0.0.1", "TestAgent")
+	res, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "10.0.0.1", "TestAgent")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	assert.Equal(t, "new-oauth@example.com", res.User.Email)
@@ -60,7 +74,7 @@ func TestOAuthLogin_ExistingUserLooksUpByEmail(t *testing.T) {
 	seed := seedUser(repo, "alice@example.com", "", "active")
 
 	code := fakeOAuthCode("alice@example.com", "Alice Updated", "https://av/", "google")
-	res, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
+	res, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, seed.ID, res.User.ID)
 	assert.Equal(t, "Alice Updated", res.User.Name)
@@ -72,7 +86,7 @@ func TestOAuthLogin_ExchangerErrorPropagatesAsUnauthenticated(t *testing.T) {
 
 	// "err|..." form makes the fake exchanger return ErrCodeExchangeFailed.
 	_, err := svc.OAuthLogin(context.Background(),
-		"err|something-bad", "google", "https://app/cb", "", "")
+		"err|something-bad", "google", "https://app/cb", "", "", "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
@@ -82,9 +96,35 @@ func TestOAuthLogin_UnverifiedEmailRejected(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	_, err := svc.OAuthLogin(context.Background(),
-		"unverified|u@example.com", "google", "https://app/cb", "", "")
+		"unverified|u@example.com", "google", "https://app/cb", "", "", "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
+}
+
+func TestOAuthLogin_StateMismatchRejected(t *testing.T) {
+	repo := newFakeRepo()
+	registry := oauth.NewRegistry()
+	exchanger := &fakeOAuthExchanger{provider: "google"}
+	registry.Register("google", exchanger)
+	svc := newTestAuthServiceWithRegistry(t, repo, registry)
+
+	begin, err := svc.BeginOAuthLogin(context.Background(), "google", "https://app/cb")
+	require.NoError(t, err)
+
+	_, err = svc.OAuthLogin(
+		context.Background(),
+		fakeOAuthCode("state-mismatch@example.com", "Mismatch", "", "google"),
+		"google",
+		"https://app/cb",
+		"",
+		begin.State+"-wrong",
+		begin.StateToken,
+		"",
+		"",
+	)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
+	assert.Zero(t, exchanger.calls.Load())
 }
 
 func TestOAuthLogin_AuditEventsRecorded(t *testing.T) {
@@ -96,7 +136,7 @@ func TestOAuthLogin_AuditEventsRecorded(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	code := fakeOAuthCode("audit@example.com", "Au", "", "github")
-	res, err := svc.OAuthLogin(context.Background(), code, "github", "https://app/cb", "1.2.3.4", "Mozilla/5.0")
+	res, err := svc.OAuthLogin(context.Background(), code, "github", "https://app/cb", "", "", "", "1.2.3.4", "Mozilla/5.0")
 	require.NoError(t, err)
 	assert.Equal(t, "audit@example.com", res.User.Email)
 }
@@ -105,7 +145,7 @@ func TestOAuthLogin_EmptyProviderInvalid(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.OAuthLogin(context.Background(), "code", "", "https://app/cb", "", "")
+	_, err := svc.OAuthLogin(context.Background(), "code", "", "https://app/cb", "", "", "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -120,7 +160,7 @@ func TestOAuthLogin_ExchangerInvoked(t *testing.T) {
 	svc := newTestAuthServiceWithRegistry(t, repo, r)
 
 	code := fakeOAuthCode("u@example.com", "U", "", "google")
-	if _, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", ""); err != nil {
+	if _, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", ""); err != nil {
 		t.Fatalf("OAuthLogin: %v", err)
 	}
 	if exch.calls.Load() != 1 {

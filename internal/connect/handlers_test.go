@@ -350,15 +350,22 @@ func TestPasswordSignupAndLogin(t *testing.T) {
 		t.Fatalf("signup unexpected: %+v", signup.Msg)
 	}
 
-	// Duplicate.
-	_, err = h.client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+	// Duplicate: still succeeds to avoid email enumeration, but must not
+	// authenticate the caller.
+	dup, err := h.client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
 		Email: "alice@example.com", Password: strongPW,
 	}))
-	if err == nil {
-		t.Fatal("expected duplicate error")
+	if err != nil {
+		t.Fatalf("duplicate signup: %v", err)
 	}
-	if connectCodeOf(err) != connect.CodeAlreadyExists {
-		t.Fatalf("expected AlreadyExists, got %v: %v", connectCodeOf(err), err)
+	if dup.Msg.AccessToken == "" || dup.Msg.RefreshToken == "" || dup.Msg.User == nil {
+		t.Fatalf("duplicate signup unexpected: %+v", dup.Msg)
+	}
+	getCurReq := withClientHeaders(connect.NewRequest(&identitypb.GetCurrentUserRequest{}))
+	getCurReq.Header().Set("Authorization", "Bearer "+dup.Msg.AccessToken)
+	_, err = h.client.GetCurrentUser(ctx, getCurReq)
+	if got := connectCodeOf(err); got != connect.CodeNotFound && got != connect.CodeUnauthenticated {
+		t.Fatalf("duplicate signup token should not authenticate, got %v: %v", got, err)
 	}
 
 	// Weak password → InvalidArgument.
@@ -378,6 +385,9 @@ func TestPasswordSignupAndLogin(t *testing.T) {
 	}
 	if login.Msg.AccessToken == "" || login.Msg.User.Id == "" {
 		t.Fatalf("login result: %+v", login.Msg)
+	}
+	if login.Msg.User.EmailVerified {
+		t.Fatalf("password login should allow unverified local accounts, got verified=%v", login.Msg.User.EmailVerified)
 	}
 
 	// Wrong password.

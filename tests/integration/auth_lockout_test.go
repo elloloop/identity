@@ -10,6 +10,7 @@ import (
 	"connectrpc.com/connect"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity"
+	"github.com/elloloop/identity/internal/service"
 )
 
 // TestLockout_FiveFailuresLockAccountThenUnlocks drives the lockout
@@ -52,6 +53,9 @@ func TestLockout_FiveFailuresLockAccountThenUnlocks(t *testing.T) {
 			t.Fatalf("attempt %d: code = %v, want Unauthenticated (err=%v)", i+1, got, err)
 		}
 	}
+	h.WaitForUser(t, email, func(user *service.User) bool {
+		return user.LockedUntil > time.Now().UnixMilli()
+	})
 
 	// Sixth attempt — with the correct password — must be rejected.
 	_, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
@@ -68,7 +72,7 @@ func TestLockout_FiveFailuresLockAccountThenUnlocks(t *testing.T) {
 	// Force-shorten the lockout window so the test does not have to wait
 	// 15 real minutes. We poke the in-memory repo directly: set
 	// LockedUntil to 1ms ago, simulating "the cooldown has just lapsed".
-	uid := findUserIDByEmail(t, h.Repo, email)
+	uid := h.FindUserIDByEmail(t, email)
 	pastMs := time.Now().Add(-time.Millisecond).UnixMilli()
 	if err := h.Repo.SetUserLockedUntil(ctx, uid, pastMs); err != nil {
 		t.Fatalf("SetUserLockedUntil: %v", err)
@@ -86,20 +90,4 @@ func TestLockout_FiveFailuresLockAccountThenUnlocks(t *testing.T) {
 	if resp.Msg.AccessToken == "" {
 		t.Fatalf("post-lockout login returned empty access token")
 	}
-}
-
-// findUserIDByEmail looks up a userID in the in-memory repo. Reaches
-// into the package-private state under r.mu via the public helper —
-// MemRepo doesn't expose a "find by email" the way the Repository
-// interface does (which returns a copy), so we walk the map.
-func findUserIDByEmail(t *testing.T, r *MemRepo, email string) string {
-	t.Helper()
-	u, err := r.FindUserByEmail(context.Background(), email)
-	if err != nil {
-		t.Fatalf("FindUserByEmail: %v", err)
-	}
-	if u == nil {
-		t.Fatalf("user %s not found in repo", email)
-	}
-	return u.ID
 }

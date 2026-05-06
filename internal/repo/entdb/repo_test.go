@@ -38,11 +38,19 @@ type storedNode struct {
 	msg proto.Message
 }
 
+type duplicateUserEntClient struct {
+	*memoryEntClient
+}
+
 func newMemoryEntClient() *memoryEntClient {
 	return &memoryEntClient{
 		store:    make(map[string]storedNode),
 		consumed: make(map[string]int64),
 	}
+}
+
+func newDuplicateUserEntClient() *duplicateUserEntClient {
+	return &duplicateUserEntClient{memoryEntClient: newMemoryEntClient()}
 }
 
 func (c *memoryEntClient) nextID() string {
@@ -109,6 +117,14 @@ func (c *memoryEntClient) create(_ context.Context, _ string, msg proto.Message)
 	if err := c.checkUniqueness(msg); err != nil {
 		return "", err
 	}
+	id := c.nextID()
+	c.store[id] = storedNode{msg: proto.Clone(msg)}
+	return id, nil
+}
+
+func (c *duplicateUserEntClient) create(_ context.Context, _ string, msg proto.Message) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	id := c.nextID()
 	c.store[id] = storedNode{msg: proto.Clone(msg)}
 	return id, nil
@@ -347,4 +363,36 @@ func TestEntDBConformance(t *testing.T) {
 			tenantID: "test-tenant",
 		}
 	})
+}
+
+func TestCreateUser_DuplicateCreateDeletesLoser(t *testing.T) {
+	t.Parallel()
+
+	client := newDuplicateUserEntClient()
+	repo := &entRepository{
+		client:   client,
+		tenantID: "test-tenant",
+	}
+
+	first := &service.User{Email: "dup@example.com", Status: "active"}
+	firstID, err := repo.CreateUser(context.Background(), first)
+	if err != nil {
+		t.Fatalf("first CreateUser: %v", err)
+	}
+
+	second := &service.User{Email: "dup@example.com", Status: "active"}
+	if _, err := repo.CreateUser(context.Background(), second); err == nil {
+		t.Fatal("second CreateUser: want duplicate cleanup error, got nil")
+	}
+
+	rows, err := client.query(context.Background(), systemActor, &schemapb.User{}, map[string]any{"email": "dup@example.com"})
+	if err != nil {
+		t.Fatalf("query dup@example.com: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows for dup@example.com = %d, want 1", len(rows))
+	}
+	if rows[0].NodeID != firstID {
+		t.Fatalf("winner node id = %q, want %q", rows[0].NodeID, firstID)
+	}
 }

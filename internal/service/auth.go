@@ -77,6 +77,16 @@ type LoginResult struct {
 	LoginChallengeID string
 }
 
+// OAuthBeginResult carries the provider authorization URL and the
+// server-minted state artifacts needed to complete the OAuth flow.
+type OAuthBeginResult struct {
+	AuthorizationURL string
+	State            string
+	StateToken       string
+	CodeVerifier     string
+	ExpiresIn        int32
+}
+
 // QrSessionInfo holds the public details of a QR login session.
 type QrSessionInfo struct {
 	Status        string

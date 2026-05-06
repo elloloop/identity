@@ -29,7 +29,7 @@ func TestOAuthLogin_ReturningUserViaProviderID(t *testing.T) {
 	// fakeOAuthExchanger encodes ProviderUserID as "sub-<email>", so we
 	// drive a login whose sub deterministically matches the seeded link.
 	code := fakeOAuthCode("stable-123", "Stable", "", "google")
-	res, err := svc.OAuthLogin(ctx, code, "google", "https://app/cb", "", "")
+	res, err := svc.OAuthLogin(ctx, code, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	assert.Equal(t, seed.ID, res.User.ID)
@@ -51,7 +51,7 @@ func TestOAuthLogin_FirstTimeLinkToExistingUser(t *testing.T) {
 	seed := seedUser(repo, "alice@example.com", "", "active")
 
 	code := fakeOAuthCode("alice@example.com", "Alice", "", "google")
-	res, err := svc.OAuthLogin(ctx, code, "google", "https://app/cb", "", "")
+	res, err := svc.OAuthLogin(ctx, code, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, seed.ID, res.User.ID)
 
@@ -71,7 +71,7 @@ func TestOAuthLogin_NewUserGetsIdentityLink(t *testing.T) {
 	ctx := context.Background()
 
 	code := fakeOAuthCode("brand-new@example.com", "Newbie", "", "microsoft")
-	res, err := svc.OAuthLogin(ctx, code, "microsoft", "https://app/cb", "", "")
+	res, err := svc.OAuthLogin(ctx, code, "microsoft", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 
@@ -93,7 +93,7 @@ func TestOAuthLogin_ProviderEmailChangedStaysLinked(t *testing.T) {
 
 	// First login: creates user@old.com and links sub-stableid.
 	first := fakeOAuthCode("stableid", "User", "", "google")
-	res1, err := svc.OAuthLogin(ctx, first, "google", "https://app/cb", "", "")
+	res1, err := svc.OAuthLogin(ctx, first, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	originalID := res1.User.ID
 	assert.Equal(t, "stableid", res1.User.Email)
@@ -115,7 +115,7 @@ func TestOAuthLogin_ProviderEmailChangedStaysLinked(t *testing.T) {
 	// Drive a second login with the SAME provider+sub: the fakeExchanger
 	// happens to return the same sub for the same code, so this proves
 	// the lookup returns the original user (no duplicate created).
-	res2, err := svc.OAuthLogin(ctx, first, "google", "https://app/cb", "", "")
+	res2, err := svc.OAuthLogin(ctx, first, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, originalID, res2.User.ID)
 
@@ -148,7 +148,7 @@ func TestOAuthLogin_ProviderEmailChangePropagates(t *testing.T) {
 	// Email="stableid" (different from "old@example.com") and
 	// ProviderUserID="sub-stableid" (matches the seeded link).
 	code := fakeOAuthCode("stableid", "User", "", "google")
-	res, err := svc.OAuthLogin(ctx, code, "google", "https://app/cb", "", "")
+	res, err := svc.OAuthLogin(ctx, code, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, seed.ID, res.User.ID, "must resolve to original user via (provider, sub)")
 	assert.Equal(t, "stableid", res.User.Email, "local email must be updated to provider's new email")
@@ -177,14 +177,14 @@ func TestOAuthLogin_CrossProviderLinking(t *testing.T) {
 	// Google login first.
 	res1, err := svc.OAuthLogin(ctx,
 		fakeOAuthCode("multi@example.com", "Multi", "", "google"),
-		"google", "https://app/cb", "", "")
+		"google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	uid := res1.User.ID
 
 	// Microsoft login with the same email — should land on the SAME user.
 	res2, err := svc.OAuthLogin(ctx,
 		fakeOAuthCode("multi@example.com", "Multi", "", "microsoft"),
-		"microsoft", "https://app/cb", "", "")
+		"microsoft", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, uid, res2.User.ID)
 
