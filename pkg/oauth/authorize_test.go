@@ -199,12 +199,11 @@ func TestOIDCDiscovery(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"authorization_endpoint": "https://accounts.example.com/auth",
-			"issuer":                 "https://accounts.example.com",
-			"token_endpoint":         "https://accounts.example.com/token",
-			"userinfo_endpoint":      "https://accounts.example.com/userinfo",
-			"jwks_uri":               "https://accounts.example.com/jwks",
+		_ = json.NewEncoder(w).Encode(oidcDiscoveryDocument{ // #nosec G101 -- OAuth endpoint fields are not credentials.
+			Issuer:           "https://accounts.example.com",
+			TokenEndpoint:    "https://accounts.example.com/token",
+			UserinfoEndpoint: "https://accounts.example.com/userinfo",
+			JWKSURI:          "https://accounts.example.com/jwks",
 		})
 	}))
 	t.Cleanup(srv.Close)
