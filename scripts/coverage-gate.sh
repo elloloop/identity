@@ -38,24 +38,34 @@ fi
 #   <file>:<startLine>.<startCol>,<endLine>.<endCol> <numStmts> <count>
 #
 # A statement is "covered" if count > 0. Package = dirname(file).
+#
+# When `go test ./... -coverpkg=./...` runs, each package's test instruments
+# the full union and writes a profile section into the same file. The same
+# (file, range) entry then appears once per tested package — typically 15-20×.
+# We dedupe by composite key and treat a line as covered if ANY appearance
+# has count > 0; otherwise the denominator is inflated by the duplication
+# factor and the gate reports a fraction of true coverage.
 
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
 # Skip the first line (mode: ...) and emit "<pkg> <stmts> <covered>".
 awk 'NR > 1 {
-  n = split($1, a, ":")
-  file = a[1]
-  m = split(file, p, "/")
-  pkg = p[1]
-  for (i = 2; i < m; i++) pkg = pkg "/" p[i]
-  stmts = $2
-  covered = ($3 > 0) ? stmts : 0
-  s[pkg] += stmts
-  c[pkg] += covered
+  key = $1
+  stmts[key] = $2            # numStmts is identical across appearances
+  if ($3 > 0) hit[key] = 1
 }
 END {
-  for (k in s) printf "%s %d %d\n", k, s[k], c[k]
+  for (k in stmts) {
+    n = split(k, a, ":")
+    file = a[1]
+    m = split(file, p, "/")
+    pkg = p[1]
+    for (i = 2; i < m; i++) pkg = pkg "/" p[i]
+    s[pkg] += stmts[k]
+    if (k in hit) c[pkg] += stmts[k]
+  }
+  for (k in s) printf "%s %d %d\n", k, s[k], c[k]+0
 }' "$PROFILE" > "$tmp"
 
 fail=0
