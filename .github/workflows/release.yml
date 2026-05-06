@@ -336,7 +336,10 @@ jobs:
           echo "image=${first_tag}" >> "$GITHUB_OUTPUT"
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
+        # v0.36.0 (2026-04-22), pinned by commit SHA. Tags 0.0.1–0.34.2
+        # are flagged as compromised by the Trivy March 2026 advisory.
+        # SHA pin defends against future tag retargeting.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.tag.outputs.image }}
           format: sarif
