@@ -8,7 +8,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   GO_VERSION: '1.25.9'
-  GOLANGCI_LINT_VERSION: 'v2.12.2'
+  GOLANGCI_LINT_VERSION: 'v2.12.1'
   GOVULNCHECK_VERSION: 'v1.1.4'
 
 permissions:
