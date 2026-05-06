@@ -140,14 +140,14 @@ jobs:
             sleep 1
           done
           echo "entdb did not come up"; exit 1
-      - name: go test -tags=realentdb
+      - name: go test -tags=integration,realentdb
         env:
           GATEWAY_ENTDB_ADDRESS: localhost:50051
         run: |
-          if compgen -G "tests/integration/*_realentdb_test.go" > /dev/null; then
-            go test -tags=realentdb -race -timeout=300s ./tests/integration/...
+          if compgen -G "tests/integration/*.go" > /dev/null; then
+            go test -tags=integration,realentdb -race -timeout=300s ./tests/integration/...
           else
-            echo "no realentdb tests yet — skipping"
+            echo "no integration tests under tests/integration — skipping"
           fi
 
   realpostgres:
@@ -181,16 +181,16 @@ jobs:
             sleep 1
           done
           echo "postgres did not come up"; exit 1
-      - name: go test -tags=realpostgres (integration)
+      - name: go test -tags=integration,realpostgres
         env:
           GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
         run: |
-          if compgen -G "tests/integration/*_realpostgres_test.go" > /dev/null; then
-            go test -tags=realpostgres -race -timeout=300s ./tests/integration/...
+          if compgen -G "tests/integration/*.go" > /dev/null; then
+            go test -tags=integration,realpostgres -race -timeout=300s ./tests/integration/...
           else
-            echo "no realpostgres integration tests yet — skipping"
+            echo "no integration tests under tests/integration — skipping"
           fi
-      - name: go test -tags=realpostgres (repo)
+      - name: go test -tags=realpostgres internal/repo/postgres
         env:
           GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
         run: go test -race -timeout=300s ./internal/repo/postgres/...
