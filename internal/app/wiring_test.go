@@ -93,7 +93,7 @@ func TestNewBuildsHealthHandler(t *testing.T) {
 	}
 	repo := memory.New()
 	handler := New(Deps{
-		Config: &config.Config{
+		Config: &config.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
 			DefaultTenantID:               "tenant",
 			AuthAllowLocal:                true,
 			PasswordSignupEnabled:         true,
