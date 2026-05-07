@@ -72,8 +72,8 @@ jobs:
             -coverprofile=cover.out \
             -coverpkg=./internal/...,./pkg/...,./cmd/... \
             ./...
-      - name: Coverage gate (internal/ regression check)
-        run: bash scripts/coverage-gate.sh cover.out 55 internal/
+      - name: Coverage gate (internal/ >= 60%)
+        run: bash scripts/coverage-gate.sh cover.out 60 internal/
       - name: Coverage gate (pkg/ >= 85%)
         run: bash scripts/coverage-gate.sh cover.out 85 pkg/
 

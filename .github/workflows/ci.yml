@@ -120,11 +120,8 @@ jobs:
       - name: Coverage summary
         run: go tool cover -func=cover.out | tail -n 30
 
-      - name: Coverage gate (internal/ regression check)
-        # Calibrated to current actual coverage minus a small buffer.
-        # Raising to 80% tracked separately; this gate prevents regressions
-        # from where we are today, not from where we want to be.
-        run: bash scripts/coverage-gate.sh cover.out 55 internal/
+      - name: Coverage gate (internal/ >= 60%)
+        run: bash scripts/coverage-gate.sh cover.out 60 internal/
 
       - name: Coverage gate (pkg/ >= 85%)
         run: bash scripts/coverage-gate.sh cover.out 85 pkg/

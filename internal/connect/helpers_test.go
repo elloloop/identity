@@ -22,6 +22,7 @@ import (
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
 )
@@ -1122,6 +1123,10 @@ func testKeyRing(t *testing.T) *jwt.KeyRing {
 // newHarness builds a complete handler stack and exposes both an in-process
 // connect client and the underlying fakes for assertions.
 func newHarness(t *testing.T) *testHarness {
+	return newHarnessWithOAuthRegistry(t, nil)
+}
+
+func newHarnessWithOAuthRegistry(t *testing.T, registry *oauth.Registry) *testHarness {
 	t.Helper()
 
 	repo := newFakeRepo()
@@ -1141,7 +1146,7 @@ func newHarness(t *testing.T) *testHarness {
 	auditLog := audit.NewLogger(nil, "test", zap.NewNop())
 	totpKey := []byte("01234567890123456789012345678901")
 
-	authSvc := service.NewAuthService(repo, cfg, kr, pkSvc, auditLog, totpKey, nil, zap.NewNop())
+	authSvc := service.NewAuthServiceWithOAuth(repo, cfg, kr, pkSvc, auditLog, totpKey, nil, zap.NewNop(), registry)
 	adminSvc := service.NewAdminService(db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
