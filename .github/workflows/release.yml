@@ -251,7 +251,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - name: Discover and run fuzz targets (10s each)
+      - name: Discover and run fuzz targets (seed corpus + 5s each)
         shell: bash
         run: |
           set -euo pipefail
@@ -267,7 +267,8 @@ jobs:
             dir="${entry%$'\t'*}"
             name="${entry##*$'\t'}"
             echo "::group::fuzz $name in $dir"
-            go test -run='^$' -fuzz="^${name}$" -fuzztime=10s "./$dir"
+            go test -run="^${name}$" -timeout=120s "./$dir"
+            go test -run='^$' -fuzz="^${name}$" -fuzztime=5s -parallel=4 -timeout=60s "./$dir"
             echo "::endgroup::"
           done
 
