@@ -82,6 +82,30 @@ func TestOAuthLogin_NewUserGetsIdentityLink(t *testing.T) {
 	assert.Equal(t, "sub-brand-new@example.com", links[0].ProviderUserID)
 }
 
+func TestOAuthLogin_LinkFailureDoesNotFailLogin(t *testing.T) {
+	repo := newErrorRepo()
+	svc := newTestAuthServiceErr(t, repo)
+	ctx := context.Background()
+
+	repo.failCreateOAuthIdentity = true
+	res, err := svc.OAuthLogin(ctx,
+		fakeOAuthCode("link-failure@example.com", "Link Failure", "", "google"),
+		"google", "https://app/cb", "", "", "", "", "")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "link-failure@example.com", res.User.Email)
+	assert.NotEmpty(t, res.AccessToken)
+	assert.NotEmpty(t, res.RefreshToken)
+
+	got, err := repo.FindUserByEmail(ctx, "link-failure@example.com")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, res.User.ID, got.ID)
+	links, err := repo.ListOAuthIdentitiesForUser(ctx, res.User.ID)
+	require.NoError(t, err)
+	assert.Empty(t, links)
+}
+
 // TestOAuthLogin_ProviderEmailChangedStaysLinked verifies the bug being
 // fixed: a Google user changes their gmail address but the same
 // (provider, sub) tuple still resolves to the original local user — no

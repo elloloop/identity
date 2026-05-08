@@ -564,7 +564,6 @@ func TestRegenerateRecoveryCodes_StoreErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
-// upsertUser update warning path: existing user with name/avatar diff and update fails.
 func TestOAuthLogin_ExistingUserUpdateWarns(t *testing.T) {
 	r := newErrorRepo()
 	seedUser(r.fakeRepo, "ouw@example.com", "", "active")

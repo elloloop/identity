@@ -8,14 +8,14 @@ profiles=()
 unit_coverpkg=./internal/...,./pkg/...,./cmd/...
 tagged_coverpkg=./internal/...,./pkg/...
 
-go test -race -timeout=1200s \
+go test -count=1 -race -timeout=1200s \
   -coverprofile=cover.unit.out \
   -coverpkg="$unit_coverpkg" \
   ./...
 profiles+=(cover.unit.out)
 
 if [[ "${RUN_INTEGRATION_COVERAGE:-}" == "1" ]]; then
-  go test -tags=integration -race -timeout=180s \
+  go test -count=1 -tags=integration -race -timeout=180s \
     -coverprofile=cover.integration.out \
     -coverpkg="$tagged_coverpkg" \
     ./tests/integration/...
@@ -23,7 +23,7 @@ if [[ "${RUN_INTEGRATION_COVERAGE:-}" == "1" ]]; then
 fi
 
 if [[ -n "${GATEWAY_ENTDB_ADDRESS:-}" ]]; then
-  go test -tags=realentdb -race -timeout=300s \
+  go test -count=1 -tags=realentdb -race -timeout=300s \
     -coverprofile=cover.realentdb.out \
     -coverpkg="$tagged_coverpkg" \
     ./tests/integration/... ./internal/repo/entdb/...
@@ -31,7 +31,7 @@ if [[ -n "${GATEWAY_ENTDB_ADDRESS:-}" ]]; then
 fi
 
 if [[ -n "${GATEWAY_POSTGRES_DSN:-}" ]]; then
-  go test -tags=realpostgres -race -timeout=300s \
+  go test -count=1 -tags=realpostgres -race -timeout=300s \
     -coverprofile=cover.realpostgres.out \
     -coverpkg="$tagged_coverpkg" \
     ./tests/integration/...
@@ -39,7 +39,7 @@ if [[ -n "${GATEWAY_POSTGRES_DSN:-}" ]]; then
 fi
 
 if [[ -n "${GATEWAY_TEST_POSTGRES_DSN:-}" ]]; then
-  go test -race -timeout=300s \
+  go test -count=1 -race -timeout=300s \
     -coverprofile=cover.postgres.out \
     -coverpkg="$tagged_coverpkg" \
     ./internal/repo/postgres/...

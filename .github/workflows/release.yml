@@ -113,10 +113,10 @@ jobs:
           GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
           GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
         run: bash scripts/run-coverage.sh
-      - name: Coverage gate (internal/ >= 83%)
-        run: bash scripts/coverage-gate.sh cover.out 83 internal/
-      - name: Coverage gate (pkg/ >= 85%)
-        run: bash scripts/coverage-gate.sh cover.out 85 pkg/
+      - name: Coverage gate (internal/ >= 86%)
+        run: bash scripts/coverage-gate.sh cover.out 86 internal/
+      - name: Coverage gate (pkg/ >= 88%)
+        run: bash scripts/coverage-gate.sh cover.out 88 pkg/
 
   smoke:
     name: Boot smoke

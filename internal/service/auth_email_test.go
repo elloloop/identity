@@ -53,6 +53,12 @@ func (r *recordingTransport) Reset() {
 func newAuthSvcWithMailer(t *testing.T) (*AuthService, *fakeRepo, *recordingTransport) {
 	t.Helper()
 	repo := newFakeRepo()
+	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
+	return svc, repo, rec
+}
+
+func newAuthSvcWithMailerForRepo(t *testing.T, repo Repository) (*AuthService, *recordingTransport) {
+	t.Helper()
 	cfg := testConfig()
 	cfg.AppBaseURL = "https://app.test"
 	cfg.EmailTokenExpirySeconds = 3600
@@ -65,7 +71,7 @@ func newAuthSvcWithMailer(t *testing.T) (*AuthService, *fakeRepo, *recordingTran
 	svc := NewAuthService(repo, cfg, kr, pkSvc,
 		audit.NewLogger(nil, "test", zap.NewNop()),
 		testTotpKey(), rec, zap.NewNop())
-	return svc, repo, rec
+	return svc, rec
 }
 
 // extractTokenFromLink pulls the ?token=... query value from a URL.
@@ -217,6 +223,40 @@ func TestConfirmPasswordReset_Success(t *testing.T) {
 	// Refresh tokens revoked.
 	if list, _ := repo.refreshTokenSnapshot(); len(list) != 0 {
 		t.Errorf("expected refresh tokens cleared, got %d", len(list))
+	}
+}
+
+func TestConfirmPasswordReset_UpdateFailureDoesNotConsumeTokenOrRevokeSessions(t *testing.T) {
+	repo := newErrorRepo()
+	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	user := seedUser(repo.fakeRepo, "alice@test.com", pwHash, "active")
+	if _, err := repo.CreateRefreshToken(context.Background(), &RefreshTokenRecord{
+		TokenHash: "rh", UserID: user.ID, ExpiresAt: nowMs() + 60_000,
+	}); err != nil {
+		t.Fatalf("create refresh: %v", err)
+	}
+
+	token := requestAndExtractResetToken(t, svc, rec, "alice@test.com")
+	repo.failUpdateUser = true
+	err := svc.ConfirmPasswordReset(context.Background(), token, "NewStr0ng!Pass")
+	if err == nil {
+		t.Fatal("expected password update error, got nil")
+	}
+
+	stored, _ := repo.FindPasswordResetTokenByHash(context.Background(), sha256Hex(token))
+	if stored == nil {
+		t.Fatal("reset token should remain stored")
+	}
+	if stored.ConsumedAt != 0 {
+		t.Fatalf("reset token must remain unconsumed when password update fails, got %d", stored.ConsumedAt)
+	}
+	if list, _ := repo.refreshTokenSnapshot(); len(list) != 1 {
+		t.Fatalf("refresh token must remain active when password update fails, got %d tokens", len(list))
+	}
+	got, _ := repo.GetUser(context.Background(), user.ID)
+	if !passwords.Verify("OldStr0ng!Pass", got.PasswordHash) {
+		t.Fatal("old password should remain valid when password update fails")
 	}
 }
 

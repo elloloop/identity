@@ -11,6 +11,20 @@ import (
 	"github.com/elloloop/identity/pkg/oauth"
 )
 
+type oauthExchangeOnly struct {
+	identity *oauth.Identity
+	err      error
+	calls    int
+}
+
+func (f *oauthExchangeOnly) Exchange(_ context.Context, _, _ string) (*oauth.Identity, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.identity, nil
+}
+
 func TestOAuthLogin_Disabled_NoRegistry(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthServiceNoOAuth(t, repo)
@@ -45,6 +59,35 @@ func TestBeginOAuthLogin_ReturnsServerOwnedState(t *testing.T) {
 	assert.NotEmpty(t, result.StateToken)
 	assert.NotEmpty(t, result.CodeVerifier)
 	assert.Equal(t, int32(300), result.ExpiresIn)
+}
+
+func TestBeginOAuthLogin_InputAndProviderErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		registry    *oauth.Registry
+		provider    string
+		redirectURI string
+		want        error
+	}{
+		{"disabled", nil, "google", "https://app/cb", ErrOAuthDisabled},
+		{"empty_provider", defaultTestOAuthRegistry(), "", "https://app/cb", ErrInvalidArgument},
+		{"empty_redirect", defaultTestOAuthRegistry(), "google", "", ErrInvalidArgument},
+		{"unknown_provider", defaultTestOAuthRegistry(), "unknown", "https://app/cb", ErrInvalidArgument},
+		{"not_authorizer", func() *oauth.Registry {
+			registry := oauth.NewRegistry()
+			registry.Register("google", &oauthExchangeOnly{identity: &oauth.Identity{Email: "u@example.com"}})
+			return registry
+		}(), "google", "https://app/cb", ErrInvalidArgument},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := newTestAuthServiceWithRegistry(t, newFakeRepo(), tt.registry)
+			result, err := svc.BeginOAuthLogin(context.Background(), tt.provider, tt.redirectURI)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, tt.want), "err=%v want=%v", err, tt.want)
+			assert.Nil(t, result)
+		})
+	}
 }
 
 func TestOAuthLogin_NewUserCreatedAndAudited(t *testing.T) {
@@ -127,6 +170,32 @@ func TestOAuthLogin_StateMismatchRejected(t *testing.T) {
 	assert.Zero(t, exchanger.calls.Load())
 }
 
+func TestOAuthLogin_StateTokenAllowsCallbackWithoutExplicitVerifier(t *testing.T) {
+	repo := newFakeRepo()
+	registry := oauth.NewRegistry()
+	exchanger := &fakeOAuthExchanger{provider: "google"}
+	registry.Register("google", exchanger)
+	svc := newTestAuthServiceWithRegistry(t, repo, registry)
+
+	begin, err := svc.BeginOAuthLogin(context.Background(), "google", "https://app/cb")
+	require.NoError(t, err)
+	res, err := svc.OAuthLogin(
+		context.Background(),
+		fakeOAuthCode("state-token@example.com", "State Token", "", "google"),
+		"google",
+		"https://app/cb",
+		"",
+		begin.State,
+		begin.StateToken,
+		"",
+		"",
+	)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "state-token@example.com", res.User.Email)
+	assert.Equal(t, int32(1), exchanger.calls.Load())
+}
+
 func TestOAuthLogin_AuditEventsRecorded(t *testing.T) {
 	// The service uses audit.NewLogger(nil, ...) in tests which writes
 	// nothing to a DB but counts in the in-memory logger. Just verify
@@ -148,6 +217,30 @@ func TestOAuthLogin_EmptyProviderInvalid(t *testing.T) {
 	_, err := svc.OAuthLogin(context.Background(), "code", "", "https://app/cb", "", "", "", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
+}
+
+func TestOAuthLogin_ProviderReturnsNoEmailRejected(t *testing.T) {
+	repo := newFakeRepo()
+	registry := oauth.NewRegistry()
+	exchanger := &oauthExchangeOnly{identity: &oauth.Identity{
+		Provider:       "google",
+		ProviderUserID: "sub-no-email",
+		EmailVerified:  true,
+		Name:           "No Email",
+	}}
+	registry.Register("google", exchanger)
+	svc := newTestAuthServiceWithRegistry(t, repo, registry)
+
+	_, err := svc.OAuthLogin(context.Background(), "code", "google", "https://app/cb", "", "", "", "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
+	assert.Equal(t, 1, exchanger.calls)
+	if got, findErr := repo.FindUserByProviderID(context.Background(), "google", "sub-no-email"); findErr != nil || got != nil {
+		t.Fatalf("no user should be linked when provider omits email: user=%+v err=%v", got, findErr)
+	}
+	if list, _ := repo.refreshTokenSnapshot(); len(list) != 0 {
+		t.Fatalf("no refresh token should be issued when provider omits email, got %d", len(list))
+	}
 }
 
 // Ensure exchanger CallCount increments — defensive check that the

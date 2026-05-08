@@ -655,11 +655,6 @@ func (s *AuthService) storeRecoveryCodes(ctx context.Context, userID string, cod
 	return nil
 }
 
-// ensureMailbox auto-provisions an email mailbox for new users. Best-effort.
-func (s *AuthService) ensureMailbox(_ context.Context, _ string, _ string, _ string) {
-	// Placeholder -- email service client not yet wired.
-}
-
 // validatePasswordStrength checks password requirements and returns an error if weak.
 func validatePasswordStrength(pw string) error {
 	issues := passwords.ValidateStrength(pw)

@@ -142,7 +142,6 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		UpdatedAt: msToTime(now),
 	}
 	s.logger.Info("local_signup_success", zap.String("email", email), zap.String("user_id", userID))
-	s.ensureMailbox(ctx, userID, email, displayName)
 
 	// Best-effort: fire a verification email. Failures are logged but
 	// must never fail signup itself.
@@ -538,10 +537,6 @@ func (s *AuthService) OAuthLogin(
 		zap.String("user_id", user.ID),
 	)
 
-	if isNew {
-		s.ensureMailbox(ctx, user.ID, email, identity.Name)
-	}
-
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
 	if err != nil {
 		return nil, err
@@ -580,14 +575,12 @@ func (s *AuthService) mapOAuthError(err error) (*LoginResult, error) {
 	}
 }
 
-// upsertOAuthUser is the OAuth-aware variant of upsertUser. It resolves
-// the local User using a (provider, provider_user_id) lookup first so
-// that a returning user keeps the same local account even when the
-// provider's email has changed since their last login. If no link
-// exists yet it falls back to the email-based lookup (first-time link
-// to an existing local user) and finally creates a new user. In either
-// non-replay branch it persists an OAuthIdentity row so the next login
-// hits the fast path.
+// upsertOAuthUser resolves the local User using a (provider,
+// provider_user_id) lookup first so that a returning user keeps the same
+// local account even when the provider's email has changed since their
+// last login. If no link exists yet it falls back to the email-based
+// lookup and finally creates a new user. In either non-replay branch it
+// persists an OAuthIdentity row so the next login hits the fast path.
 //
 // Returns (user, isNewUser, error). isNewUser is true only when a new
 // User row was created (not when an existing user got a fresh provider
@@ -732,59 +725,6 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 			"email_at_link_time": email,
 		}),
 	)
-}
-
-// upsertUser finds a user by email or creates one. Returns (user, isNew, error).
-func (s *AuthService) upsertUser(ctx context.Context, email, displayName, avatarURL string) (*User, bool, error) {
-	existing, err := s.repo.FindUserByEmail(ctx, email)
-	if err != nil {
-		return nil, false, err
-	}
-	if existing != nil {
-		changed := make(map[string]any)
-		if displayName != "" && displayName != existing.Name {
-			changed["name"] = displayName
-		}
-		if avatarURL != "" && avatarURL != existing.AvatarURL {
-			changed["avatar_url"] = avatarURL
-		}
-		if len(changed) > 0 {
-			changed["updated_at"] = s.nowMs()
-			if err := s.repo.UpdateUser(ctx, existing.ID, changed); err != nil {
-				s.logger.Warn("upsert_user_update_failed", zap.Error(err))
-			}
-		}
-		return existing, false, nil
-	}
-
-	now := s.nowMs()
-	if displayName == "" {
-		displayName = fallbackDisplayName(email, displayName)
-	}
-	userID, err := s.repo.CreateUser(ctx, &User{
-		Email:     email,
-		Name:      displayName,
-		AvatarURL: avatarURL,
-		Role:      "member",
-		Status:    "active",
-		CreatedAt: msToTime(now),
-		UpdatedAt: msToTime(now),
-	})
-	if err != nil {
-		return nil, false, fmt.Errorf("creating user: %w", err)
-	}
-	user := &User{
-		ID:        userID,
-		Email:     email,
-		Name:      displayName,
-		AvatarURL: avatarURL,
-		Role:      "member",
-		Status:    "active",
-		CreatedAt: msToTime(now),
-		UpdatedAt: msToTime(now),
-	}
-	s.logger.Info("user_auto_provisioned", zap.String("email", email), zap.String("user_id", userID))
-	return user, true, nil
 }
 
 // checkAccountStatus verifies the user's status allows login.
