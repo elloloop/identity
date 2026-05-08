@@ -1575,8 +1575,20 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	if err := r.UpdateUser(ctx, "", nil); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("UpdateUser: %v", err)
 	}
+	if _, err := r.IncrementFailedLoginCount(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("IncrementFailedLoginCount: %v", err)
+	}
+	if err := r.ResetFailedLoginCount(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ResetFailedLoginCount: %v", err)
+	}
+	if err := r.SetUserLockedUntil(ctx, "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("SetUserLockedUntil: %v", err)
+	}
 	if _, err := r.FindRefreshTokenByHash(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("FindRefreshTokenByHash: %v", err)
+	}
+	if _, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("FindRefreshTokenByHashIncludingConsumed: %v", err)
 	}
 	if _, err := r.CreateRefreshToken(ctx, &RefreshTokenRecord{}); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("CreateRefreshToken: %v", err)
@@ -1586,6 +1598,9 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	}
 	if err := r.DeleteRefreshTokensForUser(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteRefreshTokensForUser: %v", err)
+	}
+	if err := r.ConsumeRefreshTokenByHash(ctx, "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ConsumeRefreshTokenByHash: %v", err)
 	}
 	if _, err := r.ListPasskeyCredentials(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("ListPasskeyCredentials: %v", err)
@@ -1658,6 +1673,48 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	}
 	if err := r.UpdateInvitation(ctx, "", nil); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("UpdateInvitation: %v", err)
+	}
+	if err := r.CreatePasswordResetToken(ctx, &PasswordResetToken{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreatePasswordResetToken: %v", err)
+	}
+	if _, err := r.FindPasswordResetTokenByHash(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("FindPasswordResetTokenByHash: %v", err)
+	}
+	if err := r.MarkPasswordResetTokenConsumed(ctx, "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("MarkPasswordResetTokenConsumed: %v", err)
+	}
+	if err := r.CreateEmailVerificationToken(ctx, &EmailVerificationToken{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreateEmailVerificationToken: %v", err)
+	}
+	if _, err := r.FindEmailVerificationTokenByHash(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("FindEmailVerificationTokenByHash: %v", err)
+	}
+	if err := r.MarkEmailVerificationTokenConsumed(ctx, "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("MarkEmailVerificationTokenConsumed: %v", err)
+	}
+	if err := r.SetUserEmailVerified(ctx, "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("SetUserEmailVerified: %v", err)
+	}
+	if err := r.CreateEmailChangeToken(ctx, &EmailChangeToken{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreateEmailChangeToken: %v", err)
+	}
+	if _, err := r.FindEmailChangeTokenByHash(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("FindEmailChangeTokenByHash: %v", err)
+	}
+	if err := r.MarkEmailChangeTokenConsumed(ctx, "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("MarkEmailChangeTokenConsumed: %v", err)
+	}
+	if err := r.UpdateUserEmail(ctx, "", "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("UpdateUserEmail: %v", err)
+	}
+	if _, err := r.FindUserByProviderID(ctx, "", ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("FindUserByProviderID: %v", err)
+	}
+	if err := r.CreateOAuthIdentity(ctx, &OAuthIdentity{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreateOAuthIdentity: %v", err)
+	}
+	if _, err := r.ListOAuthIdentitiesForUser(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ListOAuthIdentitiesForUser: %v", err)
 	}
 }
 

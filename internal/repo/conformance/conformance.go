@@ -235,6 +235,30 @@ func RunConformance(t *testing.T, makeFresh func(t *testing.T) service.Repositor
 		}
 	})
 
+	t.Run("RefreshToken_DeleteOne", func(t *testing.T) {
+		ctx := context.Background()
+		r := makeFresh(t)
+		id, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "delete-one", UserID: "u-1"})
+		if err != nil {
+			t.Fatalf("CreateRefreshToken: %v", err)
+		}
+		_, err = r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "keep-one", UserID: "u-1"})
+		if err != nil {
+			t.Fatalf("CreateRefreshToken keep: %v", err)
+		}
+		if err := r.DeleteRefreshToken(ctx, id); err != nil {
+			t.Fatalf("DeleteRefreshToken: %v", err)
+		}
+		deleted, _ := r.FindRefreshTokenByHashIncludingConsumed(ctx, "delete-one")
+		if deleted != nil {
+			t.Fatalf("deleted token still present: %#v", deleted)
+		}
+		kept, _ := r.FindRefreshTokenByHashIncludingConsumed(ctx, "keep-one")
+		if kept == nil {
+			t.Fatal("DeleteRefreshToken removed a different token")
+		}
+	})
+
 	t.Run("PasswordResetToken_CRUD", func(t *testing.T) {
 		ctx := context.Background()
 		r := makeFresh(t)
@@ -396,6 +420,24 @@ func RunConformance(t *testing.T, makeFresh func(t *testing.T) service.Repositor
 		got, _ = r.GetTotpCredential(ctx, "u-1")
 		if got != nil {
 			t.Fatal("DeleteForUser left a row")
+		}
+	})
+
+	t.Run("TotpCredential_DeleteOne", func(t *testing.T) {
+		ctx := context.Background()
+		r := makeFresh(t)
+		id, err := r.CreateTotpCredential(ctx, &service.TotpCredRecord{
+			UserID: "u-1", SecretEncrypted: "enc", CreatedAt: 100,
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := r.DeleteTotpCredential(ctx, id); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		got, _ := r.GetTotpCredential(ctx, "u-1")
+		if got != nil {
+			t.Fatal("Delete left a row")
 		}
 	})
 

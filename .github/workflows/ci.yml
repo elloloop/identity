@@ -98,7 +98,35 @@ jobs:
   test:
     name: Build + Test + Coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
+    services:
+      entdb:
+        image: ghcr.io/elloloop/tenant-shard-db:1.9.2
+        env:
+          GRPC_BIND: "0.0.0.0:50051"
+          WAL_BACKEND: local
+          DATA_DIR: /var/lib/entdb
+        ports:
+          - 50051:50051
+        options: >-
+          --health-cmd "python -c \"import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)\""
+          --health-interval 5s
+          --health-timeout 8s
+          --health-retries 12
+          --health-start-period 5s
+      postgres:
+        image: postgres:16.13-alpine3.23
+        env:
+          POSTGRES_USER: identity
+          POSTGRES_PASSWORD: identity
+          POSTGRES_DB: identity
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U identity"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
 
@@ -110,18 +138,32 @@ jobs:
       - name: go build
         run: go build ./...
 
-      - name: go test (race + coverage)
+      - name: Wait for coverage backends
         run: |
-          go test -race -timeout=1200s \
-            -coverprofile=cover.out \
-            -coverpkg=./internal/...,./pkg/...,./cmd/... \
-            ./...
+          for i in $(seq 1 30); do
+            if nc -z localhost 50051; then echo "entdb up"; break; fi
+            sleep 1
+            if [[ $i -eq 30 ]]; then echo "entdb did not come up"; exit 1; fi
+          done
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1; then echo "postgres up"; break; fi
+            sleep 1
+            if [[ $i -eq 30 ]]; then echo "postgres did not come up"; exit 1; fi
+          done
+
+      - name: go test (race + merged coverage)
+        env:
+          RUN_INTEGRATION_COVERAGE: "1"
+          GATEWAY_ENTDB_ADDRESS: localhost:50051
+          GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
+          GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
+        run: bash scripts/run-coverage.sh
 
       - name: Coverage summary
         run: go tool cover -func=cover.out | tail -n 30
 
-      - name: Coverage gate (internal/ >= 60%)
-        run: bash scripts/coverage-gate.sh cover.out 60 internal/
+      - name: Coverage gate (internal/ >= 83%)
+        run: bash scripts/coverage-gate.sh cover.out 83 internal/
 
       - name: Coverage gate (pkg/ >= 85%)
         run: bash scripts/coverage-gate.sh cover.out 85 pkg/
