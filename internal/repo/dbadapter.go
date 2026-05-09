@@ -2,12 +2,15 @@ package repo
 
 import (
 	"context"
+	"fmt"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
 
 	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
 	"github.com/elloloop/identity/internal/service"
 )
+
+const entDBApplyWaitTimeoutMs int32 = 5000
 
 // NewDBAdapter exposes the SDK's raw transport as service.DB. The
 // service.DB contract is already the transport contract: tenant id,
@@ -37,7 +40,14 @@ func (a *dbAdapter) QueryNodes(ctx context.Context, tenantID, actor string, type
 }
 
 func (a *dbAdapter) ExecuteAtomic(ctx context.Context, tenantID, actor, idempotencyKey string, ops []sdk.Operation) (*sdk.CommitResult, error) {
-	return a.transport.ExecuteAtomic(ctx, tenantID, actor, idempotencyKey, ops)
+	result, err := a.transport.ExecuteAtomic(ctx, tenantID, actor, idempotencyKey, ops)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.waitForApplied(ctx, tenantID, actor, result, len(ops)); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (a *dbAdapter) GetEdgesFrom(ctx context.Context, tenantID, actor, fromNodeID string, edgeTypeID int) ([]*sdk.Edge, error) {
@@ -50,4 +60,41 @@ func (a *dbAdapter) GetEdgesTo(ctx context.Context, tenantID, actor, toNodeID st
 
 func (a *dbAdapter) SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*sdk.Node, error) {
 	return a.transport.SearchNodes(ctx, tenantID, actor, typeID, query)
+}
+
+func (a *dbAdapter) waitForApplied(ctx context.Context, tenantID, actor string, result *sdk.CommitResult, opCount int) error {
+	if result == nil {
+		return fmt.Errorf("entdb: nil commit result")
+	}
+	if !result.Success {
+		if result.Error != "" {
+			return fmt.Errorf("entdb: commit failed: %s", result.Error)
+		}
+		return fmt.Errorf("entdb: commit failed")
+	}
+	if opCount == 0 || result.Applied {
+		return nil
+	}
+	if result.Receipt == nil || result.Receipt.StreamPosition == "" {
+		return fmt.Errorf("entdb: commit returned before apply without stream position")
+	}
+	reached, current, err := a.transport.WaitForOffset(
+		ctx,
+		tenantID,
+		actor,
+		result.Receipt.StreamPosition,
+		entDBApplyWaitTimeoutMs,
+	)
+	if err != nil {
+		return fmt.Errorf("entdb: wait for commit apply: %w", err)
+	}
+	if !reached {
+		return fmt.Errorf(
+			"entdb: commit apply timeout waiting for %q; current offset %q",
+			result.Receipt.StreamPosition,
+			current,
+		)
+	}
+	result.Applied = true
+	return nil
 }
