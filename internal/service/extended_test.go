@@ -604,7 +604,7 @@ func TestVerifyTotpSetup_HappyPath(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "verify-ok@example.com", "", "active")
 
-	secret := "JBSWY3DPEHPK3PXP"
+	secret := "JBSWY3DPEHPK3PXP" // #nosec G101 -- deterministic TOTP test vector.
 	encrypted, err := totp.EncryptSecret(secret, testTotpKey())
 	require.NoError(t, err)
 
@@ -728,7 +728,7 @@ func TestVerifyTotp_TotpHappyPath(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "totpok@example.com", "", "active")
 
-	secret := "JBSWY3DPEHPK3PXP"
+	secret := "JBSWY3DPEHPK3PXP" // #nosec G101 -- deterministic TOTP test vector.
 	encrypted, err := totp.EncryptSecret(secret, testTotpKey())
 	require.NoError(t, err)
 	repo.mu.Lock()

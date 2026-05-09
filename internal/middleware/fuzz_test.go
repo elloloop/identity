@@ -41,23 +41,19 @@ func FuzzExtractBearerToken(f *testing.F) {
 		// is the suffix. extractBearerToken does no further validation, so
 		// we mirror that.
 		if strings.HasPrefix(headerValue, "Bearer ") {
-			want := headerValue[len("Bearer "):]
 			// http.Header.Set may canonicalize/strip on some inputs (control
 			// bytes). Re-read what Go actually stored to compute the
 			// expected value the function will see.
 			stored := req.Header.Get("Authorization")
 			if strings.HasPrefix(stored, "Bearer ") {
-				want = stored[len("Bearer "):]
-			} else {
+				want := stored[len("Bearer "):]
+				if got != want {
+					t.Fatalf("got %q, want %q for header %q", got, want, headerValue)
+				}
+			} else if got != "" {
 				// Header didn't survive intact; whatever extract returns
 				// must just not be a partial-success. Empty is fine.
-				if got != "" && !strings.HasPrefix(stored, "Bearer ") {
-					t.Fatalf("got non-empty token %q for stored header %q", got, stored)
-				}
-				return
-			}
-			if got != want {
-				t.Fatalf("got %q, want %q for header %q", got, want, headerValue)
+				t.Fatalf("got non-empty token %q for stored header %q", got, stored)
 			}
 			return
 		}

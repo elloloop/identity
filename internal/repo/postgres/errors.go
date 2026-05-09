@@ -30,11 +30,8 @@ func wrapPgErr(op string, err error) error {
 		return nil
 	}
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		switch pgErr.Code {
-		case pgErrCodeUniqueViolation:
-			return fmt.Errorf("postgres: %s: %w", op, service.ErrAlreadyExists)
-		}
+	if errors.As(err, &pgErr) && pgErr.Code == pgErrCodeUniqueViolation {
+		return fmt.Errorf("postgres: %s: %w", op, service.ErrAlreadyExists)
 	}
 	return fmt.Errorf("postgres: %s: %w", op, err)
 }

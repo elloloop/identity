@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -51,9 +52,13 @@ const DefaultConnTimeout = 5 * time.Second
 // through their own config struct. tenantID is passed in (rather than
 // read from env) because identity already plumbs cfg.DefaultTenantID.
 func ConfigFromEnv(tenantID string) Config {
+	maxConns := envInt("GATEWAY_POSTGRES_MAX_CONNS", int(DefaultMaxConns))
+	if maxConns > math.MaxInt32 {
+		maxConns = math.MaxInt32
+	}
 	return Config{
 		DSN:         os.Getenv("GATEWAY_POSTGRES_DSN"),
-		MaxConns:    int32(envInt("GATEWAY_POSTGRES_MAX_CONNS", int(DefaultMaxConns))),
+		MaxConns:    int32(maxConns), // #nosec G115 -- clamped above.
 		ConnTimeout: time.Duration(envInt("GATEWAY_POSTGRES_CONN_TIMEOUT_MS", int(DefaultConnTimeout/time.Millisecond))) * time.Millisecond,
 		AutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", true),
 		TenantID:    tenantID,

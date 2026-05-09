@@ -195,8 +195,11 @@ func (r *fakeRepo) IncrementFailedLoginCount(_ context.Context, userID string) (
 	if !ok {
 		return 0, fmt.Errorf("user %s not found", userID)
 	}
+	if u.FailedLoginCount >= int(maxInt32) {
+		return 0, fmt.Errorf("failed login count overflow for user %s", userID)
+	}
 	u.FailedLoginCount++
-	return int32(u.FailedLoginCount), nil
+	return int32(u.FailedLoginCount), nil // #nosec G115 -- bounds checked above.
 }
 
 func (r *fakeRepo) ResetFailedLoginCount(_ context.Context, userID string) error {
@@ -252,13 +255,11 @@ func applyUserFields(u *User, fields map[string]any) {
 				u.LockedUntil = int64(x)
 			}
 		case "updated_at":
-			switch x := v.(type) {
-			case int64:
+			if x, ok := v.(int64); ok {
 				u.UpdatedAt = time.UnixMilli(x)
 			}
 		case "last_login_at":
-			switch x := v.(type) {
-			case int64:
+			if x, ok := v.(int64); ok {
 				u.LastLoginAtMs = x
 			}
 		case "recovery_email":
@@ -649,6 +650,7 @@ func (r *fakeRepo) UpdateInvitation(_ context.Context, nodeID string, fields map
 // ── Test helpers ───────────────────────────────────────────────────────
 
 func testConfig() *config.Config {
+	// #nosec G101 -- test configuration field names contain password/passkey labels.
 	return &config.Config{
 		DefaultTenantID:               "test-tenant",
 		AuthAllowLocal:                true,
@@ -822,17 +824,6 @@ func seedUser(repo *fakeRepo, email, passwordHash, status string) *User {
 	repo.users[id] = u
 	repo.mu.Unlock()
 	return u
-}
-
-// seedUserFull creates a user with all fields populated.
-func seedUserFull(repo *fakeRepo, u *User) {
-	repo.mu.Lock()
-	if u.ID == "" {
-		u.ID = nextNodeID()
-	}
-	cp := *u
-	repo.users[u.ID] = &cp
-	repo.mu.Unlock()
 }
 
 // seedInvitation creates an invitation directly in the fake repo.

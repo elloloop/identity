@@ -37,7 +37,7 @@ func newProfileWithDB(db DB) *ProfileService {
 
 func TestAdminInviteUser_DuplicateCheckQueryFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	// Pass admin check (GetNode), fail QueryNodes.
 	db.failQueryNodes = true
 	svc := newAdminWithDB(db)
@@ -48,7 +48,7 @@ func TestAdminInviteUser_DuplicateCheckQueryFails(t *testing.T) {
 
 func TestAdminInviteUser_CreateUserExecuteFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
@@ -58,7 +58,7 @@ func TestAdminInviteUser_CreateUserExecuteFails(t *testing.T) {
 
 func TestAdminInviteUser_CreateInvitationExecuteFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	// First execute (create user) succeeds, second (create invitation) fails.
 	db.failExecuteAfter = 2
 	svc := newAdminWithDB(db)
@@ -69,8 +69,8 @@ func TestAdminInviteUser_CreateInvitationExecuteFails(t *testing.T) {
 
 func TestAdminDeactivateUser_GetNodeFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addUser("target-1", "t@test.com", "T", "member", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("target-1", "t@test.com", "T", "member", "active")
 	// First GetNode (admin check) ok, second (target fetch) fails.
 	db.failGetNodeAfter = 2
 	svc := newAdminWithDB(db)
@@ -81,8 +81,8 @@ func TestAdminDeactivateUser_GetNodeFails(t *testing.T) {
 
 func TestAdminDeactivateUser_ExecuteFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addUser("target-1", "t@test.com", "T", "member", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("target-1", "t@test.com", "T", "member", "active")
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
@@ -92,8 +92,8 @@ func TestAdminDeactivateUser_ExecuteFails(t *testing.T) {
 
 func TestAdminReactivateUser_GetNodeFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addUser("target-1", "t@test.com", "T", "member", "deactivated")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("target-1", "t@test.com", "T", "member", "deactivated")
 	db.failGetNodeAfter = 2
 	svc := newAdminWithDB(db)
 
@@ -103,8 +103,8 @@ func TestAdminReactivateUser_GetNodeFails(t *testing.T) {
 
 func TestAdminReactivateUser_ExecuteFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addUser("target-1", "t@test.com", "T", "member", "deactivated")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("target-1", "t@test.com", "T", "member", "deactivated")
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
@@ -114,8 +114,8 @@ func TestAdminReactivateUser_ExecuteFails(t *testing.T) {
 
 func TestAdminResetUserPassword_GetNodeFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addUser("target-1", "t@test.com", "T", "member", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("target-1", "t@test.com", "T", "member", "active")
 	db.failGetNodeAfter = 2
 	svc := newAdminWithDB(db)
 
@@ -125,8 +125,8 @@ func TestAdminResetUserPassword_GetNodeFails(t *testing.T) {
 
 func TestAdminResetUserPassword_ExecuteFails_TempPath(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addUser("target-1", "t@test.com", "T", "member", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("target-1", "t@test.com", "T", "member", "active")
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
@@ -136,8 +136,8 @@ func TestAdminResetUserPassword_ExecuteFails_TempPath(t *testing.T) {
 
 func TestAdminResetUserPassword_ExecuteFails_TokenPath(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addUser("target-1", "t@test.com", "T", "member", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("target-1", "t@test.com", "T", "member", "active")
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
@@ -147,8 +147,8 @@ func TestAdminResetUserPassword_ExecuteFails_TokenPath(t *testing.T) {
 
 func TestAdminSetUserQuota_GetNodeFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addUser("target-1", "t@test.com", "T", "member", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("target-1", "t@test.com", "T", "member", "active")
 	db.failGetNodeAfter = 2
 	svc := newAdminWithDB(db)
 
@@ -158,8 +158,8 @@ func TestAdminSetUserQuota_GetNodeFails(t *testing.T) {
 
 func TestAdminSetUserQuota_ExecuteFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addUser("target-1", "t@test.com", "T", "member", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("target-1", "t@test.com", "T", "member", "active")
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
@@ -169,7 +169,7 @@ func TestAdminSetUserQuota_ExecuteFails(t *testing.T) {
 
 func TestAdminListUsers_QueryFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	db.failQueryNodes = true
 	svc := newAdminWithDB(db)
 
@@ -179,7 +179,7 @@ func TestAdminListUsers_QueryFails(t *testing.T) {
 
 func TestAdminGetUser_GetNodeFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	db.failGetNodeAfter = 2
 	svc := newAdminWithDB(db)
 
@@ -189,7 +189,7 @@ func TestAdminGetUser_GetNodeFails(t *testing.T) {
 
 func TestAdminUpdateUser_ExecuteFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	db.failExecuteAtomic = true
 	svc := newAdminWithDB(db)
 
@@ -199,8 +199,8 @@ func TestAdminUpdateUser_ExecuteFails(t *testing.T) {
 
 func TestAdminUpdateUser_RefetchFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addUser("user-1", "u@test.com", "U", "member", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("user-1", "u@test.com", "U", "member", "active")
 	// Fail GetNode on the refetch (3rd call: admin-check, then refetch).
 	db.failGetNodeAfter = 2
 	svc := newAdminWithDB(db)
@@ -212,7 +212,7 @@ func TestAdminUpdateUser_RefetchFails(t *testing.T) {
 func TestAdminUpdateUser_RefetchReturnsNil(t *testing.T) {
 	// Update succeeds but the user was concurrently deleted — node nil.
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	svc := newAdminWithDB(db)
 
 	// user-x doesn't exist; update will succeed (no-op in fake), refetch returns nil.
@@ -225,7 +225,7 @@ func TestAdminUpdateUser_RefetchReturnsNil(t *testing.T) {
 func TestGroupUpdateGroup_RefetchFails(t *testing.T) {
 	db := newErrorDB()
 	seedGroupAdmin(db.fakeDB)
-	db.fakeDB.addGroup("grp-1", "G", "")
+	db.addGroup("grp-1", "G", "")
 	db.failGetNode = true
 	svc := newGroupWithDB(db)
 
@@ -257,15 +257,15 @@ func TestGroupListMembers_GetNodeMissingUserSkipped(t *testing.T) {
 	// Add an edge but no user node — GetNode returns nil; the user is skipped.
 	db := newErrorDB()
 	seedGroupAdmin(db.fakeDB)
-	db.fakeDB.addGroup("grp-1", "Team", "")
+	db.addGroup("grp-1", "Team", "")
 	svc := newGroupWithDB(db)
 
 	// Inject an incoming membership edge to grp-1 from a nonexistent user node.
-	db.fakeDB.mu.Lock()
-	db.fakeDB.edges = append(db.fakeDB.edges, &entdb.Edge{
+	db.mu.Lock()
+	db.edges = append(db.edges, &entdb.Edge{
 		FromNodeID: "ghost-user", ToNodeID: "grp-1", EdgeTypeID: edgeMemberOf,
 	})
-	db.fakeDB.mu.Unlock()
+	db.mu.Unlock()
 
 	members, err := svc.ListGroupMembers(context.Background(), "admin-1", "grp-1")
 	require.NoError(t, err)
@@ -276,7 +276,7 @@ func TestGroupListMembers_GetNodeMissingUserSkipped(t *testing.T) {
 
 func TestHelpListRequests_QueryFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	// Fail the second query (after admin check, the list-help-requests query).
 	db.failQueryAfter = 1
 	svc := newHelpWithDB(db)
@@ -287,7 +287,7 @@ func TestHelpListRequests_QueryFails(t *testing.T) {
 
 func TestHelpResolveRequest_GetNodeFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	db.failGetNodeAfter = 2
 	svc := newHelpWithDB(db)
 
@@ -297,8 +297,8 @@ func TestHelpResolveRequest_GetNodeFails(t *testing.T) {
 
 func TestHelpResolveRequest_ExecuteFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
-	db.fakeDB.addHelpRequest("hr-1", "h@test.com", "pending", nowMs())
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addHelpRequest("hr-1", "h@test.com", "pending", nowMs())
 	db.failExecuteAtomic = true
 	svc := newHelpWithDB(db)
 
@@ -310,7 +310,7 @@ func TestHelpResolveRequest_ExecuteFails(t *testing.T) {
 
 func TestProfileUpdateProfile_ExecuteFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("user-1", "u@test.com", "U", "member", "active")
+	db.addUser("user-1", "u@test.com", "U", "member", "active")
 	db.failExecuteAtomic = true
 	svc := newProfileWithDB(db)
 
@@ -321,7 +321,7 @@ func TestProfileUpdateProfile_ExecuteFails(t *testing.T) {
 func TestProfileUpdateProfile_RefetchFallback(t *testing.T) {
 	// Update succeeds, but GetNode on the refetch fails → fallback path.
 	db := newErrorDB()
-	db.fakeDB.addUser("user-1", "u@test.com", "U", "member", "active")
+	db.addUser("user-1", "u@test.com", "U", "member", "active")
 	// First GetNode (initial fetch) succeeds; second (refetch) fails.
 	db.failGetNodeAfter = 2
 	svc := newProfileWithDB(db)
@@ -351,7 +351,7 @@ func TestProfileRevokeSession_GetNodeFails(t *testing.T) {
 
 func TestProfileRevokeSession_ExecuteFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addRefreshToken("sess-1", "user-1", nowMs()+3600*1000)
+	db.addRefreshToken("sess-1", "user-1", nowMs()+3600*1000)
 	db.failExecuteAtomic = true
 	svc := newProfileWithDB(db)
 
@@ -371,7 +371,7 @@ func TestProfileRevokeAllSessions_GetNodeFails(t *testing.T) {
 func TestProfileRevokeAllSessions_QueryFails(t *testing.T) {
 	db := newErrorDB()
 	pwHash, _ := passwords.Hash("Str0ng!Pass")
-	db.fakeDB.addUserWithPassword("user-1", "u@test.com", "U", "member", "active", pwHash)
+	db.addUserWithPassword("user-1", "u@test.com", "U", "member", "active", pwHash)
 	db.failQueryNodes = true
 	svc := newProfileWithDB(db)
 
@@ -382,8 +382,8 @@ func TestProfileRevokeAllSessions_QueryFails(t *testing.T) {
 func TestProfileRevokeAllSessions_ExecuteFails(t *testing.T) {
 	db := newErrorDB()
 	pwHash, _ := passwords.Hash("Str0ng!Pass")
-	db.fakeDB.addUserWithPassword("user-1", "u@test.com", "U", "member", "active", pwHash)
-	db.fakeDB.addRefreshToken("sess-1", "user-1", nowMs()+3600*1000)
+	db.addUserWithPassword("user-1", "u@test.com", "U", "member", "active", pwHash)
+	db.addRefreshToken("sess-1", "user-1", nowMs()+3600*1000)
 	db.failExecuteAtomic = true
 	svc := newProfileWithDB(db)
 
@@ -412,7 +412,7 @@ func TestProfileDeletePasskey_QueryFails(t *testing.T) {
 
 func TestProfileDeletePasskey_ExecuteFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addPasskey("pk-1", "user-1", "cred-1", "Key")
+	db.addPasskey("pk-1", "user-1", "cred-1", "Key")
 	db.failExecuteAtomic = true
 	svc := newProfileWithDB(db)
 
@@ -432,7 +432,7 @@ func TestProfileChangePassword_GetUserFails(t *testing.T) {
 func TestProfileChangePassword_ExecuteFails(t *testing.T) {
 	db := newErrorDB()
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
-	db.fakeDB.addUserWithPassword("user-1", "u@test.com", "U", "member", "active", pwHash)
+	db.addUserWithPassword("user-1", "u@test.com", "U", "member", "active", pwHash)
 	db.failExecuteAtomic = true
 	svc := newProfileWithDB(db)
 
@@ -442,7 +442,7 @@ func TestProfileChangePassword_ExecuteFails(t *testing.T) {
 
 func TestProfileListAuditEvents_QueryFails(t *testing.T) {
 	db := newErrorDB()
-	db.fakeDB.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
 	db.failQueryAfter = 1
 	svc := newProfileWithDB(db)
 

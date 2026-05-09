@@ -97,7 +97,7 @@ func TestBeginRegistration_ReturnsValidJSON(t *testing.T) {
 				Name        string `json:"name"`
 				DisplayName string `json:"displayName"`
 			} `json:"user"`
-			Challenge        string `json:"challenge"`
+			Challenge          string `json:"challenge"`
 			ExcludeCredentials []any  `json:"excludeCredentials"`
 		} `json:"publicKey"`
 	}
@@ -327,8 +327,8 @@ func TestExtractCredentialID_MissingID(t *testing.T) {
 
 func TestRegistrationResult_Fields(t *testing.T) {
 	r := &RegistrationResult{
-		CredentialID: "dGVzdC1jcmVk",
-		PublicKey:    "cHVibGljLWtleQ==",
+		CredentialID: "dGVzdC1jcmVk",     // #nosec G101 -- deterministic test fixture.
+		PublicKey:    "cHVibGljLWtleQ==", // #nosec G101 -- deterministic test fixture.
 		SignCount:    42,
 		AAGUID:       "01020304-0506-0708-090a-0b0c0d0e0f10",
 		Transports:   "usb,nfc",

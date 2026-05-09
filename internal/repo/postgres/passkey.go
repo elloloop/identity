@@ -10,6 +10,7 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
+// #nosec G101 -- SQL column list contains key field names, not credentials.
 const passkeyColumns = `
 	id, credential_id, user_id, public_key, sign_count,
 	device_name, aaguid, transports, created_at_ms, last_used_at_ms`

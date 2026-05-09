@@ -73,7 +73,7 @@ func (h *IdentityHandler) ListUsers(
 	resp := &identitypb.ListUsersResponse{
 		Users:      usersToProto(users),
 		NextCursor: nextCursor,
-		TotalCount: int32(totalCount),
+		TotalCount: intToProtoInt32(totalCount),
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -221,8 +221,8 @@ func (h *IdentityHandler) CreateUser(
 
 	result, err := h.admin.InviteUser(
 		ctx, callerID, req.Msg.Email, req.Msg.Name, req.Msg.Role,
-		"", // recoveryEmail
-		0,  // quotaBytes
+		"",   // recoveryEmail
+		0,    // quotaBytes
 		true, // createImmediately
 	)
 	if err != nil {

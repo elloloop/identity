@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"go.uber.org/zap"
@@ -225,12 +226,15 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 	if cred.UserID == "" {
 		return nil, fmt.Errorf("credential missing user_id")
 	}
+	if cred.SignCount > int64(math.MaxUint32) {
+		return nil, fmt.Errorf("credential sign_count overflows WebAuthn counter")
+	}
 
 	newSignCount, err := s.passkeys.CompleteAuthentication(
 		credentialJSON,
 		challenge.Challenge,
 		cred.PublicKey,
-		uint32(cred.SignCount),
+		uint32(cred.SignCount), // #nosec G115 -- bounds checked above.
 		cred.CredentialID,
 	)
 	if err != nil {
@@ -285,7 +289,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 

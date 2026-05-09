@@ -72,12 +72,6 @@ const (
 	tHfCreatedAt = "9"
 )
 
-// Group payload field IDs.
-const (
-	tGfName        = "1"
-	tGfDescription = "2"
-)
-
 // ──────────────────────────────────────────────────────────────────────
 // fakeRepo implements service.Repository.
 // ──────────────────────────────────────────────────────────────────────
@@ -229,7 +223,7 @@ func (r *fakeRepo) IncrementFailedLoginCount(_ context.Context, userID string) (
 		return 0, fmt.Errorf("user %s not found", userID)
 	}
 	u.FailedLoginCount++
-	return int32(u.FailedLoginCount), nil
+	return intToProtoInt32(u.FailedLoginCount), nil
 }
 
 func (r *fakeRepo) ResetFailedLoginCount(_ context.Context, userID string) error {
@@ -906,7 +900,7 @@ func (f *fakeDB) ExecuteAtomic(_ context.Context, _, _, _ string, ops []entdb.Op
 		case entdb.OpDeleteEdge:
 			var keep []*entdb.Edge
 			for _, e := range f.edges {
-				if !(e.EdgeTypeID == op.EdgeTypeID && e.FromNodeID == op.FromNodeID && e.ToNodeID == op.ToNodeID) {
+				if e.EdgeTypeID != op.EdgeTypeID || e.FromNodeID != op.FromNodeID || e.ToNodeID != op.ToNodeID {
 					keep = append(keep, e)
 				}
 			}
@@ -1043,19 +1037,6 @@ func (f *fakeDB) addPasskey(id, userID, credentialID, deviceName string) {
 	}
 }
 
-func (f *fakeDB) addGroup(id, name, description string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.nodes[id] = &entdb.Node{
-		NodeID: id,
-		TypeID: tTypeWorkingGroup,
-		Payload: map[string]any{
-			tGfName:        name,
-			tGfDescription: description,
-		},
-	}
-}
-
 func copyMap(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
@@ -1086,6 +1067,7 @@ type testHarness struct {
 }
 
 func testConfig() *config.Config {
+	// #nosec G101 -- test configuration field names contain password/passkey labels.
 	return &config.Config{
 		DefaultTenantID:               "test-tenant",
 		AuthAllowLocal:                true,

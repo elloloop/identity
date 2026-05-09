@@ -224,7 +224,7 @@ func (h *IdentityHandler) RevokeAllSessions(
 	}
 
 	resp := &identitypb.RevokeAllSessionsResponse{
-		RevokedCount: int32(revokedCount),
+		RevokedCount: intToProtoInt32(revokedCount),
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -247,7 +247,7 @@ func (h *IdentityHandler) SignOutEverywhere(
 	}
 
 	resp := &identitypb.SignOutEverywhereResponse{
-		RevokedCount: int32(revokedCount),
+		RevokedCount: intToProtoInt32(revokedCount),
 	}
 	return connect.NewResponse(resp), nil
 }

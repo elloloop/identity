@@ -127,7 +127,7 @@ func TestSecurity_AccountLockout_After5Failures(t *testing.T) {
 
 func TestSecurity_LockoutExpires(t *testing.T) {
 	repo := newFakeRepo()
-	svc := newTestAuthServiceWithTime(t, repo, func() time.Time { return time.Now() })
+	svc := newTestAuthServiceWithTime(t, repo, time.Now)
 	pwHash := hashPW(t, strongPW)
 	u := seedUser(repo, "lockexpire@example.com", pwHash, "active")
 
@@ -225,4 +225,3 @@ func TestSecurity_QRLoginSession_SingleUse(t *testing.T) {
 	assert.Nil(t, result2.User)
 	assert.Empty(t, result2.AccessToken)
 }
-

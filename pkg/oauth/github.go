@@ -14,9 +14,9 @@ import (
 // Default GitHub OAuth endpoints.
 const (
 	githubAuthorizationURL = "https://github.com/login/oauth/authorize"
-	githubTokenURL    = "https://github.com/login/oauth/access_token"
-	githubUserURL     = "https://api.github.com/user"
-	githubUserMailURL = "https://api.github.com/user/emails"
+	githubTokenURL         = "https://github.com/login/oauth/access_token" // #nosec G101 -- OAuth token endpoint, not a credential.
+	githubUserURL          = "https://api.github.com/user"
+	githubUserMailURL      = "https://api.github.com/user/emails"
 )
 
 // GitHubConfig configures a GitHub Exchanger.
@@ -27,9 +27,9 @@ type GitHubConfig struct {
 	HTTPClient *http.Client
 
 	AuthorizationURL string
-	TokenURL    string
-	UserURL     string
-	UserMailURL string
+	TokenURL         string
+	UserURL          string
+	UserMailURL      string
 }
 
 type githubExchanger struct {
@@ -129,7 +129,7 @@ func (g *githubExchanger) Exchange(ctx context.Context, code, redirectURI string
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCodeExchangeFailed, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("%w: read body: %v", ErrCodeExchangeFailed, err)
@@ -196,7 +196,7 @@ func (g *githubExchanger) fetchUser(ctx context.Context, accessToken string) (*g
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrIdentityVerification, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, fmt.Errorf("%w: user HTTP %d", ErrIdentityVerification, resp.StatusCode)
@@ -228,7 +228,7 @@ func (g *githubExchanger) fetchPrimaryEmail(ctx context.Context, accessToken str
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrIdentityVerification, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		// Treat as "no emails available" rather than a hard failure

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -252,7 +253,10 @@ func (r *pgRepository) IncrementFailedLoginCount(ctx context.Context, userID str
 	if err != nil {
 		return 0, wrapPgErr("IncrementFailedLoginCount", err)
 	}
-	return int32(newCount), nil
+	if newCount > int64(math.MaxInt32) {
+		return 0, fmt.Errorf("postgres: IncrementFailedLoginCount: count overflow")
+	}
+	return int32(newCount), nil // #nosec G115 -- bounds checked above.
 }
 
 func (r *pgRepository) ResetFailedLoginCount(ctx context.Context, userID string) error {

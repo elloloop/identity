@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
@@ -127,7 +128,9 @@ func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, l
 	}
 	offset := 0
 	if cursor != "" {
-		fmt.Sscanf(cursor, "%d", &offset)
+		if parsed, err := strconv.Atoi(cursor); err == nil {
+			offset = parsed
+		}
 	}
 
 	nodes, err := s.db.QueryNodes(ctx, s.tenantID, "user:system", typeWorkingGroup, nil)

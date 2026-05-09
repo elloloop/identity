@@ -21,9 +21,9 @@ import (
 // tests.
 const (
 	googleAuthorizationURL = "https://accounts.google.com/o/oauth2/v2/auth"
-	googleTokenURL = "https://oauth2.googleapis.com/token"
-	googleJWKSURL  = "https://www.googleapis.com/oauth2/v3/certs"
-	googleIssuer   = "https://accounts.google.com"
+	googleTokenURL         = "https://oauth2.googleapis.com/token" // #nosec G101 -- OAuth token endpoint, not a credential.
+	googleJWKSURL          = "https://www.googleapis.com/oauth2/v3/certs"
+	googleIssuer           = "https://accounts.google.com"
 )
 
 // GoogleConfig configures a Google Exchanger. ClientID and
@@ -172,7 +172,7 @@ func (g *googleExchanger) Exchange(ctx context.Context, code, redirectURI string
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCodeExchangeFailed, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("%w: read body: %v", ErrCodeExchangeFailed, err)

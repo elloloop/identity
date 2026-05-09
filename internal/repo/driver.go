@@ -12,6 +12,7 @@ package repo
 import (
 	"context"
 	"fmt"
+	"math"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
 	"go.uber.org/zap"
@@ -94,9 +95,12 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		if cfg.TenantID == "" {
 			return nil, fmt.Errorf("repo: Build: postgres driver requires TenantID")
 		}
+		if cfg.PostgresMaxConns > math.MaxInt32 {
+			return nil, fmt.Errorf("repo: Build: postgres max connections exceeds int32: %d", cfg.PostgresMaxConns)
+		}
 		pgRepo, err := pgrepo.New(ctx, pgrepo.Config{
 			DSN:         cfg.PostgresDSN,
-			MaxConns:    int32(cfg.PostgresMaxConns),
+			MaxConns:    int32(cfg.PostgresMaxConns), // #nosec G115 -- bounds checked above.
 			AutoMigrate: cfg.PostgresAutoMigrate,
 			TenantID:    cfg.TenantID,
 		})

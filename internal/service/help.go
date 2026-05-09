@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
@@ -123,7 +124,9 @@ func (s *HelpService) ListHelpRequests(
 	}
 	offset := 0
 	if cursor != "" {
-		fmt.Sscanf(cursor, "%d", &offset)
+		if parsed, err := strconv.Atoi(cursor); err == nil {
+			offset = parsed
+		}
 	}
 
 	// Fetch help requests with optional status filter.

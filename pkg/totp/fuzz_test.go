@@ -16,7 +16,7 @@ import (
 func FuzzVerify(f *testing.F) {
 	// A throwaway secret is fine — VerifyCode will fail signature checks
 	// for fuzzed codes regardless. We only care about the parsing path.
-	const secret = "JBSWY3DPEHPK3PXP" // valid base32
+	const secret = "JBSWY3DPEHPK3PXP" // #nosec G101 -- deterministic TOTP test vector.
 
 	f.Add("")
 	f.Add("123456")
@@ -63,7 +63,7 @@ func FuzzDecryptSecret(f *testing.F) {
 	f.Add(validCT)
 	f.Add("")
 	f.Add("not-base64!@#$")
-	f.Add("AAAA")             // valid base64, too short for nonce
+	f.Add("AAAA")                  // valid base64, too short for nonce
 	f.Add(strings.Repeat("A", 64)) // valid base64, GCM auth will fail
 
 	f.Fuzz(func(t *testing.T, ciphertext string) {

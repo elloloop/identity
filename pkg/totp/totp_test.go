@@ -50,7 +50,7 @@ func TestGenerateQRURI_ContainsIssuer(t *testing.T) {
 }
 
 func TestGenerateQRURI_ContainsSecret(t *testing.T) {
-	secret := "JBSWY3DPEHPK3PXP"
+	secret := "JBSWY3DPEHPK3PXP" // #nosec G101 -- deterministic TOTP test vector.
 	uri := GenerateQRURI(secret, "user@example.com", "Glassa")
 	if !strings.Contains(uri, "secret="+secret) {
 		t.Errorf("expected URI to contain 'secret=%s', got %q", secret, uri)
@@ -72,8 +72,8 @@ func TestVerifyCode_CurrentCode(t *testing.T) {
 	// Generate a valid code for the current time
 	code, err := totp.GenerateCodeCustom(secret, time.Now(), totp.ValidateOpts{
 		Period:    30,
-		Skew:     0,
-		Digits:   otp.DigitsSix,
+		Skew:      0,
+		Digits:    otp.DigitsSix,
 		Algorithm: otp.AlgorithmSHA1,
 	})
 	if err != nil {
