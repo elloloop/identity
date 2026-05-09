@@ -61,7 +61,7 @@ import { Code } from "astro-expressive-code/components";
 
   <h3>Exempt paths</h3>
   <ul>
-    <li><code>OAuthLogin</code>, <code>PasswordLogin</code>, <code>PasswordSignup</code>, <code>RefreshToken</code>, <code>Logout</code>, <code>GetCurrentUser</code></li>
+    <li><code>BeginOAuthLogin</code>, <code>OAuthLogin</code>, <code>PasswordLogin</code>, <code>PasswordSignup</code>, <code>RefreshToken</code>, <code>Logout</code>, <code>GetCurrentUser</code></li>
     <li><code>BeginPasskeyLogin</code>, <code>CompletePasskeyLogin</code></li>
     <li><code>InitiateQrLogin</code>, <code>PollQrLogin</code></li>
     <li><code>AcceptInvitation</code>, <code>RequestAdminHelp</code>, <code>VerifyTotp</code></li>
@@ -124,5 +124,60 @@ import { Code } from "astro-expressive-code/components";
     On the Nth failure within the window, <code>PasswordLogin</code>
     returns <code>account temporarily locked</code> until the timer
     expires; correct credentials reset the counter.
+  </p>
+
+  <h2>Email Verification Policy</h2>
+  <p>
+    OAuth and local password accounts do not use the same verification gate.
+  </p>
+  <ul>
+    <li>
+      <strong>OAuth login</strong> requires the upstream provider to assert a
+      verified email address before Identity will mint a session.
+    </li>
+    <li>
+      <strong>Password login</strong> does not block on
+      <code>email_verified</code>. A local user may sign in immediately after
+      signup and complete verification later in-app.
+    </li>
+  </ul>
+
+  <h2>Signup Enumeration Safety</h2>
+  <p>
+    <code>PasswordSignup</code> is intentionally not an account-existence
+    oracle. When the email is new, Identity creates the user, sends the
+    verification email, and returns the usual signup response. When the
+    email already exists, Identity still returns a success-shaped payload,
+    sends a notice email to the existing address, and does not create a
+    second user or mint a durable session for the caller.
+  </p>
+
+  <h2>Replica consistency</h2>
+  <p>
+    Security-sensitive auth state is repo-backed rather than replica-local.
+    That includes failed-login counters, refresh-token rotation and replay
+    detection, passkey challenges, TOTP enrollment and login challenges,
+    QR login sessions, and the various email-token flows.
+  </p>
+  <p>
+    The remaining process-local auth inputs are boot-time configuration and
+    cryptographic material: JWT keys, the TOTP encryption key, passkey RP
+    config, OAuth provider credentials, and the self-serve password toggles.
+    Multi-replica deployments therefore require consistent rollout of those
+    values across every replica.
+  </p>
+
+  <h2>Self-Serve Password Toggles</h2>
+  <p>
+    <code>GATEWAY_PASSWORD_SIGNUP_ENABLED</code> and
+    <code>GATEWAY_PASSWORD_RESET_ENABLED</code> are deployment-scoped flags.
+    Identity reads them once at process start. They are not hot-reloaded,
+    and there is no repo-backed runtime feature-flag model for them today.
+  </p>
+  <p>
+    Changing either toggle in a multi-replica deployment requires a rolling
+    restart. During the rollout window, old replicas continue serving the
+    previous behavior until they drain. The operator runbook lives at
+    <a href="/identity/docs/operations/password-toggle-rollout">Password Toggle Rollout</a>.
   </p>
 </DocsLayout>

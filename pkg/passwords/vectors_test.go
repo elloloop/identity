@@ -1,6 +1,7 @@
 package passwords
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -42,15 +43,8 @@ func TestVectors_KnownPassword_EmptyString(t *testing.T) {
 
 func TestVectors_KnownPassword_NullByte(t *testing.T) {
 	t.Parallel()
-	// bcrypt implementations typically handle null bytes differently.
-	// Go's bcrypt should handle this without panicking.
-	pw := "hello\x00world"
-	hash, err := Hash(pw)
-	if err != nil {
-		t.Fatalf("Hash error: %v", err)
-	}
-	if !Verify(pw, hash) {
-		t.Error("Verify should accept password with null byte")
+	if _, err := Hash("hello\x00world"); !errors.Is(err, errPasswordContainsNUL) {
+		t.Fatalf("Hash error = %v, want %v", err, errPasswordContainsNUL)
 	}
 }
 
@@ -111,11 +105,10 @@ func TestVectors_HashLength_Always60(t *testing.T) {
 
 func TestVectors_HashLength_OverMaxReturnsError(t *testing.T) {
 	t.Parallel()
-	// Go's bcrypt implementation rejects passwords > 72 bytes.
 	longPW := strings.Repeat("A", 73)
 	_, err := Hash(longPW)
 	if err == nil {
-		t.Log("Note: this bcrypt impl accepts > 72 bytes (truncates internally)")
+		t.Error("Hash should reject passwords over 72 bytes")
 	}
 }
 
@@ -124,11 +117,11 @@ func TestVectors_HashLength_OverMaxReturnsError(t *testing.T) {
 func TestVectors_UnicodePasswords(t *testing.T) {
 	t.Parallel()
 	unicodePasswords := []string{
-		"éèêë", // French accents: eeee
-		"世界",             // Chinese: "world"
-		"АБВ",       // Cyrillic: ABV
-		"\U0001F600\U0001F601",     // Emoji: grinning faces
-		"café",                // Mixed: cafe with accent
+		"éèêë",                 // French accents: eeee
+		"世界",                   // Chinese: "world"
+		"АБВ",                  // Cyrillic: ABV
+		"\U0001F600\U0001F601", // Emoji: grinning faces
+		"café",                 // Mixed: cafe with accent
 	}
 
 	for _, pw := range unicodePasswords {
@@ -151,8 +144,8 @@ func TestVectors_UnicodeNormalization_DifferentForms(t *testing.T) {
 	// NFC: e + combining acute = precomposed e-acute (U+00E9)
 	// NFD: e followed by combining acute accent (U+0065 U+0301)
 	// bcrypt does NOT normalize Unicode, so these should produce different hashes.
-	nfc := "é"        // e-acute (precomposed)
-	nfd := "é"       // e + combining acute
+	nfc := "é"  // e-acute (precomposed)
+	nfd := "é" // e + combining acute
 
 	hashNFC, err := Hash(nfc)
 	if err != nil {
@@ -190,12 +183,8 @@ func TestVectors_MaxLength_72Bytes(t *testing.T) {
 	// Test that 73 bytes either errors or truncates
 	pw73 := base + "X"
 	_, err = Hash(pw73)
-	if err != nil {
-		// Go's bcrypt rejects > 72 bytes
-		t.Logf("Hash rejects >72 bytes as expected: %v", err)
-	} else {
-		// Some implementations truncate instead
-		t.Log("Hash accepted >72 bytes (truncation behavior)")
+	if err == nil {
+		t.Error("Hash should reject passwords over 72 bytes")
 	}
 }
 
@@ -265,7 +254,7 @@ func TestVectors_InvalidHashFormats(t *testing.T) {
 		"$2a$10$",
 		"notahash",
 		"$2a$10$shortSalt",
-		"$1$salt$hash", // MD5 crypt, not bcrypt
+		"$1$salt$hash",                 // MD5 crypt, not bcrypt
 		"$5$rounds=5000$saltsalt$hash", // SHA-256 crypt
 	}
 

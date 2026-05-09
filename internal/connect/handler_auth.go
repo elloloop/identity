@@ -12,6 +12,31 @@ import (
 
 // ─── Authentication RPCs ────────────────────────────────────────────────────
 
+// BeginOAuthLogin returns the provider authorization URL plus the
+// server-minted state artifacts needed to complete the callback safely.
+func (h *IdentityHandler) BeginOAuthLogin(
+	ctx context.Context,
+	req *connect.Request[identitypb.BeginOAuthLoginRequest],
+) (*connect.Response[identitypb.BeginOAuthLoginResponse], error) {
+	result, err := h.auth.BeginOAuthLogin(
+		ctx,
+		req.Msg.Provider,
+		req.Msg.RedirectUri,
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	resp := &identitypb.BeginOAuthLoginResponse{
+		AuthorizationUrl: result.AuthorizationURL,
+		State:            result.State,
+		StateToken:       result.StateToken,
+		CodeVerifier:     result.CodeVerifier,
+		ExpiresIn:        result.ExpiresIn,
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // OAuthLogin exchanges an OAuth authorization code for backend-issued tokens.
 //
 // The service layer is responsible for the actual provider-side code
@@ -29,6 +54,9 @@ func (h *IdentityHandler) OAuthLogin(
 		req.Msg.Code,
 		req.Msg.Provider,
 		req.Msg.RedirectUri,
+		req.Msg.CodeVerifier,
+		req.Msg.State,
+		req.Msg.StateToken,
 		ipAddr,
 		userAgent,
 	)

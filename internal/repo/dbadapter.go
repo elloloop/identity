@@ -2,12 +2,10 @@ package repo
 
 import (
 	"context"
-	"fmt"
-	"reflect"
-	"unsafe"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
 
+	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -19,7 +17,7 @@ import (
 // delegate to the raw transport instead of translating through typed
 // witnesses.
 func NewDBAdapter(client *sdk.DbClient) (service.DB, error) {
-	transport, err := transportFromClient(client)
+	transport, err := entdbrepo.TransportFromClient(client)
 	if err != nil {
 		return nil, err
 	}
@@ -52,31 +50,4 @@ func (a *dbAdapter) GetEdgesTo(ctx context.Context, tenantID, actor, toNodeID st
 
 func (a *dbAdapter) SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*sdk.Node, error) {
 	return a.transport.SearchNodes(ctx, tenantID, actor, typeID, query)
-}
-
-// The SDK exposes the raw transport interface as a public type but not
-// via a getter on DbClient. With the dependency pinned exactly in
-// go.mod, reading the private field keeps this adapter a thin
-// pass-through instead of re-implementing the SDK transport or routing
-// raw-node service calls through typed helpers that discard node ids.
-func transportFromClient(client *sdk.DbClient) (sdk.Transport, error) {
-	if client == nil {
-		return nil, fmt.Errorf("entdb: nil db client")
-	}
-	v := reflect.ValueOf(client)
-	if v.Kind() != reflect.Pointer || v.IsNil() {
-		return nil, fmt.Errorf("entdb: invalid db client %T", client)
-	}
-	field := v.Elem().FieldByName("transport")
-	if !field.IsValid() {
-		return nil, fmt.Errorf("entdb: db client transport field missing")
-	}
-	if !field.CanAddr() {
-		return nil, fmt.Errorf("entdb: db client transport field is not addressable")
-	}
-	transport, ok := reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Interface().(sdk.Transport)
-	if !ok || transport == nil {
-		return nil, fmt.Errorf("entdb: db client transport unavailable")
-	}
-	return transport, nil
 }

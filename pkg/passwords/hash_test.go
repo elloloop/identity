@@ -1,6 +1,7 @@
 package passwords
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -50,6 +51,22 @@ func TestVerify_EmptyHash(t *testing.T) {
 func TestVerify_InvalidHash(t *testing.T) {
 	if Verify("anything", "not-a-valid-bcrypt-hash") {
 		t.Error("Verify should return false for an invalid hash")
+	}
+}
+
+func TestHashRejectsNULPassword(t *testing.T) {
+	if _, err := Hash("hello\x00world"); !errors.Is(err, errPasswordContainsNUL) {
+		t.Fatalf("Hash error = %v, want %v", err, errPasswordContainsNUL)
+	}
+}
+
+func TestVerifyRejectsNULCandidate(t *testing.T) {
+	hash, err := Hash("")
+	if err != nil {
+		t.Fatalf("Hash returned error: %v", err)
+	}
+	if Verify("\x00", hash) {
+		t.Error("Verify should reject a NUL candidate against an empty password hash")
 	}
 }
 

@@ -12,6 +12,20 @@ func TestValidateStrength_Strong(t *testing.T) {
 	}
 }
 
+func TestValidateStrength_RejectsNUL(t *testing.T) {
+	issues := ValidateStrength("Str0ng!Pass#9\x00")
+	found := false
+	for _, issue := range issues {
+		if strings.Contains(issue, "NUL") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected NUL issue, got %v", issues)
+	}
+}
+
 func TestValidateStrength_TooShort(t *testing.T) {
 	issues := ValidateStrength("Ab1!")
 	found := false
@@ -31,13 +45,13 @@ func TestValidateStrength_TooLong(t *testing.T) {
 	issues := ValidateStrength(long)
 	found := false
 	for _, issue := range issues {
-		if strings.Contains(issue, "at most 128") {
+		if strings.Contains(issue, "at most 72") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected 'at most 128 characters' issue, got %v", issues)
+		t.Errorf("expected 'at most 72 bytes' issue, got %v", issues)
 	}
 }
 
@@ -160,12 +174,11 @@ func TestValidateStrength_ExactMinLength(t *testing.T) {
 }
 
 func TestValidateStrength_ExactMaxLength(t *testing.T) {
-	// Exactly 128 chars, meets all rules
-	base := "Aa1!" + strings.Repeat("x", 124) // 128 chars total
+	base := "Aa1!" + strings.Repeat("x", 68)
 	issues := ValidateStrength(base)
 	for _, issue := range issues {
-		if strings.Contains(issue, "at most 128") {
-			t.Errorf("password of exactly 128 chars should not fail max length check, got %v", issues)
+		if strings.Contains(issue, "at most 72") {
+			t.Errorf("password of exactly 72 bytes should not fail max length check, got %v", issues)
 		}
 	}
 }

@@ -6,10 +6,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity"
+	"github.com/elloloop/identity/internal/service"
 )
 
 func TestQrLogin_HappyPath(t *testing.T) {
@@ -41,6 +43,9 @@ func TestQrLogin_HappyPath(t *testing.T) {
 	if !strings.Contains(initiate.Msg.QrUrl, initiate.Msg.SessionId) {
 		t.Fatalf("qr url %q does not contain session id %q", initiate.Msg.QrUrl, initiate.Msg.SessionId)
 	}
+	h.WaitForQrLoginSession(t, initiate.Msg.SessionId, func(rec *service.QrLoginSessionRecord) bool {
+		return rec.Status == "pending" && rec.ExpiresAt > time.Now().UnixMilli()
+	})
 
 	pending, err := h.Client.PollQrLogin(ctx, newReq(&identitypb.PollQrLoginRequest{
 		SessionId: initiate.Msg.SessionId,
@@ -120,6 +125,9 @@ func TestQrLogin_RejectPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitiateQrLogin: %v", err)
 	}
+	h.WaitForQrLoginSession(t, initiate.Msg.SessionId, func(rec *service.QrLoginSessionRecord) bool {
+		return rec.Status == "pending" && rec.ExpiresAt > time.Now().UnixMilli()
+	})
 
 	approver := h.AuthedClient(signup.Msg.AccessToken)
 	rejected, err := approver.ApproveQrLogin(ctx, connect.NewRequest(&identitypb.ApproveQrLoginRequest{
@@ -165,8 +173,11 @@ func TestQrLogin_ExpiryPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitiateQrLogin: %v", err)
 	}
+	h.WaitForQrLoginSession(t, initiate.Msg.SessionId, func(rec *service.QrLoginSessionRecord) bool {
+		return rec.Status == "pending" && rec.ExpiresAt > time.Now().UnixMilli()
+	})
 
-	expireQrLoginSession(t, h.Repo, initiate.Msg.SessionId)
+	h.ExpireQrLoginSession(t, initiate.Msg.SessionId)
 
 	approver := h.AuthedClient(signup.Msg.AccessToken)
 

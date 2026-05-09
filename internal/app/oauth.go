@@ -31,6 +31,7 @@ func buildOAuthRegistry(cfg *config.Config, logger *zap.Logger) *oauth.Registry 
 		r.Register("microsoft", oauth.NewMicrosoft(oauth.MicrosoftConfig{
 			ClientID:     cfg.MicrosoftClientID,
 			ClientSecret: cfg.MicrosoftClientSecret,
+			TenantID:     cfg.MicrosoftTenantID,
 		}))
 	}
 	if cfg.GitHubClientID != "" && cfg.GitHubClientSecret != "" {

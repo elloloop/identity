@@ -184,9 +184,7 @@ func TestEmail_RequestPasswordReset_Disabled_NoEmailOrToken(t *testing.T) {
 		t.Fatalf("expected 0 reset emails, got %d", got)
 	}
 
-	h.Repo.mu.Lock()
-	defer h.Repo.mu.Unlock()
-	if got := len(h.Repo.passwordResets); got != 0 {
+	if got := h.CountPasswordResetTokensForUser(t, h.FindUserIDByEmail(t, "reset-disabled@test.com")); got != 0 {
 		t.Fatalf("expected 0 reset tokens, got %d", got)
 	}
 }

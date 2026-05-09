@@ -20,6 +20,7 @@ import (
 // Default Google OIDC endpoints. Overridable via GoogleConfig for
 // tests.
 const (
+	googleAuthorizationURL = "https://accounts.google.com/o/oauth2/v2/auth"
 	googleTokenURL = "https://oauth2.googleapis.com/token"
 	googleJWKSURL  = "https://www.googleapis.com/oauth2/v3/certs"
 	googleIssuer   = "https://accounts.google.com"
@@ -40,9 +41,21 @@ type GoogleConfig struct {
 	// googleTokenURL.
 	TokenURL string
 
+	// AuthorizationURL overrides the provider authorization endpoint.
+	// Optional; defaults to googleAuthorizationURL or the discovery
+	// document's authorization_endpoint when DiscoveryURL is set.
+	AuthorizationURL string
+
 	// JWKSURL overrides the JWKS endpoint. Optional; defaults to
 	// googleJWKSURL.
 	JWKSURL string
+
+	// DiscoveryURL overrides the OIDC discovery endpoint. When set,
+	// Exchange resolves token / JWKS / userinfo endpoints from it.
+	DiscoveryURL string
+
+	// UserinfoURL overrides the OIDC userinfo endpoint. Optional.
+	UserinfoURL string
 
 	// Issuer overrides the expected `iss` claim. Optional; defaults
 	// to googleIssuer.
@@ -113,14 +126,41 @@ func (g *googleExchanger) Exchange(ctx context.Context, code, redirectURI string
 		return nil, fmt.Errorf("%w: client credentials not configured", ErrCodeExchangeFailed)
 	}
 
+	tokenURL := g.cfg.TokenURL
+	jwksURL := g.cfg.JWKSURL
+	userinfoURL := g.cfg.UserinfoURL
+	if g.cfg.DiscoveryURL != "" {
+		doc, err := fetchOIDCDiscovery(ctx, g.client, g.cfg.DiscoveryURL)
+		if err != nil {
+			return nil, err
+		}
+		tokenURL = doc.TokenEndpoint
+		jwksURL = doc.JWKSURI
+		if userinfoURL == "" {
+			userinfoURL = doc.UserinfoEndpoint
+		}
+	}
+	if tokenURL == "" {
+		tokenURL = googleTokenURL
+	}
+	if jwksURL == "" {
+		jwksURL = googleJWKSURL
+	}
+	if g.jwks == nil || g.jwks.url != jwksURL {
+		g.jwks = newJWKSCache(jwksURL, g.cfg.JWKSCacheTTL, g.client)
+	}
+
 	form := url.Values{}
 	form.Set("code", code)
 	form.Set("client_id", g.cfg.ClientID)
 	form.Set("client_secret", g.cfg.ClientSecret)
 	form.Set("redirect_uri", redirectURI)
 	form.Set("grant_type", "authorization_code")
+	if codeVerifier := codeVerifierFromContext(ctx); codeVerifier != "" {
+		form.Set("code_verifier", codeVerifier)
+	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.TokenURL,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL,
 		strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("%w: build request: %v", ErrCodeExchangeFailed, err)
@@ -160,14 +200,67 @@ func (g *googleExchanger) Exchange(ctx context.Context, code, redirectURI string
 		return nil, fmt.Errorf("%w: %s", ErrEmailNotVerified, claims.Email)
 	}
 
+	userinfo, err := fetchOIDCUserInfo(ctx, g.client, userinfoURL, tr.AccessToken)
+	if err != nil {
+		return nil, err
+	}
+
+	email := strings.ToLower(strings.TrimSpace(claims.Email))
+	name := claims.Name
+	avatarURL := claims.Picture
+	if userinfo != nil {
+		if email == "" && userinfo.Email != "" {
+			email = strings.ToLower(strings.TrimSpace(userinfo.Email))
+		}
+		if name == "" {
+			name = strings.TrimSpace(userinfo.Name)
+		}
+		if name == "" {
+			name = strings.TrimSpace(userinfo.PreferredUsername)
+		}
+		if avatarURL == "" {
+			avatarURL = strings.TrimSpace(userinfo.Picture)
+		}
+	}
+	if email == "" {
+		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
+	}
+
 	return &Identity{
 		ProviderUserID: claims.Sub,
-		Email:          strings.ToLower(strings.TrimSpace(claims.Email)),
+		Email:          email,
 		EmailVerified:  true,
-		Name:           claims.Name,
-		AvatarURL:      claims.Picture,
+		Name:           name,
+		AvatarURL:      avatarURL,
 		Provider:       "google",
 	}, nil
+}
+
+func (g *googleExchanger) AuthorizationURL(ctx context.Context, redirectURI, state, codeChallenge string) (string, error) {
+	if g.cfg.ClientID == "" {
+		return "", fmt.Errorf("%w: client credentials not configured", ErrCodeExchangeFailed)
+	}
+	authURL := g.cfg.AuthorizationURL
+	if g.cfg.DiscoveryURL != "" && authURL == "" {
+		doc, err := fetchOIDCDiscovery(ctx, g.client, g.cfg.DiscoveryURL)
+		if err != nil {
+			return "", err
+		}
+		authURL = doc.AuthorizationEndpoint
+	}
+	if authURL == "" {
+		authURL = googleAuthorizationURL
+	}
+
+	params := url.Values{}
+	params.Set("client_id", g.cfg.ClientID)
+	params.Set("redirect_uri", redirectURI)
+	params.Set("response_type", "code")
+	params.Set("scope", "openid email profile")
+	if err := addPKCEParams(params, state, codeChallenge); err != nil {
+		return "", err
+	}
+	return buildAuthorizationURL(authURL, params)
 }
 
 // googleIDClaims is the subset of an OIDC ID token we consume.

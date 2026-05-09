@@ -70,6 +70,7 @@ export const sidebarSections: NavSection[] = [
     items: [
       { label: "Audit Logging", href: `${BASE}/docs/operations/audit-logging` },
       { label: "Observability", href: `${BASE}/docs/operations/observability` },
+      { label: "Password Toggle Rollout", href: `${BASE}/docs/operations/password-toggle-rollout` },
     ],
   },
   {

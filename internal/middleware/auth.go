@@ -10,6 +10,7 @@ import (
 // AuthExemptPaths lists URL paths that do not require a valid JWT.
 // Connect-Go uses the proto service/method as the URL path.
 var AuthExemptPaths = map[string]bool{
+	"/identity.IdentityService/BeginOAuthLogin":      true,
 	"/identity.IdentityService/OAuthLogin":           true,
 	"/identity.IdentityService/PasswordLogin":        true,
 	"/identity.IdentityService/PasswordSignup":       true,

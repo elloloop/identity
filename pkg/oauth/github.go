@@ -13,6 +13,7 @@ import (
 
 // Default GitHub OAuth endpoints.
 const (
+	githubAuthorizationURL = "https://github.com/login/oauth/authorize"
 	githubTokenURL    = "https://github.com/login/oauth/access_token"
 	githubUserURL     = "https://api.github.com/user"
 	githubUserMailURL = "https://api.github.com/user/emails"
@@ -25,6 +26,7 @@ type GitHubConfig struct {
 
 	HTTPClient *http.Client
 
+	AuthorizationURL string
 	TokenURL    string
 	UserURL     string
 	UserMailURL string
@@ -53,6 +55,25 @@ func NewGitHub(cfg GitHubConfig) Exchanger {
 		client = defaultHTTPClient()
 	}
 	return &githubExchanger{cfg: cfg, client: client}
+}
+
+func (g *githubExchanger) AuthorizationURL(_ context.Context, redirectURI, state, codeChallenge string) (string, error) {
+	if g.cfg.ClientID == "" {
+		return "", fmt.Errorf("%w: client credentials not configured", ErrCodeExchangeFailed)
+	}
+	authURL := g.cfg.AuthorizationURL
+	if authURL == "" {
+		authURL = githubAuthorizationURL
+	}
+
+	params := url.Values{}
+	params.Set("client_id", g.cfg.ClientID)
+	params.Set("redirect_uri", redirectURI)
+	params.Set("scope", "read:user user:email")
+	if err := addPKCEParams(params, state, codeChallenge); err != nil {
+		return "", err
+	}
+	return buildAuthorizationURL(authURL, params)
 }
 
 type githubTokenResponse struct {
@@ -91,6 +112,9 @@ func (g *githubExchanger) Exchange(ctx context.Context, code, redirectURI string
 	form.Set("code", code)
 	if redirectURI != "" {
 		form.Set("redirect_uri", redirectURI)
+	}
+	if codeVerifier := codeVerifierFromContext(ctx); codeVerifier != "" {
+		form.Set("code_verifier", codeVerifier)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.TokenURL,

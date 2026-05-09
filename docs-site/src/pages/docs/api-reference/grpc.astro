@@ -22,7 +22,8 @@ import { Code } from "astro-expressive-code/components";
   <h2>Authentication</h2>
   <table>
     <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>OAuthLogin</code></td><td>none</td><td>Upsert user from OAuth provider, issue tokens. <em>(post-validation half implemented; code-exchange is a placeholder)</em></td></tr>
+    <tr><td><code>BeginOAuthLogin</code></td><td>none</td><td>Mint OAuth state + PKCE artifacts and return the provider authorization URL</td></tr>
+    <tr><td><code>OAuthLogin</code></td><td>none</td><td>Exchange the authorization code, validate provider identity, upsert the user, and issue tokens</td></tr>
     <tr><td><code>PasswordSignup</code></td><td>none</td><td>Create user with email + password</td></tr>
     <tr><td><code>PasswordLogin</code></td><td>none</td><td>Email + password → tokens (or TOTP challenge)</td></tr>
   </table>

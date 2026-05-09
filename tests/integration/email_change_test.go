@@ -42,7 +42,7 @@ func TestEmailChange_FullFlow(t *testing.T) {
 	if userID == "" {
 		t.Fatalf("signup returned empty user id")
 	}
-	if got := h.Repo.CountRefreshTokensForUser(userID); got == 0 {
+	if got := h.CountRefreshTokensForUser(t, userID); got == 0 {
 		t.Fatalf("expected at least one refresh token after signup, got %d", got)
 	}
 	h.Mailer.Reset() // drop the auto verification email noise
@@ -92,7 +92,7 @@ func TestEmailChange_FullFlow(t *testing.T) {
 	}
 
 	// Refresh tokens revoked.
-	if got := h.Repo.CountRefreshTokensForUser(userID); got != 0 {
+	if got := h.CountRefreshTokensForUser(t, userID); got != 0 {
 		t.Errorf("expected 0 refresh tokens after confirm, got %d", got)
 	}
 

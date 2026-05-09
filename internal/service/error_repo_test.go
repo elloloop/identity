@@ -23,7 +23,11 @@ type errorRepo struct {
 	failCreateUser                 bool
 	failUpdateUser                 bool
 	failFindRefreshTokenByHash     bool
+	failFindRefreshTokenIncluding  bool
 	failCreateRefreshToken         bool
+	failConsumeRefreshToken        bool
+	failDeleteRefreshToken         bool
+	failDeleteRefreshTokensForUser bool
 	failListPasskeyCredentials     bool
 	failGetPasskeyCredentialByCred bool
 	failCreatePasskeyChallenge     bool
@@ -40,6 +44,11 @@ type errorRepo struct {
 	failUpdateQrLoginSession       bool
 	failDeleteRecoveryCodesForUser bool
 	failCreateRecoveryCode         bool
+	failCreateEmailChangeToken     bool
+	failFindEmailChangeToken       bool
+	failMarkEmailChangeConsumed    bool
+	failUpdateUserEmail            bool
+	failCreateOAuthIdentity        bool
 }
 
 func newErrorRepo() *errorRepo {
@@ -81,11 +90,74 @@ func (r *errorRepo) FindRefreshTokenByHash(ctx context.Context, h string) (*Refr
 	return r.fakeRepo.FindRefreshTokenByHash(ctx, h)
 }
 
+func (r *errorRepo) FindRefreshTokenByHashIncludingConsumed(ctx context.Context, h string) (*RefreshTokenRecord, error) {
+	if r.failFindRefreshTokenIncluding {
+		return nil, errInjected
+	}
+	return r.fakeRepo.FindRefreshTokenByHashIncludingConsumed(ctx, h)
+}
+
 func (r *errorRepo) CreateRefreshToken(ctx context.Context, rec *RefreshTokenRecord) (string, error) {
 	if r.failCreateRefreshToken {
 		return "", errInjected
 	}
 	return r.fakeRepo.CreateRefreshToken(ctx, rec)
+}
+
+func (r *errorRepo) DeleteRefreshToken(ctx context.Context, nodeID string) error {
+	if r.failDeleteRefreshToken {
+		return errInjected
+	}
+	return r.fakeRepo.DeleteRefreshToken(ctx, nodeID)
+}
+
+func (r *errorRepo) DeleteRefreshTokensForUser(ctx context.Context, userID string) error {
+	if r.failDeleteRefreshTokensForUser {
+		return errInjected
+	}
+	return r.fakeRepo.DeleteRefreshTokensForUser(ctx, userID)
+}
+
+func (r *errorRepo) ConsumeRefreshTokenByHash(ctx context.Context, hash string, atMs int64) error {
+	if r.failConsumeRefreshToken {
+		return errInjected
+	}
+	return r.fakeRepo.ConsumeRefreshTokenByHash(ctx, hash, atMs)
+}
+
+func (r *errorRepo) CreateEmailChangeToken(ctx context.Context, rec *EmailChangeToken) error {
+	if r.failCreateEmailChangeToken {
+		return errInjected
+	}
+	return r.fakeRepo.CreateEmailChangeToken(ctx, rec)
+}
+
+func (r *errorRepo) FindEmailChangeTokenByHash(ctx context.Context, hash string) (*EmailChangeToken, error) {
+	if r.failFindEmailChangeToken {
+		return nil, errInjected
+	}
+	return r.fakeRepo.FindEmailChangeTokenByHash(ctx, hash)
+}
+
+func (r *errorRepo) MarkEmailChangeTokenConsumed(ctx context.Context, id string, atMs int64) error {
+	if r.failMarkEmailChangeConsumed {
+		return errInjected
+	}
+	return r.fakeRepo.MarkEmailChangeTokenConsumed(ctx, id, atMs)
+}
+
+func (r *errorRepo) UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error {
+	if r.failUpdateUserEmail {
+		return errInjected
+	}
+	return r.fakeRepo.UpdateUserEmail(ctx, userID, newEmail, atMs)
+}
+
+func (r *errorRepo) CreateOAuthIdentity(ctx context.Context, oi *OAuthIdentity) error {
+	if r.failCreateOAuthIdentity {
+		return errInjected
+	}
+	return r.fakeRepo.CreateOAuthIdentity(ctx, oi)
 }
 
 func (r *errorRepo) ListPasskeyCredentials(ctx context.Context, uid string) ([]*PasskeyCredRecord, error) {

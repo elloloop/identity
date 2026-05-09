@@ -12,14 +12,16 @@ import (
 )
 
 const (
-	dbTypeUser          = 1
-	dbTypeWorkingGroup  = 2
-	dbTypeRefreshToken  = 5
-	dbTypePasswordReset = 19
-	dbTypePasskey       = 20
-	dbTypeAuditEvent    = 26
-	dbTypeInvitation    = 27
-	dbTypeAdminHelpReq  = 28
+	dbTypeUser             = 1
+	dbTypeWorkingGroup     = 2
+	dbTypeRefreshToken     = 5
+	dbTypePasswordReset    = 19
+	dbTypePasskey          = 20
+	dbTypePasskeyChallenge = 21
+	dbTypeQrLoginSession   = 22
+	dbTypeAuditEvent       = 26
+	dbTypeInvitation       = 27
+	dbTypeAdminHelpReq     = 28
 
 	dbEdgeMemberOf = 101
 )
@@ -204,6 +206,8 @@ func (r *pgRepository) QueryNodes(ctx context.Context, _, _ string, typeID int, 
 		return r.queryGroupNodes(ctx, filter)
 	case dbTypeRefreshToken:
 		return r.queryRefreshTokenNodes(ctx, filter)
+	case dbTypePasswordReset:
+		return r.queryPasswordResetNodes(ctx, filter)
 	case dbTypePasskey:
 		return r.queryPasskeyNodes(ctx, filter)
 	case dbTypeAuditEvent:
@@ -607,6 +611,18 @@ func (r *pgRepository) updateAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 			dbPkfLastUsedAt: {col: "last_used_at_ms", kind: dbKindInt64},
 			"4":             {col: "sign_count", kind: dbKindInt64},
 		})
+	case dbTypePasskeyChallenge:
+		return updateBySpecs(ctx, tx, r.tenantID, "passkey_challenges", op.NodeID, op.Patch, map[string]dbFieldSpec{
+			"1": {col: "challenge", kind: dbKindString},
+		})
+	case dbTypeQrLoginSession:
+		return updateBySpecs(ctx, tx, r.tenantID, "qr_login_sessions", op.NodeID, op.Patch, map[string]dbFieldSpec{
+			"2":  {col: "status", kind: dbKindString},
+			"3":  {col: "user_id", kind: dbKindString},
+			"7":  {col: "approved_device_info", kind: dbKindString},
+			"8":  {col: "expires_at_ms", kind: dbKindInt64},
+			"10": {col: "updated_at_ms", kind: dbKindInt64},
+		})
 	default:
 		return fmt.Errorf("postgres: ExecuteAtomic(update): unsupported type_id %d", op.TypeID)
 	}
@@ -765,6 +781,33 @@ func (r *pgRepository) queryRefreshTokenNodes(ctx context.Context, filter map[st
 	}
 	if err := rows.Err(); err != nil {
 		return nil, wrapPgErr("QueryNodes(refresh tokens)", err)
+	}
+	return out, nil
+}
+
+func (r *pgRepository) queryPasswordResetNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
+	query, args := buildSelectQuery(`SELECT id, token_hash, user_id, expires_at_ms, created_at_ms, consumed_at_ms FROM password_reset_tokens WHERE tenant_id = $1`, r.tenantID, filter, map[string]dbFieldSpec{
+		dbPrfTokenHash: {col: "token_hash", kind: dbKindString},
+		dbPrfUserID:    {col: "user_id", kind: dbKindString},
+		dbPrfExpiresAt: {col: "expires_at_ms", kind: dbKindInt64},
+		dbPrfCreatedAt: {col: "created_at_ms", kind: dbKindInt64},
+	}, ` ORDER BY created_at_ms ASC, id ASC`)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, wrapPgErr("QueryNodes(password reset tokens)", err)
+	}
+	defer rows.Close()
+
+	var out []*sdk.Node
+	for rows.Next() {
+		rec, err := scanPasswordReset(rows)
+		if err != nil {
+			return nil, wrapPgErr("QueryNodes(password reset tokens)", err)
+		}
+		out = append(out, passwordResetNodeFromRecord(rec))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapPgErr("QueryNodes(password reset tokens)", err)
 	}
 	return out, nil
 }
@@ -955,6 +998,19 @@ func passkeyNodeFromRecord(rec *service.PasskeyCredRecord) *sdk.Node {
 			dbPkfDeviceName:   rec.DeviceName,
 			dbPkfCreatedAt:    rec.CreatedAt,
 			dbPkfLastUsedAt:   rec.LastUsedAt,
+		},
+	}
+}
+
+func passwordResetNodeFromRecord(rec *service.PasswordResetToken) *sdk.Node {
+	return &sdk.Node{
+		NodeID: rec.NodeID,
+		TypeID: dbTypePasswordReset,
+		Payload: map[string]any{
+			dbPrfTokenHash: rec.TokenHash,
+			dbPrfUserID:    rec.UserID,
+			dbPrfExpiresAt: rec.ExpiresAt,
+			dbPrfCreatedAt: rec.CreatedAt,
 		},
 	}
 }

@@ -3,6 +3,7 @@ package connect
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	identitypb "github.com/elloloop/identity/gen/go/identity"
 	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -350,15 +352,22 @@ func TestPasswordSignupAndLogin(t *testing.T) {
 		t.Fatalf("signup unexpected: %+v", signup.Msg)
 	}
 
-	// Duplicate.
-	_, err = h.client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+	// Duplicate: still succeeds to avoid email enumeration, but must not
+	// authenticate the caller.
+	dup, err := h.client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
 		Email: "alice@example.com", Password: strongPW,
 	}))
-	if err == nil {
-		t.Fatal("expected duplicate error")
+	if err != nil {
+		t.Fatalf("duplicate signup: %v", err)
 	}
-	if connectCodeOf(err) != connect.CodeAlreadyExists {
-		t.Fatalf("expected AlreadyExists, got %v: %v", connectCodeOf(err), err)
+	if dup.Msg.AccessToken == "" || dup.Msg.RefreshToken == "" || dup.Msg.User == nil {
+		t.Fatalf("duplicate signup unexpected: %+v", dup.Msg)
+	}
+	getCurReq := withClientHeaders(connect.NewRequest(&identitypb.GetCurrentUserRequest{}))
+	getCurReq.Header().Set("Authorization", "Bearer "+dup.Msg.AccessToken)
+	_, err = h.client.GetCurrentUser(ctx, getCurReq)
+	if got := connectCodeOf(err); got != connect.CodeNotFound && got != connect.CodeUnauthenticated {
+		t.Fatalf("duplicate signup token should not authenticate, got %v: %v", got, err)
 	}
 
 	// Weak password → InvalidArgument.
@@ -378,6 +387,9 @@ func TestPasswordSignupAndLogin(t *testing.T) {
 	}
 	if login.Msg.AccessToken == "" || login.Msg.User.Id == "" {
 		t.Fatalf("login result: %+v", login.Msg)
+	}
+	if login.Msg.User.EmailVerified {
+		t.Fatalf("password login should allow unverified local accounts, got verified=%v", login.Msg.User.EmailVerified)
 	}
 
 	// Wrong password.
@@ -441,6 +453,58 @@ func TestOAuthLogin_LocalDisabled(t *testing.T) {
 	code := connectCodeOf(err)
 	if code != connect.CodeInvalidArgument && code != connect.CodeInternal && code != connect.CodeUnavailable {
 		t.Fatalf("unexpected oauth login code: %v: %v", code, err)
+	}
+}
+
+type connectOAuthExchanger struct{}
+
+func (connectOAuthExchanger) Exchange(context.Context, string, string) (*oauth.Identity, error) {
+	return &oauth.Identity{
+		Provider:       "google",
+		ProviderUserID: "connect-user",
+		Email:          "connect-oauth@example.com",
+		EmailVerified:  true,
+		Name:           "Connect OAuth",
+	}, nil
+}
+
+func (connectOAuthExchanger) AuthorizationURL(_ context.Context, redirectURI, state, codeChallenge string) (string, error) {
+	u := url.URL{Scheme: "https", Host: "example.com", Path: "/oauth/start"}
+	q := u.Query()
+	q.Set("redirect_uri", redirectURI)
+	q.Set("state", state)
+	q.Set("code_challenge", codeChallenge)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+func TestBeginOAuthLogin_ViaConnect(t *testing.T) {
+	registry := oauth.NewRegistry()
+	registry.Register("google", connectOAuthExchanger{})
+	h := newHarnessWithOAuthRegistry(t, registry)
+
+	resp, err := h.client.BeginOAuthLogin(context.Background(), connect.NewRequest(&identitypb.BeginOAuthLoginRequest{
+		Provider:    "google",
+		RedirectUri: "https://app.example.com/oauth/callback",
+	}))
+	if err != nil {
+		t.Fatalf("BeginOAuthLogin: %v", err)
+	}
+	if resp.Msg.State == "" || resp.Msg.StateToken == "" || resp.Msg.CodeVerifier == "" {
+		t.Fatalf("missing state artifacts: %+v", resp.Msg)
+	}
+	if resp.Msg.ExpiresIn <= 0 {
+		t.Fatalf("ExpiresIn = %d", resp.Msg.ExpiresIn)
+	}
+	u, err := url.Parse(resp.Msg.AuthorizationUrl)
+	if err != nil {
+		t.Fatalf("authorization url parse: %v", err)
+	}
+	if got := u.Query().Get("state"); got != resp.Msg.State {
+		t.Fatalf("state in URL = %q, want %q", got, resp.Msg.State)
+	}
+	if got := u.Query().Get("redirect_uri"); got != "https://app.example.com/oauth/callback" {
+		t.Fatalf("redirect_uri = %q", got)
 	}
 }
 
@@ -1195,6 +1259,91 @@ func TestProfileHandlers_HappyAndError(t *testing.T) {
 		Password: "EvenStr0nger!Pwd",
 	}), "u-1")); err != nil {
 		t.Fatalf("signout everywhere: %v", err)
+	}
+}
+
+func TestEmailRecoveryHandlers_ViaConnect(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	user := h.repo.seedUser(&service.User{
+		Email:        "recover@example.com",
+		Name:         "Recover",
+		Status:       "active",
+		Role:         "member",
+		PasswordHash: mustHash(t, strongPW),
+	})
+	future := time.Now().Add(time.Hour).UnixMilli()
+
+	if err := h.repo.CreatePasswordResetToken(ctx, &service.PasswordResetToken{
+		TokenHash: sha256Hex("reset-raw"),
+		UserID:    user.ID,
+		ExpiresAt: future,
+		CreatedAt: time.Now().UnixMilli(),
+	}); err != nil {
+		t.Fatalf("seed password reset: %v", err)
+	}
+	if _, err := h.client.ConfirmPasswordReset(ctx, connect.NewRequest(&identitypb.ConfirmPasswordResetRequest{
+		Token:       "reset-raw",
+		NewPassword: "NewStr0ng!Pass1",
+	})); err != nil {
+		t.Fatalf("ConfirmPasswordReset: %v", err)
+	}
+	if _, err := h.client.PasswordLogin(ctx, withClientHeaders(connect.NewRequest(&identitypb.PasswordLoginRequest{
+		Email: "recover@example.com", Password: "NewStr0ng!Pass1",
+	}))); err != nil {
+		t.Fatalf("login with reset password: %v", err)
+	}
+
+	if _, err := h.client.SendEmailVerification(ctx, authedReq(connect.NewRequest(&identitypb.SendEmailVerificationRequest{}), user.ID)); err != nil {
+		t.Fatalf("SendEmailVerification: %v", err)
+	}
+	if got := len(h.repo.emailVerifications); got == 0 {
+		t.Fatalf("expected verification token")
+	}
+
+	if err := h.repo.CreateEmailVerificationToken(ctx, &service.EmailVerificationToken{
+		TokenHash: sha256Hex("verify-raw"),
+		UserID:    user.ID,
+		Email:     user.Email,
+		ExpiresAt: future,
+		CreatedAt: time.Now().UnixMilli(),
+	}); err != nil {
+		t.Fatalf("seed email verification: %v", err)
+	}
+	verified, err := h.client.VerifyEmail(ctx, connect.NewRequest(&identitypb.VerifyEmailRequest{Token: "verify-raw"}))
+	if err != nil {
+		t.Fatalf("VerifyEmail: %v", err)
+	}
+	if !verified.Msg.User.EmailVerified {
+		t.Fatalf("verified user = %+v", verified.Msg.User)
+	}
+
+	if _, err := h.client.RequestEmailChange(ctx, authedReq(connect.NewRequest(&identitypb.RequestEmailChangeRequest{
+		NewEmail:        "changed@example.com",
+		CurrentPassword: "NewStr0ng!Pass1",
+	}), user.ID)); err != nil {
+		t.Fatalf("RequestEmailChange: %v", err)
+	}
+	if got := len(h.repo.emailChanges); got == 0 {
+		t.Fatalf("expected email change token")
+	}
+
+	if err := h.repo.CreateEmailChangeToken(ctx, &service.EmailChangeToken{
+		TokenHash: sha256Hex("change-raw"),
+		UserID:    user.ID,
+		OldEmail:  user.Email,
+		NewEmail:  "final@example.com",
+		ExpiresAt: future,
+		CreatedAt: time.Now().UnixMilli(),
+	}); err != nil {
+		t.Fatalf("seed email change: %v", err)
+	}
+	changed, err := h.client.ConfirmEmailChange(ctx, connect.NewRequest(&identitypb.ConfirmEmailChangeRequest{Token: "change-raw"}))
+	if err != nil {
+		t.Fatalf("ConfirmEmailChange: %v", err)
+	}
+	if changed.Msg.User.Email != "final@example.com" || !changed.Msg.User.EmailVerified {
+		t.Fatalf("changed user = %+v", changed.Msg.User)
 	}
 }
 

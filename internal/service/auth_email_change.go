@@ -68,8 +68,11 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 		return fmt.Errorf("%w: new email matches current email", ErrInvalidArgument)
 	}
 
-	// Uniqueness: someone else cannot already own this email.
-	if existing, err := s.repo.FindUserByEmail(ctx, newEmail); err == nil && existing != nil && existing.ID != userID {
+	existing, err := s.repo.FindUserByEmail(ctx, newEmail)
+	if err != nil {
+		return fmt.Errorf("checking email uniqueness: %w", err)
+	}
+	if existing != nil && existing.ID != userID {
 		return fmt.Errorf("%w: email already in use", ErrAlreadyExists)
 	}
 
@@ -192,10 +195,11 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
-	// Check that no other user has taken the new_email between request
-	// and confirm. If so, reject and leave the token unconsumed so the
-	// user can retry once the conflict clears.
-	if existing, err := s.repo.FindUserByEmail(ctx, rec.NewEmail); err == nil && existing != nil && existing.ID != user.ID {
+	existing, err := s.repo.FindUserByEmail(ctx, rec.NewEmail)
+	if err != nil {
+		return nil, fmt.Errorf("checking email uniqueness: %w", err)
+	}
+	if existing != nil && existing.ID != user.ID {
 		return nil, fmt.Errorf("%w: email already in use", ErrAlreadyExists)
 	}
 
