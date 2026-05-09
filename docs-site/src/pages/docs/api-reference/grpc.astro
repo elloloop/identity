@@ -18,6 +18,13 @@ import { Code } from "astro-expressive-code/components";
     This page summarises the surface; consult the .proto for exact field
     types and reservations.
   </p>
+  <p>
+    Proto changes are checked by Buf in CI. Pull requests must pass
+    <code>buf lint</code> and a breaking-change check against
+    <code>main</code>, so wire-compatible additions are allowed but removed
+    fields, changed field numbers, renamed RPCs, and changed field types are
+    blocked before merge.
+  </p>
 
   <h2>Authentication</h2>
   <table>
