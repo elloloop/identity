@@ -4,8 +4,8 @@ go 1.25.0
 
 require (
 	connectrpc.com/connect v1.19.2
-	github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.9.0
-	github.com/go-webauthn/webauthn v0.17.0
+	github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.10.2
+	github.com/go-webauthn/webauthn v0.17.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/jackc/pgx/v5 v5.9.2
@@ -16,8 +16,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
-	go.uber.org/zap v1.27.1
-	golang.org/x/crypto v0.50.0
+	go.uber.org/zap v1.28.0
+	golang.org/x/crypto v0.51.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -98,8 +98,8 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
