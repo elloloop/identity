@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 #
-# coverage-gate.sh — fail CI if per-package-tree coverage drops below a threshold.
+# coverage-gate.sh — fail CI if coverage drops below configured thresholds.
 #
 # Usage:
+#   coverage-gate.sh <profile> --config <config>
 #   coverage-gate.sh <profile> <threshold> <prefix> [<prefix>...]
 #
 # Example:
+#   coverage-gate.sh cover.out --config .coverage-gates.yml
 #   coverage-gate.sh cover.out 80 internal/ pkg/
-#
-# Reads `go tool cover -func=<profile>` and computes the weighted statement
-# coverage for every package whose import path contains any of the given
-# prefixes. Exits non-zero if any of the prefixes ends up below <threshold>.
 #
 # The script is intentionally dependency-free — only awk + go tool cover.
 
@@ -22,35 +20,20 @@ if [[ $# -lt 3 ]]; then
 fi
 
 PROFILE="$1"; shift
-THRESHOLD="$1"; shift
-PREFIXES=("$@")
 
 if [[ ! -f "$PROFILE" ]]; then
   echo "coverage-gate: profile not found: $PROFILE" >&2
   exit 2
 fi
 
-# Per-package weighted coverage: parse the raw profile so we get statement
-# counts (the `-func` summary already aggregates by func and rounds %, which
-# loses the weights we need).
-#
-# Profile format (after the mode line):
-#   <file>:<startLine>.<startCol>,<endLine>.<endCol> <numStmts> <count>
-#
-# A statement is "covered" if count > 0. Package = dirname(file).
-#
-# When `go test ./... -coverpkg=./...` runs, each package's test instruments
-# the full union and writes a profile section into the same file. The same
-# (file, range) entry then appears once per tested package — typically 15-20×.
-# We dedupe by composite key and treat a line as covered if ANY appearance
-# has count > 0; otherwise the denominator is inflated by the duplication
-# factor and the gate reports a fraction of true coverage.
-
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+config_tmp=""
+seen_tmp=""
+trap 'rm -f "$tmp" ${config_tmp:-} ${seen_tmp:-}' EXIT
 
-# Skip the first line (mode: ...) and emit "<pkg> <stmts> <covered>".
-awk 'NR > 1 {
+module="$(go list -m 2>/dev/null || true)"
+
+awk -v module="$module" 'NR > 1 {
   key = $1
   stmts[key] = $2            # numStmts is identical across appearances
   if ($3 > 0) hit[key] = 1
@@ -62,11 +45,117 @@ END {
     m = split(file, p, "/")
     pkg = p[1]
     for (i = 2; i < m; i++) pkg = pkg "/" p[i]
+    if (module != "" && index(pkg, module "/") == 1) {
+      pkg = substr(pkg, length(module) + 2)
+    }
     s[pkg] += stmts[k]
     if (k in hit) c[pkg] += stmts[k]
   }
   for (k in s) printf "%s %d %d\n", k, s[k], c[k]+0
 }' "$PROFILE" > "$tmp"
+
+if [[ "${1:-}" == "--config" ]]; then
+  if [[ $# -ne 2 ]]; then
+    echo "usage: $0 <profile> --config <config>" >&2
+    exit 2
+  fi
+  CONFIG="$2"
+  if [[ ! -f "$CONFIG" ]]; then
+    echo "coverage-gate: config not found: $CONFIG" >&2
+    exit 2
+  fi
+
+  config_tmp="$(mktemp)"
+  awk '
+    /^[[:space:]]*($|#)/ { next }
+    /^[[:space:]]*default:[[:space:]]*/ {
+      line=$0; sub(/^[[:space:]]*default:[[:space:]]*/, "", line); sub(/[[:space:]]+#.*$/, "", line)
+      print "default\t" line
+      next
+    }
+    /^[[:space:]]*include:[[:space:]]*$/ { section="include"; next }
+    /^[[:space:]]*packages:[[:space:]]*$/ { section="packages"; next }
+    section == "include" && /^[[:space:]]*-[[:space:]]*/ {
+      line=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", line); sub(/[[:space:]]+#.*$/, "", line)
+      print "include\t" line
+      next
+    }
+    section == "packages" && /^[[:space:]]*[^[:space:]#][^:]*:[[:space:]]*/ {
+      line=$0; sub(/^[[:space:]]*/, "", line); sub(/[[:space:]]+#.*$/, "", line)
+      split(line, parts, ":")
+      key=parts[1]
+      value=line; sub(/^[^:]*:[[:space:]]*/, "", value)
+      print "package\t" key "\t" value
+      next
+    }
+    {
+      print "coverage-gate: unsupported config line: " NR ": " $0 > "/dev/stderr"
+      exit 2
+    }
+  ' "$CONFIG" > "$config_tmp"
+
+  default_threshold="$(awk -F '\t' '$1 == "default" { print $2 }' "$config_tmp")"
+  if [[ -z "$default_threshold" ]]; then
+    echo "coverage-gate: config missing default threshold" >&2
+    exit 2
+  fi
+
+  includes=()
+  while IFS=$'\t' read -r _ include; do
+    includes+=("$include")
+  done < <(awk -F '\t' '$1 == "include" { print $1 "\t" $2 }' "$config_tmp")
+  if [[ ${#includes[@]} -eq 0 ]]; then
+    includes=("internal/" "pkg/")
+  fi
+
+  seen_tmp="$(mktemp)"
+
+  fail=0
+  while read -r pkg stmts cov; do
+    included=0
+    for include in "${includes[@]}"; do
+      case "$pkg" in
+        "$include"* ) included=1 ;;
+      esac
+    done
+    if [[ $included -eq 0 ]]; then
+      continue
+    fi
+
+    threshold="$(awk -F '\t' -v pkg="$pkg" -v default="$default_threshold" '
+      $1 == "package" && $2 == pkg { print $3; found=1 }
+      END { if (!found) print default }
+    ' "$config_tmp")"
+    if awk -F '\t' -v pkg="$pkg" '$1 == "package" && $2 == pkg { found=1 } END { exit found ? 0 : 1 }' "$config_tmp"; then
+      echo "$pkg" >> "$seen_tmp"
+    fi
+    pct=$(awk -v c="$cov" -v t="$stmts" 'BEGIN { printf "%.2f", (c/t)*100 }')
+    cmp=$(awk -v p="$pct" -v th="$threshold" 'BEGIN { print (p+0 < th+0) ? "fail" : "ok" }')
+    if [[ "$cmp" == "fail" ]]; then
+      echo "coverage-gate: FAIL  $pkg  $pct% < $threshold% ($cov/$stmts stmts)"
+      fail=1
+    else
+      echo "coverage-gate: ok    $pkg  $pct% >= $threshold% ($cov/$stmts stmts)"
+    fi
+  done < "$tmp"
+
+  while IFS=$'\t' read -r _ pkg _; do
+    if ! grep -Fxq "$pkg" "$seen_tmp"; then
+      echo "coverage-gate: FAIL  $pkg  no statements found"
+      fail=1
+    fi
+  done < <(awk -F '\t' '$1 == "package" { print $1 "\t" $2 "\t" $3 }' "$config_tmp")
+
+  exit "$fail"
+fi
+
+if [[ $# -lt 2 ]]; then
+  echo "usage: $0 <profile> <threshold> <prefix> [<prefix>...]" >&2
+  exit 2
+fi
+
+THRESHOLD="$1"; shift
+PREFIXES=("$@")
 
 fail=0
 for prefix in "${PREFIXES[@]}"; do

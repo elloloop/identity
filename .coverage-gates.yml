@@ -1,0 +1,24 @@
+default: 80
+
+include:
+  - internal/
+  - pkg/
+
+packages:
+  internal/app: 90
+  internal/config: 98
+  internal/connect: 94
+  internal/middleware: 98
+  internal/repo: 82
+  internal/repo/conformance: 67
+  internal/repo/entdb: 78
+  internal/repo/memory: 84
+  internal/repo/postgres: 75
+  internal/service: 92
+  pkg/audit: 98
+  pkg/email: 90
+  pkg/jwt: 85
+  pkg/oauth: 82
+  pkg/passkeys: 91
+  pkg/passwords: 98
+  pkg/totp: 89
