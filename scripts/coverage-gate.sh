@@ -122,9 +122,9 @@ if [[ "${1:-}" == "--config" ]]; then
       continue
     fi
 
-    threshold="$(awk -F '\t' -v pkg="$pkg" -v default="$default_threshold" '
+    threshold="$(awk -F '\t' -v pkg="$pkg" -v fallback="$default_threshold" '
       $1 == "package" && $2 == pkg { print $3; found=1 }
-      END { if (!found) print default }
+      END { if (!found) print fallback }
     ' "$config_tmp")"
     if awk -F '\t' -v pkg="$pkg" '$1 == "package" && $2 == pkg { found=1 } END { exit found ? 0 : 1 }' "$config_tmp"; then
       echo "$pkg" >> "$seen_tmp"
