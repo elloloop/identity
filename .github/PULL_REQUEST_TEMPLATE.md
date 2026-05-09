@@ -40,8 +40,18 @@ For features: list the tests you added (unit / integration / realentdb / realpos
 
 See [AGENTS.md](../AGENTS.md). The following must be true:
 
-- [ ] No patch fixes / shims / compatibility layers — wrong shapes are fixed, not wrapped
+- [ ] No patch fixes / shims / compatibility layers - wrong shapes are fixed, not wrapped
 - [ ] No dead code left behind from a refactor
 - [ ] No half-finished implementations (impl + tests + wiring all land together)
 - [ ] Bug fixes ship with regression tests
 - [ ] Commit messages are imperative, no AI attribution, no inaccessible-context references
+
+## Contributor License Agreement
+
+First-time contributors will see a CLA status check on this PR. To sign,
+read [CLA.md](../CLA.md) and comment on this PR with exactly:
+
+> I have read the CLA Document and I hereby sign the CLA
+
+The check turns green once your signature is recorded. Returning
+contributors are remembered automatically; sign once.
