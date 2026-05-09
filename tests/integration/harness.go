@@ -3,17 +3,9 @@
 // Package integration contains end-to-end tests that exercise the
 // real identity service binary's HTTP/Connect handler chain. The
 // harness builds the same wiring used by cmd/identity/main.go via
-// internal/app, but injects in-memory persistence so tests can run
-// without a live EntDB instance.
-//
-// Approach: in-process. The harness imports the internal/app package
-// (the same wiring code as cmd/identity/main.go) and serves the
-// resulting http.Handler via httptest.NewServer. This is faster than
-// shelling out to the binary, gives clean stack traces, and lets
-// tests inspect the in-memory persistence layer directly when useful.
-//
-// Each test gets its own server (and its own MemRepo) so tests can
-// run with t.Parallel() without state leaking across tests.
+// internal/app, but lets each build-tagged StartServer choose the
+// backing store so the same test suite can run against memory,
+// Postgres, and EntDB.
 package integration
 
 import (
@@ -44,14 +36,16 @@ import (
 // the Connect client to make RPC calls, BaseURL to hit health/JWKS
 // endpoints, and KeyRing if they need to inspect signed tokens.
 type Harness struct {
-	BaseURL string
-	Client  identityconnectgen.IdentityServiceClient
-	HTTP    *http.Client
-	KeyRing *jwt.KeyRing
-	Repo    *MemRepo
-	Audit   *RecordingDB
-	Mailer  *RecordingMailer
-	Server  *httptest.Server
+	BaseURL  string
+	Client   identityconnectgen.IdentityServiceClient
+	HTTP     *http.Client
+	KeyRing  *jwt.KeyRing
+	TenantID string
+	Repo     service.Repository
+	DB       service.DB
+	Audit    *RecordingDB
+	Mailer   *RecordingMailer
+	Server   *httptest.Server
 }
 
 // RecordingMailer captures every email.Send call so tests can assert
@@ -91,14 +85,65 @@ func (m *RecordingMailer) Reset() {
 
 var _ email.Transport = (*RecordingMailer)(nil)
 
-// StartServer spins up an in-process identity service backed by an
-// in-memory repository and returns a Harness for driving it. The
-// server is torn down via t.Cleanup; callers do not need to close
-// it explicitly.
-func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
-	t.Helper()
+const (
+	testTypeUser             = 1
+	testTypeRefreshToken     = 5
+	testTypePasswordReset    = 19
+	testTypePasskeyCred      = 20
+	testTypePasskeyChallenge = 21
+	testTypeQrLoginSession   = 22
+	testTypeAuditEvent       = 26
 
-	cfg := newTestConfig()
+	testUserEmailField           = "1"
+	testRefreshUserIDField       = "2"
+	testPasswordResetUserIDField = "2"
+	testPasskeySignCountField    = "4"
+	testPasskeyChallengeField    = "1"
+	testQrExpiresAtField         = "8"
+	testQrUpdatedAtField         = "10"
+	testAuditEventTypeField      = "1"
+)
+
+// HarnessOption configures StartServer.
+type HarnessOption func(*harnessOptions)
+
+type harnessOptions struct {
+	oauthRegistry *oauth.Registry
+	config        func(*config.Config)
+}
+
+func applyHarnessOptions(cfg *config.Config, opts []HarnessOption) harnessOptions {
+	hOpts := harnessOptions{}
+	for _, o := range opts {
+		o(&hOpts)
+	}
+	if hOpts.config != nil {
+		hOpts.config(cfg)
+	}
+	return hOpts
+}
+
+// WithOAuthRegistry overrides the OAuth registry used by the harness.
+// Pass nil to leave OAuth disabled (the default).
+func WithOAuthRegistry(r *oauth.Registry) HarnessOption {
+	return func(o *harnessOptions) { o.oauthRegistry = r }
+}
+
+// WithConfig mutates the test config before the service graph is built.
+func WithConfig(fn func(*config.Config)) HarnessOption {
+	return func(o *harnessOptions) { o.config = fn }
+}
+
+func startHarness(
+	t *testing.T,
+	cfg *config.Config,
+	repo service.Repository,
+	db service.DB,
+	auditDB *RecordingDB,
+	mailer *RecordingMailer,
+	oauthRegistry *oauth.Registry,
+) *Harness {
+	t.Helper()
 
 	signingKey, err := jwt.GenerateKey("test-kid")
 	if err != nil {
@@ -118,28 +163,16 @@ func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 		t.Fatalf("init webauthn: %v", err)
 	}
 
-	repo := NewMemRepo()
-	auditDB := NewRecordingDB()
-	mailer := NewRecordingMailer()
-
-	hOpts := harnessOptions{}
-	for _, o := range opts {
-		o(&hOpts)
-	}
-	if hOpts.config != nil {
-		hOpts.config(cfg)
-	}
-
 	handler := app.New(app.Deps{
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,
 		Repo:           repo,
-		DB:             auditDB, // captures audit-event ExecuteAtomic calls
+		DB:             db,
 		Passkeys:       pkSvc,
 		TOTPKey:        []byte("01234567890123456789012345678901"),
 		EmailTransport: mailer,
-		OAuthRegistry:  hOpts.oauthRegistry,
+		OAuthRegistry:  oauthRegistry,
 	})
 
 	srv := httptest.NewServer(handler)
@@ -149,34 +182,17 @@ func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 	client := identityconnectgen.NewIdentityServiceClient(httpClient, srv.URL)
 
 	return &Harness{
-		BaseURL: srv.URL,
-		Client:  client,
-		HTTP:    httpClient,
-		KeyRing: keyRing,
-		Repo:    repo,
-		Audit:   auditDB,
-		Mailer:  mailer,
-		Server:  srv,
+		BaseURL:  srv.URL,
+		Client:   client,
+		HTTP:     httpClient,
+		KeyRing:  keyRing,
+		TenantID: cfg.DefaultTenantID,
+		Repo:     repo,
+		DB:       db,
+		Audit:    auditDB,
+		Mailer:   mailer,
+		Server:   srv,
 	}
-}
-
-// HarnessOption configures StartServer.
-type HarnessOption func(*harnessOptions)
-
-type harnessOptions struct {
-	oauthRegistry *oauth.Registry
-	config        func(*config.Config)
-}
-
-// WithOAuthRegistry overrides the OAuth registry used by the harness.
-// Pass nil to leave OAuth disabled (the default).
-func WithOAuthRegistry(r *oauth.Registry) HarnessOption {
-	return func(o *harnessOptions) { o.oauthRegistry = r }
-}
-
-// WithConfig mutates the test config before the service graph is built.
-func WithConfig(fn func(*config.Config)) HarnessOption {
-	return func(o *harnessOptions) { o.config = fn }
 }
 
 // AuthedClient returns a Connect client whose every request carries
@@ -187,6 +203,340 @@ func (h *Harness) AuthedClient(accessToken string) identityconnectgen.IdentitySe
 		bearerHTTPClient{base: h.HTTP, token: accessToken},
 		h.BaseURL,
 	)
+}
+
+func (h *Harness) FindUserIDByEmail(t *testing.T, email string) string {
+	t.Helper()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		user, err := h.Repo.FindUserByEmail(ctx, email)
+		if err == nil && user != nil {
+			return user.ID
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("FindUserByEmail(%q): %v", email, err)
+			}
+			t.Fatalf("FindUserByEmail(%q): user not found", email)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) WaitForUser(t *testing.T, email string, predicate func(*service.User) bool) *service.User {
+	t.Helper()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		user, err := h.Repo.FindUserByEmail(ctx, email)
+		if err == nil && user != nil && predicate(user) {
+			return user
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("FindUserByEmail(%q): %v", email, err)
+			}
+			t.Fatalf("user %q did not reach expected state", email)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) CountRefreshTokensForUser(t *testing.T, userID string) int {
+	t.Helper()
+	if repo, ok := h.Repo.(*MemRepo); ok {
+		return repo.CountRefreshTokensForUser(userID)
+	}
+	return h.queryNodeCount(t, testTypeRefreshToken, map[string]any{
+		testRefreshUserIDField: userID,
+	})
+}
+
+func (h *Harness) CountUsersByEmail(t *testing.T, email string) int {
+	t.Helper()
+	if repo, ok := h.Repo.(*MemRepo); ok {
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		n := 0
+		for _, user := range repo.users {
+			if user.Email == email {
+				n++
+			}
+		}
+		return n
+	}
+	return h.queryNodeCount(t, testTypeUser, map[string]any{
+		testUserEmailField: email,
+	})
+}
+
+func (h *Harness) CountPasswordResetTokensForUser(t *testing.T, userID string) int {
+	t.Helper()
+	if repo, ok := h.Repo.(*MemRepo); ok {
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		n := 0
+		for _, tok := range repo.passwordResets {
+			if tok.UserID == userID {
+				n++
+			}
+		}
+		return n
+	}
+	return h.queryNodeCount(t, testTypePasswordReset, map[string]any{
+		testPasswordResetUserIDField: userID,
+	})
+}
+
+func (h *Harness) CountAuditEventsByType(t *testing.T, eventType string) int {
+	t.Helper()
+	if h.Audit != nil {
+		return h.Audit.CountByEventType(eventType)
+	}
+	return h.queryNodeCount(t, testTypeAuditEvent, map[string]any{
+		testAuditEventTypeField: eventType,
+	})
+}
+
+func (h *Harness) ListPasskeyCredentials(t *testing.T, userID string) []*service.PasskeyCredRecord {
+	t.Helper()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		recs, err := h.Repo.ListPasskeyCredentials(ctx, userID)
+		if err == nil && len(recs) > 0 {
+			return recs
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("ListPasskeyCredentials(%q): %v", userID, err)
+			}
+			t.Fatalf("ListPasskeyCredentials(%q): no credentials found", userID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) SetPasskeyChallengeValue(t *testing.T, challengeID, challenge string) {
+	t.Helper()
+
+	if repo, ok := h.Repo.(*MemRepo); ok {
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		rec := repo.passkeyChallenges[challengeID]
+		if rec == nil {
+			t.Fatalf("passkey challenge %q not found", challengeID)
+		}
+		rec.Challenge = challenge
+		return
+	}
+
+	rec := h.waitForPasskeyChallenge(t, challengeID)
+	h.updateNode(t, testTypePasskeyChallenge, rec.NodeID, map[string]any{
+		testPasskeyChallengeField: challenge,
+	})
+	h.waitForPasskeyChallengeValue(t, challengeID, challenge)
+}
+
+func (h *Harness) SetPasskeyCredentialSignCount(t *testing.T, credentialID string, signCount int64) {
+	t.Helper()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rec, err := h.Repo.GetPasskeyCredentialByCredID(ctx, credentialID)
+		if err == nil && rec != nil {
+			if err := h.Repo.UpdatePasskeyCredential(ctx, rec.NodeID, map[string]any{"sign_count": signCount}); err != nil {
+				t.Fatalf("UpdatePasskeyCredential(%q): %v", credentialID, err)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("GetPasskeyCredentialByCredID(%q): %v", credentialID, err)
+			}
+			t.Fatalf("GetPasskeyCredentialByCredID(%q): credential not found", credentialID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) ExpireQrLoginSession(t *testing.T, sessionID string) {
+	t.Helper()
+
+	if repo, ok := h.Repo.(*MemRepo); ok {
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		for _, rec := range repo.qrSessions {
+			if rec.SessionID == sessionID {
+				rec.ExpiresAt = time.Now().Add(-time.Millisecond).UnixMilli()
+				return
+			}
+		}
+		t.Fatalf("FindQrLoginSession(%q): session not found", sessionID)
+	}
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rec, err := h.Repo.FindQrLoginSession(ctx, sessionID)
+		if err == nil && rec != nil {
+			nowMs := time.Now().UnixMilli()
+			h.updateNode(t, testTypeQrLoginSession, rec.NodeID, map[string]any{
+				testQrExpiresAtField: nowMs - 1,
+				testQrUpdatedAtField: nowMs,
+			})
+			h.WaitForQrLoginSession(t, sessionID, func(rec *service.QrLoginSessionRecord) bool {
+				return rec.ExpiresAt <= time.Now().UnixMilli()
+			})
+			return
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("FindQrLoginSession(%q): %v", sessionID, err)
+			}
+			t.Fatalf("FindQrLoginSession(%q): session not found", sessionID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) WaitForRefreshTokenCount(t *testing.T, userID string, want int) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if got := h.CountRefreshTokensForUser(t, userID); got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("refresh token count for %q did not reach %d", userID, want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) WaitForUserCount(t *testing.T, email string, want int) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if got := h.CountUsersByEmail(t, email); got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("user count for %q did not reach %d", email, want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) WaitForQrLoginSession(t *testing.T, sessionID string, predicate func(*service.QrLoginSessionRecord) bool) *service.QrLoginSessionRecord {
+	t.Helper()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rec, err := h.Repo.FindQrLoginSession(ctx, sessionID)
+		if err == nil && rec != nil && predicate(rec) {
+			return rec
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("FindQrLoginSession(%q): %v", sessionID, err)
+			}
+			t.Fatalf("qr session %q did not reach expected state", sessionID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) WaitForTotpCredential(t *testing.T, userID string, predicate func(*service.TotpCredRecord) bool) *service.TotpCredRecord {
+	t.Helper()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rec, err := h.Repo.GetTotpCredential(ctx, userID)
+		if err == nil && rec != nil && predicate(rec) {
+			return rec
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("GetTotpCredential(%q): %v", userID, err)
+			}
+			t.Fatalf("totp credential for %q did not reach expected state", userID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) queryNodeCount(t *testing.T, typeID int, filter map[string]any) int {
+	t.Helper()
+
+	nodes, err := h.DB.QueryNodes(context.Background(), h.TenantID, "user:system", typeID, filter)
+	if err != nil {
+		t.Fatalf("QueryNodes(type=%d, filter=%v): %v", typeID, filter, err)
+	}
+	return len(nodes)
+}
+
+func (h *Harness) waitForPasskeyChallenge(t *testing.T, challengeID string) *service.PasskeyChallengeRecord {
+	t.Helper()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rec, err := h.Repo.GetPasskeyChallenge(ctx, challengeID)
+		if err == nil && rec != nil {
+			return rec
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("GetPasskeyChallenge(%q): %v", challengeID, err)
+			}
+			t.Fatalf("GetPasskeyChallenge(%q): challenge not found", challengeID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) waitForPasskeyChallengeValue(t *testing.T, challengeID, want string) {
+	t.Helper()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rec, err := h.Repo.GetPasskeyChallenge(ctx, challengeID)
+		if err == nil && rec != nil && rec.Challenge == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("GetPasskeyChallenge(%q): %v", challengeID, err)
+			}
+			t.Fatalf("passkey challenge %q did not reach expected value", challengeID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *Harness) updateNode(t *testing.T, typeID int, nodeID string, patch map[string]any) {
+	t.Helper()
+
+	_, err := h.DB.ExecuteAtomic(context.Background(), h.TenantID, "user:system", "", []entdb.Operation{{
+		Type:   entdb.OpUpdateNode,
+		TypeID: typeID,
+		NodeID: nodeID,
+		Patch:  patch,
+	}})
+	if err != nil {
+		t.Fatalf("ExecuteAtomic(update type=%d node=%q): %v", typeID, nodeID, err)
+	}
 }
 
 // bearerHTTPClient is a connect.HTTPClient that injects a Bearer

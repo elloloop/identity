@@ -11,6 +11,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passwords"
 )
@@ -25,6 +27,23 @@ var (
 	dummyPasswordHashOnce sync.Once
 )
 
+const (
+	passwordSignupMinDuration = 250 * time.Millisecond
+	oauthStateTokenExpiry     = 5 * time.Minute
+	maxInt32                  = int32(1<<31 - 1)
+)
+
+func secondsToInt32(seconds int) int32 {
+	switch {
+	case seconds <= 0:
+		return 0
+	case seconds > int(maxInt32):
+		return maxInt32
+	default:
+		return int32(seconds)
+	}
+}
+
 func getDummyPasswordHash() string {
 	dummyPasswordHashOnce.Do(func() {
 		h, err := passwords.Hash("dummy-fixed-password-for-timing-equalization")
@@ -37,6 +56,22 @@ func getDummyPasswordHash() string {
 		dummyPasswordHash = h
 	})
 	return dummyPasswordHash
+}
+
+func finishPasswordSignupFloor(start time.Time) {
+	if wait := time.Until(start.Add(passwordSignupMinDuration)); wait > 0 {
+		time.Sleep(wait)
+	}
+}
+
+func fallbackDisplayName(email, preferred string) string {
+	if name := strings.TrimSpace(preferred); name != "" {
+		return name
+	}
+	if local, _, ok := strings.Cut(email, "@"); ok && local != "" {
+		return local
+	}
+	return "there"
 }
 
 // ── PasswordSignup ─────────────────────────────────────────────────────
@@ -59,24 +94,23 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	if err := validatePasswordStrength(password); err != nil {
 		return nil, err
 	}
-
-	existing, err := s.repo.FindUserByEmail(ctx, email)
-	if err != nil {
-		return nil, err
-	}
-	if existing != nil {
-		return nil, fmt.Errorf("%w: user already exists", ErrAlreadyExists)
-	}
+	start := time.Now()
+	defer finishPasswordSignupFloor(start)
 
 	pwHash, err := passwords.Hash(password)
 	if err != nil {
 		return nil, fmt.Errorf("hashing password: %w", err)
 	}
 
-	displayName := name
-	if displayName == "" {
-		displayName = strings.Split(email, "@")[0]
+	existing, err := s.repo.FindUserByEmail(ctx, email)
+	if err != nil {
+		return nil, err
 	}
+	if existing != nil {
+		return s.handleDuplicatePasswordSignup(ctx, existing, email, name)
+	}
+
+	displayName := fallbackDisplayName(email, name)
 	now := s.nowMs()
 	recEmail := strings.TrimSpace(strings.ToLower(recoveryEmail))
 
@@ -91,6 +125,10 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		UpdatedAt:     msToTime(now),
 	})
 	if err != nil {
+		existing, lookupErr := s.repo.FindUserByEmail(ctx, email)
+		if lookupErr == nil && existing != nil {
+			return s.handleDuplicatePasswordSignup(ctx, existing, email, name)
+		}
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
 
@@ -104,7 +142,6 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		UpdatedAt: msToTime(now),
 	}
 	s.logger.Info("local_signup_success", zap.String("email", email), zap.String("user_id", userID))
-	s.ensureMailbox(ctx, userID, email, displayName)
 
 	// Best-effort: fire a verification email. Failures are logged but
 	// must never fail signup itself.
@@ -128,7 +165,73 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+	}, nil
+}
+
+func (s *AuthService) handleDuplicatePasswordSignup(ctx context.Context, user *User, email, name string) (*LoginResult, error) {
+	if err := s.sendExistingSignupNotice(ctx, user); err != nil {
+		s.logger.Warn("duplicate_signup_notice_failed",
+			zap.String("user_id", user.ID),
+			zap.String("email", email),
+			zap.Error(err),
+		)
+	}
+	s.logger.Info("local_signup_existing_email", zap.String("email", email), zap.String("user_id", user.ID))
+	return s.newDuplicateSignupResult(email, fallbackDisplayName(email, name))
+}
+
+func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) error {
+	loginURL := s.appBaseURL()
+	text := strings.Join([]string{
+		fmt.Sprintf("Hi %s,", displayNameOrEmail(user)),
+		"",
+		"Someone tried to sign up with this email address.",
+		"",
+		"If this was you, sign in to your existing account here:",
+		loginURL,
+		"",
+		"If this wasn't you, you can ignore this email.",
+	}, "\n")
+	return s.mailer.Send(ctx, email.Message{
+		To:      user.Email,
+		From:    s.cfg.SMTPFrom,
+		Subject: "Someone tried to sign up with your email",
+		Text:    text,
+	})
+}
+
+func (s *AuthService) newDuplicateSignupResult(email, displayName string) (*LoginResult, error) {
+	now := s.nowMs()
+	user := &User{
+		ID:        "signup-pending-" + randomToken(8),
+		Email:     email,
+		Name:      displayName,
+		Role:      "member",
+		Status:    "active",
+		CreatedAt: msToTime(now),
+		UpdatedAt: msToTime(now),
+	}
+	// Duplicate signup must not authenticate the caller, but it also
+	// must not disclose whether the address already exists. We return a
+	// success-shaped payload with an unstored refresh token and a JWT for
+	// a synthetic subject that is absent from the repository.
+	accessToken, err := jwt.CreateAccessToken(jwt.Claims{
+		Sub:    user.ID,
+		Email:  user.Email,
+		Name:   user.Name,
+		Role:   user.Role,
+		Tenant: s.tenantID,
+	}, s.keyRing, s.cfg.JWTExpiry())
+	if err != nil {
+		return nil, fmt.Errorf("creating duplicate-signup decoy token: %w", err)
+	}
+	refreshToken, _ := generateRefreshToken()
+	return &LoginResult{
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 
@@ -231,7 +334,8 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return nil, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
-	// Enforce account status.
+	// Local password accounts may sign in before verifying email; only
+	// account status is a hard gate here.
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
 		return nil, err
 	}
@@ -268,11 +372,78 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 
 // ── OAuthLogin ─────────────────────────────────────────────────────────
+
+// BeginOAuthLogin returns a provider authorization URL plus the
+// server-minted state artifacts needed to complete the callback safely.
+func (s *AuthService) BeginOAuthLogin(
+	ctx context.Context,
+	provider, redirectURI string,
+) (*OAuthBeginResult, error) {
+	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
+		return nil, ErrOAuthDisabled
+	}
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	redirectURI = strings.TrimSpace(redirectURI)
+	if provider == "" {
+		return nil, fmt.Errorf("%w: provider is required", ErrInvalidArgument)
+	}
+	if redirectURI == "" {
+		return nil, fmt.Errorf("%w: redirect uri is required", ErrInvalidArgument)
+	}
+
+	exchanger, ok := s.oauthRegistry.Get(provider)
+	if !ok {
+		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
+	}
+	authorizer, ok := exchanger.(oauth.Authorizer)
+	if !ok {
+		return nil, fmt.Errorf("%w: oauth provider %q cannot start authorization", ErrInvalidArgument, provider)
+	}
+
+	state, err := oauth.GenerateState()
+	if err != nil {
+		return nil, fmt.Errorf("generating oauth state: %w", err)
+	}
+	codeVerifier, err := oauth.GenerateCodeVerifier()
+	if err != nil {
+		return nil, fmt.Errorf("generating oauth code verifier: %w", err)
+	}
+	stateToken, err := oauth.IssueStateToken(
+		s.keyRing,
+		provider,
+		redirectURI,
+		state,
+		codeVerifier,
+		oauthStateTokenExpiry,
+		s.nowFunc().UTC(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+	}
+	authorizationURL, err := authorizer.AuthorizationURL(
+		ctx,
+		redirectURI,
+		state,
+		oauth.CodeChallengeS256(codeVerifier),
+	)
+	if err != nil {
+		_, mappedErr := s.mapOAuthError(err)
+		return nil, mappedErr
+	}
+
+	return &OAuthBeginResult{
+		AuthorizationURL: authorizationURL,
+		State:            state,
+		StateToken:       stateToken,
+		CodeVerifier:     codeVerifier,
+		ExpiresIn:        int32(oauthStateTokenExpiry / time.Second),
+	}, nil
+}
 
 // OAuthLogin performs the full OAuth code-exchange flow: it looks up
 // the registered Exchanger for the provider, swaps the code for a
@@ -283,22 +454,50 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 // refresh tokens are discarded — they are not persisted.
 func (s *AuthService) OAuthLogin(
 	ctx context.Context,
-	code, provider, redirectURI, ipAddr, userAgent string,
+	code, provider, redirectURI, codeVerifier, state, stateToken, ipAddr, userAgent string,
 ) (*LoginResult, error) {
 	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
 		return nil, ErrOAuthDisabled
 	}
 	provider = strings.ToLower(strings.TrimSpace(provider))
+	redirectURI = strings.TrimSpace(redirectURI)
 	if provider == "" {
 		return nil, fmt.Errorf("%w: provider is required", ErrInvalidArgument)
 	}
 	if strings.TrimSpace(code) == "" {
 		return nil, fmt.Errorf("%w: code is required", ErrInvalidArgument)
 	}
+	if redirectURI == "" {
+		return nil, fmt.Errorf("%w: redirect uri is required", ErrInvalidArgument)
+	}
 
 	exchanger, ok := s.oauthRegistry.Get(provider)
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
+	}
+
+	if strings.TrimSpace(stateToken) != "" {
+		claims, err := oauth.VerifyStateToken(
+			stateToken,
+			s.keyRing,
+			provider,
+			redirectURI,
+			state,
+			codeVerifier,
+			s.nowFunc().UTC(),
+		)
+		if err != nil {
+			s.logger.Info("oauth_state_validation_failed",
+				zap.String("provider", provider),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("%w: invalid oauth state", ErrUnauthenticated)
+		}
+		codeVerifier = claims.CodeVerifier
+	}
+
+	if strings.TrimSpace(codeVerifier) != "" {
+		ctx = oauth.WithCodeVerifier(ctx, codeVerifier)
 	}
 
 	identity, err := exchanger.Exchange(ctx, code, redirectURI)
@@ -338,10 +537,6 @@ func (s *AuthService) OAuthLogin(
 		zap.String("user_id", user.ID),
 	)
 
-	if isNew {
-		s.ensureMailbox(ctx, user.ID, email, identity.Name)
-	}
-
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
 	if err != nil {
 		return nil, err
@@ -361,7 +556,7 @@ func (s *AuthService) OAuthLogin(
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 
@@ -380,14 +575,12 @@ func (s *AuthService) mapOAuthError(err error) (*LoginResult, error) {
 	}
 }
 
-// upsertOAuthUser is the OAuth-aware variant of upsertUser. It resolves
-// the local User using a (provider, provider_user_id) lookup first so
-// that a returning user keeps the same local account even when the
-// provider's email has changed since their last login. If no link
-// exists yet it falls back to the email-based lookup (first-time link
-// to an existing local user) and finally creates a new user. In either
-// non-replay branch it persists an OAuthIdentity row so the next login
-// hits the fast path.
+// upsertOAuthUser resolves the local User using a (provider,
+// provider_user_id) lookup first so that a returning user keeps the same
+// local account even when the provider's email has changed since their
+// last login. If no link exists yet it falls back to the email-based
+// lookup and finally creates a new user. In either non-replay branch it
+// persists an OAuthIdentity row so the next login hits the fast path.
 //
 // Returns (user, isNewUser, error). isNewUser is true only when a new
 // User row was created (not when an existing user got a fresh provider
@@ -421,10 +614,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	}
 
 	// 3. New user.
-	displayName := identity.Name
-	if displayName == "" {
-		displayName = strings.Split(email, "@")[0]
-	}
+	displayName := fallbackDisplayName(email, identity.Name)
 	userID, err := s.repo.CreateUser(ctx, &User{
 		Email:           email,
 		Name:            displayName,
@@ -537,59 +727,6 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 	)
 }
 
-// upsertUser finds a user by email or creates one. Returns (user, isNew, error).
-func (s *AuthService) upsertUser(ctx context.Context, email, displayName, avatarURL string) (*User, bool, error) {
-	existing, err := s.repo.FindUserByEmail(ctx, email)
-	if err != nil {
-		return nil, false, err
-	}
-	if existing != nil {
-		changed := make(map[string]any)
-		if displayName != "" && displayName != existing.Name {
-			changed["name"] = displayName
-		}
-		if avatarURL != "" && avatarURL != existing.AvatarURL {
-			changed["avatar_url"] = avatarURL
-		}
-		if len(changed) > 0 {
-			changed["updated_at"] = s.nowMs()
-			if err := s.repo.UpdateUser(ctx, existing.ID, changed); err != nil {
-				s.logger.Warn("upsert_user_update_failed", zap.Error(err))
-			}
-		}
-		return existing, false, nil
-	}
-
-	now := s.nowMs()
-	if displayName == "" {
-		displayName = strings.Split(email, "@")[0]
-	}
-	userID, err := s.repo.CreateUser(ctx, &User{
-		Email:     email,
-		Name:      displayName,
-		AvatarURL: avatarURL,
-		Role:      "member",
-		Status:    "active",
-		CreatedAt: msToTime(now),
-		UpdatedAt: msToTime(now),
-	})
-	if err != nil {
-		return nil, false, fmt.Errorf("creating user: %w", err)
-	}
-	user := &User{
-		ID:        userID,
-		Email:     email,
-		Name:      displayName,
-		AvatarURL: avatarURL,
-		Role:      "member",
-		Status:    "active",
-		CreatedAt: msToTime(now),
-		UpdatedAt: msToTime(now),
-	}
-	s.logger.Info("user_auto_provisioned", zap.String("email", email), zap.String("user_id", userID))
-	return user, true, nil
-}
-
 // checkAccountStatus verifies the user's status allows login.
 func (s *AuthService) checkAccountStatus(_ context.Context, user *User, _, _ string) error {
 	status := strings.ToLower(user.Status)
@@ -684,7 +821,7 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 

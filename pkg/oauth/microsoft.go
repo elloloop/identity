@@ -15,9 +15,10 @@ import (
 
 // Default Microsoft Azure AD common-endpoint URLs.
 const (
-	microsoftTokenURL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-	microsoftJWKSURL  = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
-	microsoftIssuerFormat = "https://login.microsoftonline.com/%s/v2.0"
+	microsoftAuthorizationFormat = "https://login.microsoftonline.com/%s/oauth2/v2.0/authorize"
+	microsoftExchangeEndpoint    = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+	microsoftJWKSURL             = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
+	microsoftIssuerFormat        = "https://login.microsoftonline.com/%s/v2.0"
 )
 
 // MicrosoftConfig configures a Microsoft Azure AD Exchanger.
@@ -27,11 +28,19 @@ type MicrosoftConfig struct {
 
 	HTTPClient *http.Client
 
+	// AuthorizationURL overrides the authorization endpoint. Optional.
+	AuthorizationURL string
+
 	// TokenURL overrides the token endpoint. Optional.
 	TokenURL string
 
 	// JWKSURL overrides the JWKS endpoint. Optional.
 	JWKSURL string
+
+	// TenantID controls the default tenant segment in the authorization
+	// endpoint when AuthorizationURL is not set. Optional; defaults to
+	// "common".
+	TenantID string
 
 	// IssuerFormat is a fmt.Sprintf format string into which the
 	// token's `tid` (tenant id) claim is interpolated to derive the
@@ -52,7 +61,7 @@ type microsoftExchanger struct {
 // NewMicrosoft returns an Exchanger for Microsoft Azure AD.
 func NewMicrosoft(cfg MicrosoftConfig) Exchanger {
 	if cfg.TokenURL == "" {
-		cfg.TokenURL = microsoftTokenURL
+		cfg.TokenURL = microsoftExchangeEndpoint
 	}
 	if cfg.JWKSURL == "" {
 		cfg.JWKSURL = microsoftJWKSURL
@@ -121,6 +130,9 @@ func (m *microsoftExchanger) Exchange(ctx context.Context, code, redirectURI str
 	form.Set("redirect_uri", redirectURI)
 	form.Set("grant_type", "authorization_code")
 	form.Set("scope", "openid email profile")
+	if codeVerifier := codeVerifierFromContext(ctx); codeVerifier != "" {
+		form.Set("code_verifier", codeVerifier)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.cfg.TokenURL,
 		strings.NewReader(form.Encode()))
@@ -189,6 +201,30 @@ func (m *microsoftExchanger) Exchange(ctx context.Context, code, redirectURI str
 		AvatarURL:      claims.Picture,
 		Provider:       "microsoft",
 	}, nil
+}
+
+func (m *microsoftExchanger) AuthorizationURL(_ context.Context, redirectURI, state, codeChallenge string) (string, error) {
+	if m.cfg.ClientID == "" {
+		return "", fmt.Errorf("%w: client credentials not configured", ErrCodeExchangeFailed)
+	}
+	authURL := m.cfg.AuthorizationURL
+	if authURL == "" {
+		tenant := strings.TrimSpace(m.cfg.TenantID)
+		if tenant == "" {
+			tenant = "common"
+		}
+		authURL = fmt.Sprintf(microsoftAuthorizationFormat, tenant)
+	}
+
+	params := url.Values{}
+	params.Set("client_id", m.cfg.ClientID)
+	params.Set("redirect_uri", redirectURI)
+	params.Set("response_type", "code")
+	params.Set("scope", "openid email profile")
+	if err := addPKCEParams(params, state, codeChallenge); err != nil {
+		return "", err
+	}
+	return buildAuthorizationURL(authURL, params)
 }
 
 func (m *microsoftExchanger) verifyIDToken(ctx context.Context, raw string) (*microsoftIDClaims, error) {

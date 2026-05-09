@@ -63,6 +63,23 @@ func TestAuthMiddleware_ExemptPath_NoToken_Passes(t *testing.T) {
 	assert.Empty(t, userID, "user ID should not be set when no token is provided")
 }
 
+func TestAuthMiddleware_BeginOAuthLogin_ExemptNoToken_Passes(t *testing.T) {
+	kr := testKeyRing(t)
+	var called bool
+	var userID string
+
+	handler := AuthMiddleware(kr, "")(echoHandler(&called, &userID))
+
+	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/BeginOAuthLogin", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.True(t, called, "handler should have been called")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, userID)
+}
+
 func TestAuthMiddleware_ExemptPath_WithToken_InjectsUserID(t *testing.T) {
 	kr := testKeyRing(t)
 	token := testToken(t, kr, "user-42", 15*time.Minute)

@@ -123,6 +123,59 @@ func TestRequestEmailChange_NewEmailAlreadyInUseRejected(t *testing.T) {
 	}
 }
 
+func TestRequestEmailChange_UniquenessLookupErrorFailsClosed(t *testing.T) {
+	t.Parallel()
+	repo := newErrorRepo()
+	user := seedUserWithPassword(t, repo.fakeRepo, "old@test.com", "Str0ng!Pass1")
+	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
+
+	repo.failFindUserByEmail = true
+	err := svc.RequestEmailChange(context.Background(), user.ID, "new@test.com", "Str0ng!Pass1")
+	if err == nil {
+		t.Fatal("expected uniqueness lookup error, got nil")
+	}
+	if got := len(rec.Sent()); got != 0 {
+		t.Fatalf("no emails should be sent when uniqueness cannot be checked, got %d", got)
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if got := len(repo.emailChanges); got != 0 {
+		t.Fatalf("no email-change token should be created when uniqueness cannot be checked, got %d", got)
+	}
+}
+
+func TestRequestEmailChange_UserLookupErrorFailsClosed(t *testing.T) {
+	t.Parallel()
+	repo := newErrorRepo()
+	user := seedUserWithPassword(t, repo.fakeRepo, "old@test.com", "Str0ng!Pass1")
+	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
+
+	repo.failGetUser = true
+	err := svc.RequestEmailChange(context.Background(), user.ID, "new@test.com", "Str0ng!Pass1")
+	if err == nil {
+		t.Fatal("expected user lookup error, got nil")
+	}
+	if got := len(rec.Sent()); got != 0 {
+		t.Fatalf("no emails should be sent when user lookup fails, got %d", got)
+	}
+}
+
+func TestRequestEmailChange_TokenCreateFailureDoesNotSendEmails(t *testing.T) {
+	t.Parallel()
+	repo := newErrorRepo()
+	user := seedUserWithPassword(t, repo.fakeRepo, "old@test.com", "Str0ng!Pass1")
+	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
+
+	repo.failCreateEmailChangeToken = true
+	err := svc.RequestEmailChange(context.Background(), user.ID, "new@test.com", "Str0ng!Pass1")
+	if err == nil {
+		t.Fatal("expected token create error, got nil")
+	}
+	if got := len(rec.Sent()); got != 0 {
+		t.Fatalf("no emails should be sent when token persistence fails, got %d", got)
+	}
+}
+
 func TestRequestEmailChange_SameAsCurrentRejected(t *testing.T) {
 	t.Parallel()
 	svc, repo, _ := newAuthSvcWithMailer(t)
@@ -143,12 +196,60 @@ func TestRequestEmailChange_InvalidNewEmailRejected(t *testing.T) {
 	}
 }
 
+func TestLooksLikeEmailRejectsMalformedAddresses(t *testing.T) {
+	t.Parallel()
+	cases := map[string]bool{
+		"alice@example.com":       true,
+		"alice@example":           false,
+		"alice example@test.com":  false,
+		"alice@example.com\nbcc":  false,
+		"@example.com":            false,
+		"alice@":                  false,
+		"alice@sub.example.com":   true,
+		"alice+label@example.com": true,
+	}
+	for addr, want := range cases {
+		if got := looksLikeEmail(addr); got != want {
+			t.Fatalf("looksLikeEmail(%q) = %v, want %v", addr, got, want)
+		}
+	}
+}
+
 func TestRequestEmailChange_UnknownUser(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newAuthSvcWithMailer(t)
 	err := svc.RequestEmailChange(context.Background(), "no-such-user", "new@test.com", "Str0ng!Pass1")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown user: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestRequestEmailChange_RejectsMissingRequiredFields(t *testing.T) {
+	t.Parallel()
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	user := seedUserWithPassword(t, repo, "old@test.com", "Str0ng!Pass1")
+
+	cases := []struct {
+		name  string
+		id    string
+		email string
+		pass  string
+		want  error
+	}{
+		{"missing_user", "", "new@test.com", "Str0ng!Pass1", ErrUnauthenticated},
+		{"missing_email", user.ID, " ", "Str0ng!Pass1", ErrInvalidArgument},
+		{"missing_password", user.ID, "new@test.com", "", ErrInvalidArgument},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			err := svc.RequestEmailChange(context.Background(), tt.id, tt.email, tt.pass)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("want %v, got %v", tt.want, err)
+			}
+			if got := len(rec.Sent()); got != 0 {
+				t.Fatalf("no emails should be sent on invalid request, got %d", got)
+			}
+		})
 	}
 }
 
@@ -168,6 +269,20 @@ func requestAndExtractChangeToken(t *testing.T, svc *AuthService, repo *fakeRepo
 	}
 	_ = repo
 	return extractChangeTokenFromBody(t, sent[0].Text)
+}
+
+func createEmailChangeToken(t *testing.T, repo Repository, user *User, token, newEmail string) {
+	t.Helper()
+	if err := repo.CreateEmailChangeToken(context.Background(), &EmailChangeToken{
+		TokenHash: sha256Hex(token),
+		UserID:    user.ID,
+		OldEmail:  user.Email,
+		NewEmail:  newEmail,
+		ExpiresAt: nowMs() + 60_000,
+		CreatedAt: nowMs(),
+	}); err != nil {
+		t.Fatalf("CreateEmailChangeToken: %v", err)
+	}
 }
 
 func TestConfirmEmailChange_Success(t *testing.T) {
@@ -229,6 +344,18 @@ func TestConfirmEmailChange_InvalidToken(t *testing.T) {
 	}
 }
 
+func TestConfirmEmailChange_TokenLookupError(t *testing.T) {
+	t.Parallel()
+	repo := newErrorRepo()
+	svc, _ := newAuthSvcWithMailerForRepo(t, repo)
+
+	repo.failFindEmailChangeToken = true
+	_, err := svc.ConfirmEmailChange(context.Background(), "email-change-token")
+	if err == nil {
+		t.Fatal("expected token lookup error, got nil")
+	}
+}
+
 func TestConfirmEmailChange_MissingToken(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newAuthSvcWithMailer(t)
@@ -254,6 +381,26 @@ func TestConfirmEmailChange_ExpiredToken(t *testing.T) {
 	_, err := svc.ConfirmEmailChange(context.Background(), tok)
 	if !errors.Is(err, ErrTokenExpired) {
 		t.Errorf("expired: want ErrTokenExpired, got %v", err)
+	}
+}
+
+func TestConfirmEmailChange_UserMissingLeavesTokenUnconsumed(t *testing.T) {
+	t.Parallel()
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	user := &User{ID: "missing-user", Email: "old@test.com"}
+	tok := "missing-user-token"
+	createEmailChangeToken(t, repo, user, tok, "new@test.com")
+
+	_, err := svc.ConfirmEmailChange(context.Background(), tok)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+	stored, _ := repo.FindEmailChangeTokenByHash(context.Background(), sha256Hex(tok))
+	if stored == nil {
+		t.Fatal("token should remain stored")
+	}
+	if stored.ConsumedAt != 0 {
+		t.Fatalf("token must remain unconsumed when the user is missing, got %d", stored.ConsumedAt)
 	}
 }
 
@@ -303,5 +450,119 @@ func TestConfirmEmailChange_NewEmailClaimedBeforeConfirm(t *testing.T) {
 	got, _ := repo.GetUser(context.Background(), user.ID)
 	if got.Email != "old@test.com" {
 		t.Errorf("user email must be unchanged, got %q", got.Email)
+	}
+}
+
+func TestConfirmEmailChange_UniquenessLookupErrorLeavesTokenUnconsumed(t *testing.T) {
+	t.Parallel()
+	repo := newErrorRepo()
+	user := seedUserWithPassword(t, repo.fakeRepo, "old@test.com", "Str0ng!Pass1")
+	svc, _ := newAuthSvcWithMailerForRepo(t, repo)
+
+	tok := "email-change-token"
+	createEmailChangeToken(t, repo, user, tok, "new@test.com")
+
+	repo.failFindUserByEmail = true
+	_, err := svc.ConfirmEmailChange(context.Background(), tok)
+	if err == nil {
+		t.Fatal("expected uniqueness lookup error, got nil")
+	}
+
+	stored, _ := repo.FindEmailChangeTokenByHash(context.Background(), sha256Hex(tok))
+	if stored == nil {
+		t.Fatal("token should remain stored")
+	}
+	if stored.ConsumedAt != 0 {
+		t.Fatalf("token must remain unconsumed when uniqueness cannot be checked, got %d", stored.ConsumedAt)
+	}
+	got, _ := repo.GetUser(context.Background(), user.ID)
+	if got.Email != "old@test.com" {
+		t.Fatalf("user email changed despite failed uniqueness check: %q", got.Email)
+	}
+}
+
+func TestConfirmEmailChange_UpdateFailureLeavesTokenAndSessionsUntouched(t *testing.T) {
+	t.Parallel()
+	repo := newErrorRepo()
+	user := seedUserWithPassword(t, repo.fakeRepo, "old@test.com", "Str0ng!Pass1")
+	svc, _ := newAuthSvcWithMailerForRepo(t, repo)
+	if _, err := repo.CreateRefreshToken(context.Background(), &RefreshTokenRecord{
+		TokenHash: "rh-1", UserID: user.ID, ExpiresAt: nowMs() + 60_000,
+	}); err != nil {
+		t.Fatalf("create refresh: %v", err)
+	}
+	tok := "update-failure-token"
+	createEmailChangeToken(t, repo, user, tok, "new@test.com")
+
+	repo.failUpdateUserEmail = true
+	_, err := svc.ConfirmEmailChange(context.Background(), tok)
+	if err == nil {
+		t.Fatal("expected email update error, got nil")
+	}
+	stored, _ := repo.FindEmailChangeTokenByHash(context.Background(), sha256Hex(tok))
+	if stored == nil {
+		t.Fatal("token should remain stored")
+	}
+	if stored.ConsumedAt != 0 {
+		t.Fatalf("token must remain unconsumed when email update fails, got %d", stored.ConsumedAt)
+	}
+	if list, _ := repo.refreshTokenSnapshot(); len(list) != 1 {
+		t.Fatalf("refresh token must remain active when email update fails, got %d tokens", len(list))
+	}
+	got, _ := repo.GetUser(context.Background(), user.ID)
+	if got.Email != "old@test.com" {
+		t.Fatalf("user email changed despite update failure: %q", got.Email)
+	}
+}
+
+func TestConfirmEmailChange_PostUpdateSideEffectFailuresStillReturnUpdatedUser(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name                    string
+		failMarkConsumed        bool
+		failDeleteRefreshTokens bool
+		wantRefreshCount        int
+		wantConsumed            bool
+	}{
+		{"consume_failure", true, false, 0, false},
+		{"session_revoke_failure", false, true, 1, true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newErrorRepo()
+			user := seedUserWithPassword(t, repo.fakeRepo, "old@test.com", "Str0ng!Pass1")
+			svc, _ := newAuthSvcWithMailerForRepo(t, repo)
+			if _, err := repo.CreateRefreshToken(context.Background(), &RefreshTokenRecord{
+				TokenHash: "rh-1", UserID: user.ID, ExpiresAt: nowMs() + 60_000,
+			}); err != nil {
+				t.Fatalf("create refresh: %v", err)
+			}
+			tok := "side-effect-token-" + tt.name
+			createEmailChangeToken(t, repo, user, tok, "new@test.com")
+			repo.failMarkEmailChangeConsumed = tt.failMarkConsumed
+			repo.failDeleteRefreshTokensForUser = tt.failDeleteRefreshTokens
+
+			got, err := svc.ConfirmEmailChange(context.Background(), tok)
+			if err != nil {
+				t.Fatalf("ConfirmEmailChange: %v", err)
+			}
+			if got.Email != "new@test.com" || !got.EmailVerified {
+				t.Fatalf("returned user not updated: %+v", got)
+			}
+			stored, _ := repo.FindEmailChangeTokenByHash(context.Background(), sha256Hex(tok))
+			if stored == nil {
+				t.Fatal("token should remain queryable")
+			}
+			if (stored.ConsumedAt > 0) != tt.wantConsumed {
+				t.Fatalf("consumed=%v, want %v; token=%+v", stored.ConsumedAt > 0, tt.wantConsumed, stored)
+			}
+			if list, _ := repo.refreshTokenSnapshot(); len(list) != tt.wantRefreshCount {
+				t.Fatalf("refresh token count = %d, want %d", len(list), tt.wantRefreshCount)
+			}
+			updated, _ := repo.GetUser(context.Background(), user.ID)
+			if updated.Email != "new@test.com" || !updated.EmailVerified {
+				t.Fatalf("repo user not updated: %+v", updated)
+			}
+		})
 	}
 }

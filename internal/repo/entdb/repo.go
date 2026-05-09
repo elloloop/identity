@@ -1,12 +1,10 @@
 // Package entdb is the EntDB-backed implementation of
 // service.Repository.
 //
-// Every read and write goes through the upstream SDK's PUBLIC typed
-// API: Plan.Create(&schemapb.User{...}), entdb.Get[*schemapb.User],
-// entdb.Query[*schemapb.User]. There is no shim layer mirroring the
-// raw RPC method names, no field-id-string constants, no
-// map[string]any payloads — every payload is a typed proto message
-// from gen/go/identity/schema.
+// Writes and point reads go through the upstream SDK's typed API.
+// List-style reads go through the raw node transport because the
+// current typed query path drops node ids and misbehaves for several
+// auth-state filters this repository depends on.
 package entdb
 
 import (
@@ -30,6 +28,10 @@ const systemActor = "user:system"
 type entRepository struct {
 	client   entClient
 	tenantID string
+}
+
+type rawUpdateClient interface {
+	rawUpdate(ctx context.Context, actor string, typeID int, nodeID string, patch map[string]any) error
 }
 
 // NewRepository constructs an EntDB-backed Repository using the SDK's
@@ -137,65 +139,128 @@ func (r *entRepository) CreateUser(ctx context.Context, u *service.User) (string
 	if err != nil {
 		return "", fmt.Errorf("repo: CreateUser: %w", err)
 	}
+	if err := r.waitForCanonicalUserByEmail(ctx, u.Email, id); err != nil {
+		return "", fmt.Errorf("repo: CreateUser: %w", err)
+	}
 	u.ID = id
 	return id, nil
+}
+
+func (r *entRepository) waitForCanonicalUserByEmail(ctx context.Context, email, wantID string) error {
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var lastErr error
+	var stableSince time.Time
+	for {
+		rows, err := r.queryUsersByEmail(waitCtx, email)
+		if err == nil && len(rows) > 0 {
+			winnerID := canonicalUserNodeID(rows)
+			switch {
+			case winnerID == wantID && len(rows) == 1:
+				if stableSince.IsZero() {
+					stableSince = time.Now()
+				}
+				if time.Since(stableSince) >= 100*time.Millisecond {
+					return nil
+				}
+			case winnerID == wantID:
+				stableSince = time.Time{}
+				if err := r.deleteOtherUsers(waitCtx, rows, wantID); err != nil {
+					lastErr = err
+				}
+			default:
+				if cleanupErr := r.deleteUser(waitCtx, wantID); cleanupErr != nil {
+					return fmt.Errorf("duplicate user cleanup for %q: %w", wantID, cleanupErr)
+				}
+				return fmt.Errorf("email %q already claimed by %s", email, winnerID)
+			}
+		} else {
+			stableSince = time.Time{}
+		}
+		if err != nil {
+			lastErr = err
+		}
+		if waitCtx.Err() != nil {
+			if lastErr != nil {
+				return lastErr
+			}
+			return waitCtx.Err()
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func (r *entRepository) queryUsersByEmail(ctx context.Context, email string) ([]queriedNode, error) {
+	return r.client.query(ctx, systemActor, &schemapb.User{}, map[string]any{"email": email})
+}
+
+func canonicalUserNodeID(rows []queriedNode) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	winner := rows[0]
+	for _, row := range rows[1:] {
+		if compareUserRows(row, winner) < 0 {
+			winner = row
+		}
+	}
+	return winner.NodeID
+}
+
+func compareUserRows(a, b queriedNode) int {
+	ua := a.Message.(*schemapb.User)
+	ub := b.Message.(*schemapb.User)
+	switch {
+	case ua.GetCreatedAt() < ub.GetCreatedAt():
+		return -1
+	case ua.GetCreatedAt() > ub.GetCreatedAt():
+		return 1
+	case a.NodeID < b.NodeID:
+		return -1
+	case a.NodeID > b.NodeID:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func (r *entRepository) deleteOtherUsers(ctx context.Context, rows []queriedNode, keepID string) error {
+	for _, row := range rows {
+		if row.NodeID == keepID {
+			continue
+		}
+		if err := r.deleteUser(ctx, row.NodeID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *entRepository) deleteUser(ctx context.Context, nodeID string) error {
+	if nodeID == "" {
+		return nil
+	}
+	if err := r.client.delete(ctx, systemActor, &schemapb.User{}, nodeID); err != nil && !errors.Is(err, errNotFound) {
+		return err
+	}
+	return nil
 }
 
 func (r *entRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
 	if userID == "" {
 		return fmt.Errorf("repo: UpdateUser: missing user id")
 	}
-	patch := &schemapb.User{}
-	applied := false
-	for k, v := range fields {
-		switch k {
-		case "email":
-			patch.Email = asString(v)
-			applied = true
-		case "name":
-			patch.Name = asString(v)
-			applied = true
-		case "role":
-			patch.Role = asString(v)
-			applied = true
-		case "avatar_url":
-			patch.AvatarUrl = asString(v)
-			applied = true
-		case "password_hash":
-			patch.PasswordHash = asString(v)
-			applied = true
-		case "totp_required":
-			patch.TotpRequired = asBool(v)
-			applied = true
-		case "failed_login_count":
-			patch.FailedLoginCount = asInt64(v)
-			applied = true
-		case "locked_until":
-			patch.LockedUntil = asInt64(v)
-			applied = true
-		case "status":
-			patch.Status = asString(v)
-			applied = true
-		case "recovery_email":
-			patch.RecoveryEmail = asString(v)
-			applied = true
-		case "quota_bytes":
-			patch.QuotaBytes = asInt64(v)
-			applied = true
-		case "last_login_at":
-			patch.LastLoginAt = asInt64(v)
-			applied = true
-		case "updated_at":
-			patch.UpdatedAt = asInt64(v)
-			applied = true
-		case "email_verified":
-			patch.EmailVerified = asBool(v)
-			applied = true
-		case "email_verified_at":
-			patch.EmailVerifiedAt = asInt64(v)
-			applied = true
+	if needsFullUserRewrite(fields) {
+		if raw, ok := r.client.(rawUpdateClient); ok {
+			if err := raw.rawUpdate(ctx, actorStr(userID), 1, userID, userFieldPatch(fields)); err != nil {
+				return fmt.Errorf("repo: UpdateUser: %w", err)
+			}
+			return nil
 		}
 	}
+	patch := &schemapb.User{}
+	applied := applyUserFields(patch, fields)
 	if !applied {
 		return nil
 	}
@@ -257,26 +322,154 @@ func (r *entRepository) ResetFailedLoginCount(ctx context.Context, userID string
 	if user == nil {
 		return fmt.Errorf("repo: ResetFailedLoginCount: user not found")
 	}
-	full := &schemapb.User{
-		Email:            user.Email,
-		Name:             user.Name,
-		Role:             user.Role,
-		AvatarUrl:        user.AvatarURL,
-		PasswordHash:     user.PasswordHash,
-		Status:           user.Status,
-		RecoveryEmail:    user.RecoveryEmail,
-		TotpRequired:     user.TotpRequired,
-		QuotaBytes:       user.QuotaBytes,
-		LastLoginAt:      user.LastLoginAtMs,
-		EmailVerified:    user.EmailVerified,
-		EmailVerifiedAt:  user.EmailVerifiedAt,
-		CreatedAt:        user.CreatedAt.UnixMilli(),
-		UpdatedAt:        user.UpdatedAt.UnixMilli(),
-	}
+	full := userProtoFromUser(user)
 	if err := r.client.update(ctx, actorStr(userID), userID, full); err != nil {
 		return fmt.Errorf("repo: ResetFailedLoginCount: %w", err)
 	}
 	return nil
+}
+
+func userProtoFromUser(user *service.User) *schemapb.User {
+	if user == nil {
+		return &schemapb.User{}
+	}
+	return &schemapb.User{
+		Email:           user.Email,
+		Name:            user.Name,
+		Role:            user.Role,
+		AvatarUrl:       user.AvatarURL,
+		PasswordHash:    user.PasswordHash,
+		TotpRequired:    user.TotpRequired,
+		Status:          user.Status,
+		RecoveryEmail:   user.RecoveryEmail,
+		QuotaBytes:      user.QuotaBytes,
+		LastLoginAt:     user.LastLoginAtMs,
+		EmailVerified:   user.EmailVerified,
+		EmailVerifiedAt: user.EmailVerifiedAt,
+		CreatedAt:       user.CreatedAt.UnixMilli(),
+		UpdatedAt:       user.UpdatedAt.UnixMilli(),
+	}
+}
+
+func applyUserFields(dst *schemapb.User, fields map[string]any) bool {
+	applied := false
+	for k, v := range fields {
+		switch k {
+		case "email":
+			dst.Email = asString(v)
+			applied = true
+		case "name":
+			dst.Name = asString(v)
+			applied = true
+		case "role":
+			dst.Role = asString(v)
+			applied = true
+		case "avatar_url":
+			dst.AvatarUrl = asString(v)
+			applied = true
+		case "password_hash":
+			dst.PasswordHash = asString(v)
+			applied = true
+		case "totp_required":
+			dst.TotpRequired = asBool(v)
+			applied = true
+		case "failed_login_count":
+			dst.FailedLoginCount = asInt64(v)
+			applied = true
+		case "locked_until":
+			dst.LockedUntil = asInt64(v)
+			applied = true
+		case "status":
+			dst.Status = asString(v)
+			applied = true
+		case "recovery_email":
+			dst.RecoveryEmail = asString(v)
+			applied = true
+		case "quota_bytes":
+			dst.QuotaBytes = asInt64(v)
+			applied = true
+		case "last_login_at":
+			dst.LastLoginAt = asInt64(v)
+			applied = true
+		case "updated_at":
+			dst.UpdatedAt = asInt64(v)
+			applied = true
+		case "email_verified":
+			dst.EmailVerified = asBool(v)
+			applied = true
+		case "email_verified_at":
+			dst.EmailVerifiedAt = asInt64(v)
+			applied = true
+		}
+	}
+	return applied
+}
+
+func needsFullUserRewrite(fields map[string]any) bool {
+	for _, v := range fields {
+		switch x := v.(type) {
+		case bool:
+			if !x {
+				return true
+			}
+		case int:
+			if x == 0 {
+				return true
+			}
+		case int32:
+			if x == 0 {
+				return true
+			}
+		case int64:
+			if x == 0 {
+				return true
+			}
+		case string:
+			if x == "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func userFieldPatch(fields map[string]any) map[string]any {
+	patch := make(map[string]any, len(fields))
+	for k, v := range fields {
+		switch k {
+		case "email":
+			patch["1"] = asString(v)
+		case "name":
+			patch["2"] = asString(v)
+		case "role":
+			patch["3"] = asString(v)
+		case "avatar_url":
+			patch["4"] = asString(v)
+		case "password_hash":
+			patch["7"] = asString(v)
+		case "totp_required":
+			patch["8"] = asBool(v)
+		case "failed_login_count":
+			patch["9"] = asInt64(v)
+		case "locked_until":
+			patch["10"] = asInt64(v)
+		case "status":
+			patch["11"] = asString(v)
+		case "recovery_email":
+			patch["12"] = asString(v)
+		case "quota_bytes":
+			patch["15"] = asInt64(v)
+		case "last_login_at":
+			patch["17"] = asInt64(v)
+		case "updated_at":
+			patch["6"] = asInt64(v)
+		case "email_verified":
+			patch["18"] = asBool(v)
+		case "email_verified_at":
+			patch["19"] = asInt64(v)
+		}
+	}
+	return patch
 }
 
 func (r *entRepository) SetUserLockedUntil(ctx context.Context, userID string, lockedUntilMs int64) error {

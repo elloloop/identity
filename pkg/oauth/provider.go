@@ -52,6 +52,12 @@ type Exchanger interface {
 	Exchange(ctx context.Context, code, redirectURI string) (*Identity, error)
 }
 
+// Authorizer builds the provider authorization URL for the first half
+// of the OAuth authorization-code flow.
+type Authorizer interface {
+	AuthorizationURL(ctx context.Context, redirectURI, state, codeChallenge string) (string, error)
+}
+
 // Common error sentinels. Callers (e.g. the service layer) can
 // errors.Is against these to map to RPC error codes.
 var (
@@ -66,6 +72,10 @@ var (
 	// ErrEmailNotVerified indicates the provider returned an unverified
 	// email; we refuse to log such users in.
 	ErrEmailNotVerified = errors.New("oauth: provider reported email is not verified")
+
+	// ErrStateValidation indicates the OAuth callback state could not be
+	// validated against the server-minted state token.
+	ErrStateValidation = errors.New("oauth: state validation failed")
 )
 
 // defaultHTTPClient returns an http.Client suitable for talking to
