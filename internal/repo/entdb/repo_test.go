@@ -2,10 +2,12 @@ package entdb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -803,7 +805,7 @@ func TestEntDBClientHelpers(t *testing.T) {
 		{"passkey_user", &schemapb.PasskeyCredential{}, map[string]any{"user_id": "u"}, 20, map[string]any{"2": "u"}, true},
 		{"totp_user", &schemapb.TotpCredential{}, map[string]any{"user_id": "u"}, 23, map[string]any{"1": "u"}, true},
 		{"recovery_code", &schemapb.RecoveryCode{}, map[string]any{"user_id": "u", "code_hash": "h"}, 24, map[string]any{"1": "u", "2": "h"}, true},
-		{"oauth_identity", &schemapb.OAuthIdentity{}, map[string]any{"user_id": "u", "provider": "google", "provider_user_id": "sub"}, 30, map[string]any{"1": "u", "2": "google", "3": "sub"}, true},
+		{"oauth_identity", &schemapb.OAuthIdentity{}, map[string]any{"user_id": "u", "provider": "google", "provider_user_id": "sub"}, 31, map[string]any{"1": "u", "2": "google", "3": "sub"}, true},
 		{"unsupported_filter", &schemapb.User{}, map[string]any{"name": "n"}, 0, nil, false},
 		{"unsupported_witness", &schemapb.EmailChangeToken{}, map[string]any{"token_hash": "h"}, 0, nil, false},
 	}
@@ -866,5 +868,48 @@ func TestEntDBClientHelpers(t *testing.T) {
 	}
 	if !isNonNilMessage(&schemapb.User{}) {
 		t.Fatal("isNonNilMessage(valid message) returned false")
+	}
+}
+
+func TestSDKScopeVisibilityWaitsStopOnContextCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	scope := &sdkScope{}
+	start := time.Now()
+
+	cases := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "node_visible",
+			run: func() error {
+				return scope.waitForNodeVisible(ctx, "invalid actor", &schemapb.User{}, "missing")
+			},
+		},
+		{
+			name: "patch_visible",
+			run: func() error {
+				return scope.waitForPatchVisible(ctx, "invalid actor", "missing", &schemapb.User{Email: "a@example.com"})
+			},
+		},
+		{
+			name: "node_deleted",
+			run: func() error {
+				return scope.waitForNodeDeleted(ctx, "invalid actor", &schemapb.User{}, "missing")
+			},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.run(); !errors.Is(err, context.Canceled) {
+				t.Fatalf("wait error = %v, want context.Canceled", err)
+			}
+		})
+	}
+	if elapsed := time.Since(start); elapsed >= 500*time.Millisecond {
+		t.Fatalf("canceled waits took %s, want immediate return", elapsed)
 	}
 }

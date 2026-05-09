@@ -420,7 +420,7 @@ func rawQuerySpec(witness proto.Message, filter map[string]any) (int, map[string
 				return 0, nil, false
 			}
 		}
-		return 30, rawFilter, true
+		return 31, rawFilter, true
 	default:
 		return 0, nil, false
 	}
@@ -433,6 +433,9 @@ func newMessageLike(witness proto.Message) proto.Message {
 func (s *sdkScope) waitForNodeVisible(ctx context.Context, actor string, witness proto.Message, nodeID string) error {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		msg := newMessageLike(witness)
 		err := s.get(ctx, actor, msg, nodeID)
 		if err == nil {
@@ -441,13 +444,18 @@ func (s *sdkScope) waitForNodeVisible(ctx context.Context, actor string, witness
 		if time.Now().After(deadline) {
 			return err
 		}
-		time.Sleep(50 * time.Millisecond)
+		if err := sleepOrContextDone(ctx, 50*time.Millisecond); err != nil {
+			return err
+		}
 	}
 }
 
 func (s *sdkScope) waitForPatchVisible(ctx context.Context, actor, nodeID string, patch proto.Message) error {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		msg := newMessageLike(patch)
 		err := s.get(ctx, actor, msg, nodeID)
 		if err == nil && patchApplied(patch.ProtoReflect(), msg.ProtoReflect()) {
@@ -459,13 +467,18 @@ func (s *sdkScope) waitForPatchVisible(ctx context.Context, actor, nodeID string
 			}
 			return fmt.Errorf("entdb: patch visibility timeout for %s", nodeID)
 		}
-		time.Sleep(50 * time.Millisecond)
+		if err := sleepOrContextDone(ctx, 50*time.Millisecond); err != nil {
+			return err
+		}
 	}
 }
 
 func (s *sdkScope) waitForNodeDeleted(ctx context.Context, actor string, witness proto.Message, nodeID string) error {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		msg := newMessageLike(witness)
 		err := s.get(ctx, actor, msg, nodeID)
 		if errors.Is(err, errNotFound) {
@@ -477,7 +490,20 @@ func (s *sdkScope) waitForNodeDeleted(ctx context.Context, actor string, witness
 			}
 			return fmt.Errorf("entdb: delete visibility timeout for %s", nodeID)
 		}
-		time.Sleep(50 * time.Millisecond)
+		if err := sleepOrContextDone(ctx, 50*time.Millisecond); err != nil {
+			return err
+		}
+	}
+}
+
+func sleepOrContextDone(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
