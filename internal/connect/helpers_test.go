@@ -1105,6 +1105,7 @@ func testKeyRing(t *testing.T) *jwt.KeyRing {
 // newHarness builds a complete handler stack and exposes both an in-process
 // connect client and the underlying fakes for assertions.
 func newHarness(t *testing.T) *testHarness {
+	t.Helper()
 	return newHarnessWithOAuthRegistry(t, nil)
 }
 

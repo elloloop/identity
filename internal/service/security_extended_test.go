@@ -119,7 +119,6 @@ func TestRefresh_ConcurrentRotationRace(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(N)
 	for i := 0; i < N; i++ {
-		i := i
 		go func() {
 			defer wg.Done()
 			<-start
@@ -327,7 +326,6 @@ func TestSecExt_ConcurrentLogin_NoInconsistentState(t *testing.T) {
 
 	wg.Add(N)
 	for i := 0; i < N; i++ {
-		i := i
 		go func() {
 			defer wg.Done()
 			r, err := svc.PasswordLogin(context.Background(), "concurrent@example.com", strongPW, "", "")

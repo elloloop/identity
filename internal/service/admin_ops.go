@@ -97,7 +97,7 @@ func (s *AdminService) ListUsers(
 	}
 	nextCursor := ""
 	if end < totalCount {
-		nextCursor = fmt.Sprintf("%d", end)
+		nextCursor = strconv.Itoa(end)
 	}
 
 	users := make([]*User, 0, len(page))

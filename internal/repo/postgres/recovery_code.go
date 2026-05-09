@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,7 +11,7 @@ import (
 
 func (r *pgRepository) CreateRecoveryCode(ctx context.Context, c *service.RecoveryCodeRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("postgres: CreateRecoveryCode: nil record")
+		return "", errors.New("postgres: CreateRecoveryCode: nil record")
 	}
 	id := c.NodeID
 	if id == "" {
@@ -63,7 +64,7 @@ var recoveryFieldColumns = map[string]struct {
 
 func (r *pgRepository) UpdateRecoveryCode(ctx context.Context, nodeID string, fields map[string]any) error {
 	if nodeID == "" {
-		return fmt.Errorf("postgres: UpdateRecoveryCode: missing node id")
+		return errors.New("postgres: UpdateRecoveryCode: missing node id")
 	}
 	if len(fields) == 0 {
 		return nil

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -38,7 +39,7 @@ func (r *pgRepository) FindQrLoginSession(ctx context.Context, sessionID string)
 
 func (r *pgRepository) CreateQrLoginSession(ctx context.Context, s *service.QrLoginSessionRecord) (string, error) {
 	if s == nil {
-		return "", fmt.Errorf("postgres: CreateQrLoginSession: nil record")
+		return "", errors.New("postgres: CreateQrLoginSession: nil record")
 	}
 	id := s.NodeID
 	if id == "" {
@@ -79,7 +80,7 @@ var qrFieldColumns = map[string]struct {
 
 func (r *pgRepository) UpdateQrLoginSession(ctx context.Context, nodeID string, fields map[string]any) error {
 	if nodeID == "" {
-		return fmt.Errorf("postgres: UpdateQrLoginSession: missing node id")
+		return errors.New("postgres: UpdateQrLoginSession: missing node id")
 	}
 	if len(fields) == 0 {
 		return nil

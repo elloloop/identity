@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -34,7 +35,7 @@ func (r *pgRepository) GetTotpCredential(ctx context.Context, userID string) (*s
 
 func (r *pgRepository) CreateTotpCredential(ctx context.Context, c *service.TotpCredRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("postgres: CreateTotpCredential: nil record")
+		return "", errors.New("postgres: CreateTotpCredential: nil record")
 	}
 	id := c.NodeID
 	if id == "" {
@@ -66,7 +67,7 @@ var totpFieldColumns = map[string]struct {
 
 func (r *pgRepository) UpdateTotpCredential(ctx context.Context, nodeID string, fields map[string]any) error {
 	if nodeID == "" {
-		return fmt.Errorf("postgres: UpdateTotpCredential: missing node id")
+		return errors.New("postgres: UpdateTotpCredential: missing node id")
 	}
 	if len(fields) == 0 {
 		return nil

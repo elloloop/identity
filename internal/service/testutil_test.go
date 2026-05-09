@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -189,7 +190,7 @@ func (r *fakeRepo) IncrementFailedLoginCount(_ context.Context, userID string) (
 	defer r.mu.Unlock()
 	if r.incrementErrCount > 0 {
 		r.incrementErrCount--
-		return 0, fmt.Errorf("simulated increment failure")
+		return 0, errors.New("simulated increment failure")
 	}
 	u, ok := r.users[userID]
 	if !ok {

@@ -2,7 +2,7 @@ package postgres
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 
@@ -22,7 +22,7 @@ func scanEmailChange(row pgx.Row) (*service.EmailChangeToken, error) {
 
 func (r *pgRepository) CreateEmailChangeToken(ctx context.Context, t *service.EmailChangeToken) error {
 	if t == nil {
-		return fmt.Errorf("postgres: CreateEmailChangeToken: nil record")
+		return errors.New("postgres: CreateEmailChangeToken: nil record")
 	}
 	id := t.NodeID
 	if id == "" {
@@ -67,7 +67,7 @@ func (r *pgRepository) FindEmailChangeTokenByHash(ctx context.Context, tokenHash
 
 func (r *pgRepository) MarkEmailChangeTokenConsumed(ctx context.Context, tokenID string, atMs int64) error {
 	if tokenID == "" {
-		return fmt.Errorf("postgres: MarkEmailChangeTokenConsumed: missing token id")
+		return errors.New("postgres: MarkEmailChangeTokenConsumed: missing token id")
 	}
 	const q = `
 		UPDATE email_change_tokens

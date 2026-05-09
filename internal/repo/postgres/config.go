@@ -1,7 +1,7 @@
 package postgres
 
 import (
-	"fmt"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -71,13 +71,13 @@ func (c *Config) applyDefaults() {
 
 func (c *Config) validate() error {
 	if c == nil {
-		return fmt.Errorf("postgres: nil config")
+		return errors.New("postgres: nil config")
 	}
 	if strings.TrimSpace(c.DSN) == "" {
-		return fmt.Errorf("postgres: DSN is required (set GATEWAY_POSTGRES_DSN)")
+		return errors.New("postgres: DSN is required (set GATEWAY_POSTGRES_DSN)")
 	}
 	if strings.TrimSpace(c.TenantID) == "" {
-		return fmt.Errorf("postgres: TenantID is required")
+		return errors.New("postgres: TenantID is required")
 	}
 	return nil
 }

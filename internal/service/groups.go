@@ -149,7 +149,7 @@ func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, l
 	}
 	nextCursor := ""
 	if end < totalCount {
-		nextCursor = fmt.Sprintf("%d", end)
+		nextCursor = strconv.Itoa(end)
 	}
 
 	groups := make([]*Group, 0, len(page))

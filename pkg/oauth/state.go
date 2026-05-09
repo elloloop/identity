@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -47,24 +48,24 @@ func IssueStateToken(
 		Expiration(now.Add(expiry)).
 		Build()
 	if err != nil {
-		return "", fmt.Errorf("%w: build state token: %v", ErrStateValidation, err)
+		return "", fmt.Errorf("%w: build state token: %w", ErrStateValidation, err)
 	}
 
 	active := kr.Active()
 	key, err := jwk.FromRaw(active.PrivateKey)
 	if err != nil {
-		return "", fmt.Errorf("%w: convert signing key: %v", ErrStateValidation, err)
+		return "", fmt.Errorf("%w: convert signing key: %w", ErrStateValidation, err)
 	}
 	if err := key.Set(jwk.KeyIDKey, active.KID); err != nil {
-		return "", fmt.Errorf("%w: set signing kid: %v", ErrStateValidation, err)
+		return "", fmt.Errorf("%w: set signing kid: %w", ErrStateValidation, err)
 	}
 	if err := key.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return "", fmt.Errorf("%w: set signing alg: %v", ErrStateValidation, err)
+		return "", fmt.Errorf("%w: set signing alg: %w", ErrStateValidation, err)
 	}
 
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
 	if err != nil {
-		return "", fmt.Errorf("%w: sign state token: %v", ErrStateValidation, err)
+		return "", fmt.Errorf("%w: sign state token: %w", ErrStateValidation, err)
 	}
 	return string(signed), nil
 }
@@ -80,7 +81,7 @@ func VerifyStateToken(
 	}
 	kid, err := extractStateTokenKID(token)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrStateValidation, err)
+		return nil, fmt.Errorf("%w: %w", ErrStateValidation, err)
 	}
 	if kid == "" {
 		return nil, fmt.Errorf("%w: missing kid", ErrStateValidation)
@@ -92,13 +93,13 @@ func VerifyStateToken(
 	}
 	key, err := jwk.FromRaw(sk.PublicKey)
 	if err != nil {
-		return nil, fmt.Errorf("%w: convert public key: %v", ErrStateValidation, err)
+		return nil, fmt.Errorf("%w: convert public key: %w", ErrStateValidation, err)
 	}
 	if err := key.Set(jwk.KeyIDKey, kid); err != nil {
-		return nil, fmt.Errorf("%w: set public kid: %v", ErrStateValidation, err)
+		return nil, fmt.Errorf("%w: set public kid: %w", ErrStateValidation, err)
 	}
 	if err := key.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return nil, fmt.Errorf("%w: set public alg: %v", ErrStateValidation, err)
+		return nil, fmt.Errorf("%w: set public alg: %w", ErrStateValidation, err)
 	}
 
 	tok, err := jwtoken.Parse(
@@ -107,16 +108,16 @@ func VerifyStateToken(
 		jwtoken.WithValidate(false),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("%w: verify state token: %v", ErrStateValidation, err)
+		return nil, fmt.Errorf("%w: verify state token: %w", ErrStateValidation, err)
 	}
 
 	claims := &StateClaims{
-		Provider:        getStringClaim(tok, "provider"),
-		RedirectURI:     getStringClaim(tok, "redirect_uri"),
-		State:           getStringClaim(tok, "oauth_state"),
-		CodeVerifier:    getStringClaim(tok, "code_verifier"),
-		IssuedAt:        tok.IssuedAt().Unix(),
-		ExpiresAt:       tok.Expiration().Unix(),
+		Provider:     getStringClaim(tok, "provider"),
+		RedirectURI:  getStringClaim(tok, "redirect_uri"),
+		State:        getStringClaim(tok, "oauth_state"),
+		CodeVerifier: getStringClaim(tok, "code_verifier"),
+		IssuedAt:     tok.IssuedAt().Unix(),
+		ExpiresAt:    tok.Expiration().Unix(),
 	}
 	if claims.Provider == "" || claims.RedirectURI == "" || claims.State == "" || claims.CodeVerifier == "" {
 		return nil, fmt.Errorf("%w: state token missing required claims", ErrStateValidation)
@@ -150,7 +151,7 @@ func extractStateTokenKID(token string) (string, error) {
 	}
 	signatures := msg.Signatures()
 	if len(signatures) == 0 {
-		return "", fmt.Errorf("no signatures in token")
+		return "", errors.New("no signatures in token")
 	}
 	return signatures[0].ProtectedHeaders().KeyID(), nil
 }

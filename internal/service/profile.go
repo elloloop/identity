@@ -221,4 +221,3 @@ func (s *ProfileService) DeletePasskey(ctx context.Context, userID, credentialID
 	)
 	return nil
 }
-

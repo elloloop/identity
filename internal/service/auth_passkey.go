@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -213,7 +214,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 
 	credID, err := passkeys.ExtractCredentialID(credentialJSON)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid credential_json: %v", ErrInvalidArgument, err)
+		return nil, fmt.Errorf("%w: invalid credential_json: %w", ErrInvalidArgument, err)
 	}
 
 	cred, err := s.repo.GetPasskeyCredentialByCredID(ctx, credID)
@@ -224,10 +225,10 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, fmt.Errorf("%w: unknown credential", ErrUnauthenticated)
 	}
 	if cred.UserID == "" {
-		return nil, fmt.Errorf("credential missing user_id")
+		return nil, errors.New("credential missing user_id")
 	}
 	if cred.SignCount > int64(math.MaxUint32) {
-		return nil, fmt.Errorf("credential sign_count overflows WebAuthn counter")
+		return nil, errors.New("credential sign_count overflows WebAuthn counter")
 	}
 
 	newSignCount, err := s.passkeys.CompleteAuthentication(

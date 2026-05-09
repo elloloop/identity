@@ -1,6 +1,7 @@
 package entdb
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"unsafe"
@@ -14,7 +15,7 @@ import (
 // node transport when the typed query helpers are insufficient.
 func TransportFromClient(client *sdk.DbClient) (sdk.Transport, error) {
 	if client == nil {
-		return nil, fmt.Errorf("entdb: nil db client")
+		return nil, errors.New("entdb: nil db client")
 	}
 	v := reflect.ValueOf(client)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
@@ -22,15 +23,15 @@ func TransportFromClient(client *sdk.DbClient) (sdk.Transport, error) {
 	}
 	field := v.Elem().FieldByName("transport")
 	if !field.IsValid() {
-		return nil, fmt.Errorf("entdb: db client transport field missing")
+		return nil, errors.New("entdb: db client transport field missing")
 	}
 	if !field.CanAddr() {
-		return nil, fmt.Errorf("entdb: db client transport field is not addressable")
+		return nil, errors.New("entdb: db client transport field is not addressable")
 	}
 	// #nosec G103 -- the SDK exposes sdk.Transport publicly but not through DbClient.
 	transport, ok := reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Interface().(sdk.Transport)
 	if !ok || transport == nil {
-		return nil, fmt.Errorf("entdb: db client transport unavailable")
+		return nil, errors.New("entdb: db client transport unavailable")
 	}
 	return transport, nil
 }

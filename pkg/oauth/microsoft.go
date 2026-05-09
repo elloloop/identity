@@ -137,26 +137,26 @@ func (m *microsoftExchanger) Exchange(ctx context.Context, code, redirectURI str
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.cfg.TokenURL,
 		strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("%w: build request: %v", ErrCodeExchangeFailed, err)
+		return nil, fmt.Errorf("%w: build request: %w", ErrCodeExchangeFailed, err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := m.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCodeExchangeFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrCodeExchangeFailed, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("%w: read body: %v", ErrCodeExchangeFailed, err)
+		return nil, fmt.Errorf("%w: read body: %w", ErrCodeExchangeFailed, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%w: provider HTTP %d", ErrCodeExchangeFailed, resp.StatusCode)
 	}
 	var tr microsoftTokenResponse
 	if err := json.Unmarshal(body, &tr); err != nil {
-		return nil, fmt.Errorf("%w: parse response: %v", ErrCodeExchangeFailed, err)
+		return nil, fmt.Errorf("%w: parse response: %w", ErrCodeExchangeFailed, err)
 	}
 	if tr.Error != "" {
 		return nil, fmt.Errorf("%w: %s", ErrCodeExchangeFailed, tr.Error)
@@ -230,7 +230,7 @@ func (m *microsoftExchanger) AuthorizationURL(_ context.Context, redirectURI, st
 func (m *microsoftExchanger) verifyIDToken(ctx context.Context, raw string) (*microsoftIDClaims, error) {
 	set, err := m.jwks.Get(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: jwks: %v", ErrIdentityVerification, err)
+		return nil, fmt.Errorf("%w: jwks: %w", ErrIdentityVerification, err)
 	}
 
 	payload, err := verifyJWS(raw, set)
@@ -238,22 +238,22 @@ func (m *microsoftExchanger) verifyIDToken(ctx context.Context, raw string) (*mi
 		m.jwks.Invalidate()
 		set2, fErr := m.jwks.Get(ctx)
 		if fErr != nil {
-			return nil, fmt.Errorf("%w: %v", ErrIdentityVerification, err)
+			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 		}
 		payload, err = verifyJWS(raw, set2)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrIdentityVerification, err)
+			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 		}
 	}
 
 	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
-		return nil, fmt.Errorf("%w: parse claims: %v", ErrIdentityVerification, err)
+		return nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
 	}
 
 	var claims microsoftIDClaims
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		return nil, fmt.Errorf("%w: decode claims: %v", ErrIdentityVerification, err)
+		return nil, fmt.Errorf("%w: decode claims: %w", ErrIdentityVerification, err)
 	}
 	if claims.TID == "" {
 		return nil, fmt.Errorf("%w: missing tid", ErrIdentityVerification)

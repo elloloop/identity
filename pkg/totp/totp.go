@@ -79,8 +79,8 @@ func VerifyCode(secret, code string) bool {
 
 	valid, err := totp.ValidateCustom(stripped.String(), secret, time.Now(), totp.ValidateOpts{
 		Period:    30,
-		Skew:     1, // +/-1 window
-		Digits:   otp.DigitsSix,
+		Skew:      1, // +/-1 window
+		Digits:    otp.DigitsSix,
 		Algorithm: otp.AlgorithmSHA1,
 	})
 	if err != nil {

@@ -11,6 +11,7 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
@@ -67,10 +68,10 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 	switch cfg.Driver {
 	case DriverEntDB:
 		if cfg.EntDBClient == nil {
-			return nil, fmt.Errorf("repo: Build: entdb driver requires EntDBClient")
+			return nil, errors.New("repo: Build: entdb driver requires EntDBClient")
 		}
 		if cfg.TenantID == "" {
-			return nil, fmt.Errorf("repo: Build: entdb driver requires TenantID")
+			return nil, errors.New("repo: Build: entdb driver requires TenantID")
 		}
 		dbAdapter, err := NewDBAdapter(cfg.EntDBClient)
 		if err != nil {
@@ -90,10 +91,10 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		}, nil
 	case DriverPostgres:
 		if cfg.PostgresDSN == "" {
-			return nil, fmt.Errorf("repo: Build: postgres driver requires PostgresDSN (set GATEWAY_POSTGRES_DSN)")
+			return nil, errors.New("repo: Build: postgres driver requires PostgresDSN (set GATEWAY_POSTGRES_DSN)")
 		}
 		if cfg.TenantID == "" {
-			return nil, fmt.Errorf("repo: Build: postgres driver requires TenantID")
+			return nil, errors.New("repo: Build: postgres driver requires TenantID")
 		}
 		if cfg.PostgresMaxConns > math.MaxInt32 {
 			return nil, fmt.Errorf("repo: Build: postgres max connections exceeds int32: %d", cfg.PostgresMaxConns)

@@ -32,10 +32,10 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.IdentityService/VerifyEmail":          true,
 	// ConfirmEmailChange is consumed by clicking a link in the new
 	// email's inbox — the user may not be currently signed in.
-	"/identity.IdentityService/ConfirmEmailChange":   true,
-	"/.well-known/jwks.json":                         true,
-	"/health":                                        true,
-	"/healthz":                                       true,
+	"/identity.IdentityService/ConfirmEmailChange": true,
+	"/.well-known/jwks.json":                       true,
+	"/health":                                      true,
+	"/healthz":                                     true,
 }
 
 // AuthMiddleware verifies JWT Bearer tokens on non-exempt paths and injects the

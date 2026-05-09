@@ -15,6 +15,7 @@ import (
 )
 
 func newOAuthStateKeyRing(t *testing.T) *identityjwt.KeyRing {
+	t.Helper()
 	return newOAuthStateKeyRingWithKID(t, "oauth-state-test")
 }
 
@@ -118,7 +119,6 @@ func TestStateToken_ValidationFailures(t *testing.T) {
 		{"verifier", "google", "https://app.example.com/oauth/callback", "state-123", ""},
 	}
 	for _, tc := range required {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := IssueStateToken(ring, tc.provider, tc.redirectURI, tc.state, tc.codeVerifier, 5*time.Minute, now); !errors.Is(err, ErrStateValidation) {
 				t.Fatalf("IssueStateToken error = %v", err)
@@ -159,7 +159,6 @@ func TestStateToken_ValidationFailures(t *testing.T) {
 		{"verifier mismatch", ring, token, "google", "https://app.example.com/oauth/callback", "state-123", "verifier-456", now.Add(time.Minute)},
 	}
 	for _, tc := range verifyCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := VerifyStateToken(tc.token, tc.ring, tc.provider, tc.redirectURI, tc.state, tc.verifier, tc.now); !errors.Is(err, ErrStateValidation) {
 				t.Fatalf("VerifyStateToken error = %v", err)
@@ -238,7 +237,6 @@ func TestOIDCDiscoveryFailures(t *testing.T) {
 		{"missing jwks", http.StatusOK, `{"token_endpoint":"https://accounts.example.com/token"}`},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tc.status)
@@ -313,7 +311,6 @@ func TestOIDCUserInfoFailures(t *testing.T) {
 		{"bad json", http.StatusOK, `not json`},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tc.status)

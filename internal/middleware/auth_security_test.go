@@ -43,7 +43,6 @@ func TestSec_HeaderInjection_CRLF(t *testing.T) {
 		{"esc-in-bearer", "Bearer abc\x1bdef"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var called bool
@@ -82,7 +81,6 @@ func TestSec_BearerSmuggling(t *testing.T) {
 		{"bearer-no-space", "Bearer" + good, false},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var called bool
@@ -124,7 +122,6 @@ func TestSec_EmptyOrMalformedAuth_NoPanic(t *testing.T) {
 		{"long-no-bearer", "ThisIsNotABearerToken1234567890"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var called bool

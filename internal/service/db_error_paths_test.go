@@ -20,14 +20,17 @@ func newAdminWithDB(db DB) *AdminService {
 		audit.NewLogger(nil, "test", zap.NewNop()),
 		config.Load(), nil, zap.NewNop())
 }
+
 func newGroupWithDB(db DB) *GroupService {
 	return NewGroupService(db, "test-tenant",
 		audit.NewLogger(nil, "test", zap.NewNop()), zap.NewNop())
 }
+
 func newHelpWithDB(db DB) *HelpService {
 	return NewHelpService(db, "test-tenant",
 		audit.NewLogger(nil, "test", zap.NewNop()), zap.NewNop())
 }
+
 func newProfileWithDB(db DB) *ProfileService {
 	return NewProfileService(db, "test-tenant",
 		audit.NewLogger(nil, "test", zap.NewNop()), zap.NewNop())

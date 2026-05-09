@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -74,7 +75,7 @@ func (r *pgRepository) GetPasskeyCredentialByCredID(ctx context.Context, credent
 
 func (r *pgRepository) CreatePasskeyCredential(ctx context.Context, c *service.PasskeyCredRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("postgres: CreatePasskeyCredential: nil record")
+		return "", errors.New("postgres: CreatePasskeyCredential: nil record")
 	}
 	id := c.NodeID
 	if id == "" {
@@ -106,7 +107,7 @@ var passkeyFieldColumns = map[string]struct {
 
 func (r *pgRepository) UpdatePasskeyCredential(ctx context.Context, nodeID string, fields map[string]any) error {
 	if nodeID == "" {
-		return fmt.Errorf("postgres: UpdatePasskeyCredential: missing node id")
+		return errors.New("postgres: UpdatePasskeyCredential: missing node id")
 	}
 	if len(fields) == 0 {
 		return nil
@@ -176,7 +177,7 @@ func (r *pgRepository) GetPasskeyChallenge(ctx context.Context, nodeID string) (
 
 func (r *pgRepository) CreatePasskeyChallenge(ctx context.Context, c *service.PasskeyChallengeRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("postgres: CreatePasskeyChallenge: nil record")
+		return "", errors.New("postgres: CreatePasskeyChallenge: nil record")
 	}
 	id := c.NodeID
 	if id == "" {

@@ -2,7 +2,7 @@ package postgres
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 
@@ -39,7 +39,7 @@ func (r *pgRepository) FindUserByProviderID(ctx context.Context, provider, provi
 
 func (r *pgRepository) CreateOAuthIdentity(ctx context.Context, oi *service.OAuthIdentity) error {
 	if oi == nil {
-		return fmt.Errorf("postgres: CreateOAuthIdentity: nil record")
+		return errors.New("postgres: CreateOAuthIdentity: nil record")
 	}
 	id := oi.NodeID
 	if id == "" {

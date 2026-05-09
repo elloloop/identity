@@ -2,14 +2,14 @@ package postgres
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/elloloop/identity/internal/service"
 )
 
 func (r *pgRepository) CreateLoginChallenge(ctx context.Context, c *service.LoginChallengeRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("postgres: CreateLoginChallenge: nil record")
+		return "", errors.New("postgres: CreateLoginChallenge: nil record")
 	}
 	id := c.NodeID
 	if id == "" {

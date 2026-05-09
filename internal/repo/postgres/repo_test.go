@@ -421,13 +421,13 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "help@example.com", helpNode.Payload[dbHfEmail])
 
-	requireQueryCount(t, repo, ctx, dbTypeUser, map[string]any{dbUfEmail: "DB-USER@EXAMPLE.COM", dbUfTOTPRequired: true, dbUfFailedLoginCount: int64(2)}, 1)
-	requireQueryCount(t, repo, ctx, dbTypeWorkingGroup, map[string]any{dbGfName: "Core Team", dbGfCreatedAt: createdAt}, 1)
-	requireQueryCount(t, repo, ctx, dbTypeRefreshToken, map[string]any{dbRfTokenHash: "refresh-hash", dbRfUserID: userID}, 1)
-	requireQueryCount(t, repo, ctx, dbTypePasswordReset, map[string]any{dbPrfTokenHash: "reset-hash", dbPrfExpiresAt: createdAt + 1000}, 1)
-	requireQueryCount(t, repo, ctx, dbTypePasskey, map[string]any{dbPkfCredentialID: "passkey-lookup-id", dbPkfDeviceName: "security key"}, 1)
-	requireQueryCount(t, repo, ctx, dbTypeAuditEvent, map[string]any{dbAfEventType: "user.created", dbAfSuccess: true}, 1)
-	requireQueryCount(t, repo, ctx, dbTypeAdminHelpReq, map[string]any{dbHfEmail: "HELP@EXAMPLE.COM", dbHfStatus: "pending"}, 1)
+	requireQueryCount(ctx, t, repo, dbTypeUser, map[string]any{dbUfEmail: "DB-USER@EXAMPLE.COM", dbUfTOTPRequired: true, dbUfFailedLoginCount: int64(2)}, 1)
+	requireQueryCount(ctx, t, repo, dbTypeWorkingGroup, map[string]any{dbGfName: "Core Team", dbGfCreatedAt: createdAt}, 1)
+	requireQueryCount(ctx, t, repo, dbTypeRefreshToken, map[string]any{dbRfTokenHash: "refresh-hash", dbRfUserID: userID}, 1)
+	requireQueryCount(ctx, t, repo, dbTypePasswordReset, map[string]any{dbPrfTokenHash: "reset-hash", dbPrfExpiresAt: createdAt + 1000}, 1)
+	requireQueryCount(ctx, t, repo, dbTypePasskey, map[string]any{dbPkfCredentialID: "passkey-lookup-id", dbPkfDeviceName: "security key"}, 1)
+	requireQueryCount(ctx, t, repo, dbTypeAuditEvent, map[string]any{dbAfEventType: "user.created", dbAfSuccess: true}, 1)
+	requireQueryCount(ctx, t, repo, dbTypeAdminHelpReq, map[string]any{dbHfEmail: "HELP@EXAMPLE.COM", dbHfStatus: "pending"}, 1)
 
 	foundUsers, err := repo.SearchNodes(ctx, tenantID, "actor", dbTypeUser, "db-user")
 	require.NoError(t, err)
@@ -483,7 +483,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	require.Error(t, err)
 }
 
-func requireQueryCount(t *testing.T, repo *pgRepository, ctx context.Context, typeID int, filter map[string]any, want int) {
+func requireQueryCount(ctx context.Context, t *testing.T, repo *pgRepository, typeID int, filter map[string]any, want int) {
 	t.Helper()
 
 	nodes, err := repo.QueryNodes(ctx, repo.tenantID, "actor", typeID, filter)

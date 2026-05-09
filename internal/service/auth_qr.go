@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -184,7 +185,7 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, ipAddr, userAg
 	// status == "approved" -- mint tokens and consume the session.
 	if session.UserID == "" {
 		s.logger.Error("qr_login_approved_without_user", zap.String("node_id", session.NodeID))
-		return nil, fmt.Errorf("approved session has no user")
+		return nil, errors.New("approved session has no user")
 	}
 
 	user, err := s.repo.GetUser(ctx, session.UserID)

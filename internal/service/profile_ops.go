@@ -131,7 +131,7 @@ func (s *ProfileService) ListAuditEvents(
 	}
 	nextCursor := ""
 	if end < totalCount {
-		nextCursor = fmt.Sprintf("%d", end)
+		nextCursor = strconv.Itoa(end)
 	}
 
 	events := make([]*AuditEvent, 0, len(page))

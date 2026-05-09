@@ -44,10 +44,7 @@ jobs:
           # only-new-issues blocks lint regressions on PR diffs while
           # tolerating pre-existing debt on main (tracked separately).
           only-new-issues: true
-          args: >-
-            --timeout=5m
-            --default=standard
-            --enable=gosec,bodyclose,gocritic
+          args: --config=.golangci.yml
 
   # ---------------------------------------------------------------------------
   # 1b. go.mod / go.sum cleanliness — prevents drifted module graph.

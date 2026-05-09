@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 func generateRandomValue(numBytes int) (string, error) {
 	if numBytes <= 0 {
-		return "", fmt.Errorf("oauth: random value size must be positive")
+		return "", errors.New("oauth: random value size must be positive")
 	}
 	buf := make([]byte, numBytes)
 	if _, err := rand.Read(buf); err != nil {
@@ -42,7 +43,7 @@ func buildAuthorizationURL(baseURL string, params url.Values) (string, error) {
 	}
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		return "", fmt.Errorf("%w: parse authorization URL: %v", ErrCodeExchangeFailed, err)
+		return "", fmt.Errorf("%w: parse authorization URL: %w", ErrCodeExchangeFailed, err)
 	}
 	query := u.Query()
 	for key, values := range params {

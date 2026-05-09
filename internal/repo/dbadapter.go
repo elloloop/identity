@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
@@ -64,19 +65,19 @@ func (a *dbAdapter) SearchNodes(ctx context.Context, tenantID, actor string, typ
 
 func (a *dbAdapter) waitForApplied(ctx context.Context, tenantID, actor string, result *sdk.CommitResult, opCount int) error {
 	if result == nil {
-		return fmt.Errorf("entdb: nil commit result")
+		return errors.New("entdb: nil commit result")
 	}
 	if !result.Success {
 		if result.Error != "" {
 			return fmt.Errorf("entdb: commit failed: %s", result.Error)
 		}
-		return fmt.Errorf("entdb: commit failed")
+		return errors.New("entdb: commit failed")
 	}
 	if opCount == 0 || result.Applied {
 		return nil
 	}
 	if result.Receipt == nil || result.Receipt.StreamPosition == "" {
-		return fmt.Errorf("entdb: commit returned before apply without stream position")
+		return errors.New("entdb: commit returned before apply without stream position")
 	}
 	reached, current, err := a.transport.WaitForOffset(
 		ctx,
