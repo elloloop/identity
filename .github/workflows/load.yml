@@ -1,0 +1,54 @@
+name: Load
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Load profile to run
+        required: true
+        default: ci
+        type: choice
+        options:
+          - ci
+          - soak
+  schedule:
+    - cron: '17 3 * * *'
+
+concurrency:
+  group: load-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.10'
+  K6_IMAGE: grafana/k6:0.49.0
+  IDENTITY_LOAD_PROFILE: ${{ github.event_name == 'schedule' && 'soak' || inputs.profile }}
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    name: Hot-path load
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Inspect k6 scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          for scenario in login_steady refresh_steady signup_burst mixed_workload; do
+            docker run --rm \
+              -v "$PWD/tests/load:/work" \
+              -w /work \
+              "$K6_IMAGE" inspect "/work/k6/${scenario}.js"
+          done
+
+      - name: Go hot-path load
+        run: go test -tags=load -count=1 -timeout=40m ./tests/load/...
