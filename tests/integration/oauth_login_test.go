@@ -89,8 +89,9 @@ func TestOAuthLogin_DisabledWithoutRegistry(t *testing.T) {
 	h := StartServer(t) // no registry
 
 	_, err := h.Client.OAuthLogin(context.Background(), connect.NewRequest(&identitypb.OAuthLoginRequest{
-		Code:     "x",
-		Provider: "google",
+		Code:        "x",
+		Provider:    "google",
+		RedirectUri: "https://app/callback",
 	}))
 	if err == nil {
 		t.Fatal("expected error when oauth disabled")
@@ -114,8 +115,9 @@ func TestOAuthLogin_UnknownProvider(t *testing.T) {
 	h := StartServer(t, WithOAuthRegistry(reg))
 
 	_, err := h.Client.OAuthLogin(context.Background(), connect.NewRequest(&identitypb.OAuthLoginRequest{
-		Code:     "x",
-		Provider: "yahoo",
+		Code:        "x",
+		Provider:    "yahoo",
+		RedirectUri: "https://app/callback",
 	}))
 	if err == nil {
 		t.Fatal("expected error for unknown provider")
@@ -138,8 +140,9 @@ func TestOAuthLogin_ExchangerErrorRejected(t *testing.T) {
 	h := StartServer(t, WithOAuthRegistry(reg))
 
 	_, err := h.Client.OAuthLogin(context.Background(), connect.NewRequest(&identitypb.OAuthLoginRequest{
-		Code:     "anything",
-		Provider: "google",
+		Code:        "anything",
+		Provider:    "google",
+		RedirectUri: "https://app/callback",
 	}))
 	if err == nil {
 		t.Fatal("expected error from failing exchanger")

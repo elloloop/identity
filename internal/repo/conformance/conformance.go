@@ -235,6 +235,30 @@ func RunConformance(t *testing.T, makeFresh func(t *testing.T) service.Repositor
 		}
 	})
 
+	t.Run("RefreshToken_DeleteOne", func(t *testing.T) {
+		ctx := context.Background()
+		r := makeFresh(t)
+		id, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "delete-one", UserID: "u-1"})
+		if err != nil {
+			t.Fatalf("CreateRefreshToken: %v", err)
+		}
+		_, err = r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "keep-one", UserID: "u-1"})
+		if err != nil {
+			t.Fatalf("CreateRefreshToken keep: %v", err)
+		}
+		if err := r.DeleteRefreshToken(ctx, id); err != nil {
+			t.Fatalf("DeleteRefreshToken: %v", err)
+		}
+		deleted, _ := r.FindRefreshTokenByHashIncludingConsumed(ctx, "delete-one")
+		if deleted != nil {
+			t.Fatalf("deleted token still present: %#v", deleted)
+		}
+		kept, _ := r.FindRefreshTokenByHashIncludingConsumed(ctx, "keep-one")
+		if kept == nil {
+			t.Fatal("DeleteRefreshToken removed a different token")
+		}
+	})
+
 	t.Run("PasswordResetToken_CRUD", func(t *testing.T) {
 		ctx := context.Background()
 		r := makeFresh(t)
@@ -298,6 +322,20 @@ func RunConformance(t *testing.T, makeFresh func(t *testing.T) service.Repositor
 		u, _ := r.GetUser(ctx, uid)
 		if u == nil || u.Email != "new@example.com" || !u.EmailVerified {
 			t.Fatalf("after UpdateUserEmail: %+v", u)
+		}
+		oldEmail, err := r.FindUserByEmail(ctx, "old@example.com")
+		if err != nil {
+			t.Fatalf("FindUserByEmail old: %v", err)
+		}
+		if oldEmail != nil {
+			t.Fatalf("old email still resolves after UpdateUserEmail: %+v", oldEmail)
+		}
+		newEmail, err := r.FindUserByEmail(ctx, "new@example.com")
+		if err != nil {
+			t.Fatalf("FindUserByEmail new: %v", err)
+		}
+		if newEmail == nil || newEmail.ID != uid {
+			t.Fatalf("new email lookup = %+v, want user %q", newEmail, uid)
 		}
 	})
 
@@ -399,6 +437,24 @@ func RunConformance(t *testing.T, makeFresh func(t *testing.T) service.Repositor
 		}
 	})
 
+	t.Run("TotpCredential_DeleteOne", func(t *testing.T) {
+		ctx := context.Background()
+		r := makeFresh(t)
+		id, err := r.CreateTotpCredential(ctx, &service.TotpCredRecord{
+			UserID: "u-1", SecretEncrypted: "enc", CreatedAt: 100,
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := r.DeleteTotpCredential(ctx, id); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		got, _ := r.GetTotpCredential(ctx, "u-1")
+		if got != nil {
+			t.Fatal("Delete left a row")
+		}
+	})
+
 	t.Run("RecoveryCode_CRUD", func(t *testing.T) {
 		ctx := context.Background()
 		r := makeFresh(t)
@@ -460,6 +516,16 @@ func RunConformance(t *testing.T, makeFresh func(t *testing.T) service.Repositor
 		if err := r.CreateOAuthIdentity(ctx, dup); err == nil {
 			t.Fatal("CreateOAuthIdentity duplicate: want error, got nil")
 		}
+		otherProvider := &service.OAuthIdentity{
+			UserID:          uid,
+			Provider:        "microsoft",
+			ProviderUserID:  "g-123",
+			EmailAtLinkTime: "oa@example.com",
+			CreatedAt:       300,
+		}
+		if err := r.CreateOAuthIdentity(ctx, otherProvider); err != nil {
+			t.Fatalf("CreateOAuthIdentity other provider same subject: %v", err)
+		}
 		got, err := r.FindUserByProviderID(ctx, "google", "g-123")
 		if err != nil || got == nil {
 			t.Fatalf("FindByProvider: %v %#v", err, got)
@@ -467,8 +533,15 @@ func RunConformance(t *testing.T, makeFresh func(t *testing.T) service.Repositor
 		if got.ID != uid {
 			t.Fatalf("FindByProvider id = %q, want %q", got.ID, uid)
 		}
+		got, err = r.FindUserByProviderID(ctx, "microsoft", "g-123")
+		if err != nil || got == nil {
+			t.Fatalf("FindByProvider other provider: %v %#v", err, got)
+		}
+		if got.ID != uid {
+			t.Fatalf("FindByProvider other provider id = %q, want %q", got.ID, uid)
+		}
 		list, err := r.ListOAuthIdentitiesForUser(ctx, uid)
-		if err != nil || len(list) != 1 {
+		if err != nil || len(list) != 2 {
 			t.Fatalf("List: len=%d err=%v", len(list), err)
 		}
 	})

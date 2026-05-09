@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,19 @@ func hashPW(t *testing.T, pw string) string {
 	return h
 }
 
+type signupRaceRepo struct {
+	*errorRepo
+	findCalls int
+}
+
+func (r *signupRaceRepo) FindUserByEmail(ctx context.Context, email string) (*User, error) {
+	r.findCalls++
+	if r.findCalls == 1 {
+		return nil, nil
+	}
+	return r.errorRepo.FindUserByEmail(ctx, email)
+}
+
 // ── Signup ──────────────────────────────────────────────────────────────
 
 func TestPasswordSignup_CreatesUserAndIssuesTokens(t *testing.T) {
@@ -41,16 +55,75 @@ func TestPasswordSignup_CreatesUserAndIssuesTokens(t *testing.T) {
 	assert.False(t, result.TotpRequired)
 }
 
-func TestPasswordSignup_DuplicateEmailFails(t *testing.T) {
-	repo := newFakeRepo()
-	svc := newTestAuthService(t, repo)
+func TestPasswordSignup_DuplicateEmail_NoEnumeration(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
 
-	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
+	fresh, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "")
+	require.NoError(t, err)
+	rec.Reset()
+
+	dup, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "")
+	require.NoError(t, err)
+	require.NotNil(t, dup)
+
+	assert.Equal(t, fresh.User.Email, dup.User.Email)
+	assert.Equal(t, fresh.User.Name, dup.User.Name)
+	assert.Equal(t, fresh.ExpiresIn, dup.ExpiresIn)
+	assert.False(t, dup.TotpRequired)
+	assert.NotEmpty(t, dup.User.ID)
+	assert.NotEmpty(t, dup.AccessToken)
+	assert.NotEmpty(t, dup.RefreshToken)
+
+	assert.Len(t, repo.users, 1, "duplicate signup must not create a second user")
+	assert.Len(t, repo.refreshTokens, 1, "duplicate signup must not mint a stored refresh token")
+
+	_, _, _, err = svc.RefreshToken(context.Background(), dup.RefreshToken, "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
+}
+
+func TestPasswordSignup_DuplicateEmail_SendsNoticeEmail(t *testing.T) {
+	svc, _, rec := newAuthSvcWithMailer(t)
+
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "")
+	require.NoError(t, err)
+	rec.Reset()
+
+	_, err = svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "")
 	require.NoError(t, err)
 
-	_, err = svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
+	sent := rec.Sent()
+	require.Len(t, sent, 1)
+	assert.Equal(t, "alice@example.com", sent[0].To)
+	assert.Equal(t, "Someone tried to sign up with your email", sent[0].Subject)
+	assert.Contains(t, sent[0].Text, "Someone tried to sign up with this email address.")
+	assert.Contains(t, sent[0].Text, "https://app.test")
+	assert.True(t, strings.Contains(strings.ToLower(sent[0].Text), "ignore"))
+}
+
+func TestPasswordSignup_DuplicateCreateRaceReturnsDecoy(t *testing.T) {
+	base := newErrorRepo()
+	winner := seedUser(base.fakeRepo, "race@example.com", hashPW(t, strongPW), "active")
+	repo := &signupRaceRepo{errorRepo: base}
+	repo.failCreateUser = true
+	svc, rec := newAuthSvcWithMailerForRepo(t, repo)
+
+	result, err := svc.PasswordSignup(context.Background(), "race@example.com", strongPW, "Racer", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.NotEqual(t, winner.ID, result.User.ID)
+	assert.Contains(t, result.User.ID, "signup-pending-")
+	assert.NotEmpty(t, result.AccessToken)
+	assert.NotEmpty(t, result.RefreshToken)
+	assert.Len(t, rec.Sent(), 1)
+
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrAlreadyExists))
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
+	got, findErr := repo.FindUserByEmail(context.Background(), "race@example.com")
+	require.NoError(t, findErr)
+	require.NotNil(t, got)
+	assert.Equal(t, winner.ID, got.ID)
 }
 
 func TestPasswordSignup_WeakPasswordFails(t *testing.T) {
@@ -106,6 +179,23 @@ func TestPasswordLogin_CorrectPasswordSucceeds(t *testing.T) {
 	assert.NotEmpty(t, result.AccessToken)
 	assert.NotEmpty(t, result.RefreshToken)
 	assert.False(t, result.TotpRequired)
+}
+
+func TestPasswordLogin_UnverifiedEmailAllowed(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	pwHash := hashPW(t, strongPW)
+	user := seedUser(repo, "bob@example.com", pwHash, "active")
+	user.EmailVerified = false
+	user.EmailVerifiedAt = 0
+
+	result, err := svc.PasswordLogin(context.Background(), "bob@example.com", strongPW, "1.2.3.4", "TestAgent")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "bob@example.com", result.User.Email)
+	assert.False(t, result.User.EmailVerified)
+	assert.NotEmpty(t, result.AccessToken)
+	assert.NotEmpty(t, result.RefreshToken)
 }
 
 func TestPasswordLogin_WrongPasswordFails(t *testing.T) {
@@ -246,6 +336,48 @@ func TestRefreshToken_InvalidTokenFails(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
 
+func TestRefreshToken_LookupErrorFailsClosed(t *testing.T) {
+	repo := newErrorRepo()
+	svc := newTestAuthServiceErr(t, repo)
+
+	repo.failFindRefreshTokenIncluding = true
+	_, _, _, err := svc.RefreshToken(context.Background(), "raw-token", "", "")
+	require.Error(t, err)
+}
+
+func TestRefreshToken_ConsumeFailureDoesNotMintReplacement(t *testing.T) {
+	repo := newErrorRepo()
+	svc := newTestAuthServiceErr(t, repo)
+	result, err := svc.PasswordSignup(context.Background(), "consume@example.com", strongPW, "", "")
+	require.NoError(t, err)
+
+	repo.failConsumeRefreshToken = true
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	require.Error(t, err)
+	list, snapErr := repo.refreshTokenSnapshot()
+	require.NoError(t, snapErr)
+	assert.Len(t, list, 1)
+	stored, findErr := repo.FindRefreshTokenByHashIncludingConsumed(context.Background(), hashRefreshToken(result.RefreshToken))
+	require.NoError(t, findErr)
+	require.NotNil(t, stored)
+	assert.Zero(t, stored.ConsumedAtMs)
+}
+
+func TestRefreshToken_ReplayRevokeFailureStillRejectsReplay(t *testing.T) {
+	repo := newErrorRepo()
+	svc := newTestAuthServiceErr(t, repo)
+	result, err := svc.PasswordSignup(context.Background(), "replay-delete@example.com", strongPW, "", "")
+	require.NoError(t, err)
+
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	require.NoError(t, err)
+
+	repo.failDeleteRefreshTokensForUser = true
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
+}
+
 // ── Logout ──────────────────────────────────────────────────────────────
 
 func TestLogout_DeletesRefreshToken(t *testing.T) {
@@ -299,7 +431,7 @@ func TestOAuthLogin_CreatesNewUser(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	code := fakeOAuthCode("oauth@example.com", "OAuth User", "https://img.example.com/pic.jpg", "google")
-	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
+	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "oauth@example.com", result.User.Email)
 	assert.Equal(t, "OAuth User", result.User.Name)
@@ -312,7 +444,7 @@ func TestOAuthLogin_ExistingUserUpdatesProfile(t *testing.T) {
 	seedUser(repo, "existing@example.com", "", "active")
 
 	code := fakeOAuthCode("existing@example.com", "New Name", "https://pic.url", "google")
-	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "")
+	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "existing@example.com", result.User.Email)
 }
@@ -630,12 +762,26 @@ func TestFriendlyDeviceName(t *testing.T) {
 	}{
 		{"", "Unknown device"},
 		{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36", "Chrome on macOS"},
+		{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/120.0", "Edge on Windows"},
 		{"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0", "Firefox on Windows"},
+		{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/17.0 Safari/605.1.15", "Safari on macOS"},
 		{"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", "Browser on iOS"},
+		{"Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120.0 Safari/537.36", "Chrome on Android"},
+		{"PostmanRuntime/7.36.0", "Postman on Unknown OS"},
 		{"curl/7.68.0", "curl on Unknown OS"},
+		{"Go-http-client/2.0 (linux)", "Browser on Linux"},
 	}
 	for _, tc := range tests {
 		result := friendlyDeviceName(tc.ua)
 		assert.Equal(t, tc.expected, result, "ua=%q", tc.ua)
 	}
+}
+
+func TestTokenExpiryHelpers(t *testing.T) {
+	assert.Equal(t, int32(0), secondsToInt32(0))
+	assert.Equal(t, int32(0), secondsToInt32(-1))
+	assert.Equal(t, maxInt32, secondsToInt32(int(maxInt32)+1))
+	assert.Equal(t, int32(60), secondsToInt32(60))
+	assert.Equal(t, "abc", truncate("abcdef", 3))
+	assert.Equal(t, "abc", truncate("abc", 3))
 }

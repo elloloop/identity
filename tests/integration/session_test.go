@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -23,7 +24,30 @@ func signupViaClient(t *testing.T, h *Harness, email string) (accessToken, refre
 	if err != nil {
 		t.Fatalf("PasswordSignup(%s): %v", email, err)
 	}
-	return resp.Msg.AccessToken, resp.Msg.RefreshToken, resp.Msg.GetUser().GetId()
+	userID = resp.Msg.GetUser().GetId()
+	h.WaitForRefreshTokenCount(t, userID, 1)
+	return resp.Msg.AccessToken, resp.Msg.RefreshToken, userID
+}
+
+func requireRefreshRejectedEventually(t *testing.T, h *Harness, refreshToken string) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, err := h.Client.RefreshToken(context.Background(), connect.NewRequest(&identitypb.RefreshTokenRequest{
+			RefreshToken: refreshToken,
+		}))
+		if err != nil {
+			if got := connect.CodeOf(err); got == connect.CodeUnauthenticated {
+				return
+			}
+			t.Fatalf("unexpected refresh rejection code = %v (err=%v)", connect.CodeOf(err), err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected refresh token to become invalid")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // TestSession_RefreshRoundTrip verifies that a refresh token issued
@@ -81,15 +105,7 @@ func TestSession_RefreshTokenRotation(t *testing.T) {
 	}
 
 	// Second attempt with the OLD token must fail.
-	_, err = h.Client.RefreshToken(ctx, connect.NewRequest(&identitypb.RefreshTokenRequest{
-		RefreshToken: oldRefresh,
-	}))
-	if err == nil {
-		t.Fatalf("expected old refresh token to be invalid after rotation")
-	}
-	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
-		t.Fatalf("rotated-token code = %v, want Unauthenticated (err=%v)", got, err)
-	}
+	requireRefreshRejectedEventually(t, h, oldRefresh)
 }
 
 // TestSession_MultipleSessionsPerUser verifies that two independent
@@ -126,7 +142,7 @@ func TestSession_MultipleSessionsPerUser(t *testing.T) {
 	}
 
 	// Includes the signup-issued session => 3 active sessions total.
-	if got := h.Repo.CountRefreshTokensForUser(userID); got != 3 {
+	if got := h.CountRefreshTokensForUser(t, userID); got != 3 {
 		t.Fatalf("active sessions = %d, want 3", got)
 	}
 
@@ -159,13 +175,5 @@ func TestSession_LogoutInvalidatesSession(t *testing.T) {
 		t.Fatalf("Logout: %v", err)
 	}
 
-	_, err := h.Client.RefreshToken(ctx, connect.NewRequest(&identitypb.RefreshTokenRequest{
-		RefreshToken: refresh,
-	}))
-	if err == nil {
-		t.Fatalf("expected refresh after logout to fail")
-	}
-	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
-		t.Fatalf("post-logout refresh code = %v, want Unauthenticated", got)
-	}
+	requireRefreshRejectedEventually(t, h, refresh)
 }

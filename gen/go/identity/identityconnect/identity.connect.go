@@ -33,6 +33,9 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// IdentityServiceBeginOAuthLoginProcedure is the fully-qualified name of the IdentityService's
+	// BeginOAuthLogin RPC.
+	IdentityServiceBeginOAuthLoginProcedure = "/identity.IdentityService/BeginOAuthLogin"
 	// IdentityServiceOAuthLoginProcedure is the fully-qualified name of the IdentityService's
 	// OAuthLogin RPC.
 	IdentityServiceOAuthLoginProcedure = "/identity.IdentityService/OAuthLogin"
@@ -201,6 +204,7 @@ const (
 // IdentityServiceClient is a client for the identity.IdentityService service.
 type IdentityServiceClient interface {
 	// Authentication
+	BeginOAuthLogin(context.Context, *connect.Request[identity.BeginOAuthLoginRequest]) (*connect.Response[identity.BeginOAuthLoginResponse], error)
 	OAuthLogin(context.Context, *connect.Request[identity.OAuthLoginRequest]) (*connect.Response[identity.OAuthLoginResponse], error)
 	PasswordSignup(context.Context, *connect.Request[identity.PasswordSignupRequest]) (*connect.Response[identity.PasswordSignupResponse], error)
 	PasswordLogin(context.Context, *connect.Request[identity.PasswordLoginRequest]) (*connect.Response[identity.PasswordLoginResponse], error)
@@ -286,6 +290,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 	baseURL = strings.TrimRight(baseURL, "/")
 	identityServiceMethods := identity.File_identity_identity_proto.Services().ByName("IdentityService").Methods()
 	return &identityServiceClient{
+		beginOAuthLogin: connect.NewClient[identity.BeginOAuthLoginRequest, identity.BeginOAuthLoginResponse](
+			httpClient,
+			baseURL+IdentityServiceBeginOAuthLoginProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("BeginOAuthLogin")),
+			connect.WithClientOptions(opts...),
+		),
 		oAuthLogin: connect.NewClient[identity.OAuthLoginRequest, identity.OAuthLoginResponse](
 			httpClient,
 			baseURL+IdentityServiceOAuthLoginProcedure,
@@ -621,6 +631,7 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 
 // identityServiceClient implements IdentityServiceClient.
 type identityServiceClient struct {
+	beginOAuthLogin             *connect.Client[identity.BeginOAuthLoginRequest, identity.BeginOAuthLoginResponse]
 	oAuthLogin                  *connect.Client[identity.OAuthLoginRequest, identity.OAuthLoginResponse]
 	passwordSignup              *connect.Client[identity.PasswordSignupRequest, identity.PasswordSignupResponse]
 	passwordLogin               *connect.Client[identity.PasswordLoginRequest, identity.PasswordLoginResponse]
@@ -676,6 +687,11 @@ type identityServiceClient struct {
 	reactivateUser              *connect.Client[identity.ReactivateUserRequest, identity.ReactivateUserResponse]
 	resetUserPassword           *connect.Client[identity.ResetUserPasswordRequest, identity.ResetUserPasswordResponse]
 	setUserQuota                *connect.Client[identity.SetUserQuotaRequest, identity.SetUserQuotaResponse]
+}
+
+// BeginOAuthLogin calls identity.IdentityService.BeginOAuthLogin.
+func (c *identityServiceClient) BeginOAuthLogin(ctx context.Context, req *connect.Request[identity.BeginOAuthLoginRequest]) (*connect.Response[identity.BeginOAuthLoginResponse], error) {
+	return c.beginOAuthLogin.CallUnary(ctx, req)
 }
 
 // OAuthLogin calls identity.IdentityService.OAuthLogin.
@@ -956,6 +972,7 @@ func (c *identityServiceClient) SetUserQuota(ctx context.Context, req *connect.R
 // IdentityServiceHandler is an implementation of the identity.IdentityService service.
 type IdentityServiceHandler interface {
 	// Authentication
+	BeginOAuthLogin(context.Context, *connect.Request[identity.BeginOAuthLoginRequest]) (*connect.Response[identity.BeginOAuthLoginResponse], error)
 	OAuthLogin(context.Context, *connect.Request[identity.OAuthLoginRequest]) (*connect.Response[identity.OAuthLoginResponse], error)
 	PasswordSignup(context.Context, *connect.Request[identity.PasswordSignupRequest]) (*connect.Response[identity.PasswordSignupResponse], error)
 	PasswordLogin(context.Context, *connect.Request[identity.PasswordLoginRequest]) (*connect.Response[identity.PasswordLoginResponse], error)
@@ -1037,6 +1054,12 @@ type IdentityServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	identityServiceMethods := identity.File_identity_identity_proto.Services().ByName("IdentityService").Methods()
+	identityServiceBeginOAuthLoginHandler := connect.NewUnaryHandler(
+		IdentityServiceBeginOAuthLoginProcedure,
+		svc.BeginOAuthLogin,
+		connect.WithSchema(identityServiceMethods.ByName("BeginOAuthLogin")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceOAuthLoginHandler := connect.NewUnaryHandler(
 		IdentityServiceOAuthLoginProcedure,
 		svc.OAuthLogin,
@@ -1369,6 +1392,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 	)
 	return "/identity.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case IdentityServiceBeginOAuthLoginProcedure:
+			identityServiceBeginOAuthLoginHandler.ServeHTTP(w, r)
 		case IdentityServiceOAuthLoginProcedure:
 			identityServiceOAuthLoginHandler.ServeHTTP(w, r)
 		case IdentityServicePasswordSignupProcedure:
@@ -1487,6 +1512,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 
 // UnimplementedIdentityServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedIdentityServiceHandler struct{}
+
+func (UnimplementedIdentityServiceHandler) BeginOAuthLogin(context.Context, *connect.Request[identity.BeginOAuthLoginRequest]) (*connect.Response[identity.BeginOAuthLoginResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.BeginOAuthLogin is not implemented"))
+}
 
 func (UnimplementedIdentityServiceHandler) OAuthLogin(context.Context, *connect.Request[identity.OAuthLoginRequest]) (*connect.Response[identity.OAuthLoginResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.OAuthLogin is not implemented"))

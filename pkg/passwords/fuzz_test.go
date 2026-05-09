@@ -1,6 +1,8 @@
 package passwords
 
 import (
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -44,7 +46,7 @@ func FuzzValidatePasswordStrength(f *testing.F) {
 
 // FuzzHashAndVerify fuzzes the round-trip Hash -> Verify property:
 //   - Hash(p) must succeed for any p whose byte length fits within bcrypt's
-//     72-byte limit (longer inputs are explicitly rejected by golang.org/x/crypto).
+//     72-byte limit and does not contain NUL bytes.
 //   - Verify(p, Hash(p)) must return true.
 //   - Verify(p2, Hash(p)) must return false when p2 != p (within bcrypt's
 //     72-byte truncation horizon).
@@ -53,14 +55,22 @@ func FuzzHashAndVerify(f *testing.F) {
 	f.Add("password", "Password")
 	f.Add("Str0ng!Password", "str0ng!password")
 	f.Add("", "x")
+	f.Add("", "\x00")
 	f.Add("a", "b")
 	f.Add("MyP@ssw0rd!", "MyP@ssw0rd?")
 
 	f.Fuzz(func(t *testing.T, p1, p2 string) {
 		// bcrypt rejects passwords longer than 72 bytes outright. This is
-		// part of the documented contract, not a panic. Skip those inputs
-		// — they're not in scope for round-trip verification.
+		// part of the documented contract, not a panic. Skip those inputs;
+		// they're not in scope for round-trip verification.
 		if len(p1) > 72 || len(p2) > 72 {
+			return
+		}
+
+		if strings.ContainsRune(p1, '\x00') {
+			if _, err := Hash(p1); !errors.Is(err, errPasswordContainsNUL) {
+				t.Fatalf("Hash(%q) error = %v, want %v", p1, err, errPasswordContainsNUL)
+			}
 			return
 		}
 

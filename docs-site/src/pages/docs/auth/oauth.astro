@@ -6,22 +6,21 @@ import { Code } from "astro-expressive-code/components";
 <DocsLayout title="OAuth">
   <h1>OAuth</h1>
   <p>
-    Identity supports Google and Microsoft as upstream OAuth providers. The
-    flow is "browser does the dance, server consumes the result": the
-    front-end SDK (e.g. Google Identity Services) handles the redirect and
-    delivers a verified user identity to Identity's <code>OAuthLogin</code>
-    RPC, which upserts the user and issues access + refresh tokens.
+    Identity supports Google, Microsoft, and GitHub as upstream OAuth
+    providers. The flow is server-owned: the client calls
+    <code>BeginOAuthLogin</code>, redirects the browser to the returned
+    provider URL, then completes the callback with <code>OAuthLogin</code>.
+    Identity does the provider token exchange, verifies the upstream
+    identity, upserts the local user, and issues its own access and
+    refresh tokens.
   </p>
 
   <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
-    <strong>Implementation status.</strong> The post-validation half
-    (user upsert + token issuance) is implemented in
-    <code>internal/service/auth_login.go</code>. The OAuth code-exchange
-    step is currently a placeholder — the source comment reads
-    "<em>The actual OIDC token exchange and validation would be injected
-    as a dependency; this method handles the post-validation user upsert +
-    token issuance.</em>" In production wire your own validator into the
-    handler before exposing this RPC.
+    <strong>Security model.</strong> <code>BeginOAuthLogin</code> mints a
+    signed state token plus a PKCE verifier. <code>OAuthLogin</code>
+    rejects callbacks whose returned <code>state</code> does not match the
+    server-minted token, so CSRF protection does not depend on a
+    client-side state cache.
   </div>
 
   <h2>Configuration</h2>
@@ -32,13 +31,30 @@ import { Code } from "astro-expressive-code/components";
 -e GATEWAY_MICROSOFT_CLIENT_SECRET=...
 -e GATEWAY_MICROSOFT_TENANT_ID=common`} lang="bash" />
 
-  <h2>Request shape</h2>
+  <h2>Start RPC</h2>
+  <Code code={`message BeginOAuthLoginRequest {
+  string redirect_uri = 1;
+  string provider     = 2;  // "google", "microsoft", or "github"
+  string tenant       = 3;  // Microsoft tenant ID (optional)
+}
+
+message BeginOAuthLoginResponse {
+  string authorization_url = 1;
+  string state             = 2;
+  string state_token       = 3;
+  string code_verifier     = 4;
+  int32 expires_in         = 5;
+}`} lang="proto" />
+
+  <h2>Callback RPC</h2>
   <Code code={`message OAuthLoginRequest {
   string code          = 1;  // authorization code from provider
   string redirect_uri  = 2;
-  string provider      = 3;  // "google" or "microsoft"
-  string code_verifier = 4;  // PKCE (optional)
+  string provider      = 3;  // "google", "microsoft", or "github"
+  string code_verifier = 4;  // optional when state_token is present
   string tenant        = 5;  // Microsoft tenant ID (optional)
+  string state         = 6;  // callback state from the provider redirect
+  string state_token   = 7;  // opaque token minted by BeginOAuthLogin
 }`} lang="proto" />
 
   <h2>Response</h2>
@@ -51,8 +67,9 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>Upsert semantics</h2>
   <p>
-    On a successful OAuth verification, Identity looks up the user by
-    email:
+    On a successful OAuth verification, Identity resolves the user by
+    <code>(provider, provider_user_id)</code> first, then falls back to the
+    provider email for first-time linking:
   </p>
   <ul>
     <li>

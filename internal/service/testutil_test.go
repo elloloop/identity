@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -749,6 +750,15 @@ func (f *fakeOAuthExchanger) Exchange(_ context.Context, code, _ string) (*oauth
 	default:
 		return nil, oauth.ErrCodeExchangeFailed
 	}
+}
+
+func (f *fakeOAuthExchanger) AuthorizationURL(_ context.Context, redirectURI, state, codeChallenge string) (string, error) {
+	params := url.Values{}
+	params.Set("redirect_uri", redirectURI)
+	params.Set("state", state)
+	params.Set("code_challenge", codeChallenge)
+	params.Set("provider", f.provider)
+	return "https://oauth.test/authorize?" + params.Encode(), nil
 }
 
 func splitCode(code string) []string {

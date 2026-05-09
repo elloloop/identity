@@ -9,8 +9,8 @@ import (
 const (
 	// MinPasswordLength is the minimum acceptable password length.
 	MinPasswordLength = 8
-	// MaxPasswordLength prevents bcrypt DoS (bcrypt truncates at 72 bytes anyway).
-	MaxPasswordLength = 128
+	// MaxPasswordLength is bcrypt's maximum password byte length.
+	MaxPasswordLength = 72
 )
 
 // commonPasswords is the top-100 common passwords blocklist.
@@ -52,7 +52,11 @@ func ValidateStrength(password string) []string {
 	}
 
 	if len(password) > MaxPasswordLength {
-		issues = append(issues, fmt.Sprintf("Password must be at most %d characters", MaxPasswordLength))
+		issues = append(issues, fmt.Sprintf("Password must be at most %d bytes", MaxPasswordLength))
+	}
+
+	if strings.ContainsRune(password, '\x00') {
+		issues = append(issues, "Password must not contain NUL bytes")
 	}
 
 	hasUpper := false
