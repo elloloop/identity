@@ -168,6 +168,9 @@ jobs:
       - name: Coverage gate (pkg/ >= 88%)
         run: bash scripts/coverage-gate.sh cover.out 88 pkg/
 
+      - name: Coverage gate (per-package)
+        run: bash scripts/coverage-gate.sh cover.out --config .coverage-gates.yml
+
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v7
