@@ -449,7 +449,7 @@ func TestSMTPContextCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	go func() {
 		c, err := ln.Accept()
 		if err != nil {
@@ -553,10 +553,10 @@ func TestSMTPDefaultFromInjected(t *testing.T) {
 func TestSMTPAddressOnly(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"a@b.com":                  "a@b.com",
-		"Alice <alice@b.com>":      "alice@b.com",
-		"\"Alice\" <alice@b.com>":  "alice@b.com",
-		"no-brackets":              "no-brackets",
+		"a@b.com":                 "a@b.com",
+		"Alice <alice@b.com>":     "alice@b.com",
+		"\"Alice\" <alice@b.com>": "alice@b.com",
+		"no-brackets":             "no-brackets",
 	}
 	for in, want := range cases {
 		if got := addressOnly(in); got != want {

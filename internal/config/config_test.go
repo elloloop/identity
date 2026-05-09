@@ -234,7 +234,7 @@ func clearGatewayEnv(t *testing.T) {
 		key := kv[:findByte(kv, '=')]
 		if len(key) > 8 && key[:8] == "GATEWAY_" {
 			t.Setenv(key, "")
-			os.Unsetenv(key)
+			_ = os.Unsetenv(key)
 		}
 	}
 }

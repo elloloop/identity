@@ -1097,9 +1097,9 @@ func buildSelectQuery(base string, tenantID string, filter map[string]any, specs
 				continue
 			}
 			if spec.caseInsensitive {
-				sb.WriteString(fmt.Sprintf(" AND lower(%s) = lower($%d)", spec.col, idx))
+				fmt.Fprintf(&sb, " AND lower(%s) = lower($%d)", spec.col, idx)
 			} else {
-				sb.WriteString(fmt.Sprintf(" AND %s = $%d", spec.col, idx))
+				fmt.Fprintf(&sb, " AND %s = $%d", spec.col, idx)
 			}
 			args = append(args, s)
 			idx++
@@ -1108,7 +1108,7 @@ func buildSelectQuery(base string, tenantID string, filter map[string]any, specs
 			if !ok {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf(" AND %s = $%d", spec.col, idx))
+			fmt.Fprintf(&sb, " AND %s = $%d", spec.col, idx)
 			args = append(args, b)
 			idx++
 		case dbKindInt64:
@@ -1116,7 +1116,7 @@ func buildSelectQuery(base string, tenantID string, filter map[string]any, specs
 			if !ok {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf(" AND %s = $%d", spec.col, idx))
+			fmt.Fprintf(&sb, " AND %s = $%d", spec.col, idx)
 			args = append(args, n)
 			idx++
 		}

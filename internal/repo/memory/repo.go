@@ -12,6 +12,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -136,8 +137,11 @@ func (r *Repo) IncrementFailedLoginCount(_ context.Context, userID string) (int3
 	if !ok {
 		return 0, fmt.Errorf("user %s not found", userID)
 	}
+	if u.FailedLoginCount >= math.MaxInt32 {
+		return 0, fmt.Errorf("failed login count overflow for user %s", userID)
+	}
 	u.FailedLoginCount++
-	return int32(u.FailedLoginCount), nil
+	return int32(u.FailedLoginCount), nil // #nosec G115 -- bounds checked above.
 }
 
 func (r *Repo) ResetFailedLoginCount(_ context.Context, userID string) error {

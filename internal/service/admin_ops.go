@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
@@ -59,7 +60,9 @@ func (s *AdminService) ListUsers(
 	}
 	offset := 0
 	if cursor != "" {
-		fmt.Sscanf(cursor, "%d", &offset)
+		if parsed, err := strconv.Atoi(cursor); err == nil {
+			offset = parsed
+		}
 	}
 
 	nodes, err := s.db.QueryNodes(ctx, s.tenantID, "user:system", typeUser, nil)
@@ -71,7 +74,7 @@ func (s *AdminService) ListUsers(
 	var filtered []*entdb.Node
 	for _, n := range nodes {
 		u := userFromNode(n)
-		if statusFilter != "" && strings.ToLower(u.Status) != strings.ToLower(statusFilter) {
+		if statusFilter != "" && !strings.EqualFold(u.Status, statusFilter) {
 			continue
 		}
 		if searchLower != "" {

@@ -2,11 +2,22 @@ package connect
 
 import (
 	"encoding/json"
+	"math"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity"
 	"github.com/elloloop/identity/internal/service"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+func intToProtoInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(n) // #nosec G115 -- bounds checked above.
+}
 
 // ─── Domain → Proto converters ──────────────────────────────────────────────
 //
@@ -25,19 +36,19 @@ func userToProto(u *service.User) *identitypb.User {
 		return nil
 	}
 	pb := &identitypb.User{
-		Id:              u.ID,
-		Email:           u.Email,
-		Name:            u.Name,
-		AvatarUrl:       u.AvatarURL,
-		Role:            u.Role,
-		TotpRequired:    u.TotpRequired,
-		Status:          userStatusToProto(u.Status),
-		RecoveryEmail:   u.RecoveryEmail,
-		QuotaBytes:      u.QuotaBytes,
-		LastLoginAtMs:   u.LastLoginAtMs,
+		Id:               u.ID,
+		Email:            u.Email,
+		Name:             u.Name,
+		AvatarUrl:        u.AvatarURL,
+		Role:             u.Role,
+		TotpRequired:     u.TotpRequired,
+		Status:           userStatusToProto(u.Status),
+		RecoveryEmail:    u.RecoveryEmail,
+		QuotaBytes:       u.QuotaBytes,
+		LastLoginAtMs:    u.LastLoginAtMs,
 		EmailVerified:    u.EmailVerified,
 		EmailVerifiedAt:  u.EmailVerifiedAt,
-		FailedLoginCount: int32(u.FailedLoginCount),
+		FailedLoginCount: intToProtoInt32(u.FailedLoginCount),
 		LockedUntil:      u.LockedUntil,
 	}
 	if !u.CreatedAt.IsZero() {

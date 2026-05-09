@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -74,7 +75,9 @@ func TestApplyOrLogSchemaGap_LogsEveryDeclaredNodeType(t *testing.T) {
 		case int32:
 			declared[name] = v
 		case int64:
-			declared[name] = int32(v)
+			require.LessOrEqual(t, v, int64(math.MaxInt32))
+			require.GreaterOrEqual(t, v, int64(math.MinInt32))
+			declared[name] = int32(v) // #nosec G115 -- bounds checked above.
 		}
 	}
 

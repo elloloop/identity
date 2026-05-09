@@ -9,6 +9,7 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
+// #nosec G101 -- SQL column list contains token field names, not credentials.
 const refreshTokenColumns = `
 	id, token_hash, user_id, device_info, device_name,
 	ip_address, user_agent,

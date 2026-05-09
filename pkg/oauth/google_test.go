@@ -74,7 +74,7 @@ func TestGoogle_TokenEndpointError(t *testing.T) {
 	}
 	exch := NewGoogle(GoogleConfig{
 		ClientID:     "x",
-		ClientSecret: "y",
+		ClientSecret: "y", // #nosec G101 -- dummy test value.
 		TokenURL:     fp.URL("/token"),
 		JWKSURL:      fp.URL("/jwks"),
 	})
@@ -86,6 +86,7 @@ func TestGoogle_TokenEndpointError(t *testing.T) {
 
 func TestGoogle_NetworkError(t *testing.T) {
 	t.Parallel()
+	// #nosec G101 -- dummy OAuth config for a network-error test.
 	exch := NewGoogle(GoogleConfig{
 		ClientID:     "x",
 		ClientSecret: "y",
@@ -107,12 +108,12 @@ func TestGoogle_BadSignature(t *testing.T) {
 	servingJWKS := newTestKey(t, "kid-server") // a different keypair
 
 	idToken := signing.signIDToken(t, map[string]any{
-		"iss": "https://accounts.test",
-		"sub": "victim",
-		"aud": "client-id",
-		"iat": now.Unix(),
-		"exp": now.Add(5 * time.Minute).Unix(),
-		"email": "v@example.com",
+		"iss":            "https://accounts.test",
+		"sub":            "victim",
+		"aud":            "client-id",
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "v@example.com",
 		"email_verified": true,
 	})
 

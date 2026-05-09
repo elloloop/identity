@@ -110,7 +110,7 @@ func (f *fakeDB) ExecuteAtomic(_ context.Context, _, _, _ string, ops []entdb.Op
 		case entdb.OpDeleteEdge:
 			var keep []*entdb.Edge
 			for _, e := range f.edges {
-				if !(e.EdgeTypeID == op.EdgeTypeID && e.FromNodeID == op.FromNodeID && e.ToNodeID == op.ToNodeID) {
+				if e.EdgeTypeID != op.EdgeTypeID || e.FromNodeID != op.FromNodeID || e.ToNodeID != op.ToNodeID {
 					keep = append(keep, e)
 				}
 			}

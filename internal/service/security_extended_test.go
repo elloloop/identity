@@ -343,9 +343,9 @@ func TestSecExt_ConcurrentLogin_NoInconsistentState(t *testing.T) {
 			successes++
 		} else if r.err != nil {
 			// Any error must be one of the well-defined sentinels.
-			if !(errors.Is(r.err, ErrUnauthenticated) ||
-				errors.Is(r.err, ErrAccountLocked) ||
-				errors.Is(r.err, ErrAccountNotActive)) {
+			if !errors.Is(r.err, ErrUnauthenticated) &&
+				!errors.Is(r.err, ErrAccountLocked) &&
+				!errors.Is(r.err, ErrAccountNotActive) {
 				t.Errorf("unexpected error type from concurrent login: %v", r.err)
 			}
 		}

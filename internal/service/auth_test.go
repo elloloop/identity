@@ -314,7 +314,7 @@ func TestRefreshToken_ExpiredTokenFails(t *testing.T) {
 	repo := newFakeRepo()
 	// Use a time in the far future for the test clock so the token appears expired.
 	futureTime := time.Now().Add(365 * 24 * time.Hour)
-	svc := newTestAuthServiceWithTime(t, repo, func() time.Time { return time.Now() })
+	svc := newTestAuthServiceWithTime(t, repo, time.Now)
 
 	result, err := svc.PasswordSignup(context.Background(), "expire@example.com", strongPW, "", "")
 	require.NoError(t, err)

@@ -17,7 +17,7 @@ import (
 func (s *AuthService) InitiateQrLogin(ctx context.Context, deviceInfo, userAgent, ipAddr string) (string, string, int32, error) {
 	sessionID := generateSessionID()
 	now := s.nowMs()
-	expiresIn := int32(s.cfg.QRLoginExpirySeconds)
+	expiresIn := secondsToInt32(s.cfg.QRLoginExpirySeconds)
 	expiresAt := now + int64(expiresIn)*1000
 
 	_, err := s.repo.CreateQrLoginSession(ctx, &QrLoginSessionRecord{
@@ -212,6 +212,6 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, ipAddr, userAg
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }

@@ -364,7 +364,7 @@ func TestVerifyTotp_GetUserErrors(t *testing.T) {
 	user, _ := r.FindUserByEmail(context.Background(), "vtu@example.com")
 	cid := "challenge-vtu"
 	nid := nextNodeID()
-	r.fakeRepo.loginChallenges[nid] = &LoginChallengeRecord{
+	r.loginChallenges[nid] = &LoginChallengeRecord{
 		NodeID: nid, ChallengeID: cid, UserID: user.ID,
 		ExpiresAt: time.Now().Add(time.Hour).UnixMilli(),
 	}
@@ -380,7 +380,7 @@ func TestVerifyTotp_GetTotpCredErrors(t *testing.T) {
 	user := seedUser(r.fakeRepo, "vt-tc@example.com", "", "active")
 	cid := "challenge-vttc"
 	nid := nextNodeID()
-	r.fakeRepo.loginChallenges[nid] = &LoginChallengeRecord{
+	r.loginChallenges[nid] = &LoginChallengeRecord{
 		NodeID: nid, ChallengeID: cid, UserID: user.ID,
 		ExpiresAt: time.Now().Add(time.Hour).UnixMilli(),
 	}
@@ -482,13 +482,13 @@ func TestPollQrLogin_ExpiredCaseReached(t *testing.T) {
 	r := newErrorRepo()
 	svc := newTestAuthServiceErr(t, r)
 
-	r.fakeRepo.mu.Lock()
+	r.mu.Lock()
 	id := nextNodeID()
-	r.fakeRepo.qrSessions[id] = &QrLoginSessionRecord{
+	r.qrSessions[id] = &QrLoginSessionRecord{
 		NodeID: id, SessionID: "expired-sid", Status: "expired",
 		ExpiresAt: time.Now().Add(time.Hour).UnixMilli(),
 	}
-	r.fakeRepo.mu.Unlock()
+	r.mu.Unlock()
 
 	res, err := svc.PollQrLogin(context.Background(), "expired-sid", "", "")
 	require.NoError(t, err)
@@ -524,14 +524,14 @@ func TestVerifyTotp_DecryptFailUsesRecoveryCode(t *testing.T) {
 	r := newErrorRepo()
 	user := seedUser(r.fakeRepo, "vtdec@example.com", "", "active")
 
-	r.fakeRepo.mu.Lock()
+	r.mu.Lock()
 	credID := nextNodeID()
-	r.fakeRepo.totpCreds[credID] = &TotpCredRecord{
+	r.totpCreds[credID] = &TotpCredRecord{
 		NodeID: credID, UserID: user.ID, SecretEncrypted: "not-encrypted-garbage", Verified: true,
 	}
 	cid := "vtdec-challenge"
 	nid := nextNodeID()
-	r.fakeRepo.loginChallenges[nid] = &LoginChallengeRecord{
+	r.loginChallenges[nid] = &LoginChallengeRecord{
 		NodeID: nid, ChallengeID: cid, UserID: user.ID,
 		ExpiresAt: time.Now().Add(time.Hour).UnixMilli(),
 	}
@@ -539,10 +539,10 @@ func TestVerifyTotp_DecryptFailUsesRecoveryCode(t *testing.T) {
 	rcID := nextNodeID()
 	rcCode := "ABCD-EFGH-JKLM"
 	rcHash := totpHashCode(rcCode)
-	r.fakeRepo.recoveryCodes[rcID] = &RecoveryCodeRecord{
+	r.recoveryCodes[rcID] = &RecoveryCodeRecord{
 		NodeID: rcID, UserID: user.ID, CodeHash: rcHash, Used: false,
 	}
-	r.fakeRepo.mu.Unlock()
+	r.mu.Unlock()
 
 	svc := newTestAuthServiceErr(t, r)
 	res, err := svc.VerifyTotp(context.Background(), cid, rcCode, "", "")

@@ -220,7 +220,7 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 

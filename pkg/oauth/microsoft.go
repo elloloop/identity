@@ -146,7 +146,7 @@ func (m *microsoftExchanger) Exchange(ctx context.Context, code, redirectURI str
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCodeExchangeFailed, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("%w: read body: %v", ErrCodeExchangeFailed, err)

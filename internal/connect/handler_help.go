@@ -52,7 +52,7 @@ func (h *IdentityHandler) ListHelpRequests(
 	resp := &identitypb.ListHelpRequestsResponse{
 		Requests:     helpRequestsToProto(requests),
 		NextCursor:   nextCursor,
-		PendingCount: int32(pendingCount),
+		PendingCount: intToProtoInt32(pendingCount),
 	}
 	return connect.NewResponse(resp), nil
 }

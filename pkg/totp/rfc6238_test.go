@@ -22,14 +22,14 @@ import (
 //   - Verify the last 6 digits match the truncated RFC expectation
 
 // RFC 6238 test secret: ASCII "12345678901234567890" base32-encoded.
-const rfcTestSecret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+const rfcTestSecret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" // #nosec G101 -- RFC 6238 test vector.
 
 func rfcGenerateCode(t *testing.T, secret string, timestamp time.Time, digits otp.Digits) string {
 	t.Helper()
 	code, err := totp.GenerateCodeCustom(secret, timestamp, totp.ValidateOpts{
 		Period:    30,
-		Skew:     0,
-		Digits:   digits,
+		Skew:      0,
+		Digits:    digits,
 		Algorithm: otp.AlgorithmSHA1,
 	})
 	if err != nil {
@@ -117,8 +117,8 @@ func TestRFC6238_VerifyCode_WithLiveSecret(t *testing.T) {
 	now := time.Now()
 	code, err := totp.GenerateCodeCustom(secret, now, totp.ValidateOpts{
 		Period:    30,
-		Skew:     0,
-		Digits:   otp.DigitsSix,
+		Skew:      0,
+		Digits:    otp.DigitsSix,
 		Algorithm: otp.AlgorithmSHA1,
 	})
 	if err != nil {

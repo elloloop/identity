@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
@@ -296,7 +297,10 @@ func (r *entRepository) IncrementFailedLoginCount(ctx context.Context, userID st
 	if user == nil {
 		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: user not found")
 	}
-	newCount := int32(user.FailedLoginCount + 1)
+	if user.FailedLoginCount >= math.MaxInt32 {
+		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: count overflow")
+	}
+	newCount := int32(user.FailedLoginCount + 1) // #nosec G115 -- bounds checked above.
 	patch := &schemapb.User{FailedLoginCount: int64(newCount)}
 	if err := r.client.update(ctx, actorStr(userID), userID, patch); err != nil {
 		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: %w", err)

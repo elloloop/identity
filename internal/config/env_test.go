@@ -223,7 +223,7 @@ func TestEnvTest_InvalidIntFallback(t *testing.T) {
 func TestEnvTest_EmptyIntFallback(t *testing.T) {
 	clearGatewayEnv(t)
 	t.Setenv("GATEWAY_GRPC_PORT", "")
-	os.Unsetenv("GATEWAY_GRPC_PORT")
+	_ = os.Unsetenv("GATEWAY_GRPC_PORT")
 	cfg := Load()
 	if cfg.GRPCPort != 50051 {
 		t.Errorf("GRPCPort with empty env: got %d, want 50051 (default)", cfg.GRPCPort)

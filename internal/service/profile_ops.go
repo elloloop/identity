@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
@@ -87,7 +88,9 @@ func (s *ProfileService) ListAuditEvents(
 	}
 	offset := 0
 	if cursor != "" {
-		fmt.Sscanf(cursor, "%d", &offset)
+		if parsed, err := strconv.Atoi(cursor); err == nil {
+			offset = parsed
+		}
 	}
 
 	// Build filter from parameters.

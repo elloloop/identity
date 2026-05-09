@@ -53,7 +53,7 @@ const DefaultConnTimeout = 5 * time.Second
 func ConfigFromEnv(tenantID string) Config {
 	return Config{
 		DSN:         os.Getenv("GATEWAY_POSTGRES_DSN"),
-		MaxConns:    int32(envInt("GATEWAY_POSTGRES_MAX_CONNS", int(DefaultMaxConns))),
+		MaxConns:    envInt32("GATEWAY_POSTGRES_MAX_CONNS", DefaultMaxConns),
 		ConnTimeout: time.Duration(envInt("GATEWAY_POSTGRES_CONN_TIMEOUT_MS", int(DefaultConnTimeout/time.Millisecond))) * time.Millisecond,
 		AutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", true),
 		TenantID:    tenantID,
@@ -92,6 +92,18 @@ func envInt(key string, def int) int {
 		return def
 	}
 	return n
+}
+
+func envInt32(key string, def int32) int32 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 32)
+	if err != nil {
+		return def
+	}
+	return int32(n)
 }
 
 func envBool(key string, def bool) bool {

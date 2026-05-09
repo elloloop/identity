@@ -17,12 +17,12 @@ import (
 // goroutine for the lifetime of the process and so tests can assert
 // fetch-call counts deterministically.
 type jwksCache struct {
-	mu       sync.Mutex
-	url      string
-	ttl      time.Duration
-	client   *http.Client
-	now      func() time.Time
-	set      jwk.Set
+	mu        sync.Mutex
+	url       string
+	ttl       time.Duration
+	client    *http.Client
+	now       func() time.Time
+	set       jwk.Set
 	fetchedAt time.Time
 }
 
@@ -80,7 +80,7 @@ func (c *jwksCache) fetch(ctx context.Context) (jwk.Set, error) {
 	if err != nil {
 		return nil, fmt.Errorf("jwks fetch: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		// Drain body to allow connection reuse.
 		_, _ = io.Copy(io.Discard, resp.Body)

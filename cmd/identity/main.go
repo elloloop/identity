@@ -59,7 +59,11 @@ func main() {
 	if err := db.Connect(context.Background()); err != nil {
 		logger.Fatal("entdb_connect_failed", zap.Error(err))
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Error("entdb_close_failed", zap.Error(err))
+		}
+	}()
 
 	// ── JWT Key Ring ─────────────────────────────────────────────────
 	var keyRing *jwt.KeyRing
@@ -146,7 +150,12 @@ func main() {
 		logger.Info("metrics_server_starting", zap.String("addr", metricsAddr))
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", promhttp.Handler())
-		if listenErr := http.ListenAndServe(metricsAddr, metricsMux); listenErr != nil {
+		metricsServer := &http.Server{
+			Addr:              metricsAddr,
+			Handler:           metricsMux,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		if listenErr := metricsServer.ListenAndServe(); listenErr != nil {
 			logger.Error("metrics_server_failed", zap.Error(listenErr))
 		}
 	}()
