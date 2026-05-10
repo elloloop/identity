@@ -18,6 +18,7 @@ func (r *pgRepository) FindUserByProviderID(ctx context.Context, provider, provi
 		       u.password_hash, u.quota_bytes, u.totp_required,
 		       u.failed_login_count, u.locked_until_ms,
 		       u.email_verified, u.email_verified_at_ms,
+		       u.idv_verified, u.idv_verified_at_ms,
 		       u.last_login_at_ms,
 		       u.created_at_ms, u.updated_at_ms
 		  FROM oauth_identities oi
