@@ -7,13 +7,12 @@
 package identity
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -264,6 +263,8 @@ type User struct {
 	EmailVerifiedAt  int64                  `protobuf:"varint,14,opt,name=email_verified_at,json=emailVerifiedAt,proto3" json:"email_verified_at,omitempty"`
 	FailedLoginCount int32                  `protobuf:"varint,15,opt,name=failed_login_count,json=failedLoginCount,proto3" json:"failed_login_count,omitempty"` // # of consecutive failed PasswordLogin attempts
 	LockedUntil      int64                  `protobuf:"varint,16,opt,name=locked_until,json=lockedUntil,proto3" json:"locked_until,omitempty"`                  // epoch ms; 0 = not locked, future = locked until
+	IdvVerified      bool                   `protobuf:"varint,17,opt,name=idv_verified,json=idvVerified,proto3" json:"idv_verified,omitempty"`                  // Latest identity verification has reached APPROVED status.
+	IdvVerifiedAt    int64                  `protobuf:"varint,18,opt,name=idv_verified_at,json=idvVerifiedAt,proto3" json:"idv_verified_at,omitempty"`          // epoch ms; 0 = never verified
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -406,6 +407,20 @@ func (x *User) GetFailedLoginCount() int32 {
 func (x *User) GetLockedUntil() int64 {
 	if x != nil {
 		return x.LockedUntil
+	}
+	return 0
+}
+
+func (x *User) GetIdvVerified() bool {
+	if x != nil {
+		return x.IdvVerified
+	}
+	return false
+}
+
+func (x *User) GetIdvVerifiedAt() int64 {
+	if x != nil {
+		return x.IdvVerifiedAt
 	}
 	return 0
 }
@@ -6941,7 +6956,7 @@ var File_identity_identity_proto protoreflect.FileDescriptor
 
 const file_identity_identity_proto_rawDesc = "" +
 	"\n" +
-	"\x17identity/identity.proto\x12\bidentity\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd1\x04\n" +
+	"\x17identity/identity.proto\x12\bidentity\x1a\x1fgoogle/protobuf/timestamp.proto\"\x9c\x05\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
@@ -6963,7 +6978,9 @@ const file_identity_identity_proto_rawDesc = "" +
 	"\x0eemail_verified\x18\r \x01(\bR\remailVerified\x12*\n" +
 	"\x11email_verified_at\x18\x0e \x01(\x03R\x0femailVerifiedAt\x12,\n" +
 	"\x12failed_login_count\x18\x0f \x01(\x05R\x10failedLoginCount\x12!\n" +
-	"\flocked_until\x18\x10 \x01(\x03R\vlockedUntil\"\x8d\x01\n" +
+	"\flocked_until\x18\x10 \x01(\x03R\vlockedUntil\x12!\n" +
+	"\fidv_verified\x18\x11 \x01(\bR\vidvVerified\x12&\n" +
+	"\x0fidv_verified_at\x18\x12 \x01(\x03R\ridvVerifiedAt\"\x8d\x01\n" +
 	"\x11CreateUserRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
@@ -7519,140 +7536,138 @@ func file_identity_identity_proto_rawDescGZIP() []byte {
 	return file_identity_identity_proto_rawDescData
 }
 
-var (
-	file_identity_identity_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-	file_identity_identity_proto_msgTypes  = make([]protoimpl.MessageInfo, 123)
-	file_identity_identity_proto_goTypes   = []any{
-		UserStatus(0),                                 // 0: identity.UserStatus
-		IdentityVerificationStatus(0),                 // 1: identity.IdentityVerificationStatus
-		HelpRequestStatus(0),                          // 2: identity.HelpRequestStatus
-		QrLoginStatus(0),                              // 3: identity.QrLoginStatus
-		(*User)(nil),                                  // 4: identity.User
-		(*CreateUserRequest)(nil),                     // 5: identity.CreateUserRequest
-		(*CreateUserResponse)(nil),                    // 6: identity.CreateUserResponse
-		(*GetUserRequest)(nil),                        // 7: identity.GetUserRequest
-		(*GetUserResponse)(nil),                       // 8: identity.GetUserResponse
-		(*UpdateUserRequest)(nil),                     // 9: identity.UpdateUserRequest
-		(*UpdateUserResponse)(nil),                    // 10: identity.UpdateUserResponse
-		(*DeleteUserRequest)(nil),                     // 11: identity.DeleteUserRequest
-		(*DeleteUserResponse)(nil),                    // 12: identity.DeleteUserResponse
-		(*ListUsersRequest)(nil),                      // 13: identity.ListUsersRequest
-		(*ListUsersResponse)(nil),                     // 14: identity.ListUsersResponse
-		(*Group)(nil),                                 // 15: identity.Group
-		(*CreateGroupRequest)(nil),                    // 16: identity.CreateGroupRequest
-		(*CreateGroupResponse)(nil),                   // 17: identity.CreateGroupResponse
-		(*UpdateGroupRequest)(nil),                    // 18: identity.UpdateGroupRequest
-		(*UpdateGroupResponse)(nil),                   // 19: identity.UpdateGroupResponse
-		(*DeleteGroupRequest)(nil),                    // 20: identity.DeleteGroupRequest
-		(*DeleteGroupResponse)(nil),                   // 21: identity.DeleteGroupResponse
-		(*ListGroupsRequest)(nil),                     // 22: identity.ListGroupsRequest
-		(*ListGroupsResponse)(nil),                    // 23: identity.ListGroupsResponse
-		(*AddGroupMemberRequest)(nil),                 // 24: identity.AddGroupMemberRequest
-		(*AddGroupMemberResponse)(nil),                // 25: identity.AddGroupMemberResponse
-		(*RemoveGroupMemberRequest)(nil),              // 26: identity.RemoveGroupMemberRequest
-		(*RemoveGroupMemberResponse)(nil),             // 27: identity.RemoveGroupMemberResponse
-		(*ListGroupMembersRequest)(nil),               // 28: identity.ListGroupMembersRequest
-		(*ListGroupMembersResponse)(nil),              // 29: identity.ListGroupMembersResponse
-		(*BeginOAuthLoginRequest)(nil),                // 30: identity.BeginOAuthLoginRequest
-		(*BeginOAuthLoginResponse)(nil),               // 31: identity.BeginOAuthLoginResponse
-		(*OAuthLoginRequest)(nil),                     // 32: identity.OAuthLoginRequest
-		(*OAuthLoginResponse)(nil),                    // 33: identity.OAuthLoginResponse
-		(*PasswordSignupRequest)(nil),                 // 34: identity.PasswordSignupRequest
-		(*PasswordSignupResponse)(nil),                // 35: identity.PasswordSignupResponse
-		(*PasswordLoginRequest)(nil),                  // 36: identity.PasswordLoginRequest
-		(*PasswordLoginResponse)(nil),                 // 37: identity.PasswordLoginResponse
-		(*GetCurrentUserRequest)(nil),                 // 38: identity.GetCurrentUserRequest
-		(*GetCurrentUserResponse)(nil),                // 39: identity.GetCurrentUserResponse
-		(*RefreshTokenRequest)(nil),                   // 40: identity.RefreshTokenRequest
-		(*RefreshTokenResponse)(nil),                  // 41: identity.RefreshTokenResponse
-		(*LogoutRequest)(nil),                         // 42: identity.LogoutRequest
-		(*LogoutResponse)(nil),                        // 43: identity.LogoutResponse
-		(*UpdateProfileRequest)(nil),                  // 44: identity.UpdateProfileRequest
-		(*UpdateProfileResponse)(nil),                 // 45: identity.UpdateProfileResponse
-		(*ChangePasswordRequest)(nil),                 // 46: identity.ChangePasswordRequest
-		(*ChangePasswordResponse)(nil),                // 47: identity.ChangePasswordResponse
-		(*RequestPasswordResetRequest)(nil),           // 48: identity.RequestPasswordResetRequest
-		(*RequestPasswordResetResponse)(nil),          // 49: identity.RequestPasswordResetResponse
-		(*ConfirmPasswordResetRequest)(nil),           // 50: identity.ConfirmPasswordResetRequest
-		(*ConfirmPasswordResetResponse)(nil),          // 51: identity.ConfirmPasswordResetResponse
-		(*SendEmailVerificationRequest)(nil),          // 52: identity.SendEmailVerificationRequest
-		(*SendEmailVerificationResponse)(nil),         // 53: identity.SendEmailVerificationResponse
-		(*VerifyEmailRequest)(nil),                    // 54: identity.VerifyEmailRequest
-		(*VerifyEmailResponse)(nil),                   // 55: identity.VerifyEmailResponse
-		(*RequestEmailChangeRequest)(nil),             // 56: identity.RequestEmailChangeRequest
-		(*RequestEmailChangeResponse)(nil),            // 57: identity.RequestEmailChangeResponse
-		(*ConfirmEmailChangeRequest)(nil),             // 58: identity.ConfirmEmailChangeRequest
-		(*ConfirmEmailChangeResponse)(nil),            // 59: identity.ConfirmEmailChangeResponse
-		(*IdentityVerification)(nil),                  // 60: identity.IdentityVerification
-		(*BeginIdentityVerificationRequest)(nil),      // 61: identity.BeginIdentityVerificationRequest
-		(*BeginIdentityVerificationResponse)(nil),     // 62: identity.BeginIdentityVerificationResponse
-		(*GetIdentityVerificationStatusRequest)(nil),  // 63: identity.GetIdentityVerificationStatusRequest
-		(*GetIdentityVerificationStatusResponse)(nil), // 64: identity.GetIdentityVerificationStatusResponse
-		(*AdminHelpRequest)(nil),                      // 65: identity.AdminHelpRequest
-		(*RequestAdminHelpRequest)(nil),               // 66: identity.RequestAdminHelpRequest
-		(*RequestAdminHelpResponse)(nil),              // 67: identity.RequestAdminHelpResponse
-		(*ListHelpRequestsRequest)(nil),               // 68: identity.ListHelpRequestsRequest
-		(*ListHelpRequestsResponse)(nil),              // 69: identity.ListHelpRequestsResponse
-		(*ResolveHelpRequestRequest)(nil),             // 70: identity.ResolveHelpRequestRequest
-		(*ResolveHelpRequestResponse)(nil),            // 71: identity.ResolveHelpRequestResponse
-		(*PasskeyCredentialInfo)(nil),                 // 72: identity.PasskeyCredentialInfo
-		(*BeginPasskeyRegistrationRequest)(nil),       // 73: identity.BeginPasskeyRegistrationRequest
-		(*BeginPasskeyRegistrationResponse)(nil),      // 74: identity.BeginPasskeyRegistrationResponse
-		(*CompletePasskeyRegistrationRequest)(nil),    // 75: identity.CompletePasskeyRegistrationRequest
-		(*CompletePasskeyRegistrationResponse)(nil),   // 76: identity.CompletePasskeyRegistrationResponse
-		(*BeginPasskeyLoginRequest)(nil),              // 77: identity.BeginPasskeyLoginRequest
-		(*BeginPasskeyLoginResponse)(nil),             // 78: identity.BeginPasskeyLoginResponse
-		(*CompletePasskeyLoginRequest)(nil),           // 79: identity.CompletePasskeyLoginRequest
-		(*CompletePasskeyLoginResponse)(nil),          // 80: identity.CompletePasskeyLoginResponse
-		(*ListPasskeysRequest)(nil),                   // 81: identity.ListPasskeysRequest
-		(*ListPasskeysResponse)(nil),                  // 82: identity.ListPasskeysResponse
-		(*DeletePasskeyRequest)(nil),                  // 83: identity.DeletePasskeyRequest
-		(*DeletePasskeyResponse)(nil),                 // 84: identity.DeletePasskeyResponse
-		(*InitiateQrLoginRequest)(nil),                // 85: identity.InitiateQrLoginRequest
-		(*InitiateQrLoginResponse)(nil),               // 86: identity.InitiateQrLoginResponse
-		(*GetQrLoginSessionRequest)(nil),              // 87: identity.GetQrLoginSessionRequest
-		(*GetQrLoginSessionResponse)(nil),             // 88: identity.GetQrLoginSessionResponse
-		(*ApproveQrLoginRequest)(nil),                 // 89: identity.ApproveQrLoginRequest
-		(*ApproveQrLoginResponse)(nil),                // 90: identity.ApproveQrLoginResponse
-		(*PollQrLoginRequest)(nil),                    // 91: identity.PollQrLoginRequest
-		(*PollQrLoginResponse)(nil),                   // 92: identity.PollQrLoginResponse
-		(*BeginTotpSetupRequest)(nil),                 // 93: identity.BeginTotpSetupRequest
-		(*BeginTotpSetupResponse)(nil),                // 94: identity.BeginTotpSetupResponse
-		(*VerifyTotpSetupRequest)(nil),                // 95: identity.VerifyTotpSetupRequest
-		(*VerifyTotpSetupResponse)(nil),               // 96: identity.VerifyTotpSetupResponse
-		(*DisableTotpRequest)(nil),                    // 97: identity.DisableTotpRequest
-		(*DisableTotpResponse)(nil),                   // 98: identity.DisableTotpResponse
-		(*VerifyTotpRequest)(nil),                     // 99: identity.VerifyTotpRequest
-		(*VerifyTotpResponse)(nil),                    // 100: identity.VerifyTotpResponse
-		(*RegenerateRecoveryCodesRequest)(nil),        // 101: identity.RegenerateRecoveryCodesRequest
-		(*RegenerateRecoveryCodesResponse)(nil),       // 102: identity.RegenerateRecoveryCodesResponse
-		(*Session)(nil),                               // 103: identity.Session
-		(*ListMySessionsRequest)(nil),                 // 104: identity.ListMySessionsRequest
-		(*ListMySessionsResponse)(nil),                // 105: identity.ListMySessionsResponse
-		(*RevokeSessionRequest)(nil),                  // 106: identity.RevokeSessionRequest
-		(*RevokeSessionResponse)(nil),                 // 107: identity.RevokeSessionResponse
-		(*RevokeAllSessionsRequest)(nil),              // 108: identity.RevokeAllSessionsRequest
-		(*RevokeAllSessionsResponse)(nil),             // 109: identity.RevokeAllSessionsResponse
-		(*SignOutEverywhereRequest)(nil),              // 110: identity.SignOutEverywhereRequest
-		(*SignOutEverywhereResponse)(nil),             // 111: identity.SignOutEverywhereResponse
-		(*AuditEvent)(nil),                            // 112: identity.AuditEvent
-		(*ListAuditEventsRequest)(nil),                // 113: identity.ListAuditEventsRequest
-		(*ListAuditEventsResponse)(nil),               // 114: identity.ListAuditEventsResponse
-		(*InviteUserRequest)(nil),                     // 115: identity.InviteUserRequest
-		(*InviteUserResponse)(nil),                    // 116: identity.InviteUserResponse
-		(*AcceptInvitationRequest)(nil),               // 117: identity.AcceptInvitationRequest
-		(*AcceptInvitationResponse)(nil),              // 118: identity.AcceptInvitationResponse
-		(*DeactivateUserRequest)(nil),                 // 119: identity.DeactivateUserRequest
-		(*DeactivateUserResponse)(nil),                // 120: identity.DeactivateUserResponse
-		(*ReactivateUserRequest)(nil),                 // 121: identity.ReactivateUserRequest
-		(*ReactivateUserResponse)(nil),                // 122: identity.ReactivateUserResponse
-		(*ResetUserPasswordRequest)(nil),              // 123: identity.ResetUserPasswordRequest
-		(*ResetUserPasswordResponse)(nil),             // 124: identity.ResetUserPasswordResponse
-		(*SetUserQuotaRequest)(nil),                   // 125: identity.SetUserQuotaRequest
-		(*SetUserQuotaResponse)(nil),                  // 126: identity.SetUserQuotaResponse
-		(*timestamppb.Timestamp)(nil),                 // 127: google.protobuf.Timestamp
-	}
-)
+var file_identity_identity_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_identity_identity_proto_msgTypes = make([]protoimpl.MessageInfo, 123)
+var file_identity_identity_proto_goTypes = []any{
+	(UserStatus)(0),                               // 0: identity.UserStatus
+	(IdentityVerificationStatus)(0),               // 1: identity.IdentityVerificationStatus
+	(HelpRequestStatus)(0),                        // 2: identity.HelpRequestStatus
+	(QrLoginStatus)(0),                            // 3: identity.QrLoginStatus
+	(*User)(nil),                                  // 4: identity.User
+	(*CreateUserRequest)(nil),                     // 5: identity.CreateUserRequest
+	(*CreateUserResponse)(nil),                    // 6: identity.CreateUserResponse
+	(*GetUserRequest)(nil),                        // 7: identity.GetUserRequest
+	(*GetUserResponse)(nil),                       // 8: identity.GetUserResponse
+	(*UpdateUserRequest)(nil),                     // 9: identity.UpdateUserRequest
+	(*UpdateUserResponse)(nil),                    // 10: identity.UpdateUserResponse
+	(*DeleteUserRequest)(nil),                     // 11: identity.DeleteUserRequest
+	(*DeleteUserResponse)(nil),                    // 12: identity.DeleteUserResponse
+	(*ListUsersRequest)(nil),                      // 13: identity.ListUsersRequest
+	(*ListUsersResponse)(nil),                     // 14: identity.ListUsersResponse
+	(*Group)(nil),                                 // 15: identity.Group
+	(*CreateGroupRequest)(nil),                    // 16: identity.CreateGroupRequest
+	(*CreateGroupResponse)(nil),                   // 17: identity.CreateGroupResponse
+	(*UpdateGroupRequest)(nil),                    // 18: identity.UpdateGroupRequest
+	(*UpdateGroupResponse)(nil),                   // 19: identity.UpdateGroupResponse
+	(*DeleteGroupRequest)(nil),                    // 20: identity.DeleteGroupRequest
+	(*DeleteGroupResponse)(nil),                   // 21: identity.DeleteGroupResponse
+	(*ListGroupsRequest)(nil),                     // 22: identity.ListGroupsRequest
+	(*ListGroupsResponse)(nil),                    // 23: identity.ListGroupsResponse
+	(*AddGroupMemberRequest)(nil),                 // 24: identity.AddGroupMemberRequest
+	(*AddGroupMemberResponse)(nil),                // 25: identity.AddGroupMemberResponse
+	(*RemoveGroupMemberRequest)(nil),              // 26: identity.RemoveGroupMemberRequest
+	(*RemoveGroupMemberResponse)(nil),             // 27: identity.RemoveGroupMemberResponse
+	(*ListGroupMembersRequest)(nil),               // 28: identity.ListGroupMembersRequest
+	(*ListGroupMembersResponse)(nil),              // 29: identity.ListGroupMembersResponse
+	(*BeginOAuthLoginRequest)(nil),                // 30: identity.BeginOAuthLoginRequest
+	(*BeginOAuthLoginResponse)(nil),               // 31: identity.BeginOAuthLoginResponse
+	(*OAuthLoginRequest)(nil),                     // 32: identity.OAuthLoginRequest
+	(*OAuthLoginResponse)(nil),                    // 33: identity.OAuthLoginResponse
+	(*PasswordSignupRequest)(nil),                 // 34: identity.PasswordSignupRequest
+	(*PasswordSignupResponse)(nil),                // 35: identity.PasswordSignupResponse
+	(*PasswordLoginRequest)(nil),                  // 36: identity.PasswordLoginRequest
+	(*PasswordLoginResponse)(nil),                 // 37: identity.PasswordLoginResponse
+	(*GetCurrentUserRequest)(nil),                 // 38: identity.GetCurrentUserRequest
+	(*GetCurrentUserResponse)(nil),                // 39: identity.GetCurrentUserResponse
+	(*RefreshTokenRequest)(nil),                   // 40: identity.RefreshTokenRequest
+	(*RefreshTokenResponse)(nil),                  // 41: identity.RefreshTokenResponse
+	(*LogoutRequest)(nil),                         // 42: identity.LogoutRequest
+	(*LogoutResponse)(nil),                        // 43: identity.LogoutResponse
+	(*UpdateProfileRequest)(nil),                  // 44: identity.UpdateProfileRequest
+	(*UpdateProfileResponse)(nil),                 // 45: identity.UpdateProfileResponse
+	(*ChangePasswordRequest)(nil),                 // 46: identity.ChangePasswordRequest
+	(*ChangePasswordResponse)(nil),                // 47: identity.ChangePasswordResponse
+	(*RequestPasswordResetRequest)(nil),           // 48: identity.RequestPasswordResetRequest
+	(*RequestPasswordResetResponse)(nil),          // 49: identity.RequestPasswordResetResponse
+	(*ConfirmPasswordResetRequest)(nil),           // 50: identity.ConfirmPasswordResetRequest
+	(*ConfirmPasswordResetResponse)(nil),          // 51: identity.ConfirmPasswordResetResponse
+	(*SendEmailVerificationRequest)(nil),          // 52: identity.SendEmailVerificationRequest
+	(*SendEmailVerificationResponse)(nil),         // 53: identity.SendEmailVerificationResponse
+	(*VerifyEmailRequest)(nil),                    // 54: identity.VerifyEmailRequest
+	(*VerifyEmailResponse)(nil),                   // 55: identity.VerifyEmailResponse
+	(*RequestEmailChangeRequest)(nil),             // 56: identity.RequestEmailChangeRequest
+	(*RequestEmailChangeResponse)(nil),            // 57: identity.RequestEmailChangeResponse
+	(*ConfirmEmailChangeRequest)(nil),             // 58: identity.ConfirmEmailChangeRequest
+	(*ConfirmEmailChangeResponse)(nil),            // 59: identity.ConfirmEmailChangeResponse
+	(*IdentityVerification)(nil),                  // 60: identity.IdentityVerification
+	(*BeginIdentityVerificationRequest)(nil),      // 61: identity.BeginIdentityVerificationRequest
+	(*BeginIdentityVerificationResponse)(nil),     // 62: identity.BeginIdentityVerificationResponse
+	(*GetIdentityVerificationStatusRequest)(nil),  // 63: identity.GetIdentityVerificationStatusRequest
+	(*GetIdentityVerificationStatusResponse)(nil), // 64: identity.GetIdentityVerificationStatusResponse
+	(*AdminHelpRequest)(nil),                      // 65: identity.AdminHelpRequest
+	(*RequestAdminHelpRequest)(nil),               // 66: identity.RequestAdminHelpRequest
+	(*RequestAdminHelpResponse)(nil),              // 67: identity.RequestAdminHelpResponse
+	(*ListHelpRequestsRequest)(nil),               // 68: identity.ListHelpRequestsRequest
+	(*ListHelpRequestsResponse)(nil),              // 69: identity.ListHelpRequestsResponse
+	(*ResolveHelpRequestRequest)(nil),             // 70: identity.ResolveHelpRequestRequest
+	(*ResolveHelpRequestResponse)(nil),            // 71: identity.ResolveHelpRequestResponse
+	(*PasskeyCredentialInfo)(nil),                 // 72: identity.PasskeyCredentialInfo
+	(*BeginPasskeyRegistrationRequest)(nil),       // 73: identity.BeginPasskeyRegistrationRequest
+	(*BeginPasskeyRegistrationResponse)(nil),      // 74: identity.BeginPasskeyRegistrationResponse
+	(*CompletePasskeyRegistrationRequest)(nil),    // 75: identity.CompletePasskeyRegistrationRequest
+	(*CompletePasskeyRegistrationResponse)(nil),   // 76: identity.CompletePasskeyRegistrationResponse
+	(*BeginPasskeyLoginRequest)(nil),              // 77: identity.BeginPasskeyLoginRequest
+	(*BeginPasskeyLoginResponse)(nil),             // 78: identity.BeginPasskeyLoginResponse
+	(*CompletePasskeyLoginRequest)(nil),           // 79: identity.CompletePasskeyLoginRequest
+	(*CompletePasskeyLoginResponse)(nil),          // 80: identity.CompletePasskeyLoginResponse
+	(*ListPasskeysRequest)(nil),                   // 81: identity.ListPasskeysRequest
+	(*ListPasskeysResponse)(nil),                  // 82: identity.ListPasskeysResponse
+	(*DeletePasskeyRequest)(nil),                  // 83: identity.DeletePasskeyRequest
+	(*DeletePasskeyResponse)(nil),                 // 84: identity.DeletePasskeyResponse
+	(*InitiateQrLoginRequest)(nil),                // 85: identity.InitiateQrLoginRequest
+	(*InitiateQrLoginResponse)(nil),               // 86: identity.InitiateQrLoginResponse
+	(*GetQrLoginSessionRequest)(nil),              // 87: identity.GetQrLoginSessionRequest
+	(*GetQrLoginSessionResponse)(nil),             // 88: identity.GetQrLoginSessionResponse
+	(*ApproveQrLoginRequest)(nil),                 // 89: identity.ApproveQrLoginRequest
+	(*ApproveQrLoginResponse)(nil),                // 90: identity.ApproveQrLoginResponse
+	(*PollQrLoginRequest)(nil),                    // 91: identity.PollQrLoginRequest
+	(*PollQrLoginResponse)(nil),                   // 92: identity.PollQrLoginResponse
+	(*BeginTotpSetupRequest)(nil),                 // 93: identity.BeginTotpSetupRequest
+	(*BeginTotpSetupResponse)(nil),                // 94: identity.BeginTotpSetupResponse
+	(*VerifyTotpSetupRequest)(nil),                // 95: identity.VerifyTotpSetupRequest
+	(*VerifyTotpSetupResponse)(nil),               // 96: identity.VerifyTotpSetupResponse
+	(*DisableTotpRequest)(nil),                    // 97: identity.DisableTotpRequest
+	(*DisableTotpResponse)(nil),                   // 98: identity.DisableTotpResponse
+	(*VerifyTotpRequest)(nil),                     // 99: identity.VerifyTotpRequest
+	(*VerifyTotpResponse)(nil),                    // 100: identity.VerifyTotpResponse
+	(*RegenerateRecoveryCodesRequest)(nil),        // 101: identity.RegenerateRecoveryCodesRequest
+	(*RegenerateRecoveryCodesResponse)(nil),       // 102: identity.RegenerateRecoveryCodesResponse
+	(*Session)(nil),                               // 103: identity.Session
+	(*ListMySessionsRequest)(nil),                 // 104: identity.ListMySessionsRequest
+	(*ListMySessionsResponse)(nil),                // 105: identity.ListMySessionsResponse
+	(*RevokeSessionRequest)(nil),                  // 106: identity.RevokeSessionRequest
+	(*RevokeSessionResponse)(nil),                 // 107: identity.RevokeSessionResponse
+	(*RevokeAllSessionsRequest)(nil),              // 108: identity.RevokeAllSessionsRequest
+	(*RevokeAllSessionsResponse)(nil),             // 109: identity.RevokeAllSessionsResponse
+	(*SignOutEverywhereRequest)(nil),              // 110: identity.SignOutEverywhereRequest
+	(*SignOutEverywhereResponse)(nil),             // 111: identity.SignOutEverywhereResponse
+	(*AuditEvent)(nil),                            // 112: identity.AuditEvent
+	(*ListAuditEventsRequest)(nil),                // 113: identity.ListAuditEventsRequest
+	(*ListAuditEventsResponse)(nil),               // 114: identity.ListAuditEventsResponse
+	(*InviteUserRequest)(nil),                     // 115: identity.InviteUserRequest
+	(*InviteUserResponse)(nil),                    // 116: identity.InviteUserResponse
+	(*AcceptInvitationRequest)(nil),               // 117: identity.AcceptInvitationRequest
+	(*AcceptInvitationResponse)(nil),              // 118: identity.AcceptInvitationResponse
+	(*DeactivateUserRequest)(nil),                 // 119: identity.DeactivateUserRequest
+	(*DeactivateUserResponse)(nil),                // 120: identity.DeactivateUserResponse
+	(*ReactivateUserRequest)(nil),                 // 121: identity.ReactivateUserRequest
+	(*ReactivateUserResponse)(nil),                // 122: identity.ReactivateUserResponse
+	(*ResetUserPasswordRequest)(nil),              // 123: identity.ResetUserPasswordRequest
+	(*ResetUserPasswordResponse)(nil),             // 124: identity.ResetUserPasswordResponse
+	(*SetUserQuotaRequest)(nil),                   // 125: identity.SetUserQuotaRequest
+	(*SetUserQuotaResponse)(nil),                  // 126: identity.SetUserQuotaResponse
+	(*timestamppb.Timestamp)(nil),                 // 127: google.protobuf.Timestamp
+}
 var file_identity_identity_proto_depIdxs = []int32{
 	127, // 0: identity.User.created_at:type_name -> google.protobuf.Timestamp
 	127, // 1: identity.User.updated_at:type_name -> google.protobuf.Timestamp

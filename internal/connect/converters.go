@@ -48,6 +48,8 @@ func userToProto(u *service.User) *identitypb.User {
 		LastLoginAtMs:    u.LastLoginAtMs,
 		EmailVerified:    u.EmailVerified,
 		EmailVerifiedAt:  u.EmailVerifiedAt,
+		IdvVerified:      u.IDVVerified,
+		IdvVerifiedAt:    u.IDVVerifiedAt,
 		FailedLoginCount: intToProtoInt32(u.FailedLoginCount),
 		LockedUntil:      u.LockedUntil,
 	}

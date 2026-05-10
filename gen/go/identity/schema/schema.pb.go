@@ -17,13 +17,12 @@
 package schema
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	_ "github.com/elloloop/identity/gen/go/entdb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -54,6 +53,8 @@ type User struct {
 	LastLoginAt      int64                  `protobuf:"varint,17,opt,name=last_login_at,json=lastLoginAt,proto3" json:"last_login_at,omitempty"`
 	EmailVerified    bool                   `protobuf:"varint,18,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
 	EmailVerifiedAt  int64                  `protobuf:"varint,19,opt,name=email_verified_at,json=emailVerifiedAt,proto3" json:"email_verified_at,omitempty"`
+	IdvVerified      bool                   `protobuf:"varint,20,opt,name=idv_verified,json=idvVerified,proto3" json:"idv_verified,omitempty"`
+	IdvVerifiedAt    int64                  `protobuf:"varint,21,opt,name=idv_verified_at,json=idvVerifiedAt,proto3" json:"idv_verified_at,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -217,6 +218,20 @@ func (x *User) GetEmailVerified() bool {
 func (x *User) GetEmailVerifiedAt() int64 {
 	if x != nil {
 		return x.EmailVerifiedAt
+	}
+	return 0
+}
+
+func (x *User) GetIdvVerified() bool {
+	if x != nil {
+		return x.IdvVerified
+	}
+	return false
+}
+
+func (x *User) GetIdvVerifiedAt() int64 {
+	if x != nil {
+		return x.IdvVerifiedAt
 	}
 	return 0
 }
@@ -1840,7 +1855,7 @@ var File_identity_schema_schema_proto protoreflect.FileDescriptor
 
 const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
-	"\x1cidentity/schema/schema.proto\x12\x0fidentity.schema\x1a\x19entdb/entdb_options.proto\"\xfb\a\n" +
+	"\x1cidentity/schema/schema.proto\x12\x0fidentity.schema\x1a\x19entdb/entdb_options.proto\"\xdf\b\n" +
 	"\x04User\x12\"\n" +
 	"\x05email\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x10\x01 \x01h\x01R\x05email\x12\x1e\n" +
 	"\x04name\x18\x02 \x01(\tB\n" +
@@ -1868,7 +1883,9 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\x0edeactivated_at\x18\x10 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\rdeactivatedAt\x125\n" +
 	"\rlast_login_at\x18\x11 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\vlastLoginAt\x126\n" +
 	"\x0eemail_verified\x18\x12 \x01(\bB\x0f\xb2\xbb\x18\v\x18\x01J\x05false`\x01R\remailVerified\x122\n" +
-	"\x11email_verified_at\x18\x13 \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\x0femailVerifiedAt: \xa2\xbb\x18\x1c\b\x01:\x02idR\x14A user in the system\"\xa1\x02\n" +
+	"\x11email_verified_at\x18\x13 \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\x0femailVerifiedAt\x122\n" +
+	"\fidv_verified\x18\x14 \x01(\bB\x0f\xb2\xbb\x18\v\x18\x01J\x05false`\x01R\vidvVerified\x12.\n" +
+	"\x0fidv_verified_at\x18\x15 \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\ridvVerifiedAt: \xa2\xbb\x18\x1c\b\x01:\x02idR\x14A user in the system\"\xa1\x02\n" +
 	"\fWorkingGroup\x12\x1c\n" +
 	"\x04name\x18\x01 \x01(\tB\b\xb2\xbb\x18\x04\b\x01\x10\x01R\x04name\x12(\n" +
 	"\vdescription\x18\x02 \x01(\tB\x06\xb2\xbb\x18\x02\x10\x01R\vdescription\x12*\n" +
@@ -2073,32 +2090,30 @@ func file_identity_schema_schema_proto_rawDescGZIP() []byte {
 	return file_identity_schema_schema_proto_rawDescData
 }
 
-var (
-	file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
-	file_identity_schema_schema_proto_goTypes  = []any{
-		(*User)(nil),                       // 0: identity.schema.User
-		(*WorkingGroup)(nil),               // 1: identity.schema.WorkingGroup
-		(*RefreshToken)(nil),               // 2: identity.schema.RefreshToken
-		(*PasswordResetToken)(nil),         // 3: identity.schema.PasswordResetToken
-		(*PasskeyCredential)(nil),          // 4: identity.schema.PasskeyCredential
-		(*PasskeyChallenge)(nil),           // 5: identity.schema.PasskeyChallenge
-		(*QrLoginSession)(nil),             // 6: identity.schema.QrLoginSession
-		(*TotpCredential)(nil),             // 7: identity.schema.TotpCredential
-		(*RecoveryCode)(nil),               // 8: identity.schema.RecoveryCode
-		(*LoginChallenge)(nil),             // 9: identity.schema.LoginChallenge
-		(*AuditEvent)(nil),                 // 10: identity.schema.AuditEvent
-		(*UserInvitation)(nil),             // 11: identity.schema.UserInvitation
-		(*AdminHelpRequest)(nil),           // 12: identity.schema.AdminHelpRequest
-		(*EmailVerificationToken)(nil),     // 13: identity.schema.EmailVerificationToken
-		(*EmailChangeToken)(nil),           // 14: identity.schema.EmailChangeToken
-		(*OAuthIdentity)(nil),              // 15: identity.schema.OAuthIdentity
-		(*IdentityVerificationRecord)(nil), // 16: identity.schema.IdentityVerificationRecord
-		(*MemberOf)(nil),                   // 17: identity.schema.MemberOf
-		(*UserPasskey)(nil),                // 18: identity.schema.UserPasskey
-		(*UserTotp)(nil),                   // 19: identity.schema.UserTotp
-		(*UserRecoveryCode)(nil),           // 20: identity.schema.UserRecoveryCode
-	}
-)
+var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_identity_schema_schema_proto_goTypes = []any{
+	(*User)(nil),                       // 0: identity.schema.User
+	(*WorkingGroup)(nil),               // 1: identity.schema.WorkingGroup
+	(*RefreshToken)(nil),               // 2: identity.schema.RefreshToken
+	(*PasswordResetToken)(nil),         // 3: identity.schema.PasswordResetToken
+	(*PasskeyCredential)(nil),          // 4: identity.schema.PasskeyCredential
+	(*PasskeyChallenge)(nil),           // 5: identity.schema.PasskeyChallenge
+	(*QrLoginSession)(nil),             // 6: identity.schema.QrLoginSession
+	(*TotpCredential)(nil),             // 7: identity.schema.TotpCredential
+	(*RecoveryCode)(nil),               // 8: identity.schema.RecoveryCode
+	(*LoginChallenge)(nil),             // 9: identity.schema.LoginChallenge
+	(*AuditEvent)(nil),                 // 10: identity.schema.AuditEvent
+	(*UserInvitation)(nil),             // 11: identity.schema.UserInvitation
+	(*AdminHelpRequest)(nil),           // 12: identity.schema.AdminHelpRequest
+	(*EmailVerificationToken)(nil),     // 13: identity.schema.EmailVerificationToken
+	(*EmailChangeToken)(nil),           // 14: identity.schema.EmailChangeToken
+	(*OAuthIdentity)(nil),              // 15: identity.schema.OAuthIdentity
+	(*IdentityVerificationRecord)(nil), // 16: identity.schema.IdentityVerificationRecord
+	(*MemberOf)(nil),                   // 17: identity.schema.MemberOf
+	(*UserPasskey)(nil),                // 18: identity.schema.UserPasskey
+	(*UserTotp)(nil),                   // 19: identity.schema.UserTotp
+	(*UserRecoveryCode)(nil),           // 20: identity.schema.UserRecoveryCode
+}
 var file_identity_schema_schema_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
 	0, // [0:0] is the sub-list for method input_type

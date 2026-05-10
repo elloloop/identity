@@ -21,6 +21,7 @@ const userColumns = `
 	password_hash, quota_bytes, totp_required,
 	failed_login_count, locked_until_ms,
 	email_verified, email_verified_at_ms,
+	idv_verified, idv_verified_at_ms,
 	last_login_at_ms,
 	created_at_ms, updated_at_ms`
 
@@ -31,8 +32,8 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		createdAtMs, updatedAtMs                               int64
 		quotaBytes, lockedUntilMs                              int64
 		failedLoginCount                                       int64
-		emailVerifiedAtMs, lastLoginAtMs                       int64
-		emailVerified, totpRequired                            bool
+		emailVerifiedAtMs, idvVerifiedAtMs, lastLoginAtMs      int64
+		emailVerified, idvVerified, totpRequired               bool
 		id, email, name, role, avatar, status, recovery, phash string
 	)
 	if err := row.Scan(
@@ -40,6 +41,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		&phash, &quotaBytes, &totpRequired,
 		&failedLoginCount, &lockedUntilMs,
 		&emailVerified, &emailVerifiedAtMs,
+		&idvVerified, &idvVerifiedAtMs,
 		&lastLoginAtMs,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
@@ -59,6 +61,8 @@ func scanUser(row pgx.Row) (*service.User, error) {
 	u.LockedUntil = lockedUntilMs
 	u.EmailVerified = emailVerified
 	u.EmailVerifiedAt = emailVerifiedAtMs
+	u.IDVVerified = idvVerified
+	u.IDVVerifiedAt = idvVerifiedAtMs
 	u.LastLoginAtMs = lastLoginAtMs
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
@@ -133,6 +137,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			recovery_email, password_hash, quota_bytes, totp_required,
 			failed_login_count, locked_until_ms,
 			email_verified, email_verified_at_ms,
+			idv_verified, idv_verified_at_ms,
 			last_login_at_ms,
 			created_at_ms, updated_at_ms
 		) VALUES (
@@ -140,14 +145,16 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			$8, $9, $10, $11,
 			$12, $13,
 			$14, $15,
-			$16,
-			$17, $18
+			$16, $17,
+			$18,
+			$19, $20
 		)`
 	_, err := r.pool.Exec(ctx, q,
 		id, r.tenantID, u.Email, u.Name, role, u.AvatarURL, status,
 		u.RecoveryEmail, u.PasswordHash, u.QuotaBytes, u.TotpRequired,
 		int64(u.FailedLoginCount), u.LockedUntil,
 		u.EmailVerified, u.EmailVerifiedAt,
+		u.IDVVerified, u.IDVVerifiedAt,
 		u.LastLoginAtMs,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	)
@@ -179,6 +186,8 @@ var userFieldColumns = map[string]struct {
 	"updated_at":         {"updated_at_ms", "int64"},
 	"email_verified":     {"email_verified", "bool"},
 	"email_verified_at":  {"email_verified_at_ms", "int64"},
+	"idv_verified":       {"idv_verified", "bool"},
+	"idv_verified_at":    {"idv_verified_at_ms", "int64"},
 }
 
 func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
@@ -297,6 +306,22 @@ func (r *pgRepository) SetUserEmailVerified(ctx context.Context, userID string, 
 		 WHERE tenant_id = $1 AND id = $2`
 	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, atMs); err != nil {
 		return wrapPgErr("SetUserEmailVerified", err)
+	}
+	return nil
+}
+
+func (r *pgRepository) SetUserIDVVerified(ctx context.Context, userID string, atMs int64) error {
+	if userID == "" {
+		return errors.New("postgres: SetUserIDVVerified: missing user id")
+	}
+	const q = `
+		UPDATE users
+		   SET idv_verified = TRUE,
+		       idv_verified_at_ms = $3,
+		       updated_at_ms = $3
+		 WHERE tenant_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, atMs); err != nil {
+		return wrapPgErr("SetUserIDVVerified", err)
 	}
 	return nil
 }

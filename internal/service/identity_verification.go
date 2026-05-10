@@ -176,6 +176,21 @@ func (s *IdentityVerificationService) GetIdentityVerificationStatus(
 	rec.RejectionReason = status.RejectionReason
 	rec.CompletedAt = completedMs
 	rec.UpdatedAt = updatedMs
+
+	// On approval, mark the user as IDV-verified so login gates can
+	// authorize them. Errors here are logged but not surfaced to the
+	// client: the verification record itself is already approved, and
+	// a stale user.idv_verified will resolve on the next login attempt
+	// (or the next status poll).
+	if status.Status == IDVStatusApproved {
+		if err := s.repo.SetUserIDVVerified(ctx, rec.UserID, completedMs); err != nil {
+			s.logger.Warn("idv_user_flag_update_failed",
+				zap.String("verification_id", rec.VerificationID),
+				zap.String("user_id", rec.UserID),
+				zap.Error(err),
+			)
+		}
+	}
 	return rec, nil
 }
 

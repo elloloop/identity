@@ -64,6 +64,11 @@ type Config struct {
 	IDVAzureEndpoint      string // e.g. https://my-face.cognitiveservices.azure.com
 	IDVAzureKey           string // Cognitive Services key
 	IDVAzureSessionTTLSec int    // session token lifetime; default 600
+	// When true, PasswordLogin / OAuthLogin reject users without an
+	// approved identity verification. The default is false (verification
+	// is offered but not required) to match the existing email-verified
+	// pattern. Tenants that need stricter onboarding flip this on.
+	IDVRequired bool
 
 	// Password
 	PasswordSignupEnabled      bool
@@ -172,6 +177,7 @@ func Load() *Config {
 		IDVAzureEndpoint:      envStr("GATEWAY_IDV_AZURE_ENDPOINT", ""),
 		IDVAzureKey:           envStr("GATEWAY_IDV_AZURE_KEY", ""),
 		IDVAzureSessionTTLSec: envInt("GATEWAY_IDV_AZURE_SESSION_TTL_SECONDS", 600),
+		IDVRequired:           envBool("GATEWAY_IDV_REQUIRED", false),
 
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),

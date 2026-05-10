@@ -674,6 +674,18 @@ func (r *Repo) SetUserEmailVerified(_ context.Context, userID string, atMs int64
 	return nil
 }
 
+func (r *Repo) SetUserIDVVerified(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.IDVVerified = true
+	u.IDVVerifiedAt = atMs
+	return nil
+}
+
 // ── Email Change Tokens ───────────────────────────────────────────
 
 func (r *Repo) CreateEmailChangeToken(_ context.Context, t *service.EmailChangeToken) error {

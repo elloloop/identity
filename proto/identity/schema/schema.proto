@@ -49,6 +49,8 @@ message User {
     int64  last_login_at      = 17 [(entdb.field) = { kind: "timestamp", pii_false: true }];
     bool   email_verified     = 18 [(entdb.field) = { default_value: "false", pii_false: true, indexed: true }];
     int64  email_verified_at  = 19 [(entdb.field) = { pii_false: true }];
+    bool   idv_verified       = 20 [(entdb.field) = { default_value: "false", pii_false: true, indexed: true }];
+    int64  idv_verified_at    = 21 [(entdb.field) = { pii_false: true }];
 }
 
 // ─── WorkingGroup (type_id 2) ──────────────────────────────────────────
