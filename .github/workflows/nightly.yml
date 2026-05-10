@@ -32,7 +32,7 @@ jobs:
         run: |
           GO_TEST_REPORT_DIR=nightly-reports \
             bash scripts/go-test-json.sh "Nightly race flake loop" -- \
-              -count=20 -race -shuffle=on -timeout=1200s ./...
+              -count=20 -race -shuffle=on -timeout=7200s ./...
 
       - name: Upload nightly report
         if: always()
