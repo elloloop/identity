@@ -276,10 +276,10 @@ func TestIDV_Begin_ProviderError(t *testing.T) {
 // idvFailingRepo wraps fakeRepo and fails CreateIdentityVerification.
 type idvFailingRepo struct {
 	*fakeRepo
-	failCreate          bool
-	failGet             bool
-	failGetLatest       bool
-	failUpdate          bool
+	failCreate    bool
+	failGet       bool
+	failGetLatest bool
+	failUpdate    bool
 }
 
 func (r *idvFailingRepo) CreateIdentityVerification(ctx context.Context, rec *IdentityVerificationRecord) error {
