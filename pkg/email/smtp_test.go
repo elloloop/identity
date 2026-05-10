@@ -14,6 +14,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/smtp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,14 +35,26 @@ type fakeSMTPServer struct {
 	rejectMail  bool
 	implicitTLS bool
 
+	// authMechs controls the mechanism list advertised after "250-AUTH".
+	// Empty means "PLAIN" for backwards compatibility with existing tests.
+	authMechs string
+
+	// loginUserPrompt / loginPassPrompt let a test override the prompt
+	// strings the server sends during AUTH LOGIN. Defaults match the most
+	// common real-world prompts. Used to verify the client doesn't parse
+	// the prompt text.
+	loginUserPrompt string
+	loginPassPrompt string
+
 	wantUser, wantPass string
 
-	mu       sync.Mutex
-	gotFrom  string
-	gotRcpt  string
-	gotData  string
-	gotAuth  bool
-	connDone int32
+	mu          sync.Mutex
+	gotFrom     string
+	gotRcpt     string
+	gotData     string
+	gotAuth     bool
+	gotAuthMech string
+	connDone    int32
 }
 
 func (s *fakeSMTPServer) addr() string { return s.listener.Addr().String() }
@@ -109,7 +122,11 @@ func (s *fakeSMTPServer) handle(c net.Conn) {
 				write("250-STARTTLS")
 			}
 			if s.requireAuth {
-				write("250-AUTH PLAIN")
+				mech := s.authMechs
+				if mech == "" {
+					mech = "PLAIN"
+				}
+				write("250-AUTH " + mech)
 			}
 			write("250 8BITMIME")
 		case strings.HasPrefix(up, "STARTTLS"):
@@ -159,6 +176,45 @@ func (s *fakeSMTPServer) handle(c net.Conn) {
 			}
 			s.mu.Lock()
 			s.gotAuth = true
+			s.gotAuthMech = "PLAIN"
+			s.mu.Unlock()
+			write("235 ok")
+		case strings.HasPrefix(up, "AUTH LOGIN"):
+			userPrompt := s.loginUserPrompt
+			if userPrompt == "" {
+				userPrompt = "Username:"
+			}
+			passPrompt := s.loginPassPrompt
+			if passPrompt == "" {
+				passPrompt = "Password:"
+			}
+			write("334 " + base64.StdEncoding.EncodeToString([]byte(userPrompt)))
+			ul, err := br.ReadString('\n')
+			if err != nil {
+				return
+			}
+			userRaw, err := base64.StdEncoding.DecodeString(strings.TrimRight(ul, "\r\n"))
+			if err != nil {
+				write("535 bad base64")
+				continue
+			}
+			write("334 " + base64.StdEncoding.EncodeToString([]byte(passPrompt)))
+			pl, err := br.ReadString('\n')
+			if err != nil {
+				return
+			}
+			passRaw, err := base64.StdEncoding.DecodeString(strings.TrimRight(pl, "\r\n"))
+			if err != nil {
+				write("535 bad base64")
+				continue
+			}
+			if string(userRaw) != s.wantUser || string(passRaw) != s.wantPass {
+				write("535 auth failed")
+				continue
+			}
+			s.mu.Lock()
+			s.gotAuth = true
+			s.gotAuthMech = "LOGIN"
 			s.mu.Unlock()
 			write("235 ok")
 		case strings.HasPrefix(up, "MAIL FROM"):
@@ -351,6 +407,88 @@ func TestSMTPAuth(t *testing.T) {
 	}
 }
 
+func TestSMTPAuthLoginOnly(t *testing.T) {
+	// Mirrors Azure Communication Services Email's SMTP relay, which
+	// advertises only AUTH LOGIN. Regression test for the bug where
+	// hardcoded smtp.PlainAuth caused every send to fail with
+	// 504 5.7.4 Unrecognized authentication type.
+	t.Parallel()
+
+	s := &fakeSMTPServer{
+		requireAuth: true,
+		authMechs:   "LOGIN",
+		wantUser:    "alice",
+		wantPass:    "secret",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "secret",
+		From: "f@example.com",
+	})
+	err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.gotAuth {
+		t.Fatalf("server did not see AUTH success")
+	}
+	if s.gotAuthMech != "LOGIN" {
+		t.Errorf("got mech %q, want LOGIN", s.gotAuthMech)
+	}
+}
+
+func TestSMTPAuthPlainPreferredWhenBothAdvertised(t *testing.T) {
+	t.Parallel()
+
+	s := &fakeSMTPServer{
+		requireAuth: true,
+		authMechs:   "PLAIN LOGIN",
+		wantUser:    "alice",
+		wantPass:    "secret",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "secret",
+		From: "f@example.com",
+	})
+	if err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gotAuthMech != "PLAIN" {
+		t.Errorf("got mech %q, want PLAIN (preferred when both advertised)", s.gotAuthMech)
+	}
+}
+
+func TestSMTPAuthNoExtension(t *testing.T) {
+	// User configured creds but the server doesn't advertise AUTH at all.
+	// We should surface a clear error rather than try to send unauth'd.
+	t.Parallel()
+
+	s := &fakeSMTPServer{} // requireAuth: false => no AUTH line
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "secret",
+		From: "f@example.com",
+	})
+	err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"})
+	if err == nil {
+		t.Fatal("expected auth-selection error")
+	}
+	if !errors.Is(err, ErrTransport) {
+		t.Fatalf("want ErrTransport, got %v", err)
+	}
+}
+
 func TestSMTPAuthFailure(t *testing.T) {
 	t.Parallel()
 
@@ -368,6 +506,409 @@ func TestSMTPAuthFailure(t *testing.T) {
 	}
 	if !errors.Is(err, ErrTransport) {
 		t.Fatalf("want ErrTransport, got %v", err)
+	}
+}
+
+// TestSMTPAuthLoginWithStartTLS exercises the actual prod path for Azure
+// Communication Services Email: port 587 → STARTTLS → AUTH LOGIN only.
+func TestSMTPAuthLoginWithStartTLS(t *testing.T) {
+	t.Parallel()
+
+	cert := genTestCert(t, "127.0.0.1")
+	s := &fakeSMTPServer{
+		starttls:    true,
+		tlsCfg:      &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+		requireAuth: true,
+		authMechs:   "LOGIN",
+		wantUser:    "alice",
+		wantPass:    "secret",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "secret",
+		From:               "f@example.com",
+		StartTLS:           true,
+		InsecureSkipVerify: true,
+	})
+	if err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.gotAuth || s.gotAuthMech != "LOGIN" {
+		t.Errorf("got auth=%v mech=%q, want LOGIN", s.gotAuth, s.gotAuthMech)
+	}
+}
+
+// TestSMTPAuthLoginWithImplicitTLS covers the port-465 style path: TLS on
+// dial, then EHLO + AUTH LOGIN inside the TLS tunnel.
+func TestSMTPAuthLoginWithImplicitTLS(t *testing.T) {
+	t.Parallel()
+
+	cert := genTestCert(t, "127.0.0.1")
+	s := &fakeSMTPServer{
+		implicitTLS: true,
+		tlsCfg:      &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+		requireAuth: true,
+		authMechs:   "LOGIN",
+		wantUser:    "alice",
+		wantPass:    "secret",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "secret",
+		From:               "f@example.com",
+		TLS:                true,
+		InsecureSkipVerify: true,
+	})
+	if err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.gotAuth || s.gotAuthMech != "LOGIN" {
+		t.Errorf("got auth=%v mech=%q, want LOGIN", s.gotAuth, s.gotAuthMech)
+	}
+}
+
+// TestSMTPAuthLoginLocalizedPrompts guards against the temptation to parse
+// the challenge text. Some relays send non-English or non-standard prompts
+// ("Nom d'utilisateur:", "User Name", "USER NAME"); loginAuth must drive the
+// exchange purely by step count.
+func TestSMTPAuthLoginLocalizedPrompts(t *testing.T) {
+	t.Parallel()
+
+	s := &fakeSMTPServer{ //nolint:gosec // G101: localized SMTP prompt strings, not credentials
+		requireAuth:     true,
+		authMechs:       "LOGIN",
+		loginUserPrompt: "Nom d'utilisateur",
+		loginPassPrompt: "Mot de passe",
+		wantUser:        "alice",
+		wantPass:        "secret",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "secret",
+		From: "f@example.com",
+	})
+	if err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.gotAuth {
+		t.Errorf("LOGIN with non-English prompts did not succeed")
+	}
+}
+
+// TestSMTPAuthLoginWrongPassword verifies that a 535 after the password
+// challenge propagates as a wrapped ErrTransport.
+func TestSMTPAuthLoginWrongPassword(t *testing.T) {
+	t.Parallel()
+
+	s := &fakeSMTPServer{
+		requireAuth: true,
+		authMechs:   "LOGIN",
+		wantUser:    "alice",
+		wantPass:    "secret",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "wrong",
+		From: "f@example.com",
+	})
+	err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"})
+	if err == nil {
+		t.Fatal("expected LOGIN auth failure")
+	}
+	if !errors.Is(err, ErrTransport) {
+		t.Fatalf("want ErrTransport, got %v", err)
+	}
+}
+
+// TestSMTPAuthOnlyUnsupportedMechs exercises the case where the server
+// advertises auth but offers no mechanism we implement (e.g. CRAM-MD5
+// only). Must return a clear ErrTransport, not a panic or a silent
+// unauthenticated send.
+func TestSMTPAuthOnlyUnsupportedMechs(t *testing.T) {
+	t.Parallel()
+
+	s := &fakeSMTPServer{
+		requireAuth: true,
+		authMechs:   "CRAM-MD5 DIGEST-MD5",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "secret",
+		From: "f@example.com",
+	})
+	err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"})
+	if err == nil {
+		t.Fatal("expected error for unsupported-only mechanisms")
+	}
+	if !errors.Is(err, ErrTransport) {
+		t.Fatalf("want ErrTransport, got %v", err)
+	}
+}
+
+// TestSMTPAuthMechParsingIgnoresExtraMechs confirms that unsupported
+// mechanisms interleaved with LOGIN do not confuse selection.
+func TestSMTPAuthMechParsingIgnoresExtraMechs(t *testing.T) {
+	t.Parallel()
+
+	s := &fakeSMTPServer{
+		requireAuth: true,
+		authMechs:   "CRAM-MD5 LOGIN XOAUTH2",
+		wantUser:    "alice",
+		wantPass:    "secret",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "secret",
+		From: "f@example.com",
+	})
+	if err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gotAuthMech != "LOGIN" {
+		t.Errorf("got mech %q, want LOGIN", s.gotAuthMech)
+	}
+}
+
+// TestSMTPAuthMechParsingCaseInsensitive guards against a future
+// refactor that drops the strings.ToUpper on the mechanism list. RFC
+// 5321 says ESMTP keywords are case-insensitive.
+func TestSMTPAuthMechParsingCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	s := &fakeSMTPServer{
+		requireAuth: true,
+		authMechs:   "plain login",
+		wantUser:    "alice",
+		wantPass:    "secret",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "secret",
+		From: "f@example.com",
+	})
+	if err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gotAuthMech != "PLAIN" {
+		t.Errorf("got mech %q, want PLAIN (lowercase advertisement should still match)", s.gotAuthMech)
+	}
+}
+
+// TestSMTPNoAuthWhenUserEmpty confirms that omitting User skips the entire
+// auth-selection path even if the server is advertising mechanisms — we
+// don't ever want a silent half-configured send.
+func TestSMTPNoAuthWhenUserEmpty(t *testing.T) {
+	t.Parallel()
+
+	s := &fakeSMTPServer{
+		// Advertise auth but don't require it — server accepts MAIL FROM
+		// without an AUTH step. This mirrors a misconfigured deployment
+		// where the operator forgot to set User; we want delivery to
+		// proceed (not error) so the higher-level chain can still log.
+		authMechs: "PLAIN LOGIN",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		From: "f@example.com",
+		// User intentionally empty.
+	})
+	if err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gotAuth {
+		t.Errorf("auth attempted despite empty User")
+	}
+}
+
+// TestLoginAuthStartResetsState ensures loginAuth is reusable across
+// retries — Start must zero the step counter so a second Auth() doesn't
+// immediately answer "Username:" with the password.
+func TestLoginAuthStartResetsState(t *testing.T) {
+	t.Parallel()
+
+	a := &loginAuth{user: "u", pass: "p", host: "h"}
+	info := &smtp.ServerInfo{Name: "h", TLS: true}
+
+	if _, _, err := a.Start(info); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	if _, err := a.Next([]byte("Username:"), true); err != nil {
+		t.Fatalf("Next user: %v", err)
+	}
+	if _, err := a.Next([]byte("Password:"), true); err != nil {
+		t.Fatalf("Next pass: %v", err)
+	}
+	// Simulate a retry: Start again, the next Next must answer with the
+	// username, not error out as "extra challenge".
+	if _, _, err := a.Start(info); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	got, err := a.Next([]byte("Username:"), true)
+	if err != nil {
+		t.Fatalf("Next after restart: %v", err)
+	}
+	if string(got) != "u" {
+		t.Errorf("got %q after restart, want %q", got, "u")
+	}
+}
+
+// TestLoginAuthNoMoreSentinel — when the server signals end-of-challenge
+// (more=false), Next must return (nil, nil) so smtp.Client.Auth exits the
+// loop cleanly.
+func TestLoginAuthNoMoreSentinel(t *testing.T) {
+	t.Parallel()
+
+	a := &loginAuth{user: "u", pass: "p", host: "h"}
+	got, err := a.Next(nil, false)
+	if err != nil {
+		t.Fatalf("Next(_, false): %v", err)
+	}
+	if got != nil {
+		t.Errorf("got %q, want nil response on end-of-challenge", got)
+	}
+}
+
+// TestLoginAuthExtraChallenge — a misbehaving server that sends a third
+// challenge must produce a clear error, not silently leak credentials or
+// loop forever.
+func TestLoginAuthExtraChallenge(t *testing.T) {
+	t.Parallel()
+
+	a := &loginAuth{user: "u", pass: "p", host: "h"}
+	info := &smtp.ServerInfo{Name: "h", TLS: true}
+	if _, _, err := a.Start(info); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if _, err := a.Next([]byte("Username:"), true); err != nil {
+		t.Fatalf("Next user: %v", err)
+	}
+	if _, err := a.Next([]byte("Password:"), true); err != nil {
+		t.Fatalf("Next pass: %v", err)
+	}
+	if _, err := a.Next([]byte("Surprise:"), true); err == nil {
+		t.Fatal("expected error on third challenge")
+	}
+}
+
+// TestLoginAuthRejectsUnencryptedWhenNotAdvertised — the safety guard
+// inherited from PlainAuth. If the connection is plaintext and the server
+// did not put LOGIN in its advertised list, refuse to send credentials.
+func TestLoginAuthRejectsUnencryptedWhenNotAdvertised(t *testing.T) {
+	t.Parallel()
+
+	a := &loginAuth{user: "u", pass: "p", host: "h"}
+	info := &smtp.ServerInfo{Name: "h", TLS: false, Auth: []string{"PLAIN"}}
+	if _, _, err := a.Start(info); err == nil {
+		t.Fatal("expected refusal on unencrypted conn without LOGIN advertised")
+	}
+}
+
+// TestLoginAuthAllowsUnencryptedWhenAdvertised — operator opt-in case.
+// If the plaintext server explicitly says LOGIN, we honor that (mirrors
+// PlainAuth's behavior, useful for localhost dev relays).
+func TestLoginAuthAllowsUnencryptedWhenAdvertised(t *testing.T) {
+	t.Parallel()
+
+	a := &loginAuth{user: "u", pass: "p", host: "h"}
+	info := &smtp.ServerInfo{Name: "h", TLS: false, Auth: []string{"LOGIN"}}
+	if _, _, err := a.Start(info); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+}
+
+// TestLoginAuthAdvertisementMatchIsCaseInsensitive — SMTP AUTH mechanism
+// names are case-insensitive (RFC 4954) and net/smtp.Client preserves
+// whatever case the server sent. The plaintext-channel guard must use a
+// case-insensitive compare, otherwise a server advertising `login`
+// (lowercase) gets rejected as "not advertised" even though selectAuth
+// (which uppercases) already chose this path. Regression test for that
+// inconsistency.
+func TestLoginAuthAdvertisementMatchIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	cases := []string{"LOGIN", "login", "Login", "LoGiN"}
+	for _, advertised := range cases {
+		t.Run(advertised, func(t *testing.T) {
+			t.Parallel()
+			a := &loginAuth{user: "u", pass: "p", host: "h"}
+			info := &smtp.ServerInfo{Name: "h", TLS: false, Auth: []string{advertised}}
+			if _, _, err := a.Start(info); err != nil {
+				t.Errorf("Start with advertised %q: %v", advertised, err)
+			}
+		})
+	}
+}
+
+// TestSMTPAuthLoginLowercaseAdvertisement is the integration-level guard
+// against the same bug: a plaintext server that advertises `login` in
+// lowercase should still succeed end-to-end. Without the EqualFold fix
+// in loginAuth.Start, selectAuth selects LOGIN, then loginAuth.Start
+// fails with "unencrypted connection" because the lowercase token
+// doesn't match the literal "LOGIN".
+func TestSMTPAuthLoginLowercaseAdvertisement(t *testing.T) {
+	t.Parallel()
+
+	s := &fakeSMTPServer{
+		requireAuth: true,
+		authMechs:   "login", // lowercase on purpose
+		wantUser:    "alice",
+		wantPass:    "secret",
+	}
+	startFake(t, s)
+
+	tr, _ := NewSMTP(SMTPConfig{
+		Host: s.host(), Port: s.port(),
+		User: "alice", Pass: "secret",
+		From: "f@example.com",
+	})
+	if err := tr.Send(context.Background(), Message{To: "u@example.com", Subject: "s", Text: "t"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.gotAuth || s.gotAuthMech != "LOGIN" {
+		t.Errorf("got auth=%v mech=%q, want LOGIN", s.gotAuth, s.gotAuthMech)
+	}
+}
+
+// TestLoginAuthWrongHostname — a defense in depth: the server name the
+// stdlib client constructed itself with must match the host we configured
+// with. Mismatch is treated as a misconfiguration, not a silent send.
+func TestLoginAuthWrongHostname(t *testing.T) {
+	t.Parallel()
+
+	a := &loginAuth{user: "u", pass: "p", host: "expected.example.com"}
+	info := &smtp.ServerInfo{Name: "attacker.example.com", TLS: true}
+	if _, _, err := a.Start(info); err == nil {
+		t.Fatal("expected wrong-hostname rejection")
 	}
 }
 

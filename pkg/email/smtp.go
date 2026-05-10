@@ -3,6 +3,7 @@ package email
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/smtp"
@@ -139,7 +140,10 @@ func (s *smtpTransport) send(ctx context.Context, m Message) error {
 	}
 
 	if s.cfg.User != "" {
-		auth := smtp.PlainAuth("", s.cfg.User, s.cfg.Pass, s.cfg.Host)
+		auth, err := selectAuth(c, s.cfg.Host, s.cfg.User, s.cfg.Pass)
+		if err != nil {
+			return fmt.Errorf("%w: auth: %w", ErrTransport, err)
+		}
 		if err := c.Auth(auth); err != nil {
 			return fmt.Errorf("%w: auth: %w", ErrTransport, err)
 		}
@@ -170,6 +174,92 @@ func (s *smtpTransport) send(ctx context.Context, m Message) error {
 		return fmt.Errorf("%w: QUIT: %w", ErrTransport, err)
 	}
 	return nil
+}
+
+// selectAuth picks an smtp.Auth implementation based on the AUTH mechanisms
+// the server advertised in its (post-STARTTLS) EHLO response. PLAIN is
+// preferred when available — it's atomic (one round trip) and is the Go
+// stdlib's well-tested path. LOGIN is used as a fallback for relays like
+// Azure Communication Services Email, which advertise only AUTH LOGIN.
+func selectAuth(c *smtp.Client, host, user, pass string) (smtp.Auth, error) {
+	ok, params := c.Extension("AUTH")
+	if !ok {
+		return nil, errors.New("server does not advertise AUTH")
+	}
+	mechs := strings.Fields(strings.ToUpper(params))
+	has := func(m string) bool {
+		for _, x := range mechs {
+			if x == m {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case has("PLAIN"):
+		return smtp.PlainAuth("", user, pass, host), nil
+	case has("LOGIN"):
+		return &loginAuth{user: user, pass: pass, host: host}, nil
+	default:
+		return nil, fmt.Errorf("no supported AUTH mechanism (server offers: %q)", params)
+	}
+}
+
+// loginAuth implements the SASL LOGIN mechanism, which is not in the Go
+// standard library. Some relays (notably Azure Communication Services Email)
+// accept only AUTH LOGIN, so we ship our own.
+//
+// The mechanism is a simple two-step challenge: the server prompts for the
+// username, then the password, each base64-encoded. We track state by step
+// rather than parsing the prompt text, since servers send different strings
+// ("Username:", "User Name", localized variants, …).
+type loginAuth struct {
+	user, pass, host string
+	step             int
+}
+
+func (a *loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	// Mirror smtp.PlainAuth's safety checks. Don't send credentials over an
+	// unencrypted connection unless the server explicitly advertised LOGIN
+	// on the plaintext channel (in which case the operator is opting in,
+	// e.g. for a localhost dev relay).
+	if !server.TLS {
+		advertised := false
+		for _, m := range server.Auth {
+			// SMTP AUTH mechanism names are case-insensitive (RFC 4954),
+			// and net/smtp.Client preserves whatever case the server sent.
+			// selectAuth itself uppercases before matching; mirror that
+			// here so a server advertising `login` (lowercase) on a
+			// plaintext channel isn't treated as "not advertised".
+			if strings.EqualFold(m, "LOGIN") {
+				advertised = true
+				break
+			}
+		}
+		if !advertised {
+			return "", nil, errors.New("unencrypted connection")
+		}
+	}
+	if server.Name != a.host {
+		return "", nil, errors.New("wrong host name")
+	}
+	a.step = 0
+	return "LOGIN", nil, nil
+}
+
+func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+	a.step++
+	switch a.step {
+	case 1:
+		return []byte(a.user), nil
+	case 2:
+		return []byte(a.pass), nil
+	default:
+		return nil, fmt.Errorf("unexpected LOGIN challenge: %q", fromServer)
+	}
 }
 
 // localHostname is the value sent in EHLO. We default to "localhost" because
