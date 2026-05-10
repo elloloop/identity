@@ -727,16 +727,25 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 	)
 }
 
-// checkAccountStatus verifies the user's status allows login.
+// checkAccountStatus verifies the user's status allows login. When the
+// deployment requires identity verification (cfg.IDVRequired), unverified
+// users are blocked with ErrIDVRequired so the client can route them to
+// the BeginIdentityVerification flow.
 func (s *AuthService) checkAccountStatus(_ context.Context, user *User, _, _ string) error {
 	status := strings.ToLower(user.Status)
-	if status == "" || status == "active" {
-		return nil
-	}
-	if status == "invited" {
+	switch status {
+	case "", "active":
+		// fall through
+	case "invited":
 		return fmt.Errorf("%w: accept your invitation first", ErrInvitationPending)
+	default:
+		return fmt.Errorf("%w: account is %s", ErrAccountNotActive, status)
 	}
-	return fmt.Errorf("%w: account is %s", ErrAccountNotActive, status)
+
+	if s.cfg != nil && s.cfg.IDVRequired && !user.IDVVerified {
+		return ErrIDVRequired
+	}
+	return nil
 }
 
 // ── AcceptInvitation ───────────────────────────────────────────────────

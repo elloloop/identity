@@ -59,7 +59,8 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrNoPasswordSet),
 		errors.Is(err, service.ErrAccountNotActive),
 		errors.Is(err, service.ErrInvitationPending),
-		errors.Is(err, service.ErrSignupDisabled):
+		errors.Is(err, service.ErrSignupDisabled),
+		errors.Is(err, service.ErrIDVRequired):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrInvitationUsed),

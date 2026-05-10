@@ -57,6 +57,8 @@ type User struct {
 	LockedUntil      int64 // epoch ms; 0 = not locked
 	EmailVerified    bool
 	EmailVerifiedAt  int64 // epoch ms
+	IDVVerified      bool  // latest identity verification reached APPROVED
+	IDVVerifiedAt    int64 // epoch ms; 0 = never verified
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -197,6 +199,10 @@ type Repository interface {
 
 	// User email-verified update
 	SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error
+
+	// User idv-verified update; called by IdentityVerificationService
+	// when a verification reaches APPROVED.
+	SetUserIDVVerified(ctx context.Context, userID string, atMs int64) error
 
 	// Identity-verification records (document + selfie verification).
 	// Latest ordering is by CreatedAt descending.
@@ -413,6 +419,7 @@ var (
 	ErrNoPasswordSet     = errors.New("no password set for this account")
 	ErrAccountNotActive  = errors.New("account is not active")
 	ErrInvitationPending = errors.New("account has not completed invitation")
+	ErrIDVRequired       = errors.New("identity verification required")
 	ErrWeakPassword      = errors.New("password does not meet strength requirements")
 	ErrTotpRequired      = errors.New("totp required")
 	ErrTokenExpired      = errors.New("token expired")

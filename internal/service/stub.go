@@ -202,6 +202,10 @@ func (StubRepository) SetUserEmailVerified(context.Context, string, int64) error
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) SetUserIDVVerified(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) CreateIdentityVerification(context.Context, *IdentityVerificationRecord) error {
 	return ErrServiceUnavailable
 }

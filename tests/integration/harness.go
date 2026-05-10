@@ -1255,6 +1255,18 @@ func (r *MemRepo) MarkEmailVerificationTokenConsumed(_ context.Context, id strin
 	return nil
 }
 
+func (r *MemRepo) SetUserIDVVerified(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.IDVVerified = true
+	u.IDVVerifiedAt = atMs
+	return nil
+}
+
 func (r *MemRepo) SetUserEmailVerified(_ context.Context, userID string, atMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -680,6 +680,18 @@ func (r *fakeRepo) SetUserEmailVerified(_ context.Context, userID string, atMs i
 	return nil
 }
 
+func (r *fakeRepo) SetUserIDVVerified(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.IDVVerified = true
+	u.IDVVerifiedAt = atMs
+	return nil
+}
+
 func (r *fakeRepo) CreateEmailChangeToken(_ context.Context, t *service.EmailChangeToken) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

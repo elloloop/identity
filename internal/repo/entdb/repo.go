@@ -72,6 +72,8 @@ func userFromProto(id string, p *schemapb.User) *service.User {
 		LockedUntil:      p.GetLockedUntil(),
 		EmailVerified:    p.GetEmailVerified(),
 		EmailVerifiedAt:  p.GetEmailVerifiedAt(),
+		IDVVerified:      p.GetIdvVerified(),
+		IDVVerifiedAt:    p.GetIdvVerifiedAt(),
 		LastLoginAtMs:    p.GetLastLoginAt(),
 		CreatedAt:        time.UnixMilli(p.GetCreatedAt()),
 		UpdatedAt:        time.UnixMilli(p.GetUpdatedAt()),
@@ -133,6 +135,8 @@ func (r *entRepository) CreateUser(ctx context.Context, u *service.User) (string
 		LastLoginAt:      u.LastLoginAtMs,
 		EmailVerified:    u.EmailVerified,
 		EmailVerifiedAt:  u.EmailVerifiedAt,
+		IdvVerified:      u.IDVVerified,
+		IdvVerifiedAt:    u.IDVVerifiedAt,
 		CreatedAt:        u.CreatedAt.UnixMilli(),
 		UpdatedAt:        u.UpdatedAt.UnixMilli(),
 	}
@@ -286,6 +290,21 @@ func (r *entRepository) SetUserEmailVerified(ctx context.Context, userID string,
 	return nil
 }
 
+func (r *entRepository) SetUserIDVVerified(ctx context.Context, userID string, atMs int64) error {
+	if userID == "" {
+		return errors.New("repo: SetUserIDVVerified: missing user id")
+	}
+	patch := &schemapb.User{
+		IdvVerified:   true,
+		IdvVerifiedAt: atMs,
+		UpdatedAt:     atMs,
+	}
+	if err := r.client.update(ctx, actorStr(userID), userID, patch); err != nil {
+		return fmt.Errorf("repo: SetUserIDVVerified: %w", err)
+	}
+	return nil
+}
+
 func (r *entRepository) IncrementFailedLoginCount(ctx context.Context, userID string) (int32, error) {
 	if userID == "" {
 		return 0, errors.New("repo: IncrementFailedLoginCount: missing user id")
@@ -350,6 +369,8 @@ func userProtoFromUser(user *service.User) *schemapb.User {
 		LastLoginAt:     user.LastLoginAtMs,
 		EmailVerified:   user.EmailVerified,
 		EmailVerifiedAt: user.EmailVerifiedAt,
+		IdvVerified:     user.IDVVerified,
+		IdvVerifiedAt:   user.IDVVerifiedAt,
 		CreatedAt:       user.CreatedAt.UnixMilli(),
 		UpdatedAt:       user.UpdatedAt.UnixMilli(),
 	}

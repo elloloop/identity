@@ -33,6 +33,8 @@ message User {
   int64 email_verified_at = 14;
   int32 failed_login_count = 15;          // # of consecutive failed PasswordLogin attempts
   int64 locked_until = 16;                // epoch ms; 0 = not locked, future = locked until
+  bool idv_verified = 17;                 // Latest identity verification has reached APPROVED status.
+  int64 idv_verified_at = 18;             // epoch ms; 0 = never verified
 }
 
 message CreateUserRequest {
