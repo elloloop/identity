@@ -577,6 +577,27 @@ func RunConformance(t *testing.T, makeFresh func(t *testing.T) service.Repositor
 		}
 	})
 
+	t.Run("SetUserIDVVerified", func(t *testing.T) {
+		ctx := context.Background()
+		r := makeFresh(t)
+		id, err := r.CreateUser(ctx, &service.User{Email: "idv-flag@example.com", Status: "active"})
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		// Initial state: not verified.
+		got, _ := r.GetUser(ctx, id)
+		if got == nil || got.IDVVerified || got.IDVVerifiedAt != 0 {
+			t.Fatalf("pre-Set: %+v", got)
+		}
+		if err := r.SetUserIDVVerified(ctx, id, 777); err != nil {
+			t.Fatalf("SetUserIDVVerified: %v", err)
+		}
+		got, _ = r.GetUser(ctx, id)
+		if got == nil || !got.IDVVerified || got.IDVVerifiedAt != 777 {
+			t.Fatalf("after Set: %+v", got)
+		}
+	})
+
 	t.Run("IdentityVerification_CRUD", func(t *testing.T) {
 		ctx := context.Background()
 		r := makeFresh(t)
