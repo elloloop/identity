@@ -33,7 +33,8 @@ func (r *pgRepository) CreateEmailVerificationToken(ctx context.Context, t *serv
 			id, tenant_id, token_hash, user_id, email,
 			expires_at_ms, created_at_ms, consumed_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, t.TokenHash, t.UserID, t.Email,
 		t.ExpiresAt, t.CreatedAt, t.ConsumedAt,
 	)

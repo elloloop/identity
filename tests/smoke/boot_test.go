@@ -158,7 +158,8 @@ func TestBootSmoke(t *testing.T) {
 	//    GATEWAY_JWT_KEYS unset — triggers the auto-generated dev RSA key
 	//                            path, which is what we want to assert works.
 	//    GATEWAY_TOTP_ENCRYPTION_KEY unset — falls back to the dev key.
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"GATEWAY_CONNECT_PORT="+strconv.Itoa(connectPort),
 		"GATEWAY_METRICS_PORT="+strconv.Itoa(metricsPort),
 		"GATEWAY_GRPC_PORT="+strconv.Itoa(freePort(t)),

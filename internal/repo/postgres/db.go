@@ -417,7 +417,8 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 		lastLoginAt, _ := nullableInt64(op.Data[dbUfLastLoginAt])
 		emailVerifiedAt, _ := nullableInt64(op.Data[dbUfEmailVerifiedAt])
 
-		_, err := tx.Exec(ctx, `
+		_, err := tx.Exec(
+			ctx, `
 			INSERT INTO users (
 				id, tenant_id, email, name, role, avatar_url, status,
 				recovery_email, password_hash, quota_bytes, totp_required,
@@ -1163,7 +1164,8 @@ func updateBySpecs(ctx context.Context, tx pgx.Tx, tenantID, table, nodeID strin
 		return nil
 	}
 	args = append(args, tenantID, nodeID)
-	_, err := tx.Exec(ctx,
+	_, err := tx.Exec(
+		ctx,
 		fmt.Sprintf(`UPDATE %s SET %s WHERE tenant_id = $%d AND id = $%d`, table, strings.Join(sets, ", "), idx, idx+1),
 		args...,
 	)

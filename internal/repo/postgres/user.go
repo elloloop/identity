@@ -149,7 +149,8 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			$18,
 			$19, $20
 		)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, u.Email, u.Name, role, u.AvatarURL, status,
 		u.RecoveryEmail, u.PasswordHash, u.QuotaBytes, u.TotpRequired,
 		int64(u.FailedLoginCount), u.LockedUntil,

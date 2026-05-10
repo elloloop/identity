@@ -36,7 +36,8 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) email.Transport
 	if cfg.SMTPProviders != "" {
 		var providers []email.SMTPConfig
 		if err := json.Unmarshal([]byte(cfg.SMTPProviders), &providers); err != nil {
-			logger.Warn("smtp_providers_parse_failed",
+			logger.Warn(
+				"smtp_providers_parse_failed",
 				zap.Error(err),
 				zap.String("hint", "GATEWAY_SMTP_PROVIDERS must be a JSON array of email.SMTPConfig"),
 			)
@@ -45,7 +46,8 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) email.Transport
 			for i, p := range providers {
 				t, err := email.NewSMTP(p)
 				if err != nil {
-					logger.Warn("smtp_provider_invalid",
+					logger.Warn(
+						"smtp_provider_invalid",
 						zap.Int("idx", i), zap.String("host", p.Host), zap.Error(err),
 					)
 					continue
@@ -54,12 +56,14 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) email.Transport
 			}
 			if len(transports) > 0 {
 				transports = append(transports, tail)
-				logger.Info("email_transport_chain_configured",
+				logger.Info(
+					"email_transport_chain_configured",
 					zap.Int("provider_count", len(transports)-1),
 				)
 				return email.NewChain(logger, transports...)
 			}
-			logger.Warn("smtp_providers_empty_after_validation",
+			logger.Warn(
+				"smtp_providers_empty_after_validation",
 				zap.String("note", "no usable SMTP providers parsed; falling back to log-only"),
 			)
 		}
@@ -80,7 +84,8 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) email.Transport
 		if err != nil {
 			logger.Warn("smtp_single_provider_invalid", zap.Error(err))
 		} else {
-			logger.Info("email_smtp_configured",
+			logger.Info(
+				"email_smtp_configured",
 				zap.String("host", smtpCfg.Host),
 				zap.Int("port", smtpCfg.Port),
 				zap.Bool("tls", smtpCfg.TLS),
@@ -91,7 +96,8 @@ func buildEmailTransport(cfg *config.Config, logger *zap.Logger) email.Transport
 	}
 
 	// (3) Nothing configured — log-only.
-	logger.Warn("email_disabled_no_transport_configured",
+	logger.Warn(
+		"email_disabled_no_transport_configured",
 		zap.String("hint",
 			"set GATEWAY_SMTP_HOST/PORT/USER/PASS/FROM or GATEWAY_SMTP_PROVIDERS to enable email delivery"),
 	)

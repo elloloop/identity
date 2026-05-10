@@ -176,7 +176,8 @@ func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, use
 		return fmt.Errorf("add group member: %w", err)
 	}
 
-	s.logger.Info("group_member_added",
+	s.logger.Info(
+		"group_member_added",
 		zap.String("group_id", groupID), zap.String("user_id", userID),
 	)
 	return nil
@@ -199,7 +200,8 @@ func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, 
 		return fmt.Errorf("remove group member: %w", err)
 	}
 
-	s.logger.Info("group_member_removed",
+	s.logger.Info(
+		"group_member_removed",
 		zap.String("group_id", groupID), zap.String("user_id", userID),
 	)
 	return nil

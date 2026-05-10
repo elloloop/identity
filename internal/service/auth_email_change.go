@@ -55,7 +55,8 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if user.PasswordHash == "" || !passwords.Verify(currentPassword, user.PasswordHash) {
-		s.audit.Log(ctx, audit.EventPasswordChanged,
+		s.audit.Log(
+			ctx, audit.EventPasswordChanged,
 			audit.WithActor(userID), audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"step": "email_change_reauth"}),
 		)
@@ -143,7 +144,8 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 		}
 	}
 
-	s.audit.Log(ctx, audit.EventPasswordChanged,
+	s.audit.Log(
+		ctx, audit.EventPasswordChanged,
 		audit.WithActor(user.ID), audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"step": "email_change_requested"}),
 	)
@@ -225,7 +227,8 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
 
-	s.audit.Log(ctx, audit.EventPasswordChanged,
+	s.audit.Log(
+		ctx, audit.EventPasswordChanged,
 		audit.WithActor(user.ID), audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
 			"step":      "email_change_confirmed",

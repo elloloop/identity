@@ -56,7 +56,8 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID, devi
 		return "", "", fmt.Errorf("storing challenge: %w", err)
 	}
 
-	s.logger.Info("passkey_registration_begin",
+	s.logger.Info(
+		"passkey_registration_begin",
 		zap.String("user_id", userID),
 		zap.String("challenge_id", nodeID),
 		zap.Int("existing_credentials", len(existingIDs)),
@@ -93,7 +94,8 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 
 	result, err := s.passkeys.CompleteRegistration(credentialJSON, challenge.Challenge)
 	if err != nil {
-		s.logger.Warn("passkey_registration_verify_failed",
+		s.logger.Warn(
+			"passkey_registration_verify_failed",
 			zap.String("user_id", userID), zap.Error(err),
 		)
 		return nil, fmt.Errorf("%w: attestation verification failed", ErrInvalidArgument)
@@ -118,13 +120,15 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 	// Single-use challenge -- delete it.
 	_ = s.repo.DeletePasskeyChallenge(ctx, challenge.NodeID)
 
-	s.logger.Info("passkey_registered",
+	s.logger.Info(
+		"passkey_registered",
 		zap.String("user_id", userID),
 		zap.String("credential_id", result.CredentialID),
 		zap.String("device_name", deviceName),
 	)
 
-	s.audit.Log(ctx, audit.EventPasskeyAdded,
+	s.audit.Log(
+		ctx, audit.EventPasskeyAdded,
 		audit.WithActor(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"credential_id": result.CredentialID}),
@@ -182,7 +186,8 @@ func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (stri
 		return "", "", fmt.Errorf("storing challenge: %w", err)
 	}
 
-	s.logger.Info("passkey_login_begin",
+	s.logger.Info(
+		"passkey_login_begin",
 		zap.String("challenge_id", nodeID),
 		zap.Int("allowed_credentials", len(allowedIDs)),
 	)
@@ -239,7 +244,8 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		cred.CredentialID,
 	)
 	if err != nil {
-		s.logger.Warn("passkey_login_verify_failed",
+		s.logger.Warn(
+			"passkey_login_verify_failed",
 			zap.String("user_id", cred.UserID),
 			zap.String("credential_id", credID),
 			zap.Error(err),
@@ -270,17 +276,20 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, err
 	}
 
-	s.logger.Info("passkey_login_success",
+	s.logger.Info(
+		"passkey_login_success",
 		zap.String("user_id", user.ID),
 		zap.String("credential_id", credID),
 	)
 
-	s.audit.Log(ctx, audit.EventPasskeyUsed,
+	s.audit.Log(
+		ctx, audit.EventPasskeyUsed,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"credential_id": credID}),
 	)
-	s.audit.Log(ctx, audit.EventLoginSuccess,
+	s.audit.Log(
+		ctx, audit.EventLoginSuccess,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"method": "passkey"}),

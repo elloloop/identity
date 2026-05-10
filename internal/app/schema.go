@@ -66,7 +66,8 @@ func applyOrLogSchemaGap(ctx context.Context, db service.DB, logger *zap.Logger)
 	}
 
 	for _, t := range declared {
-		logger.Info("schema_loaded",
+		logger.Info(
+			"schema_loaded",
 			zap.Int32("type_id", t.TypeID),
 			zap.String("name", t.Name),
 			zap.String("data_policy", t.DataPolicy),

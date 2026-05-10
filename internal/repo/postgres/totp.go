@@ -46,7 +46,8 @@ func (r *pgRepository) CreateTotpCredential(ctx context.Context, c *service.Totp
 			id, tenant_id, user_id, secret_encrypted, verified,
 			created_at_ms, last_used_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, c.UserID, c.SecretEncrypted, c.Verified,
 		c.CreatedAt, c.LastUsedAt,
 	)

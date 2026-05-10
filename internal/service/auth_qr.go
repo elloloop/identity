@@ -36,7 +36,8 @@ func (s *AuthService) InitiateQrLogin(ctx context.Context, deviceInfo, userAgent
 	}
 
 	qrURL := strings.TrimRight(s.cfg.QRLoginBaseURL, "/") + "/qr-login/" + sessionID
-	s.logger.Info("qr_login_initiated",
+	s.logger.Info(
+		"qr_login_initiated",
 		zap.String("device_info", deviceInfo),
 		zap.Int32("expires_in", expiresIn),
 	)
@@ -115,7 +116,8 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 			"approved_device_info": truncate(userAgent, 512),
 			"updated_at":           now,
 		})
-		s.audit.Log(ctx, audit.EventQrLoginApproved,
+		s.audit.Log(
+			ctx, audit.EventQrLoginApproved,
 			audit.WithActor(userID),
 			audit.WithSuccess(true),
 		)
@@ -125,7 +127,8 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 			"status":     "rejected",
 			"updated_at": now,
 		})
-		s.audit.Log(ctx, audit.EventQrLoginRejected,
+		s.audit.Log(
+			ctx, audit.EventQrLoginRejected,
 			audit.WithActor(userID),
 			audit.WithSuccess(true),
 		)
@@ -134,7 +137,8 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 		return "", fmt.Errorf("updating QR login session: %w", err)
 	}
 
-	s.logger.Info("qr_login_decision",
+	s.logger.Info(
+		"qr_login_decision",
 		zap.String("user_id", userID),
 		zap.Bool("approved", approve),
 	)

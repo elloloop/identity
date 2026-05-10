@@ -56,7 +56,8 @@ func (r *pgRepository) CreateQrLoginSession(ctx context.Context, s *service.QrLo
 			approved_device_info,
 			expires_at_ms, created_at_ms, updated_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, s.SessionID, status, s.UserID,
 		s.NewDeviceInfo, s.NewDeviceIP, s.NewDeviceUserAgent,
 		s.ApprovedDeviceInfo,

@@ -155,7 +155,8 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		return nil, err
 	}
 
-	s.audit.Log(ctx, audit.EventLoginSuccess,
+	s.audit.Log(
+		ctx, audit.EventLoginSuccess,
 		audit.WithActor(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"method": "signup"}),
@@ -171,7 +172,8 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 
 func (s *AuthService) handleDuplicatePasswordSignup(ctx context.Context, user *User, email, name string) (*LoginResult, error) {
 	if err := s.sendExistingSignupNotice(ctx, user); err != nil {
-		s.logger.Warn("duplicate_signup_notice_failed",
+		s.logger.Warn(
+			"duplicate_signup_notice_failed",
 			zap.String("user_id", user.ID),
 			zap.String("email", email),
 			zap.Error(err),
@@ -263,7 +265,8 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		// microseconds while the wrong-password path takes ~250ms).
 		_ = passwords.Verify(password, getDummyPasswordHash())
 		s.logger.Info("local_login_failed", zap.String("reason", "user_not_found"))
-		s.audit.Log(ctx, audit.EventLoginFailure,
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
 			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "user_not_found", "email": email}),
@@ -276,7 +279,8 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	// so operators can distinguish "tried during lockout" from
 	// "threshold tripped".
 	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
-		s.audit.Log(ctx, audit.EventLoginLocked,
+		s.audit.Log(
+			ctx, audit.EventLoginLocked,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{
@@ -300,7 +304,8 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 
 	// No password set (OAuth-only user).
 	if user.PasswordHash == "" {
-		s.audit.Log(ctx, audit.EventLoginFailure,
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "no_password_set"}),
@@ -317,7 +322,8 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 			return nil, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 		}
 		if lockedNow {
-			s.audit.Log(ctx, audit.EventAccountLocked,
+			s.audit.Log(
+				ctx, audit.EventAccountLocked,
 				audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 				audit.WithSuccess(false),
 				audit.WithDetails(map[string]any{
@@ -326,7 +332,8 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 				}),
 			)
 		}
-		s.audit.Log(ctx, audit.EventLoginFailure,
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "password_mismatch"}),
@@ -358,7 +365,8 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 
 	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info("local_login_success", zap.String("email", email), zap.String("user_id", user.ID))
-	s.audit.Log(ctx, audit.EventLoginSuccess,
+	s.audit.Log(
+		ctx, audit.EventLoginSuccess,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"method": "password"}),
@@ -487,7 +495,8 @@ func (s *AuthService) OAuthLogin(
 			s.nowFunc().UTC(),
 		)
 		if err != nil {
-			s.logger.Info("oauth_state_validation_failed",
+			s.logger.Info(
+				"oauth_state_validation_failed",
 				zap.String("provider", provider),
 				zap.Error(err),
 			)
@@ -502,10 +511,12 @@ func (s *AuthService) OAuthLogin(
 
 	identity, err := exchanger.Exchange(ctx, code, redirectURI)
 	if err != nil {
-		s.logger.Info("oauth_login_failed",
+		s.logger.Info(
+			"oauth_login_failed",
 			zap.String("provider", provider), zap.Error(err),
 		)
-		s.audit.Log(ctx, audit.EventOAuthLogin,
+		s.audit.Log(
+			ctx, audit.EventOAuthLogin,
 			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{
@@ -531,7 +542,8 @@ func (s *AuthService) OAuthLogin(
 	}
 
 	s.updateLastLogin(ctx, user.ID)
-	s.logger.Info("oauth_login_success",
+	s.logger.Info(
+		"oauth_login_success",
 		zap.String("email", email),
 		zap.String("provider", provider),
 		zap.String("user_id", user.ID),
@@ -542,7 +554,8 @@ func (s *AuthService) OAuthLogin(
 		return nil, err
 	}
 
-	s.audit.Log(ctx, audit.EventOAuthLogin,
+	s.audit.Log(
+		ctx, audit.EventOAuthLogin,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
@@ -642,7 +655,8 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		UpdatedAt:       msToTime(now),
 	}
 	s.linkOAuthIdentity(ctx, userID, identity, email, now)
-	s.logger.Info("oauth_user_provisioned",
+	s.logger.Info(
+		"oauth_user_provisioned",
 		zap.String("email", email),
 		zap.String("user_id", userID),
 		zap.String("provider", identity.Provider),
@@ -709,14 +723,16 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 		CreatedAt:       nowMs,
 	}
 	if err := s.repo.CreateOAuthIdentity(ctx, oi); err != nil {
-		s.logger.Warn("oauth_identity_link_failed",
+		s.logger.Warn(
+			"oauth_identity_link_failed",
 			zap.String("user_id", userID),
 			zap.String("provider", identity.Provider),
 			zap.Error(err),
 		)
 		return
 	}
-	s.audit.Log(ctx, audit.EventType("oauth_identity_linked"),
+	s.audit.Log(
+		ctx, audit.EventType("oauth_identity_linked"),
 		audit.WithActor(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{

@@ -81,7 +81,8 @@ func TestLog_ConcurrentEmission(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < perGoroutine; j++ {
-				l.Log(context.Background(), EventLoginSuccess,
+				l.Log(
+					context.Background(), EventLoginSuccess,
 					WithActor("user-x"),
 					WithDetails(map[string]any{"j": j}),
 				)
@@ -120,7 +121,8 @@ func TestLog_NestedDetails(t *testing.T) {
 	w := &fakeWriter{}
 	l := NewLogger(w, "t", zap.NewNop())
 
-	l.Log(context.Background(), EventLoginSuccess,
+	l.Log(
+		context.Background(), EventLoginSuccess,
 		WithDetails(map[string]any{
 			"nested": map[string]any{"k": "v"},
 			"count":  42,

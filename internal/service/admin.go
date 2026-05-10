@@ -165,7 +165,8 @@ func (s *AdminService) InviteUser(
 	// response and can hand it off out-of-band.
 	s.sendInvitationEmail(ctx, email, name, role, setupURL)
 
-	s.audit.Log(ctx, audit.EventUserInvited,
+	s.audit.Log(
+		ctx, audit.EventUserInvited,
 		audit.WithActor(actorID), audit.WithTarget(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"email": email, "role": role}),
@@ -217,7 +218,8 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		return fmt.Errorf("deactivate user: %w", err)
 	}
 
-	s.audit.Log(ctx, audit.EventUserDeactivated,
+	s.audit.Log(
+		ctx, audit.EventUserDeactivated,
 		audit.WithActor(actorID), audit.WithTarget(targetUserID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"reason": reason}),
@@ -251,7 +253,8 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 		return fmt.Errorf("reactivate user: %w", err)
 	}
 
-	s.audit.Log(ctx, audit.EventUserReactivated,
+	s.audit.Log(
+		ctx, audit.EventUserReactivated,
 		audit.WithActor(actorID), audit.WithTarget(targetUserID), audit.WithSuccess(true),
 	)
 	return nil

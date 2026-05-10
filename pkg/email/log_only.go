@@ -34,7 +34,8 @@ func (l *logOnlyTransport) Send(_ context.Context, m Message) error {
 	if len(preview) > previewLen {
 		preview = preview[:previewLen]
 	}
-	l.logger.Warn("email_disabled_no_transport",
+	l.logger.Warn(
+		"email_disabled_no_transport",
 		zap.String("to", m.To),
 		zap.String("subject", m.Subject),
 		zap.String("preview", preview),

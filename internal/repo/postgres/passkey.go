@@ -86,7 +86,8 @@ func (r *pgRepository) CreatePasskeyCredential(ctx context.Context, c *service.P
 			id, tenant_id, credential_id, user_id, public_key, sign_count,
 			device_name, aaguid, transports, created_at_ms, last_used_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, c.CredentialID, c.UserID, c.PublicKey, c.SignCount,
 		c.DeviceName, c.AAGUID, c.Transports, c.CreatedAt, c.LastUsedAt,
 	)
@@ -188,7 +189,8 @@ func (r *pgRepository) CreatePasskeyChallenge(ctx context.Context, c *service.Pa
 			id, tenant_id, challenge, user_id, challenge_type,
 			expires_at_ms, created_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, c.Challenge, c.UserID, c.ChallengeType,
 		c.ExpiresAt, c.CreatedAt,
 	)

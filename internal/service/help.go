@@ -96,7 +96,8 @@ func (s *HelpService) RequestAdminHelp(
 		requestID = result.CreatedNodeIDs[0]
 	}
 
-	s.audit.Log(ctx, audit.EventAdminHelpRequested,
+	s.audit.Log(
+		ctx, audit.EventAdminHelpRequested,
 		audit.WithTarget(requestID),
 		audit.WithIP(sourceIP),
 		audit.WithUserAgent(userAgent),
@@ -222,7 +223,8 @@ func (s *HelpService) ResolveHelpRequest(
 	hr.ResolutionNotes = strings.TrimSpace(notes)
 	hr.ResolvedAt = now
 
-	s.audit.Log(ctx, audit.EventAdminHelpResolved,
+	s.audit.Log(
+		ctx, audit.EventAdminHelpResolved,
 		audit.WithActor(actorID), audit.WithTarget(requestID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"outcome": newStatus}),

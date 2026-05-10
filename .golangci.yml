@@ -40,6 +40,10 @@ linters:
         - name: var-naming
         - name: var-declaration
   exclusions:
+    paths:
+      # Generated code is the upstream's responsibility; we don't own
+      # its cyclomatic complexity or unsafe pointer usage.
+      - gen/
     rules:
       - path: _test\.go
         linters:

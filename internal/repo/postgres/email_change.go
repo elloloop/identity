@@ -33,7 +33,8 @@ func (r *pgRepository) CreateEmailChangeToken(ctx context.Context, t *service.Em
 			id, tenant_id, token_hash, user_id, old_email, new_email,
 			expires_at_ms, created_at_ms, consumed_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, t.TokenHash, t.UserID, t.OldEmail, t.NewEmail,
 		t.ExpiresAt, t.CreatedAt, t.ConsumedAt,
 	)

@@ -38,7 +38,8 @@ func (r *pgRepository) CreateIdentityVerification(ctx context.Context, rec *serv
 			provider, provider_session_id, status,
 			created_at_ms, updated_at_ms, completed_at_ms, rejection_reason
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, rec.VerificationID, rec.UserID,
 		rec.Provider, rec.ProviderSessionID, rec.Status,
 		rec.CreatedAt, rec.UpdatedAt, rec.CompletedAt, rec.RejectionReason,
@@ -106,7 +107,8 @@ func (r *pgRepository) UpdateIdentityVerificationStatus(ctx context.Context, ver
 		       completed_at_ms = $5,
 		       updated_at_ms = $6
 		 WHERE tenant_id = $1 AND verification_id = $2`
-	if _, err := r.pool.Exec(ctx, q,
+	if _, err := r.pool.Exec(
+		ctx, q,
 		r.tenantID, verificationID, status, rejectionReason, completedAtMs, updatedAtMs,
 	); err != nil {
 		return wrapPgErr("UpdateIdentityVerificationStatus", err)

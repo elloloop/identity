@@ -51,7 +51,8 @@ func (r *pgRepository) CreateOAuthIdentity(ctx context.Context, oi *service.OAut
 			id, tenant_id, user_id, provider, provider_user_id,
 			email_at_link_time, created_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, oi.UserID, oi.Provider, oi.ProviderUserID,
 		oi.EmailAtLinkTime, oi.CreatedAt,
 	)
@@ -91,4 +92,4 @@ func (r *pgRepository) ListOAuthIdentitiesForUser(ctx context.Context, userID st
 }
 
 // pgx.Rows compile-time assertion for clarity.
-var _ pgx.Rows = (pgx.Rows)(nil)
+var _ pgx.Rows = pgx.Rows(nil)

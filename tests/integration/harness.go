@@ -28,8 +28,8 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/email"
-	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/idv"
+	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 )

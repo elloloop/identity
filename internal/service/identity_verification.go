@@ -78,7 +78,8 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 		DisplayName: user.Name,
 	})
 	if err != nil {
-		s.logger.Error("idv_begin_provider_failed",
+		s.logger.Error(
+			"idv_begin_provider_failed",
 			zap.String("provider", s.provider.Name()),
 			zap.String("user_id", userID),
 			zap.Error(err),
@@ -149,7 +150,8 @@ func (s *IdentityVerificationService) GetIdentityVerificationStatus(
 		return rec, nil
 	}
 	if err != nil {
-		s.logger.Error("idv_status_provider_failed",
+		s.logger.Error(
+			"idv_status_provider_failed",
 			zap.String("provider", s.provider.Name()),
 			zap.String("verification_id", rec.VerificationID),
 			zap.Error(err),
@@ -184,7 +186,8 @@ func (s *IdentityVerificationService) GetIdentityVerificationStatus(
 	// (or the next status poll).
 	if status.Status == IDVStatusApproved {
 		if err := s.repo.SetUserIDVVerified(ctx, rec.UserID, completedMs); err != nil {
-			s.logger.Warn("idv_user_flag_update_failed",
+			s.logger.Warn(
+				"idv_user_flag_update_failed",
 				zap.String("verification_id", rec.VerificationID),
 				zap.String("user_id", rec.UserID),
 				zap.Error(err),

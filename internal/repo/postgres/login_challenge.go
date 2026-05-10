@@ -19,7 +19,8 @@ func (r *pgRepository) CreateLoginChallenge(ctx context.Context, c *service.Logi
 		INSERT INTO login_challenges (
 			id, tenant_id, challenge_id, user_id, expires_at_ms, created_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, c.ChallengeID, c.UserID, c.ExpiresAt, c.CreatedAt,
 	)
 	if err != nil {
