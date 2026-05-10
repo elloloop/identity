@@ -67,6 +67,23 @@ func TestHandler_BeginIdentityVerification_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHandler_BeginIdentityVerification_UnknownUserMapsToNotFound(t *testing.T) {
+	t.Parallel()
+
+	client, _, _ := newIDVHarness(t, idv.NewStubProvider())
+
+	_, err := client.BeginIdentityVerification(
+		context.Background(),
+		authedReq(connect.NewRequest(&identitypb.BeginIdentityVerificationRequest{}), "no-such-user"),
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeNotFound {
+		t.Fatalf("CodeOf = %v; want NotFound", got)
+	}
+}
+
 func TestHandler_BeginIdentityVerification_Unauthenticated(t *testing.T) {
 	t.Parallel()
 
@@ -112,6 +129,128 @@ func TestHandler_GetIdentityVerificationStatus_AfterBegin(t *testing.T) {
 	}
 	if got := status.Msg.Verification.Status; got != identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_APPROVED {
 		t.Fatalf("status = %v; want APPROVED", got)
+	}
+}
+
+func TestIDVStatusToProto_AllBranches(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   string
+		want identitypb.IdentityVerificationStatus
+	}{
+		{service.IDVStatusPending, identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_PENDING},
+		{service.IDVStatusInReview, identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_IN_REVIEW},
+		{service.IDVStatusApproved, identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_APPROVED},
+		{service.IDVStatusRejected, identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_REJECTED},
+		{service.IDVStatusExpired, identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_EXPIRED},
+		{"", identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_UNSPECIFIED},
+		{"garbage", identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_UNSPECIFIED},
+	}
+	for _, tc := range cases {
+		if got := idvStatusToProto(tc.in); got != tc.want {
+			t.Errorf("idvStatusToProto(%q) = %v; want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestIDVRecordToProto_NilReturnsNil(t *testing.T) {
+	t.Parallel()
+	if got := idvRecordToProto(nil); got != nil {
+		t.Fatalf("idvRecordToProto(nil) = %v; want nil", got)
+	}
+}
+
+func TestIDVRecordToProto_PopulatesAllFields(t *testing.T) {
+	t.Parallel()
+
+	rec := &service.IdentityVerificationRecord{
+		NodeID:            "node-1",
+		VerificationID:    "v-1",
+		UserID:            "u-1",
+		TenantID:          "t-1",
+		Provider:          "stub",
+		ProviderSessionID: "sess-1",
+		Status:            service.IDVStatusRejected,
+		CreatedAt:         1_000,
+		UpdatedAt:         2_000,
+		CompletedAt:       3_000,
+		RejectionReason:   "document_unreadable",
+	}
+	got := idvRecordToProto(rec)
+	if got.Id != "node-1" || got.UserId != "u-1" || got.TenantId != "t-1" {
+		t.Fatalf("ids: %+v", got)
+	}
+	if got.Provider != "stub" || got.ProviderSessionId != "sess-1" {
+		t.Fatalf("provider: %+v", got)
+	}
+	if got.Status != identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_REJECTED {
+		t.Fatalf("status: %v", got.Status)
+	}
+	if got.CreatedAt == nil || got.UpdatedAt == nil || got.CompletedAt == nil {
+		t.Fatalf("timestamps: %+v", got)
+	}
+	if got.RejectionReason != "document_unreadable" {
+		t.Fatalf("reason: %q", got.RejectionReason)
+	}
+}
+
+func TestHandler_GetIdentityVerificationStatus_Unauthenticated(t *testing.T) {
+	t.Parallel()
+
+	client, _, _ := newIDVHarness(t, idv.NewStubProvider())
+
+	_, err := client.GetIdentityVerificationStatus(
+		context.Background(),
+		connect.NewRequest(&identitypb.GetIdentityVerificationStatusRequest{}),
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("CodeOf = %v; want Unauthenticated", got)
+	}
+}
+
+func TestHandler_GetIdentityVerificationStatus_NotFound(t *testing.T) {
+	t.Parallel()
+
+	client, repo, _ := newIDVHarness(t, idv.NewStubProvider())
+	other, _ := repo.CreateUser(context.Background(), &service.User{Email: "other@example.com", Status: "active"})
+
+	// No verification has been started for `other`; latest-lookup returns NotFound.
+	_, err := client.GetIdentityVerificationStatus(
+		context.Background(),
+		authedReq(connect.NewRequest(&identitypb.GetIdentityVerificationStatusRequest{}), other),
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeNotFound {
+		t.Fatalf("CodeOf = %v; want NotFound", got)
+	}
+}
+
+func TestHandler_GetIdentityVerificationStatus_DisabledWhenServiceNil(t *testing.T) {
+	t.Parallel()
+
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, testConfig())
+	mux := http.NewServeMux()
+	path, handler := identityconnect.NewIdentityServiceHandler(h)
+	mux.Handle(path, handler)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := identityconnect.NewIdentityServiceClient(srv.Client(), srv.URL)
+
+	_, err := client.GetIdentityVerificationStatus(
+		context.Background(),
+		authedReq(connect.NewRequest(&identitypb.GetIdentityVerificationStatusRequest{}), "u-1"),
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeUnimplemented {
+		t.Fatalf("CodeOf = %v; want Unimplemented", got)
 	}
 }
 
