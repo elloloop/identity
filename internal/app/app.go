@@ -18,6 +18,7 @@ import (
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/idv"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -47,6 +48,12 @@ type Deps struct {
 	// config's GATEWAY_*_CLIENT_ID/SECRET env vars (only providers
 	// with both credentials set are registered).
 	OAuthRegistry *oauth.Registry
+
+	// IDVProvider drives identity-verification (document + selfie).
+	// May be nil — in that case BeginIdentityVerification returns
+	// CodeUnimplemented. Production deployments wire an Azure or
+	// other real provider; tests typically pass an idv.StubProvider.
+	IDVProvider idv.Provider
 }
 
 // New builds the full HTTP handler stack: middleware chain wrapping
@@ -87,7 +94,14 @@ func New(deps Deps) http.Handler {
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 	profileSvc := service.NewProfileService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 
-	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, deps.Config)
+	var idvSvc *service.IdentityVerificationService
+	if deps.IDVProvider != nil {
+		idvSvc = service.NewIdentityVerificationService(
+			deps.Repo, deps.IDVProvider, deps.Config.DefaultTenantID, logger,
+		)
+	}
+
+	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, deps.Config)
 
 	mux := http.NewServeMux()
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler)
