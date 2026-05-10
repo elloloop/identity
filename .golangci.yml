@@ -68,6 +68,10 @@ linters:
       - path: pkg/oauth/oidc\.go
         linters:
           - nilnil
+      # Provider factory: nil + nil intentionally signals "disabled".
+      - path: cmd/identity/idv\.go
+        linters:
+          - nilnil
 
 # Considered but intentionally disabled:
 # - exportloopref: obsolete for Go 1.22+; copyloopvar covers loop-variable captures.

@@ -57,6 +57,14 @@ type Config struct {
 	GitHubClientID        string
 	GitHubClientSecret    string
 
+	// Identity Verification (document + selfie). The provider name
+	// selects the implementation in pkg/idv. Empty disables IDV; the
+	// RPCs return CodeUnimplemented to clients in that case.
+	IDVProvider           string // "azure", "stub", or "" (disabled)
+	IDVAzureEndpoint      string // e.g. https://my-face.cognitiveservices.azure.com
+	IDVAzureKey           string // Cognitive Services key
+	IDVAzureSessionTTLSec int    // session token lifetime; default 600
+
 	// Password
 	PasswordSignupEnabled      bool
 	PasswordResetEnabled       bool
@@ -159,6 +167,11 @@ func Load() *Config {
 		MicrosoftTenantID:     envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
 		GitHubClientID:        envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
 		GitHubClientSecret:    envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
+
+		IDVProvider:           envStr("GATEWAY_IDV_PROVIDER", ""),
+		IDVAzureEndpoint:      envStr("GATEWAY_IDV_AZURE_ENDPOINT", ""),
+		IDVAzureKey:           envStr("GATEWAY_IDV_AZURE_KEY", ""),
+		IDVAzureSessionTTLSec: envInt("GATEWAY_IDV_AZURE_SESSION_TTL_SECONDS", 600),
 
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),

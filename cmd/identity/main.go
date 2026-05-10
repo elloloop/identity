@@ -133,15 +133,22 @@ func main() {
 	authRepo := built.Repository
 	dbAdapter := built.DB
 
+	// ── Identity-verification provider (optional) ────────────────────
+	idvProvider, err := buildIDVProvider(cfg, logger)
+	if err != nil {
+		logger.Fatal("idv_provider_init_failed", zap.Error(err))
+	}
+
 	// ── Build HTTP handler via shared wiring ─────────────────────────
 	chain := app.New(app.Deps{
-		Config:   cfg,
-		Logger:   logger,
-		KeyRing:  keyRing,
-		Repo:     authRepo,
-		DB:       dbAdapter,
-		Passkeys: webauthnSvc,
-		TOTPKey:  totpKey,
+		Config:      cfg,
+		Logger:      logger,
+		KeyRing:     keyRing,
+		Repo:        authRepo,
+		DB:          dbAdapter,
+		Passkeys:    webauthnSvc,
+		TOTPKey:     totpKey,
+		IDVProvider: idvProvider,
 	})
 
 	// ── Prometheus metrics server ────────────────────────────────────
