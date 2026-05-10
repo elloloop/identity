@@ -153,7 +153,8 @@ func TestLog_SetsAllFields(t *testing.T) {
 	fixedTime := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	l.nowFunc = func() time.Time { return fixedTime }
 
-	l.Log(context.Background(), EventPasswordChanged,
+	l.Log(
+		context.Background(), EventPasswordChanged,
 		WithActor("user-10"),
 		WithTarget("user-20"),
 		WithIP("192.168.1.1"),
@@ -213,7 +214,8 @@ func TestWithTarget(t *testing.T) {
 	w := &fakeWriter{}
 	l := NewLogger(w, "t", zap.NewNop())
 
-	l.Log(context.Background(), EventAdminResetPassword,
+	l.Log(
+		context.Background(), EventAdminResetPassword,
 		WithActor("admin-1"),
 		WithTarget("user-50"),
 	)
@@ -245,7 +247,8 @@ func TestWithDetails(t *testing.T) {
 	w := &fakeWriter{}
 	l := NewLogger(w, "t", zap.NewNop())
 
-	l.Log(context.Background(), EventOAuthLogin,
+	l.Log(
+		context.Background(), EventOAuthLogin,
 		WithDetails(map[string]any{
 			"provider": "google",
 			"email":    "test@example.com",

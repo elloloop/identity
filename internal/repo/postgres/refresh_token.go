@@ -83,7 +83,8 @@ func (r *pgRepository) CreateRefreshToken(ctx context.Context, t *service.Refres
 			$5, $6, $7, $8,
 			$9, $10, $11, $12
 		)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, t.TokenHash, t.UserID,
 		t.DeviceInfo, t.DeviceName, t.IPAddress, t.UserAgent,
 		t.ExpiresAt, t.CreatedAt, t.LastUsedAt, t.ConsumedAtMs,

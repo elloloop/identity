@@ -185,7 +185,8 @@ func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 	// Recover from any panic — audit writes must never crash the caller.
 	defer func() {
 		if r := recover(); r != nil {
-			l.logger.Error("audit_log_panic",
+			l.logger.Error(
+				"audit_log_panic",
 				zap.String("event_type", string(event)),
 				zap.Any("panic", r),
 			)
@@ -193,7 +194,8 @@ func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 	}()
 
 	if l.writer == nil {
-		l.logger.Warn("audit_log_skipped_nil_client",
+		l.logger.Warn(
+			"audit_log_skipped_nil_client",
 			zap.String("event_type", string(event)),
 		)
 		return
@@ -201,7 +203,8 @@ func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 
 	// Warn on unknown event types but still write (defensive, don't break callers).
 	if _, ok := validEventTypes[event]; !ok {
-		l.logger.Warn("audit_unknown_event_type",
+		l.logger.Warn(
+			"audit_unknown_event_type",
 			zap.String("event_type", string(event)),
 		)
 	}
@@ -250,7 +253,8 @@ func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 
 	_, err := l.writer.ExecuteAtomic(ctx, l.tenantID, "user:system", "", ops)
 	if err != nil {
-		l.logger.Error("audit_log_failed",
+		l.logger.Error(
+			"audit_log_failed",
 			zap.String("event_type", string(event)),
 			zap.Error(err),
 		)

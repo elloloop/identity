@@ -93,7 +93,8 @@ func (s *AuthService) VerifyTotpSetup(ctx context.Context, userID, code string) 
 	}
 
 	if !totp.VerifyCode(secret, code) {
-		s.audit.Log(ctx, audit.EventTotpEnabled,
+		s.audit.Log(
+			ctx, audit.EventTotpEnabled,
 			audit.WithActor(userID),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "invalid_code"}),
@@ -111,7 +112,8 @@ func (s *AuthService) VerifyTotpSetup(ctx context.Context, userID, code string) 
 		"updated_at":    now,
 	})
 
-	s.audit.Log(ctx, audit.EventTotpEnabled,
+	s.audit.Log(
+		ctx, audit.EventTotpEnabled,
 		audit.WithActor(userID),
 		audit.WithSuccess(true),
 	)
@@ -180,7 +182,8 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 	}
 
 	if !totpOK && !recoveryUsed {
-		s.audit.Log(ctx, audit.EventTotpVerified,
+		s.audit.Log(
+			ctx, audit.EventTotpVerified,
 			audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "invalid_code"}),
@@ -201,18 +204,21 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 	if recoveryUsed {
 		method = "recovery_code"
 	}
-	s.audit.Log(ctx, audit.EventTotpVerified,
+	s.audit.Log(
+		ctx, audit.EventTotpVerified,
 		audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"method": method}),
 	)
-	s.audit.Log(ctx, audit.EventLoginSuccess,
+	s.audit.Log(
+		ctx, audit.EventLoginSuccess,
 		audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"method": "password+totp"}),
 	)
 
-	s.logger.Info("totp_login_success",
+	s.logger.Info(
+		"totp_login_success",
 		zap.String("user_id", userID),
 		zap.Bool("recovery", recoveryUsed),
 	)
@@ -252,7 +258,8 @@ func (s *AuthService) DisableTotp(ctx context.Context, userID, password string) 
 		"updated_at":    s.nowMs(),
 	})
 
-	s.audit.Log(ctx, audit.EventTotpDisabled,
+	s.audit.Log(
+		ctx, audit.EventTotpDisabled,
 		audit.WithActor(userID),
 		audit.WithSuccess(true),
 	)

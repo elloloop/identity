@@ -33,7 +33,8 @@ func TestPostgres_Container(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	pg, err := tcpg.Run(ctx,
+	pg, err := tcpg.Run(
+		ctx,
 		"postgres:16.13-alpine3.23",
 		tcpg.WithDatabase("identity"),
 		tcpg.WithUsername("identity"),

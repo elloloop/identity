@@ -19,7 +19,8 @@ func buildIDVProvider(cfg *config.Config, logger *zap.Logger) (idv.Provider, err
 		logger.Info("idv_provider_disabled")
 		return nil, nil
 	case "stub":
-		logger.Warn("idv_provider_stub_in_use",
+		logger.Warn(
+			"idv_provider_stub_in_use",
 			zap.String("note", "stub auto-approves every session — never use in production"),
 		)
 		return idv.NewStubProvider(), nil
@@ -33,7 +34,8 @@ func buildIDVProvider(cfg *config.Config, logger *zap.Logger) (idv.Provider, err
 		if err != nil {
 			return nil, fmt.Errorf("azure: %w", err)
 		}
-		logger.Info("idv_provider_loaded",
+		logger.Info(
+			"idv_provider_loaded",
 			zap.String("provider", "azure"),
 			zap.String("endpoint", cfg.IDVAzureEndpoint),
 		)

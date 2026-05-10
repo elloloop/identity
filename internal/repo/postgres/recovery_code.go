@@ -22,7 +22,8 @@ func (r *pgRepository) CreateRecoveryCode(ctx context.Context, c *service.Recove
 			id, tenant_id, user_id, code_hash, used,
 			created_at_ms, used_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := r.pool.Exec(ctx, q,
+	_, err := r.pool.Exec(
+		ctx, q,
 		id, r.tenantID, c.UserID, c.CodeHash, c.Used,
 		c.CreatedAt, c.UsedAt,
 	)

@@ -44,7 +44,8 @@ func main() {
 
 	cfg := config.Load()
 
-	logger.Info("identity_service_starting",
+	logger.Info(
+		"identity_service_starting",
 		zap.Int("connect_port", cfg.ConnectPort),
 		zap.Int("metrics_port", cfg.MetricsPort),
 		zap.String("entdb_address", cfg.EntDBAddress),
@@ -72,7 +73,8 @@ func main() {
 		if err != nil {
 			logger.Fatal("jwt_key_ring_parse_failed", zap.Error(err))
 		}
-		logger.Info("jwt_key_ring_loaded",
+		logger.Info(
+			"jwt_key_ring_loaded",
 			zap.Int("key_count", len(keyRing.AllKIDs())),
 			zap.String("active_kid", keyRing.Active().KID),
 		)
@@ -85,7 +87,8 @@ func main() {
 		if err != nil {
 			logger.Fatal("jwt_key_ring_create_failed", zap.Error(err))
 		}
-		logger.Warn("auto_generating_dev_rsa_key",
+		logger.Warn(
+			"auto_generating_dev_rsa_key",
 			zap.String("kid", key.KID),
 		)
 	}

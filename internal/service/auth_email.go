@@ -123,7 +123,8 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
 
-	s.audit.Log(ctx, audit.EventPasswordReset,
+	s.audit.Log(
+		ctx, audit.EventPasswordReset,
 		audit.WithActor(user.ID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"step": "requested"}),
@@ -198,7 +199,8 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
 
-	s.audit.Log(ctx, audit.EventPasswordReset,
+	s.audit.Log(
+		ctx, audit.EventPasswordReset,
 		audit.WithActor(user.ID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"step": "confirmed"}),

@@ -119,7 +119,8 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 		return fmt.Errorf("revoke session: %w", err)
 	}
 
-	s.audit.Log(ctx, audit.EventSessionRevoked,
+	s.audit.Log(
+		ctx, audit.EventSessionRevoked,
 		audit.WithActor(userID), audit.WithTarget(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"session_id": sessionID}),
@@ -162,7 +163,8 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 		count++
 	}
 
-	s.audit.Log(ctx, audit.EventSessionRevoked,
+	s.audit.Log(
+		ctx, audit.EventSessionRevoked,
 		audit.WithActor(userID), audit.WithTarget(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"scope": "all", "revoked_count": count}),
@@ -214,7 +216,8 @@ func (s *ProfileService) DeletePasskey(ctx context.Context, userID, credentialID
 		return fmt.Errorf("delete passkey: %w", err)
 	}
 
-	s.audit.Log(ctx, audit.EventPasskeyRemoved,
+	s.audit.Log(
+		ctx, audit.EventPasskeyRemoved,
 		audit.WithActor(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"credential_id": credentialID}),

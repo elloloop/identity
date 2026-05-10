@@ -34,7 +34,8 @@ func FuzzLog(f *testing.F) {
 
 		// Use a known-valid event type so the warn path doesn't fire; the
 		// fuzz target is the details map, not the event enum.
-		logger.Log(context.Background(), EventLoginSuccess,
+		logger.Log(
+			context.Background(), EventLoginSuccess,
 			WithActor("user-fuzz"),
 			WithDetails(map[string]any{key: value}),
 		)

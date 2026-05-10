@@ -55,7 +55,8 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPass
 		return fmt.Errorf("update password: %w", err)
 	}
 
-	s.audit.Log(ctx, audit.EventPasswordChanged,
+	s.audit.Log(
+		ctx, audit.EventPasswordChanged,
 		audit.WithActor(userID), audit.WithTarget(userID), audit.WithSuccess(true),
 	)
 	return nil
