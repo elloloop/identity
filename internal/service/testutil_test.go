@@ -111,6 +111,7 @@ type fakeRepo struct {
 	emailVerifications map[string]*EmailVerificationToken
 	emailChanges       map[string]*EmailChangeToken
 	oauthIdentities    map[string]*OAuthIdentity
+	idvRecords         map[string]*IdentityVerificationRecord
 }
 
 func newFakeRepo() *fakeRepo {
@@ -128,6 +129,7 @@ func newFakeRepo() *fakeRepo {
 		emailVerifications: make(map[string]*EmailVerificationToken),
 		emailChanges:       make(map[string]*EmailChangeToken),
 		oauthIdentities:    make(map[string]*OAuthIdentity),
+		idvRecords:         make(map[string]*IdentityVerificationRecord),
 	}
 }
 
@@ -1019,4 +1021,67 @@ func (r *fakeRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) 
 		}
 	}
 	return out, nil
+}
+
+// ── Identity Verification ──────────────────────────────────────────────
+
+func (r *fakeRepo) CreateIdentityVerification(_ context.Context, rec *IdentityVerificationRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if rec.VerificationID == "" {
+		return errors.New("idv: missing verification id")
+	}
+	if _, ok := r.idvRecords[rec.VerificationID]; ok {
+		return fmt.Errorf("idv: %s already exists", rec.VerificationID)
+	}
+	if rec.NodeID == "" {
+		rec.NodeID = nextNodeID()
+	}
+	cp := *rec
+	r.idvRecords[rec.VerificationID] = &cp
+	return nil
+}
+
+func (r *fakeRepo) GetIdentityVerification(_ context.Context, verificationID string) (*IdentityVerificationRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.idvRecords[verificationID]
+	if !ok {
+		return nil, nil
+	}
+	cp := *rec
+	return &cp, nil
+}
+
+func (r *fakeRepo) GetLatestIdentityVerificationForUser(_ context.Context, userID string) (*IdentityVerificationRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var latest *IdentityVerificationRecord
+	for _, rec := range r.idvRecords {
+		if rec.UserID != userID {
+			continue
+		}
+		if latest == nil || rec.CreatedAt > latest.CreatedAt {
+			latest = rec
+		}
+	}
+	if latest == nil {
+		return nil, nil
+	}
+	cp := *latest
+	return &cp, nil
+}
+
+func (r *fakeRepo) UpdateIdentityVerificationStatus(_ context.Context, verificationID, status, rejectionReason string, completedAtMs, updatedAtMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.idvRecords[verificationID]
+	if !ok {
+		return fmt.Errorf("idv: %s not found", verificationID)
+	}
+	rec.Status = status
+	rec.RejectionReason = rejectionReason
+	rec.CompletedAt = completedAtMs
+	rec.UpdatedAt = updatedAtMs
+	return nil
 }

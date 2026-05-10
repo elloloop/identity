@@ -334,6 +334,38 @@ message OAuthIdentity {
     int64  created_at         = 5 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
 }
 
+// ─── IdentityVerification (type_id 32) ─────────────────────────────────
+//
+// One row per document + selfie verification session run for a User.
+// The Provider field names the backing implementation (e.g. "azure",
+// "stub"); ProviderSessionID is the provider's own identifier for the
+// check, used to correlate webhooks and follow-up status fetches.
+//
+// Status moves through:  pending → in_review → (approved | rejected) ;
+// expired is a terminal state for sessions the user never finished.
+//
+// Application code MUST enforce uniqueness on (verification_id) per
+// tenant; EntDB does not currently provide composite unique constraints
+// across (tenant, secondary key).
+message IdentityVerificationRecord {
+    option (entdb.node) = {
+        type_id: 32
+        data_policy: DATA_POLICY_PERSONAL
+        subject_field: "user_id"
+        description: "A document + selfie identity-verification session tracked against a User."
+    };
+
+    string verification_id     = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string user_id             = 2 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    string provider            = 3 [(entdb.field) = { required: true, indexed: true, enum_values: "azure,stub,onfido,persona,veriff", pii_false: true }];
+    string provider_session_id = 4 [(entdb.field) = { indexed: true, pii_false: true }];
+    string status              = 5 [(entdb.field) = { required: true, indexed: true, enum_values: "pending,in_review,approved,rejected,expired", pii_false: true }];
+    int64  created_at          = 6 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
+    int64  updated_at          = 7 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
+    int64  completed_at        = 8 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    string rejection_reason    = 9 [(entdb.field) = { pii: true, description: "Provider verdict reason; empty unless status = rejected." }];
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Types
 // ═══════════════════════════════════════════════════════════════════════

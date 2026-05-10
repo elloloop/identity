@@ -11,6 +11,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -39,6 +40,7 @@ type Repo struct {
 	emailVerifications map[string]*service.EmailVerificationToken
 	emailChanges       map[string]*service.EmailChangeToken
 	oauthIdentities    map[string]*service.OAuthIdentity
+	idvRecords         map[string]*service.IdentityVerificationRecord
 }
 
 // New returns an empty Repo.
@@ -57,6 +59,7 @@ func New() *Repo {
 		emailVerifications: make(map[string]*service.EmailVerificationToken),
 		emailChanges:       make(map[string]*service.EmailChangeToken),
 		oauthIdentities:    make(map[string]*service.OAuthIdentity),
+		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
 	}
 }
 
@@ -767,6 +770,67 @@ func (r *Repo) ListOAuthIdentitiesForUser(_ context.Context, userID string) ([]*
 		}
 	}
 	return out, nil
+}
+
+// ── Identity Verification Records ─────────────────────────────────
+
+func (r *Repo) CreateIdentityVerification(_ context.Context, rec *service.IdentityVerificationRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if rec.VerificationID == "" {
+		return errors.New("identity verification: missing verification id")
+	}
+	if _, exists := r.idvRecords[rec.VerificationID]; exists {
+		return fmt.Errorf("identity verification %s already exists", rec.VerificationID)
+	}
+	rec.NodeID = r.nextID()
+	cp := *rec
+	r.idvRecords[rec.VerificationID] = &cp
+	return nil
+}
+
+func (r *Repo) GetIdentityVerification(_ context.Context, verificationID string) (*service.IdentityVerificationRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.idvRecords[verificationID]
+	if !ok {
+		return nil, nil
+	}
+	cp := *rec
+	return &cp, nil
+}
+
+func (r *Repo) GetLatestIdentityVerificationForUser(_ context.Context, userID string) (*service.IdentityVerificationRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var latest *service.IdentityVerificationRecord
+	for _, rec := range r.idvRecords {
+		if rec.UserID != userID {
+			continue
+		}
+		if latest == nil || rec.CreatedAt > latest.CreatedAt {
+			latest = rec
+		}
+	}
+	if latest == nil {
+		return nil, nil
+	}
+	cp := *latest
+	return &cp, nil
+}
+
+func (r *Repo) UpdateIdentityVerificationStatus(_ context.Context, verificationID, status, rejectionReason string, completedAtMs, updatedAtMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.idvRecords[verificationID]
+	if !ok {
+		return fmt.Errorf("identity verification %s not found", verificationID)
+	}
+	rec.Status = status
+	rec.RejectionReason = rejectionReason
+	rec.CompletedAt = completedAtMs
+	rec.UpdatedAt = updatedAtMs
+	return nil
 }
 
 // ── service.DB stub ───────────────────────────────────────────────

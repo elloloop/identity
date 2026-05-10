@@ -28,4 +28,6 @@ var (
 	EmailVerificationTokenTokenHash = entdb.UniqueKey[string]{TypeID: 29, FieldID: 1, Name: "token_hash"}
 
 	EmailChangeTokenTokenHash = entdb.UniqueKey[string]{TypeID: 30, FieldID: 1, Name: "token_hash"}
+
+	IdentityVerificationRecordVerificationID = entdb.UniqueKey[string]{TypeID: 32, FieldID: 1, Name: "verification_id"}
 )

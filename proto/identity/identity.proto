@@ -333,6 +333,51 @@ message ConfirmEmailChangeResponse {
   User user = 1;
 }
 
+// ─── Identity Verification ──────────────────────────────────────────
+// Document + selfie verification (e.g. for KYC). Pluggable provider:
+// "azure" ships with the service; deployments can wire other providers
+// (Onfido, Persona, etc.) through config without changing the API.
+
+enum IdentityVerificationStatus {
+  IDENTITY_VERIFICATION_STATUS_UNSPECIFIED = 0;
+  IDENTITY_VERIFICATION_STATUS_PENDING = 1;     // Session created, client has not submitted yet
+  IDENTITY_VERIFICATION_STATUS_IN_REVIEW = 2;   // Submitted, awaiting provider verdict
+  IDENTITY_VERIFICATION_STATUS_APPROVED = 3;
+  IDENTITY_VERIFICATION_STATUS_REJECTED = 4;
+  IDENTITY_VERIFICATION_STATUS_EXPIRED = 5;
+}
+
+message IdentityVerification {
+  string id = 1;
+  string user_id = 2;
+  string tenant_id = 3;
+  string provider = 4;                              // "azure", "stub", ...
+  string provider_session_id = 5;                   // Provider's check/session ID
+  IdentityVerificationStatus status = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  google.protobuf.Timestamp completed_at = 9;
+  string rejection_reason = 10;                     // Empty unless status = REJECTED
+}
+
+message BeginIdentityVerificationRequest {}
+
+message BeginIdentityVerificationResponse {
+  string verification_id = 1;
+  string provider = 2;                              // Tells the client which SDK to load
+  string session_token = 3;                         // Provider-specific; passed to client SDK
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message GetIdentityVerificationStatusRequest {
+  // Optional. When empty, the latest verification for the caller is returned.
+  string verification_id = 1;
+}
+
+message GetIdentityVerificationStatusResponse {
+  IdentityVerification verification = 1;
+}
+
 // ─── Admin Help Flow ────────────────────────────────────────────────
 // Replaces the self-serve ForgotPassword flow. End users who can't log in
 // raise a ticket; admins resolve it via the dashboard.
@@ -723,6 +768,10 @@ service IdentityService {
   // Email Change (primary-email rotation, double-opt-in)
   rpc RequestEmailChange(RequestEmailChangeRequest) returns (RequestEmailChangeResponse);
   rpc ConfirmEmailChange(ConfirmEmailChangeRequest) returns (ConfirmEmailChangeResponse);
+
+  // Identity Verification (document + selfie via pluggable provider)
+  rpc BeginIdentityVerification(BeginIdentityVerificationRequest) returns (BeginIdentityVerificationResponse);
+  rpc GetIdentityVerificationStatus(GetIdentityVerificationStatusRequest) returns (GetIdentityVerificationStatusResponse);
 
   // Admin help (replaces self-serve ForgotPassword)
   rpc RequestAdminHelp(RequestAdminHelpRequest) returns (RequestAdminHelpResponse);

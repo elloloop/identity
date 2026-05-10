@@ -38,9 +38,10 @@ var expectedNodeTypes = map[string]int32{
 	"AuditEvent":             26,
 	"UserInvitation":         27,
 	"AdminHelpRequest":       28,
-	"EmailVerificationToken": 29,
-	"EmailChangeToken":       30,
-	"OAuthIdentity":          31,
+	"EmailVerificationToken":     29,
+	"EmailChangeToken":           30,
+	"OAuthIdentity":              31,
+	"IdentityVerificationRecord": 32,
 }
 
 func TestApplyOrLogSchemaGap_ReturnsNilWithLogger(t *testing.T) {

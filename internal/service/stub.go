@@ -202,6 +202,22 @@ func (StubRepository) SetUserEmailVerified(context.Context, string, int64) error
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) CreateIdentityVerification(context.Context, *IdentityVerificationRecord) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) GetIdentityVerification(context.Context, string) (*IdentityVerificationRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) GetLatestIdentityVerificationForUser(context.Context, string) (*IdentityVerificationRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) UpdateIdentityVerificationStatus(context.Context, string, string, string, int64, int64) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) CreateEmailChangeToken(context.Context, *EmailChangeToken) error {
 	return ErrServiceUnavailable
 }

@@ -198,6 +198,13 @@ type Repository interface {
 	// User email-verified update
 	SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error
 
+	// Identity-verification records (document + selfie verification).
+	// Latest ordering is by CreatedAt descending.
+	CreateIdentityVerification(ctx context.Context, r *IdentityVerificationRecord) error
+	GetIdentityVerification(ctx context.Context, verificationID string) (*IdentityVerificationRecord, error)
+	GetLatestIdentityVerificationForUser(ctx context.Context, userID string) (*IdentityVerificationRecord, error)
+	UpdateIdentityVerificationStatus(ctx context.Context, verificationID, status, rejectionReason string, completedAtMs, updatedAtMs int64) error
+
 	// Email-change tokens (primary email rotation, double-opt-in)
 	CreateEmailChangeToken(ctx context.Context, t *EmailChangeToken) error
 	FindEmailChangeTokenByHash(ctx context.Context, tokenHash string) (*EmailChangeToken, error)
@@ -318,6 +325,34 @@ type EmailVerificationToken struct {
 	ExpiresAt  int64 // epoch ms
 	CreatedAt  int64 // epoch ms
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
+}
+
+// Identity-verification status string constants. Mirrored as proto
+// enum values in IdentityVerificationStatus.
+const (
+	IDVStatusPending  = "pending"
+	IDVStatusInReview = "in_review"
+	IDVStatusApproved = "approved"
+	IDVStatusRejected = "rejected"
+	IDVStatusExpired  = "expired"
+)
+
+// IdentityVerificationRecord represents a single verification session
+// (document + selfie) tracked by the service. The provider field names
+// the backing implementation (e.g. "azure", "stub"); ProviderSessionID
+// is the provider's own identifier for the check.
+type IdentityVerificationRecord struct {
+	NodeID            string
+	VerificationID    string // public identifier returned to clients
+	UserID            string
+	TenantID          string
+	Provider          string
+	ProviderSessionID string
+	Status            string // one of IDVStatus* constants
+	CreatedAt         int64  // epoch ms
+	UpdatedAt         int64  // epoch ms
+	CompletedAt       int64  // epoch ms; 0 if not yet completed
+	RejectionReason   string // empty unless Status == IDVStatusRejected
 }
 
 // EmailChangeToken represents a pending primary-email rotation.
@@ -567,7 +602,8 @@ func (s *AuthService) recordFailedLogin(ctx context.Context, user *User) (newCou
 				zap.String("user_id", user.ID), zap.Error(lockErr))
 			return newCount, false, lockErr
 		}
-		s.logger.Warn("account_locked",
+		s.logger.Warn(
+			"account_locked",
 			zap.String("user_id", user.ID),
 			zap.Int("lockout_seconds", s.cfg.LoginLockoutSeconds),
 		)
@@ -768,7 +804,8 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 			s.logger.Warn("refresh_token_replay_revoke_failed",
 				zap.String("user_id", userID), zap.Error(delErr))
 		}
-		s.audit.Log(ctx, audit.EventLoginFailure,
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
 			audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
 			audit.WithDetails(map[string]any{"reason": "refresh_token_replay"}),
