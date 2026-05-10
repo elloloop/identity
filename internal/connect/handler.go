@@ -31,16 +31,20 @@ type IdentityHandler struct {
 	groups  *service.GroupService
 	help    *service.HelpService
 	profile *service.ProfileService
+	idv     *service.IdentityVerificationService
 	cfg     *config.Config
 }
 
-// NewIdentityHandler creates a new IdentityHandler wired to the service layer.
+// NewIdentityHandler creates a new IdentityHandler wired to the service
+// layer. idv is optional: pass nil in deployments that do not need
+// identity verification, and the IDV RPCs will return CodeUnimplemented.
 func NewIdentityHandler(
 	auth *service.AuthService,
 	admin *service.AdminService,
 	groups *service.GroupService,
 	help *service.HelpService,
 	profile *service.ProfileService,
+	idv *service.IdentityVerificationService,
 	cfg *config.Config,
 ) *IdentityHandler {
 	return &IdentityHandler{
@@ -49,6 +53,7 @@ func NewIdentityHandler(
 		groups:  groups,
 		help:    help,
 		profile: profile,
+		idv:     idv,
 		cfg:     cfg,
 	}
 }
