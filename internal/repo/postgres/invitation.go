@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -41,7 +42,7 @@ var invitationFieldColumns = map[string]struct {
 
 func (r *pgRepository) UpdateInvitation(ctx context.Context, nodeID string, fields map[string]any) error {
 	if nodeID == "" {
-		return fmt.Errorf("postgres: UpdateInvitation: missing node id")
+		return errors.New("postgres: UpdateInvitation: missing node id")
 	}
 	if len(fields) == 0 {
 		return nil

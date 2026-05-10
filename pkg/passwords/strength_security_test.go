@@ -34,7 +34,7 @@ func TestSec_VerifyConstantTime(t *testing.T) {
 
 	// Same length as `correct` to keep length effects out of timing.
 	earlyDiff := "XheC0rrect#PasswordValue!" // first byte differs
-	lateDiff := "TheC0rrect#PasswordValueX" // last byte differs
+	lateDiff := "TheC0rrect#PasswordValueX"  // last byte differs
 
 	const iters = 30
 	measure := func(candidate string) time.Duration {

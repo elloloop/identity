@@ -33,7 +33,6 @@ func TestExtractKID_MalformedToken(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := VerifyAccessToken(tc.token, kr, "")
@@ -117,8 +116,8 @@ func TestVerify_FutureIssued(t *testing.T) {
 	tok, err := jwtoken.NewBuilder().
 		Claim("sub", "x").
 		Claim("email", "a@b.com").
-		IssuedAt(time.Now().Add(48*time.Hour)).
-		Expiration(time.Now().Add(72*time.Hour)).
+		IssuedAt(time.Now().Add(48 * time.Hour)).
+		Expiration(time.Now().Add(72 * time.Hour)).
 		Build()
 	require.NoError(t, err)
 

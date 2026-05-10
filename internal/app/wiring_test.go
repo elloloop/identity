@@ -65,7 +65,6 @@ func TestBuildEmailTransport(t *testing.T) {
 		{"valid single tls provider", &config.Config{SMTPHost: "smtp.example.com", SMTPPort: 465, SMTPFrom: "noreply@example.com", SMTPTLS: true}},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			if transport := buildEmailTransport(tc.cfg, nil); transport == nil {
 				t.Fatal("transport is nil")

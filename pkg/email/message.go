@@ -57,11 +57,11 @@ func (m Message) Validate() error {
 		return fmt.Errorf("%w: to is required", ErrInvalidMessage)
 	}
 	if _, err := mail.ParseAddress(m.To); err != nil {
-		return fmt.Errorf("%w: invalid to address %q: %v", ErrInvalidMessage, m.To, err)
+		return fmt.Errorf("%w: invalid to address %q: %w", ErrInvalidMessage, m.To, err)
 	}
 	if strings.TrimSpace(m.From) != "" {
 		if _, err := mail.ParseAddress(m.From); err != nil {
-			return fmt.Errorf("%w: invalid from address %q: %v", ErrInvalidMessage, m.From, err)
+			return fmt.Errorf("%w: invalid from address %q: %w", ErrInvalidMessage, m.From, err)
 		}
 	}
 	if strings.TrimSpace(m.Subject) == "" {

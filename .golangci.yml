@@ -1,0 +1,77 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - contextcheck
+    - copyloopvar
+    - cyclop
+    - errname
+    - errorlint
+    - gocritic
+    - gosec
+    - nilerr
+    - nilnil
+    - perfsprint
+    - revive
+    - thelper
+    - unconvert
+  settings:
+    cyclop:
+      max-complexity: 35
+      package-average: 15
+    revive:
+      severity: warning
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+          disabled: true
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G404:"
+      - path: _test\.go
+        linters:
+          - cyclop
+      # Test fakes mirror repository not-found semantics.
+      - path: _test\.go
+        linters:
+          - nilnil
+      - path: internal/repo/conformance/conformance\.go
+        linters:
+          - cyclop
+      # Repository lookups intentionally return nil, nil for not-found.
+      - path: internal/repo/memory/repo\.go
+        linters:
+          - nilnil
+      - path: internal/repo/entdb/repo\.go
+        linters:
+          - nilnil
+      - path: internal/repo/postgres/.*\.go
+        linters:
+          - nilnil
+      - path: pkg/oauth/oidc\.go
+        linters:
+          - nilnil
+
+# Considered but intentionally disabled:
+# - exportloopref: obsolete for Go 1.22+; copyloopvar covers loop-variable captures.
+
+formatters:
+  enable:
+    - gofumpt

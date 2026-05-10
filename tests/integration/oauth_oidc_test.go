@@ -45,11 +45,11 @@ func TestOIDC_HappyPath(t *testing.T) {
 	}
 
 	resp, err := h.Client.OAuthLogin(context.Background(), connect.NewRequest(&identitypb.OAuthLoginRequest{
-		Code:         code,
-		Provider:     "google",
-		RedirectUri:  redirectURI,
-		State:        gotState,
-		StateToken:   begin.Msg.StateToken,
+		Code:        code,
+		Provider:    "google",
+		RedirectUri: redirectURI,
+		State:       gotState,
+		StateToken:  begin.Msg.StateToken,
 	}))
 	if err != nil {
 		t.Fatalf("OAuthLogin: %v", err)

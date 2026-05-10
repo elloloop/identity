@@ -84,7 +84,7 @@ func (r *entRepository) FindUserByEmail(ctx context.Context, email string) (*ser
 	}
 	dst := &schemapb.User{}
 	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.UserEmail, email, dst)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -109,7 +109,7 @@ func (r *entRepository) GetUser(ctx context.Context, userID string) (*service.Us
 
 func (r *entRepository) CreateUser(ctx context.Context, u *service.User) (string, error) {
 	if u == nil {
-		return "", fmt.Errorf("repo: CreateUser: nil user")
+		return "", errors.New("repo: CreateUser: nil user")
 	}
 	now := time.Now().UnixMilli()
 	if u.CreatedAt.IsZero() {
@@ -250,7 +250,7 @@ func (r *entRepository) deleteUser(ctx context.Context, nodeID string) error {
 
 func (r *entRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
 	if userID == "" {
-		return fmt.Errorf("repo: UpdateUser: missing user id")
+		return errors.New("repo: UpdateUser: missing user id")
 	}
 	if needsFullUserRewrite(fields) {
 		if raw, ok := r.client.(rawUpdateClient); ok {
@@ -273,7 +273,7 @@ func (r *entRepository) UpdateUser(ctx context.Context, userID string, fields ma
 
 func (r *entRepository) SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error {
 	if userID == "" {
-		return fmt.Errorf("repo: SetUserEmailVerified: missing user id")
+		return errors.New("repo: SetUserEmailVerified: missing user id")
 	}
 	patch := &schemapb.User{
 		EmailVerified:   true,
@@ -288,17 +288,17 @@ func (r *entRepository) SetUserEmailVerified(ctx context.Context, userID string,
 
 func (r *entRepository) IncrementFailedLoginCount(ctx context.Context, userID string) (int32, error) {
 	if userID == "" {
-		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: missing user id")
+		return 0, errors.New("repo: IncrementFailedLoginCount: missing user id")
 	}
 	user, err := r.GetUser(ctx, userID)
 	if err != nil {
 		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: %w", err)
 	}
 	if user == nil {
-		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: user not found")
+		return 0, errors.New("repo: IncrementFailedLoginCount: user not found")
 	}
 	if user.FailedLoginCount >= math.MaxInt32 {
-		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: count overflow")
+		return 0, errors.New("repo: IncrementFailedLoginCount: count overflow")
 	}
 	newCount := int32(user.FailedLoginCount + 1) // #nosec G115 -- bounds checked above.
 	patch := &schemapb.User{FailedLoginCount: int64(newCount)}
@@ -310,7 +310,7 @@ func (r *entRepository) IncrementFailedLoginCount(ctx context.Context, userID st
 
 func (r *entRepository) ResetFailedLoginCount(ctx context.Context, userID string) error {
 	if userID == "" {
-		return fmt.Errorf("repo: ResetFailedLoginCount: missing user id")
+		return errors.New("repo: ResetFailedLoginCount: missing user id")
 	}
 	// Plan.Update sends only fields with non-default values (the SDK
 	// uses proto3 Range, which skips zero scalars). To clear two
@@ -324,7 +324,7 @@ func (r *entRepository) ResetFailedLoginCount(ctx context.Context, userID string
 		return fmt.Errorf("repo: ResetFailedLoginCount: %w", err)
 	}
 	if user == nil {
-		return fmt.Errorf("repo: ResetFailedLoginCount: user not found")
+		return errors.New("repo: ResetFailedLoginCount: user not found")
 	}
 	full := userProtoFromUser(user)
 	if err := r.client.update(ctx, actorStr(userID), userID, full); err != nil {
@@ -478,7 +478,7 @@ func userFieldPatch(fields map[string]any) map[string]any {
 
 func (r *entRepository) SetUserLockedUntil(ctx context.Context, userID string, lockedUntilMs int64) error {
 	if userID == "" {
-		return fmt.Errorf("repo: SetUserLockedUntil: missing user id")
+		return errors.New("repo: SetUserLockedUntil: missing user id")
 	}
 	patch := &schemapb.User{LockedUntil: lockedUntilMs}
 	if err := r.client.update(ctx, actorStr(userID), userID, patch); err != nil {
@@ -527,7 +527,7 @@ func (r *entRepository) FindRefreshTokenByHashIncludingConsumed(ctx context.Cont
 	}
 	dst := &schemapb.RefreshToken{}
 	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.RefreshTokenTokenHash, hash, dst)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -553,7 +553,7 @@ func (r *entRepository) ConsumeRefreshTokenByHash(ctx context.Context, hash stri
 
 func (r *entRepository) CreateRefreshToken(ctx context.Context, t *service.RefreshTokenRecord) (string, error) {
 	if t == nil {
-		return "", fmt.Errorf("repo: CreateRefreshToken: nil record")
+		return "", errors.New("repo: CreateRefreshToken: nil record")
 	}
 	msg := &schemapb.RefreshToken{
 		TokenHash:  t.TokenHash,
@@ -642,7 +642,7 @@ func (r *entRepository) GetPasskeyCredentialByCredID(ctx context.Context, creden
 	}
 	dst := &schemapb.PasskeyCredential{}
 	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.PasskeyCredentialCredentialID, credentialID, dst)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -653,7 +653,7 @@ func (r *entRepository) GetPasskeyCredentialByCredID(ctx context.Context, creden
 
 func (r *entRepository) CreatePasskeyCredential(ctx context.Context, c *service.PasskeyCredRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("repo: CreatePasskeyCredential: nil record")
+		return "", errors.New("repo: CreatePasskeyCredential: nil record")
 	}
 	msg := &schemapb.PasskeyCredential{
 		CredentialId: c.CredentialID,
@@ -676,7 +676,7 @@ func (r *entRepository) CreatePasskeyCredential(ctx context.Context, c *service.
 
 func (r *entRepository) UpdatePasskeyCredential(ctx context.Context, nodeID string, fields map[string]any) error {
 	if nodeID == "" {
-		return fmt.Errorf("repo: UpdatePasskeyCredential: missing node id")
+		return errors.New("repo: UpdatePasskeyCredential: missing node id")
 	}
 	patch := &schemapb.PasskeyCredential{}
 	applied := false
@@ -734,7 +734,7 @@ func (r *entRepository) GetPasskeyChallenge(ctx context.Context, nodeID string) 
 
 func (r *entRepository) CreatePasskeyChallenge(ctx context.Context, c *service.PasskeyChallengeRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("repo: CreatePasskeyChallenge: nil record")
+		return "", errors.New("repo: CreatePasskeyChallenge: nil record")
 	}
 	msg := &schemapb.PasskeyChallenge{
 		Challenge:     c.Challenge,
@@ -788,7 +788,7 @@ func (r *entRepository) FindQrLoginSession(ctx context.Context, sessionID string
 	}
 	dst := &schemapb.QrLoginSession{}
 	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.QrLoginSessionSessionID, sessionID, dst)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -799,7 +799,7 @@ func (r *entRepository) FindQrLoginSession(ctx context.Context, sessionID string
 
 func (r *entRepository) CreateQrLoginSession(ctx context.Context, s *service.QrLoginSessionRecord) (string, error) {
 	if s == nil {
-		return "", fmt.Errorf("repo: CreateQrLoginSession: nil record")
+		return "", errors.New("repo: CreateQrLoginSession: nil record")
 	}
 	msg := &schemapb.QrLoginSession{
 		SessionId:          s.SessionID,
@@ -823,7 +823,7 @@ func (r *entRepository) CreateQrLoginSession(ctx context.Context, s *service.QrL
 
 func (r *entRepository) UpdateQrLoginSession(ctx context.Context, nodeID string, fields map[string]any) error {
 	if nodeID == "" {
-		return fmt.Errorf("repo: UpdateQrLoginSession: missing node id")
+		return errors.New("repo: UpdateQrLoginSession: missing node id")
 	}
 	patch := &schemapb.QrLoginSession{}
 	applied := false
@@ -884,7 +884,7 @@ func (r *entRepository) GetTotpCredential(ctx context.Context, userID string) (*
 
 func (r *entRepository) CreateTotpCredential(ctx context.Context, c *service.TotpCredRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("repo: CreateTotpCredential: nil record")
+		return "", errors.New("repo: CreateTotpCredential: nil record")
 	}
 	msg := &schemapb.TotpCredential{
 		UserId:          c.UserID,
@@ -903,7 +903,7 @@ func (r *entRepository) CreateTotpCredential(ctx context.Context, c *service.Tot
 
 func (r *entRepository) UpdateTotpCredential(ctx context.Context, nodeID string, fields map[string]any) error {
 	if nodeID == "" {
-		return fmt.Errorf("repo: UpdateTotpCredential: missing node id")
+		return errors.New("repo: UpdateTotpCredential: missing node id")
 	}
 	patch := &schemapb.TotpCredential{}
 	applied := false
@@ -973,7 +973,7 @@ func recoveryCodeFromProto(id string, p *schemapb.RecoveryCode) *service.Recover
 
 func (r *entRepository) CreateRecoveryCode(ctx context.Context, c *service.RecoveryCodeRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("repo: CreateRecoveryCode: nil record")
+		return "", errors.New("repo: CreateRecoveryCode: nil record")
 	}
 	msg := &schemapb.RecoveryCode{
 		UserId:    c.UserID,
@@ -1006,7 +1006,7 @@ func (r *entRepository) FindRecoveryCodeByHash(ctx context.Context, userID, hash
 
 func (r *entRepository) UpdateRecoveryCode(ctx context.Context, nodeID string, fields map[string]any) error {
 	if nodeID == "" {
-		return fmt.Errorf("repo: UpdateRecoveryCode: missing node id")
+		return errors.New("repo: UpdateRecoveryCode: missing node id")
 	}
 	patch := &schemapb.RecoveryCode{}
 	applied := false
@@ -1062,7 +1062,7 @@ func loginChallengeFromProto(id string, p *schemapb.LoginChallenge) *service.Log
 
 func (r *entRepository) CreateLoginChallenge(ctx context.Context, c *service.LoginChallengeRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("repo: CreateLoginChallenge: nil record")
+		return "", errors.New("repo: CreateLoginChallenge: nil record")
 	}
 	msg := &schemapb.LoginChallenge{
 		ChallengeId: c.ChallengeID,
@@ -1084,7 +1084,7 @@ func (r *entRepository) GetLoginChallengeByChallengeID(ctx context.Context, chal
 	}
 	dst := &schemapb.LoginChallenge{}
 	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.LoginChallengeChallengeID, challengeID, dst)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -1128,7 +1128,7 @@ func (r *entRepository) FindInvitationByHash(ctx context.Context, tokenHash stri
 	}
 	dst := &schemapb.UserInvitation{}
 	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.UserInvitationTokenHash, tokenHash, dst)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -1139,7 +1139,7 @@ func (r *entRepository) FindInvitationByHash(ctx context.Context, tokenHash stri
 
 func (r *entRepository) UpdateInvitation(ctx context.Context, nodeID string, fields map[string]any) error {
 	if nodeID == "" {
-		return fmt.Errorf("repo: UpdateInvitation: missing node id")
+		return errors.New("repo: UpdateInvitation: missing node id")
 	}
 	patch := &schemapb.UserInvitation{}
 	applied := false
@@ -1179,7 +1179,7 @@ func passwordResetFromProto(id string, p *schemapb.PasswordResetToken) *service.
 
 func (r *entRepository) CreatePasswordResetToken(ctx context.Context, t *service.PasswordResetToken) error {
 	if t == nil {
-		return fmt.Errorf("repo: CreatePasswordResetToken: nil record")
+		return errors.New("repo: CreatePasswordResetToken: nil record")
 	}
 	msg := &schemapb.PasswordResetToken{
 		TokenHash: t.TokenHash,
@@ -1201,7 +1201,7 @@ func (r *entRepository) FindPasswordResetTokenByHash(ctx context.Context, tokenH
 	}
 	dst := &schemapb.PasswordResetToken{}
 	id, marker, err := r.client.findByKey(ctx, systemActor, schemapb.PasswordResetTokenTokenHash, tokenHash, dst)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -1220,7 +1220,7 @@ func (r *entRepository) FindPasswordResetTokenByHash(ctx context.Context, tokenH
 
 func (r *entRepository) MarkPasswordResetTokenConsumed(ctx context.Context, tokenID string, atMs int64) error {
 	if tokenID == "" {
-		return fmt.Errorf("repo: MarkPasswordResetTokenConsumed: missing token id")
+		return errors.New("repo: MarkPasswordResetTokenConsumed: missing token id")
 	}
 	// PasswordResetToken proto does not yet carry consumed_at; the
 	// in-memory entClient tracks the marker on a side-channel for
@@ -1252,7 +1252,7 @@ func emailVerificationFromProto(id string, p *schemapb.EmailVerificationToken) *
 
 func (r *entRepository) CreateEmailVerificationToken(ctx context.Context, t *service.EmailVerificationToken) error {
 	if t == nil {
-		return fmt.Errorf("repo: CreateEmailVerificationToken: nil record")
+		return errors.New("repo: CreateEmailVerificationToken: nil record")
 	}
 	msg := &schemapb.EmailVerificationToken{
 		TokenHash:  t.TokenHash,
@@ -1276,7 +1276,7 @@ func (r *entRepository) FindEmailVerificationTokenByHash(ctx context.Context, to
 	}
 	dst := &schemapb.EmailVerificationToken{}
 	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.EmailVerificationTokenTokenHash, tokenHash, dst)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -1287,7 +1287,7 @@ func (r *entRepository) FindEmailVerificationTokenByHash(ctx context.Context, to
 
 func (r *entRepository) MarkEmailVerificationTokenConsumed(ctx context.Context, tokenID string, atMs int64) error {
 	if tokenID == "" {
-		return fmt.Errorf("repo: MarkEmailVerificationTokenConsumed: missing token id")
+		return errors.New("repo: MarkEmailVerificationTokenConsumed: missing token id")
 	}
 	patch := &schemapb.EmailVerificationToken{ConsumedAt: atMs}
 	if err := r.client.update(ctx, systemActor, tokenID, patch); err != nil {
@@ -1316,7 +1316,7 @@ func emailChangeFromProto(id string, p *schemapb.EmailChangeToken) *service.Emai
 
 func (r *entRepository) CreateEmailChangeToken(ctx context.Context, t *service.EmailChangeToken) error {
 	if t == nil {
-		return fmt.Errorf("repo: CreateEmailChangeToken: nil record")
+		return errors.New("repo: CreateEmailChangeToken: nil record")
 	}
 	msg := &schemapb.EmailChangeToken{
 		TokenHash:  t.TokenHash,
@@ -1341,7 +1341,7 @@ func (r *entRepository) FindEmailChangeTokenByHash(ctx context.Context, tokenHas
 	}
 	dst := &schemapb.EmailChangeToken{}
 	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.EmailChangeTokenTokenHash, tokenHash, dst)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -1352,7 +1352,7 @@ func (r *entRepository) FindEmailChangeTokenByHash(ctx context.Context, tokenHas
 
 func (r *entRepository) MarkEmailChangeTokenConsumed(ctx context.Context, tokenID string, atMs int64) error {
 	if tokenID == "" {
-		return fmt.Errorf("repo: MarkEmailChangeTokenConsumed: missing token id")
+		return errors.New("repo: MarkEmailChangeTokenConsumed: missing token id")
 	}
 	patch := &schemapb.EmailChangeToken{ConsumedAt: atMs}
 	if err := r.client.update(ctx, systemActor, tokenID, patch); err != nil {
@@ -1363,7 +1363,7 @@ func (r *entRepository) MarkEmailChangeTokenConsumed(ctx context.Context, tokenI
 
 func (r *entRepository) UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error {
 	if userID == "" {
-		return fmt.Errorf("repo: UpdateUserEmail: missing user id")
+		return errors.New("repo: UpdateUserEmail: missing user id")
 	}
 	patch := &schemapb.User{
 		Email:           newEmail,
@@ -1410,7 +1410,7 @@ func (r *entRepository) FindUserByProviderID(ctx context.Context, provider, prov
 
 func (r *entRepository) CreateOAuthIdentity(ctx context.Context, oi *service.OAuthIdentity) error {
 	if oi == nil {
-		return fmt.Errorf("repo: CreateOAuthIdentity: nil record")
+		return errors.New("repo: CreateOAuthIdentity: nil record")
 	}
 	// EntDB does not yet support composite unique constraints; the
 	// service layer enforces (provider, provider_user_id) uniqueness

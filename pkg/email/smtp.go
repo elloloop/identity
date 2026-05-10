@@ -82,7 +82,7 @@ func (s *smtpTransport) Send(ctx context.Context, m Message) error {
 
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("%w: %v", ErrTransport, ctx.Err())
+		return fmt.Errorf("%w: %w", ErrTransport, ctx.Err())
 	case err := <-done:
 		return err
 	}
@@ -109,7 +109,7 @@ func (s *smtpTransport) send(ctx context.Context, m Message) error {
 		conn, err = dialer.DialContext(ctx, "tcp", addr)
 	}
 	if err != nil {
-		return fmt.Errorf("%w: dial %s: %v", ErrTransport, addr, err)
+		return fmt.Errorf("%w: dial %s: %w", ErrTransport, addr, err)
 	}
 
 	// Apply ctx deadline to the underlying conn so reads/writes don't hang
@@ -121,12 +121,12 @@ func (s *smtpTransport) send(ctx context.Context, m Message) error {
 	c, err := smtp.NewClient(conn, s.cfg.Host)
 	if err != nil {
 		_ = conn.Close()
-		return fmt.Errorf("%w: smtp handshake: %v", ErrTransport, err)
+		return fmt.Errorf("%w: smtp handshake: %w", ErrTransport, err)
 	}
 	defer func() { _ = c.Close() }()
 
 	if err := c.Hello(localHostname()); err != nil {
-		return fmt.Errorf("%w: EHLO: %v", ErrTransport, err)
+		return fmt.Errorf("%w: EHLO: %w", ErrTransport, err)
 	}
 
 	if s.cfg.StartTLS {
@@ -134,40 +134,40 @@ func (s *smtpTransport) send(ctx context.Context, m Message) error {
 			return fmt.Errorf("%w: server does not advertise STARTTLS", ErrTransport)
 		}
 		if err := c.StartTLS(tlsCfg); err != nil {
-			return fmt.Errorf("%w: STARTTLS: %v", ErrTransport, err)
+			return fmt.Errorf("%w: STARTTLS: %w", ErrTransport, err)
 		}
 	}
 
 	if s.cfg.User != "" {
 		auth := smtp.PlainAuth("", s.cfg.User, s.cfg.Pass, s.cfg.Host)
 		if err := c.Auth(auth); err != nil {
-			return fmt.Errorf("%w: auth: %v", ErrTransport, err)
+			return fmt.Errorf("%w: auth: %w", ErrTransport, err)
 		}
 	}
 
 	if err := c.Mail(addressOnly(m.From)); err != nil {
-		return fmt.Errorf("%w: MAIL FROM: %v", ErrTransport, err)
+		return fmt.Errorf("%w: MAIL FROM: %w", ErrTransport, err)
 	}
 	if err := c.Rcpt(addressOnly(m.To)); err != nil {
-		return fmt.Errorf("%w: RCPT TO: %v", ErrTransport, err)
+		return fmt.Errorf("%w: RCPT TO: %w", ErrTransport, err)
 	}
 
 	w, err := c.Data()
 	if err != nil {
-		return fmt.Errorf("%w: DATA: %v", ErrTransport, err)
+		return fmt.Errorf("%w: DATA: %w", ErrTransport, err)
 	}
 	if _, err := w.Write(buildBody(m)); err != nil {
 		_ = w.Close()
-		return fmt.Errorf("%w: write body: %v", ErrTransport, err)
+		return fmt.Errorf("%w: write body: %w", ErrTransport, err)
 	}
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("%w: close body: %v", ErrTransport, err)
+		return fmt.Errorf("%w: close body: %w", ErrTransport, err)
 	}
 
 	if err := c.Quit(); err != nil {
 		// Many servers close the connection abruptly after QUIT; only log via
 		// returned error so callers may choose to ignore.
-		return fmt.Errorf("%w: QUIT: %v", ErrTransport, err)
+		return fmt.Errorf("%w: QUIT: %w", ErrTransport, err)
 	}
 	return nil
 }

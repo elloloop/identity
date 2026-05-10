@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -88,7 +89,7 @@ func (s *AuthService) VerifyTotpSetup(ctx context.Context, userID, code string) 
 	secret, err := totp.DecryptSecret(cred.SecretEncrypted, s.totpKey)
 	if err != nil {
 		s.logger.Error("totp_decrypt_failed", zap.String("user_id", userID), zap.Error(err))
-		return false, fmt.Errorf("could not decrypt TOTP secret")
+		return false, errors.New("could not decrypt TOTP secret")
 	}
 
 	if !totp.VerifyCode(secret, code) {

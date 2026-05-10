@@ -150,7 +150,7 @@ func (s *HelpService) ListHelpRequests(
 	}
 	nextCursor := ""
 	if end < totalCount {
-		nextCursor = fmt.Sprintf("%d", end)
+		nextCursor = strconv.Itoa(end)
 	}
 
 	requests := make([]*HelpRequest, 0, len(page))

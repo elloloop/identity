@@ -2,7 +2,7 @@ package postgres
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 
@@ -22,7 +22,7 @@ func scanEmailVerification(row pgx.Row) (*service.EmailVerificationToken, error)
 
 func (r *pgRepository) CreateEmailVerificationToken(ctx context.Context, t *service.EmailVerificationToken) error {
 	if t == nil {
-		return fmt.Errorf("postgres: CreateEmailVerificationToken: nil record")
+		return errors.New("postgres: CreateEmailVerificationToken: nil record")
 	}
 	id := t.NodeID
 	if id == "" {
@@ -66,7 +66,7 @@ func (r *pgRepository) FindEmailVerificationTokenByHash(ctx context.Context, tok
 
 func (r *pgRepository) MarkEmailVerificationTokenConsumed(ctx context.Context, tokenID string, atMs int64) error {
 	if tokenID == "" {
-		return fmt.Errorf("postgres: MarkEmailVerificationTokenConsumed: missing token id")
+		return errors.New("postgres: MarkEmailVerificationTokenConsumed: missing token id")
 	}
 	const q = `
 		UPDATE email_verification_tokens

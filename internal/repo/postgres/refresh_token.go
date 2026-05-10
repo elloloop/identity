@@ -2,7 +2,7 @@ package postgres
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 
@@ -67,7 +67,7 @@ func (r *pgRepository) FindRefreshTokenByHashIncludingConsumed(ctx context.Conte
 
 func (r *pgRepository) CreateRefreshToken(ctx context.Context, t *service.RefreshTokenRecord) (string, error) {
 	if t == nil {
-		return "", fmt.Errorf("postgres: CreateRefreshToken: nil record")
+		return "", errors.New("postgres: CreateRefreshToken: nil record")
 	}
 	id := t.NodeID
 	if id == "" {

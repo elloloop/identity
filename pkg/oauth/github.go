@@ -120,26 +120,26 @@ func (g *githubExchanger) Exchange(ctx context.Context, code, redirectURI string
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.TokenURL,
 		strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("%w: build request: %v", ErrCodeExchangeFailed, err)
+		return nil, fmt.Errorf("%w: build request: %w", ErrCodeExchangeFailed, err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCodeExchangeFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrCodeExchangeFailed, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("%w: read body: %v", ErrCodeExchangeFailed, err)
+		return nil, fmt.Errorf("%w: read body: %w", ErrCodeExchangeFailed, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%w: provider HTTP %d", ErrCodeExchangeFailed, resp.StatusCode)
 	}
 	var tr githubTokenResponse
 	if err := json.Unmarshal(body, &tr); err != nil {
-		return nil, fmt.Errorf("%w: parse response: %v", ErrCodeExchangeFailed, err)
+		return nil, fmt.Errorf("%w: parse response: %w", ErrCodeExchangeFailed, err)
 	}
 	if tr.Error != "" {
 		return nil, fmt.Errorf("%w: %s", ErrCodeExchangeFailed, tr.Error)
@@ -188,13 +188,13 @@ func displayNameForGitHub(u *githubUser) string {
 func (g *githubExchanger) fetchUser(ctx context.Context, accessToken string) (*githubUser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.cfg.UserURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: build user request: %v", ErrIdentityVerification, err)
+		return nil, fmt.Errorf("%w: build user request: %w", ErrIdentityVerification, err)
 	}
 	req.Header.Set("Authorization", "token "+accessToken)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrIdentityVerification, err)
+		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -203,11 +203,11 @@ func (g *githubExchanger) fetchUser(ctx context.Context, accessToken string) (*g
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("%w: read user body: %v", ErrIdentityVerification, err)
+		return nil, fmt.Errorf("%w: read user body: %w", ErrIdentityVerification, err)
 	}
 	var u githubUser
 	if err := json.Unmarshal(body, &u); err != nil {
-		return nil, fmt.Errorf("%w: parse user: %v", ErrIdentityVerification, err)
+		return nil, fmt.Errorf("%w: parse user: %w", ErrIdentityVerification, err)
 	}
 	if u.ID == 0 {
 		return nil, fmt.Errorf("%w: user missing id", ErrIdentityVerification)
@@ -220,13 +220,13 @@ func (g *githubExchanger) fetchUser(ctx context.Context, accessToken string) (*g
 func (g *githubExchanger) fetchPrimaryEmail(ctx context.Context, accessToken string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.cfg.UserMailURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("%w: build emails request: %v", ErrIdentityVerification, err)
+		return "", fmt.Errorf("%w: build emails request: %w", ErrIdentityVerification, err)
 	}
 	req.Header.Set("Authorization", "token "+accessToken)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrIdentityVerification, err)
+		return "", fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -238,11 +238,11 @@ func (g *githubExchanger) fetchPrimaryEmail(ctx context.Context, accessToken str
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", fmt.Errorf("%w: read emails: %v", ErrIdentityVerification, err)
+		return "", fmt.Errorf("%w: read emails: %w", ErrIdentityVerification, err)
 	}
 	var emails []githubEmail
 	if err := json.Unmarshal(body, &emails); err != nil {
-		return "", fmt.Errorf("%w: parse emails: %v", ErrIdentityVerification, err)
+		return "", fmt.Errorf("%w: parse emails: %w", ErrIdentityVerification, err)
 	}
 	for _, e := range emails {
 		if e.Primary && e.Verified {

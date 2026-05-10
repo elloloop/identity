@@ -140,7 +140,7 @@ func (c *memoryEntClient) update(_ context.Context, _ string, nodeID string, pat
 		return fmt.Errorf("entdb: update: node %q not found", nodeID)
 	}
 	if reflect.TypeOf(existing.msg) != reflect.TypeOf(patch) {
-		return fmt.Errorf("entdb: update: type mismatch")
+		return errors.New("entdb: update: type mismatch")
 	}
 	// Merge non-default scalars from patch into existing — mirrors
 	// the SDK's Plan.Update semantics where only set fields are
@@ -161,7 +161,7 @@ func (c *memoryEntClient) delete(_ context.Context, _ string, witness proto.Mess
 		return nil
 	}
 	if reflect.TypeOf(n.msg) != reflect.TypeOf(witness) {
-		return fmt.Errorf("entdb: delete: type mismatch")
+		return errors.New("entdb: delete: type mismatch")
 	}
 	delete(c.store, nodeID)
 	delete(c.consumed, nodeID)

@@ -423,7 +423,7 @@ func (s *AuthService) BeginOAuthLogin(
 		s.nowFunc().UTC(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 	}
 	authorizationURL, err := authorizer.AuthorizationURL(
 		ctx,
@@ -567,11 +567,11 @@ func (s *AuthService) mapOAuthError(err error) (*LoginResult, error) {
 	case errors.Is(err, oauth.ErrEmailNotVerified):
 		return nil, fmt.Errorf("%w: provider email is not verified", ErrUnauthenticated)
 	case errors.Is(err, oauth.ErrIdentityVerification):
-		return nil, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 	case errors.Is(err, oauth.ErrCodeExchangeFailed):
-		return nil, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 	default:
-		return nil, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 	}
 }
 

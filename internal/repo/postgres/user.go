@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -103,7 +104,7 @@ func (r *pgRepository) GetUser(ctx context.Context, userID string) (*service.Use
 
 func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string, error) {
 	if u == nil {
-		return "", fmt.Errorf("postgres: CreateUser: nil user")
+		return "", errors.New("postgres: CreateUser: nil user")
 	}
 	now := nowMs()
 	if u.CreatedAt.IsZero() {
@@ -182,7 +183,7 @@ var userFieldColumns = map[string]struct {
 
 func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
 	if userID == "" {
-		return fmt.Errorf("postgres: UpdateUser: missing user id")
+		return errors.New("postgres: UpdateUser: missing user id")
 	}
 	if len(fields) == 0 {
 		return nil
@@ -238,7 +239,7 @@ func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map
 
 func (r *pgRepository) IncrementFailedLoginCount(ctx context.Context, userID string) (int32, error) {
 	if userID == "" {
-		return 0, fmt.Errorf("postgres: IncrementFailedLoginCount: missing user id")
+		return 0, errors.New("postgres: IncrementFailedLoginCount: missing user id")
 	}
 	const q = `
 		UPDATE users
@@ -248,20 +249,20 @@ func (r *pgRepository) IncrementFailedLoginCount(ctx context.Context, userID str
 	var newCount int64
 	err := r.pool.QueryRow(ctx, q, r.tenantID, userID).Scan(&newCount)
 	if noRows(err) {
-		return 0, fmt.Errorf("postgres: IncrementFailedLoginCount: user not found")
+		return 0, errors.New("postgres: IncrementFailedLoginCount: user not found")
 	}
 	if err != nil {
 		return 0, wrapPgErr("IncrementFailedLoginCount", err)
 	}
 	if newCount > int64(math.MaxInt32) {
-		return 0, fmt.Errorf("postgres: IncrementFailedLoginCount: count overflow")
+		return 0, errors.New("postgres: IncrementFailedLoginCount: count overflow")
 	}
 	return int32(newCount), nil // #nosec G115 -- bounds checked above.
 }
 
 func (r *pgRepository) ResetFailedLoginCount(ctx context.Context, userID string) error {
 	if userID == "" {
-		return fmt.Errorf("postgres: ResetFailedLoginCount: missing user id")
+		return errors.New("postgres: ResetFailedLoginCount: missing user id")
 	}
 	const q = `
 		UPDATE users
@@ -275,7 +276,7 @@ func (r *pgRepository) ResetFailedLoginCount(ctx context.Context, userID string)
 
 func (r *pgRepository) SetUserLockedUntil(ctx context.Context, userID string, lockedUntilMs int64) error {
 	if userID == "" {
-		return fmt.Errorf("postgres: SetUserLockedUntil: missing user id")
+		return errors.New("postgres: SetUserLockedUntil: missing user id")
 	}
 	const q = `UPDATE users SET locked_until_ms = $3 WHERE tenant_id = $1 AND id = $2`
 	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, lockedUntilMs); err != nil {
@@ -286,7 +287,7 @@ func (r *pgRepository) SetUserLockedUntil(ctx context.Context, userID string, lo
 
 func (r *pgRepository) SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error {
 	if userID == "" {
-		return fmt.Errorf("postgres: SetUserEmailVerified: missing user id")
+		return errors.New("postgres: SetUserEmailVerified: missing user id")
 	}
 	const q = `
 		UPDATE users
@@ -302,7 +303,7 @@ func (r *pgRepository) SetUserEmailVerified(ctx context.Context, userID string, 
 
 func (r *pgRepository) UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error {
 	if userID == "" {
-		return fmt.Errorf("postgres: UpdateUserEmail: missing user id")
+		return errors.New("postgres: UpdateUserEmail: missing user id")
 	}
 	const q = `
 		UPDATE users

@@ -334,10 +334,10 @@ func TestLog_NilLoggerDoesNotPanic(t *testing.T) {
 // TestSortedJSON verifies deterministic key ordering.
 func TestSortedJSON(t *testing.T) {
 	m := map[string]any{
-		"zebra":    1,
-		"apple":    "fruit",
-		"mango":    true,
-		"banana":   3.14,
+		"zebra":  1,
+		"apple":  "fruit",
+		"mango":  true,
+		"banana": 3.14,
 	}
 	got := sortedJSON(m)
 	expected := `{"apple":"fruit","banana":3.14,"mango":true,"zebra":1}`

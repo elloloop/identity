@@ -49,6 +49,7 @@ func (s *fakeSMTPServer) host() string {
 	h, _, _ := net.SplitHostPort(s.addr())
 	return h
 }
+
 func (s *fakeSMTPServer) port() int {
 	_, p, _ := net.SplitHostPort(s.addr())
 	var n int

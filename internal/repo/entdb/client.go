@@ -136,7 +136,7 @@ func (s *sdkScope) get(ctx context.Context, actor string, dst proto.Message, nod
 
 func (s *sdkScope) query(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, error) {
 	if s.transport != nil {
-		if rows, err, ok := s.queryViaTransport(ctx, actor, witness, filter); ok {
+		if rows, ok, err := s.queryViaTransport(ctx, actor, witness, filter); ok {
 			return rows, err
 		}
 	}
@@ -235,7 +235,7 @@ func (s *sdkScope) update(ctx context.Context, actor string, nodeID string, msg 
 
 func (s *sdkScope) rawUpdate(ctx context.Context, actor string, typeID int, nodeID string, patch map[string]any) error {
 	if s.transport == nil {
-		return fmt.Errorf("entdb: raw transport unavailable")
+		return errors.New("entdb: raw transport unavailable")
 	}
 	_, err := s.transport.ExecuteAtomic(ctx, s.tenantID, actor, "", []sdk.Operation{{
 		Type:   sdk.OpUpdateNode,
@@ -329,27 +329,27 @@ func queryAs[T proto.Message](ctx context.Context, scope *sdk.Scope, filter map[
 	return res, nil
 }
 
-func (s *sdkScope) queryViaTransport(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, error, bool) {
+func (s *sdkScope) queryViaTransport(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, bool, error) {
 	typeID, rawFilter, ok := rawQuerySpec(witness, filter)
 	if !ok {
-		return nil, nil, false
+		return nil, false, nil
 	}
 	nodes, err := s.transport.QueryNodes(ctx, s.tenantID, actor, typeID, rawFilter)
 	if err != nil {
-		return nil, err, true
+		return nil, true, err
 	}
 	out := make([]queriedNode, 0, len(nodes))
 	for _, node := range nodes {
 		msg := newMessageLike(witness)
 		if err := s.get(ctx, actor, msg, node.NodeID); err != nil {
-			return nil, err, true
+			return nil, true, err
 		}
 		out = append(out, queriedNode{
 			NodeID:  node.NodeID,
 			Message: msg,
 		})
 	}
-	return out, nil, true
+	return out, true, nil
 }
 
 func rawQuerySpec(witness proto.Message, filter map[string]any) (int, map[string]any, bool) {
@@ -532,16 +532,16 @@ func isNonNilMessage(m proto.Message) bool {
 
 func firstCreatedID(res *sdk.CommitResult) (string, error) {
 	if res == nil {
-		return "", fmt.Errorf("entdb: nil commit result")
+		return "", errors.New("entdb: nil commit result")
 	}
 	if !res.Success {
 		if res.Error != "" {
 			return "", fmt.Errorf("entdb: commit: %s", res.Error)
 		}
-		return "", fmt.Errorf("entdb: commit not successful")
+		return "", errors.New("entdb: commit not successful")
 	}
 	if len(res.CreatedNodeIDs) == 0 {
-		return "", fmt.Errorf("entdb: commit succeeded but no node id returned")
+		return "", errors.New("entdb: commit succeeded but no node id returned")
 	}
 	return res.CreatedNodeIDs[0], nil
 }

@@ -223,13 +223,13 @@ func parseKeyRingFromEnv(jsonStr string) (*jwt.KeyRing, error) {
 		return nil, fmt.Errorf("parsing JWT keys JSON: %w", err)
 	}
 	if len(raw) == 0 {
-		return nil, fmt.Errorf("JWT keys JSON is empty")
+		return nil, errors.New("JWT keys JSON is empty")
 	}
 
 	keys := make([]jwt.SigningKey, 0, len(raw))
 	for _, k := range raw {
 		if k.KID == "" {
-			return nil, fmt.Errorf("JWT key missing kid")
+			return nil, errors.New("JWT key missing kid")
 		}
 
 		// Parse private key PEM.

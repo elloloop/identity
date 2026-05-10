@@ -2,7 +2,7 @@ package postgres
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 
@@ -22,7 +22,7 @@ func scanPasswordReset(row pgx.Row) (*service.PasswordResetToken, error) {
 
 func (r *pgRepository) CreatePasswordResetToken(ctx context.Context, t *service.PasswordResetToken) error {
 	if t == nil {
-		return fmt.Errorf("postgres: CreatePasswordResetToken: nil record")
+		return errors.New("postgres: CreatePasswordResetToken: nil record")
 	}
 	id := t.NodeID
 	if id == "" {
@@ -66,7 +66,7 @@ func (r *pgRepository) FindPasswordResetTokenByHash(ctx context.Context, tokenHa
 
 func (r *pgRepository) MarkPasswordResetTokenConsumed(ctx context.Context, tokenID string, atMs int64) error {
 	if tokenID == "" {
-		return fmt.Errorf("postgres: MarkPasswordResetTokenConsumed: missing token id")
+		return errors.New("postgres: MarkPasswordResetTokenConsumed: missing token id")
 	}
 	const q = `
 		UPDATE password_reset_tokens

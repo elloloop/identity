@@ -2,7 +2,9 @@ package passkeys
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -46,10 +48,10 @@ type WebAuthnService struct {
 // Returns an error if the configuration is invalid.
 func NewWebAuthnService(cfg Config) (*WebAuthnService, error) {
 	if cfg.RPID == "" {
-		return nil, fmt.Errorf("passkeys: RPID is required")
+		return nil, errors.New("passkeys: RPID is required")
 	}
 	if cfg.Origin == "" {
-		return nil, fmt.Errorf("passkeys: Origin is required")
+		return nil, errors.New("passkeys: Origin is required")
 	}
 
 	wconfig := &webauthn.Config{
@@ -193,7 +195,6 @@ func (s *WebAuthnService) CompleteRegistration(
 
 	aaguid := ""
 	if credential.Authenticator.AAGUID != nil {
-		// Format as hex UUID-style string.
 		a := credential.Authenticator.AAGUID
 		if len(a) == 16 {
 			aaguid = fmt.Sprintf(
@@ -201,7 +202,7 @@ func (s *WebAuthnService) CompleteRegistration(
 				a[0:4], a[4:6], a[6:8], a[8:10], a[10:16],
 			)
 		} else {
-			aaguid = fmt.Sprintf("%x", a)
+			aaguid = hex.EncodeToString(a)
 		}
 	}
 
@@ -330,7 +331,7 @@ func (s *WebAuthnService) CompleteAuthentication(
 		return 0, fmt.Errorf("passkeys: verifying authentication: %w", loginErr)
 	}
 	if credential.Authenticator.CloneWarning {
-		return 0, fmt.Errorf("passkeys: authenticator counter regression detected")
+		return 0, errors.New("passkeys: authenticator counter regression detected")
 	}
 
 	return credential.Authenticator.SignCount, nil
@@ -354,7 +355,7 @@ func ExtractCredentialID(credentialJSON string) (string, error) {
 		raw = cred.RawID
 	}
 	if raw == "" {
-		return "", fmt.Errorf("passkeys: credential JSON missing 'id' and 'rawId'")
+		return "", errors.New("passkeys: credential JSON missing 'id' and 'rawId'")
 	}
 
 	// Normalize — strip padding if the caller included it.
