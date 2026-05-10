@@ -1,0 +1,150 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Identity Verification">
+  <h1>Identity Verification (KYC)</h1>
+  <p>
+    Identity supports document + selfie verification through a pluggable
+    provider interface. The first shipping implementation is
+    <strong>Azure AI Face Liveness</strong>; deployments can wire any other
+    provider (Onfido, Persona, Veriff, Sumsub, an in-house pipeline) by
+    implementing the small <code>idv.Provider</code> interface and
+    selecting it via config.
+  </p>
+
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+    <strong>Optional or mandatory.</strong> The feature works in two modes:
+    <em>optional</em> (default) lets clients run verification at any time
+    and exposes the result on <code>User.idv_verified</code>;
+    <em>mandatory</em> blocks login for users whose latest verification
+    has not reached <code>APPROVED</code>. Mirror of the existing
+    <code>email_verified</code> pattern.
+  </div>
+
+  <h2>Configuration</h2>
+
+  <h3>Pick a provider</h3>
+  <Code code={`# Disabled (default) — RPCs return CodeUnimplemented
+-e GATEWAY_IDV_PROVIDER=
+
+# Stub — auto-approves every session, useful for bring-up only
+-e GATEWAY_IDV_PROVIDER=stub
+
+# Azure AI Face Liveness
+-e GATEWAY_IDV_PROVIDER=azure
+-e GATEWAY_IDV_AZURE_ENDPOINT=https://my-face.cognitiveservices.azure.com
+-e GATEWAY_IDV_AZURE_KEY=...subscription-key...
+-e GATEWAY_IDV_AZURE_SESSION_TTL_SECONDS=600`} lang="bash" />
+
+  <h3>Gate login on verification</h3>
+  <Code code={`# Reject login when latest verification != APPROVED
+-e GATEWAY_IDV_REQUIRED=true`} lang="bash" />
+
+  <p>
+    With <code>GATEWAY_IDV_REQUIRED=true</code>, both
+    <code>PasswordLogin</code> and the <code>OAuthLogin</code>
+    finalisation return <code>FAILED_PRECONDITION:
+    identity verification required</code> until the user has an approved
+    verification. Clients route those errors to the verification flow.
+  </p>
+
+  <h2>Flow</h2>
+
+  <ol>
+    <li>
+      Client calls <code>BeginIdentityVerification</code>. Server creates
+      a session with the configured provider, persists a PENDING record
+      against the caller, and returns a provider-specific
+      <code>session_token</code> the client SDK uses for capture.
+    </li>
+    <li>
+      Client SDK drives document + selfie capture. For Azure, this is the
+      <em>Vision SDK</em> initialised with the returned token.
+    </li>
+    <li>
+      Client polls <code>GetIdentityVerificationStatus</code>. Server
+      refreshes from the provider, persists terminal verdicts, and on
+      <code>APPROVED</code> sets <code>User.idv_verified = true</code>.
+    </li>
+  </ol>
+
+  <h2>Begin RPC</h2>
+  <Code code={`message BeginIdentityVerificationRequest {}
+
+message BeginIdentityVerificationResponse {
+  string verification_id = 1;
+  string provider        = 2;  // "azure", "stub", ...
+  string session_token   = 3;  // Pass to the provider's client SDK
+  google.protobuf.Timestamp expires_at = 4;
+}`} lang="proto" />
+
+  <h2>Status RPC</h2>
+  <Code code={`message GetIdentityVerificationStatusRequest {
+  // Optional. When empty, the latest verification for the caller is returned.
+  string verification_id = 1;
+}
+
+message GetIdentityVerificationStatusResponse {
+  IdentityVerification verification = 1;
+}
+
+enum IdentityVerificationStatus {
+  IDENTITY_VERIFICATION_STATUS_UNSPECIFIED = 0;
+  IDENTITY_VERIFICATION_STATUS_PENDING     = 1; // Client has not submitted yet
+  IDENTITY_VERIFICATION_STATUS_IN_REVIEW   = 2; // Submitted, awaiting verdict
+  IDENTITY_VERIFICATION_STATUS_APPROVED    = 3;
+  IDENTITY_VERIFICATION_STATUS_REJECTED    = 4;
+  IDENTITY_VERIFICATION_STATUS_EXPIRED     = 5;
+}`} lang="proto" />
+
+  <h2>User flag</h2>
+  <p>
+    Once a verification reaches <code>APPROVED</code>, the user record
+    carries <code>idv_verified = true</code> and
+    <code>idv_verified_at</code> (epoch ms). These survive across new
+    verification attempts; the latest verdict overrides only on a new
+    successful poll.
+  </p>
+
+  <h2>Plugging in your own provider</h2>
+  <p>
+    The <code>pkg/idv</code> package defines a minimal interface; any
+    deployment can drop in a custom implementation:
+  </p>
+  <Code code={`type Provider interface {
+    Name() string
+    BeginVerification(ctx context.Context, req Request) (*Session, error)
+    GetVerification(ctx context.Context, providerSessionID string) (*StatusResult, error)
+}`} lang="go" />
+
+  <p>
+    A non-Azure provider then registers itself in <code>cmd/identity/idv.go</code>'s
+    <code>buildIDVProvider</code> switch (or in a fork's equivalent
+    factory). The service layer, persistence, RPC contract, and login
+    gate all keep working unchanged.
+  </p>
+
+  <h2>Operational notes</h2>
+  <ul>
+    <li>
+      <strong>Sync vs async</strong>: Azure is a sync flow — the server
+      polls the provider on each <code>GetIdentityVerificationStatus</code>
+      call. Async providers (e.g. Onfido webhooks) implement the same
+      interface and update local state from a webhook handler; the
+      polling RPC then returns whatever local state is fresh.
+    </li>
+    <li>
+      <strong>Cost</strong>: Azure Face Liveness is billed per session.
+      Set <code>GATEWAY_IDV_AZURE_SESSION_TTL_SECONDS</code> tightly
+      enough that abandoned sessions don't accumulate cost.
+    </li>
+    <li>
+      <strong>Stub provider</strong>: never deploy with
+      <code>GATEWAY_IDV_PROVIDER=stub</code> — it auto-approves every
+      session. The binary logs a loud warning at startup when stub is
+      selected.
+    </li>
+  </ul>
+</DocsLayout>
