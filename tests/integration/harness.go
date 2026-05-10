@@ -29,6 +29,7 @@ import (
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/idv"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
@@ -111,6 +112,7 @@ type HarnessOption func(*harnessOptions)
 type harnessOptions struct {
 	oauthRegistry *oauth.Registry
 	config        func(*config.Config)
+	idvProvider   idv.Provider
 }
 
 func applyHarnessOptions(cfg *config.Config, opts []HarnessOption) harnessOptions {
@@ -135,6 +137,12 @@ func WithConfig(fn func(*config.Config)) HarnessOption {
 	return func(o *harnessOptions) { o.config = fn }
 }
 
+// WithIDVProvider sets the identity-verification provider on the harness.
+// Pass nil to leave IDV disabled (the default — RPCs return Unimplemented).
+func WithIDVProvider(p idv.Provider) HarnessOption {
+	return func(o *harnessOptions) { o.idvProvider = p }
+}
+
 func startHarness(
 	t *testing.T,
 	cfg *config.Config,
@@ -143,6 +151,7 @@ func startHarness(
 	auditDB *RecordingDB,
 	mailer *RecordingMailer,
 	oauthRegistry *oauth.Registry,
+	idvProvider idv.Provider,
 ) *Harness {
 	t.Helper()
 
@@ -174,6 +183,7 @@ func startHarness(
 		TOTPKey:        []byte("01234567890123456789012345678901"),
 		EmailTransport: mailer,
 		OAuthRegistry:  oauthRegistry,
+		IDVProvider:    idvProvider,
 	})
 
 	srv := httptest.NewServer(handler)
