@@ -576,4 +576,87 @@ func RunConformance(t *testing.T, makeFresh func(t *testing.T) service.Repositor
 			t.Fatalf("after Set: %+v", got)
 		}
 	})
+
+	t.Run("IdentityVerification_CRUD", func(t *testing.T) {
+		ctx := context.Background()
+		r := makeFresh(t)
+		uid, err := r.CreateUser(ctx, &service.User{Email: "idv@example.com", Status: "active"})
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+
+		first := &service.IdentityVerificationRecord{
+			VerificationID:    "idv-1",
+			UserID:            uid,
+			Provider:          "stub",
+			ProviderSessionID: "sess-1",
+			Status:            service.IDVStatusPending,
+			CreatedAt:         100,
+			UpdatedAt:         100,
+		}
+		if err := r.CreateIdentityVerification(ctx, first); err != nil {
+			t.Fatalf("Create idv-1: %v", err)
+		}
+
+		got, err := r.GetIdentityVerification(ctx, "idv-1")
+		if err != nil || got == nil {
+			t.Fatalf("Get idv-1: err=%v rec=%#v", err, got)
+		}
+		if got.UserID != uid || got.Status != service.IDVStatusPending || got.Provider != "stub" {
+			t.Fatalf("Get idv-1 mismatch: %+v", got)
+		}
+
+		// Latest-for-user with a single record returns it.
+		latest, err := r.GetLatestIdentityVerificationForUser(ctx, uid)
+		if err != nil || latest == nil || latest.VerificationID != "idv-1" {
+			t.Fatalf("Latest after one create: err=%v rec=%#v", err, latest)
+		}
+
+		// A second record with later CreatedAt becomes the latest.
+		second := &service.IdentityVerificationRecord{
+			VerificationID: "idv-2",
+			UserID:         uid,
+			Provider:       "stub",
+			Status:         service.IDVStatusPending,
+			CreatedAt:      200,
+			UpdatedAt:      200,
+		}
+		if err := r.CreateIdentityVerification(ctx, second); err != nil {
+			t.Fatalf("Create idv-2: %v", err)
+		}
+		latest, err = r.GetLatestIdentityVerificationForUser(ctx, uid)
+		if err != nil || latest == nil || latest.VerificationID != "idv-2" {
+			t.Fatalf("Latest after two creates: err=%v rec=%#v", err, latest)
+		}
+
+		// UpdateStatus moves the record to APPROVED.
+		if err := r.UpdateIdentityVerificationStatus(ctx, "idv-1", service.IDVStatusApproved, "", 300, 300); err != nil {
+			t.Fatalf("UpdateStatus approve: %v", err)
+		}
+		got, _ = r.GetIdentityVerification(ctx, "idv-1")
+		if got == nil || got.Status != service.IDVStatusApproved || got.CompletedAt != 300 || got.UpdatedAt != 300 {
+			t.Fatalf("after approve: %+v", got)
+		}
+
+		// Rejection captures the reason.
+		if err := r.UpdateIdentityVerificationStatus(ctx, "idv-2", service.IDVStatusRejected, "document_unreadable", 400, 400); err != nil {
+			t.Fatalf("UpdateStatus reject: %v", err)
+		}
+		got, _ = r.GetIdentityVerification(ctx, "idv-2")
+		if got == nil || got.Status != service.IDVStatusRejected || got.RejectionReason != "document_unreadable" {
+			t.Fatalf("after reject: %+v", got)
+		}
+
+		// Unknown verification_id returns (nil, nil), not an error.
+		miss, err := r.GetIdentityVerification(ctx, "idv-missing")
+		if err != nil || miss != nil {
+			t.Fatalf("Get unknown: err=%v rec=%#v", err, miss)
+		}
+
+		// Unknown user returns (nil, nil) for latest.
+		latest, err = r.GetLatestIdentityVerificationForUser(ctx, "no-such-user")
+		if err != nil || latest != nil {
+			t.Fatalf("Latest unknown user: err=%v rec=%#v", err, latest)
+		}
+	})
 }

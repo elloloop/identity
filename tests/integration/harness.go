@@ -10,6 +10,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -625,6 +626,7 @@ type MemRepo struct {
 	emailVerifications map[string]*service.EmailVerificationToken
 	emailChanges       map[string]*service.EmailChangeToken
 	oauthIdentities    map[string]*service.OAuthIdentity
+	idvRecords         map[string]*service.IdentityVerificationRecord
 }
 
 // NewMemRepo returns an empty MemRepo.
@@ -643,6 +645,7 @@ func NewMemRepo() *MemRepo {
 		emailVerifications: make(map[string]*service.EmailVerificationToken),
 		emailChanges:       make(map[string]*service.EmailChangeToken),
 		oauthIdentities:    make(map[string]*service.OAuthIdentity),
+		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
 	}
 }
 
@@ -1351,6 +1354,69 @@ func (r *MemRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) (
 		}
 	}
 	return out, nil
+}
+
+// ── Identity Verification ──────────────────────────────────────────────
+
+func (r *MemRepo) CreateIdentityVerification(_ context.Context, rec *service.IdentityVerificationRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if rec.VerificationID == "" {
+		return errors.New("idv: missing verification id")
+	}
+	if _, ok := r.idvRecords[rec.VerificationID]; ok {
+		return fmt.Errorf("idv: %s already exists", rec.VerificationID)
+	}
+	if rec.NodeID == "" {
+		rec.NodeID = r.nextID()
+	}
+	cp := *rec
+	r.idvRecords[rec.VerificationID] = &cp
+	return nil
+}
+
+func (r *MemRepo) GetIdentityVerification(_ context.Context, verificationID string) (*service.IdentityVerificationRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.idvRecords[verificationID]
+	if !ok {
+		return nil, nil
+	}
+	cp := *rec
+	return &cp, nil
+}
+
+func (r *MemRepo) GetLatestIdentityVerificationForUser(_ context.Context, userID string) (*service.IdentityVerificationRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var latest *service.IdentityVerificationRecord
+	for _, rec := range r.idvRecords {
+		if rec.UserID != userID {
+			continue
+		}
+		if latest == nil || rec.CreatedAt > latest.CreatedAt {
+			latest = rec
+		}
+	}
+	if latest == nil {
+		return nil, nil
+	}
+	cp := *latest
+	return &cp, nil
+}
+
+func (r *MemRepo) UpdateIdentityVerificationStatus(_ context.Context, verificationID, status, rejectionReason string, completedAtMs, updatedAtMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.idvRecords[verificationID]
+	if !ok {
+		return fmt.Errorf("idv: %s not found", verificationID)
+	}
+	rec.Status = status
+	rec.RejectionReason = rejectionReason
+	rec.CompletedAt = completedAtMs
+	rec.UpdatedAt = updatedAtMs
+	return nil
 }
 
 // compile-time interface assertion

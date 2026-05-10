@@ -77,6 +77,12 @@ const (
 	// IdentityServiceConfirmEmailChangeProcedure is the fully-qualified name of the IdentityService's
 	// ConfirmEmailChange RPC.
 	IdentityServiceConfirmEmailChangeProcedure = "/identity.IdentityService/ConfirmEmailChange"
+	// IdentityServiceBeginIdentityVerificationProcedure is the fully-qualified name of the
+	// IdentityService's BeginIdentityVerification RPC.
+	IdentityServiceBeginIdentityVerificationProcedure = "/identity.IdentityService/BeginIdentityVerification"
+	// IdentityServiceGetIdentityVerificationStatusProcedure is the fully-qualified name of the
+	// IdentityService's GetIdentityVerificationStatus RPC.
+	IdentityServiceGetIdentityVerificationStatusProcedure = "/identity.IdentityService/GetIdentityVerificationStatus"
 	// IdentityServiceRequestAdminHelpProcedure is the fully-qualified name of the IdentityService's
 	// RequestAdminHelp RPC.
 	IdentityServiceRequestAdminHelpProcedure = "/identity.IdentityService/RequestAdminHelp"
@@ -224,6 +230,9 @@ type IdentityServiceClient interface {
 	// Email Change (primary-email rotation, double-opt-in)
 	RequestEmailChange(context.Context, *connect.Request[identity.RequestEmailChangeRequest]) (*connect.Response[identity.RequestEmailChangeResponse], error)
 	ConfirmEmailChange(context.Context, *connect.Request[identity.ConfirmEmailChangeRequest]) (*connect.Response[identity.ConfirmEmailChangeResponse], error)
+	// Identity Verification (document + selfie via pluggable provider)
+	BeginIdentityVerification(context.Context, *connect.Request[identity.BeginIdentityVerificationRequest]) (*connect.Response[identity.BeginIdentityVerificationResponse], error)
+	GetIdentityVerificationStatus(context.Context, *connect.Request[identity.GetIdentityVerificationStatusRequest]) (*connect.Response[identity.GetIdentityVerificationStatusResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[identity.RequestAdminHelpRequest]) (*connect.Response[identity.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[identity.ListHelpRequestsRequest]) (*connect.Response[identity.ListHelpRequestsResponse], error)
@@ -378,6 +387,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceConfirmEmailChangeProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("ConfirmEmailChange")),
+			connect.WithClientOptions(opts...),
+		),
+		beginIdentityVerification: connect.NewClient[identity.BeginIdentityVerificationRequest, identity.BeginIdentityVerificationResponse](
+			httpClient,
+			baseURL+IdentityServiceBeginIdentityVerificationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("BeginIdentityVerification")),
+			connect.WithClientOptions(opts...),
+		),
+		getIdentityVerificationStatus: connect.NewClient[identity.GetIdentityVerificationStatusRequest, identity.GetIdentityVerificationStatusResponse](
+			httpClient,
+			baseURL+IdentityServiceGetIdentityVerificationStatusProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetIdentityVerificationStatus")),
 			connect.WithClientOptions(opts...),
 		),
 		requestAdminHelp: connect.NewClient[identity.RequestAdminHelpRequest, identity.RequestAdminHelpResponse](
@@ -631,62 +652,64 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 
 // identityServiceClient implements IdentityServiceClient.
 type identityServiceClient struct {
-	beginOAuthLogin             *connect.Client[identity.BeginOAuthLoginRequest, identity.BeginOAuthLoginResponse]
-	oAuthLogin                  *connect.Client[identity.OAuthLoginRequest, identity.OAuthLoginResponse]
-	passwordSignup              *connect.Client[identity.PasswordSignupRequest, identity.PasswordSignupResponse]
-	passwordLogin               *connect.Client[identity.PasswordLoginRequest, identity.PasswordLoginResponse]
-	getCurrentUser              *connect.Client[identity.GetCurrentUserRequest, identity.GetCurrentUserResponse]
-	refreshToken                *connect.Client[identity.RefreshTokenRequest, identity.RefreshTokenResponse]
-	logout                      *connect.Client[identity.LogoutRequest, identity.LogoutResponse]
-	updateProfile               *connect.Client[identity.UpdateProfileRequest, identity.UpdateProfileResponse]
-	changePassword              *connect.Client[identity.ChangePasswordRequest, identity.ChangePasswordResponse]
-	requestPasswordReset        *connect.Client[identity.RequestPasswordResetRequest, identity.RequestPasswordResetResponse]
-	confirmPasswordReset        *connect.Client[identity.ConfirmPasswordResetRequest, identity.ConfirmPasswordResetResponse]
-	sendEmailVerification       *connect.Client[identity.SendEmailVerificationRequest, identity.SendEmailVerificationResponse]
-	verifyEmail                 *connect.Client[identity.VerifyEmailRequest, identity.VerifyEmailResponse]
-	requestEmailChange          *connect.Client[identity.RequestEmailChangeRequest, identity.RequestEmailChangeResponse]
-	confirmEmailChange          *connect.Client[identity.ConfirmEmailChangeRequest, identity.ConfirmEmailChangeResponse]
-	requestAdminHelp            *connect.Client[identity.RequestAdminHelpRequest, identity.RequestAdminHelpResponse]
-	listHelpRequests            *connect.Client[identity.ListHelpRequestsRequest, identity.ListHelpRequestsResponse]
-	resolveHelpRequest          *connect.Client[identity.ResolveHelpRequestRequest, identity.ResolveHelpRequestResponse]
-	beginPasskeyRegistration    *connect.Client[identity.BeginPasskeyRegistrationRequest, identity.BeginPasskeyRegistrationResponse]
-	completePasskeyRegistration *connect.Client[identity.CompletePasskeyRegistrationRequest, identity.CompletePasskeyRegistrationResponse]
-	beginPasskeyLogin           *connect.Client[identity.BeginPasskeyLoginRequest, identity.BeginPasskeyLoginResponse]
-	completePasskeyLogin        *connect.Client[identity.CompletePasskeyLoginRequest, identity.CompletePasskeyLoginResponse]
-	listPasskeys                *connect.Client[identity.ListPasskeysRequest, identity.ListPasskeysResponse]
-	deletePasskey               *connect.Client[identity.DeletePasskeyRequest, identity.DeletePasskeyResponse]
-	initiateQrLogin             *connect.Client[identity.InitiateQrLoginRequest, identity.InitiateQrLoginResponse]
-	getQrLoginSession           *connect.Client[identity.GetQrLoginSessionRequest, identity.GetQrLoginSessionResponse]
-	approveQrLogin              *connect.Client[identity.ApproveQrLoginRequest, identity.ApproveQrLoginResponse]
-	pollQrLogin                 *connect.Client[identity.PollQrLoginRequest, identity.PollQrLoginResponse]
-	beginTotpSetup              *connect.Client[identity.BeginTotpSetupRequest, identity.BeginTotpSetupResponse]
-	verifyTotpSetup             *connect.Client[identity.VerifyTotpSetupRequest, identity.VerifyTotpSetupResponse]
-	disableTotp                 *connect.Client[identity.DisableTotpRequest, identity.DisableTotpResponse]
-	verifyTotp                  *connect.Client[identity.VerifyTotpRequest, identity.VerifyTotpResponse]
-	regenerateRecoveryCodes     *connect.Client[identity.RegenerateRecoveryCodesRequest, identity.RegenerateRecoveryCodesResponse]
-	listMySessions              *connect.Client[identity.ListMySessionsRequest, identity.ListMySessionsResponse]
-	revokeSession               *connect.Client[identity.RevokeSessionRequest, identity.RevokeSessionResponse]
-	revokeAllSessions           *connect.Client[identity.RevokeAllSessionsRequest, identity.RevokeAllSessionsResponse]
-	signOutEverywhere           *connect.Client[identity.SignOutEverywhereRequest, identity.SignOutEverywhereResponse]
-	listAuditEvents             *connect.Client[identity.ListAuditEventsRequest, identity.ListAuditEventsResponse]
-	createUser                  *connect.Client[identity.CreateUserRequest, identity.CreateUserResponse]
-	getUser                     *connect.Client[identity.GetUserRequest, identity.GetUserResponse]
-	updateUser                  *connect.Client[identity.UpdateUserRequest, identity.UpdateUserResponse]
-	deleteUser                  *connect.Client[identity.DeleteUserRequest, identity.DeleteUserResponse]
-	listUsers                   *connect.Client[identity.ListUsersRequest, identity.ListUsersResponse]
-	createGroup                 *connect.Client[identity.CreateGroupRequest, identity.CreateGroupResponse]
-	updateGroup                 *connect.Client[identity.UpdateGroupRequest, identity.UpdateGroupResponse]
-	deleteGroup                 *connect.Client[identity.DeleteGroupRequest, identity.DeleteGroupResponse]
-	listGroups                  *connect.Client[identity.ListGroupsRequest, identity.ListGroupsResponse]
-	addGroupMember              *connect.Client[identity.AddGroupMemberRequest, identity.AddGroupMemberResponse]
-	removeGroupMember           *connect.Client[identity.RemoveGroupMemberRequest, identity.RemoveGroupMemberResponse]
-	listGroupMembers            *connect.Client[identity.ListGroupMembersRequest, identity.ListGroupMembersResponse]
-	inviteUser                  *connect.Client[identity.InviteUserRequest, identity.InviteUserResponse]
-	acceptInvitation            *connect.Client[identity.AcceptInvitationRequest, identity.AcceptInvitationResponse]
-	deactivateUser              *connect.Client[identity.DeactivateUserRequest, identity.DeactivateUserResponse]
-	reactivateUser              *connect.Client[identity.ReactivateUserRequest, identity.ReactivateUserResponse]
-	resetUserPassword           *connect.Client[identity.ResetUserPasswordRequest, identity.ResetUserPasswordResponse]
-	setUserQuota                *connect.Client[identity.SetUserQuotaRequest, identity.SetUserQuotaResponse]
+	beginOAuthLogin               *connect.Client[identity.BeginOAuthLoginRequest, identity.BeginOAuthLoginResponse]
+	oAuthLogin                    *connect.Client[identity.OAuthLoginRequest, identity.OAuthLoginResponse]
+	passwordSignup                *connect.Client[identity.PasswordSignupRequest, identity.PasswordSignupResponse]
+	passwordLogin                 *connect.Client[identity.PasswordLoginRequest, identity.PasswordLoginResponse]
+	getCurrentUser                *connect.Client[identity.GetCurrentUserRequest, identity.GetCurrentUserResponse]
+	refreshToken                  *connect.Client[identity.RefreshTokenRequest, identity.RefreshTokenResponse]
+	logout                        *connect.Client[identity.LogoutRequest, identity.LogoutResponse]
+	updateProfile                 *connect.Client[identity.UpdateProfileRequest, identity.UpdateProfileResponse]
+	changePassword                *connect.Client[identity.ChangePasswordRequest, identity.ChangePasswordResponse]
+	requestPasswordReset          *connect.Client[identity.RequestPasswordResetRequest, identity.RequestPasswordResetResponse]
+	confirmPasswordReset          *connect.Client[identity.ConfirmPasswordResetRequest, identity.ConfirmPasswordResetResponse]
+	sendEmailVerification         *connect.Client[identity.SendEmailVerificationRequest, identity.SendEmailVerificationResponse]
+	verifyEmail                   *connect.Client[identity.VerifyEmailRequest, identity.VerifyEmailResponse]
+	requestEmailChange            *connect.Client[identity.RequestEmailChangeRequest, identity.RequestEmailChangeResponse]
+	confirmEmailChange            *connect.Client[identity.ConfirmEmailChangeRequest, identity.ConfirmEmailChangeResponse]
+	beginIdentityVerification     *connect.Client[identity.BeginIdentityVerificationRequest, identity.BeginIdentityVerificationResponse]
+	getIdentityVerificationStatus *connect.Client[identity.GetIdentityVerificationStatusRequest, identity.GetIdentityVerificationStatusResponse]
+	requestAdminHelp              *connect.Client[identity.RequestAdminHelpRequest, identity.RequestAdminHelpResponse]
+	listHelpRequests              *connect.Client[identity.ListHelpRequestsRequest, identity.ListHelpRequestsResponse]
+	resolveHelpRequest            *connect.Client[identity.ResolveHelpRequestRequest, identity.ResolveHelpRequestResponse]
+	beginPasskeyRegistration      *connect.Client[identity.BeginPasskeyRegistrationRequest, identity.BeginPasskeyRegistrationResponse]
+	completePasskeyRegistration   *connect.Client[identity.CompletePasskeyRegistrationRequest, identity.CompletePasskeyRegistrationResponse]
+	beginPasskeyLogin             *connect.Client[identity.BeginPasskeyLoginRequest, identity.BeginPasskeyLoginResponse]
+	completePasskeyLogin          *connect.Client[identity.CompletePasskeyLoginRequest, identity.CompletePasskeyLoginResponse]
+	listPasskeys                  *connect.Client[identity.ListPasskeysRequest, identity.ListPasskeysResponse]
+	deletePasskey                 *connect.Client[identity.DeletePasskeyRequest, identity.DeletePasskeyResponse]
+	initiateQrLogin               *connect.Client[identity.InitiateQrLoginRequest, identity.InitiateQrLoginResponse]
+	getQrLoginSession             *connect.Client[identity.GetQrLoginSessionRequest, identity.GetQrLoginSessionResponse]
+	approveQrLogin                *connect.Client[identity.ApproveQrLoginRequest, identity.ApproveQrLoginResponse]
+	pollQrLogin                   *connect.Client[identity.PollQrLoginRequest, identity.PollQrLoginResponse]
+	beginTotpSetup                *connect.Client[identity.BeginTotpSetupRequest, identity.BeginTotpSetupResponse]
+	verifyTotpSetup               *connect.Client[identity.VerifyTotpSetupRequest, identity.VerifyTotpSetupResponse]
+	disableTotp                   *connect.Client[identity.DisableTotpRequest, identity.DisableTotpResponse]
+	verifyTotp                    *connect.Client[identity.VerifyTotpRequest, identity.VerifyTotpResponse]
+	regenerateRecoveryCodes       *connect.Client[identity.RegenerateRecoveryCodesRequest, identity.RegenerateRecoveryCodesResponse]
+	listMySessions                *connect.Client[identity.ListMySessionsRequest, identity.ListMySessionsResponse]
+	revokeSession                 *connect.Client[identity.RevokeSessionRequest, identity.RevokeSessionResponse]
+	revokeAllSessions             *connect.Client[identity.RevokeAllSessionsRequest, identity.RevokeAllSessionsResponse]
+	signOutEverywhere             *connect.Client[identity.SignOutEverywhereRequest, identity.SignOutEverywhereResponse]
+	listAuditEvents               *connect.Client[identity.ListAuditEventsRequest, identity.ListAuditEventsResponse]
+	createUser                    *connect.Client[identity.CreateUserRequest, identity.CreateUserResponse]
+	getUser                       *connect.Client[identity.GetUserRequest, identity.GetUserResponse]
+	updateUser                    *connect.Client[identity.UpdateUserRequest, identity.UpdateUserResponse]
+	deleteUser                    *connect.Client[identity.DeleteUserRequest, identity.DeleteUserResponse]
+	listUsers                     *connect.Client[identity.ListUsersRequest, identity.ListUsersResponse]
+	createGroup                   *connect.Client[identity.CreateGroupRequest, identity.CreateGroupResponse]
+	updateGroup                   *connect.Client[identity.UpdateGroupRequest, identity.UpdateGroupResponse]
+	deleteGroup                   *connect.Client[identity.DeleteGroupRequest, identity.DeleteGroupResponse]
+	listGroups                    *connect.Client[identity.ListGroupsRequest, identity.ListGroupsResponse]
+	addGroupMember                *connect.Client[identity.AddGroupMemberRequest, identity.AddGroupMemberResponse]
+	removeGroupMember             *connect.Client[identity.RemoveGroupMemberRequest, identity.RemoveGroupMemberResponse]
+	listGroupMembers              *connect.Client[identity.ListGroupMembersRequest, identity.ListGroupMembersResponse]
+	inviteUser                    *connect.Client[identity.InviteUserRequest, identity.InviteUserResponse]
+	acceptInvitation              *connect.Client[identity.AcceptInvitationRequest, identity.AcceptInvitationResponse]
+	deactivateUser                *connect.Client[identity.DeactivateUserRequest, identity.DeactivateUserResponse]
+	reactivateUser                *connect.Client[identity.ReactivateUserRequest, identity.ReactivateUserResponse]
+	resetUserPassword             *connect.Client[identity.ResetUserPasswordRequest, identity.ResetUserPasswordResponse]
+	setUserQuota                  *connect.Client[identity.SetUserQuotaRequest, identity.SetUserQuotaResponse]
 }
 
 // BeginOAuthLogin calls identity.IdentityService.BeginOAuthLogin.
@@ -762,6 +785,16 @@ func (c *identityServiceClient) RequestEmailChange(ctx context.Context, req *con
 // ConfirmEmailChange calls identity.IdentityService.ConfirmEmailChange.
 func (c *identityServiceClient) ConfirmEmailChange(ctx context.Context, req *connect.Request[identity.ConfirmEmailChangeRequest]) (*connect.Response[identity.ConfirmEmailChangeResponse], error) {
 	return c.confirmEmailChange.CallUnary(ctx, req)
+}
+
+// BeginIdentityVerification calls identity.IdentityService.BeginIdentityVerification.
+func (c *identityServiceClient) BeginIdentityVerification(ctx context.Context, req *connect.Request[identity.BeginIdentityVerificationRequest]) (*connect.Response[identity.BeginIdentityVerificationResponse], error) {
+	return c.beginIdentityVerification.CallUnary(ctx, req)
+}
+
+// GetIdentityVerificationStatus calls identity.IdentityService.GetIdentityVerificationStatus.
+func (c *identityServiceClient) GetIdentityVerificationStatus(ctx context.Context, req *connect.Request[identity.GetIdentityVerificationStatusRequest]) (*connect.Response[identity.GetIdentityVerificationStatusResponse], error) {
+	return c.getIdentityVerificationStatus.CallUnary(ctx, req)
 }
 
 // RequestAdminHelp calls identity.IdentityService.RequestAdminHelp.
@@ -992,6 +1025,9 @@ type IdentityServiceHandler interface {
 	// Email Change (primary-email rotation, double-opt-in)
 	RequestEmailChange(context.Context, *connect.Request[identity.RequestEmailChangeRequest]) (*connect.Response[identity.RequestEmailChangeResponse], error)
 	ConfirmEmailChange(context.Context, *connect.Request[identity.ConfirmEmailChangeRequest]) (*connect.Response[identity.ConfirmEmailChangeResponse], error)
+	// Identity Verification (document + selfie via pluggable provider)
+	BeginIdentityVerification(context.Context, *connect.Request[identity.BeginIdentityVerificationRequest]) (*connect.Response[identity.BeginIdentityVerificationResponse], error)
+	GetIdentityVerificationStatus(context.Context, *connect.Request[identity.GetIdentityVerificationStatusRequest]) (*connect.Response[identity.GetIdentityVerificationStatusResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[identity.RequestAdminHelpRequest]) (*connect.Response[identity.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[identity.ListHelpRequestsRequest]) (*connect.Response[identity.ListHelpRequestsResponse], error)
@@ -1142,6 +1178,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceConfirmEmailChangeProcedure,
 		svc.ConfirmEmailChange,
 		connect.WithSchema(identityServiceMethods.ByName("ConfirmEmailChange")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceBeginIdentityVerificationHandler := connect.NewUnaryHandler(
+		IdentityServiceBeginIdentityVerificationProcedure,
+		svc.BeginIdentityVerification,
+		connect.WithSchema(identityServiceMethods.ByName("BeginIdentityVerification")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGetIdentityVerificationStatusHandler := connect.NewUnaryHandler(
+		IdentityServiceGetIdentityVerificationStatusProcedure,
+		svc.GetIdentityVerificationStatus,
+		connect.WithSchema(identityServiceMethods.ByName("GetIdentityVerificationStatus")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceRequestAdminHelpHandler := connect.NewUnaryHandler(
@@ -1422,6 +1470,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceRequestEmailChangeHandler.ServeHTTP(w, r)
 		case IdentityServiceConfirmEmailChangeProcedure:
 			identityServiceConfirmEmailChangeHandler.ServeHTTP(w, r)
+		case IdentityServiceBeginIdentityVerificationProcedure:
+			identityServiceBeginIdentityVerificationHandler.ServeHTTP(w, r)
+		case IdentityServiceGetIdentityVerificationStatusProcedure:
+			identityServiceGetIdentityVerificationStatusHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestAdminHelpProcedure:
 			identityServiceRequestAdminHelpHandler.ServeHTTP(w, r)
 		case IdentityServiceListHelpRequestsProcedure:
@@ -1571,6 +1623,14 @@ func (UnimplementedIdentityServiceHandler) RequestEmailChange(context.Context, *
 
 func (UnimplementedIdentityServiceHandler) ConfirmEmailChange(context.Context, *connect.Request[identity.ConfirmEmailChangeRequest]) (*connect.Response[identity.ConfirmEmailChangeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.ConfirmEmailChange is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) BeginIdentityVerification(context.Context, *connect.Request[identity.BeginIdentityVerificationRequest]) (*connect.Response[identity.BeginIdentityVerificationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.BeginIdentityVerification is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetIdentityVerificationStatus(context.Context, *connect.Request[identity.GetIdentityVerificationStatusRequest]) (*connect.Response[identity.GetIdentityVerificationStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.GetIdentityVerificationStatus is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) RequestAdminHelp(context.Context, *connect.Request[identity.RequestAdminHelpRequest]) (*connect.Response[identity.RequestAdminHelpResponse], error) {

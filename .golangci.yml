@@ -75,3 +75,6 @@ linters:
 formatters:
   enable:
     - gofumpt
+  exclusions:
+    paths:
+      - gen/

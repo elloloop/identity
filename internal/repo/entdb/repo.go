@@ -1452,5 +1452,107 @@ func (r *entRepository) ListOAuthIdentitiesForUser(ctx context.Context, userID s
 	return out, nil
 }
 
+// ── Identity-verification records ─────────────────────────────────
+
+func identityVerificationFromProto(id string, p *schemapb.IdentityVerificationRecord) *service.IdentityVerificationRecord {
+	if p == nil {
+		return nil
+	}
+	return &service.IdentityVerificationRecord{
+		NodeID:            id,
+		VerificationID:    p.GetVerificationId(),
+		UserID:            p.GetUserId(),
+		Provider:          p.GetProvider(),
+		ProviderSessionID: p.GetProviderSessionId(),
+		Status:            p.GetStatus(),
+		CreatedAt:         p.GetCreatedAt(),
+		UpdatedAt:         p.GetUpdatedAt(),
+		CompletedAt:       p.GetCompletedAt(),
+		RejectionReason:   p.GetRejectionReason(),
+	}
+}
+
+func (r *entRepository) CreateIdentityVerification(ctx context.Context, rec *service.IdentityVerificationRecord) error {
+	if rec == nil {
+		return errors.New("repo: CreateIdentityVerification: nil record")
+	}
+	if rec.VerificationID == "" {
+		return errors.New("repo: CreateIdentityVerification: missing verification id")
+	}
+	msg := &schemapb.IdentityVerificationRecord{
+		VerificationId:    rec.VerificationID,
+		UserId:            rec.UserID,
+		Provider:          rec.Provider,
+		ProviderSessionId: rec.ProviderSessionID,
+		Status:            rec.Status,
+		CreatedAt:         rec.CreatedAt,
+		UpdatedAt:         rec.UpdatedAt,
+		CompletedAt:       rec.CompletedAt,
+		RejectionReason:   rec.RejectionReason,
+	}
+	id, err := r.client.create(ctx, actorStr(rec.UserID), msg)
+	if err != nil {
+		return fmt.Errorf("repo: CreateIdentityVerification: %w", err)
+	}
+	rec.NodeID = id
+	return nil
+}
+
+func (r *entRepository) GetIdentityVerification(ctx context.Context, verificationID string) (*service.IdentityVerificationRecord, error) {
+	if verificationID == "" {
+		return nil, nil
+	}
+	dst := &schemapb.IdentityVerificationRecord{}
+	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.IdentityVerificationRecordVerificationID, verificationID, dst)
+	if errors.Is(err, errNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repo: GetIdentityVerification: %w", err)
+	}
+	return identityVerificationFromProto(id, dst), nil
+}
+
+func (r *entRepository) GetLatestIdentityVerificationForUser(ctx context.Context, userID string) (*service.IdentityVerificationRecord, error) {
+	if userID == "" {
+		return nil, nil
+	}
+	rows, err := r.client.query(ctx, actorStr(userID), &schemapb.IdentityVerificationRecord{}, map[string]any{"user_id": userID})
+	if err != nil {
+		return nil, fmt.Errorf("repo: GetLatestIdentityVerificationForUser: %w", err)
+	}
+	var latest *service.IdentityVerificationRecord
+	for _, row := range rows {
+		rec := identityVerificationFromProto(row.NodeID, row.Message.(*schemapb.IdentityVerificationRecord))
+		if latest == nil || rec.CreatedAt > latest.CreatedAt {
+			latest = rec
+		}
+	}
+	return latest, nil
+}
+
+func (r *entRepository) UpdateIdentityVerificationStatus(ctx context.Context, verificationID, status, rejectionReason string, completedAtMs, updatedAtMs int64) error {
+	if verificationID == "" {
+		return errors.New("repo: UpdateIdentityVerificationStatus: missing verification id")
+	}
+	rec, err := r.GetIdentityVerification(ctx, verificationID)
+	if err != nil {
+		return fmt.Errorf("repo: UpdateIdentityVerificationStatus: lookup: %w", err)
+	}
+	if rec == nil {
+		return errors.New("repo: UpdateIdentityVerificationStatus: not found")
+	}
+	patch := &schemapb.IdentityVerificationRecord{
+		Status:          status,
+		RejectionReason: rejectionReason,
+		CompletedAt:     completedAtMs,
+		UpdatedAt:       updatedAtMs,
+	}
+	if err := r.client.update(ctx, systemActor, rec.NodeID, patch); err != nil {
+		return fmt.Errorf("repo: UpdateIdentityVerificationStatus: %w", err)
+	}
+	return nil
+}
+
 // Compile-time check that entRepository satisfies the interface.
 var _ service.Repository = (*entRepository)(nil)
