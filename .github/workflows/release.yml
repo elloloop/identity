@@ -447,3 +447,66 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
           category: trivy-image
+
+  # ---------------------------------------------------------------------------
+  # Publish the proto sources as versioned archives on the GitHub Release,
+  # alongside a reference to the just-published container image. Consumers
+  # who want to codegen against a specific identity version can download
+  # `identity-protos-<version>.tar.gz` instead of vendoring a git ref.
+  # ---------------------------------------------------------------------------
+  release-protos:
+    name: Publish proto bundle to GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build proto archives
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VER="${VERSION#v}"
+          mkdir -p dist
+          tar -czf "dist/identity-protos-${VER}.tar.gz" proto buf.yaml buf.gen.yaml
+          (cd "$GITHUB_WORKSPACE" && zip -r "dist/identity-protos-${VER}.zip" proto buf.yaml buf.gen.yaml)
+          (cd dist && sha256sum \
+            "identity-protos-${VER}.tar.gz" \
+            "identity-protos-${VER}.zip" \
+            > "identity-protos-${VER}.sha256")
+          ls -la dist/
+
+      - name: Create GitHub Release with proto bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ needs.build-and-push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          VER="${VERSION#v}"
+          notes_file="$(mktemp)"
+          {
+            echo "## Container image"
+            echo
+            echo "\`${IMAGE}:${VER}\`"
+            echo
+            echo "Digest: \`${DIGEST}\`"
+            echo
+            echo "Signed via cosign keyless OIDC and scanned with Trivy (HIGH/CRITICAL gate)."
+            echo
+            echo "## Proto bundle"
+            echo
+            echo "The \`identity-protos-${VER}.{tar.gz,zip}\` archives contain the \`proto/\` tree, \`buf.yaml\`, and \`buf.gen.yaml\` from this tag. Consumers can vendor or codegen against this exact version without depending on a git ref."
+            echo
+            echo "Verify integrity using the accompanying \`identity-protos-${VER}.sha256\` file."
+          } > "$notes_file"
+
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes-file "$notes_file" \
+            "dist/identity-protos-${VER}.tar.gz" \
+            "dist/identity-protos-${VER}.zip" \
+            "dist/identity-protos-${VER}.sha256"
