@@ -553,3 +553,42 @@ func (r *fakeRepo) refreshTokenSnapshot() ([]*RefreshTokenRecord, error) {
 	}
 	return out, nil
 }
+
+// ── Per-recipient throttle ─────────────────────────────────────────────
+
+func TestRequestPasswordReset_PerRecipientThrottle(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.cfg.EmailSendCooldownSeconds = 60
+	svc.emailThrottle = newEmailSendThrottle(int64(svc.cfg.EmailSendCooldownSeconds)*1000, 0)
+
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	seedUser(repo, "alice@test.com", pwHash, "active")
+
+	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com"); err != nil {
+		t.Fatalf("first reset: %v", err)
+	}
+	if err := svc.RequestPasswordReset(context.Background(), "alice@test.com"); err != nil {
+		t.Fatalf("second reset: %v", err)
+	}
+	if got := len(rec.Sent()); got != 1 {
+		t.Fatalf("expected throttle to drop the second send (1 email), got %d", got)
+	}
+}
+
+func TestSendEmailVerification_PerRecipientThrottle(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.cfg.EmailSendCooldownSeconds = 60
+	svc.emailThrottle = newEmailSendThrottle(int64(svc.cfg.EmailSendCooldownSeconds)*1000, 0)
+
+	u := seedUser(repo, "bob@test.com", "x", "active")
+
+	if err := svc.SendEmailVerification(context.Background(), u.ID); err != nil {
+		t.Fatalf("first verify: %v", err)
+	}
+	if err := svc.SendEmailVerification(context.Background(), u.ID); err != nil {
+		t.Fatalf("second verify: %v", err)
+	}
+	if got := len(rec.Sent()); got != 1 {
+		t.Fatalf("expected throttle to drop second send (1 email), got %d", got)
+	}
+}

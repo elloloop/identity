@@ -140,6 +140,11 @@ type Config struct {
 	// How long an email-verification or password-reset token is valid for.
 	EmailTokenExpirySeconds int // GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS (default 86400)
 
+	// Per-recipient cooldown between transactional email sends. Defeats
+	// inbox-bombing via repeated unauthenticated RequestPasswordReset /
+	// SendEmailVerification calls. In-memory per replica.
+	EmailSendCooldownSeconds int // GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS (default 60)
+
 	// Postgres (alternate persistence driver). When PostgresDSN is set
 	// the application bootstrapper may prefer the Postgres-backed
 	// repository over EntDB; the actual driver selection lives in the
@@ -232,7 +237,8 @@ func Load() *Config {
 		SMTPProviders: envStr("GATEWAY_SMTP_PROVIDERS", ""),
 
 		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
-		EmailTokenExpirySeconds: envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
+		EmailTokenExpirySeconds:  envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
+		EmailSendCooldownSeconds: envInt("GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS", 60),
 
 		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),

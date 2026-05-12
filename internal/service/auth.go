@@ -454,6 +454,7 @@ type AuthService struct {
 	// case OAuthLogin returns ErrOAuthDisabled. A non-nil but empty
 	// registry has the same effect when looking up a specific provider.
 	oauthRegistry *oauth.Registry
+	emailThrottle *emailSendThrottle
 	nowFunc       func() time.Time // overridable for testing
 }
 
@@ -512,6 +513,7 @@ func NewAuthServiceWithOAuth(
 		mailer:        mailer,
 		logger:        logger,
 		oauthRegistry: oauthRegistry,
+		emailThrottle: newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
 		nowFunc:       time.Now,
 	}
 }

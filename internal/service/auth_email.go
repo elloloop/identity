@@ -85,6 +85,11 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		return nil
 	}
 
+	if !s.emailThrottle.allow(emailAddr, s.nowMs()) {
+		s.logger.Info("password_reset_throttled", zap.String("email", emailAddr))
+		return nil
+	}
+
 	rawToken := randomToken(32)
 	tokenHash := sha256Hex(rawToken)
 	now := s.nowMs()
@@ -225,6 +230,11 @@ func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) 
 	}
 	if user == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+
+	if !s.emailThrottle.allow(strings.ToLower(user.Email), s.nowMs()) {
+		s.logger.Info("email_verification_throttled", zap.String("user_id", user.ID))
+		return nil
 	}
 
 	rawToken := randomToken(32)
