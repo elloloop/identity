@@ -141,7 +141,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		CreatedAt: msToTime(now),
 		UpdatedAt: msToTime(now),
 	}
-	s.logger.Info("local_signup_success", zap.String("email", email), zap.String("user_id", userID))
+	s.logger.Info("local_signup_success", zap.String("email", redactEmail(email)), zap.String("user_id", userID))
 
 	// Best-effort: fire a verification email. Failures are logged but
 	// must never fail signup itself.
@@ -175,11 +175,11 @@ func (s *AuthService) handleDuplicatePasswordSignup(ctx context.Context, user *U
 		s.logger.Warn(
 			"duplicate_signup_notice_failed",
 			zap.String("user_id", user.ID),
-			zap.String("email", email),
+			zap.String("email", redactEmail(email)),
 			zap.Error(err),
 		)
 	}
-	s.logger.Info("local_signup_existing_email", zap.String("email", email), zap.String("user_id", user.ID))
+	s.logger.Info("local_signup_existing_email", zap.String("email", redactEmail(email)), zap.String("user_id", user.ID))
 	return s.newDuplicateSignupResult(email, fallbackDisplayName(email, name))
 }
 
@@ -368,7 +368,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	}
 
 	s.updateLastLogin(ctx, user.ID)
-	s.logger.Info("local_login_success", zap.String("email", email), zap.String("user_id", user.ID))
+	s.logger.Info("local_login_success", zap.String("email", redactEmail(email)), zap.String("user_id", user.ID))
 	s.audit.Log(
 		ctx, audit.EventLoginSuccess,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
@@ -548,7 +548,7 @@ func (s *AuthService) OAuthLogin(
 	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info(
 		"oauth_login_success",
-		zap.String("email", email),
+		zap.String("email", redactEmail(email)),
 		zap.String("provider", provider),
 		zap.String("user_id", user.ID),
 	)
@@ -661,7 +661,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	s.linkOAuthIdentity(ctx, userID, identity, email, now)
 	s.logger.Info(
 		"oauth_user_provisioned",
-		zap.String("email", email),
+		zap.String("email", redactEmail(email)),
 		zap.String("user_id", userID),
 		zap.String("provider", identity.Provider),
 	)
@@ -689,17 +689,17 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 		u.EmailVerified = true
 		u.EmailVerifiedAt = nowMs
 	}
-	// If the provider asserts a new (verified) email and we found this
-	// user via (provider, sub) — propagate the email change locally.
-	// We deliberately do NOT change email when the local user was
-	// resolved by FindUserByEmail (no change there by definition).
+	// Provider-asserted email changes are NOT auto-applied to the local
+	// account. A compromised provider account (or a provider that lets
+	// admins change member emails) would otherwise let an attacker
+	// rewrite the local email and complete password-reset takeover.
+	// Email changes go through the user-initiated email-change flow with
+	// verification on the new address. Log so operators see the divergence.
 	if email != "" && email != u.Email {
-		patch["email"] = email
-		patch["email_verified"] = true
-		patch["email_verified_at"] = nowMs
-		u.Email = email
-		u.EmailVerified = true
-		u.EmailVerifiedAt = nowMs
+		s.logger.Info("oauth_provider_email_divergence",
+			zap.String("user_id", u.ID),
+			zap.String("provider", identity.Provider),
+		)
 	}
 	if len(patch) == 0 {
 		return
@@ -747,11 +747,28 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 	)
 }
 
-// checkAccountStatus verifies the user's status allows login. When the
-// deployment requires identity verification (cfg.IDVRequired), unverified
-// users are blocked with ErrIDVRequired so the client can route them to
-// the BeginIdentityVerification flow.
-func (s *AuthService) checkAccountStatus(_ context.Context, user *User, _, _ string) error {
+// checkAccountStatus verifies the user's status allows login.
+//
+// Beyond the obvious "status field" check (active / invited / suspended),
+// this also enforces the failed-login lockout window. Every login path —
+// password, OAuth, passkey — calls this BEFORE issuing tokens, so a user
+// in lockout cannot bypass the limit by switching authentication method.
+// When cfg.IDVRequired is set, unverified users are blocked with
+// ErrIDVRequired so the client can route them to BeginIdentityVerification.
+func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr, userAgent string) error {
+	if user.LockedUntil > 0 && user.LockedUntil > s.nowMs() {
+		s.audit.Log(
+			ctx, audit.EventLoginLocked,
+			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{
+				"reason":       "account_locked",
+				"locked_until": user.LockedUntil,
+			}),
+		)
+		return fmt.Errorf("%w: account temporarily locked due to too many failed attempts", ErrAccountLocked)
+	}
+
 	status := strings.ToLower(user.Status)
 	switch status {
 	case "", "active":

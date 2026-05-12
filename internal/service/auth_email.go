@@ -77,11 +77,11 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	user, err := s.repo.FindUserByEmail(ctx, emailAddr)
 	if err != nil {
 		s.logger.Warn("password_reset_lookup_failed",
-			zap.String("email", emailAddr), zap.Error(err))
+			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
 		return nil
 	}
 	if user == nil {
-		s.logger.Info("password_reset_unknown_email", zap.String("email", emailAddr))
+		s.logger.Info("password_reset_unknown_email", zap.String("email", redactEmail(emailAddr)))
 		return nil
 	}
 
