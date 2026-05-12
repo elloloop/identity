@@ -181,7 +181,7 @@ func Load() *Config {
 
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
-		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 3600),
+		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
 
 		TOTPEncryptionKey: envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),
 		TOTPIssuer:        envStr("GATEWAY_TOTP_ISSUER", "Glassa Work"),
