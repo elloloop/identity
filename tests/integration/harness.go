@@ -173,7 +173,11 @@ func startHarness(
 		t.Fatalf("init webauthn: %v", err)
 	}
 
+<<<<<<< HEAD
 	handler, stop, err := app.New(app.Deps{
+=======
+	handler, stop := app.New(app.Deps{
+>>>>>>> e7e994c (audit: update integration harnesses for app.New return-tuple change)
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,
@@ -185,9 +189,12 @@ func startHarness(
 		OAuthRegistry:  oauthRegistry,
 		IDVProvider:    idvProvider,
 	})
+<<<<<<< HEAD
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
+=======
+>>>>>>> e7e994c (audit: update integration harnesses for app.New return-tuple change)
 	t.Cleanup(stop)
 
 	srv := httptest.NewServer(handler)

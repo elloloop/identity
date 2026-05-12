@@ -205,7 +205,11 @@ func startLoadHarness(t *testing.T) *loadHarness {
 		SMTPFrom:                      "no-reply@test.local",
 	}
 	repo := memory.New()
+<<<<<<< HEAD
 	handler, stop, err := app.New(app.Deps{
+=======
+	handler, stop := app.New(app.Deps{
+>>>>>>> e7e994c (audit: update integration harnesses for app.New return-tuple change)
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,
@@ -215,9 +219,12 @@ func startLoadHarness(t *testing.T) *loadHarness {
 		TOTPKey:        []byte("01234567890123456789012345678901"),
 		EmailTransport: email.NewLogOnly(zap.NewNop()),
 	})
+<<<<<<< HEAD
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
+=======
+>>>>>>> e7e994c (audit: update integration harnesses for app.New return-tuple change)
 	t.Cleanup(stop)
 
 	server := httptest.NewServer(handler)

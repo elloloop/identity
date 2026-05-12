@@ -64,7 +64,11 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 		t.Cleanup(closer.Close)
 	}
 
+<<<<<<< HEAD
 	handler, stop, err := app.New(app.Deps{
+=======
+	handler, stop := app.New(app.Deps{
+>>>>>>> e7e994c (audit: update integration harnesses for app.New return-tuple change)
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,
