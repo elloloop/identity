@@ -191,51 +191,64 @@ func main() {
 	defer stopApp()
 
 	// ── Prometheus metrics server ────────────────────────────────────
-	go func() {
-		metricsAddr := fmt.Sprintf(":%d", cfg.MetricsPort)
-		logger.Info("metrics_server_starting", zap.String("addr", metricsAddr))
-		metricsMux := http.NewServeMux()
-		metricsMux.Handle("/metrics", promhttp.Handler())
-		metricsServer := &http.Server{
-			Addr:              metricsAddr,
-			Handler:           metricsMux,
-			ReadHeaderTimeout: 10 * time.Second,
-		}
-		if listenErr := metricsServer.ListenAndServe(); listenErr != nil {
-			logger.Error("metrics_server_failed", zap.Error(listenErr))
-		}
-	}()
+	metricsAddr := fmt.Sprintf(":%d", cfg.MetricsPort)
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsServer := &http.Server{
+		Addr:              metricsAddr,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 16, // 64 KiB
+	}
 
-	// ── Start Connect server ─────────────────────────────────────────
+	// ── Connect server ───────────────────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.ConnectPort)
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           chain,
+		Handler:           http.MaxBytesHandler(chain, cfg.HTTPMaxBodyBytes),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 16, // 64 KiB
 	}
 
+	serverErr := make(chan error, 2)
+	go func() {
+		logger.Info("metrics_server_starting", zap.String("addr", metricsAddr))
+		if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- fmt.Errorf("metrics: %w", err)
+		}
+	}()
 	go func() {
 		logger.Info("identity_service_started", zap.String("addr", addr))
-		if listenErr := server.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
-			logger.Fatal("server_failed", zap.Error(listenErr))
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- fmt.Errorf("connect: %w", err)
 		}
 	}()
 
 	// ── Graceful shutdown ────────────────────────────────────────────
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	sig := <-sigCh
-
-	logger.Info("identity_service_shutting_down", zap.String("signal", sig.String()))
+	select {
+	case sig := <-sigCh:
+		logger.Info("identity_service_shutting_down", zap.String("signal", sig.String()))
+	case err := <-serverErr:
+		logger.Error("server_failed_early", zap.Error(err))
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
+	// Stop accepting first, drain in-flight, then close DB.
 	if shutdownErr := server.Shutdown(ctx); shutdownErr != nil {
 		logger.Error("server_shutdown_error", zap.Error(shutdownErr))
 	}
-
-	// db.Close() is handled by defer above — no duplicate call needed.
+	if shutdownErr := metricsServer.Shutdown(ctx); shutdownErr != nil {
+		logger.Error("metrics_shutdown_error", zap.Error(shutdownErr))
+	}
 	logger.Info("shutdown_complete")
 }
 

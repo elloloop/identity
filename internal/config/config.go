@@ -157,6 +157,26 @@ type Config struct {
 	// Surface via audit.Logger.DroppedCount() on a metric.
 	AuditQueueSize int // GATEWAY_AUDIT_QUEUE_SIZE (default 4096)
 
+	// Maximum HTTP request body size in bytes, enforced via
+	// http.MaxBytesHandler so a slow-POST / oversize-payload attacker
+	// can't exhaust memory. Default 1 MiB — auth RPC bodies are tiny.
+	HTTPMaxBodyBytes int64 // GATEWAY_HTTP_MAX_BODY_BYTES (default 1048576)
+
+	// Trusted proxies: comma-separated list of CIDRs whose
+	// X-Forwarded-For headers the service will honour. Anything outside
+	// these ranges is treated as an untrusted client and its forwarded
+	// headers are ignored — TCP peer IP is used instead.
+	TrustedProxies string // GATEWAY_TRUSTED_PROXIES (default "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32,::1/128")
+
+	// Rate-limit configuration. The in-memory token bucket is keyed by
+	// client IP. quotas are requests-per-window per IP. Set to 0 to
+	// disable the per-endpoint limiter.
+	RateLimitWindowSeconds int // GATEWAY_RATE_LIMIT_WINDOW_SECONDS (default 60)
+	RateLimitSignupPerIP   int // GATEWAY_RATE_LIMIT_SIGNUP_PER_IP (default 10/min)
+	RateLimitLoginPerIP    int // GATEWAY_RATE_LIMIT_LOGIN_PER_IP (default 30/min)
+	RateLimitResetPerIP    int // GATEWAY_RATE_LIMIT_RESET_PER_IP (default 5/min)
+	RateLimitVerifyPerIP   int // GATEWAY_RATE_LIMIT_VERIFY_PER_IP (default 20/min)
+
 	// Postgres (alternate persistence driver). When PostgresDSN is set
 	// the application bootstrapper may prefer the Postgres-backed
 	// repository over EntDB; the actual driver selection lives in the
@@ -253,6 +273,19 @@ func Load() *Config {
 		EmailTokenExpirySeconds:  envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
 		EmailSendCooldownSeconds: envInt("GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS", 60),
 		AuditQueueSize:           envInt("GATEWAY_AUDIT_QUEUE_SIZE", 4096),
+
+		HTTPMaxBodyBytes: int64(envInt("GATEWAY_HTTP_MAX_BODY_BYTES", 1<<20)),
+
+		TrustedProxies: envStr(
+			"GATEWAY_TRUSTED_PROXIES",
+			"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32,::1/128",
+		),
+
+		RateLimitWindowSeconds: envInt("GATEWAY_RATE_LIMIT_WINDOW_SECONDS", 60),
+		RateLimitSignupPerIP:   envInt("GATEWAY_RATE_LIMIT_SIGNUP_PER_IP", 10),
+		RateLimitLoginPerIP:    envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
+		RateLimitResetPerIP:    envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
+		RateLimitVerifyPerIP:   envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
 
 		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),

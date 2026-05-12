@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -80,6 +81,31 @@ func New(deps Deps) (http.Handler, func(), error) {
 	}
 	logger.Info("cors_allowed_origins", zap.Strings("origins", allowedOrigins))
 
+	trustedProxies, err := middleware.ParseTrustedProxies(deps.Config.TrustedProxies)
+	if err != nil {
+		logger.Error("trusted_proxies_invalid", zap.Error(err))
+	}
+	rateLimitWindow := time.Duration(deps.Config.RateLimitWindowSeconds) * time.Second
+	if rateLimitWindow <= 0 {
+		rateLimitWindow = time.Minute
+	}
+	rateLimits := []middleware.PathLimit{
+		{PathPrefix: "/identity.IdentityService/PasswordSignup", Tag: "signup",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitSignupPerIP, 0)},
+		{PathPrefix: "/identity.IdentityService/PasswordLogin", Tag: "login",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0)},
+		{PathPrefix: "/identity.IdentityService/RequestPasswordReset", Tag: "reset",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitResetPerIP, 0)},
+		{PathPrefix: "/identity.IdentityService/SendEmailVerification", Tag: "verify",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitVerifyPerIP, 0)},
+		{PathPrefix: "/identity.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0)},
+		{PathPrefix: "/identity.IdentityService/BeginPasskeyLogin", Tag: "passkey_begin",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0)},
+		{PathPrefix: "/identity.IdentityService/VerifyTotp", Tag: "totp_verify",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0)},
+	}
+
 	// Surface the EntDB schema-apply gap loudly at boot so operators
 	// see exactly which node types identity expects the database to
 	// know about. See internal/app/schema.go for why this only logs.
@@ -127,12 +153,18 @@ func New(deps Deps) (http.Handler, func(), error) {
 	mux.Handle(path, svcHandler)
 
 	// Order (outermost runs first on request path):
-	//   logging → CORS → health → JWKS → auth → Connect handler
+	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → auth → Connect
+	// client-IP must precede rate-limit (the limiter keys on the
+	// resolved IP) and health must precede client-IP so liveness probes
+	// from kubelets cannot be rate-limited.
 	var chain http.Handler = mux
 	chain = middleware.AuthMiddleware(deps.KeyRing, deps.Config.DefaultTenantID, deps.Config.JWTAudience, deps.Config.JWTRequireAudience)(chain)
 	chain = middleware.JWKSMiddleware(deps.KeyRing)(chain)
-	chain = middleware.HealthMiddleware(chain)
+	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)
+	chain = middleware.ClientIPMiddleware(trustedProxies)(chain)
+	chain = middleware.HealthMiddleware(newDBReadinessProbe(deps.DB), chain)
 	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
+	chain = middleware.RecoverMiddleware(logger)(chain)
 	chain = middleware.LoggingMiddleware(logger)(chain)
 	return chain, stopAudit, nil
 }
