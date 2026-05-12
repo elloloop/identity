@@ -410,3 +410,59 @@ func TestLog_AsyncDoesNotBlockCallerOnSlowWriter(t *testing.T) {
 		t.Fatalf("async log appeared to block the caller: %v", elapsed)
 	}
 }
+
+func TestStartAsync_TwiceIsNoOp(t *testing.T) {
+	w := &fakeWriter{}
+	l := NewLogger(w, "t", nil)
+	stop1 := l.StartAsync(8)
+	stop2 := l.StartAsync(8)
+	defer stop1()
+	defer stop2()
+	l.Log(context.Background(), EventLoginSuccess, WithActor("u"))
+	stop1()
+	if w.callCount() != 1 {
+		t.Fatalf("expected 1 call after drain, got %d", w.callCount())
+	}
+}
+
+func TestStartAsync_ZeroQueueSize_UsesDefault(t *testing.T) {
+	w := &fakeWriter{}
+	l := NewLogger(w, "t", nil)
+	stop := l.StartAsync(0)
+	defer stop()
+	l.Log(context.Background(), EventLoginSuccess, WithActor("u"))
+	stop()
+	if w.callCount() != 1 {
+		t.Fatalf("expected 1 call, got %d", w.callCount())
+	}
+}
+
+func TestClose_TwiceIsSafe(t *testing.T) {
+	w := &fakeWriter{}
+	l := NewLogger(w, "t", nil)
+	stop := l.StartAsync(8)
+	stop()
+	stop() // second call must be safe
+}
+
+func TestWriteOne_RecoversFromPanic(t *testing.T) {
+	w := &fakeWriter{}
+	w.beforeReturn = func() { panic("simulated transport panic") }
+	l := NewLogger(w, "t", nil)
+	stop := l.StartAsync(8)
+
+	l.Log(context.Background(), EventLoginSuccess, WithActor("u"))
+	stop() // drain
+	// If the panic propagated, the test would have crashed.
+}
+
+func TestWriteOne_LogsTransportError(t *testing.T) {
+	w := &fakeWriter{returnErr: errors.New("entdb unreachable")}
+	l := NewLogger(w, "t", nil)
+	stop := l.StartAsync(8)
+	l.Log(context.Background(), EventLoginSuccess, WithActor("u"))
+	stop()
+	if w.callCount() != 1 {
+		t.Fatalf("expected 1 call (writer called even on error), got %d", w.callCount())
+	}
+}
