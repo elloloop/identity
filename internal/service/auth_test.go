@@ -724,8 +724,8 @@ func TestVerifyTotp_RecoveryCodeWorks(t *testing.T) {
 	repo.mu.Unlock()
 
 	// Store a recovery code.
-	recoveryCode := "ABCD-EFGH-JKLM"
-	codeHash := totp.HashRecoveryCode(recoveryCode)
+	recoveryCode := "ABCDEFGHJK"
+	codeHash := totp.HashRecoveryCode(recoveryCode, testTotpRecoveryPepper())
 	repo.mu.Lock()
 	rcID := nextNodeID()
 	repo.recoveryCodes[rcID] = &RecoveryCodeRecord{
@@ -760,6 +760,67 @@ func TestVerifyTotp_RecoveryCodeWorks(t *testing.T) {
 	rc := repo.recoveryCodes[rcID]
 	repo.mu.Unlock()
 	assert.True(t, rc.Used)
+}
+
+// TestVerifyTotp_RecoveryCodePepperMismatch confirms that a recovery
+// code stored under a different pepper is rejected. A stolen DB with
+// the old hashes is useless once the pepper rotates.
+func TestVerifyTotp_RecoveryCodePepperMismatch(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	pwHash := hashPW(t, strongPW)
+	u := seedUser(repo, "pepper-mismatch@example.com", pwHash, "active")
+	u.TotpRequired = true
+
+	encrypted, err := totp.EncryptSecret("JBSWY3DPEHPK3PXP", testTotpKey())
+	require.NoError(t, err)
+	repo.mu.Lock()
+	credID := nextNodeID()
+	repo.totpCreds[credID] = &TotpCredRecord{
+		NodeID:          credID,
+		UserID:          u.ID,
+		SecretEncrypted: encrypted,
+		Verified:        true,
+	}
+	repo.mu.Unlock()
+
+	// Store the recovery code hashed under a DIFFERENT pepper than the
+	// service uses. The service must refuse to verify it.
+	recoveryCode := "ABCDEFGHJK"
+	wrongPepper := []byte("a-completely-different-pepper-32by")
+	codeHash := totp.HashRecoveryCode(recoveryCode, wrongPepper)
+	require.NotEmpty(t, codeHash)
+	repo.mu.Lock()
+	rcID := nextNodeID()
+	repo.recoveryCodes[rcID] = &RecoveryCodeRecord{
+		NodeID:   rcID,
+		UserID:   u.ID,
+		CodeHash: codeHash,
+		Used:     false,
+	}
+	repo.mu.Unlock()
+
+	challengeID := "test-challenge-pepper-mismatch"
+	repo.mu.Lock()
+	lcID := nextNodeID()
+	repo.loginChallenges[lcID] = &LoginChallengeRecord{
+		NodeID:      lcID,
+		ChallengeID: challengeID,
+		UserID:      u.ID,
+		ExpiresAt:   time.Now().Add(5 * time.Minute).UnixMilli(),
+		CreatedAt:   time.Now().UnixMilli(),
+	}
+	repo.mu.Unlock()
+
+	_, err = svc.VerifyTotp(context.Background(), challengeID, recoveryCode, "", "")
+	require.Error(t, err, "verify must fail when recovery code was hashed with a different pepper")
+
+	// The code must remain unused so the user is not silently locked out
+	// by a successful-looking flow.
+	repo.mu.Lock()
+	rc := repo.recoveryCodes[rcID]
+	repo.mu.Unlock()
+	assert.False(t, rc.Used)
 }
 
 // ── Passkey registration ────────────────────────────────────────────────

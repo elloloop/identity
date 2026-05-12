@@ -165,14 +165,15 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	}
 
 	handler, stop, err := app.New(app.Deps{
-		Config:         cfg,
-		Logger:         zap.NewNop(),
-		KeyRing:        keyRing,
-		Repo:           authRepo,
-		DB:             dbAdapter,
-		Passkeys:       pkSvc,
-		TOTPKey:        []byte("01234567890123456789012345678901"),
-		EmailTransport: &silentMailer{},
+		Config:             cfg,
+		Logger:             zap.NewNop(),
+		KeyRing:            keyRing,
+		Repo:               authRepo,
+		DB:                 dbAdapter,
+		Passkeys:           pkSvc,
+		TOTPKey:            []byte("01234567890123456789012345678901"),
+		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
+		EmailTransport:     &silentMailer{},
 	})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)

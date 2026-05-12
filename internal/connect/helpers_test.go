@@ -1207,8 +1207,9 @@ func newHarnessWithOAuthRegistry(t *testing.T, registry *oauth.Registry) *testHa
 
 	auditLog := audit.NewLogger(nil, "test", zap.NewNop())
 	totpKey := []byte("01234567890123456789012345678901")
+	totpRecoveryPepper := []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH")
 
-	authSvc := service.NewAuthServiceWithOAuth(repo, cfg, kr, pkSvc, auditLog, totpKey, nil, zap.NewNop(), registry)
+	authSvc := service.NewAuthServiceWithOAuth(repo, cfg, kr, pkSvc, auditLog, totpKey, totpRecoveryPepper, nil, zap.NewNop(), registry)
 	adminSvc := service.NewAdminService(db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())

@@ -13,7 +13,9 @@ import (
 	"github.com/elloloop/identity/pkg/totp"
 )
 
-func totpHashCode(s string) string { return totp.HashRecoveryCode(s) }
+func totpHashCode(s string) string {
+	return totp.HashRecoveryCode(s, testTotpRecoveryPepper())
+}
 
 func TestPasswordSignup_FindUserByEmailErrors(t *testing.T) {
 	r := newErrorRepo()

@@ -206,14 +206,15 @@ func startLoadHarness(t *testing.T) *loadHarness {
 	}
 	repo := memory.New()
 	handler, stop, err := app.New(app.Deps{
-		Config:         cfg,
-		Logger:         zap.NewNop(),
-		KeyRing:        keyRing,
-		Repo:           repo,
-		DB:             repo,
-		Passkeys:       passkeysSvc,
-		TOTPKey:        []byte("01234567890123456789012345678901"),
-		EmailTransport: email.NewLogOnly(zap.NewNop()),
+		Config:             cfg,
+		Logger:             zap.NewNop(),
+		KeyRing:            keyRing,
+		Repo:               repo,
+		DB:                 repo,
+		Passkeys:           passkeysSvc,
+		TOTPKey:            []byte("01234567890123456789012345678901"),
+		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
+		EmailTransport:     email.NewLogOnly(zap.NewNop()),
 	})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)

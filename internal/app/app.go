@@ -38,6 +38,11 @@ type Deps struct {
 	Passkeys *passkeys.WebAuthnService
 	TOTPKey  []byte
 
+	// TOTPRecoveryPepper is the HMAC-SHA-256 key used to hash and
+	// verify recovery codes. Must be >= totp.MinRecoveryPepperBytes
+	// bytes long; the binary refuses to start otherwise.
+	TOTPRecoveryPepper []byte
+
 	// EmailTransport delivers outbound mail. If nil, New constructs a
 	// transport from cfg via buildEmailTransport (so production code
 	// only needs to populate this when a test wants a custom recorder).
@@ -100,7 +105,7 @@ func New(deps Deps) (http.Handler, func(), error) {
 
 	authSvc := service.NewAuthServiceWithOAuth(
 		deps.Repo, deps.Config, deps.KeyRing, deps.Passkeys,
-		auditLog, deps.TOTPKey, mailer, logger,
+		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, logger,
 		oauthRegistry,
 	)
 	adminSvc := service.NewAdminService(deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)

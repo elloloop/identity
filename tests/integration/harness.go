@@ -174,16 +174,17 @@ func startHarness(
 	}
 
 	handler, stop, err := app.New(app.Deps{
-		Config:         cfg,
-		Logger:         zap.NewNop(),
-		KeyRing:        keyRing,
-		Repo:           repo,
-		DB:             db,
-		Passkeys:       pkSvc,
-		TOTPKey:        []byte("01234567890123456789012345678901"),
-		EmailTransport: mailer,
-		OAuthRegistry:  oauthRegistry,
-		IDVProvider:    idvProvider,
+		Config:             cfg,
+		Logger:             zap.NewNop(),
+		KeyRing:            keyRing,
+		Repo:               repo,
+		DB:                 db,
+		Passkeys:           pkSvc,
+		TOTPKey:            []byte("01234567890123456789012345678901"),
+		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
+		EmailTransport:     mailer,
+		OAuthRegistry:      oauthRegistry,
+		IDVProvider:        idvProvider,
 	})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)

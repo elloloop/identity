@@ -168,7 +168,7 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 		totpOK = true
 	} else {
 		// Try recovery code.
-		codeHash := totp.HashRecoveryCode(code)
+		codeHash := totp.HashRecoveryCode(code, s.totpRecoveryPepper)
 		if codeHash != "" {
 			rc, rcErr := s.repo.FindRecoveryCodeByHash(ctx, userID, codeHash)
 			if rcErr == nil && rc != nil && !rc.Used {

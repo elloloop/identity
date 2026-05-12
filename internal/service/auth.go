@@ -441,15 +441,16 @@ var (
 
 // AuthService implements authentication and token management business logic.
 type AuthService struct {
-	repo     Repository
-	tenantID string
-	keyRing  *jwt.KeyRing
-	passkeys *passkeys.WebAuthnService
-	audit    *audit.Logger
-	cfg      *config.Config
-	totpKey  []byte
-	mailer   email.Transport
-	logger   *zap.Logger
+	repo               Repository
+	tenantID           string
+	keyRing            *jwt.KeyRing
+	passkeys           *passkeys.WebAuthnService
+	audit              *audit.Logger
+	cfg                *config.Config
+	totpKey            []byte
+	totpRecoveryPepper []byte
+	mailer             email.Transport
+	logger             *zap.Logger
 	// oauthRegistry holds per-provider Exchangers. May be nil; in that
 	// case OAuthLogin returns ErrOAuthDisabled. A non-nil but empty
 	// registry has the same effect when looking up a specific provider.
@@ -471,10 +472,11 @@ func NewAuthService(
 	passkeysSvc *passkeys.WebAuthnService,
 	auditLogger *audit.Logger,
 	totpKey []byte,
+	totpRecoveryPepper []byte,
 	mailer email.Transport,
 	logger *zap.Logger,
 ) *AuthService {
-	return NewAuthServiceWithOAuth(repo, cfg, keyRing, passkeysSvc, auditLogger, totpKey, mailer, logger, nil)
+	return NewAuthServiceWithOAuth(repo, cfg, keyRing, passkeysSvc, auditLogger, totpKey, totpRecoveryPepper, mailer, logger, nil)
 }
 
 // NewAuthServiceWithOAuth is the extended constructor that injects an
@@ -486,6 +488,7 @@ func NewAuthServiceWithOAuth(
 	passkeysSvc *passkeys.WebAuthnService,
 	auditLogger *audit.Logger,
 	totpKey []byte,
+	totpRecoveryPepper []byte,
 	mailer email.Transport,
 	logger *zap.Logger,
 	oauthRegistry *oauth.Registry,
@@ -502,19 +505,29 @@ func NewAuthServiceWithOAuth(
 	if !cfg.PasswordResetEnabled {
 		logger.Warn("password_reset_disabled")
 	}
+	if len(totpRecoveryPepper) < totp.MinRecoveryPepperBytes {
+		// Refuse to construct an AuthService with a too-short pepper:
+		// any recovery-code path would silently fail, which is worse
+		// than a panic at boot.
+		panic(fmt.Sprintf(
+			"totp recovery pepper too short: got %d bytes, need >= %d",
+			len(totpRecoveryPepper), totp.MinRecoveryPepperBytes,
+		))
+	}
 	return &AuthService{
-		repo:          repo,
-		tenantID:      cfg.DefaultTenantID,
-		keyRing:       keyRing,
-		passkeys:      passkeysSvc,
-		audit:         auditLogger,
-		cfg:           cfg,
-		totpKey:       totpKey,
-		mailer:        mailer,
-		logger:        logger,
-		oauthRegistry: oauthRegistry,
-		emailThrottle: newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
-		nowFunc:       time.Now,
+		repo:               repo,
+		tenantID:           cfg.DefaultTenantID,
+		keyRing:            keyRing,
+		passkeys:           passkeysSvc,
+		audit:              auditLogger,
+		cfg:                cfg,
+		totpKey:            totpKey,
+		totpRecoveryPepper: totpRecoveryPepper,
+		mailer:             mailer,
+		logger:             logger,
+		oauthRegistry:      oauthRegistry,
+		emailThrottle:      newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
+		nowFunc:            time.Now,
 	}
 }
 
@@ -696,7 +709,7 @@ func (s *AuthService) storeRecoveryCodes(ctx context.Context, userID string, cod
 	for _, code := range codes {
 		_, err := s.repo.CreateRecoveryCode(ctx, &RecoveryCodeRecord{
 			UserID:    userID,
-			CodeHash:  totp.HashRecoveryCode(code),
+			CodeHash:  totp.HashRecoveryCode(code, s.totpRecoveryPepper),
 			Used:      false,
 			CreatedAt: now,
 		})

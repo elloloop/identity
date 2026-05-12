@@ -121,6 +121,9 @@ func TestVerifyCode_NonDigitCode(t *testing.T) {
 	}
 }
 
+// testPepper is a fixed 32-byte HMAC key used by recovery-code tests.
+var testPepper = []byte("test-recovery-pepper-0123456789ab") // 32 bytes
+
 func TestGenerateRecoveryCodes_Count(t *testing.T) {
 	codes := GenerateRecoveryCodes(10)
 	if len(codes) != 10 {
@@ -139,11 +142,14 @@ func TestGenerateRecoveryCodes_Count(t *testing.T) {
 }
 
 func TestGenerateRecoveryCodes_Format(t *testing.T) {
-	pattern := regexp.MustCompile(`^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$`)
+	pattern := regexp.MustCompile(`^[A-Z2-7]{10}$`)
 	codes := GenerateRecoveryCodes(10)
 	for _, code := range codes {
 		if !pattern.MatchString(code) {
-			t.Errorf("code %q does not match XXXX-XXXX-XXXX format", code)
+			t.Errorf("code %q does not match 10-char base32 (A-Z, 2-7) format", code)
+		}
+		if len(code) != RecoveryCodeLength {
+			t.Errorf("code %q has length %d, want %d", code, len(code), RecoveryCodeLength)
 		}
 	}
 }
@@ -160,68 +166,113 @@ func TestGenerateRecoveryCodes_Unique(t *testing.T) {
 }
 
 func TestHashRecoveryCode_Deterministic(t *testing.T) {
-	code := "ABCD-EFGH-JKLM"
-	hash1 := HashRecoveryCode(code)
-	hash2 := HashRecoveryCode(code)
+	code := "ABCDEFGHJK"
+	hash1 := HashRecoveryCode(code, testPepper)
+	hash2 := HashRecoveryCode(code, testPepper)
 	if hash1 != hash2 {
-		t.Error("HashRecoveryCode should be deterministic")
+		t.Error("HashRecoveryCode should be deterministic for the same pepper")
 	}
 	if hash1 == "" {
 		t.Error("HashRecoveryCode should not return empty for valid code")
 	}
-	// Should be a hex string of length 64 (SHA-256)
+	// HMAC-SHA-256 hex digest is 64 chars.
 	if len(hash1) != 64 {
 		t.Errorf("expected hash length 64, got %d", len(hash1))
 	}
 }
 
+func TestHashRecoveryCode_PepperChangesOutput(t *testing.T) {
+	code := "ABCDEFGHJK"
+	other := []byte("a-completely-different-pepper-32by") // 32 bytes
+	a := HashRecoveryCode(code, testPepper)
+	b := HashRecoveryCode(code, other)
+	if a == "" || b == "" {
+		t.Fatal("hash unexpectedly empty")
+	}
+	if a == b {
+		t.Error("HashRecoveryCode must produce different outputs for different peppers")
+	}
+}
+
 func TestHashRecoveryCode_Empty(t *testing.T) {
-	hash := HashRecoveryCode("")
-	if hash != "" {
+	if hash := HashRecoveryCode("", testPepper); hash != "" {
 		t.Error("HashRecoveryCode should return empty for empty code")
 	}
 }
 
+func TestHashRecoveryCode_ShortPepperRejected(t *testing.T) {
+	short := make([]byte, MinRecoveryPepperBytes-1)
+	if hash := HashRecoveryCode("ABCDEFGHJK", short); hash != "" {
+		t.Errorf("HashRecoveryCode must reject pepper shorter than %d bytes, got %q",
+			MinRecoveryPepperBytes, hash)
+	}
+}
+
 func TestVerifyRecoveryCode_Correct(t *testing.T) {
-	code := "ABCD-EFGH-JKLM"
-	hash := HashRecoveryCode(code)
-	if !VerifyRecoveryCode(code, hash) {
+	code := "ABCDEFGHJK"
+	hash := HashRecoveryCode(code, testPepper)
+	if !VerifyRecoveryCode(code, hash, testPepper) {
 		t.Error("VerifyRecoveryCode should return true for correct code")
 	}
 }
 
 func TestVerifyRecoveryCode_Wrong(t *testing.T) {
-	code := "ABCD-EFGH-JKLM"
-	hash := HashRecoveryCode(code)
-	if VerifyRecoveryCode("XXXX-YYYY-ZZZZ", hash) {
+	hash := HashRecoveryCode("ABCDEFGHJK", testPepper)
+	if VerifyRecoveryCode("ZZZZZZZZZZ", hash, testPepper) {
 		t.Error("VerifyRecoveryCode should return false for wrong code")
 	}
 }
 
+func TestVerifyRecoveryCode_PepperMismatch(t *testing.T) {
+	code := "ABCDEFGHJK"
+	hash := HashRecoveryCode(code, testPepper)
+	wrongPepper := []byte("a-completely-different-pepper-32by") // 32 bytes
+	if VerifyRecoveryCode(code, hash, wrongPepper) {
+		t.Error("VerifyRecoveryCode must fail when the pepper does not match the one used to hash")
+	}
+}
+
 func TestVerifyRecoveryCode_CaseInsensitive(t *testing.T) {
-	code := "ABCD-EFGH-JKLM"
-	hash := HashRecoveryCode(code)
-	// Lowercase version should also verify
-	if !VerifyRecoveryCode("abcd-efgh-jklm", hash) {
+	code := "ABCDEFGHJK"
+	hash := HashRecoveryCode(code, testPepper)
+	if !VerifyRecoveryCode("abcdefghjk", hash, testPepper) {
 		t.Error("VerifyRecoveryCode should be case-insensitive")
 	}
 }
 
-func TestVerifyRecoveryCode_NoDashes(t *testing.T) {
-	code := "ABCD-EFGH-JKLM"
-	hash := HashRecoveryCode(code)
-	// Without dashes should also verify
-	if !VerifyRecoveryCode("ABCDEFGHJKLM", hash) {
-		t.Error("VerifyRecoveryCode should accept code without dashes")
+func TestVerifyRecoveryCode_StripsWhitespace(t *testing.T) {
+	code := "ABCDEFGHJK"
+	hash := HashRecoveryCode(code, testPepper)
+	if !VerifyRecoveryCode(" abcd efgh jk ", hash, testPepper) {
+		t.Error("VerifyRecoveryCode should ignore whitespace/separators")
 	}
 }
 
 func TestVerifyRecoveryCode_EmptyInputs(t *testing.T) {
-	hash := HashRecoveryCode("ABCD-EFGH-JKLM")
-	if VerifyRecoveryCode("", hash) {
+	hash := HashRecoveryCode("ABCDEFGHJK", testPepper)
+	if VerifyRecoveryCode("", hash, testPepper) {
 		t.Error("VerifyRecoveryCode should return false for empty code")
 	}
-	if VerifyRecoveryCode("ABCD-EFGH-JKLM", "") {
+	if VerifyRecoveryCode("ABCDEFGHJK", "", testPepper) {
 		t.Error("VerifyRecoveryCode should return false for empty hash")
+	}
+}
+
+func TestVerifyRecoveryCode_ConstantTime(t *testing.T) {
+	// Confirms VerifyRecoveryCode rejects a hex hash that differs from
+	// the real one in only one nibble — the same path hmac.Equal takes
+	// when only one bit differs. This is a behavioural check; the
+	// compile-time guarantee that comparison is constant-time comes
+	// from using hmac.Equal in the implementation.
+	code := "ABCDEFGHJK"
+	hash := HashRecoveryCode(code, testPepper)
+	tampered := []byte(hash)
+	if tampered[0] == 'a' {
+		tampered[0] = 'b'
+	} else {
+		tampered[0] = 'a'
+	}
+	if VerifyRecoveryCode(code, string(tampered), testPepper) {
+		t.Error("VerifyRecoveryCode must reject a hash that differs from the real one")
 	}
 }

@@ -1744,12 +1744,22 @@ func TestStubDB_AllMethodsReturnUnavailable(t *testing.T) {
 
 // ── NewAuthService / NewAdminService / NewGroupService / NewHelpService / NewProfileService nil logger ─
 
+func TestNewAuthService_ShortPepperPanics(t *testing.T) {
+	repo := newFakeRepo()
+	cfg := testConfig()
+	kr := testKeyRing(t)
+
+	assert.Panics(t, func() {
+		_ = NewAuthService(repo, cfg, kr, nil, nil, testTotpKey(), []byte("too-short"), nil, nil)
+	}, "AuthService must refuse a short recovery pepper rather than silently accept it")
+}
+
 func TestNewServices_NilLoggerIsSafe(t *testing.T) {
 	repo := newFakeRepo()
 	cfg := testConfig()
 	kr := testKeyRing(t)
 
-	a := NewAuthService(repo, cfg, kr, nil, nil, testTotpKey(), nil, nil)
+	a := NewAuthService(repo, cfg, kr, nil, nil, testTotpKey(), testTotpRecoveryPepper(), nil, nil)
 	assert.NotNil(t, a)
 
 	db := newFakeDB()
