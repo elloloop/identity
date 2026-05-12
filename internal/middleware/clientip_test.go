@@ -29,7 +29,7 @@ func TestParseTrustedProxies_EmptyReturnsEmpty(t *testing.T) {
 func TestClientIP_NoTrustedProxies_UsesPeer(t *testing.T) {
 	trusted, _ := ParseTrustedProxies("")
 	handler := ClientIPMiddleware(trusted)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(r.Header.Get(ClientIPHeader)))
+		_, _ = w.Write([]byte(r.Header.Get(ClientIPHeader)))
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -43,7 +43,7 @@ func TestClientIP_NoTrustedProxies_UsesPeer(t *testing.T) {
 func TestClientIP_TrustedPeer_HonorsXFF(t *testing.T) {
 	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
 	handler := ClientIPMiddleware(trusted)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(r.Header.Get(ClientIPHeader)))
+		_, _ = w.Write([]byte(r.Header.Get(ClientIPHeader)))
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -58,7 +58,7 @@ func TestClientIP_TrustedPeer_HonorsXFF(t *testing.T) {
 func TestClientIP_UntrustedPeer_IgnoresXFF(t *testing.T) {
 	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
 	handler := ClientIPMiddleware(trusted)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(r.Header.Get(ClientIPHeader)))
+		_, _ = w.Write([]byte(r.Header.Get(ClientIPHeader)))
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
