@@ -113,11 +113,7 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 	db := newIssue3DB(repo, auditDB)
 	mailer := NewRecordingMailer()
 
-<<<<<<< HEAD
 	handler, stop, err := app.New(app.Deps{
-=======
-	handler, stop := app.New(app.Deps{
->>>>>>> e7e994c (audit: update integration harnesses for app.New return-tuple change)
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,
@@ -127,12 +123,9 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 		TOTPKey:        []byte("01234567890123456789012345678901"),
 		EmailTransport: mailer,
 	})
-<<<<<<< HEAD
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
-=======
->>>>>>> e7e994c (audit: update integration harnesses for app.New return-tuple change)
 	t.Cleanup(stop)
 
 	srv := httptest.NewServer(handler)
