@@ -172,3 +172,37 @@ func TestParseAllowedOrigins_ValidList_PreservesOrderAndCase(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://A.example.com", "http://localhost:9002", "https://b.example.com"}, out)
 }
+
+// ── Coverage for non-credentialed and edge paths ───────────────────────
+
+func TestParseAllowedOrigins_NoCredentials_AllowsEmptyEntries(t *testing.T) {
+	out, err := ParseAllowedOrigins("http://a.example.com,,http://b.example.com", false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"http://a.example.com", "http://b.example.com"}, out)
+}
+
+func TestParseAllowedOrigins_NoCredentials_OnlyEmpty_ReturnsErr(t *testing.T) {
+	_, err := ParseAllowedOrigins(",,,", false)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrAllowedOriginsEmpty))
+}
+
+func TestParseAllowedOrigins_WhitespaceInsideOrigin_Rejected(t *testing.T) {
+	_, err := ParseAllowedOrigins("http://bad host:9002", true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "whitespace")
+}
+
+func TestParseAllowedOrigins_HostEmpty_Rejected(t *testing.T) {
+	_, err := ParseAllowedOrigins("http://", true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "host")
+}
+
+func TestCORS_PreflightWithoutOrigin_Returns204(t *testing.T) {
+	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+	req := httptest.NewRequest(http.MethodOptions, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
