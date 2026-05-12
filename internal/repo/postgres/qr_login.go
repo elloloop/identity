@@ -16,7 +16,7 @@ func (r *pgRepository) FindQrLoginSession(ctx context.Context, sessionID string)
 	const q = `
 		SELECT id, session_id, status, user_id,
 		       new_device_info, new_device_ip, new_device_user_agent,
-		       approved_device_info,
+		       approved_device_info, poll_secret_hash,
 		       expires_at_ms, created_at_ms, updated_at_ms
 		  FROM qr_login_sessions
 		 WHERE tenant_id = $1 AND session_id = $2
@@ -25,7 +25,7 @@ func (r *pgRepository) FindQrLoginSession(ctx context.Context, sessionID string)
 	err := r.pool.QueryRow(ctx, q, r.tenantID, sessionID).Scan(
 		&s.NodeID, &s.SessionID, &s.Status, &s.UserID,
 		&s.NewDeviceInfo, &s.NewDeviceIP, &s.NewDeviceUserAgent,
-		&s.ApprovedDeviceInfo,
+		&s.ApprovedDeviceInfo, &s.PollSecretHash,
 		&s.ExpiresAt, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if noRows(err) {
@@ -53,14 +53,14 @@ func (r *pgRepository) CreateQrLoginSession(ctx context.Context, s *service.QrLo
 		INSERT INTO qr_login_sessions (
 			id, tenant_id, session_id, status, user_id,
 			new_device_info, new_device_ip, new_device_user_agent,
-			approved_device_info,
+			approved_device_info, poll_secret_hash,
 			expires_at_ms, created_at_ms, updated_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	_, err := r.pool.Exec(
 		ctx, q,
 		id, r.tenantID, s.SessionID, status, s.UserID,
 		s.NewDeviceInfo, s.NewDeviceIP, s.NewDeviceUserAgent,
-		s.ApprovedDeviceInfo,
+		s.ApprovedDeviceInfo, s.PollSecretHash,
 		s.ExpiresAt, s.CreatedAt, s.UpdatedAt,
 	)
 	if err != nil {

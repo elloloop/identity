@@ -164,6 +164,10 @@ message QrLoginSession {
     int64  expires_at             = 8  [(entdb.field) = { kind: "timestamp", pii_false: true }];
     int64  created_at             = 9  [(entdb.field) = { kind: "timestamp", pii_false: true }];
     int64  updated_at             = 10 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    // sha256(poll_secret); the plaintext is returned only to the initiating
+    // device. PollQrLogin rejects sessions where the presented secret does
+    // not hash to this value.
+    string poll_secret_hash       = 11 [(entdb.field) = { pii_false: true }];
 }
 
 // ─── TotpCredential (type_id 23) ───────────────────────────────────────

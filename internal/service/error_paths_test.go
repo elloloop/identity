@@ -416,7 +416,7 @@ func TestInitiateQrLogin_RepoErrors(t *testing.T) {
 	r.failCreateQrLoginSession = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	_, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.Error(t, err)
 }
 
@@ -443,7 +443,7 @@ func TestPollQrLogin_FindErrors(t *testing.T) {
 	r.failFindQrLoginSession = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.PollQrLogin(context.Background(), "sid", "", "")
+	_, err := svc.PollQrLogin(context.Background(), "sid", "anysecret", "", "")
 	require.Error(t, err)
 }
 
@@ -452,13 +452,13 @@ func TestPollQrLogin_GetUserErrors(t *testing.T) {
 	user := seedUser(r.fakeRepo, "qrgu@example.com", "", "active")
 	svc := newTestAuthServiceErr(t, r)
 
-	sid, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), sid, true, user.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
 	require.NoError(t, err)
 
 	r.failGetUser = true
-	_, err = svc.PollQrLogin(context.Background(), sid, "", "")
+	_, err = svc.PollQrLogin(context.Background(), init.SessionID, init.PollSecret, "", "")
 	require.Error(t, err)
 }
 
@@ -467,13 +467,13 @@ func TestPollQrLogin_IssueTokensFails(t *testing.T) {
 	user := seedUser(r.fakeRepo, "qrtok@example.com", "", "active")
 	svc := newTestAuthServiceErr(t, r)
 
-	sid, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), sid, true, user.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
 	require.NoError(t, err)
 
 	r.failCreateRefreshToken = true
-	_, err = svc.PollQrLogin(context.Background(), sid, "", "")
+	_, err = svc.PollQrLogin(context.Background(), init.SessionID, init.PollSecret, "", "")
 	require.Error(t, err)
 }
 
@@ -490,7 +490,7 @@ func TestPollQrLogin_ExpiredCaseReached(t *testing.T) {
 	}
 	r.mu.Unlock()
 
-	res, err := svc.PollQrLogin(context.Background(), "expired-sid", "", "")
+	res, err := svc.PollQrLogin(context.Background(), "expired-sid", "anysecret", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "expired", res.Status)
 }
@@ -499,11 +499,11 @@ func TestApproveQrLogin_UpdateErrors(t *testing.T) {
 	r := newErrorRepo()
 	svc := newTestAuthServiceErr(t, r)
 
-	sid, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
 	r.failUpdateQrLoginSession = true
-	_, err = svc.ApproveQrLogin(context.Background(), sid, true, "u", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, "u", "")
 	require.Error(t, err)
 }
 
@@ -511,11 +511,11 @@ func TestApproveQrLogin_RejectUpdateErrors(t *testing.T) {
 	r := newErrorRepo()
 	svc := newTestAuthServiceErr(t, r)
 
-	sid, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
 	r.failUpdateQrLoginSession = true
-	_, err = svc.ApproveQrLogin(context.Background(), sid, false, "u", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, false, "u", "")
 	require.Error(t, err)
 }
 

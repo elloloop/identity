@@ -205,21 +205,21 @@ func TestSecurity_QRLoginSession_SingleUse(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	user := seedUser(repo, "qr-single@example.com", "", "active")
 
-	sessionID, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.ApproveQrLogin(context.Background(), sessionID, true, user.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
 	require.NoError(t, err)
 
 	// First poll: returns tokens.
-	result1, err := svc.PollQrLogin(context.Background(), sessionID, "", "")
+	result1, err := svc.PollQrLogin(context.Background(), init.SessionID, init.PollSecret, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "approved", result1.Status)
 	assert.NotNil(t, result1.User)
 	assert.NotEmpty(t, result1.AccessToken)
 
 	// Second poll: consumed.
-	result2, err := svc.PollQrLogin(context.Background(), sessionID, "", "")
+	result2, err := svc.PollQrLogin(context.Background(), init.SessionID, init.PollSecret, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "consumed", result2.Status)
 	assert.Nil(t, result2.User)

@@ -190,7 +190,7 @@ func (h *IdentityHandler) InitiateQrLogin(
 ) (*connect.Response[identitypb.InitiateQrLoginResponse], error) {
 	ipAddr := clientIP(req.Header())
 
-	sessionID, qrURL, expiresIn, err := h.auth.InitiateQrLogin(
+	result, err := h.auth.InitiateQrLogin(
 		ctx,
 		req.Msg.DeviceInfo,
 		req.Msg.UserAgent,
@@ -201,9 +201,10 @@ func (h *IdentityHandler) InitiateQrLogin(
 	}
 
 	resp := &identitypb.InitiateQrLoginResponse{
-		SessionId: sessionID,
-		QrUrl:     qrURL,
-		ExpiresIn: expiresIn,
+		SessionId:  result.SessionID,
+		QrUrl:      result.QRURL,
+		ExpiresIn:  result.ExpiresIn,
+		PollSecret: result.PollSecret,
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -258,7 +259,7 @@ func (h *IdentityHandler) PollQrLogin(
 	userAgent := clientUserAgent(req.Header())
 
 	result, err := h.auth.PollQrLogin(
-		ctx, req.Msg.SessionId, ipAddr, userAgent,
+		ctx, req.Msg.SessionId, req.Msg.PollSecret, ipAddr, userAgent,
 	)
 	if err != nil {
 		return nil, toConnectError(err)
