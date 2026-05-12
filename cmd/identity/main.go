@@ -33,6 +33,7 @@ import (
 	"github.com/elloloop/identity/internal/repo"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passkeys"
+	"github.com/elloloop/identity/pkg/totp"
 )
 
 func main() {
@@ -119,6 +120,35 @@ func main() {
 		logger.Warn("using_dev_totp_encryption_key")
 	}
 
+	// ── TOTP recovery-code pepper ────────────────────────────────────
+	// The pepper is the HMAC-SHA-256 key under which every recovery
+	// code hash is stored. It gates offline brute force of a stolen
+	// recovery-code table. Required whenever TOTPEncryptionKey is
+	// configured (i.e. any non-dev deployment); a deterministic dev
+	// fallback is only allowed when the encryption key is also dev.
+	var totpRecoveryPepper []byte
+	if cfg.TOTPRecoveryPepper != "" {
+		totpRecoveryPepper, err = base64.StdEncoding.DecodeString(cfg.TOTPRecoveryPepper)
+		if err != nil {
+			logger.Fatal("totp_recovery_pepper_decode_failed", zap.Error(err))
+		}
+		if len(totpRecoveryPepper) < totp.MinRecoveryPepperBytes {
+			logger.Fatal(
+				"totp_recovery_pepper_too_short",
+				zap.Int("got", len(totpRecoveryPepper)),
+				zap.Int("min", totp.MinRecoveryPepperBytes),
+			)
+		}
+	} else if cfg.TOTPEncryptionKey != "" {
+		logger.Fatal(
+			"totp_recovery_pepper_required",
+			zap.String("env", "GATEWAY_TOTP_RECOVERY_PEPPER"),
+		)
+	} else {
+		totpRecoveryPepper = []byte("glassa-dev-totp-recovery-pepper-do-not-use-in-prod")
+		logger.Warn("using_dev_totp_recovery_pepper")
+	}
+
 	// ── Repository / DB adapters ─────────────────────────────────────
 	// repo.Build dispatches on cfg.RepoDriver and returns matching
 	// service.Repository + service.DB implementations. Both share a
@@ -144,14 +174,15 @@ func main() {
 
 	// ── Build HTTP handler via shared wiring ─────────────────────────
 	chain, stopApp, err := app.New(app.Deps{
-		Config:      cfg,
-		Logger:      logger,
-		KeyRing:     keyRing,
-		Repo:        authRepo,
-		DB:          dbAdapter,
-		Passkeys:    webauthnSvc,
-		TOTPKey:     totpKey,
-		IDVProvider: idvProvider,
+		Config:             cfg,
+		Logger:             logger,
+		KeyRing:            keyRing,
+		Repo:               authRepo,
+		DB:                 dbAdapter,
+		Passkeys:           webauthnSvc,
+		TOTPKey:            totpKey,
+		TOTPRecoveryPepper: totpRecoveryPepper,
+		IDVProvider:        idvProvider,
 	})
 	if err != nil {
 		logger.Fatal("app_init_failed", zap.Error(err))

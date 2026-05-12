@@ -90,6 +90,13 @@ type Config struct {
 	TOTPEncryptionKey string
 	TOTPIssuer        string
 
+	// Pepper used as the HMAC-SHA-256 key for recovery-code hashing.
+	// Base64-encoded; must decode to >= 32 bytes. Required whenever
+	// TOTPEncryptionKey is set (i.e. any non-dev deployment). The
+	// pepper turns a stolen DB into a brute-force-resistant artifact:
+	// without it, an attacker cannot precompute or enumerate hashes.
+	TOTPRecoveryPepper string
+
 	// Login challenge (how long after password success user has to complete 2FA)
 	LoginChallengeExpirySeconds int
 
@@ -207,8 +214,9 @@ func Load() *Config {
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
 		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
 
-		TOTPEncryptionKey: envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),
-		TOTPIssuer:        envStr("GATEWAY_TOTP_ISSUER", "Glassa Work"),
+		TOTPEncryptionKey:  envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),
+		TOTPIssuer:         envStr("GATEWAY_TOTP_ISSUER", "Glassa Work"),
+		TOTPRecoveryPepper: envStr("GATEWAY_TOTP_RECOVERY_PEPPER", ""),
 
 		LoginChallengeExpirySeconds: envInt("GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS", 300),
 

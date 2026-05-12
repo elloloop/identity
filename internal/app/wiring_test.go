@@ -112,12 +112,13 @@ func TestNewBuildsHealthHandler(t *testing.T) {
 			TOTPIssuer:                    "Identity Test",
 			PasswordResetExpirySeconds:    3600,
 		},
-		Logger:   zap.NewNop(),
-		KeyRing:  keyRing,
-		Repo:     repo,
-		DB:       repo,
-		Passkeys: passkeyService,
-		TOTPKey:  []byte("01234567890123456789012345678901"),
+		Logger:             zap.NewNop(),
+		KeyRing:            keyRing,
+		Repo:               repo,
+		DB:                 repo,
+		Passkeys:           passkeyService,
+		TOTPKey:            []byte("01234567890123456789012345678901"),
+		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

@@ -134,38 +134,32 @@ func TestRFC6238_VerifyCode_WithLiveSecret(t *testing.T) {
 
 func TestRFC6238_RecoveryCodeFormat(t *testing.T) {
 	t.Parallel()
-	pattern := regexp.MustCompile(`^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$`)
+	pattern := regexp.MustCompile(`^[A-Z2-7]{10}$`)
 	codes := GenerateRecoveryCodes(100)
 
 	for _, code := range codes {
 		if !pattern.MatchString(code) {
-			t.Errorf("code %q doesn't match XXXX-XXXX-XXXX format", code)
+			t.Errorf("code %q is not 10 chars of RFC 4648 base32", code)
 		}
-		// Verify 12 chars excluding dashes
-		noDash := code[:4] + code[5:9] + code[10:]
-		if len(noDash) != 12 {
-			t.Errorf("code %q has %d chars excluding dashes, want 12", code, len(noDash))
+		if len(code) != RecoveryCodeLength {
+			t.Errorf("code %q length = %d, want %d", code, len(code), RecoveryCodeLength)
 		}
 	}
 }
 
 func TestRFC6238_RecoveryCodeEntropy(t *testing.T) {
 	t.Parallel()
-	// Character set: A-Z (26) + 2-9 (8) = 34 characters, minus exclusions.
-	// Actually the set is [A-Z2-9] = 34 chars.
-	// 12 positions: 34^12 = ~4.83 * 10^18 combinations.
-	// Must be at least 10^9 = 1 billion.
-	//
-	// Even with a reduced charset of just 10 chars, 12 positions = 10^12 > 10^9.
-	// Our charset of 34 gives >> 10^9.
-	charsetSize := 34 // A-Z (26) + 2-9 (8)
-	positions := 12
+	// RFC 4648 base32 alphabet: A-Z (26) + 2-7 (6) = 32 characters.
+	// 10 positions: 32^10 = 2^50 ≈ 1.13 * 10^15 combinations.
+	// Minimum acceptable for backup codes: 1e12 (~40 bits).
+	charsetSize := 32
+	positions := RecoveryCodeLength
 	combinations := 1.0
 	for i := 0; i < positions; i++ {
 		combinations *= float64(charsetSize)
 	}
 
-	minRequired := 1e9
+	minRequired := 1e12
 	if combinations < minRequired {
 		t.Errorf("recovery code entropy: %.2e combinations < %.2e required", combinations, minRequired)
 	}

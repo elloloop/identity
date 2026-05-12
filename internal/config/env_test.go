@@ -37,6 +37,7 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"PasswordResetExpirySeconds", cfg.PasswordResetExpirySeconds, 900},
 		{"TOTPEncryptionKey", cfg.TOTPEncryptionKey, ""},
 		{"TOTPIssuer", cfg.TOTPIssuer, "Glassa Work"},
+		{"TOTPRecoveryPepper", cfg.TOTPRecoveryPepper, ""},
 		{"LoginChallengeExpirySeconds", cfg.LoginChallengeExpirySeconds, 300},
 		{"PasskeyRPID", cfg.PasskeyRPID, "localhost"},
 		{"PasskeyRPName", cfg.PasskeyRPName, "Glassa Work"},

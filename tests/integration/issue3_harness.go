@@ -114,14 +114,15 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 	mailer := NewRecordingMailer()
 
 	handler, stop, err := app.New(app.Deps{
-		Config:         cfg,
-		Logger:         zap.NewNop(),
-		KeyRing:        keyRing,
-		Repo:           repo,
-		DB:             db,
-		Passkeys:       pkSvc,
-		TOTPKey:        []byte("01234567890123456789012345678901"),
-		EmailTransport: mailer,
+		Config:             cfg,
+		Logger:             zap.NewNop(),
+		KeyRing:            keyRing,
+		Repo:               repo,
+		DB:                 db,
+		Passkeys:           pkSvc,
+		TOTPKey:            []byte("01234567890123456789012345678901"),
+		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
+		EmailTransport:     mailer,
 	})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)

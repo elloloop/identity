@@ -2,20 +2,23 @@
 //
 // Features:
 //   - 6-digit codes, 30-second window, base32 secrets
-//   - Recovery codes in XXXX-XXXX-XXXX format (SHA-256 hashed at rest)
+//   - Recovery codes in 10-character RFC 4648 base32 format,
+//     stored as HMAC-SHA-256(pepper, code) — never as raw or salted hashes
 //   - Secret encryption at rest using AES-GCM
 //
 // Security:
 //   - Adjacent window of +/-1 (~30s) absorbs clock drift
-//   - Recovery codes use a 32-char alphabet (no 0/O/1/I) for readability
-//   - All comparisons of hashes use constant-time comparison
+//   - Recovery code hashes require a server-side pepper; a leaked DB
+//     dump alone is insufficient to brute-force codes offline
+//   - All comparisons of recovery hashes use hmac.Equal (constant-time)
 //   - No secrets are ever logged
 package totp
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
+	"encoding/base32"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -26,8 +29,15 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
-// recoveryAlphabet excludes 0/O/1/I for readability.
-const recoveryAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+// RecoveryCodeLength is the number of characters in a recovery code.
+// 10 chars of RFC 4648 base32 = 50 bits of entropy, drawn directly
+// from crypto/rand.
+const RecoveryCodeLength = 10
+
+// MinRecoveryPepperBytes is the minimum length (in raw bytes, post
+// base64 decode) accepted for the recovery-code pepper. 32 bytes is
+// the natural HMAC-SHA-256 key size.
+const MinRecoveryPepperBytes = 32
 
 // GenerateSecret returns a fresh base32 TOTP secret (160-bit / 32-char).
 func GenerateSecret() (string, error) {
@@ -89,31 +99,34 @@ func VerifyCode(secret, code string) bool {
 	return valid
 }
 
-// GenerateRecoveryCodes returns n cryptographically-random recovery codes
-// in XXXX-XXXX-XXXX format. Each code uses a 32-char alphabet for 60 bits
-// of entropy, matching Google/Microsoft backup-code strength.
+// GenerateRecoveryCodes returns n cryptographically-random recovery codes.
+// Each code is RecoveryCodeLength characters drawn from the RFC 4648
+// base32 alphabet, giving 50 bits of entropy per code.
 func GenerateRecoveryCodes(n int) []string {
 	if n <= 0 {
 		return nil
 	}
 	codes := make([]string, 0, n)
 	for i := 0; i < n; i++ {
-		raw := make([]byte, 12)
-		if _, err := rand.Read(raw); err != nil {
-			panic(fmt.Sprintf("crypto/rand failed: %v", err))
-		}
-		chars := make([]byte, 12)
-		for j := 0; j < 12; j++ {
-			chars[j] = recoveryAlphabet[int(raw[j])%len(recoveryAlphabet)]
-		}
-		code := fmt.Sprintf("%s-%s-%s", string(chars[0:4]), string(chars[4:8]), string(chars[8:12]))
-		codes = append(codes, code)
+		codes = append(codes, generateRecoveryCode())
 	}
 	return codes
 }
 
-// normalizeRecoveryCode canonicalizes a recovery code: uppercase, no dashes,
-// no whitespace. This ensures hashing is deterministic regardless of input format.
+func generateRecoveryCode() string {
+	// 10 base32 chars carry 50 bits, so we need at least 7 random
+	// bytes (56 bits). Take 8 bytes to leave headroom for the encoder.
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+	enc := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw[:])
+	return enc[:RecoveryCodeLength]
+}
+
+// normalizeRecoveryCode canonicalizes a recovery code: uppercase, no
+// separators, no whitespace. This makes hashing deterministic
+// regardless of how the user pastes the code back.
 func normalizeRecoveryCode(code string) string {
 	if code == "" {
 		return ""
@@ -127,22 +140,30 @@ func normalizeRecoveryCode(code string) string {
 	return b.String()
 }
 
-// HashRecoveryCode returns the SHA-256 hex digest of the canonicalized recovery code.
-func HashRecoveryCode(code string) string {
+// HashRecoveryCode returns hex(HMAC-SHA-256(pepper, canonical(code))).
+//
+// The pepper is a server-side secret loaded from configuration; an
+// attacker who exfiltrates only the database cannot brute-force codes
+// offline without it. Empty code or insufficiently-long pepper
+// returns the empty string so callers can reject the hash before it
+// is stored.
+func HashRecoveryCode(code string, pepper []byte) string {
 	canonical := normalizeRecoveryCode(code)
-	if canonical == "" {
+	if canonical == "" || len(pepper) < MinRecoveryPepperBytes {
 		return ""
 	}
-	h := sha256.Sum256([]byte(canonical))
-	return hex.EncodeToString(h[:])
+	mac := hmac.New(sha256.New, pepper)
+	mac.Write([]byte(canonical))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// VerifyRecoveryCode checks a recovery code against a stored SHA-256 hash
-// using constant-time comparison to prevent timing attacks.
-func VerifyRecoveryCode(code, hash string) bool {
-	computed := HashRecoveryCode(code)
+// VerifyRecoveryCode checks a recovery code against a stored HMAC-SHA-256
+// hash. Comparison uses hmac.Equal, which is constant-time over the
+// length of the inputs.
+func VerifyRecoveryCode(code, hash string, pepper []byte) bool {
+	computed := HashRecoveryCode(code, pepper)
 	if computed == "" || hash == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(computed), []byte(hash)) == 1
+	return hmac.Equal([]byte(computed), []byte(hash))
 }

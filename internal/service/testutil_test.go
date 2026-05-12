@@ -75,7 +75,7 @@ func newTestAuthServiceWithAudit(t *testing.T, repo *fakeRepo, writer *recording
 	return NewAuthServiceWithOAuth(
 		repo, cfg, kr, passkeysSvc,
 		audit.NewLogger(writer, "test-tenant", nil),
-		testTotpKey(), email.NewLogOnly(zap.NewNop()), zap.NewNop(),
+		testTotpKey(), testTotpRecoveryPepper(), email.NewLogOnly(zap.NewNop()), zap.NewNop(),
 		defaultTestOAuthRegistry(),
 	)
 }
@@ -691,6 +691,13 @@ func testTotpKey() []byte {
 	return []byte("01234567890123456789012345678901") // 32 bytes
 }
 
+// testTotpRecoveryPepper returns a 32-byte deterministic pepper used
+// in unit tests. Recovery-code hashes computed with this pepper are
+// stable across runs so fixtures can hard-code them.
+func testTotpRecoveryPepper() []byte {
+	return []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH") // 40 bytes
+}
+
 func newTestAuthService(t *testing.T, repo *fakeRepo) *AuthService {
 	t.Helper()
 	return newTestAuthServiceWithRegistry(t, repo, defaultTestOAuthRegistry())
@@ -717,7 +724,7 @@ func newTestAuthServiceWithRegistry(t *testing.T, repo *fakeRepo, reg *oauth.Reg
 	return NewAuthServiceWithOAuth(
 		repo, cfg, kr, passkeysSvc,
 		audit.NewLogger(nil, "test", nil),
-		testTotpKey(), email.NewLogOnly(zap.NewNop()), zap.NewNop(),
+		testTotpKey(), testTotpRecoveryPepper(), email.NewLogOnly(zap.NewNop()), zap.NewNop(),
 		reg,
 	)
 }
