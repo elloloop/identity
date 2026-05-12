@@ -138,7 +138,10 @@ type Config struct {
 	//
 	//   GATEWAY_POSTGRES_DSN          e.g. "postgres://user:pass@host:5432/identity?sslmode=disable"
 	//   GATEWAY_POSTGRES_MAX_CONNS    pool size, default 25
-	//   GATEWAY_POSTGRES_AUTO_MIGRATE run pending migrations on connect, default true
+	//   GATEWAY_POSTGRES_AUTO_MIGRATE run pending migrations on connect, default false
+	//                                 (production: run migrations out-of-band as a
+	//                                  separate Job; setting this true on a rolling
+	//                                  deploy can race multiple replicas).
 	PostgresDSN         string
 	PostgresMaxConns    int
 	PostgresAutoMigrate bool
@@ -222,7 +225,7 @@ func Load() *Config {
 
 		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
-		PostgresAutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", true),
+		PostgresAutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", false),
 	}
 }
 
