@@ -127,7 +127,8 @@ func main() {
 	// configured (i.e. any non-dev deployment); a deterministic dev
 	// fallback is only allowed when the encryption key is also dev.
 	var totpRecoveryPepper []byte
-	if cfg.TOTPRecoveryPepper != "" {
+	switch {
+	case cfg.TOTPRecoveryPepper != "":
 		totpRecoveryPepper, err = base64.StdEncoding.DecodeString(cfg.TOTPRecoveryPepper)
 		if err != nil {
 			logger.Fatal("totp_recovery_pepper_decode_failed", zap.Error(err))
@@ -139,12 +140,12 @@ func main() {
 				zap.Int("min", totp.MinRecoveryPepperBytes),
 			)
 		}
-	} else if cfg.TOTPEncryptionKey != "" {
+	case cfg.TOTPEncryptionKey != "":
 		logger.Fatal(
 			"totp_recovery_pepper_required",
 			zap.String("env", "GATEWAY_TOTP_RECOVERY_PEPPER"),
 		)
-	} else {
+	default:
 		totpRecoveryPepper = []byte("glassa-dev-totp-recovery-pepper-do-not-use-in-prod")
 		logger.Warn("using_dev_totp_recovery_pepper")
 	}
