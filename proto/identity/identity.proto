@@ -522,6 +522,10 @@ message InitiateQrLoginResponse {
   string session_id = 1;  // opaque token for polling
   string qr_url     = 2;  // URL to encode in the QR code
   int32  expires_in = 3;  // seconds until session expires
+  // Returned only to the initiating device. Must be presented on every
+  // PollQrLogin call. NEVER embedded in qr_url, so an attacker who only
+  // sees the scanned QR code cannot poll for the issued tokens.
+  string poll_secret = 4;
 }
 
 // Step 2a: Authenticated device looks up session details for display.
@@ -548,7 +552,9 @@ message ApproveQrLoginResponse {
 
 // Step 3: New device polls for completion.
 message PollQrLoginRequest {
-  string session_id = 1;
+  string session_id  = 1;
+  // Returned by InitiateQrLogin only to the initiator. Required.
+  string poll_secret = 2;
 }
 
 message PollQrLoginResponse {

@@ -823,9 +823,9 @@ func TestInitiateQrLogin_LongUserAgentTruncated(t *testing.T) {
 	for i := range ua {
 		ua[i] = 'A'
 	}
-	sessionID, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", string(ua), "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", string(ua), "")
 	require.NoError(t, err)
-	assert.NotEmpty(t, sessionID)
+	assert.NotEmpty(t, init.SessionID)
 }
 
 func TestGetQrLoginSession_EmptyID(t *testing.T) {
@@ -850,11 +850,11 @@ func TestGetQrLoginSession_ExpiresPending(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	sessionID, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 	svc.nowFunc = func() time.Time { return time.Now().Add(time.Hour) }
 
-	info, err := svc.GetQrLoginSession(context.Background(), sessionID)
+	info, err := svc.GetQrLoginSession(context.Background(), init.SessionID)
 	require.NoError(t, err)
 	assert.Equal(t, "expired", info.Status)
 }
@@ -881,11 +881,11 @@ func TestApproveQrLogin_ExpiredPending(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	sessionID, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 	svc.nowFunc = func() time.Time { return time.Now().Add(time.Hour) }
 
-	_, err = svc.ApproveQrLogin(context.Background(), sessionID, true, "u", "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, "u", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrQrLoginExpired))
 }
@@ -895,13 +895,13 @@ func TestApproveQrLogin_AlreadyConsumed(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "qr-approved@example.com", "", "active")
 
-	sessionID, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), sessionID, true, u.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "")
 	require.NoError(t, err)
 
 	// Approving twice should fail with ErrQrLoginNotPending.
-	_, err = svc.ApproveQrLogin(context.Background(), sessionID, true, u.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrQrLoginNotPending))
 }
@@ -910,7 +910,7 @@ func TestPollQrLogin_EmptyID(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.PollQrLogin(context.Background(), "", "", "")
+	_, err := svc.PollQrLogin(context.Background(), "", "anysecret", "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -919,10 +919,10 @@ func TestPollQrLogin_PendingReturnsPending(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	sessionID, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
-	res, err := svc.PollQrLogin(context.Background(), sessionID, "", "")
+	res, err := svc.PollQrLogin(context.Background(), init.SessionID, init.PollSecret, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "pending", res.Status)
 }
@@ -931,20 +931,20 @@ func TestPollQrLogin_ApprovedWithoutUserFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	sessionID, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
 
 	// Manipulate the session: status approved with empty user_id.
 	repo.mu.Lock()
 	for _, sess := range repo.qrSessions {
-		if sess.SessionID == sessionID {
+		if sess.SessionID == init.SessionID {
 			sess.Status = "approved"
 			sess.UserID = ""
 		}
 	}
 	repo.mu.Unlock()
 
-	_, err = svc.PollQrLogin(context.Background(), sessionID, "", "")
+	_, err = svc.PollQrLogin(context.Background(), init.SessionID, init.PollSecret, "", "")
 	require.Error(t, err)
 }
 
@@ -953,16 +953,16 @@ func TestPollQrLogin_ApprovedUserDeleted(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "qr-deleted@example.com", "", "active")
 
-	sessionID, _, _, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
 	require.NoError(t, err)
-	_, err = svc.ApproveQrLogin(context.Background(), sessionID, true, u.ID, "")
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, u.ID, "")
 	require.NoError(t, err)
 
 	repo.mu.Lock()
 	delete(repo.users, u.ID)
 	repo.mu.Unlock()
 
-	_, err = svc.PollQrLogin(context.Background(), sessionID, "", "")
+	_, err = svc.PollQrLogin(context.Background(), init.SessionID, init.PollSecret, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }

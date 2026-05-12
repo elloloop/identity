@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,12 +12,22 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 )
 
+// InitiateQrLoginResult is the value returned by InitiateQrLogin.
+type InitiateQrLoginResult struct {
+	SessionID  string
+	QRURL      string
+	PollSecret string
+	ExpiresIn  int32
+}
+
 // ── InitiateQrLogin ────────────────────────────────────────────────────
 
 // InitiateQrLogin creates a new QR login session for an unauthenticated device.
-// Returns (sessionID, qrURL, expiresIn, error).
-func (s *AuthService) InitiateQrLogin(ctx context.Context, deviceInfo, userAgent, ipAddr string) (string, string, int32, error) {
+// The returned PollSecret is shown only to the initiating device and must be
+// presented on every PollQrLogin call; it is NEVER embedded in the QR URL.
+func (s *AuthService) InitiateQrLogin(ctx context.Context, deviceInfo, userAgent, ipAddr string) (*InitiateQrLoginResult, error) {
 	sessionID := generateSessionID()
+	pollSecret := randomToken(32)
 	now := s.nowMs()
 	expiresIn := secondsToInt32(s.cfg.QRLoginExpirySeconds)
 	expiresAt := now + int64(expiresIn)*1000
@@ -27,12 +38,13 @@ func (s *AuthService) InitiateQrLogin(ctx context.Context, deviceInfo, userAgent
 		NewDeviceInfo:      deviceInfo,
 		NewDeviceIP:        ipAddr,
 		NewDeviceUserAgent: truncate(userAgent, 512),
+		PollSecretHash:     sha256Hex(pollSecret),
 		ExpiresAt:          expiresAt,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	})
 	if err != nil {
-		return "", "", 0, fmt.Errorf("creating QR login session: %w", err)
+		return nil, fmt.Errorf("creating QR login session: %w", err)
 	}
 
 	qrURL := strings.TrimRight(s.cfg.QRLoginBaseURL, "/") + "/qr-login/" + sessionID
@@ -41,7 +53,12 @@ func (s *AuthService) InitiateQrLogin(ctx context.Context, deviceInfo, userAgent
 		zap.String("device_info", deviceInfo),
 		zap.Int32("expires_in", expiresIn),
 	)
-	return sessionID, qrURL, expiresIn, nil
+	return &InitiateQrLoginResult{
+		SessionID:  sessionID,
+		QRURL:      qrURL,
+		PollSecret: pollSecret,
+		ExpiresIn:  expiresIn,
+	}, nil
 }
 
 // ── GetQrLoginSession ──────────────────────────────────────────────────
@@ -149,9 +166,14 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 
 // PollQrLogin polls a QR login session. When approved, issues tokens and
 // marks the session consumed. Returns (status, user, accessToken, refreshToken, error).
-func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, ipAddr, userAgent string) (*PollQrResult, error) {
+// pollSecret must match the value returned by InitiateQrLogin; otherwise the
+// session appears "expired" to the caller — a stolen QR URL alone is useless.
+func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ipAddr, userAgent string) (*PollQrResult, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
+	}
+	if pollSecret == "" {
+		return &PollQrResult{Status: "expired"}, nil
 	}
 
 	session, err := s.repo.FindQrLoginSession(ctx, sessionID)
@@ -161,6 +183,10 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, ipAddr, userAg
 	if session == nil {
 		// Do not distinguish "never existed" from "expired" -- both
 		// look the same to a brute-force attacker.
+		return &PollQrResult{Status: "expired"}, nil
+	}
+
+	if subtle.ConstantTimeCompare([]byte(sha256Hex(pollSecret)), []byte(session.PollSecretHash)) != 1 {
 		return &PollQrResult{Status: "expired"}, nil
 	}
 

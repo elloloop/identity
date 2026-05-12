@@ -278,9 +278,13 @@ type QrLoginSessionRecord struct {
 	NewDeviceIP        string
 	NewDeviceUserAgent string
 	ApprovedDeviceInfo string
-	ExpiresAt          int64
-	CreatedAt          int64
-	UpdatedAt          int64
+	// PollSecretHash is sha256(poll_secret) where poll_secret is returned
+	// only to the initiating device by InitiateQrLogin. PollQrLogin must
+	// present the matching plaintext or the session looks "expired".
+	PollSecretHash string
+	ExpiresAt      int64
+	CreatedAt      int64
+	UpdatedAt      int64
 }
 
 // TotpCredRecord represents a stored TOTP credential.

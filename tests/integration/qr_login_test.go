@@ -43,12 +43,19 @@ func TestQrLogin_HappyPath(t *testing.T) {
 	if !strings.Contains(initiate.Msg.QrUrl, initiate.Msg.SessionId) {
 		t.Fatalf("qr url %q does not contain session id %q", initiate.Msg.QrUrl, initiate.Msg.SessionId)
 	}
+	if initiate.Msg.PollSecret == "" {
+		t.Fatalf("expected non-empty poll_secret from InitiateQrLogin")
+	}
+	if strings.Contains(initiate.Msg.QrUrl, initiate.Msg.PollSecret) {
+		t.Fatalf("poll_secret must not leak into the QR URL")
+	}
 	h.WaitForQrLoginSession(t, initiate.Msg.SessionId, func(rec *service.QrLoginSessionRecord) bool {
 		return rec.Status == "pending" && rec.ExpiresAt > time.Now().UnixMilli()
 	})
 
 	pending, err := h.Client.PollQrLogin(ctx, newReq(&identitypb.PollQrLoginRequest{
-		SessionId: initiate.Msg.SessionId,
+		SessionId:  initiate.Msg.SessionId,
+		PollSecret: initiate.Msg.PollSecret,
 	}, map[string]string{
 		"X-Forwarded-For": "203.0.113.10",
 		"User-Agent":      "Chrome Mobile",
@@ -58,6 +65,18 @@ func TestQrLogin_HappyPath(t *testing.T) {
 	}
 	if pending.Msg.Status != identitypb.QrLoginStatus_QR_LOGIN_STATUS_PENDING {
 		t.Fatalf("pending status = %v, want PENDING", pending.Msg.Status)
+	}
+
+	// Polling without the secret must look like "expired" — a stolen QR URL
+	// alone is useless for completing login.
+	noSecret, err := h.Client.PollQrLogin(ctx, connect.NewRequest(&identitypb.PollQrLoginRequest{
+		SessionId: initiate.Msg.SessionId,
+	}))
+	if err != nil {
+		t.Fatalf("PollQrLogin without secret: %v", err)
+	}
+	if noSecret.Msg.Status != identitypb.QrLoginStatus_QR_LOGIN_STATUS_EXPIRED {
+		t.Fatalf("missing poll_secret should appear expired, got %v", noSecret.Msg.Status)
 	}
 
 	approver := h.AuthedClient(signup.Msg.AccessToken)
@@ -75,7 +94,8 @@ func TestQrLogin_HappyPath(t *testing.T) {
 	}
 
 	poll, err := h.Client.PollQrLogin(ctx, newReq(&identitypb.PollQrLoginRequest{
-		SessionId: initiate.Msg.SessionId,
+		SessionId:  initiate.Msg.SessionId,
+		PollSecret: initiate.Msg.PollSecret,
 	}, map[string]string{
 		"X-Forwarded-For": "203.0.113.10",
 		"User-Agent":      "Chrome Mobile",
@@ -94,7 +114,8 @@ func TestQrLogin_HappyPath(t *testing.T) {
 	}
 
 	consumed, err := h.Client.PollQrLogin(ctx, connect.NewRequest(&identitypb.PollQrLoginRequest{
-		SessionId: initiate.Msg.SessionId,
+		SessionId:  initiate.Msg.SessionId,
+		PollSecret: initiate.Msg.PollSecret,
 	}))
 	if err != nil {
 		t.Fatalf("PollQrLogin consumed: %v", err)
@@ -142,7 +163,8 @@ func TestQrLogin_RejectPath(t *testing.T) {
 	}
 
 	poll, err := h.Client.PollQrLogin(ctx, connect.NewRequest(&identitypb.PollQrLoginRequest{
-		SessionId: initiate.Msg.SessionId,
+		SessionId:  initiate.Msg.SessionId,
+		PollSecret: initiate.Msg.PollSecret,
 	}))
 	if err != nil {
 		t.Fatalf("PollQrLogin rejected: %v", err)
@@ -203,7 +225,8 @@ func TestQrLogin_ExpiryPath(t *testing.T) {
 	}
 
 	poll, err := h.Client.PollQrLogin(ctx, connect.NewRequest(&identitypb.PollQrLoginRequest{
-		SessionId: initiate.Msg.SessionId,
+		SessionId:  initiate.Msg.SessionId,
+		PollSecret: initiate.Msg.PollSecret,
 	}))
 	if err != nil {
 		t.Fatalf("PollQrLogin expired: %v", err)
