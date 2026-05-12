@@ -42,8 +42,8 @@ func TestConfigFromEnvDefaultsInvalidValues(t *testing.T) {
 	if cfg.ConnTimeout != DefaultConnTimeout {
 		t.Fatalf("ConnTimeout = %v", cfg.ConnTimeout)
 	}
-	if !cfg.AutoMigrate {
-		t.Fatal("AutoMigrate = false")
+	if cfg.AutoMigrate {
+		t.Fatal("AutoMigrate = true; default must be false")
 	}
 }
 

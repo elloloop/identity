@@ -55,7 +55,7 @@ func ConfigFromEnv(tenantID string) Config {
 		DSN:         os.Getenv("GATEWAY_POSTGRES_DSN"),
 		MaxConns:    envInt32("GATEWAY_POSTGRES_MAX_CONNS", DefaultMaxConns),
 		ConnTimeout: time.Duration(envInt("GATEWAY_POSTGRES_CONN_TIMEOUT_MS", int(DefaultConnTimeout/time.Millisecond))) * time.Millisecond,
-		AutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", true),
+		AutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", false),
 		TenantID:    tenantID,
 	}
 }

@@ -24,9 +24,11 @@
 //
 // Schema DDL lives under migrations/ and is applied via
 // golang-migrate/migrate using the embed.FS source. By default New()
-// runs pending migrations on first connect. Set Config.AutoMigrate to
-// false (or GATEWAY_POSTGRES_AUTO_MIGRATE=false) to require explicit
-// migrations from a deploy pipeline.
+// does NOT run pending migrations on connect — production deploys run
+// migrations out-of-band as a separate Job, so a rolling rollout never
+// races two replicas to apply the same change. Set Config.AutoMigrate
+// to true (or GATEWAY_POSTGRES_AUTO_MIGRATE=true) only for local dev
+// and single-replica environments.
 //
 // # Multi-tenancy
 //
