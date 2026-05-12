@@ -71,9 +71,14 @@ func authenticatedUserID(headers headerReader) string {
 	return headers.Get("X-Authenticated-User-Id")
 }
 
-// clientIP extracts the client IP from the X-Forwarded-For header, falling
-// back to X-Real-Ip.
+// clientIP returns the client IP resolved by ClientIPMiddleware via the
+// trusted-proxy allowlist. Direct reads of X-Forwarded-For are not
+// trustworthy: anyone on the public internet can spoof that header.
 func clientIP(headers headerReader) string {
+	if ip := headers.Get("X-Client-IP"); ip != "" {
+		return ip
+	}
+	// Fallbacks for tests / pre-middleware code paths.
 	if ip := headers.Get("X-Forwarded-For"); ip != "" {
 		return ip
 	}
