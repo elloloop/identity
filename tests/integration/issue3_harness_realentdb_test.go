@@ -70,7 +70,7 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 		t.Fatalf("repo.Build: %v", err)
 	}
 
-	handler := app.New(app.Deps{
+	handler, err := app.New(app.Deps{
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,
@@ -80,6 +80,9 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 		TOTPKey:        []byte("01234567890123456789012345678901"),
 		EmailTransport: issue3SilentMailer{},
 	})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)

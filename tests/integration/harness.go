@@ -173,7 +173,7 @@ func startHarness(
 		t.Fatalf("init webauthn: %v", err)
 	}
 
-	handler := app.New(app.Deps{
+	handler, err := app.New(app.Deps{
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,
@@ -185,6 +185,9 @@ func startHarness(
 		OAuthRegistry:  oauthRegistry,
 		IDVProvider:    idvProvider,
 	})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)

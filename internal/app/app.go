@@ -7,6 +7,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"go.uber.org/zap"
@@ -59,11 +60,17 @@ type Deps struct {
 // New builds the full HTTP handler stack: middleware chain wrapping
 // the Connect-RPC handler. The returned handler is ready to be served
 // via http.Server (or httptest.NewServer in tests).
-func New(deps Deps) http.Handler {
+func New(deps Deps) (http.Handler, error) {
 	logger := deps.Logger
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+
+	allowedOrigins, err := middleware.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
+	if err != nil {
+		return nil, fmt.Errorf("cors config invalid: %w", err)
+	}
+	logger.Info("cors_allowed_origins", zap.Strings("origins", allowedOrigins))
 
 	// Surface the EntDB schema-apply gap loudly at boot so operators
 	// see exactly which node types identity expects the database to
@@ -113,7 +120,7 @@ func New(deps Deps) http.Handler {
 	chain = middleware.AuthMiddleware(deps.KeyRing, deps.Config.DefaultTenantID)(chain)
 	chain = middleware.JWKSMiddleware(deps.KeyRing)(chain)
 	chain = middleware.HealthMiddleware(chain)
-	chain = middleware.CORSMiddleware(deps.Config.AllowedOrigins)(chain)
+	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
 	chain = middleware.LoggingMiddleware(logger)(chain)
-	return chain
+	return chain, nil
 }

@@ -205,7 +205,7 @@ func startLoadHarness(t *testing.T) *loadHarness {
 		SMTPFrom:                      "no-reply@test.local",
 	}
 	repo := memory.New()
-	handler := app.New(app.Deps{
+	handler, err := app.New(app.Deps{
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,
@@ -215,6 +215,9 @@ func startLoadHarness(t *testing.T) *loadHarness {
 		TOTPKey:        []byte("01234567890123456789012345678901"),
 		EmailTransport: email.NewLogOnly(zap.NewNop()),
 	})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
 
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
