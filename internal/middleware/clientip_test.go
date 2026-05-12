@@ -26,46 +26,51 @@ func TestParseTrustedProxies_EmptyReturnsEmpty(t *testing.T) {
 	assert.Empty(t, out)
 }
 
+// captureClientIPHandler returns a handler that records the resolved
+// client IP into the provided pointer rather than writing it back to
+// the response body. Avoids gosec's G705 false-positive on writing
+// header-derived bytes to a ResponseWriter in tests.
+func captureClientIPHandler(seen *string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*seen = r.Header.Get(ClientIPHeader)
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
 func TestClientIP_NoTrustedProxies_UsesPeer(t *testing.T) {
 	trusted, _ := ParseTrustedProxies("")
-	handler := ClientIPMiddleware(trusted)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(r.Header.Get(ClientIPHeader)))
-	}))
+	var got string
+	handler := ClientIPMiddleware(trusted)(captureClientIPHandler(&got))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.10:55555"
 	req.Header.Set("X-Forwarded-For", "1.2.3.4")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	assert.Equal(t, "203.0.113.10", rec.Body.String())
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	assert.Equal(t, "203.0.113.10", got)
 }
 
 func TestClientIP_TrustedPeer_HonorsXFF(t *testing.T) {
 	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
-	handler := ClientIPMiddleware(trusted)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(r.Header.Get(ClientIPHeader)))
-	}))
+	var got string
+	handler := ClientIPMiddleware(trusted)(captureClientIPHandler(&got))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.5:80"
 	req.Header.Set("X-Forwarded-For", "1.2.3.4, 10.0.0.7")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	assert.Equal(t, "1.2.3.4", rec.Body.String(),
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	assert.Equal(t, "1.2.3.4", got,
 		"should walk right-to-left, skipping trusted hops")
 }
 
 func TestClientIP_UntrustedPeer_IgnoresXFF(t *testing.T) {
 	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
-	handler := ClientIPMiddleware(trusted)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(r.Header.Get(ClientIPHeader)))
-	}))
+	var got string
+	handler := ClientIPMiddleware(trusted)(captureClientIPHandler(&got))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.10:80" // untrusted public IP
 	req.Header.Set("X-Forwarded-For", "spoofed-attacker-ip")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	assert.Equal(t, "203.0.113.10", rec.Body.String(),
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	assert.Equal(t, "203.0.113.10", got,
 		"untrusted peer's XFF must be ignored")
 }
