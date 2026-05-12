@@ -58,9 +58,12 @@ type Deps struct {
 }
 
 // New builds the full HTTP handler stack: middleware chain wrapping
-// the Connect-RPC handler. The returned handler is ready to be served
-// via http.Server (or httptest.NewServer in tests).
-func New(deps Deps) (http.Handler, error) {
+// the Connect-RPC handler. The returned shutdown func must be called
+// during graceful termination so background workers (audit flusher etc.)
+// drain cleanly. Configuration errors (e.g. invalid CORS origins) are
+// returned without starting the audit flusher.
+func New(deps Deps) (http.Handler, func(), error) {
+	noopStop := func() {}
 	logger := deps.Logger
 	if logger == nil {
 		logger = zap.NewNop()
@@ -68,7 +71,7 @@ func New(deps Deps) (http.Handler, error) {
 
 	allowedOrigins, err := middleware.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
 	if err != nil {
-		return nil, fmt.Errorf("cors config invalid: %w", err)
+		return nil, noopStop, fmt.Errorf("cors config invalid: %w", err)
 	}
 	logger.Info("cors_allowed_origins", zap.Strings("origins", allowedOrigins))
 
@@ -80,6 +83,10 @@ func New(deps Deps) (http.Handler, error) {
 	}
 
 	auditLog := audit.NewLogger(deps.DB, deps.Config.DefaultTenantID, logger)
+	// Move audit writes off the auth hot path. Drops are counted and
+	// surfaced via auditLog.DroppedCount(). Caller must invoke the
+	// returned shutdown func to drain pending writes on termination.
+	stopAudit := auditLog.StartAsync(deps.Config.AuditQueueSize)
 
 	mailer := deps.EmailTransport
 	if mailer == nil {
@@ -122,5 +129,5 @@ func New(deps Deps) (http.Handler, error) {
 	chain = middleware.HealthMiddleware(chain)
 	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
 	chain = middleware.LoggingMiddleware(logger)(chain)
-	return chain, nil
+	return chain, stopAudit, nil
 }
