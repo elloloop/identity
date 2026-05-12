@@ -269,7 +269,7 @@ func Load() *Config {
 		SMTPTLS:       envBool("GATEWAY_SMTP_TLS", true),
 		SMTPProviders: envStr("GATEWAY_SMTP_PROVIDERS", ""),
 
-		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
+		AppBaseURL:               envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
 		EmailTokenExpirySeconds:  envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
 		EmailSendCooldownSeconds: envInt("GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS", 60),
 		AuditQueueSize:           envInt("GATEWAY_AUDIT_QUEUE_SIZE", 4096),
