@@ -18,11 +18,15 @@ import (
 // chainHandler wraps the middleware stack: CORS -> Health -> JWKS -> Auth -> handler.
 func chainHandler(t *testing.T, kr *jwtpkg.KeyRing, allowedOrigins string, inner http.Handler) http.Handler {
 	t.Helper()
+	parsed, err := ParseAllowedOrigins(allowedOrigins, true)
+	if err != nil {
+		t.Fatalf("ParseAllowedOrigins: %v", err)
+	}
 	h := inner
 	h = AuthMiddleware(kr, "", "", false)(h)
 	h = JWKSMiddleware(kr)(h)
 	h = HealthMiddleware(h)
-	h = CORSMiddleware(allowedOrigins)(h)
+	h = CORSMiddleware(parsed)(h)
 	return h
 }
 

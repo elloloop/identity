@@ -91,12 +91,13 @@ func TestNewBuildsHealthHandler(t *testing.T) {
 		t.Fatalf("NewWebAuthnService: %v", err)
 	}
 	repo := memory.New()
-	handler := New(Deps{
+	handler, err := New(Deps{
 		Config: &config.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
 			DefaultTenantID:               "tenant",
 			AuthAllowLocal:                true,
 			PasswordSignupEnabled:         true,
 			PasswordResetEnabled:          true,
+			AllowedOrigins:                "http://localhost:9002",
 			JWTExpirySeconds:              900,
 			RefreshExpirySeconds:          604800,
 			LoginMaxFailedAttempts:        5,
@@ -118,6 +119,9 @@ func TestNewBuildsHealthHandler(t *testing.T) {
 		Passkeys: passkeyService,
 		TOTPKey:  []byte("01234567890123456789012345678901"),
 	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/healthz", nil))

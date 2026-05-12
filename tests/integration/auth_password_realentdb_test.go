@@ -164,7 +164,7 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 		t.Fatalf("init webauthn: %v", err)
 	}
 
-	handler := app.New(app.Deps{
+	handler, err := app.New(app.Deps{
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,
@@ -174,6 +174,9 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 		TOTPKey:        []byte("01234567890123456789012345678901"),
 		EmailTransport: &silentMailer{},
 	})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
