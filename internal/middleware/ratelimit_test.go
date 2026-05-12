@@ -128,3 +128,30 @@ func TestRateLimitMiddleware_NonMatchingPath_Bypasses(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 	}
 }
+
+func TestFixedWindowLimiter_EvictsOldEntries(t *testing.T) {
+	l := NewFixedWindowLimiter(50*time.Millisecond, 5, 2)
+	now := time.Now()
+	for _, k := range []string{"a", "b"} {
+		assert.True(t, l.Allow(k, now))
+	}
+	// Now insert "c"; with maxSize=2 the limiter has to evict.
+	// First it tries to drop entries whose window expired; advance
+	// the clock past the window so "a" and "b" are evictable.
+	assert.True(t, l.Allow("c", now.Add(60*time.Millisecond)))
+}
+
+func TestFixedWindowLimiter_EvictsArbitraryWhenAllWithinWindow(t *testing.T) {
+	l := NewFixedWindowLimiter(time.Minute, 5, 2)
+	now := time.Now()
+	assert.True(t, l.Allow("a", now))
+	assert.True(t, l.Allow("b", now))
+	// All entries still within window; eviction has to drop one
+	// arbitrary entry to fit "c".
+	assert.True(t, l.Allow("c", now))
+}
+
+func TestFixedWindowLimiter_NilReceiverAlwaysAllows(t *testing.T) {
+	var l *FixedWindowLimiter
+	assert.True(t, l.Allow("a", time.Now()))
+}

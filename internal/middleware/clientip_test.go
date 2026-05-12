@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -73,4 +74,61 @@ func TestClientIP_UntrustedPeer_IgnoresXFF(t *testing.T) {
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 	assert.Equal(t, "203.0.113.10", got,
 		"untrusted peer's XFF must be ignored")
+}
+
+func TestClientIPFromContext_NotSet(t *testing.T) {
+	if got := ClientIPFromContext(context.Background()); got != "" {
+		t.Fatalf("expected empty, got %q", got)
+	}
+}
+
+func TestClientIPFromContext_PropagatedByMiddleware(t *testing.T) {
+	trusted, _ := ParseTrustedProxies("")
+	var seenCtx string
+	h := ClientIPMiddleware(trusted)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seenCtx = ClientIPFromContext(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.10:55555"
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	assert.Equal(t, "203.0.113.10", seenCtx)
+}
+
+func TestStripPort_NoPort(t *testing.T) {
+	// SplitHostPort fails on no-port input; stripPort returns the input.
+	if got := stripPort("203.0.113.10"); got != "203.0.113.10" {
+		t.Fatalf("got %q, want 203.0.113.10", got)
+	}
+}
+
+func TestResolveClientIP_TrustedPeerEmptyXFF_FallsBackToPeer(t *testing.T) {
+	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.5:80"
+	// No XFF header.
+	got := resolveClientIP(req, trusted)
+	assert.Equal(t, "10.0.0.5", got)
+}
+
+func TestResolveClientIP_AllTrustedHops_FallsBackToLeftmost(t *testing.T) {
+	trusted, _ := ParseTrustedProxies("10.0.0.0/8,192.168.0.0/16")
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.5:80"
+	req.Header.Set("X-Forwarded-For", "10.0.0.7, 192.168.1.1, 10.0.0.9")
+	got := resolveClientIP(req, trusted)
+	assert.Equal(t, "10.0.0.7", got, "all hops trusted; fall back to left-most")
+}
+
+func TestResolveClientIP_XFFWithEmptyEntries(t *testing.T) {
+	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.5:80"
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, , 10.0.0.7")
+	got := resolveClientIP(req, trusted)
+	assert.Equal(t, "1.2.3.4", got, "empty entries skipped, real client returned")
+}
+
+func TestIpIn_ParseFailsReturnsFalse(t *testing.T) {
+	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
+	assert.False(t, ipIn("not-an-ip", trusted))
 }
