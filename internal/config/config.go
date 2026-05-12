@@ -43,6 +43,15 @@ type Config struct {
 	JWTKeys          string
 	JWTExpirySeconds int
 
+	// JWT audience. When non-empty, minted access tokens carry this as
+	// the "aud" claim and the verifier enforces a match. When
+	// JWTRequireAudience is true, tokens with no "aud" claim are also
+	// rejected; the false default exists so a deploy can roll out the
+	// mint-side change first, wait for in-flight tokens to expire, then
+	// flip to required.
+	JWTAudience        string
+	JWTRequireAudience bool
+
 	// Refresh tokens
 	RefreshExpirySeconds int
 
@@ -160,8 +169,10 @@ func Load() *Config {
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),
 
-		JWTKeys:          envStr("GATEWAY_JWT_KEYS", ""),
-		JWTExpirySeconds: envInt("GATEWAY_JWT_EXPIRY_SECONDS", 900),
+		JWTKeys:            envStr("GATEWAY_JWT_KEYS", ""),
+		JWTExpirySeconds:   envInt("GATEWAY_JWT_EXPIRY_SECONDS", 900),
+		JWTAudience:        envStr("GATEWAY_JWT_AUDIENCE", ""),
+		JWTRequireAudience: envBool("GATEWAY_JWT_REQUIRE_AUD", false),
 
 		RefreshExpirySeconds: envInt("GATEWAY_REFRESH_EXPIRY_SECONDS", 604800),
 

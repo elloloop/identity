@@ -46,7 +46,7 @@ func TestSec_AlgNone_Rejected(t *testing.T) {
 	pb, _ := json.Marshal(payload)
 	tok := b64(hb) + "." + b64(pb) + "."
 
-	_, err := VerifyAccessToken(tok, kr, "")
+	_, err := VerifyAccessToken(tok, kr, "", "", false)
 	require.Error(t, err, "alg=none MUST be rejected")
 }
 
@@ -78,7 +78,7 @@ func TestSec_AlgConfusion_HS256WithRSAPubKey(t *testing.T) {
 
 	tok := signingInput + "." + b64(sig)
 
-	_, err = VerifyAccessToken(tok, kr, "")
+	_, err = VerifyAccessToken(tok, kr, "", "", false)
 	require.Error(t, err, "HS256 with RSA pubkey-as-secret MUST be rejected (alg confusion)")
 }
 
@@ -103,7 +103,7 @@ func TestSec_TamperedPayload_Rejected(t *testing.T) {
 	mutated, _ := json.Marshal(m)
 	tampered := parts[0] + "." + b64(mutated) + "." + parts[2]
 
-	_, err = VerifyAccessToken(tampered, kr, "")
+	_, err = VerifyAccessToken(tampered, kr, "", "", false)
 	require.Error(t, err, "tampered payload MUST be rejected")
 }
 
@@ -125,7 +125,7 @@ func TestSec_TamperedSignature_Rejected(t *testing.T) {
 	}
 	tampered := parts[0] + "." + parts[1] + "." + b64(sig)
 
-	_, err = VerifyAccessToken(tampered, kr, "")
+	_, err = VerifyAccessToken(tampered, kr, "", "", false)
 	require.Error(t, err, "tampered signature MUST be rejected")
 }
 
@@ -152,7 +152,7 @@ func TestSec_TruncatedToken(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := VerifyAccessToken(tc.input, kr, "")
+			_, err := VerifyAccessToken(tc.input, kr, "", "", false)
 			require.Error(t, err, "truncated/malformed token MUST be rejected")
 		})
 	}
@@ -185,7 +185,7 @@ func TestSec_JKU_JWK_HeaderIgnored(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, jwkAttacker))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr, "")
+	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
 	require.Error(t, err, "attacker-key signature MUST be rejected even if jwk header present")
 	assert.Contains(t, err.Error(), "unknown signing key")
 }
@@ -213,7 +213,7 @@ func TestSec_KIDNotInRing_Rejected(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, jk))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr, "")
+	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown signing key")
 }
@@ -226,7 +226,7 @@ func TestSec_Expired_OneSecondPast(t *testing.T) {
 	tok, err := CreateAccessToken(Claims{Sub: "u"}, kr, -1*time.Second)
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(tok, kr, "")
+	_, err = VerifyAccessToken(tok, kr, "", "", false)
 	require.Error(t, err, "1s-past-exp token MUST be rejected")
 }
 
@@ -250,7 +250,7 @@ func TestSec_Expired_ExpZero(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, jk))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr, "")
+	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
 	require.Error(t, err, "exp=0 token MUST be rejected")
 }
 
@@ -278,7 +278,7 @@ func TestSec_Expired_MissingExp(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, jk))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr, "")
+	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
 	require.Error(t, err, "token with missing exp MUST be rejected; if this passes, verifier accepts unbounded-lifetime tokens")
 }
 
@@ -304,47 +304,137 @@ func TestSec_NotBeforeFuture_Rejected(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, jk))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr, "")
+	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
 	require.Error(t, err, "nbf-in-future MUST be rejected")
 }
 
-// TestSec_IssuerAudience_NotEnforced documents that VerifyAccessToken does
-// not enforce iss/aud claims. If a token has an unexpected issuer or
-// audience, the verifier currently accepts it. This test pins the current
-// (lax) behavior and FAILS if iss/aud enforcement is added — at which point
-// the test should be updated rather than the production code reverted.
-//
-// This is an INFORMATIONAL test; it does not assert rejection because the
-// production code does not enforce these claims. The accompanying report
-// flags this as a hardening gap.
-func TestSec_IssuerAudience_NotEnforced(t *testing.T) {
-	t.Parallel()
-	kr := makeSecKR(t, "test-kid")
+// signWithRing signs an in-memory jwt.Token with the active key from the
+// given ring — small helper for audience tests below.
+func signWithRing(t *testing.T, kr *KeyRing, tok jwtoken.Token) string {
+	t.Helper()
 	active := kr.Active()
-
-	tok, err := jwtoken.NewBuilder().
-		Claim("sub", "u").
-		Issuer("https://attacker.example.com").
-		Audience([]string{"https://attacker.example.com/api"}).
-		IssuedAt(time.Now()).
-		Expiration(time.Now().Add(time.Hour)).
-		Build()
-	require.NoError(t, err)
-
 	jk, err := jwk.FromRaw(active.PrivateKey)
 	require.NoError(t, err)
 	require.NoError(t, jk.Set(jwk.KeyIDKey, active.KID))
 	require.NoError(t, jk.Set(jwk.AlgorithmKey, jwa.RS256))
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, jk))
 	require.NoError(t, err)
+	return string(signed)
+}
 
-	// Pin current behavior: token is accepted because iss/aud are not validated.
-	// FAIL message documents the gap if behavior changes.
-	_, verr := VerifyAccessToken(string(signed), kr, "")
-	if verr != nil {
-		t.Fatalf("BUG/CHANGE: VerifyAccessToken now rejects tokens with foreign iss/aud (%v); update this test if iss/aud enforcement was added intentionally", verr)
+// TestSec_Audience_ForeignAud_Rejected asserts a token whose aud does not
+// contain the verifier's expected audience is rejected, regardless of the
+// requireAudience flag. A token minted for an unrelated audience must
+// never authenticate against this service.
+func TestSec_Audience_ForeignAud_Rejected(t *testing.T) {
+	t.Parallel()
+	kr := makeSecKR(t, "test-kid")
+
+	tok, err := jwtoken.NewBuilder().
+		Claim("sub", "u").
+		Audience([]string{"https://attacker.example.com/api"}).
+		IssuedAt(time.Now()).
+		Expiration(time.Now().Add(time.Hour)).
+		Build()
+	require.NoError(t, err)
+	signed := signWithRing(t, kr, tok)
+
+	for _, requireAud := range []bool{false, true} {
+		_, err := VerifyAccessToken(signed, kr, "", "https://identity.example.com", requireAud)
+		require.Error(t, err, "foreign aud MUST be rejected (requireAudience=%v)", requireAud)
+		assert.Contains(t, err.Error(), "audience mismatch")
 	}
-	t.Log("INFO: iss/aud claims are NOT validated by VerifyAccessToken — hardening gap")
+}
+
+// TestSec_Audience_MissingAud_NotRequired_Accepted asserts a token with no
+// aud claim is accepted when requireAudience=false. This is the migration
+// window: mint-side starts setting aud, verifier accepts both shapes until
+// every in-flight token has been re-issued.
+func TestSec_Audience_MissingAud_NotRequired_Accepted(t *testing.T) {
+	t.Parallel()
+	kr := makeSecKR(t, "test-kid")
+
+	tok, err := CreateAccessToken(Claims{Sub: "u"}, kr, time.Hour)
+	require.NoError(t, err)
+
+	claims, err := VerifyAccessToken(tok, kr, "", "https://identity.example.com", false)
+	require.NoError(t, err)
+	assert.Empty(t, claims.Audience)
+}
+
+// TestSec_Audience_MissingAud_Required_Rejected asserts a token with no aud
+// claim is rejected when requireAudience=true. After the migration window
+// callers flip this on to forbid legacy (aud-less) tokens.
+func TestSec_Audience_MissingAud_Required_Rejected(t *testing.T) {
+	t.Parallel()
+	kr := makeSecKR(t, "test-kid")
+
+	tok, err := CreateAccessToken(Claims{Sub: "u"}, kr, time.Hour)
+	require.NoError(t, err)
+
+	_, err = VerifyAccessToken(tok, kr, "", "https://identity.example.com", true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "audience missing")
+}
+
+// TestSec_Audience_Matching_Accepted asserts a token whose aud matches the
+// expected audience is accepted, with the audience surfaced on the returned
+// claims.
+func TestSec_Audience_Matching_Accepted(t *testing.T) {
+	t.Parallel()
+	kr := makeSecKR(t, "test-kid")
+
+	tok, err := CreateAccessToken(Claims{
+		Sub:      "u",
+		Audience: []string{"https://identity.example.com"},
+	}, kr, time.Hour)
+	require.NoError(t, err)
+
+	claims, err := VerifyAccessToken(tok, kr, "", "https://identity.example.com", true)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://identity.example.com"}, claims.Audience)
+}
+
+// TestSec_Audience_MultipleAud_OneMatching_Accepted asserts a token with
+// multiple audiences is accepted when one of them is the expected
+// audience — matches RFC 7519 semantics for the "aud" claim.
+func TestSec_Audience_MultipleAud_OneMatching_Accepted(t *testing.T) {
+	t.Parallel()
+	kr := makeSecKR(t, "test-kid")
+
+	tok, err := CreateAccessToken(Claims{
+		Sub: "u",
+		Audience: []string{
+			"https://other.example.com",
+			"https://identity.example.com",
+			"https://billing.example.com",
+		},
+	}, kr, time.Hour)
+	require.NoError(t, err)
+
+	claims, err := VerifyAccessToken(tok, kr, "", "https://identity.example.com", true)
+	require.NoError(t, err)
+	assert.Len(t, claims.Audience, 3)
+	assert.Contains(t, claims.Audience, "https://identity.example.com")
+}
+
+// TestSec_Audience_ExpectedEmpty_SkipsCheck asserts the audience check is
+// fully bypassed when the verifier has no configured expectation, even if
+// the token carries a foreign aud. This is the unconfigured-verifier mode
+// (e.g. local dev where no GATEWAY_JWT_AUDIENCE is set).
+func TestSec_Audience_ExpectedEmpty_SkipsCheck(t *testing.T) {
+	t.Parallel()
+	kr := makeSecKR(t, "test-kid")
+
+	tok, err := CreateAccessToken(Claims{
+		Sub:      "u",
+		Audience: []string{"https://attacker.example.com/api"},
+	}, kr, time.Hour)
+	require.NoError(t, err)
+
+	claims, err := VerifyAccessToken(tok, kr, "", "", false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://attacker.example.com/api"}, claims.Audience)
 }
 
 // TestSec_Tenant_Mismatch_Rejected asserts a token whose tenant claim does
@@ -358,7 +448,7 @@ func TestSec_Tenant_Mismatch_Rejected(t *testing.T) {
 	tok, err := CreateAccessToken(Claims{Sub: "u", Tenant: "tenant-A"}, kr, time.Hour)
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(tok, kr, "tenant-B")
+	_, err = VerifyAccessToken(tok, kr, "tenant-B", "", false)
 	require.Error(t, err, "cross-tenant token MUST be rejected")
 	assert.Contains(t, err.Error(), "tenant mismatch")
 }
@@ -372,7 +462,7 @@ func TestSec_Tenant_Match_Accepted(t *testing.T) {
 	tok, err := CreateAccessToken(Claims{Sub: "u", Tenant: "tenant-A"}, kr, time.Hour)
 	require.NoError(t, err)
 
-	claims, err := VerifyAccessToken(tok, kr, "tenant-A")
+	claims, err := VerifyAccessToken(tok, kr, "tenant-A", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "tenant-A", claims.Tenant)
 	assert.Equal(t, "u", claims.Sub)
@@ -389,7 +479,7 @@ func TestSec_Tenant_EmptyExpected_SkipsCheck(t *testing.T) {
 	tok, err := CreateAccessToken(Claims{Sub: "u", Tenant: "tenant-anything"}, kr, time.Hour)
 	require.NoError(t, err)
 
-	claims, err := VerifyAccessToken(tok, kr, "")
+	claims, err := VerifyAccessToken(tok, kr, "", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "tenant-anything", claims.Tenant)
 }
@@ -404,7 +494,7 @@ func TestSec_Tenant_EmptyClaim_RejectedWhenExpected(t *testing.T) {
 	tok, err := CreateAccessToken(Claims{Sub: "u"}, kr, time.Hour)
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(tok, kr, "tenant-A")
+	_, err = VerifyAccessToken(tok, kr, "tenant-A", "", false)
 	require.Error(t, err, "token with empty tenant claim MUST be rejected when verifier expects a specific tenant")
 	assert.Contains(t, err.Error(), "tenant mismatch")
 }

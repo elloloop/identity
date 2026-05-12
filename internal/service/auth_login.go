@@ -218,13 +218,17 @@ func (s *AuthService) newDuplicateSignupResult(email, displayName string) (*Logi
 	// must not disclose whether the address already exists. We return a
 	// success-shaped payload with an unstored refresh token and a JWT for
 	// a synthetic subject that is absent from the repository.
-	accessToken, err := jwt.CreateAccessToken(jwt.Claims{
+	decoyClaims := jwt.Claims{
 		Sub:    user.ID,
 		Email:  user.Email,
 		Name:   user.Name,
 		Role:   user.Role,
 		Tenant: s.tenantID,
-	}, s.keyRing, s.cfg.JWTExpiry())
+	}
+	if s.cfg.JWTAudience != "" {
+		decoyClaims.Audience = []string{s.cfg.JWTAudience}
+	}
+	accessToken, err := jwt.CreateAccessToken(decoyClaims, s.keyRing, s.cfg.JWTExpiry())
 	if err != nil {
 		return nil, fmt.Errorf("creating duplicate-signup decoy token: %w", err)
 	}

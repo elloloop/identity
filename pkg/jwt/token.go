@@ -13,14 +13,15 @@ import (
 
 // Claims holds the fields embedded in an access token.
 type Claims struct {
-	Sub       string `json:"sub"`
-	Email     string `json:"email"`
-	Name      string `json:"name"`
-	Role      string `json:"role"`
-	Tenant    string `json:"tenant"`
-	AvatarURL string `json:"avatar_url"`
-	IssuedAt  int64  `json:"iat"`
-	ExpiresAt int64  `json:"exp"`
+	Sub       string   `json:"sub"`
+	Email     string   `json:"email"`
+	Name      string   `json:"name"`
+	Role      string   `json:"role"`
+	Tenant    string   `json:"tenant"`
+	AvatarURL string   `json:"avatar_url"`
+	Audience  []string `json:"aud,omitempty"`
+	IssuedAt  int64    `json:"iat"`
+	ExpiresAt int64    `json:"exp"`
 }
 
 // CreateAccessToken signs a new RS256 access token using the active key in the
@@ -30,7 +31,7 @@ func CreateAccessToken(claims Claims, kr *KeyRing, expiry time.Duration) (string
 	now := time.Now().Unix()
 	exp := now + int64(expiry.Seconds())
 
-	tok, err := jwtoken.NewBuilder().
+	builder := jwtoken.NewBuilder().
 		Claim("sub", claims.Sub).
 		Claim("email", claims.Email).
 		Claim("name", claims.Name).
@@ -38,8 +39,11 @@ func CreateAccessToken(claims Claims, kr *KeyRing, expiry time.Duration) (string
 		Claim("tenant", claims.Tenant).
 		Claim("avatar_url", claims.AvatarURL).
 		IssuedAt(time.Unix(now, 0)).
-		Expiration(time.Unix(exp, 0)).
-		Build()
+		Expiration(time.Unix(exp, 0))
+	if len(claims.Audience) > 0 {
+		builder = builder.Audience(claims.Audience)
+	}
+	tok, err := builder.Build()
 	if err != nil {
 		return "", fmt.Errorf("building token: %w", err)
 	}
@@ -72,12 +76,25 @@ func CreateAccessToken(claims Claims, kr *KeyRing, expiry time.Duration) (string
 //
 // If expectedTenant is non-empty, the token's "tenant" claim must match it
 // exactly; otherwise the token is rejected. Passing an empty expectedTenant
-// disables the cross-tenant check (backward-compatible mode).
+// disables the cross-tenant check.
+//
+// Audience handling:
+//   - If expectedAudience is empty, the "aud" claim is not inspected.
+//   - If expectedAudience is non-empty and the token's "aud" claim is
+//     present, it must contain expectedAudience (a token MAY carry multiple
+//     audiences — the check passes when any of them matches).
+//   - If expectedAudience is non-empty and the token has no "aud" claim,
+//     the token is rejected only when requireAudience is true. This gives
+//     callers a one-deploy migration window: ship the verifier with
+//     requireAudience=false, wait for all minted tokens to carry "aud",
+//     then flip requireAudience=true.
+//   - A token whose "aud" claim is present but does not contain
+//     expectedAudience is ALWAYS rejected, regardless of requireAudience.
 //
 // Tokens with a missing or zero "exp" claim are explicitly rejected: the
 // underlying lestrrat-go jwt library treats an absent exp as "no expiration",
 // which would otherwise produce unbounded-lifetime tokens.
-func VerifyAccessToken(tokenStr string, kr *KeyRing, expectedTenant string) (*Claims, error) {
+func VerifyAccessToken(tokenStr string, kr *KeyRing, expectedTenant, expectedAudience string, requireAudience bool) (*Claims, error) {
 	tokenBytes := []byte(tokenStr)
 
 	// Extract kid from JWS protected header before verification.
@@ -150,11 +167,32 @@ func VerifyAccessToken(tokenStr string, kr *KeyRing, expectedTenant string) (*Cl
 	if v, ok := tok.Get("avatar_url"); ok {
 		claims.AvatarURL, _ = v.(string)
 	}
+	claims.Audience = tok.Audience()
 
 	// Cross-tenant check: when the verifying service knows its expected
 	// tenant, reject tokens whose tenant claim does not match.
 	if expectedTenant != "" && claims.Tenant != expectedTenant {
 		return nil, fmt.Errorf("tenant mismatch: token tenant=%q expected=%q", claims.Tenant, expectedTenant)
+	}
+
+	// Audience check.
+	if expectedAudience != "" {
+		if len(claims.Audience) == 0 {
+			if requireAudience {
+				return nil, fmt.Errorf("audience missing: expected=%q", expectedAudience)
+			}
+		} else {
+			matched := false
+			for _, a := range claims.Audience {
+				if a == expectedAudience {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return nil, fmt.Errorf("audience mismatch: token aud=%v expected=%q", claims.Audience, expectedAudience)
+			}
+		}
 	}
 
 	return claims, nil

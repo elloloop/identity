@@ -38,7 +38,7 @@ func TestCreateAndVerify(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, tokenStr)
 
-	got, err := VerifyAccessToken(tokenStr, kr, "")
+	got, err := VerifyAccessToken(tokenStr, kr, "", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "user-123", got.Sub)
 	assert.Equal(t, "alice@example.com", got.Email)
@@ -65,7 +65,7 @@ func TestVerify_ExpiredToken(t *testing.T) {
 	tokenStr, err := CreateAccessToken(claims, kr, -1*time.Second)
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(tokenStr, kr, "")
+	_, err = VerifyAccessToken(tokenStr, kr, "", "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "verifying token")
 }
@@ -91,7 +91,7 @@ func TestVerify_WrongKey(t *testing.T) {
 	kr2, err := NewKeyRing([]SigningKey{k2})
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(tokenStr, kr2, "")
+	_, err = VerifyAccessToken(tokenStr, kr2, "", "", false)
 	require.Error(t, err)
 }
 
@@ -117,7 +117,7 @@ func TestVerify_MissingKID(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr, "")
+	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing kid")
 }
@@ -146,7 +146,7 @@ func TestVerify_UnknownKID(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr, "")
+	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown signing key")
 }

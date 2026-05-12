@@ -110,7 +110,7 @@ func New(deps Deps) http.Handler {
 	// Order (outermost runs first on request path):
 	//   logging → CORS → health → JWKS → auth → Connect handler
 	var chain http.Handler = mux
-	chain = middleware.AuthMiddleware(deps.KeyRing, deps.Config.DefaultTenantID)(chain)
+	chain = middleware.AuthMiddleware(deps.KeyRing, deps.Config.DefaultTenantID, deps.Config.JWTAudience, deps.Config.JWTRequireAudience)(chain)
 	chain = middleware.JWKSMiddleware(deps.KeyRing)(chain)
 	chain = middleware.HealthMiddleware(chain)
 	chain = middleware.CORSMiddleware(deps.Config.AllowedOrigins)(chain)
