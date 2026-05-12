@@ -566,6 +566,9 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 		Tenant:    s.tenantID,
 		AvatarURL: user.AvatarURL,
 	}
+	if s.cfg.JWTAudience != "" {
+		claims.Audience = []string{s.cfg.JWTAudience}
+	}
 	accessToken, err := jwt.CreateAccessToken(claims, s.keyRing, s.cfg.JWTExpiry())
 	if err != nil {
 		return "", "", fmt.Errorf("creating access token: %w", err)

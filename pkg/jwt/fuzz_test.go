@@ -50,7 +50,7 @@ func FuzzVerifyAccessToken(f *testing.F) {
 	f.Add(string([]byte{0x00, 0x01, 0x02, 0xff}))
 
 	f.Fuzz(func(t *testing.T, tokenStr string) {
-		claims, err := VerifyAccessToken(tokenStr, kr, "")
+		claims, err := VerifyAccessToken(tokenStr, kr, "", "", false)
 		if err != nil {
 			// Error path: claims must be nil to honour the (nil, error) contract.
 			if claims != nil {

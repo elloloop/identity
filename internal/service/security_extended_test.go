@@ -226,11 +226,11 @@ func TestSecExt_CrossTenant_TokenRejection(t *testing.T) {
 
 	// Service B verifying with its OWN expected tenant must REJECT the
 	// token (claim says tenant-a, expected tenant-b).
-	_, err = jwt.VerifyAccessToken(tokenA, svcB.keyRing, svcB.tenantID)
+	_, err = jwt.VerifyAccessToken(tokenA, svcB.keyRing, svcB.tenantID, "", false)
 	require.Error(t, err, "verifier must reject token whose tenant claim doesn't match expected tenant")
 
 	// Sanity: same token still verifies cleanly when expected tenant matches.
-	claims, err := jwt.VerifyAccessToken(tokenA, svcA.keyRing, "tenant-a")
+	claims, err := jwt.VerifyAccessToken(tokenA, svcA.keyRing, "tenant-a", "", false)
 	require.NoError(t, err, "matching expected tenant must verify")
 	require.Equal(t, "tenant-a", claims.Tenant)
 }

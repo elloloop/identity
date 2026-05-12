@@ -46,10 +46,13 @@ var AuthExemptPaths = map[string]bool{
 // whose "tenant" claim does not match are rejected. Pass an empty string to
 // disable the cross-tenant check.
 //
+// expectedAudience and requireAudience are passed through to
+// jwtpkg.VerifyAccessToken — see that function for the audience policy.
+//
 // For auth-exempt paths the middleware still attempts to parse and verify a
 // token when one is present (e.g. GetCurrentUser may optionally read the
 // caller identity) but never rejects the request.
-func AuthMiddleware(keyRing *jwtpkg.KeyRing, expectedTenant string) func(http.Handler) http.Handler {
+func AuthMiddleware(keyRing *jwtpkg.KeyRing, expectedTenant, expectedAudience string, requireAudience bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
@@ -58,7 +61,7 @@ func AuthMiddleware(keyRing *jwtpkg.KeyRing, expectedTenant string) func(http.Ha
 			if AuthExemptPaths[path] {
 				// Still try to parse auth if present (for GetCurrentUser).
 				if token := extractBearerToken(r); token != "" {
-					if claims, err := jwtpkg.VerifyAccessToken(token, keyRing, expectedTenant); err == nil {
+					if claims, err := jwtpkg.VerifyAccessToken(token, keyRing, expectedTenant, expectedAudience, requireAudience); err == nil {
 						r.Header.Set("X-Authenticated-User-Id", claims.Sub)
 					}
 				}
@@ -74,7 +77,7 @@ func AuthMiddleware(keyRing *jwtpkg.KeyRing, expectedTenant string) func(http.Ha
 				return
 			}
 
-			claims, err := jwtpkg.VerifyAccessToken(token, keyRing, expectedTenant)
+			claims, err := jwtpkg.VerifyAccessToken(token, keyRing, expectedTenant, expectedAudience, requireAudience)
 			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
