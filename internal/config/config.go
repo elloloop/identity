@@ -145,6 +145,11 @@ type Config struct {
 	// SendEmailVerification calls. In-memory per replica.
 	EmailSendCooldownSeconds int // GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS (default 60)
 
+	// Audit log queue depth for the async flusher. Drops happen if the
+	// auth hot path produces events faster than EntDB can absorb them.
+	// Surface via audit.Logger.DroppedCount() on a metric.
+	AuditQueueSize int // GATEWAY_AUDIT_QUEUE_SIZE (default 4096)
+
 	// Postgres (alternate persistence driver). When PostgresDSN is set
 	// the application bootstrapper may prefer the Postgres-backed
 	// repository over EntDB; the actual driver selection lives in the
@@ -239,6 +244,7 @@ func Load() *Config {
 		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
 		EmailTokenExpirySeconds:  envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
 		EmailSendCooldownSeconds: envInt("GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS", 60),
+		AuditQueueSize:           envInt("GATEWAY_AUDIT_QUEUE_SIZE", 4096),
 
 		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),

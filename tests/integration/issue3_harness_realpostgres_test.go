@@ -64,7 +64,7 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 		t.Cleanup(closer.Close)
 	}
 
-	handler, err := app.New(app.Deps{
+	handler, stop, err := app.New(app.Deps{
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,

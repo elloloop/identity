@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
@@ -155,12 +157,35 @@ func WithDetails(details map[string]any) Option {
 }
 
 // Logger writes audit events to EntDB. All methods are best-effort.
+//
+// By default, Log writes synchronously on the caller's goroutine. Call
+// StartAsync to move writes to a background goroutine with a bounded
+// queue, so the auth hot path is not gated on EntDB latency. Drops
+// when the queue is full are counted and visible via DroppedCount.
 type Logger struct {
 	writer   NodeWriter
 	tenantID string
 	logger   *zap.Logger
 	// nowFunc is overridable for testing.
 	nowFunc func() time.Time
+
+	// Async machinery. queueLive is true while the flusher goroutine
+	// is running and the queue is accepting new items. After Close it
+	// flips back to false and Log returns to sync writes.
+	queueLive  atomic.Bool
+	queue      chan asyncOp
+	done       chan struct{}
+	dropped    atomic.Uint64
+	startStop  sync.Mutex
+	flushersWG sync.WaitGroup
+}
+
+// asyncOp is the value enqueued by Log when async mode is enabled.
+type asyncOp struct {
+	ctx    context.Context
+	tenant string
+	ops    []entdb.Operation
+	event  EventType
 }
 
 // NewLogger creates an audit Logger.
@@ -251,11 +276,123 @@ func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 		},
 	}
 
+	if l.queueLive.Load() {
+		l.enqueueAsync(ctx, event, ops)
+		return
+	}
+
 	_, err := l.writer.ExecuteAtomic(ctx, l.tenantID, "user:system", "", ops)
 	if err != nil {
 		l.logger.Error(
 			"audit_log_failed",
 			zap.String("event_type", string(event)),
+			zap.Error(err),
+		)
+	}
+}
+
+// StartAsync switches Log into async mode: writes are enqueued on a
+// bounded channel and drained by a background goroutine. queueSize must
+// be > 0. Calling StartAsync more than once is a no-op. The returned
+// Close func stops the flusher and drains pending writes; safe to call
+// multiple times.
+func (l *Logger) StartAsync(queueSize int) func() {
+	l.startStop.Lock()
+	defer l.startStop.Unlock()
+	if l.queueLive.Load() {
+		return l.closeFn()
+	}
+	if queueSize <= 0 {
+		queueSize = 1024
+	}
+	l.queue = make(chan asyncOp, queueSize)
+	l.done = make(chan struct{})
+	l.queueLive.Store(true)
+	l.flushersWG.Add(1)
+	go l.flush()
+	return l.closeFn()
+}
+
+// DroppedCount returns the cumulative number of audit events dropped
+// because the async queue was full. Useful for tests and Prometheus
+// exporters.
+func (l *Logger) DroppedCount() uint64 {
+	return l.dropped.Load()
+}
+
+func (l *Logger) closeFn() func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			// queueLive=false redirects new Log calls to sync mode
+			// before we signal the flusher to drain.
+			if !l.queueLive.Swap(false) {
+				return
+			}
+			close(l.done)
+			l.flushersWG.Wait()
+		})
+	}
+}
+
+func (l *Logger) enqueueAsync(ctx context.Context, event EventType, ops []entdb.Operation) {
+	op := asyncOp{
+		ctx:    context.WithoutCancel(ctx),
+		tenant: l.tenantID,
+		ops:    ops,
+		event:  event,
+	}
+	select {
+	case l.queue <- op:
+	default:
+		// Queue full: drop and surface. We DON'T block the caller —
+		// that's the whole point of async mode.
+		n := l.dropped.Add(1)
+		if n == 1 || n%1000 == 0 {
+			l.logger.Warn("audit_log_dropped_queue_full",
+				zap.String("event_type", string(event)),
+				zap.Uint64("total_dropped", n),
+			)
+		}
+	}
+}
+
+func (l *Logger) flush() {
+	defer l.flushersWG.Done()
+	for {
+		select {
+		case op, ok := <-l.queue:
+			if !ok {
+				return
+			}
+			l.writeOne(op)
+		case <-l.done:
+			// Drain remaining items, then exit.
+			for {
+				select {
+				case op := <-l.queue:
+					l.writeOne(op)
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+func (l *Logger) writeOne(op asyncOp) {
+	defer func() {
+		if r := recover(); r != nil {
+			l.logger.Error("audit_log_async_panic",
+				zap.String("event_type", string(op.event)),
+				zap.Any("panic", r),
+			)
+		}
+	}()
+	_, err := l.writer.ExecuteAtomic(op.ctx, op.tenant, "user:system", "", op.ops)
+	if err != nil {
+		l.logger.Error("audit_log_async_failed",
+			zap.String("event_type", string(op.event)),
 			zap.Error(err),
 		)
 	}

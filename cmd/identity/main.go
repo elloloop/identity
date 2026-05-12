@@ -143,7 +143,7 @@ func main() {
 	}
 
 	// ── Build HTTP handler via shared wiring ─────────────────────────
-	chain, err := app.New(app.Deps{
+	chain, stopApp, err := app.New(app.Deps{
 		Config:      cfg,
 		Logger:      logger,
 		KeyRing:     keyRing,
@@ -156,6 +156,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("app_init_failed", zap.Error(err))
 	}
+	defer stopApp()
 
 	// ── Prometheus metrics server ────────────────────────────────────
 	go func() {

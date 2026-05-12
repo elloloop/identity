@@ -164,7 +164,7 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 		t.Fatalf("init webauthn: %v", err)
 	}
 
-	handler, err := app.New(app.Deps{
+	handler, stop, err := app.New(app.Deps{
 		Config:         cfg,
 		Logger:         zap.NewNop(),
 		KeyRing:        keyRing,

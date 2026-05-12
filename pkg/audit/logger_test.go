@@ -14,9 +14,10 @@ import (
 
 // fakeWriter is a test double for the NodeWriter interface.
 type fakeWriter struct {
-	mu        sync.Mutex
-	calls     []fakeCall
-	returnErr error
+	mu           sync.Mutex
+	calls        []fakeCall
+	returnErr    error
+	beforeReturn func() // optional gate used by async tests
 }
 
 type fakeCall struct {
@@ -32,15 +33,20 @@ func (f *fakeWriter) ExecuteAtomic(
 	ops []entdb.Operation,
 ) (*entdb.CommitResult, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, fakeCall{
 		TenantID:       tenantID,
 		Actor:          actor,
 		IdempotencyKey: idempotencyKey,
 		Ops:            ops,
 	})
-	if f.returnErr != nil {
-		return nil, f.returnErr
+	hook := f.beforeReturn
+	rerr := f.returnErr
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	if rerr != nil {
+		return nil, rerr
 	}
 	return &entdb.CommitResult{Success: true, Applied: true}, nil
 }
@@ -346,5 +352,61 @@ func TestSortedJSON(t *testing.T) {
 	expected := `{"apple":"fruit","banana":3.14,"mango":true,"zebra":1}`
 	if got != expected {
 		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
+// ── Async mode ─────────────────────────────────────────────────────────
+
+func TestLog_AsyncBuffersAndFlushes(t *testing.T) {
+	w := &fakeWriter{}
+	l := NewLogger(w, "t", nil)
+	stop := l.StartAsync(64)
+	defer stop()
+
+	for i := 0; i < 5; i++ {
+		l.Log(context.Background(), EventLoginSuccess, WithActor("u"))
+	}
+	// Calling stop drains the queue.
+	stop()
+	if w.callCount() != 5 {
+		t.Fatalf("async flush: expected 5 calls, got %d", w.callCount())
+	}
+	if l.DroppedCount() != 0 {
+		t.Fatalf("unexpected drops: %d", l.DroppedCount())
+	}
+}
+
+func TestLog_AsyncDropsOnFullQueue(t *testing.T) {
+	// Blocking writer ensures the flusher cannot drain — the queue
+	// fills and the producer-side drops kick in.
+	block := make(chan struct{})
+	w := &fakeWriter{}
+	w.beforeReturn = func() { <-block }
+	l := NewLogger(w, "t", nil)
+	stop := l.StartAsync(2) // tiny queue
+	defer func() { close(block); stop() }()
+
+	for i := 0; i < 50; i++ {
+		l.Log(context.Background(), EventLoginSuccess, WithActor("u"))
+	}
+	if l.DroppedCount() == 0 {
+		t.Fatalf("expected drops when queue is full, got 0")
+	}
+}
+
+func TestLog_AsyncDoesNotBlockCallerOnSlowWriter(t *testing.T) {
+	block := make(chan struct{})
+	w := &fakeWriter{}
+	w.beforeReturn = func() { <-block }
+	l := NewLogger(w, "t", nil)
+	stop := l.StartAsync(1024)
+	defer func() { close(block); stop() }()
+
+	start := time.Now()
+	for i := 0; i < 50; i++ {
+		l.Log(context.Background(), EventLoginSuccess, WithActor("u"))
+	}
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("async log appeared to block the caller: %v", elapsed)
 	}
 }
