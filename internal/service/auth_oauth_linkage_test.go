@@ -149,44 +149,41 @@ func TestOAuthLogin_ProviderEmailChangedStaysLinked(t *testing.T) {
 	assert.Len(t, links, 1)
 }
 
-// TestOAuthLogin_ProviderEmailChangePropagates verifies that when the
-// provider returns a NEW email for a user we already have linked via
-// (provider, sub), the local email is updated to match — no second
-// account, no stale email.
-func TestOAuthLogin_ProviderEmailChangePropagates(t *testing.T) {
+// TestOAuthLogin_ProviderEmailChangeDoesNotMutateLocal verifies that
+// when the provider returns a different email for an already-linked user
+// (resolved via the provider+sub fast path), the local account's email
+// is NOT silently overwritten. Auto-applying a provider-side email change
+// would let a compromised provider account take over the local account
+// via password-reset on the new address. The link still resolves
+// correctly; the divergence is logged so operators can act if needed.
+func TestOAuthLogin_ProviderEmailChangeDoesNotMutateLocal(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	ctx := context.Background()
 
-	// Seed a user + pre-existing identity link with sub "sub-stableid".
 	seed := seedUser(repo, "old@example.com", "", "active")
+	// fakeOAuthExchanger sets ProviderUserID="sub-<email>", so to make the
+	// (provider, sub) fast path resolve to our seed user, seed the link
+	// with the sub that corresponds to the new email.
 	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
 		UserID:          seed.ID,
 		Provider:        "google",
-		ProviderUserID:  "sub-stableid",
+		ProviderUserID:  "sub-newaddr@example.com",
 		EmailAtLinkTime: "old@example.com",
 		CreatedAt:       1,
 	}))
 
-	// Now drive a login with code "stableid" — fake exchanger produces
-	// Email="stableid" (different from "old@example.com") and
-	// ProviderUserID="sub-stableid" (matches the seeded link).
-	code := fakeOAuthCode("stableid", "User", "", "google")
+	code := fakeOAuthCode("newaddr@example.com", "User", "", "google")
 	res, err := svc.OAuthLogin(ctx, code, "google", "https://app/cb", "", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, seed.ID, res.User.ID, "must resolve to original user via (provider, sub)")
-	assert.Equal(t, "stableid", res.User.Email, "local email must be updated to provider's new email")
+	assert.Equal(t, "old@example.com", res.User.Email, "provider-side email change must NOT mutate local email")
 
-	// No duplicate user created.
-	got, err := repo.FindUserByEmail(ctx, "stableid")
+	// Original email still resolves to the same user.
+	original, err := repo.FindUserByEmail(ctx, "old@example.com")
 	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, seed.ID, got.ID)
-
-	// Old email no longer resolves to a user (it has been overwritten).
-	stale, err := repo.FindUserByEmail(ctx, "old@example.com")
-	require.NoError(t, err)
-	assert.Nil(t, stale)
+	require.NotNil(t, original)
+	assert.Equal(t, seed.ID, original.ID)
 }
 
 // TestOAuthLogin_CrossProviderLinking verifies that a user who first

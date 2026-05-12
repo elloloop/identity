@@ -52,7 +52,7 @@ func (s *HelpService) RequestAdminHelp(
 	recent, err := s.db.QueryNodes(ctx, s.tenantID, "user:system", typeAdminHelpReq,
 		map[string]any{hfStatus: "pending"})
 	if err != nil {
-		s.logger.Warn("admin_help_rate_check_failed", zap.String("email", email), zap.Error(err))
+		s.logger.Warn("admin_help_rate_check_failed", zap.String("email", redactEmail(email)), zap.Error(err))
 		recent = nil
 	}
 
@@ -66,7 +66,7 @@ func (s *HelpService) RequestAdminHelp(
 	}
 	if countRecent >= 3 {
 		s.logger.Info("admin_help_rate_limited",
-			zap.String("email", email), zap.Int("count", countRecent))
+			zap.String("email", redactEmail(email)), zap.Int("count", countRecent))
 		// Always return nil — no enumeration.
 		return nil
 	}
@@ -86,7 +86,7 @@ func (s *HelpService) RequestAdminHelp(
 	op := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeAdminHelpReq, Data: data}
 	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", "", []entdb.Operation{op})
 	if err != nil {
-		s.logger.Error("admin_help_create_failed", zap.String("email", email), zap.Error(err))
+		s.logger.Error("admin_help_create_failed", zap.String("email", redactEmail(email)), zap.Error(err))
 		// Best-effort: still return nil.
 		return nil
 	}
@@ -104,7 +104,7 @@ func (s *HelpService) RequestAdminHelp(
 		audit.WithDetails(map[string]any{"email": email}),
 	)
 	s.logger.Info("admin_help_requested",
-		zap.String("email", email), zap.String("request_id", requestID))
+		zap.String("email", redactEmail(email)), zap.String("request_id", requestID))
 	return nil
 }
 

@@ -271,6 +271,13 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
+	// Enforce account status + lockout before issuing tokens. Without
+	// this, an account locked by failed-password attempts would still
+	// be loginable via passkey, defeating the lockout entirely.
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return nil, err
+	}
+
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
 	if err != nil {
 		return nil, err
