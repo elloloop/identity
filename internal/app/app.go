@@ -90,20 +90,34 @@ func New(deps Deps) (http.Handler, func(), error) {
 		rateLimitWindow = time.Minute
 	}
 	rateLimits := []middleware.PathLimit{
-		{PathPrefix: "/identity.IdentityService/PasswordSignup", Tag: "signup",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitSignupPerIP, 0)},
-		{PathPrefix: "/identity.IdentityService/PasswordLogin", Tag: "login",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0)},
-		{PathPrefix: "/identity.IdentityService/RequestPasswordReset", Tag: "reset",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitResetPerIP, 0)},
-		{PathPrefix: "/identity.IdentityService/SendEmailVerification", Tag: "verify",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitVerifyPerIP, 0)},
-		{PathPrefix: "/identity.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0)},
-		{PathPrefix: "/identity.IdentityService/BeginPasskeyLogin", Tag: "passkey_begin",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0)},
-		{PathPrefix: "/identity.IdentityService/VerifyTotp", Tag: "totp_verify",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0)},
+		{
+			PathPrefix: "/identity.IdentityService/PasswordSignup", Tag: "signup",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitSignupPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/PasswordLogin", Tag: "login",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/RequestPasswordReset", Tag: "reset",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitResetPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/SendEmailVerification", Tag: "verify",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitVerifyPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/BeginPasskeyLogin", Tag: "passkey_begin",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/VerifyTotp", Tag: "totp_verify",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0),
+		},
 	}
 
 	// Surface the EntDB schema-apply gap loudly at boot so operators
