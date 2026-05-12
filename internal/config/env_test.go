@@ -34,7 +34,7 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"MicrosoftTenantID", cfg.MicrosoftTenantID, ""},
 		{"PasswordSignupEnabled", cfg.PasswordSignupEnabled, true},
 		{"PasswordResetEnabled", cfg.PasswordResetEnabled, true},
-		{"PasswordResetExpirySeconds", cfg.PasswordResetExpirySeconds, 3600},
+		{"PasswordResetExpirySeconds", cfg.PasswordResetExpirySeconds, 900},
 		{"TOTPEncryptionKey", cfg.TOTPEncryptionKey, ""},
 		{"TOTPIssuer", cfg.TOTPIssuer, "Glassa Work"},
 		{"LoginChallengeExpirySeconds", cfg.LoginChallengeExpirySeconds, 300},
