@@ -85,7 +85,7 @@ func TestTotpDeleteAndDBStubBehavior(t *testing.T) {
 	if _, err := repo.SearchNodes(ctx, "tenant", "actor", 1, "query"); !errors.Is(err, service.ErrServiceUnavailable) {
 		t.Fatalf("SearchNodes error = %v", err)
 	}
-	result, err := repo.ExecuteAtomic(ctx, "tenant", "actor", "idem", nil)
+	result, err := repo.ExecuteAtomic(ctx, "tenant", "actor", nil)
 	if err != nil {
 		t.Fatalf("ExecuteAtomic: %v", err)
 	}

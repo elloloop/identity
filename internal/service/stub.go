@@ -266,7 +266,7 @@ func (StubDB) QueryNodes(context.Context, string, string, int, map[string]any) (
 	return nil, ErrServiceUnavailable
 }
 
-func (StubDB) ExecuteAtomic(context.Context, string, string, string, []entdb.Operation) (*entdb.CommitResult, error) {
+func (StubDB) ExecuteAtomic(context.Context, string, string, []entdb.Operation) (*entdb.CommitResult, error) {
 	return nil, ErrServiceUnavailable
 }
 

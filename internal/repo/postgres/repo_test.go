@@ -262,7 +262,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	qrID := "db-qr-1"
 	createdAt := int64(1_700_000_000_000)
 
-	result, err := repo.ExecuteAtomic(ctx, tenantID, "actor", "idem-1", []sdk.Operation{
+	result, err := repo.ExecuteAtomic(ctx, tenantID, "actor", []sdk.Operation{
 		{
 			Type:   sdk.OpCreateNode,
 			TypeID: dbTypeUser,
@@ -449,7 +449,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, otherEdges)
 
-	_, err = repo.ExecuteAtomic(ctx, tenantID, "actor", "idem-2", []sdk.Operation{
+	_, err = repo.ExecuteAtomic(ctx, tenantID, "actor", []sdk.Operation{
 		{Type: sdk.OpUpdateNode, TypeID: dbTypeUser, NodeID: userID, Patch: map[string]any{dbUfName: "DB User Updated", dbUfQuotaBytes: int64(2048)}},
 		{Type: sdk.OpUpdateNode, TypeID: dbTypeWorkingGroup, NodeID: groupID, Patch: map[string]any{dbGfDescription: "Updated description"}},
 		{Type: sdk.OpUpdateNode, TypeID: dbTypeAdminHelpReq, NodeID: "db-help-1", Patch: map[string]any{dbHfStatus: "resolved", dbHfResolvedBy: userID, dbHfResolvedAt: createdAt + 4000}},
@@ -462,7 +462,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	require.Equal(t, "DB User Updated", updatedUser.Name)
 	require.EqualValues(t, 2048, updatedUser.QuotaBytes)
 
-	_, err = repo.ExecuteAtomic(ctx, tenantID, "actor", "idem-3", []sdk.Operation{
+	_, err = repo.ExecuteAtomic(ctx, tenantID, "actor", []sdk.Operation{
 		{Type: sdk.OpDeleteEdge, EdgeTypeID: dbEdgeMemberOf, FromNodeID: userID, ToNodeID: groupID},
 		{Type: sdk.OpDeleteNode, TypeID: dbTypePasskey, NodeID: passkeyID},
 		{Type: sdk.OpDeleteNode, TypeID: dbTypeRefreshToken, NodeID: refreshID},
@@ -479,7 +479,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	require.Error(t, err)
 	_, err = repo.SearchNodes(ctx, tenantID, "actor", 999, "anything")
 	require.Error(t, err)
-	_, err = repo.ExecuteAtomic(ctx, tenantID, "actor", "idem-4", []sdk.Operation{{Type: sdk.OpCreateNode, TypeID: 999}})
+	_, err = repo.ExecuteAtomic(ctx, tenantID, "actor", []sdk.Operation{{Type: sdk.OpCreateNode, TypeID: 999}})
 	require.Error(t, err)
 }
 

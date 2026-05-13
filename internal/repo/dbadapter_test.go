@@ -69,7 +69,7 @@ func TestDBAdapter_ExecuteAtomicRejectsFailedCommit(t *testing.T) {
 	}
 	db := &dbAdapter{transport: transport}
 
-	_, err := db.ExecuteAtomic(context.Background(), "tenant-1", "user:admin-1", "", []sdk.Operation{{
+	_, err := db.ExecuteAtomic(context.Background(), "tenant-1", "user:admin-1", []sdk.Operation{{
 		Type:   sdk.OpUpdateNode,
 		TypeID: 2,
 		NodeID: "grp-1",
@@ -89,7 +89,7 @@ func TestDBAdapter_ExecuteAtomicRequiresReceiptForUnappliedCommit(t *testing.T) 
 	}
 	db := &dbAdapter{transport: transport}
 
-	_, err := db.ExecuteAtomic(context.Background(), "tenant-1", "user:admin-1", "", []sdk.Operation{{
+	_, err := db.ExecuteAtomic(context.Background(), "tenant-1", "user:admin-1", []sdk.Operation{{
 		Type:   sdk.OpUpdateNode,
 		TypeID: 2,
 		NodeID: "grp-1",
@@ -117,7 +117,7 @@ func TestDBAdapter_ExecuteAtomicReturnsApplyTimeout(t *testing.T) {
 	}
 	db := &dbAdapter{transport: transport}
 
-	_, err := db.ExecuteAtomic(context.Background(), "tenant-1", "user:admin-1", "", []sdk.Operation{{
+	_, err := db.ExecuteAtomic(context.Background(), "tenant-1", "user:admin-1", []sdk.Operation{{
 		Type:   sdk.OpUpdateNode,
 		TypeID: 2,
 		NodeID: "grp-1",
@@ -137,7 +137,7 @@ func TestDBAdapter_ExecuteAtomicSkipsWaitForAppliedCommit(t *testing.T) {
 	}
 	db := &dbAdapter{transport: transport}
 
-	if _, err := db.ExecuteAtomic(context.Background(), "tenant-1", "user:admin-1", "", []sdk.Operation{{
+	if _, err := db.ExecuteAtomic(context.Background(), "tenant-1", "user:admin-1", []sdk.Operation{{
 		Type:   sdk.OpUpdateNode,
 		TypeID: 2,
 		NodeID: "grp-1",

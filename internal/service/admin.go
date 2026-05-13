@@ -127,7 +127,7 @@ func (s *AdminService) InviteUser(
 
 	// Create user node.
 	userOp := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeUser, Data: userData}
-	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", "", []entdb.Operation{userOp})
+	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{userOp})
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
@@ -149,7 +149,7 @@ func (s *AdminService) InviteUser(
 		invCreatedAt: now,
 	}
 	invOp := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeUserInvitation, Data: invData}
-	_, err = s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", "", []entdb.Operation{invOp})
+	_, err = s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{invOp})
 	if err != nil {
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
@@ -214,7 +214,7 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 		Patch: map[string]any{ufStatus: "deactivated", ufDeactivatedAt: now, ufUpdatedAt: now},
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("deactivate user: %w", err)
 	}
 
@@ -249,7 +249,7 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 		Patch: map[string]any{ufStatus: "active", ufDeactivatedAt: int64(0), ufUpdatedAt: now},
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("reactivate user: %w", err)
 	}
 
@@ -292,7 +292,7 @@ func (s *AdminService) ResetUserPassword(
 			Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 			Patch: map[string]any{ufPasswordHash: hash, ufUpdatedAt: now},
 		}
-		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
 			return nil, fmt.Errorf("set temp password: %w", err)
 		}
 		res.TemporaryPassword = tempPw
@@ -307,7 +307,7 @@ func (s *AdminService) ResetUserPassword(
 				prfCreatedAt: now,
 			},
 		}
-		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", "", []entdb.Operation{op}); err != nil {
+		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{op}); err != nil {
 			return nil, fmt.Errorf("create reset token: %w", err)
 		}
 		res.ResetToken = rawToken

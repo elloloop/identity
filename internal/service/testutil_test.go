@@ -36,7 +36,7 @@ func newRecordingAuditWriter() *recordingAuditWriter {
 }
 
 func (w *recordingAuditWriter) ExecuteAtomic(
-	_ context.Context, _, _, _ string, ops []entdb.Operation,
+	_ context.Context, _, _ string, ops []entdb.Operation,
 ) (*entdb.CommitResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

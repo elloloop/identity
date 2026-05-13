@@ -84,7 +84,7 @@ func (s *HelpService) RequestAdminHelp(
 	}
 
 	op := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeAdminHelpReq, Data: data}
-	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", "", []entdb.Operation{op})
+	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{op})
 	if err != nil {
 		s.logger.Error("admin_help_create_failed", zap.String("email", redactEmail(email)), zap.Error(err))
 		// Best-effort: still return nil.
@@ -212,7 +212,7 @@ func (s *HelpService) ResolveHelpRequest(
 	}
 
 	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeAdminHelpReq, NodeID: requestID, Patch: patch}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return nil, fmt.Errorf("resolve help request: %w", err)
 	}
 

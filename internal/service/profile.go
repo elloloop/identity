@@ -53,7 +53,7 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userID, name, avatar
 	}
 
 	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: userID, Patch: patch}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(userID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(userID), []entdb.Operation{op}); err != nil {
 		return nil, fmt.Errorf("update profile: %w", err)
 	}
 
@@ -115,7 +115,7 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 	}
 
 	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeRefreshToken, NodeID: sessionID}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("revoke session: %w", err)
 	}
 
@@ -156,7 +156,7 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 	count := 0
 	for _, n := range nodes {
 		op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeRefreshToken, NodeID: n.NodeID}
-		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", "", []entdb.Operation{op}); err != nil {
+		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{op}); err != nil {
 			s.logger.Warn("revoke_session_delete_failed", zap.String("session_id", n.NodeID))
 			continue
 		}
@@ -212,7 +212,7 @@ func (s *ProfileService) DeletePasskey(ctx context.Context, userID, credentialID
 	}
 
 	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typePasskeyCredCred, NodeID: cred.NodeID}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(userID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(userID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("delete passkey: %w", err)
 	}
 

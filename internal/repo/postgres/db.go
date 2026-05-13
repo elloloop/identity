@@ -219,7 +219,7 @@ func (r *pgRepository) QueryNodes(ctx context.Context, _, _ string, typeID int, 
 	}
 }
 
-func (r *pgRepository) ExecuteAtomic(ctx context.Context, _, _, _ string, ops []sdk.Operation) (*sdk.CommitResult, error) {
+func (r *pgRepository) ExecuteAtomic(ctx context.Context, _, _ string, ops []sdk.Operation) (*sdk.CommitResult, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, wrapPgErr("ExecuteAtomic", err)

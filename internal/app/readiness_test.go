@@ -23,7 +23,7 @@ func (s *stubDB) QueryNodes(_ context.Context, _, _ string, typeID int, _ map[st
 	return nil, s.failQuery
 }
 
-func (s *stubDB) ExecuteAtomic(_ context.Context, _, _, _ string, _ []entdb.Operation) (*entdb.CommitResult, error) {
+func (s *stubDB) ExecuteAtomic(_ context.Context, _, _ string, _ []entdb.Operation) (*entdb.CommitResult, error) {
 	return &entdb.CommitResult{Success: true, Applied: true}, nil
 }
 

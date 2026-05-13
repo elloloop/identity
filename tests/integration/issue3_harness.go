@@ -221,9 +221,9 @@ func (d *issue3DB) QueryNodes(_ context.Context, _, _ string, typeID int, filter
 	}
 }
 
-func (d *issue3DB) ExecuteAtomic(ctx context.Context, tenantID, actor, idempotencyKey string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+func (d *issue3DB) ExecuteAtomic(ctx context.Context, tenantID, actor string, ops []entdb.Operation) (*entdb.CommitResult, error) {
 	if issue3IsAuditWrite(ops) {
-		return d.audit.ExecuteAtomic(ctx, tenantID, actor, idempotencyKey, ops)
+		return d.audit.ExecuteAtomic(ctx, tenantID, actor, ops)
 	}
 
 	var createdIDs []string

@@ -51,7 +51,7 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPass
 		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: userID,
 		Patch: map[string]any{ufPasswordHash: newHash, ufUpdatedAt: nowMs()},
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(userID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(userID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
 

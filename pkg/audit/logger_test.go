@@ -21,23 +21,21 @@ type fakeWriter struct {
 }
 
 type fakeCall struct {
-	TenantID       string
-	Actor          string
-	IdempotencyKey string
-	Ops            []entdb.Operation
+	TenantID string
+	Actor    string
+	Ops      []entdb.Operation
 }
 
 func (f *fakeWriter) ExecuteAtomic(
 	_ context.Context,
-	tenantID, actor, idempotencyKey string,
+	tenantID, actor string,
 	ops []entdb.Operation,
 ) (*entdb.CommitResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, fakeCall{
-		TenantID:       tenantID,
-		Actor:          actor,
-		IdempotencyKey: idempotencyKey,
-		Ops:            ops,
+		TenantID: tenantID,
+		Actor:    actor,
+		Ops:      ops,
 	})
 	hook := f.beforeReturn
 	rerr := f.returnErr

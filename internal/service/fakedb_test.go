@@ -75,7 +75,7 @@ func fakeMatchFilter(payload map[string]any, filter map[string]any) bool {
 	return true
 }
 
-func (f *fakeDB) ExecuteAtomic(_ context.Context, _, _, _ string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+func (f *fakeDB) ExecuteAtomic(_ context.Context, _, _ string, ops []entdb.Operation) (*entdb.CommitResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
