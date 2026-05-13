@@ -97,6 +97,16 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	start := time.Now()
 	defer finishPasswordSignupFloor(start)
 
+	// Per-email signup throttle. Throttled requests return the same
+	// anti-enumeration decoy as duplicate-email signups so the endpoint
+	// cannot be used to probe which addresses have been recently
+	// targeted. Complements the per-IP rate limit at the middleware
+	// layer (which is keyed on resolved client IP).
+	if !s.signupThrottle.allow(email, s.nowMs()) {
+		s.logger.Info("signup_throttled", zap.String("email", redactEmail(email)))
+		return s.newDuplicateSignupResult(email, fallbackDisplayName(email, name))
+	}
+
 	pwHash, err := passwords.Hash(password)
 	if err != nil {
 		return nil, fmt.Errorf("hashing password: %w", err)

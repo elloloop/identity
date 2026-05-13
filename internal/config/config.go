@@ -152,6 +152,13 @@ type Config struct {
 	// SendEmailVerification calls. In-memory per replica.
 	EmailSendCooldownSeconds int // GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS (default 60)
 
+	// Per-email cooldown on PasswordSignup. Throttled signups return
+	// the same anti-enumeration decoy as a duplicate-email signup so the
+	// endpoint cannot be used to probe for which addresses are
+	// rate-limited (which would itself reveal recent attempts).
+	// Complements the per-IP rate limit at the middleware layer.
+	SignupEmailCooldownSeconds int // GATEWAY_SIGNUP_EMAIL_COOLDOWN_SECONDS (default 60)
+
 	// Audit log queue depth for the async flusher. Drops happen if the
 	// auth hot path produces events faster than EntDB can absorb them.
 	// Surface via audit.Logger.DroppedCount() on a metric.
@@ -269,10 +276,11 @@ func Load() *Config {
 		SMTPTLS:       envBool("GATEWAY_SMTP_TLS", true),
 		SMTPProviders: envStr("GATEWAY_SMTP_PROVIDERS", ""),
 
-		AppBaseURL:               envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
-		EmailTokenExpirySeconds:  envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
-		EmailSendCooldownSeconds: envInt("GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS", 60),
-		AuditQueueSize:           envInt("GATEWAY_AUDIT_QUEUE_SIZE", 4096),
+		AppBaseURL:                 envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
+		EmailTokenExpirySeconds:    envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
+		EmailSendCooldownSeconds:   envInt("GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS", 60),
+		SignupEmailCooldownSeconds: envInt("GATEWAY_SIGNUP_EMAIL_COOLDOWN_SECONDS", 60),
+		AuditQueueSize:             envInt("GATEWAY_AUDIT_QUEUE_SIZE", 4096),
 
 		HTTPMaxBodyBytes: int64(envInt("GATEWAY_HTTP_MAX_BODY_BYTES", 1<<20)),
 
