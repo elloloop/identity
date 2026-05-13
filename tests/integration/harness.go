@@ -317,6 +317,26 @@ func (h *Harness) CountAuditEventsByType(t *testing.T, eventType string) int {
 	})
 }
 
+// WaitForAuditEventCountAtLeast polls CountAuditEventsByType until the
+// count reaches `want` or the 2s deadline elapses. The audit logger is
+// async (bounded channel + background goroutine), so tests asserting
+// "this RPC emitted event X" race the write goroutine — this helper
+// closes that race deterministically.
+func (h *Harness) WaitForAuditEventCountAtLeast(t *testing.T, eventType string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if got := h.CountAuditEventsByType(t, eventType); got >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("audit event %q count did not reach %d (last=%d)",
+				eventType, want, h.CountAuditEventsByType(t, eventType))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func (h *Harness) ListPasskeyCredentials(t *testing.T, userID string) []*service.PasskeyCredRecord {
 	t.Helper()
 
