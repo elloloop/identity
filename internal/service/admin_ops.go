@@ -37,7 +37,7 @@ func (s *AdminService) SetUserQuota(ctx context.Context, actorID, targetUserID s
 		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 		Patch: map[string]any{ufQuotaBytes: quotaBytes, ufUpdatedAt: nowMs()},
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("set quota: %w", err)
 	}
 	return nil
@@ -143,7 +143,7 @@ func (s *AdminService) UpdateUser(ctx context.Context, actorID, userID, name, ro
 	}
 
 	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: userID, Patch: patch}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
 

@@ -862,7 +862,7 @@ func (r *Repo) QueryNodes(context.Context, string, string, int, map[string]any) 
 	return nil, errMemoryDBUnsupported
 }
 
-func (r *Repo) ExecuteAtomic(context.Context, string, string, string, []sdk.Operation) (*sdk.CommitResult, error) {
+func (r *Repo) ExecuteAtomic(context.Context, string, string, []sdk.Operation) (*sdk.CommitResult, error) {
 	return &sdk.CommitResult{Success: true, Applied: true}, nil
 }
 

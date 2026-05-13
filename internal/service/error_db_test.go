@@ -47,12 +47,12 @@ func (d *errorDB) QueryNodes(ctx context.Context, t, a string, tid int, f map[st
 	return d.fakeDB.QueryNodes(ctx, t, a, tid, f)
 }
 
-func (d *errorDB) ExecuteAtomic(ctx context.Context, t, a, ik string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+func (d *errorDB) ExecuteAtomic(ctx context.Context, t, a string, ops []entdb.Operation) (*entdb.CommitResult, error) {
 	d.executeCount++
 	if d.failExecuteAtomic || (d.failExecuteAfter > 0 && d.executeCount >= d.failExecuteAfter) {
 		return nil, errInjected
 	}
-	return d.fakeDB.ExecuteAtomic(ctx, t, a, ik, ops)
+	return d.fakeDB.ExecuteAtomic(ctx, t, a, ops)
 }
 
 func (d *errorDB) GetEdgesFrom(ctx context.Context, t, a, fid string, eid int) ([]*entdb.Edge, error) {

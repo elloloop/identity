@@ -26,10 +26,9 @@ type RecordingDB struct {
 // audit.Logger writes a single CreateNode operation per event with
 // the AuditEvent type ID (26) and field-id-keyed data.
 type AuditCall struct {
-	TenantID       string
-	Actor          string
-	IdempotencyKey string
-	Ops            []entdb.Operation
+	TenantID string
+	Actor    string
+	Ops      []entdb.Operation
 }
 
 // NewRecordingDB returns an empty RecordingDB.
@@ -69,15 +68,14 @@ func (d *RecordingDB) CountByEventType(eventType string) int {
 // ExecuteAtomic records the call and returns a successful no-op
 // result. Returning success keeps audit logger logs at the success
 // level, mirroring real EntDB behaviour.
-func (d *RecordingDB) ExecuteAtomic(_ context.Context, tenantID, actor, idempotencyKey string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+func (d *RecordingDB) ExecuteAtomic(_ context.Context, tenantID, actor string, ops []entdb.Operation) (*entdb.CommitResult, error) {
 	d.mu.Lock()
 	cp := make([]entdb.Operation, len(ops))
 	copy(cp, ops)
 	d.events = append(d.events, AuditCall{
-		TenantID:       tenantID,
-		Actor:          actor,
-		IdempotencyKey: idempotencyKey,
-		Ops:            cp,
+		TenantID: tenantID,
+		Actor:    actor,
+		Ops:      cp,
 	})
 	d.mu.Unlock()
 	return &entdb.CommitResult{}, nil

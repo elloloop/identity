@@ -40,8 +40,11 @@ func (a *dbAdapter) QueryNodes(ctx context.Context, tenantID, actor string, type
 	return a.transport.QueryNodes(ctx, tenantID, actor, typeID, filter)
 }
 
-func (a *dbAdapter) ExecuteAtomic(ctx context.Context, tenantID, actor, idempotencyKey string, ops []sdk.Operation) (*sdk.CommitResult, error) {
-	result, err := a.transport.ExecuteAtomic(ctx, tenantID, actor, idempotencyKey, ops)
+func (a *dbAdapter) ExecuteAtomic(ctx context.Context, tenantID, actor string, ops []sdk.Operation) (*sdk.CommitResult, error) {
+	// The EntDB SDK Transport accepts an idempotencyKey we don't use
+	// (no service flow needs cross-request retry safety today); pass
+	// "" to keep the call shape but not expose it through our interface.
+	result, err := a.transport.ExecuteAtomic(ctx, tenantID, actor, "", ops)
 	if err != nil {
 		return nil, err
 	}

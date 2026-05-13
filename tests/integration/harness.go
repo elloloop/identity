@@ -544,7 +544,7 @@ func (h *Harness) waitForPasskeyChallengeValue(t *testing.T, challengeID, want s
 func (h *Harness) updateNode(t *testing.T, typeID int, nodeID string, patch map[string]any) {
 	t.Helper()
 
-	_, err := h.DB.ExecuteAtomic(context.Background(), h.TenantID, "user:system", "", []entdb.Operation{{
+	_, err := h.DB.ExecuteAtomic(context.Background(), h.TenantID, "user:system", []entdb.Operation{{
 		Type:   entdb.OpUpdateNode,
 		TypeID: typeID,
 		NodeID: nodeID,

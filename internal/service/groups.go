@@ -49,7 +49,7 @@ func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, descripti
 		gfUpdatedAt:   now,
 	}
 	op := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeWorkingGroup, Data: data}
-	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op})
+	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op})
 	if err != nil {
 		return nil, fmt.Errorf("create group: %w", err)
 	}
@@ -85,7 +85,7 @@ func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, 
 	}
 
 	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeWorkingGroup, NodeID: groupID, Patch: patch}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return nil, fmt.Errorf("update group: %w", err)
 	}
 
@@ -110,7 +110,7 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string)
 	}
 
 	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeWorkingGroup, NodeID: groupID}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("delete group: %w", err)
 	}
 
@@ -172,7 +172,7 @@ func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, use
 		Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf,
 		FromNodeID: userID, ToNodeID: groupID,
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("add group member: %w", err)
 	}
 
@@ -196,7 +196,7 @@ func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, 
 		Type: entdb.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
 		FromNodeID: userID, ToNodeID: groupID,
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), "", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("remove group member: %w", err)
 	}
 

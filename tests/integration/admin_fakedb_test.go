@@ -88,7 +88,7 @@ func (f *adminFakeDB) QueryNodes(_ context.Context, _, _ string, typeID int, fil
 	return out, nil
 }
 
-func (f *adminFakeDB) ExecuteAtomic(_ context.Context, _, _, _ string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+func (f *adminFakeDB) ExecuteAtomic(_ context.Context, _, _ string, ops []entdb.Operation) (*entdb.CommitResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var created []string

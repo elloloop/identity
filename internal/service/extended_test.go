@@ -1728,7 +1728,7 @@ func TestStubDB_AllMethodsReturnUnavailable(t *testing.T) {
 	if _, err := d.QueryNodes(ctx, "", "", 0, nil); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("QueryNodes: %v", err)
 	}
-	if _, err := d.ExecuteAtomic(ctx, "", "", "", nil); !errors.Is(err, ErrServiceUnavailable) {
+	if _, err := d.ExecuteAtomic(ctx, "", "", nil); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("ExecuteAtomic: %v", err)
 	}
 	if _, err := d.GetEdgesFrom(ctx, "", "", "", 0); !errors.Is(err, ErrServiceUnavailable) {
