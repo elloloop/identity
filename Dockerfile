@@ -6,7 +6,7 @@
 # Run:
 #   docker run -p 80:80 -p 9090:9090 -e GATEWAY_ENTDB_ADDRESS=entdb:50051 identity
 
-FROM --platform=$BUILDPLATFORM golang:1.25.10-alpine3.23 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.3-alpine3.23 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
