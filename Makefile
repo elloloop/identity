@@ -142,7 +142,7 @@ realpostgres: ## Integration tests against a real postgres (expects GATEWAY_POST
 		$(GO) test -race -timeout=300s ./internal/repo/postgres/...
 
 .PHONY: fuzz
-fuzz: ## Fuzz smoke — runs each fuzz target with seed corpus + 5s fuzzing
+fuzz: ## Fuzz smoke — runs each fuzz target with seed corpus + 15s fuzzing
 	@set -euo pipefail; \
 	targets=$$( \
 		grep -rEn --include='*_test.go' '^func (Fuzz[A-Za-z0-9_]+)\(' . \
@@ -156,7 +156,7 @@ fuzz: ## Fuzz smoke — runs each fuzz target with seed corpus + 5s fuzzing
 	echo "$$targets" | while read -r dir name; do \
 		echo "==> fuzz $$name in $$dir"; \
 		$(GO) test -run="^$${name}$$" -timeout=120s "./$$dir"; \
-		$(GO) test -run='^$$' -fuzz="^$${name}$$" -fuzztime=5s -parallel=4 -timeout=60s "./$$dir"; \
+		$(GO) test -run='^$$' -fuzz="^$${name}$$" -fuzztime=15s -parallel=4 -timeout=120s "./$$dir"; \
 	done
 
 # ---------------------------------------------------------------------------
