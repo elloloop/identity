@@ -281,11 +281,7 @@ func TestPassword_LoginWrongPasswordRejected_AuditEmitted(t *testing.T) {
 		t.Fatalf("code = %v, want Unauthenticated (err=%v)", got, err)
 	}
 
-	failuresAfter := h.CountAuditEventsByType(t, "login_failure")
-	if failuresAfter <= failuresBefore {
-		t.Fatalf("expected login_failure audit event count to increase: before=%d after=%d",
-			failuresBefore, failuresAfter)
-	}
+	h.WaitForAuditEventCountAtLeast(t, "login_failure", failuresBefore+1)
 }
 
 func TestPassword_LoginUnverifiedEmailAllowed(t *testing.T) {
