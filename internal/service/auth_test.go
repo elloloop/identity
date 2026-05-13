@@ -878,3 +878,57 @@ func TestTokenExpiryHelpers(t *testing.T) {
 	assert.Equal(t, "abc", truncate("abcdef", 3))
 	assert.Equal(t, "abc", truncate("abc", 3))
 }
+
+// ── Per-email signup throttle ──────────────────────────────────────────
+
+func TestPasswordSignup_PerEmailThrottle_ReturnsDecoy(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.SignupEmailCooldownSeconds = 60
+	svc.signupThrottle = newEmailSendThrottle(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
+
+	// First call: succeeds, user created.
+	res1, err := svc.PasswordSignup(context.Background(), "throttle@example.com", strongPW, "T", "")
+	require.NoError(t, err)
+	require.NotNil(t, res1)
+	assert.NotContains(t, res1.User.ID, "signup-pending-")
+
+	// Second call within cooldown: must return an anti-enumeration
+	// decoy that LOOKS LIKE success but does not create a second user
+	// and does not mint a valid refresh token.
+	res2, err := svc.PasswordSignup(context.Background(), "throttle@example.com", strongPW, "T", "")
+	require.NoError(t, err)
+	require.NotNil(t, res2)
+	assert.Contains(t, res2.User.ID, "signup-pending-",
+		"throttled signup must return synthetic decoy user, not the real one")
+	assert.NotEmpty(t, res2.AccessToken)
+	assert.NotEmpty(t, res2.RefreshToken)
+
+	// The decoy refresh token must NOT be persisted — proves the
+	// throttled caller cannot redeem it.
+	_, _, _, err = svc.RefreshToken(context.Background(), res2.RefreshToken, "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated),
+		"throttled-signup decoy refresh token must not be redeemable")
+
+	// Only ONE user in the repo.
+	assert.Len(t, repo.users, 1, "throttled signup must not create a second user")
+}
+
+func TestPasswordSignup_PerEmailThrottle_DifferentEmails_Independent(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.SignupEmailCooldownSeconds = 60
+	svc.signupThrottle = newEmailSendThrottle(int64(svc.cfg.SignupEmailCooldownSeconds)*1000, 0)
+
+	res1, err := svc.PasswordSignup(context.Background(), "a@example.com", strongPW, "", "")
+	require.NoError(t, err)
+	assert.NotContains(t, res1.User.ID, "signup-pending-")
+
+	res2, err := svc.PasswordSignup(context.Background(), "b@example.com", strongPW, "", "")
+	require.NoError(t, err)
+	assert.NotContains(t, res2.User.ID, "signup-pending-",
+		"different email must not share throttle state")
+
+	assert.Len(t, repo.users, 2)
+}
