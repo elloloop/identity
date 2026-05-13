@@ -86,7 +86,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	}
 
 	if !s.emailThrottle.allow(emailAddr, s.nowMs()) {
-		s.logger.Info("password_reset_throttled", zap.String("email", emailAddr))
+		s.logger.Info("password_reset_throttled", zap.String("email", redactEmail(emailAddr)))
 		return nil
 	}
 

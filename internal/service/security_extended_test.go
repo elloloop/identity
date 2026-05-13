@@ -259,20 +259,6 @@ func TestSecExt_AccountLockout_NFailuresLockWithinWindow(t *testing.T) {
 		"after %d failed attempts the account MUST be locked", maxAttempts)
 }
 
-// TestSecExt_PasswordResetTokenReplay_NotApplicable documents that the
-// codebase has no public "consume password reset token" path —
-// AdminService.ResetUserPassword only generates a reset token; there is
-// no service method that consumes it. So replay-rejection cannot be
-// asserted at this layer. This test is a placeholder that records the
-// gap (a reset token should be single-use when the consume endpoint is
-// added).
-func TestSecExt_PasswordResetTokenReplay_NotApplicable(t *testing.T) {
-	t.Parallel()
-	t.Skip("no public password-reset consume endpoint exists in AuthService; " +
-		"AdminService.ResetUserPassword only generates the token. Replay-rejection " +
-		"must be asserted when the consume endpoint is implemented.")
-}
-
 // TestSecExt_InvitationTokenReplay asserts that an accepted invitation
 // token cannot be reused.
 func TestSecExt_InvitationTokenReplay(t *testing.T) {
