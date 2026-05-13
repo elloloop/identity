@@ -13,9 +13,26 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// bcryptCost is the work factor for bcrypt hashing. 12 is a good balance of
-// security and speed (≈250 ms on modern hardware).
-const bcryptCost = 12
+// ProductionBcryptCost is the bcrypt work factor used in production
+// (≈250 ms on modern hardware). Lowering it is a security regression; the
+// strength_security_test enforces it.
+const ProductionBcryptCost = 12
+
+// bcryptCost is the work factor actually used by Hash. It defaults to the
+// production value and is a var (not a const) only so tests can lower it via
+// SetCostForTests for speed. Production code MUST NOT mutate it.
+var bcryptCost = ProductionBcryptCost
+
+// SetCostForTests overrides the bcrypt cost factor for the duration of a
+// test binary. Call ONLY from TestMain (before any tests run) or from a
+// single test that immediately defers the returned restore func. It is not
+// safe for concurrent use and must never be called from production code.
+// Returns a restore func that resets the original cost.
+func SetCostForTests(cost int) (restore func()) {
+	old := bcryptCost
+	bcryptCost = cost
+	return func() { bcryptCost = old }
+}
 
 var errPasswordContainsNUL = errors.New("password contains NUL byte")
 

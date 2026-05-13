@@ -72,10 +72,21 @@ func TestSec_VerifyConstantTime(t *testing.T) {
 }
 
 // TestSec_HashCost_AtLeast30ms asserts the bcrypt cost factor has not been
-// silently lowered. With cost 12, Hash should take well over 30 ms on any
-// modern hardware. If this fails, someone reduced the work factor and
-// the codebase is now vulnerable to fast offline cracking.
+// silently lowered. With ProductionBcryptCost (=12), Hash should take well
+// over 30 ms on any modern hardware. If this fails, someone reduced the work
+// factor and the codebase is now vulnerable to fast offline cracking.
+//
+// TestMain lowers bcryptCost to MinCost so the rest of the suite runs fast;
+// we explicitly restore production cost here so this check measures the real
+// production work factor.
 func TestSec_HashCost_AtLeast30ms(t *testing.T) {
+	if ProductionBcryptCost < 12 {
+		t.Fatalf("ProductionBcryptCost lowered to %d; must be >= 12", ProductionBcryptCost)
+	}
+
+	restore := SetCostForTests(ProductionBcryptCost)
+	defer restore()
+
 	const minDuration = 30 * time.Millisecond
 
 	start := time.Now()
