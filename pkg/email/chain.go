@@ -40,7 +40,7 @@ func (c *Chain) Send(ctx context.Context, m Message) error {
 		err := fmt.Errorf("%w: chain has no transports", ErrTransport)
 		c.logger.Error(
 			"email_send_failed",
-			zap.String("to", m.To),
+			zap.String("to", Redact(m.To)),
 			zap.String("subject", m.Subject),
 			zap.Error(err),
 		)
@@ -57,7 +57,7 @@ func (c *Chain) Send(ctx context.Context, m Message) error {
 			c.logger.Info(
 				"email_sent",
 				zap.Int("provider_idx", idx),
-				zap.String("to", m.To),
+				zap.String("to", Redact(m.To)),
 				zap.String("subject", m.Subject),
 			)
 			return nil
@@ -65,7 +65,7 @@ func (c *Chain) Send(ctx context.Context, m Message) error {
 		c.logger.Warn(
 			"email_send_attempt_failed",
 			zap.Int("provider_idx", idx),
-			zap.String("to", m.To),
+			zap.String("to", Redact(m.To)),
 			zap.String("subject", m.Subject),
 			zap.Error(err),
 		)
@@ -74,7 +74,7 @@ func (c *Chain) Send(ctx context.Context, m Message) error {
 
 	c.logger.Error(
 		"email_send_failed",
-		zap.String("to", m.To),
+		zap.String("to", Redact(m.To)),
 		zap.String("subject", m.Subject),
 		zap.Int("attempts", len(c.transports)),
 		zap.Error(lastErr),

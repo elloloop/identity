@@ -336,7 +336,7 @@ func (s *AdminService) sendInvitationEmail(ctx context.Context, to, name, role, 
 		"Link":        link,
 	})
 	if err != nil {
-		s.logger.Warn("invitation_email_render_failed", zap.String("to", to), zap.Error(err))
+		s.logger.Warn("invitation_email_render_failed", zap.String("to", redactEmail(to)), zap.Error(err))
 		return
 	}
 	msg := email.Message{
@@ -347,6 +347,6 @@ func (s *AdminService) sendInvitationEmail(ctx context.Context, to, name, role, 
 		Text:    text,
 	}
 	if err := s.mailer.Send(ctx, msg); err != nil {
-		s.logger.Warn("invitation_email_send_failed", zap.String("to", to), zap.Error(err))
+		s.logger.Warn("invitation_email_send_failed", zap.String("to", redactEmail(to)), zap.Error(err))
 	}
 }
