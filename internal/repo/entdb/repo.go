@@ -1467,7 +1467,13 @@ func (r *entRepository) ListOAuthIdentitiesForUser(ctx context.Context, userID s
 
 // ── Identity-verification records ─────────────────────────────────
 
-func identityVerificationFromProto(id string, p *schemapb.IdentityVerificationRecord) *service.IdentityVerificationRecord {
+// identityVerificationFromProto rehydrates a *service.IdentityVerificationRecord
+// from the wire payload. tenantID is the repository's tenant scope —
+// the proto has no tenant_id field because identity-tenant ↔ entdb-tenant
+// is 1:1 (per docs/IDENTITY.md): the storage scope IS the tenant. Reads
+// always know which tenant they're reading from, so the field is
+// synthesised here rather than persisted on every row.
+func identityVerificationFromProto(id, tenantID string, p *schemapb.IdentityVerificationRecord) *service.IdentityVerificationRecord {
 	if p == nil {
 		return nil
 	}
@@ -1475,6 +1481,7 @@ func identityVerificationFromProto(id string, p *schemapb.IdentityVerificationRe
 		NodeID:            id,
 		VerificationID:    p.GetVerificationId(),
 		UserID:            p.GetUserId(),
+		TenantID:          tenantID,
 		Provider:          p.GetProvider(),
 		ProviderSessionID: p.GetProviderSessionId(),
 		Status:            p.GetStatus(),
@@ -1523,7 +1530,7 @@ func (r *entRepository) GetIdentityVerification(ctx context.Context, verificatio
 	if err != nil {
 		return nil, fmt.Errorf("repo: GetIdentityVerification: %w", err)
 	}
-	return identityVerificationFromProto(id, dst), nil
+	return identityVerificationFromProto(id, r.tenantID, dst), nil
 }
 
 func (r *entRepository) GetLatestIdentityVerificationForUser(ctx context.Context, userID string) (*service.IdentityVerificationRecord, error) {
@@ -1536,7 +1543,7 @@ func (r *entRepository) GetLatestIdentityVerificationForUser(ctx context.Context
 	}
 	var latest *service.IdentityVerificationRecord
 	for _, row := range rows {
-		rec := identityVerificationFromProto(row.NodeID, row.Message.(*schemapb.IdentityVerificationRecord))
+		rec := identityVerificationFromProto(row.NodeID, r.tenantID, row.Message.(*schemapb.IdentityVerificationRecord))
 		if latest == nil || rec.CreatedAt > latest.CreatedAt {
 			latest = rec
 		}

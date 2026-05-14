@@ -48,8 +48,17 @@ func TestIDV_StubProvider_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
-	if got := statusRes.Msg.GetVerification().GetStatus(); got != identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_APPROVED {
+	verif := statusRes.Msg.GetVerification()
+	if got := verif.GetStatus(); got != identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_APPROVED {
 		t.Fatalf("status = %v; want APPROVED", got)
+	}
+	// Per docs/IDENTITY.md the identity-tenant ↔ entdb-tenant mapping is
+	// 1:1, so every persisted IDV record carries the scope's tenant id.
+	// On the entdb backend the proto has no tenant_id field, so the repo
+	// synthesises it from the scope on read; this assertion catches a
+	// regression where the field stops being populated end-to-end.
+	if got := verif.GetTenantId(); got == "" {
+		t.Fatalf("verification.tenant_id is empty; expected the deployment tenant id")
 	}
 }
 
