@@ -130,6 +130,8 @@ func (s *sdkScope) get(ctx context.Context, actor string, dst proto.Message, nod
 		return getInto[*schemapb.EmailChangeToken](ctx, scope, dst, nodeID)
 	case *schemapb.OAuthIdentity:
 		return getInto[*schemapb.OAuthIdentity](ctx, scope, dst, nodeID)
+	case *schemapb.IdentityVerificationRecord:
+		return getInto[*schemapb.IdentityVerificationRecord](ctx, scope, dst, nodeID)
 	}
 	return fmt.Errorf("entdb: get: unsupported message type %T", dst)
 }
@@ -171,6 +173,8 @@ func (s *sdkScope) query(ctx context.Context, actor string, witness proto.Messag
 		return queryAs[*schemapb.EmailChangeToken](ctx, scope, filter)
 	case *schemapb.OAuthIdentity:
 		return queryAs[*schemapb.OAuthIdentity](ctx, scope, filter)
+	case *schemapb.IdentityVerificationRecord:
+		return queryAs[*schemapb.IdentityVerificationRecord](ctx, scope, filter)
 	}
 	return nil, fmt.Errorf("entdb: query: unsupported message type %T", witness)
 }
@@ -288,6 +292,8 @@ func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Messa
 		sdk.Delete[*schemapb.EmailChangeToken](plan, nodeID)
 	case *schemapb.OAuthIdentity:
 		sdk.Delete[*schemapb.OAuthIdentity](plan, nodeID)
+	case *schemapb.IdentityVerificationRecord:
+		sdk.Delete[*schemapb.IdentityVerificationRecord](plan, nodeID)
 	default:
 		return fmt.Errorf("entdb: delete: unsupported message type %T", witness)
 	}
