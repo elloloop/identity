@@ -85,7 +85,7 @@ func (r *entRepository) FindUserByEmail(ctx context.Context, email string) (*ser
 		return nil, nil
 	}
 	dst := &schemapb.User{}
-	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.UserEmail, email, dst)
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.UserEmail, email, dst)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
@@ -547,7 +547,7 @@ func (r *entRepository) FindRefreshTokenByHashIncludingConsumed(ctx context.Cont
 		return nil, nil
 	}
 	dst := &schemapb.RefreshToken{}
-	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.RefreshTokenTokenHash, hash, dst)
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.RefreshTokenTokenHash, hash, dst)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
@@ -662,7 +662,7 @@ func (r *entRepository) GetPasskeyCredentialByCredID(ctx context.Context, creden
 		return nil, nil
 	}
 	dst := &schemapb.PasskeyCredential{}
-	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.PasskeyCredentialCredentialID, credentialID, dst)
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.PasskeyCredentialCredentialID, credentialID, dst)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
@@ -809,7 +809,7 @@ func (r *entRepository) FindQrLoginSession(ctx context.Context, sessionID string
 		return nil, nil
 	}
 	dst := &schemapb.QrLoginSession{}
-	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.QrLoginSessionSessionID, sessionID, dst)
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.QrLoginSessionSessionID, sessionID, dst)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
@@ -1106,7 +1106,7 @@ func (r *entRepository) GetLoginChallengeByChallengeID(ctx context.Context, chal
 		return nil, nil
 	}
 	dst := &schemapb.LoginChallenge{}
-	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.LoginChallengeChallengeID, challengeID, dst)
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.LoginChallengeChallengeID, challengeID, dst)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
@@ -1150,7 +1150,7 @@ func (r *entRepository) FindInvitationByHash(ctx context.Context, tokenHash stri
 		return nil, nil
 	}
 	dst := &schemapb.UserInvitation{}
-	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.UserInvitationTokenHash, tokenHash, dst)
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.UserInvitationTokenHash, tokenHash, dst)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
@@ -1192,11 +1192,12 @@ func passwordResetFromProto(id string, p *schemapb.PasswordResetToken) *service.
 		return nil
 	}
 	return &service.PasswordResetToken{
-		NodeID:    id,
-		TokenHash: p.GetTokenHash(),
-		UserID:    p.GetUserId(),
-		ExpiresAt: p.GetExpiresAt(),
-		CreatedAt: p.GetCreatedAt(),
+		NodeID:     id,
+		TokenHash:  p.GetTokenHash(),
+		UserID:     p.GetUserId(),
+		ExpiresAt:  p.GetExpiresAt(),
+		CreatedAt:  p.GetCreatedAt(),
+		ConsumedAt: p.GetConsumedAt(),
 	}
 }
 
@@ -1205,10 +1206,11 @@ func (r *entRepository) CreatePasswordResetToken(ctx context.Context, t *service
 		return errors.New("repo: CreatePasswordResetToken: nil record")
 	}
 	msg := &schemapb.PasswordResetToken{
-		TokenHash: t.TokenHash,
-		UserId:    t.UserID,
-		ExpiresAt: t.ExpiresAt,
-		CreatedAt: t.CreatedAt,
+		TokenHash:  t.TokenHash,
+		UserId:     t.UserID,
+		ExpiresAt:  t.ExpiresAt,
+		CreatedAt:  t.CreatedAt,
+		ConsumedAt: t.ConsumedAt,
 	}
 	id, err := r.client.create(ctx, actorStr(t.UserID), msg)
 	if err != nil {
@@ -1223,34 +1225,22 @@ func (r *entRepository) FindPasswordResetTokenByHash(ctx context.Context, tokenH
 		return nil, nil
 	}
 	dst := &schemapb.PasswordResetToken{}
-	id, marker, err := r.client.findByKey(ctx, systemActor, schemapb.PasswordResetTokenTokenHash, tokenHash, dst)
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.PasswordResetTokenTokenHash, tokenHash, dst)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("repo: FindPasswordResetTokenByHash: %w", err)
 	}
-	rec := passwordResetFromProto(id, dst)
-	// PasswordResetToken proto does not yet expose consumed_at; the
-	// conformance suite checks ConsumedAt round-trip via the
-	// entClient's side-channel marker until upstream lands the field.
-	// Production server returns marker = 0 ("unconsumed") — correct
-	// for the production reset flow because consumed tokens are
-	// deleted server-side after the reset succeeds.
-	rec.ConsumedAt = marker
-	return rec, nil
+	return passwordResetFromProto(id, dst), nil
 }
 
 func (r *entRepository) MarkPasswordResetTokenConsumed(ctx context.Context, tokenID string, atMs int64) error {
 	if tokenID == "" {
 		return errors.New("repo: MarkPasswordResetTokenConsumed: missing token id")
 	}
-	// PasswordResetToken proto does not yet carry consumed_at; the
-	// in-memory entClient tracks the marker on a side-channel for
-	// conformance, and the production server treats the row as
-	// implicitly consumed when MarkConsumed lands. When upstream
-	// adds consumed_at to the proto, this becomes a typed Update.
-	if err := r.client.markConsumed(ctx, systemActor, &schemapb.PasswordResetToken{}, tokenID, atMs); err != nil {
+	patch := &schemapb.PasswordResetToken{ConsumedAt: atMs}
+	if err := r.client.update(ctx, systemActor, tokenID, patch); err != nil {
 		return fmt.Errorf("repo: MarkPasswordResetTokenConsumed: %w", err)
 	}
 	return nil
@@ -1298,7 +1288,7 @@ func (r *entRepository) FindEmailVerificationTokenByHash(ctx context.Context, to
 		return nil, nil
 	}
 	dst := &schemapb.EmailVerificationToken{}
-	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.EmailVerificationTokenTokenHash, tokenHash, dst)
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.EmailVerificationTokenTokenHash, tokenHash, dst)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
@@ -1363,7 +1353,7 @@ func (r *entRepository) FindEmailChangeTokenByHash(ctx context.Context, tokenHas
 		return nil, nil
 	}
 	dst := &schemapb.EmailChangeToken{}
-	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.EmailChangeTokenTokenHash, tokenHash, dst)
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.EmailChangeTokenTokenHash, tokenHash, dst)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
@@ -1526,7 +1516,7 @@ func (r *entRepository) GetIdentityVerification(ctx context.Context, verificatio
 		return nil, nil
 	}
 	dst := &schemapb.IdentityVerificationRecord{}
-	id, _, err := r.client.findByKey(ctx, systemActor, schemapb.IdentityVerificationRecordVerificationID, verificationID, dst)
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.IdentityVerificationRecordVerificationID, verificationID, dst)
 	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}

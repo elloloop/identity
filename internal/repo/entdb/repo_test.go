@@ -32,7 +32,6 @@ import (
 type memoryEntClient struct {
 	mu        sync.Mutex
 	store     map[string]storedNode
-	consumed  map[string]int64
 	idCounter int64
 }
 
@@ -46,8 +45,7 @@ type duplicateUserEntClient struct {
 
 func newMemoryEntClient() *memoryEntClient {
 	return &memoryEntClient{
-		store:    make(map[string]storedNode),
-		consumed: make(map[string]int64),
+		store: make(map[string]storedNode),
 	}
 }
 
@@ -88,15 +86,14 @@ func (c *memoryEntClient) query(_ context.Context, _ string, witness proto.Messa
 		}
 		copy := proto.Clone(n.msg)
 		out = append(out, queriedNode{
-			NodeID:           id,
-			Message:          copy,
-			ConsumedAtMarker: c.consumed[id],
+			NodeID:  id,
+			Message: copy,
 		})
 	}
 	return out, nil
 }
 
-func (c *memoryEntClient) findByKey(_ context.Context, _ string, key sdk.UniqueKey[string], value string, dst proto.Message) (string, int64, error) {
+func (c *memoryEntClient) findByKey(_ context.Context, _ string, key sdk.UniqueKey[string], value string, dst proto.Message) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	wantType := reflect.TypeOf(dst)
@@ -108,9 +105,9 @@ func (c *memoryEntClient) findByKey(_ context.Context, _ string, key sdk.UniqueK
 			continue
 		}
 		proto.Merge(dst, n.msg)
-		return id, c.consumed[id], nil
+		return id, nil
 	}
-	return "", 0, errNotFound
+	return "", errNotFound
 }
 
 func (c *memoryEntClient) create(_ context.Context, _ string, msg proto.Message) (string, error) {
@@ -164,17 +161,6 @@ func (c *memoryEntClient) delete(_ context.Context, _ string, witness proto.Mess
 		return errors.New("entdb: delete: type mismatch")
 	}
 	delete(c.store, nodeID)
-	delete(c.consumed, nodeID)
-	return nil
-}
-
-func (c *memoryEntClient) markConsumed(_ context.Context, _ string, _ proto.Message, nodeID string, atMs int64) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if _, ok := c.store[nodeID]; !ok {
-		return fmt.Errorf("entdb: markConsumed: node %q not found", nodeID)
-	}
-	c.consumed[nodeID] = atMs
 	return nil
 }
 

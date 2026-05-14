@@ -22,14 +22,6 @@ import (
 type queriedNode struct {
 	NodeID  string
 	Message proto.Message
-	// ConsumedAtMarker carries a consumed_at timestamp for node types
-	// whose identity-side proto schema doesn't carry the field yet
-	// (today: PasswordResetToken). The in-memory test client tracks
-	// it on a side channel; the production sdkScope leaves it 0 (the
-	// real server deletes consumed reset tokens after the password
-	// write, so production never reads this marker). Goes away once
-	// proto/identity/schema/schema.proto grows PasswordResetToken.consumed_at.
-	ConsumedAtMarker int64
 }
 
 // entClient is the small surface the typed Repository depends on. Each
@@ -45,13 +37,11 @@ type queriedNode struct {
 type entClient interface {
 	get(ctx context.Context, actor string, dst proto.Message, nodeID string) error
 	// findByKey looks up a node by a typed unique-key token and reads
-	// the typed payload. Returns the assigned node id and any
-	// consumed-at marker (used by token types whose proto does not yet
-	// expose consumed_at — see markConsumed). Single logical operation
-	// against the SDK's GetByKey + Get pair, the only path that
-	// exercises the server's secondary unique-key index. Returns
+	// the typed payload. Returns the assigned node id. Single logical
+	// operation against the SDK's GetByKey + Get pair, the only path
+	// that exercises the server's secondary unique-key index. Returns
 	// errNotFound when the key has no matching row.
-	findByKey(ctx context.Context, actor string, key sdk.UniqueKey[string], value string, dst proto.Message) (nodeID string, consumedAtMarker int64, err error)
+	findByKey(ctx context.Context, actor string, key sdk.UniqueKey[string], value string, dst proto.Message) (nodeID string, err error)
 	// query returns nodes matching a non-unique filter. Used for list
 	// lookups (e.g. all RefreshTokens for a user). Unique-by-field
 	// lookups must go through findByKey, which exercises the secondary
@@ -60,14 +50,6 @@ type entClient interface {
 	create(ctx context.Context, actor string, msg proto.Message) (string, error)
 	update(ctx context.Context, actor string, nodeID string, msg proto.Message) error
 	delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error
-	// markConsumed records a consumed_at timestamp for node types
-	// whose identity-side proto schema doesn't carry the field yet.
-	// Used only by PasswordResetToken today; the conformance fake
-	// tracks the marker on a side channel, the production
-	// implementation is a no-op (the real server deletes consumed
-	// reset tokens after the password write succeeds). Goes away
-	// once proto/identity/schema/schema.proto adds the field.
-	markConsumed(ctx context.Context, actor string, witness proto.Message, nodeID string, atMs int64) error
 }
 
 // errNotFound is returned by entClient.get when the requested node id
@@ -184,24 +166,22 @@ func (s *sdkScope) query(ctx context.Context, actor string, witness proto.Messag
 // the typed payload via Get. This is the only path that exercises the
 // server's secondary unique-key index — Query[T] with a name-keyed
 // filter goes through a different (and currently buggy) read path.
-func (s *sdkScope) findByKey(ctx context.Context, actor string, key sdk.UniqueKey[string], value string, dst proto.Message) (string, int64, error) {
+func (s *sdkScope) findByKey(ctx context.Context, actor string, key sdk.UniqueKey[string], value string, dst proto.Message) (string, error) {
 	scope, err := s.scope(actor)
 	if err != nil {
-		return "", 0, err
+		return "", err
 	}
 	node, err := sdk.GetByKey(ctx, scope, key, value)
 	if err != nil {
-		return "", 0, err
+		return "", err
 	}
 	if node == nil {
-		return "", 0, errNotFound
+		return "", errNotFound
 	}
 	if err := s.get(ctx, actor, dst, node.NodeID); err != nil {
-		return "", 0, err
+		return "", err
 	}
-	// Production server has no side-channel marker; consumed_at lives
-	// in the proto once upstream lands the field.
-	return node.NodeID, 0, nil
+	return node.NodeID, nil
 }
 
 func (s *sdkScope) create(ctx context.Context, actor string, msg proto.Message) (string, error) {
@@ -249,15 +229,6 @@ func (s *sdkScope) rawUpdate(ctx context.Context, actor string, typeID int, node
 		Patch:  patch,
 	}})
 	return err
-}
-
-// markConsumed is a no-op against the real server: the identity-side
-// PasswordResetToken proto has no consumed_at field. The production
-// reset flow works because the real server deletes consumed reset
-// tokens after the password write succeeds. Becomes a typed Update
-// once proto/identity/schema/schema.proto adds the field.
-func (s *sdkScope) markConsumed(_ context.Context, _ string, _ proto.Message, _ string, _ int64) error {
-	return nil
 }
 
 func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error {
