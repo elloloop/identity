@@ -102,10 +102,11 @@ message PasswordResetToken {
         description: "A short-lived token for password reset flows"
     };
 
-    string token_hash = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
-    string user_id    = 2 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
-    int64  expires_at = 3 [(entdb.field) = { kind: "timestamp", pii_false: true }];
-    int64  created_at = 4 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    string token_hash  = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
+    string user_id     = 2 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    int64  expires_at  = 3 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  created_at  = 4 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  consumed_at = 5 [(entdb.field) = { kind: "timestamp", pii_false: true }]; // 0 = unconsumed
 }
 
 // ─── PasskeyCredential (type_id 20) ────────────────────────────────────

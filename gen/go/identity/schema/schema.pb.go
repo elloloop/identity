@@ -434,6 +434,7 @@ type PasswordResetToken struct {
 	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	ExpiresAt     int64                  `protobuf:"varint,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	CreatedAt     int64                  `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ConsumedAt    int64                  `protobuf:"varint,5,opt,name=consumed_at,json=consumedAt,proto3" json:"consumed_at,omitempty"` // 0 = unconsumed
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -492,6 +493,13 @@ func (x *PasswordResetToken) GetExpiresAt() int64 {
 func (x *PasswordResetToken) GetCreatedAt() int64 {
 	if x != nil {
 		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *PasswordResetToken) GetConsumedAt() int64 {
+	if x != nil {
+		return x.ConsumedAt
 	}
 	return 0
 }
@@ -1926,7 +1934,7 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"lastUsedAt\x122\n" +
 	"\vconsumed_at\x18\n" +
 	" \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
-	"consumedAt:A\xa2\xbb\x18=\b\x050\x04:\auser_idR.A hashed refresh token bound to a user session\"\x92\x02\n" +
+	"consumedAt:A\xa2\xbb\x18=\b\x050\x04:\auser_idR.A hashed refresh token bound to a user session\"\xc6\x02\n" +
 	"\x12PasswordResetToken\x12+\n" +
 	"\n" +
 	"token_hash\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\ttokenHash\x12*\n" +
@@ -1934,7 +1942,9 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x03 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\texpiresAt\x120\n" +
 	"\n" +
-	"created_at\x18\x04 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt:?\xa2\xbb\x18;\b\x130\x04:\auser_idR,A short-lived token for password reset flows\"\xc0\x04\n" +
+	"created_at\x18\x04 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt\x122\n" +
+	"\vconsumed_at\x18\x05 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
+	"consumedAt:?\xa2\xbb\x18;\b\x130\x04:\auser_idR,A short-lived token for password reset flows\"\xc0\x04\n" +
 	"\x11PasskeyCredential\x121\n" +
 	"\rcredential_id\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\fcredentialId\x12*\n" +
 	"\auser_id\x18\x02 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x12'\n" +
