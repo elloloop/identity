@@ -14,22 +14,21 @@ import (
 )
 
 // queriedNode pairs a typed proto message with its node id. The SDK's
-// public typed Query[T] discards the node id (it returns []T only),
-// which is a documented v1.7.0 limitation — typed find-then-update
-// flows that need the node id can only work via this seam, with the
-// in-memory test scope filling in the node id and the production
-// scope leaving it empty until upstream lands the typed
-// "QueryWithIDs" RPC. The realentdb integration test skips the
-// PasswordLogin leg for this exact reason.
+// public typed Query[T] returns []T only — it does not expose the
+// per-row node id — so find-then-update flows route through this seam
+// instead. The in-memory test scope fills the node id from its store;
+// the production sdkScope's typed-Query fallback leaves it empty, and
+// the raw-transport fast path (queryViaTransport) populates it.
 type queriedNode struct {
 	NodeID  string
 	Message proto.Message
-	// ConsumedAtMarker carries a consumed_at timestamp for proto
-	// types that do not yet expose the field on their schema (today:
-	// PasswordResetToken). The in-memory test client populates this
-	// from its side channel; the production sdkScope leaves it 0.
-	// Once upstream adds the missing proto field, this field and
-	// markConsumed go away in the same change.
+	// ConsumedAtMarker carries a consumed_at timestamp for node types
+	// whose identity-side proto schema doesn't carry the field yet
+	// (today: PasswordResetToken). The in-memory test client tracks
+	// it on a side channel; the production sdkScope leaves it 0 (the
+	// real server deletes consumed reset tokens after the password
+	// write, so production never reads this marker). Goes away once
+	// proto/identity/schema/schema.proto grows PasswordResetToken.consumed_at.
 	ConsumedAtMarker int64
 }
 
@@ -62,10 +61,12 @@ type entClient interface {
 	update(ctx context.Context, actor string, nodeID string, msg proto.Message) error
 	delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error
 	// markConsumed records a consumed_at timestamp for node types
-	// whose proto definition does not yet expose the field. Used
-	// only by PasswordResetToken on v1.7.0; the conformance fake
-	// tracks the marker on a side channel and the production
-	// implementation is a no-op pending the upstream proto fix.
+	// whose identity-side proto schema doesn't carry the field yet.
+	// Used only by PasswordResetToken today; the conformance fake
+	// tracks the marker on a side channel, the production
+	// implementation is a no-op (the real server deletes consumed
+	// reset tokens after the password write succeeds). Goes away
+	// once proto/identity/schema/schema.proto adds the field.
 	markConsumed(ctx context.Context, actor string, witness proto.Message, nodeID string, atMs int64) error
 }
 
@@ -250,11 +251,11 @@ func (s *sdkScope) rawUpdate(ctx context.Context, actor string, typeID int, node
 	return err
 }
 
-// markConsumed is a no-op against the real server: PasswordResetToken
-// on v1.7.0 has no consumed_at proto field. The production reset flow
-// works because the server deletes consumed reset tokens after the
-// password write succeeds. Once upstream lands the field this becomes
-// a typed Update.
+// markConsumed is a no-op against the real server: the identity-side
+// PasswordResetToken proto has no consumed_at field. The production
+// reset flow works because the real server deletes consumed reset
+// tokens after the password write succeeds. Becomes a typed Update
+// once proto/identity/schema/schema.proto adds the field.
 func (s *sdkScope) markConsumed(_ context.Context, _ string, _ proto.Message, _ string, _ int64) error {
 	return nil
 }
@@ -325,11 +326,10 @@ func queryAs[T proto.Message](ctx context.Context, scope *sdk.Scope, filter map[
 		if !isNonNilMessage(m) {
 			continue
 		}
-		// NodeID stays empty here: sdk.Query[T] on v1.7.0 returns
-		// only the typed payload. find-then-update flows that need
-		// the node id are blocked on the upstream RPC fix; the
-		// realentdb integration test skips PasswordLogin for this
-		// reason.
+		// NodeID stays empty here: sdk.Query[T] returns only the
+		// typed payload. Find-then-update flows that need the node
+		// id either fall back to the raw transport (queryViaTransport
+		// above, which carries the id) or skip the leg entirely.
 		res = append(res, queriedNode{Message: m})
 	}
 	return res, nil
