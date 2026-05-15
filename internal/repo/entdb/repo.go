@@ -36,10 +36,11 @@ type rawUpdateClient interface {
 }
 
 // NewRepository constructs an EntDB-backed Repository using the SDK's
-// public typed surface.
+// public typed surface. The returned repository wraps every entClient
+// call in an OpenTelemetry span (no-op when OTel is disabled).
 func NewRepository(client *sdk.DbClient, tenantID string) service.Repository {
 	return &entRepository{
-		client:   newSDKScope(client, tenantID),
+		client:   newTracedClient(newSDKScope(client, tenantID)),
 		tenantID: tenantID,
 	}
 }

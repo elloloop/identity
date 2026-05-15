@@ -198,6 +198,24 @@ type Config struct {
 	PostgresDSN         string
 	PostgresMaxConns    int
 	PostgresAutoMigrate bool
+
+	// OTel exports OpenTelemetry traces to a deployer-supplied OTLP
+	// collector. Default off so a deployer who has no collector pays
+	// zero cost — when disabled the no-op tracer is installed and the
+	// otelconnect interceptor is omitted from the handler chain.
+	//
+	//   GATEWAY_OTEL_ENABLED            true|false (default false)
+	//   GATEWAY_OTEL_EXPORTER_ENDPOINT  host:port — required when enabled
+	//   GATEWAY_OTEL_EXPORTER_PROTOCOL  grpc|http (default grpc)
+	//   GATEWAY_OTEL_SAMPLE_RATIO       0.0–1.0 (default 0.1)
+	//   GATEWAY_OTEL_DEPLOYMENT_ENV     deployment.environment.name (default "")
+	//   GATEWAY_OTEL_SERVICE_VERSION    overrides build version baked into the binary
+	OTelEnabled          bool
+	OTelExporterEndpoint string
+	OTelExporterProtocol string
+	OTelSampleRatio      float64
+	OTelDeploymentEnv    string
+	OTelServiceVersion   string
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -298,6 +316,13 @@ func Load() *Config {
 		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
 		PostgresAutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", false),
+
+		OTelEnabled:          envBool("GATEWAY_OTEL_ENABLED", false),
+		OTelExporterEndpoint: envStr("GATEWAY_OTEL_EXPORTER_ENDPOINT", ""),
+		OTelExporterProtocol: envStr("GATEWAY_OTEL_EXPORTER_PROTOCOL", "grpc"),
+		OTelSampleRatio:      envFloat("GATEWAY_OTEL_SAMPLE_RATIO", 0.1),
+		OTelDeploymentEnv:    envStr("GATEWAY_OTEL_DEPLOYMENT_ENV", ""),
+		OTelServiceVersion:   envStr("GATEWAY_OTEL_SERVICE_VERSION", ""),
 	}
 }
 
@@ -341,6 +366,20 @@ func envInt(key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// envFloat reads a float64 environment variable. Returns def if the
+// variable is unset, empty, or not a valid float.
+func envFloat(key string, def float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return def
+	}
+	return f
 }
 
 // envBool reads a boolean environment variable. Recognises "true",

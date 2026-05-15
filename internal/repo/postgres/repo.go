@@ -17,7 +17,7 @@ import (
 // pgRepository is the Postgres-backed implementation of identity's
 // persistence contracts. It is created via New().
 type pgRepository struct {
-	pool     *pgxpool.Pool
+	pool     *tracedPool
 	tenantID string
 	cfg      Config
 }
@@ -52,10 +52,11 @@ func New(ctx context.Context, cfg Config) (*pgRepository, error) {
 		poolCfg.ConnConfig.ConnectTimeout = cfg.ConnTimeout
 	}
 
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	rawPool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: open pool: %w", err)
 	}
+	pool := newTracedPool(rawPool)
 
 	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

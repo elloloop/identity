@@ -1,15 +1,19 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/elloloop/identity/internal/observability"
 )
 
 func TestLoggingMiddleware_LogsRequest(t *testing.T) {
@@ -86,6 +90,51 @@ func TestLoggingMiddleware_DefaultStatusIsOK(t *testing.T) {
 	require.Equal(t, 1, logs.Len())
 	fields := logs.All()[0].ContextMap()
 	assert.EqualValues(t, http.StatusOK, fields["status"])
+}
+
+// TestLoggingMiddleware_EmitsTraceID asserts the M8 correlation
+// contract: a request served with an active recording span in its
+// context produces a log line carrying the active trace id under
+// observability.TraceIDLogField.
+func TestLoggingMiddleware_EmitsTraceID(t *testing.T) {
+	t.Parallel()
+
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	ctx, span := tp.Tracer("test").Start(context.Background(), "request")
+	defer span.End()
+
+	core, logs := observer.New(zapcore.InfoLevel)
+	logger := zap.New(core)
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	r := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/PasswordLogin", nil).WithContext(ctx)
+	LoggingMiddleware(logger)(inner).ServeHTTP(httptest.NewRecorder(), r)
+
+	require.Equal(t, 1, logs.Len())
+	got := logs.All()[0].ContextMap()[observability.TraceIDLogField]
+	assert.Equal(t, span.SpanContext().TraceID().String(), got)
+}
+
+// TestLoggingMiddleware_OmitsTraceIDWithoutSpan asserts log lines for
+// requests without an active span do not carry the all-zeros trace id.
+func TestLoggingMiddleware_OmitsTraceIDWithoutSpan(t *testing.T) {
+	t.Parallel()
+
+	core, logs := observer.New(zapcore.InfoLevel)
+	logger := zap.New(core)
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	LoggingMiddleware(logger)(inner).ServeHTTP(
+		httptest.NewRecorder(),
+		httptest.NewRequest(http.MethodGet, "/", nil),
+	)
+	require.Equal(t, 1, logs.Len())
+	_, present := logs.All()[0].ContextMap()[observability.TraceIDLogField]
+	assert.False(t, present, "trace_id must not be set when no span is recording")
 }
 
 func TestResponseWriter_WriteHeader_DelegatesAndCaptures(t *testing.T) {

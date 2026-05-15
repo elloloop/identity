@@ -11,12 +11,16 @@ import (
 	"net/http"
 	"time"
 
+	"connectrpc.com/connect"
+	"connectrpc.com/otelconnect"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
 	"github.com/elloloop/identity/internal/config"
 	identityconnect "github.com/elloloop/identity/internal/connect"
 	"github.com/elloloop/identity/internal/middleware"
+	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
@@ -61,6 +65,13 @@ type Deps struct {
 	// CodeUnimplemented. Production deployments wire an Azure or
 	// other real provider; tests typically pass an idv.StubProvider.
 	IDVProvider idv.Provider
+
+	// MetricsRegistry is the Prometheus registry the server records
+	// RED metrics into. May be nil — in that case the default
+	// registry is used (which is what production wants). Tests pass an
+	// isolated registry so they can read counters without colliding
+	// with other tests in the same process.
+	MetricsRegistry prometheus.Registerer
 }
 
 // New builds the full HTTP handler stack: middleware chain wrapping
@@ -137,11 +148,13 @@ func New(deps Deps) (http.Handler, func(), error) {
 	if mailer == nil {
 		mailer = buildEmailTransport(deps.Config, logger)
 	}
+	mailer = observability.WrapMailer(mailer)
 
 	oauthRegistry := deps.OAuthRegistry
 	if oauthRegistry == nil {
 		oauthRegistry = buildOAuthRegistry(deps.Config, logger)
 	}
+	oauthRegistry = wrapOAuthRegistry(oauthRegistry)
 
 	authSvc := service.NewAuthServiceWithOAuth(
 		deps.Repo, deps.Config, deps.KeyRing, deps.Passkeys,
@@ -156,22 +169,35 @@ func New(deps Deps) (http.Handler, func(), error) {
 	var idvSvc *service.IdentityVerificationService
 	if deps.IDVProvider != nil {
 		idvSvc = service.NewIdentityVerificationService(
-			deps.Repo, deps.IDVProvider, deps.Config.DefaultTenantID, logger,
+			deps.Repo, observability.WrapIDVProvider(deps.IDVProvider), deps.Config.DefaultTenantID, logger,
 		)
 	}
 
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, deps.Config)
 
+	connectOpts, err := buildConnectHandlerOptions(deps.Config)
+	if err != nil {
+		return nil, noopStop, fmt.Errorf("otelconnect interceptor: %w", err)
+	}
+
 	mux := http.NewServeMux()
-	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler)
+	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
 	mux.Handle(path, svcHandler)
 
+	rpcMetrics, err := middleware.NewRPCMetrics(deps.MetricsRegistry)
+	if err != nil {
+		return nil, noopStop, fmt.Errorf("rpc metrics: %w", err)
+	}
+
 	// Order (outermost runs first on request path):
-	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → auth → Connect
+	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → auth → metrics → Connect
 	// client-IP must precede rate-limit (the limiter keys on the
 	// resolved IP) and health must precede client-IP so liveness probes
-	// from kubelets cannot be rate-limited.
+	// from kubelets cannot be rate-limited. metrics sits just outside
+	// the Connect mux so it observes every RPC's final status,
+	// including any failure synthesized by the otelconnect interceptor.
 	var chain http.Handler = mux
+	chain = middleware.MetricsMiddleware(rpcMetrics)(chain)
 	chain = middleware.AuthMiddleware(deps.KeyRing, deps.Config.DefaultTenantID, deps.Config.JWTAudience, deps.Config.JWTRequireAudience)(chain)
 	chain = middleware.JWKSMiddleware(deps.KeyRing)(chain)
 	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)
@@ -181,4 +207,44 @@ func New(deps Deps) (http.Handler, func(), error) {
 	chain = middleware.RecoverMiddleware(logger)(chain)
 	chain = middleware.LoggingMiddleware(logger)(chain)
 	return chain, stopAudit, nil
+}
+
+// buildConnectHandlerOptions returns the otelconnect interceptor
+// (when OTel is enabled) plus any future Connect-level options. When
+// OTel is disabled the function returns an empty slice — no
+// interceptor is added, so the Connect server's hot path has zero
+// overhead beyond the no-op tracer/meter calls inside the runtime.
+//
+// Prometheus RED metrics live in MetricsMiddleware (one mechanism,
+// not two). We disable otelconnect's metric emitter so the two
+// pipelines don't double-count.
+func buildConnectHandlerOptions(cfg *config.Config) ([]connect.HandlerOption, error) {
+	if cfg == nil || !cfg.OTelEnabled {
+		return nil, nil
+	}
+	interceptor, err := otelconnect.NewInterceptor(otelconnect.WithoutMetrics())
+	if err != nil {
+		return nil, err
+	}
+	return []connect.HandlerOption{connect.WithInterceptors(interceptor)}, nil
+}
+
+// wrapOAuthRegistry returns a registry whose Exchangers are wrapped
+// with an OTel client-kind span for the outbound token-endpoint POST.
+// The wrapped registry shares no state with the input — the input is
+// expected to be the freshly-built per-process registry, not a
+// shared one.
+func wrapOAuthRegistry(in *oauth.Registry) *oauth.Registry {
+	if in == nil {
+		return in
+	}
+	out := oauth.NewRegistry()
+	for _, name := range in.Providers() {
+		e, ok := in.Get(name)
+		if !ok {
+			continue
+		}
+		out.Register(name, observability.WrapOAuthExchanger(name, e))
+	}
+	return out
 }
