@@ -250,6 +250,26 @@ func (StubRepository) ListOAuthIdentitiesForUser(context.Context, string) ([]*OA
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) DeleteExpiredWebAuthnChallenges(context.Context, int64, int) (int, error) {
+	return 0, ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredEmailVerificationTokens(context.Context, int64, int) (int, error) {
+	return 0, ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredPasswordResetTokens(context.Context, int64, int) (int, error) {
+	return 0, ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredEmailChangeTokens(context.Context, int64, int) (int, error) {
+	return 0, ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredLoginChallenges(context.Context, int64, int) (int, error) {
+	return 0, ErrServiceUnavailable
+}
+
 // ── StubDB ────────────────────────────────────────────────────────────
 
 // StubDB implements DB (and audit.NodeWriter) but returns

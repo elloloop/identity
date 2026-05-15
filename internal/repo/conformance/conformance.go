@@ -27,11 +27,18 @@
 // enforce foreign-key constraints (Postgres) pass without any test-
 // seam shim, and drivers that don't enforce FKs (memory, EntDB) still
 // exercise the same code path.
+//
+// Sweeper subtests (DeleteExpired*) accept either a real deletion or
+// service.ErrSweepNotImplemented; the latter lets the entdb driver
+// participate in the suite while its sweep waits on the v1.12
+// migration. A driver that returns a different error still fails the
+// suite.
 package conformance
 
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -51,6 +58,75 @@ type Driver struct {
 	// them with t.Cleanup inside NewRepo so a subtest never leaks
 	// state into the next.
 	NewRepo func(t *testing.T) service.Repository
+}
+
+// runSweepCase exercises one DeleteExpired* method. The caller
+// supplies seedExpired (creates a row with ExpiresAt < 10_000) and
+// seedUnexpired (creates a row with ExpiresAt > 10_000), plus an
+// unexpiredStillPresent probe that must return true after the sweep
+// for the suite to pass.
+//
+// The test then asserts:
+//   - sweep with beforeMs=100 (below the expired rows' ExpiresAt)
+//     deletes nothing,
+//   - sweep with beforeMs=10_000, limit=1 deletes exactly 1,
+//   - sweep with beforeMs=10_000, limit=10 deletes the remaining 1,
+//   - unexpiredStillPresent reports true.
+//
+// Drivers that return service.ErrSweepNotImplemented on the first
+// sweep call are exempt from the data assertions but must still
+// return that exact sentinel.
+func runSweepCase(t *testing.T, label string, sweep func(ctx context.Context, beforeMs int64, limit int) (int, error), seedExpired, seedUnexpired func(t *testing.T), unexpiredStillPresent func(t *testing.T) bool) {
+	t.Helper()
+	ctx := context.Background()
+
+	seedExpired(t)
+	seedExpired(t)
+	seedUnexpired(t)
+
+	// First sweep at a time strictly less than the expired rows'
+	// ExpiresAt: nothing to delete.
+	deleted, err := sweep(ctx, 100, 10)
+	if errors.Is(err, service.ErrSweepNotImplemented) {
+		t.Logf("%s: backend does not implement sweep — skipping data assertions", label)
+		return
+	}
+	if err != nil {
+		t.Fatalf("%s: first sweep: %v", label, err)
+	}
+	if deleted != 0 {
+		t.Fatalf("%s: first sweep deleted %d rows, want 0", label, deleted)
+	}
+
+	// Second sweep beyond the expired rows but capped at 1: deletes 1.
+	deleted, err = sweep(ctx, 10_000, 1)
+	if err != nil {
+		t.Fatalf("%s: limit-1 sweep: %v", label, err)
+	}
+	if deleted != 1 {
+		t.Fatalf("%s: limit-1 sweep deleted %d rows, want 1", label, deleted)
+	}
+
+	// Final sweep removes the last expired row; unexpired stays.
+	deleted, err = sweep(ctx, 10_000, 10)
+	if err != nil {
+		t.Fatalf("%s: final sweep: %v", label, err)
+	}
+	if deleted != 1 {
+		t.Fatalf("%s: final sweep deleted %d rows, want 1", label, deleted)
+	}
+	if !unexpiredStillPresent(t) {
+		t.Fatalf("%s: unexpired row was deleted by the sweeper", label)
+	}
+
+	// One more sweep with the same threshold: nothing left expired.
+	deleted, err = sweep(ctx, 10_000, 10)
+	if err != nil {
+		t.Fatalf("%s: idempotent re-sweep: %v", label, err)
+	}
+	if deleted != 0 {
+		t.Fatalf("%s: idempotent re-sweep deleted %d rows, want 0", label, deleted)
+	}
 }
 
 // RunConformance exercises every method on the service.Repository
@@ -723,6 +799,197 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 	})
+
+	// ── Sweeper subtests ────────────────────────────────────────────
+	// Drivers that cannot yet implement DeleteExpired* (i.e. EntDB
+	// pre-v1.12) signal that with service.ErrSweepNotImplemented and
+	// are exempted from the deletion assertions but still confirmed
+	// to return the correct sentinel.
+
+	t.Run("DeleteExpiredPasswordResetTokens", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid := createTestUser(t, r, "prt-sweep@example.com")
+		var keptHash string
+		seedExpired := func(t *testing.T) {
+			t.Helper()
+			h := uniqueHash("prt-exp")
+			if err := r.CreatePasswordResetToken(ctx, &service.PasswordResetToken{
+				TokenHash: h, UserID: uid, ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("seed expired: %v", err)
+			}
+		}
+		seedUnexpired := func(t *testing.T) {
+			t.Helper()
+			keptHash = uniqueHash("prt-keep")
+			if err := r.CreatePasswordResetToken(ctx, &service.PasswordResetToken{
+				TokenHash: keptHash, UserID: uid, ExpiresAt: 100_000, CreatedAt: 200,
+			}); err != nil {
+				t.Fatalf("seed unexpired: %v", err)
+			}
+		}
+		stillPresent := func(t *testing.T) bool {
+			t.Helper()
+			got, err := r.FindPasswordResetTokenByHash(ctx, keptHash)
+			if err != nil {
+				t.Fatalf("Find kept: %v", err)
+			}
+			return got != nil
+		}
+		runSweepCase(t, "PasswordResetTokens", r.DeleteExpiredPasswordResetTokens, seedExpired, seedUnexpired, stillPresent)
+	})
+
+	t.Run("DeleteExpiredEmailVerificationTokens", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid := createTestUser(t, r, "evt-sweep@example.com")
+		var keptHash string
+		seedExpired := func(t *testing.T) {
+			t.Helper()
+			h := uniqueHash("evt-exp")
+			if err := r.CreateEmailVerificationToken(ctx, &service.EmailVerificationToken{
+				TokenHash: h, UserID: uid, Email: "e@example.com",
+				ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("seed expired: %v", err)
+			}
+		}
+		seedUnexpired := func(t *testing.T) {
+			t.Helper()
+			keptHash = uniqueHash("evt-keep")
+			if err := r.CreateEmailVerificationToken(ctx, &service.EmailVerificationToken{
+				TokenHash: keptHash, UserID: uid, Email: "e@example.com",
+				ExpiresAt: 100_000, CreatedAt: 200,
+			}); err != nil {
+				t.Fatalf("seed unexpired: %v", err)
+			}
+		}
+		stillPresent := func(t *testing.T) bool {
+			t.Helper()
+			got, err := r.FindEmailVerificationTokenByHash(ctx, keptHash)
+			if err != nil {
+				t.Fatalf("Find kept: %v", err)
+			}
+			return got != nil
+		}
+		runSweepCase(t, "EmailVerificationTokens", r.DeleteExpiredEmailVerificationTokens, seedExpired, seedUnexpired, stillPresent)
+	})
+
+	t.Run("DeleteExpiredEmailChangeTokens", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid := createTestUser(t, r, "ect-sweep@example.com")
+		var keptHash string
+		seedExpired := func(t *testing.T) {
+			t.Helper()
+			h := uniqueHash("ect-exp")
+			if err := r.CreateEmailChangeToken(ctx, &service.EmailChangeToken{
+				TokenHash: h, UserID: uid, OldEmail: "old@x", NewEmail: "new@x",
+				ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("seed expired: %v", err)
+			}
+		}
+		seedUnexpired := func(t *testing.T) {
+			t.Helper()
+			keptHash = uniqueHash("ect-keep")
+			if err := r.CreateEmailChangeToken(ctx, &service.EmailChangeToken{
+				TokenHash: keptHash, UserID: uid, OldEmail: "old@x", NewEmail: "new@x",
+				ExpiresAt: 100_000, CreatedAt: 200,
+			}); err != nil {
+				t.Fatalf("seed unexpired: %v", err)
+			}
+		}
+		stillPresent := func(t *testing.T) bool {
+			t.Helper()
+			got, err := r.FindEmailChangeTokenByHash(ctx, keptHash)
+			if err != nil {
+				t.Fatalf("Find kept: %v", err)
+			}
+			return got != nil
+		}
+		runSweepCase(t, "EmailChangeTokens", r.DeleteExpiredEmailChangeTokens, seedExpired, seedUnexpired, stillPresent)
+	})
+
+	t.Run("DeleteExpiredLoginChallenges", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		uid := createTestUser(t, r, "lc-sweep@example.com")
+		var keptChallengeID string
+		seedExpired := func(t *testing.T) {
+			t.Helper()
+			cid := uniqueHash("lc-exp")
+			if _, err := r.CreateLoginChallenge(ctx, &service.LoginChallengeRecord{
+				ChallengeID: cid, UserID: uid, ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("seed expired: %v", err)
+			}
+		}
+		seedUnexpired := func(t *testing.T) {
+			t.Helper()
+			keptChallengeID = uniqueHash("lc-keep")
+			if _, err := r.CreateLoginChallenge(ctx, &service.LoginChallengeRecord{
+				ChallengeID: keptChallengeID, UserID: uid, ExpiresAt: 100_000, CreatedAt: 200,
+			}); err != nil {
+				t.Fatalf("seed unexpired: %v", err)
+			}
+		}
+		stillPresent := func(t *testing.T) bool {
+			t.Helper()
+			got, err := r.GetLoginChallengeByChallengeID(ctx, keptChallengeID)
+			if err != nil {
+				t.Fatalf("Get kept: %v", err)
+			}
+			return got != nil
+		}
+		runSweepCase(t, "LoginChallenges", r.DeleteExpiredLoginChallenges, seedExpired, seedUnexpired, stillPresent)
+	})
+
+	t.Run("DeleteExpiredWebAuthnChallenges", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		var keptNodeID string
+		seedExpired := func(t *testing.T) {
+			t.Helper()
+			if _, err := r.CreatePasskeyChallenge(ctx, &service.PasskeyChallengeRecord{
+				Challenge:     uniqueHash("pkc-exp"),
+				ChallengeType: "registration", ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("seed expired: %v", err)
+			}
+		}
+		seedUnexpired := func(t *testing.T) {
+			t.Helper()
+			id, err := r.CreatePasskeyChallenge(ctx, &service.PasskeyChallengeRecord{
+				Challenge:     uniqueHash("pkc-keep"),
+				ChallengeType: "registration", ExpiresAt: 100_000, CreatedAt: 200,
+			})
+			if err != nil {
+				t.Fatalf("seed unexpired: %v", err)
+			}
+			keptNodeID = id
+		}
+		stillPresent := func(t *testing.T) bool {
+			t.Helper()
+			got, err := r.GetPasskeyChallenge(ctx, keptNodeID)
+			if err != nil {
+				t.Fatalf("Get kept: %v", err)
+			}
+			return got != nil
+		}
+		runSweepCase(t, "WebAuthnChallenges", r.DeleteExpiredWebAuthnChallenges, seedExpired, seedUnexpired, stillPresent)
+	})
+}
+
+// uniqueHash returns a per-call unique token-hash string. Tests use
+// it to seed distinct rows whose lifetimes are entirely within the
+// subtest scope (and won't collide across parallel runs).
+var uniqueHashCounter int64
+
+func uniqueHash(prefix string) string {
+	uniqueHashCounter++
+	return prefix + "-" + time.Now().Format("150405.000000000") + "-" + strconv.FormatInt(uniqueHashCounter, 10)
 }
 
 // createTestUser creates a User in the given repository and returns

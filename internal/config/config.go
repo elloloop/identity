@@ -216,6 +216,24 @@ type Config struct {
 	OTelSampleRatio      float64
 	OTelDeploymentEnv    string
 	OTelServiceVersion   string
+
+	// Sweeper (#94). A background goroutine periodically deletes
+	// expired-but-uncollected rows from five ephemeral tables
+	// (WebAuthn challenges, email-verification / password-reset /
+	// email-change tokens, login challenges). Without GC these
+	// tables grow unboundedly with the abandoned-flow rate.
+	//
+	//   GATEWAY_SWEEPER_INTERVAL_SECONDS  tick interval; 0 disables sweeping
+	//                                     entirely (useful for tests and for
+	//                                     deployers who run their own GC).
+	//   GATEWAY_SWEEPER_BATCH_SIZE        per-table per-tick deletion cap.
+	//   GATEWAY_SWEEPER_GRACE_SECONDS     additional grace past expires_at
+	//                                     before a row is eligible to delete;
+	//                                     covers in-flight flows that just
+	//                                     consumed the token.
+	SweeperIntervalSeconds int
+	SweeperBatchSize       int
+	SweeperGraceSeconds    int
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -323,6 +341,10 @@ func Load() *Config {
 		OTelSampleRatio:      envFloat("GATEWAY_OTEL_SAMPLE_RATIO", 0.1),
 		OTelDeploymentEnv:    envStr("GATEWAY_OTEL_DEPLOYMENT_ENV", ""),
 		OTelServiceVersion:   envStr("GATEWAY_OTEL_SERVICE_VERSION", ""),
+
+		SweeperIntervalSeconds: envInt("GATEWAY_SWEEPER_INTERVAL_SECONDS", 300),
+		SweeperBatchSize:       envInt("GATEWAY_SWEEPER_BATCH_SIZE", 500),
+		SweeperGraceSeconds:    envInt("GATEWAY_SWEEPER_GRACE_SECONDS", 60),
 	}
 }
 

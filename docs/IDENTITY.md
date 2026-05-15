@@ -223,6 +223,28 @@ image (≤ 1.10.x) which doesn't require client-side schema
 registration. See `docs/v1.12-migration.md` (TODO) for the migration
 plan when upstream is ready.
 
+## Runtime
+
+Background goroutines started by `app.New` and stopped by the
+returned shutdown func:
+
+- **Async audit flusher** — `pkg/audit` enqueues `AuditEvent` writes
+  on a bounded channel and drains them off the auth hot path.
+  Configured by `GATEWAY_AUDIT_QUEUE_SIZE`; drops are counted and
+  exposed on `/metrics`.
+- **Expired-row sweeper** — `internal/app/sweeper.go` walks five
+  ephemeral tables (`WebAuthnChallenge`, `EmailVerificationToken`,
+  `PasswordResetToken`, `EmailChangeToken`, `LoginChallenge`) every
+  `GATEWAY_SWEEPER_INTERVAL_SECONDS` and deletes up to
+  `GATEWAY_SWEEPER_BATCH_SIZE` rows per table whose `expires_at` is
+  older than `now() - GATEWAY_SWEEPER_GRACE_SECONDS`. Set the
+  interval to 0 to disable the sweeper entirely (useful in tests and
+  for deployers running their own GC). Deletions and errors are
+  counted as `identity_sweeper_deleted_total{node_type}` and
+  `identity_sweeper_errors_total{node_type}` on `/metrics`. Backends
+  that cannot run the sweep (currently EntDB, pending the v1.12
+  migration) log a one-time skip notice and are otherwise silent.
+
 ## Deployment topology
 
 - **One identity deployment per product.** glassa.work runs its own

@@ -1466,6 +1466,86 @@ func (r *MemRepo) UpdateIdentityVerificationStatus(_ context.Context, verificati
 	return nil
 }
 
+func (r *MemRepo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs int64, limit int) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.passkeyChallenges {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.passkeyChallenges, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r *MemRepo) DeleteExpiredEmailVerificationTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, t := range r.emailVerifications {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if t.ExpiresAt < beforeMs {
+			delete(r.emailVerifications, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r *MemRepo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, t := range r.passwordResets {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if t.ExpiresAt < beforeMs {
+			delete(r.passwordResets, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r *MemRepo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, t := range r.emailChanges {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if t.ExpiresAt < beforeMs {
+			delete(r.emailChanges, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r *MemRepo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int64, limit int) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.loginChallenges {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.loginChallenges, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
 // compile-time interface assertion
 var _ service.Repository = (*MemRepo)(nil)
 

@@ -62,6 +62,29 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.CookieSameSite != "Lax" {
 		t.Errorf("CookieSameSite: want Lax, got %q", cfg.CookieSameSite)
 	}
+	if cfg.SweeperIntervalSeconds != 300 {
+		t.Errorf("SweeperIntervalSeconds: want 300, got %d", cfg.SweeperIntervalSeconds)
+	}
+	if cfg.SweeperBatchSize != 500 {
+		t.Errorf("SweeperBatchSize: want 500, got %d", cfg.SweeperBatchSize)
+	}
+	if cfg.SweeperGraceSeconds != 60 {
+		t.Errorf("SweeperGraceSeconds: want 60, got %d", cfg.SweeperGraceSeconds)
+	}
+}
+
+// TestLoad_SweeperDisabledWhenIntervalZero asserts the documented
+// behaviour: setting GATEWAY_SWEEPER_INTERVAL_SECONDS=0 in the
+// environment loads as 0 (which app.New uses to skip starting the
+// sweeper goroutine).
+func TestLoad_SweeperDisabledWhenIntervalZero(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_SWEEPER_INTERVAL_SECONDS", "0")
+
+	cfg := Load()
+	if cfg.SweeperIntervalSeconds != 0 {
+		t.Errorf("SweeperIntervalSeconds: want 0, got %d", cfg.SweeperIntervalSeconds)
+	}
 }
 
 // TestLoad_OverrideFromEnv verifies that environment variables override defaults.

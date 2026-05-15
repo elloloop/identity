@@ -144,6 +144,26 @@ func New(deps Deps) (http.Handler, func(), error) {
 	// returned shutdown func to drain pending writes on termination.
 	stopAudit := auditLog.StartAsync(deps.Config.AuditQueueSize)
 
+	// Garbage-collection sweeper for expired ephemeral rows (#94).
+	// Disabled when SweeperIntervalSeconds <= 0 — deployers who
+	// already run their own GC, and the unit-test harness, both
+	// flip it off via GATEWAY_SWEEPER_INTERVAL_SECONDS=0.
+	stopSweeper := func() {}
+	if sw := newSweeper(
+		deps.Repo,
+		deps.Config.SweeperIntervalSeconds,
+		deps.Config.SweeperBatchSize,
+		deps.Config.SweeperGraceSeconds,
+		logger,
+	); sw != nil {
+		stopSweeper = sw.start()
+	}
+
+	stopApp := func() {
+		stopSweeper()
+		stopAudit()
+	}
+
 	mailer := deps.EmailTransport
 	if mailer == nil {
 		mailer = buildEmailTransport(deps.Config, logger)
@@ -206,7 +226,7 @@ func New(deps Deps) (http.Handler, func(), error) {
 	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
 	chain = middleware.RecoverMiddleware(logger)(chain)
 	chain = middleware.LoggingMiddleware(logger)(chain)
-	return chain, stopAudit, nil
+	return chain, stopApp, nil
 }
 
 // buildConnectHandlerOptions returns the otelconnect interceptor
