@@ -1,9 +1,11 @@
-# Identity — pre-launch hardening: parallel work plan
+# Identity — server hardening: parallel work plan
 
-This document is a parallel-work plan for finishing the identity-service
-pre-launch hardening backlog. It is written so multiple agents (or
-humans) can pick up independent slices in parallel without stepping on
-each other.
+This document is a parallel-work plan for finishing the identity-server
+hardening backlog. identity is an OSS server (Docker image + Go binary)
+that deployers run as a backend in their own systems; this backlog is
+what's left before they can run it in production with confidence. It is
+written so multiple agents (or humans) can pick up independent slices
+in parallel without stepping on each other.
 
 Each item below points at exactly one GitHub issue, names the files
 the work touches, lists what blocks it, and gives concrete
@@ -20,14 +22,14 @@ Companion docs:
 
 Latest released: **v0.6.10** (2026-05-14).
 
-Operational hardening from the original launch review is **shipped**.
-The architectural items — decisions or substantial implementations —
-are what remains.
+Operational hardening from the original review is **shipped**. The
+architectural items — substantial implementations of the server's
+remaining surface — are what remains.
 
 | Issue | Title | Severity | Blocked by | Effort | Lane |
 |---|---|---|---|---|---|
-| **#90** | C4: JWT signing keys — pick KMS provider | CRITICAL | needs decision | 1–3 days post-decision | A |
-| **#91** | H2: refresh-token revocation model | HIGH | needs decision | 2–4 days post-decision | A |
+| **#90** | C4: JWT signing keys — pluggable signer (file/rotation default) | CRITICAL | — | 1–3 days | A |
+| **#91** | H2: refresh-token revocation — both models, config-driven | HIGH | — | 2–4 days | A |
 | **#92** | H7: CI conformance matrix | HIGH | — | 2–3 days | A |
 | **#93** | H9: implement \`mode=multi\` | HIGH | — | 1–2 weeks | B |
 | **#94** | M3: GC sweeper | MEDIUM | #82 for entdb-side | 3–5 days | C |
@@ -47,7 +49,7 @@ These lanes are designed so two agents picking different lanes will
 not touch the same files. An agent should pick one lane and run it to
 completion before switching.
 
-### Lane A — observability + decision-gated security
+### Lane A — observability + security infrastructure
 
 Items that touch shared infrastructure files (config, middleware,
 top-level wiring) but do so in narrow, well-defined places. Sequence
@@ -55,10 +57,11 @@ them within the lane because they all touch `internal/app/app.go` and
 `internal/config/config.go`.
 
 - **#95 (M8 OpenTelemetry)** — biggest infrastructure touch. Land first.
-- **#90 (C4 JWT KMS)** — orthogonal to #95 but touches the same
+- **#90 (C4 JWT signer)** — pluggable signer + file/rotation default,
+  KMS as optional plugin. Orthogonal to #95 but touches the same
   `internal/app/app.go` wiring. Land after #95 to avoid rebase pain.
-- **#91 (H2 refresh-token revocation)** — adds a request middleware
-  similar to OTel's. Land after #95.
+- **#91 (H2 refresh-token revocation)** — both models, config-driven.
+  Adds a request middleware similar to OTel's. Land after #95.
 - **#92 (H7 CI conformance matrix)** — touches `.github/workflows/`
   only. Can be parallel with any of the above.
 
@@ -104,12 +107,12 @@ All ten issues above closed, all PRs merged, all referenced features
 covered by tests, and `docs/IDENTITY.md`'s decision log updated for
 any architectural choices made along the way.
 
-At that point the service supports both product shapes from
+At that point the server supports both product shapes from
 `docs/IDENTITY.md` (B2C single-tenant and B2B multi-tenant), has
-production-grade observability, KMS-backed key rotation, the
-correct refresh-token revocation contract, server-side CAS for the
-single-use token paths, and a sweep loop that prevents unbounded
-table growth.
+production-grade observability, a pluggable JWT signer with key
+rotation, both refresh-token revocation models available config-driven,
+server-side CAS for the single-use token paths, and a sweep loop that
+prevents unbounded table growth.
 
 ---
 
@@ -125,8 +128,8 @@ table growth.
 5. **Land one PR per issue.** Don't bundle. See
    [AGENTS.md rule 6 — no half-finished implementations](../AGENTS.md).
 6. **Update the decision log in `docs/IDENTITY.md`** if your work
-   makes a decision (KMS provider chosen, revocation model chosen,
-   etc.).
+   makes an architectural decision (signer-interface shape, revocation
+   contract, sweeper cadence, etc.).
 7. **Close the issue** as part of the merging PR (`closes #N`).
 
 ---
