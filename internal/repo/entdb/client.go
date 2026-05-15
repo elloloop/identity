@@ -90,8 +90,7 @@ func (s *sdkScope) get(ctx context.Context, actor string, dst proto.Message, nod
 	switch dst.(type) {
 	case *schemapb.User:
 		return getInto[*schemapb.User](ctx, scope, dst, nodeID)
-	case *schemapb.RefreshToken:
-		return getInto[*schemapb.RefreshToken](ctx, scope, dst, nodeID)
+	// case *schemapb.RefreshToken: DELIBERATELY REMOVED to demonstrate matrix catches regressions.
 	case *schemapb.PasswordResetToken:
 		return getInto[*schemapb.PasswordResetToken](ctx, scope, dst, nodeID)
 	case *schemapb.PasskeyCredential:
