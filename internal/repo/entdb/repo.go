@@ -1584,5 +1584,169 @@ func (r *entRepository) UpdateIdentityVerificationStatus(ctx context.Context, ve
 	return nil
 }
 
+// ── Organizations ─────────────────────────────────────────────────
+
+func organizationFromProto(id string, p *schemapb.Organization) *service.Organization {
+	if p == nil {
+		return nil
+	}
+	return &service.Organization{
+		ID:          id,
+		Slug:        p.GetSlug(),
+		DisplayName: p.GetDisplayName(),
+		OwnerUserID: p.GetOwnerUserId(),
+		CreatedAtMs: p.GetCreatedAt(),
+		UpdatedAtMs: p.GetUpdatedAt(),
+	}
+}
+
+func organizationMembershipFromProto(id string, p *schemapb.OrganizationMembership) *service.OrganizationMembership {
+	if p == nil {
+		return nil
+	}
+	return &service.OrganizationMembership{
+		NodeID:         id,
+		OrganizationID: p.GetOrganizationId(),
+		UserID:         p.GetUserId(),
+		Role:           p.GetRole(),
+		CreatedAtMs:    p.GetCreatedAt(),
+	}
+}
+
+func (r *entRepository) CreateOrganization(ctx context.Context, o *service.Organization) (string, error) {
+	if o == nil {
+		return "", errors.New("repo: CreateOrganization: nil organization")
+	}
+	if o.Slug == "" {
+		return "", fmt.Errorf("%w: missing slug", service.ErrInvalidArgument)
+	}
+	now := time.Now().UnixMilli()
+	if o.CreatedAtMs == 0 {
+		o.CreatedAtMs = now
+	}
+	if o.UpdatedAtMs == 0 {
+		o.UpdatedAtMs = o.CreatedAtMs
+	}
+	// Slug uniqueness is declared on the proto field, so EntDB rejects
+	// duplicates at insert time. We pre-check anyway to translate the
+	// upstream error into service.ErrAlreadyExists for callers.
+	if existing, err := r.GetOrganizationBySlug(ctx, o.Slug); err != nil {
+		return "", err
+	} else if existing != nil {
+		return "", fmt.Errorf("%w: slug %q", service.ErrAlreadyExists, o.Slug)
+	}
+	msg := &schemapb.Organization{
+		Slug:        o.Slug,
+		DisplayName: o.DisplayName,
+		OwnerUserId: o.OwnerUserID,
+		CreatedAt:   o.CreatedAtMs,
+		UpdatedAt:   o.UpdatedAtMs,
+	}
+	id, err := r.client.create(ctx, actorStr(o.OwnerUserID), msg)
+	if err != nil {
+		return "", fmt.Errorf("repo: CreateOrganization: %w", err)
+	}
+	o.ID = id
+	return id, nil
+}
+
+func (r *entRepository) GetOrganization(ctx context.Context, orgID string) (*service.Organization, error) {
+	if orgID == "" {
+		return nil, nil
+	}
+	dst := &schemapb.Organization{}
+	if err := r.client.get(ctx, systemActor, dst, orgID); err != nil {
+		if errors.Is(err, errNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("repo: GetOrganization: %w", err)
+	}
+	return organizationFromProto(orgID, dst), nil
+}
+
+func (r *entRepository) GetOrganizationBySlug(ctx context.Context, slug string) (*service.Organization, error) {
+	if slug == "" {
+		return nil, nil
+	}
+	dst := &schemapb.Organization{}
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.OrganizationSlug, slug, dst)
+	if errors.Is(err, errNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repo: GetOrganizationBySlug: %w", err)
+	}
+	return organizationFromProto(id, dst), nil
+}
+
+func (r *entRepository) ListOrganizationsForUser(ctx context.Context, userID string) ([]*service.Organization, error) {
+	if userID == "" {
+		return nil, nil
+	}
+	rows, err := r.client.query(ctx, actorStr(userID), &schemapb.OrganizationMembership{}, map[string]any{"user_id": userID})
+	if err != nil {
+		return nil, fmt.Errorf("repo: ListOrganizationsForUser: %w", err)
+	}
+	out := make([]*service.Organization, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		mem := organizationMembershipFromProto(row.NodeID, row.Message.(*schemapb.OrganizationMembership))
+		if _, dup := seen[mem.OrganizationID]; dup {
+			continue
+		}
+		seen[mem.OrganizationID] = struct{}{}
+		org, err := r.GetOrganization(ctx, mem.OrganizationID)
+		if err != nil {
+			return nil, fmt.Errorf("repo: ListOrganizationsForUser: %w", err)
+		}
+		if org == nil {
+			continue
+		}
+		out = append(out, org)
+	}
+	return out, nil
+}
+
+func (r *entRepository) AddOrganizationMember(ctx context.Context, m *service.OrganizationMembership) (string, error) {
+	if m == nil {
+		return "", errors.New("repo: AddOrganizationMember: nil membership")
+	}
+	if m.OrganizationID == "" || m.UserID == "" {
+		return "", fmt.Errorf("%w: missing organization_id or user_id", service.ErrInvalidArgument)
+	}
+	// EntDB does not provide composite unique constraints, so the
+	// service layer enforces "exactly one (org, user) row" by checking
+	// before insert. The check uses the same query path as
+	// ListOrganizationsForUser so the secondary index is exercised.
+	rows, err := r.client.query(ctx, actorStr(m.UserID), &schemapb.OrganizationMembership{}, map[string]any{
+		"organization_id": m.OrganizationID,
+		"user_id":         m.UserID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("repo: AddOrganizationMember dup-check: %w", err)
+	}
+	if len(rows) > 0 {
+		return "", fmt.Errorf("%w: %s already in %s", service.ErrAlreadyExists, m.UserID, m.OrganizationID)
+	}
+	if m.CreatedAtMs == 0 {
+		m.CreatedAtMs = time.Now().UnixMilli()
+	}
+	if m.Role == "" {
+		m.Role = "member"
+	}
+	msg := &schemapb.OrganizationMembership{
+		OrganizationId: m.OrganizationID,
+		UserId:         m.UserID,
+		Role:           m.Role,
+		CreatedAt:      m.CreatedAtMs,
+	}
+	id, err := r.client.create(ctx, actorStr(m.UserID), msg)
+	if err != nil {
+		return "", fmt.Errorf("repo: AddOrganizationMember: %w", err)
+	}
+	m.NodeID = id
+	return id, nil
+}
+
 // Compile-time check that entRepository satisfies the interface.
 var _ service.Repository = (*entRepository)(nil)

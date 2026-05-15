@@ -341,6 +341,72 @@ message OAuthIdentity {
     int64  created_at         = 5 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
 }
 
+// ─── Organization (type_id 33) ─────────────────────────────────────────
+//
+// Identity-layer organisation entity used by `mode=multi` deployments.
+// Maps 1:1 to a tenant-shard-db tenant (see decision log §2 in
+// docs/IDENTITY.md): every Organization row's storage scope IS the
+// matching tenant. There is therefore no `tenant_id` field on the
+// payload — the row only exists inside its own tenant's data plane,
+// and identity-layer code already knows which tenant it's reading.
+//
+// `slug` is the URL-safe identifier deployers expose to end-users
+// (`acmecorp.example.com` → tenant slug `acmecorp`). It must be unique
+// within a deployment; identity enforces uniqueness by using the slug
+// AS the tenant id passed to `Admin.CreateTenant`, so collisions
+// surface as an EntDB-level error at signup time.
+//
+// `display_name` is the human-readable organisation name shown in
+// product UIs. It is not part of routing and is not required to be
+// unique.
+//
+// `owner_user_id` records which identity-layer User row created the
+// org (the first admin from `OrganizationSignup`). Subsequent admin
+// changes do not move it — it is provenance, not authority.
+message Organization {
+    option (entdb.node) = {
+        type_id: 33
+        data_policy: DATA_POLICY_BUSINESS
+        description: "An identity-layer organisation; maps 1:1 to a tenant-shard-db tenant."
+    };
+
+    string slug          = 1 [(entdb.field) = { required: true, unique: true, indexed: true, searchable: true, pii_false: true, description: "URL-safe identifier; matches the tenant-shard-db tenant id." }];
+    string display_name  = 2 [(entdb.field) = { required: true, searchable: true, pii: true }];
+    string owner_user_id = 3 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    int64  created_at    = 4 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
+    int64  updated_at    = 5 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
+}
+
+// ─── OrganizationMembership (type_id 34) ───────────────────────────────
+//
+// One row per (organization, user) pairing. Lets identity answer
+// "which organisations does this user belong to?" without scanning
+// every Organization row.
+//
+// Storage-layer `TenantMember` is the source of truth for "can this
+// user write to this tenant"; OrganizationMembership is a per-tenant
+// secondary index keyed on (organization_id, user_id) that identity
+// uses for product-layer listings. It is created alongside every
+// identity-side user-added-to-tenant operation.
+//
+// Note: the membership row lives inside the organisation's own
+// tenant scope. ListOrganizationsForUser fans out across configured
+// tenants in `mode=multi`; the fan-out shape is defined by the
+// per-request tenant resolution layer (slice 3 of #93).
+message OrganizationMembership {
+    option (entdb.node) = {
+        type_id: 34
+        data_policy: DATA_POLICY_BUSINESS
+        subject_field: "user_id"
+        description: "Identity-layer membership row linking a User to an Organization."
+    };
+
+    string organization_id = 1 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 33, pii_false: true }];
+    string user_id         = 2 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    string role            = 3 [(entdb.field) = { enum_values: "admin,member,guest", default_value: "member", pii_false: true }];
+    int64  created_at      = 4 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
+}
+
 // ─── IdentityVerification (type_id 32) ─────────────────────────────────
 //
 // One row per document + selfie verification session run for a User.

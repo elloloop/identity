@@ -270,6 +270,26 @@ func (StubRepository) DeleteExpiredLoginChallenges(context.Context, int64, int) 
 	return 0, ErrServiceUnavailable
 }
 
+func (StubRepository) CreateOrganization(context.Context, *Organization) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) GetOrganization(context.Context, string) (*Organization, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) GetOrganizationBySlug(context.Context, string) (*Organization, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) ListOrganizationsForUser(context.Context, string) ([]*Organization, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) AddOrganizationMember(context.Context, *OrganizationMembership) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
 // ── StubDB ────────────────────────────────────────────────────────────
 
 // StubDB implements DB (and audit.NodeWriter) but returns

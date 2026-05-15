@@ -52,3 +52,7 @@ class EmailChangeTokenKeys:
 class IdentityVerificationRecordKeys:
     verification_id = UniqueKey[str](type_id=32, field_id=1, name="verification_id")
 
+
+class OrganizationKeys:
+    slug = UniqueKey[str](type_id=33, field_id=1, name="slug")
+

@@ -1605,6 +1605,188 @@ func (x *OAuthIdentity) GetCreatedAt() int64 {
 	return 0
 }
 
+// ─── Organization (type_id 33) ─────────────────────────────────────────
+//
+// Identity-layer organisation entity used by `mode=multi` deployments.
+// Maps 1:1 to a tenant-shard-db tenant (see decision log §2 in
+// docs/IDENTITY.md): every Organization row's storage scope IS the
+// matching tenant. There is therefore no `tenant_id` field on the
+// payload — the row only exists inside its own tenant's data plane,
+// and identity-layer code already knows which tenant it's reading.
+//
+// `slug` is the URL-safe identifier deployers expose to end-users
+// (`acmecorp.example.com` → tenant slug `acmecorp`). It must be unique
+// within a deployment; identity enforces uniqueness by using the slug
+// AS the tenant id passed to `Admin.CreateTenant`, so collisions
+// surface as an EntDB-level error at signup time.
+//
+// `display_name` is the human-readable organisation name shown in
+// product UIs. It is not part of routing and is not required to be
+// unique.
+//
+// `owner_user_id` records which identity-layer User row created the
+// org (the first admin from `OrganizationSignup`). Subsequent admin
+// changes do not move it — it is provenance, not authority.
+type Organization struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Slug          string                 `protobuf:"bytes,1,opt,name=slug,proto3" json:"slug,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	OwnerUserId   string                 `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt     int64                  `protobuf:"varint,5,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Organization) Reset() {
+	*x = Organization{}
+	mi := &file_identity_schema_schema_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Organization) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Organization) ProtoMessage() {}
+
+func (x *Organization) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_schema_schema_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Organization.ProtoReflect.Descriptor instead.
+func (*Organization) Descriptor() ([]byte, []int) {
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *Organization) GetSlug() string {
+	if x != nil {
+		return x.Slug
+	}
+	return ""
+}
+
+func (x *Organization) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *Organization) GetOwnerUserId() string {
+	if x != nil {
+		return x.OwnerUserId
+	}
+	return ""
+}
+
+func (x *Organization) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *Organization) GetUpdatedAt() int64 {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return 0
+}
+
+// ─── OrganizationMembership (type_id 34) ───────────────────────────────
+//
+// One row per (organization, user) pairing. Lets identity answer
+// "which organisations does this user belong to?" without scanning
+// every Organization row.
+//
+// Storage-layer `TenantMember` is the source of truth for "can this
+// user write to this tenant"; OrganizationMembership is a per-tenant
+// secondary index keyed on (organization_id, user_id) that identity
+// uses for product-layer listings. It is created alongside every
+// identity-side user-added-to-tenant operation.
+//
+// Note: the membership row lives inside the organisation's own
+// tenant scope. ListOrganizationsForUser fans out across configured
+// tenants in `mode=multi`; the fan-out shape is defined by the
+// per-request tenant resolution layer (slice 3 of #93).
+type OrganizationMembership struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	OrganizationId string                 `protobuf:"bytes,1,opt,name=organization_id,json=organizationId,proto3" json:"organization_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Role           string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
+	CreatedAt      int64                  `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *OrganizationMembership) Reset() {
+	*x = OrganizationMembership{}
+	mi := &file_identity_schema_schema_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrganizationMembership) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrganizationMembership) ProtoMessage() {}
+
+func (x *OrganizationMembership) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_schema_schema_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrganizationMembership.ProtoReflect.Descriptor instead.
+func (*OrganizationMembership) Descriptor() ([]byte, []int) {
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *OrganizationMembership) GetOrganizationId() string {
+	if x != nil {
+		return x.OrganizationId
+	}
+	return ""
+}
+
+func (x *OrganizationMembership) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *OrganizationMembership) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *OrganizationMembership) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
 // ─── IdentityVerification (type_id 32) ─────────────────────────────────
 //
 // One row per document + selfie verification session run for a User.
@@ -1635,7 +1817,7 @@ type IdentityVerificationRecord struct {
 
 func (x *IdentityVerificationRecord) Reset() {
 	*x = IdentityVerificationRecord{}
-	mi := &file_identity_schema_schema_proto_msgTypes[16]
+	mi := &file_identity_schema_schema_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1647,7 +1829,7 @@ func (x *IdentityVerificationRecord) String() string {
 func (*IdentityVerificationRecord) ProtoMessage() {}
 
 func (x *IdentityVerificationRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[16]
+	mi := &file_identity_schema_schema_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1660,7 +1842,7 @@ func (x *IdentityVerificationRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityVerificationRecord.ProtoReflect.Descriptor instead.
 func (*IdentityVerificationRecord) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{16}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *IdentityVerificationRecord) GetVerificationId() string {
@@ -1734,7 +1916,7 @@ type MemberOf struct {
 
 func (x *MemberOf) Reset() {
 	*x = MemberOf{}
-	mi := &file_identity_schema_schema_proto_msgTypes[17]
+	mi := &file_identity_schema_schema_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1746,7 +1928,7 @@ func (x *MemberOf) String() string {
 func (*MemberOf) ProtoMessage() {}
 
 func (x *MemberOf) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[17]
+	mi := &file_identity_schema_schema_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1759,7 +1941,7 @@ func (x *MemberOf) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberOf.ProtoReflect.Descriptor instead.
 func (*MemberOf) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{17}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{19}
 }
 
 type UserPasskey struct {
@@ -1770,7 +1952,7 @@ type UserPasskey struct {
 
 func (x *UserPasskey) Reset() {
 	*x = UserPasskey{}
-	mi := &file_identity_schema_schema_proto_msgTypes[18]
+	mi := &file_identity_schema_schema_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1782,7 +1964,7 @@ func (x *UserPasskey) String() string {
 func (*UserPasskey) ProtoMessage() {}
 
 func (x *UserPasskey) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[18]
+	mi := &file_identity_schema_schema_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1795,7 +1977,7 @@ func (x *UserPasskey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPasskey.ProtoReflect.Descriptor instead.
 func (*UserPasskey) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{18}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{20}
 }
 
 type UserTotp struct {
@@ -1806,7 +1988,7 @@ type UserTotp struct {
 
 func (x *UserTotp) Reset() {
 	*x = UserTotp{}
-	mi := &file_identity_schema_schema_proto_msgTypes[19]
+	mi := &file_identity_schema_schema_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1818,7 +2000,7 @@ func (x *UserTotp) String() string {
 func (*UserTotp) ProtoMessage() {}
 
 func (x *UserTotp) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[19]
+	mi := &file_identity_schema_schema_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1831,7 +2013,7 @@ func (x *UserTotp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTotp.ProtoReflect.Descriptor instead.
 func (*UserTotp) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{19}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{21}
 }
 
 type UserRecoveryCode struct {
@@ -1842,7 +2024,7 @@ type UserRecoveryCode struct {
 
 func (x *UserRecoveryCode) Reset() {
 	*x = UserRecoveryCode{}
-	mi := &file_identity_schema_schema_proto_msgTypes[20]
+	mi := &file_identity_schema_schema_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1854,7 +2036,7 @@ func (x *UserRecoveryCode) String() string {
 func (*UserRecoveryCode) ProtoMessage() {}
 
 func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[20]
+	mi := &file_identity_schema_schema_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1867,7 +2049,7 @@ func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserRecoveryCode.ProtoReflect.Descriptor instead.
 func (*UserRecoveryCode) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{20}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{22}
 }
 
 var File_identity_schema_schema_proto protoreflect.FileDescriptor
@@ -2082,7 +2264,22 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\x10provider_user_id\x18\x03 \x01(\tB8\xb2\xbb\x184\b\x01\x18\x01 \x01R,Stable per-provider user id (e.g. OIDC sub).R\x0eproviderUserId\x12m\n" +
 	"\x12email_at_link_time\x18\x04 \x01(\tB@\xb2\xbb\x18< \x01R8Snapshot of provider email when first linked, for audit.R\x0femailAtLinkTime\x122\n" +
 	"\n" +
-	"created_at\x18\x05 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt:b\xa2\xbb\x18^\b\x1f:\auser_idRQLinkage between a local User and a provider-side stable identity (provider, sub).\"\xbb\x05\n" +
+	"created_at\x18\x05 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt:b\xa2\xbb\x18^\b\x1f:\auser_idRQLinkage between a local User and a provider-side stable identity (provider, sub).\"\x8e\x03\n" +
+	"\fOrganization\x12_\n" +
+	"\x04slug\x18\x01 \x01(\tBK\xb2\xbb\x18G\b\x01\x10\x01\x18\x01R;URL-safe identifier; matches the tenant-shard-db tenant id.`\x01h\x01R\x04slug\x12-\n" +
+	"\fdisplay_name\x18\x02 \x01(\tB\n" +
+	"\xb2\xbb\x18\x06\b\x01\x10\x01 \x01R\vdisplayName\x125\n" +
+	"\rowner_user_id\x18\x03 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\vownerUserId\x122\n" +
+	"\n" +
+	"created_at\x18\x04 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt\x122\n" +
+	"\n" +
+	"updated_at\x18\x05 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tupdatedAt:O\xa2\xbb\x18K\b!0\x01REAn identity-layer organisation; maps 1:1 to a tenant-shard-db tenant.\"\xc1\x02\n" +
+	"\x16OrganizationMembership\x12:\n" +
+	"\x0forganization_id\x18\x01 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@!`\x01R\x0eorganizationId\x12*\n" +
+	"\auser_id\x18\x02 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x126\n" +
+	"\x04role\x18\x03 \x01(\tB\"\xb2\xbb\x18\x1e2\x12admin,member,guestJ\x06member`\x01R\x04role\x122\n" +
+	"\n" +
+	"created_at\x18\x04 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt:S\xa2\xbb\x18O\b\"0\x01:\auser_idR@Identity-layer membership row linking a User to an Organization.\"\xbb\x05\n" +
 	"\x1aIdentityVerificationRecord\x125\n" +
 	"\x0fverification_id\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\x0everificationId\x12*\n" +
 	"\auser_id\x18\x02 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x12H\n" +
@@ -2112,7 +2309,7 @@ func file_identity_schema_schema_proto_rawDescGZIP() []byte {
 	return file_identity_schema_schema_proto_rawDescData
 }
 
-var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_identity_schema_schema_proto_goTypes = []any{
 	(*User)(nil),                       // 0: identity.schema.User
 	(*WorkingGroup)(nil),               // 1: identity.schema.WorkingGroup
@@ -2130,11 +2327,13 @@ var file_identity_schema_schema_proto_goTypes = []any{
 	(*EmailVerificationToken)(nil),     // 13: identity.schema.EmailVerificationToken
 	(*EmailChangeToken)(nil),           // 14: identity.schema.EmailChangeToken
 	(*OAuthIdentity)(nil),              // 15: identity.schema.OAuthIdentity
-	(*IdentityVerificationRecord)(nil), // 16: identity.schema.IdentityVerificationRecord
-	(*MemberOf)(nil),                   // 17: identity.schema.MemberOf
-	(*UserPasskey)(nil),                // 18: identity.schema.UserPasskey
-	(*UserTotp)(nil),                   // 19: identity.schema.UserTotp
-	(*UserRecoveryCode)(nil),           // 20: identity.schema.UserRecoveryCode
+	(*Organization)(nil),               // 16: identity.schema.Organization
+	(*OrganizationMembership)(nil),     // 17: identity.schema.OrganizationMembership
+	(*IdentityVerificationRecord)(nil), // 18: identity.schema.IdentityVerificationRecord
+	(*MemberOf)(nil),                   // 19: identity.schema.MemberOf
+	(*UserPasskey)(nil),                // 20: identity.schema.UserPasskey
+	(*UserTotp)(nil),                   // 21: identity.schema.UserTotp
+	(*UserRecoveryCode)(nil),           // 22: identity.schema.UserRecoveryCode
 }
 var file_identity_schema_schema_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -2155,7 +2354,7 @@ func file_identity_schema_schema_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_identity_schema_schema_proto_rawDesc), len(file_identity_schema_schema_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
