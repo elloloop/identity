@@ -5,19 +5,28 @@
 // memory — a single source of truth for "does this driver honour the
 // contract the service layer relies on?". A new driver runs:
 //
-//	conformance.RunConformance(t, func(t *testing.T) service.Repository {
-//	    return mydriver.New(...)
+//	conformance.RunConformance(t, conformance.Driver{
+//	    Name:    "mydriver",
+//	    NewRepo: func(t *testing.T) service.Repository { return mydriver.New(...) },
 //	})
 //
 // and either passes the suite or fails loudly with the precise
 // semantic that broke. Same test bodies, same assertions — only the
-// backend varies.
+// backend varies. The driver name is included in every subtest path
+// so a failure like `TestConformance/postgres/UserCRUD` is
+// immediately attributable.
 //
 // Subtests are intentionally narrow: each one exercises ONE
 // Repository semantic, named after the methods it covers, so a
 // failure points at one method (or one method pair). The goal is
 // breadth of coverage, not exhaustive concurrency edge-cases — those
 // belong in driver-specific unit tests.
+//
+// The suite is backend-agnostic: every subtest that touches a
+// user-scoped row creates its User via CreateUser first. Drivers that
+// enforce foreign-key constraints (Postgres) pass without any test-
+// seam shim, and drivers that don't enforce FKs (memory, EntDB) still
+// exercise the same code path.
 package conformance
 
 import (
@@ -29,655 +38,710 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
+// Driver names the backend implementation under test and provides a
+// factory the suite calls at the top of every subtest.
+type Driver struct {
+	// Name appears in every subtest path emitted by the suite, e.g.
+	// `TestConformance/postgres/UserCRUD`. Use the same names CI
+	// surfaces as check names — `memory`, `postgres`, `entdb`.
+	Name string
+
+	// NewRepo returns a freshly-constructed Repository with empty
+	// state. Drivers that need per-test cleanup hooks should register
+	// them with t.Cleanup inside NewRepo so a subtest never leaks
+	// state into the next.
+	NewRepo func(t *testing.T) service.Repository
+}
+
 // RunConformance exercises every method on the service.Repository
-// contract against a freshly-constructed driver-specific
-// implementation.
-//
-// makeFresh is invoked at the top of every subtest; it must return a
-// Repository with empty state so subtests do not leak data into each
-// other. Drivers that need per-test cleanup hooks should register
-// them with t.Cleanup inside makeFresh.
-func RunConformance(t *testing.T, makeFresh func(t *testing.T) service.Repository) {
+// contract against driver.NewRepo. Subtests run under a t.Run group
+// named after driver.Name so test logs and CI output show the driver
+// for every assertion.
+func RunConformance(t *testing.T, driver Driver) {
 	t.Helper()
 
-	t.Run("UserCRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
+	if driver.Name == "" {
+		t.Fatal("conformance: driver.Name is required")
+	}
+	if driver.NewRepo == nil {
+		t.Fatal("conformance: driver.NewRepo is required")
+	}
 
-		got, err := r.FindUserByEmail(ctx, "alice@example.com")
-		if err != nil {
-			t.Fatalf("FindUserByEmail empty: %v", err)
-		}
-		if got != nil {
-			t.Fatalf("FindUserByEmail empty: want nil, got %#v", got)
-		}
+	t.Run(driver.Name, func(t *testing.T) {
+		t.Run("UserCRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
 
-		now := time.UnixMilli(1_700_000_000_000)
-		id, err := r.CreateUser(ctx, &service.User{
-			Email:        "alice@example.com",
-			Name:         "Alice",
-			Status:       "active",
-			Role:         "member",
-			PasswordHash: "h-1",
-			CreatedAt:    now,
-			UpdatedAt:    now,
+			got, err := r.FindUserByEmail(ctx, "alice@example.com")
+			if err != nil {
+				t.Fatalf("FindUserByEmail empty: %v", err)
+			}
+			if got != nil {
+				t.Fatalf("FindUserByEmail empty: want nil, got %#v", got)
+			}
+
+			now := time.UnixMilli(1_700_000_000_000)
+			id, err := r.CreateUser(ctx, &service.User{
+				Email:        "alice@example.com",
+				Name:         "Alice",
+				Status:       "active",
+				Role:         "member",
+				PasswordHash: "h-1",
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			if id == "" {
+				t.Fatal("CreateUser: empty id")
+			}
+
+			got, err = r.FindUserByEmail(ctx, "alice@example.com")
+			if err != nil {
+				t.Fatalf("FindUserByEmail: %v", err)
+			}
+			if got == nil {
+				t.Fatal("FindUserByEmail: nil after create")
+			}
+			if got.ID != id {
+				t.Fatalf("FindUserByEmail id = %q, want %q", got.ID, id)
+			}
+			if got.Email != "alice@example.com" {
+				t.Fatalf("FindUserByEmail email = %q", got.Email)
+			}
+			if got.PasswordHash != "h-1" {
+				t.Fatalf("FindUserByEmail password_hash = %q, want %q",
+					got.PasswordHash, "h-1")
+			}
+
+			byID, err := r.GetUser(ctx, id)
+			if err != nil {
+				t.Fatalf("GetUser: %v", err)
+			}
+			if byID == nil || byID.ID != id {
+				t.Fatalf("GetUser: %#v", byID)
+			}
+			if byID.PasswordHash != "h-1" {
+				t.Fatalf("GetUser password_hash = %q", byID.PasswordHash)
+			}
 		})
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-		if id == "" {
-			t.Fatal("CreateUser: empty id")
-		}
 
-		got, err = r.FindUserByEmail(ctx, "alice@example.com")
-		if err != nil {
-			t.Fatalf("FindUserByEmail: %v", err)
-		}
-		if got == nil {
-			t.Fatal("FindUserByEmail: nil after create")
-		}
-		if got.ID != id {
-			t.Fatalf("FindUserByEmail id = %q, want %q", got.ID, id)
-		}
-		if got.Email != "alice@example.com" {
-			t.Fatalf("FindUserByEmail email = %q", got.Email)
-		}
-		if got.PasswordHash != "h-1" {
-			// password_hash round-trip is the headline regression
-			// the entdb driver rewrite was designed to fix.
-			t.Fatalf("FindUserByEmail password_hash = %q, want %q",
-				got.PasswordHash, "h-1")
-		}
-
-		byID, err := r.GetUser(ctx, id)
-		if err != nil {
-			t.Fatalf("GetUser: %v", err)
-		}
-		if byID == nil || byID.ID != id {
-			t.Fatalf("GetUser: %#v", byID)
-		}
-		if byID.PasswordHash != "h-1" {
-			t.Fatalf("GetUser password_hash = %q", byID.PasswordHash)
-		}
-	})
-
-	t.Run("UserDuplicate_Email_Rejected", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		_, err := r.CreateUser(ctx, &service.User{Email: "dup@example.com", Status: "active"})
-		if err != nil {
-			t.Fatalf("first CreateUser: %v", err)
-		}
-		_, err = r.CreateUser(ctx, &service.User{Email: "dup@example.com", Status: "active"})
-		if err == nil {
-			t.Fatal("CreateUser duplicate: want error, got nil")
-		}
-	})
-
-	t.Run("UserUpdate_FieldRoundTrip", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateUser(ctx, &service.User{Email: "u@example.com", Status: "active", Name: "Old"})
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-		if err := r.UpdateUser(ctx, id, map[string]any{
-			"name":              "New",
-			"avatar_url":        "https://x/a.png",
-			"password_hash":     "h-2",
-			"status":            "active",
-			"recovery_email":    "r@example.com",
-			"email_verified":    true,
-			"email_verified_at": int64(123),
-		}); err != nil {
-			t.Fatalf("UpdateUser: %v", err)
-		}
-		got, err := r.GetUser(ctx, id)
-		if err != nil || got == nil {
-			t.Fatalf("GetUser: %v, %#v", err, got)
-		}
-		if got.Name != "New" || got.AvatarURL != "https://x/a.png" || got.PasswordHash != "h-2" {
-			t.Fatalf("UpdateUser round-trip: %+v", got)
-		}
-		if !got.EmailVerified || got.EmailVerifiedAt != 123 {
-			t.Fatalf("UpdateUser email_verified round-trip: verified=%v at=%d", got.EmailVerified, got.EmailVerifiedAt)
-		}
-	})
-
-	t.Run("UserLockout_FailedLoginCount", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateUser(ctx, &service.User{Email: "lock@example.com", Status: "active"})
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-		n, err := r.IncrementFailedLoginCount(ctx, id)
-		if err != nil || n != 1 {
-			t.Fatalf("Increment#1: n=%d err=%v", n, err)
-		}
-		n, err = r.IncrementFailedLoginCount(ctx, id)
-		if err != nil || n != 2 {
-			t.Fatalf("Increment#2: n=%d err=%v", n, err)
-		}
-		if err := r.SetUserLockedUntil(ctx, id, 1234); err != nil {
-			t.Fatalf("SetUserLockedUntil: %v", err)
-		}
-		got, _ := r.GetUser(ctx, id)
-		if got == nil || got.FailedLoginCount != 2 || got.LockedUntil != 1234 {
-			t.Fatalf("locked state: %+v", got)
-		}
-		if err := r.ResetFailedLoginCount(ctx, id); err != nil {
-			t.Fatalf("ResetFailedLoginCount: %v", err)
-		}
-		got, _ = r.GetUser(ctx, id)
-		if got == nil || got.FailedLoginCount != 0 || got.LockedUntil != 0 {
-			t.Fatalf("after reset: %+v", got)
-		}
-	})
-
-	t.Run("RefreshToken_CreateFindConsume", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
-			TokenHash:  "rh-1",
-			UserID:     "u-1",
-			ExpiresAt:  9_000_000_000_000,
-			CreatedAt:  100,
-			LastUsedAt: 100,
+		t.Run("UserDuplicate_Email_Rejected", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			_, err := r.CreateUser(ctx, &service.User{Email: "dup@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("first CreateUser: %v", err)
+			}
+			_, err = r.CreateUser(ctx, &service.User{Email: "dup@example.com", Status: "active"})
+			if err == nil {
+				t.Fatal("CreateUser duplicate: want error, got nil")
+			}
 		})
-		if err != nil || id == "" {
-			t.Fatalf("CreateRefreshToken: id=%q err=%v", id, err)
-		}
-		got, err := r.FindRefreshTokenByHash(ctx, "rh-1")
-		if err != nil || got == nil {
-			t.Fatalf("FindRefreshTokenByHash: %v, %#v", err, got)
-		}
-		if got.UserID != "u-1" {
-			t.Fatalf("UserID = %q", got.UserID)
-		}
-		if err := r.ConsumeRefreshTokenByHash(ctx, "rh-1", 200); err != nil {
-			t.Fatalf("Consume: %v", err)
-		}
-		// Live lookup should now miss; including-consumed should hit.
-		live, err := r.FindRefreshTokenByHash(ctx, "rh-1")
-		if err != nil {
-			t.Fatalf("FindRefreshTokenByHash post-consume: %v", err)
-		}
-		if live != nil {
-			t.Fatalf("FindRefreshTokenByHash post-consume: got %#v, want nil", live)
-		}
-		all, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, "rh-1")
-		if err != nil || all == nil || all.ConsumedAtMs != 200 {
-			t.Fatalf("FindRefreshTokenByHashIncludingConsumed: %#v err=%v", all, err)
-		}
-		// Second consume must lose the race.
-		if err := r.ConsumeRefreshTokenByHash(ctx, "rh-1", 300); !errors.Is(err, service.ErrUnauthenticated) {
-			t.Fatalf("second Consume: want ErrUnauthenticated, got %v", err)
-		}
-	})
 
-	t.Run("RefreshToken_DeleteForUser", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		_, _ = r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "a", UserID: "u-1"})
-		_, _ = r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "b", UserID: "u-1"})
-		_, _ = r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "c", UserID: "u-2"})
-		if err := r.DeleteRefreshTokensForUser(ctx, "u-1"); err != nil {
-			t.Fatalf("DeleteForUser: %v", err)
-		}
-		got, _ := r.FindRefreshTokenByHashIncludingConsumed(ctx, "a")
-		if got != nil {
-			t.Fatalf("u-1 token still present after DeleteForUser")
-		}
-		got, _ = r.FindRefreshTokenByHashIncludingConsumed(ctx, "c")
-		if got == nil {
-			t.Fatal("u-2 token removed by DeleteForUser scope leak")
-		}
-	})
-
-	t.Run("RefreshToken_DeleteOne", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "delete-one", UserID: "u-1"})
-		if err != nil {
-			t.Fatalf("CreateRefreshToken: %v", err)
-		}
-		_, err = r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "keep-one", UserID: "u-1"})
-		if err != nil {
-			t.Fatalf("CreateRefreshToken keep: %v", err)
-		}
-		if err := r.DeleteRefreshToken(ctx, id); err != nil {
-			t.Fatalf("DeleteRefreshToken: %v", err)
-		}
-		deleted, _ := r.FindRefreshTokenByHashIncludingConsumed(ctx, "delete-one")
-		if deleted != nil {
-			t.Fatalf("deleted token still present: %#v", deleted)
-		}
-		kept, _ := r.FindRefreshTokenByHashIncludingConsumed(ctx, "keep-one")
-		if kept == nil {
-			t.Fatal("DeleteRefreshToken removed a different token")
-		}
-	})
-
-	t.Run("PasswordResetToken_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		tok := &service.PasswordResetToken{TokenHash: "p-1", UserID: "u-1", ExpiresAt: 1_000, CreatedAt: 100}
-		if err := r.CreatePasswordResetToken(ctx, tok); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		if tok.NodeID == "" {
-			t.Fatal("CreatePasswordResetToken did not set NodeID")
-		}
-		got, err := r.FindPasswordResetTokenByHash(ctx, "p-1")
-		if err != nil || got == nil {
-			t.Fatalf("Find: %v %#v", err, got)
-		}
-		if err := r.MarkPasswordResetTokenConsumed(ctx, got.NodeID, 200); err != nil {
-			t.Fatalf("MarkConsumed: %v", err)
-		}
-		got, _ = r.FindPasswordResetTokenByHash(ctx, "p-1")
-		if got == nil || got.ConsumedAt != 200 {
-			t.Fatalf("after MarkConsumed: %#v", got)
-		}
-	})
-
-	t.Run("EmailVerificationToken_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		tok := &service.EmailVerificationToken{TokenHash: "ev-1", UserID: "u-1", Email: "x@y.com", ExpiresAt: 1_000, CreatedAt: 100}
-		if err := r.CreateEmailVerificationToken(ctx, tok); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, _ := r.FindEmailVerificationTokenByHash(ctx, "ev-1")
-		if got == nil {
-			t.Fatal("Find missing")
-		}
-		if err := r.MarkEmailVerificationTokenConsumed(ctx, got.NodeID, 222); err != nil {
-			t.Fatalf("MarkConsumed: %v", err)
-		}
-	})
-
-	t.Run("EmailChangeToken_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		uid, err := r.CreateUser(ctx, &service.User{Email: "old@example.com", Status: "active"})
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-		tok := &service.EmailChangeToken{TokenHash: "ec-1", UserID: uid, OldEmail: "old@example.com", NewEmail: "new@example.com", ExpiresAt: 1_000, CreatedAt: 100}
-		if err := r.CreateEmailChangeToken(ctx, tok); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, _ := r.FindEmailChangeTokenByHash(ctx, "ec-1")
-		if got == nil {
-			t.Fatal("Find missing")
-		}
-		if err := r.MarkEmailChangeTokenConsumed(ctx, got.NodeID, 333); err != nil {
-			t.Fatalf("MarkConsumed: %v", err)
-		}
-		if err := r.UpdateUserEmail(ctx, uid, "new@example.com", 444); err != nil {
-			t.Fatalf("UpdateUserEmail: %v", err)
-		}
-		u, _ := r.GetUser(ctx, uid)
-		if u == nil || u.Email != "new@example.com" || !u.EmailVerified {
-			t.Fatalf("after UpdateUserEmail: %+v", u)
-		}
-		oldEmail, err := r.FindUserByEmail(ctx, "old@example.com")
-		if err != nil {
-			t.Fatalf("FindUserByEmail old: %v", err)
-		}
-		if oldEmail != nil {
-			t.Fatalf("old email still resolves after UpdateUserEmail: %+v", oldEmail)
-		}
-		newEmail, err := r.FindUserByEmail(ctx, "new@example.com")
-		if err != nil {
-			t.Fatalf("FindUserByEmail new: %v", err)
-		}
-		if newEmail == nil || newEmail.ID != uid {
-			t.Fatalf("new email lookup = %+v, want user %q", newEmail, uid)
-		}
-	})
-
-	t.Run("PasskeyCredential_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{
-			CredentialID: "cred-1", UserID: "u-1", PublicKey: "pk", SignCount: 5,
+		t.Run("UserUpdate_FieldRoundTrip", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{Email: "u@example.com", Status: "active", Name: "Old"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			if err := r.UpdateUser(ctx, id, map[string]any{
+				"name":              "New",
+				"avatar_url":        "https://x/a.png",
+				"password_hash":     "h-2",
+				"status":            "active",
+				"recovery_email":    "r@example.com",
+				"email_verified":    true,
+				"email_verified_at": int64(123),
+			}); err != nil {
+				t.Fatalf("UpdateUser: %v", err)
+			}
+			got, err := r.GetUser(ctx, id)
+			if err != nil || got == nil {
+				t.Fatalf("GetUser: %v, %#v", err, got)
+			}
+			if got.Name != "New" || got.AvatarURL != "https://x/a.png" || got.PasswordHash != "h-2" {
+				t.Fatalf("UpdateUser round-trip: %+v", got)
+			}
+			if !got.EmailVerified || got.EmailVerifiedAt != 123 {
+				t.Fatalf("UpdateUser email_verified round-trip: verified=%v at=%d", got.EmailVerified, got.EmailVerifiedAt)
+			}
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, _ := r.GetPasskeyCredentialByCredID(ctx, "cred-1")
-		if got == nil || got.NodeID != id {
-			t.Fatalf("GetByCred: %#v", got)
-		}
-		list, err := r.ListPasskeyCredentials(ctx, "u-1")
-		if err != nil || len(list) != 1 {
-			t.Fatalf("List: len=%d err=%v", len(list), err)
-		}
-		if err := r.UpdatePasskeyCredential(ctx, id, map[string]any{"sign_count": int64(99)}); err != nil {
-			t.Fatalf("Update: %v", err)
-		}
-	})
 
-	t.Run("PasskeyChallenge_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreatePasskeyChallenge(ctx, &service.PasskeyChallengeRecord{
-			Challenge:     "c-1",
-			UserID:        "u-1",
-			ChallengeType: "registration",
-			ExpiresAt:     1_000,
+		t.Run("UserLockout_FailedLoginCount", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{Email: "lock@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			n, err := r.IncrementFailedLoginCount(ctx, id)
+			if err != nil || n != 1 {
+				t.Fatalf("Increment#1: n=%d err=%v", n, err)
+			}
+			n, err = r.IncrementFailedLoginCount(ctx, id)
+			if err != nil || n != 2 {
+				t.Fatalf("Increment#2: n=%d err=%v", n, err)
+			}
+			if err := r.SetUserLockedUntil(ctx, id, 1234); err != nil {
+				t.Fatalf("SetUserLockedUntil: %v", err)
+			}
+			got, _ := r.GetUser(ctx, id)
+			if got == nil || got.FailedLoginCount != 2 || got.LockedUntil != 1234 {
+				t.Fatalf("locked state: %+v", got)
+			}
+			if err := r.ResetFailedLoginCount(ctx, id); err != nil {
+				t.Fatalf("ResetFailedLoginCount: %v", err)
+			}
+			got, _ = r.GetUser(ctx, id)
+			if got == nil || got.FailedLoginCount != 0 || got.LockedUntil != 0 {
+				t.Fatalf("after reset: %+v", got)
+			}
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, err := r.GetPasskeyChallenge(ctx, id)
-		if err != nil || got == nil || got.Challenge != "c-1" {
-			t.Fatalf("Get: %v, %#v", err, got)
-		}
-		if err := r.DeletePasskeyChallenge(ctx, id); err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
-	})
 
-	t.Run("QrLoginSession_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{
-			SessionID: "qr-1", Status: "pending", NewDeviceInfo: "Chrome",
-			ExpiresAt: 1_000, CreatedAt: 100, UpdatedAt: 100,
+		t.Run("RefreshToken_CreateFindConsume", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "rt-cfc@example.com")
+			id, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
+				TokenHash:  "rh-1",
+				UserID:     userID,
+				ExpiresAt:  9_000_000_000_000,
+				CreatedAt:  100,
+				LastUsedAt: 100,
+			})
+			if err != nil || id == "" {
+				t.Fatalf("CreateRefreshToken: id=%q err=%v", id, err)
+			}
+			got, err := r.FindRefreshTokenByHash(ctx, "rh-1")
+			if err != nil || got == nil {
+				t.Fatalf("FindRefreshTokenByHash: %v, %#v", err, got)
+			}
+			if got.UserID != userID {
+				t.Fatalf("UserID = %q, want %q", got.UserID, userID)
+			}
+			if err := r.ConsumeRefreshTokenByHash(ctx, "rh-1", 200); err != nil {
+				t.Fatalf("Consume: %v", err)
+			}
+			live, err := r.FindRefreshTokenByHash(ctx, "rh-1")
+			if err != nil {
+				t.Fatalf("FindRefreshTokenByHash post-consume: %v", err)
+			}
+			if live != nil {
+				t.Fatalf("FindRefreshTokenByHash post-consume: got %#v, want nil", live)
+			}
+			all, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, "rh-1")
+			if err != nil || all == nil || all.ConsumedAtMs != 200 {
+				t.Fatalf("FindRefreshTokenByHashIncludingConsumed: %#v err=%v", all, err)
+			}
+			if err := r.ConsumeRefreshTokenByHash(ctx, "rh-1", 300); !errors.Is(err, service.ErrUnauthenticated) {
+				t.Fatalf("second Consume: want ErrUnauthenticated, got %v", err)
+			}
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, _ := r.FindQrLoginSession(ctx, "qr-1")
-		if got == nil || got.NodeID != id {
-			t.Fatalf("Find: %#v", got)
-		}
-		if err := r.UpdateQrLoginSession(ctx, id, map[string]any{
-			"status":  "approved",
-			"user_id": "u-1",
-		}); err != nil {
-			t.Fatalf("Update: %v", err)
-		}
-		got, _ = r.FindQrLoginSession(ctx, "qr-1")
-		if got == nil || got.Status != "approved" || got.UserID != "u-1" {
-			t.Fatalf("after Update: %#v", got)
-		}
-	})
 
-	t.Run("TotpCredential_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateTotpCredential(ctx, &service.TotpCredRecord{
-			UserID: "u-1", SecretEncrypted: "enc", CreatedAt: 100,
+		t.Run("RefreshToken_DeleteForUser", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userA := createTestUser(t, r, "rt-dfu-a@example.com")
+			userB := createTestUser(t, r, "rt-dfu-b@example.com")
+			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "a", UserID: userA}); err != nil {
+				t.Fatalf("CreateRefreshToken a: %v", err)
+			}
+			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "b", UserID: userA}); err != nil {
+				t.Fatalf("CreateRefreshToken b: %v", err)
+			}
+			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "c", UserID: userB}); err != nil {
+				t.Fatalf("CreateRefreshToken c: %v", err)
+			}
+			if err := r.DeleteRefreshTokensForUser(ctx, userA); err != nil {
+				t.Fatalf("DeleteForUser: %v", err)
+			}
+			got, _ := r.FindRefreshTokenByHashIncludingConsumed(ctx, "a")
+			if got != nil {
+				t.Fatalf("userA token still present after DeleteForUser")
+			}
+			got, _ = r.FindRefreshTokenByHashIncludingConsumed(ctx, "c")
+			if got == nil {
+				t.Fatal("userB token removed by DeleteForUser scope leak")
+			}
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, _ := r.GetTotpCredential(ctx, "u-1")
-		if got == nil || got.NodeID != id {
-			t.Fatalf("Get: %#v", got)
-		}
-		if err := r.UpdateTotpCredential(ctx, id, map[string]any{"verified": true}); err != nil {
-			t.Fatalf("Update: %v", err)
-		}
-		got, _ = r.GetTotpCredential(ctx, "u-1")
-		if got == nil || !got.Verified {
-			t.Fatalf("after Update: %#v", got)
-		}
-		if err := r.DeleteTotpCredentialsForUser(ctx, "u-1"); err != nil {
-			t.Fatalf("DeleteForUser: %v", err)
-		}
-		got, _ = r.GetTotpCredential(ctx, "u-1")
-		if got != nil {
-			t.Fatal("DeleteForUser left a row")
-		}
-	})
 
-	t.Run("TotpCredential_DeleteOne", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateTotpCredential(ctx, &service.TotpCredRecord{
-			UserID: "u-1", SecretEncrypted: "enc", CreatedAt: 100,
+		t.Run("RefreshToken_DeleteOne", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "rt-del-one@example.com")
+			id, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "delete-one", UserID: userID})
+			if err != nil {
+				t.Fatalf("CreateRefreshToken: %v", err)
+			}
+			_, err = r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "keep-one", UserID: userID})
+			if err != nil {
+				t.Fatalf("CreateRefreshToken keep: %v", err)
+			}
+			if err := r.DeleteRefreshToken(ctx, id); err != nil {
+				t.Fatalf("DeleteRefreshToken: %v", err)
+			}
+			deleted, _ := r.FindRefreshTokenByHashIncludingConsumed(ctx, "delete-one")
+			if deleted != nil {
+				t.Fatalf("deleted token still present: %#v", deleted)
+			}
+			kept, _ := r.FindRefreshTokenByHashIncludingConsumed(ctx, "keep-one")
+			if kept == nil {
+				t.Fatal("DeleteRefreshToken removed a different token")
+			}
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		if err := r.DeleteTotpCredential(ctx, id); err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
-		got, _ := r.GetTotpCredential(ctx, "u-1")
-		if got != nil {
-			t.Fatal("Delete left a row")
-		}
-	})
 
-	t.Run("RecoveryCode_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateRecoveryCode(ctx, &service.RecoveryCodeRecord{
-			UserID: "u-1", CodeHash: "hash-1", CreatedAt: 100,
+		t.Run("PasswordResetToken_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "prt@example.com")
+			tok := &service.PasswordResetToken{TokenHash: "p-1", UserID: userID, ExpiresAt: 1_000, CreatedAt: 100}
+			if err := r.CreatePasswordResetToken(ctx, tok); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if tok.NodeID == "" {
+				t.Fatal("CreatePasswordResetToken did not set NodeID")
+			}
+			got, err := r.FindPasswordResetTokenByHash(ctx, "p-1")
+			if err != nil || got == nil {
+				t.Fatalf("Find: %v %#v", err, got)
+			}
+			if err := r.MarkPasswordResetTokenConsumed(ctx, got.NodeID, 200); err != nil {
+				t.Fatalf("MarkConsumed: %v", err)
+			}
+			got, _ = r.FindPasswordResetTokenByHash(ctx, "p-1")
+			if got == nil || got.ConsumedAt != 200 {
+				t.Fatalf("after MarkConsumed: %#v", got)
+			}
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, _ := r.FindRecoveryCodeByHash(ctx, "u-1", "hash-1")
-		if got == nil || got.NodeID != id {
-			t.Fatalf("Find: %#v", got)
-		}
-		if err := r.UpdateRecoveryCode(ctx, id, map[string]any{"used": true, "used_at": int64(200)}); err != nil {
-			t.Fatalf("Update: %v", err)
-		}
-		if err := r.DeleteRecoveryCodesForUser(ctx, "u-1"); err != nil {
-			t.Fatalf("DeleteForUser: %v", err)
-		}
-	})
 
-	t.Run("LoginChallenge_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateLoginChallenge(ctx, &service.LoginChallengeRecord{
-			ChallengeID: "lc-1", UserID: "u-1", ExpiresAt: 1_000, CreatedAt: 100,
+		t.Run("EmailVerificationToken_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "evt@example.com")
+			tok := &service.EmailVerificationToken{TokenHash: "ev-1", UserID: userID, Email: "x@y.com", ExpiresAt: 1_000, CreatedAt: 100}
+			if err := r.CreateEmailVerificationToken(ctx, tok); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			got, _ := r.FindEmailVerificationTokenByHash(ctx, "ev-1")
+			if got == nil {
+				t.Fatal("Find missing")
+			}
+			if err := r.MarkEmailVerificationTokenConsumed(ctx, got.NodeID, 222); err != nil {
+				t.Fatalf("MarkConsumed: %v", err)
+			}
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, _ := r.GetLoginChallengeByChallengeID(ctx, "lc-1")
-		if got == nil || got.NodeID != id {
-			t.Fatalf("Get: %#v", got)
-		}
-		if err := r.DeleteLoginChallenge(ctx, id); err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
+
+		t.Run("EmailChangeToken_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid, err := r.CreateUser(ctx, &service.User{Email: "old@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			tok := &service.EmailChangeToken{TokenHash: "ec-1", UserID: uid, OldEmail: "old@example.com", NewEmail: "new@example.com", ExpiresAt: 1_000, CreatedAt: 100}
+			if err := r.CreateEmailChangeToken(ctx, tok); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			got, _ := r.FindEmailChangeTokenByHash(ctx, "ec-1")
+			if got == nil {
+				t.Fatal("Find missing")
+			}
+			if err := r.MarkEmailChangeTokenConsumed(ctx, got.NodeID, 333); err != nil {
+				t.Fatalf("MarkConsumed: %v", err)
+			}
+			if err := r.UpdateUserEmail(ctx, uid, "new@example.com", 444); err != nil {
+				t.Fatalf("UpdateUserEmail: %v", err)
+			}
+			u, _ := r.GetUser(ctx, uid)
+			if u == nil || u.Email != "new@example.com" || !u.EmailVerified {
+				t.Fatalf("after UpdateUserEmail: %+v", u)
+			}
+			oldEmail, err := r.FindUserByEmail(ctx, "old@example.com")
+			if err != nil {
+				t.Fatalf("FindUserByEmail old: %v", err)
+			}
+			if oldEmail != nil {
+				t.Fatalf("old email still resolves after UpdateUserEmail: %+v", oldEmail)
+			}
+			newEmail, err := r.FindUserByEmail(ctx, "new@example.com")
+			if err != nil {
+				t.Fatalf("FindUserByEmail new: %v", err)
+			}
+			if newEmail == nil || newEmail.ID != uid {
+				t.Fatalf("new email lookup = %+v, want user %q", newEmail, uid)
+			}
+		})
+
+		t.Run("PasskeyCredential_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "pk@example.com")
+			id, err := r.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{
+				CredentialID: "cred-1", UserID: userID, PublicKey: "pk", SignCount: 5,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			got, _ := r.GetPasskeyCredentialByCredID(ctx, "cred-1")
+			if got == nil || got.NodeID != id {
+				t.Fatalf("GetByCred: %#v", got)
+			}
+			list, err := r.ListPasskeyCredentials(ctx, userID)
+			if err != nil || len(list) != 1 {
+				t.Fatalf("List: len=%d err=%v", len(list), err)
+			}
+			if err := r.UpdatePasskeyCredential(ctx, id, map[string]any{"sign_count": int64(99)}); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+		})
+
+		t.Run("PasskeyChallenge_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "pkc@example.com")
+			id, err := r.CreatePasskeyChallenge(ctx, &service.PasskeyChallengeRecord{
+				Challenge:     "c-1",
+				UserID:        userID,
+				ChallengeType: "registration",
+				ExpiresAt:     1_000,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			got, err := r.GetPasskeyChallenge(ctx, id)
+			if err != nil || got == nil || got.Challenge != "c-1" {
+				t.Fatalf("Get: %v, %#v", err, got)
+			}
+			if err := r.DeletePasskeyChallenge(ctx, id); err != nil {
+				t.Fatalf("Delete: %v", err)
+			}
+		})
+
+		t.Run("QrLoginSession_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "qr@example.com")
+			id, err := r.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{
+				SessionID: "qr-1", Status: "pending", NewDeviceInfo: "Chrome",
+				ExpiresAt: 1_000, CreatedAt: 100, UpdatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			got, _ := r.FindQrLoginSession(ctx, "qr-1")
+			if got == nil || got.NodeID != id {
+				t.Fatalf("Find: %#v", got)
+			}
+			if err := r.UpdateQrLoginSession(ctx, id, map[string]any{
+				"status":  "approved",
+				"user_id": userID,
+			}); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			got, _ = r.FindQrLoginSession(ctx, "qr-1")
+			if got == nil || got.Status != "approved" || got.UserID != userID {
+				t.Fatalf("after Update: %#v", got)
+			}
+		})
+
+		t.Run("TotpCredential_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "totp@example.com")
+			id, err := r.CreateTotpCredential(ctx, &service.TotpCredRecord{
+				UserID: userID, SecretEncrypted: "enc", CreatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			got, _ := r.GetTotpCredential(ctx, userID)
+			if got == nil || got.NodeID != id {
+				t.Fatalf("Get: %#v", got)
+			}
+			if err := r.UpdateTotpCredential(ctx, id, map[string]any{"verified": true}); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			got, _ = r.GetTotpCredential(ctx, userID)
+			if got == nil || !got.Verified {
+				t.Fatalf("after Update: %#v", got)
+			}
+			if err := r.DeleteTotpCredentialsForUser(ctx, userID); err != nil {
+				t.Fatalf("DeleteForUser: %v", err)
+			}
+			got, _ = r.GetTotpCredential(ctx, userID)
+			if got != nil {
+				t.Fatal("DeleteForUser left a row")
+			}
+		})
+
+		t.Run("TotpCredential_DeleteOne", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "totp-del@example.com")
+			id, err := r.CreateTotpCredential(ctx, &service.TotpCredRecord{
+				UserID: userID, SecretEncrypted: "enc", CreatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if err := r.DeleteTotpCredential(ctx, id); err != nil {
+				t.Fatalf("Delete: %v", err)
+			}
+			got, _ := r.GetTotpCredential(ctx, userID)
+			if got != nil {
+				t.Fatal("Delete left a row")
+			}
+		})
+
+		t.Run("RecoveryCode_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "rc@example.com")
+			id, err := r.CreateRecoveryCode(ctx, &service.RecoveryCodeRecord{
+				UserID: userID, CodeHash: "hash-1", CreatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			got, _ := r.FindRecoveryCodeByHash(ctx, userID, "hash-1")
+			if got == nil || got.NodeID != id {
+				t.Fatalf("Find: %#v", got)
+			}
+			if err := r.UpdateRecoveryCode(ctx, id, map[string]any{"used": true, "used_at": int64(200)}); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			if err := r.DeleteRecoveryCodesForUser(ctx, userID); err != nil {
+				t.Fatalf("DeleteForUser: %v", err)
+			}
+		})
+
+		t.Run("LoginChallenge_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "lc@example.com")
+			id, err := r.CreateLoginChallenge(ctx, &service.LoginChallengeRecord{
+				ChallengeID: "lc-1", UserID: userID, ExpiresAt: 1_000, CreatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			got, _ := r.GetLoginChallengeByChallengeID(ctx, "lc-1")
+			if got == nil || got.NodeID != id {
+				t.Fatalf("Get: %#v", got)
+			}
+			if err := r.DeleteLoginChallenge(ctx, id); err != nil {
+				t.Fatalf("Delete: %v", err)
+			}
+		})
+
+		t.Run("OAuthIdentity_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid, err := r.CreateUser(ctx, &service.User{Email: "oa@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			// Second user so a duplicate (provider, sub) link can target
+			// a different user_id without colliding on email.
+			otherUID, err := r.CreateUser(ctx, &service.User{Email: "oa-other@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser other: %v", err)
+			}
+			oi := &service.OAuthIdentity{
+				UserID: uid, Provider: "google", ProviderUserID: "g-123",
+				EmailAtLinkTime: "oa@example.com", CreatedAt: 100,
+			}
+			if err := r.CreateOAuthIdentity(ctx, oi); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			// Composite uniqueness: a second link with same (provider, sub)
+			// must reject (the schema does not enforce this so the
+			// service layer must, and CreateOAuthIdentity is the
+			// designated guard).
+			dup := &service.OAuthIdentity{UserID: otherUID, Provider: "google", ProviderUserID: "g-123", CreatedAt: 200}
+			if err := r.CreateOAuthIdentity(ctx, dup); err == nil {
+				t.Fatal("CreateOAuthIdentity duplicate: want error, got nil")
+			}
+			otherProvider := &service.OAuthIdentity{
+				UserID:          uid,
+				Provider:        "microsoft",
+				ProviderUserID:  "g-123",
+				EmailAtLinkTime: "oa@example.com",
+				CreatedAt:       300,
+			}
+			if err := r.CreateOAuthIdentity(ctx, otherProvider); err != nil {
+				t.Fatalf("CreateOAuthIdentity other provider same subject: %v", err)
+			}
+			got, err := r.FindUserByProviderID(ctx, "google", "g-123")
+			if err != nil || got == nil {
+				t.Fatalf("FindByProvider: %v %#v", err, got)
+			}
+			if got.ID != uid {
+				t.Fatalf("FindByProvider id = %q, want %q", got.ID, uid)
+			}
+			got, err = r.FindUserByProviderID(ctx, "microsoft", "g-123")
+			if err != nil || got == nil {
+				t.Fatalf("FindByProvider other provider: %v %#v", err, got)
+			}
+			if got.ID != uid {
+				t.Fatalf("FindByProvider other provider id = %q, want %q", got.ID, uid)
+			}
+			list, err := r.ListOAuthIdentitiesForUser(ctx, uid)
+			if err != nil || len(list) != 2 {
+				t.Fatalf("List: len=%d err=%v", len(list), err)
+			}
+		})
+
+		t.Run("Invitation_FindUpdate", func(t *testing.T) {
+			// Only Find + Update are on the Repository interface; the
+			// driver-specific create path is exercised via service.DB
+			// which sits outside this conformance suite.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			got, err := r.FindInvitationByHash(ctx, "no-such")
+			if err != nil {
+				t.Fatalf("Find missing: %v", err)
+			}
+			if got != nil {
+				t.Fatalf("Find missing: want nil, got %#v", got)
+			}
+		})
+
+		t.Run("SetUserEmailVerified", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{Email: "ev@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			if err := r.SetUserEmailVerified(ctx, id, 555); err != nil {
+				t.Fatalf("SetUserEmailVerified: %v", err)
+			}
+			got, _ := r.GetUser(ctx, id)
+			if got == nil || !got.EmailVerified || got.EmailVerifiedAt != 555 {
+				t.Fatalf("after Set: %+v", got)
+			}
+		})
+
+		t.Run("SetUserIDVVerified", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{Email: "idv-flag@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			got, _ := r.GetUser(ctx, id)
+			if got == nil || got.IDVVerified || got.IDVVerifiedAt != 0 {
+				t.Fatalf("pre-Set: %+v", got)
+			}
+			if err := r.SetUserIDVVerified(ctx, id, 777); err != nil {
+				t.Fatalf("SetUserIDVVerified: %v", err)
+			}
+			got, _ = r.GetUser(ctx, id)
+			if got == nil || !got.IDVVerified || got.IDVVerifiedAt != 777 {
+				t.Fatalf("after Set: %+v", got)
+			}
+		})
+
+		t.Run("IdentityVerification_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid, err := r.CreateUser(ctx, &service.User{Email: "idv@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+
+			first := &service.IdentityVerificationRecord{
+				VerificationID:    "idv-1",
+				UserID:            uid,
+				Provider:          "stub",
+				ProviderSessionID: "sess-1",
+				Status:            service.IDVStatusPending,
+				CreatedAt:         100,
+				UpdatedAt:         100,
+			}
+			if err := r.CreateIdentityVerification(ctx, first); err != nil {
+				t.Fatalf("Create idv-1: %v", err)
+			}
+
+			got, err := r.GetIdentityVerification(ctx, "idv-1")
+			if err != nil || got == nil {
+				t.Fatalf("Get idv-1: err=%v rec=%#v", err, got)
+			}
+			if got.UserID != uid || got.Status != service.IDVStatusPending || got.Provider != "stub" {
+				t.Fatalf("Get idv-1 mismatch: %+v", got)
+			}
+
+			latest, err := r.GetLatestIdentityVerificationForUser(ctx, uid)
+			if err != nil || latest == nil || latest.VerificationID != "idv-1" {
+				t.Fatalf("Latest after one create: err=%v rec=%#v", err, latest)
+			}
+
+			second := &service.IdentityVerificationRecord{
+				VerificationID: "idv-2",
+				UserID:         uid,
+				Provider:       "stub",
+				Status:         service.IDVStatusPending,
+				CreatedAt:      200,
+				UpdatedAt:      200,
+			}
+			if err := r.CreateIdentityVerification(ctx, second); err != nil {
+				t.Fatalf("Create idv-2: %v", err)
+			}
+			latest, err = r.GetLatestIdentityVerificationForUser(ctx, uid)
+			if err != nil || latest == nil || latest.VerificationID != "idv-2" {
+				t.Fatalf("Latest after two creates: err=%v rec=%#v", err, latest)
+			}
+
+			if err := r.UpdateIdentityVerificationStatus(ctx, "idv-1", service.IDVStatusApproved, "", 300, 300); err != nil {
+				t.Fatalf("UpdateStatus approve: %v", err)
+			}
+			got, _ = r.GetIdentityVerification(ctx, "idv-1")
+			if got == nil || got.Status != service.IDVStatusApproved || got.CompletedAt != 300 || got.UpdatedAt != 300 {
+				t.Fatalf("after approve: %+v", got)
+			}
+
+			if err := r.UpdateIdentityVerificationStatus(ctx, "idv-2", service.IDVStatusRejected, "document_unreadable", 400, 400); err != nil {
+				t.Fatalf("UpdateStatus reject: %v", err)
+			}
+			got, _ = r.GetIdentityVerification(ctx, "idv-2")
+			if got == nil || got.Status != service.IDVStatusRejected || got.RejectionReason != "document_unreadable" {
+				t.Fatalf("after reject: %+v", got)
+			}
+
+			miss, err := r.GetIdentityVerification(ctx, "idv-missing")
+			if err != nil || miss != nil {
+				t.Fatalf("Get unknown: err=%v rec=%#v", err, miss)
+			}
+
+			latest, err = r.GetLatestIdentityVerificationForUser(ctx, "no-such-user")
+			if err != nil || latest != nil {
+				t.Fatalf("Latest unknown user: err=%v rec=%#v", err, latest)
+			}
+		})
 	})
+}
 
-	t.Run("OAuthIdentity_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		uid, err := r.CreateUser(ctx, &service.User{Email: "oa@example.com", Status: "active"})
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-		oi := &service.OAuthIdentity{
-			UserID: uid, Provider: "google", ProviderUserID: "g-123",
-			EmailAtLinkTime: "oa@example.com", CreatedAt: 100,
-		}
-		if err := r.CreateOAuthIdentity(ctx, oi); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		// composite uniqueness: a second link with same (provider, sub)
-		// must reject (the schema does not enforce this so the
-		// service layer must, and CreateOAuthIdentity is the
-		// designated guard).
-		dup := &service.OAuthIdentity{UserID: "other", Provider: "google", ProviderUserID: "g-123", CreatedAt: 200}
-		if err := r.CreateOAuthIdentity(ctx, dup); err == nil {
-			t.Fatal("CreateOAuthIdentity duplicate: want error, got nil")
-		}
-		otherProvider := &service.OAuthIdentity{
-			UserID:          uid,
-			Provider:        "microsoft",
-			ProviderUserID:  "g-123",
-			EmailAtLinkTime: "oa@example.com",
-			CreatedAt:       300,
-		}
-		if err := r.CreateOAuthIdentity(ctx, otherProvider); err != nil {
-			t.Fatalf("CreateOAuthIdentity other provider same subject: %v", err)
-		}
-		got, err := r.FindUserByProviderID(ctx, "google", "g-123")
-		if err != nil || got == nil {
-			t.Fatalf("FindByProvider: %v %#v", err, got)
-		}
-		if got.ID != uid {
-			t.Fatalf("FindByProvider id = %q, want %q", got.ID, uid)
-		}
-		got, err = r.FindUserByProviderID(ctx, "microsoft", "g-123")
-		if err != nil || got == nil {
-			t.Fatalf("FindByProvider other provider: %v %#v", err, got)
-		}
-		if got.ID != uid {
-			t.Fatalf("FindByProvider other provider id = %q, want %q", got.ID, uid)
-		}
-		list, err := r.ListOAuthIdentitiesForUser(ctx, uid)
-		if err != nil || len(list) != 2 {
-			t.Fatalf("List: len=%d err=%v", len(list), err)
-		}
+// createTestUser creates a User in the given repository and returns
+// the generated ID. Subtests use this to satisfy backend-imposed FK
+// constraints before writing user-scoped rows (refresh tokens, passkey
+// credentials, etc.). The email is required-unique-per-tenant, so
+// callers pass a distinct email per subtest.
+func createTestUser(t *testing.T, r service.Repository, email string) string {
+	t.Helper()
+	id, err := r.CreateUser(context.Background(), &service.User{
+		Email:  email,
+		Status: "active",
+		Role:   "member",
 	})
-
-	t.Run("Invitation_FindUpdate", func(t *testing.T) {
-		// Only Find + Update are on the Repository interface; the
-		// driver-specific create path is exercised via service.DB
-		// which sits outside this conformance suite.
-		ctx := context.Background()
-		r := makeFresh(t)
-		got, err := r.FindInvitationByHash(ctx, "no-such")
-		if err != nil {
-			t.Fatalf("Find missing: %v", err)
-		}
-		if got != nil {
-			t.Fatalf("Find missing: want nil, got %#v", got)
-		}
-	})
-
-	t.Run("SetUserEmailVerified", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateUser(ctx, &service.User{Email: "ev@example.com", Status: "active"})
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-		if err := r.SetUserEmailVerified(ctx, id, 555); err != nil {
-			t.Fatalf("SetUserEmailVerified: %v", err)
-		}
-		got, _ := r.GetUser(ctx, id)
-		if got == nil || !got.EmailVerified || got.EmailVerifiedAt != 555 {
-			t.Fatalf("after Set: %+v", got)
-		}
-	})
-
-	t.Run("SetUserIDVVerified", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		id, err := r.CreateUser(ctx, &service.User{Email: "idv-flag@example.com", Status: "active"})
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-		// Initial state: not verified.
-		got, _ := r.GetUser(ctx, id)
-		if got == nil || got.IDVVerified || got.IDVVerifiedAt != 0 {
-			t.Fatalf("pre-Set: %+v", got)
-		}
-		if err := r.SetUserIDVVerified(ctx, id, 777); err != nil {
-			t.Fatalf("SetUserIDVVerified: %v", err)
-		}
-		got, _ = r.GetUser(ctx, id)
-		if got == nil || !got.IDVVerified || got.IDVVerifiedAt != 777 {
-			t.Fatalf("after Set: %+v", got)
-		}
-	})
-
-	t.Run("IdentityVerification_CRUD", func(t *testing.T) {
-		ctx := context.Background()
-		r := makeFresh(t)
-		uid, err := r.CreateUser(ctx, &service.User{Email: "idv@example.com", Status: "active"})
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-
-		first := &service.IdentityVerificationRecord{
-			VerificationID:    "idv-1",
-			UserID:            uid,
-			Provider:          "stub",
-			ProviderSessionID: "sess-1",
-			Status:            service.IDVStatusPending,
-			CreatedAt:         100,
-			UpdatedAt:         100,
-		}
-		if err := r.CreateIdentityVerification(ctx, first); err != nil {
-			t.Fatalf("Create idv-1: %v", err)
-		}
-
-		got, err := r.GetIdentityVerification(ctx, "idv-1")
-		if err != nil || got == nil {
-			t.Fatalf("Get idv-1: err=%v rec=%#v", err, got)
-		}
-		if got.UserID != uid || got.Status != service.IDVStatusPending || got.Provider != "stub" {
-			t.Fatalf("Get idv-1 mismatch: %+v", got)
-		}
-
-		// Latest-for-user with a single record returns it.
-		latest, err := r.GetLatestIdentityVerificationForUser(ctx, uid)
-		if err != nil || latest == nil || latest.VerificationID != "idv-1" {
-			t.Fatalf("Latest after one create: err=%v rec=%#v", err, latest)
-		}
-
-		// A second record with later CreatedAt becomes the latest.
-		second := &service.IdentityVerificationRecord{
-			VerificationID: "idv-2",
-			UserID:         uid,
-			Provider:       "stub",
-			Status:         service.IDVStatusPending,
-			CreatedAt:      200,
-			UpdatedAt:      200,
-		}
-		if err := r.CreateIdentityVerification(ctx, second); err != nil {
-			t.Fatalf("Create idv-2: %v", err)
-		}
-		latest, err = r.GetLatestIdentityVerificationForUser(ctx, uid)
-		if err != nil || latest == nil || latest.VerificationID != "idv-2" {
-			t.Fatalf("Latest after two creates: err=%v rec=%#v", err, latest)
-		}
-
-		// UpdateStatus moves the record to APPROVED.
-		if err := r.UpdateIdentityVerificationStatus(ctx, "idv-1", service.IDVStatusApproved, "", 300, 300); err != nil {
-			t.Fatalf("UpdateStatus approve: %v", err)
-		}
-		got, _ = r.GetIdentityVerification(ctx, "idv-1")
-		if got == nil || got.Status != service.IDVStatusApproved || got.CompletedAt != 300 || got.UpdatedAt != 300 {
-			t.Fatalf("after approve: %+v", got)
-		}
-
-		// Rejection captures the reason.
-		if err := r.UpdateIdentityVerificationStatus(ctx, "idv-2", service.IDVStatusRejected, "document_unreadable", 400, 400); err != nil {
-			t.Fatalf("UpdateStatus reject: %v", err)
-		}
-		got, _ = r.GetIdentityVerification(ctx, "idv-2")
-		if got == nil || got.Status != service.IDVStatusRejected || got.RejectionReason != "document_unreadable" {
-			t.Fatalf("after reject: %+v", got)
-		}
-
-		// Unknown verification_id returns (nil, nil), not an error.
-		miss, err := r.GetIdentityVerification(ctx, "idv-missing")
-		if err != nil || miss != nil {
-			t.Fatalf("Get unknown: err=%v rec=%#v", err, miss)
-		}
-
-		// Unknown user returns (nil, nil) for latest.
-		latest, err = r.GetLatestIdentityVerificationForUser(ctx, "no-such-user")
-		if err != nil || latest != nil {
-			t.Fatalf("Latest unknown user: err=%v rec=%#v", err, latest)
-		}
-	})
+	if err != nil {
+		t.Fatalf("createTestUser %q: %v", email, err)
+	}
+	if id == "" {
+		t.Fatalf("createTestUser %q: empty id", email)
+	}
+	return id
 }

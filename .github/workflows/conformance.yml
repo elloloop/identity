@@ -1,0 +1,133 @@
+name: Conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+
+# Cancel in-progress runs for the same ref so PR pushes don't pile up.
+concurrency:
+  group: conformance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.26.3'
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Driver matrix — runs the driver-agnostic conformance suite
+  # (internal/repo/conformance) against each repository driver. The PR
+  # check name "Conformance / <driver>" is what branch protection pins;
+  # the matrix is the single source of truth for which drivers gate
+  # the merge.
+  #
+  # Service containers (postgres + entdb) are declared at the job level
+  # so they boot for every entry. The conformance test for the memory
+  # driver ignores them; postgres and entdb tests skip cleanly if their
+  # env-var is unset (which is the local-developer escape hatch). On CI
+  # we always wire the env vars so a real run never silently skips.
+  # ---------------------------------------------------------------------------
+  conformance:
+    name: Conformance / ${{ matrix.driver }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - driver: memory
+            package: ./internal/repo/memory/...
+            build_tag: ""
+            need_postgres: false
+            need_entdb: false
+          - driver: postgres
+            package: ./internal/repo/postgres/...
+            build_tag: ""
+            need_postgres: true
+            need_entdb: false
+          - driver: entdb
+            package: ./internal/repo/entdb/...
+            build_tag: realentdb
+            need_postgres: false
+            need_entdb: true
+
+    services:
+      postgres:
+        image: postgres:16.13-alpine3.23
+        env:
+          POSTGRES_USER: identity
+          POSTGRES_PASSWORD: identity
+          POSTGRES_DB: identity
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U identity"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      entdb:
+        image: ghcr.io/elloloop/tenant-shard-db:1.10.2
+        env:
+          GRPC_BIND: "0.0.0.0:50051"
+          WAL_BACKEND: local
+          DATA_DIR: /var/lib/entdb
+        ports:
+          - 50051:50051
+        options: >-
+          --health-cmd "python -c \"import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)\""
+          --health-interval 5s
+          --health-timeout 8s
+          --health-retries 12
+          --health-start-period 5s
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Wait for postgres
+        if: matrix.need_postgres
+        run: |
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1; then
+              echo "postgres up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "postgres did not come up" >&2
+          exit 1
+
+      - name: Wait for entdb
+        if: matrix.need_entdb
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z localhost 50051; then
+              echo "entdb up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "entdb did not come up" >&2
+          exit 1
+
+      - name: Run conformance suite
+        env:
+          GATEWAY_TEST_POSTGRES_DSN: ${{ matrix.need_postgres && 'postgres://identity:identity@localhost:5432/identity?sslmode=disable' || '' }}
+          GATEWAY_ENTDB_ADDRESS: ${{ matrix.need_entdb && 'localhost:50051' || '' }}
+        run: |
+          set -euo pipefail
+          tag_flag=""
+          if [[ -n "${{ matrix.build_tag }}" ]]; then
+            tag_flag="-tags=${{ matrix.build_tag }}"
+          fi
+          go test ${tag_flag} -race -count=1 -timeout=300s -run='^TestConformance$' -v ${{ matrix.package }}

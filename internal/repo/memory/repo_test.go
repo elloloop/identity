@@ -10,12 +10,16 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-// TestMemoryConformance runs the driver-agnostic conformance suite
-// against the in-memory Repository implementation.
-func TestMemoryConformance(t *testing.T) {
+// TestConformance runs the driver-agnostic conformance suite against
+// the in-memory Repository implementation. CI's `Conformance / memory`
+// matrix entry invokes this test.
+func TestConformance(t *testing.T) {
 	t.Parallel()
-	conformance.RunConformance(t, func(_ *testing.T) service.Repository {
-		return memory.New()
+	conformance.RunConformance(t, conformance.Driver{
+		Name: "memory",
+		NewRepo: func(_ *testing.T) service.Repository {
+			return memory.New()
+		},
 	})
 }
 

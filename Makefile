@@ -1,4 +1,4 @@
-# Local mirror of .github/workflows/ci.yml.
+# Local mirror of .github/workflows/ci.yml and conformance.yml.
 #
 # `make ci` runs the subset of jobs that don't need external services and
 # should match the gating PR check most contributors care about (lint, tidy,
@@ -7,6 +7,11 @@
 # `make ci-full` adds the real-backend integration tests using the local
 # docker-compose stack (entdb + postgres). `make ci-docker` covers the
 # container build smoke.
+#
+# `make conformance-all` runs the driver-agnostic Repository conformance
+# suite against memory + postgres + entdb (the same matrix CI's
+# Conformance / <driver> jobs run; postgres and entdb skip if their
+# env-vars are unset).
 #
 # Tool versions are pinned to match CI; see GOLANGCI_LINT_VERSION /
 # GOVULNCHECK_VERSION below. Bump them in lockstep with the workflow.
@@ -139,7 +144,35 @@ realpostgres: ## Integration tests against a real postgres (expects GATEWAY_POST
 		$(GO) test -tags=realpostgres -race -timeout=300s ./tests/integration/...; \
 	fi
 	GATEWAY_TEST_POSTGRES_DSN=$$GATEWAY_POSTGRES_DSN \
-		$(GO) test -race -timeout=300s ./internal/repo/postgres/...
+		$(GO) test -race -timeout=300s -skip='^TestConformance$$' ./internal/repo/postgres/...
+
+# ---------------------------------------------------------------------------
+# Conformance — runs internal/repo/conformance against each driver. Maps
+# 1:1 to .github/workflows/conformance.yml. Skips a driver if its
+# backing-service env-var is unset so a developer running this without
+# `make services-up` still gets a useful local signal from the memory
+# entry.
+# ---------------------------------------------------------------------------
+
+.PHONY: conformance-all
+conformance-all: conformance-memory conformance-postgres conformance-entdb ## Run the conformance suite for every driver
+	@echo "==> conformance-all: passed (skipped drivers whose env-vars were unset)"
+
+.PHONY: conformance-memory
+conformance-memory: ## Conformance suite against the in-memory driver
+	$(GO) test -race -count=1 -timeout=300s -run='^TestConformance$$' ./internal/repo/memory/...
+
+.PHONY: conformance-postgres
+conformance-postgres: ## Conformance suite against a real postgres (skips if GATEWAY_TEST_POSTGRES_DSN unset)
+	@if [ -z "$$GATEWAY_TEST_POSTGRES_DSN" ] && [ -n "$$GATEWAY_POSTGRES_DSN" ]; then \
+		GATEWAY_TEST_POSTGRES_DSN="$$GATEWAY_POSTGRES_DSN" $(GO) test -race -count=1 -timeout=300s -run='^TestConformance$$' ./internal/repo/postgres/...; \
+	else \
+		$(GO) test -race -count=1 -timeout=300s -run='^TestConformance$$' ./internal/repo/postgres/...; \
+	fi
+
+.PHONY: conformance-entdb
+conformance-entdb: ## Conformance suite against a real entdb (skips if GATEWAY_ENTDB_ADDRESS unset)
+	$(GO) test -tags=realentdb -race -count=1 -timeout=300s -run='^TestConformance$$' ./internal/repo/entdb/...
 
 .PHONY: fuzz
 fuzz: ## Fuzz smoke — runs each fuzz target with seed corpus + 15s fuzzing

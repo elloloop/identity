@@ -15,7 +15,6 @@ import (
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
 
 	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
-	"github.com/elloloop/identity/internal/repo/conformance"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -336,21 +335,6 @@ func zeroValue(fd protoreflect.FieldDescriptor, v any) bool {
 		return n == 0
 	}
 	return false
-}
-
-// TestEntDBConformance runs the driver-agnostic Repository conformance
-// suite against the entdb driver wired with an in-memory entClient.
-// Production wiring uses NewRepository(*sdk.DbClient, ...); this test
-// bypasses the gRPC connection by injecting an in-memory entClient
-// directly, exercising every Repository method end-to-end.
-func TestEntDBConformance(t *testing.T) {
-	t.Parallel()
-	conformance.RunConformance(t, func(_ *testing.T) service.Repository {
-		return &entRepository{
-			client:   newMemoryEntClient(),
-			tenantID: "test-tenant",
-		}
-	})
 }
 
 func TestCreateUser_DuplicateCreateDeletesLoser(t *testing.T) {
@@ -792,6 +776,7 @@ func TestEntDBClientHelpers(t *testing.T) {
 		{"totp_user", &schemapb.TotpCredential{}, map[string]any{"user_id": "u"}, 23, map[string]any{"1": "u"}, true},
 		{"recovery_code", &schemapb.RecoveryCode{}, map[string]any{"user_id": "u", "code_hash": "h"}, 24, map[string]any{"1": "u", "2": "h"}, true},
 		{"oauth_identity", &schemapb.OAuthIdentity{}, map[string]any{"user_id": "u", "provider": "google", "provider_user_id": "sub"}, 31, map[string]any{"1": "u", "2": "google", "3": "sub"}, true},
+		{"idv_user", &schemapb.IdentityVerificationRecord{}, map[string]any{"user_id": "u"}, 32, map[string]any{"2": "u"}, true},
 		{"unsupported_filter", &schemapb.User{}, map[string]any{"name": "n"}, 0, nil, false},
 		{"unsupported_witness", &schemapb.EmailChangeToken{}, map[string]any{"token_hash": "h"}, 0, nil, false},
 	}

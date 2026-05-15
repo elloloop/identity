@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
@@ -222,13 +223,163 @@ func (s *sdkScope) rawUpdate(ctx context.Context, actor string, typeID int, node
 	if s.transport == nil {
 		return errors.New("entdb: raw transport unavailable")
 	}
-	_, err := s.transport.ExecuteAtomic(ctx, s.tenantID, actor, "", []sdk.Operation{{
+	if _, err := s.transport.ExecuteAtomic(ctx, s.tenantID, actor, "", []sdk.Operation{{
 		Type:   sdk.OpUpdateNode,
 		TypeID: typeID,
 		NodeID: nodeID,
 		Patch:  patch,
-	}})
-	return err
+	}}); err != nil {
+		return err
+	}
+	// ExecuteAtomic queues the op on the WAL; the canonical store
+	// catches up asynchronously. Wait for the patch to be visible
+	// through a typed get before returning so the very next read
+	// observes the update.
+	witness, ok := rawUpdateWitness(typeID)
+	if !ok {
+		return nil
+	}
+	return s.waitForRawPatchVisible(ctx, actor, witness, nodeID, patch)
+}
+
+// rawUpdateWitness returns a zero-value typed *schemapb.X witness for
+// the given type id so callers can build a typed get-msg for the
+// post-rawUpdate visibility wait. Returns ok=false when the type id is
+// outside the schema; callers can still proceed without the wait.
+func rawUpdateWitness(typeID int) (proto.Message, bool) {
+	if typeID == 1 {
+		return &schemapb.User{}, true
+	}
+	return nil, false
+}
+
+// waitForRawPatchVisible polls a typed Get until the field-id map
+// patch produced by rawUpdate is reflected in the stored node. The
+// proto3-Range visibility helper used after Plan.Update doesn't
+// understand raw field-id patches, so this helper does a structural
+// match instead: every patch field becomes a typed proto-reflect Set
+// against a typed witness, and we wait until the stored row's
+// reflected values match.
+//
+// When the patch has an unknown field id, the wait is skipped (the
+// caller's next read will hit the same applier eventually); the
+// rawUpdate itself already succeeded on the server.
+func (s *sdkScope) waitForRawPatchVisible(ctx context.Context, actor string, witness proto.Message, nodeID string, patch map[string]any) error {
+	want := newMessageLike(witness)
+	if !applyRawPatchToProto(want, patch) {
+		return nil
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		got := newMessageLike(witness)
+		err := s.get(ctx, actor, got, nodeID)
+		if err == nil && rawPatchApplied(want.ProtoReflect(), got.ProtoReflect(), patch) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("entdb: raw patch visibility timeout for %s", nodeID)
+		}
+		if err := sleepOrContextDone(ctx, 50*time.Millisecond); err != nil {
+			return err
+		}
+	}
+}
+
+// applyRawPatchToProto sets each field-id→value entry on the proto
+// message via proto-reflect, so callers can build a "want" message
+// from a rawUpdate map. Returns false when the patch can't be
+// reflected onto the witness (unknown field id, wrong scalar kind);
+// callers treat that as "skip the post-update wait, the server
+// applied it anyway."
+func applyRawPatchToProto(msg proto.Message, patch map[string]any) bool {
+	fields := msg.ProtoReflect().Descriptor().Fields()
+	for k, v := range patch {
+		fid, err := strconv.Atoi(k)
+		if err != nil {
+			return false
+		}
+		fd := fields.ByNumber(protoreflect.FieldNumber(fid)) // #nosec G115 -- bounds checked by descriptor lookup.
+		if fd == nil {
+			return false
+		}
+		val, ok := protoValueFromAny(fd, v)
+		if !ok {
+			return false
+		}
+		msg.ProtoReflect().Set(fd, val)
+	}
+	return true
+}
+
+// rawPatchApplied reports whether every field in the rawUpdate patch
+// matches the corresponding field on the stored proto. Zero values
+// in the patch (e.g. failed_login_count=0) match only when the
+// stored value is also zero, which is the whole point of the wait.
+func rawPatchApplied(want, got protoreflect.Message, patch map[string]any) bool {
+	fields := want.Descriptor().Fields()
+	for k := range patch {
+		fid, err := strconv.Atoi(k)
+		if err != nil {
+			continue
+		}
+		fd := fields.ByNumber(protoreflect.FieldNumber(fid)) // #nosec G115 -- bounds checked by descriptor lookup.
+		if fd == nil {
+			continue
+		}
+		if !want.Get(fd).Equal(got.Get(fd)) {
+			return false
+		}
+	}
+	return true
+}
+
+// protoValueFromAny coerces a Go value from a rawUpdate map into a
+// protoreflect.Value of the kind the field expects. Mirrors the
+// conversions sdk.ExecuteAtomic performs on the wire. Returns ok=false
+// when the value can't be coerced; callers treat that as "skip the
+// post-update wait."
+func protoValueFromAny(fd protoreflect.FieldDescriptor, v any) (protoreflect.Value, bool) {
+	switch fd.Kind() {
+	case protoreflect.StringKind:
+		s, ok := v.(string)
+		if !ok {
+			return protoreflect.Value{}, false
+		}
+		return protoreflect.ValueOfString(s), true
+	case protoreflect.BoolKind:
+		b, ok := v.(bool)
+		if !ok {
+			return protoreflect.Value{}, false
+		}
+		return protoreflect.ValueOfBool(b), true
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		switch n := v.(type) {
+		case int64:
+			return protoreflect.ValueOfInt64(n), true
+		case int:
+			return protoreflect.ValueOfInt64(int64(n)), true
+		case int32:
+			return protoreflect.ValueOfInt64(int64(n)), true
+		}
+		return protoreflect.Value{}, false
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
+		switch n := v.(type) {
+		case int64:
+			return protoreflect.ValueOfInt32(int32(n)), true // #nosec G115 -- caller bounds-checks.
+		case int:
+			return protoreflect.ValueOfInt32(int32(n)), true // #nosec G115 -- caller bounds-checks.
+		case int32:
+			return protoreflect.ValueOfInt32(n), true
+		}
+		return protoreflect.Value{}, false
+	}
+	return protoreflect.Value{}, false
 }
 
 func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error {
@@ -398,6 +549,16 @@ func rawQuerySpec(witness proto.Message, filter map[string]any) (int, map[string
 			}
 		}
 		return 31, rawFilter, true
+	case *schemapb.IdentityVerificationRecord:
+		for k, v := range filter {
+			switch k {
+			case "user_id":
+				rawFilter["2"] = v
+			default:
+				return 0, nil, false
+			}
+		}
+		return 32, rawFilter, true
 	default:
 		return 0, nil, false
 	}
