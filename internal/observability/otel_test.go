@@ -89,6 +89,50 @@ func TestSetup_EnabledRejectsBadProtocol(t *testing.T) {
 	}
 }
 
+// TestSetup_EnabledHTTPHappyPath drives the "real exporter + real
+// SDK tracer provider + propagator" path so coverage reflects the
+// production wiring. The exporter never actually connects; we tear
+// it down immediately via the returned shutdown.
+func TestSetup_EnabledHTTPHappyPath(t *testing.T) {
+	prevTP := otel.GetTracerProvider()
+	t.Cleanup(func() { otel.SetTracerProvider(prevTP) })
+
+	shutdown, err := Setup(context.Background(), Config{
+		Enabled:        true,
+		Endpoint:       "localhost:4318",
+		Protocol:       "http",
+		SampleRatio:    0.5,
+		DeploymentEnv:  "test",
+		ServiceVersion: "0.0.0-test",
+		Insecure:       true,
+	})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	defer func() { _ = shutdown(context.Background()) }()
+	if otel.GetTracerProvider() == prevTP {
+		t.Errorf("Setup did not replace global TracerProvider")
+	}
+}
+
+// TestSetup_EnabledGRPCHappyPath covers the gRPC exporter branch.
+func TestSetup_EnabledGRPCHappyPath(t *testing.T) {
+	prevTP := otel.GetTracerProvider()
+	t.Cleanup(func() { otel.SetTracerProvider(prevTP) })
+
+	shutdown, err := Setup(context.Background(), Config{
+		Enabled:     true,
+		Endpoint:    "localhost:4317",
+		Protocol:    "grpc",
+		SampleRatio: 1.0,
+		Insecure:    true,
+	})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	defer func() { _ = shutdown(context.Background()) }()
+}
+
 // TestFromAppConfig copies env-driven fields into Config; deployers
 // rely on this single seam being right.
 func TestFromAppConfig(t *testing.T) {

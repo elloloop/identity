@@ -186,6 +186,34 @@ func TestEnvBool_Variants(t *testing.T) {
 	}
 }
 
+// TestEnvFloat_Default verifies envFloat returns the default for unset vars.
+func TestEnvFloat_Default(t *testing.T) {
+	clearGatewayEnv(t)
+	got := envFloat("GATEWAY_TEST_UNSET_FLOAT", 0.5)
+	if got != 0.5 {
+		t.Errorf("want 0.5, got %v", got)
+	}
+}
+
+// TestEnvFloat_Override verifies envFloat reads the environment.
+func TestEnvFloat_Override(t *testing.T) {
+	t.Setenv("GATEWAY_TEST_FLOAT_OVERRIDE", "0.25")
+	got := envFloat("GATEWAY_TEST_FLOAT_OVERRIDE", 0.1)
+	if got != 0.25 {
+		t.Errorf("want 0.25, got %v", got)
+	}
+}
+
+// TestEnvFloat_InvalidFallsBackToDefault verifies that a non-float
+// env value falls back to the default.
+func TestEnvFloat_InvalidFallsBackToDefault(t *testing.T) {
+	t.Setenv("GATEWAY_TEST_FLOAT_BAD", "not-a-float")
+	got := envFloat("GATEWAY_TEST_FLOAT_BAD", 0.7)
+	if got != 0.7 {
+		t.Errorf("want 0.7, got %v", got)
+	}
+}
+
 // TestEnvBool_UnrecognizedFallsBackToDefault verifies that an
 // unrecognized string falls back to the default.
 func TestEnvBool_UnrecognizedFallsBackToDefault(t *testing.T) {

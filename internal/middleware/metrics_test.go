@@ -124,3 +124,88 @@ func TestNewRPCMetrics_NilRegistryUsesFreshOne(t *testing.T) {
 		t.Fatalf("second NewRPCMetrics(nil): %v", err)
 	}
 }
+
+// TestNewRPCMetrics_DuplicateRegistrationFails confirms a second
+// registration against the same registry surfaces the error the
+// caller is supposed to fail-fast on.
+func TestNewRPCMetrics_DuplicateRegistrationFails(t *testing.T) {
+	t.Parallel()
+
+	reg := prometheus.NewRegistry()
+	if _, err := NewRPCMetrics(reg); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if _, err := NewRPCMetrics(reg); err == nil {
+		t.Fatal("second registration should have failed")
+	}
+}
+
+// TestMetricsMiddleware_NilMetricsIsPassthrough covers the nil-safe
+// branch — production wiring always supplies a non-nil instance,
+// but the contract is documented and we lean on it for tests.
+func TestMetricsMiddleware_NilMetricsIsPassthrough(t *testing.T) {
+	t.Parallel()
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := MetricsMiddleware(nil)(inner)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/identity.IdentityService/PasswordLogin", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+// TestConnectCodeFromHTTP_AllCodes covers every branch of the
+// status-code -> Connect-code mapper so the alerting label set is
+// fully exercised.
+func TestConnectCodeFromHTTP_AllCodes(t *testing.T) {
+	t.Parallel()
+
+	if got := connectCodeFromHTTP(0, "already_set"); got != "already_set" {
+		t.Errorf("preset header should win, got %q", got)
+	}
+
+	cases := map[int]string{
+		http.StatusOK:                  "ok",
+		http.StatusBadRequest:          "invalid_argument",
+		http.StatusUnauthorized:        "unauthenticated",
+		http.StatusForbidden:           "permission_denied",
+		http.StatusNotFound:            "not_found",
+		http.StatusConflict:            "already_exists",
+		http.StatusTooManyRequests:     "resource_exhausted",
+		http.StatusGatewayTimeout:      "deadline_exceeded",
+		http.StatusRequestTimeout:      "deadline_exceeded",
+		http.StatusNotImplemented:      "unimplemented",
+		http.StatusServiceUnavailable:  "unavailable",
+		http.StatusInternalServerError: "internal",
+		http.StatusTeapot:              "unknown",
+	}
+	for status, want := range cases {
+		if got := connectCodeFromHTTP(status, ""); got != want {
+			t.Errorf("status %d: got %q, want %q", status, got, want)
+		}
+	}
+}
+
+// TestRPCMethodFromPath_RejectsNestedAndEmpty asserts cardinality is
+// bounded — paths with query/hash chars, deep paths, or empty method
+// must not be measured.
+func TestRPCMethodFromPath_RejectsNestedAndEmpty(t *testing.T) {
+	t.Parallel()
+
+	bad := []string{
+		"/identity.IdentityService/",
+		"/identity.IdentityService/PasswordLogin?x=1",
+		"/identity.IdentityService/PasswordLogin/foo",
+		"/identity.IdentityService/PasswordLogin#bar",
+		"/other.Service/Method",
+	}
+	for _, p := range bad {
+		if _, ok := rpcMethodFromPath(p); ok {
+			t.Errorf("rpcMethodFromPath(%q) returned ok; want false", p)
+		}
+	}
+}
