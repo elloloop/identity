@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -300,11 +301,7 @@ func (s *sdkScope) waitForRawPatchVisible(ctx context.Context, actor string, wit
 func applyRawPatchToProto(msg proto.Message, patch map[string]any) bool {
 	fields := msg.ProtoReflect().Descriptor().Fields()
 	for k, v := range patch {
-		fid, err := strconv.Atoi(k)
-		if err != nil {
-			return false
-		}
-		fd := fields.ByNumber(protoreflect.FieldNumber(fid)) // #nosec G115 -- bounds checked by descriptor lookup.
+		fd := lookupFieldByRawID(fields, k)
 		if fd == nil {
 			return false
 		}
@@ -317,6 +314,19 @@ func applyRawPatchToProto(msg proto.Message, patch map[string]any) bool {
 	return true
 }
 
+// lookupFieldByRawID resolves a rawUpdate map key (decimal field id as
+// a string) back to the proto descriptor. Returns nil when the key
+// isn't a valid proto field-number (non-numeric, negative, > int32
+// max, or unknown to the descriptor); callers treat that as "skip the
+// post-update wait."
+func lookupFieldByRawID(fields protoreflect.FieldDescriptors, key string) protoreflect.FieldDescriptor {
+	n, err := strconv.ParseInt(key, 10, 32)
+	if err != nil || n <= 0 {
+		return nil
+	}
+	return fields.ByNumber(protoreflect.FieldNumber(n))
+}
+
 // rawPatchApplied reports whether every field in the rawUpdate patch
 // matches the corresponding field on the stored proto. Zero values
 // in the patch (e.g. failed_login_count=0) match only when the
@@ -324,11 +334,7 @@ func applyRawPatchToProto(msg proto.Message, patch map[string]any) bool {
 func rawPatchApplied(want, got protoreflect.Message, patch map[string]any) bool {
 	fields := want.Descriptor().Fields()
 	for k := range patch {
-		fid, err := strconv.Atoi(k)
-		if err != nil {
-			continue
-		}
-		fd := fields.ByNumber(protoreflect.FieldNumber(fid)) // #nosec G115 -- bounds checked by descriptor lookup.
+		fd := lookupFieldByRawID(fields, k)
 		if fd == nil {
 			continue
 		}
@@ -371,9 +377,15 @@ func protoValueFromAny(fd protoreflect.FieldDescriptor, v any) (protoreflect.Val
 	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
 		switch n := v.(type) {
 		case int64:
-			return protoreflect.ValueOfInt32(int32(n)), true // #nosec G115 -- caller bounds-checks.
+			if n < math.MinInt32 || n > math.MaxInt32 {
+				return protoreflect.Value{}, false
+			}
+			return protoreflect.ValueOfInt32(int32(n)), true
 		case int:
-			return protoreflect.ValueOfInt32(int32(n)), true // #nosec G115 -- caller bounds-checks.
+			if int64(n) < math.MinInt32 || int64(n) > math.MaxInt32 {
+				return protoreflect.Value{}, false
+			}
+			return protoreflect.ValueOfInt32(int32(n)), true
 		case int32:
 			return protoreflect.ValueOfInt32(n), true
 		}
