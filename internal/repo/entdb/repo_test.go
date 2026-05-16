@@ -163,6 +163,15 @@ func (c *memoryEntClient) delete(_ context.Context, _ string, witness proto.Mess
 	return nil
 }
 
+// ensureUserTenantMember is a no-op on the memory client. The
+// in-memory store bypasses the EntDB global registry entirely, so
+// there is no membership model to enforce here. The real sdkScope
+// implementation calls Admin.CreateUser + Admin.AddTenantMember
+// against the server.
+func (c *memoryEntClient) ensureUserTenantMember(_ context.Context, _, _, _, _ string) error {
+	return nil
+}
+
 // mergePatch overlays `patch` onto `existing`. Non-default scalars in
 // `patch` overwrite the existing values; default scalars are skipped
 // (so "name = empty string" patches do not clobber existing names).

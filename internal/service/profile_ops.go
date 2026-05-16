@@ -103,7 +103,7 @@ func (s *ProfileService) ListAuditEvents(
 		filter[afEventType] = eventType
 	}
 
-	nodes, err := s.db.QueryNodes(ctx, s.tenantID, "user:system", typeAuditEvent, filter)
+	nodes, err := s.db.QueryNodes(ctx, s.tenantID, tenantAdminActor, typeAuditEvent, filter)
 	if err != nil {
 		return nil, "", fmt.Errorf("list audit events: %w", err)
 	}

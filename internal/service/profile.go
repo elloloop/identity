@@ -79,7 +79,7 @@ func (s *ProfileService) ListMySessions(ctx context.Context, userID string) ([]*
 		return nil, errors.New("user_id is required")
 	}
 
-	nodes, err := s.db.QueryNodes(ctx, s.tenantID, "user:system", typeRefreshToken,
+	nodes, err := s.db.QueryNodes(ctx, s.tenantID, tenantAdminActor, typeRefreshToken,
 		map[string]any{rfUserID: userID})
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -103,7 +103,7 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 		return errors.New("session_id is required")
 	}
 
-	node, err := s.db.GetNode(ctx, s.tenantID, "user:system", typeRefreshToken, sessionID)
+	node, err := s.db.GetNode(ctx, s.tenantID, tenantAdminActor, typeRefreshToken, sessionID)
 	if err != nil {
 		return fmt.Errorf("fetch session: %w", err)
 	}
@@ -115,7 +115,7 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 	}
 
 	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeRefreshToken, NodeID: sessionID}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, tenantAdminActor, []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("revoke session: %w", err)
 	}
 
@@ -147,7 +147,7 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 		return 0, errors.New("invalid password")
 	}
 
-	nodes, err := s.db.QueryNodes(ctx, s.tenantID, "user:system", typeRefreshToken,
+	nodes, err := s.db.QueryNodes(ctx, s.tenantID, tenantAdminActor, typeRefreshToken,
 		map[string]any{rfUserID: userID})
 	if err != nil {
 		return 0, fmt.Errorf("list sessions: %w", err)
@@ -156,7 +156,7 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 	count := 0
 	for _, n := range nodes {
 		op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeRefreshToken, NodeID: n.NodeID}
-		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{op}); err != nil {
+		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, tenantAdminActor, []entdb.Operation{op}); err != nil {
 			s.logger.Warn("revoke_session_delete_failed", zap.String("session_id", n.NodeID))
 			continue
 		}

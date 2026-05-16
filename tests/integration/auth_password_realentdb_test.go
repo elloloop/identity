@@ -112,6 +112,8 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
+	ensureRealEntDBTenant(t, client, tenantID)
+
 	built, err := repo.Build(context.Background(), repo.Config{
 		Driver:      repo.DriverEntDB,
 		EntDBClient: client,

@@ -321,3 +321,7 @@ func (StubDB) GetEdgesTo(context.Context, string, string, string, int) ([]*entdb
 func (StubDB) SearchNodes(context.Context, string, string, int, string) ([]*entdb.Node, error) {
 	return nil, ErrServiceUnavailable
 }
+
+func (StubDB) RegisterUserInTenant(context.Context, string, string, string, string, string) error {
+	return ErrServiceUnavailable
+}

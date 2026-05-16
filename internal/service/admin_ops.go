@@ -65,7 +65,7 @@ func (s *AdminService) ListUsers(
 		}
 	}
 
-	nodes, err := s.db.QueryNodes(ctx, s.tenantID, "user:system", typeUser, nil)
+	nodes, err := s.db.QueryNodes(ctx, s.tenantID, tenantAdminActor, typeUser, nil)
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("list users: %w", err)
 	}

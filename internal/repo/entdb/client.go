@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -52,6 +55,16 @@ type entClient interface {
 	create(ctx context.Context, actor string, msg proto.Message) (string, error)
 	update(ctx context.Context, actor string, nodeID string, msg proto.Message) error
 	delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error
+	// ensureUserTenantMember registers userID in the global user
+	// registry and adds it as a member of the scope's tenant. Both
+	// calls tolerate ALREADY_EXISTS so the helper is idempotent
+	// across repeat signups under the same id. Required by
+	// tenant-shard-db v1.12+, where actors must be registered users
+	// AND tenant members before they can issue writes of their own
+	// (e.g. a refresh token write keyed by the user's actor). The
+	// in-memory test client implements this as a no-op because it
+	// bypasses the EntDB global registry entirely.
+	ensureUserTenantMember(ctx context.Context, userID, emailAddr, name, role string) error
 }
 
 // errNotFound is returned by entClient.get when the requested node id
@@ -226,6 +239,57 @@ func (s *sdkScope) update(ctx context.Context, actor string, nodeID string, msg 
 		return err
 	}
 	return s.waitForPatchVisible(ctx, actor, nodeID, msg)
+}
+
+func (s *sdkScope) ensureUserTenantMember(ctx context.Context, userID, emailAddr, name, role string) error {
+	// The global registry's Admin.CreateUser rejects empty name with
+	// VALIDATION_ERROR. Identity does not require a display name on
+	// signup (and the tenant-scoped User row already absorbed whatever
+	// the caller passed), so default to the local-part of the email
+	// when name is empty.
+	if name == "" {
+		name = userID
+		if i := strings.IndexByte(emailAddr, '@'); emailAddr != "" && i > 0 {
+			name = emailAddr[:i]
+		}
+	}
+	admin := s.client.Admin()
+	if _, err := admin.CreateUser(ctx, systemActor, userID, emailAddr, name); err != nil && !isAlreadyExists(err) {
+		return fmt.Errorf("entdb: register user %q: %w", userID, err)
+	}
+	if err := admin.AddTenantMember(ctx, systemActor, s.tenantID, userID, role); err != nil && !isAlreadyExists(err) {
+		return fmt.Errorf("entdb: add tenant member %q: %w", userID, err)
+	}
+	return nil
+}
+
+// isAlreadyExists reports whether err is a gRPC ALREADY_EXISTS status
+// or carries the canonical "already exists" message fragment. The
+// upstream Go server emits the typed gRPC status; the older Python
+// implementation embedded the same code in plain-text errors. Both
+// paths keep ensureUserTenantMember idempotent.
+func isAlreadyExists(err error) bool {
+	if err == nil {
+		return false
+	}
+	if st, ok := status.FromError(err); ok {
+		return st.Code() == codes.AlreadyExists
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "ALREADY_EXISTS") || strings.Contains(msg, "already exists")
+}
+
+// isTenantNotOpened reports whether err is the server-side
+// FailedPrecondition signalling that the tenant has no on-disk WAL
+// yet — the v1.12.x server returns this on QueryNodes against a
+// tenant that has had no writes. Identity treats it as an empty
+// result rather than an error so the query-then-create idempotency
+// guard works on a brand-new tenant.
+func isTenantNotOpened(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "tenant not opened")
 }
 
 func (s *sdkScope) rawUpdate(ctx context.Context, actor string, typeID int, nodeID string, patch map[string]any) error {
@@ -488,6 +552,15 @@ func (s *sdkScope) queryViaTransport(ctx context.Context, actor string, witness 
 	}
 	nodes, err := s.transport.QueryNodes(ctx, s.tenantID, actor, typeID, rawFilter)
 	if err != nil {
+		// tenant-shard-db v1.12.x returns FailedPrecondition
+		// "tenant not opened" on a QueryNodes against a tenant that
+		// hasn't had a write yet. Identity uses query-then-create
+		// as the duplicate guard for several entities (OAuth links,
+		// users by email), so an empty tenant is a valid
+		// pre-condition for "no matches" rather than an error.
+		if isTenantNotOpened(err) {
+			return nil, true, nil
+		}
 		return nil, true, err
 	}
 	out := make([]queriedNode, 0, len(nodes))

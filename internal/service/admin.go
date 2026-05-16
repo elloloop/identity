@@ -90,7 +90,7 @@ func (s *AdminService) InviteUser(
 	}
 
 	// Check duplicate.
-	existing, err := s.db.QueryNodes(ctx, s.tenantID, "user:system", typeUser, map[string]any{ufEmail: email})
+	existing, err := s.db.QueryNodes(ctx, s.tenantID, tenantAdminActor, typeUser, map[string]any{ufEmail: email})
 	if err != nil {
 		return nil, fmt.Errorf("duplicate check failed: %w", err)
 	}
@@ -127,13 +127,27 @@ func (s *AdminService) InviteUser(
 
 	// Create user node.
 	userOp := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeUser, Data: userData}
-	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{userOp})
+	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, tenantAdminActor, []entdb.Operation{userOp})
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 	userID := ""
 	if len(result.CreatedNodeIDs) > 0 {
 		userID = result.CreatedNodeIDs[0]
+	}
+
+	// tenant-shard-db v1.12+ requires every actor to be a registered
+	// user AND a tenant member before they can issue tenant-scoped
+	// writes of their own. The invitee's user node lives in the
+	// tenant scope here, but on accept-invitation flows they need to
+	// pass the `user:<id>` actor check on reads/writes of their own
+	// data — that requires the registration step on top of the tenant
+	// row create. No-op on drivers without a separate global registry
+	// (postgres, in-memory fakes).
+	if userID != "" {
+		if err := s.db.RegisterUserInTenant(ctx, s.tenantID, userID, email, name, role); err != nil {
+			return nil, fmt.Errorf("register invited user: %w", err)
+		}
 	}
 
 	// Create invitation node.
@@ -149,7 +163,7 @@ func (s *AdminService) InviteUser(
 		invCreatedAt: now,
 	}
 	invOp := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeUserInvitation, Data: invData}
-	_, err = s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{invOp})
+	_, err = s.db.ExecuteAtomic(ctx, s.tenantID, tenantAdminActor, []entdb.Operation{invOp})
 	if err != nil {
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
@@ -307,7 +321,7 @@ func (s *AdminService) ResetUserPassword(
 				prfCreatedAt: now,
 			},
 		}
-		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, "user:system", []entdb.Operation{op}); err != nil {
+		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, tenantAdminActor, []entdb.Operation{op}); err != nil {
 			return nil, fmt.Errorf("create reset token: %w", err)
 		}
 		res.ResetToken = rawToken

@@ -105,5 +105,11 @@ func (d *RecordingDB) SearchNodes(context.Context, string, string, int, string) 
 	return nil, service.ErrServiceUnavailable
 }
 
+// RegisterUserInTenant is a no-op on the recording DB; the recorder
+// has no global registry or membership model to enforce.
+func (d *RecordingDB) RegisterUserInTenant(context.Context, string, string, string, string, string) error {
+	return nil
+}
+
 // compile-time interface assertion
 var _ service.DB = (*RecordingDB)(nil)

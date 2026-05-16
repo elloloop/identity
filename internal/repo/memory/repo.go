@@ -1068,6 +1068,13 @@ func (r *Repo) SearchNodes(context.Context, string, string, int, string) ([]*sdk
 	return nil, errMemoryDBUnsupported
 }
 
+// RegisterUserInTenant is a no-op on the in-memory driver. The
+// in-memory store bypasses the EntDB two-tier model entirely, so
+// there is no global registry / tenant-membership to enforce.
+func (r *Repo) RegisterUserInTenant(_ context.Context, _, _, _, _, _ string) error {
+	return nil
+}
+
 // compile-time interface assertion
 var (
 	_ service.Repository = (*Repo)(nil)

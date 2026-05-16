@@ -79,8 +79,8 @@ func TestLog_CreatesNode(t *testing.T) {
 	if call.TenantID != "tenant-1" {
 		t.Errorf("expected tenant-1, got %q", call.TenantID)
 	}
-	if call.Actor != "user:system" {
-		t.Errorf("expected actor user:system, got %q", call.Actor)
+	if call.Actor != "system:admin" {
+		t.Errorf("expected actor system:admin, got %q", call.Actor)
 	}
 	if len(call.Ops) != 1 {
 		t.Fatalf("expected 1 operation, got %d", len(call.Ops))

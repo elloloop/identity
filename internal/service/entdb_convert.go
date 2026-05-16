@@ -147,3 +147,17 @@ func nowMs() int64 {
 func actorStr(userID string) string {
 	return "user:" + userID
 }
+
+// tenantAdminActor is the actor used by service-layer admin and
+// bookkeeping operations that need tenant-wide visibility (e.g.
+// uniqueness checks across users, listing groups across users,
+// admin-driven user invites).
+//
+// `system:admin` is the upstream tenant-shard-db tenant-admin
+// namespace. Unlike a user actor it has tenant-wide read/write and
+// does not need to be a registered user in the global registry. The
+// older form `"user:system"` had no such privileges under v1.12+'s
+// actor-scoped visibility model — it would silently return zero rows
+// for any cross-user query and ACCESS_DENIED for any write under a
+// tenant it was not a member of.
+const tenantAdminActor = "system:admin"

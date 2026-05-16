@@ -89,6 +89,17 @@ func (t *tracedClient) delete(ctx context.Context, actor string, witness proto.M
 	return err
 }
 
+func (t *tracedClient) ensureUserTenantMember(ctx context.Context, userID, emailAddr, name, role string) error {
+	ctx, end := observability.StartClient(ctx, "entdb.ensureUserTenantMember",
+		attribute.String("entdb.actor", systemActor),
+		attribute.String("entdb.user_id", userID),
+		attribute.String("entdb.role", role),
+	)
+	err := t.inner.ensureUserTenantMember(ctx, userID, emailAddr, name, role)
+	end(err)
+	return err
+}
+
 func (t *tracedRawClient) rawUpdate(ctx context.Context, actor string, typeID int, nodeID string, patch map[string]any) error {
 	ctx, end := observability.StartClient(ctx, "entdb.rawUpdate",
 		attribute.String("entdb.actor", actor),

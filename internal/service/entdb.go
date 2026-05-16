@@ -206,4 +206,12 @@ type DB interface {
 	GetEdgesFrom(ctx context.Context, tenantID, actor, fromNodeID string, edgeTypeID int) ([]*entdb.Edge, error)
 	GetEdgesTo(ctx context.Context, tenantID, actor, toNodeID string, edgeTypeID int) ([]*entdb.Edge, error)
 	SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*entdb.Node, error)
+	// RegisterUserInTenant registers userID in the global user
+	// registry and adds them as a member of tenantID with the given
+	// role. Idempotent: tolerates ALREADY_EXISTS on both calls. The
+	// service-layer admin path (admin.InviteUser) uses this to bring
+	// new users onto v1.12+'s "actor must be a tenant member"
+	// contract; the typed entRepository.CreateUser path uses the
+	// equivalent SDK calls directly via its entClient seam.
+	RegisterUserInTenant(ctx context.Context, tenantID, userID, email, name, role string) error
 }

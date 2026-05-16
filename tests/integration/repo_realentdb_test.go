@@ -49,6 +49,7 @@ func TestRealEntDB_Organization(t *testing.T) {
 	defer cancel()
 
 	tenantID := fmt.Sprintf("realentdb-org-%d", time.Now().UnixNano())
+	ensureRealEntDBTenant(t, client, tenantID)
 	repo := entdb.NewRepository(client, tenantID)
 	now := time.Now()
 

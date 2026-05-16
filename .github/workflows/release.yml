@@ -56,19 +56,14 @@ jobs:
     timeout-minutes: 30
     services:
       entdb:
-        image: ghcr.io/elloloop/tenant-shard-db:1.10.2
-        env:
-          GRPC_BIND: "0.0.0.0:50051"
-          WAL_BACKEND: local
-          DATA_DIR: /var/lib/entdb
+        # tenant-shard-db v1.12+ is a distroless image (no shell/python),
+        # so an in-container --health-cmd cannot spawn. The Go server
+        # ignores env vars (CLI flags only, with defaults baked into
+        # the entrypoint). TCP readiness is polled by the "Wait for"
+        # step below.
+        image: ghcr.io/elloloop/tenant-shard-db:1.12.4
         ports:
           - 50051:50051
-        options: >-
-          --health-cmd "python -c \"import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)\""
-          --health-interval 5s
-          --health-timeout 8s
-          --health-retries 12
-          --health-start-period 5s
       postgres:
         image: postgres:16.13-alpine3.23
         env:
@@ -158,19 +153,14 @@ jobs:
     timeout-minutes: 15
     services:
       entdb:
-        image: ghcr.io/elloloop/tenant-shard-db:1.10.2
-        env:
-          GRPC_BIND: "0.0.0.0:50051"
-          WAL_BACKEND: local
-          DATA_DIR: /var/lib/entdb
+        # tenant-shard-db v1.12+ is a distroless image (no shell/python),
+        # so an in-container --health-cmd cannot spawn. The Go server
+        # ignores env vars (CLI flags only, with defaults baked into
+        # the entrypoint). TCP readiness is polled by the "Wait for"
+        # step below.
+        image: ghcr.io/elloloop/tenant-shard-db:1.12.4
         ports:
           - 50051:50051
-        options: >-
-          --health-cmd "python -c \"import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)\""
-          --health-interval 5s
-          --health-timeout 8s
-          --health-retries 12
-          --health-start-period 5s
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6

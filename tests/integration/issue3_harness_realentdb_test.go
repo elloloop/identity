@@ -61,6 +61,8 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
+	ensureRealEntDBTenant(t, client, tenantID)
+
 	built, err := repo.Build(context.Background(), repo.Config{
 		Driver:      repo.DriverEntDB,
 		EntDBClient: client,

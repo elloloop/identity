@@ -55,7 +55,9 @@ func TestConformance(t *testing.T) {
 		NewRepo: func(t *testing.T) service.Repository {
 			t.Helper()
 			n := atomic.AddInt64(&seq, 1)
-			return NewRepository(client, fmt.Sprintf("%s-%d", base, n))
+			tenantID := fmt.Sprintf("%s-%d", base, n)
+			ensureRealEntDBTenant(t, client, tenantID)
+			return NewRepository(client, tenantID)
 		},
 	})
 }
