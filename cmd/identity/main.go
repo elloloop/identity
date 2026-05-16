@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
@@ -30,6 +31,7 @@ import (
 
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/repo"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -52,6 +54,28 @@ func main() {
 		zap.String("entdb_address", cfg.EntDBAddress),
 		zap.String("tenant", cfg.DefaultTenantID),
 	)
+
+	// ── OpenTelemetry traces (off by default) ────────────────────────
+	otelShutdown, err := observability.Setup(context.Background(), observability.FromAppConfig(cfg))
+	if err != nil {
+		logger.Fatal("otel_setup_failed", zap.Error(err))
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			logger.Error("otel_shutdown_failed", zap.Error(err))
+		}
+	}()
+	if cfg.OTelEnabled {
+		logger.Info(
+			"otel_enabled",
+			zap.String("endpoint", cfg.OTelExporterEndpoint),
+			zap.String("protocol", cfg.OTelExporterProtocol),
+			zap.Float64("sample_ratio", cfg.OTelSampleRatio),
+			zap.String("deployment_env", cfg.OTelDeploymentEnv),
+		)
+	}
 
 	// ── EntDB client ─────────────────────────────────────────────────
 	db, err := entdb.NewClient(cfg.EntDBAddress)
@@ -184,6 +208,7 @@ func main() {
 		TOTPKey:            totpKey,
 		TOTPRecoveryPepper: totpRecoveryPepper,
 		IDVProvider:        idvProvider,
+		MetricsRegistry:    prometheus.DefaultRegisterer,
 	})
 	if err != nil {
 		logger.Fatal("app_init_failed", zap.Error(err))
