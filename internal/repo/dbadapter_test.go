@@ -257,18 +257,18 @@ func (t *commitResultTransport) WaitForOffset(context.Context, string, string, s
 
 type passthroughTransport struct {
 	sdk.Transport
-	queryNodesCalled    bool
-	getEdgesFromCalled  bool
-	getEdgesToCalled    bool
-	searchNodesCalled   bool
-	queryNodesResult    []*sdk.Node
-	getEdgesFromResult  []*sdk.Edge
-	getEdgesToResult    []*sdk.Edge
-	searchNodesResult   []*sdk.Node
-	queryNodesErr       error
-	getEdgesFromErr     error
-	getEdgesToErr       error
-	searchNodesErr      error
+	queryNodesCalled   bool
+	getEdgesFromCalled bool
+	getEdgesToCalled   bool
+	searchNodesCalled  bool
+	queryNodesResult   []*sdk.Node
+	getEdgesFromResult []*sdk.Edge
+	getEdgesToResult   []*sdk.Edge
+	searchNodesResult  []*sdk.Node
+	queryNodesErr      error
+	getEdgesFromErr    error
+	getEdgesToErr      error
+	searchNodesErr     error
 }
 
 func (t *passthroughTransport) QueryNodes(context.Context, string, string, int, map[string]any) ([]*sdk.Node, error) {
