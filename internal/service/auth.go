@@ -225,7 +225,27 @@ type Repository interface {
 	FindUserByProviderID(ctx context.Context, provider, providerUserID string) (*User, error)
 	CreateOAuthIdentity(ctx context.Context, oi *OAuthIdentity) error
 	ListOAuthIdentitiesForUser(ctx context.Context, userID string) ([]*OAuthIdentity, error)
+
+	// Garbage-collection sweepers for ephemeral state. The
+	// background sweeper started by app.New calls these every
+	// GATEWAY_SWEEPER_INTERVAL_SECONDS; each call deletes up to
+	// `limit` rows whose ExpiresAt is strictly less than `beforeMs`
+	// and returns the number actually deleted. Drivers that cannot
+	// implement the sweep (e.g. the EntDB driver while the v1.12
+	// migration is still in flight) return ErrSweepNotImplemented so
+	// the sweeper can log and skip them.
+	DeleteExpiredWebAuthnChallenges(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
+	DeleteExpiredEmailVerificationTokens(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
+	DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
+	DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
+	DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
 }
+
+// ErrSweepNotImplemented is returned by Repository implementations
+// whose backend cannot yet run the expired-row sweep. The sweeper
+// goroutine in internal/app/sweeper.go treats this as a soft skip
+// (one log line per backend, then ignored) rather than an error.
+var ErrSweepNotImplemented = errors.New("identity: sweep not implemented for this backend")
 
 // ── Record types for persistence ───────────────────────────────────────
 

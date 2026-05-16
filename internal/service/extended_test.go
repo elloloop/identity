@@ -1716,6 +1716,21 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	if _, err := r.ListOAuthIdentitiesForUser(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("ListOAuthIdentitiesForUser: %v", err)
 	}
+	if _, err := r.DeleteExpiredWebAuthnChallenges(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredWebAuthnChallenges: %v", err)
+	}
+	if _, err := r.DeleteExpiredEmailVerificationTokens(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredEmailVerificationTokens: %v", err)
+	}
+	if _, err := r.DeleteExpiredPasswordResetTokens(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredPasswordResetTokens: %v", err)
+	}
+	if _, err := r.DeleteExpiredEmailChangeTokens(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredEmailChangeTokens: %v", err)
+	}
+	if _, err := r.DeleteExpiredLoginChallenges(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredLoginChallenges: %v", err)
+	}
 }
 
 func TestStubDB_AllMethodsReturnUnavailable(t *testing.T) {

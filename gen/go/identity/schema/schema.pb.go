@@ -1934,13 +1934,13 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"lastUsedAt\x122\n" +
 	"\vconsumed_at\x18\n" +
 	" \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
-	"consumedAt:A\xa2\xbb\x18=\b\x050\x04:\auser_idR.A hashed refresh token bound to a user session\"\xc6\x02\n" +
+	"consumedAt:A\xa2\xbb\x18=\b\x050\x04:\auser_idR.A hashed refresh token bound to a user session\"\xc8\x02\n" +
 	"\x12PasswordResetToken\x12+\n" +
 	"\n" +
 	"token_hash\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\ttokenHash\x12*\n" +
-	"\auser_id\x18\x02 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x120\n" +
+	"\auser_id\x18\x02 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x122\n" +
 	"\n" +
-	"expires_at\x18\x03 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\texpiresAt\x120\n" +
+	"expires_at\x18\x03 \x01(\x03B\x13\xb2\xbb\x18\x0f\x18\x01:\ttimestamp`\x01R\texpiresAt\x120\n" +
 	"\n" +
 	"created_at\x18\x04 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt\x122\n" +
 	"\vconsumed_at\x18\x05 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
@@ -1961,13 +1961,13 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\b \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt\x123\n" +
 	"\flast_used_at\x18\t \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
-	"lastUsedAt:I\xa2\xbb\x18E\b\x14:\auser_idR8A WebAuthn/FIDO2 passkey credential registered by a user\"\xe5\x02\n" +
+	"lastUsedAt:I\xa2\xbb\x18E\b\x14:\auser_idR8A WebAuthn/FIDO2 passkey credential registered by a user\"\xe7\x02\n" +
 	"\x10PasskeyChallenge\x12*\n" +
 	"\tchallenge\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\tchallenge\x12&\n" +
 	"\auser_id\x18\x02 \x01(\tB\r\xb2\xbb\x18\t:\x03ref@\x01`\x01R\x06userId\x12J\n" +
-	"\x0echallenge_type\x18\x03 \x01(\tB#\xb2\xbb\x18\x1f2\x1bregistration,authentication`\x01R\rchallengeType\x120\n" +
+	"\x0echallenge_type\x18\x03 \x01(\tB#\xb2\xbb\x18\x1f2\x1bregistration,authentication`\x01R\rchallengeType\x122\n" +
 	"\n" +
-	"expires_at\x18\x04 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\texpiresAt\x120\n" +
+	"expires_at\x18\x04 \x01(\x03B\x13\xb2\xbb\x18\x0f\x18\x01:\ttimestamp`\x01R\texpiresAt\x120\n" +
 	"\n" +
 	"created_at\x18\x05 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt:M\xa2\xbb\x18I\b\x150\x04RCA short-lived WebAuthn challenge for registration or authentication\"\xf7\x04\n" +
 	"\x0eQrLoginSession\x12+\n" +
@@ -2001,12 +2001,12 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\x04used\x18\x03 \x01(\bB\b\xb2\xbb\x18\x04\x18\x01`\x01R\x04used\x120\n" +
 	"\n" +
 	"created_at\x18\x04 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt\x12*\n" +
-	"\aused_at\x18\x05 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\x06usedAt:?\xa2\xbb\x18;\b\x18:\auser_idR.A one-time recovery code for 2FA backup access\"\x8e\x02\n" +
+	"\aused_at\x18\x05 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\x06usedAt:?\xa2\xbb\x18;\b\x18:\auser_idR.A one-time recovery code for 2FA backup access\"\x90\x02\n" +
 	"\x0eLoginChallenge\x12/\n" +
 	"\fchallenge_id\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\vchallengeId\x12(\n" +
-	"\auser_id\x18\x02 \x01(\tB\x0f\xb2\xbb\x18\v\b\x01:\x03ref@\x01`\x01R\x06userId\x120\n" +
+	"\auser_id\x18\x02 \x01(\tB\x0f\xb2\xbb\x18\v\b\x01:\x03ref@\x01`\x01R\x06userId\x122\n" +
 	"\n" +
-	"expires_at\x18\x03 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\texpiresAt\x120\n" +
+	"expires_at\x18\x03 \x01(\x03B\x13\xb2\xbb\x18\x0f\x18\x01:\ttimestamp`\x01R\texpiresAt\x120\n" +
 	"\n" +
 	"created_at\x18\x04 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt:=\xa2\xbb\x189\b\x190\x04R3A pending login challenge awaiting 2FA verification\"\x8f\x06\n" +
 	"\n" +
@@ -2051,27 +2051,27 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\vresolved_at\x18\b \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
 	"resolvedAt\x122\n" +
 	"\n" +
-	"created_at\x18\t \x01(\x03B\x13\xb2\xbb\x18\x0f\x18\x01:\ttimestamp`\x01R\tcreatedAt:L\xa2\xbb\x18H\b\x1c0\x01RBA help request from a user who cannot log in, resolved by an admin\"\xcd\x02\n" +
+	"created_at\x18\t \x01(\x03B\x13\xb2\xbb\x18\x0f\x18\x01:\ttimestamp`\x01R\tcreatedAt:L\xa2\xbb\x18H\b\x1c0\x01RBA help request from a user who cannot log in, resolved by an admin\"\xda\x02\n" +
 	"\x16EmailVerificationToken\x12+\n" +
 	"\n" +
 	"token_hash\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\ttokenHash\x12&\n" +
 	"\auser_id\x18\x02 \x01(\tB\r\xb2\xbb\x18\t:\x03ref@\x01`\x01R\x06userId\x12 \n" +
 	"\x05email\x18\x03 \x01(\tB\n" +
-	"\xb2\xbb\x18\x06\b\x01\x18\x01 \x01R\x05email\x12'\n" +
+	"\xb2\xbb\x18\x06\b\x01\x18\x01 \x01R\x05email\x124\n" +
 	"\n" +
-	"expires_at\x18\x04 \x01(\x03B\b\xb2\xbb\x18\x04\b\x01`\x01R\texpiresAt\x12'\n" +
+	"expires_at\x18\x04 \x01(\x03B\x15\xb2\xbb\x18\x11\b\x01\x18\x01:\ttimestamp`\x01R\texpiresAt\x12'\n" +
 	"\n" +
 	"created_at\x18\x05 \x01(\x03B\b\xb2\xbb\x18\x04\b\x01`\x01R\tcreatedAt\x12'\n" +
 	"\vconsumed_at\x18\x06 \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\n" +
-	"consumedAt:A\xa2\xbb\x18=\b\x1d:\auser_idR0A short-lived token for email verification flows\"\xf8\x02\n" +
+	"consumedAt:A\xa2\xbb\x18=\b\x1d:\auser_idR0A short-lived token for email verification flows\"\x85\x03\n" +
 	"\x10EmailChangeToken\x12+\n" +
 	"\n" +
 	"token_hash\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\ttokenHash\x12&\n" +
 	"\auser_id\x18\x02 \x01(\tB\r\xb2\xbb\x18\t:\x03ref@\x01`\x01R\x06userId\x12#\n" +
 	"\told_email\x18\x03 \x01(\tB\x06\xb2\xbb\x18\x02 \x01R\boldEmail\x12#\n" +
-	"\tnew_email\x18\x04 \x01(\tB\x06\xb2\xbb\x18\x02 \x01R\bnewEmail\x12'\n" +
+	"\tnew_email\x18\x04 \x01(\tB\x06\xb2\xbb\x18\x02 \x01R\bnewEmail\x124\n" +
 	"\n" +
-	"expires_at\x18\x05 \x01(\x03B\b\xb2\xbb\x18\x04\b\x01`\x01R\texpiresAt\x12'\n" +
+	"expires_at\x18\x05 \x01(\x03B\x15\xb2\xbb\x18\x11\b\x01\x18\x01:\ttimestamp`\x01R\texpiresAt\x12'\n" +
 	"\n" +
 	"created_at\x18\x06 \x01(\x03B\b\xb2\xbb\x18\x04\b\x01`\x01R\tcreatedAt\x12'\n" +
 	"\vconsumed_at\x18\a \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\n" +

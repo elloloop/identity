@@ -63,6 +63,114 @@ func TestRefreshTokenDeleteAndCount(t *testing.T) {
 	}
 }
 
+// TestSweepers_RespectLimit asserts that the memory driver's
+// DeleteExpired* methods stop after limit rows. The conformance suite
+// covers happy-path correctness; this test focuses on the limit cap
+// (which is the property a buggy sweep is most likely to break).
+func TestSweepers_RespectLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		seed func(repo *memory.Repo, hash string)
+		// pass-through sweep call so we can index by name
+		sweep func(repo *memory.Repo, ctx context.Context, beforeMs int64, limit int) (int, error)
+	}{
+		{
+			name: "PasswordResetTokens",
+			seed: func(repo *memory.Repo, hash string) {
+				_ = repo.CreatePasswordResetToken(ctx, &service.PasswordResetToken{
+					TokenHash: hash, UserID: "u", ExpiresAt: 100, CreatedAt: 50,
+				})
+			},
+			sweep: func(r *memory.Repo, c context.Context, b int64, l int) (int, error) {
+				return r.DeleteExpiredPasswordResetTokens(c, b, l)
+			},
+		},
+		{
+			name: "EmailVerificationTokens",
+			seed: func(repo *memory.Repo, hash string) {
+				_ = repo.CreateEmailVerificationToken(ctx, &service.EmailVerificationToken{
+					TokenHash: hash, UserID: "u", Email: "x@y", ExpiresAt: 100, CreatedAt: 50,
+				})
+			},
+			sweep: func(r *memory.Repo, c context.Context, b int64, l int) (int, error) {
+				return r.DeleteExpiredEmailVerificationTokens(c, b, l)
+			},
+		},
+		{
+			name: "EmailChangeTokens",
+			seed: func(repo *memory.Repo, hash string) {
+				_ = repo.CreateEmailChangeToken(ctx, &service.EmailChangeToken{
+					TokenHash: hash, UserID: "u", OldEmail: "o", NewEmail: "n",
+					ExpiresAt: 100, CreatedAt: 50,
+				})
+			},
+			sweep: func(r *memory.Repo, c context.Context, b int64, l int) (int, error) {
+				return r.DeleteExpiredEmailChangeTokens(c, b, l)
+			},
+		},
+		{
+			name: "LoginChallenges",
+			seed: func(repo *memory.Repo, hash string) {
+				_, _ = repo.CreateLoginChallenge(ctx, &service.LoginChallengeRecord{
+					ChallengeID: hash, UserID: "u", ExpiresAt: 100, CreatedAt: 50,
+				})
+			},
+			sweep: func(r *memory.Repo, c context.Context, b int64, l int) (int, error) {
+				return r.DeleteExpiredLoginChallenges(c, b, l)
+			},
+		},
+		{
+			name: "WebAuthnChallenges",
+			seed: func(repo *memory.Repo, hash string) {
+				_, _ = repo.CreatePasskeyChallenge(ctx, &service.PasskeyChallengeRecord{
+					Challenge: hash, ChallengeType: "registration",
+					ExpiresAt: 100, CreatedAt: 50,
+				})
+			},
+			sweep: func(r *memory.Repo, c context.Context, b int64, l int) (int, error) {
+				return r.DeleteExpiredWebAuthnChallenges(c, b, l)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := memory.New()
+			// Seed 5 expired rows.
+			for i := 0; i < 5; i++ {
+				tc.seed(repo, tc.name+"-h-"+itoaSmall(i))
+			}
+			deleted, err := tc.sweep(repo, ctx, 200, 2)
+			if err != nil {
+				t.Fatalf("sweep limit=2: %v", err)
+			}
+			if deleted != 2 {
+				t.Fatalf("deleted = %d, want 2 (limit cap)", deleted)
+			}
+			deleted, err = tc.sweep(repo, ctx, 200, 10)
+			if err != nil {
+				t.Fatalf("sweep limit=10: %v", err)
+			}
+			if deleted != 3 {
+				t.Fatalf("deleted = %d, want 3 (remaining)", deleted)
+			}
+		})
+	}
+}
+
+// itoaSmall converts a small positive int (0..9 is plenty for the
+// loop counter that uses it) to a single-digit string.
+func itoaSmall(n int) string {
+	if n < 0 || n > 9 {
+		return "?"
+	}
+	return string([]byte{byte('0' + n)})
+}
+
 func TestTotpDeleteAndDBStubBehavior(t *testing.T) {
 	t.Parallel()
 
