@@ -29,7 +29,9 @@ func TestRealEntDBRepositorySmoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	repo := NewRepository(client, fmt.Sprintf("realentdb-smoke-%d", time.Now().UnixNano()))
+	tenantID := fmt.Sprintf("realentdb-smoke-%d", time.Now().UnixNano())
+	ensureRealEntDBTenant(t, client, tenantID)
+	repo := NewRepository(client, tenantID)
 	now := time.Now()
 	userID, err := repo.CreateUser(ctx, &service.User{
 		Email:        "realentdb@example.com",

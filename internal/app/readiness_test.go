@@ -39,6 +39,10 @@ func (s *stubDB) SearchNodes(_ context.Context, _, _ string, _ int, _ string) ([
 	return nil, nil
 }
 
+func (s *stubDB) RegisterUserInTenant(context.Context, string, string, string, string, string) error {
+	return nil
+}
+
 func TestNewDBReadinessProbe_NilReturnsNil(t *testing.T) {
 	if got := newDBReadinessProbe(nil); got != nil {
 		t.Fatalf("expected nil for nil DB, got %T", got)

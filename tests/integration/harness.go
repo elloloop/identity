@@ -514,7 +514,12 @@ func (h *Harness) WaitForTotpCredential(t *testing.T, userID string, predicate f
 func (h *Harness) queryNodeCount(t *testing.T, typeID int, filter map[string]any) int {
 	t.Helper()
 
-	nodes, err := h.DB.QueryNodes(context.Background(), h.TenantID, "user:system", typeID, filter)
+	// `system:admin` has tenant-wide read on tenant-shard-db v1.12+,
+	// where `user:system` only sees rows it created. The harness test
+	// fixtures cross actor boundaries (admin creating users, users
+	// creating their own refresh tokens), so a count assertion needs
+	// the tenant-admin actor to see all rows.
+	nodes, err := h.DB.QueryNodes(context.Background(), h.TenantID, "system:admin", typeID, filter)
 	if err != nil {
 		t.Fatalf("QueryNodes(type=%d, filter=%v): %v", typeID, filter, err)
 	}
@@ -564,7 +569,9 @@ func (h *Harness) waitForPasskeyChallengeValue(t *testing.T, challengeID, want s
 func (h *Harness) updateNode(t *testing.T, typeID int, nodeID string, patch map[string]any) {
 	t.Helper()
 
-	_, err := h.DB.ExecuteAtomic(context.Background(), h.TenantID, "user:system", []entdb.Operation{{
+	// Use the tenant-admin actor so updates cross user boundaries
+	// without ACCESS_DENIED on v1.12+ — see queryNodeCount above.
+	_, err := h.DB.ExecuteAtomic(context.Background(), h.TenantID, "system:admin", []entdb.Operation{{
 		Type:   entdb.OpUpdateNode,
 		TypeID: typeID,
 		NodeID: nodeID,

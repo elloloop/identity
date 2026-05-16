@@ -1209,6 +1209,11 @@ func (f *fakeDB) SearchNodes(_ context.Context, _, _ string, typeID int, query s
 	return out, nil
 }
 
+// RegisterUserInTenant is a no-op on the in-memory fake.
+func (f *fakeDB) RegisterUserInTenant(_ context.Context, _, _, _, _, _ string) error {
+	return nil
+}
+
 // ── seed helpers ──
 
 func (f *fakeDB) addUser(id, email, name, role, status string) {

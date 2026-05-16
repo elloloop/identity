@@ -165,7 +165,7 @@ GATEWAY_DEFAULT_TENANT_ID = <string>     # required when mode=single
    methods (`CreateOrganization`, `GetOrganization`,
    `GetOrganizationBySlug`, `ListOrganizationsForUser`,
    `AddOrganizationMember`) across all three backends, conformance
-   suite coverage, postgres migration `0006_add_organizations`. The
+   suite coverage, postgres migration `0007_add_organizations`. The
    `GATEWAY_IDENTITY_MODE` flag is **not yet wired**, and the
    `OrganizationSignup` RPC is **not yet implemented**.
 2. `OrganizationSignup` RPC + multi-mode config flag.

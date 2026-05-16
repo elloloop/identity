@@ -281,7 +281,7 @@ func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 		return
 	}
 
-	_, err := l.writer.ExecuteAtomic(ctx, l.tenantID, "user:system", ops)
+	_, err := l.writer.ExecuteAtomic(ctx, l.tenantID, "system:admin", ops)
 	if err != nil {
 		l.logger.Error(
 			"audit_log_failed",
@@ -389,7 +389,7 @@ func (l *Logger) writeOne(op asyncOp) {
 			)
 		}
 	}()
-	_, err := l.writer.ExecuteAtomic(op.ctx, op.tenant, "user:system", op.ops)
+	_, err := l.writer.ExecuteAtomic(op.ctx, op.tenant, "system:admin", op.ops)
 	if err != nil {
 		l.logger.Error("audit_log_async_failed",
 			zap.String("event_type", string(op.event)),

@@ -90,7 +90,7 @@ func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, 
 	}
 
 	// Re-fetch.
-	node, err := s.db.GetNode(ctx, s.tenantID, "user:system", typeWorkingGroup, groupID)
+	node, err := s.db.GetNode(ctx, s.tenantID, tenantAdminActor, typeWorkingGroup, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("re-fetch group: %w", err)
 	}
@@ -133,7 +133,7 @@ func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, l
 		}
 	}
 
-	nodes, err := s.db.QueryNodes(ctx, s.tenantID, "user:system", typeWorkingGroup, nil)
+	nodes, err := s.db.QueryNodes(ctx, s.tenantID, tenantAdminActor, typeWorkingGroup, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("list groups: %w", err)
 	}
@@ -217,14 +217,14 @@ func (s *GroupService) ListGroupMembers(ctx context.Context, actorID, groupID st
 		return nil, errors.New("group_id is required")
 	}
 
-	edges, err := s.db.GetEdgesTo(ctx, s.tenantID, "user:system", groupID, edgeMemberOf)
+	edges, err := s.db.GetEdgesTo(ctx, s.tenantID, tenantAdminActor, groupID, edgeMemberOf)
 	if err != nil {
 		return nil, fmt.Errorf("list group members: %w", err)
 	}
 
 	users := make([]*User, 0, len(edges))
 	for _, e := range edges {
-		userNode, err := s.db.GetNode(ctx, s.tenantID, "user:system", typeUser, e.FromNodeID)
+		userNode, err := s.db.GetNode(ctx, s.tenantID, tenantAdminActor, typeUser, e.FromNodeID)
 		if err != nil || userNode == nil {
 			continue
 		}

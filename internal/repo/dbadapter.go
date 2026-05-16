@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
 	"github.com/elloloop/identity/internal/service"
@@ -64,6 +67,56 @@ func (a *dbAdapter) GetEdgesTo(ctx context.Context, tenantID, actor, toNodeID st
 
 func (a *dbAdapter) SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*sdk.Node, error) {
 	return a.transport.SearchNodes(ctx, tenantID, actor, typeID, query)
+}
+
+// RegisterUserInTenant registers userID globally and adds it as a
+// tenant member with the given role. v1.12+ enforces that every actor
+// be a registered user and a tenant member before issuing tenant-
+// scoped writes of their own; the typed entRepository.CreateUser path
+// has its own wiring for this, but the raw service.DB path (admin
+// invites, system bookkeeping) needs the same registration step on
+// any user it creates outside the typed repo.
+//
+// Uses the raw Transport.CreateUser / Transport.AddTenantMember
+// calls directly rather than going through *sdk.DbClient.Admin().
+// The Admin handle is a thin shim over those same Transport methods
+// and going through the transport keeps the adapter testable with a
+// fake Transport.
+func (a *dbAdapter) RegisterUserInTenant(ctx context.Context, tenantID, userID, email, name, role string) error {
+	if userID == "" {
+		return errors.New("entdb: RegisterUserInTenant: empty user id")
+	}
+	// The global registry's Admin.CreateUser rejects empty name with
+	// VALIDATION_ERROR; default to the local-part of the email so
+	// flows that don't carry a display name still register cleanly.
+	if name == "" {
+		name = userID
+		if i := strings.IndexByte(email, '@'); email != "" && i > 0 {
+			name = email[:i]
+		}
+	}
+	const adminActor = "system:admin"
+	if _, err := a.transport.CreateUser(ctx, adminActor, userID, email, name); err != nil && !dbAdapterIsAlreadyExists(err) {
+		return fmt.Errorf("entdb: register user %q: %w", userID, err)
+	}
+	if err := a.transport.AddTenantMember(ctx, adminActor, tenantID, userID, role); err != nil && !dbAdapterIsAlreadyExists(err) {
+		return fmt.Errorf("entdb: add tenant member %q: %w", userID, err)
+	}
+	return nil
+}
+
+// dbAdapterIsAlreadyExists tolerates the upstream Go server's typed
+// gRPC AlreadyExists status code and the Python legacy server's
+// string-embedded form.
+func dbAdapterIsAlreadyExists(err error) bool {
+	if err == nil {
+		return false
+	}
+	if st, ok := status.FromError(err); ok {
+		return st.Code() == codes.AlreadyExists
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "ALREADY_EXISTS") || strings.Contains(msg, "already exists")
 }
 
 func (a *dbAdapter) waitForApplied(ctx context.Context, tenantID, actor string, result *sdk.CommitResult, opCount int) error {

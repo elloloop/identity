@@ -1175,4 +1175,12 @@ func updateBySpecs(ctx context.Context, tx pgx.Tx, tenantID, table, nodeID strin
 	return nil
 }
 
+// RegisterUserInTenant is a no-op on the postgres driver. Unlike
+// tenant-shard-db's two-tier (global registry + per-tenant scope)
+// model, the postgres driver runs a single SQL database; there is no
+// separate registration step before tenant-scoped writes succeed.
+func (r *pgRepository) RegisterUserInTenant(_ context.Context, _, _, _, _, _ string) error {
+	return nil
+}
+
 var _ service.DB = (*pgRepository)(nil)

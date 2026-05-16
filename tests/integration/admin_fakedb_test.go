@@ -158,6 +158,13 @@ func (f *adminFakeDB) SearchNodes(_ context.Context, _, _ string, typeID int, qu
 	return out, nil
 }
 
+// RegisterUserInTenant is a no-op on the admin fake. The fake's
+// single flat node store has no global-registry / membership model
+// to enforce.
+func (f *adminFakeDB) RegisterUserInTenant(_ context.Context, _, _, _, _, _ string) error {
+	return nil
+}
+
 func copyPayload(m map[string]any) map[string]any {
 	if m == nil {
 		return nil

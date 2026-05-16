@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	connectrpc.com/connect v1.19.2
 	connectrpc.com/otelconnect v0.9.0
-	github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.10.2
+	github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.12.4
 	github.com/go-webauthn/webauthn v0.17.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
@@ -26,6 +26,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.41.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.51.0
+	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -111,6 +112,5 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260209200024-4cfbd4190f57 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57 // indirect
-	google.golang.org/grpc v1.80.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

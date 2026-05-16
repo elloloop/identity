@@ -172,6 +172,13 @@ func (f *fakeDB) SearchNodes(_ context.Context, _, _ string, typeID int, query s
 	return result, nil
 }
 
+// RegisterUserInTenant is a no-op on the in-memory fake. The fake
+// has no global registry / tenant-membership model — every node lives
+// in a single flat store.
+func (f *fakeDB) RegisterUserInTenant(_ context.Context, _, _, _, _, _ string) error {
+	return nil
+}
+
 // ── fakeDB seed helpers ───────────────────────────────────────────────
 
 func (f *fakeDB) addUser(id, email, name, role, status string) {

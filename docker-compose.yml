@@ -25,29 +25,15 @@
 
 services:
   entdb:
-    image: ghcr.io/elloloop/tenant-shard-db:1.9.2
-    environment:
-      GRPC_BIND: 0.0.0.0:50051
-      WAL_BACKEND: local
-      DATA_DIR: /var/lib/entdb
-      LOG_LEVEL: INFO
-      LOG_FORMAT: json
+    # tenant-shard-db v1.12+ is a distroless image (no shell/python),
+    # so the healthcheck cannot exec python in-container. Identity
+    # `depends_on` is degraded to `service_started`; the service
+    # reconnects on demand if entdb isn't accepting RPCs yet.
+    image: ghcr.io/elloloop/tenant-shard-db:1.12.4
     ports:
       - "50051:50051"
     volumes:
       - entdb-data:/var/lib/entdb
-    healthcheck:
-      # The image ships with python+grpc on PATH; channel_ready_future
-      # blocks until the gRPC server is accepting RPCs (not just TCP up).
-      test:
-        - CMD
-        - python
-        - -c
-        - "import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)"
-      interval: 5s
-      timeout: 8s
-      retries: 12
-      start_period: 5s
 
   # Alternate persistence driver. The identity service can run on
   # Postgres instead of EntDB by setting:
@@ -79,7 +65,7 @@ services:
       target: server
     depends_on:
       entdb:
-        condition: service_healthy
+        condition: service_started
     environment:
       GATEWAY_ENTDB_ADDRESS: entdb:50051
       GATEWAY_DEFAULT_TENANT_ID: local

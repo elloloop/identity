@@ -341,6 +341,13 @@ func (d *issue3DB) SearchNodes(_ context.Context, _, _ string, typeID int, query
 	}
 }
 
+// RegisterUserInTenant is a no-op on the issue3 fake. The fake's
+// single in-memory store has no global-registry / membership model
+// to enforce.
+func (d *issue3DB) RegisterUserInTenant(_ context.Context, _, _, _, _, _ string) error {
+	return nil
+}
+
 func (d *issue3DB) createNode(op entdb.Operation) (string, error) {
 	switch op.TypeID {
 	case issue3TypeUser:

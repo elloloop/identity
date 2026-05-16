@@ -22,7 +22,16 @@ import (
 
 // systemActor is the actor used for cross-user lookups (uniqueness
 // queries, system bookkeeping) where there is no specific user.
-const systemActor = "user:system"
+//
+// tenant-shard-db v1.12 enforces actor-scoped row visibility: a
+// `user:X` actor only sees rows X created. Cross-user reads (e.g.
+// FindUserByEmail, the OAuth composite-uniqueness dup-check, the
+// duplicate-user cleanup wait) MUST use a tenant-admin actor.
+// `system:admin` is the upstream's tenant-admin namespace: it does
+// not need to be a registered user, has tenant-wide read/write, and
+// is the actor identity already passes to global-registry admin
+// RPCs.
+const systemActor = "system:admin"
 
 // entRepository is the EntDB-backed implementation of
 // service.Repository.
@@ -101,7 +110,15 @@ func (r *entRepository) GetUser(ctx context.Context, userID string) (*service.Us
 		return nil, nil
 	}
 	dst := &schemapb.User{}
-	if err := r.client.get(ctx, actorStr(userID), dst, userID); err != nil {
+	// Reads go via systemActor (tenant-admin namespace). A fresh
+	// signup's `user:<id>` actor isn't a tenant member until
+	// CreateUser's ensureUserTenantMember step commits, so a
+	// concurrent read from the same flow can still race with the
+	// membership add. systemActor side-steps both the timing and the
+	// "lookup id we never minted" cases (e.g. duplicate-signup's
+	// fake token id, which should surface as NotFound rather than
+	// ACCESS_DENIED).
+	if err := r.client.get(ctx, systemActor, dst, userID); err != nil {
 		if errors.Is(err, errNotFound) {
 			return nil, nil
 		}
@@ -146,6 +163,15 @@ func (r *entRepository) CreateUser(ctx context.Context, u *service.User) (string
 		return "", fmt.Errorf("repo: CreateUser: %w", err)
 	}
 	if err := r.waitForCanonicalUserByEmail(ctx, u.Email, id); err != nil {
+		return "", fmt.Errorf("repo: CreateUser: %w", err)
+	}
+	// tenant-shard-db v1.12+ requires every actor to be a registered
+	// user in the global registry AND a member of the tenant before
+	// they can issue writes of their own. Identity uses each user's
+	// own id as the actor for their refresh tokens, passkeys, audit
+	// rows, etc., so without this every post-signup write is denied
+	// ACCESS_DENIED. The call is idempotent.
+	if err := r.client.ensureUserTenantMember(ctx, id, u.Email, u.Name, "member"); err != nil {
 		return "", fmt.Errorf("repo: CreateUser: %w", err)
 	}
 	u.ID = id

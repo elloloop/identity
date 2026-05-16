@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -160,6 +162,15 @@ func (c *memoryEntClient) delete(_ context.Context, _ string, witness proto.Mess
 		return errors.New("entdb: delete: type mismatch")
 	}
 	delete(c.store, nodeID)
+	return nil
+}
+
+// ensureUserTenantMember is a no-op on the memory client. The
+// in-memory store bypasses the EntDB global registry entirely, so
+// there is no membership model to enforce here. The real sdkScope
+// implementation calls Admin.CreateUser + Admin.AddTenantMember
+// against the server.
+func (c *memoryEntClient) ensureUserTenantMember(_ context.Context, _, _, _, _ string) error {
 	return nil
 }
 
@@ -883,5 +894,50 @@ func TestSDKScopeVisibilityWaitsStopOnContextCancel(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed >= 500*time.Millisecond {
 		t.Fatalf("canceled waits took %s, want immediate return", elapsed)
+	}
+}
+
+func TestIsAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"all_caps_fragment", errors.New("server returned ALREADY_EXISTS for user X"), true},
+		{"lowercase_fragment", errors.New("user already exists in this tenant"), true},
+		{"grpc_already_exists", status.Error(codes.AlreadyExists, "duplicate"), true},
+		{"grpc_other_code", status.Error(codes.Internal, "boom"), false},
+		{"unrelated_plain_text", errors.New("INTERNAL: storage unavailable"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isAlreadyExists(tc.err); got != tc.want {
+				t.Fatalf("isAlreadyExists(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsTenantNotOpened(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"fragment", errors.New("entdb Internal: store: query nodes: FailedPrecondition: tenant not opened: t1"), true},
+		{"unrelated", errors.New("entdb VALIDATION_ERROR: bad filter"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTenantNotOpened(tc.err); got != tc.want {
+				t.Fatalf("isTenantNotOpened(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }

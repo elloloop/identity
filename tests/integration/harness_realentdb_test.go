@@ -37,6 +37,8 @@ func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
+	ensureRealEntDBTenant(t, client, cfg.DefaultTenantID)
+
 	built, err := repo.Build(context.Background(), repo.Config{
 		Driver:      repo.DriverEntDB,
 		EntDBClient: client,
