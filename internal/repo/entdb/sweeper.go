@@ -2,41 +2,55 @@ package entdb
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/elloloop/identity/internal/service"
+	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 )
 
-// The five DeleteExpired* sweepers are unimplemented on the EntDB
-// backend in this revision. The implementation needs FilterLt on
-// expires_at, which shipped upstream in tenant-shard-db v1.12.0, but
-// identity is still pinned to the v1.10.x server image while
-// upstream tenant-shard-db#508 (entdb-server schema-less mode) is
-// resolved.
-//
-// Until the v1.12 migration (issue #82) lands, these methods return
-// service.ErrSweepNotImplemented so the background sweeper in
-// internal/app/sweeper.go logs once and continues without erroring.
-// All other backends (memory + Postgres) implement the sweep
-// today; see internal/repo/postgres/sweeper.go.
-//
-// Tracking: GH #94 (sweeper) and #82 (v1.12 migration).
+// The five DeleteExpired* sweepers drop up to limit rows whose
+// expires_at is strictly less than beforeMs. Each one dispatches
+// through entClient.deleteExpired, which handles the typed query
+// + batched OpDeleteNode atomic-commit pair against the raw
+// transport. The schema declares expires_at indexed on every
+// affected node type so the underlying scan stays on a B-tree
+// expression index.
 
-func (r *entRepository) DeleteExpiredWebAuthnChallenges(_ context.Context, _ int64, _ int) (int, error) {
-	return 0, service.ErrSweepNotImplemented
+func (r *entRepository) DeleteExpiredWebAuthnChallenges(ctx context.Context, beforeMs int64, limit int) (int, error) {
+	n, err := r.client.deleteExpired(ctx, systemActor, &schemapb.PasskeyChallenge{}, beforeMs, limit)
+	if err != nil {
+		return 0, fmt.Errorf("repo: DeleteExpiredWebAuthnChallenges: %w", err)
+	}
+	return n, nil
 }
 
-func (r *entRepository) DeleteExpiredEmailVerificationTokens(_ context.Context, _ int64, _ int) (int, error) {
-	return 0, service.ErrSweepNotImplemented
+func (r *entRepository) DeleteExpiredEmailVerificationTokens(ctx context.Context, beforeMs int64, limit int) (int, error) {
+	n, err := r.client.deleteExpired(ctx, systemActor, &schemapb.EmailVerificationToken{}, beforeMs, limit)
+	if err != nil {
+		return 0, fmt.Errorf("repo: DeleteExpiredEmailVerificationTokens: %w", err)
+	}
+	return n, nil
 }
 
-func (r *entRepository) DeleteExpiredPasswordResetTokens(_ context.Context, _ int64, _ int) (int, error) {
-	return 0, service.ErrSweepNotImplemented
+func (r *entRepository) DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) (int, error) {
+	n, err := r.client.deleteExpired(ctx, systemActor, &schemapb.PasswordResetToken{}, beforeMs, limit)
+	if err != nil {
+		return 0, fmt.Errorf("repo: DeleteExpiredPasswordResetTokens: %w", err)
+	}
+	return n, nil
 }
 
-func (r *entRepository) DeleteExpiredEmailChangeTokens(_ context.Context, _ int64, _ int) (int, error) {
-	return 0, service.ErrSweepNotImplemented
+func (r *entRepository) DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) (int, error) {
+	n, err := r.client.deleteExpired(ctx, systemActor, &schemapb.EmailChangeToken{}, beforeMs, limit)
+	if err != nil {
+		return 0, fmt.Errorf("repo: DeleteExpiredEmailChangeTokens: %w", err)
+	}
+	return n, nil
 }
 
-func (r *entRepository) DeleteExpiredLoginChallenges(_ context.Context, _ int64, _ int) (int, error) {
-	return 0, service.ErrSweepNotImplemented
+func (r *entRepository) DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) (int, error) {
+	n, err := r.client.deleteExpired(ctx, systemActor, &schemapb.LoginChallenge{}, beforeMs, limit)
+	if err != nil {
+		return 0, fmt.Errorf("repo: DeleteExpiredLoginChallenges: %w", err)
+	}
+	return n, nil
 }

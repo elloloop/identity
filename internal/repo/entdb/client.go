@@ -55,6 +55,12 @@ type entClient interface {
 	create(ctx context.Context, actor string, msg proto.Message) (string, error)
 	update(ctx context.Context, actor string, nodeID string, msg proto.Message) error
 	delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error
+	// deleteExpired removes up to limit rows of the witness type whose
+	// expires_at is strictly less than beforeMs. Used by the GC
+	// sweeper; takes the typed witness so per-type field ids and
+	// type ids stay resolved inside the dispatch table next to the
+	// other typed ops, not at the call site.
+	deleteExpired(ctx context.Context, actor string, witness proto.Message, beforeMs int64, limit int) (int, error)
 	// ensureUserTenantMember registers userID in the global user
 	// registry and adds it as a member of the scope's tenant. Both
 	// calls tolerate ALREADY_EXISTS so the helper is idempotent
@@ -464,6 +470,85 @@ func protoValueFromAny(fd protoreflect.FieldDescriptor, v any) (protoreflect.Val
 		return protoreflect.Value{}, false
 	}
 	return protoreflect.Value{}, false
+}
+
+// expiresAtSweepSpec returns the (type id, expires_at field id) pair
+// the raw transport needs to query and delete expired rows for the
+// witness type. Returns ok=false for types the sweeper does not own;
+// callers report that as an unsupported-type error rather than a
+// silent no-op so a new sweep target can never land without an entry
+// here. The values match the proto schema (see
+// proto/identity/schema/schema.proto).
+func expiresAtSweepSpec(witness proto.Message) (typeID, fieldID int, ok bool) {
+	switch witness.(type) {
+	case *schemapb.PasskeyChallenge:
+		return 21, 4, true
+	case *schemapb.PasswordResetToken:
+		return 19, 3, true
+	case *schemapb.EmailVerificationToken:
+		return 29, 4, true
+	case *schemapb.EmailChangeToken:
+		return 30, 5, true
+	case *schemapb.LoginChallenge:
+		return 25, 3, true
+	}
+	return 0, 0, false
+}
+
+func (s *sdkScope) deleteExpired(ctx context.Context, actor string, witness proto.Message, beforeMs int64, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("entdb: deleteExpired: limit must be > 0, got %d", limit)
+	}
+	if s.transport == nil {
+		return 0, errors.New("entdb: deleteExpired: raw transport unavailable")
+	}
+	typeID, fieldID, ok := expiresAtSweepSpec(witness)
+	if !ok {
+		return 0, fmt.Errorf("entdb: deleteExpired: unsupported message type %T", witness)
+	}
+
+	// QueryNodes accepts payload-field-id keys (decimal string) for
+	// the filter map, matching the wire's "field IDs, not field names,
+	// on disk" invariant. "$lt" is the wire-level less-than operator
+	// shipped in tenant-shard-db v1.12 (FilterLt in the typed SDK).
+	filter := map[string]any{
+		strconv.Itoa(fieldID): map[string]any{"$lt": beforeMs},
+	}
+	nodes, err := s.transport.QueryNodes(ctx, s.tenantID, actor, typeID, filter)
+	if err != nil {
+		// A tenant that has had no writes returns "tenant not opened";
+		// treat that as "nothing to sweep" the same way the rest of
+		// the repo does for query-then-create idempotency.
+		if isTenantNotOpened(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	if len(nodes) == 0 {
+		return 0, nil
+	}
+
+	// QueryNodes on tenant-shard-db v1.12.4 ignores WithLimit/WithOffset
+	// (queryConfig is unused on the wire per scope.go's comment), so
+	// the cap is applied client-side. The expires_at column is indexed
+	// per the proto schema, so the server still walks an index range
+	// — only the network payload is larger than strictly needed.
+	if len(nodes) > limit {
+		nodes = nodes[:limit]
+	}
+
+	ops := make([]sdk.Operation, 0, len(nodes))
+	for _, n := range nodes {
+		ops = append(ops, sdk.Operation{
+			Type:   sdk.OpDeleteNode,
+			TypeID: typeID,
+			NodeID: n.NodeID,
+		})
+	}
+	if _, err := s.transport.ExecuteAtomic(ctx, s.tenantID, actor, "", ops); err != nil {
+		return 0, err
+	}
+	return len(ops), nil
 }
 
 func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error {

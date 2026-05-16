@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -163,6 +164,55 @@ func (c *memoryEntClient) delete(_ context.Context, _ string, witness proto.Mess
 	}
 	delete(c.store, nodeID)
 	return nil
+}
+
+func (c *memoryEntClient) deleteExpired(_ context.Context, _ string, witness proto.Message, beforeMs int64, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("entdb: deleteExpired: limit must be > 0, got %d", limit)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	wantType := reflect.TypeOf(witness)
+	fields := witness.ProtoReflect().Descriptor().Fields()
+	fd := fields.ByName("expires_at")
+	if fd == nil {
+		return 0, fmt.Errorf("entdb: deleteExpired: %T has no expires_at field", witness)
+	}
+
+	// Collect candidate ids and their expires_at; sort to keep
+	// the per-batch deletion order deterministic across runs. The
+	// production transport's QueryNodes does not currently expose a
+	// server-side limit (see sdkScope.deleteExpired); the fake
+	// mirrors that "fetch all, slice client-side" behaviour so unit
+	// tests catch a bug in the slice math.
+	type cand struct {
+		id        string
+		expiresAt int64
+	}
+	cands := make([]cand, 0)
+	for id, n := range c.store {
+		if reflect.TypeOf(n.msg) != wantType {
+			continue
+		}
+		exp := n.msg.ProtoReflect().Get(fd).Int()
+		if exp >= beforeMs {
+			continue
+		}
+		cands = append(cands, cand{id: id, expiresAt: exp})
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		if cands[i].expiresAt != cands[j].expiresAt {
+			return cands[i].expiresAt < cands[j].expiresAt
+		}
+		return cands[i].id < cands[j].id
+	})
+	if len(cands) > limit {
+		cands = cands[:limit]
+	}
+	for _, c2 := range cands {
+		delete(c.store, c2.id)
+	}
+	return len(cands), nil
 }
 
 // ensureUserTenantMember is a no-op on the memory client. The

@@ -230,10 +230,13 @@ type Repository interface {
 	// background sweeper started by app.New calls these every
 	// GATEWAY_SWEEPER_INTERVAL_SECONDS; each call deletes up to
 	// `limit` rows whose ExpiresAt is strictly less than `beforeMs`
-	// and returns the number actually deleted. Drivers that cannot
-	// implement the sweep (e.g. the EntDB driver while the v1.12
-	// migration is still in flight) return ErrSweepNotImplemented so
-	// the sweeper can log and skip them.
+	// and returns the number actually deleted. Every shipping backend
+	// (memory, postgres, entdb) implements the real sweep; the
+	// ErrSweepNotImplemented sentinel remains so a new backend can
+	// land its CRUD methods first and its sweep in a follow-up PR
+	// without erroring the sweeper goroutine. Implementations MUST
+	// reject limit <= 0 — an unbounded delete batch could lock a hot
+	// table for an unbounded window.
 	DeleteExpiredWebAuthnChallenges(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
 	DeleteExpiredEmailVerificationTokens(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
 	DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
@@ -263,10 +266,13 @@ type Repository interface {
 	AddOrganizationMember(ctx context.Context, m *OrganizationMembership) (string, error)
 }
 
-// ErrSweepNotImplemented is returned by Repository implementations
-// whose backend cannot yet run the expired-row sweep. The sweeper
-// goroutine in internal/app/sweeper.go treats this as a soft skip
-// (one log line per backend, then ignored) rather than an error.
+// ErrSweepNotImplemented is the soft-skip sentinel a Repository may
+// return from a DeleteExpired* method when the backend cannot yet
+// run the expired-row sweep. The sweeper goroutine in
+// internal/app/sweeper.go logs this once per node type per process
+// and continues. No backend in tree returns this today; it remains
+// so a new backend can land its CRUD methods first and its sweep in
+// a follow-up PR without erroring the sweeper goroutine.
 var ErrSweepNotImplemented = errors.New("identity: sweep not implemented for this backend")
 
 // ── Record types for persistence ───────────────────────────────────────
