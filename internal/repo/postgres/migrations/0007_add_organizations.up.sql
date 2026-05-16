@@ -1,4 +1,4 @@
--- 0006_add_organizations.up.sql
+-- 0007_add_organizations.up.sql
 --
 -- Identity-layer Organization + OrganizationMembership tables for
 -- `mode=multi` deployments (see docs/IDENTITY.md). Both rows live
