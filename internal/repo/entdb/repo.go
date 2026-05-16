@@ -331,13 +331,22 @@ func (r *entRepository) ResetFailedLoginCount(ctx context.Context, userID string
 	if userID == "" {
 		return errors.New("repo: ResetFailedLoginCount: missing user id")
 	}
-	// Plan.Update sends only fields with non-default values (the SDK
-	// uses proto3 Range, which skips zero scalars). To clear two
-	// int64 fields back to zero we read the current row, build a
-	// full proto with the lockout fields explicitly zero plus all
-	// other fields preserved, and write it back. The redundant
-	// rewrite is acceptable: ResetFailedLoginCount runs once per
-	// successful login, not on the hot path.
+	// SDK Plan.Update walks the patch with proto3 Range, which skips
+	// zero scalars. A typed *schemapb.User{FailedLoginCount: 0,
+	// LockedUntil: 0} therefore emits nothing — the server applies an
+	// empty patch and the lockout state stays set. Go through
+	// rawUpdate so the field-id→value map carries the explicit zeros.
+	if raw, ok := r.client.(rawUpdateClient); ok {
+		patch := map[string]any{"9": int64(0), "10": int64(0)}
+		if err := raw.rawUpdate(ctx, actorStr(userID), 1, userID, patch); err != nil {
+			return fmt.Errorf("repo: ResetFailedLoginCount: %w", err)
+		}
+		return nil
+	}
+	// The in-memory entClient stub does not implement rawUpdate; it
+	// uses a heuristic in mergePatch to clear the lockout fields when
+	// it sees a "full user rewrite". Preserve that path for unit
+	// tests that exercise the stub directly.
 	user, err := r.GetUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("repo: ResetFailedLoginCount: %w", err)

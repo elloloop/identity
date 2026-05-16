@@ -321,7 +321,10 @@ jobs:
       - name: go test -tags=realpostgres internal/repo/postgres
         env:
           GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
-        run: go test -race -timeout=300s ./internal/repo/postgres/...
+        # The conformance suite runs in the Conformance / postgres matrix
+        # entry (.github/workflows/conformance.yml); skip it here to
+        # avoid double-billing CI compute on every PR.
+        run: go test -race -timeout=300s -skip='^TestConformance$' ./internal/repo/postgres/...
 
   # ---------------------------------------------------------------------------
   # 6. Fuzz smoke — quick fuzz on every PR.
