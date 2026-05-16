@@ -577,100 +577,62 @@ func (s *sdkScope) queryViaTransport(ctx context.Context, actor string, witness 
 	return out, true, nil
 }
 
-func rawQuerySpec(witness proto.Message, filter map[string]any) (int, map[string]any, bool) {
-	rawFilter := make(map[string]any, len(filter))
+// rawQueryFieldSpec maps proto field names to raw-transport field
+// ids for one node type. The server's QueryNodes RPC takes the raw
+// numeric filter keys, not the proto field names.
+type rawQueryFieldSpec struct {
+	typeID int
+	fields map[string]string
+}
+
+var (
+	rawQuerySpecUser                       = rawQueryFieldSpec{1, map[string]string{"email": "1"}}
+	rawQuerySpecRefreshToken               = rawQueryFieldSpec{5, map[string]string{"user_id": "2"}}
+	rawQuerySpecPasskeyCredential          = rawQueryFieldSpec{20, map[string]string{"user_id": "2"}}
+	rawQuerySpecTotpCredential             = rawQueryFieldSpec{23, map[string]string{"user_id": "1"}}
+	rawQuerySpecRecoveryCode               = rawQueryFieldSpec{24, map[string]string{"user_id": "1", "code_hash": "2"}}
+	rawQuerySpecOAuthIdentity              = rawQueryFieldSpec{31, map[string]string{"user_id": "1", "provider": "2", "provider_user_id": "3"}}
+	rawQuerySpecIdentityVerificationRecord = rawQueryFieldSpec{32, map[string]string{"user_id": "2"}}
+	rawQuerySpecOrganizationMembership     = rawQueryFieldSpec{34, map[string]string{"organization_id": "1", "user_id": "2"}}
+)
+
+func rawQueryFieldSpecFor(witness proto.Message) (rawQueryFieldSpec, bool) {
 	switch witness.(type) {
 	case *schemapb.User:
-		for k, v := range filter {
-			switch k {
-			case "email":
-				rawFilter["1"] = v
-			default:
-				return 0, nil, false
-			}
-		}
-		return 1, rawFilter, true
+		return rawQuerySpecUser, true
 	case *schemapb.RefreshToken:
-		for k, v := range filter {
-			switch k {
-			case "user_id":
-				rawFilter["2"] = v
-			default:
-				return 0, nil, false
-			}
-		}
-		return 5, rawFilter, true
+		return rawQuerySpecRefreshToken, true
 	case *schemapb.PasskeyCredential:
-		for k, v := range filter {
-			switch k {
-			case "user_id":
-				rawFilter["2"] = v
-			default:
-				return 0, nil, false
-			}
-		}
-		return 20, rawFilter, true
+		return rawQuerySpecPasskeyCredential, true
 	case *schemapb.TotpCredential:
-		for k, v := range filter {
-			switch k {
-			case "user_id":
-				rawFilter["1"] = v
-			default:
-				return 0, nil, false
-			}
-		}
-		return 23, rawFilter, true
+		return rawQuerySpecTotpCredential, true
 	case *schemapb.RecoveryCode:
-		for k, v := range filter {
-			switch k {
-			case "user_id":
-				rawFilter["1"] = v
-			case "code_hash":
-				rawFilter["2"] = v
-			default:
-				return 0, nil, false
-			}
-		}
-		return 24, rawFilter, true
+		return rawQuerySpecRecoveryCode, true
 	case *schemapb.OAuthIdentity:
-		for k, v := range filter {
-			switch k {
-			case "user_id":
-				rawFilter["1"] = v
-			case "provider":
-				rawFilter["2"] = v
-			case "provider_user_id":
-				rawFilter["3"] = v
-			default:
-				return 0, nil, false
-			}
-		}
-		return 31, rawFilter, true
+		return rawQuerySpecOAuthIdentity, true
 	case *schemapb.IdentityVerificationRecord:
-		for k, v := range filter {
-			switch k {
-			case "user_id":
-				rawFilter["2"] = v
-			default:
-				return 0, nil, false
-			}
-		}
-		return 32, rawFilter, true
+		return rawQuerySpecIdentityVerificationRecord, true
 	case *schemapb.OrganizationMembership:
-		for k, v := range filter {
-			switch k {
-			case "organization_id":
-				rawFilter["1"] = v
-			case "user_id":
-				rawFilter["2"] = v
-			default:
-				return 0, nil, false
-			}
-		}
-		return 34, rawFilter, true
+		return rawQuerySpecOrganizationMembership, true
 	default:
+		return rawQueryFieldSpec{}, false
+	}
+}
+
+func rawQuerySpec(witness proto.Message, filter map[string]any) (int, map[string]any, bool) {
+	spec, ok := rawQueryFieldSpecFor(witness)
+	if !ok {
 		return 0, nil, false
 	}
+	rawFilter := make(map[string]any, len(filter))
+	for k, v := range filter {
+		fieldID, ok := spec.fields[k]
+		if !ok {
+			return 0, nil, false
+		}
+		rawFilter[fieldID] = v
+	}
+	return spec.typeID, rawFilter, true
 }
 
 func newMessageLike(witness proto.Message) proto.Message {
