@@ -82,6 +82,14 @@ func (t *tracedClient) update(ctx context.Context, actor string, nodeID string, 
 	return err
 }
 
+func (t *tracedClient) updateIf(ctx context.Context, actor string, nodeID string, msg proto.Message, field string, equals any) error {
+	attrs := append(entAttrs(actor, msg, nodeID), attribute.String("entdb.precondition_field", field))
+	ctx, end := observability.StartClient(ctx, "entdb.updateIf", attrs...)
+	err := t.inner.updateIf(ctx, actor, nodeID, msg, field, equals)
+	end(err)
+	return err
+}
+
 func (t *tracedClient) delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error {
 	ctx, end := observability.StartClient(ctx, "entdb.delete", entAttrs(actor, witness, nodeID)...)
 	err := t.inner.delete(ctx, actor, witness, nodeID)

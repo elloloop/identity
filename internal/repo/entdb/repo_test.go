@@ -152,6 +152,30 @@ func (c *memoryEntClient) update(_ context.Context, _ string, nodeID string, pat
 	return nil
 }
 
+func (c *memoryEntClient) updateIf(_ context.Context, _ string, nodeID string, patch proto.Message, field string, equals any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	existing, ok := c.store[nodeID]
+	if !ok {
+		return fmt.Errorf("entdb: updateIf: node %q not found", nodeID)
+	}
+	if reflect.TypeOf(existing.msg) != reflect.TypeOf(patch) {
+		return errors.New("entdb: updateIf: type mismatch")
+	}
+	mr := existing.msg.ProtoReflect()
+	fd := mr.Descriptor().Fields().ByName(protoreflect.Name(field))
+	if fd == nil {
+		return fmt.Errorf("entdb: updateIf: unknown field %q on %T", field, existing.msg)
+	}
+	got := protoValueAsAny(fd, mr.Get(fd))
+	if !sameScalar(got, equals) {
+		return errPreconditionFailed
+	}
+	existing.msg = mergePatch(existing.msg, patch)
+	c.store[nodeID] = existing
+	return nil
+}
+
 func (c *memoryEntClient) delete(_ context.Context, _ string, witness proto.Message, nodeID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -1054,6 +1054,21 @@ func (r *MemRepo) UpdateQrLoginSession(_ context.Context, nodeID string, fields 
 	return nil
 }
 
+func (r *MemRepo) ConsumeQrLoginSession(_ context.Context, nodeID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.qrSessions[nodeID]
+	if !ok {
+		return service.ErrQrLoginNotPending
+	}
+	if s.Status != "approved" {
+		return service.ErrQrLoginNotPending
+	}
+	s.Status = "consumed"
+	s.UpdatedAt = atMs
+	return nil
+}
+
 // ── TOTP Credentials ──────────────────────────────────────────────
 
 func (r *MemRepo) GetTotpCredential(_ context.Context, userID string) (*service.TotpCredRecord, error) {

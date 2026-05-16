@@ -124,3 +124,26 @@ func (r *pgRepository) UpdateQrLoginSession(ctx context.Context, nodeID string, 
 	}
 	return nil
 }
+
+// ConsumeQrLoginSession atomically transitions an approved session to
+// consumed via a single UPDATE gated on the current status. The
+// `WHERE status = 'approved'` clause is the CAS predicate; UPDATE
+// returns the number of rows touched, which we inspect to detect a
+// concurrent loser.
+func (r *pgRepository) ConsumeQrLoginSession(ctx context.Context, nodeID string, atMs int64) error {
+	if nodeID == "" {
+		return service.ErrQrLoginNotPending
+	}
+	const q = `
+		UPDATE qr_login_sessions
+		   SET status = 'consumed', updated_at_ms = $3
+		 WHERE tenant_id = $1 AND id = $2 AND status = 'approved'`
+	tag, err := r.pool.Exec(ctx, q, r.tenantID, nodeID, atMs)
+	if err != nil {
+		return wrapPgErr("ConsumeQrLoginSession", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return service.ErrQrLoginNotPending
+	}
+	return nil
+}

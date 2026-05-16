@@ -19,10 +19,14 @@ The remaining process-local data falls into two categories:
 1. Immutable-at-boot configuration and cryptographic material.
 2. Harmless caches that do not act as the source of truth for authentication.
 
-That means the service is structurally capable of running behind multiple replicas as long as every replica points at the same repository and is deployed with the same configuration. Two repo-backed concurrency gaps still need follow-up work:
+That means the service is structurally capable of running behind multiple replicas as long as every replica points at the same repository and is deployed with the same configuration. One repo-backed concurrency gap still needs follow-up work:
 
 1. EntDB refresh-token consumption is not yet atomic across replicas: follow-up issue `#24`.
-2. QR login session consumption is not yet atomic across replicas: follow-up issue `#14`.
+
+QR login session consumption (`#14`) now uses a repository-level
+compare-and-set transition (`ConsumeQrLoginSession`) implemented on
+every backend, so the approved→consumed step is the serialization
+point for token issuance.
 
 The one deliberate non-reloadable area is the self-serve password toggles: `GATEWAY_PASSWORD_SIGNUP_ENABLED` and `GATEWAY_PASSWORD_RESET_ENABLED` are read once at process start and therefore require a rolling restart to change consistently across replicas.
 
@@ -36,7 +40,7 @@ The one deliberate non-reloadable area is the self-serve password toggles: `GATE
 | Refresh replay detection | Repo-backed, but EntDB follow-up needed | `internal/service/auth.go:743-796`, `internal/repo/postgres/refresh_token.go:119-140`, `internal/repo/entdb/repo.go:535-547` | Postgres is atomic today. EntDB still does read-then-update and needs follow-up issue `#24`. |
 | OAuth callback state | Replica-safe signed token, not a process cache | `internal/service/auth_login.go:372-417`, `internal/service/auth_login.go:469-487`, `pkg/oauth/state.go:24-143` | `BeginOAuthLogin` signs provider, redirect URI, state, and PKCE verifier into a short-lived token. |
 | OIDC JWKS cache | In-process cache, harmless | `pkg/oauth/jwks.go:14-98` | Per-replica cache only. Verification invalidates and refetches on key-miss rotation paths. |
-| QR login sessions | Repo-backed, but consume path is not atomic | `internal/service/auth_qr.go:23-32`, `internal/service/auth_qr.go:152-206`, `internal/repo/postgres/qr_login.go:11-80`, `internal/repo/entdb/repo.go:781-857` | Session rows are durable, but polling still issues tokens before a compare-and-set consume transition. Follow-up issue `#14`. |
+| QR login sessions | Repo-backed and shared (atomic consume) | `internal/service/auth_qr.go`, `internal/repo/postgres/qr_login.go`, `internal/repo/entdb/repo.go` | Session rows are durable. `PollQrLogin` runs an atomic approved→consumed transition through `ConsumeQrLoginSession` before token issuance — Postgres uses `UPDATE … WHERE status = 'approved'`, EntDB uses the SDK's `Plan.UpdateIf` CAS primitive. |
 | Passkey challenges | Repo-backed and shared | `internal/service/auth_passkey.go:45-55`, `internal/service/auth_passkey.go:74-90`, `internal/repo/postgres/passkey.go:154-194`, `internal/repo/entdb/repo.go:717-779` | Registration and login challenges are stored durably instead of in memory. |
 | Passkey credentials and counters | Repo-backed and shared | `internal/service/auth_passkey.go:101-117`, `internal/repo/postgres/passkey.go:11-152`, `internal/repo/entdb/repo.go:609-715` | Credentials and sign counters are durable and replica-visible. |
 | TOTP setup-in-progress | Repo-backed and shared | `internal/service/auth_totp.go:27-55`, `internal/service/auth_totp.go:80-118`, `internal/repo/postgres/totp.go:11-74`, `internal/repo/entdb/repo.go:867-955` | Enrollment state is stored as a durable credential row plus recovery-code rows. |
@@ -69,10 +73,17 @@ The auth flows that would be dangerous if stored in memory are already repo-back
 
 This is the right ownership model. A replica can crash between steps without losing the system's view of whether a challenge, token, or lockout is valid.
 
-What remains are repository-level serialization gaps, not state-ownership mistakes:
+What remains is one repository-level serialization gap, not a state-ownership mistake:
 
 - EntDB refresh-token consume still needs an atomic compare-and-set: issue `#24`
-- QR login consume still needs an atomic approved-to-consumed transition: issue `#14`
+
+QR-login consume (issue `#14`) was closed by the
+`Repository.ConsumeQrLoginSession` compare-and-set primitive — Postgres
+gates the `UPDATE` on `WHERE status = 'approved'` and inspects
+rows-affected, EntDB uses the SDK's `Plan.UpdateIf` precondition, and
+memory holds the mutex across check+write. `PollQrLogin` runs the CAS
+before issuing tokens, so two replicas observing the same approved
+session resolve to exactly one token-minting winner.
 
 ### 2. The self-serve password toggles are deployment config, not live feature flags
 
@@ -97,11 +108,8 @@ These values are not mutable state, but they are authentication inputs. A rollou
 
 `internal/repo/memory` stores the full auth model in Go maps behind a mutex. That is fine for tests and local development, but it is not a real deployment backend and should never be used for replica-bearing environments.
 
-### 5. Two multi-replica follow-ups remain outside the state-ownership question
+### 5. One multi-replica follow-up remains outside the state-ownership question
 
-The remaining risks are both serialization bugs in repo-backed flows:
-
-- `PollQrLogin` issues tokens before the session is marked consumed. Two replicas polling the same approved session can both mint tokens before one write lands. Follow-up issue: `#14`.
 - EntDB refresh-token rotation still reads the row and then writes `consumed_at` in a second step. That needs a true atomic consume primitive so two replicas cannot both win a refresh race. Follow-up issue: `#24`.
 
 ## Decision Recorded For Issue #11
