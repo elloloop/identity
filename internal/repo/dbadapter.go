@@ -23,21 +23,16 @@ const entDBApplyWaitTimeoutMs int32 = 5000
 // helpers here loses node ids on query results, so the adapter must
 // delegate to the raw transport instead of translating through typed
 // witnesses.
-//
-// The adapter also keeps a handle on the typed *sdk.DbClient so it
-// can serve service.DB.RegisterUserInTenant via the SDK's Admin RPCs
-// (those are not exposed through the raw Transport seam).
 func NewDBAdapter(client *sdk.DbClient) (service.DB, error) {
 	transport, err := entdbrepo.TransportFromClient(client)
 	if err != nil {
 		return nil, err
 	}
-	return &dbAdapter{transport: transport, client: client}, nil
+	return &dbAdapter{transport: transport}, nil
 }
 
 type dbAdapter struct {
 	transport sdk.Transport
-	client    *sdk.DbClient
 }
 
 func (a *dbAdapter) GetNode(ctx context.Context, tenantID, actor string, typeID int, nodeID string) (*sdk.Node, error) {
@@ -81,6 +76,12 @@ func (a *dbAdapter) SearchNodes(ctx context.Context, tenantID, actor string, typ
 // has its own wiring for this, but the raw service.DB path (admin
 // invites, system bookkeeping) needs the same registration step on
 // any user it creates outside the typed repo.
+//
+// Uses the raw Transport.CreateUser / Transport.AddTenantMember
+// calls directly rather than going through *sdk.DbClient.Admin().
+// The Admin handle is a thin shim over those same Transport methods
+// and going through the transport keeps the adapter testable with a
+// fake Transport.
 func (a *dbAdapter) RegisterUserInTenant(ctx context.Context, tenantID, userID, email, name, role string) error {
 	if userID == "" {
 		return errors.New("entdb: RegisterUserInTenant: empty user id")
@@ -95,11 +96,10 @@ func (a *dbAdapter) RegisterUserInTenant(ctx context.Context, tenantID, userID, 
 		}
 	}
 	const adminActor = "system:admin"
-	admin := a.client.Admin()
-	if _, err := admin.CreateUser(ctx, adminActor, userID, email, name); err != nil && !dbAdapterIsAlreadyExists(err) {
+	if _, err := a.transport.CreateUser(ctx, adminActor, userID, email, name); err != nil && !dbAdapterIsAlreadyExists(err) {
 		return fmt.Errorf("entdb: register user %q: %w", userID, err)
 	}
-	if err := admin.AddTenantMember(ctx, adminActor, tenantID, userID, role); err != nil && !dbAdapterIsAlreadyExists(err) {
+	if err := a.transport.AddTenantMember(ctx, adminActor, tenantID, userID, role); err != nil && !dbAdapterIsAlreadyExists(err) {
 		return fmt.Errorf("entdb: add tenant member %q: %w", userID, err)
 	}
 	return nil

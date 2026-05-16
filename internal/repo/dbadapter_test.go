@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -250,4 +251,284 @@ func (t *commitResultTransport) ExecuteAtomic(
 func (t *commitResultTransport) WaitForOffset(context.Context, string, string, string, int32) (bool, string, error) {
 	t.waitCalls++
 	return t.reached, t.current, nil
+}
+
+// ── Passthrough method tests ───────────────────────────────────────
+
+type passthroughTransport struct {
+	sdk.Transport
+	queryNodesCalled    bool
+	getEdgesFromCalled  bool
+	getEdgesToCalled    bool
+	searchNodesCalled   bool
+	queryNodesResult    []*sdk.Node
+	getEdgesFromResult  []*sdk.Edge
+	getEdgesToResult    []*sdk.Edge
+	searchNodesResult   []*sdk.Node
+	queryNodesErr       error
+	getEdgesFromErr     error
+	getEdgesToErr       error
+	searchNodesErr      error
+}
+
+func (t *passthroughTransport) QueryNodes(context.Context, string, string, int, map[string]any) ([]*sdk.Node, error) {
+	t.queryNodesCalled = true
+	return t.queryNodesResult, t.queryNodesErr
+}
+
+func (t *passthroughTransport) GetEdgesFrom(context.Context, string, string, string, int) ([]*sdk.Edge, error) {
+	t.getEdgesFromCalled = true
+	return t.getEdgesFromResult, t.getEdgesFromErr
+}
+
+func (t *passthroughTransport) GetEdgesTo(context.Context, string, string, string, int) ([]*sdk.Edge, error) {
+	t.getEdgesToCalled = true
+	return t.getEdgesToResult, t.getEdgesToErr
+}
+
+func (t *passthroughTransport) SearchNodes(context.Context, string, string, int, string) ([]*sdk.Node, error) {
+	t.searchNodesCalled = true
+	return t.searchNodesResult, t.searchNodesErr
+}
+
+func TestDBAdapter_QueryNodesDelegatesToTransport(t *testing.T) {
+	t.Parallel()
+	transport := &passthroughTransport{queryNodesResult: []*sdk.Node{{NodeID: "n1"}}}
+	db := &dbAdapter{transport: transport}
+	got, err := db.QueryNodes(context.Background(), "tenant-1", "user:alice", 1, map[string]any{"x": "y"})
+	if err != nil {
+		t.Fatalf("QueryNodes: %v", err)
+	}
+	if !transport.queryNodesCalled {
+		t.Fatal("transport.QueryNodes not called")
+	}
+	if len(got) != 1 || got[0].NodeID != "n1" {
+		t.Fatalf("QueryNodes result = %+v, want one node \"n1\"", got)
+	}
+}
+
+func TestDBAdapter_GetEdgesFromDelegatesToTransport(t *testing.T) {
+	t.Parallel()
+	transport := &passthroughTransport{getEdgesFromResult: []*sdk.Edge{{FromNodeID: "a"}}}
+	db := &dbAdapter{transport: transport}
+	got, err := db.GetEdgesFrom(context.Background(), "tenant-1", "user:alice", "a", 1)
+	if err != nil {
+		t.Fatalf("GetEdgesFrom: %v", err)
+	}
+	if !transport.getEdgesFromCalled {
+		t.Fatal("transport.GetEdgesFrom not called")
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d edges, want 1", len(got))
+	}
+}
+
+func TestDBAdapter_GetEdgesToDelegatesToTransport(t *testing.T) {
+	t.Parallel()
+	transport := &passthroughTransport{getEdgesToResult: []*sdk.Edge{{ToNodeID: "b"}}}
+	db := &dbAdapter{transport: transport}
+	got, err := db.GetEdgesTo(context.Background(), "tenant-1", "user:alice", "b", 1)
+	if err != nil {
+		t.Fatalf("GetEdgesTo: %v", err)
+	}
+	if !transport.getEdgesToCalled {
+		t.Fatal("transport.GetEdgesTo not called")
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d edges, want 1", len(got))
+	}
+}
+
+func TestDBAdapter_SearchNodesDelegatesToTransport(t *testing.T) {
+	t.Parallel()
+	transport := &passthroughTransport{searchNodesResult: []*sdk.Node{{NodeID: "found"}}}
+	db := &dbAdapter{transport: transport}
+	got, err := db.SearchNodes(context.Background(), "tenant-1", "user:alice", 1, "q")
+	if err != nil {
+		t.Fatalf("SearchNodes: %v", err)
+	}
+	if !transport.searchNodesCalled {
+		t.Fatal("transport.SearchNodes not called")
+	}
+	if len(got) != 1 || got[0].NodeID != "found" {
+		t.Fatalf("SearchNodes result = %+v, want one node \"found\"", got)
+	}
+}
+
+// ── RegisterUserInTenant tests ─────────────────────────────────────
+
+type registerTransport struct {
+	sdk.Transport
+	createUserCalls       []registerCreateUserCall
+	addMemberCalls        []registerAddMemberCall
+	createUserErr         error
+	addMemberErr          error
+	createUserAfterCalled func()
+}
+
+type registerCreateUserCall struct {
+	actor, userID, email, name string
+}
+
+type registerAddMemberCall struct {
+	actor, tenantID, userID, role string
+}
+
+func (t *registerTransport) CreateUser(_ context.Context, actor, userID, email, name string) (*sdk.UserInfo, error) {
+	t.createUserCalls = append(t.createUserCalls, registerCreateUserCall{actor, userID, email, name})
+	if t.createUserAfterCalled != nil {
+		t.createUserAfterCalled()
+	}
+	if t.createUserErr != nil {
+		return nil, t.createUserErr
+	}
+	return &sdk.UserInfo{}, nil
+}
+
+func (t *registerTransport) AddTenantMember(_ context.Context, actor, tenantID, userID, role string) error {
+	t.addMemberCalls = append(t.addMemberCalls, registerAddMemberCall{actor, tenantID, userID, role})
+	return t.addMemberErr
+}
+
+func TestDBAdapter_RegisterUserInTenant_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	transport := &registerTransport{}
+	db := &dbAdapter{transport: transport}
+
+	if err := db.RegisterUserInTenant(context.Background(), "tenant-1", "user-1", "alice@example.com", "Alice", "member"); err != nil {
+		t.Fatalf("RegisterUserInTenant: %v", err)
+	}
+	if len(transport.createUserCalls) != 1 {
+		t.Fatalf("CreateUser called %d times, want 1", len(transport.createUserCalls))
+	}
+	if got := transport.createUserCalls[0]; got != (registerCreateUserCall{"system:admin", "user-1", "alice@example.com", "Alice"}) {
+		t.Fatalf("CreateUser call = %+v, want system:admin/user-1/alice@example.com/Alice", got)
+	}
+	if len(transport.addMemberCalls) != 1 {
+		t.Fatalf("AddTenantMember called %d times, want 1", len(transport.addMemberCalls))
+	}
+	if got := transport.addMemberCalls[0]; got != (registerAddMemberCall{"system:admin", "tenant-1", "user-1", "member"}) {
+		t.Fatalf("AddTenantMember call = %+v", got)
+	}
+}
+
+func TestDBAdapter_RegisterUserInTenant_EmptyUserID(t *testing.T) {
+	t.Parallel()
+
+	db := &dbAdapter{transport: &registerTransport{}}
+	err := db.RegisterUserInTenant(context.Background(), "tenant-1", "", "alice@example.com", "Alice", "member")
+	if err == nil || !strings.Contains(err.Error(), "empty user id") {
+		t.Fatalf("err = %v, want empty user id error", err)
+	}
+}
+
+func TestDBAdapter_RegisterUserInTenant_EmptyNameDefaultsToEmailLocalPart(t *testing.T) {
+	t.Parallel()
+
+	transport := &registerTransport{}
+	db := &dbAdapter{transport: transport}
+
+	if err := db.RegisterUserInTenant(context.Background(), "tenant-1", "user-1", "alice@example.com", "", "member"); err != nil {
+		t.Fatalf("RegisterUserInTenant: %v", err)
+	}
+	if got := transport.createUserCalls[0].name; got != "alice" {
+		t.Fatalf("CreateUser name = %q, want \"alice\" (local-part of email)", got)
+	}
+}
+
+func TestDBAdapter_RegisterUserInTenant_EmptyNameAndEmailDefaultsToUserID(t *testing.T) {
+	t.Parallel()
+
+	transport := &registerTransport{}
+	db := &dbAdapter{transport: transport}
+
+	if err := db.RegisterUserInTenant(context.Background(), "tenant-1", "user-1", "", "", "member"); err != nil {
+		t.Fatalf("RegisterUserInTenant: %v", err)
+	}
+	if got := transport.createUserCalls[0].name; got != "user-1" {
+		t.Fatalf("CreateUser name = %q, want \"user-1\" (userID fallback)", got)
+	}
+}
+
+func TestDBAdapter_RegisterUserInTenant_ToleratesAlreadyExistsOnCreateUser(t *testing.T) {
+	t.Parallel()
+
+	transport := &registerTransport{
+		createUserErr: errors.New("entdb UNIQUE_CONSTRAINT: globalstore: user \"u\" already exists"),
+	}
+	db := &dbAdapter{transport: transport}
+
+	if err := db.RegisterUserInTenant(context.Background(), "tenant-1", "user-1", "alice@example.com", "Alice", "member"); err != nil {
+		t.Fatalf("RegisterUserInTenant: %v, want nil (ALREADY_EXISTS is idempotent)", err)
+	}
+	if len(transport.addMemberCalls) != 1 {
+		t.Fatalf("AddTenantMember calls = %d, want 1 (must run after CreateUser tolerates dup)", len(transport.addMemberCalls))
+	}
+}
+
+func TestDBAdapter_RegisterUserInTenant_PropagatesNonAlreadyExistsCreateError(t *testing.T) {
+	t.Parallel()
+
+	transport := &registerTransport{
+		createUserErr: errors.New("entdb INTERNAL: server exploded"),
+	}
+	db := &dbAdapter{transport: transport}
+
+	err := db.RegisterUserInTenant(context.Background(), "tenant-1", "user-1", "alice@example.com", "Alice", "member")
+	if err == nil || !strings.Contains(err.Error(), "register user") {
+		t.Fatalf("err = %v, want register user wrapped error", err)
+	}
+	if len(transport.addMemberCalls) != 0 {
+		t.Fatalf("AddTenantMember called %d times after CreateUser failure, want 0", len(transport.addMemberCalls))
+	}
+}
+
+func TestDBAdapter_RegisterUserInTenant_ToleratesAlreadyExistsOnAddTenantMember(t *testing.T) {
+	t.Parallel()
+
+	transport := &registerTransport{
+		addMemberErr: errors.New("entdb ALREADY_EXISTS: user is already a member"),
+	}
+	db := &dbAdapter{transport: transport}
+
+	if err := db.RegisterUserInTenant(context.Background(), "tenant-1", "user-1", "alice@example.com", "Alice", "member"); err != nil {
+		t.Fatalf("RegisterUserInTenant: %v, want nil (membership ALREADY_EXISTS is idempotent)", err)
+	}
+}
+
+func TestDBAdapter_RegisterUserInTenant_PropagatesNonAlreadyExistsMemberError(t *testing.T) {
+	t.Parallel()
+
+	transport := &registerTransport{
+		addMemberErr: errors.New("entdb INTERNAL: db unreachable"),
+	}
+	db := &dbAdapter{transport: transport}
+
+	err := db.RegisterUserInTenant(context.Background(), "tenant-1", "user-1", "alice@example.com", "Alice", "member")
+	if err == nil || !strings.Contains(err.Error(), "add tenant member") {
+		t.Fatalf("err = %v, want add tenant member wrapped error", err)
+	}
+}
+
+func TestDBAdapterIsAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"all-caps fragment", errors.New("server returned ALREADY_EXISTS for user X"), true},
+		{"lowercase fragment", errors.New("user already exists in this tenant"), true},
+		{"unrelated", errors.New("INTERNAL: storage unavailable"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := dbAdapterIsAlreadyExists(tc.err); got != tc.want {
+				t.Fatalf("dbAdapterIsAlreadyExists(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
 }
