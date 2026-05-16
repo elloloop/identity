@@ -112,6 +112,8 @@ type fakeRepo struct {
 	emailChanges       map[string]*EmailChangeToken
 	oauthIdentities    map[string]*OAuthIdentity
 	idvRecords         map[string]*IdentityVerificationRecord
+	orgs               map[string]*Organization
+	orgMembers         map[string]*OrganizationMembership
 }
 
 func newFakeRepo() *fakeRepo {
@@ -130,6 +132,8 @@ func newFakeRepo() *fakeRepo {
 		emailChanges:       make(map[string]*EmailChangeToken),
 		oauthIdentities:    make(map[string]*OAuthIdentity),
 		idvRecords:         make(map[string]*IdentityVerificationRecord),
+		orgs:               make(map[string]*Organization),
+		orgMembers:         make(map[string]*OrganizationMembership),
 	}
 }
 
@@ -1183,4 +1187,88 @@ func (r *fakeRepo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int6
 		}
 	}
 	return n, nil
+}
+
+// ── Organizations ─────────────────────────────────────────────────
+
+func (r *fakeRepo) CreateOrganization(_ context.Context, o *Organization) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if o == nil || o.Slug == "" {
+		return "", fmt.Errorf("%w: missing slug", ErrInvalidArgument)
+	}
+	for _, existing := range r.orgs {
+		if existing.Slug == o.Slug {
+			return "", fmt.Errorf("%w: slug %q", ErrAlreadyExists, o.Slug)
+		}
+	}
+	id := nextNodeID()
+	o.ID = id
+	cp := *o
+	r.orgs[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) GetOrganization(_ context.Context, orgID string) (*Organization, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	o, ok := r.orgs[orgID]
+	if !ok {
+		return nil, nil
+	}
+	cp := *o
+	return &cp, nil
+}
+
+func (r *fakeRepo) GetOrganizationBySlug(_ context.Context, slug string) (*Organization, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, o := range r.orgs {
+		if o.Slug == slug {
+			cp := *o
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) ListOrganizationsForUser(_ context.Context, userID string) ([]*Organization, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*Organization
+	seen := map[string]struct{}{}
+	for _, m := range r.orgMembers {
+		if m.UserID != userID {
+			continue
+		}
+		if _, dup := seen[m.OrganizationID]; dup {
+			continue
+		}
+		seen[m.OrganizationID] = struct{}{}
+		o, ok := r.orgs[m.OrganizationID]
+		if !ok {
+			continue
+		}
+		cp := *o
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (r *fakeRepo) AddOrganizationMember(_ context.Context, m *OrganizationMembership) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if m == nil || m.OrganizationID == "" || m.UserID == "" {
+		return "", fmt.Errorf("%w: missing organization_id or user_id", ErrInvalidArgument)
+	}
+	for _, existing := range r.orgMembers {
+		if existing.OrganizationID == m.OrganizationID && existing.UserID == m.UserID {
+			return "", fmt.Errorf("%w: %s already in %s", ErrAlreadyExists, m.UserID, m.OrganizationID)
+		}
+	}
+	id := nextNodeID()
+	m.NodeID = id
+	cp := *m
+	r.orgMembers[id] = &cp
+	return id, nil
 }

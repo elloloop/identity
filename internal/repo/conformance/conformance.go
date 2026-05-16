@@ -980,6 +980,155 @@ func RunConformance(t *testing.T, driver Driver) {
 		}
 		runSweepCase(t, "WebAuthnChallenges", r.DeleteExpiredWebAuthnChallenges, seedExpired, seedUnexpired, stillPresent)
 	})
+
+	t.Run("Organization_CRUD", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+
+		ownerID := createTestUser(t, r, "owner@example.com")
+		memberID := createTestUser(t, r, "member@example.com")
+
+		// CreateOrganization with empty slug must fail.
+		if _, err := r.CreateOrganization(ctx, &service.Organization{DisplayName: "Acme", OwnerUserID: ownerID}); err == nil {
+			t.Fatal("CreateOrganization with empty slug: want error, got nil")
+		}
+
+		// Create succeeds and assigns an id.
+		orgID, err := r.CreateOrganization(ctx, &service.Organization{
+			Slug:        "acmecorp",
+			DisplayName: "Acme Corp",
+			OwnerUserID: ownerID,
+			CreatedAtMs: 1_700_000_000_000,
+			UpdatedAtMs: 1_700_000_000_000,
+		})
+		if err != nil {
+			t.Fatalf("CreateOrganization: %v", err)
+		}
+		if orgID == "" {
+			t.Fatal("CreateOrganization: empty id")
+		}
+
+		// Duplicate slug must reject with ErrAlreadyExists.
+		_, err = r.CreateOrganization(ctx, &service.Organization{
+			Slug:        "acmecorp",
+			DisplayName: "Acme Doppelganger",
+			OwnerUserID: ownerID,
+		})
+		if err == nil {
+			t.Fatal("CreateOrganization duplicate slug: want error, got nil")
+		}
+		if !errors.Is(err, service.ErrAlreadyExists) {
+			t.Fatalf("CreateOrganization duplicate slug: want ErrAlreadyExists, got %v", err)
+		}
+
+		// GetOrganization by id round-trips every field.
+		got, err := r.GetOrganization(ctx, orgID)
+		if err != nil || got == nil {
+			t.Fatalf("GetOrganization: %v, %#v", err, got)
+		}
+		if got.ID != orgID || got.Slug != "acmecorp" || got.DisplayName != "Acme Corp" || got.OwnerUserID != ownerID {
+			t.Fatalf("GetOrganization round-trip mismatch: %+v", got)
+		}
+		if got.CreatedAtMs == 0 || got.UpdatedAtMs == 0 {
+			t.Fatalf("GetOrganization timestamps unset: %+v", got)
+		}
+
+		// GetOrganizationBySlug resolves to the same row.
+		bySlug, err := r.GetOrganizationBySlug(ctx, "acmecorp")
+		if err != nil || bySlug == nil {
+			t.Fatalf("GetOrganizationBySlug: %v, %#v", err, bySlug)
+		}
+		if bySlug.ID != orgID {
+			t.Fatalf("GetOrganizationBySlug id = %q, want %q", bySlug.ID, orgID)
+		}
+
+		// Unknown slug returns (nil, nil).
+		miss, err := r.GetOrganizationBySlug(ctx, "no-such")
+		if err != nil || miss != nil {
+			t.Fatalf("GetOrganizationBySlug unknown: %v, %#v", err, miss)
+		}
+
+		// AddOrganizationMember for the owner. Stores the role.
+		ownerMemID, err := r.AddOrganizationMember(ctx, &service.OrganizationMembership{
+			OrganizationID: orgID,
+			UserID:         ownerID,
+			Role:           "admin",
+			CreatedAtMs:    1_700_000_000_000,
+		})
+		if err != nil || ownerMemID == "" {
+			t.Fatalf("AddOrganizationMember owner: %v id=%q", err, ownerMemID)
+		}
+
+		// Adding the same (org, user) again must reject.
+		_, err = r.AddOrganizationMember(ctx, &service.OrganizationMembership{
+			OrganizationID: orgID, UserID: ownerID, Role: "admin",
+		})
+		if err == nil {
+			t.Fatal("AddOrganizationMember duplicate: want error, got nil")
+		}
+		if !errors.Is(err, service.ErrAlreadyExists) {
+			t.Fatalf("AddOrganizationMember duplicate: want ErrAlreadyExists, got %v", err)
+		}
+
+		// Add the second user as a regular member.
+		if _, err := r.AddOrganizationMember(ctx, &service.OrganizationMembership{
+			OrganizationID: orgID,
+			UserID:         memberID,
+			Role:           "member",
+			CreatedAtMs:    1_700_000_000_001,
+		}); err != nil {
+			t.Fatalf("AddOrganizationMember member: %v", err)
+		}
+
+		// A second org the owner does NOT belong to. Used to confirm the
+		// listing query is scoped by user_id, not by tenant alone.
+		otherOrgID, err := r.CreateOrganization(ctx, &service.Organization{
+			Slug:        "betaco",
+			DisplayName: "Beta Co",
+			OwnerUserID: memberID,
+			CreatedAtMs: 1_700_000_001_000,
+			UpdatedAtMs: 1_700_000_001_000,
+		})
+		if err != nil {
+			t.Fatalf("CreateOrganization other: %v", err)
+		}
+		if _, err := r.AddOrganizationMember(ctx, &service.OrganizationMembership{
+			OrganizationID: otherOrgID, UserID: memberID, Role: "admin", CreatedAtMs: 1_700_000_001_000,
+		}); err != nil {
+			t.Fatalf("AddOrganizationMember other-owner: %v", err)
+		}
+
+		// ListOrganizationsForUser(owner) returns just the org owner is in.
+		ownerOrgs, err := r.ListOrganizationsForUser(ctx, ownerID)
+		if err != nil {
+			t.Fatalf("ListOrganizationsForUser owner: %v", err)
+		}
+		if len(ownerOrgs) != 1 {
+			t.Fatalf("ListOrganizationsForUser owner: len=%d, want 1; got %+v", len(ownerOrgs), ownerOrgs)
+		}
+		if ownerOrgs[0].ID != orgID {
+			t.Fatalf("ListOrganizationsForUser owner: id=%q, want %q", ownerOrgs[0].ID, orgID)
+		}
+
+		// ListOrganizationsForUser(member) returns both orgs.
+		memberOrgs, err := r.ListOrganizationsForUser(ctx, memberID)
+		if err != nil {
+			t.Fatalf("ListOrganizationsForUser member: %v", err)
+		}
+		if len(memberOrgs) != 2 {
+			t.Fatalf("ListOrganizationsForUser member: len=%d, want 2; got %+v", len(memberOrgs), memberOrgs)
+		}
+		ids := map[string]bool{memberOrgs[0].ID: true, memberOrgs[1].ID: true}
+		if !ids[orgID] || !ids[otherOrgID] {
+			t.Fatalf("ListOrganizationsForUser member: missing org; got %+v", memberOrgs)
+		}
+
+		// Unknown user returns no rows, no error.
+		none, err := r.ListOrganizationsForUser(ctx, "no-such-user")
+		if err != nil || len(none) != 0 {
+			t.Fatalf("ListOrganizationsForUser unknown: err=%v rows=%+v", err, none)
+		}
+	})
 }
 
 // uniqueHash returns a per-call unique token-hash string. Tests use

@@ -239,6 +239,28 @@ type Repository interface {
 	DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
 	DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
 	DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
+
+	// Organizations — identity-layer entity used by `mode=multi`
+	// deployments. CreateOrganization writes the Organization row and
+	// the owner's OrganizationMembership atomically (from the caller's
+	// point of view; the underlying tenant is created by the
+	// OrganizationSignup RPC before this is reached). Returns the new
+	// organisation id. Slug uniqueness is enforced.
+	//
+	// In `mode=single`, the OrganizationSignup RPC is unimplemented
+	// (per decision log §3), so these methods are exercised only by
+	// `mode=multi` deployments and by the conformance suite.
+	CreateOrganization(ctx context.Context, org *Organization) (string, error)
+	GetOrganization(ctx context.Context, orgID string) (*Organization, error)
+	GetOrganizationBySlug(ctx context.Context, slug string) (*Organization, error)
+	ListOrganizationsForUser(ctx context.Context, userID string) ([]*Organization, error)
+	// AddOrganizationMember inserts the (org, user, role) membership
+	// row. Returns ErrAlreadyExists if the user is already a member
+	// of the organisation. Used by OrganizationSignup (slice 2) and
+	// the invitation-redemption flow (slice 4) — exposed on the
+	// Repository so both call sites can rely on the same
+	// at-most-one-membership-per-pair invariant.
+	AddOrganizationMember(ctx context.Context, m *OrganizationMembership) (string, error)
 }
 
 // ErrSweepNotImplemented is returned by Repository implementations
@@ -429,6 +451,38 @@ type InvitationRecord struct {
 	ExpiresAt  int64
 	AcceptedAt int64
 	CreatedAt  int64
+}
+
+// Organization is the identity-layer organisation entity used by
+// `mode=multi` deployments. Each Organization maps 1:1 to a
+// tenant-shard-db tenant (see docs/IDENTITY.md decision log §2): the
+// Slug is reused as the tenant id when the underlying tenant is
+// created, so collisions surface as an EntDB-level error at
+// `OrganizationSignup` time.
+//
+// Identity-layer admin/role decisions live in `OrganizationMembership`
+// (separately persisted) and on the User.Role axis. `OwnerUserID` is
+// provenance — the User who created the organisation — not authority.
+type Organization struct {
+	ID          string // repository node id; opaque to callers
+	Slug        string // URL-safe; matches the tenant-shard-db tenant id
+	DisplayName string
+	OwnerUserID string
+	CreatedAtMs int64 // epoch ms
+	UpdatedAtMs int64 // epoch ms
+}
+
+// OrganizationMembership records that a User belongs to an
+// Organization. There is exactly one row per (organization, user)
+// pair within a tenant. The role here is identity's product-layer
+// role (`admin` / `member` / `guest`) and is independent of
+// tenant-shard-db's `TenantMember.Role` (see decision log §4).
+type OrganizationMembership struct {
+	NodeID         string
+	OrganizationID string
+	UserID         string
+	Role           string
+	CreatedAtMs    int64
 }
 
 // ── Sentinel errors ────────────────────────────────────────────────────

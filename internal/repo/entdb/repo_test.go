@@ -287,6 +287,7 @@ var uniqueFields = []struct {
 	{&schemapb.UserInvitation{}, "email"},
 	{&schemapb.EmailVerificationToken{}, "token_hash"},
 	{&schemapb.EmailChangeToken{}, "token_hash"},
+	{&schemapb.Organization{}, "slug"},
 }
 
 func (c *memoryEntClient) checkUniqueness(msg proto.Message) error {

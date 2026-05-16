@@ -143,7 +143,10 @@ GATEWAY_DEFAULT_TENANT_ID = <string>     # required when mode=single
   tenant in tenant-shard-db, registers the admin user globally, adds
   them as `"admin"` (or `"owner"` if upstream supports the distinction)
   of the new tenant, and creates the identity-layer admin User row
-  scoped to the new tenant.
+  scoped to the new tenant. Identity also persists an `Organization`
+  row (proto type_id 33) and an `OrganizationMembership` row
+  (type_id 34) so it can later answer "which organisations does this
+  user belong to" without re-querying the storage layer.
 - **Subsequent user signups / invitation acceptances** resolve the
   tenant from the request (see below), then add the new user as a
   `"member"` of the existing tenant.
@@ -154,6 +157,20 @@ GATEWAY_DEFAULT_TENANT_ID = <string>     # required when mode=single
   user's tenant membership before serving any RPC. Configuration knobs
   for this layer live alongside `GATEWAY_IDENTITY_MODE` once we
   implement it.
+
+`mode=multi` is being landed in feature-bounded slices on
+[#93](https://github.com/elloloop/identity/issues/93):
+
+1. **Organization foundation** *(landed)* — proto types, repo
+   methods (`CreateOrganization`, `GetOrganization`,
+   `GetOrganizationBySlug`, `ListOrganizationsForUser`,
+   `AddOrganizationMember`) across all three backends, conformance
+   suite coverage, postgres migration `0006_add_organizations`. The
+   `GATEWAY_IDENTITY_MODE` flag is **not yet wired**, and the
+   `OrganizationSignup` RPC is **not yet implemented**.
+2. `OrganizationSignup` RPC + multi-mode config flag.
+3. Per-request tenant resolution middleware.
+4. Tenant-aware invitations.
 
 ### Why a flag, not separate binaries
 
@@ -207,14 +224,27 @@ manages "can write to this scope or not."
 
 - **Proto schema** — `proto/identity/schema/schema.proto`. Declares
   every node type (`User`, `RefreshToken`, `PasswordResetToken`,
-  `PasskeyCredential`, …) with field types, indexes, uniqueness, and
-  PII tagging. Generated Go code lives in `gen/go/identity/schema/`.
+  `PasskeyCredential`, `Organization`, …) with field types, indexes,
+  uniqueness, and PII tagging. Generated Go code lives in
+  `gen/go/identity/schema/`.
 - **Repo wiring** — `internal/repo/entdb/` translates between
   identity's domain types (`service.User`, `service.RefreshTokenRecord`,
   …) and the proto messages, then issues operations against the
   tenant-shard-db SDK.
 - **tenant-shard-db** — stores opaque tuples. It does not need a copy
   of our schema (the database is schemaless by design).
+
+The `Organization` node (type_id 33) and `OrganizationMembership` node
+(type_id 34) are the identity-layer storage for `mode=multi`
+deployments. The `Organization.slug` field is the URL-safe identifier
+deployers expose to end-users (e.g. `acmecorp.example.com` → slug
+`acmecorp`); identity reuses the slug AS the tenant-id passed to
+`Admin.CreateTenant`, so slug uniqueness collisions surface at signup
+time as an EntDB error. `OrganizationMembership` is a per-tenant
+secondary index keyed on `(organization_id, user_id)` that identity
+uses for `ListOrganizationsForUser`; the tenant-shard-db `TenantMember`
+table remains the storage-layer source of truth for write
+authorisation.
 
 When v1.12+ of the Go server reimplementation lands a schema-loader
 hook, identity will register the proto-extracted schema with the
