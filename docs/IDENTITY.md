@@ -271,9 +271,10 @@ returned shutdown func:
   interval to 0 to disable the sweeper entirely (useful in tests and
   for deployers running their own GC). Deletions and errors are
   counted as `identity_sweeper_deleted_total{node_type}` and
-  `identity_sweeper_errors_total{node_type}` on `/metrics`. Backends
-  that cannot run the sweep (currently EntDB, pending the v1.12
-  migration) log a one-time skip notice and are otherwise silent.
+  `identity_sweeper_errors_total{node_type}` on `/metrics`. All three
+  shipping backends (memory, Postgres, EntDB) run the real sweep;
+  the `ErrSweepNotImplemented` soft-skip remains for any future
+  backend whose CRUD methods land ahead of its sweep.
 
 ## Deployment topology
 

@@ -29,10 +29,12 @@
 // exercise the same code path.
 //
 // Sweeper subtests (DeleteExpired*) accept either a real deletion or
-// service.ErrSweepNotImplemented; the latter lets the entdb driver
-// participate in the suite while its sweep waits on the v1.12
-// migration. A driver that returns a different error still fails the
-// suite.
+// service.ErrSweepNotImplemented. Every backend currently in tree
+// (memory, postgres, entdb) implements the real sweep; the exemption
+// is retained so a new backend can land its CRUD methods first and
+// the sweep in a follow-up PR without failing the conformance suite
+// (Rule 6 — split along feature boundaries). A driver that returns a
+// different error still fails the suite.
 package conformance
 
 import (
@@ -75,7 +77,9 @@ type Driver struct {
 //
 // Drivers that return service.ErrSweepNotImplemented on the first
 // sweep call are exempt from the data assertions but must still
-// return that exact sentinel.
+// return that exact sentinel. As of v0.7.x every shipping backend
+// implements the real sweep, so this branch is unused in practice;
+// see the package doc for the rationale on keeping it.
 func runSweepCase(t *testing.T, label string, sweep func(ctx context.Context, beforeMs int64, limit int) (int, error), seedExpired, seedUnexpired func(t *testing.T), unexpiredStillPresent func(t *testing.T) bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -801,10 +805,12 @@ func RunConformance(t *testing.T, driver Driver) {
 	})
 
 	// ── Sweeper subtests ────────────────────────────────────────────
-	// Drivers that cannot yet implement DeleteExpired* (i.e. EntDB
-	// pre-v1.12) signal that with service.ErrSweepNotImplemented and
-	// are exempted from the deletion assertions but still confirmed
-	// to return the correct sentinel.
+	// Drivers that signal service.ErrSweepNotImplemented from a
+	// DeleteExpired* method are exempted from the deletion assertions
+	// (see runSweepCase). Every backend in tree (memory, postgres,
+	// entdb) currently implements the real sweep, so the skip branch
+	// is unused — the exemption remains for any future backend that
+	// lands its CRUD methods ahead of its sweep.
 
 	t.Run("DeleteExpiredPasswordResetTokens", func(t *testing.T) {
 		ctx := context.Background()
@@ -979,6 +985,34 @@ func RunConformance(t *testing.T, driver Driver) {
 			return got != nil
 		}
 		runSweepCase(t, "WebAuthnChallenges", r.DeleteExpiredWebAuthnChallenges, seedExpired, seedUnexpired, stillPresent)
+	})
+
+	t.Run("DeleteExpired_RejectsNonPositiveLimit", func(t *testing.T) {
+		// A non-positive limit could leave the underlying delete
+		// statement with no cap. Every Repository implementation must
+		// refuse 0 and negative values rather than silently treating
+		// them as "delete all", because the sweeper goroutine relies on
+		// the per-tick batch size to keep one tenant's GC from starving
+		// every other tenant on the same backend.
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		for _, limit := range []int{0, -1} {
+			if _, err := r.DeleteExpiredPasswordResetTokens(ctx, 1, limit); err == nil {
+				t.Errorf("DeleteExpiredPasswordResetTokens limit=%d: want error, got nil", limit)
+			}
+			if _, err := r.DeleteExpiredWebAuthnChallenges(ctx, 1, limit); err == nil {
+				t.Errorf("DeleteExpiredWebAuthnChallenges limit=%d: want error, got nil", limit)
+			}
+			if _, err := r.DeleteExpiredLoginChallenges(ctx, 1, limit); err == nil {
+				t.Errorf("DeleteExpiredLoginChallenges limit=%d: want error, got nil", limit)
+			}
+			if _, err := r.DeleteExpiredEmailChangeTokens(ctx, 1, limit); err == nil {
+				t.Errorf("DeleteExpiredEmailChangeTokens limit=%d: want error, got nil", limit)
+			}
+			if _, err := r.DeleteExpiredEmailVerificationTokens(ctx, 1, limit); err == nil {
+				t.Errorf("DeleteExpiredEmailVerificationTokens limit=%d: want error, got nil", limit)
+			}
+		}
 	})
 
 	t.Run("Organization_CRUD", func(t *testing.T) {

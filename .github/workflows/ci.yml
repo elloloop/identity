@@ -261,6 +261,14 @@ jobs:
             echo "no realentdb tests yet — skipping"
           fi
 
+      - name: go test -tags=realentdb internal/repo/entdb
+        env:
+          GATEWAY_ENTDB_ADDRESS: localhost:50051
+        # The conformance suite runs in the Conformance / entdb matrix
+        # entry (.github/workflows/conformance.yml); skip it here to
+        # avoid double-billing CI compute on every PR.
+        run: go test -tags=realentdb -race -timeout=300s -skip='^TestConformance$' ./internal/repo/entdb/...
+
   # ---------------------------------------------------------------------------
   # 5c. Integration tests against a real Postgres instance (gated by build tag).
   # ---------------------------------------------------------------------------

@@ -82,6 +82,15 @@ jobs:
               -tags=integration,realentdb -race -count=5 -shuffle=on \
               -timeout=1800s ./tests/integration/...
 
+      - name: go test -tags=realentdb internal/repo/entdb
+        env:
+          GATEWAY_ENTDB_ADDRESS: localhost:50051
+        run: |
+          GO_TEST_REPORT_DIR=nightly-reports \
+            bash scripts/go-test-json.sh "Nightly entdb repository" -- \
+              -tags=realentdb -race -count=5 -shuffle=on \
+              -timeout=1200s -skip='^TestConformance$' ./internal/repo/entdb/...
+
       - name: Upload nightly report
         if: always()
         uses: actions/upload-artifact@v7

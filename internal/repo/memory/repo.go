@@ -852,16 +852,20 @@ func (r *Repo) UpdateIdentityVerificationStatus(_ context.Context, verificationI
 // ── Sweepers ──────────────────────────────────────────────────────
 //
 // Each sweeper walks its map deleting rows whose ExpiresAt is
-// strictly less than beforeMs, up to `limit` rows. limit <= 0 means
-// "no cap"; the sweeper goroutine always passes a positive limit so
-// this is a defensive convenience.
+// strictly less than beforeMs, up to `limit` rows. limit <= 0 is
+// rejected — the Repository contract requires implementations to
+// refuse an unbounded delete batch so a buggy caller cannot stall
+// the in-process map under the package lock.
 
 func (r *Repo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs int64, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("memory: DeleteExpiredWebAuthnChallenges: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for id, c := range r.passkeyChallenges {
-		if limit > 0 && n >= limit {
+		if n >= limit {
 			break
 		}
 		if c.ExpiresAt < beforeMs {
@@ -873,11 +877,14 @@ func (r *Repo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs int64
 }
 
 func (r *Repo) DeleteExpiredEmailVerificationTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("memory: DeleteExpiredEmailVerificationTokens: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for id, t := range r.emailVerifications {
-		if limit > 0 && n >= limit {
+		if n >= limit {
 			break
 		}
 		if t.ExpiresAt < beforeMs {
@@ -889,11 +896,14 @@ func (r *Repo) DeleteExpiredEmailVerificationTokens(_ context.Context, beforeMs 
 }
 
 func (r *Repo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("memory: DeleteExpiredPasswordResetTokens: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for id, t := range r.passwordResets {
-		if limit > 0 && n >= limit {
+		if n >= limit {
 			break
 		}
 		if t.ExpiresAt < beforeMs {
@@ -905,11 +915,14 @@ func (r *Repo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs int6
 }
 
 func (r *Repo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("memory: DeleteExpiredEmailChangeTokens: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for id, t := range r.emailChanges {
-		if limit > 0 && n >= limit {
+		if n >= limit {
 			break
 		}
 		if t.ExpiresAt < beforeMs {
@@ -921,11 +934,14 @@ func (r *Repo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs int64,
 }
 
 func (r *Repo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int64, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("memory: DeleteExpiredLoginChallenges: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for id, c := range r.loginChallenges {
-		if limit > 0 && n >= limit {
+		if n >= limit {
 			break
 		}
 		if c.ExpiresAt < beforeMs {
