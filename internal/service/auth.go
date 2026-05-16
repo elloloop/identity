@@ -164,6 +164,16 @@ type Repository interface {
 	FindQrLoginSession(ctx context.Context, sessionID string) (*QrLoginSessionRecord, error)
 	CreateQrLoginSession(ctx context.Context, r *QrLoginSessionRecord) (string, error)
 	UpdateQrLoginSession(ctx context.Context, nodeID string, fields map[string]any) error
+	// ConsumeQrLoginSession atomically transitions a QR login session
+	// from status="approved" to status="consumed", setting updated_at
+	// to atMs. Implementations must guarantee single-winner semantics
+	// across concurrent callers: exactly one of N replicas polling the
+	// same approved session may complete the transition; the rest see
+	// ErrQrLoginNotPending and must NOT mint tokens. This is the
+	// serialization point for the QR-login token-issuance flow in
+	// multi-replica deployments. Returns ErrQrLoginNotPending when the
+	// session does not exist or is no longer in the "approved" state.
+	ConsumeQrLoginSession(ctx context.Context, nodeID string, atMs int64) error
 
 	// TOTP credentials
 	GetTotpCredential(ctx context.Context, userID string) (*TotpCredRecord, error)

@@ -54,6 +54,14 @@ type entClient interface {
 	query(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, error)
 	create(ctx context.Context, actor string, msg proto.Message) (string, error)
 	update(ctx context.Context, actor string, nodeID string, msg proto.Message) error
+	// updateIf is the compare-and-set variant of update. It applies the
+	// patch only when the node's current value of `field` equals
+	// `equals`; on mismatch it returns errPreconditionFailed without
+	// touching the row. The serialization point for state-machine
+	// transitions where two replicas must not both win — e.g. the
+	// QR-login approved→consumed transition. Backed by the SDK's
+	// Plan.UpdateIf primitive (tenant-shard-db v1.12+).
+	updateIf(ctx context.Context, actor string, nodeID string, msg proto.Message, field string, equals any) error
 	delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error
 	// ensureUserTenantMember registers userID in the global user
 	// registry and adds it as a member of the scope's tenant. Both
@@ -70,6 +78,15 @@ type entClient interface {
 // errNotFound is returned by entClient.get when the requested node id
 // does not exist.
 var errNotFound = errors.New("entdb: not found")
+
+// errPreconditionFailed is returned by entClient.updateIf when the
+// node's current field value did not match the expected value. Callers
+// in repo.go map this to the service-layer sentinel that triggers
+// "lost the race" semantics (e.g. service.ErrQrLoginNotPending). The
+// production sdkScope path unwraps the SDK's typed
+// *entdb.PreconditionFailure into this sentinel so the upstream type
+// stays out of the Repository layer.
+var errPreconditionFailed = errors.New("entdb: precondition failed")
 
 // sdkScope adapts a *sdk.DbClient to entClient. It calls the SDK's
 // package-level typed generic functions through a per-message switch
@@ -236,6 +253,22 @@ func (s *sdkScope) update(ctx context.Context, actor string, nodeID string, msg 
 	plan := scope.Plan()
 	plan.Update(nodeID, msg)
 	if _, err := plan.Commit(ctx); err != nil {
+		return err
+	}
+	return s.waitForPatchVisible(ctx, actor, nodeID, msg)
+}
+
+func (s *sdkScope) updateIf(ctx context.Context, actor string, nodeID string, msg proto.Message, field string, equals any) error {
+	scope, err := s.scope(actor)
+	if err != nil {
+		return err
+	}
+	plan := scope.Plan()
+	plan.UpdateIf(nodeID, msg, field, equals)
+	if _, err := plan.Commit(ctx); err != nil {
+		if errors.Is(err, sdk.ErrPreconditionFailed) {
+			return errPreconditionFailed
+		}
 		return err
 	}
 	return s.waitForPatchVisible(ctx, actor, nodeID, msg)

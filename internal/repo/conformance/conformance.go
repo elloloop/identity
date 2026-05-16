@@ -523,6 +523,130 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("QrLoginSession_ConsumeCAS_HappyPathAndReplay", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "qr-consume@example.com")
+			id, err := r.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{
+				SessionID: "qr-consume-1", Status: "approved", UserID: userID,
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, UpdatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if err := r.ConsumeQrLoginSession(ctx, id, 200); err != nil {
+				t.Fatalf("first Consume: want nil, got %v", err)
+			}
+			got, err := r.FindQrLoginSession(ctx, "qr-consume-1")
+			if err != nil || got == nil {
+				t.Fatalf("Find post-consume: err=%v got=%#v", err, got)
+			}
+			if got.Status != "consumed" {
+				t.Fatalf("Status post-consume = %q, want consumed", got.Status)
+			}
+			if got.UpdatedAt != 200 {
+				t.Fatalf("UpdatedAt post-consume = %d, want 200", got.UpdatedAt)
+			}
+			if err := r.ConsumeQrLoginSession(ctx, id, 300); !errors.Is(err, service.ErrQrLoginNotPending) {
+				t.Fatalf("replay Consume: want ErrQrLoginNotPending, got %v", err)
+			}
+		})
+
+		t.Run("QrLoginSession_ConsumeCAS_RejectsNonApproved", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			// Pending session — Consume must refuse without changing state.
+			pid, err := r.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{
+				SessionID: "qr-pending", Status: "pending",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, UpdatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create pending: %v", err)
+			}
+			if err := r.ConsumeQrLoginSession(ctx, pid, 200); !errors.Is(err, service.ErrQrLoginNotPending) {
+				t.Fatalf("Consume pending: want ErrQrLoginNotPending, got %v", err)
+			}
+			pgot, _ := r.FindQrLoginSession(ctx, "qr-pending")
+			if pgot == nil || pgot.Status != "pending" {
+				t.Fatalf("pending session state changed: %#v", pgot)
+			}
+
+			// Rejected session — same: refuse, no state change.
+			userID := createTestUser(t, r, "qr-rej@example.com")
+			rid, err := r.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{
+				SessionID: "qr-rejected", Status: "rejected", UserID: userID,
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, UpdatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create rejected: %v", err)
+			}
+			if err := r.ConsumeQrLoginSession(ctx, rid, 200); !errors.Is(err, service.ErrQrLoginNotPending) {
+				t.Fatalf("Consume rejected: want ErrQrLoginNotPending, got %v", err)
+			}
+
+			// Missing session — same.
+			if err := r.ConsumeQrLoginSession(ctx, "missing-node", 200); !errors.Is(err, service.ErrQrLoginNotPending) {
+				t.Fatalf("Consume missing: want ErrQrLoginNotPending, got %v", err)
+			}
+		})
+
+		t.Run("QrLoginSession_ConsumeCAS_RaceSingleWinner", func(t *testing.T) {
+			// Drives ConsumeQrLoginSession from N goroutines against the
+			// same approved session row. Exactly one goroutine must win;
+			// all others must see ErrQrLoginNotPending. The repository is
+			// the serialization point — this test is the cross-driver
+			// equivalent of the multi-replica race the production server
+			// faces in #14.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "qr-race@example.com")
+			id, err := r.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{
+				SessionID: "qr-race-1", Status: "approved", UserID: userID,
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, UpdatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			const N = 8
+			results := make(chan error, N)
+			start := make(chan struct{})
+			for i := 0; i < N; i++ {
+				go func() {
+					<-start
+					results <- r.ConsumeQrLoginSession(ctx, id, 200)
+				}()
+			}
+			close(start)
+
+			winners := 0
+			losers := 0
+			for i := 0; i < N; i++ {
+				err := <-results
+				switch {
+				case err == nil:
+					winners++
+				case errors.Is(err, service.ErrQrLoginNotPending):
+					losers++
+				default:
+					t.Errorf("loser got unexpected error: %v", err)
+				}
+			}
+			if winners != 1 {
+				t.Fatalf("ConsumeQrLoginSession winners = %d, want 1 (losers=%d)", winners, losers)
+			}
+			if losers != N-1 {
+				t.Fatalf("ConsumeQrLoginSession losers = %d, want %d", losers, N-1)
+			}
+			got, err := r.FindQrLoginSession(ctx, "qr-race-1")
+			if err != nil || got == nil {
+				t.Fatalf("Find post-race: err=%v got=%#v", err, got)
+			}
+			if got.Status != "consumed" {
+				t.Fatalf("final status = %q, want consumed", got.Status)
+			}
+		})
+
 		t.Run("TotpCredential_CRUD", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)

@@ -118,6 +118,10 @@ func (StubRepository) UpdateQrLoginSession(context.Context, string, map[string]a
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) ConsumeQrLoginSession(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) GetTotpCredential(context.Context, string) (*TotpCredRecord, error) {
 	return nil, ErrServiceUnavailable
 }

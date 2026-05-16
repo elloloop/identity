@@ -164,10 +164,17 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 
 // ── PollQrLogin ────────────────────────────────────────────────────────
 
-// PollQrLogin polls a QR login session. When approved, issues tokens and
-// marks the session consumed. Returns (status, user, accessToken, refreshToken, error).
-// pollSecret must match the value returned by InitiateQrLogin; otherwise the
-// session appears "expired" to the caller — a stolen QR URL alone is useless.
+// PollQrLogin polls a QR login session. When approved, atomically
+// consumes the session and issues tokens. Returns (status, user,
+// accessToken, refreshToken, error). pollSecret must match the value
+// returned by InitiateQrLogin; otherwise the session appears "expired"
+// to the caller — a stolen QR URL alone is useless.
+//
+// Multi-replica correctness: the approved→consumed transition runs
+// through the repository's ConsumeQrLoginSession compare-and-set
+// primitive BEFORE tokens are minted, so only one of N concurrent
+// pollers against the same approved session can complete the flow.
+// The loser sees status="consumed" on the next poll cycle.
 func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ipAddr, userAgent string) (*PollQrResult, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
@@ -212,10 +219,22 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 		return &PollQrResult{Status: "expired"}, nil
 	}
 
-	// status == "approved" -- mint tokens and consume the session.
+	// status == "approved" -- consume atomically, then mint tokens.
 	if session.UserID == "" {
 		s.logger.Error("qr_login_approved_without_user", zap.String("node_id", session.NodeID))
 		return nil, errors.New("approved session has no user")
+	}
+
+	// Serialize approved→consumed at the repository layer. Two replicas
+	// observing the same approved session race here; exactly one wins
+	// and proceeds to mint tokens. The loser sees ErrQrLoginNotPending
+	// and surfaces "consumed" — the same shape another caller would see
+	// after the winner committed.
+	if err := s.repo.ConsumeQrLoginSession(ctx, session.NodeID, now); err != nil {
+		if errors.Is(err, ErrQrLoginNotPending) {
+			return &PollQrResult{Status: "consumed"}, nil
+		}
+		return nil, fmt.Errorf("consuming QR login session: %w", err)
 	}
 
 	user, err := s.repo.GetUser(ctx, session.UserID)
@@ -230,11 +249,6 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 	if err != nil {
 		return nil, err
 	}
-
-	// Mark consumed after issuing tokens.
-	_ = s.repo.UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
-		"status": "consumed", "updated_at": now,
-	})
 
 	s.logger.Info("qr_login_completed", zap.String("user_id", user.ID))
 

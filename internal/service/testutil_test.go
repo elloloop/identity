@@ -487,6 +487,21 @@ func (r *fakeRepo) UpdateQrLoginSession(_ context.Context, nodeID string, fields
 	return nil
 }
 
+func (r *fakeRepo) ConsumeQrLoginSession(_ context.Context, nodeID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.qrSessions[nodeID]
+	if !ok {
+		return ErrQrLoginNotPending
+	}
+	if s.Status != "approved" {
+		return ErrQrLoginNotPending
+	}
+	s.Status = "consumed"
+	s.UpdatedAt = atMs
+	return nil
+}
+
 // ── TOTP Credentials ───────────────────────────────────────────────────
 
 func (r *fakeRepo) GetTotpCredential(_ context.Context, userID string) (*TotpCredRecord, error) {
