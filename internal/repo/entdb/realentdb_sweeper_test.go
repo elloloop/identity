@@ -22,9 +22,15 @@ import (
 //
 //   - the FilterLt boundary (rows at exactly beforeMs survive — the
 //     filter is strict less-than, not less-than-or-equal),
-//   - the per-tick limit cap (the issue body specifies "respects the
-//     limit strictly"),
+//   - the per-tick limit cap (the v1.14.0 OpDeleteWhere honours
+//     Postgres DELETE … LIMIT semantics),
 //   - the idempotent re-sweep on an already-clean partition.
+//
+// tenant-shard-db v1.14.0's OpDeleteWhere primitive (#540) does not
+// return a deleted-row count, so the assertions infer "rows deleted"
+// from the rows that survive each sweep. The boundary and unexpired
+// checks are the load-bearing assertions for the strict-< filter and
+// the limit cap.
 //
 // Gated on GATEWAY_ENTDB_ADDRESS like every other real-EntDB test in
 // this package. The Conformance / entdb CI matrix entry exports that
@@ -80,15 +86,31 @@ func TestRealEntDB_SweeperEndToEnd(t *testing.T) {
 			TokenHash: "prt-keep", UserID: uid, ExpiresAt: 100_000, CreatedAt: 500,
 		}))
 
-		// limit=2 deletes exactly 2 of the 3 expired rows.
-		n, err := repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 2)
-		require.NoError(t, err)
-		require.Equal(t, 2, n, "limit=2 must delete exactly 2 rows")
+		// First sweep with limit=2 should leave one of the three
+		// expired rows behind. We can't query the count of expired
+		// rows directly (the SDK doesn't expose a COUNT helper), so
+		// the assertion is "at least one of prt-exp-0/1/2 still
+		// exists" after the limit-2 sweep, AND boundary + unexpired
+		// survive.
+		require.NoError(t, repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 2))
+
+		stillThere := 0
+		for i := 0; i < 3; i++ {
+			got, err := repo.FindPasswordResetTokenByHash(ctx, fmt.Sprintf("prt-exp-%d", i))
+			require.NoError(t, err)
+			if got != nil {
+				stillThere++
+			}
+		}
+		require.Equal(t, 1, stillThere, "limit=2 sweep must leave exactly one expired row behind")
 
 		// Second sweep at the same beforeMs cleans up the third.
-		n, err = repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 10)
-		require.NoError(t, err)
-		require.Equal(t, 1, n, "remaining expired row must be deleted")
+		require.NoError(t, repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 10))
+		for i := 0; i < 3; i++ {
+			got, err := repo.FindPasswordResetTokenByHash(ctx, fmt.Sprintf("prt-exp-%d", i))
+			require.NoError(t, err)
+			require.Nil(t, got, "expired row prt-exp-%d should be gone after full sweep", i)
+		}
 
 		// Boundary + unexpired rows survive.
 		got, err := repo.FindPasswordResetTokenByHash(ctx, "prt-edge")
@@ -98,10 +120,11 @@ func TestRealEntDB_SweeperEndToEnd(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, got, "unexpired row was incorrectly deleted")
 
-		// Idempotent re-sweep.
-		n, err = repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 10)
+		// Idempotent re-sweep — boundary + unexpired still survive.
+		require.NoError(t, repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 10))
+		got, err = repo.FindPasswordResetTokenByHash(ctx, "prt-edge")
 		require.NoError(t, err)
-		require.Equal(t, 0, n)
+		require.NotNil(t, got)
 	})
 
 	t.Run("PasskeyChallenges", func(t *testing.T) {
@@ -122,9 +145,7 @@ func TestRealEntDB_SweeperEndToEnd(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		n, err := repo.DeleteExpiredWebAuthnChallenges(ctx, 5_000, 10)
-		require.NoError(t, err)
-		require.Equal(t, 2, n)
+		require.NoError(t, repo.DeleteExpiredWebAuthnChallenges(ctx, 5_000, 10))
 
 		got, err := repo.GetPasskeyChallenge(ctx, keepID)
 		require.NoError(t, err)
@@ -149,13 +170,16 @@ func TestRealEntDB_SweeperEndToEnd(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		n, err := repo.DeleteExpiredLoginChallenges(ctx, 5_000, 10)
-		require.NoError(t, err)
-		require.Equal(t, 2, n)
+		require.NoError(t, repo.DeleteExpiredLoginChallenges(ctx, 5_000, 10))
 
 		got, err := repo.GetLoginChallengeByChallengeID(ctx, "lc-keep")
 		require.NoError(t, err)
 		require.NotNil(t, got, "unexpired login challenge was incorrectly deleted")
+		for i := 0; i < 2; i++ {
+			got, err := repo.GetLoginChallengeByChallengeID(ctx, fmt.Sprintf("lc-exp-%d", i))
+			require.NoError(t, err)
+			require.Nil(t, got, "expired login challenge %d should be gone", i)
+		}
 	})
 
 	t.Run("EmailVerificationTokens", func(t *testing.T) {
@@ -173,13 +197,16 @@ func TestRealEntDB_SweeperEndToEnd(t *testing.T) {
 			ExpiresAt: 100_000, CreatedAt: 500,
 		}))
 
-		n, err := repo.DeleteExpiredEmailVerificationTokens(ctx, 5_000, 10)
-		require.NoError(t, err)
-		require.Equal(t, 2, n)
+		require.NoError(t, repo.DeleteExpiredEmailVerificationTokens(ctx, 5_000, 10))
 
 		got, err := repo.FindEmailVerificationTokenByHash(ctx, "evt-keep")
 		require.NoError(t, err)
 		require.NotNil(t, got, "unexpired email verification token was incorrectly deleted")
+		for i := 0; i < 2; i++ {
+			got, err := repo.FindEmailVerificationTokenByHash(ctx, fmt.Sprintf("evt-exp-%d", i))
+			require.NoError(t, err)
+			require.Nil(t, got, "expired evt-exp-%d should be gone", i)
+		}
 	})
 
 	t.Run("EmailChangeTokens", func(t *testing.T) {
@@ -196,19 +223,22 @@ func TestRealEntDB_SweeperEndToEnd(t *testing.T) {
 			ExpiresAt: 100_000, CreatedAt: 500,
 		}))
 
-		n, err := repo.DeleteExpiredEmailChangeTokens(ctx, 5_000, 10)
-		require.NoError(t, err)
-		require.Equal(t, 2, n)
+		require.NoError(t, repo.DeleteExpiredEmailChangeTokens(ctx, 5_000, 10))
 
 		got, err := repo.FindEmailChangeTokenByHash(ctx, "ect-keep")
 		require.NoError(t, err)
 		require.NotNil(t, got, "unexpired email change token was incorrectly deleted")
+		for i := 0; i < 2; i++ {
+			got, err := repo.FindEmailChangeTokenByHash(ctx, fmt.Sprintf("ect-exp-%d", i))
+			require.NoError(t, err)
+			require.Nil(t, got, "expired ect-exp-%d should be gone", i)
+		}
 	})
 
 	t.Run("RejectsNonPositiveLimit", func(t *testing.T) {
-		_, err := repo.DeleteExpiredPasswordResetTokens(ctx, 1, 0)
+		err := repo.DeleteExpiredPasswordResetTokens(ctx, 1, 0)
 		require.Error(t, err, "limit=0 must error so a buggy caller does not block on an unbounded delete")
-		_, err = repo.DeleteExpiredLoginChallenges(ctx, 1, -5)
+		err = repo.DeleteExpiredLoginChallenges(ctx, 1, -5)
 		require.Error(t, err)
 	})
 }
