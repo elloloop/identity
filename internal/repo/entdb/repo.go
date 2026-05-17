@@ -1966,22 +1966,26 @@ func (r *entRepository) RevokeSessionsForUser(ctx context.Context, userID string
 	}
 	// tenant-shard-db v1.14.0's SEC-4 (#530) caps the query at 1000
 	// rows per call. Sessions are not deleted by revocation (they
-	// transition to revoked_at_ms != 0 and stay), so we cannot drain
-	// the result set by mutation. Instead we loop until an iteration
-	// finds zero un-revoked rows in the cap-sized window. In the
-	// common case a user has <10 sessions and a single iteration is
-	// enough; the loop only meaningfully iterates if a single user
-	// has accumulated >1000 sessions, which would itself be worth
-	// investigating.
+	// transition to revoked_at_ms != 0 and stay), so a naive
+	// "query all, mutate, re-query" loop sees already-revoked rows
+	// occupying the cap-sized window and never reaches the unprocessed
+	// tail. Filter the query to only return rows where
+	// revoked_at_ms == 0; each iteration drains a fresh batch of
+	// un-revoked sessions until the predicate matches nothing.
 	for i := 0; i < bulkDrainMaxIterations; i++ {
-		rows, err := r.client.query(ctx, actorStr(userID), &schemapb.Session{}, map[string]any{"user_id": userID})
+		rows, err := r.client.query(ctx, actorStr(userID), &schemapb.Session{}, map[string]any{
+			"user_id":       userID,
+			"revoked_at_ms": int64(0),
+		})
 		if err != nil {
 			return fmt.Errorf("repo: RevokeSessionsForUser query: %w", err)
 		}
-		revoked := 0
+		if len(rows) == 0 {
+			return nil
+		}
 		for _, row := range rows {
 			rec := sessionFromProto(row.NodeID, row.Message.(*schemapb.Session))
-			if rec == nil || rec.RevokedAtMs != 0 {
+			if rec == nil {
 				continue
 			}
 			patch := &schemapb.Session{RevokedAtMs: atMs}
@@ -1991,10 +1995,6 @@ func (r *entRepository) RevokeSessionsForUser(ctx context.Context, userID string
 				}
 				return fmt.Errorf("repo: RevokeSessionsForUser update: %w", err)
 			}
-			revoked++
-		}
-		if revoked == 0 {
-			return nil
 		}
 	}
 	return fmt.Errorf("repo: RevokeSessionsForUser: exceeded %d-iteration drain ceiling for user %q", bulkDrainMaxIterations, userID)

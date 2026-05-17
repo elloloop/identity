@@ -1111,3 +1111,90 @@ func TestSEC4_DeleteRefreshTokensForUser_DrainsBeyondQueryCap(t *testing.T) {
 		t.Fatalf("after drain: %d refresh tokens left, want 0", remaining)
 	}
 }
+
+// TestSEC4_DeleteTotpCredentialsForUser_DrainsBeyondQueryCap
+// regresses the drain pattern for the TOTP cleanup path. Same shape
+// as TestSEC4_DeleteRefreshTokensForUser_DrainsBeyondQueryCap; see
+// that test's docstring for the SEC-4 rationale.
+func TestSEC4_DeleteTotpCredentialsForUser_DrainsBeyondQueryCap(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := newMemoryEntClient()
+	capped := &cappedQueryClient{memoryEntClient: mem, cap: 3}
+	repo := &entRepository{client: capped, tenantID: "t"}
+
+	for i := 0; i < 7; i++ {
+		mem.store[fmt.Sprintf("totp-%02d", i)] = storedNode{msg: &schemapb.TotpCredential{
+			UserId: "u-1",
+		}}
+	}
+
+	if err := repo.DeleteTotpCredentialsForUser(ctx, "u-1"); err != nil {
+		t.Fatalf("DeleteTotpCredentialsForUser: %v", err)
+	}
+	for id, n := range mem.store {
+		if _, ok := n.msg.(*schemapb.TotpCredential); ok {
+			t.Fatalf("after drain: totp credential %q still present", id)
+		}
+	}
+}
+
+// TestSEC4_DeleteRecoveryCodesForUser_DrainsBeyondQueryCap regresses
+// the drain pattern for the recovery-codes cleanup path.
+func TestSEC4_DeleteRecoveryCodesForUser_DrainsBeyondQueryCap(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := newMemoryEntClient()
+	capped := &cappedQueryClient{memoryEntClient: mem, cap: 3}
+	repo := &entRepository{client: capped, tenantID: "t"}
+
+	for i := 0; i < 8; i++ {
+		mem.store[fmt.Sprintf("rc-%02d", i)] = storedNode{msg: &schemapb.RecoveryCode{
+			UserId: "u-1",
+		}}
+	}
+
+	if err := repo.DeleteRecoveryCodesForUser(ctx, "u-1"); err != nil {
+		t.Fatalf("DeleteRecoveryCodesForUser: %v", err)
+	}
+	for id, n := range mem.store {
+		if _, ok := n.msg.(*schemapb.RecoveryCode); ok {
+			t.Fatalf("after drain: recovery code %q still present", id)
+		}
+	}
+}
+
+// TestSEC4_RevokeSessionsForUser_DrainsBeyondQueryCap regresses the
+// drain pattern for session revocation. Unlike the three delete-for-
+// user paths, RevokeSessionsForUser drives convergence by mutating
+// rows from RevokedAtMs=0 to a non-zero value. The drain loop exits
+// when an iteration finds zero un-revoked rows in the cap-sized
+// query window. Seed more rows than the cap and assert every one
+// ends up revoked.
+func TestSEC4_RevokeSessionsForUser_DrainsBeyondQueryCap(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := newMemoryEntClient()
+	capped := &cappedQueryClient{memoryEntClient: mem, cap: 3}
+	repo := &entRepository{client: capped, tenantID: "t"}
+
+	for i := 0; i < 7; i++ {
+		mem.store[fmt.Sprintf("sess-%02d", i)] = storedNode{msg: &schemapb.Session{
+			Sid:    fmt.Sprintf("sid-%02d", i),
+			UserId: "u-1",
+		}}
+	}
+
+	if err := repo.RevokeSessionsForUser(ctx, "u-1", 9_999); err != nil {
+		t.Fatalf("RevokeSessionsForUser: %v", err)
+	}
+	for id, n := range mem.store {
+		s, ok := n.msg.(*schemapb.Session)
+		if !ok {
+			continue
+		}
+		if s.GetRevokedAtMs() == 0 {
+			t.Fatalf("after drain: session %q still has revoked_at_ms=0", id)
+		}
+	}
+}
