@@ -391,6 +391,409 @@ func TestSessionAuthMiddleware_TokenWithoutSIDPassesThroughInSessionMode(t *test
 	}
 }
 
+// ── Nil-safety / wrapper paths ────────────────────────────────────────
+
+func TestSessionCache_NilSource_ReturnsNil(t *testing.T) {
+	t.Parallel()
+	if c := NewSessionCache(nil, time.Minute, nil); c != nil {
+		t.Fatalf("NewSessionCache(nil) = %v, want nil", c)
+	}
+}
+
+func TestSessionMetrics_NilRegistererUsesIsolatedRegistry(t *testing.T) {
+	t.Parallel()
+	m, err := NewSessionMetrics(nil)
+	if err != nil {
+		t.Fatalf("NewSessionMetrics(nil): %v", err)
+	}
+	if m == nil {
+		t.Fatal("NewSessionMetrics(nil) returned nil metrics")
+	}
+}
+
+func TestSessionMetrics_DuplicateRegistrationErrors(t *testing.T) {
+	t.Parallel()
+	reg := prometheus.NewRegistry()
+	if _, err := NewSessionMetrics(reg); err != nil {
+		t.Fatalf("first NewSessionMetrics: %v", err)
+	}
+	if _, err := NewSessionMetrics(reg); err == nil {
+		t.Fatal("second NewSessionMetrics: want collision error, got nil")
+	}
+}
+
+func TestSessionCache_NilReceiverIsSafe(t *testing.T) {
+	t.Parallel()
+	var c *SessionCache
+	// Lookup on a nil cache is the "session lookup disabled" path —
+	// every sid is treated as Active so mode=ttl wiring stays
+	// no-op-friendly.
+	state, err := c.Lookup(context.Background(), "any")
+	if err != nil || state != SessionStateActive {
+		t.Fatalf("nil-receiver Lookup: state=%v err=%v", state, err)
+	}
+	c.Invalidate("any") // must not panic
+	c.InvalidateAll()
+}
+
+func TestSessionCache_InvalidateAllDropsEveryEntry(t *testing.T) {
+	t.Parallel()
+	src := newStubLookup()
+	src.put(&service.SessionRecord{SID: "s1", UserID: "u1"})
+	src.put(&service.SessionRecord{SID: "s2", UserID: "u1"})
+	cache := NewSessionCache(src, time.Minute, nil)
+	// Populate both entries.
+	if _, err := cache.Lookup(context.Background(), "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Lookup(context.Background(), "s2"); err != nil {
+		t.Fatal(err)
+	}
+	cache.InvalidateAll()
+	src.revoke("s1", 100)
+	src.revoke("s2", 100)
+	// Both must re-read the source and observe Revoked.
+	state, _ := cache.Lookup(context.Background(), "s1")
+	if state != SessionStateRevoked {
+		t.Fatalf("s1 after InvalidateAll: state=%v, want Revoked", state)
+	}
+	state, _ = cache.Lookup(context.Background(), "s2")
+	if state != SessionStateRevoked {
+		t.Fatalf("s2 after InvalidateAll: state=%v, want Revoked", state)
+	}
+}
+
+func TestRevokingSessionRepository_InvalidatesAllOnRevokeForUser(t *testing.T) {
+	t.Parallel()
+	src := newStubLookup()
+	src.put(&service.SessionRecord{SID: "s1", UserID: "u1"})
+	src.put(&service.SessionRecord{SID: "s2", UserID: "u1"})
+	cache := NewSessionCache(src, time.Minute, nil)
+	wrap := WrapSessionRepository(&fakeRepo{stub: src}, cache)
+
+	// Warm both entries.
+	_, _ = cache.Lookup(context.Background(), "s1")
+	_, _ = cache.Lookup(context.Background(), "s2")
+	if err := wrap.RevokeSessionsForUser(context.Background(), "u1", 200); err != nil {
+		t.Fatal(err)
+	}
+	// Both sessions now revoked, and the cache was invalidated so the
+	// next lookup sees the Revoked state immediately.
+	state, _ := cache.Lookup(context.Background(), "s1")
+	if state != SessionStateRevoked {
+		t.Fatalf("s1 after RevokeForUser: state=%v, want Revoked", state)
+	}
+}
+
+func TestWrapSessionRepository_NilCacheIsIdentity(t *testing.T) {
+	t.Parallel()
+	r := &fakeRepo{stub: newStubLookup()}
+	got := WrapSessionRepository(r, nil)
+	if got != r {
+		t.Fatalf("WrapSessionRepository(_, nil) wrapped instead of pass-through")
+	}
+}
+
+func TestSessionAuthMiddleware_NilCacheFallsBackToAuthMiddleware(t *testing.T) {
+	// The contract: passing cache=nil returns the regular AuthMiddleware
+	// so the mode=ttl wiring keeps zero overhead. The behaviour is
+	// already covered above; this test just exercises the early return.
+	t.Parallel()
+	kr, _ := newTestKeyRing(t)
+	mw := SessionAuthMiddleware(kr, "", "", false, nil)
+	if mw == nil {
+		t.Fatal("nil-cache middleware = nil")
+	}
+}
+
+func TestSessionAuthMiddleware_MissingAuthorizationHeader(t *testing.T) {
+	t.Parallel()
+	kr, _ := newTestKeyRing(t)
+	src := newStubLookup()
+	cache := NewSessionCache(src, time.Minute, nil)
+	mw := SessionAuthMiddleware(kr, "", "", false, cache)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next called without auth header")
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/Echo", nil)
+	rw := httptest.NewRecorder()
+	mw.ServeHTTP(rw, req)
+	if rw.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rw.Code)
+	}
+}
+
+func TestSessionAuthMiddleware_InvalidToken(t *testing.T) {
+	t.Parallel()
+	kr, _ := newTestKeyRing(t)
+	src := newStubLookup()
+	cache := NewSessionCache(src, time.Minute, nil)
+	mw := SessionAuthMiddleware(kr, "", "", false, cache)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next called with invalid token")
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/Echo", nil)
+	req.Header.Set("Authorization", "Bearer not-a-jwt")
+	rw := httptest.NewRecorder()
+	mw.ServeHTTP(rw, req)
+	if rw.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rw.Code)
+	}
+}
+
+func TestSessionAuthMiddleware_LookupErrorReturns503(t *testing.T) {
+	t.Parallel()
+	kr, kid := newTestKeyRing(t)
+	src := newStubLookup()
+	src.err = errors.New("transient repo error")
+	cache := NewSessionCache(src, time.Minute, nil)
+	mw := SessionAuthMiddleware(kr, "tenant-1", "", false, cache)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next called on lookup error")
+	}))
+	token := mintTokenWithSID(t, kr, kid, "u1", "tenant-1", "sid-x")
+	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/Echo", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rw := httptest.NewRecorder()
+	mw.ServeHTTP(rw, req)
+	if rw.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rw.Code)
+	}
+}
+
+func TestSessionAuthMiddleware_ExemptPath_RevokedSessionStripsHeader(t *testing.T) {
+	t.Parallel()
+	kr, kid := newTestKeyRing(t)
+	src := newStubLookup()
+	src.put(&service.SessionRecord{SID: "sid-revoked", UserID: "u1", RevokedAtMs: 200})
+	cache := NewSessionCache(src, time.Minute, nil)
+
+	var seenUser string
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seenUser = r.Header.Get("X-Authenticated-User-Id")
+	})
+	mw := SessionAuthMiddleware(kr, "tenant-1", "", false, cache)(next)
+
+	token := mintTokenWithSID(t, kr, kid, "u1", "tenant-1", "sid-revoked")
+	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rw := httptest.NewRecorder()
+	mw.ServeHTTP(rw, req)
+
+	if seenUser != "" {
+		t.Fatalf("revoked session on exempt path leaked user id: %q", seenUser)
+	}
+	if rw.Code != http.StatusOK {
+		t.Fatalf("exempt path returned %d, want 200 (exempt paths never reject)", rw.Code)
+	}
+}
+
+func TestSessionAuthMiddleware_ExemptPath_ActiveSessionSetsHeader(t *testing.T) {
+	t.Parallel()
+	kr, kid := newTestKeyRing(t)
+	src := newStubLookup()
+	src.put(&service.SessionRecord{SID: "sid-ok", UserID: "u1"})
+	cache := NewSessionCache(src, time.Minute, nil)
+	var seenUser string
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seenUser = r.Header.Get("X-Authenticated-User-Id")
+	})
+	mw := SessionAuthMiddleware(kr, "tenant-1", "", false, cache)(next)
+	token := mintTokenWithSID(t, kr, kid, "u1", "tenant-1", "sid-ok")
+	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rw := httptest.NewRecorder()
+	mw.ServeHTTP(rw, req)
+	if seenUser != "u1" {
+		t.Fatalf("exempt + active session: header = %q, want u1", seenUser)
+	}
+}
+
+func TestSessionAuthMiddleware_ExemptPath_TokenWithoutSIDSetsHeader(t *testing.T) {
+	t.Parallel()
+	kr, kid := newTestKeyRing(t)
+	src := newStubLookup()
+	cache := NewSessionCache(src, time.Minute, nil)
+	var seenUser string
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seenUser = r.Header.Get("X-Authenticated-User-Id")
+	})
+	mw := SessionAuthMiddleware(kr, "tenant-1", "", false, cache)(next)
+	token := mintTokenWithSID(t, kr, kid, "u1", "tenant-1", "")
+	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rw := httptest.NewRecorder()
+	mw.ServeHTTP(rw, req)
+	if seenUser != "u1" {
+		t.Fatalf("exempt + no-sid: header = %q, want u1", seenUser)
+	}
+}
+
+// TestSessionCache_SlowPathConcurrentRefiller covers the
+// "concurrent refiller already won the lock" branch in Lookup:
+// goroutine B enters the slow path, takes the per-sid mutex, and
+// the deadline is already in the future because goroutine A
+// populated the entry while B was queueing for the lock.
+//
+// We can't reliably reproduce that interleaving from outside Lookup,
+// so this test wires the conditions directly: an entry is
+// hand-populated with a future deadline, the Load fast path is then
+// stale (a stale-deadline raw.(*cacheEntry) on the first Load), and
+// Lookup re-enters the slow path. The re-check in the slow path then
+// observes the fresh deadline that the prior population put there.
+//
+// Wiring detail: we expire the fast-path entry by stamping a
+// deadline that is in the past from the perspective of the fast
+// path's first `entry.deadline.After(now)` (using start time = now)
+// but in the future from the slow path's `entry.deadline.After(c.now())`
+// (called with the cache's now func). The cache uses time.Now under
+// the hood, so we can't easily override the clock — but we CAN
+// pre-populate the entry with a future deadline AND a stale fast-path
+// load by inserting into the entries sync.Map and calling Lookup with
+// a deadline that the fast path missed because `now` was captured
+// before c.now() advanced. That's flaky in practice; for coverage
+// we use the simpler equivalent: drive enough concurrent goroutines
+// that the scheduler interleaves them past the fast path. With
+// GOMAXPROCS=N goroutines, the second Lookup hits the slow path
+// re-check on every run when the cache is empty + just populated.
+func TestSessionCache_SlowPathConcurrentRefiller(t *testing.T) {
+	t.Parallel()
+	src := newStubLookup()
+	src.put(&service.SessionRecord{SID: "race", UserID: "u1"})
+	cache := NewSessionCache(src, time.Minute, nil)
+
+	// Drive N goroutines concurrently against the same sid with an
+	// empty cache. Exactly one wins the LoadOrStore "create" path; the
+	// rest take the per-sid lock after that goroutine populates the
+	// deadline and observe the now-future deadline on the re-check.
+	const N = 32
+	results := make(chan SessionState, N)
+	start := make(chan struct{})
+	for i := 0; i < N; i++ {
+		go func() {
+			<-start
+			state, _ := cache.Lookup(context.Background(), "race")
+			results <- state
+		}()
+	}
+	close(start)
+	for i := 0; i < N; i++ {
+		if state := <-results; state != SessionStateActive {
+			t.Errorf("goroutine %d saw state=%v, want Active", i, state)
+		}
+	}
+	// The repo was hit exactly once across the race.
+	if got := src.reads.Load(); got != 1 {
+		t.Fatalf("concurrent slow path reads = %d, want 1", got)
+	}
+}
+
+// TestSessionCache_StaleFastPathHitsSlowPathRecheck exercises the
+// "slow-path re-check finds a valid deadline" branch in Lookup. The
+// branch is normally hit when goroutine A populates an entry while
+// goroutine B was queueing for the per-sid mutex; rather than
+// reproduce that interleaving by hand, we drive Lookup against an
+// entry whose deadline equals the fast-path snapshot (`now`) — which
+// fails the `After(now)` predicate — and then stub c.now so the
+// slow-path re-check is called with a strictly earlier moment.
+// The deadline IS After that earlier moment so the re-check returns
+// the cached state without reading the repo.
+func TestSessionCache_StaleFastPathHitsSlowPathRecheck(t *testing.T) {
+	t.Parallel()
+	src := newStubLookup()
+	src.put(&service.SessionRecord{SID: "stale", UserID: "u1"})
+	cache := NewSessionCache(src, time.Minute, nil)
+
+	t0 := time.Now()
+	// Stubbed clock:
+	//   call 1 (start of Lookup)               → t0
+	//   call 2 (slow-path entry.deadline check) → t0 minus 1ms
+	// Real time never moves backwards, but the slow-path re-check is
+	// called against c.now() after the lock acquisition; in the real
+	// world that's monotonically later than the fast-path snapshot
+	// and the re-check serves a fresher deadline that another
+	// goroutine just wrote. We simulate the equivalent state by
+	// returning a c.now() that PRE-dates the entry's deadline.
+	var calls int
+	cache.now = func() time.Time {
+		calls++
+		switch calls {
+		case 1:
+			return t0
+		case 2:
+			return t0.Add(-time.Millisecond)
+		default:
+			return t0.Add(time.Minute)
+		}
+	}
+
+	// Hand-write the cache entry so the fast path fails the
+	// After(now=t0) predicate (deadline == t0) and the slow path's
+	// re-check (now=t0-1ms) succeeds (deadline t0 IS After t0-1ms).
+	cache.entries.Store("stale", &cacheEntry{
+		rec:      &service.SessionRecord{SID: "stale"},
+		deadline: t0,
+	})
+
+	state, err := cache.Lookup(context.Background(), "stale")
+	if err != nil || state != SessionStateActive {
+		t.Fatalf("Lookup(stale): state=%v err=%v", state, err)
+	}
+	// The slow-path re-check served from the existing entry — no repo
+	// read should have happened.
+	if got := src.reads.Load(); got != 0 {
+		t.Fatalf("StaleFastPath unexpected reads = %d, want 0", got)
+	}
+}
+
+// TestOutcomeLabel covers the cache-state → metric-label mapping
+// exhaustively. The middleware reads this from both hit and miss
+// paths, so a wrong arm shows up as a mis-bucketed Prometheus label
+// rather than as a test failure — exercise every branch directly.
+func TestOutcomeLabel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		state SessionState
+		err   error
+		hit   bool
+		want  string
+	}{
+		{"error", SessionStateActive, errors.New("boom"), false, "error"},
+		{"hit_active", SessionStateActive, nil, true, "hit"},
+		{"hit_revoked", SessionStateRevoked, nil, true, "hit_revoked"},
+		{"miss_active", SessionStateActive, nil, false, "miss"},
+		{"miss_revoked", SessionStateRevoked, nil, false, "miss_revoked"},
+		{"missing", SessionStateMissing, nil, false, "missing"},
+		{"hit_missing", SessionStateMissing, nil, true, "missing"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := outcomeLabel(c.state, c.err, c.hit); got != c.want {
+				t.Errorf("outcomeLabel(%v, %v, %v) = %q, want %q", c.state, c.err, c.hit, got, c.want)
+			}
+		})
+	}
+}
+
+func TestStateFromEntry(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		e    *cacheEntry
+		want SessionState
+	}{
+		{"missing", &cacheEntry{missing: true}, SessionStateMissing},
+		{"revoked", &cacheEntry{rec: &service.SessionRecord{RevokedAtMs: 1}}, SessionStateRevoked},
+		{"active", &cacheEntry{rec: &service.SessionRecord{}}, SessionStateActive},
+		{"empty", &cacheEntry{}, SessionStateActive},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := stateFromEntry(c.e); got != c.want {
+				t.Errorf("stateFromEntry(%+v) = %v, want %v", c.e, got, c.want)
+			}
+		})
+	}
+}
+
 // ── Benchmarks ────────────────────────────────────────────────────────
 
 // BenchmarkSessionLookup_WarmCache measures the warm-cache hot path.

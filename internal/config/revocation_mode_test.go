@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
 // TestRevocationModeEnv_DefaultIsTTL — unset env falls back to ttl,
@@ -61,5 +62,52 @@ func TestRevocationModeEnv_NegativeCacheTTL(t *testing.T) {
 	cfg.SessionCacheTTLSeconds = -1
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate must reject negative SessionCacheTTLSeconds")
+	}
+}
+
+// TestRevocationModeEnv_UnrecognisedFallsBack is the regression for
+// revocationModeFromEnv's default branch: garbage in env yields the
+// safe default rather than crashing. Validate() then catches the
+// configured-but-invalid case from a directly constructed Config.
+func TestRevocationModeEnv_UnrecognisedFallsBack(t *testing.T) {
+	t.Setenv("GATEWAY_REVOCATION_MODE", "garbage")
+	cfg := Load()
+	if cfg.RevocationMode != RevocationModeTTL {
+		t.Fatalf("garbage env → mode = %q, want default %q", cfg.RevocationMode, RevocationModeTTL)
+	}
+}
+
+// TestValidate_EmptyModeDefaultsToTTL exercises the empty-mode arm
+// inside Validate so a directly-constructed Config (test, scaffold)
+// still resolves to the documented default rather than failing
+// validation on an unset enum.
+func TestValidate_EmptyModeDefaultsToTTL(t *testing.T) {
+	cfg := &Config{
+		JWTExpirySeconds: 900,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate empty mode: %v", err)
+	}
+	if cfg.RevocationMode != RevocationModeTTL {
+		t.Fatalf("Validate did not default empty mode to ttl: %q", cfg.RevocationMode)
+	}
+}
+
+// TestSessionCacheTTL_RoundTrip covers the Duration accessor used
+// by the middleware wiring.
+func TestSessionCacheTTL_RoundTrip(t *testing.T) {
+	cases := []struct {
+		secs int
+		want time.Duration
+	}{
+		{0, 0},
+		{60, 60 * time.Second},
+		{300, 5 * time.Minute},
+	}
+	for _, tc := range cases {
+		cfg := &Config{SessionCacheTTLSeconds: tc.secs}
+		if got := cfg.SessionCacheTTL(); got != tc.want {
+			t.Errorf("SessionCacheTTL(%d) = %v, want %v", tc.secs, got, tc.want)
+		}
 	}
 }

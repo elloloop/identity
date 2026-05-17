@@ -43,7 +43,7 @@ func TestModeTTL_DefaultBehaviour(t *testing.T) {
 	require.NotEmpty(t, access)
 	require.NotEmpty(t, refresh)
 
-	claims, err := jwt.VerifyAccessToken(access, h.KeyRing, "", "", false)
+	claims, err := jwt.VerifyAccessToken(access, h.Signer, "", "", false)
 	require.NoError(t, err)
 	require.Empty(t, claims.SID, "mode=ttl must not put a sid on the access token")
 
@@ -83,7 +83,7 @@ func TestModeSession_RevokeKillsAccessToken(t *testing.T) {
 	require.NoError(t, err)
 	access := resp.Msg.AccessToken
 
-	claims, err := jwt.VerifyAccessToken(access, h.KeyRing, "", "", false)
+	claims, err := jwt.VerifyAccessToken(access, h.Signer, "", "", false)
 	require.NoError(t, err)
 	require.NotEmpty(t, claims.SID, "mode=session must put a sid on the access token")
 
@@ -128,7 +128,7 @@ func TestModeSession_StrictModeReadsRepoEachRequest(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	claims, err := jwt.VerifyAccessToken(access, h.KeyRing, "", "", false)
+	claims, err := jwt.VerifyAccessToken(access, h.Signer, "", "", false)
 	require.NoError(t, err)
 	require.NoError(t, h.Repo.RevokeSession(ctx, claims.SID, 1))
 

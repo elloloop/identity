@@ -216,3 +216,40 @@ func TestConfig_Validate_UnknownMode(t *testing.T) {
 	cfg.RevocationMode = "bogus"
 	require.Error(t, cfg.Validate())
 }
+
+// TestModeSession_IssueTokens_CreateSessionError covers the error
+// path on the session-mint side: a transient CreateSession failure
+// fails the whole token-issue path so we never hand the client an
+// access token whose sid has no backing row.
+func TestModeSession_IssueTokens_CreateSessionError(t *testing.T) {
+	repo := newErrorRepo()
+	svc := newTestAuthServiceErr(t, repo)
+	svc.cfg.RevocationMode = config.RevocationModeSession
+	repo.failCreateSession = true
+
+	_, err := svc.PasswordSignup(context.Background(), "create-fail@example.com", strongPW, "", "")
+	require.Error(t, err)
+}
+
+// TestModeSession_RevokeFailureIsBestEffort: a RevokeSessionsForUser
+// error is logged but does not propagate; the caller has already
+// invalidated refresh tokens so the worst case is the access-token
+// validity stretches to the cache TTL (not a complete bypass).
+// Drives the failure path of revokeUserSessionsIfModeSession.
+func TestModeSession_RevokeFailureIsBestEffort(t *testing.T) {
+	repo := newErrorRepo()
+	svc := newTestAuthServiceErr(t, repo)
+	svc.cfg.RevocationMode = config.RevocationModeSession
+
+	// Seed a user and a session.
+	_, err := svc.PasswordSignup(context.Background(), "revoke-fail@example.com", strongPW, "", "")
+	require.NoError(t, err)
+	user, err := repo.FindUserByEmail(context.Background(), "revoke-fail@example.com")
+	require.NoError(t, err)
+	require.NotNil(t, user)
+
+	repo.failRevokeSessionsForUser = true
+	// Calling the helper directly (it's lower-case but reachable inside
+	// the package). A logged failure must not panic or propagate.
+	svc.revokeUserSessionsIfModeSession(context.Background(), user.ID, "test")
+}

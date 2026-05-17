@@ -50,6 +50,22 @@ type errorRepo struct {
 	failMarkEmailChangeConsumed    bool
 	failUpdateUserEmail            bool
 	failCreateOAuthIdentity        bool
+	failCreateSession              bool
+	failRevokeSessionsForUser      bool
+}
+
+func (r *errorRepo) CreateSession(ctx context.Context, s *SessionRecord) (string, error) {
+	if r.failCreateSession {
+		return "", errInjected
+	}
+	return r.fakeRepo.CreateSession(ctx, s)
+}
+
+func (r *errorRepo) RevokeSessionsForUser(ctx context.Context, userID string, atMs int64) error {
+	if r.failRevokeSessionsForUser {
+		return errInjected
+	}
+	return r.fakeRepo.RevokeSessionsForUser(ctx, userID, atMs)
 }
 
 func newErrorRepo() *errorRepo {

@@ -242,19 +242,22 @@ func outcomeLabel(state SessionState, err error, hit bool) string {
 	if err != nil {
 		return "error"
 	}
-	switch {
-	case hit && state == SessionStateActive:
-		return "hit"
-	case hit && state == SessionStateRevoked:
-		return "hit_revoked"
-	case state == SessionStateActive:
+	switch state {
+	case SessionStateActive:
+		if hit {
+			return "hit"
+		}
 		return "miss"
-	case state == SessionStateRevoked:
+	case SessionStateRevoked:
+		if hit {
+			return "hit_revoked"
+		}
 		return "miss_revoked"
-	case state == SessionStateMissing:
-		return "missing"
 	}
-	return "unknown"
+	// SessionStateMissing — only ever the result of a fresh repo read,
+	// since a confirmed-missing entry isn't worth distinguishing as a
+	// "hit" for alerting purposes.
+	return "missing"
 }
 
 // Invalidate drops cached state for sid. Called from
