@@ -1851,6 +1851,16 @@ func (r *entRepository) CreateSession(ctx context.Context, s *service.SessionRec
 	if s.CreatedAtMs == 0 {
 		s.CreatedAtMs = time.Now().UnixMilli()
 	}
+	// Mirror CreateOrganization's pre-check pattern: EntDB enforces
+	// sid uniqueness on the wire, but the underlying SDK error type
+	// is opaque from the repo layer. The pre-check translates the
+	// collision into the canonical service.ErrAlreadyExists for the
+	// service layer + conformance suite.
+	if existing, err := r.GetSessionBySid(ctx, s.SID); err != nil {
+		return "", err
+	} else if existing != nil {
+		return "", fmt.Errorf("%w: sid %q", service.ErrAlreadyExists, s.SID)
+	}
 	msg := &schemapb.Session{
 		Sid:         s.SID,
 		UserId:      s.UserID,
