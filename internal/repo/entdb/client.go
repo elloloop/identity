@@ -755,7 +755,7 @@ var (
 	rawQuerySpecOAuthIdentity              = rawQueryFieldSpec{31, map[string]string{"user_id": "1", "provider": "2", "provider_user_id": "3"}}
 	rawQuerySpecIdentityVerificationRecord = rawQueryFieldSpec{32, map[string]string{"user_id": "2"}}
 	rawQuerySpecOrganizationMembership     = rawQueryFieldSpec{34, map[string]string{"organization_id": "1", "user_id": "2"}}
-	rawQuerySpecSession                    = rawQueryFieldSpec{35, map[string]string{"sid": "1", "user_id": "2", "revoked_at_ms": "4"}}
+	rawQuerySpecSession                    = rawQueryFieldSpec{35, map[string]string{"sid": "1", "user_id": "2"}}
 )
 
 func rawQueryFieldSpecFor(witness proto.Message) (rawQueryFieldSpec, bool) {

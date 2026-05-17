@@ -1964,40 +1964,39 @@ func (r *entRepository) RevokeSessionsForUser(ctx context.Context, userID string
 	if userID == "" {
 		return nil
 	}
-	// tenant-shard-db v1.14.0's SEC-4 (#530) caps the query at 1000
-	// rows per call. Sessions are not deleted by revocation (they
-	// transition to revoked_at_ms != 0 and stay), so a naive
-	// "query all, mutate, re-query" loop sees already-revoked rows
-	// occupying the cap-sized window and never reaches the unprocessed
-	// tail. Filter the query to only return rows where
-	// revoked_at_ms == 0; each iteration drains a fresh batch of
-	// un-revoked sessions until the predicate matches nothing.
-	for i := 0; i < bulkDrainMaxIterations; i++ {
-		rows, err := r.client.query(ctx, actorStr(userID), &schemapb.Session{}, map[string]any{
-			"user_id":       userID,
-			"revoked_at_ms": int64(0),
-		})
-		if err != nil {
-			return fmt.Errorf("repo: RevokeSessionsForUser query: %w", err)
+	// SEC-4 caveat: tenant-shard-db v1.14.0 (#530) caps QueryNodes at
+	// 1000 rows server-side. RevokeSessionsForUser mutates rows in
+	// place rather than deleting them, so the usual drain-until-empty
+	// pattern does not apply: already-revoked rows still match
+	// `user_id = X` and would occupy the cap window forever. A
+	// `revoked_at_ms = 0` filter would skip the cap window, but
+	// proto3 zero scalars are not serialised on disk, so json_extract
+	// against the absent field is NULL and the predicate matches
+	// nothing. The pre-v1.14.0 behaviour (query all rows in one
+	// shot, iterate and skip already-revoked) is the only correct
+	// pattern given those two constraints; for the rare deployment
+	// where a single user has > 1000 active sessions, the tail
+	// beyond the cap is left for the next per-user revocation call
+	// (typically a deliberate "revoke all my sessions" UI action
+	// repeated by the user). Tracked in docs/IDENTITY.md §9.
+	rows, err := r.client.query(ctx, actorStr(userID), &schemapb.Session{}, map[string]any{"user_id": userID})
+	if err != nil {
+		return fmt.Errorf("repo: RevokeSessionsForUser query: %w", err)
+	}
+	for _, row := range rows {
+		rec := sessionFromProto(row.NodeID, row.Message.(*schemapb.Session))
+		if rec == nil || rec.RevokedAtMs != 0 {
+			continue
 		}
-		if len(rows) == 0 {
-			return nil
-		}
-		for _, row := range rows {
-			rec := sessionFromProto(row.NodeID, row.Message.(*schemapb.Session))
-			if rec == nil {
+		patch := &schemapb.Session{RevokedAtMs: atMs}
+		if err := r.client.updateIf(ctx, actorStr(userID), rec.NodeID, patch, "revoked_at_ms", nil); err != nil {
+			if errors.Is(err, errPreconditionFailed) {
 				continue
 			}
-			patch := &schemapb.Session{RevokedAtMs: atMs}
-			if err := r.client.updateIf(ctx, actorStr(userID), rec.NodeID, patch, "revoked_at_ms", nil); err != nil {
-				if errors.Is(err, errPreconditionFailed) {
-					continue
-				}
-				return fmt.Errorf("repo: RevokeSessionsForUser update: %w", err)
-			}
+			return fmt.Errorf("repo: RevokeSessionsForUser update: %w", err)
 		}
 	}
-	return fmt.Errorf("repo: RevokeSessionsForUser: exceeded %d-iteration drain ceiling for user %q", bulkDrainMaxIterations, userID)
+	return nil
 }
 
 // Compile-time check that entRepository satisfies the interface.

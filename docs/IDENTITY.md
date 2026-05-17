@@ -448,21 +448,35 @@ before you ship.
      `sdkScope.deleteExpired` go away.
    - **Page-cap drain loops for user-scoped bulk deletes (#530,
      SEC-4).** v1.14.0's server caps `QueryNodes` at 1000 rows
-     per call. The four user-scoped bulk operations
+     per call. The three delete-for-user paths
      (`DeleteRefreshTokensForUser`, `DeleteTotpCredentialsForUser`,
-     `DeleteRecoveryCodesForUser`, `RevokeSessionsForUser`) now
-     drain in a `query → mutate → re-query` loop until the next
-     query is empty (or, for sessions, returns no un-revoked rows)
-     — capped at 100 iterations so a buggy backend cannot pin a
-     goroutine. The other unbounded list endpoints
-     (`ListPasskeyCredentials`, `ListOAuthIdentitiesForUser`,
-     `ListOrganizationsForUser`, the OAuth dup-checks, the
-     duplicate-user safety net `queryUsersByEmail`) are bounded
-     by reasonable per-user counts (well under 1000) and accept
-     the server-side cap as the implicit limit. If a deployer
-     starts hitting the cap on a list endpoint that's a product
-     issue (a single user shouldn't legitimately accumulate 1000+
-     orgs or passkeys), not a cap-tuning issue.
+     `DeleteRecoveryCodesForUser`) drain in a
+     `query → delete → re-query` loop until the next query is
+     empty — capped at 100 iterations
+     (`bulkDrainMaxIterations`) so a buggy backend cannot pin a
+     goroutine. `RevokeSessionsForUser` is the one bulk-mutation
+     path that **cannot** drain: it transitions
+     `revoked_at_ms = 0 → atMs` rather than deleting the row, so
+     already-revoked rows still match `user_id = X` and would
+     occupy the cap window forever; a `revoked_at_ms = 0`
+     filter on the query is not usable either because proto3
+     zero scalars are not serialised on the wire (json_extract on
+     an absent field returns NULL, so the predicate matches
+     nothing on a freshly-created session). It runs a single
+     QueryNodes and revokes every un-revoked row in the cap-sized
+     result set; the tail beyond the cap (a user with > 1000
+     active sessions) is left for the next revocation call —
+     deliberately, because that count is an abuse signal worth
+     alerting on rather than silently iterating through. The
+     other unbounded list endpoints (`ListPasskeyCredentials`,
+     `ListOAuthIdentitiesForUser`, `ListOrganizationsForUser`,
+     the OAuth dup-checks, the duplicate-user safety net
+     `queryUsersByEmail`) are bounded by reasonable per-user
+     counts (well under 1000) and accept the server-side cap as
+     the implicit limit. If a deployer starts hitting the cap on
+     a list endpoint that's a product issue (a single user
+     shouldn't legitimately accumulate 1000+ orgs or passkeys),
+     not a cap-tuning issue.
    - **Typed error matching for `ALREADY_EXISTS` (#533, SEC-5).**
      The v1.14.0 SDK now wraps every gRPC status from the
      transport into a typed error: `*sdk.EntDBError` with

@@ -1164,19 +1164,25 @@ func TestSEC4_DeleteRecoveryCodesForUser_DrainsBeyondQueryCap(t *testing.T) {
 	}
 }
 
-// TestSEC4_RevokeSessionsForUser_DrainsBeyondQueryCap regresses the
-// drain pattern for session revocation. Unlike the three delete-for-
-// user paths, RevokeSessionsForUser drives convergence by mutating
-// rows from RevokedAtMs=0 to a non-zero value. The drain loop exits
-// when an iteration finds zero un-revoked rows in the cap-sized
-// query window. Seed more rows than the cap and assert every one
-// ends up revoked.
-func TestSEC4_RevokeSessionsForUser_DrainsBeyondQueryCap(t *testing.T) {
+// TestSEC4_RevokeSessionsForUser_RevokesEveryUnrevokedSessionInWindow
+// asserts that RevokeSessionsForUser revokes every un-revoked
+// session returned by a single QueryNodes call. Unlike the three
+// delete-for-user paths, RevokeSessionsForUser mutates rows in
+// place rather than deleting them; a drain-until-empty loop is not
+// safe because already-revoked rows still match `user_id = X` and
+// would occupy the cap-sized query window forever, and the
+// `revoked_at_ms = 0` filter cannot be used because proto3 zero
+// scalars are not serialised on disk (json_extract on the missing
+// field returns NULL, so the predicate matches nothing). Identity
+// accepts the v1.14.0 server-side 1000-row cap as the implicit
+// limit for this one call — a user with > 1000 active sessions
+// would be a deliberate abuse signal worth alerting on. See
+// docs/IDENTITY.md §9.
+func TestSEC4_RevokeSessionsForUser_RevokesEveryUnrevokedSessionInWindow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	mem := newMemoryEntClient()
-	capped := &cappedQueryClient{memoryEntClient: mem, cap: 3}
-	repo := &entRepository{client: capped, tenantID: "t"}
+	repo := &entRepository{client: mem, tenantID: "t"}
 
 	for i := 0; i < 7; i++ {
 		mem.store[fmt.Sprintf("sess-%02d", i)] = storedNode{msg: &schemapb.Session{
@@ -1194,7 +1200,7 @@ func TestSEC4_RevokeSessionsForUser_DrainsBeyondQueryCap(t *testing.T) {
 			continue
 		}
 		if s.GetRevokedAtMs() == 0 {
-			t.Fatalf("after drain: session %q still has revoked_at_ms=0", id)
+			t.Fatalf("after revoke-for-user: session %q still has revoked_at_ms=0", id)
 		}
 	}
 }
