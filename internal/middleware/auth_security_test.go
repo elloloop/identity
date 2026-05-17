@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 )
 
 // recordingHandler returns an http.Handler that records whether it was called.
@@ -163,24 +165,20 @@ func TestSec_BearerCaseSensitive_Required(t *testing.T) {
 
 // ---- helpers (kept private to this file to avoid clashing with auth_test.go) ----
 
-func newSecTestKR(t *testing.T) *jwtpkg.KeyRing {
+func newSecTestKR(t *testing.T) *jwttest.Signer {
 	t.Helper()
-	sk, err := jwtpkg.GenerateKey("sec-test-kid")
-	require.NoError(t, err)
-	kr, err := jwtpkg.NewKeyRing([]jwtpkg.SigningKey{sk})
-	require.NoError(t, err)
-	return kr
+	return jwttest.NewSigner(t, "sec-test-kid")
 }
 
-func mintToken(t *testing.T, kr *jwtpkg.KeyRing, sub string) string {
+func mintToken(t *testing.T, s *jwttest.Signer, sub string) string {
 	t.Helper()
-	tok, err := jwtpkg.CreateAccessToken(jwtpkg.Claims{
+	tok, err := s.SignAccessToken(context.Background(), jwtpkg.Claims{
 		Sub:    sub,
 		Email:  "u@example.com",
 		Name:   "U",
 		Role:   "member",
 		Tenant: "t1",
-	}, kr, 15*time.Minute)
+	}, 15*time.Minute)
 	require.NoError(t, err)
 	return tok
 }

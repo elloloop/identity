@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
 )
@@ -17,7 +16,7 @@ import (
 func TestJWKSMiddleware_NonJWKSPath_PassesThrough(t *testing.T) {
 	t.Parallel()
 
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	called := false
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -35,28 +34,21 @@ func TestJWKSMiddleware_NonJWKSPath_PassesThrough(t *testing.T) {
 }
 
 // TestJWKSMiddleware_InvalidPublicKey_Returns500 exercises the JWKS error
-// path: when KeyRing.JWKS() fails (e.g. a key has an invalid RSA public key
+// path: when the rendering fails (e.g. a key has an invalid RSA public key
 // that jwk.FromRaw rejects), the middleware must respond with 500 and not
 // fall through to the next handler.
 func TestJWKSMiddleware_InvalidPublicKey_Returns500(t *testing.T) {
 	t.Parallel()
 
-	// rsa.PublicKey with nil N is rejected by jwk.FromRaw with an error
-	// (no panic) — perfect for triggering KeyRing.JWKS()'s error path.
-	bad := jwtpkg.SigningKey{
-		KID:        "bad-kid",
-		PrivateKey: nil,
-		PublicKey:  &rsa.PublicKey{N: nil, E: 0},
-		Active:     true,
-	}
-	kr, err := jwtpkg.NewKeyRing([]jwtpkg.SigningKey{bad})
-	require.NoError(t, err)
-
+	// A KeyProvider whose Keys() advertises a malformed RSA public key
+	// (nil modulus). jwk.FromRaw rejects this without panicking, hitting
+	// the rendering error path.
+	bad := badKeyProvider{}
 	called := false
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 	})
-	handler := JWKSMiddleware(kr)(inner)
+	handler := JWKSMiddleware(bad)(inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
 	rec := httptest.NewRecorder()
@@ -66,3 +58,15 @@ func TestJWKSMiddleware_InvalidPublicKey_Returns500(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "internal")
 }
+
+// badKeyProvider returns a malformed RSA public key so JWKS rendering fails.
+type badKeyProvider struct{}
+
+func (badKeyProvider) Keys() []jwtpkg.PublicKey {
+	return []jwtpkg.PublicKey{{
+		KID: "bad-kid",
+		Key: &rsa.PublicKey{N: nil, E: 0},
+	}}
+}
+
+func (badKeyProvider) Get(_ string) (*rsa.PublicKey, bool) { return nil, false }

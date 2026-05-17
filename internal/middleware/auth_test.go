@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,28 +11,25 @@ import (
 	"github.com/stretchr/testify/require"
 
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 )
 
-// testKeyRing creates a KeyRing with a freshly generated RSA key for testing.
-func testKeyRing(t *testing.T) *jwtpkg.KeyRing {
+// testSigner builds an in-memory signer for tests.
+func testSigner(t *testing.T) *jwttest.Signer {
 	t.Helper()
-	sk, err := jwtpkg.GenerateKey("test-kid")
-	require.NoError(t, err)
-	kr, err := jwtpkg.NewKeyRing([]jwtpkg.SigningKey{sk})
-	require.NoError(t, err)
-	return kr
+	return jwttest.NewSigner(t, "test-kid")
 }
 
 // testToken creates a valid signed access token for testing.
-func testToken(t *testing.T, kr *jwtpkg.KeyRing, sub string, expiry time.Duration) string {
+func testToken(t *testing.T, s *jwttest.Signer, sub string, expiry time.Duration) string {
 	t.Helper()
-	token, err := jwtpkg.CreateAccessToken(jwtpkg.Claims{
+	token, err := s.SignAccessToken(context.Background(), jwtpkg.Claims{
 		Sub:    sub,
 		Email:  "test@example.com",
 		Name:   "Test User",
 		Role:   "member",
 		Tenant: "tenant-1",
-	}, kr, expiry)
+	}, expiry)
 	require.NoError(t, err)
 	return token
 }
@@ -47,7 +45,7 @@ func echoHandler(called *bool, userID *string) http.Handler {
 }
 
 func TestAuthMiddleware_ExemptPath_NoToken_Passes(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -64,7 +62,7 @@ func TestAuthMiddleware_ExemptPath_NoToken_Passes(t *testing.T) {
 }
 
 func TestAuthMiddleware_BeginOAuthLogin_ExemptNoToken_Passes(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -81,7 +79,7 @@ func TestAuthMiddleware_BeginOAuthLogin_ExemptNoToken_Passes(t *testing.T) {
 }
 
 func TestAuthMiddleware_ExemptPath_WithToken_InjectsUserID(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	token := testToken(t, kr, "user-42", 15*time.Minute)
 	var called bool
 	var userID string
@@ -100,7 +98,7 @@ func TestAuthMiddleware_ExemptPath_WithToken_InjectsUserID(t *testing.T) {
 }
 
 func TestAuthMiddleware_ExemptPath_InvalidToken_StillPasses(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -118,7 +116,7 @@ func TestAuthMiddleware_ExemptPath_InvalidToken_StillPasses(t *testing.T) {
 }
 
 func TestAuthMiddleware_RequiredPath_NoToken_Returns401(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -135,7 +133,7 @@ func TestAuthMiddleware_RequiredPath_NoToken_Returns401(t *testing.T) {
 }
 
 func TestAuthMiddleware_RequiredPath_InvalidToken_Returns401(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -153,7 +151,7 @@ func TestAuthMiddleware_RequiredPath_InvalidToken_Returns401(t *testing.T) {
 }
 
 func TestAuthMiddleware_RequiredPath_ValidToken_InjectsUserID(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	token := testToken(t, kr, "user-99", 15*time.Minute)
 	var called bool
 	var userID string
@@ -172,7 +170,7 @@ func TestAuthMiddleware_RequiredPath_ValidToken_InjectsUserID(t *testing.T) {
 }
 
 func TestAuthMiddleware_RequiredPath_ExpiredToken_Returns401(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	// Create a token that has already expired (negative duration effectively means
 	// expiry = now - 1s, which is in the past).
 	token := testToken(t, kr, "user-expired", -1*time.Second)
@@ -223,7 +221,7 @@ func TestExtractBearerToken_NoBearer(t *testing.T) {
 }
 
 func TestAuthMiddleware_HealthPath_ExemptNoToken(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 

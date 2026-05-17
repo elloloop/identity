@@ -330,6 +330,20 @@ before you ship.
    schema-extraction-and-loading, identity uploads the schema as a
    bootstrap step, but the database still treats its content as
    opaque storage.
+6. **JWT signing is a pluggable `jwt.Signer` interface, default
+   file-backed.** Issue #90. The OSS image must work with no external
+   KMS dependency, so the default backend reads a JSON keys file on
+   disk and reloads on SIGHUP — every deployer can rotate keys without
+   running anything else. One in-tree KMS backend ships as the worked
+   example (`pkg/jwt/kmsaws`, AWS KMS): chosen over GCP KMS because
+   the AWS SDK has the smaller transitive dependency footprint and
+   the RSASSA_PKCS1_V1_5_SHA_256 + DIGEST flow maps 1:1 onto RS256
+   without an extra envelope. Adding GCP-KMS / Vault / HSM is a
+   matter of implementing `jwt.Signer` in a sibling package — every
+   caller in this repo speaks only to the interface. A startup
+   assertion fails fast if the JWKS endpoint does not include every
+   active kid the signer reports, so signing and verification cannot
+   drift. Rotation runbook lives at `docs/key-rotation.md`.
 
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

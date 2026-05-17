@@ -533,7 +533,7 @@ var (
 type AuthService struct {
 	repo               Repository
 	tenantID           string
-	keyRing            *jwt.KeyRing
+	signer             jwt.Signer
 	passkeys           *passkeys.WebAuthnService
 	audit              *audit.Logger
 	cfg                *config.Config
@@ -559,7 +559,7 @@ type AuthService struct {
 func NewAuthService(
 	repo Repository,
 	cfg *config.Config,
-	keyRing *jwt.KeyRing,
+	signer jwt.Signer,
 	passkeysSvc *passkeys.WebAuthnService,
 	auditLogger *audit.Logger,
 	totpKey []byte,
@@ -567,7 +567,7 @@ func NewAuthService(
 	mailer email.Transport,
 	logger *zap.Logger,
 ) *AuthService {
-	return NewAuthServiceWithOAuth(repo, cfg, keyRing, passkeysSvc, auditLogger, totpKey, totpRecoveryPepper, mailer, logger, nil)
+	return NewAuthServiceWithOAuth(repo, cfg, signer, passkeysSvc, auditLogger, totpKey, totpRecoveryPepper, mailer, logger, nil)
 }
 
 // NewAuthServiceWithOAuth is the extended constructor that injects an
@@ -575,7 +575,7 @@ func NewAuthService(
 func NewAuthServiceWithOAuth(
 	repo Repository,
 	cfg *config.Config,
-	keyRing *jwt.KeyRing,
+	signer jwt.Signer,
 	passkeysSvc *passkeys.WebAuthnService,
 	auditLogger *audit.Logger,
 	totpKey []byte,
@@ -608,7 +608,7 @@ func NewAuthServiceWithOAuth(
 	return &AuthService{
 		repo:               repo,
 		tenantID:           cfg.DefaultTenantID,
-		keyRing:            keyRing,
+		signer:             signer,
 		passkeys:           passkeysSvc,
 		audit:              auditLogger,
 		cfg:                cfg,
@@ -676,7 +676,7 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	if s.cfg.JWTAudience != "" {
 		claims.Audience = []string{s.cfg.JWTAudience}
 	}
-	accessToken, err := jwt.CreateAccessToken(claims, s.keyRing, s.cfg.JWTExpiry())
+	accessToken, err := s.signer.SignAccessToken(ctx, claims, s.cfg.JWTExpiry())
 	if err != nil {
 		return "", "", fmt.Errorf("creating access token: %w", err)
 	}

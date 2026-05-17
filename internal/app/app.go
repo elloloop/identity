@@ -37,7 +37,7 @@ import (
 type Deps struct {
 	Config   *config.Config
 	Logger   *zap.Logger
-	KeyRing  *jwt.KeyRing
+	Signer   jwt.Signer
 	Repo     service.Repository
 	DB       service.DB
 	Passkeys *passkeys.WebAuthnService
@@ -177,7 +177,7 @@ func New(deps Deps) (http.Handler, func(), error) {
 	oauthRegistry = wrapOAuthRegistry(oauthRegistry)
 
 	authSvc := service.NewAuthServiceWithOAuth(
-		deps.Repo, deps.Config, deps.KeyRing, deps.Passkeys,
+		deps.Repo, deps.Config, deps.Signer, deps.Passkeys,
 		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, logger,
 		oauthRegistry,
 	)
@@ -218,8 +218,8 @@ func New(deps Deps) (http.Handler, func(), error) {
 	// including any failure synthesized by the otelconnect interceptor.
 	var chain http.Handler = mux
 	chain = middleware.MetricsMiddleware(rpcMetrics)(chain)
-	chain = middleware.AuthMiddleware(deps.KeyRing, deps.Config.DefaultTenantID, deps.Config.JWTAudience, deps.Config.JWTRequireAudience)(chain)
-	chain = middleware.JWKSMiddleware(deps.KeyRing)(chain)
+	chain = middleware.AuthMiddleware(deps.Signer, deps.Config.DefaultTenantID, deps.Config.JWTAudience, deps.Config.JWTRequireAudience)(chain)
+	chain = middleware.JWKSMiddleware(deps.Signer)(chain)
 	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)
 	chain = middleware.ClientIPMiddleware(trustedProxies)(chain)
 	chain = middleware.HealthMiddleware(newDBReadinessProbe(deps.DB), chain)

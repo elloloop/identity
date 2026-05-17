@@ -19,7 +19,7 @@ import (
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo/memory"
-	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -47,32 +47,17 @@ func newTestConfig() *config.Config {
 	}
 }
 
-// testHarness is the minimum surface buildTestApp needs from the
-// caller's *testing.T / *testing.B. It avoids duplicating the wiring
-// across the test and bench files.
-type testHarness interface {
-	Helper()
-	Fatalf(format string, args ...any)
-}
+func buildTestApp(tb testing.TB, cfg *config.Config) (http.Handler, *prometheus.Registry, func()) {
+	tb.Helper()
 
-func buildTestApp(th testHarness, cfg *config.Config) (http.Handler, *prometheus.Registry, func()) {
-	th.Helper()
-
-	key, err := jwt.GenerateKey("otel-test")
-	if err != nil {
-		th.Fatalf("GenerateKey: %v", err)
-	}
-	keyRing, err := jwt.NewKeyRing([]jwt.SigningKey{key})
-	if err != nil {
-		th.Fatalf("NewKeyRing: %v", err)
-	}
+	signer := jwttest.NewSigner(tb, "otel-test")
 	pkSvc, err := passkeys.NewWebAuthnService(passkeys.Config{
 		RPID:   "localhost",
 		RPName: "Identity Test",
 		Origin: "http://localhost:9002",
 	})
 	if err != nil {
-		th.Fatalf("NewWebAuthnService: %v", err)
+		tb.Fatalf("NewWebAuthnService: %v", err)
 	}
 	repo := memory.New()
 	reg := prometheus.NewRegistry()
@@ -80,7 +65,7 @@ func buildTestApp(th testHarness, cfg *config.Config) (http.Handler, *prometheus
 	handler, stop, err := New(Deps{
 		Config:             cfg,
 		Logger:             zap.NewNop(),
-		KeyRing:            keyRing,
+		Signer:             signer,
 		Repo:               repo,
 		DB:                 repo,
 		Passkeys:           pkSvc,
@@ -89,7 +74,7 @@ func buildTestApp(th testHarness, cfg *config.Config) (http.Handler, *prometheus
 		MetricsRegistry:    reg,
 	})
 	if err != nil {
-		th.Fatalf("New: %v", err)
+		tb.Fatalf("New: %v", err)
 	}
 	return handler, reg, stop
 }

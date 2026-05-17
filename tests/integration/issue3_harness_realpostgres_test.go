@@ -15,7 +15,7 @@ import (
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/repo"
-	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -32,14 +32,7 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 	cfg.DefaultTenantID = tenantID
 	cfg.PasswordResetExpirySeconds = 3600
 
-	signingKey, err := jwt.GenerateKey("issue-3-realpostgres-test-kid")
-	if err != nil {
-		t.Fatalf("generate signing key: %v", err)
-	}
-	keyRing, err := jwt.NewKeyRing([]jwt.SigningKey{signingKey})
-	if err != nil {
-		t.Fatalf("build key ring: %v", err)
-	}
+	signer := jwttest.NewSigner(t, "issue-3-realpostgres-test-kid")
 
 	pkSvc, err := passkeys.NewWebAuthnService(passkeys.Config{
 		RPID:   cfg.PasskeyRPID,
@@ -67,7 +60,7 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 	handler, stop, err := app.New(app.Deps{
 		Config:             cfg,
 		Logger:             zap.NewNop(),
-		KeyRing:            keyRing,
+		Signer:             signer,
 		Repo:               built.Repository,
 		DB:                 built.DB,
 		Passkeys:           pkSvc,

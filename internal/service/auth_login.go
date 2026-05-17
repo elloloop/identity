@@ -104,7 +104,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	// layer (which is keyed on resolved client IP).
 	if !s.signupThrottle.allow(email, s.nowMs()) {
 		s.logger.Info("signup_throttled", zap.String("email", redactEmail(email)))
-		return s.newDuplicateSignupResult(email, fallbackDisplayName(email, name))
+		return s.newDuplicateSignupResult(ctx, email, fallbackDisplayName(email, name))
 	}
 
 	pwHash, err := passwords.Hash(password)
@@ -190,7 +190,7 @@ func (s *AuthService) handleDuplicatePasswordSignup(ctx context.Context, user *U
 		)
 	}
 	s.logger.Info("local_signup_existing_email", zap.String("email", redactEmail(email)), zap.String("user_id", user.ID))
-	return s.newDuplicateSignupResult(email, fallbackDisplayName(email, name))
+	return s.newDuplicateSignupResult(ctx, email, fallbackDisplayName(email, name))
 }
 
 func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) error {
@@ -213,7 +213,7 @@ func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) 
 	})
 }
 
-func (s *AuthService) newDuplicateSignupResult(email, displayName string) (*LoginResult, error) {
+func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displayName string) (*LoginResult, error) {
 	now := s.nowMs()
 	user := &User{
 		ID:        "signup-pending-" + randomToken(8),
@@ -238,7 +238,7 @@ func (s *AuthService) newDuplicateSignupResult(email, displayName string) (*Logi
 	if s.cfg.JWTAudience != "" {
 		decoyClaims.Audience = []string{s.cfg.JWTAudience}
 	}
-	accessToken, err := jwt.CreateAccessToken(decoyClaims, s.keyRing, s.cfg.JWTExpiry())
+	accessToken, err := s.signer.SignAccessToken(ctx, decoyClaims, s.cfg.JWTExpiry())
 	if err != nil {
 		return nil, fmt.Errorf("creating duplicate-signup decoy token: %w", err)
 	}
@@ -436,7 +436,8 @@ func (s *AuthService) BeginOAuthLogin(
 		return nil, fmt.Errorf("generating oauth code verifier: %w", err)
 	}
 	stateToken, err := oauth.IssueStateToken(
-		s.keyRing,
+		ctx,
+		s.signer,
 		provider,
 		redirectURI,
 		state,
@@ -501,7 +502,7 @@ func (s *AuthService) OAuthLogin(
 	if strings.TrimSpace(stateToken) != "" {
 		claims, err := oauth.VerifyStateToken(
 			stateToken,
-			s.keyRing,
+			s.signer,
 			provider,
 			redirectURI,
 			state,

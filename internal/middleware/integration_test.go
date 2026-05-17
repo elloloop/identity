@@ -16,7 +16,7 @@ import (
 // ── Full middleware chain integration tests ─────────────────────────────
 
 // chainHandler wraps the middleware stack: CORS -> Health -> JWKS -> Auth -> handler.
-func chainHandler(t *testing.T, kr *jwtpkg.KeyRing, allowedOrigins string, inner http.Handler) http.Handler {
+func chainHandler(t *testing.T, kr jwtpkg.Signer, allowedOrigins string, inner http.Handler) http.Handler {
 	t.Helper()
 	parsed, err := ParseAllowedOrigins(allowedOrigins, true)
 	if err != nil {
@@ -31,7 +31,7 @@ func chainHandler(t *testing.T, kr *jwtpkg.KeyRing, allowedOrigins string, inner
 }
 
 func TestIntegration_UnauthenticatedExemptPath_PassesThrough(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -48,7 +48,7 @@ func TestIntegration_UnauthenticatedExemptPath_PassesThrough(t *testing.T) {
 }
 
 func TestIntegration_UnauthenticatedProtectedPath_Returns401(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -64,7 +64,7 @@ func TestIntegration_UnauthenticatedProtectedPath_Returns401(t *testing.T) {
 }
 
 func TestIntegration_ValidJWT_InjectsUserIDHeader(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	token := testToken(t, kr, "user-chain-42", 15*time.Minute)
 	var called bool
 	var userID string
@@ -83,7 +83,7 @@ func TestIntegration_ValidJWT_InjectsUserIDHeader(t *testing.T) {
 }
 
 func TestIntegration_ExpiredJWT_Returns401(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	token := testToken(t, kr, "user-expired", -1*time.Second)
 	var called bool
 	var userID string
@@ -101,7 +101,7 @@ func TestIntegration_ExpiredJWT_Returns401(t *testing.T) {
 }
 
 func TestIntegration_CORSPreflight_Returns204(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -120,7 +120,7 @@ func TestIntegration_CORSPreflight_Returns204(t *testing.T) {
 }
 
 func TestIntegration_CORSDisallowedOrigin_NoAccessControlHeaders(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	token := testToken(t, kr, "user-cors", 15*time.Minute)
 	var called bool
 	var userID string
@@ -140,7 +140,7 @@ func TestIntegration_CORSDisallowedOrigin_NoAccessControlHeaders(t *testing.T) {
 }
 
 func TestIntegration_Health_ReturnsStatusOK(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -157,7 +157,7 @@ func TestIntegration_Health_ReturnsStatusOK(t *testing.T) {
 }
 
 func TestIntegration_JWKS_ReturnsValidJWKS(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -185,7 +185,7 @@ func TestIntegration_JWKS_ReturnsValidJWKS(t *testing.T) {
 }
 
 func TestIntegration_FullRequestThroughChain(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	token := testToken(t, kr, "full-chain-user", 15*time.Minute)
 	var called bool
 	var userID string
@@ -206,7 +206,7 @@ func TestIntegration_FullRequestThroughChain(t *testing.T) {
 }
 
 func TestIntegration_HealthzPath_ReturnsOK(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -222,7 +222,7 @@ func TestIntegration_HealthzPath_ReturnsOK(t *testing.T) {
 }
 
 func TestIntegration_RootPath_ReturnsOK(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	var called bool
 	var userID string
 
@@ -238,7 +238,7 @@ func TestIntegration_RootPath_ReturnsOK(t *testing.T) {
 }
 
 func TestIntegration_MultipleOrigins_AllAllowed(t *testing.T) {
-	kr := testKeyRing(t)
+	kr := testSigner(t)
 	token := testToken(t, kr, "user-multi", 15*time.Minute)
 	var called bool
 	var userID string

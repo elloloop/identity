@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -24,80 +25,59 @@ type Claims struct {
 	ExpiresAt int64    `json:"exp"`
 }
 
-// CreateAccessToken signs a new RS256 access token using the active key in the
-// ring. The token always carries a "kid" header so verifiers can pick the
-// correct public key.
-func CreateAccessToken(claims Claims, kr *KeyRing, expiry time.Duration) (string, error) {
-	now := time.Now().Unix()
-	exp := now + int64(expiry.Seconds())
-
-	builder := jwtoken.NewBuilder().
-		Claim("sub", claims.Sub).
-		Claim("email", claims.Email).
-		Claim("name", claims.Name).
-		Claim("role", claims.Role).
-		Claim("tenant", claims.Tenant).
-		Claim("avatar_url", claims.AvatarURL).
-		IssuedAt(time.Unix(now, 0)).
-		Expiration(time.Unix(exp, 0))
-	if len(claims.Audience) > 0 {
-		builder = builder.Audience(claims.Audience)
+// ClaimsMap converts the access-token claims plus standard iat/exp into
+// the generic claim map [Signer.SignClaims] consumes. Used internally by
+// concrete signers; exposed so future backends in other repositories
+// can reuse the canonical claim layout.
+func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
+	iat := now.Unix()
+	exp := now.Add(expiry).Unix()
+	m := map[string]any{
+		"sub":        c.Sub,
+		"email":      c.Email,
+		"name":       c.Name,
+		"role":       c.Role,
+		"tenant":     c.Tenant,
+		"avatar_url": c.AvatarURL,
+		"iat":        iat,
+		"exp":        exp,
 	}
-	tok, err := builder.Build()
-	if err != nil {
-		return "", fmt.Errorf("building token: %w", err)
+	if len(c.Audience) > 0 {
+		m["aud"] = c.Audience
 	}
-
-	active := kr.Active()
-
-	// Build the JWK for signing (includes kid header).
-	key, err := jwk.FromRaw(active.PrivateKey)
-	if err != nil {
-		return "", fmt.Errorf("converting private key: %w", err)
-	}
-	if err := key.Set(jwk.KeyIDKey, active.KID); err != nil {
-		return "", fmt.Errorf("setting kid on key: %w", err)
-	}
-	if err := key.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return "", fmt.Errorf("setting alg on key: %w", err)
-	}
-
-	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
-	if err != nil {
-		return "", fmt.Errorf("signing token: %w", err)
-	}
-
-	return string(signed), nil
+	return m
 }
 
-// VerifyAccessToken verifies an RS256 access token and returns its claims.
-// The token must carry a "kid" header that matches a key in the ring.
-// Tokens without "kid" or with an unknown "kid" are rejected.
+// VerifyAccessToken verifies an RS256 access token against the supplied
+// [KeyProvider] and returns its claims. The token must carry a "kid"
+// header that matches a key the provider publishes. Tokens without
+// "kid" or with an unknown "kid" are rejected.
 //
-// If expectedTenant is non-empty, the token's "tenant" claim must match it
-// exactly; otherwise the token is rejected. Passing an empty expectedTenant
-// disables the cross-tenant check.
+// If expectedTenant is non-empty, the token's "tenant" claim must match
+// it exactly; otherwise the token is rejected. Passing an empty
+// expectedTenant disables the cross-tenant check.
 //
 // Audience handling:
 //   - If expectedAudience is empty, the "aud" claim is not inspected.
 //   - If expectedAudience is non-empty and the token's "aud" claim is
-//     present, it must contain expectedAudience (a token MAY carry multiple
-//     audiences — the check passes when any of them matches).
-//   - If expectedAudience is non-empty and the token has no "aud" claim,
-//     the token is rejected only when requireAudience is true. This gives
-//     callers a one-deploy migration window: ship the verifier with
-//     requireAudience=false, wait for all minted tokens to carry "aud",
-//     then flip requireAudience=true.
+//     present, it must contain expectedAudience (a token MAY carry
+//     multiple audiences — the check passes when any of them matches).
+//   - If expectedAudience is non-empty and the token has no "aud"
+//     claim, the token is rejected only when requireAudience is true.
+//     This gives callers a one-deploy migration window: ship the
+//     verifier with requireAudience=false, wait for all minted tokens
+//     to carry "aud", then flip requireAudience=true.
 //   - A token whose "aud" claim is present but does not contain
-//     expectedAudience is ALWAYS rejected, regardless of requireAudience.
+//     expectedAudience is ALWAYS rejected, regardless of
+//     requireAudience.
 //
-// Tokens with a missing or zero "exp" claim are explicitly rejected: the
-// underlying lestrrat-go jwt library treats an absent exp as "no expiration",
-// which would otherwise produce unbounded-lifetime tokens.
-func VerifyAccessToken(tokenStr string, kr *KeyRing, expectedTenant, expectedAudience string, requireAudience bool) (*Claims, error) {
+// Tokens with a missing or zero "exp" claim are explicitly rejected:
+// the underlying lestrrat-go jwt library treats an absent exp as
+// "no expiration", which would otherwise produce unbounded-lifetime
+// tokens.
+func VerifyAccessToken(tokenStr string, kp KeyProvider, expectedTenant, expectedAudience string, requireAudience bool) (*Claims, error) {
 	tokenBytes := []byte(tokenStr)
 
-	// Extract kid from JWS protected header before verification.
 	kid, err := extractKID(tokenBytes)
 	if err != nil {
 		return nil, fmt.Errorf("parsing token headers: %w", err)
@@ -106,14 +86,12 @@ func VerifyAccessToken(tokenStr string, kr *KeyRing, expectedTenant, expectedAud
 		return nil, errors.New("token missing kid header")
 	}
 
-	// Check that the kid is known.
-	sk, ok := kr.Get(kid)
+	pub, ok := kp.Get(kid)
 	if !ok {
 		return nil, fmt.Errorf("unknown signing key kid=%s", kid)
 	}
 
-	// Build a JWK from the matching public key.
-	key, err := jwk.FromRaw(sk.PublicKey)
+	key, err := jwk.FromRaw(pub)
 	if err != nil {
 		return nil, fmt.Errorf("converting public key: %w", err)
 	}
@@ -124,7 +102,6 @@ func VerifyAccessToken(tokenStr string, kr *KeyRing, expectedTenant, expectedAud
 		return nil, fmt.Errorf("setting alg: %w", err)
 	}
 
-	// Parse and verify.
 	tok, err := jwtoken.Parse(
 		tokenBytes,
 		jwtoken.WithKey(jwa.RS256, key),
@@ -134,9 +111,6 @@ func VerifyAccessToken(tokenStr string, kr *KeyRing, expectedTenant, expectedAud
 		return nil, fmt.Errorf("verifying token: %w", err)
 	}
 
-	// Explicit expiration check: lestrrat-go's WithValidate() treats a missing
-	// or zero exp claim as "no expiration set" rather than an expired token,
-	// so we enforce it ourselves.
 	exp := tok.Expiration()
 	if exp.IsZero() {
 		return nil, errors.New("token missing or zero expiration")
@@ -169,13 +143,10 @@ func VerifyAccessToken(tokenStr string, kr *KeyRing, expectedTenant, expectedAud
 	}
 	claims.Audience = tok.Audience()
 
-	// Cross-tenant check: when the verifying service knows its expected
-	// tenant, reject tokens whose tenant claim does not match.
 	if expectedTenant != "" && claims.Tenant != expectedTenant {
 		return nil, fmt.Errorf("tenant mismatch: token tenant=%q expected=%q", claims.Tenant, expectedTenant)
 	}
 
-	// Audience check.
 	if expectedAudience != "" {
 		if len(claims.Audience) == 0 {
 			if requireAudience {
@@ -196,6 +167,80 @@ func VerifyAccessToken(tokenStr string, kr *KeyRing, expectedTenant, expectedAud
 	}
 
 	return claims, nil
+}
+
+// JWKS renders the [KeyProvider]'s public keys as a JWKS document (RFC
+// 7517) suitable for serving at /.well-known/jwks.json. Every key the
+// provider exposes is included so verifiers can validate tokens minted
+// before a rotation completed.
+func JWKS(kp KeyProvider) ([]byte, error) {
+	set := jwk.NewSet()
+	for _, pk := range kp.Keys() {
+		key, err := jwk.FromRaw(pk.Key)
+		if err != nil {
+			return nil, fmt.Errorf("converting public key for kid=%s: %w", pk.KID, err)
+		}
+		if err := key.Set(jwk.KeyIDKey, pk.KID); err != nil {
+			return nil, fmt.Errorf("setting kid: %w", err)
+		}
+		if err := key.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
+			return nil, fmt.Errorf("setting alg: %w", err)
+		}
+		if err := key.Set(jwk.KeyUsageKey, "sig"); err != nil {
+			return nil, fmt.Errorf("setting use: %w", err)
+		}
+		if err := set.AddKey(key); err != nil {
+			return nil, fmt.Errorf("adding key to set: %w", err)
+		}
+	}
+	return json.Marshal(set)
+}
+
+// AssertJWKSIncludesActiveKIDs is a startup sanity check: every
+// currently-active kid the signer reports must appear in the JWKS
+// document the verifier publishes. Drift here means a third-party
+// service that fetched JWKS once cannot validate the next token we
+// mint.
+//
+// Returns an error when (a) JWKS rendering fails, or (b) any active
+// kid is missing from the rendered JWKS. Pass the rendered JWKS into a
+// startup assertion (cmd/identity/main.go panics on error). Inactive
+// (expired-but-still-publishable) keys are NOT required to appear.
+func AssertJWKSIncludesActiveKIDs(s Signer, now time.Time) error {
+	jwksBytes, err := JWKS(s)
+	if err != nil {
+		return fmt.Errorf("rendering JWKS: %w", err)
+	}
+	var doc struct {
+		Keys []struct {
+			Kid string `json:"kid"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(jwksBytes, &doc); err != nil {
+		return fmt.Errorf("decoding rendered JWKS: %w", err)
+	}
+	published := make(map[string]bool, len(doc.Keys))
+	for _, k := range doc.Keys {
+		published[k.Kid] = true
+	}
+
+	activeKID := s.ActiveKID()
+	if activeKID == "" {
+		return errors.New("signer has no active kid")
+	}
+	if !published[activeKID] {
+		return fmt.Errorf("signer active kid %q is not in JWKS", activeKID)
+	}
+
+	for _, k := range s.Keys() {
+		if !k.IsActive(now) {
+			continue
+		}
+		if !published[k.KID] {
+			return fmt.Errorf("active kid %q is missing from JWKS", k.KID)
+		}
+	}
+	return nil
 }
 
 // extractKID parses the JWS compact serialization and returns the "kid"

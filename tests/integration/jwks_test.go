@@ -81,7 +81,7 @@ func TestJWKS_EndpointReturnsValidSet(t *testing.T) {
 	}
 
 	// 3) The advertised kid must be the one the active signing key uses.
-	wantKID := h.KeyRing.Active().KID
+	wantKID := h.Signer.ActiveKID()
 	foundActive := false
 	for _, k := range raw.Keys {
 		if k["kid"] == wantKID {
