@@ -911,6 +911,30 @@ func (r *entRepository) UpdateQrLoginSession(ctx context.Context, nodeID string,
 	return nil
 }
 
+// ConsumeQrLoginSession transitions status from "approved" to
+// "consumed" atomically via the SDK's UpdateIf primitive. The server
+// evaluates the precondition against the materialized node state, so
+// two replicas racing on the same session row resolve to exactly one
+// winner; the loser's plan aborts with ErrPreconditionFailed and this
+// method returns service.ErrQrLoginNotPending.
+func (r *entRepository) ConsumeQrLoginSession(ctx context.Context, nodeID string, atMs int64) error {
+	if nodeID == "" {
+		return service.ErrQrLoginNotPending
+	}
+	patch := &schemapb.QrLoginSession{
+		Status:    "consumed",
+		UpdatedAt: atMs,
+	}
+	err := r.client.updateIf(ctx, systemActor, nodeID, patch, "status", "approved")
+	if errors.Is(err, errPreconditionFailed) {
+		return service.ErrQrLoginNotPending
+	}
+	if err != nil {
+		return fmt.Errorf("repo: ConsumeQrLoginSession: %w", err)
+	}
+	return nil
+}
+
 // ── TOTP credentials ──────────────────────────────────────────────
 
 func totpCredFromProto(id string, p *schemapb.TotpCredential) *service.TotpCredRecord {

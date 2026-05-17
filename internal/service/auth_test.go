@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -560,6 +561,85 @@ func TestQrLogin_NonexistentSessionReturnsExpired(t *testing.T) {
 	result, err := svc.PollQrLogin(context.Background(), "nonexistent-session", "somesecret", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "expired", result.Status)
+}
+
+// TestQrLogin_ConcurrentPollOfApprovedSession_SingleWinner asserts the
+// multi-replica regression for issue #14: N goroutines polling the same
+// approved QR session must all succeed (each call is well-formed), but
+// only ONE may walk away with tokens. The rest see status="consumed"
+// — equivalent to "another replica already minted tokens for this
+// session." The repository's ConsumeQrLoginSession is the
+// serialization point.
+func TestQrLogin_ConcurrentPollOfApprovedSession_SingleWinner(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	user := seedUser(repo, "qr-race@example.com", "", "active")
+
+	init, err := svc.InitiateQrLogin(context.Background(), "Phone", "", "")
+	require.NoError(t, err)
+
+	_, err = svc.ApproveQrLogin(context.Background(), init.SessionID, true, user.ID, "")
+	require.NoError(t, err)
+
+	const N = 16
+	type pollOutcome struct {
+		status      string
+		accessToken string
+		err         error
+	}
+	results := make([]pollOutcome, N)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			r, err := svc.PollQrLogin(context.Background(), init.SessionID, init.PollSecret, "", "")
+			if err != nil {
+				results[i] = pollOutcome{err: err}
+				return
+			}
+			results[i] = pollOutcome{status: r.Status, accessToken: r.AccessToken}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	approvedWinners := 0
+	consumedLosers := 0
+	for _, r := range results {
+		require.NoError(t, r.err)
+		switch r.status {
+		case "approved":
+			approvedWinners++
+			require.NotEmpty(t, r.accessToken, "winner must carry an access token")
+		case "consumed":
+			consumedLosers++
+			require.Empty(t, r.accessToken, "loser must not carry a token")
+		default:
+			t.Fatalf("unexpected status %q", r.status)
+		}
+	}
+	assert.Equal(t, 1, approvedWinners,
+		"exactly one concurrent poll of the same approved QR session must mint tokens; got %d", approvedWinners)
+	assert.Equal(t, N-1, consumedLosers,
+		"all losers must observe status=consumed")
+
+	// Each winning poll mints a refresh token. Losers must NOT mint
+	// extra tokens: total refresh-token rows for the user must equal
+	// the single winner.
+	repo.mu.Lock()
+	rtCount := 0
+	for _, rt := range repo.refreshTokens {
+		if rt.UserID == user.ID {
+			rtCount++
+		}
+	}
+	repo.mu.Unlock()
+	assert.Equal(t, 1, rtCount,
+		"only the winning poll may write a refresh-token row; got %d", rtCount)
 }
 
 // ── TOTP ────────────────────────────────────────────────────────────────

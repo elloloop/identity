@@ -42,6 +42,7 @@ type errorRepo struct {
 	failFindQrLoginSession         bool
 	failCreateQrLoginSession       bool
 	failUpdateQrLoginSession       bool
+	failConsumeQrLoginSession      bool
 	failDeleteRecoveryCodesForUser bool
 	failCreateRecoveryCode         bool
 	failCreateEmailChangeToken     bool
@@ -256,6 +257,13 @@ func (r *errorRepo) UpdateQrLoginSession(ctx context.Context, nid string, fields
 		return errInjected
 	}
 	return r.fakeRepo.UpdateQrLoginSession(ctx, nid, fields)
+}
+
+func (r *errorRepo) ConsumeQrLoginSession(ctx context.Context, nid string, atMs int64) error {
+	if r.failConsumeQrLoginSession {
+		return errInjected
+	}
+	return r.fakeRepo.ConsumeQrLoginSession(ctx, nid, atMs)
 }
 
 func (r *errorRepo) DeleteRecoveryCodesForUser(ctx context.Context, uid string) error {

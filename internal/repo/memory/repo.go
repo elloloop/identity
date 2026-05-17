@@ -429,6 +429,25 @@ func (r *Repo) UpdateQrLoginSession(_ context.Context, nodeID string, fields map
 	return nil
 }
 
+// ConsumeQrLoginSession atomically transitions an approved session to
+// consumed. The mutex held across read+check+write makes this CAS
+// trivially correct for the in-process driver: any second caller sees
+// status != "approved" and returns ErrQrLoginNotPending.
+func (r *Repo) ConsumeQrLoginSession(_ context.Context, nodeID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.qrSessions[nodeID]
+	if !ok {
+		return service.ErrQrLoginNotPending
+	}
+	if s.Status != "approved" {
+		return service.ErrQrLoginNotPending
+	}
+	s.Status = "consumed"
+	s.UpdatedAt = atMs
+	return nil
+}
+
 // ── TOTP Credentials ──────────────────────────────────────────────
 
 func (r *Repo) GetTotpCredential(_ context.Context, userID string) (*service.TotpCredRecord, error) {
