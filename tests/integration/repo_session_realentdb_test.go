@@ -62,13 +62,13 @@ func TestRealEntDB_Session_CRUDAndRevoke(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Duplicate sid → repo surfaces the EntDB collision (the conformance
-	// suite asserts service.ErrAlreadyExists; the real backend should
-	// match).
+	// Duplicate sid → service.ErrAlreadyExists (pre-check in repo.go
+	// translates the EntDB unique-key collision into the canonical
+	// service-layer sentinel).
 	_, err = repo.CreateSession(ctx, &service.SessionRecord{
 		SID: sidA, UserID: userID, CreatedAtMs: now.UnixMilli(),
 	})
-	require.Error(t, err)
+	require.ErrorIs(t, err, service.ErrAlreadyExists)
 
 	// Round-trip via GetSessionBySid.
 	got, err := repo.GetSessionBySid(ctx, sidA)
