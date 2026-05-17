@@ -61,13 +61,26 @@ func TestPostgres_SweeperRespectsLimitAndGrace(t *testing.T) {
 		}
 		seed("prt-keep", 100_000)
 
-		deleted, err := repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 2)
-		require.NoError(t, err)
-		require.Equal(t, 2, deleted, "limit=2 must delete exactly 2")
+		// tenant-shard-db v1.14.0's OpDeleteWhere (#540) does not return
+		// a deleted-row count, so the Repository.DeleteExpired* contract
+		// now returns only error. Infer "rows deleted" by counting the
+		// rows that survive each sweep with a separate query against the
+		// same table.
+		count := func(hashPrefix string) int {
+			var n int
+			require.NoError(t, repo.pool.QueryRow(ctx,
+				`SELECT COUNT(*) FROM password_reset_tokens WHERE tenant_id=$1 AND token_hash LIKE $2`,
+				tenant, hashPrefix+"%",
+			).Scan(&n))
+			return n
+		}
 
-		deleted, err = repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 10)
-		require.NoError(t, err)
-		require.Equal(t, 3, deleted, "remaining 3 must be deleted")
+		require.Equal(t, 5, count("prt-exp-"), "seed must produce 5 expired rows")
+		require.NoError(t, repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 2))
+		require.Equal(t, 3, count("prt-exp-"), "limit=2 must delete exactly 2 expired rows")
+
+		require.NoError(t, repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 10))
+		require.Equal(t, 0, count("prt-exp-"), "remaining 3 expired rows must be deleted")
 
 		// Final state: only the unexpired row survives.
 		got, err := repo.FindPasswordResetTokenByHash(ctx, "prt-keep")
@@ -75,18 +88,16 @@ func TestPostgres_SweeperRespectsLimitAndGrace(t *testing.T) {
 		require.NotNil(t, got, "unexpired row was incorrectly deleted")
 
 		// Idempotent re-sweep.
-		deleted, err = repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 10)
-		require.NoError(t, err)
-		require.Equal(t, 0, deleted)
+		require.NoError(t, repo.DeleteExpiredPasswordResetTokens(ctx, 2_000, 10))
 	})
 
 	t.Run("RejectsZeroLimit", func(t *testing.T) {
-		_, err := repo.DeleteExpiredPasswordResetTokens(ctx, 1_000, 0)
+		err := repo.DeleteExpiredPasswordResetTokens(ctx, 1_000, 0)
 		require.Error(t, err, "limit=0 must error so a buggy caller does not block on an unbounded delete")
 	})
 
 	t.Run("RejectsNegativeLimit", func(t *testing.T) {
-		_, err := repo.DeleteExpiredLoginChallenges(ctx, 1_000, -5)
+		err := repo.DeleteExpiredLoginChallenges(ctx, 1_000, -5)
 		require.Error(t, err)
 	})
 }

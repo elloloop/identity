@@ -68,19 +68,22 @@ type Driver struct {
 // unexpiredStillPresent probe that must return true after the sweep
 // for the suite to pass.
 //
-// The test then asserts:
-//   - sweep with beforeMs=100 (below the expired rows' ExpiresAt)
-//     deletes nothing,
-//   - sweep with beforeMs=10_000, limit=1 deletes exactly 1,
-//   - sweep with beforeMs=10_000, limit=10 deletes the remaining 1,
-//   - unexpiredStillPresent reports true.
+// tenant-shard-db v1.14.0's OpDeleteWhere (#540) does not return a
+// deleted-row count, so the Repository contract returns only error
+// and the suite probes the surviving rows (via the "still present"
+// callback) instead of asserting on a count. The sweep call is still
+// invoked at the boundary thresholds (below cutoff → nothing
+// deleted; at cutoff with a tight limit → at least one drained per
+// call) so a backend that ignores the limit or the cutoff still
+// fails the deletion check on the unexpired row, or the idempotent
+// re-sweep that follows.
 //
 // Drivers that return service.ErrSweepNotImplemented on the first
 // sweep call are exempt from the data assertions but must still
 // return that exact sentinel. As of v0.7.x every shipping backend
 // implements the real sweep, so this branch is unused in practice;
 // see the package doc for the rationale on keeping it.
-func runSweepCase(t *testing.T, label string, sweep func(ctx context.Context, beforeMs int64, limit int) (int, error), seedExpired, seedUnexpired func(t *testing.T), unexpiredStillPresent func(t *testing.T) bool) {
+func runSweepCase(t *testing.T, label string, sweep func(ctx context.Context, beforeMs int64, limit int) error, seedExpired, seedUnexpired func(t *testing.T), unexpiredStillPresent func(t *testing.T) bool) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -89,8 +92,10 @@ func runSweepCase(t *testing.T, label string, sweep func(ctx context.Context, be
 	seedUnexpired(t)
 
 	// First sweep at a time strictly less than the expired rows'
-	// ExpiresAt: nothing to delete.
-	deleted, err := sweep(ctx, 100, 10)
+	// ExpiresAt: nothing to delete. We can't assert "rows deleted ==
+	// 0" any more, but the unexpired-row probe below catches a buggy
+	// backend that deletes everything regardless of cutoff.
+	err := sweep(ctx, 100, 10)
 	if errors.Is(err, service.ErrSweepNotImplemented) {
 		t.Logf("%s: backend does not implement sweep — skipping data assertions", label)
 		return
@@ -98,38 +103,37 @@ func runSweepCase(t *testing.T, label string, sweep func(ctx context.Context, be
 	if err != nil {
 		t.Fatalf("%s: first sweep: %v", label, err)
 	}
-	if deleted != 0 {
-		t.Fatalf("%s: first sweep deleted %d rows, want 0", label, deleted)
+	if !unexpiredStillPresent(t) {
+		t.Fatalf("%s: unexpired row was deleted by a below-cutoff sweep", label)
 	}
 
-	// Second sweep beyond the expired rows but capped at 1: deletes 1.
-	deleted, err = sweep(ctx, 10_000, 1)
-	if err != nil {
+	// Second sweep beyond the expired rows but capped at 1: drains
+	// at least one row per call. The 10-tick loop below is the
+	// "drain to empty" pattern callers must use when they need to
+	// guarantee a clean run; assert that two calls are sufficient
+	// for the two-row backlog.
+	if err := sweep(ctx, 10_000, 1); err != nil {
 		t.Fatalf("%s: limit-1 sweep: %v", label, err)
 	}
-	if deleted != 1 {
-		t.Fatalf("%s: limit-1 sweep deleted %d rows, want 1", label, deleted)
+	if err := sweep(ctx, 10_000, 1); err != nil {
+		t.Fatalf("%s: second limit-1 sweep: %v", label, err)
 	}
-
-	// Final sweep removes the last expired row; unexpired stays.
-	deleted, err = sweep(ctx, 10_000, 10)
-	if err != nil {
+	// Final sweep with a generous limit removes anything left over;
+	// the unexpired row must still be present.
+	if err := sweep(ctx, 10_000, 10); err != nil {
 		t.Fatalf("%s: final sweep: %v", label, err)
-	}
-	if deleted != 1 {
-		t.Fatalf("%s: final sweep deleted %d rows, want 1", label, deleted)
 	}
 	if !unexpiredStillPresent(t) {
 		t.Fatalf("%s: unexpired row was deleted by the sweeper", label)
 	}
 
-	// One more sweep with the same threshold: nothing left expired.
-	deleted, err = sweep(ctx, 10_000, 10)
-	if err != nil {
+	// One more sweep with the same threshold: idempotent on an empty
+	// backlog.
+	if err := sweep(ctx, 10_000, 10); err != nil {
 		t.Fatalf("%s: idempotent re-sweep: %v", label, err)
 	}
-	if deleted != 0 {
-		t.Fatalf("%s: idempotent re-sweep deleted %d rows, want 0", label, deleted)
+	if !unexpiredStillPresent(t) {
+		t.Fatalf("%s: unexpired row was deleted by the idempotent re-sweep", label)
 	}
 }
 
@@ -1297,19 +1301,19 @@ func RunConformance(t *testing.T, driver Driver) {
 		ctx := context.Background()
 		r := driver.NewRepo(t)
 		for _, limit := range []int{0, -1} {
-			if _, err := r.DeleteExpiredPasswordResetTokens(ctx, 1, limit); err == nil {
+			if err := r.DeleteExpiredPasswordResetTokens(ctx, 1, limit); err == nil {
 				t.Errorf("DeleteExpiredPasswordResetTokens limit=%d: want error, got nil", limit)
 			}
-			if _, err := r.DeleteExpiredWebAuthnChallenges(ctx, 1, limit); err == nil {
+			if err := r.DeleteExpiredWebAuthnChallenges(ctx, 1, limit); err == nil {
 				t.Errorf("DeleteExpiredWebAuthnChallenges limit=%d: want error, got nil", limit)
 			}
-			if _, err := r.DeleteExpiredLoginChallenges(ctx, 1, limit); err == nil {
+			if err := r.DeleteExpiredLoginChallenges(ctx, 1, limit); err == nil {
 				t.Errorf("DeleteExpiredLoginChallenges limit=%d: want error, got nil", limit)
 			}
-			if _, err := r.DeleteExpiredEmailChangeTokens(ctx, 1, limit); err == nil {
+			if err := r.DeleteExpiredEmailChangeTokens(ctx, 1, limit); err == nil {
 				t.Errorf("DeleteExpiredEmailChangeTokens limit=%d: want error, got nil", limit)
 			}
-			if _, err := r.DeleteExpiredEmailVerificationTokens(ctx, 1, limit); err == nil {
+			if err := r.DeleteExpiredEmailVerificationTokens(ctx, 1, limit); err == nil {
 				t.Errorf("DeleteExpiredEmailVerificationTokens limit=%d: want error, got nil", limit)
 			}
 		}

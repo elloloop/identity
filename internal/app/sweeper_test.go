@@ -43,41 +43,37 @@ type mockSweepRepo struct {
 	// err and skip control the per-method behaviour. err is returned
 	// for every method when non-nil. skip causes every method to
 	// return service.ErrSweepNotImplemented.
-	err    error
-	skip   bool
-	delete int
+	err  error
+	skip bool
 }
 
-func (m *mockSweepRepo) sweep(beforeMs int64, limit int) (int, error) {
+func (m *mockSweepRepo) sweep(beforeMs int64, limit int) error {
 	m.calls.Add(1)
 	m.lastBefore.Store(beforeMs)
 	m.lastLimit.Store(int64(limit))
 	if m.skip {
-		return 0, service.ErrSweepNotImplemented
+		return service.ErrSweepNotImplemented
 	}
-	if m.err != nil {
-		return 0, m.err
-	}
-	return m.delete, nil
+	return m.err
 }
 
-func (m *mockSweepRepo) DeleteExpiredWebAuthnChallenges(_ context.Context, b int64, l int) (int, error) {
+func (m *mockSweepRepo) DeleteExpiredWebAuthnChallenges(_ context.Context, b int64, l int) error {
 	return m.sweep(b, l)
 }
 
-func (m *mockSweepRepo) DeleteExpiredEmailVerificationTokens(_ context.Context, b int64, l int) (int, error) {
+func (m *mockSweepRepo) DeleteExpiredEmailVerificationTokens(_ context.Context, b int64, l int) error {
 	return m.sweep(b, l)
 }
 
-func (m *mockSweepRepo) DeleteExpiredPasswordResetTokens(_ context.Context, b int64, l int) (int, error) {
+func (m *mockSweepRepo) DeleteExpiredPasswordResetTokens(_ context.Context, b int64, l int) error {
 	return m.sweep(b, l)
 }
 
-func (m *mockSweepRepo) DeleteExpiredEmailChangeTokens(_ context.Context, b int64, l int) (int, error) {
+func (m *mockSweepRepo) DeleteExpiredEmailChangeTokens(_ context.Context, b int64, l int) error {
 	return m.sweep(b, l)
 }
 
-func (m *mockSweepRepo) DeleteExpiredLoginChallenges(_ context.Context, b int64, l int) (int, error) {
+func (m *mockSweepRepo) DeleteExpiredLoginChallenges(_ context.Context, b int64, l int) error {
 	return m.sweep(b, l)
 }
 
@@ -98,7 +94,7 @@ func TestSweeper_DisabledWhenIntervalNegative(t *testing.T) {
 }
 
 func TestSweeper_RunOnceCallsAllFiveMethods(t *testing.T) {
-	repo := &mockSweepRepo{delete: 7}
+	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
 	s := newSweeper(repo, 1, 50, 30, logger)
 	if s == nil {
@@ -171,23 +167,30 @@ func TestSweeper_RealErrorIncrementsErrorCounter(t *testing.T) {
 	}
 }
 
-func TestSweeper_DeletedRowsIncrementCounter(t *testing.T) {
-	repo := &mockSweepRepo{delete: 4}
+// TestSweeper_SuccessfulRunIncrementsRunsCounter asserts that each
+// per-node-type sweep tick bumps identity_sweeper_runs_total{node_type}.
+// tenant-shard-db v1.14.0's OpDeleteWhere does not return a deleted-
+// row count, so the previous identity_sweeper_deleted_total metric
+// (rows-deleted, per node type) was replaced by this per-tick
+// counter — it preserves the "GC is alive" liveness signal without
+// claiming a count the upstream can't provide.
+func TestSweeper_SuccessfulRunIncrementsRunsCounter(t *testing.T) {
+	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
 	initSweeperMetrics()
-	baseline := readCounter(sweeperDeleted.WithLabelValues("login_challenges"))
+	baseline := readCounter(sweeperRuns.WithLabelValues("login_challenges"))
 
 	s := newSweeper(repo, 1, 50, 30, logger)
 	s.runOnce(context.Background())
 
-	got := readCounter(sweeperDeleted.WithLabelValues("login_challenges"))
-	if got != baseline+4 {
-		t.Fatalf("expected deleted counter +4, got %v -> %v", baseline, got)
+	got := readCounter(sweeperRuns.WithLabelValues("login_challenges"))
+	if got != baseline+1 {
+		t.Fatalf("expected runs counter +1, got %v -> %v", baseline, got)
 	}
 }
 
 func TestSweeper_StartStopCleanly(t *testing.T) {
-	repo := &mockSweepRepo{delete: 1}
+	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
 
 	// A very short interval lets the loop tick at least once before

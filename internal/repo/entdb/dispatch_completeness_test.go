@@ -40,6 +40,14 @@ import (
 //
 // Then for each repo-side type it confirms each switch has the case.
 // A missing case is the exact regression #85 fixed.
+//
+// The sweeper dispatch arm in sdkScope.deleteExpired is also covered:
+// every schemapb type passed to r.client.deleteExpired in sweeper.go
+// must appear as a `case *schemapb.X:` arm of sdkScope.deleteExpired
+// so the entdb.DeleteWhere[T] generic gets the right type witness.
+// (Before v1.14.0 the dispatch happened through expiresAtSweepSpec,
+// which is now gone — the SDK reads (entdb.node).type_id directly
+// from the proto descriptor.)
 func TestDispatchCompleteness(t *testing.T) {
 	root, err := repoRoot()
 	if err != nil {
@@ -61,7 +69,7 @@ func TestDispatchCompleteness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan client.go: %v", err)
 	}
-	for _, m := range []string{"get", "query", "delete"} {
+	for _, m := range []string{"get", "query", "delete", "deleteExpired"} {
 		if len(dispatched[m]) == 0 {
 			t.Fatalf("client.go: sdkScope.%s has no proto-type cases — scanner is broken", m)
 		}
@@ -86,7 +94,8 @@ func TestDispatchCompleteness(t *testing.T) {
 
 	// Sweeper dispatch: every schemapb type passed to
 	// r.client.deleteExpired in sweeper.go must appear as a case in
-	// client.go's expiresAtSweepSpec.
+	// client.go's sdkScope.deleteExpired type switch — that switch
+	// picks the right entdb.DeleteWhere[T] instantiation.
 	sweepTypes, err := schemapbTypesPassedToDeleteExpired(sweeperGoPath)
 	if err != nil {
 		t.Fatalf("scan sweeper.go: %v", err)
@@ -94,24 +103,17 @@ func TestDispatchCompleteness(t *testing.T) {
 	if len(sweepTypes) == 0 {
 		t.Fatalf("sweeper.go scan found no schemapb types — scanner is broken")
 	}
-	sweepDispatched, err := typesInSweepSpec(clientGoPath)
-	if err != nil {
-		t.Fatalf("scan expiresAtSweepSpec: %v", err)
-	}
-	if len(sweepDispatched) == 0 {
-		t.Fatalf("client.go: expiresAtSweepSpec has no proto-type cases — scanner is broken")
-	}
 	missing := []string{}
 	for tn := range sweepTypes {
-		if !sweepDispatched[tn] {
+		if !dispatched["deleteExpired"][tn] {
 			missing = append(missing, tn)
 		}
 	}
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		t.Errorf(
-			"expiresAtSweepSpec is missing case for: %s\n"+
-				"every schemapb type passed to r.client.deleteExpired in sweeper.go must be in client.go's expiresAtSweepSpec",
+			"sdkScope.deleteExpired switch is missing case for: %s\n"+
+				"every schemapb type passed to r.client.deleteExpired in sweeper.go must be in client.go's dispatch table",
 			strings.Join(missing, ", "),
 		)
 	}
@@ -237,8 +239,9 @@ func schemapbCompositeTypeName(e ast.Expr) string {
 }
 
 // dispatchedTypesByMethod parses client.go and returns, for each of
-// sdkScope.{get, query, delete}, the set of schemapb.X type names
-// appearing as `case *schemapb.X:` arms in the method's type switch.
+// sdkScope.{get, query, delete, deleteExpired}, the set of schemapb.X
+// type names appearing as `case *schemapb.X:` arms in the method's
+// type switch.
 func dispatchedTypesByMethod(path string) (map[string]map[string]bool, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
@@ -246,9 +249,10 @@ func dispatchedTypesByMethod(path string) (map[string]map[string]bool, error) {
 		return nil, err
 	}
 	out := map[string]map[string]bool{
-		"get":    {},
-		"query":  {},
-		"delete": {},
+		"get":           {},
+		"query":         {},
+		"delete":        {},
+		"deleteExpired": {},
 	}
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -327,47 +331,6 @@ func schemapbTypesPassedToDeleteExpired(path string) (map[string]bool, error) {
 			}
 			if name := schemapbCompositeTypeName(call.Args[2]); name != "" {
 				out[name] = true
-			}
-			return true
-		})
-	}
-	return out, nil
-}
-
-// typesInSweepSpec returns the set of schemapb.X type names appearing
-// as `case *schemapb.X:` arms inside the top-level expiresAtSweepSpec
-// function in client.go.
-func typesInSweepSpec(path string) (map[string]bool, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]bool{}
-	for _, decl := range f.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil || fn.Name == nil || fn.Name.Name != "expiresAtSweepSpec" {
-			continue
-		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			cc, ok := n.(*ast.CaseClause)
-			if !ok {
-				return true
-			}
-			for _, expr := range cc.List {
-				star, ok := expr.(*ast.StarExpr)
-				if !ok {
-					continue
-				}
-				sel, ok := star.X.(*ast.SelectorExpr)
-				if !ok {
-					continue
-				}
-				pkg, ok := sel.X.(*ast.Ident)
-				if !ok || pkg.Name != "schemapb" {
-					continue
-				}
-				out[sel.Sel.Name] = true
 			}
 			return true
 		})

@@ -262,19 +262,26 @@ type Repository interface {
 	// Garbage-collection sweepers for ephemeral state. The
 	// background sweeper started by app.New calls these every
 	// GATEWAY_SWEEPER_INTERVAL_SECONDS; each call deletes up to
-	// `limit` rows whose ExpiresAt is strictly less than `beforeMs`
-	// and returns the number actually deleted. Every shipping backend
-	// (memory, postgres, entdb) implements the real sweep; the
-	// ErrSweepNotImplemented sentinel remains so a new backend can
-	// land its CRUD methods first and its sweep in a follow-up PR
-	// without erroring the sweeper goroutine. Implementations MUST
-	// reject limit <= 0 — an unbounded delete batch could lock a hot
-	// table for an unbounded window.
-	DeleteExpiredWebAuthnChallenges(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
-	DeleteExpiredEmailVerificationTokens(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
-	DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
-	DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
-	DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) (deleted int, err error)
+	// `limit` rows whose ExpiresAt is strictly less than `beforeMs`.
+	// Every shipping backend (memory, postgres, entdb) implements the
+	// real sweep; the ErrSweepNotImplemented sentinel remains so a new
+	// backend can land its CRUD methods first and its sweep in a
+	// follow-up PR without erroring the sweeper goroutine.
+	// Implementations MUST reject limit <= 0 — an unbounded delete
+	// batch could lock a hot table for an unbounded window.
+	//
+	// Return value is only error: tenant-shard-db v1.14.0's
+	// OpDeleteWhere primitive intentionally does not return a deleted-
+	// row count (see #540 "applied, no count for v1"), so identity
+	// drops the count from the contract to avoid forcing one of the
+	// three backends into a per-row tally that the others can't
+	// match. The app-layer sweeper emits per-tick "sweep completed"
+	// events instead of a row count.
+	DeleteExpiredWebAuthnChallenges(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredEmailVerificationTokens(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) error
 
 	// Organizations — identity-layer entity used by `mode=multi`
 	// deployments. CreateOrganization writes the Organization row and

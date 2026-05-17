@@ -399,8 +399,9 @@ before you ship.
    trade-off. Adding a third model in the future means a new value
    on this knob, not a translation layer wrapping the existing ones.
 8. **`OrganizationSignup` rollback is best-effort compensating
-   deletes, not transactional.** tenant-shard-db v1.13 does not
-   expose a `DeleteTenant` primitive, so once `Admin.CreateTenant`
+   deletes, not transactional.** tenant-shard-db (through v1.14.0
+   today) does not expose a `DeleteTenant` primitive, so once
+   `Admin.CreateTenant`
    has succeeded the tenant exists in the storage layer until an
    operator removes it out-of-band. Identity's `OrganizationSignup`
    rolls back what it can — the per-tenant `Admin.RemoveTenantMember`
@@ -414,6 +415,64 @@ before you ship.
    failure mode that should be rare. If a deployer needs reliable
    cleanup of half-created tenants, that's a candidate upstream
    feature on tenant-shard-db, not an identity-layer workaround.
+9. **tenant-shard-db v1.14.0 alignment — sweeper, page cap, typed
+   errors.** The v1.14.0 bump (SDK + server image) reworked three
+   identity-side seams:
+
+   - **Sweeper now uses `OpDeleteWhere` (#540).** The five
+     `Repository.DeleteExpired*` methods previously paired a
+     `QueryNodes` with a batched `OpDeleteNode` atomic commit
+     through the raw transport. v1.14.0 collapses that into a
+     single-RPC `entdb.DeleteWhere[T]` call, which the server
+     applies inside one applier-goroutine slice and caps at the
+     configured per-op limit. The Repository contract for the
+     five sweep methods changed from `(deleted int, err error)`
+     to `error` because the upstream PR intentionally does not
+     return a deleted-row count ("applied, no count for v1" in
+     the issue resolution). The app-layer sweeper now publishes
+     `identity_sweeper_runs_total{node_type}` (a per-tick "GC is
+     alive" counter) instead of the v1.13.x
+     `identity_sweeper_deleted_total{node_type}` (a rows-deleted
+     counter); operators that scrape the old metric must update
+     dashboards. Errors continue to bump
+     `identity_sweeper_errors_total{node_type}`.
+   - **Page-cap drain loops for user-scoped bulk deletes (#530,
+     SEC-4).** v1.14.0's server caps `QueryNodes` at 1000 rows
+     per call. The four user-scoped bulk operations
+     (`DeleteRefreshTokensForUser`, `DeleteTotpCredentialsForUser`,
+     `DeleteRecoveryCodesForUser`, `RevokeSessionsForUser`) now
+     drain in a `query → mutate → re-query` loop until the next
+     query is empty (or, for sessions, returns no un-revoked rows)
+     — capped at 100 iterations so a buggy backend cannot pin a
+     goroutine. The other unbounded list endpoints
+     (`ListPasskeyCredentials`, `ListOAuthIdentitiesForUser`,
+     `ListOrganizationsForUser`, the OAuth dup-checks, the
+     duplicate-user safety net `queryUsersByEmail`) are bounded
+     by reasonable per-user counts (well under 1000) and accept
+     the server-side cap as the implicit limit. If a deployer
+     starts hitting the cap on a list endpoint that's a product
+     issue (a single user shouldn't legitimately accumulate 1000+
+     orgs or passkeys), not a cap-tuning issue.
+   - **Typed error matching for `ALREADY_EXISTS` (#533, SEC-5).**
+     The v1.14.0 SDK now wraps every gRPC status from the
+     transport into a typed error: `*sdk.EntDBError` with
+     `Code == "ALREADY_EXISTS"` for plain duplicate detections,
+     and `*sdk.UniqueConstraintError` for single-field unique-key
+     collisions. Identity's `isAlreadyExists` and
+     `dbAdapterIsAlreadyExists` helpers were rewritten to match
+     those typed errors via `errors.As`; the v1.13.x raw
+     `status.FromError` path is gone, and so are the legacy
+     substring matchers ("ALREADY_EXISTS" / "already exists" in
+     `err.Error()`). The SEC-5 sanitization only rewrites the
+     `codes.Internal` / `codes.Unknown` text on the wire, so
+     `tenant not opened` (FailedPrecondition) and the typed
+     ALREADY_EXISTS / NOT_FOUND paths the helpers care about are
+     preserved verbatim. The
+     `TestSEC4_DeleteRefreshTokensForUser_DrainsBeyondQueryCap`
+     regression and the typed-error matrix on `TestIsAlreadyExists`
+     / `TestDBAdapterIsAlreadyExists` are the unit-level
+     guardrails; the conformance suite and `Integration (real
+     entdb)` cover the live-server path.
 
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

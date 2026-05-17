@@ -9,48 +9,52 @@ import (
 
 // The five DeleteExpired* sweepers drop up to limit rows whose
 // expires_at is strictly less than beforeMs. Each one dispatches
-// through entClient.deleteExpired, which handles the typed query
-// + batched OpDeleteNode atomic-commit pair against the raw
-// transport. The schema declares expires_at indexed on every
-// affected node type so the underlying scan stays on a B-tree
-// expression index.
+// through entClient.deleteExpired, which in turn issues a single
+// OpDeleteWhere op via tenant-shard-db v1.14.0's single-RPC sweeper
+// primitive (#540). Earlier identity releases ran a QueryNodes +
+// batched OpDeleteNode pair through the raw transport; v1.14.0
+// collapses both into one round trip and the server caps the per-op
+// limit so a runaway predicate cannot pin the single applier
+// goroutine for a tenant.
+//
+// The OpDeleteWhere primitive does not return a row count (see the
+// v1.14.0 release notes — "applied, no count for v1"); the sweeper
+// methods therefore return only error, and the app-layer sweeper
+// emits a per-tick "sweep completed" counter instead of a row count.
+// The schema declares expires_at indexed on every affected node type
+// so the underlying scan stays on a B-tree expression index.
 
-func (r *entRepository) DeleteExpiredWebAuthnChallenges(ctx context.Context, beforeMs int64, limit int) (int, error) {
-	n, err := r.client.deleteExpired(ctx, systemActor, &schemapb.PasskeyChallenge{}, beforeMs, limit)
-	if err != nil {
-		return 0, fmt.Errorf("repo: DeleteExpiredWebAuthnChallenges: %w", err)
+func (r *entRepository) DeleteExpiredWebAuthnChallenges(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.PasskeyChallenge{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredWebAuthnChallenges: %w", err)
 	}
-	return n, nil
+	return nil
 }
 
-func (r *entRepository) DeleteExpiredEmailVerificationTokens(ctx context.Context, beforeMs int64, limit int) (int, error) {
-	n, err := r.client.deleteExpired(ctx, systemActor, &schemapb.EmailVerificationToken{}, beforeMs, limit)
-	if err != nil {
-		return 0, fmt.Errorf("repo: DeleteExpiredEmailVerificationTokens: %w", err)
+func (r *entRepository) DeleteExpiredEmailVerificationTokens(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.EmailVerificationToken{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredEmailVerificationTokens: %w", err)
 	}
-	return n, nil
+	return nil
 }
 
-func (r *entRepository) DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) (int, error) {
-	n, err := r.client.deleteExpired(ctx, systemActor, &schemapb.PasswordResetToken{}, beforeMs, limit)
-	if err != nil {
-		return 0, fmt.Errorf("repo: DeleteExpiredPasswordResetTokens: %w", err)
+func (r *entRepository) DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.PasswordResetToken{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredPasswordResetTokens: %w", err)
 	}
-	return n, nil
+	return nil
 }
 
-func (r *entRepository) DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) (int, error) {
-	n, err := r.client.deleteExpired(ctx, systemActor, &schemapb.EmailChangeToken{}, beforeMs, limit)
-	if err != nil {
-		return 0, fmt.Errorf("repo: DeleteExpiredEmailChangeTokens: %w", err)
+func (r *entRepository) DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.EmailChangeToken{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredEmailChangeTokens: %w", err)
 	}
-	return n, nil
+	return nil
 }
 
-func (r *entRepository) DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) (int, error) {
-	n, err := r.client.deleteExpired(ctx, systemActor, &schemapb.LoginChallenge{}, beforeMs, limit)
-	if err != nil {
-		return 0, fmt.Errorf("repo: DeleteExpiredLoginChallenges: %w", err)
+func (r *entRepository) DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.LoginChallenge{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredLoginChallenges: %w", err)
 	}
-	return n, nil
+	return nil
 }

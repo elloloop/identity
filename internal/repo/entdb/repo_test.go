@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -200,9 +198,15 @@ func (c *memoryEntClient) delete(_ context.Context, _ string, witness proto.Mess
 	return nil
 }
 
-func (c *memoryEntClient) deleteExpired(_ context.Context, _ string, witness proto.Message, beforeMs int64, limit int) (int, error) {
+// deleteExpired mirrors tenant-shard-db v1.14.0's single-RPC
+// OpDeleteWhere (#540) for the in-memory fake. Iterates the store,
+// drops up to limit rows where expires_at < beforeMs, ordered by
+// (expires_at ASC, id ASC) so batches are deterministic across
+// runs. Returns only error to match the production sdkScope, which
+// has no count to propagate from the upstream receipt.
+func (c *memoryEntClient) deleteExpired(_ context.Context, _ string, witness proto.Message, beforeMs int64, limit int) error {
 	if limit <= 0 {
-		return 0, fmt.Errorf("entdb: deleteExpired: limit must be > 0, got %d", limit)
+		return fmt.Errorf("entdb: deleteExpired: limit must be > 0, got %d", limit)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -210,15 +214,9 @@ func (c *memoryEntClient) deleteExpired(_ context.Context, _ string, witness pro
 	fields := witness.ProtoReflect().Descriptor().Fields()
 	fd := fields.ByName("expires_at")
 	if fd == nil {
-		return 0, fmt.Errorf("entdb: deleteExpired: %T has no expires_at field", witness)
+		return fmt.Errorf("entdb: deleteExpired: %T has no expires_at field", witness)
 	}
 
-	// Collect candidate ids and their expires_at; sort to keep
-	// the per-batch deletion order deterministic across runs. The
-	// production transport's QueryNodes does not currently expose a
-	// server-side limit (see sdkScope.deleteExpired); the fake
-	// mirrors that "fetch all, slice client-side" behaviour so unit
-	// tests catch a bug in the slice math.
 	type cand struct {
 		id        string
 		expiresAt int64
@@ -246,7 +244,7 @@ func (c *memoryEntClient) deleteExpired(_ context.Context, _ string, witness pro
 	for _, c2 := range cands {
 		delete(c.store, c2.id)
 	}
-	return len(cands), nil
+	return nil
 }
 
 // ensureUserTenantMember is a no-op on the memory client. The
@@ -985,17 +983,46 @@ func TestSDKScopeVisibilityWaitsStopOnContextCancel(t *testing.T) {
 func TestIsAlreadyExists(t *testing.T) {
 	t.Parallel()
 
+	// tenant-shard-db v1.14.0 wraps every transport-level gRPC status
+	// into a typed *sdk.EntDBError (Code == "ALREADY_EXISTS") or, for
+	// single-field unique-key collisions, the typed
+	// *sdk.UniqueConstraintError (Code == "UNIQUE_CONSTRAINT"). Raw
+	// status errors and free-form string errors no longer reach
+	// identity from the SDK — the v1.13.x string matchers were dropped
+	// (SEC-5 sanitization audit, see docs/IDENTITY.md §9). Match the
+	// typed errors directly so a future SEC-5 round of message
+	// rewording cannot regress idempotency.
 	cases := []struct {
 		name string
 		err  error
 		want bool
 	}{
 		{"nil", nil, false},
-		{"all_caps_fragment", errors.New("server returned ALREADY_EXISTS for user X"), true},
-		{"lowercase_fragment", errors.New("user already exists in this tenant"), true},
-		{"grpc_already_exists", status.Error(codes.AlreadyExists, "duplicate"), true},
-		{"grpc_other_code", status.Error(codes.Internal, "boom"), false},
-		{"unrelated_plain_text", errors.New("INTERNAL: storage unavailable"), false},
+		{
+			name: "typed_entdb_already_exists",
+			err:  &sdk.EntDBError{Code: "ALREADY_EXISTS", Message: "user X already in tenant"},
+			want: true,
+		},
+		{
+			name: "typed_unique_constraint_error",
+			err:  sdk.NewUniqueConstraintError("t1", 1, 1, "alice@example.com"),
+			want: true,
+		},
+		{
+			name: "wrapped_typed_already_exists",
+			err:  fmt.Errorf("entdb: register user %q: %w", "u", &sdk.EntDBError{Code: "ALREADY_EXISTS", Message: "x"}),
+			want: true,
+		},
+		{
+			name: "typed_entdb_internal_error",
+			err:  &sdk.EntDBError{Code: "Internal", Message: "internal error"},
+			want: false,
+		},
+		{
+			name: "untyped_string_error",
+			err:  errors.New("user already exists"),
+			want: false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1024,5 +1051,63 @@ func TestIsTenantNotOpened(t *testing.T) {
 				t.Fatalf("isTenantNotOpened(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+// cappedQueryClient wraps an entClient and clamps query results at
+// `cap` rows per call. Used to regression-test identity's SEC-4
+// drain loops against tenant-shard-db v1.14.0's server-side cap on
+// QueryNodes (#530) without spinning up a real EntDB.
+type cappedQueryClient struct {
+	*memoryEntClient
+	cap int
+}
+
+func (c *cappedQueryClient) query(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, error) {
+	rows, err := c.memoryEntClient.query(ctx, actor, witness, filter)
+	if err != nil {
+		return nil, err
+	}
+	if c.cap > 0 && len(rows) > c.cap {
+		rows = rows[:c.cap]
+	}
+	return rows, nil
+}
+
+// TestSEC4_DeleteRefreshTokensForUser_DrainsBeyondQueryCap is the
+// regression test for the SEC-4 drain pattern: tenant-shard-db
+// v1.14.0 caps QueryNodes at 1000 rows server-side (#530), so a
+// per-user bulk delete that previously assumed "query returns every
+// match" would silently truncate. With the drain loop in place,
+// DeleteRefreshTokensForUser must remove every row even when the
+// user has more than the per-call cap.
+func TestSEC4_DeleteRefreshTokensForUser_DrainsBeyondQueryCap(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := newMemoryEntClient()
+	// Use a tiny cap (3) to keep the test fast; the drain logic is
+	// the same shape at 1000.
+	capped := &cappedQueryClient{memoryEntClient: mem, cap: 3}
+	repo := &entRepository{client: capped, tenantID: "t"}
+
+	// Seed 10 refresh tokens for the same user — more than 3× the cap.
+	for i := 0; i < 10; i++ {
+		mem.store[fmt.Sprintf("rt-%02d", i)] = storedNode{msg: &schemapb.RefreshToken{
+			TokenHash: fmt.Sprintf("rt-%02d", i),
+			UserId:    "u-1",
+		}}
+	}
+
+	if err := repo.DeleteRefreshTokensForUser(ctx, "u-1"); err != nil {
+		t.Fatalf("DeleteRefreshTokensForUser: %v", err)
+	}
+	remaining := 0
+	for _, n := range mem.store {
+		if _, ok := n.msg.(*schemapb.RefreshToken); ok {
+			remaining++
+		}
+	}
+	if remaining != 0 {
+		t.Fatalf("after drain: %d refresh tokens left, want 0", remaining)
 	}
 }

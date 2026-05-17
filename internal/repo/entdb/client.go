@@ -10,8 +10,6 @@ import (
 	"time"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -66,10 +64,16 @@ type entClient interface {
 	delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error
 	// deleteExpired removes up to limit rows of the witness type whose
 	// expires_at is strictly less than beforeMs. Used by the GC
-	// sweeper; takes the typed witness so per-type field ids and
-	// type ids stay resolved inside the dispatch table next to the
-	// other typed ops, not at the call site.
-	deleteExpired(ctx context.Context, actor string, witness proto.Message, beforeMs int64, limit int) (int, error)
+	// sweeper; takes the typed witness so the SDK can resolve T's
+	// type id from the proto descriptor (read by entdb.DeleteWhere[T])
+	// without a per-type field-id map at the call site.
+	//
+	// Returns only error: tenant-shard-db v1.14.0's OpDeleteWhere
+	// (#540) is "applied, no count" by design; the upstream PR called
+	// out that a deleted-row count would add a column to the receipt
+	// for limited operational value. The app-layer sweeper logs and
+	// counts ticks instead of rows.
+	deleteExpired(ctx context.Context, actor string, witness proto.Message, beforeMs int64, limit int) error
 	// ensureUserTenantMember registers userID in the global user
 	// registry and adds it as a member of the scope's tenant. Both
 	// calls tolerate ALREADY_EXISTS so the helper is idempotent
@@ -109,8 +113,10 @@ type sdkScope struct {
 }
 
 func newSDKScope(client *sdk.DbClient, tenantID string) *sdkScope {
-	transport, _ := TransportFromClient(client)
-	return &sdkScope{client: client, tenantID: tenantID, transport: transport}
+	// tenant-shard-db v1.14.0 (#528) added a public read-only Transport
+	// accessor on *DbClient, so the repo can reach the raw transport
+	// without reflection. Earlier releases forced an unsafe field read.
+	return &sdkScope{client: client, tenantID: tenantID, transport: client.Transport()}
 }
 
 func (s *sdkScope) scope(actor string) (*sdk.Scope, error) {
@@ -308,28 +314,39 @@ func (s *sdkScope) ensureUserTenantMember(ctx context.Context, userID, emailAddr
 	return nil
 }
 
-// isAlreadyExists reports whether err is a gRPC ALREADY_EXISTS status
-// or carries the canonical "already exists" message fragment. The
-// upstream Go server emits the typed gRPC status; the older Python
-// implementation embedded the same code in plain-text errors. Both
-// paths keep ensureUserTenantMember idempotent.
+// isAlreadyExists reports whether err is the SDK's ALREADY_EXISTS
+// signal. tenant-shard-db v1.14.0 wraps the upstream gRPC status into
+// the typed *sdk.EntDBError (Code == "ALREADY_EXISTS") and into the
+// typed *sdk.UniqueConstraintError for single-field unique-key
+// collisions (which embed EntDBError with a "UNIQUE_CONSTRAINT" code
+// but are still produced from the same AlreadyExists status). Match
+// on both so ensureUserTenantMember stays idempotent across either
+// path.
 func isAlreadyExists(err error) bool {
 	if err == nil {
 		return false
 	}
-	if st, ok := status.FromError(err); ok {
-		return st.Code() == codes.AlreadyExists
+	var entErr *sdk.EntDBError
+	if errors.As(err, &entErr) && entErr.Code == "ALREADY_EXISTS" {
+		return true
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "ALREADY_EXISTS") || strings.Contains(msg, "already exists")
+	var uce *sdk.UniqueConstraintError
+	return errors.As(err, &uce)
 }
 
 // isTenantNotOpened reports whether err is the server-side
 // FailedPrecondition signalling that the tenant has no on-disk WAL
-// yet — the v1.12.x server returns this on QueryNodes against a
-// tenant that has had no writes. Identity treats it as an empty
-// result rather than an error so the query-then-create idempotency
-// guard works on a brand-new tenant.
+// yet — the v1.12+ server returns this on QueryNodes against a tenant
+// that has had no writes. Identity treats it as an empty result
+// rather than an error so the query-then-create idempotency guard
+// works on a brand-new tenant.
+//
+// v1.14.0 wraps FailedPrecondition into a generic *sdk.EntDBError
+// whose stringified form is "entdb FailedPrecondition: <server
+// message>". The server message still contains the literal "tenant
+// not opened" phrase from the upstream applier, which is the part we
+// match against. SEC-5 sanitization only retargets codes.Internal /
+// codes.Unknown so this signal is preserved.
 func isTenantNotOpened(err error) bool {
 	if err == nil {
 		return false
@@ -511,83 +528,48 @@ func protoValueFromAny(fd protoreflect.FieldDescriptor, v any) (protoreflect.Val
 	return protoreflect.Value{}, false
 }
 
-// expiresAtSweepSpec returns the (type id, expires_at field id) pair
-// the raw transport needs to query and delete expired rows for the
-// witness type. Returns ok=false for types the sweeper does not own;
-// callers report that as an unsupported-type error rather than a
-// silent no-op so a new sweep target can never land without an entry
-// here. The values match the proto schema (see
-// proto/identity/schema/schema.proto).
-func expiresAtSweepSpec(witness proto.Message) (typeID, fieldID int, ok bool) {
+// deleteExpired drives the single-RPC sweeper via tenant-shard-db
+// v1.14.0's OpDeleteWhere primitive (#540). The witness type carries
+// the (entdb.node).type_id annotation that DeleteWhere[T] reads from
+// the descriptor, and the AND-ed Filter{Field: "expires_at", Op:
+// FilterLt} matches every row whose expires_at is strictly older
+// than the cutoff. The server caps the delete at the requested
+// limit (Postgres DELETE … LIMIT semantics) — drains beyond the cap
+// roll over to the next sweep tick.
+func (s *sdkScope) deleteExpired(ctx context.Context, actor string, witness proto.Message, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("entdb: deleteExpired: limit must be > 0, got %d", limit)
+	}
+	scope, err := s.scope(actor)
+	if err != nil {
+		return err
+	}
+	plan := scope.Plan()
+	where := []sdk.Filter{{Field: "expires_at", Op: sdk.FilterLt, Value: beforeMs}}
 	switch witness.(type) {
 	case *schemapb.PasskeyChallenge:
-		return 21, 4, true
+		sdk.DeleteWhere[*schemapb.PasskeyChallenge](plan, where, limit)
 	case *schemapb.PasswordResetToken:
-		return 19, 3, true
+		sdk.DeleteWhere[*schemapb.PasswordResetToken](plan, where, limit)
 	case *schemapb.EmailVerificationToken:
-		return 29, 4, true
+		sdk.DeleteWhere[*schemapb.EmailVerificationToken](plan, where, limit)
 	case *schemapb.EmailChangeToken:
-		return 30, 5, true
+		sdk.DeleteWhere[*schemapb.EmailChangeToken](plan, where, limit)
 	case *schemapb.LoginChallenge:
-		return 25, 3, true
+		sdk.DeleteWhere[*schemapb.LoginChallenge](plan, where, limit)
+	default:
+		return fmt.Errorf("entdb: deleteExpired: unsupported message type %T", witness)
 	}
-	return 0, 0, false
-}
-
-func (s *sdkScope) deleteExpired(ctx context.Context, actor string, witness proto.Message, beforeMs int64, limit int) (int, error) {
-	if limit <= 0 {
-		return 0, fmt.Errorf("entdb: deleteExpired: limit must be > 0, got %d", limit)
-	}
-	if s.transport == nil {
-		return 0, errors.New("entdb: deleteExpired: raw transport unavailable")
-	}
-	typeID, fieldID, ok := expiresAtSweepSpec(witness)
-	if !ok {
-		return 0, fmt.Errorf("entdb: deleteExpired: unsupported message type %T", witness)
-	}
-
-	// QueryNodes accepts payload-field-id keys (decimal string) for
-	// the filter map, matching the wire's "field IDs, not field names,
-	// on disk" invariant. "$lt" is the wire-level less-than operator
-	// shipped in tenant-shard-db v1.12 (FilterLt in the typed SDK).
-	filter := map[string]any{
-		strconv.Itoa(fieldID): map[string]any{"$lt": beforeMs},
-	}
-	nodes, err := s.transport.QueryNodes(ctx, s.tenantID, actor, typeID, filter)
-	if err != nil {
+	if _, err := plan.Commit(ctx); err != nil {
 		// A tenant that has had no writes returns "tenant not opened";
 		// treat that as "nothing to sweep" the same way the rest of
 		// the repo does for query-then-create idempotency.
 		if isTenantNotOpened(err) {
-			return 0, nil
+			return nil
 		}
-		return 0, err
+		return err
 	}
-	if len(nodes) == 0 {
-		return 0, nil
-	}
-
-	// QueryNodes on tenant-shard-db v1.12.4 ignores WithLimit/WithOffset
-	// (queryConfig is unused on the wire per scope.go's comment), so
-	// the cap is applied client-side. The expires_at column is indexed
-	// per the proto schema, so the server still walks an index range
-	// — only the network payload is larger than strictly needed.
-	if len(nodes) > limit {
-		nodes = nodes[:limit]
-	}
-
-	ops := make([]sdk.Operation, 0, len(nodes))
-	for _, n := range nodes {
-		ops = append(ops, sdk.Operation{
-			Type:   sdk.OpDeleteNode,
-			TypeID: typeID,
-			NodeID: n.NodeID,
-		})
-	}
-	if _, err := s.transport.ExecuteAtomic(ctx, s.tenantID, actor, "", ops); err != nil {
-		return 0, err
-	}
-	return len(ops), nil
+	return nil
 }
 
 func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error {

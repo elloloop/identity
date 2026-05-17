@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"google.golang.org/protobuf/proto"
-
 	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 )
 
@@ -15,6 +13,11 @@ import (
 // scope's deleteExpired behaviour). The conformance suite repeats
 // these assertions end-to-end against the real EntDB server when
 // GATEWAY_ENTDB_ADDRESS is set (Conformance / entdb in CI).
+//
+// tenant-shard-db v1.14.0's OpDeleteWhere primitive (#540) does not
+// return a deleted-row count, so the assertions probe the rows that
+// remain in the in-memory store rather than checking a numeric
+// return.
 func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -22,7 +25,7 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 	cases := []struct {
 		name      string
 		seed      func(c *memoryEntClient, hash string, expiresAt int64)
-		callSweep func(r *entRepository, beforeMs int64, limit int) (int, error)
+		callSweep func(r *entRepository, beforeMs int64, limit int) error
 	}{
 		{
 			name: "WebAuthnChallenges",
@@ -31,7 +34,7 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 					Challenge: key, ExpiresAt: expiresAt,
 				}}
 			},
-			callSweep: func(r *entRepository, beforeMs int64, limit int) (int, error) {
+			callSweep: func(r *entRepository, beforeMs int64, limit int) error {
 				return r.DeleteExpiredWebAuthnChallenges(ctx, beforeMs, limit)
 			},
 		},
@@ -42,7 +45,7 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 					TokenHash: key, ExpiresAt: expiresAt,
 				}}
 			},
-			callSweep: func(r *entRepository, beforeMs int64, limit int) (int, error) {
+			callSweep: func(r *entRepository, beforeMs int64, limit int) error {
 				return r.DeleteExpiredEmailVerificationTokens(ctx, beforeMs, limit)
 			},
 		},
@@ -53,7 +56,7 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 					TokenHash: key, ExpiresAt: expiresAt,
 				}}
 			},
-			callSweep: func(r *entRepository, beforeMs int64, limit int) (int, error) {
+			callSweep: func(r *entRepository, beforeMs int64, limit int) error {
 				return r.DeleteExpiredPasswordResetTokens(ctx, beforeMs, limit)
 			},
 		},
@@ -64,7 +67,7 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 					TokenHash: key, ExpiresAt: expiresAt,
 				}}
 			},
-			callSweep: func(r *entRepository, beforeMs int64, limit int) (int, error) {
+			callSweep: func(r *entRepository, beforeMs int64, limit int) error {
 				return r.DeleteExpiredEmailChangeTokens(ctx, beforeMs, limit)
 			},
 		},
@@ -75,7 +78,7 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 					ChallengeId: key, ExpiresAt: expiresAt,
 				}}
 			},
-			callSweep: func(r *entRepository, beforeMs int64, limit int) (int, error) {
+			callSweep: func(r *entRepository, beforeMs int64, limit int) error {
 				return r.DeleteExpiredLoginChallenges(ctx, beforeMs, limit)
 			},
 		},
@@ -91,48 +94,39 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 			tt.seed(c, "exp-2", 2_000)
 			tt.seed(c, "keep", 100_000)
 
-			// Sweep beforeMs below the earliest expired row deletes
-			// nothing.
-			n, err := tt.callSweep(repo, 500, 10)
-			if err != nil {
+			// Sweep below the earliest expired row deletes nothing.
+			if err := tt.callSweep(repo, 500, 10); err != nil {
 				t.Fatalf("sweep below earliest: %v", err)
 			}
-			if n != 0 {
-				t.Fatalf("sweep below earliest deleted %d, want 0", n)
+			if got := len(c.store); got != 3 {
+				t.Fatalf("after below-cutoff sweep: %d rows left, want 3", got)
 			}
 
-			// limit=1 caps the batch to a single deletion.
-			n, err = tt.callSweep(repo, 10_000, 1)
-			if err != nil {
+			// limit=1 caps the batch to a single deletion. Two ticks
+			// at limit=1 drain both expired rows.
+			if err := tt.callSweep(repo, 10_000, 1); err != nil {
 				t.Fatalf("limit=1 sweep: %v", err)
-			}
-			if n != 1 {
-				t.Fatalf("limit=1 sweep deleted %d, want 1", n)
 			}
 			if got := len(c.store); got != 2 {
 				t.Fatalf("after limit=1 sweep: %d rows left, want 2", got)
 			}
 
-			// Final sweep removes the second expired row; unexpired
-			// survives.
-			n, err = tt.callSweep(repo, 10_000, 10)
-			if err != nil {
-				t.Fatalf("final sweep: %v", err)
+			if err := tt.callSweep(repo, 10_000, 1); err != nil {
+				t.Fatalf("limit=1 second sweep: %v", err)
 			}
-			if n != 1 {
-				t.Fatalf("final sweep deleted %d, want 1", n)
+			if got := len(c.store); got != 1 {
+				t.Fatalf("after second limit=1 sweep: %d rows left, want 1", got)
 			}
 			if _, ok := c.store["keep"]; !ok {
 				t.Fatal("unexpired row was deleted by the sweeper")
 			}
 
-			// Idempotent re-sweep.
-			n, err = tt.callSweep(repo, 10_000, 10)
-			if err != nil {
+			// Idempotent re-sweep on a clean backlog.
+			if err := tt.callSweep(repo, 10_000, 10); err != nil {
 				t.Fatalf("idempotent re-sweep: %v", err)
 			}
-			if n != 0 {
-				t.Fatalf("idempotent re-sweep deleted %d, want 0", n)
+			if got := len(c.store); got != 1 {
+				t.Fatalf("after idempotent re-sweep: %d rows left, want 1", got)
 			}
 		})
 	}
@@ -150,44 +144,20 @@ func TestSweepers_RejectsNonPositiveLimit(t *testing.T) {
 	repo := &entRepository{client: newMemoryEntClient(), tenantID: "t"}
 
 	for _, limit := range []int{0, -1} {
-		if _, err := repo.DeleteExpiredWebAuthnChallenges(ctx, 1, limit); err == nil {
+		if err := repo.DeleteExpiredWebAuthnChallenges(ctx, 1, limit); err == nil {
 			t.Fatalf("DeleteExpiredWebAuthnChallenges limit=%d: want error, got nil", limit)
 		}
-		if _, err := repo.DeleteExpiredEmailVerificationTokens(ctx, 1, limit); err == nil {
+		if err := repo.DeleteExpiredEmailVerificationTokens(ctx, 1, limit); err == nil {
 			t.Fatalf("DeleteExpiredEmailVerificationTokens limit=%d: want error, got nil", limit)
 		}
-		if _, err := repo.DeleteExpiredPasswordResetTokens(ctx, 1, limit); err == nil {
+		if err := repo.DeleteExpiredPasswordResetTokens(ctx, 1, limit); err == nil {
 			t.Fatalf("DeleteExpiredPasswordResetTokens limit=%d: want error, got nil", limit)
 		}
-		if _, err := repo.DeleteExpiredEmailChangeTokens(ctx, 1, limit); err == nil {
+		if err := repo.DeleteExpiredEmailChangeTokens(ctx, 1, limit); err == nil {
 			t.Fatalf("DeleteExpiredEmailChangeTokens limit=%d: want error, got nil", limit)
 		}
-		if _, err := repo.DeleteExpiredLoginChallenges(ctx, 1, limit); err == nil {
+		if err := repo.DeleteExpiredLoginChallenges(ctx, 1, limit); err == nil {
 			t.Fatalf("DeleteExpiredLoginChallenges limit=%d: want error, got nil", limit)
-		}
-	}
-}
-
-// TestSweepers_UnsupportedTypeAtDispatch keeps the dispatch table
-// honest: every type wired into the five entRepository sweepers must
-// also be listed in expiresAtSweepSpec. The check is at the dispatch
-// boundary rather than via the entRepository because the type-switch
-// failure surfaces as a clear "unsupported message type" rather than
-// a SDK-level "unknown field id" error.
-func TestSweepers_UnsupportedTypeAtDispatch(t *testing.T) {
-	t.Parallel()
-	if _, _, ok := expiresAtSweepSpec(&schemapb.User{}); ok {
-		t.Fatal("expiresAtSweepSpec accepted *schemapb.User; only the five sweep targets should match")
-	}
-	for _, w := range []proto.Message{
-		&schemapb.PasskeyChallenge{},
-		&schemapb.EmailVerificationToken{},
-		&schemapb.PasswordResetToken{},
-		&schemapb.EmailChangeToken{},
-		&schemapb.LoginChallenge{},
-	} {
-		if _, _, ok := expiresAtSweepSpec(w); !ok {
-			t.Fatalf("expiresAtSweepSpec rejected %T; expected ok", w)
 		}
 	}
 }

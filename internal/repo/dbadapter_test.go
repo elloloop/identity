@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -454,8 +455,14 @@ func TestDBAdapter_RegisterUserInTenant_EmptyNameAndEmailDefaultsToUserID(t *tes
 func TestDBAdapter_RegisterUserInTenant_ToleratesAlreadyExistsOnCreateUser(t *testing.T) {
 	t.Parallel()
 
+	// tenant-shard-db v1.14.0 surfaces the duplicate as a typed
+	// *sdk.UniqueConstraintError (the SDK parses the ALREADY_EXISTS
+	// gRPC status and wraps it). Older string-only assertions were
+	// removed: the SDK no longer leaks the underlying message
+	// verbatim, and identity should not match against the SEC-5
+	// sanitized text either.
 	transport := &registerTransport{
-		createUserErr: errors.New("entdb UNIQUE_CONSTRAINT: globalstore: user \"u\" already exists"),
+		createUserErr: sdk.NewUniqueConstraintError("tenant-1", 1, 1, "u"),
 	}
 	db := &dbAdapter{transport: transport}
 
@@ -488,7 +495,7 @@ func TestDBAdapter_RegisterUserInTenant_ToleratesAlreadyExistsOnAddTenantMember(
 	t.Parallel()
 
 	transport := &registerTransport{
-		addMemberErr: errors.New("entdb ALREADY_EXISTS: user is already a member"),
+		addMemberErr: &sdk.EntDBError{Code: "ALREADY_EXISTS", Message: "user is already a member"},
 	}
 	db := &dbAdapter{transport: transport}
 
@@ -569,7 +576,9 @@ func TestTenantAdmin_CreateTenant_HappyPath(t *testing.T) {
 
 func TestTenantAdmin_CreateTenant_AlreadyExists_NormalisesSentinel(t *testing.T) {
 	t.Parallel()
-	tp := &tenantAdminTransport{createTenantErr: errors.New("server returned ALREADY_EXISTS for tenant acme")}
+	// tenant-shard-db v1.14.0 surfaces the duplicate as a typed
+	// *sdk.EntDBError with Code == "ALREADY_EXISTS".
+	tp := &tenantAdminTransport{createTenantErr: &sdk.EntDBError{Code: "ALREADY_EXISTS", Message: "tenant acme exists"}}
 	a := &tenantAdmin{transport: tp}
 	err := a.CreateTenant(context.Background(), "acme", "Acme Corp")
 	if !errors.Is(err, service.ErrAlreadyExists) {
@@ -605,7 +614,7 @@ func TestTenantAdmin_PromoteTenantMember_HappyPath(t *testing.T) {
 
 func TestTenantAdmin_PromoteTenantMember_AlreadyAtRole_Idempotent(t *testing.T) {
 	t.Parallel()
-	tp := &tenantAdminTransport{changeRoleErr: errors.New("ALREADY_EXISTS: alice is already admin in acme")}
+	tp := &tenantAdminTransport{changeRoleErr: &sdk.EntDBError{Code: "ALREADY_EXISTS", Message: "alice is already admin in acme"}}
 	a := &tenantAdmin{transport: tp}
 	if err := a.PromoteTenantMember(context.Background(), "acme", "alice", "admin"); err != nil {
 		t.Fatalf("expected idempotent success, got %v", err)
@@ -648,7 +657,23 @@ func TestTenantAdmin_RemoveTenantMember_HappyPath(t *testing.T) {
 
 func TestTenantAdmin_RemoveTenantMember_NotFound_Idempotent(t *testing.T) {
 	t.Parallel()
-	tp := &tenantAdminTransport{removeMemberErr: errors.New("membership not found for alice")}
+	// tenant-shard-db v1.14.0 surfaces missing membership as the
+	// typed *sdk.NotFoundError. The "no membership" substring path is
+	// for the legacy FailedPrecondition case that the test below
+	// covers.
+	tp := &tenantAdminTransport{removeMemberErr: &sdk.NotFoundError{EntDBError: sdk.EntDBError{Code: "NOT_FOUND", Message: "membership for alice not found"}}}
+	a := &tenantAdmin{transport: tp}
+	if err := a.RemoveTenantMember(context.Background(), "acme", "alice"); err != nil {
+		t.Fatalf("expected idempotent success, got %v", err)
+	}
+}
+
+func TestTenantAdmin_RemoveTenantMember_NoMembershipSubstring_Idempotent(t *testing.T) {
+	t.Parallel()
+	// Some legacy server paths surface FailedPrecondition with a
+	// "no membership" message rather than NotFound. Keep the
+	// substring fallback for that path.
+	tp := &tenantAdminTransport{removeMemberErr: &sdk.EntDBError{Code: "FailedPrecondition", Message: "no membership for alice in acme"}}
 	a := &tenantAdmin{transport: tp}
 	if err := a.RemoveTenantMember(context.Background(), "acme", "alice"); err != nil {
 		t.Fatalf("expected idempotent success, got %v", err)
@@ -699,15 +724,42 @@ func TestPostgresTenantAdmin_RemoveTenantMember_NoOp(t *testing.T) {
 func TestDBAdapterIsAlreadyExists(t *testing.T) {
 	t.Parallel()
 
+	// tenant-shard-db v1.14.0 wraps every ALREADY_EXISTS gRPC status
+	// into a typed *sdk.EntDBError or *sdk.UniqueConstraintError. The
+	// v1.13.x raw status-error and free-form string paths no longer
+	// reach identity, so the matcher rejects them (SEC-5 sanitization
+	// audit — see docs/IDENTITY.md §9).
 	cases := []struct {
 		name string
 		err  error
 		want bool
 	}{
 		{"nil", nil, false},
-		{"all-caps fragment", errors.New("server returned ALREADY_EXISTS for user X"), true},
-		{"lowercase fragment", errors.New("user already exists in this tenant"), true},
-		{"unrelated", errors.New("INTERNAL: storage unavailable"), false},
+		{
+			name: "typed_entdb_already_exists",
+			err:  &sdk.EntDBError{Code: "ALREADY_EXISTS", Message: "x"},
+			want: true,
+		},
+		{
+			name: "typed_unique_constraint",
+			err:  sdk.NewUniqueConstraintError("t", 1, 1, "v"),
+			want: true,
+		},
+		{
+			name: "wrapped_typed_already_exists",
+			err:  fmt.Errorf("add member: %w", &sdk.EntDBError{Code: "ALREADY_EXISTS", Message: "x"}),
+			want: true,
+		},
+		{
+			name: "typed_internal_error",
+			err:  &sdk.EntDBError{Code: "Internal", Message: "internal error"},
+			want: false,
+		},
+		{
+			name: "untyped_string",
+			err:  errors.New("user already exists"),
+			want: false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

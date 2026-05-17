@@ -17,11 +17,19 @@ import (
 // values are one of the five sweeper-target node types so operators
 // can scope alerts to "email_verification_tokens piling up" without
 // matching the whole sweep.
+//
+// tenant-shard-db v1.14.0's OpDeleteWhere primitive (#540) does not
+// return a deleted-row count, so the sweeper no longer publishes a
+// rows-deleted counter — the upstream PR called out that a count
+// would add a column to the receipt for limited operational value.
+// The per-tick "sweep ran successfully" counter (identity_sweeper_
+// runs_total) provides "the GC is alive" liveness; the error counter
+// catches a stuck backend.
 var (
-	sweeperDeleted = prometheus.NewCounterVec(
+	sweeperRuns = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "identity_sweeper_deleted_total",
-			Help: "Rows deleted by the identity GC sweeper, per node type.",
+			Name: "identity_sweeper_runs_total",
+			Help: "Sweep cycles completed by the identity GC sweeper, per node type. tenant-shard-db v1.14.0's OpDeleteWhere does not surface a deleted-row count, so this metric counts ticks (each tick deletes up to GATEWAY_SWEEPER_BATCH rows) rather than rows.",
 		},
 		[]string{"node_type"},
 	)
@@ -47,7 +55,7 @@ func initSweeperMetrics() {
 		// MustRegister panics on duplicate registration. We register
 		// once per process; tests that build multiple app.New
 		// instances are protected by the sync.Once.
-		prometheus.DefaultRegisterer.MustRegister(sweeperDeleted, sweeperErrors)
+		prometheus.DefaultRegisterer.MustRegister(sweeperRuns, sweeperErrors)
 	})
 }
 
@@ -56,7 +64,7 @@ func initSweeperMetrics() {
 // here plus the matching Repository method.
 type nodeTypeSweeper struct {
 	name string
-	fn   func(ctx context.Context, beforeMs int64, limit int) (int, error)
+	fn   func(ctx context.Context, beforeMs int64, limit int) error
 }
 
 // sweeper periodically deletes expired ephemeral rows in batches.
@@ -167,8 +175,7 @@ func (s *sweeper) targets() []nodeTypeSweeper {
 }
 
 func (s *sweeper) sweepType(ctx context.Context, t nodeTypeSweeper, beforeMs int64) {
-	deleted, err := t.fn(ctx, beforeMs, s.batch)
-	if err != nil {
+	if err := t.fn(ctx, beforeMs, s.batch); err != nil {
 		if errors.Is(err, service.ErrSweepNotImplemented) {
 			s.logSkipOnce(t.name)
 			return
@@ -183,15 +190,13 @@ func (s *sweeper) sweepType(ctx context.Context, t nodeTypeSweeper, beforeMs int
 		)
 		return
 	}
-	if deleted > 0 {
-		sweeperDeleted.WithLabelValues(t.name).Add(float64(deleted))
-		s.logger.Info(
-			"sweeper_deleted",
-			zap.String("node_type", t.name),
-			zap.Int("deleted", deleted),
-			zap.Int64("before_ms", beforeMs),
-		)
-	}
+	sweeperRuns.WithLabelValues(t.name).Inc()
+	s.logger.Debug(
+		"sweeper_ran",
+		zap.String("node_type", t.name),
+		zap.Int64("before_ms", beforeMs),
+		zap.Int("batch", s.batch),
+	)
 }
 
 func (s *sweeper) logSkipOnce(nodeType string) {

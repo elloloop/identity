@@ -67,15 +67,20 @@ func TestRefreshTokenDeleteAndCount(t *testing.T) {
 // DeleteExpired* methods stop after limit rows. The conformance suite
 // covers happy-path correctness; this test focuses on the limit cap
 // (which is the property a buggy sweep is most likely to break).
+//
+// tenant-shard-db v1.14.0's OpDeleteWhere (#540) does not return a
+// deleted-row count, so the Repository contract returns only error
+// and the test infers the cap from the count of rows that remain
+// after each sweep.
 func TestSweepers_RespectLimit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
 	cases := []struct {
-		name string
-		seed func(repo *memory.Repo, hash string)
-		// pass-through sweep call so we can index by name
-		sweep func(repo *memory.Repo, ctx context.Context, beforeMs int64, limit int) (int, error)
+		name      string
+		seed      func(repo *memory.Repo, hash string)
+		sweep     func(repo *memory.Repo, ctx context.Context, beforeMs int64, limit int) error
+		remaining func(repo *memory.Repo) int
 	}{
 		{
 			name: "PasswordResetTokens",
@@ -84,9 +89,10 @@ func TestSweepers_RespectLimit(t *testing.T) {
 					TokenHash: hash, UserID: "u", ExpiresAt: 100, CreatedAt: 50,
 				})
 			},
-			sweep: func(r *memory.Repo, c context.Context, b int64, l int) (int, error) {
+			sweep: func(r *memory.Repo, c context.Context, b int64, l int) error {
 				return r.DeleteExpiredPasswordResetTokens(c, b, l)
 			},
+			remaining: func(r *memory.Repo) int { return r.CountPasswordResetTokens() },
 		},
 		{
 			name: "EmailVerificationTokens",
@@ -95,9 +101,10 @@ func TestSweepers_RespectLimit(t *testing.T) {
 					TokenHash: hash, UserID: "u", Email: "x@y", ExpiresAt: 100, CreatedAt: 50,
 				})
 			},
-			sweep: func(r *memory.Repo, c context.Context, b int64, l int) (int, error) {
+			sweep: func(r *memory.Repo, c context.Context, b int64, l int) error {
 				return r.DeleteExpiredEmailVerificationTokens(c, b, l)
 			},
+			remaining: func(r *memory.Repo) int { return r.CountEmailVerificationTokens() },
 		},
 		{
 			name: "EmailChangeTokens",
@@ -107,9 +114,10 @@ func TestSweepers_RespectLimit(t *testing.T) {
 					ExpiresAt: 100, CreatedAt: 50,
 				})
 			},
-			sweep: func(r *memory.Repo, c context.Context, b int64, l int) (int, error) {
+			sweep: func(r *memory.Repo, c context.Context, b int64, l int) error {
 				return r.DeleteExpiredEmailChangeTokens(c, b, l)
 			},
+			remaining: func(r *memory.Repo) int { return r.CountEmailChangeTokens() },
 		},
 		{
 			name: "LoginChallenges",
@@ -118,9 +126,10 @@ func TestSweepers_RespectLimit(t *testing.T) {
 					ChallengeID: hash, UserID: "u", ExpiresAt: 100, CreatedAt: 50,
 				})
 			},
-			sweep: func(r *memory.Repo, c context.Context, b int64, l int) (int, error) {
+			sweep: func(r *memory.Repo, c context.Context, b int64, l int) error {
 				return r.DeleteExpiredLoginChallenges(c, b, l)
 			},
+			remaining: func(r *memory.Repo) int { return r.CountLoginChallenges() },
 		},
 		{
 			name: "WebAuthnChallenges",
@@ -130,9 +139,10 @@ func TestSweepers_RespectLimit(t *testing.T) {
 					ExpiresAt: 100, CreatedAt: 50,
 				})
 			},
-			sweep: func(r *memory.Repo, c context.Context, b int64, l int) (int, error) {
+			sweep: func(r *memory.Repo, c context.Context, b int64, l int) error {
 				return r.DeleteExpiredWebAuthnChallenges(c, b, l)
 			},
+			remaining: func(r *memory.Repo) int { return r.CountPasskeyChallenges() },
 		},
 	}
 
@@ -144,19 +154,20 @@ func TestSweepers_RespectLimit(t *testing.T) {
 			for i := 0; i < 5; i++ {
 				tc.seed(repo, tc.name+"-h-"+itoaSmall(i))
 			}
-			deleted, err := tc.sweep(repo, ctx, 200, 2)
-			if err != nil {
+			if got := tc.remaining(repo); got != 5 {
+				t.Fatalf("after seed: remaining = %d, want 5", got)
+			}
+			if err := tc.sweep(repo, ctx, 200, 2); err != nil {
 				t.Fatalf("sweep limit=2: %v", err)
 			}
-			if deleted != 2 {
-				t.Fatalf("deleted = %d, want 2 (limit cap)", deleted)
+			if got := tc.remaining(repo); got != 3 {
+				t.Fatalf("after sweep limit=2: remaining = %d, want 3 (2 deleted)", got)
 			}
-			deleted, err = tc.sweep(repo, ctx, 200, 10)
-			if err != nil {
+			if err := tc.sweep(repo, ctx, 200, 10); err != nil {
 				t.Fatalf("sweep limit=10: %v", err)
 			}
-			if deleted != 3 {
-				t.Fatalf("deleted = %d, want 3 (remaining)", deleted)
+			if got := tc.remaining(repo); got != 0 {
+				t.Fatalf("after sweep limit=10: remaining = %d, want 0 (3 deleted)", got)
 			}
 		})
 	}
