@@ -2,7 +2,10 @@ package entdb
 
 import (
 	"context"
+	"fmt"
 	"testing"
+
+	"google.golang.org/protobuf/proto"
 
 	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 )
@@ -159,5 +162,45 @@ func TestSweepers_RejectsNonPositiveLimit(t *testing.T) {
 		if err := repo.DeleteExpiredLoginChallenges(ctx, 1, limit); err == nil {
 			t.Fatalf("DeleteExpiredLoginChallenges limit=%d: want error, got nil", limit)
 		}
+	}
+}
+
+// TestExpiresAtSweepSpec pins the (type id, expires_at field id)
+// table the raw-transport sweeper depends on. The values must match
+// the proto schema (proto/identity/schema/schema.proto): drifting
+// either side silently breaks the sweep against a real EntDB while
+// the in-memory tests stay green because the fake uses proto
+// reflection instead of the raw field-id map. Pin both directions
+// (every sweep target maps; non-sweep types return ok=false).
+func TestExpiresAtSweepSpec(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		witness         proto.Message
+		wantType, wantF int
+		wantOK          bool
+	}{
+		{&schemapb.PasskeyChallenge{}, 21, 4, true},
+		{&schemapb.PasswordResetToken{}, 19, 3, true},
+		{&schemapb.EmailVerificationToken{}, 29, 4, true},
+		{&schemapb.EmailChangeToken{}, 30, 5, true},
+		{&schemapb.LoginChallenge{}, 25, 3, true},
+		// A non-sweep type must return ok=false so a new sweeper
+		// target can never silently skip — the calling code reports
+		// an "unsupported message type" error.
+		{&schemapb.User{}, 0, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%T", tc.witness), func(t *testing.T) {
+			typeID, fieldID, ok := expiresAtSweepSpec(tc.witness)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if typeID != tc.wantType {
+				t.Fatalf("typeID = %d, want %d", typeID, tc.wantType)
+			}
+			if fieldID != tc.wantF {
+				t.Fatalf("fieldID = %d, want %d", fieldID, tc.wantF)
+			}
+		})
 	}
 }
