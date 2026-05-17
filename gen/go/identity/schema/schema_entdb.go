@@ -32,4 +32,6 @@ var (
 	IdentityVerificationRecordVerificationID = entdb.UniqueKey[string]{TypeID: 32, FieldID: 1, Name: "verification_id"}
 
 	OrganizationSlug = entdb.UniqueKey[string]{TypeID: 33, FieldID: 1, Name: "slug"}
+
+	SessionSid = entdb.UniqueKey[string]{TypeID: 35, FieldID: 1, Name: "sid"}
 )

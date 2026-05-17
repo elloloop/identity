@@ -664,6 +664,7 @@ type MemRepo struct {
 	idvRecords         map[string]*service.IdentityVerificationRecord
 	orgs               map[string]*service.Organization
 	orgMembers         map[string]*service.OrganizationMembership
+	sessions           map[string]*service.SessionRecord
 }
 
 // NewMemRepo returns an empty MemRepo.
@@ -685,6 +686,7 @@ func NewMemRepo() *MemRepo {
 		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
 		orgs:               make(map[string]*service.Organization),
 		orgMembers:         make(map[string]*service.OrganizationMembership),
+		sessions:           make(map[string]*service.SessionRecord),
 	}
 }
 
@@ -1647,6 +1649,83 @@ func (r *MemRepo) AddOrganizationMember(_ context.Context, m *service.Organizati
 	cp := *m
 	r.orgMembers[id] = &cp
 	return id, nil
+}
+
+// ── Sessions ──────────────────────────────────────────────────────
+
+func (r *MemRepo) CreateSession(_ context.Context, s *service.SessionRecord) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("%w: nil session", service.ErrInvalidArgument)
+	}
+	if s.SID == "" {
+		return "", fmt.Errorf("%w: missing sid", service.ErrInvalidArgument)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sessions == nil {
+		r.sessions = make(map[string]*service.SessionRecord)
+	}
+	for _, existing := range r.sessions {
+		if existing.SID == s.SID {
+			return "", fmt.Errorf("%w: sid %q", service.ErrAlreadyExists, s.SID)
+		}
+	}
+	id := r.nextID()
+	s.NodeID = id
+	cp := *s
+	r.sessions[id] = &cp
+	return id, nil
+}
+
+func (r *MemRepo) GetSessionBySid(_ context.Context, sid string) (*service.SessionRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.SID == sid {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) RevokeSession(_ context.Context, sid string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.SID == sid && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+func (r *MemRepo) RevokeSessionsForUser(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.UserID == userID && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+// CountSessionsForUser is a test helper.
+func (r *MemRepo) CountSessionsForUser(userID string) (active, revoked int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.UserID != userID {
+			continue
+		}
+		if s.RevokedAtMs == 0 {
+			active++
+		} else {
+			revoked++
+		}
+	}
+	return
 }
 
 // compile-time interface assertion

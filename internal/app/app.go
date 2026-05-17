@@ -86,6 +86,14 @@ func New(deps Deps) (http.Handler, func(), error) {
 		logger = zap.NewNop()
 	}
 
+	// Validate config invariants that can't be expressed as per-field
+	// defaults (most importantly the mode=ttl access-token TTL cap).
+	// Fail fast before any goroutines start so a misconfigured deploy
+	// never serves a single request.
+	if err := deps.Config.Validate(); err != nil {
+		return nil, noopStop, err
+	}
+
 	allowedOrigins, err := middleware.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
 	if err != nil {
 		return nil, noopStop, fmt.Errorf("cors config invalid: %w", err)
@@ -164,6 +172,22 @@ func New(deps Deps) (http.Handler, func(), error) {
 		stopAudit()
 	}
 
+	// Session cache + metric for mode=session. mode=ttl returns a nil
+	// cache (and the middleware wrapper falls back to the zero-cost
+	// AuthMiddleware). The Repository wrapper invalidates the cache on
+	// same-process revokes so a forced revoke is visible on the very
+	// next request rather than at the next TTL boundary.
+	var sessionCache *middleware.SessionCache
+	repo := deps.Repo
+	if deps.Config.RevocationMode == config.RevocationModeSession {
+		sessionMetrics, err := middleware.NewSessionMetrics(deps.MetricsRegistry)
+		if err != nil {
+			return nil, noopStop, fmt.Errorf("session metrics: %w", err)
+		}
+		sessionCache = middleware.NewSessionCache(repo, deps.Config.SessionCacheTTL(), sessionMetrics)
+		repo = middleware.WrapSessionRepository(repo, sessionCache)
+	}
+
 	mailer := deps.EmailTransport
 	if mailer == nil {
 		mailer = buildEmailTransport(deps.Config, logger)
@@ -177,7 +201,7 @@ func New(deps Deps) (http.Handler, func(), error) {
 	oauthRegistry = wrapOAuthRegistry(oauthRegistry)
 
 	authSvc := service.NewAuthServiceWithOAuth(
-		deps.Repo, deps.Config, deps.Signer, deps.Passkeys,
+		repo, deps.Config, deps.Signer, deps.Passkeys,
 		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, logger,
 		oauthRegistry,
 	)
@@ -189,7 +213,7 @@ func New(deps Deps) (http.Handler, func(), error) {
 	var idvSvc *service.IdentityVerificationService
 	if deps.IDVProvider != nil {
 		idvSvc = service.NewIdentityVerificationService(
-			deps.Repo, observability.WrapIDVProvider(deps.IDVProvider), deps.Config.DefaultTenantID, logger,
+			repo, observability.WrapIDVProvider(deps.IDVProvider), deps.Config.DefaultTenantID, logger,
 		)
 	}
 
@@ -218,7 +242,10 @@ func New(deps Deps) (http.Handler, func(), error) {
 	// including any failure synthesized by the otelconnect interceptor.
 	var chain http.Handler = mux
 	chain = middleware.MetricsMiddleware(rpcMetrics)(chain)
-	chain = middleware.AuthMiddleware(deps.Signer, deps.Config.DefaultTenantID, deps.Config.JWTAudience, deps.Config.JWTRequireAudience)(chain)
+	chain = middleware.SessionAuthMiddleware(
+		deps.Signer, deps.Config.DefaultTenantID, deps.Config.JWTAudience,
+		deps.Config.JWTRequireAudience, sessionCache,
+	)(chain)
 	chain = middleware.JWKSMiddleware(deps.Signer)(chain)
 	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)
 	chain = middleware.ClientIPMiddleware(trustedProxies)(chain)

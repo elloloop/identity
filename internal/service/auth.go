@@ -126,6 +126,29 @@ type Repository interface {
 	ResetFailedLoginCount(ctx context.Context, userID string) error
 	SetUserLockedUntil(ctx context.Context, userID string, lockedUntilMs int64) error
 
+	// Sessions (mode=session revocation). The verification middleware
+	// looks the row up by SID on every authenticated request (via an
+	// in-process cache; see internal/middleware/session.go). A non-zero
+	// RevokedAtMs means the session has been killed and any access
+	// token carrying this SID must be rejected.
+	//
+	// CreateSession is invoked from the token-issuance path when
+	// `mode=session`. GetSessionBySid is the read on the hot path;
+	// RevokeSession atomically marks one session revoked; and
+	// RevokeSessionsForUser is invoked from DeleteRefreshTokensForUser
+	// so the existing replay-detection path also kills the access
+	// tokens.
+	//
+	// Implementations MUST guarantee SID uniqueness; CreateSession
+	// returns ErrAlreadyExists when the SID collides. RevokeSession
+	// is idempotent — re-revoking an already-revoked session is a
+	// no-op rather than an error so concurrent revoke calls don't
+	// race each other into failure.
+	CreateSession(ctx context.Context, s *SessionRecord) (string, error)
+	GetSessionBySid(ctx context.Context, sid string) (*SessionRecord, error)
+	RevokeSession(ctx context.Context, sid string, atMs int64) error
+	RevokeSessionsForUser(ctx context.Context, userID string, atMs int64) error
+
 	// Refresh tokens
 	FindRefreshTokenByHash(ctx context.Context, hash string) (*RefreshTokenRecord, error)
 	// FindRefreshTokenByHashIncludingConsumed returns the row even when
@@ -286,6 +309,23 @@ type Repository interface {
 var ErrSweepNotImplemented = errors.New("identity: sweep not implemented for this backend")
 
 // ── Record types for persistence ───────────────────────────────────────
+
+// SessionRecord represents a stored access-token-bound session, used
+// by `GATEWAY_REVOCATION_MODE=session` deployments. The SID is the
+// stable per-session identifier carried as the `sid` claim on access
+// tokens; the verification middleware looks the row up on every
+// authenticated request (via an in-process cache).
+//
+// In `mode=ttl` deployments (the default) this record type is not
+// written or read — the row type costs zero on the hot path for
+// deployers who never opt in.
+type SessionRecord struct {
+	NodeID      string
+	SID         string
+	UserID      string
+	CreatedAtMs int64 // epoch ms
+	RevokedAtMs int64 // epoch ms; 0 = active
+}
 
 // RefreshTokenRecord represents a stored refresh token.
 type RefreshTokenRecord struct {
@@ -663,8 +703,14 @@ func generateChallengeID() string {
 	return hex.EncodeToString(b)
 }
 
-// issueTokens creates a JWT access token and a refresh token stored in the repo.
+// issueTokens creates a JWT access token and a refresh token stored
+// in the repo. When the configured revocation mode is `session`, the
+// access token also carries a `sid` claim referencing a freshly
+// minted Session row; the verification middleware looks the row up on
+// every authenticated request.
 func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
+	now := s.nowMs()
+
 	claims := jwt.Claims{
 		Sub:       user.ID,
 		Email:     user.Email,
@@ -676,13 +722,25 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	if s.cfg.JWTAudience != "" {
 		claims.Audience = []string{s.cfg.JWTAudience}
 	}
+
+	if s.cfg.RevocationMode == config.RevocationModeSession {
+		sid := generateSessionID()
+		if _, err := s.repo.CreateSession(ctx, &SessionRecord{
+			SID:         sid,
+			UserID:      user.ID,
+			CreatedAtMs: now,
+		}); err != nil {
+			return "", "", fmt.Errorf("creating session: %w", err)
+		}
+		claims.SID = sid
+	}
+
 	accessToken, err := s.signer.SignAccessToken(ctx, claims, s.cfg.JWTExpiry())
 	if err != nil {
 		return "", "", fmt.Errorf("creating access token: %w", err)
 	}
 
 	rawRefresh, refreshHash := generateRefreshToken()
-	now := s.nowMs()
 	devName := friendlyDeviceName(userAgent)
 
 	_, err = s.repo.CreateRefreshToken(ctx, &RefreshTokenRecord{
@@ -743,6 +801,24 @@ func (s *AuthService) resetFailedLogin(ctx context.Context, user *User) {
 	}
 	if err := s.repo.ResetFailedLoginCount(ctx, user.ID); err != nil {
 		s.logger.Warn("failed_login_reset_failed", zap.String("user_id", user.ID), zap.Error(err))
+	}
+}
+
+// revokeUserSessionsIfModeSession invokes RevokeSessionsForUser when
+// the configured revocation mode is `session`. Callers pair this with
+// DeleteRefreshTokensForUser at credential-change / replay-detection
+// sites so the existing access tokens stop working immediately rather
+// than after the natural JWT expiry. Failures are logged but not
+// propagated: the caller has already invalidated refresh tokens, so a
+// failed session revocation only widens the access-token validity to
+// the cache TTL — not a complete bypass.
+func (s *AuthService) revokeUserSessionsIfModeSession(ctx context.Context, userID, reason string) {
+	if s.cfg.RevocationMode != config.RevocationModeSession {
+		return
+	}
+	if err := s.repo.RevokeSessionsForUser(ctx, userID, s.nowMs()); err != nil {
+		s.logger.Warn("session_revoke_for_user_failed",
+			zap.String("user_id", userID), zap.String("reason", reason), zap.Error(err))
 	}
 }
 
@@ -925,6 +1001,12 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 			s.logger.Warn("refresh_token_replay_revoke_failed",
 				zap.String("user_id", userID), zap.Error(delErr))
 		}
+		// In mode=session the existing replay-detection path also
+		// kills the access tokens — without this step, an attacker
+		// who triggered the replay still holds a live JWT until its
+		// natural expiry (the bug the two-mode contract exists to
+		// fix; see docs/IDENTITY.md decision log §6).
+		s.revokeUserSessionsIfModeSession(ctx, userID, "refresh_token_replay")
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),

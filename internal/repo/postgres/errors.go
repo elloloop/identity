@@ -35,3 +35,12 @@ func wrapPgErr(op string, err error) error {
 	}
 	return fmt.Errorf("postgres: %s: %w", op, err)
 }
+
+// isUniqueViolation reports whether err carries the standard
+// unique_violation SQLSTATE. Callers that want to format their own
+// service-layer sentinel (e.g. "sid %q already exists") use this
+// instead of wrapPgErr so the call site keeps the wrapping verbatim.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == pgErrCodeUniqueViolation
+}

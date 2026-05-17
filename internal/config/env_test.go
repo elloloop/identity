@@ -65,6 +65,8 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"SMTPProviders", cfg.SMTPProviders, ""},
 		{"AppBaseURL", cfg.AppBaseURL, "http://localhost:9002"},
 		{"EmailTokenExpirySeconds", cfg.EmailTokenExpirySeconds, 86400},
+		{"RevocationMode", cfg.RevocationMode, RevocationModeTTL},
+		{"SessionCacheTTLSeconds", cfg.SessionCacheTTLSeconds, 60},
 	}
 
 	for _, c := range checks {
