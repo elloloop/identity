@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -378,14 +379,24 @@ func buildMultiModeWiring(cfg *config.Config, db *entdb.DbClient, logger *zap.Lo
 	}
 	switch repo.Driver(cfg.RepoDriver) {
 	case repo.DriverEntDB:
-		return repo.NewTenantAdmin(db), func(tenantID string) service.Repository {
+		admin, adminErr := repo.NewTenantAdmin(db)
+		if adminErr != nil {
+			logger.Fatal("tenant_admin_init_failed", zap.Error(adminErr))
+		}
+		return admin, func(tenantID string) service.Repository {
 			return entdbrepo.NewRepository(db, tenantID)
 		}
 	case repo.DriverPostgres:
+		if cfg.PostgresMaxConns > math.MaxInt32 {
+			logger.Fatal("postgres_max_conns_overflow",
+				zap.Int("got", cfg.PostgresMaxConns), zap.Int("max", math.MaxInt32))
+		}
+		maxConns := int32(cfg.PostgresMaxConns) // #nosec G115 -- bounds checked above.
+		dsn := cfg.PostgresDSN
 		return repo.NewPostgresTenantAdmin(), func(tenantID string) service.Repository {
 			pg, pgErr := pgrepo.New(context.Background(), pgrepo.Config{
-				DSN:         cfg.PostgresDSN,
-				MaxConns:    int32(cfg.PostgresMaxConns), // #nosec G115 -- config-bounded.
+				DSN:         dsn,
+				MaxConns:    maxConns,
 				AutoMigrate: false,
 				TenantID:    tenantID,
 			})

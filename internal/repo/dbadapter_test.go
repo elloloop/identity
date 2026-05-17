@@ -511,6 +511,191 @@ func TestDBAdapter_RegisterUserInTenant_PropagatesNonAlreadyExistsMemberError(t 
 	}
 }
 
+// ── TenantAdmin tests ─────────────────────────────────────────────
+
+type tenantAdminTransport struct {
+	sdk.Transport
+	createTenantCalls []tenantAdminCreateTenantCall
+	changeRoleCalls   []tenantAdminChangeRoleCall
+	removeMemberCalls []tenantAdminRemoveMemberCall
+	createTenantErr   error
+	changeRoleErr     error
+	removeMemberErr   error
+}
+
+type tenantAdminCreateTenantCall struct {
+	actor, tenantID, name string
+}
+type tenantAdminChangeRoleCall struct {
+	actor, tenantID, userID, role string
+}
+type tenantAdminRemoveMemberCall struct {
+	actor, tenantID, userID string
+}
+
+func (t *tenantAdminTransport) CreateTenant(_ context.Context, actor, tenantID, name string, _ ...sdk.CreateTenantOption) (*sdk.TenantDetail, error) {
+	t.createTenantCalls = append(t.createTenantCalls, tenantAdminCreateTenantCall{actor, tenantID, name})
+	if t.createTenantErr != nil {
+		return nil, t.createTenantErr
+	}
+	return &sdk.TenantDetail{}, nil
+}
+
+func (t *tenantAdminTransport) ChangeMemberRole(_ context.Context, actor, tenantID, userID, role string) error {
+	t.changeRoleCalls = append(t.changeRoleCalls, tenantAdminChangeRoleCall{actor, tenantID, userID, role})
+	return t.changeRoleErr
+}
+
+func (t *tenantAdminTransport) RemoveTenantMember(_ context.Context, actor, tenantID, userID string) error {
+	t.removeMemberCalls = append(t.removeMemberCalls, tenantAdminRemoveMemberCall{actor, tenantID, userID})
+	return t.removeMemberErr
+}
+
+func TestTenantAdmin_CreateTenant_HappyPath(t *testing.T) {
+	t.Parallel()
+	tp := &tenantAdminTransport{}
+	a := &tenantAdmin{transport: tp}
+	if err := a.CreateTenant(context.Background(), "acme", "Acme Corp"); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if len(tp.createTenantCalls) != 1 {
+		t.Fatalf("CreateTenant called %d times, want 1", len(tp.createTenantCalls))
+	}
+	got := tp.createTenantCalls[0]
+	if got != (tenantAdminCreateTenantCall{"system:admin", "acme", "Acme Corp"}) {
+		t.Fatalf("CreateTenant call = %+v", got)
+	}
+}
+
+func TestTenantAdmin_CreateTenant_AlreadyExists_NormalisesSentinel(t *testing.T) {
+	t.Parallel()
+	tp := &tenantAdminTransport{createTenantErr: errors.New("server returned ALREADY_EXISTS for tenant acme")}
+	a := &tenantAdmin{transport: tp}
+	err := a.CreateTenant(context.Background(), "acme", "Acme Corp")
+	if !errors.Is(err, service.ErrAlreadyExists) {
+		t.Fatalf("expected ErrAlreadyExists, got %v", err)
+	}
+}
+
+func TestTenantAdmin_CreateTenant_OtherError_Propagated(t *testing.T) {
+	t.Parallel()
+	tp := &tenantAdminTransport{createTenantErr: errors.New("INTERNAL: storage down")}
+	a := &tenantAdmin{transport: tp}
+	err := a.CreateTenant(context.Background(), "acme", "Acme Corp")
+	if err == nil || errors.Is(err, service.ErrAlreadyExists) {
+		t.Fatalf("expected non-AlreadyExists error, got %v", err)
+	}
+}
+
+func TestTenantAdmin_PromoteTenantMember_HappyPath(t *testing.T) {
+	t.Parallel()
+	tp := &tenantAdminTransport{}
+	a := &tenantAdmin{transport: tp}
+	if err := a.PromoteTenantMember(context.Background(), "acme", "alice", "admin"); err != nil {
+		t.Fatalf("PromoteTenantMember: %v", err)
+	}
+	if len(tp.changeRoleCalls) != 1 {
+		t.Fatalf("ChangeMemberRole called %d times, want 1", len(tp.changeRoleCalls))
+	}
+	got := tp.changeRoleCalls[0]
+	if got != (tenantAdminChangeRoleCall{"system:admin", "acme", "alice", "admin"}) {
+		t.Fatalf("ChangeMemberRole call = %+v", got)
+	}
+}
+
+func TestTenantAdmin_PromoteTenantMember_AlreadyAtRole_Idempotent(t *testing.T) {
+	t.Parallel()
+	tp := &tenantAdminTransport{changeRoleErr: errors.New("ALREADY_EXISTS: alice is already admin in acme")}
+	a := &tenantAdmin{transport: tp}
+	if err := a.PromoteTenantMember(context.Background(), "acme", "alice", "admin"); err != nil {
+		t.Fatalf("expected idempotent success, got %v", err)
+	}
+}
+
+func TestTenantAdmin_PromoteTenantMember_AlreadyAtRoleViaSubstring_Idempotent(t *testing.T) {
+	t.Parallel()
+	tp := &tenantAdminTransport{changeRoleErr: errors.New("user is already admin")}
+	a := &tenantAdmin{transport: tp}
+	if err := a.PromoteTenantMember(context.Background(), "acme", "alice", "admin"); err != nil {
+		t.Fatalf("expected idempotent success, got %v", err)
+	}
+}
+
+func TestTenantAdmin_PromoteTenantMember_OtherError_Propagated(t *testing.T) {
+	t.Parallel()
+	tp := &tenantAdminTransport{changeRoleErr: errors.New("INTERNAL: storage down")}
+	a := &tenantAdmin{transport: tp}
+	if err := a.PromoteTenantMember(context.Background(), "acme", "alice", "admin"); err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+}
+
+func TestTenantAdmin_RemoveTenantMember_HappyPath(t *testing.T) {
+	t.Parallel()
+	tp := &tenantAdminTransport{}
+	a := &tenantAdmin{transport: tp}
+	if err := a.RemoveTenantMember(context.Background(), "acme", "alice"); err != nil {
+		t.Fatalf("RemoveTenantMember: %v", err)
+	}
+	if len(tp.removeMemberCalls) != 1 {
+		t.Fatalf("RemoveTenantMember called %d times, want 1", len(tp.removeMemberCalls))
+	}
+	got := tp.removeMemberCalls[0]
+	if got != (tenantAdminRemoveMemberCall{"system:admin", "acme", "alice"}) {
+		t.Fatalf("RemoveTenantMember call = %+v", got)
+	}
+}
+
+func TestTenantAdmin_RemoveTenantMember_NotFound_Idempotent(t *testing.T) {
+	t.Parallel()
+	tp := &tenantAdminTransport{removeMemberErr: errors.New("membership not found for alice")}
+	a := &tenantAdmin{transport: tp}
+	if err := a.RemoveTenantMember(context.Background(), "acme", "alice"); err != nil {
+		t.Fatalf("expected idempotent success, got %v", err)
+	}
+}
+
+func TestTenantAdmin_RemoveTenantMember_OtherError_Propagated(t *testing.T) {
+	t.Parallel()
+	tp := &tenantAdminTransport{removeMemberErr: errors.New("INTERNAL: storage down")}
+	a := &tenantAdmin{transport: tp}
+	if err := a.RemoveTenantMember(context.Background(), "acme", "alice"); err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+}
+
+// ── PostgresTenantAdmin tests ──────────────────────────────────────
+
+func TestPostgresTenantAdmin_CreateTenant_Idempotent(t *testing.T) {
+	t.Parallel()
+	a := NewPostgresTenantAdmin()
+	if err := a.CreateTenant(context.Background(), "acme", "Acme Corp"); err != nil {
+		t.Fatalf("first CreateTenant: %v", err)
+	}
+	if err := a.CreateTenant(context.Background(), "acme", "Acme Corp"); !errors.Is(err, service.ErrAlreadyExists) {
+		t.Fatalf("second CreateTenant: want ErrAlreadyExists, got %v", err)
+	}
+	if err := a.CreateTenant(context.Background(), "other", "Other"); err != nil {
+		t.Fatalf("different tenant: %v", err)
+	}
+}
+
+func TestPostgresTenantAdmin_PromoteTenantMember_NoOp(t *testing.T) {
+	t.Parallel()
+	a := NewPostgresTenantAdmin()
+	if err := a.PromoteTenantMember(context.Background(), "acme", "alice", "admin"); err != nil {
+		t.Fatalf("PromoteTenantMember: %v", err)
+	}
+}
+
+func TestPostgresTenantAdmin_RemoveTenantMember_NoOp(t *testing.T) {
+	t.Parallel()
+	a := NewPostgresTenantAdmin()
+	if err := a.RemoveTenantMember(context.Background(), "acme", "alice"); err != nil {
+		t.Fatalf("RemoveTenantMember: %v", err)
+	}
+}
+
 func TestDBAdapterIsAlreadyExists(t *testing.T) {
 	t.Parallel()
 

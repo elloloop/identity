@@ -36,8 +36,15 @@ func NewDBAdapter(client *sdk.DbClient) (service.DB, error) {
 // — the narrow surface OrganizationSignup needs to provision a new
 // tenant + its first admin user. Idempotent on ALREADY_EXISTS
 // (necessary when the same signup is retried after a partial failure).
-func NewTenantAdmin(client *sdk.DbClient) service.TenantAdmin {
-	return &tenantAdmin{client: client}
+//
+// Uses the raw Transport calls (which the SDK's Admin handle is a
+// thin shim over) so the adapter stays testable with a fake Transport.
+func NewTenantAdmin(client *sdk.DbClient) (service.TenantAdmin, error) {
+	transport, err := entdbrepo.TransportFromClient(client)
+	if err != nil {
+		return nil, err
+	}
+	return &tenantAdmin{transport: transport}, nil
 }
 
 // PostgresTenantAdmin is a service.TenantAdmin implementation for the
@@ -79,14 +86,13 @@ func (a *PostgresTenantAdmin) RemoveTenantMember(_ context.Context, _, _ string)
 }
 
 type tenantAdmin struct {
-	client *sdk.DbClient
+	transport sdk.Transport
 }
 
 const tenantAdminActor = "system:admin"
 
 func (a *tenantAdmin) CreateTenant(ctx context.Context, tenantID, displayName string) error {
-	admin := a.client.Admin()
-	if _, err := admin.CreateTenant(ctx, tenantAdminActor, tenantID, displayName); err != nil {
+	if _, err := a.transport.CreateTenant(ctx, tenantAdminActor, tenantID, displayName); err != nil {
 		if dbAdapterIsAlreadyExists(err) {
 			return service.ErrAlreadyExists
 		}
@@ -96,8 +102,7 @@ func (a *tenantAdmin) CreateTenant(ctx context.Context, tenantID, displayName st
 }
 
 func (a *tenantAdmin) PromoteTenantMember(ctx context.Context, tenantID, userID, role string) error {
-	admin := a.client.Admin()
-	if err := admin.ChangeMemberRole(ctx, tenantAdminActor, tenantID, userID, role); err != nil {
+	if err := a.transport.ChangeMemberRole(ctx, tenantAdminActor, tenantID, userID, role); err != nil {
 		// Tolerate "already at this role" idempotently — the upstream
 		// server typically returns ALREADY_EXISTS / FailedPrecondition
 		// in that case. Without a typed error we fall back to a
@@ -115,8 +120,7 @@ func (a *tenantAdmin) PromoteTenantMember(ctx context.Context, tenantID, userID,
 }
 
 func (a *tenantAdmin) RemoveTenantMember(ctx context.Context, tenantID, userID string) error {
-	admin := a.client.Admin()
-	if err := admin.RemoveTenantMember(ctx, tenantAdminActor, tenantID, userID); err != nil {
+	if err := a.transport.RemoveTenantMember(ctx, tenantAdminActor, tenantID, userID); err != nil {
 		// Tolerate "member not present" on rollback so re-runs stay
 		// idempotent. The underlying server typically returns
 		// FailedPrecondition / NotFound here; without a typed error we

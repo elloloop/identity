@@ -172,7 +172,7 @@ GATEWAY_DEFAULT_TENANT_ID = <string>     # required when mode=single
   for this layer live alongside `GATEWAY_IDENTITY_MODE` once we
   implement it.
 
-`mode=multi` is being landed in feature-bounded slices on
+`mode=multi` lands across four feature-bounded slices on
 [#93](https://github.com/elloloop/identity/issues/93):
 
 1. **Organization foundation** *(landed)* — proto types, repo

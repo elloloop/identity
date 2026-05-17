@@ -114,6 +114,10 @@ func TestOrganizationSignup_RealEntDB(t *testing.T) {
 		t.Fatalf("webauthn: %v", err)
 	}
 
+	tenantAdmin, err := repo.NewTenantAdmin(client)
+	if err != nil {
+		t.Fatalf("repo.NewTenantAdmin: %v", err)
+	}
 	handler, stop, err := app.New(app.Deps{
 		Config:             cfg,
 		Logger:             zap.NewNop(),
@@ -124,7 +128,7 @@ func TestOrganizationSignup_RealEntDB(t *testing.T) {
 		TOTPKey:            []byte("01234567890123456789012345678901"),
 		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
 		EmailTransport:     &silentMailer{},
-		TenantAdmin:        repo.NewTenantAdmin(client),
+		TenantAdmin:        tenantAdmin,
 		RepositoryForTenant: func(tenantID string) service.Repository {
 			return entdbrepo.NewRepository(client, tenantID)
 		},
