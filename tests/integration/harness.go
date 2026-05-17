@@ -29,19 +29,19 @@ import (
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/idv"
-	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
 // Harness is the bag of resources returned by StartServer. Tests use
 // the Connect client to make RPC calls, BaseURL to hit health/JWKS
-// endpoints, and KeyRing if they need to inspect signed tokens.
+// endpoints, and Signer if they need to inspect signed tokens.
 type Harness struct {
 	BaseURL  string
 	Client   identityconnectgen.IdentityServiceClient
 	HTTP     *http.Client
-	KeyRing  *jwt.KeyRing
+	Signer   *jwttest.Signer
 	TenantID string
 	Repo     service.Repository
 	DB       service.DB
@@ -155,14 +155,7 @@ func startHarness(
 ) *Harness {
 	t.Helper()
 
-	signingKey, err := jwt.GenerateKey("test-kid")
-	if err != nil {
-		t.Fatalf("generate signing key: %v", err)
-	}
-	keyRing, err := jwt.NewKeyRing([]jwt.SigningKey{signingKey})
-	if err != nil {
-		t.Fatalf("build key ring: %v", err)
-	}
+	signer := jwttest.NewSigner(t, "test-kid")
 
 	pkSvc, err := passkeys.NewWebAuthnService(passkeys.Config{
 		RPID:   cfg.PasskeyRPID,
@@ -176,7 +169,7 @@ func startHarness(
 	handler, stop, err := app.New(app.Deps{
 		Config:             cfg,
 		Logger:             zap.NewNop(),
-		KeyRing:            keyRing,
+		Signer:             signer,
 		Repo:               repo,
 		DB:                 db,
 		Passkeys:           pkSvc,
@@ -201,7 +194,7 @@ func startHarness(
 		BaseURL:  srv.URL,
 		Client:   client,
 		HTTP:     httpClient,
-		KeyRing:  keyRing,
+		Signer:   signer,
 		TenantID: cfg.DefaultTenantID,
 		Repo:     repo,
 		DB:       db,

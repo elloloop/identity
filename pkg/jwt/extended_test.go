@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"context"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ import (
 // extractKID, which is hit before the kid lookup in VerifyAccessToken.
 func TestExtractKID_MalformedToken(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 
 	cases := []struct {
 		name  string
@@ -35,10 +36,8 @@ func TestExtractKID_MalformedToken(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := VerifyAccessToken(tc.token, kr, "", "", false)
+			_, err := VerifyAccessToken(tc.token, s, "", "", false)
 			require.Error(t, err)
-			// Either parse error or missing kid. Both are surfaced via the
-			// "parsing token headers" wrapper or the "missing kid" branch.
 			ok := strings.Contains(err.Error(), "parsing token headers") ||
 				strings.Contains(err.Error(), "missing kid")
 			assert.True(t, ok, "unexpected error: %v", err)
@@ -50,7 +49,6 @@ func TestExtractKID_MalformedToken(t *testing.T) {
 // produces zero signatures, hitting the "no signatures in token" branch.
 func TestExtractKID_NoSignatures(t *testing.T) {
 	t.Parallel()
-	// JSON-serialized JWS with empty signatures array.
 	bogus := `{"payload":"eyJzdWIiOiJ4In0","signatures":[]}`
 	_, err := extractKID([]byte(bogus))
 	require.Error(t, err)
@@ -60,32 +58,30 @@ func TestExtractKID_NoSignatures(t *testing.T) {
 // an error cleanly.
 func TestVerify_OversizedToken(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 	huge := strings.Repeat("A", 1<<16) + "." + strings.Repeat("B", 1<<16) + "." + strings.Repeat("C", 1<<16)
-	_, err := VerifyAccessToken(huge, kr, "", "", false)
+	_, err := VerifyAccessToken(huge, s, "", "", false)
 	require.Error(t, err)
 }
 
 // TestVerify_AlgNoneRejected ensures tokens signed with alg=none cannot be
-// verified against the keyring.
+// verified.
 func TestVerify_AlgNoneRejected(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 
-	// Build an unsecured (alg=none) token by hand.
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","kid":"test-kid","typ":"JWT"}`))
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"x","exp":9999999999}`))
 	tokenStr := header + "." + payload + "."
 
-	_, err := VerifyAccessToken(tokenStr, kr, "", "", false)
+	_, err := VerifyAccessToken(tokenStr, s, "", "", false)
 	require.Error(t, err)
 }
 
-// TestVerify_HS256Rejected ensures a token signed with HS256 (symmetric) is
-// rejected when the verifier expects RS256.
+// TestVerify_HS256Rejected ensures a token signed with HS256 is rejected.
 func TestVerify_HS256Rejected(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 
 	tok, err := jwtoken.NewBuilder().
 		Claim("sub", "x").
@@ -102,16 +98,14 @@ func TestVerify_HS256Rejected(t *testing.T) {
 	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.HS256, hs))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
+	_, err = VerifyAccessToken(string(signed), s, "", "", false)
 	require.Error(t, err)
 }
 
-// TestVerify_FutureIssued: tokens with iat far in the future are rejected by
-// the underlying validator (iat must be in the past).
+// TestVerify_FutureIssued: tokens with iat far in the future are rejected.
 func TestVerify_FutureIssued(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
-	active := kr.Active()
+	s := newMemSigner(t, "test-kid")
 
 	tok, err := jwtoken.NewBuilder().
 		Claim("sub", "x").
@@ -121,75 +115,64 @@ func TestVerify_FutureIssued(t *testing.T) {
 		Build()
 	require.NoError(t, err)
 
-	key, err := jwk.FromRaw(active.PrivateKey)
-	require.NoError(t, err)
-	require.NoError(t, key.Set(jwk.KeyIDKey, active.KID))
-	require.NoError(t, key.Set(jwk.AlgorithmKey, jwa.RS256))
-	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
+	mk := s.byKID[s.activeKID]
+	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, mk.jwk))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
+	_, err = VerifyAccessToken(string(signed), s, "", "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "iat")
 }
 
-// TestNewKeyRing_EmptyKID exercises the "all keys must have a non-empty KID"
-// branch by constructing a SigningKey directly without the GenerateKey helper.
-func TestNewKeyRing_EmptyKIDInSlice(t *testing.T) {
+// TestRotationChain exercises the full rotation flow on the abstract Signer:
+// add a new key, promote it, drop the old one, and verify token-state
+// transitions at each step.
+func TestRotationChain(t *testing.T) {
 	t.Parallel()
-	k1, err := GenerateKey("k1")
-	require.NoError(t, err)
-	k1.Active = true
-
-	bad := SigningKey{
-		KID:        "",
-		PrivateKey: k1.PrivateKey,
-		PublicKey:  k1.PublicKey,
-		Active:     false,
-	}
-
-	_, err = NewKeyRing([]SigningKey{k1, bad})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "non-empty KID")
-}
-
-// TestKeyRing_SingleActiveAfterRotation: simulates a 3-step rotation and
-// confirms tokens signed with the previous active key still verify.
-func TestKeyRing_RotationChain(t *testing.T) {
-	t.Parallel()
-	k1, _ := GenerateKey("k1")
-	k1.Active = true
-	k2, _ := GenerateKey("k2")
-	k2.Active = false
-
-	kr1, err := NewKeyRing([]SigningKey{k1, k2})
-	require.NoError(t, err)
+	s := newMemSigner(t, "k1")
+	s.addKey(t, "k2")
+	require.Equal(t, "k1", s.ActiveKID())
 
 	claims := Claims{Sub: "u1", Email: "u@x", Name: "U", Role: "member", Tenant: "t1"}
-	t1, err := CreateAccessToken(claims, kr1, 15*time.Minute)
+	t1, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 
-	// Promote k2 to active.
-	k1.Active = false
-	k2.Active = true
-	kr2, err := NewKeyRing([]SigningKey{k1, k2})
-	require.NoError(t, err)
-	require.Equal(t, "k2", kr2.Active().KID)
+	s.setActive("k2")
+	require.Equal(t, "k2", s.ActiveKID())
 
-	// Old token still verifies.
-	_, err = VerifyAccessToken(t1, kr2, "", "", false)
+	// Old token still verifies because k1 is still in the provider.
+	_, err = VerifyAccessToken(t1, s, "", "", false)
 	require.NoError(t, err)
 
-	// New token signed with k2 verifies.
-	t2, err := CreateAccessToken(claims, kr2, 15*time.Minute)
+	// New token is signed with k2.
+	t2, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
-	_, err = VerifyAccessToken(t2, kr2, "", "", false)
+	_, err = VerifyAccessToken(t2, s, "", "", false)
 	require.NoError(t, err)
 
-	// Drop k1 from the ring; t1 must no longer verify.
-	kr3, err := NewKeyRing([]SigningKey{k2})
-	require.NoError(t, err)
-	_, err = VerifyAccessToken(t1, kr3, "", "", false)
+	// Drop k1 entirely. Now the old token must fail.
+	s.dropKey("k1")
+	_, err = VerifyAccessToken(t1, s, "", "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown signing key")
+}
+
+// TestAssertJWKSIncludesActiveKIDs panics when the active kid is missing
+// from the published JWKS document. This is the startup-assertion the
+// service runs before serving any RPCs.
+func TestAssertJWKSIncludesActiveKIDs(t *testing.T) {
+	t.Parallel()
+	s := newMemSigner(t, "primary")
+	s.addKey(t, "secondary")
+
+	if err := AssertJWKSIncludesActiveKIDs(s, time.Now()); err != nil {
+		t.Fatalf("AssertJWKSIncludesActiveKIDs: %v", err)
+	}
+
+	// Force a drift: keep activeKID = "missing" but only publish "primary".
+	s.activeKID = "missing"
+	err := AssertJWKSIncludesActiveKIDs(s, time.Now())
+	if err == nil {
+		t.Fatalf("expected error for drifted active kid")
+	}
 }

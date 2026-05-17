@@ -37,10 +37,23 @@ type Config struct {
 	EmailServiceHost string
 	EmailServicePort int
 
-	// JWT (RS256)
-	// JSON array: [{"kid":"k1","private_key_pem":"...","public_key_pem":"...","active":true}]
-	// If empty and running locally, an ephemeral RSA key is auto-generated.
-	JWTKeys          string
+	// JWT (RS256). Two backends ship in-tree:
+	//
+	//   file     (default) reads the keys file at GATEWAY_JWT_KEYS_FILE,
+	//            reloads on SIGHUP. The default for any non-KMS
+	//            deployment; works without external dependencies. If
+	//            JWTKeysFile is empty, the binary auto-generates a
+	//            throwaway dev key in a temp file at startup (suitable
+	//            for local dev / CI only — emits a warning log).
+	//   kms_aws  delegates Sign to AWS KMS. JWTKMSKeys is a CSV of
+	//            "kid=keyARN" entries.
+	//
+	// Adding a new backend (GCP KMS, HashiCorp Vault, hardware HSM, …)
+	// is a matter of implementing pkg/jwt.Signer in a sibling package.
+	JWTSigner        string
+	JWTKeysFile      string
+	JWTKMSKeys       string
+	JWTKMSAWSRegion  string
 	JWTExpirySeconds int
 
 	// JWT audience. When non-empty, minted access tokens carry this as
@@ -252,7 +265,10 @@ func Load() *Config {
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),
 
-		JWTKeys:            envStr("GATEWAY_JWT_KEYS", ""),
+		JWTSigner:          envStr("GATEWAY_JWT_SIGNER", "file"),
+		JWTKeysFile:        envStr("GATEWAY_JWT_KEYS_FILE", ""),
+		JWTKMSKeys:         envStr("GATEWAY_JWT_KMS_KEYS", ""),
+		JWTKMSAWSRegion:    envStr("GATEWAY_JWT_KMS_AWS_REGION", ""),
 		JWTExpirySeconds:   envInt("GATEWAY_JWT_EXPIRY_SECONDS", 900),
 		JWTAudience:        envStr("GATEWAY_JWT_AUDIENCE", ""),
 		JWTRequireAudience: envBool("GATEWAY_JWT_REQUIRE_AUD", false),

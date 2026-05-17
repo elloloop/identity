@@ -155,8 +155,9 @@ func TestBootSmoke(t *testing.T) {
 	//                            loopback:port is fine for boot; the binary
 	//                            does not block on connecting.
 	//    GATEWAY_DEFAULT_TENANT_ID — exercise the dev default explicitly.
-	//    GATEWAY_JWT_KEYS unset — triggers the auto-generated dev RSA key
-	//                            path, which is what we want to assert works.
+	//    GATEWAY_JWT_SIGNER + GATEWAY_JWT_KEYS_FILE unset — triggers the
+	//                            auto-generated dev RSA key path, which
+	//                            is what we want to assert works.
 	//    GATEWAY_TOTP_ENCRYPTION_KEY unset — falls back to the dev key.
 	env := append(
 		os.Environ(),
@@ -166,9 +167,9 @@ func TestBootSmoke(t *testing.T) {
 		"GATEWAY_ENTDB_ADDRESS=127.0.0.1:1",
 		"GATEWAY_DEFAULT_TENANT_ID=smoke-test",
 	)
-	// Strip any pre-existing JWT/TOTP env so we genuinely exercise the dev
-	// fallbacks the smoke test is meant to certify.
-	env = append(env, "GATEWAY_JWT_KEYS=", "GATEWAY_TOTP_ENCRYPTION_KEY=")
+	// Strip any pre-existing JWT/TOTP env so we genuinely exercise the
+	// dev fallbacks the smoke test is meant to certify.
+	env = append(env, "GATEWAY_JWT_SIGNER=", "GATEWAY_JWT_KEYS_FILE=", "GATEWAY_TOTP_ENCRYPTION_KEY=")
 
 	cmd := exec.Command(binPath)
 	cmd.Env = env

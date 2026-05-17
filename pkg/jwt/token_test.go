@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -12,18 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestKeyRing(t *testing.T) *KeyRing {
-	t.Helper()
-	k, err := GenerateKey("test-kid")
-	require.NoError(t, err)
-	k.Active = true
-	kr, err := NewKeyRing([]SigningKey{k})
-	require.NoError(t, err)
-	return kr
-}
-
 func TestCreateAndVerify(t *testing.T) {
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 
 	claims := Claims{
 		Sub:       "user-123",
@@ -34,11 +25,11 @@ func TestCreateAndVerify(t *testing.T) {
 		AvatarURL: "https://example.com/avatar.png",
 	}
 
-	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 	require.NotEmpty(t, tokenStr)
 
-	got, err := VerifyAccessToken(tokenStr, kr, "", "", false)
+	got, err := VerifyAccessToken(tokenStr, s, "", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "user-123", got.Sub)
 	assert.Equal(t, "alice@example.com", got.Email)
@@ -51,7 +42,7 @@ func TestCreateAndVerify(t *testing.T) {
 }
 
 func TestVerify_ExpiredToken(t *testing.T) {
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 
 	claims := Claims{
 		Sub:    "user-123",
@@ -61,18 +52,16 @@ func TestVerify_ExpiredToken(t *testing.T) {
 		Tenant: "t1",
 	}
 
-	// Create a token that expired 1 second ago.
-	tokenStr, err := CreateAccessToken(claims, kr, -1*time.Second)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, -1*time.Second)
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(tokenStr, kr, "", "", false)
+	_, err = VerifyAccessToken(tokenStr, s, "", "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "verifying token")
 }
 
 func TestVerify_WrongKey(t *testing.T) {
-	// Create token with one key ring.
-	kr1 := newTestKeyRing(t)
+	s1 := newMemSigner(t, "test-kid")
 
 	claims := Claims{
 		Sub:    "user-123",
@@ -81,23 +70,18 @@ func TestVerify_WrongKey(t *testing.T) {
 		Role:   "member",
 		Tenant: "t1",
 	}
-	tokenStr, err := CreateAccessToken(claims, kr1, 15*time.Minute)
+	tokenStr, err := s1.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 
-	// Try to verify with a different key ring that has the same kid but different key.
-	k2, err := GenerateKey("test-kid")
-	require.NoError(t, err)
-	k2.Active = true
-	kr2, err := NewKeyRing([]SigningKey{k2})
-	require.NoError(t, err)
+	// Verify against a different signer with the same kid but different key.
+	s2 := newMemSigner(t, "test-kid")
 
-	_, err = VerifyAccessToken(tokenStr, kr2, "", "", false)
+	_, err = VerifyAccessToken(tokenStr, s2, "", "", false)
 	require.Error(t, err)
 }
 
 func TestVerify_MissingKID(t *testing.T) {
-	kr := newTestKeyRing(t)
-	active := kr.Active()
+	s := newMemSigner(t, "test-kid")
 
 	// Manually build a token without a kid header.
 	tok, err := jwtoken.NewBuilder().
@@ -108,51 +92,46 @@ func TestVerify_MissingKID(t *testing.T) {
 	require.NoError(t, err)
 
 	// Sign with raw key (no kid set on key).
-	key, err := jwk.FromRaw(active.PrivateKey)
+	mk := s.byKID[s.activeKID]
+	key, err := jwk.FromRaw(mk.pub.Key)
 	require.NoError(t, err)
-	// Deliberately do NOT set KeyIDKey.
-	err = key.Set(jwk.AlgorithmKey, jwa.RS256)
+	// We need the private key here for signing; reach into the test
+	// helper directly since this is a structural negative test.
+	priv := mk.jwk
+	_ = key
+	_ = priv
+
+	// Build a JWK that lacks the kid header.
+	stripped, err := priv.Clone()
+	require.NoError(t, err)
+	require.NoError(t, stripped.Remove(jwk.KeyIDKey))
+
+	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, stripped))
 	require.NoError(t, err)
 
-	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
-	require.NoError(t, err)
-
-	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
+	_, err = VerifyAccessToken(string(signed), s, "", "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing kid")
 }
 
 func TestVerify_UnknownKID(t *testing.T) {
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 
-	// Generate a different key and sign a token with kid="unknown-kid".
-	otherKey, err := GenerateKey("unknown-kid")
-	require.NoError(t, err)
-
-	tok, err := jwtoken.NewBuilder().
-		Claim("sub", "user-123").
-		IssuedAt(time.Now()).
-		Expiration(time.Now().Add(15 * time.Minute)).
-		Build()
+	// Build a separate signer whose kid is not known to s.
+	other := newMemSigner(t, "unknown-kid")
+	tok, err := other.SignAccessToken(context.Background(), Claims{
+		Sub:    "user-123",
+		Tenant: "t",
+	}, 15*time.Minute)
 	require.NoError(t, err)
 
-	key, err := jwk.FromRaw(otherKey.PrivateKey)
-	require.NoError(t, err)
-	err = key.Set(jwk.KeyIDKey, "unknown-kid")
-	require.NoError(t, err)
-	err = key.Set(jwk.AlgorithmKey, jwa.RS256)
-	require.NoError(t, err)
-
-	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
-	require.NoError(t, err)
-
-	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
+	_, err = VerifyAccessToken(tok, s, "", "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown signing key")
 }
 
 func TestCreateToken_HasKIDHeader(t *testing.T) {
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 
 	claims := Claims{
 		Sub:    "user-123",
@@ -161,17 +140,16 @@ func TestCreateToken_HasKIDHeader(t *testing.T) {
 		Role:   "member",
 		Tenant: "t1",
 	}
-	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 
-	// Parse the raw JWS to inspect the protected header.
 	kid, err := extractKID([]byte(tokenStr))
 	require.NoError(t, err)
 	assert.Equal(t, "test-kid", kid)
 }
 
 func TestClaims_AllFieldsPresent(t *testing.T) {
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 
 	claims := Claims{
 		Sub:       "user-456",
@@ -182,14 +160,12 @@ func TestClaims_AllFieldsPresent(t *testing.T) {
 		AvatarURL: "https://cdn.example.com/bob.jpg",
 	}
 
-	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 
-	// Parse without verification to inspect the raw payload.
 	tok, err := jwtoken.Parse([]byte(tokenStr), jwtoken.WithVerify(false), jwtoken.WithValidate(false))
 	require.NoError(t, err)
 
-	// Serialize to JSON to check all fields are present.
 	payload, err := json.Marshal(tok)
 	require.NoError(t, err)
 

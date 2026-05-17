@@ -21,7 +21,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
-	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
@@ -1356,17 +1356,9 @@ func testConfig() *config.Config {
 	}
 }
 
-func testKeyRing(t *testing.T) *jwt.KeyRing {
+func testKeyRing(t *testing.T) *jwttest.Signer {
 	t.Helper()
-	sk, err := jwt.GenerateKey("test-kid")
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-	kr, err := jwt.NewKeyRing([]jwt.SigningKey{sk})
-	if err != nil {
-		t.Fatalf("new key ring: %v", err)
-	}
-	return kr
+	return jwttest.NewSigner(t, "test-kid")
 }
 
 // newHarness builds a complete handler stack and exposes both an in-process

@@ -10,19 +10,18 @@ package main
 
 import (
 	"context"
-	"crypto/rsa"
-	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	awskms "github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
@@ -33,7 +32,9 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/repo"
-	"github.com/elloloop/identity/pkg/jwt"
+	jwtpkg "github.com/elloloop/identity/pkg/jwt"
+	jwtfile "github.com/elloloop/identity/pkg/jwt/file"
+	jwtkmsaws "github.com/elloloop/identity/pkg/jwt/kmsaws"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/identity/pkg/totp"
 )
@@ -91,31 +92,21 @@ func main() {
 		}
 	}()
 
-	// ── JWT Key Ring ─────────────────────────────────────────────────
-	var keyRing *jwt.KeyRing
-	if cfg.JWTKeys != "" {
-		keyRing, err = parseKeyRingFromEnv(cfg.JWTKeys)
-		if err != nil {
-			logger.Fatal("jwt_key_ring_parse_failed", zap.Error(err))
-		}
-		logger.Info(
-			"jwt_key_ring_loaded",
-			zap.Int("key_count", len(keyRing.AllKIDs())),
-			zap.String("active_kid", keyRing.Active().KID),
-		)
-	} else {
-		key, genErr := jwt.GenerateKey("dev")
-		if genErr != nil {
-			logger.Fatal("jwt_key_generate_failed", zap.Error(genErr))
-		}
-		keyRing, err = jwt.NewKeyRing([]jwt.SigningKey{key})
-		if err != nil {
-			logger.Fatal("jwt_key_ring_create_failed", zap.Error(err))
-		}
-		logger.Warn(
-			"auto_generating_dev_rsa_key",
-			zap.String("kid", key.KID),
-		)
+	// ── JWT signer ───────────────────────────────────────────────────
+	// GATEWAY_JWT_SIGNER selects the backend; file is the default.
+	signer, stopSigner, err := buildSigner(context.Background(), cfg, logger)
+	if err != nil {
+		logger.Fatal("jwt_signer_init_failed", zap.Error(err))
+	}
+	defer stopSigner()
+
+	// Startup assertion: the JWKS document the verifier publishes
+	// MUST include every active kid the signer reports. Drift means
+	// downstream services cached a JWKS that cannot validate the next
+	// token we mint — that's a panic-at-startup condition, not a
+	// runtime warning.
+	if err := jwtpkg.AssertJWKSIncludesActiveKIDs(signer, time.Now().UTC()); err != nil {
+		logger.Fatal("jwks_active_kid_drift", zap.Error(err))
 	}
 
 	// ── WebAuthn / Passkeys ──────────────────────────────────────────
@@ -201,7 +192,7 @@ func main() {
 	chain, stopApp, err := app.New(app.Deps{
 		Config:             cfg,
 		Logger:             logger,
-		KeyRing:            keyRing,
+		Signer:             signer,
 		Repo:               authRepo,
 		DB:                 dbAdapter,
 		Passkeys:           webauthnSvc,
@@ -277,6 +268,99 @@ func main() {
 	logger.Info("shutdown_complete")
 }
 
+// buildSigner constructs the configured jwt.Signer and returns a stop
+// func that detaches signal handlers etc. on shutdown.
+func buildSigner(ctx context.Context, cfg *config.Config, logger *zap.Logger) (jwtpkg.Signer, func(), error) {
+	switch cfg.JWTSigner {
+	case "", "file":
+		return buildFileSigner(cfg, logger)
+	case "kms_aws":
+		return buildKMSAWSSigner(ctx, cfg, logger)
+	default:
+		return nil, func() {}, fmt.Errorf("unknown GATEWAY_JWT_SIGNER %q (want file or kms_aws)", cfg.JWTSigner)
+	}
+}
+
+func buildFileSigner(cfg *config.Config, logger *zap.Logger) (jwtpkg.Signer, func(), error) {
+	logOpt := jwtfile.Options{
+		Logf: func(format string, args ...any) {
+			logger.Info(fmt.Sprintf(format, args...))
+		},
+	}
+
+	path := cfg.JWTKeysFile
+	if path == "" {
+		// Dev fallback: generate a throwaway key in a temp file so the
+		// service still starts without external setup. NEVER do this in
+		// production — the warning log is loud on purpose.
+		tmpDir, err := os.MkdirTemp("", "identity-jwt-dev-")
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("creating dev keys dir: %w", err)
+		}
+		path = filepath.Join(tmpDir, "keys.json")
+		s, err := jwtfile.GenerateAndWrite(path, "dev", 365*24*time.Hour, logOpt)
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("generating dev signing key: %w", err)
+		}
+		logger.Warn(
+			"jwt_signer_dev_key_generated",
+			zap.String("path", path),
+			zap.String("kid", s.ActiveKID()),
+			zap.String("hint", "set GATEWAY_JWT_KEYS_FILE for any non-dev deployment"),
+		)
+		stop := func() {
+			_ = os.RemoveAll(tmpDir)
+		}
+		return s, stop, nil
+	}
+
+	s, err := jwtfile.New(path, logOpt)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	logger.Info("jwt_signer_file", zap.String("path", path), zap.String("active_kid", s.ActiveKID()))
+
+	stopWatch := jwtfile.WatchSIGHUP(s, func(err error) {
+		logger.Error("jwt_signer_reload_failed", zap.Error(err))
+	})
+
+	return s, stopWatch, nil
+}
+
+func buildKMSAWSSigner(ctx context.Context, cfg *config.Config, logger *zap.Logger) (jwtpkg.Signer, func(), error) {
+	if cfg.JWTKMSKeys == "" {
+		return nil, func() {}, errors.New("GATEWAY_JWT_KMS_KEYS is required when GATEWAY_JWT_SIGNER=kms_aws")
+	}
+	refs, err := jwtkmsaws.ARNFromConfig(cfg.JWTKMSKeys)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("parsing GATEWAY_JWT_KMS_KEYS: %w", err)
+	}
+
+	var opts []func(*awsconfig.LoadOptions) error
+	if cfg.JWTKMSAWSRegion != "" {
+		opts = append(opts, awsconfig.WithRegion(cfg.JWTKMSAWSRegion))
+	}
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("loading AWS config: %w", err)
+	}
+	client := awskms.NewFromConfig(awsCfg)
+
+	s, err := jwtkmsaws.New(ctx, jwtkmsaws.Config{
+		API:  client,
+		Keys: refs,
+	})
+	if err != nil {
+		return nil, func() {}, err
+	}
+	kids := make([]string, 0, len(refs))
+	for _, r := range refs {
+		kids = append(kids, r.KID)
+	}
+	logger.Info("jwt_signer_kms_aws", zap.Strings("kids", kids), zap.String("active_kid", s.ActiveKID()))
+	return s, func() {}, nil
+}
+
 // syncLogger flushes the zap logger and intentionally swallows the sync error,
 // since stdout sync on some platforms returns ENOTTY and the process is about
 // to exit anyway.
@@ -285,63 +369,4 @@ func syncLogger(logger *zap.Logger) {
 		// best-effort -- stderr may not be syncable (e.g. terminal)
 		_ = err
 	}
-}
-
-// jwtKeyJSON is the JSON schema for a single key in the GATEWAY_JWT_KEYS
-// environment variable.
-type jwtKeyJSON struct {
-	KID           string `json:"kid"`
-	PrivateKeyPEM string `json:"private_key_pem"`
-	PublicKeyPEM  string `json:"public_key_pem"`
-	Active        bool   `json:"active"`
-}
-
-// parseKeyRingFromEnv parses the GATEWAY_JWT_KEYS JSON array into a KeyRing.
-//
-// Expected format:
-//
-//	[{"kid":"k1","private_key_pem":"-----BEGIN RSA PRIVATE KEY-----\n...","active":true}]
-func parseKeyRingFromEnv(jsonStr string) (*jwt.KeyRing, error) {
-	var raw []jwtKeyJSON
-	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
-		return nil, fmt.Errorf("parsing JWT keys JSON: %w", err)
-	}
-	if len(raw) == 0 {
-		return nil, errors.New("JWT keys JSON is empty")
-	}
-
-	keys := make([]jwt.SigningKey, 0, len(raw))
-	for _, k := range raw {
-		if k.KID == "" {
-			return nil, errors.New("JWT key missing kid")
-		}
-
-		// Parse private key PEM.
-		privBlock, _ := pem.Decode([]byte(k.PrivateKeyPEM))
-		if privBlock == nil {
-			return nil, fmt.Errorf("kid=%s: invalid private key PEM", k.KID)
-		}
-		privKey, err := x509.ParsePKCS1PrivateKey(privBlock.Bytes)
-		if err != nil {
-			// Try PKCS8 as fallback.
-			pkcs8Key, pkcs8Err := x509.ParsePKCS8PrivateKey(privBlock.Bytes)
-			if pkcs8Err != nil {
-				return nil, fmt.Errorf("kid=%s: parsing private key: %w", k.KID, err)
-			}
-			var ok bool
-			privKey, ok = pkcs8Key.(*rsa.PrivateKey)
-			if !ok {
-				return nil, fmt.Errorf("kid=%s: private key is not RSA", k.KID)
-			}
-		}
-
-		keys = append(keys, jwt.SigningKey{
-			KID:        k.KID,
-			PrivateKey: privKey,
-			PublicKey:  &privKey.PublicKey,
-			Active:     k.Active,
-		})
-	}
-
-	return jwt.NewKeyRing(keys)
 }

@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -18,13 +19,12 @@ import (
 
 func TestRFC7519_HeaderFields_AlgKidTyp(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 	claims := Claims{Sub: "u1", Email: "a@b.com", Name: "A", Role: "member", Tenant: "t1"}
 
-	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 
-	// Split compact serialization: header.payload.signature
 	parts := strings.Split(tokenStr, ".")
 	require.Len(t, parts, 3, "JWS compact serialization has 3 parts")
 
@@ -36,8 +36,7 @@ func TestRFC7519_HeaderFields_AlgKidTyp(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "RS256", header["alg"], "alg must be RS256")
-	assert.Equal(t, "test-kid", header["kid"], "kid must match key ring active kid")
-	// typ may be JWT or absent; if present must be JWT
+	assert.Equal(t, "test-kid", header["kid"], "kid must match signer active kid")
 	if typ, ok := header["typ"]; ok {
 		assert.Equal(t, "JWT", typ)
 	}
@@ -47,10 +46,10 @@ func TestRFC7519_HeaderFields_AlgKidTyp(t *testing.T) {
 
 func TestRFC7519_RegisteredClaims_SubIssExpIatAud(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 	claims := Claims{Sub: "user-abc", Email: "a@b.com", Name: "A", Role: "member", Tenant: "t1"}
 
-	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 
 	tok, err := jwtoken.Parse([]byte(tokenStr), jwtoken.WithVerify(false), jwtoken.WithValidate(false))
@@ -64,18 +63,17 @@ func TestRFC7519_RegisteredClaims_SubIssExpIatAud(t *testing.T) {
 
 func TestRFC7519_ExpiryMatchesDuration(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 	claims := Claims{Sub: "u1", Email: "a@b.com", Name: "A", Role: "member", Tenant: "t1"}
 
-	before := time.Now().Add(-2 * time.Second) // allow 2s clock tolerance
-	tokenStr, err := CreateAccessToken(claims, kr, 30*time.Minute)
+	before := time.Now().Add(-2 * time.Second)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 30*time.Minute)
 	require.NoError(t, err)
 	after := time.Now().Add(2 * time.Second)
 
 	tok, err := jwtoken.Parse([]byte(tokenStr), jwtoken.WithVerify(false), jwtoken.WithValidate(false))
 	require.NoError(t, err)
 
-	// exp should be approximately iat + 30 min
 	expectedMin := before.Add(30 * time.Minute)
 	expectedMax := after.Add(30 * time.Minute)
 
@@ -87,24 +85,22 @@ func TestRFC7519_ExpiryMatchesDuration(t *testing.T) {
 
 func TestRFC7519_ExpiredTokenRejected(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 	claims := Claims{Sub: "u1", Email: "a@b.com", Name: "A", Role: "member", Tenant: "t1"}
 
-	tokenStr, err := CreateAccessToken(claims, kr, -5*time.Second)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, -5*time.Second)
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(tokenStr, kr, "", "", false)
+	_, err = VerifyAccessToken(tokenStr, s, "", "", false)
 	require.Error(t, err, "expired token must be rejected")
 }
 
 // ── Future iat handling ────────────────────────────────────────────────
 
 func TestRFC7519_FutureIat_StillVerifies(t *testing.T) {
-	// A token with iat slightly in the future should still verify
-	// (clock skew tolerance). We build it manually.
 	t.Parallel()
-	kr := newTestKeyRing(t)
-	active := kr.Active()
+	s := newMemSigner(t, "test-kid")
+	mk := s.byKID[s.activeKID]
 
 	tok, err := jwtoken.NewBuilder().
 		Claim("sub", "user-future").
@@ -117,24 +113,19 @@ func TestRFC7519_FutureIat_StillVerifies(t *testing.T) {
 		Build()
 	require.NoError(t, err)
 
-	key, err := jwk.FromRaw(active.PrivateKey)
-	require.NoError(t, err)
-	_ = key.Set(jwk.KeyIDKey, active.KID)
-	_ = key.Set(jwk.AlgorithmKey, jwa.RS256)
-
-	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
+	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, mk.jwk))
 	require.NoError(t, err)
 
-	// This may succeed or fail depending on library skew tolerance.
-	// The test documents the behavior.
-	_, _ = VerifyAccessToken(string(signed), kr, "", "", false)
+	// May succeed or fail depending on library skew tolerance — test
+	// documents the behaviour.
+	_, _ = VerifyAccessToken(string(signed), s, "", "", false)
 }
 
 // ── Claims extraction correctness ──────────────────────────────────────
 
 func TestRFC7519_ClaimsExtraction_AllCustomFields(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 	claims := Claims{
 		Sub:       "user-extract",
 		Email:     "extract@test.com",
@@ -144,10 +135,10 @@ func TestRFC7519_ClaimsExtraction_AllCustomFields(t *testing.T) {
 		AvatarURL: "https://cdn.example.com/avatar.png",
 	}
 
-	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 
-	got, err := VerifyAccessToken(tokenStr, kr, "", "", false)
+	got, err := VerifyAccessToken(tokenStr, s, "", "", false)
 	require.NoError(t, err)
 
 	assert.Equal(t, "user-extract", got.Sub)
@@ -164,47 +155,31 @@ func TestRFC7519_ClaimsExtraction_AllCustomFields(t *testing.T) {
 
 func TestRFC7519_KeyRotation_OldTokenStillVerifies(t *testing.T) {
 	t.Parallel()
-	k1, err := GenerateKey("rotation-k1")
-	require.NoError(t, err)
-	k1.Active = true
-
-	kr1, err := NewKeyRing([]SigningKey{k1})
-	require.NoError(t, err)
+	s := newMemSigner(t, "rotation-k1")
 
 	claims := Claims{Sub: "user-rot", Email: "rot@b.com", Name: "R", Role: "member", Tenant: "t1"}
-	tokenStr, err := CreateAccessToken(claims, kr1, 15*time.Minute)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 
-	// Rotate: k1 inactive, k2 active, both in ring
-	k2, err := GenerateKey("rotation-k2")
-	require.NoError(t, err)
+	// Rotate: add k2 and promote it.
+	s.addKey(t, "rotation-k2")
+	s.setActive("rotation-k2")
 
-	k1.Active = false
-	k2.Active = true
-	kr2, err := NewKeyRing([]SigningKey{k1, k2})
-	require.NoError(t, err)
-
-	// Token signed with k1 must still verify with kr2
-	got, err := VerifyAccessToken(tokenStr, kr2, "", "", false)
+	// Token signed with k1 must still verify because k1 remains in
+	// the provider.
+	got, err := VerifyAccessToken(tokenStr, s, "", "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "user-rot", got.Sub)
 }
 
 func TestRFC7519_KeyRotation_NewTokenUsesActiveKey(t *testing.T) {
 	t.Parallel()
-	k1, err := GenerateKey("rot-old")
-	require.NoError(t, err)
-	k1.Active = false
-
-	k2, err := GenerateKey("rot-new")
-	require.NoError(t, err)
-	k2.Active = true
-
-	kr, err := NewKeyRing([]SigningKey{k1, k2})
-	require.NoError(t, err)
+	s := newMemSigner(t, "rot-old")
+	s.addKey(t, "rot-new")
+	s.setActive("rot-new")
 
 	claims := Claims{Sub: "u1", Email: "a@b.com", Name: "A", Role: "member", Tenant: "t1"}
-	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 
 	kid, err := extractKID([]byte(tokenStr))
@@ -216,14 +191,9 @@ func TestRFC7519_KeyRotation_NewTokenUsesActiveKey(t *testing.T) {
 
 func TestRFC7517_JWKS_RequiredFields(t *testing.T) {
 	t.Parallel()
-	k, err := GenerateKey("jwks-test")
-	require.NoError(t, err)
-	k.Active = true
+	s := newMemSigner(t, "jwks-test")
 
-	kr, err := NewKeyRing([]SigningKey{k})
-	require.NoError(t, err)
-
-	jwksBytes, err := kr.JWKS()
+	jwksBytes, err := JWKS(s)
 	require.NoError(t, err)
 
 	var jwks struct {
@@ -244,23 +214,16 @@ func TestRFC7517_JWKS_RequiredFields(t *testing.T) {
 
 func TestRFC7517_JWKS_KeyIDMatchesTokenKID(t *testing.T) {
 	t.Parallel()
-	k, err := GenerateKey("kid-match-test")
-	require.NoError(t, err)
-	k.Active = true
+	s := newMemSigner(t, "kid-match-test")
 
-	kr, err := NewKeyRing([]SigningKey{k})
-	require.NoError(t, err)
-
-	// Get kid from token
 	claims := Claims{Sub: "u1", Email: "a@b.com", Name: "A", Role: "member", Tenant: "t1"}
-	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	require.NoError(t, err)
 
 	tokenKID, err := extractKID([]byte(tokenStr))
 	require.NoError(t, err)
 
-	// Get kid from JWKS
-	jwksBytes, err := kr.JWKS()
+	jwksBytes, err := JWKS(s)
 	require.NoError(t, err)
 
 	var jwks struct {
@@ -281,14 +244,9 @@ func TestRFC7517_JWKS_KeyIDMatchesTokenKID(t *testing.T) {
 
 func TestRFC7517_JWKS_NFieldIsBase64url(t *testing.T) {
 	t.Parallel()
-	k, err := GenerateKey("b64-test")
-	require.NoError(t, err)
-	k.Active = true
+	s := newMemSigner(t, "b64-test")
 
-	kr, err := NewKeyRing([]SigningKey{k})
-	require.NoError(t, err)
-
-	jwksBytes, err := kr.JWKS()
+	jwksBytes, err := JWKS(s)
 	require.NoError(t, err)
 
 	var jwks struct {
@@ -298,32 +256,27 @@ func TestRFC7517_JWKS_NFieldIsBase64url(t *testing.T) {
 	require.NoError(t, err)
 
 	n := jwks.Keys[0]["n"].(string)
-	// RFC 7517 mandates base64url without padding
 	assert.NotContains(t, n, "+", "n must not contain + (base64url)")
 	assert.NotContains(t, n, "/", "n must not contain / (base64url)")
 }
 
 func TestRFC7519_EmptySubReturnsError(t *testing.T) {
 	t.Parallel()
-	kr := newTestKeyRing(t)
+	s := newMemSigner(t, "test-kid")
 	claims := Claims{Sub: "", Email: "a@b.com", Name: "A", Role: "member", Tenant: "t1"}
 
-	// Even with empty sub, the library should still produce a token
-	// (sub is technically optional in JWT spec). Document behavior.
-	tokenStr, err := CreateAccessToken(claims, kr, 15*time.Minute)
+	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	if err == nil {
-		// Verify it round-trips
-		got, err := VerifyAccessToken(tokenStr, kr, "", "", false)
+		got, err := VerifyAccessToken(tokenStr, s, "", "", false)
 		require.NoError(t, err)
 		assert.Equal(t, "", got.Sub)
 	}
 }
 
 func TestRFC7519_TokenNotValidBefore(t *testing.T) {
-	// Manually create a token with nbf in the future.
 	t.Parallel()
-	kr := newTestKeyRing(t)
-	active := kr.Active()
+	s := newMemSigner(t, "test-kid")
+	mk := s.byKID[s.activeKID]
 
 	tok, err := jwtoken.NewBuilder().
 		Claim("sub", "user-nbf").
@@ -337,14 +290,14 @@ func TestRFC7519_TokenNotValidBefore(t *testing.T) {
 		Build()
 	require.NoError(t, err)
 
-	key, err := jwk.FromRaw(active.PrivateKey)
-	require.NoError(t, err)
-	_ = key.Set(jwk.KeyIDKey, active.KID)
-	_ = key.Set(jwk.AlgorithmKey, jwa.RS256)
-
-	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
+	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, mk.jwk))
 	require.NoError(t, err)
 
-	_, err = VerifyAccessToken(string(signed), kr, "", "", false)
+	_, err = VerifyAccessToken(string(signed), s, "", "", false)
 	require.Error(t, err, "token with future nbf should be rejected")
 }
+
+// We don't actually use jwk directly in this test file post-refactor, but
+// keep the import so future kid-related JWKS test additions don't need
+// to add it back.
+var _ = jwk.NewSet

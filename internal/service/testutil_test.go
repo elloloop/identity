@@ -18,7 +18,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
-	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
@@ -693,17 +693,9 @@ func testConfig() *config.Config {
 	}
 }
 
-func testKeyRing(t *testing.T) *jwt.KeyRing {
+func testKeyRing(t *testing.T) *jwttest.Signer {
 	t.Helper()
-	sk, err := jwt.GenerateKey("test-kid")
-	if err != nil {
-		t.Fatalf("generating test key: %v", err)
-	}
-	kr, err := jwt.NewKeyRing([]jwt.SigningKey{sk})
-	if err != nil {
-		t.Fatalf("creating test key ring: %v", err)
-	}
-	return kr
+	return jwttest.NewSigner(t, "test-kid")
 }
 
 func testTotpKey() []byte {

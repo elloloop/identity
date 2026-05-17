@@ -52,7 +52,7 @@ var AuthExemptPaths = map[string]bool{
 // For auth-exempt paths the middleware still attempts to parse and verify a
 // token when one is present (e.g. GetCurrentUser may optionally read the
 // caller identity) but never rejects the request.
-func AuthMiddleware(keyRing *jwtpkg.KeyRing, expectedTenant, expectedAudience string, requireAudience bool) func(http.Handler) http.Handler {
+func AuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience string, requireAudience bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
@@ -61,7 +61,7 @@ func AuthMiddleware(keyRing *jwtpkg.KeyRing, expectedTenant, expectedAudience st
 			if AuthExemptPaths[path] {
 				// Still try to parse auth if present (for GetCurrentUser).
 				if token := extractBearerToken(r); token != "" {
-					if claims, err := jwtpkg.VerifyAccessToken(token, keyRing, expectedTenant, expectedAudience, requireAudience); err == nil {
+					if claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience); err == nil {
 						r.Header.Set("X-Authenticated-User-Id", claims.Sub)
 					}
 				}
@@ -77,7 +77,7 @@ func AuthMiddleware(keyRing *jwtpkg.KeyRing, expectedTenant, expectedAudience st
 				return
 			}
 
-			claims, err := jwtpkg.VerifyAccessToken(token, keyRing, expectedTenant, expectedAudience, requireAudience)
+			claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience)
 			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)

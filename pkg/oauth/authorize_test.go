@@ -12,25 +12,17 @@ import (
 	"time"
 
 	identityjwt "github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 )
 
-func newOAuthStateKeyRing(t *testing.T) *identityjwt.KeyRing {
+func newOAuthStateSigner(t *testing.T) *jwttest.Signer {
 	t.Helper()
-	return newOAuthStateKeyRingWithKID(t, "oauth-state-test")
+	return jwttest.NewSigner(t, "oauth-state-test")
 }
 
-func newOAuthStateKeyRingWithKID(t *testing.T, kid string) *identityjwt.KeyRing {
+func newOAuthStateSignerWithKID(t *testing.T, kid string) *jwttest.Signer {
 	t.Helper()
-	key, err := identityjwt.GenerateKey(kid)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-	key.Active = true
-	ring, err := identityjwt.NewKeyRing([]identityjwt.SigningKey{key})
-	if err != nil {
-		t.Fatalf("NewKeyRing: %v", err)
-	}
-	return ring
+	return jwttest.NewSigner(t, kid)
 }
 
 func TestCodeVerifierContext(t *testing.T) {
@@ -52,9 +44,11 @@ func TestStateToken_RoundTripAndMismatch(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 5, 6, 15, 0, 0, 0, time.UTC)
-	ring := newOAuthStateKeyRing(t)
+	ring := newOAuthStateSigner(t)
+	ctx := context.Background()
 
 	token, err := IssueStateToken(
+		ctx,
 		ring,
 		"google",
 		"https://app.example.com/oauth/callback",
@@ -100,10 +94,11 @@ func TestStateToken_ValidationFailures(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 5, 6, 15, 0, 0, 0, time.UTC)
-	ring := newOAuthStateKeyRing(t)
+	ring := newOAuthStateSigner(t)
+	ctx := context.Background()
 
-	if _, err := IssueStateToken(nil, "google", "https://app.example.com/oauth/callback", "state-123", "verifier-123", 5*time.Minute, now); !errors.Is(err, ErrStateValidation) {
-		t.Fatalf("nil key ring error = %v", err)
+	if _, err := IssueStateToken(ctx, nil, "google", "https://app.example.com/oauth/callback", "state-123", "verifier-123", 5*time.Minute, now); !errors.Is(err, ErrStateValidation) {
+		t.Fatalf("nil signer error = %v", err)
 	}
 
 	required := []struct {
@@ -120,13 +115,14 @@ func TestStateToken_ValidationFailures(t *testing.T) {
 	}
 	for _, tc := range required {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := IssueStateToken(ring, tc.provider, tc.redirectURI, tc.state, tc.codeVerifier, 5*time.Minute, now); !errors.Is(err, ErrStateValidation) {
+			if _, err := IssueStateToken(ctx, ring, tc.provider, tc.redirectURI, tc.state, tc.codeVerifier, 5*time.Minute, now); !errors.Is(err, ErrStateValidation) {
 				t.Fatalf("IssueStateToken error = %v", err)
 			}
 		})
 	}
 
 	token, err := IssueStateToken(
+		ctx,
 		ring,
 		"google",
 		"https://app.example.com/oauth/callback",
@@ -141,7 +137,7 @@ func TestStateToken_ValidationFailures(t *testing.T) {
 
 	verifyCases := []struct {
 		name        string
-		ring        *identityjwt.KeyRing
+		ring        identityjwt.KeyProvider
 		token       string
 		provider    string
 		redirectURI string
@@ -151,7 +147,7 @@ func TestStateToken_ValidationFailures(t *testing.T) {
 	}{
 		{"nil ring", nil, token, "google", "https://app.example.com/oauth/callback", "state-123", "verifier-123", now.Add(time.Minute)},
 		{"bad token", ring, "not-a-jws", "google", "https://app.example.com/oauth/callback", "state-123", "verifier-123", now.Add(time.Minute)},
-		{"unknown kid", newOAuthStateKeyRingWithKID(t, "oauth-state-other"), token, "google", "https://app.example.com/oauth/callback", "state-123", "verifier-123", now.Add(time.Minute)},
+		{"unknown kid", newOAuthStateSignerWithKID(t, "oauth-state-other"), token, "google", "https://app.example.com/oauth/callback", "state-123", "verifier-123", now.Add(time.Minute)},
 		{"expired", ring, token, "google", "https://app.example.com/oauth/callback", "state-123", "verifier-123", now.Add(6 * time.Minute)},
 		{"provider mismatch", ring, token, "github", "https://app.example.com/oauth/callback", "state-123", "verifier-123", now.Add(time.Minute)},
 		{"redirect mismatch", ring, token, "google", "https://app.example.com/other", "state-123", "verifier-123", now.Add(time.Minute)},
@@ -167,6 +163,7 @@ func TestStateToken_ValidationFailures(t *testing.T) {
 	}
 
 	futureToken, err := IssueStateToken(
+		ctx,
 		ring,
 		"google",
 		"https://app.example.com/oauth/callback",

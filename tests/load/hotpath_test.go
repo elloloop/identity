@@ -23,7 +23,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo/memory"
 	"github.com/elloloop/identity/pkg/email"
-	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -165,14 +165,7 @@ func loadConfigFromEnv(t *testing.T) loadConfig {
 func startLoadHarness(t *testing.T) *loadHarness {
 	t.Helper()
 
-	signingKey, err := jwt.GenerateKey("load-test-kid")
-	if err != nil {
-		t.Fatalf("generate signing key: %v", err)
-	}
-	keyRing, err := jwt.NewKeyRing([]jwt.SigningKey{signingKey})
-	if err != nil {
-		t.Fatalf("build key ring: %v", err)
-	}
+	signer := jwttest.NewSigner(t, "load-test-kid")
 	passkeysSvc, err := passkeys.NewWebAuthnService(passkeys.Config{
 		RPID:   "localhost",
 		RPName: "IdentityLoadTests",
@@ -208,7 +201,7 @@ func startLoadHarness(t *testing.T) *loadHarness {
 	handler, stop, err := app.New(app.Deps{
 		Config:             cfg,
 		Logger:             zap.NewNop(),
-		KeyRing:            keyRing,
+		Signer:             signer,
 		Repo:               repo,
 		DB:                 repo,
 		Passkeys:           passkeysSvc,

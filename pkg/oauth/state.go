@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,7 +24,8 @@ type StateClaims struct {
 }
 
 func IssueStateToken(
-	kr *identityjwt.KeyRing,
+	ctx context.Context,
+	signer identityjwt.Signer,
 	provider, redirectURI, state, codeVerifier string,
 	expiry time.Duration,
 	now time.Time,
@@ -35,49 +37,34 @@ func IssueStateToken(
 	if provider == "" || redirectURI == "" || state == "" || codeVerifier == "" {
 		return "", fmt.Errorf("%w: missing required state-token claim", ErrStateValidation)
 	}
-	if kr == nil {
-		return "", fmt.Errorf("%w: missing signing key ring", ErrStateValidation)
+	if signer == nil {
+		return "", fmt.Errorf("%w: missing signer", ErrStateValidation)
 	}
 
-	tok, err := jwtoken.NewBuilder().
-		Claim("provider", provider).
-		Claim("redirect_uri", redirectURI).
-		Claim("oauth_state", state).
-		Claim("code_verifier", codeVerifier).
-		IssuedAt(now).
-		Expiration(now.Add(expiry)).
-		Build()
-	if err != nil {
-		return "", fmt.Errorf("%w: build state token: %w", ErrStateValidation, err)
+	claims := map[string]any{
+		"provider":      provider,
+		"redirect_uri":  redirectURI,
+		"oauth_state":   state,
+		"code_verifier": codeVerifier,
+		"iat":           now.Unix(),
+		"exp":           now.Add(expiry).Unix(),
 	}
 
-	active := kr.Active()
-	key, err := jwk.FromRaw(active.PrivateKey)
-	if err != nil {
-		return "", fmt.Errorf("%w: convert signing key: %w", ErrStateValidation, err)
-	}
-	if err := key.Set(jwk.KeyIDKey, active.KID); err != nil {
-		return "", fmt.Errorf("%w: set signing kid: %w", ErrStateValidation, err)
-	}
-	if err := key.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return "", fmt.Errorf("%w: set signing alg: %w", ErrStateValidation, err)
-	}
-
-	signed, err := jwtoken.Sign(tok, jwtoken.WithKey(jwa.RS256, key))
+	signed, err := signer.SignClaims(ctx, claims)
 	if err != nil {
 		return "", fmt.Errorf("%w: sign state token: %w", ErrStateValidation, err)
 	}
-	return string(signed), nil
+	return signed, nil
 }
 
 func VerifyStateToken(
 	token string,
-	kr *identityjwt.KeyRing,
+	kp identityjwt.KeyProvider,
 	expectedProvider, expectedRedirectURI, returnedState, explicitCodeVerifier string,
 	now time.Time,
 ) (*StateClaims, error) {
-	if kr == nil {
-		return nil, fmt.Errorf("%w: missing verification key ring", ErrStateValidation)
+	if kp == nil {
+		return nil, fmt.Errorf("%w: missing key provider", ErrStateValidation)
 	}
 	kid, err := extractStateTokenKID(token)
 	if err != nil {
@@ -87,11 +74,11 @@ func VerifyStateToken(
 		return nil, fmt.Errorf("%w: missing kid", ErrStateValidation)
 	}
 
-	sk, ok := kr.Get(kid)
+	pub, ok := kp.Get(kid)
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown kid", ErrStateValidation)
 	}
-	key, err := jwk.FromRaw(sk.PublicKey)
+	key, err := jwk.FromRaw(pub)
 	if err != nil {
 		return nil, fmt.Errorf("%w: convert public key: %w", ErrStateValidation, err)
 	}

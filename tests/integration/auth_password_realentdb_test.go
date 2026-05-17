@@ -42,7 +42,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo"
 	"github.com/elloloop/identity/pkg/email"
-	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -148,14 +148,7 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 		SMTPFrom:                      "no-reply@test.local",
 	}
 
-	signingKey, err := jwt.GenerateKey("real-entdb-test")
-	if err != nil {
-		t.Fatalf("generate signing key: %v", err)
-	}
-	keyRing, err := jwt.NewKeyRing([]jwt.SigningKey{signingKey})
-	if err != nil {
-		t.Fatalf("build key ring: %v", err)
-	}
+	signer := jwttest.NewSigner(t, "real-entdb-test")
 
 	pkSvc, err := passkeys.NewWebAuthnService(passkeys.Config{
 		RPID:   cfg.PasskeyRPID,
@@ -169,7 +162,7 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	handler, stop, err := app.New(app.Deps{
 		Config:             cfg,
 		Logger:             zap.NewNop(),
-		KeyRing:            keyRing,
+		Signer:             signer,
 		Repo:               authRepo,
 		DB:                 dbAdapter,
 		Passkeys:           pkSvc,

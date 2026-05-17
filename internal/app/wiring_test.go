@@ -9,7 +9,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo/memory"
-	"github.com/elloloop/identity/pkg/jwt"
+	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -74,14 +74,7 @@ func TestBuildEmailTransport(t *testing.T) {
 }
 
 func TestNewBuildsHealthHandler(t *testing.T) {
-	key, err := jwt.GenerateKey("app-test")
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-	keyRing, err := jwt.NewKeyRing([]jwt.SigningKey{key})
-	if err != nil {
-		t.Fatalf("NewKeyRing: %v", err)
-	}
+	signer := jwttest.NewSigner(t, "app-test")
 	passkeyService, err := passkeys.NewWebAuthnService(passkeys.Config{
 		RPID:   "localhost",
 		RPName: "Identity Test",
@@ -113,7 +106,7 @@ func TestNewBuildsHealthHandler(t *testing.T) {
 			PasswordResetExpirySeconds:    3600,
 		},
 		Logger:             zap.NewNop(),
-		KeyRing:            keyRing,
+		Signer:             signer,
 		Repo:               repo,
 		DB:                 repo,
 		Passkeys:           passkeyService,
