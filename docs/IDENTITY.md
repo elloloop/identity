@@ -415,27 +415,37 @@ before you ship.
    failure mode that should be rare. If a deployer needs reliable
    cleanup of half-created tenants, that's a candidate upstream
    feature on tenant-shard-db, not an identity-layer workaround.
-9. **tenant-shard-db v1.14.0 alignment — sweeper, page cap, typed
-   errors.** The v1.14.0 bump (SDK + server image) reworked three
-   identity-side seams:
+9. **tenant-shard-db v1.14.0 alignment — sweeper contract, page
+   cap, typed errors.** The v1.14.0 bump (SDK + server image)
+   reworked three identity-side seams:
 
-   - **Sweeper now uses `OpDeleteWhere` (#540).** The five
-     `Repository.DeleteExpired*` methods previously paired a
-     `QueryNodes` with a batched `OpDeleteNode` atomic commit
-     through the raw transport. v1.14.0 collapses that into a
-     single-RPC `entdb.DeleteWhere[T]` call, which the server
-     applies inside one applier-goroutine slice and caps at the
-     configured per-op limit. The Repository contract for the
-     five sweep methods changed from `(deleted int, err error)`
-     to `error` because the upstream PR intentionally does not
-     return a deleted-row count ("applied, no count for v1" in
-     the issue resolution). The app-layer sweeper now publishes
-     `identity_sweeper_runs_total{node_type}` (a per-tick "GC is
-     alive" counter) instead of the v1.13.x
+   - **Sweeper contract drops the row count, raw transport stays.**
+     v1.14.0 ships `OpDeleteWhere` (#540), a single-RPC predicate-
+     based delete that would collapse the existing `QueryNodes +
+     batched OpDeleteNode` pair into one round trip. The upstream
+     primitive **does not return a deleted-row count by design**
+     ("applied, no count for v1"), so the `Repository.DeleteExpired*`
+     contract changed from `(deleted int, err error)` to `error`
+     across every backend (memory, postgres, entdb). The app-layer
+     sweeper now publishes `identity_sweeper_runs_total{node_type}`
+     (a per-tick "GC is alive" counter) instead of the v1.13.x
      `identity_sweeper_deleted_total{node_type}` (a rows-deleted
      counter); operators that scrape the old metric must update
      dashboards. Errors continue to bump
      `identity_sweeper_errors_total{node_type}`.
+     **The entdb backend keeps the v1.13.x raw-transport
+     QueryNodes + ExecuteAtomic(OpDeleteNode) implementation**:
+     v1.14.0's typed `entdb.DeleteWhere[T]` requires server-side
+     schema-aware resolution of `Filter.Field`, which the
+     schemaless server identity runs against rejects with
+     "cannot translate filter key 'expires_at' without a schema."
+     Tracked upstream at elloloop/tenant-shard-db#545 — once the
+     SDK exposes a numeric-field-id escape hatch on `Filter` (or
+     the schemaless resolver accepts numeric-string field names
+     directly, parallel to how `transport.QueryNodes` already
+     does), the entdb sweeper migrates to the single-RPC primitive
+     and `expiresAtSweepSpec` plus the QueryNodes batch loop in
+     `sdkScope.deleteExpired` go away.
    - **Page-cap drain loops for user-scoped bulk deletes (#530,
      SEC-4).** v1.14.0's server caps `QueryNodes` at 1000 rows
      per call. The four user-scoped bulk operations

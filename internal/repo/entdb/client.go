@@ -528,45 +528,98 @@ func protoValueFromAny(fd protoreflect.FieldDescriptor, v any) (protoreflect.Val
 	return protoreflect.Value{}, false
 }
 
-// deleteExpired drives the single-RPC sweeper via tenant-shard-db
-// v1.14.0's OpDeleteWhere primitive (#540). The witness type carries
-// the (entdb.node).type_id annotation that DeleteWhere[T] reads from
-// the descriptor, and the AND-ed Filter{Field: "expires_at", Op:
-// FilterLt} matches every row whose expires_at is strictly older
-// than the cutoff. The server caps the delete at the requested
-// limit (Postgres DELETE … LIMIT semantics) — drains beyond the cap
-// roll over to the next sweep tick.
+// expiresAtSweepSpec returns the (type id, expires_at field id) pair
+// the raw transport needs to query and delete expired rows for the
+// witness type. Returns ok=false for types the sweeper does not own;
+// callers report that as an unsupported-type error rather than a
+// silent no-op so a new sweep target can never land without an entry
+// here. The values match the proto schema (see
+// proto/identity/schema/schema.proto).
+//
+// Identity runs tenant-shard-db schemaless, so the sweeper takes the
+// raw `QueryNodes(filter map) + ExecuteAtomic(OpDeleteNode)` path
+// rather than v1.14.0's typed entdb.DeleteWhere[T] — DeleteWhere
+// requires server-side schema-aware field-name resolution that the
+// schemaless server rejects with "cannot translate filter key
+// 'expires_at' without a schema". Tracked upstream at
+// elloloop/tenant-shard-db#545; revisit the sweeper once the SDK
+// exposes a numeric-field-id escape hatch on Filter.
+func expiresAtSweepSpec(witness proto.Message) (typeID, fieldID int, ok bool) {
+	switch witness.(type) {
+	case *schemapb.PasskeyChallenge:
+		return 21, 4, true
+	case *schemapb.PasswordResetToken:
+		return 19, 3, true
+	case *schemapb.EmailVerificationToken:
+		return 29, 4, true
+	case *schemapb.EmailChangeToken:
+		return 30, 5, true
+	case *schemapb.LoginChallenge:
+		return 25, 3, true
+	}
+	return 0, 0, false
+}
+
+// deleteExpired drains rows whose expires_at is strictly less than
+// beforeMs via QueryNodes (returns ids) + ExecuteAtomic with
+// OpDeleteNode (bulk-deletes). Identity stays on this v1.13.x
+// pattern because tenant-shard-db v1.14.0's typed DeleteWhere[T]
+// requires a schema for the field-name resolver and identity runs
+// the server schemaless — see elloloop/tenant-shard-db#545.
+//
+// Returns only error: the Repository contract dropped the row count
+// for the v1.14.0 alignment, so the app-layer sweeper publishes a
+// per-tick liveness counter instead of a rows-deleted counter.
 func (s *sdkScope) deleteExpired(ctx context.Context, actor string, witness proto.Message, beforeMs int64, limit int) error {
 	if limit <= 0 {
 		return fmt.Errorf("entdb: deleteExpired: limit must be > 0, got %d", limit)
 	}
-	scope, err := s.scope(actor)
-	if err != nil {
-		return err
+	if s.transport == nil {
+		return errors.New("entdb: deleteExpired: raw transport unavailable")
 	}
-	plan := scope.Plan()
-	where := []sdk.Filter{{Field: "expires_at", Op: sdk.FilterLt, Value: beforeMs}}
-	switch witness.(type) {
-	case *schemapb.PasskeyChallenge:
-		sdk.DeleteWhere[*schemapb.PasskeyChallenge](plan, where, limit)
-	case *schemapb.PasswordResetToken:
-		sdk.DeleteWhere[*schemapb.PasswordResetToken](plan, where, limit)
-	case *schemapb.EmailVerificationToken:
-		sdk.DeleteWhere[*schemapb.EmailVerificationToken](plan, where, limit)
-	case *schemapb.EmailChangeToken:
-		sdk.DeleteWhere[*schemapb.EmailChangeToken](plan, where, limit)
-	case *schemapb.LoginChallenge:
-		sdk.DeleteWhere[*schemapb.LoginChallenge](plan, where, limit)
-	default:
+	typeID, fieldID, ok := expiresAtSweepSpec(witness)
+	if !ok {
 		return fmt.Errorf("entdb: deleteExpired: unsupported message type %T", witness)
 	}
-	if _, err := plan.Commit(ctx); err != nil {
+
+	// QueryNodes accepts payload-field-id keys (decimal string) for
+	// the filter map, matching the wire's "field IDs, not field names,
+	// on disk" invariant. "$lt" is the wire-level less-than operator
+	// shipped in tenant-shard-db v1.12 (FilterLt in the typed SDK).
+	filter := map[string]any{
+		strconv.Itoa(fieldID): map[string]any{"$lt": beforeMs},
+	}
+	nodes, err := s.transport.QueryNodes(ctx, s.tenantID, actor, typeID, filter)
+	if err != nil {
 		// A tenant that has had no writes returns "tenant not opened";
 		// treat that as "nothing to sweep" the same way the rest of
 		// the repo does for query-then-create idempotency.
 		if isTenantNotOpened(err) {
 			return nil
 		}
+		return err
+	}
+	if len(nodes) == 0 {
+		return nil
+	}
+
+	// v1.14.0's SEC-4 (#530) caps QueryNodes at 1000 rows server-side.
+	// The sweeper already loops on the app-layer ticker, so a single
+	// over-budget tick rolls over to the next tick rather than
+	// pinning the applier on one tenant.
+	if len(nodes) > limit {
+		nodes = nodes[:limit]
+	}
+
+	ops := make([]sdk.Operation, 0, len(nodes))
+	for _, n := range nodes {
+		ops = append(ops, sdk.Operation{
+			Type:   sdk.OpDeleteNode,
+			TypeID: typeID,
+			NodeID: n.NodeID,
+		})
+	}
+	if _, err := s.transport.ExecuteAtomic(ctx, s.tenantID, actor, "", ops); err != nil {
 		return err
 	}
 	return nil
