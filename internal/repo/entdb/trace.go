@@ -97,15 +97,15 @@ func (t *tracedClient) delete(ctx context.Context, actor string, witness proto.M
 	return err
 }
 
-func (t *tracedClient) deleteExpired(ctx context.Context, actor string, witness proto.Message, beforeMs int64, limit int) (int, error) {
+func (t *tracedClient) deleteExpired(ctx context.Context, actor string, witness proto.Message, beforeMs int64, limit int) error {
 	attrs := append(entAttrs(actor, witness, ""),
 		attribute.Int64("entdb.before_ms", beforeMs),
 		attribute.Int("entdb.limit", limit),
 	)
 	ctx, end := observability.StartClient(ctx, "entdb.deleteExpired", attrs...)
-	deleted, err := t.inner.deleteExpired(ctx, actor, witness, beforeMs, limit)
+	err := t.inner.deleteExpired(ctx, actor, witness, beforeMs, limit)
 	end(err)
-	return deleted, err
+	return err
 }
 
 func (t *tracedClient) ensureUserTenantMember(ctx context.Context, userID, emailAddr, name, role string) error {

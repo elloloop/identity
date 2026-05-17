@@ -44,6 +44,19 @@ type rawUpdateClient interface {
 	rawUpdate(ctx context.Context, actor string, typeID int, nodeID string, patch map[string]any) error
 }
 
+// bulkDrainMaxIterations bounds the per-call bulk-delete drain loop
+// for the DeleteXxxForUser sweeps. tenant-shard-db v1.14.0 (#530,
+// SEC-4) clamps QueryNodes server-side at 1000 rows per call, so
+// identity's user-scoped deletes that previously trusted "query
+// returns every match" now silently truncate at the cap. Each
+// delete-for-user method now loops query→delete until the query
+// returns no rows; this constant is a sanity ceiling on the loop so
+// a buggy backend that keeps returning the same row id forever
+// cannot pin a goroutine. 100 iterations × 1000 rows/iter = 100_000
+// per-user max, far above any plausible legitimate count for any of
+// the four bulk-cleanup paths.
+const bulkDrainMaxIterations = 100
+
 // NewRepository constructs an EntDB-backed Repository using the SDK's
 // public typed surface. The returned repository wraps every entClient
 // call in an OpenTelemetry span (no-op when OTel is disabled).
@@ -671,16 +684,25 @@ func (r *entRepository) DeleteRefreshTokensForUser(ctx context.Context, userID s
 	if userID == "" {
 		return nil
 	}
-	rows, err := r.client.query(ctx, systemActor, &schemapb.RefreshToken{}, map[string]any{"user_id": userID})
-	if err != nil {
-		return fmt.Errorf("repo: DeleteRefreshTokensForUser query: %w", err)
-	}
-	for _, row := range rows {
-		if err := r.client.delete(ctx, actorStr(userID), &schemapb.RefreshToken{}, row.NodeID); err != nil {
-			return fmt.Errorf("repo: DeleteRefreshTokensForUser delete: %w", err)
+	// tenant-shard-db v1.14.0's SEC-4 (#530) caps QueryNodes at 1000
+	// rows per call. Drain in a loop so a user with more than 1000
+	// refresh tokens still gets every row deleted; bulkDrainMaxIterations
+	// is the safety stop.
+	for i := 0; i < bulkDrainMaxIterations; i++ {
+		rows, err := r.client.query(ctx, systemActor, &schemapb.RefreshToken{}, map[string]any{"user_id": userID})
+		if err != nil {
+			return fmt.Errorf("repo: DeleteRefreshTokensForUser query: %w", err)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		for _, row := range rows {
+			if err := r.client.delete(ctx, actorStr(userID), &schemapb.RefreshToken{}, row.NodeID); err != nil {
+				return fmt.Errorf("repo: DeleteRefreshTokensForUser delete: %w", err)
+			}
 		}
 	}
-	return nil
+	return fmt.Errorf("repo: DeleteRefreshTokensForUser: exceeded %d-iteration drain ceiling for user %q (server side cap %d×iterations); investigate runaway token issuance", bulkDrainMaxIterations, userID, bulkDrainMaxIterations*1000)
 }
 
 // ── Passkey credentials ───────────────────────────────────────────
@@ -1051,16 +1073,25 @@ func (r *entRepository) DeleteTotpCredentialsForUser(ctx context.Context, userID
 	if userID == "" {
 		return nil
 	}
-	rows, err := r.client.query(ctx, actorStr(userID), &schemapb.TotpCredential{}, map[string]any{"user_id": userID})
-	if err != nil {
-		return fmt.Errorf("repo: DeleteTotpCredentialsForUser query: %w", err)
-	}
-	for _, row := range rows {
-		if err := r.client.delete(ctx, actorStr(userID), &schemapb.TotpCredential{}, row.NodeID); err != nil {
-			return fmt.Errorf("repo: DeleteTotpCredentialsForUser delete: %w", err)
+	// SEC-4 drain loop — see DeleteRefreshTokensForUser. Identity
+	// expects at most one TOTP credential per user (the create path
+	// deletes the previous row), but the cleanup must converge even
+	// if a buggy seed or replay leaves stragglers.
+	for i := 0; i < bulkDrainMaxIterations; i++ {
+		rows, err := r.client.query(ctx, actorStr(userID), &schemapb.TotpCredential{}, map[string]any{"user_id": userID})
+		if err != nil {
+			return fmt.Errorf("repo: DeleteTotpCredentialsForUser query: %w", err)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		for _, row := range rows {
+			if err := r.client.delete(ctx, actorStr(userID), &schemapb.TotpCredential{}, row.NodeID); err != nil {
+				return fmt.Errorf("repo: DeleteTotpCredentialsForUser delete: %w", err)
+			}
 		}
 	}
-	return nil
+	return fmt.Errorf("repo: DeleteTotpCredentialsForUser: exceeded %d-iteration drain ceiling for user %q", bulkDrainMaxIterations, userID)
 }
 
 // ── Recovery codes ────────────────────────────────────────────────
@@ -1141,16 +1172,24 @@ func (r *entRepository) DeleteRecoveryCodesForUser(ctx context.Context, userID s
 	if userID == "" {
 		return nil
 	}
-	rows, err := r.client.query(ctx, actorStr(userID), &schemapb.RecoveryCode{}, map[string]any{"user_id": userID})
-	if err != nil {
-		return fmt.Errorf("repo: DeleteRecoveryCodesForUser query: %w", err)
-	}
-	for _, row := range rows {
-		if err := r.client.delete(ctx, actorStr(userID), &schemapb.RecoveryCode{}, row.NodeID); err != nil {
-			return fmt.Errorf("repo: DeleteRecoveryCodesForUser delete: %w", err)
+	// SEC-4 drain loop — see DeleteRefreshTokensForUser. Recovery
+	// codes are typically a single batch (~10 codes) but the cleanup
+	// path must converge for any plausible count.
+	for i := 0; i < bulkDrainMaxIterations; i++ {
+		rows, err := r.client.query(ctx, actorStr(userID), &schemapb.RecoveryCode{}, map[string]any{"user_id": userID})
+		if err != nil {
+			return fmt.Errorf("repo: DeleteRecoveryCodesForUser query: %w", err)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		for _, row := range rows {
+			if err := r.client.delete(ctx, actorStr(userID), &schemapb.RecoveryCode{}, row.NodeID); err != nil {
+				return fmt.Errorf("repo: DeleteRecoveryCodesForUser delete: %w", err)
+			}
 		}
 	}
-	return nil
+	return fmt.Errorf("repo: DeleteRecoveryCodesForUser: exceeded %d-iteration drain ceiling for user %q", bulkDrainMaxIterations, userID)
 }
 
 // ── Login challenges ──────────────────────────────────────────────
@@ -1925,6 +1964,21 @@ func (r *entRepository) RevokeSessionsForUser(ctx context.Context, userID string
 	if userID == "" {
 		return nil
 	}
+	// SEC-4 caveat: tenant-shard-db v1.14.0 (#530) caps QueryNodes at
+	// 1000 rows server-side. RevokeSessionsForUser mutates rows in
+	// place rather than deleting them, so the usual drain-until-empty
+	// pattern does not apply: already-revoked rows still match
+	// `user_id = X` and would occupy the cap window forever. A
+	// `revoked_at_ms = 0` filter would skip the cap window, but
+	// proto3 zero scalars are not serialised on disk, so json_extract
+	// against the absent field is NULL and the predicate matches
+	// nothing. The pre-v1.14.0 behaviour (query all rows in one
+	// shot, iterate and skip already-revoked) is the only correct
+	// pattern given those two constraints; for the rare deployment
+	// where a single user has > 1000 active sessions, the tail
+	// beyond the cap is left for the next per-user revocation call
+	// (typically a deliberate "revoke all my sessions" UI action
+	// repeated by the user). Tracked in docs/IDENTITY.md §9.
 	rows, err := r.client.query(ctx, actorStr(userID), &schemapb.Session{}, map[string]any{"user_id": userID})
 	if err != nil {
 		return fmt.Errorf("repo: RevokeSessionsForUser query: %w", err)

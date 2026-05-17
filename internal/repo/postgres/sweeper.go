@@ -14,10 +14,16 @@ import (
 //
 // limit <= 0 is rejected: a sweeper batch with no cap could lock a
 // hot table for an unbounded window.
+//
+// Return value is only error: tenant-shard-db v1.14.0's
+// OpDeleteWhere primitive (#540) does not return a deleted-row count,
+// so the Repository contract drops the count to keep all three
+// backends (memory, postgres, entdb) on a single signature. The
+// postgres-specific `tag.RowsAffected()` is therefore not surfaced.
 
-func (r *pgRepository) deleteExpiredBatch(ctx context.Context, op, table string, beforeMs int64, limit int) (int, error) {
+func (r *pgRepository) deleteExpiredBatch(ctx context.Context, op, table string, beforeMs int64, limit int) error {
 	if limit <= 0 {
-		return 0, fmt.Errorf("postgres: %s: limit must be > 0, got %d", op, limit)
+		return fmt.Errorf("postgres: %s: limit must be > 0, got %d", op, limit)
 	}
 	q := fmt.Sprintf(`
 		DELETE FROM %s
@@ -27,29 +33,28 @@ func (r *pgRepository) deleteExpiredBatch(ctx context.Context, op, table string,
 		      ORDER BY expires_at_ms ASC
 		      LIMIT $3
 		 )`, table, table)
-	tag, err := r.pool.Exec(ctx, q, r.tenantID, beforeMs, limit)
-	if err != nil {
-		return 0, wrapPgErr(op, err)
+	if _, err := r.pool.Exec(ctx, q, r.tenantID, beforeMs, limit); err != nil {
+		return wrapPgErr(op, err)
 	}
-	return int(tag.RowsAffected()), nil
+	return nil
 }
 
-func (r *pgRepository) DeleteExpiredWebAuthnChallenges(ctx context.Context, beforeMs int64, limit int) (int, error) {
+func (r *pgRepository) DeleteExpiredWebAuthnChallenges(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredWebAuthnChallenges", "passkey_challenges", beforeMs, limit)
 }
 
-func (r *pgRepository) DeleteExpiredEmailVerificationTokens(ctx context.Context, beforeMs int64, limit int) (int, error) {
+func (r *pgRepository) DeleteExpiredEmailVerificationTokens(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredEmailVerificationTokens", "email_verification_tokens", beforeMs, limit)
 }
 
-func (r *pgRepository) DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) (int, error) {
+func (r *pgRepository) DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredPasswordResetTokens", "password_reset_tokens", beforeMs, limit)
 }
 
-func (r *pgRepository) DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) (int, error) {
+func (r *pgRepository) DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredEmailChangeTokens", "email_change_tokens", beforeMs, limit)
 }
 
-func (r *pgRepository) DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) (int, error) {
+func (r *pgRepository) DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredLoginChallenges", "login_challenges", beforeMs, limit)
 }

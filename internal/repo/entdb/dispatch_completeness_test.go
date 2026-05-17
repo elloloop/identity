@@ -40,6 +40,16 @@ import (
 //
 // Then for each repo-side type it confirms each switch has the case.
 // A missing case is the exact regression #85 fixed.
+//
+// The sweeper dispatch is also covered: every schemapb type passed
+// to r.client.deleteExpired in sweeper.go must appear as a case in
+// client.go's expiresAtSweepSpec helper, which returns the (type id,
+// expires_at field id) pair the raw QueryNodes/ExecuteAtomic path
+// needs. Identity stays on this raw-transport pattern because
+// tenant-shard-db v1.14.0's typed DeleteWhere[T] requires
+// schema-aware field-name resolution (upstream
+// elloloop/tenant-shard-db#545) which the schemaless server
+// rejects.
 func TestDispatchCompleteness(t *testing.T) {
 	root, err := repoRoot()
 	if err != nil {
@@ -86,7 +96,7 @@ func TestDispatchCompleteness(t *testing.T) {
 
 	// Sweeper dispatch: every schemapb type passed to
 	// r.client.deleteExpired in sweeper.go must appear as a case in
-	// client.go's expiresAtSweepSpec.
+	// client.go's expiresAtSweepSpec helper.
 	sweepTypes, err := schemapbTypesPassedToDeleteExpired(sweeperGoPath)
 	if err != nil {
 		t.Fatalf("scan sweeper.go: %v", err)

@@ -88,6 +88,43 @@ func (r *Repo) CountRefreshTokensForUser(userID string) int {
 	return n
 }
 
+// CountPasswordResetTokens is a test helper used by the sweeper
+// regression to infer "rows deleted" from "rows still present" after
+// the v1.14.0 contract dropped the row-count return.
+func (r *Repo) CountPasswordResetTokens() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.passwordResets)
+}
+
+// CountEmailVerificationTokens is a test helper; see CountPasswordResetTokens.
+func (r *Repo) CountEmailVerificationTokens() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.emailVerifications)
+}
+
+// CountEmailChangeTokens is a test helper; see CountPasswordResetTokens.
+func (r *Repo) CountEmailChangeTokens() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.emailChanges)
+}
+
+// CountLoginChallenges is a test helper; see CountPasswordResetTokens.
+func (r *Repo) CountLoginChallenges() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.loginChallenges)
+}
+
+// CountPasskeyChallenges is a test helper; see CountPasswordResetTokens.
+func (r *Repo) CountPasskeyChallenges() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.passkeyChallenges)
+}
+
 // ── Users ─────────────────────────────────────────────────────────
 
 func (r *Repo) FindUserByEmail(_ context.Context, email string) (*service.User, error) {
@@ -878,9 +915,9 @@ func (r *Repo) UpdateIdentityVerificationStatus(_ context.Context, verificationI
 // refuse an unbounded delete batch so a buggy caller cannot stall
 // the in-process map under the package lock.
 
-func (r *Repo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs int64, limit int) (int, error) {
+func (r *Repo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs int64, limit int) error {
 	if limit <= 0 {
-		return 0, fmt.Errorf("memory: DeleteExpiredWebAuthnChallenges: limit must be > 0, got %d", limit)
+		return fmt.Errorf("memory: DeleteExpiredWebAuthnChallenges: limit must be > 0, got %d", limit)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -894,12 +931,12 @@ func (r *Repo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs int64
 			n++
 		}
 	}
-	return n, nil
+	return nil
 }
 
-func (r *Repo) DeleteExpiredEmailVerificationTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+func (r *Repo) DeleteExpiredEmailVerificationTokens(_ context.Context, beforeMs int64, limit int) error {
 	if limit <= 0 {
-		return 0, fmt.Errorf("memory: DeleteExpiredEmailVerificationTokens: limit must be > 0, got %d", limit)
+		return fmt.Errorf("memory: DeleteExpiredEmailVerificationTokens: limit must be > 0, got %d", limit)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -913,12 +950,12 @@ func (r *Repo) DeleteExpiredEmailVerificationTokens(_ context.Context, beforeMs 
 			n++
 		}
 	}
-	return n, nil
+	return nil
 }
 
-func (r *Repo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+func (r *Repo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs int64, limit int) error {
 	if limit <= 0 {
-		return 0, fmt.Errorf("memory: DeleteExpiredPasswordResetTokens: limit must be > 0, got %d", limit)
+		return fmt.Errorf("memory: DeleteExpiredPasswordResetTokens: limit must be > 0, got %d", limit)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -932,12 +969,12 @@ func (r *Repo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs int6
 			n++
 		}
 	}
-	return n, nil
+	return nil
 }
 
-func (r *Repo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+func (r *Repo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs int64, limit int) error {
 	if limit <= 0 {
-		return 0, fmt.Errorf("memory: DeleteExpiredEmailChangeTokens: limit must be > 0, got %d", limit)
+		return fmt.Errorf("memory: DeleteExpiredEmailChangeTokens: limit must be > 0, got %d", limit)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -951,12 +988,12 @@ func (r *Repo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs int64,
 			n++
 		}
 	}
-	return n, nil
+	return nil
 }
 
-func (r *Repo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int64, limit int) (int, error) {
+func (r *Repo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int64, limit int) error {
 	if limit <= 0 {
-		return 0, fmt.Errorf("memory: DeleteExpiredLoginChallenges: limit must be > 0, got %d", limit)
+		return fmt.Errorf("memory: DeleteExpiredLoginChallenges: limit must be > 0, got %d", limit)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -970,7 +1007,7 @@ func (r *Repo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int64, l
 			n++
 		}
 	}
-	return n, nil
+	return nil
 }
 
 // ── Organizations ─────────────────────────────────────────────────

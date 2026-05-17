@@ -170,8 +170,9 @@ func isSlugChar(r rune) bool {
 //  7. Issue access + refresh tokens.
 //
 // On a failure after step 2 the partial identity-layer state is rolled
-// back (best-effort); the tenant itself stays — tenant-shard-db v1.13
-// does not expose DeleteTenant. See docs/IDENTITY.md decision log.
+// back (best-effort); the tenant itself stays — tenant-shard-db
+// (through v1.14.0 today) does not expose DeleteTenant. See
+// docs/IDENTITY.md decision log.
 func (s *OrganizationSignupService) Signup(
 	ctx context.Context,
 	slug, displayName, email, password, name string,
@@ -376,9 +377,9 @@ func (s *OrganizationSignupService) issueTokens(
 
 // rollbackTenantMember compensates for a failure after step 4 by
 // dropping the admin from the new tenant's membership. The tenant
-// itself cannot be deleted — tenant-shard-db v1.13 does not expose a
-// DeleteTenant primitive. See docs/IDENTITY.md decision log entry on
-// compensating rollback.
+// itself cannot be deleted — tenant-shard-db (through v1.14.0 today)
+// does not expose a DeleteTenant primitive. See docs/IDENTITY.md
+// decision log entry on compensating rollback.
 func (s *OrganizationSignupService) rollbackTenantMember(ctx context.Context, slug, adminID string) {
 	if err := s.tenantAdmin.RemoveTenantMember(ctx, slug, adminID); err != nil {
 		s.logger.Warn("organization_signup_rollback_tenant_member_failed",

@@ -875,7 +875,7 @@ func (r *fakeRepo) UpdateIdentityVerificationStatus(_ context.Context, verificat
 	return nil
 }
 
-func (r *fakeRepo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs int64, limit int) (int, error) {
+func (r *fakeRepo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs int64, limit int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -888,10 +888,10 @@ func (r *fakeRepo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs i
 			n++
 		}
 	}
-	return n, nil
+	return nil
 }
 
-func (r *fakeRepo) DeleteExpiredEmailVerificationTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+func (r *fakeRepo) DeleteExpiredEmailVerificationTokens(_ context.Context, beforeMs int64, limit int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -904,10 +904,10 @@ func (r *fakeRepo) DeleteExpiredEmailVerificationTokens(_ context.Context, befor
 			n++
 		}
 	}
-	return n, nil
+	return nil
 }
 
-func (r *fakeRepo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+func (r *fakeRepo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs int64, limit int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -920,10 +920,10 @@ func (r *fakeRepo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs 
 			n++
 		}
 	}
-	return n, nil
+	return nil
 }
 
-func (r *fakeRepo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs int64, limit int) (int, error) {
+func (r *fakeRepo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs int64, limit int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -936,10 +936,10 @@ func (r *fakeRepo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs in
 			n++
 		}
 	}
-	return n, nil
+	return nil
 }
 
-func (r *fakeRepo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int64, limit int) (int, error) {
+func (r *fakeRepo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int64, limit int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -952,7 +952,7 @@ func (r *fakeRepo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int6
 			n++
 		}
 	}
-	return n, nil
+	return nil
 }
 
 // ── Organizations ─────────────────────────────────────────────────

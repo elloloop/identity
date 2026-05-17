@@ -8,10 +8,7 @@ import (
 	"sync"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
-	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -24,12 +21,16 @@ const entDBApplyWaitTimeoutMs int32 = 5000
 // helpers here loses node ids on query results, so the adapter must
 // delegate to the raw transport instead of translating through typed
 // witnesses.
+//
+// tenant-shard-db v1.14.0 (#528) exposes *DbClient.Transport() as a
+// public read-only accessor, so the adapter reaches through it
+// directly. Before v1.14.0 identity used an unsafe-reflection helper
+// to do the same — that helper is gone.
 func NewDBAdapter(client *sdk.DbClient) (service.DB, error) {
-	transport, err := entdbrepo.TransportFromClient(client)
-	if err != nil {
-		return nil, err
+	if client == nil {
+		return nil, errors.New("entdb: nil db client")
 	}
-	return &dbAdapter{transport: transport}, nil
+	return &dbAdapter{transport: client.Transport()}, nil
 }
 
 // NewTenantAdmin wraps an EntDB SDK client as a service.TenantAdmin
@@ -40,11 +41,10 @@ func NewDBAdapter(client *sdk.DbClient) (service.DB, error) {
 // Uses the raw Transport calls (which the SDK's Admin handle is a
 // thin shim over) so the adapter stays testable with a fake Transport.
 func NewTenantAdmin(client *sdk.DbClient) (service.TenantAdmin, error) {
-	transport, err := entdbrepo.TransportFromClient(client)
-	if err != nil {
-		return nil, err
+	if client == nil {
+		return nil, errors.New("entdb: nil db client")
 	}
-	return &tenantAdmin{transport: transport}, nil
+	return &tenantAdmin{transport: client.Transport()}, nil
 }
 
 // PostgresTenantAdmin is a service.TenantAdmin implementation for the
@@ -103,10 +103,12 @@ func (a *tenantAdmin) CreateTenant(ctx context.Context, tenantID, displayName st
 
 func (a *tenantAdmin) PromoteTenantMember(ctx context.Context, tenantID, userID, role string) error {
 	if err := a.transport.ChangeMemberRole(ctx, tenantAdminActor, tenantID, userID, role); err != nil {
-		// Tolerate "already at this role" idempotently — the upstream
-		// server typically returns ALREADY_EXISTS / FailedPrecondition
-		// in that case. Without a typed error we fall back to a
-		// substring match.
+		// Tolerate "already at this role" idempotently. The upstream
+		// signal is *sdk.EntDBError with code ALREADY_EXISTS (handled
+		// by dbAdapterIsAlreadyExists) or a FailedPrecondition that
+		// also stringifies with the role name when the server thinks
+		// the member is already in that role; match the second
+		// variant on the status message text.
 		if dbAdapterIsAlreadyExists(err) {
 			return nil
 		}
@@ -122,11 +124,17 @@ func (a *tenantAdmin) PromoteTenantMember(ctx context.Context, tenantID, userID,
 func (a *tenantAdmin) RemoveTenantMember(ctx context.Context, tenantID, userID string) error {
 	if err := a.transport.RemoveTenantMember(ctx, tenantAdminActor, tenantID, userID); err != nil {
 		// Tolerate "member not present" on rollback so re-runs stay
-		// idempotent. The underlying server typically returns
-		// FailedPrecondition / NotFound here; without a typed error we
-		// can only do a substring match.
+		// idempotent. tenant-shard-db v1.14.0 surfaces this as the
+		// typed *sdk.NotFoundError (Code == "NOT_FOUND"); some legacy
+		// paths still come through as a FailedPrecondition with a
+		// status message containing "no membership", so match that
+		// too.
+		var nf *sdk.NotFoundError
+		if errors.As(err, &nf) {
+			return nil
+		}
 		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "not found") || strings.Contains(msg, "no membership") {
+		if strings.Contains(msg, "no membership") {
 			return nil
 		}
 		return err
@@ -208,18 +216,25 @@ func (a *dbAdapter) RegisterUserInTenant(ctx context.Context, tenantID, userID, 
 	return nil
 }
 
-// dbAdapterIsAlreadyExists tolerates the upstream Go server's typed
-// gRPC AlreadyExists status code and the Python legacy server's
-// string-embedded form.
+// dbAdapterIsAlreadyExists reports whether err is the upstream's
+// ALREADY_EXISTS signal. tenant-shard-db v1.14.0 wraps the gRPC
+// status into the typed *EntDBError (Code == "ALREADY_EXISTS") and
+// the typed *UniqueConstraintError (which embeds EntDBError with the
+// "UNIQUE_CONSTRAINT" code but is still produced for the same
+// AlreadyExists status). Match on both so the duplicate-tolerant
+// idempotency guard works for either path.
 func dbAdapterIsAlreadyExists(err error) bool {
 	if err == nil {
 		return false
 	}
-	if st, ok := status.FromError(err); ok {
-		return st.Code() == codes.AlreadyExists
+	var entErr *sdk.EntDBError
+	if errors.As(err, &entErr) {
+		if entErr.Code == "ALREADY_EXISTS" {
+			return true
+		}
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "ALREADY_EXISTS") || strings.Contains(msg, "already exists")
+	var uce *sdk.UniqueConstraintError
+	return errors.As(err, &uce)
 }
 
 func (a *dbAdapter) waitForApplied(ctx context.Context, tenantID, actor string, result *sdk.CommitResult, opCount int) error {
