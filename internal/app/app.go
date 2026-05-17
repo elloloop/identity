@@ -133,6 +133,13 @@ func New(deps Deps) (http.Handler, func(), error) {
 			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitSignupPerIP, 0),
 		},
 		{
+			// OrganizationSignup is an unauthenticated entry point that
+			// provisions a whole tenant — share the per-IP signup quota
+			// so a single source can't carve out tenants at signup speed.
+			PathPrefix: "/identity.IdentityService/OrganizationSignup", Tag: "org_signup",
+			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitSignupPerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.IdentityService/PasswordLogin", Tag: "login",
 			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0),
 		},
