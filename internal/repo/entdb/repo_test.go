@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1072,6 +1073,70 @@ func (c *cappedQueryClient) query(ctx context.Context, actor string, witness pro
 		rows = rows[:c.cap]
 	}
 	return rows, nil
+}
+
+// nondeletingClient wraps memoryEntClient and ignores delete calls,
+// simulating a buggy backend that keeps returning the same rows
+// forever — the failure mode bulkDrainMaxIterations guards against.
+type nondeletingClient struct{ *memoryEntClient }
+
+func (c *nondeletingClient) delete(_ context.Context, _ string, _ proto.Message, _ string) error {
+	return nil
+}
+
+// TestSEC4_DrainCeilingError exercises the bulkDrainMaxIterations
+// safety stop on each of the three delete-for-user paths. The
+// nondeletingClient swallows every delete, so the underlying
+// memoryEntClient.query keeps returning the same row forever; the
+// drain loop must give up after bulkDrainMaxIterations and return
+// a descriptive error.
+func TestSEC4_DrainCeilingError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		seed func(c *memoryEntClient)
+		call func(repo *entRepository) error
+	}{
+		{
+			name: "RefreshTokens",
+			seed: func(c *memoryEntClient) {
+				c.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u"}}
+			},
+			call: func(r *entRepository) error { return r.DeleteRefreshTokensForUser(ctx, "u") },
+		},
+		{
+			name: "TotpCredentials",
+			seed: func(c *memoryEntClient) {
+				c.store["totp"] = storedNode{msg: &schemapb.TotpCredential{UserId: "u"}}
+			},
+			call: func(r *entRepository) error { return r.DeleteTotpCredentialsForUser(ctx, "u") },
+		},
+		{
+			name: "RecoveryCodes",
+			seed: func(c *memoryEntClient) {
+				c.store["rc"] = storedNode{msg: &schemapb.RecoveryCode{UserId: "u"}}
+			},
+			call: func(r *entRepository) error { return r.DeleteRecoveryCodesForUser(ctx, "u") },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mem := newMemoryEntClient()
+			tc.seed(mem)
+			repo := &entRepository{client: &nondeletingClient{memoryEntClient: mem}, tenantID: "t"}
+			err := tc.call(repo)
+			if err == nil {
+				t.Fatal("expected drain-ceiling error, got nil")
+			}
+			if !strings.Contains(err.Error(), "drain ceiling") {
+				t.Fatalf("error %q does not mention drain ceiling", err.Error())
+			}
+		})
+	}
 }
 
 // TestSEC4_DeleteRefreshTokensForUser_DrainsBeyondQueryCap is the
