@@ -83,6 +83,7 @@ const (
 	EventQrLoginRejected    EventType = "qr_login_rejected"
 	EventAdminHelpRequested EventType = "admin_help_requested"
 	EventAdminHelpResolved  EventType = "admin_help_resolved"
+	EventOrganizationSignup EventType = "organization_signup"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -110,6 +111,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventQrLoginRejected:    {},
 	EventAdminHelpRequested: {},
 	EventAdminHelpResolved:  {},
+	EventOrganizationSignup: {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

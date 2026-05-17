@@ -296,6 +296,7 @@ func jwksKIDSet(t *testing.T, baseURL string) map[string]bool {
 func newRotationCfg() *config.Config {
 	return &config.Config{
 		DefaultTenantID:               "rotation",
+		IdentityMode:                  config.IdentityModeSingle,
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

@@ -24,6 +24,12 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.IdentityService/AcceptInvitation":     true,
 	"/identity.IdentityService/RequestAdminHelp":     true,
 	"/identity.IdentityService/VerifyTotp":           true,
+	// OrganizationSignup is the entry point for B2B multi-tenant
+	// deployments (mode=multi). The caller is by definition not yet
+	// a member of any tenant, so authentication cannot precede this
+	// call. The handler itself enforces the mode guard (returns
+	// Unimplemented in mode=single per docs/IDENTITY.md §3).
+	"/identity.IdentityService/OrganizationSignup": true,
 	// Email + reset flows are unauthenticated by design — the user is
 	// either anonymous (forgot password) or proving control of an
 	// inbox via a token rather than via a JWT.

@@ -608,6 +608,7 @@ func newReq[T any](msg *T, headers map[string]string) *connect.Request[T] {
 func newTestConfig() *config.Config {
 	return &config.Config{
 		DefaultTenantID:               "test-tenant",
+		IdentityMode:                  config.IdentityModeSingle,
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

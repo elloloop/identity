@@ -60,6 +60,14 @@ type Config struct {
 	// Tenant
 	DefaultTenantID string
 
+	// IdentityMode selects the per-deployment tenancy shape — "single"
+	// (one tenant for the whole deployment, B2C) or "multi" (one tenant
+	// per customer organisation, B2B). Driven by GATEWAY_IDENTITY_MODE.
+	// See docs/IDENTITY.md decision log §1: the mode is per-deployment,
+	// not per-request. In "multi" the OrganizationSignup RPC is wired
+	// up; in "single" it returns Unimplemented (decision log §3).
+	IdentityMode string
+
 	// Email service (internal gRPC)
 	EmailServiceHost string
 	EmailServicePort int
@@ -313,6 +321,7 @@ func Load() *Config {
 		EntDBAddress: envStr("GATEWAY_ENTDB_ADDRESS", "entdb:50051"),
 
 		DefaultTenantID: envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
+		IdentityMode:    envStr("GATEWAY_IDENTITY_MODE", "single"),
 
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),
@@ -417,6 +426,22 @@ func Load() *Config {
 		SweeperBatchSize:       envInt("GATEWAY_SWEEPER_BATCH_SIZE", 500),
 		SweeperGraceSeconds:    envInt("GATEWAY_SWEEPER_GRACE_SECONDS", 60),
 	}
+}
+
+// Identity-mode constants for GATEWAY_IDENTITY_MODE. See
+// docs/IDENTITY.md decision log §1 — the mode is per-deployment and
+// fixed at boot.
+const (
+	IdentityModeSingle = "single"
+	IdentityModeMulti  = "multi"
+)
+
+// IsMultiMode reports whether the deployment is configured for
+// `mode=multi` (B2B multi-tenant). False indicates `mode=single` or
+// any unrecognised value (which the binary should already have
+// rejected at startup).
+func (c *Config) IsMultiMode() bool {
+	return c.IdentityMode == IdentityModeMulti
 }
 
 // JWTExpiry returns the JWT expiry as a time.Duration.
