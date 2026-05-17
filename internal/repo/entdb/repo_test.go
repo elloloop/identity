@@ -167,8 +167,18 @@ func (c *memoryEntClient) updateIf(_ context.Context, _ string, nodeID string, p
 	if fd == nil {
 		return fmt.Errorf("entdb: updateIf: unknown field %q on %T", field, existing.msg)
 	}
-	got := protoValueAsAny(fd, mr.Get(fd))
-	if !sameScalar(got, equals) {
+	// Mirror the server-side CAS semantics in tenant-shard-db's
+	// ops_update_node.go preconditionMatches: an `equals=nil`
+	// precondition matches iff the field is absent on disk. proto3
+	// scalars at their zero value are not serialized on the wire and
+	// therefore not present in the on-disk payload, so the fake
+	// treats `equals=nil` as matching the field's proto3 default.
+	got := mr.Get(fd)
+	if equals == nil {
+		if !got.Equal(fd.Default()) {
+			return errPreconditionFailed
+		}
+	} else if !sameScalar(protoValueAsAny(fd, got), equals) {
 		return errPreconditionFailed
 	}
 	existing.msg = mergePatch(existing.msg, patch)
