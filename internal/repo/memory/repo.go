@@ -43,6 +43,7 @@ type Repo struct {
 	idvRecords         map[string]*service.IdentityVerificationRecord
 	orgs               map[string]*service.Organization
 	orgMembers         map[string]*service.OrganizationMembership
+	sessions           map[string]*service.SessionRecord
 }
 
 // New returns an empty Repo.
@@ -64,6 +65,7 @@ func New() *Repo {
 		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
 		orgs:               make(map[string]*service.Organization),
 		orgMembers:         make(map[string]*service.OrganizationMembership),
+		sessions:           make(map[string]*service.SessionRecord),
 	}
 }
 
@@ -1068,6 +1070,84 @@ func (r *Repo) AddOrganizationMember(_ context.Context, m *service.OrganizationM
 	cp := *m
 	r.orgMembers[id] = &cp
 	return id, nil
+}
+
+// ── Sessions ──────────────────────────────────────────────────────
+
+func (r *Repo) CreateSession(_ context.Context, s *service.SessionRecord) (string, error) {
+	if s == nil {
+		return "", errors.New("memory: CreateSession: nil session")
+	}
+	if s.SID == "" {
+		return "", fmt.Errorf("%w: missing sid", service.ErrInvalidArgument)
+	}
+	if s.UserID == "" {
+		return "", fmt.Errorf("%w: missing user_id", service.ErrInvalidArgument)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.sessions {
+		if existing.SID == s.SID {
+			return "", fmt.Errorf("%w: sid %q", service.ErrAlreadyExists, s.SID)
+		}
+	}
+	id := r.nextID()
+	s.NodeID = id
+	cp := *s
+	r.sessions[id] = &cp
+	return id, nil
+}
+
+func (r *Repo) GetSessionBySid(_ context.Context, sid string) (*service.SessionRecord, error) {
+	if sid == "" {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.SID == sid {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+// RevokeSession is idempotent: a no-op if the session does not exist
+// or is already revoked. Concurrent revoke calls converge on the same
+// final state rather than racing each other into failure.
+func (r *Repo) RevokeSession(_ context.Context, sid string, atMs int64) error {
+	if sid == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.SID == sid {
+			if s.RevokedAtMs == 0 {
+				s.RevokedAtMs = atMs
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// RevokeSessionsForUser revokes every active session for the user.
+// Existing revoked rows are left alone so the original revoke
+// timestamp survives.
+func (r *Repo) RevokeSessionsForUser(_ context.Context, userID string, atMs int64) error {
+	if userID == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.UserID == userID && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
 }
 
 // ── service.DB stub ───────────────────────────────────────────────

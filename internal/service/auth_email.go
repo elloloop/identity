@@ -198,11 +198,14 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
 	// Revoke all active sessions — credential change must force
-	// re-authentication everywhere.
+	// re-authentication everywhere. In mode=session we also revoke
+	// the Session rows so the in-flight access tokens stop working
+	// immediately.
 	if err := s.repo.DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
 		s.logger.Warn("password_reset_session_revoke_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
+	s.revokeUserSessionsIfModeSession(ctx, user.ID, "password_reset")
 
 	s.audit.Log(
 		ctx, audit.EventPasswordReset,

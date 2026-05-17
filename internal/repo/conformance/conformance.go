@@ -909,6 +909,123 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("Session_CRUD", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid := createTestUser(t, r, "sess-crud@example.com")
+
+			// CreateSession requires sid + user_id; rejects empty sid.
+			if _, err := r.CreateSession(ctx, &service.SessionRecord{UserID: uid}); err == nil {
+				t.Fatal("CreateSession with empty sid: want error, got nil")
+			}
+
+			// Happy path: insert succeeds and round-trips by sid.
+			s := &service.SessionRecord{
+				SID: "sess-1", UserID: uid, CreatedAtMs: 1_700_000_000_000,
+			}
+			id, err := r.CreateSession(ctx, s)
+			if err != nil || id == "" {
+				t.Fatalf("CreateSession: id=%q err=%v", id, err)
+			}
+			got, err := r.GetSessionBySid(ctx, "sess-1")
+			if err != nil || got == nil {
+				t.Fatalf("GetSessionBySid: %v %#v", err, got)
+			}
+			if got.UserID != uid || got.RevokedAtMs != 0 || got.SID != "sess-1" {
+				t.Fatalf("Session round-trip mismatch: %+v", got)
+			}
+
+			// Duplicate sid must reject.
+			if _, err := r.CreateSession(ctx, &service.SessionRecord{
+				SID: "sess-1", UserID: uid, CreatedAtMs: 1_700_000_000_001,
+			}); err == nil {
+				t.Fatal("CreateSession duplicate sid: want error, got nil")
+			} else if !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("CreateSession duplicate sid: want ErrAlreadyExists, got %v", err)
+			}
+
+			// Unknown sid returns (nil, nil), not an error.
+			miss, err := r.GetSessionBySid(ctx, "no-such-sid")
+			if err != nil || miss != nil {
+				t.Fatalf("GetSessionBySid unknown: err=%v rec=%#v", err, miss)
+			}
+		})
+
+		t.Run("Session_Revoke", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid := createTestUser(t, r, "sess-revoke@example.com")
+
+			// RevokeSession on an unknown sid is a successful no-op.
+			if err := r.RevokeSession(ctx, "unknown-sid", 200); err != nil {
+				t.Fatalf("RevokeSession unknown: %v", err)
+			}
+
+			// Seed two sessions; revoke one explicitly, the other via
+			// RevokeSessionsForUser.
+			if _, err := r.CreateSession(ctx, &service.SessionRecord{
+				SID: "sess-a", UserID: uid, CreatedAtMs: 100,
+			}); err != nil {
+				t.Fatalf("CreateSession a: %v", err)
+			}
+			if _, err := r.CreateSession(ctx, &service.SessionRecord{
+				SID: "sess-b", UserID: uid, CreatedAtMs: 100,
+			}); err != nil {
+				t.Fatalf("CreateSession b: %v", err)
+			}
+
+			if err := r.RevokeSession(ctx, "sess-a", 200); err != nil {
+				t.Fatalf("RevokeSession a: %v", err)
+			}
+			got, _ := r.GetSessionBySid(ctx, "sess-a")
+			if got == nil || got.RevokedAtMs != 200 {
+				t.Fatalf("after RevokeSession a: %+v", got)
+			}
+
+			// Idempotency: revoking the same session a second time must
+			// not error and must not overwrite the original timestamp.
+			if err := r.RevokeSession(ctx, "sess-a", 300); err != nil {
+				t.Fatalf("RevokeSession a (idempotent): %v", err)
+			}
+			got, _ = r.GetSessionBySid(ctx, "sess-a")
+			if got == nil || got.RevokedAtMs != 200 {
+				t.Fatalf("idempotent revoke changed timestamp: %+v", got)
+			}
+
+			// sess-b still active.
+			gotB, _ := r.GetSessionBySid(ctx, "sess-b")
+			if gotB == nil || gotB.RevokedAtMs != 0 {
+				t.Fatalf("sess-b changed unexpectedly: %+v", gotB)
+			}
+
+			// Add a session for a different user so we can verify
+			// scope-by-user later.
+			otherUID := createTestUser(t, r, "sess-other-user@example.com")
+			if _, err := r.CreateSession(ctx, &service.SessionRecord{
+				SID: "sess-other", UserID: otherUID, CreatedAtMs: 100,
+			}); err != nil {
+				t.Fatalf("CreateSession other: %v", err)
+			}
+
+			if err := r.RevokeSessionsForUser(ctx, uid, 400); err != nil {
+				t.Fatalf("RevokeSessionsForUser: %v", err)
+			}
+			gotB, _ = r.GetSessionBySid(ctx, "sess-b")
+			if gotB == nil || gotB.RevokedAtMs != 400 {
+				t.Fatalf("RevokeSessionsForUser: sess-b: %+v", gotB)
+			}
+			// sess-a already-revoked: original timestamp preserved.
+			gotA, _ := r.GetSessionBySid(ctx, "sess-a")
+			if gotA == nil || gotA.RevokedAtMs != 200 {
+				t.Fatalf("RevokeSessionsForUser preserved-original: %+v", gotA)
+			}
+			// Other user's session untouched.
+			gotOther, _ := r.GetSessionBySid(ctx, "sess-other")
+			if gotOther == nil || gotOther.RevokedAtMs != 0 {
+				t.Fatalf("RevokeSessionsForUser scope leak: %+v", gotOther)
+			}
+		})
+
 		t.Run("IdentityVerification_CRUD", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)

@@ -1823,5 +1823,117 @@ func (r *entRepository) AddOrganizationMember(ctx context.Context, m *service.Or
 	return id, nil
 }
 
+// ── Sessions ──────────────────────────────────────────────────────
+
+func sessionFromProto(id string, p *schemapb.Session) *service.SessionRecord {
+	if p == nil {
+		return nil
+	}
+	return &service.SessionRecord{
+		NodeID:      id,
+		SID:         p.GetSid(),
+		UserID:      p.GetUserId(),
+		CreatedAtMs: p.GetCreatedAtMs(),
+		RevokedAtMs: p.GetRevokedAtMs(),
+	}
+}
+
+func (r *entRepository) CreateSession(ctx context.Context, s *service.SessionRecord) (string, error) {
+	if s == nil {
+		return "", errors.New("repo: CreateSession: nil session")
+	}
+	if s.SID == "" {
+		return "", fmt.Errorf("%w: missing sid", service.ErrInvalidArgument)
+	}
+	if s.UserID == "" {
+		return "", fmt.Errorf("%w: missing user_id", service.ErrInvalidArgument)
+	}
+	if s.CreatedAtMs == 0 {
+		s.CreatedAtMs = time.Now().UnixMilli()
+	}
+	msg := &schemapb.Session{
+		Sid:         s.SID,
+		UserId:      s.UserID,
+		CreatedAtMs: s.CreatedAtMs,
+		RevokedAtMs: s.RevokedAtMs,
+	}
+	id, err := r.client.create(ctx, actorStr(s.UserID), msg)
+	if err != nil {
+		return "", fmt.Errorf("repo: CreateSession: %w", err)
+	}
+	s.NodeID = id
+	return id, nil
+}
+
+func (r *entRepository) GetSessionBySid(ctx context.Context, sid string) (*service.SessionRecord, error) {
+	if sid == "" {
+		return nil, nil
+	}
+	dst := &schemapb.Session{}
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.SessionSid, sid, dst)
+	if errors.Is(err, errNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repo: GetSessionBySid: %w", err)
+	}
+	return sessionFromProto(id, dst), nil
+}
+
+// RevokeSession is idempotent. The internal lookup discovers the node
+// id by sid; an unknown sid is a successful no-op so concurrent
+// revoke calls converge rather than racing each other into failure.
+// The updateIf precondition is `revoked_at_ms == 0`, so a session
+// that has already been revoked also resolves to no-op.
+func (r *entRepository) RevokeSession(ctx context.Context, sid string, atMs int64) error {
+	if sid == "" {
+		return nil
+	}
+	rec, err := r.GetSessionBySid(ctx, sid)
+	if err != nil {
+		return fmt.Errorf("repo: RevokeSession: %w", err)
+	}
+	if rec == nil {
+		return nil
+	}
+	if rec.RevokedAtMs != 0 {
+		return nil
+	}
+	patch := &schemapb.Session{RevokedAtMs: atMs}
+	if err := r.client.updateIf(ctx, actorStr(rec.UserID), rec.NodeID, patch, "revoked_at_ms", nil); err != nil {
+		if errors.Is(err, errPreconditionFailed) {
+			// Another caller revoked the same session first; that's
+			// the contract — no-op rather than error.
+			return nil
+		}
+		return fmt.Errorf("repo: RevokeSession: %w", err)
+	}
+	return nil
+}
+
+func (r *entRepository) RevokeSessionsForUser(ctx context.Context, userID string, atMs int64) error {
+	if userID == "" {
+		return nil
+	}
+	rows, err := r.client.query(ctx, actorStr(userID), &schemapb.Session{}, map[string]any{"user_id": userID})
+	if err != nil {
+		return fmt.Errorf("repo: RevokeSessionsForUser query: %w", err)
+	}
+	for _, row := range rows {
+		rec := sessionFromProto(row.NodeID, row.Message.(*schemapb.Session))
+		if rec == nil || rec.RevokedAtMs != 0 {
+			continue
+		}
+		patch := &schemapb.Session{RevokedAtMs: atMs}
+		if err := r.client.updateIf(ctx, actorStr(userID), rec.NodeID, patch, "revoked_at_ms", nil); err != nil {
+			if errors.Is(err, errPreconditionFailed) {
+				continue
+			}
+			return fmt.Errorf("repo: RevokeSessionsForUser update: %w", err)
+		}
+	}
+	return nil
+}
+
 // Compile-time check that entRepository satisfies the interface.
 var _ service.Repository = (*entRepository)(nil)

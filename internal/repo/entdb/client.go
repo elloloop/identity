@@ -159,6 +159,8 @@ func (s *sdkScope) get(ctx context.Context, actor string, dst proto.Message, nod
 		return getInto[*schemapb.Organization](ctx, scope, dst, nodeID)
 	case *schemapb.OrganizationMembership:
 		return getInto[*schemapb.OrganizationMembership](ctx, scope, dst, nodeID)
+	case *schemapb.Session:
+		return getInto[*schemapb.Session](ctx, scope, dst, nodeID)
 	}
 	return fmt.Errorf("entdb: get: unsupported message type %T", dst)
 }
@@ -206,6 +208,8 @@ func (s *sdkScope) query(ctx context.Context, actor string, witness proto.Messag
 		return queryAs[*schemapb.Organization](ctx, scope, filter)
 	case *schemapb.OrganizationMembership:
 		return queryAs[*schemapb.OrganizationMembership](ctx, scope, filter)
+	case *schemapb.Session:
+		return queryAs[*schemapb.Session](ctx, scope, filter)
 	}
 	return nil, fmt.Errorf("entdb: query: unsupported message type %T", witness)
 }
@@ -625,6 +629,8 @@ func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Messa
 		sdk.Delete[*schemapb.Organization](plan, nodeID)
 	case *schemapb.OrganizationMembership:
 		sdk.Delete[*schemapb.OrganizationMembership](plan, nodeID)
+	case *schemapb.Session:
+		sdk.Delete[*schemapb.Session](plan, nodeID)
 	default:
 		return fmt.Errorf("entdb: delete: unsupported message type %T", witness)
 	}
@@ -714,6 +720,7 @@ var (
 	rawQuerySpecOAuthIdentity              = rawQueryFieldSpec{31, map[string]string{"user_id": "1", "provider": "2", "provider_user_id": "3"}}
 	rawQuerySpecIdentityVerificationRecord = rawQueryFieldSpec{32, map[string]string{"user_id": "2"}}
 	rawQuerySpecOrganizationMembership     = rawQueryFieldSpec{34, map[string]string{"organization_id": "1", "user_id": "2"}}
+	rawQuerySpecSession                    = rawQueryFieldSpec{35, map[string]string{"sid": "1", "user_id": "2"}}
 )
 
 func rawQueryFieldSpecFor(witness proto.Message) (rawQueryFieldSpec, bool) {
@@ -734,6 +741,8 @@ func rawQueryFieldSpecFor(witness proto.Message) (rawQueryFieldSpec, bool) {
 		return rawQuerySpecIdentityVerificationRecord, true
 	case *schemapb.OrganizationMembership:
 		return rawQuerySpecOrganizationMembership, true
+	case *schemapb.Session:
+		return rawQuerySpecSession, true
 	default:
 		return rawQueryFieldSpec{}, false
 	}

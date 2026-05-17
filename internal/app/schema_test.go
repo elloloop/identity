@@ -44,6 +44,7 @@ var expectedNodeTypes = map[string]int32{
 	"IdentityVerificationRecord": 32,
 	"Organization":               33,
 	"OrganizationMembership":     34,
+	"Session":                    35,
 }
 
 func TestApplyOrLogSchemaGap_ReturnsNilWithLogger(t *testing.T) {

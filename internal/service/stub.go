@@ -294,6 +294,22 @@ func (StubRepository) AddOrganizationMember(context.Context, *OrganizationMember
 	return "", ErrServiceUnavailable
 }
 
+func (StubRepository) CreateSession(context.Context, *SessionRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) GetSessionBySid(context.Context, string) (*SessionRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) RevokeSession(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) RevokeSessionsForUser(context.Context, string, int64) error {
+	return ErrServiceUnavailable
+}
+
 // ── StubDB ────────────────────────────────────────────────────────────
 
 // StubDB implements DB (and audit.NodeWriter) but returns

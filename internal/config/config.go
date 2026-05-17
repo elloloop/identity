@@ -8,10 +8,37 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+)
+
+// RevocationMode names the two refresh-token revocation models the
+// service supports. See the Config.RevocationMode comment for the
+// semantics; the two-mode contract is in docs/IDENTITY.md decision
+// log §6.
+type RevocationMode string
+
+const (
+	// RevocationModeTTL keeps the existing zero-cost hot path.
+	// DeleteRefreshTokensForUser deletes refresh tokens; in-flight
+	// access tokens stay valid until natural JWT expiry. The default.
+	RevocationModeTTL RevocationMode = "ttl"
+
+	// RevocationModeSession mints access tokens with an `sid` claim
+	// referencing a Session row. The verification middleware reads
+	// that row (via an in-process cache) and rejects the request when
+	// the session is revoked.
+	RevocationModeSession RevocationMode = "session"
+
+	// RevocationModeTTLAccessTokenCap is the maximum access-token TTL
+	// (seconds) compatible with the `ttl` revocation model. A deployer
+	// who needs a longer-lived access token must switch to
+	// `RevocationModeSession`, where cache TTL bounds the revocation
+	// latency.
+	RevocationModeTTLAccessTokenCap = 900
 )
 
 // Config holds all identity service configuration.
@@ -67,6 +94,31 @@ type Config struct {
 
 	// Refresh tokens
 	RefreshExpirySeconds int
+
+	// Revocation mode. Selects how the service propagates a
+	// DeleteRefreshTokensForUser to in-flight access tokens.
+	//
+	//   "ttl"     (default) — refresh tokens are deleted; already-minted
+	//             access tokens stay valid until natural JWT expiry. Zero
+	//             hot-path cost. Hard startup assertion:
+	//             `JWTExpirySeconds <= 900` so a deployer cannot raise the
+	//             access-token lifetime without explicitly switching modes.
+	//   "session" — opt-in. Access tokens carry an `sid` claim referencing
+	//             a Session row; the verification middleware reads that
+	//             row (via an in-process cache, configurable below) and
+	//             rejects the request when `revoked_at_ms != 0`.
+	//             DeleteRefreshTokensForUser additionally triggers
+	//             RevokeSessionsForUser so the existing replay-detection
+	//             code path also kills the access tokens.
+	//
+	// See docs/IDENTITY.md decision log §6 for the two-mode contract.
+	RevocationMode RevocationMode
+
+	// SessionCacheTTLSeconds bounds how long a session-state read from the
+	// in-process cache may serve "active" before being re-read from the
+	// repository. 0 = strict mode: every authenticated request reads the
+	// row. Effective only when RevocationMode == RevocationModeSession.
+	SessionCacheTTLSeconds int
 
 	// OAuth providers. Identity does the code exchange for these
 	// providers itself — see pkg/oauth. A provider is enabled only
@@ -275,6 +327,9 @@ func Load() *Config {
 
 		RefreshExpirySeconds: envInt("GATEWAY_REFRESH_EXPIRY_SECONDS", 604800),
 
+		RevocationMode:         revocationModeFromEnv("GATEWAY_REVOCATION_MODE", RevocationModeTTL),
+		SessionCacheTTLSeconds: envInt("GATEWAY_SESSION_CACHE_TTL_SECONDS", 60),
+
 		GoogleClientID:        envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", envStr("GATEWAY_GOOGLE_CLIENT_ID", "")),
 		GoogleClientSecret:    envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", envStr("GATEWAY_GOOGLE_CLIENT_SECRET", "")),
 		MicrosoftClientID:     envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_ID", envStr("GATEWAY_MICROSOFT_CLIENT_ID", "")),
@@ -418,6 +473,68 @@ func envFloat(key string, def float64) float64 {
 		return def
 	}
 	return f
+}
+
+// revocationModeFromEnv reads RevocationMode from the named env var.
+// Unrecognised values fall back to def — Load() does not panic so a
+// misconfigured env at startup is surfaced by Validate() rather than
+// crashing this helper.
+func revocationModeFromEnv(key string, def RevocationMode) RevocationMode {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	switch RevocationMode(strings.ToLower(v)) {
+	case RevocationModeTTL:
+		return RevocationModeTTL
+	case RevocationModeSession:
+		return RevocationModeSession
+	}
+	return def
+}
+
+// Validate enforces invariants that are too complex to express as
+// per-field defaults: most importantly the `mode=ttl` access-token
+// TTL ceiling. The binary calls this at startup; tests pin their
+// configs through the same path so misuse surfaces immediately
+// rather than as a silent revocation-window gap.
+//
+// Why a method rather than running inside Load(): tests build
+// *Config values directly (without going through Load) and a
+// silent failure mode there would re-introduce the bug this
+// function prevents. Callers that synthesise a Config must invoke
+// Validate before handing it to app.New.
+func (c *Config) Validate() error {
+	switch c.RevocationMode {
+	case "":
+		// Empty means "use default" in Load(); a directly-constructed
+		// Config (e.g. in tests) gets the same treatment so downstream
+		// switch statements behave consistently.
+		c.RevocationMode = RevocationModeTTL
+	case RevocationModeTTL, RevocationModeSession:
+	default:
+		return fmt.Errorf("config: invalid GATEWAY_REVOCATION_MODE %q (must be one of: ttl, session)", c.RevocationMode)
+	}
+
+	if c.RevocationMode == RevocationModeTTL && c.JWTExpirySeconds > RevocationModeTTLAccessTokenCap {
+		return fmt.Errorf(
+			"config: GATEWAY_JWT_EXPIRY_SECONDS=%d exceeds the %ds cap for GATEWAY_REVOCATION_MODE=ttl; "+
+				"set GATEWAY_REVOCATION_MODE=session to keep the longer access-token lifetime",
+			c.JWTExpirySeconds, RevocationModeTTLAccessTokenCap,
+		)
+	}
+
+	if c.SessionCacheTTLSeconds < 0 {
+		return fmt.Errorf("config: GATEWAY_SESSION_CACHE_TTL_SECONDS=%d must be >= 0", c.SessionCacheTTLSeconds)
+	}
+
+	return nil
+}
+
+// SessionCacheTTL returns the configured cache TTL as a time.Duration.
+// 0 means strict mode (read on every request).
+func (c *Config) SessionCacheTTL() time.Duration {
+	return time.Duration(c.SessionCacheTTLSeconds) * time.Second
 }
 
 // envBool reads a boolean environment variable. Recognises "true",

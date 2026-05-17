@@ -99,6 +99,7 @@ type fakeRepo struct {
 	idvRecords         map[string]*service.IdentityVerificationRecord
 	orgs               map[string]*service.Organization
 	orgMembers         map[string]*service.OrganizationMembership
+	sessions           map[string]*service.SessionRecord
 
 	// Optional error injections for specific calls.
 	errFindUser   error
@@ -123,6 +124,7 @@ func newFakeRepo() *fakeRepo {
 		oauthIdentities:    make(map[string]*service.OAuthIdentity),
 		orgs:               make(map[string]*service.Organization),
 		orgMembers:         make(map[string]*service.OrganizationMembership),
+		sessions:           make(map[string]*service.SessionRecord),
 	}
 }
 
@@ -1035,6 +1037,63 @@ func (r *fakeRepo) AddOrganizationMember(_ context.Context, m *service.Organizat
 	cp := *m
 	r.orgMembers[id] = &cp
 	return id, nil
+}
+
+// ── Sessions ──────────────────────────────────────────────────────────
+
+func (r *fakeRepo) CreateSession(_ context.Context, s *service.SessionRecord) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("%w: nil session", service.ErrInvalidArgument)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sessions == nil {
+		r.sessions = make(map[string]*service.SessionRecord)
+	}
+	for _, existing := range r.sessions {
+		if existing.SID == s.SID {
+			return "", fmt.Errorf("%w: sid %q", service.ErrAlreadyExists, s.SID)
+		}
+	}
+	id := nextID()
+	s.NodeID = id
+	cp := *s
+	r.sessions[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) GetSessionBySid(_ context.Context, sid string) (*service.SessionRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.SID == sid {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) RevokeSession(_ context.Context, sid string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.SID == sid && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) RevokeSessionsForUser(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.UserID == userID && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
 }
 
 // seedUser inserts a user directly.

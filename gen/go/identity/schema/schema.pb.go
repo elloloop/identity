@@ -1787,6 +1787,97 @@ func (x *OrganizationMembership) GetCreatedAt() int64 {
 	return 0
 }
 
+// ─── Session (type_id 35) ──────────────────────────────────────────────
+//
+// One row per logged-in session for `GATEWAY_REVOCATION_MODE=session`
+// deployments. Access tokens minted under that mode carry an `sid`
+// claim referencing this row; verification middleware looks the row
+// up (via an in-process cache with configurable TTL) and rejects the
+// request when `revoked_at_ms != 0`.
+//
+// The two-mode contract is documented in docs/IDENTITY.md (decision
+// log §6). In `mode=ttl` (the default) Sessions are never created and
+// the lookup is skipped entirely — this node type costs zero on the
+// hot path for deployers who never opt in.
+//
+// Why a separate node type from RefreshToken: a refresh token rotates
+// on every use (consumed_at is the serialization point for replay
+// detection), whereas a session stays stable for the lifetime of the
+// login. Conflating them would force cache invalidation on every
+// legitimate rotation, defeating the warm-cache hot path.
+//
+// Type_id 35 is the next free slot after Organization (33) and
+// OrganizationMembership (34); see proto field comment at the top
+// of this file — node type ids on disk are STABLE and must never
+// be renumbered.
+type Session struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sid           string                 `protobuf:"bytes,1,opt,name=sid,proto3" json:"sid,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	CreatedAtMs   int64                  `protobuf:"varint,3,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
+	RevokedAtMs   int64                  `protobuf:"varint,4,opt,name=revoked_at_ms,json=revokedAtMs,proto3" json:"revoked_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Session) Reset() {
+	*x = Session{}
+	mi := &file_identity_schema_schema_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Session) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Session) ProtoMessage() {}
+
+func (x *Session) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_schema_schema_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Session.ProtoReflect.Descriptor instead.
+func (*Session) Descriptor() ([]byte, []int) {
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *Session) GetSid() string {
+	if x != nil {
+		return x.Sid
+	}
+	return ""
+}
+
+func (x *Session) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *Session) GetCreatedAtMs() int64 {
+	if x != nil {
+		return x.CreatedAtMs
+	}
+	return 0
+}
+
+func (x *Session) GetRevokedAtMs() int64 {
+	if x != nil {
+		return x.RevokedAtMs
+	}
+	return 0
+}
+
 // ─── IdentityVerification (type_id 32) ─────────────────────────────────
 //
 // One row per document + selfie verification session run for a User.
@@ -1817,7 +1908,7 @@ type IdentityVerificationRecord struct {
 
 func (x *IdentityVerificationRecord) Reset() {
 	*x = IdentityVerificationRecord{}
-	mi := &file_identity_schema_schema_proto_msgTypes[18]
+	mi := &file_identity_schema_schema_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1829,7 +1920,7 @@ func (x *IdentityVerificationRecord) String() string {
 func (*IdentityVerificationRecord) ProtoMessage() {}
 
 func (x *IdentityVerificationRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[18]
+	mi := &file_identity_schema_schema_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1842,7 +1933,7 @@ func (x *IdentityVerificationRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityVerificationRecord.ProtoReflect.Descriptor instead.
 func (*IdentityVerificationRecord) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{18}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *IdentityVerificationRecord) GetVerificationId() string {
@@ -1916,7 +2007,7 @@ type MemberOf struct {
 
 func (x *MemberOf) Reset() {
 	*x = MemberOf{}
-	mi := &file_identity_schema_schema_proto_msgTypes[19]
+	mi := &file_identity_schema_schema_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1928,7 +2019,7 @@ func (x *MemberOf) String() string {
 func (*MemberOf) ProtoMessage() {}
 
 func (x *MemberOf) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[19]
+	mi := &file_identity_schema_schema_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1941,7 +2032,7 @@ func (x *MemberOf) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberOf.ProtoReflect.Descriptor instead.
 func (*MemberOf) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{19}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{20}
 }
 
 type UserPasskey struct {
@@ -1952,7 +2043,7 @@ type UserPasskey struct {
 
 func (x *UserPasskey) Reset() {
 	*x = UserPasskey{}
-	mi := &file_identity_schema_schema_proto_msgTypes[20]
+	mi := &file_identity_schema_schema_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1964,7 +2055,7 @@ func (x *UserPasskey) String() string {
 func (*UserPasskey) ProtoMessage() {}
 
 func (x *UserPasskey) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[20]
+	mi := &file_identity_schema_schema_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1977,7 +2068,7 @@ func (x *UserPasskey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPasskey.ProtoReflect.Descriptor instead.
 func (*UserPasskey) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{20}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{21}
 }
 
 type UserTotp struct {
@@ -1988,7 +2079,7 @@ type UserTotp struct {
 
 func (x *UserTotp) Reset() {
 	*x = UserTotp{}
-	mi := &file_identity_schema_schema_proto_msgTypes[21]
+	mi := &file_identity_schema_schema_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2000,7 +2091,7 @@ func (x *UserTotp) String() string {
 func (*UserTotp) ProtoMessage() {}
 
 func (x *UserTotp) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[21]
+	mi := &file_identity_schema_schema_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2013,7 +2104,7 @@ func (x *UserTotp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTotp.ProtoReflect.Descriptor instead.
 func (*UserTotp) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{21}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{22}
 }
 
 type UserRecoveryCode struct {
@@ -2024,7 +2115,7 @@ type UserRecoveryCode struct {
 
 func (x *UserRecoveryCode) Reset() {
 	*x = UserRecoveryCode{}
-	mi := &file_identity_schema_schema_proto_msgTypes[22]
+	mi := &file_identity_schema_schema_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2036,7 +2127,7 @@ func (x *UserRecoveryCode) String() string {
 func (*UserRecoveryCode) ProtoMessage() {}
 
 func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[22]
+	mi := &file_identity_schema_schema_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2049,7 +2140,7 @@ func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserRecoveryCode.ProtoReflect.Descriptor instead.
 func (*UserRecoveryCode) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{22}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{23}
 }
 
 var File_identity_schema_schema_proto protoreflect.FileDescriptor
@@ -2279,7 +2370,12 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x126\n" +
 	"\x04role\x18\x03 \x01(\tB\"\xb2\xbb\x18\x1e2\x12admin,member,guestJ\x06member`\x01R\x04role\x122\n" +
 	"\n" +
-	"created_at\x18\x04 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt:S\xa2\xbb\x18O\b\"0\x01:\auser_idR@Identity-layer membership row linking a User to an Organization.\"\xbb\x05\n" +
+	"created_at\x18\x04 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt:S\xa2\xbb\x18O\b\"0\x01:\auser_idR@Identity-layer membership row linking a User to an Organization.\"\x91\x03\n" +
+	"\aSession\x12c\n" +
+	"\x03sid\x18\x01 \x01(\tBQ\xb2\xbb\x18M\b\x01\x18\x01RCStable per-session id; carried as the `sid` claim on access tokens.`\x01h\x01R\x03sid\x12*\n" +
+	"\auser_id\x18\x02 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x127\n" +
+	"\rcreated_at_ms\x18\x03 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\vcreatedAtMs\x12i\n" +
+	"\rrevoked_at_ms\x18\x04 \x01(\x03BE\xb2\xbb\x18A\x18\x01:\ttimestampR00 = active; non-zero = revoked at this epoch ms.`\x01R\vrevokedAtMs:Q\xa2\xbb\x18M\b#0\x04:\auser_idR>An access-token-bound session row for mode=session revocation.\"\xbb\x05\n" +
 	"\x1aIdentityVerificationRecord\x125\n" +
 	"\x0fverification_id\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\x0everificationId\x12*\n" +
 	"\auser_id\x18\x02 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x12H\n" +
@@ -2309,7 +2405,7 @@ func file_identity_schema_schema_proto_rawDescGZIP() []byte {
 	return file_identity_schema_schema_proto_rawDescData
 }
 
-var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_identity_schema_schema_proto_goTypes = []any{
 	(*User)(nil),                       // 0: identity.schema.User
 	(*WorkingGroup)(nil),               // 1: identity.schema.WorkingGroup
@@ -2329,11 +2425,12 @@ var file_identity_schema_schema_proto_goTypes = []any{
 	(*OAuthIdentity)(nil),              // 15: identity.schema.OAuthIdentity
 	(*Organization)(nil),               // 16: identity.schema.Organization
 	(*OrganizationMembership)(nil),     // 17: identity.schema.OrganizationMembership
-	(*IdentityVerificationRecord)(nil), // 18: identity.schema.IdentityVerificationRecord
-	(*MemberOf)(nil),                   // 19: identity.schema.MemberOf
-	(*UserPasskey)(nil),                // 20: identity.schema.UserPasskey
-	(*UserTotp)(nil),                   // 21: identity.schema.UserTotp
-	(*UserRecoveryCode)(nil),           // 22: identity.schema.UserRecoveryCode
+	(*Session)(nil),                    // 18: identity.schema.Session
+	(*IdentityVerificationRecord)(nil), // 19: identity.schema.IdentityVerificationRecord
+	(*MemberOf)(nil),                   // 20: identity.schema.MemberOf
+	(*UserPasskey)(nil),                // 21: identity.schema.UserPasskey
+	(*UserTotp)(nil),                   // 22: identity.schema.UserTotp
+	(*UserRecoveryCode)(nil),           // 23: identity.schema.UserRecoveryCode
 }
 var file_identity_schema_schema_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -2354,7 +2451,7 @@ func file_identity_schema_schema_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_identity_schema_schema_proto_rawDesc), len(file_identity_schema_schema_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   23,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

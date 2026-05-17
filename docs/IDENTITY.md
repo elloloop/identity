@@ -344,6 +344,36 @@ before you ship.
    assertion fails fast if the JWKS endpoint does not include every
    active kid the signer reports, so signing and verification cannot
    drift. Rotation runbook lives at `docs/key-rotation.md`.
+7. **Refresh-token revocation: ship both models, config-driven.**
+   Different deployers have different tolerances for the access-token
+   replay window after `DeleteRefreshTokensForUser`. We ship two
+   models behind one knob (`GATEWAY_REVOCATION_MODE`) and pick the
+   cheapest safe default (`ttl`).
+
+   - `mode=ttl` (default). When a refresh token is revoked, in-flight
+     access tokens stay valid until their natural JWT expiry. Zero
+     hot-path cost; no extra repo reads on authenticated requests. A
+     hard startup assertion (`GATEWAY_JWT_EXPIRY_SECONDS <= 900`)
+     stops a deployer from silently raising the access-token lifetime
+     without switching modes. Suitable for low-stakes deployments.
+
+   - `mode=session` (opt-in). Access tokens carry a `sid` claim
+     referencing a `Session` row (proto type_id 35); the verification
+     middleware reads the row via an in-process cache
+     (`GATEWAY_SESSION_CACHE_TTL_SECONDS`, default 60s; 0 = strict).
+     `DeleteRefreshTokensForUser` additionally triggers
+     `RevokeSessionsForUser`, so the existing replay-detection path
+     also kills the access tokens. Same-process revocation is
+     synchronous; cross-replica revocation is bounded by the cache
+     TTL. Required for deployers handling sensitive data.
+
+   The two paths share no fallback or translation layer — `mode=ttl`
+   is the existing zero-cost path with the startup assertion added,
+   and `mode=session` is a clean new code path selected by the
+   config knob. The decision to ship both flows from identity being
+   an OSS server image: the deployer-not-the-vendor picks the
+   trade-off. Adding a third model in the future means a new value
+   on this knob, not a translation layer wrapping the existing ones.
 
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

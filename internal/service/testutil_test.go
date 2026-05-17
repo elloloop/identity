@@ -114,6 +114,7 @@ type fakeRepo struct {
 	idvRecords         map[string]*IdentityVerificationRecord
 	orgs               map[string]*Organization
 	orgMembers         map[string]*OrganizationMembership
+	sessions           map[string]*SessionRecord
 }
 
 func newFakeRepo() *fakeRepo {
@@ -134,6 +135,7 @@ func newFakeRepo() *fakeRepo {
 		idvRecords:         make(map[string]*IdentityVerificationRecord),
 		orgs:               make(map[string]*Organization),
 		orgMembers:         make(map[string]*OrganizationMembership),
+		sessions:           make(map[string]*SessionRecord),
 	}
 }
 
@@ -1278,4 +1280,61 @@ func (r *fakeRepo) AddOrganizationMember(_ context.Context, m *OrganizationMembe
 	cp := *m
 	r.orgMembers[id] = &cp
 	return id, nil
+}
+
+// ── Sessions ──────────────────────────────────────────────────────────
+
+func (r *fakeRepo) CreateSession(_ context.Context, s *SessionRecord) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("%w: nil session", ErrInvalidArgument)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sessions == nil {
+		r.sessions = make(map[string]*SessionRecord)
+	}
+	for _, existing := range r.sessions {
+		if existing.SID == s.SID {
+			return "", fmt.Errorf("%w: sid %q", ErrAlreadyExists, s.SID)
+		}
+	}
+	id := nextNodeID()
+	s.NodeID = id
+	cp := *s
+	r.sessions[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) GetSessionBySid(_ context.Context, sid string) (*SessionRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.SID == sid {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) RevokeSession(_ context.Context, sid string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.SID == sid && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) RevokeSessionsForUser(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		if s.UserID == userID && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
 }

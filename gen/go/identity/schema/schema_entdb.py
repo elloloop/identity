@@ -56,3 +56,7 @@ class IdentityVerificationRecordKeys:
 class OrganizationKeys:
     slug = UniqueKey[str](type_id=33, field_id=1, name="slug")
 
+
+class SessionKeys:
+    sid = UniqueKey[str](type_id=35, field_id=1, name="sid")
+

@@ -13,6 +13,13 @@ import (
 )
 
 // Claims holds the fields embedded in an access token.
+//
+// SID is the session id added when the service is running in
+// `GATEWAY_REVOCATION_MODE=session`. It is the empty string in
+// mode=ttl deployments, in which case the verification middleware
+// skips the session lookup entirely (the hot path keeps its zero
+// cost). The claim is JSON-named `sid` so it lines up with OAuth /
+// OIDC tooling that already understands the `sid` convention.
 type Claims struct {
 	Sub       string   `json:"sub"`
 	Email     string   `json:"email"`
@@ -20,6 +27,7 @@ type Claims struct {
 	Role      string   `json:"role"`
 	Tenant    string   `json:"tenant"`
 	AvatarURL string   `json:"avatar_url"`
+	SID       string   `json:"sid,omitempty"`
 	Audience  []string `json:"aud,omitempty"`
 	IssuedAt  int64    `json:"iat"`
 	ExpiresAt int64    `json:"exp"`
@@ -41,6 +49,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 		"avatar_url": c.AvatarURL,
 		"iat":        iat,
 		"exp":        exp,
+	}
+	if c.SID != "" {
+		m["sid"] = c.SID
 	}
 	if len(c.Audience) > 0 {
 		m["aud"] = c.Audience
@@ -140,6 +151,9 @@ func VerifyAccessToken(tokenStr string, kp KeyProvider, expectedTenant, expected
 	}
 	if v, ok := tok.Get("avatar_url"); ok {
 		claims.AvatarURL, _ = v.(string)
+	}
+	if v, ok := tok.Get("sid"); ok {
+		claims.SID, _ = v.(string)
 	}
 	claims.Audience = tok.Audience()
 

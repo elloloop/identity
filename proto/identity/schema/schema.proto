@@ -407,6 +407,43 @@ message OrganizationMembership {
     int64  created_at      = 4 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
 }
 
+// ─── Session (type_id 35) ──────────────────────────────────────────────
+//
+// One row per logged-in session for `GATEWAY_REVOCATION_MODE=session`
+// deployments. Access tokens minted under that mode carry an `sid`
+// claim referencing this row; verification middleware looks the row
+// up (via an in-process cache with configurable TTL) and rejects the
+// request when `revoked_at_ms != 0`.
+//
+// The two-mode contract is documented in docs/IDENTITY.md (decision
+// log §6). In `mode=ttl` (the default) Sessions are never created and
+// the lookup is skipped entirely — this node type costs zero on the
+// hot path for deployers who never opt in.
+//
+// Why a separate node type from RefreshToken: a refresh token rotates
+// on every use (consumed_at is the serialization point for replay
+// detection), whereas a session stays stable for the lifetime of the
+// login. Conflating them would force cache invalidation on every
+// legitimate rotation, defeating the warm-cache hot path.
+//
+// Type_id 35 is the next free slot after Organization (33) and
+// OrganizationMembership (34); see proto field comment at the top
+// of this file — node type ids on disk are STABLE and must never
+// be renumbered.
+message Session {
+    option (entdb.node) = {
+        type_id: 35
+        data_policy: DATA_POLICY_EPHEMERAL
+        subject_field: "user_id"
+        description: "An access-token-bound session row for mode=session revocation."
+    };
+
+    string sid            = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true, description: "Stable per-session id; carried as the `sid` claim on access tokens." }];
+    string user_id        = 2 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    int64  created_at_ms  = 3 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
+    int64  revoked_at_ms  = 4 [(entdb.field) = { kind: "timestamp", indexed: true, pii_false: true, description: "0 = active; non-zero = revoked at this epoch ms." }];
+}
+
 // ─── IdentityVerification (type_id 32) ─────────────────────────────────
 //
 // One row per document + selfie verification session run for a User.
