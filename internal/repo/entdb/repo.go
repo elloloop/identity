@@ -594,11 +594,21 @@ func (r *entRepository) FindRefreshTokenByHashIncludingConsumed(ctx context.Cont
 }
 
 // ConsumeRefreshTokenByHash atomically marks the row consumed iff it
-// is currently unconsumed (consumed_at == 0). The CAS precondition is
-// the serialization point: two replicas racing to rotate the same
-// refresh token both submit UpdateIf(consumed_at == 0); exactly one
-// commits and the other observes ErrUnauthenticated. Matches the
-// Postgres backend's `UPDATE ... WHERE consumed_at_ms = 0` pattern.
+// is currently unconsumed. The CAS precondition is the serialization
+// point: two replicas racing to rotate the same refresh token both
+// submit UpdateIf(consumed_at is unset); exactly one commits and the
+// other observes ErrUnauthenticated. Mirrors the Postgres backend's
+// `UPDATE ... WHERE consumed_at_ms = 0` pattern.
+//
+// The precondition value is nil rather than int64(0) because proto3
+// int64 fields with the zero value are not serialized on the wire and
+// therefore not present in the EntDB on-disk payload. The server-side
+// applier matches an absent field only when the expected value is also
+// nil (preconditionMatches in tenant-shard-db's ops_update_node.go);
+// passing int64(0) would always fail the precondition even on a
+// genuinely unconsumed row. After rotation the field carries the
+// commit timestamp, which is non-nil on disk and so also mismatches
+// the nil precondition — every later attempt loses the race.
 func (r *entRepository) ConsumeRefreshTokenByHash(ctx context.Context, hash string, atMs int64) error {
 	if hash == "" {
 		return service.ErrUnauthenticated
@@ -611,7 +621,7 @@ func (r *entRepository) ConsumeRefreshTokenByHash(ctx context.Context, hash stri
 		return service.ErrUnauthenticated
 	}
 	patch := &schemapb.RefreshToken{ConsumedAt: atMs}
-	if err := r.client.updateIf(ctx, systemActor, rec.NodeID, patch, "consumed_at", int64(0)); err != nil {
+	if err := r.client.updateIf(ctx, systemActor, rec.NodeID, patch, "consumed_at", nil); err != nil {
 		if errors.Is(err, errPreconditionFailed) {
 			// Another replica rotated this token first, or the row was
 			// already consumed when we re-read above. Service layer
