@@ -26,18 +26,21 @@ import (
 // Each method delegates to the appropriate service, translating between
 // proto and service-layer types.
 type IdentityHandler struct {
-	auth    *service.AuthService
-	admin   *service.AdminService
-	groups  *service.GroupService
-	help    *service.HelpService
-	profile *service.ProfileService
-	idv     *service.IdentityVerificationService
-	cfg     *config.Config
+	auth      *service.AuthService
+	admin     *service.AdminService
+	groups    *service.GroupService
+	help      *service.HelpService
+	profile   *service.ProfileService
+	idv       *service.IdentityVerificationService
+	orgSignup *service.OrganizationSignupService
+	cfg       *config.Config
 }
 
 // NewIdentityHandler creates a new IdentityHandler wired to the service
 // layer. idv is optional: pass nil in deployments that do not need
 // identity verification, and the IDV RPCs will return CodeUnimplemented.
+// orgSignup is optional: nil (or a deployment not in mode=multi) causes
+// the OrganizationSignup RPC to return CodeUnimplemented.
 func NewIdentityHandler(
 	auth *service.AuthService,
 	admin *service.AdminService,
@@ -45,16 +48,18 @@ func NewIdentityHandler(
 	help *service.HelpService,
 	profile *service.ProfileService,
 	idv *service.IdentityVerificationService,
+	orgSignup *service.OrganizationSignupService,
 	cfg *config.Config,
 ) *IdentityHandler {
 	return &IdentityHandler{
-		auth:    auth,
-		admin:   admin,
-		groups:  groups,
-		help:    help,
-		profile: profile,
-		idv:     idv,
-		cfg:     cfg,
+		auth:      auth,
+		admin:     admin,
+		groups:    groups,
+		help:      help,
+		profile:   profile,
+		idv:       idv,
+		orgSignup: orgSignup,
+		cfg:       cfg,
 	}
 }
 

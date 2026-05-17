@@ -140,13 +140,27 @@ GATEWAY_DEFAULT_TENANT_ID = <string>     # required when mode=single
   the `OrganizationSignup` RPC.
 - **`OrganizationSignup`** is the entry point: it takes an organisation
   name + the first admin user's credentials. The service creates the
-  tenant in tenant-shard-db, registers the admin user globally, adds
-  them as `"admin"` (or `"owner"` if upstream supports the distinction)
-  of the new tenant, and creates the identity-layer admin User row
-  scoped to the new tenant. Identity also persists an `Organization`
-  row (proto type_id 33) and an `OrganizationMembership` row
-  (type_id 34) so it can later answer "which organisations does this
-  user belong to" without re-querying the storage layer.
+  tenant in tenant-shard-db via `Admin.CreateTenant(slug, displayName)`,
+  then writes the identity-layer admin `User` row inside the new
+  tenant — the typed `Repository.CreateUser` path already handles
+  global-registry registration (`Admin.CreateUser`) + adding the
+  user as a `"member"` of the tenant (the v1.12+ actor invariant).
+  Identity then promotes the storage-layer role to `"admin"` via
+  `Admin.ChangeMemberRole` (a decision independent of identity's
+  product role — see decision log §4), persists an `Organization`
+  row (proto type_id 33), and links the admin via an
+  `OrganizationMembership` row (type_id 34) so it can later answer
+  "which organisations does this user belong to?" without re-querying
+  the storage layer.
+- **Required wiring.** `app.New` rejects `mode=multi` at boot if either
+  the `TenantAdmin` (cross-tenant admin handle) or the
+  `RepositoryForTenant` (per-tenant repo factory) is missing. The
+  entdb driver wires the full `TenantAdmin` against tenant-shard-db's
+  `Admin` handle. The postgres driver wires a degenerate
+  `PostgresTenantAdmin` (slug uniqueness is enforced in-process plus
+  by the `organizations.(tenant_id, slug)` unique index — postgres
+  has no cross-tenant registry concept). The memory driver does not
+  support `mode=multi`.
 - **Subsequent user signups / invitation acceptances** resolve the
   tenant from the request (see below), then add the new user as a
   `"member"` of the existing tenant.
@@ -165,10 +179,20 @@ GATEWAY_DEFAULT_TENANT_ID = <string>     # required when mode=single
    methods (`CreateOrganization`, `GetOrganization`,
    `GetOrganizationBySlug`, `ListOrganizationsForUser`,
    `AddOrganizationMember`) across all three backends, conformance
-   suite coverage, postgres migration `0007_add_organizations`. The
-   `GATEWAY_IDENTITY_MODE` flag is **not yet wired**, and the
-   `OrganizationSignup` RPC is **not yet implemented**.
-2. `OrganizationSignup` RPC + multi-mode config flag.
+   suite coverage, postgres migration `0007_add_organizations`.
+2. **`OrganizationSignup` RPC + multi-mode config flag** *(landed)* —
+   `GATEWAY_IDENTITY_MODE=single|multi` selected at boot;
+   `OrganizationSignup` RPC wired only in `mode=multi` and returns
+   `CodeUnimplemented` in `mode=single` (decision log §3). The RPC
+   provisions the tenant in tenant-shard-db (`Admin.CreateTenant`),
+   then writes the identity-layer Organization + admin User +
+   OrganizationMembership rows inside that new tenant via a per-tenant
+   `Repository` (factory wired by the binary). The admin user is
+   created through the typed repo path (which already handles the
+   v1.12+ global-registry registration + default `"member"` tenant
+   role), then promoted to `"admin"` at the storage layer via
+   `Admin.ChangeMemberRole` — keeping the storage-layer role decision
+   independent of identity's product role per decision log §4.
 3. Per-request tenant resolution middleware.
 4. Tenant-aware invitations.
 
@@ -374,6 +398,22 @@ before you ship.
    an OSS server image: the deployer-not-the-vendor picks the
    trade-off. Adding a third model in the future means a new value
    on this knob, not a translation layer wrapping the existing ones.
+8. **`OrganizationSignup` rollback is best-effort compensating
+   deletes, not transactional.** tenant-shard-db v1.13 does not
+   expose a `DeleteTenant` primitive, so once `Admin.CreateTenant`
+   has succeeded the tenant exists in the storage layer until an
+   operator removes it out-of-band. Identity's `OrganizationSignup`
+   rolls back what it can — the per-tenant `Admin.RemoveTenantMember`
+   call — and leaves the empty tenant in place. The next signup
+   attempt with the same slug fails at `Admin.CreateTenant` with
+   `AlreadyExists`, which the caller surfaces to the deployer's
+   signup UI. We accepted this over a "tenant in pending state"
+   marker because (a) the empty-tenant footprint is tiny and
+   (b) introducing the marker would require a new schema-aware
+   primitive upstream — a larger change than is justified for a
+   failure mode that should be rare. If a deployer needs reliable
+   cleanup of half-created tenants, that's a candidate upstream
+   feature on tenant-shard-db, not an identity-layer workaround.
 
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

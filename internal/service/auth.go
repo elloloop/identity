@@ -565,6 +565,11 @@ var (
 	ErrLocalAuthDisabled = errors.New("local auth disabled")
 	ErrOAuthDisabled     = errors.New("oauth login is not configured")
 	ErrSignupDisabled    = errors.New("signup is disabled for this deployment")
+	// ErrUnimplemented signals that the requested RPC is intentionally
+	// disabled in the current deployment mode (e.g. OrganizationSignup
+	// in mode=single per docs/IDENTITY.md decision log §3). The Connect
+	// handler layer maps this to CodeUnimplemented.
+	ErrUnimplemented = errors.New("operation unimplemented in this deployment mode")
 )
 
 // ── AuthService ────────────────────────────────────────────────────────

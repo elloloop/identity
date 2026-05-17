@@ -7,6 +7,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -42,6 +43,21 @@ type Deps struct {
 	DB       service.DB
 	Passkeys *passkeys.WebAuthnService
 	TOTPKey  []byte
+
+	// TenantAdmin is the cross-tenant admin handle backing the
+	// `mode=multi` OrganizationSignup RPC. Required when
+	// Config.IdentityMode == "multi"; ignored in single mode. The
+	// production binary wires repo.NewTenantAdmin(entdbClient);
+	// integration tests pass a fake.
+	TenantAdmin service.TenantAdmin
+
+	// RepositoryForTenant is the factory OrganizationSignup uses to
+	// obtain a Repository scoped to the freshly-created tenant. When
+	// nil, the handler treats `mode=multi` as not yet wired and
+	// returns CodeUnimplemented. The production binary wires a closure
+	// over the entdb client; tests pass a closure returning an
+	// in-memory Repo keyed on tenant id.
+	RepositoryForTenant service.RepositoryForTenant
 
 	// TOTPRecoveryPepper is the HMAC-SHA-256 key used to hash and
 	// verify recovery codes. Must be >= totp.MinRecoveryPepperBytes
@@ -91,6 +107,9 @@ func New(deps Deps) (http.Handler, func(), error) {
 	// Fail fast before any goroutines start so a misconfigured deploy
 	// never serves a single request.
 	if err := deps.Config.Validate(); err != nil {
+		return nil, noopStop, err
+	}
+	if err := validateIdentityMode(deps, logger); err != nil {
 		return nil, noopStop, err
 	}
 
@@ -217,7 +236,8 @@ func New(deps Deps) (http.Handler, func(), error) {
 		)
 	}
 
-	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, deps.Config)
+	orgSignupSvc := buildOrganizationSignupService(deps, auditLog, logger)
+	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, orgSignupSvc, deps.Config)
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {
@@ -274,6 +294,54 @@ func buildConnectHandlerOptions(cfg *config.Config) ([]connect.HandlerOption, er
 		return nil, err
 	}
 	return []connect.HandlerOption{connect.WithInterceptors(interceptor)}, nil
+}
+
+// validateIdentityMode enforces the per-deployment mode invariants at
+// boot. mode=single requires a DefaultTenantID (the bootstrap tenant
+// it pins all signups to). mode=multi requires the TenantAdmin and
+// RepositoryForTenant wiring so OrganizationSignup is actually
+// reachable; unrecognised modes are rejected outright to keep the
+// auth-surface reasoning unambiguous (decision log §1).
+func validateIdentityMode(deps Deps, logger *zap.Logger) error {
+	if deps.Config == nil {
+		return errors.New("identity mode: nil config")
+	}
+	mode := deps.Config.IdentityMode
+	switch mode {
+	case config.IdentityModeSingle:
+		if deps.Config.DefaultTenantID == "" {
+			return errors.New("identity mode=single requires GATEWAY_DEFAULT_TENANT_ID")
+		}
+		logger.Info("identity_mode_selected", zap.String("mode", mode), zap.String("default_tenant_id", deps.Config.DefaultTenantID))
+		return nil
+	case config.IdentityModeMulti:
+		if deps.TenantAdmin == nil || deps.RepositoryForTenant == nil {
+			return errors.New("identity mode=multi requires TenantAdmin and RepositoryForTenant")
+		}
+		logger.Info("identity_mode_selected", zap.String("mode", mode))
+		return nil
+	default:
+		return fmt.Errorf("identity mode: unknown value %q (expected %q or %q)",
+			mode, config.IdentityModeSingle, config.IdentityModeMulti)
+	}
+}
+
+// buildOrganizationSignupService returns the wired
+// OrganizationSignupService in `mode=multi`, or nil in `mode=single`.
+// The Connect handler treats nil as "disabled" and returns
+// CodeUnimplemented (per decision log §3).
+func buildOrganizationSignupService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *service.OrganizationSignupService {
+	if !deps.Config.IsMultiMode() {
+		return nil
+	}
+	return service.NewOrganizationSignupService(
+		deps.TenantAdmin,
+		deps.RepositoryForTenant,
+		deps.Config,
+		deps.Signer,
+		auditLog,
+		logger,
+	)
 }
 
 // wrapOAuthRegistry returns a registry whose Exchangers are wrapped

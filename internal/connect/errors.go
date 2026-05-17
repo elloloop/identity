@@ -73,6 +73,9 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrLocalAuthDisabled),
 		errors.Is(err, service.ErrOAuthDisabled):
 		return connect.NewError(connect.CodeUnavailable, err)
+
+	case errors.Is(err, service.ErrUnimplemented):
+		return connect.NewError(connect.CodeUnimplemented, err)
 	}
 
 	// Check for common error message patterns from the admin/group/help

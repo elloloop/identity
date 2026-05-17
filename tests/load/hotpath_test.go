@@ -177,6 +177,7 @@ func startLoadHarness(t *testing.T) *loadHarness {
 
 	cfg := &config.Config{
 		DefaultTenantID:               "load-test",
+		IdentityMode:                  config.IdentityModeSingle,
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

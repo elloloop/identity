@@ -31,6 +31,9 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/repo"
+	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
+	pgrepo "github.com/elloloop/identity/internal/repo/postgres"
+	"github.com/elloloop/identity/internal/service"
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
 	jwtfile "github.com/elloloop/identity/pkg/jwt/file"
 	jwtkmsaws "github.com/elloloop/identity/pkg/jwt/kmsaws"
@@ -187,18 +190,23 @@ func main() {
 		logger.Fatal("idv_provider_init_failed", zap.Error(err))
 	}
 
+	// ── Multi-mode tenant admin + per-tenant repo factory ────────────
+	tenantAdmin, repoForTenant := buildMultiModeWiring(cfg, db, logger)
+
 	// ── Build HTTP handler via shared wiring ─────────────────────────
 	chain, stopApp, err := app.New(app.Deps{
-		Config:             cfg,
-		Logger:             logger,
-		Signer:             signer,
-		Repo:               authRepo,
-		DB:                 dbAdapter,
-		Passkeys:           webauthnSvc,
-		TOTPKey:            totpKey,
-		TOTPRecoveryPepper: totpRecoveryPepper,
-		IDVProvider:        idvProvider,
-		MetricsRegistry:    prometheus.DefaultRegisterer,
+		Config:              cfg,
+		Logger:              logger,
+		Signer:              signer,
+		Repo:                authRepo,
+		DB:                  dbAdapter,
+		Passkeys:            webauthnSvc,
+		TOTPKey:             totpKey,
+		TOTPRecoveryPepper:  totpRecoveryPepper,
+		IDVProvider:         idvProvider,
+		MetricsRegistry:     prometheus.DefaultRegisterer,
+		TenantAdmin:         tenantAdmin,
+		RepositoryForTenant: repoForTenant,
 	})
 	if err != nil {
 		logger.Fatal("app_init_failed", zap.Error(err))
@@ -351,6 +359,48 @@ func buildKMSAWSSigner(ctx context.Context, cfg *config.Config, logger *zap.Logg
 	}
 	logger.Info("jwt_signer_kms_aws", zap.Strings("kids", kids), zap.String("active_kid", s.ActiveKID()))
 	return s, func() {}, nil
+}
+
+// buildMultiModeWiring returns the TenantAdmin + per-tenant repo
+// factory for OrganizationSignup. Returns (nil, nil) in single mode.
+//
+// In multi mode it dispatches on the persistence driver:
+//   - entdb: full TenantAdmin against tenant-shard-db's Admin handle.
+//   - postgres: degenerate PostgresTenantAdmin (slug uniqueness is
+//     enforced via the per-tenant Repository's CreateOrganization
+//     unique index — postgres has no cross-tenant registry concept).
+//   - memory: not supported; the bootstrap function fatals.
+//
+// app.New rejects mode=multi at boot if both returned values are nil.
+func buildMultiModeWiring(cfg *config.Config, db *entdb.DbClient, logger *zap.Logger) (service.TenantAdmin, service.RepositoryForTenant) {
+	if !cfg.IsMultiMode() {
+		return nil, nil
+	}
+	switch repo.Driver(cfg.RepoDriver) {
+	case repo.DriverEntDB:
+		return repo.NewTenantAdmin(db), func(tenantID string) service.Repository {
+			return entdbrepo.NewRepository(db, tenantID)
+		}
+	case repo.DriverPostgres:
+		return repo.NewPostgresTenantAdmin(), func(tenantID string) service.Repository {
+			pg, pgErr := pgrepo.New(context.Background(), pgrepo.Config{
+				DSN:         cfg.PostgresDSN,
+				MaxConns:    int32(cfg.PostgresMaxConns), // #nosec G115 -- config-bounded.
+				AutoMigrate: false,
+				TenantID:    tenantID,
+			})
+			if pgErr != nil {
+				logger.Error("postgres_per_tenant_repo_failed",
+					zap.String("tenant_id", tenantID), zap.Error(pgErr))
+				return nil
+			}
+			return pg
+		}
+	default:
+		logger.Fatal("identity_mode_multi_unsupported_driver",
+			zap.String("driver", cfg.RepoDriver))
+		return nil, nil
+	}
 }
 
 // syncLogger flushes the zap logger and intentionally swallows the sync error,

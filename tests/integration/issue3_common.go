@@ -98,6 +98,7 @@ func loginViaPassword(t *testing.T, h *issue3Harness, email, password string) *i
 func newIssue3TestConfig() *config.Config {
 	return &config.Config{
 		DefaultTenantID:               "test-tenant",
+		IdentityMode:                  config.IdentityModeSingle,
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,
