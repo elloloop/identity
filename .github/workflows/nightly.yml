@@ -54,7 +54,7 @@ jobs:
         # ignores env vars (CLI flags only, with defaults baked into
         # the entrypoint). TCP readiness is polled by the "Wait for"
         # step below.
-        image: ghcr.io/elloloop/tenant-shard-db:1.12.4
+        image: ghcr.io/elloloop/tenant-shard-db:1.13.1
         ports:
           - 50051:50051
     steps:
