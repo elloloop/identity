@@ -2,6 +2,7 @@ package jwt
 
 import (
 	"context"
+	"crypto/rsa"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -175,4 +176,53 @@ func TestAssertJWKSIncludesActiveKIDs(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error for drifted active kid")
 	}
+}
+
+// TestAssertJWKSIncludesActiveKIDs_NoActiveKID covers the empty-kid path.
+func TestAssertJWKSIncludesActiveKIDs_NoActiveKID(t *testing.T) {
+	t.Parallel()
+	s := newMemSigner(t, "primary")
+	s.activeKID = ""
+	if err := AssertJWKSIncludesActiveKIDs(s, time.Now()); err == nil {
+		t.Fatalf("expected error for empty active kid")
+	}
+}
+
+// TestAssertJWKSIncludesActiveKIDs_JWKSError covers the rendering-error
+// path: a malformed public key surfaces from JWKS rendering and the
+// assertion propagates it.
+func TestAssertJWKSIncludesActiveKIDs_JWKSError(t *testing.T) {
+	t.Parallel()
+	s := &brokenSigner{}
+	if err := AssertJWKSIncludesActiveKIDs(s, time.Now()); err == nil {
+		t.Fatalf("expected JWKS rendering error")
+	}
+}
+
+// TestJWKS_RenderError covers the rsa.PublicKey-with-nil-N failure path.
+func TestJWKS_RenderError(t *testing.T) {
+	t.Parallel()
+	if _, err := JWKS(&brokenSigner{}); err == nil {
+		t.Fatalf("expected JWKS rendering error")
+	}
+}
+
+// brokenSigner emits a malformed RSA public key (nil modulus). jwk.FromRaw
+// rejects it without panicking — perfect for exercising the JWKS error
+// branch.
+type brokenSigner struct{}
+
+func (brokenSigner) ActiveKID() string { return "broken" }
+func (brokenSigner) Keys() []PublicKey {
+	return []PublicKey{{KID: "broken", Key: &rsa.PublicKey{}}}
+}
+
+func (brokenSigner) Get(_ string) (*rsa.PublicKey, bool) { return nil, false }
+
+func (brokenSigner) SignAccessToken(_ context.Context, _ Claims, _ time.Duration) (string, error) {
+	return "", nil
+}
+
+func (brokenSigner) SignClaims(_ context.Context, _ map[string]any) (string, error) {
+	return "", nil
 }

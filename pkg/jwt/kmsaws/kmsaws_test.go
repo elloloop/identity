@@ -90,6 +90,41 @@ func (f *fakeKMS) Sign(_ context.Context, in *kms.SignInput, _ ...func(*kms.Opti
 	}, nil
 }
 
+// TestKMSSigner_KeysAndJWKS confirms the public-key snapshot the
+// JWKS endpoint consumes is populated end-to-end.
+func TestKMSSigner_KeysAndJWKS(t *testing.T) {
+	f := newFakeKMS()
+	f.addKey(t, "arn:a")
+	f.addKey(t, "arn:b")
+	s, err := New(context.Background(), Config{
+		API: f,
+		Keys: []KeyRef{
+			{KID: "a", KeyARN: "arn:a", NotBefore: time.Now().Add(-time.Hour), ExpiresAt: time.Now().Add(time.Hour)},
+			{KID: "b", KeyARN: "arn:b", NotBefore: time.Now().Add(-time.Minute), ExpiresAt: time.Now().Add(24 * time.Hour)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	pubs := s.Keys()
+	if len(pubs) != 2 {
+		t.Fatalf("Keys = %d, want 2", len(pubs))
+	}
+	jwksBytes, err := jwt.JWKS(s)
+	if err != nil {
+		t.Fatalf("JWKS: %v", err)
+	}
+	if len(jwksBytes) == 0 {
+		t.Fatalf("empty JWKS")
+	}
+	if pub, ok := s.Get("a"); !ok || pub == nil {
+		t.Fatalf("Get(a) = %v %v", pub, ok)
+	}
+	if _, ok := s.Get("nope"); ok {
+		t.Fatalf("Get(nope) = true")
+	}
+}
+
 func TestKMSSigner_SignAndVerify(t *testing.T) {
 	f := newFakeKMS()
 	f.addKey(t, "arn:k1")
@@ -299,6 +334,66 @@ func TestARNFromConfig_FingerprintsBareARN(t *testing.T) {
 func TestARNFromConfig_Empty(t *testing.T) {
 	if _, err := ARNFromConfig(""); err == nil {
 		t.Fatalf("expected error for empty config")
+	}
+}
+
+func TestKMSSigner_GetPublicKeyError(t *testing.T) {
+	// The fake returns ErrNotFound for an unknown ARN; New() must
+	// surface that error.
+	f := newFakeKMS()
+	_, err := New(context.Background(), Config{
+		API:  f,
+		Keys: []KeyRef{{KID: "k", KeyARN: "arn:missing"}},
+	})
+	if err == nil {
+		t.Fatalf("expected error from GetPublicKey on missing ARN")
+	}
+}
+
+func TestKMSSigner_NilAPI(t *testing.T) {
+	if _, err := New(context.Background(), Config{
+		API:  nil,
+		Keys: []KeyRef{{KID: "k", KeyARN: "arn:k"}},
+	}); err == nil {
+		t.Fatalf("expected error for nil API")
+	}
+}
+
+func TestKMSSigner_MissingKID(t *testing.T) {
+	f := newFakeKMS()
+	f.addKey(t, "arn:k")
+	if _, err := New(context.Background(), Config{
+		API:  f,
+		Keys: []KeyRef{{KeyARN: "arn:k"}},
+	}); err == nil {
+		t.Fatalf("expected error for missing kid")
+	}
+}
+
+func TestKMSSigner_MissingARN(t *testing.T) {
+	f := newFakeKMS()
+	if _, err := New(context.Background(), Config{
+		API:  f,
+		Keys: []KeyRef{{KID: "k"}},
+	}); err == nil {
+		t.Fatalf("expected error for missing ARN")
+	}
+}
+
+func TestARNFromConfig_HandlesBlankEntries(t *testing.T) {
+	refs, err := ARNFromConfig(", kid1=arn1 , ,kid2=arn2,")
+	if err != nil {
+		t.Fatalf("ARNFromConfig: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("len = %d, want 2 (entries=%v)", len(refs), refs)
+	}
+}
+
+func TestARNFromConfig_RejectsEmptyARN(t *testing.T) {
+	// "kid=" leaves an empty ARN, which must be rejected.
+	if _, err := ARNFromConfig("kid="); err == nil {
+		t.Fatalf("expected error for empty arn")
 	}
 }
 

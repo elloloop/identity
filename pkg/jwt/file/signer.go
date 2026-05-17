@@ -223,8 +223,70 @@ func (s *Signer) SignClaims(_ context.Context, claims map[string]any) (string, e
 	return string(signed), nil
 }
 
-// GenerateAndWrite is a convenience used by tests and the smoke harness
-// when no keys file is supplied: it creates a fresh RSA-2048 key,
+// GenerateInMemory constructs a Signer with a freshly-generated RSA
+// key. The key never touches disk. This is the dev-fallback path
+// cmd/identity uses when no keys file is configured — the scratch
+// Docker image has no /tmp to write to, and a deployer who hasn't
+// set GATEWAY_JWT_KEYS_FILE never wanted persistent keys anyway.
+//
+// Production deployments always set GATEWAY_JWT_KEYS_FILE; this
+// fallback exists only so a freshly-pulled binary boots cleanly.
+func GenerateInMemory(kid string, validFor time.Duration, opts Options) (*Signer, error) {
+	if kid == "" {
+		return nil, errors.New("kid is required")
+	}
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, fmt.Errorf("generating RSA key: %w", err)
+	}
+
+	now := time.Now().UTC()
+	notBefore := now.Add(-time.Minute)
+	var expiresAt time.Time
+	if validFor > 0 {
+		expiresAt = now.Add(validFor)
+	}
+
+	signKey, err := jwk.FromRaw(priv)
+	if err != nil {
+		return nil, fmt.Errorf("convert to jwk: %w", err)
+	}
+	if err := signKey.Set(jwk.KeyIDKey, kid); err != nil {
+		return nil, fmt.Errorf("set kid: %w", err)
+	}
+	if err := signKey.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
+		return nil, fmt.Errorf("set alg: %w", err)
+	}
+
+	pk := parsedKey{
+		pub: jwt.PublicKey{
+			KID:       kid,
+			Key:       &priv.PublicKey,
+			NotBefore: notBefore,
+			ExpiresAt: expiresAt,
+		},
+		priv:    priv,
+		signKey: signKey,
+	}
+	snap := &keySnapshot{
+		keys:      []parsedKey{pk},
+		byKID:     map[string]parsedKey{kid: pk},
+		activeKID: kid,
+	}
+
+	s := &Signer{
+		now:    opts.Now,
+		logger: opts.Logf,
+	}
+	if s.now == nil {
+		s.now = func() time.Time { return time.Now().UTC() }
+	}
+	s.snap.Store(snap)
+	return s, nil
+}
+
+// GenerateAndWrite is a convenience used by tests when they specifically
+// want a keys.json file on disk: it creates a fresh RSA-2048 key,
 // writes a one-entry keys file at path, and returns the resulting
 // Signer. Production deployments always ship their own keys file.
 func GenerateAndWrite(path, kid string, validFor time.Duration, opts Options) (*Signer, error) {

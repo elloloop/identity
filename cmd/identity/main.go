@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -290,28 +289,21 @@ func buildFileSigner(cfg *config.Config, logger *zap.Logger) (jwtpkg.Signer, fun
 
 	path := cfg.JWTKeysFile
 	if path == "" {
-		// Dev fallback: generate a throwaway key in a temp file so the
-		// service still starts without external setup. NEVER do this in
+		// Dev fallback: generate a throwaway key in-memory so the
+		// service still starts without external setup. The scratch
+		// container image has no writable temp dir, so we deliberately
+		// avoid touching the filesystem here. NEVER use this in
 		// production — the warning log is loud on purpose.
-		tmpDir, err := os.MkdirTemp("", "identity-jwt-dev-")
-		if err != nil {
-			return nil, func() {}, fmt.Errorf("creating dev keys dir: %w", err)
-		}
-		path = filepath.Join(tmpDir, "keys.json")
-		s, err := jwtfile.GenerateAndWrite(path, "dev", 365*24*time.Hour, logOpt)
+		s, err := jwtfile.GenerateInMemory("dev", 365*24*time.Hour, logOpt)
 		if err != nil {
 			return nil, func() {}, fmt.Errorf("generating dev signing key: %w", err)
 		}
 		logger.Warn(
 			"jwt_signer_dev_key_generated",
-			zap.String("path", path),
 			zap.String("kid", s.ActiveKID()),
 			zap.String("hint", "set GATEWAY_JWT_KEYS_FILE for any non-dev deployment"),
 		)
-		stop := func() {
-			_ = os.RemoveAll(tmpDir)
-		}
-		return s, stop, nil
+		return s, func() {}, nil
 	}
 
 	s, err := jwtfile.New(path, logOpt)
