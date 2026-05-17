@@ -59,8 +59,9 @@ type entClient interface {
 	// `equals`; on mismatch it returns errPreconditionFailed without
 	// touching the row. The serialization point for state-machine
 	// transitions where two replicas must not both win — e.g. the
-	// QR-login approved→consumed transition. Backed by the SDK's
-	// Plan.UpdateIf primitive (tenant-shard-db v1.12+).
+	// QR-login approved→consumed transition and the refresh-token
+	// unconsumed→consumed transition. Backed by the SDK's Plan.UpdateIf
+	// primitive (tenant-shard-db v1.13.1+ for the schemaless-mode fix).
 	updateIf(ctx context.Context, actor string, nodeID string, msg proto.Message, field string, equals any) error
 	delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error
 	// deleteExpired removes up to limit rows of the witness type whose
@@ -88,8 +89,9 @@ var errNotFound = errors.New("entdb: not found")
 // errPreconditionFailed is returned by entClient.updateIf when the
 // node's current field value did not match the expected value. Callers
 // in repo.go map this to the service-layer sentinel that triggers
-// "lost the race" semantics (e.g. service.ErrQrLoginNotPending). The
-// production sdkScope path unwraps the SDK's typed
+// "lost the race" semantics (service.ErrQrLoginNotPending for the QR
+// transition, service.ErrUnauthenticated for the refresh-token
+// rotation race). The production sdkScope path unwraps the SDK's typed
 // *entdb.PreconditionFailure into this sentinel so the upstream type
 // stays out of the Repository layer.
 var errPreconditionFailed = errors.New("entdb: precondition failed")

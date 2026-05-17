@@ -593,16 +593,31 @@ func (r *entRepository) FindRefreshTokenByHashIncludingConsumed(ctx context.Cont
 	return refreshTokenFromProto(id, dst), nil
 }
 
+// ConsumeRefreshTokenByHash atomically marks the row consumed iff it
+// is currently unconsumed (consumed_at == 0). The CAS precondition is
+// the serialization point: two replicas racing to rotate the same
+// refresh token both submit UpdateIf(consumed_at == 0); exactly one
+// commits and the other observes ErrUnauthenticated. Matches the
+// Postgres backend's `UPDATE ... WHERE consumed_at_ms = 0` pattern.
 func (r *entRepository) ConsumeRefreshTokenByHash(ctx context.Context, hash string, atMs int64) error {
+	if hash == "" {
+		return service.ErrUnauthenticated
+	}
 	rec, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, hash)
 	if err != nil {
 		return fmt.Errorf("repo: ConsumeRefreshTokenByHash: %w", err)
 	}
-	if rec == nil || rec.ConsumedAtMs > 0 {
+	if rec == nil {
 		return service.ErrUnauthenticated
 	}
 	patch := &schemapb.RefreshToken{ConsumedAt: atMs}
-	if err := r.client.update(ctx, systemActor, rec.NodeID, patch); err != nil {
+	if err := r.client.updateIf(ctx, systemActor, rec.NodeID, patch, "consumed_at", int64(0)); err != nil {
+		if errors.Is(err, errPreconditionFailed) {
+			// Another replica rotated this token first, or the row was
+			// already consumed when we re-read above. Service layer
+			// treats both as a replay/race loss.
+			return service.ErrUnauthenticated
+		}
 		return fmt.Errorf("repo: ConsumeRefreshTokenByHash: %w", err)
 	}
 	return nil

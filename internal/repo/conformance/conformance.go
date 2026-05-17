@@ -321,6 +321,65 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("RefreshToken_ConsumeCAS_RaceSingleWinner", func(t *testing.T) {
+			// Drives ConsumeRefreshTokenByHash from N goroutines against
+			// the same unconsumed token. Exactly one goroutine must win;
+			// all others must observe ErrUnauthenticated. The repository
+			// is the serialization point — this is the cross-driver
+			// equivalent of the multi-replica refresh-rotation race
+			// issue #24 fixes.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "rt-race@example.com")
+			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
+				TokenHash:  "rt-race-1",
+				UserID:     userID,
+				ExpiresAt:  9_000_000_000_000,
+				CreatedAt:  100,
+				LastUsedAt: 100,
+			}); err != nil {
+				t.Fatalf("CreateRefreshToken: %v", err)
+			}
+
+			const N = 8
+			results := make(chan error, N)
+			start := make(chan struct{})
+			for i := 0; i < N; i++ {
+				go func() {
+					<-start
+					results <- r.ConsumeRefreshTokenByHash(ctx, "rt-race-1", 200)
+				}()
+			}
+			close(start)
+
+			winners := 0
+			losers := 0
+			for i := 0; i < N; i++ {
+				err := <-results
+				switch {
+				case err == nil:
+					winners++
+				case errors.Is(err, service.ErrUnauthenticated):
+					losers++
+				default:
+					t.Errorf("loser got unexpected error: %v", err)
+				}
+			}
+			if winners != 1 {
+				t.Fatalf("ConsumeRefreshTokenByHash winners = %d, want 1 (losers=%d)", winners, losers)
+			}
+			if losers != N-1 {
+				t.Fatalf("ConsumeRefreshTokenByHash losers = %d, want %d", losers, N-1)
+			}
+			got, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, "rt-race-1")
+			if err != nil || got == nil {
+				t.Fatalf("Find post-race: err=%v got=%#v", err, got)
+			}
+			if got.ConsumedAtMs == 0 {
+				t.Fatalf("final consumed_at_ms = 0, want non-zero (post-race row should be consumed)")
+			}
+		})
+
 		t.Run("RefreshToken_DeleteForUser", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
