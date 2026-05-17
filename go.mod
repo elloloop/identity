@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	connectrpc.com/connect v1.19.2
 	connectrpc.com/otelconnect v0.9.0
-	github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.12.4
+	github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.13.1
 	github.com/go-webauthn/webauthn v0.17.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
