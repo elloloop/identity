@@ -166,12 +166,13 @@ func TestSweepers_RejectsNonPositiveLimit(t *testing.T) {
 }
 
 // TestExpiresAtSweepSpec pins the (type id, expires_at field id)
-// table the raw-transport sweeper depends on. The values must match
-// the proto schema (proto/identity/schema/schema.proto): drifting
-// either side silently breaks the sweep against a real EntDB while
-// the in-memory tests stay green because the fake uses proto
-// reflection instead of the raw field-id map. Pin both directions
-// (every sweep target maps; non-sweep types return ok=false).
+// table the sweeper's DeleteWhere Filter depends on. The values must
+// match the proto schema (proto/identity/schema/schema.proto):
+// drifting the field id silently breaks the sweep against a real
+// EntDB while the in-memory tests stay green because the fake uses
+// proto reflection instead of the numeric field id. Pin both
+// directions (every sweep target maps; non-sweep types return
+// ok=false).
 func TestExpiresAtSweepSpec(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

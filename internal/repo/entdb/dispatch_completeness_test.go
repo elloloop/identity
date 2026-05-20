@@ -42,14 +42,11 @@ import (
 // A missing case is the exact regression #85 fixed.
 //
 // The sweeper dispatch is also covered: every schemapb type passed
-// to r.client.deleteExpired in sweeper.go must appear as a case in
-// client.go's expiresAtSweepSpec helper, which returns the (type id,
-// expires_at field id) pair the raw QueryNodes/ExecuteAtomic path
-// needs. Identity stays on this raw-transport pattern because
-// tenant-shard-db v1.14.0's typed DeleteWhere[T] requires
-// schema-aware field-name resolution (upstream
-// elloloop/tenant-shard-db#545) which the schemaless server
-// rejects.
+// to r.client.deleteExpired in sweeper.go must appear both as a case
+// in sdkScope.deleteExpired's DeleteWhere[T] switch and as a case in
+// client.go's expiresAtSweepSpec helper, which returns the expires_at
+// field id the DeleteWhere Filter is keyed by. A type present in one
+// but not the other would sweep the wrong field or panic at runtime.
 func TestDispatchCompleteness(t *testing.T) {
 	root, err := repoRoot()
 	if err != nil {
@@ -95,7 +92,8 @@ func TestDispatchCompleteness(t *testing.T) {
 	}
 
 	// Sweeper dispatch: every schemapb type passed to
-	// r.client.deleteExpired in sweeper.go must appear as a case in
+	// r.client.deleteExpired in sweeper.go must appear both in
+	// sdkScope.deleteExpired's DeleteWhere[T] switch and in
 	// client.go's expiresAtSweepSpec helper.
 	sweepTypes, err := schemapbTypesPassedToDeleteExpired(sweeperGoPath)
 	if err != nil {
@@ -104,6 +102,24 @@ func TestDispatchCompleteness(t *testing.T) {
 	if len(sweepTypes) == 0 {
 		t.Fatalf("sweeper.go scan found no schemapb types — scanner is broken")
 	}
+	if len(dispatched["deleteExpired"]) == 0 {
+		t.Fatalf("client.go: sdkScope.deleteExpired has no proto-type cases — scanner is broken")
+	}
+	missingSwitch := []string{}
+	for tn := range sweepTypes {
+		if !dispatched["deleteExpired"][tn] {
+			missingSwitch = append(missingSwitch, tn)
+		}
+	}
+	sort.Strings(missingSwitch)
+	if len(missingSwitch) > 0 {
+		t.Errorf(
+			"sdkScope.deleteExpired switch is missing case for: %s\n"+
+				"every schemapb type passed to r.client.deleteExpired in sweeper.go must be in client.go's DeleteWhere[T] switch",
+			strings.Join(missingSwitch, ", "),
+		)
+	}
+
 	sweepDispatched, err := typesInSweepSpec(clientGoPath)
 	if err != nil {
 		t.Fatalf("scan expiresAtSweepSpec: %v", err)
@@ -247,8 +263,9 @@ func schemapbCompositeTypeName(e ast.Expr) string {
 }
 
 // dispatchedTypesByMethod parses client.go and returns, for each of
-// sdkScope.{get, query, delete}, the set of schemapb.X type names
-// appearing as `case *schemapb.X:` arms in the method's type switch.
+// sdkScope.{get, query, delete, deleteExpired}, the set of schemapb.X
+// type names appearing as `case *schemapb.X:` arms in the method's
+// type switch.
 func dispatchedTypesByMethod(path string) (map[string]map[string]bool, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
@@ -256,9 +273,10 @@ func dispatchedTypesByMethod(path string) (map[string]map[string]bool, error) {
 		return nil, err
 	}
 	out := map[string]map[string]bool{
-		"get":    {},
-		"query":  {},
-		"delete": {},
+		"get":           {},
+		"query":         {},
+		"delete":        {},
+		"deleteExpired": {},
 	}
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
