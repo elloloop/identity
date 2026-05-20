@@ -325,8 +325,15 @@ jobs:
         run: go test -race -timeout=300s -skip='^TestConformance$' ./internal/repo/postgres/...
 
   # ---------------------------------------------------------------------------
-  # 6. Fuzz smoke — quick fuzz on every PR.
+  # 6. Fuzz smoke — replay the seed corpus on every PR.
   # ---------------------------------------------------------------------------
+  # Per-PR fuzzing replays the committed seed corpus deterministically: every
+  # fuzz target runs as an ordinary subtest (no `-fuzz`), so a regression of any
+  # known crash fails the PR reproducibly. Live fuzzing (`-fuzz`) is left to the
+  # nightly job, which has a generous per-target budget. Time-boxed live fuzzing
+  # on a shared PR runner fails non-deterministically with "context deadline
+  # exceeded" when a worker is mid-execution as the budget expires — a flake that
+  # depends on runner load, not on any input, and blocks unrelated PRs.
   fuzz:
     name: Fuzz smoke
     runs-on: ubuntu-latest
@@ -339,29 +346,20 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Discover and run fuzz targets (seed corpus + 15s each)
+      - name: Replay fuzz seed corpus
         shell: bash
         run: |
           set -euo pipefail
-          # Each fuzz target is its own `go test -fuzz=` invocation because
-          # `-fuzz` only accepts a single name.
-          mapfile -t targets < <(
-            grep -rEn --include='*_test.go' '^func (Fuzz[A-Za-z0-9_]+)\(' . \
-              | sed -E 's|^(.*)/[^/]+:[0-9]+:func (Fuzz[A-Za-z0-9_]+).*$|\1\t\2|' \
+          mapfile -t pkgs < <(
+            grep -rEl --include='*_test.go' '^func Fuzz[A-Za-z0-9_]+\(' . \
+              | sed -E 's|/[^/]+$||' \
               | sort -u
           )
-          if [[ ${#targets[@]} -eq 0 ]]; then
+          if [[ ${#pkgs[@]} -eq 0 ]]; then
             echo "no fuzz targets — skipping"
             exit 0
           fi
-          for entry in "${targets[@]}"; do
-            dir="${entry%$'\t'*}"
-            name="${entry##*$'\t'}"
-            echo "::group::fuzz $name in $dir"
-            go test -run="^${name}$" -timeout=120s "./$dir"
-            go test -run='^$' -fuzz="^${name}$" -fuzztime=15s -parallel=4 -timeout=120s "./$dir"
-            echo "::endgroup::"
-          done
+          go test -race -timeout=120s "${pkgs[@]}"
 
   # ---------------------------------------------------------------------------
   # 7. Container build smoke — multi-arch base reachable, Dockerfile builds.
