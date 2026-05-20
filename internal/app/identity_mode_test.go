@@ -61,7 +61,7 @@ func TestIdentityModeGuard_UnknownMode_Rejected(t *testing.T) {
 	deps := newSingleModeDeps(t)
 	deps.Config.IdentityMode = "wat"
 
-	_, _, err := New(deps)
+	_, err := New(deps)
 	if err == nil {
 		t.Fatalf("expected error for unknown mode, got nil")
 	}
@@ -74,7 +74,7 @@ func TestIdentityModeGuard_Single_RequiresDefaultTenant(t *testing.T) {
 	deps := newSingleModeDeps(t)
 	deps.Config.DefaultTenantID = ""
 
-	_, _, err := New(deps)
+	_, err := New(deps)
 	if err == nil {
 		t.Fatalf("expected error for missing default tenant, got nil")
 	}
@@ -88,7 +88,7 @@ func TestIdentityModeGuard_Multi_RequiresTenantAdminAndFactory(t *testing.T) {
 	deps.Config.IdentityMode = config.IdentityModeMulti
 
 	// neither wired — both nil
-	_, _, err := New(deps)
+	_, err := New(deps)
 	if err == nil {
 		t.Fatalf("expected error for missing wiring in multi mode, got nil")
 	}
@@ -108,13 +108,11 @@ func TestIdentityModeGuard_Multi_WiredOK(t *testing.T) {
 		return memory.New()
 	}
 
-	_, stop, err := New(deps)
+	built, err := New(deps)
 	if err != nil {
 		t.Fatalf("expected successful boot in multi mode, got: %v", err)
 	}
-	if stop != nil {
-		t.Cleanup(stop)
-	}
+	t.Cleanup(built.Stop)
 }
 
 // stubTenantAdmin is a no-op implementation used only to prove the

@@ -19,6 +19,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY cmd/    ./cmd/
+COPY identityserver/ ./identityserver/
 COPY internal/ ./internal/
 COPY pkg/    ./pkg/
 COPY gen/    ./gen/

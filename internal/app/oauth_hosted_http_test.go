@@ -57,7 +57,7 @@ func newHostedTestHandler(t *testing.T, allowlist string, reg *oauth.Registry) h
 		t.Fatalf("NewWebAuthnService: %v", err)
 	}
 	repo := memory.New()
-	handler, stop, err := New(Deps{
+	built, err := New(Deps{
 		Config: &config.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
 			DefaultTenantID:        "tenant",
 			IdentityMode:           config.IdentityModeSingle,
@@ -84,7 +84,9 @@ func newHostedTestHandler(t *testing.T, allowlist string, reg *oauth.Registry) h
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	t.Cleanup(stop)
+	built.Start()
+	handler := built.Handler
+	t.Cleanup(built.Stop)
 	return handler
 }
 

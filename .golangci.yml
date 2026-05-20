@@ -73,7 +73,7 @@ linters:
         linters:
           - nilnil
       # Provider factory: nil + nil intentionally signals "disabled".
-      - path: cmd/identity/idv\.go
+      - path: identityserver/adapters\.go
         linters:
           - nilnil
 
