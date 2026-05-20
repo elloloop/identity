@@ -982,6 +982,84 @@ func (r *entRepository) ConsumeQrLoginSession(ctx context.Context, nodeID string
 	return nil
 }
 
+// ── OAuth one-time codes ──────────────────────────────────────────
+
+func oauthOneTimeCodeFromProto(id string, p *schemapb.OAuthOneTimeCode) *service.OAuthOneTimeCodeRecord {
+	if p == nil {
+		return nil
+	}
+	return &service.OAuthOneTimeCodeRecord{
+		NodeID:     id,
+		CodeHash:   p.GetCodeHash(),
+		UserID:     p.GetUserId(),
+		ExpiresAt:  p.GetExpiresAt(),
+		CreatedAt:  p.GetCreatedAt(),
+		ConsumedAt: p.GetConsumedAt(),
+	}
+}
+
+func (r *entRepository) CreateOAuthOneTimeCode(ctx context.Context, c *service.OAuthOneTimeCodeRecord) (string, error) {
+	if c == nil {
+		return "", errors.New("repo: CreateOAuthOneTimeCode: nil record")
+	}
+	msg := &schemapb.OAuthOneTimeCode{
+		CodeHash:   c.CodeHash,
+		UserId:     c.UserID,
+		ExpiresAt:  c.ExpiresAt,
+		CreatedAt:  c.CreatedAt,
+		ConsumedAt: c.ConsumedAt,
+	}
+	id, err := r.client.create(ctx, actorStr(c.UserID), msg)
+	if err != nil {
+		return "", fmt.Errorf("repo: CreateOAuthOneTimeCode: %w", err)
+	}
+	c.NodeID = id
+	return id, nil
+}
+
+// ConsumeOAuthOneTimeCode resolves the code by its unique code_hash,
+// rejects an already-consumed or expired code, then flips consumed_at
+// via the SDK's UpdateIf compare-and-set gated on consumed_at == 0.
+// Two replicas racing the same code resolve to exactly one winner; the
+// loser's plan aborts with ErrPreconditionFailed and this method
+// returns service.ErrOAuthCodeInvalid — the same shape a replay sees.
+func (r *entRepository) ConsumeOAuthOneTimeCode(ctx context.Context, codeHash string, atMs int64) (*service.OAuthOneTimeCodeRecord, error) {
+	if codeHash == "" {
+		return nil, service.ErrOAuthCodeInvalid
+	}
+	dst := &schemapb.OAuthOneTimeCode{}
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.OAuthOneTimeCodeCodeHash, codeHash, dst)
+	if errors.Is(err, errNotFound) {
+		return nil, service.ErrOAuthCodeInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repo: ConsumeOAuthOneTimeCode: %w", err)
+	}
+	if dst.GetConsumedAt() != 0 || dst.GetExpiresAt() <= atMs {
+		return nil, service.ErrOAuthCodeInvalid
+	}
+
+	// The precondition value is nil (not int64(0)) because a proto3
+	// int64 with the zero value is not serialized on the wire and so is
+	// absent from the EntDB payload; the server applier matches an absent
+	// field only against a nil expected value. This mirrors
+	// ConsumeRefreshTokenByHash. After consumption the field carries the
+	// timestamp, which is non-nil and so loses the nil precondition on a
+	// replay.
+	patch := &schemapb.OAuthOneTimeCode{ConsumedAt: atMs}
+	err = r.client.updateIf(ctx, systemActor, id, patch, "consumed_at", nil)
+	if errors.Is(err, errPreconditionFailed) {
+		return nil, service.ErrOAuthCodeInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repo: ConsumeOAuthOneTimeCode: %w", err)
+	}
+
+	rec := oauthOneTimeCodeFromProto(id, dst)
+	rec.ConsumedAt = atMs
+	return rec, nil
+}
+
 // ── TOTP credentials ──────────────────────────────────────────────
 
 func totpCredFromProto(id string, p *schemapb.TotpCredential) *service.TotpCredRecord {

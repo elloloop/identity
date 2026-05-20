@@ -12,6 +12,10 @@ import (
 var AuthExemptPaths = map[string]bool{
 	"/identity.IdentityService/BeginOAuthLogin":      true,
 	"/identity.IdentityService/OAuthLogin":           true,
+	// RedeemOAuthCode trades the hosted-flow one-time code for tokens;
+	// the caller is anonymous until the code is redeemed, so it cannot
+	// carry a JWT.
+	"/identity.IdentityService/RedeemOAuthCode":      true,
 	"/identity.IdentityService/PasswordLogin":        true,
 	"/identity.IdentityService/PasswordSignup":       true,
 	"/identity.IdentityService/RefreshToken":         true,
@@ -44,6 +48,20 @@ var AuthExemptPaths = map[string]bool{
 	"/healthz":                                     true,
 }
 
+// hostedOAuthPrefix is the path prefix for the browser-facing hosted
+// OAuth routes (GET /oauth/start/{provider}, GET /oauth/callback/
+// {provider}). These are unauthenticated by design — the user is mid
+// sign-in and has no JWT yet — so they are exempt as a prefix rather
+// than per-exact-path (the {provider} segment varies).
+const hostedOAuthPrefix = "/oauth/"
+
+// isAuthExempt reports whether path bypasses JWT enforcement: either an
+// exact-match entry in AuthExemptPaths or any path under the hosted
+// OAuth prefix.
+func isAuthExempt(path string) bool {
+	return AuthExemptPaths[path] || strings.HasPrefix(path, hostedOAuthPrefix)
+}
+
 // AuthMiddleware verifies JWT Bearer tokens on non-exempt paths and injects the
 // authenticated user ID into the X-Authenticated-User-Id request header so
 // downstream Connect handlers can read it.
@@ -64,7 +82,7 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience stri
 			path := r.URL.Path
 
 			// Skip auth for exempt paths.
-			if AuthExemptPaths[path] {
+			if isAuthExempt(path) {
 				// Still try to parse auth if present (for GetCurrentUser).
 				if token := extractBearerToken(r); token != "" {
 					if claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience); err == nil {

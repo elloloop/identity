@@ -1999,6 +1999,96 @@ func (x *IdentityVerificationRecord) GetRejectionReason() string {
 	return ""
 }
 
+// ─── OAuthOneTimeCode (type_id 36) ─────────────────────────────────────
+//
+// The single-use handover artifact for the hosted OAuth flow. After the
+// hosted callback (GET /oauth/callback/{provider}) completes the code
+// exchange and authenticates the user, it mints an opaque one-time code,
+// stores its SHA-256 hash here keyed to the user, and 302-redirects the
+// browser to return_to?code=<otc>. The SPA exchanges the code via the
+// RedeemOAuthCode RPC, which atomically consumes this row (consumed_at
+// CAS from 0) and mints a fresh token pair.
+//
+// Only the user id + a short expiry are persisted — no token material is
+// stored at rest. Single-use is enforced by the consumed_at compare-and-
+// set so a replay (or two replicas racing the same code) yields exactly
+// one winner; losers see Unauthenticated.
+type OAuthOneTimeCode struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CodeHash      string                 `protobuf:"bytes,1,opt,name=code_hash,json=codeHash,proto3" json:"code_hash,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ExpiresAt     int64                  `protobuf:"varint,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ConsumedAt    int64                  `protobuf:"varint,5,opt,name=consumed_at,json=consumedAt,proto3" json:"consumed_at,omitempty"` // 0 = unconsumed
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OAuthOneTimeCode) Reset() {
+	*x = OAuthOneTimeCode{}
+	mi := &file_identity_schema_schema_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthOneTimeCode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthOneTimeCode) ProtoMessage() {}
+
+func (x *OAuthOneTimeCode) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_schema_schema_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthOneTimeCode.ProtoReflect.Descriptor instead.
+func (*OAuthOneTimeCode) Descriptor() ([]byte, []int) {
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *OAuthOneTimeCode) GetCodeHash() string {
+	if x != nil {
+		return x.CodeHash
+	}
+	return ""
+}
+
+func (x *OAuthOneTimeCode) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *OAuthOneTimeCode) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *OAuthOneTimeCode) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *OAuthOneTimeCode) GetConsumedAt() int64 {
+	if x != nil {
+		return x.ConsumedAt
+	}
+	return 0
+}
+
 type MemberOf struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -2007,7 +2097,7 @@ type MemberOf struct {
 
 func (x *MemberOf) Reset() {
 	*x = MemberOf{}
-	mi := &file_identity_schema_schema_proto_msgTypes[20]
+	mi := &file_identity_schema_schema_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2019,7 +2109,7 @@ func (x *MemberOf) String() string {
 func (*MemberOf) ProtoMessage() {}
 
 func (x *MemberOf) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[20]
+	mi := &file_identity_schema_schema_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2032,7 +2122,7 @@ func (x *MemberOf) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberOf.ProtoReflect.Descriptor instead.
 func (*MemberOf) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{20}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{21}
 }
 
 type UserPasskey struct {
@@ -2043,7 +2133,7 @@ type UserPasskey struct {
 
 func (x *UserPasskey) Reset() {
 	*x = UserPasskey{}
-	mi := &file_identity_schema_schema_proto_msgTypes[21]
+	mi := &file_identity_schema_schema_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2055,7 +2145,7 @@ func (x *UserPasskey) String() string {
 func (*UserPasskey) ProtoMessage() {}
 
 func (x *UserPasskey) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[21]
+	mi := &file_identity_schema_schema_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2068,7 +2158,7 @@ func (x *UserPasskey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPasskey.ProtoReflect.Descriptor instead.
 func (*UserPasskey) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{21}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{22}
 }
 
 type UserTotp struct {
@@ -2079,7 +2169,7 @@ type UserTotp struct {
 
 func (x *UserTotp) Reset() {
 	*x = UserTotp{}
-	mi := &file_identity_schema_schema_proto_msgTypes[22]
+	mi := &file_identity_schema_schema_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2091,7 +2181,7 @@ func (x *UserTotp) String() string {
 func (*UserTotp) ProtoMessage() {}
 
 func (x *UserTotp) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[22]
+	mi := &file_identity_schema_schema_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2104,7 +2194,7 @@ func (x *UserTotp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTotp.ProtoReflect.Descriptor instead.
 func (*UserTotp) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{22}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{23}
 }
 
 type UserRecoveryCode struct {
@@ -2115,7 +2205,7 @@ type UserRecoveryCode struct {
 
 func (x *UserRecoveryCode) Reset() {
 	*x = UserRecoveryCode{}
-	mi := &file_identity_schema_schema_proto_msgTypes[23]
+	mi := &file_identity_schema_schema_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2127,7 +2217,7 @@ func (x *UserRecoveryCode) String() string {
 func (*UserRecoveryCode) ProtoMessage() {}
 
 func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[23]
+	mi := &file_identity_schema_schema_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2140,7 +2230,7 @@ func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserRecoveryCode.ProtoReflect.Descriptor instead.
 func (*UserRecoveryCode) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{23}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{24}
 }
 
 var File_identity_schema_schema_proto protoreflect.FileDescriptor
@@ -2387,7 +2477,16 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\a \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tupdatedAt\x124\n" +
 	"\fcompleted_at\x18\b \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\vcompletedAt\x12k\n" +
-	"\x10rejection_reason\x18\t \x01(\tB@\xb2\xbb\x18< \x01R8Provider verdict reason; empty unless status = rejected.R\x0frejectionReason:Z\xa2\xbb\x18V\b :\auser_idRIA document + selfie identity-verification session tracked against a User.\">\n" +
+	"\x10rejection_reason\x18\t \x01(\tB@\xb2\xbb\x18< \x01R8Provider verdict reason; empty unless status = rejected.R\x0frejectionReason:Z\xa2\xbb\x18V\b :\auser_idRIA document + selfie identity-verification session tracked against a User.\"\xb3\x03\n" +
+	"\x10OAuthOneTimeCode\x12v\n" +
+	"\tcode_hash\x18\x01 \x01(\tBY\xb2\xbb\x18U\b\x01\x18\x01RKsha256(one-time code); plaintext is returned only in the callback redirect.`\x01h\x01R\bcodeHash\x12*\n" +
+	"\auser_id\x18\x02 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x124\n" +
+	"\n" +
+	"expires_at\x18\x03 \x01(\x03B\x15\xb2\xbb\x18\x11\b\x01\x18\x01:\ttimestamp`\x01R\texpiresAt\x122\n" +
+	"\n" +
+	"created_at\x18\x04 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt\x122\n" +
+	"\vconsumed_at\x18\x05 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
+	"consumedAt:]\xa2\xbb\x18Y\b$0\x04:\auser_idRJSingle-use, short-lived code handing a hosted-OAuth login back to the SPA.\">\n" +
 	"\bMemberOf:2\xaa\xbb\x18.\be\x12\tMEMBER_OFJ\x1fUser belongs to a working group\"F\n" +
 	"\vUserPasskey:7\xaa\xbb\x183\b\xd8\x01\x12\fUSER_PASSKEY0\x01J\x1eUser owns a passkey credential\"U\n" +
 	"\bUserTotp:I\xaa\xbb\x18E\b\xd9\x01\x12\tUSER_TOTP \x010\x01J1User has a TOTP credential (at most one per user)\"T\n" +
@@ -2405,7 +2504,7 @@ func file_identity_schema_schema_proto_rawDescGZIP() []byte {
 	return file_identity_schema_schema_proto_rawDescData
 }
 
-var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_identity_schema_schema_proto_goTypes = []any{
 	(*User)(nil),                       // 0: identity.schema.User
 	(*WorkingGroup)(nil),               // 1: identity.schema.WorkingGroup
@@ -2427,10 +2526,11 @@ var file_identity_schema_schema_proto_goTypes = []any{
 	(*OrganizationMembership)(nil),     // 17: identity.schema.OrganizationMembership
 	(*Session)(nil),                    // 18: identity.schema.Session
 	(*IdentityVerificationRecord)(nil), // 19: identity.schema.IdentityVerificationRecord
-	(*MemberOf)(nil),                   // 20: identity.schema.MemberOf
-	(*UserPasskey)(nil),                // 21: identity.schema.UserPasskey
-	(*UserTotp)(nil),                   // 22: identity.schema.UserTotp
-	(*UserRecoveryCode)(nil),           // 23: identity.schema.UserRecoveryCode
+	(*OAuthOneTimeCode)(nil),           // 20: identity.schema.OAuthOneTimeCode
+	(*MemberOf)(nil),                   // 21: identity.schema.MemberOf
+	(*UserPasskey)(nil),                // 22: identity.schema.UserPasskey
+	(*UserTotp)(nil),                   // 23: identity.schema.UserTotp
+	(*UserRecoveryCode)(nil),           // 24: identity.schema.UserRecoveryCode
 }
 var file_identity_schema_schema_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -2451,7 +2551,7 @@ func file_identity_schema_schema_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_identity_schema_schema_proto_rawDesc), len(file_identity_schema_schema_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -34,4 +34,6 @@ var (
 	OrganizationSlug = entdb.UniqueKey[string]{TypeID: 33, FieldID: 1, Name: "slug"}
 
 	SessionSid = entdb.UniqueKey[string]{TypeID: 35, FieldID: 1, Name: "sid"}
+
+	OAuthOneTimeCodeCodeHash = entdb.UniqueKey[string]{TypeID: 36, FieldID: 1, Name: "code_hash"}
 )

@@ -456,6 +456,18 @@ func TestOAuthLogin_LocalDisabled(t *testing.T) {
 	}
 }
 
+func TestRedeemOAuthCode_UnknownCodeUnauthenticated(t *testing.T) {
+	h := newHarness(t)
+	_, err := h.client.RedeemOAuthCode(context.Background(),
+		connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: "does-not-exist"}))
+	if err == nil {
+		t.Fatal("expected error redeeming unknown code")
+	}
+	if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("RedeemOAuthCode unknown code = %v, want Unauthenticated", got)
+	}
+}
+
 type connectOAuthExchanger struct{}
 
 func (connectOAuthExchanger) Exchange(context.Context, string, string) (*oauth.Identity, error) {

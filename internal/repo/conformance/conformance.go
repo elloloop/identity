@@ -714,6 +714,142 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("OAuthOneTimeCode_ConsumeCAS_HappyPathAndReplay", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "otc-consume@example.com")
+			id, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
+				CodeHash: "otc-hash-1", UserID: userID,
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if id == "" {
+				t.Fatal("CreateOAuthOneTimeCode did not return a node id")
+			}
+			rec, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-hash-1", 200)
+			if err != nil {
+				t.Fatalf("first Consume: want nil, got %v", err)
+			}
+			if rec == nil || rec.UserID != userID {
+				t.Fatalf("Consume returned wrong record: %#v", rec)
+			}
+			if rec.ConsumedAt != 200 {
+				t.Fatalf("ConsumedAt = %d, want 200", rec.ConsumedAt)
+			}
+			// Replay must fail with ErrOAuthCodeInvalid.
+			if _, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-hash-1", 300); !errors.Is(err, service.ErrOAuthCodeInvalid) {
+				t.Fatalf("replay Consume: want ErrOAuthCodeInvalid, got %v", err)
+			}
+		})
+
+		t.Run("OAuthOneTimeCode_ConsumeCAS_RejectsExpiredAndMissing", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "otc-expired@example.com")
+			// Expired code: expires_at <= atMs must be refused.
+			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
+				CodeHash: "otc-expired", UserID: userID,
+				ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create expired: %v", err)
+			}
+			if _, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-expired", 2_000); !errors.Is(err, service.ErrOAuthCodeInvalid) {
+				t.Fatalf("Consume expired: want ErrOAuthCodeInvalid, got %v", err)
+			}
+			// Unknown code: same shape.
+			if _, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-missing", 2_000); !errors.Is(err, service.ErrOAuthCodeInvalid) {
+				t.Fatalf("Consume missing: want ErrOAuthCodeInvalid, got %v", err)
+			}
+		})
+
+		t.Run("OAuthOneTimeCode_ConsumeCAS_RaceSingleWinner", func(t *testing.T) {
+			// Drives ConsumeOAuthOneTimeCode from N goroutines against the
+			// same code. Exactly one goroutine wins (and gets the record);
+			// all others see ErrOAuthCodeInvalid. The repository is the
+			// serialization point — the cross-driver equivalent of the
+			// multi-replica redeem race.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "otc-race@example.com")
+			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
+				CodeHash: "otc-race-1", UserID: userID,
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			const N = 8
+			type outcome struct {
+				rec *service.OAuthOneTimeCodeRecord
+				err error
+			}
+			results := make(chan outcome, N)
+			start := make(chan struct{})
+			for i := 0; i < N; i++ {
+				go func() {
+					<-start
+					rec, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-race-1", 200)
+					results <- outcome{rec, err}
+				}()
+			}
+			close(start)
+
+			winners := 0
+			losers := 0
+			for i := 0; i < N; i++ {
+				o := <-results
+				switch {
+				case o.err == nil:
+					winners++
+					if o.rec == nil || o.rec.UserID != userID {
+						t.Errorf("winner got wrong record: %#v", o.rec)
+					}
+				case errors.Is(o.err, service.ErrOAuthCodeInvalid):
+					losers++
+				default:
+					t.Errorf("loser got unexpected error: %v", o.err)
+				}
+			}
+			if winners != 1 {
+				t.Fatalf("ConsumeOAuthOneTimeCode winners = %d, want 1 (losers=%d)", winners, losers)
+			}
+			if losers != N-1 {
+				t.Fatalf("ConsumeOAuthOneTimeCode losers = %d, want %d", losers, N-1)
+			}
+		})
+
+		t.Run("OAuthOneTimeCode_DeleteExpired", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "otc-sweep@example.com")
+			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
+				CodeHash: "otc-old", UserID: userID, ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create old: %v", err)
+			}
+			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
+				CodeHash: "otc-fresh", UserID: userID, ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create fresh: %v", err)
+			}
+			if err := r.DeleteExpiredOAuthOneTimeCodes(ctx, 5_000, 100); err != nil {
+				t.Fatalf("DeleteExpired: %v", err)
+			}
+			// The expired code is gone (consume now fails); the fresh one
+			// survives (consume succeeds).
+			if _, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-old", 6_000); !errors.Is(err, service.ErrOAuthCodeInvalid) {
+				t.Fatalf("Consume swept code: want ErrOAuthCodeInvalid, got %v", err)
+			}
+			if _, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-fresh", 6_000); err != nil {
+				t.Fatalf("Consume surviving code: want nil, got %v", err)
+			}
+			if err := r.DeleteExpiredOAuthOneTimeCodes(ctx, 5_000, 0); err == nil {
+				t.Fatal("DeleteExpired with limit 0: want error, got nil")
+			}
+		})
+
 		t.Run("TotpCredential_CRUD", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)

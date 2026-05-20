@@ -498,5 +498,66 @@ before you ship.
      guardrails; the conformance suite and `Integration (real
      entdb)` cover the live-server path.
 
+10. **Hosted OAuth flow ships alongside the headless RPCs, off by
+    default.** Issue #126. identity offers two OAuth shapes and the
+    deployer picks; neither replaces the other.
+
+    - **Headless (existing).** The SPA supplies its own `redirect_uri`
+      to `BeginOAuthLogin`, hosts the provider callback page itself,
+      and posts the `?code=` back to `OAuthLogin`. The state token
+      (`pkg/oauth/state.go`) round-trips the PKCE verifier through the
+      SPA. Kept for native/mobile (custom URL schemes can't use a
+      hosted web callback cleanly) and for callers who want full
+      control. **Its shape is unchanged by this work** — no claim was
+      added to the headless state token.
+
+    - **Hosted (new).** `GET /oauth/start/{provider}?return_to=` and
+      `GET /oauth/callback/{provider}` are plain `http.Handler` routes
+      (not Connect RPCs — the browser is 302-redirected through them).
+      They are thin wrappers over the same `BeginOAuthLogin` /
+      `OAuthLogin` service internals; there is no forked exchange path.
+      The single redirect URI registered with the provider is
+      `<identity-origin>/oauth/callback/{provider}`, derived from the
+      request so `/start` and `/callback` agree.
+
+    Three deliberate choices inside the hosted flow:
+
+    - **One-time code, not fragment-token or cookie, for the SPA
+      handover.** The callback mints an opaque single-use code, stores
+      only its SHA-256 hash (proto type_id 36, `OAuthOneTimeCode`)
+      bound to the user id with a 60s TTL, and 302-redirects to
+      `return_to?code=<otc>`. The SPA exchanges it via the new
+      `RedeemOAuthCode` RPC, which atomically consumes the code
+      (`ConsumeOAuthOneTimeCode` — the same single-winner CAS shape as
+      the refresh-token and QR-login consume paths) and mints a fresh
+      token pair through the normal `issueTokens` path. **No token
+      material is persisted at rest** — only the user id is stored, so
+      a leaked code store yields nothing redeemable after the 60s
+      window or a single redeem. Chosen over URL-fragment tokens (leak
+      to browser history / `Referer`) and httpOnly cookies (awkward
+      cross-origin and unusable for native callers).
+
+    - **`return_to` is a separate signed artifact, not a headless
+      state-token claim.** The hosted state token
+      (`pkg/oauth/hosted_state.go`, `flow=hosted`) carries provider +
+      PKCE verifier + `return_to` and IS the OAuth `state` parameter,
+      so the callback recovers everything tamper-proof. It is distinct
+      from the headless state token precisely so binding `return_to`
+      did not become a breaking change to the headless flow.
+
+    - **`return_to` allowlist, fail-closed, disabled by default.**
+      `GATEWAY_OAUTH_ALLOWED_RETURN_URLS` is a comma-separated list of
+      exact origins / URL prefixes. A `return_to` is allowed only if it
+      equals or is prefixed by an entry; anything else is rejected with
+      400 at `/oauth/start` before any provider round-trip. **Empty
+      disables the hosted flow entirely** — the `/oauth/*` routes are
+      not registered (404) and only the headless RPCs work. This is the
+      provider-facing-redirect allowlist that did not exist before:
+      with the headless flow the SPA owned the redirect URI as a
+      free-form client param; now that identity owns the single
+      provider-facing redirect, "where to send the user back" becomes
+      an identity-side allowlist instead. The active allowlist is
+      logged at startup.
+
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

@@ -73,6 +73,31 @@ func (h *IdentityHandler) OAuthLogin(
 	return connect.NewResponse(resp), nil
 }
 
+// RedeemOAuthCode exchanges the single-use one-time code from the
+// hosted OAuth callback redirect for a backend-issued token pair. The
+// code is consumed atomically; a replay or expired code surfaces as
+// CodeUnauthenticated.
+func (h *IdentityHandler) RedeemOAuthCode(
+	ctx context.Context,
+	req *connect.Request[identitypb.RedeemOAuthCodeRequest],
+) (*connect.Response[identitypb.RedeemOAuthCodeResponse], error) {
+	ipAddr := clientIP(req.Header())
+	userAgent := clientUserAgent(req.Header())
+
+	result, err := h.auth.RedeemOAuthCode(ctx, req.Msg.Code, ipAddr, userAgent)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	resp := &identitypb.RedeemOAuthCodeResponse{
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // PasswordSignup creates a new user account with email and password.
 func (h *IdentityHandler) PasswordSignup(
 	ctx context.Context,

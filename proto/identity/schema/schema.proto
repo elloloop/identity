@@ -476,6 +476,35 @@ message IdentityVerificationRecord {
     string rejection_reason    = 9 [(entdb.field) = { pii: true, description: "Provider verdict reason; empty unless status = rejected." }];
 }
 
+// ─── OAuthOneTimeCode (type_id 36) ─────────────────────────────────────
+//
+// The single-use handover artifact for the hosted OAuth flow. After the
+// hosted callback (GET /oauth/callback/{provider}) completes the code
+// exchange and authenticates the user, it mints an opaque one-time code,
+// stores its SHA-256 hash here keyed to the user, and 302-redirects the
+// browser to return_to?code=<otc>. The SPA exchanges the code via the
+// RedeemOAuthCode RPC, which atomically consumes this row (consumed_at
+// CAS from 0) and mints a fresh token pair.
+//
+// Only the user id + a short expiry are persisted — no token material is
+// stored at rest. Single-use is enforced by the consumed_at compare-and-
+// set so a replay (or two replicas racing the same code) yields exactly
+// one winner; losers see Unauthenticated.
+message OAuthOneTimeCode {
+    option (entdb.node) = {
+        type_id: 36
+        data_policy: DATA_POLICY_EPHEMERAL
+        subject_field: "user_id"
+        description: "Single-use, short-lived code handing a hosted-OAuth login back to the SPA."
+    };
+
+    string code_hash  = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true, description: "sha256(one-time code); plaintext is returned only in the callback redirect." }];
+    string user_id    = 2 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    int64  expires_at = 3 [(entdb.field) = { required: true, kind: "timestamp", indexed: true, pii_false: true }];
+    int64  created_at = 4 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
+    int64  consumed_at = 5 [(entdb.field) = { kind: "timestamp", pii_false: true }]; // 0 = unconsumed
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Types
 // ═══════════════════════════════════════════════════════════════════════

@@ -341,7 +341,7 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
-			if AuthExemptPaths[path] {
+			if isAuthExempt(path) {
 				// Even on exempt paths we parse a present token so the
 				// downstream handler can read X-Authenticated-User-Id.
 				// When the token carries a sid claim AND we're in
