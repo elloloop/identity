@@ -11,3 +11,8 @@ plugins:
     opt:
       - paths=source_relative
       - Mentdb/entdb_options.proto=github.com/elloloop/identity/gen/go/entdb
+  - remote: buf.build/grpc/go:v1.5.1
+    out: gen/go
+    opt:
+      - paths=source_relative
+      - Mentdb/entdb_options.proto=github.com/elloloop/identity/gen/go/entdb

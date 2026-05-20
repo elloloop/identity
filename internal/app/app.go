@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -90,13 +91,48 @@ type Deps struct {
 	MetricsRegistry prometheus.Registerer
 }
 
-// New builds the full HTTP handler stack: middleware chain wrapping
-// the Connect-RPC handler. The returned shutdown func must be called
-// during graceful termination so background workers (audit flusher etc.)
-// drain cleanly. Configuration errors (e.g. invalid CORS origins) are
-// returned without starting the audit flusher.
-func New(deps Deps) (http.Handler, func(), error) {
-	noopStop := func() {}
+// Built is the result of New: the assembled identity service, ready to
+// mount and run. It separates construction (no goroutines) from the
+// background-worker lifecycle so the embedding consumer — the container
+// binary or a host server — controls when workers run via Start/Stop.
+//
+//   - Handler is the full middleware chain wrapping the Connect-RPC
+//     handler; mount it on any HTTP/2 (or h2c) server.
+//   - ConnectHandler is the Connect service implementation. The native
+//     gRPC bridge registers against this so both mount surfaces share
+//     one service-layer wiring.
+//   - Start launches the background workers (audit flusher, sweeper);
+//     it is idempotent. Stop drains them; safe to call multiple times.
+type Built struct {
+	Handler        http.Handler
+	ConnectHandler *identityconnect.IdentityHandler
+
+	startOnce sync.Once
+	stopOnce  sync.Once
+	startWork func()
+	stopWork  func()
+}
+
+// Start launches the background workers. Calling it more than once is a
+// no-op. It is separate from New so the audit flusher and sweeper
+// goroutines never start until the consumer is ready to run them.
+func (b *Built) Start() {
+	b.startOnce.Do(b.startWork)
+}
+
+// Stop drains the background workers. Safe to call multiple times and
+// safe to call without a preceding Start.
+func (b *Built) Stop() {
+	b.stopOnce.Do(b.stopWork)
+}
+
+// New assembles the identity service from injected dependencies. It
+// builds the middleware chain, the Connect-RPC service handler, and the
+// background workers — but does NOT start the workers; the caller starts
+// them with (*Built).Start once it is ready to serve, and drains them
+// with (*Built).Stop on shutdown. Configuration errors (e.g. invalid
+// CORS origins) are returned before any worker is constructed.
+func New(deps Deps) (*Built, error) {
 	logger := deps.Logger
 	if logger == nil {
 		logger = zap.NewNop()
@@ -107,15 +143,15 @@ func New(deps Deps) (http.Handler, func(), error) {
 	// Fail fast before any goroutines start so a misconfigured deploy
 	// never serves a single request.
 	if err := deps.Config.Validate(); err != nil {
-		return nil, noopStop, err
+		return nil, err
 	}
 	if err := validateIdentityMode(deps, logger); err != nil {
-		return nil, noopStop, err
+		return nil, err
 	}
 
 	allowedOrigins, err := middleware.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
 	if err != nil {
-		return nil, noopStop, fmt.Errorf("cors config invalid: %w", err)
+		return nil, fmt.Errorf("cors config invalid: %w", err)
 	}
 	logger.Info("cors_allowed_origins", zap.Strings("origins", allowedOrigins))
 
@@ -173,29 +209,41 @@ func New(deps Deps) (http.Handler, func(), error) {
 	}
 
 	auditLog := audit.NewLogger(deps.DB, deps.Config.DefaultTenantID, logger)
-	// Move audit writes off the auth hot path. Drops are counted and
-	// surfaced via auditLog.DroppedCount(). Caller must invoke the
-	// returned shutdown func to drain pending writes on termination.
-	stopAudit := auditLog.StartAsync(deps.Config.AuditQueueSize)
 
 	// Garbage-collection sweeper for expired ephemeral rows (#94).
 	// Disabled when SweeperIntervalSeconds <= 0 — deployers who
 	// already run their own GC, and the unit-test harness, both
 	// flip it off via GATEWAY_SWEEPER_INTERVAL_SECONDS=0.
-	stopSweeper := func() {}
-	if sw := newSweeper(
+	sweep := newSweeper(
 		deps.Repo,
 		deps.Config.SweeperIntervalSeconds,
 		deps.Config.SweeperBatchSize,
 		deps.Config.SweeperGraceSeconds,
 		logger,
-	); sw != nil {
-		stopSweeper = sw.start()
-	}
+	)
 
-	stopApp := func() {
-		stopSweeper()
-		stopAudit()
+	// Background-worker lifecycle. The audit flusher and sweeper do NOT
+	// start in New — they start when the consumer calls (*Built).Start,
+	// so an embedding host controls when goroutines run, and drain when
+	// it calls (*Built).Stop. Until Start runs, audit writes happen
+	// synchronously on the calling goroutine (audit.Logger falls back to
+	// sync mode), so a never-started Built is still correct, just slower.
+	var stopAudit, stopSweeper func()
+	startWork := func() {
+		// Move audit writes off the auth hot path. Drops are counted and
+		// surfaced via auditLog.DroppedCount().
+		stopAudit = auditLog.StartAsync(deps.Config.AuditQueueSize)
+		if sweep != nil {
+			stopSweeper = sweep.start()
+		}
+	}
+	stopWork := func() {
+		if stopSweeper != nil {
+			stopSweeper()
+		}
+		if stopAudit != nil {
+			stopAudit()
+		}
 	}
 
 	// Session cache + metric for mode=session. mode=ttl returns a nil
@@ -208,7 +256,7 @@ func New(deps Deps) (http.Handler, func(), error) {
 	if deps.Config.RevocationMode == config.RevocationModeSession {
 		sessionMetrics, err := middleware.NewSessionMetrics(deps.MetricsRegistry)
 		if err != nil {
-			return nil, noopStop, fmt.Errorf("session metrics: %w", err)
+			return nil, fmt.Errorf("session metrics: %w", err)
 		}
 		sessionCache = middleware.NewSessionCache(repo, deps.Config.SessionCacheTTL(), sessionMetrics)
 		repo = middleware.WrapSessionRepository(repo, sessionCache)
@@ -248,7 +296,7 @@ func New(deps Deps) (http.Handler, func(), error) {
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {
-		return nil, noopStop, fmt.Errorf("otelconnect interceptor: %w", err)
+		return nil, fmt.Errorf("otelconnect interceptor: %w", err)
 	}
 
 	mux := http.NewServeMux()
@@ -269,7 +317,7 @@ func New(deps Deps) (http.Handler, func(), error) {
 
 	rpcMetrics, err := middleware.NewRPCMetrics(deps.MetricsRegistry)
 	if err != nil {
-		return nil, noopStop, fmt.Errorf("rpc metrics: %w", err)
+		return nil, fmt.Errorf("rpc metrics: %w", err)
 	}
 
 	// Order (outermost runs first on request path):
@@ -292,7 +340,13 @@ func New(deps Deps) (http.Handler, func(), error) {
 	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
 	chain = middleware.RecoverMiddleware(logger)(chain)
 	chain = middleware.LoggingMiddleware(logger)(chain)
-	return chain, stopApp, nil
+
+	return &Built{
+		Handler:        chain,
+		ConnectHandler: handler,
+		startWork:      startWork,
+		stopWork:       stopWork,
+	}, nil
 }
 
 // buildConnectHandlerOptions returns the otelconnect interceptor

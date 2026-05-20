@@ -63,7 +63,7 @@ func buildTestApp(tb testing.TB, cfg *config.Config) (http.Handler, *prometheus.
 	repo := memory.New()
 	reg := prometheus.NewRegistry()
 
-	handler, stop, err := New(Deps{
+	built, err := New(Deps{
 		Config:             cfg,
 		Logger:             zap.NewNop(),
 		Signer:             signer,
@@ -77,7 +77,8 @@ func buildTestApp(tb testing.TB, cfg *config.Config) (http.Handler, *prometheus.
 	if err != nil {
 		tb.Fatalf("New: %v", err)
 	}
-	return handler, reg, stop
+	built.Start()
+	return built.Handler, reg, built.Stop
 }
 
 // TestOTel_EnabledProducesSpans_ForRPC asserts the M8 contract: a

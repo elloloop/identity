@@ -78,7 +78,7 @@ func TestJWTSigner_FileRotation_TokenAStillValidatesAfterRotateToB(t *testing.T)
 	dbAdapter := newIssue3DB(repo, auditDB)
 	mailer := NewRecordingMailer()
 
-	handler, stop, err := app.New(app.Deps{
+	built, err := app.New(app.Deps{
 		Config:             cfg,
 		Logger:             zap.NewNop(),
 		Signer:             signer,
@@ -92,7 +92,9 @@ func TestJWTSigner_FileRotation_TokenAStillValidatesAfterRotateToB(t *testing.T)
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
-	t.Cleanup(stop)
+	built.Start()
+	handler := built.Handler
+	t.Cleanup(built.Stop)
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)

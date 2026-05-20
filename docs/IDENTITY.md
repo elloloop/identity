@@ -279,8 +279,9 @@ plan when upstream is ready.
 
 ## Runtime
 
-Background goroutines started by `app.New` and stopped by the
-returned shutdown func:
+Background goroutines launched by `identityserver.Server.Start` and
+drained by `Shutdown` (the container binary and any embedding host
+control when they run — `New` starts nothing):
 
 - **Async audit flusher** — `pkg/audit` enqueues `AuditEvent` writes
   on a bounded channel and drains them off the auth hot path.
@@ -558,6 +559,46 @@ before you ship.
       provider-facing redirect, "where to send the user back" becomes
       an identity-side allowlist instead. The active allowlist is
       logged at startup.
+
+11. **identity is embeddable as a library, not only a container.**
+    Issue #127. The full wiring already lived in `internal/app`; it was
+    promoted to a public `identityserver` package so a host program can
+    `import` identity and mount it into its own Go server instead of
+    standing up the dedicated container. See `docs/embedding.md` for the
+    API. Three deliberate choices:
+
+    - **Both mount surfaces ship in v1.** `Server.Handler()` returns the
+      Connect `http.Handler` (the primary path: gRPC, gRPC-Web, Connect,
+      plus health/JWKS, behind the full middleware chain).
+      `Server.RegisterGRPC(*grpc.Server)` registers identity natively on a
+      host's existing grpc-go server. Connect and grpc-go are different
+      stacks, so the native path needs a bridge: `buf.gen.yaml` adds the
+      pinned `buf.build/grpc/go:v1.5.1` plugin to emit the grpc-go server
+      stub, and `identityserver/grpc_bridge.go` implements that stub by
+      delegating every RPC to the same `*connect.Handler` the HTTP surface
+      serves. There is **no duplicated handler logic** — one service-layer
+      wiring backs both surfaces. The bridge copies incoming gRPC metadata
+      into the Connect request headers, so client IP, user-agent and the
+      authenticated user id are read the same way over both transports.
+
+    - **The HTTP middleware chain is HTTP-only; native gRPC auth is the
+      host's job.** The JWT-verifying auth middleware, CORS, rate-limit,
+      health and JWKS live in the `http.Handler` and do not run on the
+      native gRPC path. A host mounting via `RegisterGRPC` supplies its
+      own server interceptor that verifies the bearer token and forwards
+      identity's expected metadata (`x-authenticated-user-id`). This keeps
+      the bridge a pure transport adapter rather than re-implementing the
+      middleware twice.
+
+    - **Background workers are consumer-controlled.** `New` does no I/O
+      beyond construction-time setup (EntDB dial, AWS config, OTel init)
+      and starts no goroutines. `Start(ctx)` launches the audit flusher,
+      sweeper, and signer SIGHUP reload; `Shutdown(ctx)` drains them and
+      releases everything `New` acquired, in reverse order. `cmd/identity`
+      is now a thin shim: it loads `OptionsFromEnv()`, calls `New` / `Start`
+      / `Shutdown`, and serves `Handler()` — the container behaves
+      identically to embedding identity over HTTP, with no wiring
+      duplicated between the binary and the library.
 
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

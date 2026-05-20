@@ -118,7 +118,7 @@ func TestOrganizationSignup_RealEntDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo.NewTenantAdmin: %v", err)
 	}
-	handler, stop, err := app.New(app.Deps{
+	appBuilt, err := app.New(app.Deps{
 		Config:             cfg,
 		Logger:             zap.NewNop(),
 		Signer:             signer,
@@ -136,7 +136,9 @@ func TestOrganizationSignup_RealEntDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
-	t.Cleanup(stop)
+	appBuilt.Start()
+	handler := appBuilt.Handler
+	t.Cleanup(appBuilt.Stop)
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
