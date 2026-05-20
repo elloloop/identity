@@ -145,6 +145,8 @@ func (s *sdkScope) get(ctx context.Context, actor string, dst proto.Message, nod
 		return getInto[*schemapb.PasskeyChallenge](ctx, scope, dst, nodeID)
 	case *schemapb.QrLoginSession:
 		return getInto[*schemapb.QrLoginSession](ctx, scope, dst, nodeID)
+	case *schemapb.OAuthOneTimeCode:
+		return getInto[*schemapb.OAuthOneTimeCode](ctx, scope, dst, nodeID)
 	case *schemapb.TotpCredential:
 		return getInto[*schemapb.TotpCredential](ctx, scope, dst, nodeID)
 	case *schemapb.RecoveryCode:
@@ -194,6 +196,8 @@ func (s *sdkScope) query(ctx context.Context, actor string, witness proto.Messag
 		return queryAs[*schemapb.PasskeyChallenge](ctx, scope, filter)
 	case *schemapb.QrLoginSession:
 		return queryAs[*schemapb.QrLoginSession](ctx, scope, filter)
+	case *schemapb.OAuthOneTimeCode:
+		return queryAs[*schemapb.OAuthOneTimeCode](ctx, scope, filter)
 	case *schemapb.TotpCredential:
 		return queryAs[*schemapb.TotpCredential](ctx, scope, filter)
 	case *schemapb.RecoveryCode:
@@ -553,6 +557,8 @@ func expiresAtSweepSpec(witness proto.Message) (typeID, fieldID int, ok bool) {
 		return 30, 5, true
 	case *schemapb.LoginChallenge:
 		return 25, 3, true
+	case *schemapb.OAuthOneTimeCode:
+		return 36, 3, true
 	}
 	return 0, 0, false
 }
@@ -590,6 +596,8 @@ func (s *sdkScope) deleteExpired(ctx context.Context, actor string, witness prot
 		sdk.DeleteWhere[*schemapb.EmailChangeToken](plan, where, limit)
 	case *schemapb.LoginChallenge:
 		sdk.DeleteWhere[*schemapb.LoginChallenge](plan, where, limit)
+	case *schemapb.OAuthOneTimeCode:
+		sdk.DeleteWhere[*schemapb.OAuthOneTimeCode](plan, where, limit)
 	default:
 		return fmt.Errorf("entdb: deleteExpired: unsupported message type %T", witness)
 	}
@@ -625,6 +633,8 @@ func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Messa
 		sdk.Delete[*schemapb.PasskeyChallenge](plan, nodeID)
 	case *schemapb.QrLoginSession:
 		sdk.Delete[*schemapb.QrLoginSession](plan, nodeID)
+	case *schemapb.OAuthOneTimeCode:
+		sdk.Delete[*schemapb.OAuthOneTimeCode](plan, nodeID)
 	case *schemapb.TotpCredential:
 		sdk.Delete[*schemapb.TotpCredential](plan, nodeID)
 	case *schemapb.RecoveryCode:

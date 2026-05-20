@@ -255,6 +255,18 @@ func New(deps Deps) (http.Handler, func(), error) {
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
 	mux.Handle(path, svcHandler)
 
+	// Browser-facing hosted OAuth routes (#126). Registered only when
+	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS is non-empty; the headless
+	// BeginOAuthLogin / OAuthLogin RPCs work regardless.
+	returnAllow := parseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
+	if returnAllow.Enabled() {
+		logger.Info("oauth_hosted_flow_enabled", zap.Strings("allowed_return_urls", returnAllow.Entries()))
+	} else {
+		logger.Info("oauth_hosted_flow_disabled",
+			zap.String("hint", "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"))
+	}
+	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
+
 	rpcMetrics, err := middleware.NewRPCMetrics(deps.MetricsRegistry)
 	if err != nil {
 		return nil, noopStop, fmt.Errorf("rpc metrics: %w", err)

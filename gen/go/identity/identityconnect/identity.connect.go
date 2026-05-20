@@ -39,6 +39,9 @@ const (
 	// IdentityServiceOAuthLoginProcedure is the fully-qualified name of the IdentityService's
 	// OAuthLogin RPC.
 	IdentityServiceOAuthLoginProcedure = "/identity.IdentityService/OAuthLogin"
+	// IdentityServiceRedeemOAuthCodeProcedure is the fully-qualified name of the IdentityService's
+	// RedeemOAuthCode RPC.
+	IdentityServiceRedeemOAuthCodeProcedure = "/identity.IdentityService/RedeemOAuthCode"
 	// IdentityServicePasswordSignupProcedure is the fully-qualified name of the IdentityService's
 	// PasswordSignup RPC.
 	IdentityServicePasswordSignupProcedure = "/identity.IdentityService/PasswordSignup"
@@ -215,6 +218,7 @@ type IdentityServiceClient interface {
 	// Authentication
 	BeginOAuthLogin(context.Context, *connect.Request[identity.BeginOAuthLoginRequest]) (*connect.Response[identity.BeginOAuthLoginResponse], error)
 	OAuthLogin(context.Context, *connect.Request[identity.OAuthLoginRequest]) (*connect.Response[identity.OAuthLoginResponse], error)
+	RedeemOAuthCode(context.Context, *connect.Request[identity.RedeemOAuthCodeRequest]) (*connect.Response[identity.RedeemOAuthCodeResponse], error)
 	PasswordSignup(context.Context, *connect.Request[identity.PasswordSignupRequest]) (*connect.Response[identity.PasswordSignupResponse], error)
 	PasswordLogin(context.Context, *connect.Request[identity.PasswordLoginRequest]) (*connect.Response[identity.PasswordLoginResponse], error)
 	// Session / Token Auth
@@ -317,6 +321,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceOAuthLoginProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("OAuthLogin")),
+			connect.WithClientOptions(opts...),
+		),
+		redeemOAuthCode: connect.NewClient[identity.RedeemOAuthCodeRequest, identity.RedeemOAuthCodeResponse](
+			httpClient,
+			baseURL+IdentityServiceRedeemOAuthCodeProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RedeemOAuthCode")),
 			connect.WithClientOptions(opts...),
 		),
 		passwordSignup: connect.NewClient[identity.PasswordSignupRequest, identity.PasswordSignupResponse](
@@ -668,6 +678,7 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 type identityServiceClient struct {
 	beginOAuthLogin               *connect.Client[identity.BeginOAuthLoginRequest, identity.BeginOAuthLoginResponse]
 	oAuthLogin                    *connect.Client[identity.OAuthLoginRequest, identity.OAuthLoginResponse]
+	redeemOAuthCode               *connect.Client[identity.RedeemOAuthCodeRequest, identity.RedeemOAuthCodeResponse]
 	passwordSignup                *connect.Client[identity.PasswordSignupRequest, identity.PasswordSignupResponse]
 	passwordLogin                 *connect.Client[identity.PasswordLoginRequest, identity.PasswordLoginResponse]
 	getCurrentUser                *connect.Client[identity.GetCurrentUserRequest, identity.GetCurrentUserResponse]
@@ -735,6 +746,11 @@ func (c *identityServiceClient) BeginOAuthLogin(ctx context.Context, req *connec
 // OAuthLogin calls identity.IdentityService.OAuthLogin.
 func (c *identityServiceClient) OAuthLogin(ctx context.Context, req *connect.Request[identity.OAuthLoginRequest]) (*connect.Response[identity.OAuthLoginResponse], error) {
 	return c.oAuthLogin.CallUnary(ctx, req)
+}
+
+// RedeemOAuthCode calls identity.IdentityService.RedeemOAuthCode.
+func (c *identityServiceClient) RedeemOAuthCode(ctx context.Context, req *connect.Request[identity.RedeemOAuthCodeRequest]) (*connect.Response[identity.RedeemOAuthCodeResponse], error) {
+	return c.redeemOAuthCode.CallUnary(ctx, req)
 }
 
 // PasswordSignup calls identity.IdentityService.PasswordSignup.
@@ -1027,6 +1043,7 @@ type IdentityServiceHandler interface {
 	// Authentication
 	BeginOAuthLogin(context.Context, *connect.Request[identity.BeginOAuthLoginRequest]) (*connect.Response[identity.BeginOAuthLoginResponse], error)
 	OAuthLogin(context.Context, *connect.Request[identity.OAuthLoginRequest]) (*connect.Response[identity.OAuthLoginResponse], error)
+	RedeemOAuthCode(context.Context, *connect.Request[identity.RedeemOAuthCodeRequest]) (*connect.Response[identity.RedeemOAuthCodeResponse], error)
 	PasswordSignup(context.Context, *connect.Request[identity.PasswordSignupRequest]) (*connect.Response[identity.PasswordSignupResponse], error)
 	PasswordLogin(context.Context, *connect.Request[identity.PasswordLoginRequest]) (*connect.Response[identity.PasswordLoginResponse], error)
 	// Session / Token Auth
@@ -1125,6 +1142,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceOAuthLoginProcedure,
 		svc.OAuthLogin,
 		connect.WithSchema(identityServiceMethods.ByName("OAuthLogin")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRedeemOAuthCodeHandler := connect.NewUnaryHandler(
+		IdentityServiceRedeemOAuthCodeProcedure,
+		svc.RedeemOAuthCode,
+		connect.WithSchema(identityServiceMethods.ByName("RedeemOAuthCode")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServicePasswordSignupHandler := connect.NewUnaryHandler(
@@ -1475,6 +1498,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceBeginOAuthLoginHandler.ServeHTTP(w, r)
 		case IdentityServiceOAuthLoginProcedure:
 			identityServiceOAuthLoginHandler.ServeHTTP(w, r)
+		case IdentityServiceRedeemOAuthCodeProcedure:
+			identityServiceRedeemOAuthCodeHandler.ServeHTTP(w, r)
 		case IdentityServicePasswordSignupProcedure:
 			identityServicePasswordSignupHandler.ServeHTTP(w, r)
 		case IdentityServicePasswordLoginProcedure:
@@ -1604,6 +1629,10 @@ func (UnimplementedIdentityServiceHandler) BeginOAuthLogin(context.Context, *con
 
 func (UnimplementedIdentityServiceHandler) OAuthLogin(context.Context, *connect.Request[identity.OAuthLoginRequest]) (*connect.Response[identity.OAuthLoginResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.OAuthLogin is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RedeemOAuthCode(context.Context, *connect.Request[identity.RedeemOAuthCodeRequest]) (*connect.Response[identity.RedeemOAuthCodeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.RedeemOAuthCode is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) PasswordSignup(context.Context, *connect.Request[identity.PasswordSignupRequest]) (*connect.Response[identity.PasswordSignupResponse], error) {

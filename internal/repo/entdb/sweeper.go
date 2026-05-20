@@ -58,3 +58,10 @@ func (r *entRepository) DeleteExpiredLoginChallenges(ctx context.Context, before
 	}
 	return nil
 }
+
+func (r *entRepository) DeleteExpiredOAuthOneTimeCodes(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.OAuthOneTimeCode{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredOAuthOneTimeCodes: %w", err)
+	}
+	return nil
+}

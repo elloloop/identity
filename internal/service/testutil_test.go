@@ -103,6 +103,7 @@ type fakeRepo struct {
 	passkeyCreds       map[string]*PasskeyCredRecord
 	passkeyChallenges  map[string]*PasskeyChallengeRecord
 	qrSessions         map[string]*QrLoginSessionRecord
+	oauthOneTimeCodes  map[string]*OAuthOneTimeCodeRecord
 	totpCreds          map[string]*TotpCredRecord
 	recoveryCodes      map[string]*RecoveryCodeRecord
 	loginChallenges    map[string]*LoginChallengeRecord
@@ -124,6 +125,7 @@ func newFakeRepo() *fakeRepo {
 		passkeyCreds:       make(map[string]*PasskeyCredRecord),
 		passkeyChallenges:  make(map[string]*PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*QrLoginSessionRecord),
+		oauthOneTimeCodes:  make(map[string]*OAuthOneTimeCodeRecord),
 		totpCreds:          make(map[string]*TotpCredRecord),
 		recoveryCodes:      make(map[string]*RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*LoginChallengeRecord),
@@ -502,6 +504,33 @@ func (r *fakeRepo) ConsumeQrLoginSession(_ context.Context, nodeID string, atMs 
 	s.Status = "consumed"
 	s.UpdatedAt = atMs
 	return nil
+}
+
+func (r *fakeRepo) CreateOAuthOneTimeCode(_ context.Context, rec *OAuthOneTimeCodeRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := nextNodeID()
+	rec.NodeID = id
+	cp := *rec
+	r.oauthOneTimeCodes[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, atMs int64) (*OAuthOneTimeCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.oauthOneTimeCodes {
+		if c.CodeHash != codeHash {
+			continue
+		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+			return nil, ErrOAuthCodeInvalid
+		}
+		c.ConsumedAt = atMs
+		cp := *c
+		return &cp, nil
+	}
+	return nil, ErrOAuthCodeInvalid
 }
 
 // ── TOTP Credentials ───────────────────────────────────────────────────
@@ -1192,6 +1221,22 @@ func (r *fakeRepo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int6
 		}
 		if c.ExpiresAt < beforeMs {
 			delete(r.loginChallenges, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.oauthOneTimeCodes {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.oauthOneTimeCodes, id)
 			n++
 		}
 	}

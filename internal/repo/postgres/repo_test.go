@@ -154,6 +154,7 @@ func truncateAll(ctx context.Context, dsn string) error {
 			passkey_challenges,
 			passkeys,
 			qr_login_sessions,
+			oauth_one_time_codes,
 			user_invitations,
 			audit_events,
 			group_memberships,

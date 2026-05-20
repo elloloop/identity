@@ -122,6 +122,14 @@ func (StubRepository) ConsumeQrLoginSession(context.Context, string, int64) erro
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) CreateOAuthOneTimeCode(context.Context, *OAuthOneTimeCodeRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) ConsumeOAuthOneTimeCode(context.Context, string, int64) (*OAuthOneTimeCodeRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
 func (StubRepository) GetTotpCredential(context.Context, string) (*TotpCredRecord, error) {
 	return nil, ErrServiceUnavailable
 }
@@ -271,6 +279,10 @@ func (StubRepository) DeleteExpiredEmailChangeTokens(context.Context, int64, int
 }
 
 func (StubRepository) DeleteExpiredLoginChallenges(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredOAuthOneTimeCodes(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }
 

@@ -60,3 +60,7 @@ class OrganizationKeys:
 class SessionKeys:
     sid = UniqueKey[str](type_id=35, field_id=1, name="sid")
 
+
+class OAuthOneTimeCodeKeys:
+    code_hash = UniqueKey[str](type_id=36, field_id=1, name="code_hash")
+

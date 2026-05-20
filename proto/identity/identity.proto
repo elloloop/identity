@@ -208,6 +208,21 @@ message OAuthLoginResponse {
   int32 expires_in      = 5;  // Access token lifetime in seconds
 }
 
+// RedeemOAuthCode exchanges the single-use one-time code handed to the
+// SPA by the hosted OAuth callback (GET /oauth/callback/{provider} ->
+// 302 return_to?code=<otc>) for a backend-issued token pair. The code
+// is single-use and short-lived; a replay returns CodeUnauthenticated.
+message RedeemOAuthCodeRequest {
+  string code = 1;  // opaque one-time code from the hosted callback redirect
+}
+
+message RedeemOAuthCodeResponse {
+  User user            = 1;
+  string access_token  = 2;  // Backend-issued JWT
+  string refresh_token = 3;  // For token rotation (send in RefreshToken RPC body)
+  int32 expires_in     = 4;  // Access token lifetime in seconds
+}
+
 message PasswordSignupRequest {
   string email    = 1;
   string password = 2;
@@ -791,6 +806,7 @@ service IdentityService {
   // Authentication
   rpc BeginOAuthLogin(BeginOAuthLoginRequest) returns (BeginOAuthLoginResponse);
   rpc OAuthLogin(OAuthLoginRequest) returns (OAuthLoginResponse);
+  rpc RedeemOAuthCode(RedeemOAuthCodeRequest) returns (RedeemOAuthCodeResponse);
   rpc PasswordSignup(PasswordSignupRequest) returns (PasswordSignupResponse);
   rpc PasswordLogin(PasswordLoginRequest) returns (PasswordLoginResponse);
 

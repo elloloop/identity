@@ -198,6 +198,21 @@ type Repository interface {
 	// session does not exist or is no longer in the "approved" state.
 	ConsumeQrLoginSession(ctx context.Context, nodeID string, atMs int64) error
 
+	// OAuth one-time codes (hosted-flow SPA handover).
+	//
+	// CreateOAuthOneTimeCode stores the code-hash → user binding written
+	// by the hosted /oauth/callback handler. ConsumeOAuthOneTimeCode is
+	// the single-winner compare-and-set: it marks the row consumed
+	// (consumed_at = atMs) only if it is currently unconsumed
+	// (consumed_at == 0) AND not yet expired (expires_at > atMs),
+	// returning the bound record on success. A replay, an expired code,
+	// or a code that does not exist all return ErrOAuthCodeInvalid so
+	// the redeem endpoint cannot be probed. Like ConsumeQrLoginSession
+	// this is the serialization point across replicas: exactly one of N
+	// concurrent redeems of the same code wins.
+	CreateOAuthOneTimeCode(ctx context.Context, r *OAuthOneTimeCodeRecord) (string, error)
+	ConsumeOAuthOneTimeCode(ctx context.Context, codeHash string, atMs int64) (*OAuthOneTimeCodeRecord, error)
+
 	// TOTP credentials
 	GetTotpCredential(ctx context.Context, userID string) (*TotpCredRecord, error)
 	CreateTotpCredential(ctx context.Context, r *TotpCredRecord) (string, error)
@@ -282,6 +297,7 @@ type Repository interface {
 	DeleteExpiredPasswordResetTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredOAuthOneTimeCodes(ctx context.Context, beforeMs int64, limit int) error
 
 	// Organizations — identity-layer entity used by `mode=multi`
 	// deployments. CreateOrganization writes the Organization row and
@@ -390,6 +406,20 @@ type QrLoginSessionRecord struct {
 	ExpiresAt      int64
 	CreatedAt      int64
 	UpdatedAt      int64
+}
+
+// OAuthOneTimeCodeRecord is the single-use handover artifact for the
+// hosted OAuth flow. The hosted callback stores the SHA-256 hash of an
+// opaque code keyed to the authenticated user; RedeemOAuthCode consumes
+// it (consumed_at CAS from 0) and mints a fresh token pair. Only the
+// user id is persisted — no token material is stored at rest.
+type OAuthOneTimeCodeRecord struct {
+	NodeID     string
+	CodeHash   string
+	UserID     string
+	ExpiresAt  int64 // epoch ms
+	CreatedAt  int64 // epoch ms
+	ConsumedAt int64 // epoch ms; 0 = unconsumed
 }
 
 // TotpCredRecord represents a stored TOTP credential.
@@ -567,6 +597,11 @@ var (
 	ErrInvalidTotpCode   = errors.New("invalid totp code")
 	ErrQrLoginExpired    = errors.New("qr login session expired")
 	ErrQrLoginNotPending = errors.New("qr login session is not pending")
+	// ErrOAuthCodeInvalid is returned when a hosted-flow one-time code is
+	// missing, expired, or already consumed. The Connect handler maps it
+	// to CodeUnauthenticated so replays and expiries look identical to a
+	// brute-force attacker.
+	ErrOAuthCodeInvalid  = errors.New("oauth one-time code is invalid or already used")
 	ErrInvitationUsed    = errors.New("invitation has already been accepted")
 	ErrInvitationExpired = errors.New("invitation has expired")
 	ErrLocalAuthDisabled = errors.New("local auth disabled")

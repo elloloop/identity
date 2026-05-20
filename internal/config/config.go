@@ -139,6 +139,18 @@ type Config struct {
 	GitHubClientID        string
 	GitHubClientSecret    string
 
+	// OAuthAllowedReturnURLs is the comma-separated allowlist of app URLs
+	// the hosted OAuth flow may redirect back to (the `return_to` param of
+	// GET /oauth/start/{provider}). Each entry is an exact origin or a URL
+	// prefix; a return_to matches when it equals an entry or begins with
+	// an entry. Validation is fail-closed: a return_to that matches no
+	// entry is rejected with 400.
+	//
+	// Empty disables the hosted flow entirely — GET /oauth/start and GET
+	// /oauth/callback return 404. The headless BeginOAuthLogin / OAuthLogin
+	// RPCs are unaffected. Driven by GATEWAY_OAUTH_ALLOWED_RETURN_URLS.
+	OAuthAllowedReturnURLs string
+
 	// Identity Verification (document + selfie). The provider name
 	// selects the implementation in pkg/idv. Empty disables IDV; the
 	// RPCs return CodeUnimplemented to clients in that case.
@@ -346,6 +358,8 @@ func Load() *Config {
 		MicrosoftTenantID:     envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
 		GitHubClientID:        envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
 		GitHubClientSecret:    envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
+
+		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
 
 		IDVProvider:           envStr("GATEWAY_IDV_PROVIDER", ""),
 		IDVAzureEndpoint:      envStr("GATEWAY_IDV_AZURE_ENDPOINT", ""),
