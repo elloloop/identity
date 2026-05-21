@@ -3,6 +3,9 @@
 /identity
 *.test
 *.out
+# `go build ./examples/embedded` drops a binary named after the package dir
+# into the working directory; keep it out of the repo root.
+/embedded
 
 # IDE
 .vscode/

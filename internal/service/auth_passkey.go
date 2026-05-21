@@ -18,7 +18,7 @@ import (
 // BeginPasskeyRegistration generates WebAuthn registration options for the
 // authenticated user. Returns (optionsJSON, challengeID, error).
 func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID, deviceName string) (string, string, error) {
-	user, err := s.repo.GetUser(ctx, userID)
+	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return "", "", err
 	}
@@ -26,7 +26,7 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID, devi
 		return "", "", fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
-	existing, err := s.repo.ListPasskeyCredentials(ctx, userID)
+	existing, err := s.repo(ctx).ListPasskeyCredentials(ctx, userID)
 	if err != nil {
 		return "", "", err
 	}
@@ -45,7 +45,7 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID, devi
 	}
 
 	now := s.nowMs()
-	nodeID, err := s.repo.CreatePasskeyChallenge(ctx, &PasskeyChallengeRecord{
+	nodeID, err := s.repo(ctx).CreatePasskeyChallenge(ctx, &PasskeyChallengeRecord{
 		Challenge:     challengeB64,
 		UserID:        userID,
 		ChallengeType: "registration",
@@ -74,7 +74,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		return nil, fmt.Errorf("%w: challenge_id and credential_json are required", ErrInvalidArgument)
 	}
 
-	challenge, err := s.repo.GetPasskeyChallenge(ctx, challengeID)
+	challenge, err := s.repo(ctx).GetPasskeyChallenge(ctx, challengeID)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		return nil, fmt.Errorf("%w: challenge does not belong to this user", ErrPermissionDenied)
 	}
 	if challenge.ExpiresAt < s.nowMs() {
-		_ = s.repo.DeletePasskeyChallenge(ctx, challenge.NodeID)
+		_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
 		return nil, fmt.Errorf("%w: challenge expired", ErrTokenExpired)
 	}
 
@@ -102,7 +102,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 	}
 
 	now := s.nowMs()
-	_, err = s.repo.CreatePasskeyCredential(ctx, &PasskeyCredRecord{
+	_, err = s.repo(ctx).CreatePasskeyCredential(ctx, &PasskeyCredRecord{
 		CredentialID: result.CredentialID,
 		UserID:       userID,
 		PublicKey:    result.PublicKey,
@@ -118,7 +118,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 	}
 
 	// Single-use challenge -- delete it.
-	_ = s.repo.DeletePasskeyChallenge(ctx, challenge.NodeID)
+	_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
 
 	s.logger.Info(
 		"passkey_registered",
@@ -151,12 +151,12 @@ func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (stri
 	var allowedIDs []string
 	if email != "" {
 		email = trimEmail(email)
-		user, err := s.repo.FindUserByEmail(ctx, email)
+		user, err := s.repo(ctx).FindUserByEmail(ctx, email)
 		if err != nil {
 			return "", "", err
 		}
 		if user != nil {
-			creds, err := s.repo.ListPasskeyCredentials(ctx, user.ID)
+			creds, err := s.repo(ctx).ListPasskeyCredentials(ctx, user.ID)
 			if err != nil {
 				return "", "", err
 			}
@@ -176,7 +176,7 @@ func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (stri
 	}
 
 	now := s.nowMs()
-	nodeID, err := s.repo.CreatePasskeyChallenge(ctx, &PasskeyChallengeRecord{
+	nodeID, err := s.repo(ctx).CreatePasskeyChallenge(ctx, &PasskeyChallengeRecord{
 		Challenge:     challengeB64,
 		ChallengeType: "authentication",
 		ExpiresAt:     now + int64(s.cfg.PasskeyChallengeExpirySeconds)*1000,
@@ -202,7 +202,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, fmt.Errorf("%w: challenge_id and credential_json are required", ErrInvalidArgument)
 	}
 
-	challenge, err := s.repo.GetPasskeyChallenge(ctx, challengeID)
+	challenge, err := s.repo(ctx).GetPasskeyChallenge(ctx, challengeID)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +213,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, fmt.Errorf("%w: challenge is not an authentication challenge", ErrInvalidArgument)
 	}
 	if challenge.ExpiresAt < s.nowMs() {
-		_ = s.repo.DeletePasskeyChallenge(ctx, challenge.NodeID)
+		_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
 		return nil, fmt.Errorf("%w: challenge expired", ErrUnauthenticated)
 	}
 
@@ -222,7 +222,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, fmt.Errorf("%w: invalid credential_json: %w", ErrInvalidArgument, err)
 	}
 
-	cred, err := s.repo.GetPasskeyCredentialByCredID(ctx, credID)
+	cred, err := s.repo(ctx).GetPasskeyCredentialByCredID(ctx, credID)
 	if err != nil {
 		return nil, err
 	}
@@ -255,15 +255,15 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 
 	// Update sign count.
 	now := s.nowMs()
-	_ = s.repo.UpdatePasskeyCredential(ctx, cred.NodeID, map[string]any{
+	_ = s.repo(ctx).UpdatePasskeyCredential(ctx, cred.NodeID, map[string]any{
 		"sign_count":   int64(newSignCount),
 		"last_used_at": now,
 	})
 
 	// Single-use challenge.
-	_ = s.repo.DeletePasskeyChallenge(ctx, challenge.NodeID)
+	_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
 
-	user, err := s.repo.GetUser(ctx, cred.UserID)
+	user, err := s.repo(ctx).GetUser(ctx, cred.UserID)
 	if err != nil {
 		return nil, err
 	}

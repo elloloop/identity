@@ -81,12 +81,16 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience stri
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 
+			// Strip any client-supplied identity headers so a caller can
+			// never spoof the values the middleware injects downstream.
+			clearAuthHeaders(r)
+
 			// Skip auth for exempt paths.
 			if isAuthExempt(path) {
 				// Still try to parse auth if present (for GetCurrentUser).
 				if token := extractBearerToken(r); token != "" {
 					if claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience); err == nil {
-						r.Header.Set("X-Authenticated-User-Id", claims.Sub)
+						setAuthHeaders(r, claims)
 					}
 				}
 				next.ServeHTTP(w, r)
@@ -108,10 +112,37 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience stri
 				return
 			}
 
-			r.Header.Set("X-Authenticated-User-Id", claims.Sub)
+			setAuthHeaders(r, claims)
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// AuthenticatedUserIDHeader carries the verified `sub` claim from the
+// auth middleware to the Connect handler layer.
+const AuthenticatedUserIDHeader = "X-Authenticated-User-Id"
+
+// AuthenticatedTenantHeader carries the verified `tenant` claim from
+// the auth middleware to the tenant-resolution middleware in
+// mode=multi. The handler layer never reads it directly; it exists so
+// resolution can cross-check the JWT-asserted tenant against the
+// host-derived tenant without re-verifying the token.
+const AuthenticatedTenantHeader = "X-Authenticated-Tenant"
+
+// setAuthHeaders writes the verified identity headers from claims. Only
+// called after VerifyAccessToken succeeds, so the values are trusted.
+func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
+	r.Header.Set(AuthenticatedUserIDHeader, claims.Sub)
+	if claims.Tenant != "" {
+		r.Header.Set(AuthenticatedTenantHeader, claims.Tenant)
+	}
+}
+
+// clearAuthHeaders removes any inbound copies of the identity headers so
+// an external client cannot inject them to impersonate a user or tenant.
+func clearAuthHeaders(r *http.Request) {
+	r.Header.Del(AuthenticatedUserIDHeader)
+	r.Header.Del(AuthenticatedTenantHeader)
 }
 
 // extractBearerToken returns the token portion of an "Authorization: Bearer <token>"

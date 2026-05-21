@@ -320,17 +320,33 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf("rpc metrics: %w", err)
 	}
 
+	// In mode=single every token's "tenant" claim must equal
+	// DefaultTenantID, so the auth middleware pins it. In mode=multi
+	// tokens carry per-tenant claims (the org slug), so the auth
+	// middleware can't pin a single tenant — the TenantResolver
+	// middleware cross-checks the claim against the resolved tenant
+	// instead. See docs/IDENTITY.md decision log on tenant resolution.
+	authExpectedTenant := deps.Config.DefaultTenantID
+	if deps.Config.IsMultiMode() {
+		authExpectedTenant = ""
+	}
+
 	// Order (outermost runs first on request path):
-	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → auth → metrics → Connect
+	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → auth → tenant → metrics → Connect
 	// client-IP must precede rate-limit (the limiter keys on the
 	// resolved IP) and health must precede client-IP so liveness probes
-	// from kubelets cannot be rate-limited. metrics sits just outside
-	// the Connect mux so it observes every RPC's final status,
-	// including any failure synthesized by the otelconnect interceptor.
+	// from kubelets cannot be rate-limited. The tenant resolver sits
+	// just inside auth so it can read the verified user-id / tenant
+	// headers, and just outside metrics so the resolved-tenant rejection
+	// is counted. In mode=single it is an identity pass-through.
+	// metrics sits just outside the Connect mux so it observes every
+	// RPC's final status, including any failure synthesized by the
+	// otelconnect interceptor.
 	var chain http.Handler = mux
 	chain = middleware.MetricsMiddleware(rpcMetrics)(chain)
+	chain = middleware.NewTenantResolver(deps.Config, deps.RepositoryForTenant, logger)(chain)
 	chain = middleware.SessionAuthMiddleware(
-		deps.Signer, deps.Config.DefaultTenantID, deps.Config.JWTAudience,
+		deps.Signer, authExpectedTenant, deps.Config.JWTAudience,
 		deps.Config.JWTRequireAudience, sessionCache,
 	)(chain)
 	chain = middleware.JWKSMiddleware(deps.Signer)(chain)

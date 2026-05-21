@@ -114,6 +114,10 @@ other tenant-related decision derives from it.
 ```
 GATEWAY_IDENTITY_MODE = single | multi   # default: single
 GATEWAY_DEFAULT_TENANT_ID = <string>     # required when mode=single
+
+# Per-request tenant resolution (mode=multi only; see below):
+GATEWAY_TENANT_RESOLUTION_SOURCES = host,jwt   # ordered precedence; default "host,jwt"
+GATEWAY_TENANT_HOST_BASE_DOMAIN   = <domain>   # required when "host" is a source
 ```
 
 ### `mode=single` (B2C, easyloops shape)
@@ -164,13 +168,48 @@ GATEWAY_DEFAULT_TENANT_ID = <string>     # required when mode=single
 - **Subsequent user signups / invitation acceptances** resolve the
   tenant from the request (see below), then add the new user as a
   `"member"` of the existing tenant.
-- **Tenant resolution per request:** the tenant id comes from either
-  (a) a subdomain on the request host (`acmecorp.glassa.work` →
-  tenant `acmecorp`) or (b) a `tid` claim on the JWT for an already-
-  authenticated session. Identity verifies that resolution matches the
-  user's tenant membership before serving any RPC. Configuration knobs
-  for this layer live alongside `GATEWAY_IDENTITY_MODE` once we
-  implement it.
+- **Tenant resolution per request.** A middleware
+  (`internal/middleware/tenant.go`, installed only in `mode=multi`)
+  resolves the request's tenant from the configured, ordered sources
+  in `GATEWAY_TENANT_RESOLUTION_SOURCES` (default `host,jwt`):
+  - **`host`** — a subdomain of `GATEWAY_TENANT_HOST_BASE_DOMAIN`
+    (`acmecorp.glassa.work` → tenant `acmecorp` when the base is
+    `glassa.work`). Only a single subdomain label maps to a tenant; the
+    apex domain and deeper nesting resolve to no tenant.
+  - **`jwt`** — the access token's **`tenant`** claim. Identity reuses
+    the existing `tenant` claim that every token already carries (the
+    org slug in `mode=multi`); it does **not** add a separate `tid`
+    claim (decision log entry below).
+
+  The first source that yields a non-empty tenant wins. When both
+  sources produce a value they must agree — a host that disagrees with
+  the token's `tenant` claim is cross-tenant token reuse and is
+  rejected with `PermissionDenied`. The resolver then verifies, via the
+  slice-1 `ListOrganizationsForUser` membership view scoped to the
+  resolved tenant, that the authenticated caller belongs to that tenant
+  before any RPC runs; a non-member is rejected with `PermissionDenied`.
+  The resolved tenant (plus a `Repository` scoped to it) is threaded
+  through the request context so every handler/service call operates on
+  the caller's tenant instead of a hardcoded default.
+
+  Three request classes are handled distinctly:
+  - **`OrganizationSignup`** provisions a brand-new tenant; it has no
+    tenant to resolve and passes through with no scope (the service
+    uses its own per-tenant repository factory).
+  - **Unauthenticated, tenant-scoped paths** (e.g. `PasswordLogin`,
+    `RequestPasswordReset`) get a tenant scope resolved from the host
+    so the service finds the user inside the right tenant, but skip the
+    membership check (the caller is proving identity, not asserting it).
+  - **Authenticated paths** require a resolved tenant, a matching
+    `tenant` claim, and a verified membership before serving.
+
+  Boot is fail-closed: `mode=multi` rejects an empty
+  `GATEWAY_TENANT_RESOLUTION_SOURCES`, and rejects a `host` source with
+  no `GATEWAY_TENANT_HOST_BASE_DOMAIN`.
+
+  In `mode=single` the middleware is never installed: the tenant is
+  always `DefaultTenantID`, a clean constant, with no host/JWT
+  inspection and no per-request lookup.
 
 `mode=multi` lands across four feature-bounded slices on
 [#93](https://github.com/elloloop/identity/issues/93):
@@ -193,7 +232,14 @@ GATEWAY_DEFAULT_TENANT_ID = <string>     # required when mode=single
    role), then promoted to `"admin"` at the storage layer via
    `Admin.ChangeMemberRole` — keeping the storage-layer role decision
    independent of identity's product role per decision log §4.
-3. Per-request tenant resolution middleware.
+3. **Per-request tenant resolution middleware** *(landed)* —
+   `internal/middleware/tenant.go` resolves the request tenant from the
+   configured host/jwt sources, verifies the caller's membership of the
+   resolved tenant, and threads a tenant-scoped `Repository` + tenant id
+   through the request context so every handler scopes to the caller's
+   tenant. `mode=single` is unchanged (the resolver is not installed;
+   the tenant stays `DefaultTenantID`). See the resolution decision-log
+   entry below.
 4. Tenant-aware invitations.
 
 ### Why a flag, not separate binaries
@@ -328,6 +374,14 @@ don't try to fit features that don't belong:
   existing IdP (Auth0, Cognito, custom) is out of scope. Per-product
   one-shot import scripts are fine; a general-purpose migration RPC
   is not.
+- **Session-based revocation in `mode=multi`.**
+  `GATEWAY_REVOCATION_MODE=session` is not yet tenant-scoped — the
+  session cache + `GetSessionBySid` lookup run against the boot-time
+  (`DefaultTenantID`) repository, while `mode=multi` sessions live in
+  per-request tenants. The config validator rejects the combination at
+  boot rather than silently looking sessions up in the wrong tenant;
+  `mode=multi` deployments use the default `mode=ttl` revocation.
+  Tenant-scoping the session lookup is a future slice.
 
 ## Decision log — read this before changing the tenancy model
 
@@ -599,6 +653,53 @@ before you ship.
       / `Shutdown`, and serves `Handler()` — the container behaves
       identically to embedding identity over HTTP, with no wiring
       duplicated between the binary and the library.
+
+12. **Per-request tenant resolution: host/jwt sources, JWT reuses the
+    existing `tenant` claim, membership checked at the middleware.**
+    Issue #93 slice 3. `mode=multi` resolves the request tenant in a
+    middleware (`internal/middleware/tenant.go`) from the configured,
+    ordered sources in `GATEWAY_TENANT_RESOLUTION_SOURCES` (default
+    `host,jwt`). Choices:
+
+    - **No new `tid` claim — reuse the existing `tenant` claim.** Every
+      access token already carries a `tenant` claim (the org slug in
+      `mode=multi`). Adding a parallel `tid` claim would be two fields
+      meaning the same thing, with a window for them to disagree. The
+      `jwt` resolution source reads the existing `tenant` claim; the
+      auth middleware surfaces the verified value to the resolver via an
+      internal request header so the token is not verified twice.
+
+    - **Host wins by default, but host and JWT must agree.** The
+      default precedence is `host,jwt`: the host subdomain is the
+      user-facing tenant boundary, so it is consulted first. When both a
+      host tenant and a token tenant are present they must be equal — a
+      host that disagrees with the token's tenant is cross-tenant token
+      reuse and is rejected (`PermissionDenied`) rather than silently
+      preferring one. A deployer that fronts identity without per-tenant
+      hostnames sets `GATEWAY_TENANT_RESOLUTION_SOURCES=jwt`.
+
+    - **Membership is verified in the middleware, before the handler.**
+      Once a request is authenticated and a tenant resolved, the
+      middleware checks the caller is an organisation member of the
+      resolved tenant (slice-1 `ListOrganizationsForUser`, scoped to
+      that tenant) before any RPC runs; a non-member gets
+      `PermissionDenied`. Putting the check at the chain boundary keeps
+      every handler free of repeated membership boilerplate and makes
+      the cross-tenant guarantee one auditable place. Unauthenticated,
+      tenant-scoped paths (login, password reset) get a tenant scope but
+      skip the member check — the caller is proving identity, not
+      asserting it — and `OrganizationSignup`, which creates the tenant,
+      is resolved past entirely.
+
+    - **The resolved tenant rides the request context; single mode stays
+      a constant.** The middleware injects a tenant id + a tenant-scoped
+      `Repository` into the context; services read it via small accessors
+      (`s.tenantID(ctx)` / `s.repo(ctx)`) that fall back to the boot-time
+      `DefaultTenantID` / boot Repository when no scope is present. In
+      `mode=single` the resolver is never installed, so that fallback is
+      always taken — the single-tenant path is unchanged, with no
+      host/JWT inspection. Boot is fail-closed: `mode=multi` rejects an
+      empty source list or a `host` source with no base domain.
 
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

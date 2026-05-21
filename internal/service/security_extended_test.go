@@ -208,7 +208,7 @@ func TestSecExt_CrossTenant_TokenRejection(t *testing.T) {
 	t.Parallel()
 	repoA := newFakeRepo()
 	svcA := newTestAuthService(t, repoA)
-	svcA.tenantID = "tenant-a"
+	svcA.defaultTenantID = "tenant-a"
 	svcA.cfg.DefaultTenantID = "tenant-a"
 
 	// Sign up Alice in tenant A.
@@ -220,13 +220,13 @@ func TestSecExt_CrossTenant_TokenRejection(t *testing.T) {
 	// JWKS in a multi-tenant deployment) but is configured for tenant-b.
 	repoB := newFakeRepo()
 	svcB := newTestAuthService(t, repoB)
-	svcB.tenantID = "tenant-b"
+	svcB.defaultTenantID = "tenant-b"
 	svcB.cfg.DefaultTenantID = "tenant-b"
 	svcB.signer = svcA.signer // shared trust
 
 	// Service B verifying with its OWN expected tenant must REJECT the
 	// token (claim says tenant-a, expected tenant-b).
-	_, err = jwt.VerifyAccessToken(tokenA, svcB.signer, svcB.tenantID, "", false)
+	_, err = jwt.VerifyAccessToken(tokenA, svcB.signer, svcB.defaultTenantID, "", false)
 	require.Error(t, err, "verifier must reject token whose tenant claim doesn't match expected tenant")
 
 	// Sanity: same token still verifies cleanly when expected tenant matches.

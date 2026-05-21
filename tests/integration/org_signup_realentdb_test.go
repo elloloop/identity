@@ -21,7 +21,6 @@ package integration
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -83,6 +82,7 @@ func TestOrganizationSignup_RealEntDB(t *testing.T) {
 	cfg := &config.Config{
 		DefaultTenantID:               systemTenant,
 		IdentityMode:                  config.IdentityModeMulti,
+		TenantResolutionSources:       "jwt",
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,
@@ -215,29 +215,11 @@ func TestOrganizationSignup_RealEntDB(t *testing.T) {
 
 	cur, err := authedClient.GetCurrentUser(context.Background(), connect.NewRequest(&identitypb.GetCurrentUserRequest{}))
 	if err != nil {
-		// The new admin's User row lives in the new tenant; the
-		// per-request tenant resolution layer (slice 3) is not yet
-		// wired, so GetCurrentUser against the default tenant won't
-		// find them. We accept either success or NotFound here so the
-		// test can land in slice 2 — slice 3 will tighten this to a
-		// hard assertion.
-		t.Logf("GetCurrentUser returned %v — expected until slice 3 wires per-request tenant resolution", err)
-	} else {
-		if cur.Msg.GetUser().GetEmail() != emailAddr {
-			t.Fatalf("GetCurrentUser email = %q, want %q", cur.Msg.GetUser().GetEmail(), emailAddr)
-		}
+		// Per-request tenant resolution (jwt source) scopes the call to
+		// the admin's tenant, so GetCurrentUser must now find them.
+		t.Fatalf("GetCurrentUser after org signup: %v", err)
 	}
-}
-
-// orgSignupBearerClient is a minimal bearer-injecting HTTP client.
-type orgSignupBearerClient struct {
-	base  *http.Client
-	token string
-}
-
-func (b orgSignupBearerClient) Do(req *http.Request) (*http.Response, error) {
-	if b.token != "" {
-		req.Header.Set("Authorization", "Bearer "+b.token)
+	if cur.Msg.GetUser().GetEmail() != emailAddr {
+		t.Fatalf("GetCurrentUser email = %q, want %q", cur.Msg.GetUser().GetEmail(), emailAddr)
 	}
-	return b.base.Do(req)
 }

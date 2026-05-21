@@ -32,7 +32,7 @@ func (s *AuthService) InitiateQrLogin(ctx context.Context, deviceInfo, userAgent
 	expiresIn := secondsToInt32(s.cfg.QRLoginExpirySeconds)
 	expiresAt := now + int64(expiresIn)*1000
 
-	_, err := s.repo.CreateQrLoginSession(ctx, &QrLoginSessionRecord{
+	_, err := s.repo(ctx).CreateQrLoginSession(ctx, &QrLoginSessionRecord{
 		SessionID:          sessionID,
 		Status:             "pending",
 		NewDeviceInfo:      deviceInfo,
@@ -69,7 +69,7 @@ func (s *AuthService) GetQrLoginSession(ctx context.Context, sessionID string) (
 		return nil, fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
 	}
 
-	session, err := s.repo.FindQrLoginSession(ctx, sessionID)
+	session, err := s.repo(ctx).FindQrLoginSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (s *AuthService) GetQrLoginSession(ctx context.Context, sessionID string) (
 	status := session.Status
 	now := s.nowMs()
 	if status == "pending" && session.ExpiresAt < now {
-		_ = s.repo.UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
+		_ = s.repo(ctx).UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
 			"status": "expired", "updated_at": now,
 		})
 		status = "expired"
@@ -102,7 +102,7 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 		return "", fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
 	}
 
-	session, err := s.repo.FindQrLoginSession(ctx, sessionID)
+	session, err := s.repo(ctx).FindQrLoginSession(ctx, sessionID)
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +113,7 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 	now := s.nowMs()
 	if session.ExpiresAt < now {
 		if session.Status == "pending" {
-			_ = s.repo.UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
+			_ = s.repo(ctx).UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
 				"status": "expired", "updated_at": now,
 			})
 		}
@@ -127,7 +127,7 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 	var newStatus string
 	if approve {
 		newStatus = "approved"
-		err = s.repo.UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
+		err = s.repo(ctx).UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
 			"status":               "approved",
 			"user_id":              userID,
 			"approved_device_info": truncate(userAgent, 512),
@@ -140,7 +140,7 @@ func (s *AuthService) ApproveQrLogin(ctx context.Context, sessionID string, appr
 		)
 	} else {
 		newStatus = "rejected"
-		err = s.repo.UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
+		err = s.repo(ctx).UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
 			"status":     "rejected",
 			"updated_at": now,
 		})
@@ -183,7 +183,7 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 		return &PollQrResult{Status: "expired"}, nil
 	}
 
-	session, err := s.repo.FindQrLoginSession(ctx, sessionID)
+	session, err := s.repo(ctx).FindQrLoginSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 
 	// Expiry check for pending sessions.
 	if status == "pending" && session.ExpiresAt < now {
-		_ = s.repo.UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
+		_ = s.repo(ctx).UpdateQrLoginSession(ctx, session.NodeID, map[string]any{
 			"status": "expired", "updated_at": now,
 		})
 		return &PollQrResult{Status: "expired"}, nil
@@ -230,14 +230,14 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 	// and proceeds to mint tokens. The loser sees ErrQrLoginNotPending
 	// and surfaces "consumed" — the same shape another caller would see
 	// after the winner committed.
-	if err := s.repo.ConsumeQrLoginSession(ctx, session.NodeID, now); err != nil {
+	if err := s.repo(ctx).ConsumeQrLoginSession(ctx, session.NodeID, now); err != nil {
 		if errors.Is(err, ErrQrLoginNotPending) {
 			return &PollQrResult{Status: "consumed"}, nil
 		}
 		return nil, fmt.Errorf("consuming QR login session: %w", err)
 	}
 
-	user, err := s.repo.GetUser(ctx, session.UserID)
+	user, err := s.repo(ctx).GetUser(ctx, session.UserID)
 	if err != nil {
 		return nil, err
 	}

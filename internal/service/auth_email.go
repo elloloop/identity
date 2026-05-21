@@ -74,7 +74,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		return nil
 	}
 
-	user, err := s.repo.FindUserByEmail(ctx, emailAddr)
+	user, err := s.repo(ctx).FindUserByEmail(ctx, emailAddr)
 	if err != nil {
 		s.logger.Warn("password_reset_lookup_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
@@ -95,7 +95,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	now := s.nowMs()
 	expiry := s.emailTokenExpiry()
 
-	if err := s.repo.CreatePasswordResetToken(ctx, &PasswordResetToken{
+	if err := s.repo(ctx).CreatePasswordResetToken(ctx, &PasswordResetToken{
 		TokenHash: tokenHash,
 		UserID:    user.ID,
 		ExpiresAt: now + int64(expiry/time.Millisecond),
@@ -157,7 +157,7 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	}
 
 	tokenHash := sha256Hex(token)
-	rec, err := s.repo.FindPasswordResetTokenByHash(ctx, tokenHash)
+	rec, err := s.repo(ctx).FindPasswordResetTokenByHash(ctx, tokenHash)
 	if err != nil {
 		return fmt.Errorf("looking up reset token: %w", err)
 	}
@@ -171,7 +171,7 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 		return fmt.Errorf("%w: reset token expired", ErrTokenExpired)
 	}
 
-	user, err := s.repo.GetUser(ctx, rec.UserID)
+	user, err := s.repo(ctx).GetUser(ctx, rec.UserID)
 	if err != nil {
 		return fmt.Errorf("fetching user: %w", err)
 	}
@@ -185,7 +185,7 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	}
 
 	now := s.nowMs()
-	if err := s.repo.UpdateUser(ctx, user.ID, map[string]any{
+	if err := s.repo(ctx).UpdateUser(ctx, user.ID, map[string]any{
 		"password_hash":      pwHash,
 		"updated_at":         now,
 		"failed_login_count": 0,
@@ -193,7 +193,7 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	}); err != nil {
 		return fmt.Errorf("updating password: %w", err)
 	}
-	if err := s.repo.MarkPasswordResetTokenConsumed(ctx, rec.NodeID, now); err != nil {
+	if err := s.repo(ctx).MarkPasswordResetTokenConsumed(ctx, rec.NodeID, now); err != nil {
 		s.logger.Warn("password_reset_consume_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
@@ -201,7 +201,7 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	// re-authentication everywhere. In mode=session we also revoke
 	// the Session rows so the in-flight access tokens stop working
 	// immediately.
-	if err := s.repo.DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
+	if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
 		s.logger.Warn("password_reset_session_revoke_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
@@ -227,7 +227,7 @@ func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) 
 	if userID == "" {
 		return fmt.Errorf("%w: user id is required", ErrInvalidArgument)
 	}
-	user, err := s.repo.GetUser(ctx, userID)
+	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("fetching user: %w", err)
 	}
@@ -245,7 +245,7 @@ func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) 
 	now := s.nowMs()
 	expiry := s.emailTokenExpiry()
 
-	if err := s.repo.CreateEmailVerificationToken(ctx, &EmailVerificationToken{
+	if err := s.repo(ctx).CreateEmailVerificationToken(ctx, &EmailVerificationToken{
 		TokenHash: tokenHash,
 		UserID:    user.ID,
 		Email:     user.Email,
@@ -291,7 +291,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 	}
 	tokenHash := sha256Hex(token)
 
-	rec, err := s.repo.FindEmailVerificationTokenByHash(ctx, tokenHash)
+	rec, err := s.repo(ctx).FindEmailVerificationTokenByHash(ctx, tokenHash)
 	if err != nil {
 		return nil, fmt.Errorf("looking up verification token: %w", err)
 	}
@@ -305,7 +305,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 		return nil, fmt.Errorf("%w: verification token expired", ErrTokenExpired)
 	}
 
-	user, err := s.repo.GetUser(ctx, rec.UserID)
+	user, err := s.repo(ctx).GetUser(ctx, rec.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("fetching user: %w", err)
 	}
@@ -315,14 +315,14 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) (*User, err
 
 	now := s.nowMs()
 	if !user.EmailVerified {
-		if err := s.repo.SetUserEmailVerified(ctx, user.ID, now); err != nil {
+		if err := s.repo(ctx).SetUserEmailVerified(ctx, user.ID, now); err != nil {
 			return nil, fmt.Errorf("setting email verified: %w", err)
 		}
 		user.EmailVerified = true
 		user.EmailVerifiedAt = now
 	}
 
-	if err := s.repo.MarkEmailVerificationTokenConsumed(ctx, rec.NodeID, now); err != nil {
+	if err := s.repo(ctx).MarkEmailVerificationTokenConsumed(ctx, rec.NodeID, now); err != nil {
 		s.logger.Warn("email_verification_consume_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
 	}

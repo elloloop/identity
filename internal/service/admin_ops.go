@@ -25,7 +25,7 @@ func (s *AdminService) SetUserQuota(ctx context.Context, actorID, targetUserID s
 		return errors.New("quota_bytes must be non-negative")
 	}
 
-	node, err := s.db.GetNode(ctx, s.tenantID, actorStr(targetUserID), typeUser, targetUserID)
+	node, err := s.db.GetNode(ctx, s.tenantID(ctx), actorStr(targetUserID), typeUser, targetUserID)
 	if err != nil {
 		return fmt.Errorf("fetch user: %w", err)
 	}
@@ -37,7 +37,7 @@ func (s *AdminService) SetUserQuota(ctx context.Context, actorID, targetUserID s
 		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 		Patch: map[string]any{ufQuotaBytes: quotaBytes, ufUpdatedAt: nowMs()},
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("set quota: %w", err)
 	}
 	return nil
@@ -65,7 +65,7 @@ func (s *AdminService) ListUsers(
 		}
 	}
 
-	nodes, err := s.db.QueryNodes(ctx, s.tenantID, tenantAdminActor, typeUser, nil)
+	nodes, err := s.db.QueryNodes(ctx, s.tenantID(ctx), tenantAdminActor, typeUser, nil)
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("list users: %w", err)
 	}
@@ -112,7 +112,7 @@ func (s *AdminService) GetUser(ctx context.Context, actorID, userID string) (*Us
 	if _, err := s.requireAdmin(ctx, actorID); err != nil {
 		return nil, err
 	}
-	node, err := s.db.GetNode(ctx, s.tenantID, actorStr(userID), typeUser, userID)
+	node, err := s.db.GetNode(ctx, s.tenantID(ctx), actorStr(userID), typeUser, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
 	}
@@ -143,12 +143,12 @@ func (s *AdminService) UpdateUser(ctx context.Context, actorID, userID, name, ro
 	}
 
 	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: userID, Patch: patch}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
 
 	// Re-fetch to return the updated user.
-	node, err := s.db.GetNode(ctx, s.tenantID, actorStr(userID), typeUser, userID)
+	node, err := s.db.GetNode(ctx, s.tenantID(ctx), actorStr(userID), typeUser, userID)
 	if err != nil {
 		return nil, fmt.Errorf("re-fetch user: %w", err)
 	}
