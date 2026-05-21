@@ -44,7 +44,10 @@ All config is via environment variables. See `internal/config/config.go` for the
 | Var | Purpose |
 |---|---|
 | `GATEWAY_ENTDB_ADDRESS` | EntDB endpoint (e.g. `entdb:50051`) |
-| `GATEWAY_DEFAULT_TENANT_ID` | Tenant ID for this deployment (each product = its own tenant) |
+| `GATEWAY_IDENTITY_MODE` | Tenancy shape: `single` (default, one tenant per deployment) or `multi` (one tenant per customer org) |
+| `GATEWAY_DEFAULT_TENANT_ID` | Tenant ID for this deployment (required in `single`; the system tenant in `multi`) |
+| `GATEWAY_TENANT_RESOLUTION_SOURCES` | `multi` only: ordered per-request resolution sources, `host`/`jwt` (default `host,jwt`) |
+| `GATEWAY_TENANT_HOST_BASE_DOMAIN` | `multi` only: base domain whose subdomain is the tenant slug (required when `host` is a source) |
 | `GATEWAY_JWT_SIGNER` | JWT signer backend: `file` (default) or `kms_aws` |
 | `GATEWAY_JWT_KEYS_FILE` | Path to the file-backed signer's keys file (see [docs/key-rotation.md](./docs/key-rotation.md)) |
 | `GATEWAY_JWT_KMS_KEYS` | AWS KMS signer: CSV of `kid=arn` entries |

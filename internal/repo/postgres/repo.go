@@ -79,6 +79,20 @@ func New(ctx context.Context, cfg Config) (*pgRepository, error) {
 	}, nil
 }
 
+// WithTenant returns a Repository sharing this store's connection pool
+// but scoped to a different tenant. Used by the mode=multi per-request
+// tenant-resolution path, where every request needs a tenant-scoped
+// Repository but opening a fresh pool per request would exhaust
+// connections. The returned value shares the pool, so it must NOT be
+// Closed independently — Close on the original releases the pool for all
+// derived scopes.
+func (r *pgRepository) WithTenant(tenantID string) service.Repository {
+	cp := *r
+	cp.tenantID = tenantID
+	cp.cfg.TenantID = tenantID
+	return &cp
+}
+
 // Close releases all pool resources. Safe to call multiple times.
 //
 // Repository does not declare a Close method, so callers that want the

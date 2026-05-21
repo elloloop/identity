@@ -21,12 +21,12 @@ import (
 // provider's own session id is stored alongside but never returned to
 // the client.
 type IdentityVerificationService struct {
-	repo     Repository
-	provider idv.Provider
-	tenantID string
-	clock    func() time.Time
-	newID    func() string
-	logger   *zap.Logger
+	defaultRepo     Repository
+	provider        idv.Provider
+	defaultTenantID string
+	clock           func() time.Time
+	newID           func() string
+	logger          *zap.Logger
 }
 
 // NewIdentityVerificationService constructs the service. clock and
@@ -41,13 +41,31 @@ func NewIdentityVerificationService(
 		logger = zap.NewNop()
 	}
 	return &IdentityVerificationService{
-		repo:     repo,
-		provider: provider,
-		tenantID: tenantID,
-		clock:    time.Now,
-		newID:    newVerificationID,
-		logger:   logger,
+		defaultRepo:     repo,
+		provider:        provider,
+		defaultTenantID: tenantID,
+		clock:           time.Now,
+		newID:           newVerificationID,
+		logger:          logger,
 	}
+}
+
+// tenantID returns the request's resolved tenant, falling back to the
+// boot-time DefaultTenantID in mode=single (decision log §1).
+func (s *IdentityVerificationService) tenantID(ctx context.Context) string {
+	if scope := TenantScopeFromContext(ctx); scope != nil && scope.TenantID != "" {
+		return scope.TenantID
+	}
+	return s.defaultTenantID
+}
+
+// repo returns the Repository scoped to the request's resolved tenant,
+// falling back to the boot-time Repository in mode=single.
+func (s *IdentityVerificationService) repo(ctx context.Context) Repository {
+	if scope := TenantScopeFromContext(ctx); scope != nil && scope.Repo != nil {
+		return scope.Repo
+	}
+	return s.defaultRepo
 }
 
 // BeginIdentityVerification creates a new verification session for
@@ -63,7 +81,7 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 	if userID == "" {
 		return nil, ErrUnauthenticated
 	}
-	user, err := s.repo.GetUser(ctx, userID)
+	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("idv: lookup user: %w", err)
 	}
@@ -73,7 +91,7 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 
 	sess, err := s.provider.BeginVerification(ctx, idv.Request{
 		UserID:      userID,
-		TenantID:    s.tenantID,
+		TenantID:    s.tenantID(ctx),
 		Email:       user.Email,
 		DisplayName: user.Name,
 	})
@@ -91,14 +109,14 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 	rec := &IdentityVerificationRecord{
 		VerificationID:    s.newID(),
 		UserID:            userID,
-		TenantID:          s.tenantID,
+		TenantID:          s.tenantID(ctx),
 		Provider:          s.provider.Name(),
 		ProviderSessionID: sess.ProviderSessionID,
 		Status:            IDVStatusPending,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	if err := s.repo.CreateIdentityVerification(ctx, rec); err != nil {
+	if err := s.repo(ctx).CreateIdentityVerification(ctx, rec); err != nil {
 		return nil, fmt.Errorf("idv: persist: %w", err)
 	}
 
@@ -143,7 +161,7 @@ func (s *IdentityVerificationService) GetIdentityVerificationStatus(
 		// Provider lost the session; mark it expired so future polls
 		// short-circuit on the terminal status.
 		now := s.clock().UnixMilli()
-		_ = s.repo.UpdateIdentityVerificationStatus(ctx, rec.VerificationID, IDVStatusExpired, "", now, now)
+		_ = s.repo(ctx).UpdateIdentityVerificationStatus(ctx, rec.VerificationID, IDVStatusExpired, "", now, now)
 		rec.Status = IDVStatusExpired
 		rec.CompletedAt = now
 		rec.UpdatedAt = now
@@ -169,7 +187,7 @@ func (s *IdentityVerificationService) GetIdentityVerificationStatus(
 		completedMs = status.CompletedAt.UnixMilli()
 	}
 	updatedMs := s.clock().UnixMilli()
-	if err := s.repo.UpdateIdentityVerificationStatus(
+	if err := s.repo(ctx).UpdateIdentityVerificationStatus(
 		ctx, rec.VerificationID, status.Status, status.RejectionReason, completedMs, updatedMs,
 	); err != nil {
 		return nil, fmt.Errorf("idv: update status: %w", err)
@@ -185,7 +203,7 @@ func (s *IdentityVerificationService) GetIdentityVerificationStatus(
 	// a stale user.idv_verified will resolve on the next login attempt
 	// (or the next status poll).
 	if status.Status == IDVStatusApproved {
-		if err := s.repo.SetUserIDVVerified(ctx, rec.UserID, completedMs); err != nil {
+		if err := s.repo(ctx).SetUserIDVVerified(ctx, rec.UserID, completedMs); err != nil {
 			s.logger.Warn(
 				"idv_user_flag_update_failed",
 				zap.String("verification_id", rec.VerificationID),
@@ -202,7 +220,7 @@ func (s *IdentityVerificationService) lookupForCaller(
 	callerUserID, verificationID string,
 ) (*IdentityVerificationRecord, error) {
 	if verificationID == "" {
-		rec, err := s.repo.GetLatestIdentityVerificationForUser(ctx, callerUserID)
+		rec, err := s.repo(ctx).GetLatestIdentityVerificationForUser(ctx, callerUserID)
 		if err != nil {
 			return nil, fmt.Errorf("idv: latest: %w", err)
 		}
@@ -211,7 +229,7 @@ func (s *IdentityVerificationService) lookupForCaller(
 		}
 		return rec, nil
 	}
-	rec, err := s.repo.GetIdentityVerification(ctx, verificationID)
+	rec, err := s.repo(ctx).GetIdentityVerification(ctx, verificationID)
 	if err != nil {
 		return nil, fmt.Errorf("idv: get: %w", err)
 	}

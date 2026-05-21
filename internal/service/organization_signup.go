@@ -304,8 +304,8 @@ func (s *OrganizationSignupService) Signup(
 		// The Organization + User + Membership rows already exist, so
 		// we return the error and leave the rows in place rather than
 		// roll back a successful signup. The admin can re-authenticate
-		// via PasswordLogin once slice 3 (per-request tenant resolution)
-		// lands.
+		// via PasswordLogin against the org's host (per-request tenant
+		// resolution scopes the login to this tenant).
 		return nil, fmt.Errorf("issue tokens: %w", err)
 	}
 

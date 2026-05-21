@@ -47,7 +47,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 		return fmt.Errorf("%w: current password is required", ErrInvalidArgument)
 	}
 
-	user, err := s.repo.GetUser(ctx, userID)
+	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("fetching user: %w", err)
 	}
@@ -69,7 +69,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 		return fmt.Errorf("%w: new email matches current email", ErrInvalidArgument)
 	}
 
-	existing, err := s.repo.FindUserByEmail(ctx, newEmail)
+	existing, err := s.repo(ctx).FindUserByEmail(ctx, newEmail)
 	if err != nil {
 		return fmt.Errorf("checking email uniqueness: %w", err)
 	}
@@ -82,7 +82,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 	now := s.nowMs()
 	expiry := s.emailTokenExpiry()
 
-	if err := s.repo.CreateEmailChangeToken(ctx, &EmailChangeToken{
+	if err := s.repo(ctx).CreateEmailChangeToken(ctx, &EmailChangeToken{
 		TokenHash: tokenHash,
 		UserID:    user.ID,
 		OldEmail:  user.Email,
@@ -175,7 +175,7 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 	}
 	tokenHash := sha256Hex(token)
 
-	rec, err := s.repo.FindEmailChangeTokenByHash(ctx, tokenHash)
+	rec, err := s.repo(ctx).FindEmailChangeTokenByHash(ctx, tokenHash)
 	if err != nil {
 		return nil, fmt.Errorf("looking up email change token: %w", err)
 	}
@@ -189,7 +189,7 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 		return nil, fmt.Errorf("%w: email change token expired", ErrTokenExpired)
 	}
 
-	user, err := s.repo.GetUser(ctx, rec.UserID)
+	user, err := s.repo(ctx).GetUser(ctx, rec.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("fetching user: %w", err)
 	}
@@ -197,7 +197,7 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
-	existing, err := s.repo.FindUserByEmail(ctx, rec.NewEmail)
+	existing, err := s.repo(ctx).FindUserByEmail(ctx, rec.NewEmail)
 	if err != nil {
 		return nil, fmt.Errorf("checking email uniqueness: %w", err)
 	}
@@ -206,7 +206,7 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 	}
 
 	now := s.nowMs()
-	if err := s.repo.UpdateUserEmail(ctx, user.ID, rec.NewEmail, now); err != nil {
+	if err := s.repo(ctx).UpdateUserEmail(ctx, user.ID, rec.NewEmail, now); err != nil {
 		return nil, fmt.Errorf("updating user email: %w", err)
 	}
 
@@ -215,7 +215,7 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 	user.EmailVerifiedAt = now
 	user.UpdatedAt = time.UnixMilli(now)
 
-	if err := s.repo.MarkEmailChangeTokenConsumed(ctx, rec.NodeID, now); err != nil {
+	if err := s.repo(ctx).MarkEmailChangeTokenConsumed(ctx, rec.NodeID, now); err != nil {
 		s.logger.Warn("email_change_consume_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
@@ -224,7 +224,7 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 	// on every device per OAuth 2.1 §4.13. In mode=session we also
 	// revoke the Session rows so the in-flight access tokens stop
 	// working immediately.
-	if err := s.repo.DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
+	if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
 		s.logger.Warn("email_change_session_revoke_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
 	}

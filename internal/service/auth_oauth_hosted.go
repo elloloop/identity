@@ -169,7 +169,7 @@ func (s *AuthService) CompleteHostedOAuth(
 func (s *AuthService) mintOAuthOneTimeCode(ctx context.Context, userID string) (string, error) {
 	now := s.nowMs()
 	raw := randomToken(32)
-	_, err := s.repo.CreateOAuthOneTimeCode(ctx, &OAuthOneTimeCodeRecord{
+	_, err := s.repo(ctx).CreateOAuthOneTimeCode(ctx, &OAuthOneTimeCodeRecord{
 		CodeHash:  sha256Hex(raw),
 		UserID:    userID,
 		ExpiresAt: now + oauthOneTimeCodeTTL.Milliseconds(),
@@ -193,7 +193,7 @@ func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAge
 		return nil, ErrOAuthCodeInvalid
 	}
 
-	rec, err := s.repo.ConsumeOAuthOneTimeCode(ctx, sha256Hex(code), s.nowMs())
+	rec, err := s.repo(ctx).ConsumeOAuthOneTimeCode(ctx, sha256Hex(code), s.nowMs())
 	if err != nil {
 		if errors.Is(err, ErrOAuthCodeInvalid) {
 			return nil, ErrOAuthCodeInvalid
@@ -201,7 +201,7 @@ func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAge
 		return nil, fmt.Errorf("consuming oauth one-time code: %w", err)
 	}
 
-	user, err := s.repo.GetUser(ctx, rec.UserID)
+	user, err := s.repo(ctx).GetUser(ctx, rec.UserID)
 	if err != nil {
 		return nil, err
 	}

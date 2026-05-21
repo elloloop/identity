@@ -76,6 +76,7 @@ func TestOrganizationSignup_RealPostgres(t *testing.T) {
 	cfg := &config.Config{
 		DefaultTenantID:               systemTenant,
 		IdentityMode:                  config.IdentityModeMulti,
+		TenantResolutionSources:       "jwt",
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,
@@ -108,30 +109,12 @@ func TestOrganizationSignup_RealPostgres(t *testing.T) {
 	}
 
 	pgTenantAdmin := repo.NewPostgresTenantAdmin()
-	// Per-tenant Repository factory: open a fresh postgres repo
-	// instance for each tenant; the pool is internal to the repo so
-	// each call holds its own connections. We track the close funcs
-	// for cleanup.
-	var tenantCloses []func()
+	// Per-tenant Repository factory: re-scope the system repo's shared
+	// connection pool to each tenant. WithTenant shares the pool, so the
+	// per-request resolution path does not open a fresh pool per call.
 	repoForTenant := func(tenantID string) service.Repository {
-		r, err := pgrepo.New(ctx, pgrepo.Config{
-			DSN:         dsn,
-			MaxConns:    5,
-			ConnTimeout: 5 * time.Second,
-			AutoMigrate: false, // first repo already ran them
-			TenantID:    tenantID,
-		})
-		if err != nil {
-			t.Fatalf("pgrepo.New(%q): %v", tenantID, err)
-		}
-		tenantCloses = append(tenantCloses, r.Close)
-		return r
+		return systemPgRepo.WithTenant(tenantID)
 	}
-	t.Cleanup(func() {
-		for _, c := range tenantCloses {
-			c()
-		}
-	})
 
 	built, err := app.New(app.Deps{
 		Config:              cfg,
@@ -215,6 +198,18 @@ func TestOrganizationSignup_RealPostgres(t *testing.T) {
 	}
 	if len(orgs) != 1 || orgs[0].Slug != slug {
 		t.Fatalf("expected one org membership in %q, got %v", slug, orgs)
+	}
+
+	// Per-request tenant resolution (jwt source) scopes an authenticated
+	// call to the admin's tenant, so GetCurrentUser must find the admin.
+	authedHTTP := orgSignupBearerClient{base: httpClient, token: resp.Msg.AccessToken}
+	authedClient := identityconnectgen.NewIdentityServiceClient(authedHTTP, srv.URL)
+	cur, err := authedClient.GetCurrentUser(context.Background(), connect.NewRequest(&identitypb.GetCurrentUserRequest{}))
+	if err != nil {
+		t.Fatalf("GetCurrentUser after org signup: %v", err)
+	}
+	if cur.Msg.GetUser().GetEmail() != emailAddr {
+		t.Fatalf("GetCurrentUser email = %q, want %q", cur.Msg.GetUser().GetEmail(), emailAddr)
 	}
 
 	// Slug collision: a second OrganizationSignup with the same slug

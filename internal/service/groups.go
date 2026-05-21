@@ -16,10 +16,10 @@ import (
 // GroupService implements working-group CRUD and membership operations.
 // The underlying EntDB node type is WorkingGroup (type_id 2).
 type GroupService struct {
-	db       DB
-	tenantID string
-	audit    *audit.Logger
-	logger   *zap.Logger
+	db              DB
+	defaultTenantID string
+	audit           *audit.Logger
+	logger          *zap.Logger
 }
 
 // NewGroupService creates a GroupService.
@@ -27,12 +27,23 @@ func NewGroupService(db DB, tenantID string, auditLog *audit.Logger, logger *zap
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &GroupService{db: db, tenantID: tenantID, audit: auditLog, logger: logger}
+	return &GroupService{db: db, defaultTenantID: tenantID, audit: auditLog, logger: logger}
+}
+
+// tenantID returns the request's resolved tenant, falling back to the
+// boot-time DefaultTenantID in mode=single (decision log §1). The DB
+// interface takes the tenant per call, so this service needs only the
+// resolved id.
+func (s *GroupService) tenantID(ctx context.Context) string {
+	if scope := TenantScopeFromContext(ctx); scope != nil && scope.TenantID != "" {
+		return scope.TenantID
+	}
+	return s.defaultTenantID
 }
 
 // CreateGroup creates a new working group.
 func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, description string) (*Group, error) {
-	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID(ctx), actorID); err != nil {
 		return nil, err
 	}
 	name = strings.TrimSpace(name)
@@ -49,7 +60,7 @@ func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, descripti
 		gfUpdatedAt:   now,
 	}
 	op := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeWorkingGroup, Data: data}
-	result, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op})
+	result, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op})
 	if err != nil {
 		return nil, fmt.Errorf("create group: %w", err)
 	}
@@ -69,7 +80,7 @@ func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, descripti
 
 // UpdateGroup patches name and/or description of a group.
 func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, description string) (*Group, error) {
-	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID(ctx), actorID); err != nil {
 		return nil, err
 	}
 	if groupID == "" {
@@ -85,12 +96,12 @@ func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, 
 	}
 
 	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeWorkingGroup, NodeID: groupID, Patch: patch}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return nil, fmt.Errorf("update group: %w", err)
 	}
 
 	// Re-fetch.
-	node, err := s.db.GetNode(ctx, s.tenantID, tenantAdminActor, typeWorkingGroup, groupID)
+	node, err := s.db.GetNode(ctx, s.tenantID(ctx), tenantAdminActor, typeWorkingGroup, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("re-fetch group: %w", err)
 	}
@@ -102,7 +113,7 @@ func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, 
 
 // DeleteGroup deletes a working group.
 func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string) error {
-	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID(ctx), actorID); err != nil {
 		return err
 	}
 	if groupID == "" {
@@ -110,7 +121,7 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string)
 	}
 
 	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeWorkingGroup, NodeID: groupID}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("delete group: %w", err)
 	}
 
@@ -120,7 +131,7 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string)
 
 // ListGroups returns a paginated list of groups.
 func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, limit int) ([]*Group, string, error) {
-	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID(ctx), actorID); err != nil {
 		return nil, "", err
 	}
 	if limit <= 0 {
@@ -133,7 +144,7 @@ func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, l
 		}
 	}
 
-	nodes, err := s.db.QueryNodes(ctx, s.tenantID, tenantAdminActor, typeWorkingGroup, nil)
+	nodes, err := s.db.QueryNodes(ctx, s.tenantID(ctx), tenantAdminActor, typeWorkingGroup, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("list groups: %w", err)
 	}
@@ -161,7 +172,7 @@ func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, l
 
 // AddGroupMember creates a MEMBER_OF edge from user to group.
 func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, userID string) error {
-	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID(ctx), actorID); err != nil {
 		return err
 	}
 	if groupID == "" || userID == "" {
@@ -172,7 +183,7 @@ func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, use
 		Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf,
 		FromNodeID: userID, ToNodeID: groupID,
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("add group member: %w", err)
 	}
 
@@ -185,7 +196,7 @@ func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, use
 
 // RemoveGroupMember deletes the MEMBER_OF edge from user to group.
 func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, userID string) error {
-	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID(ctx), actorID); err != nil {
 		return err
 	}
 	if groupID == "" || userID == "" {
@@ -196,7 +207,7 @@ func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, 
 		Type: entdb.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
 		FromNodeID: userID, ToNodeID: groupID,
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID, actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("remove group member: %w", err)
 	}
 
@@ -210,21 +221,21 @@ func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, 
 // ListGroupMembers returns all users that belong to a group via
 // MEMBER_OF edges.
 func (s *GroupService) ListGroupMembers(ctx context.Context, actorID, groupID string) ([]*User, error) {
-	if _, err := requireAdminActor(ctx, s.db, s.tenantID, actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db, s.tenantID(ctx), actorID); err != nil {
 		return nil, err
 	}
 	if groupID == "" {
 		return nil, errors.New("group_id is required")
 	}
 
-	edges, err := s.db.GetEdgesTo(ctx, s.tenantID, tenantAdminActor, groupID, edgeMemberOf)
+	edges, err := s.db.GetEdgesTo(ctx, s.tenantID(ctx), tenantAdminActor, groupID, edgeMemberOf)
 	if err != nil {
 		return nil, fmt.Errorf("list group members: %w", err)
 	}
 
 	users := make([]*User, 0, len(edges))
 	for _, e := range edges {
-		userNode, err := s.db.GetNode(ctx, s.tenantID, tenantAdminActor, typeUser, e.FromNodeID)
+		userNode, err := s.db.GetNode(ctx, s.tenantID(ctx), tenantAdminActor, typeUser, e.FromNodeID)
 		if err != nil || userNode == nil {
 			continue
 		}

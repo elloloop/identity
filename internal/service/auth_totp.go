@@ -17,7 +17,7 @@ import (
 // BeginTotpSetup starts TOTP enrollment for the authenticated user.
 // Returns (secret, qrURI, recoveryCodes, error).
 func (s *AuthService) BeginTotpSetup(ctx context.Context, userID string) (string, string, []string, error) {
-	user, err := s.repo.GetUser(ctx, userID)
+	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -26,12 +26,12 @@ func (s *AuthService) BeginTotpSetup(ctx context.Context, userID string) (string
 	}
 
 	// Clean up any previously-started (unverified) enrollment.
-	existing, err := s.repo.GetTotpCredential(ctx, userID)
+	existing, err := s.repo(ctx).GetTotpCredential(ctx, userID)
 	if err != nil {
 		return "", "", nil, err
 	}
 	if existing != nil && !existing.Verified {
-		_ = s.repo.DeleteTotpCredential(ctx, existing.NodeID)
+		_ = s.repo(ctx).DeleteTotpCredential(ctx, existing.NodeID)
 	}
 
 	secret, err := totp.GenerateSecret()
@@ -45,7 +45,7 @@ func (s *AuthService) BeginTotpSetup(ctx context.Context, userID string) (string
 	}
 
 	now := s.nowMs()
-	_, err = s.repo.CreateTotpCredential(ctx, &TotpCredRecord{
+	_, err = s.repo(ctx).CreateTotpCredential(ctx, &TotpCredRecord{
 		UserID:          userID,
 		SecretEncrypted: encrypted,
 		Verified:        false,
@@ -78,7 +78,7 @@ func (s *AuthService) VerifyTotpSetup(ctx context.Context, userID, code string) 
 		return false, fmt.Errorf("%w: code is required", ErrInvalidArgument)
 	}
 
-	cred, err := s.repo.GetTotpCredential(ctx, userID)
+	cred, err := s.repo(ctx).GetTotpCredential(ctx, userID)
 	if err != nil {
 		return false, err
 	}
@@ -103,11 +103,11 @@ func (s *AuthService) VerifyTotpSetup(ctx context.Context, userID, code string) 
 	}
 
 	now := s.nowMs()
-	_ = s.repo.UpdateTotpCredential(ctx, cred.NodeID, map[string]any{
+	_ = s.repo(ctx).UpdateTotpCredential(ctx, cred.NodeID, map[string]any{
 		"verified":     true,
 		"last_used_at": now,
 	})
-	_ = s.repo.UpdateUser(ctx, userID, map[string]any{
+	_ = s.repo(ctx).UpdateUser(ctx, userID, map[string]any{
 		"totp_required": true,
 		"updated_at":    now,
 	})
@@ -139,7 +139,7 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 	}
 	userID := record.UserID
 
-	user, err := s.repo.GetUser(ctx, userID)
+	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
-	cred, err := s.repo.GetTotpCredential(ctx, userID)
+	cred, err := s.repo(ctx).GetTotpCredential(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -170,9 +170,9 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 		// Try recovery code.
 		codeHash := totp.HashRecoveryCode(code, s.totpRecoveryPepper)
 		if codeHash != "" {
-			rc, rcErr := s.repo.FindRecoveryCodeByHash(ctx, userID, codeHash)
+			rc, rcErr := s.repo(ctx).FindRecoveryCodeByHash(ctx, userID, codeHash)
 			if rcErr == nil && rc != nil && !rc.Used {
-				_ = s.repo.UpdateRecoveryCode(ctx, rc.NodeID, map[string]any{
+				_ = s.repo(ctx).UpdateRecoveryCode(ctx, rc.NodeID, map[string]any{
 					"used":    true,
 					"used_at": s.nowMs(),
 				})
@@ -192,7 +192,7 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 	}
 
 	now := s.nowMs()
-	_ = s.repo.UpdateTotpCredential(ctx, cred.NodeID, map[string]any{"last_used_at": now})
+	_ = s.repo(ctx).UpdateTotpCredential(ctx, cred.NodeID, map[string]any{"last_used_at": now})
 	s.updateLastLogin(ctx, userID)
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
@@ -239,7 +239,7 @@ func (s *AuthService) DisableTotp(ctx context.Context, userID, password string) 
 		return fmt.Errorf("%w: password confirmation required", ErrInvalidArgument)
 	}
 
-	user, err := s.repo.GetUser(ctx, userID)
+	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -251,9 +251,9 @@ func (s *AuthService) DisableTotp(ctx context.Context, userID, password string) 
 		return fmt.Errorf("%w: invalid password", ErrUnauthenticated)
 	}
 
-	_ = s.repo.DeleteTotpCredentialsForUser(ctx, userID)
-	_ = s.repo.DeleteRecoveryCodesForUser(ctx, userID)
-	_ = s.repo.UpdateUser(ctx, userID, map[string]any{
+	_ = s.repo(ctx).DeleteTotpCredentialsForUser(ctx, userID)
+	_ = s.repo(ctx).DeleteRecoveryCodesForUser(ctx, userID)
+	_ = s.repo(ctx).UpdateUser(ctx, userID, map[string]any{
 		"totp_required": false,
 		"updated_at":    s.nowMs(),
 	})
@@ -276,7 +276,7 @@ func (s *AuthService) RegenerateRecoveryCodes(ctx context.Context, userID, passw
 		return nil, fmt.Errorf("%w: password confirmation required", ErrInvalidArgument)
 	}
 
-	user, err := s.repo.GetUser(ctx, userID)
+	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}

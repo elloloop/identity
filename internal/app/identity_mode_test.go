@@ -86,6 +86,8 @@ func TestIdentityModeGuard_Single_RequiresDefaultTenant(t *testing.T) {
 func TestIdentityModeGuard_Multi_RequiresTenantAdminAndFactory(t *testing.T) {
 	deps := newSingleModeDeps(t)
 	deps.Config.IdentityMode = config.IdentityModeMulti
+	deps.Config.TenantResolutionSources = "host,jwt"
+	deps.Config.TenantHostBaseDomain = "example.test"
 
 	// neither wired — both nil
 	_, err := New(deps)
@@ -97,9 +99,44 @@ func TestIdentityModeGuard_Multi_RequiresTenantAdminAndFactory(t *testing.T) {
 	}
 }
 
+func TestIdentityModeGuard_Multi_RequiresResolutionSource(t *testing.T) {
+	deps := newSingleModeDeps(t)
+	deps.Config.IdentityMode = config.IdentityModeMulti
+	deps.Config.TenantResolutionSources = "" // fail closed
+	deps.TenantAdmin = &stubTenantAdmin{}
+	deps.RepositoryForTenant = func(_ string) service.Repository { return memory.New() }
+
+	_, err := New(deps)
+	if err == nil {
+		t.Fatalf("expected error for missing resolution source in multi mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "TENANT_RESOLUTION_SOURCES") {
+		t.Fatalf("expected 'TENANT_RESOLUTION_SOURCES' error, got: %v", err)
+	}
+}
+
+func TestIdentityModeGuard_Multi_HostSourceRequiresBaseDomain(t *testing.T) {
+	deps := newSingleModeDeps(t)
+	deps.Config.IdentityMode = config.IdentityModeMulti
+	deps.Config.TenantResolutionSources = "host"
+	deps.Config.TenantHostBaseDomain = "" // host source without a base domain
+	deps.TenantAdmin = &stubTenantAdmin{}
+	deps.RepositoryForTenant = func(_ string) service.Repository { return memory.New() }
+
+	_, err := New(deps)
+	if err == nil {
+		t.Fatalf("expected error for host source without base domain, got nil")
+	}
+	if !strings.Contains(err.Error(), "TENANT_HOST_BASE_DOMAIN") {
+		t.Fatalf("expected 'TENANT_HOST_BASE_DOMAIN' error, got: %v", err)
+	}
+}
+
 func TestIdentityModeGuard_Multi_WiredOK(t *testing.T) {
 	deps := newSingleModeDeps(t)
 	deps.Config.IdentityMode = config.IdentityModeMulti
+	deps.Config.TenantResolutionSources = "host,jwt"
+	deps.Config.TenantHostBaseDomain = "example.test"
 
 	// Provide minimal multi-mode wiring; the actual values are not
 	// exercised here, only their presence is required by the guard.

@@ -618,8 +618,8 @@ var (
 
 // AuthService implements authentication and token management business logic.
 type AuthService struct {
-	repo               Repository
-	tenantID           string
+	defaultRepo        Repository
+	defaultTenantID    string
 	signer             jwt.Signer
 	passkeys           *passkeys.WebAuthnService
 	audit              *audit.Logger
@@ -693,8 +693,8 @@ func NewAuthServiceWithOAuth(
 		))
 	}
 	return &AuthService{
-		repo:               repo,
-		tenantID:           cfg.DefaultTenantID,
+		defaultRepo:        repo,
+		defaultTenantID:    cfg.DefaultTenantID,
 		signer:             signer,
 		passkeys:           passkeysSvc,
 		audit:              auditLogger,
@@ -708,6 +708,28 @@ func NewAuthServiceWithOAuth(
 		signupThrottle:     newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
 		nowFunc:            time.Now,
 	}
+}
+
+// ── Per-request tenant scoping ──────────────────────────────────────────
+
+// tenantID returns the request's resolved tenant. In mode=multi the
+// resolution middleware injects a TenantScope; in mode=single (and any
+// pre-resolution path) it falls back to the boot-time DefaultTenantID,
+// so the single-tenant path stays a clean constant.
+func (s *AuthService) tenantID(ctx context.Context) string {
+	if scope := TenantScopeFromContext(ctx); scope != nil && scope.TenantID != "" {
+		return scope.TenantID
+	}
+	return s.defaultTenantID
+}
+
+// repo returns the Repository scoped to the request's resolved tenant,
+// falling back to the boot-time Repository in mode=single.
+func (s *AuthService) repo(ctx context.Context) Repository {
+	if scope := TenantScopeFromContext(ctx); scope != nil && scope.Repo != nil {
+		return scope.Repo
+	}
+	return s.defaultRepo
 }
 
 // ── Internal helpers ───────────────────────────────────────────────────
@@ -763,7 +785,7 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 		Email:     user.Email,
 		Name:      user.Name,
 		Role:      user.Role,
-		Tenant:    s.tenantID,
+		Tenant:    s.tenantID(ctx),
 		AvatarURL: user.AvatarURL,
 	}
 	if s.cfg.JWTAudience != "" {
@@ -772,7 +794,7 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 
 	if s.cfg.RevocationMode == config.RevocationModeSession {
 		sid := generateSessionID()
-		if _, err := s.repo.CreateSession(ctx, &SessionRecord{
+		if _, err := s.repo(ctx).CreateSession(ctx, &SessionRecord{
 			SID:         sid,
 			UserID:      user.ID,
 			CreatedAtMs: now,
@@ -790,7 +812,7 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	rawRefresh, refreshHash := generateRefreshToken()
 	devName := friendlyDeviceName(userAgent)
 
-	_, err = s.repo.CreateRefreshToken(ctx, &RefreshTokenRecord{
+	_, err = s.repo(ctx).CreateRefreshToken(ctx, &RefreshTokenRecord{
 		TokenHash:  refreshHash,
 		UserID:     user.ID,
 		DeviceInfo: devName,
@@ -814,7 +836,7 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // THIS call. Errors are returned so callers can fail closed: a silent
 // swallow here would let a database outage become a lockout-bypass.
 func (s *AuthService) recordFailedLogin(ctx context.Context, user *User) (newCount int32, lockedNow bool, err error) {
-	newCount, err = s.repo.IncrementFailedLoginCount(ctx, user.ID)
+	newCount, err = s.repo(ctx).IncrementFailedLoginCount(ctx, user.ID)
 	if err != nil {
 		s.logger.Warn("failed_login_increment_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
@@ -823,7 +845,7 @@ func (s *AuthService) recordFailedLogin(ctx context.Context, user *User) (newCou
 	if int(newCount) >= s.cfg.LoginMaxFailedAttempts {
 		now := s.nowMs()
 		lockedUntil := now + int64(s.cfg.LoginLockoutSeconds)*1000
-		if lockErr := s.repo.SetUserLockedUntil(ctx, user.ID, lockedUntil); lockErr != nil {
+		if lockErr := s.repo(ctx).SetUserLockedUntil(ctx, user.ID, lockedUntil); lockErr != nil {
 			s.logger.Warn("set_locked_until_failed",
 				zap.String("user_id", user.ID), zap.Error(lockErr))
 			return newCount, false, lockErr
@@ -846,7 +868,7 @@ func (s *AuthService) resetFailedLogin(ctx context.Context, user *User) {
 	if user.FailedLoginCount == 0 && user.LockedUntil == 0 {
 		return
 	}
-	if err := s.repo.ResetFailedLoginCount(ctx, user.ID); err != nil {
+	if err := s.repo(ctx).ResetFailedLoginCount(ctx, user.ID); err != nil {
 		s.logger.Warn("failed_login_reset_failed", zap.String("user_id", user.ID), zap.Error(err))
 	}
 }
@@ -863,7 +885,7 @@ func (s *AuthService) revokeUserSessionsIfModeSession(ctx context.Context, userI
 	if s.cfg.RevocationMode != config.RevocationModeSession {
 		return
 	}
-	if err := s.repo.RevokeSessionsForUser(ctx, userID, s.nowMs()); err != nil {
+	if err := s.repo(ctx).RevokeSessionsForUser(ctx, userID, s.nowMs()); err != nil {
 		s.logger.Warn("session_revoke_for_user_failed",
 			zap.String("user_id", userID), zap.String("reason", reason), zap.Error(err))
 	}
@@ -872,7 +894,7 @@ func (s *AuthService) revokeUserSessionsIfModeSession(ctx context.Context, userI
 // updateLastLogin sets last_login_at for admin visibility (best-effort).
 func (s *AuthService) updateLastLogin(ctx context.Context, userID string) {
 	now := s.nowMs()
-	if err := s.repo.UpdateUser(ctx, userID, map[string]any{
+	if err := s.repo(ctx).UpdateUser(ctx, userID, map[string]any{
 		"last_login_at": now, "updated_at": now,
 	}); err != nil {
 		s.logger.Warn("last_login_update_failed", zap.String("user_id", userID), zap.Error(err))
@@ -883,7 +905,7 @@ func (s *AuthService) updateLastLogin(ctx context.Context, userID string) {
 func (s *AuthService) issueLoginChallenge(ctx context.Context, userID string) (string, error) {
 	now := s.nowMs()
 	challengeID := generateChallengeID()
-	_, err := s.repo.CreateLoginChallenge(ctx, &LoginChallengeRecord{
+	_, err := s.repo(ctx).CreateLoginChallenge(ctx, &LoginChallengeRecord{
 		ChallengeID: challengeID,
 		UserID:      userID,
 		ExpiresAt:   now + int64(s.cfg.LoginChallengeExpirySeconds)*1000,
@@ -897,7 +919,7 @@ func (s *AuthService) issueLoginChallenge(ctx context.Context, userID string) (s
 
 // consumeLoginChallenge validates and deletes a pending login challenge.
 func (s *AuthService) consumeLoginChallenge(ctx context.Context, challengeID string) (*LoginChallengeRecord, error) {
-	record, err := s.repo.GetLoginChallengeByChallengeID(ctx, challengeID)
+	record, err := s.repo(ctx).GetLoginChallengeByChallengeID(ctx, challengeID)
 	if err != nil {
 		return nil, err
 	}
@@ -905,11 +927,11 @@ func (s *AuthService) consumeLoginChallenge(ctx context.Context, challengeID str
 		return nil, fmt.Errorf("%w: invalid or expired login challenge", ErrUnauthenticated)
 	}
 	if record.ExpiresAt < s.nowMs() {
-		_ = s.repo.DeleteLoginChallenge(ctx, record.NodeID)
+		_ = s.repo(ctx).DeleteLoginChallenge(ctx, record.NodeID)
 		return nil, fmt.Errorf("%w: login challenge expired", ErrUnauthenticated)
 	}
 	// Single-use: delete before returning success.
-	if err := s.repo.DeleteLoginChallenge(ctx, record.NodeID); err != nil {
+	if err := s.repo(ctx).DeleteLoginChallenge(ctx, record.NodeID); err != nil {
 		s.logger.Warn("login_challenge_delete_failed", zap.String("challenge_id", challengeID))
 	}
 	return record, nil
@@ -917,12 +939,12 @@ func (s *AuthService) consumeLoginChallenge(ctx context.Context, challengeID str
 
 // storeRecoveryCodes deletes existing codes for a user and stores fresh hashes.
 func (s *AuthService) storeRecoveryCodes(ctx context.Context, userID string, codes []string) error {
-	if err := s.repo.DeleteRecoveryCodesForUser(ctx, userID); err != nil {
+	if err := s.repo(ctx).DeleteRecoveryCodesForUser(ctx, userID); err != nil {
 		return fmt.Errorf("deleting old recovery codes: %w", err)
 	}
 	now := s.nowMs()
 	for _, code := range codes {
-		_, err := s.repo.CreateRecoveryCode(ctx, &RecoveryCodeRecord{
+		_, err := s.repo(ctx).CreateRecoveryCode(ctx, &RecoveryCodeRecord{
 			UserID:    userID,
 			CodeHash:  totp.HashRecoveryCode(code, s.totpRecoveryPepper),
 			Used:      false,
@@ -995,7 +1017,7 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*User,
 	if userID == "" {
 		return nil, fmt.Errorf("%w: missing user ID", ErrUnauthenticated)
 	}
-	user, err := s.repo.GetUser(ctx, userID)
+	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1029,7 +1051,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	}
 	tokenHash := hashRefreshToken(rawRefreshToken)
 
-	record, err := s.repo.FindRefreshTokenByHashIncludingConsumed(ctx, tokenHash)
+	record, err := s.repo(ctx).FindRefreshTokenByHashIncludingConsumed(ctx, tokenHash)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("querying refresh token: %w", err)
 	}
@@ -1044,7 +1066,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		// user will be forced to re-authenticate.
 		userID := record.UserID
 		s.logger.Warn("refresh_token_replay_detected", zap.String("user_id", userID))
-		if delErr := s.repo.DeleteRefreshTokensForUser(ctx, userID); delErr != nil {
+		if delErr := s.repo(ctx).DeleteRefreshTokensForUser(ctx, userID); delErr != nil {
 			s.logger.Warn("refresh_token_replay_revoke_failed",
 				zap.String("user_id", userID), zap.Error(delErr))
 		}
@@ -1064,7 +1086,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	}
 
 	if record.ExpiresAt < s.nowMs() {
-		_ = s.repo.DeleteRefreshToken(ctx, record.NodeID)
+		_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
 		return nil, "", "", fmt.Errorf("%w: refresh token expired", ErrTokenExpired)
 	}
 
@@ -1073,14 +1095,14 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// concurrent rotations of the same token resolve to exactly one
 	// winner. The loser observes the now-consumed state on its next read
 	// and gets ErrUnauthenticated.
-	if err := s.repo.ConsumeRefreshTokenByHash(ctx, tokenHash, s.nowMs()); err != nil {
+	if err := s.repo(ctx).ConsumeRefreshTokenByHash(ctx, tokenHash, s.nowMs()); err != nil {
 		if errors.Is(err, ErrUnauthenticated) {
 			return nil, "", "", fmt.Errorf("%w: refresh token already consumed", ErrUnauthenticated)
 		}
 		return nil, "", "", fmt.Errorf("consuming refresh token: %w", err)
 	}
 
-	user, err := s.repo.GetUser(ctx, record.UserID)
+	user, err := s.repo(ctx).GetUser(ctx, record.UserID)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -1103,7 +1125,7 @@ func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error 
 		return nil
 	}
 	tokenHash := hashRefreshToken(rawRefreshToken)
-	record, err := s.repo.FindRefreshTokenByHash(ctx, tokenHash)
+	record, err := s.repo(ctx).FindRefreshTokenByHash(ctx, tokenHash)
 	if err != nil {
 		return fmt.Errorf("querying refresh token: %w", err)
 	}
@@ -1111,7 +1133,7 @@ func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error 
 		return nil
 	}
 	userID := record.UserID
-	_ = s.repo.DeleteRefreshToken(ctx, record.NodeID)
+	_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
 
 	if userID != "" {
 		s.audit.Log(ctx, audit.EventLogout, audit.WithActor(userID))

@@ -112,7 +112,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		return nil, fmt.Errorf("hashing password: %w", err)
 	}
 
-	existing, err := s.repo.FindUserByEmail(ctx, email)
+	existing, err := s.repo(ctx).FindUserByEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	now := s.nowMs()
 	recEmail := strings.TrimSpace(strings.ToLower(recoveryEmail))
 
-	userID, err := s.repo.CreateUser(ctx, &User{
+	userID, err := s.repo(ctx).CreateUser(ctx, &User{
 		Email:         email,
 		Name:          displayName,
 		Role:          "member",
@@ -135,7 +135,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		UpdatedAt:     msToTime(now),
 	})
 	if err != nil {
-		existing, lookupErr := s.repo.FindUserByEmail(ctx, email)
+		existing, lookupErr := s.repo(ctx).FindUserByEmail(ctx, email)
 		if lookupErr == nil && existing != nil {
 			return s.handleDuplicatePasswordSignup(ctx, existing, email, name)
 		}
@@ -233,7 +233,7 @@ func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displ
 		Email:  user.Email,
 		Name:   user.Name,
 		Role:   user.Role,
-		Tenant: s.tenantID,
+		Tenant: s.tenantID(ctx),
 	}
 	if s.cfg.JWTAudience != "" {
 		decoyClaims.Audience = []string{s.cfg.JWTAudience}
@@ -267,7 +267,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
 
-	user, err := s.repo.FindUserByEmail(ctx, email)
+	user, err := s.repo(ctx).FindUserByEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +308,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	// Lockout window has passed. Reset count + LockedUntil before
 	// proceeding so any subsequent failure starts a fresh count from 0.
 	if user.LockedUntil > 0 && user.LockedUntil <= s.nowMs() {
-		if err := s.repo.ResetFailedLoginCount(ctx, user.ID); err != nil {
+		if err := s.repo(ctx).ResetFailedLoginCount(ctx, user.ID); err != nil {
 			s.logger.Warn("failed_login_reset_post_lockout_failed",
 				zap.String("user_id", user.ID), zap.Error(err))
 		}
@@ -618,7 +618,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 
 	// 1. (provider, sub) lookup — survives provider-side email change.
 	if identity.ProviderUserID != "" {
-		linked, err := s.repo.FindUserByProviderID(ctx, identity.Provider, identity.ProviderUserID)
+		linked, err := s.repo(ctx).FindUserByProviderID(ctx, identity.Provider, identity.ProviderUserID)
 		if err != nil {
 			return nil, false, err
 		}
@@ -631,7 +631,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	// 2. Email-based lookup — first-time link of this provider to an
 	// existing local user (may have signed up via password or another
 	// provider).
-	existing, err := s.repo.FindUserByEmail(ctx, email)
+	existing, err := s.repo(ctx).FindUserByEmail(ctx, email)
 	if err != nil {
 		return nil, false, err
 	}
@@ -643,7 +643,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 
 	// 3. New user.
 	displayName := fallbackDisplayName(email, identity.Name)
-	userID, err := s.repo.CreateUser(ctx, &User{
+	userID, err := s.repo(ctx).CreateUser(ctx, &User{
 		Email:           email,
 		Name:            displayName,
 		AvatarURL:       identity.AvatarURL,
@@ -716,7 +716,7 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 		return
 	}
 	patch["updated_at"] = nowMs
-	if err := s.repo.UpdateUser(ctx, u.ID, patch); err != nil {
+	if err := s.repo(ctx).UpdateUser(ctx, u.ID, patch); err != nil {
 		s.logger.Warn("oauth_upsert_update_failed", zap.Error(err))
 	}
 }
@@ -737,7 +737,7 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 		EmailAtLinkTime: email,
 		CreatedAt:       nowMs,
 	}
-	if err := s.repo.CreateOAuthIdentity(ctx, oi); err != nil {
+	if err := s.repo(ctx).CreateOAuthIdentity(ctx, oi); err != nil {
 		s.logger.Warn(
 			"oauth_identity_link_failed",
 			zap.String("user_id", userID),
@@ -811,7 +811,7 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	}
 
 	tokenHash := hashInvitationToken(invitationToken)
-	inv, err := s.repo.FindInvitationByHash(ctx, tokenHash)
+	inv, err := s.repo(ctx).FindInvitationByHash(ctx, tokenHash)
 	if err != nil {
 		return nil, err
 	}
@@ -828,13 +828,13 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	// Find the user associated with the invitation.
 	var user *User
 	if inv.UserID != "" {
-		user, err = s.repo.GetUser(ctx, inv.UserID)
+		user, err = s.repo(ctx).GetUser(ctx, inv.UserID)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if user == nil && inv.Email != "" {
-		user, err = s.repo.FindUserByEmail(ctx, inv.Email)
+		user, err = s.repo(ctx).FindUserByEmail(ctx, inv.Email)
 		if err != nil {
 			return nil, err
 		}
@@ -858,12 +858,12 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 		patch["name"] = strings.TrimSpace(name)
 		user.Name = strings.TrimSpace(name)
 	}
-	if err := s.repo.UpdateUser(ctx, user.ID, patch); err != nil {
+	if err := s.repo(ctx).UpdateUser(ctx, user.ID, patch); err != nil {
 		return nil, fmt.Errorf("updating user: %w", err)
 	}
 
 	// Mark invitation as accepted.
-	_ = s.repo.UpdateInvitation(ctx, inv.NodeID, map[string]any{"accepted_at": now})
+	_ = s.repo(ctx).UpdateInvitation(ctx, inv.NodeID, map[string]any{"accepted_at": now})
 
 	user.Status = "active"
 	user.UpdatedAt = msToTime(now)

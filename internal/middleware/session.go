@@ -341,6 +341,9 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
+			// Strip any client-supplied identity headers so a caller can
+			// never spoof the values the middleware injects downstream.
+			clearAuthHeaders(r)
 			if isAuthExempt(path) {
 				// Even on exempt paths we parse a present token so the
 				// downstream handler can read X-Authenticated-User-Id.
@@ -353,7 +356,7 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 						if claims.SID != "" {
 							state, lookupErr := cache.Lookup(r.Context(), claims.SID)
 							if lookupErr == nil && state == SessionStateActive {
-								r.Header.Set("X-Authenticated-User-Id", claims.Sub)
+								setAuthHeaders(r, claims)
 							}
 							// On lookup error / revoked / missing: do
 							// NOT set the user-id header; the handler
@@ -362,7 +365,7 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 							// (preserves the existing exempt-path contract
 							// for unauthenticated callers).
 						} else {
-							r.Header.Set("X-Authenticated-User-Id", claims.Sub)
+							setAuthHeaders(r, claims)
 						}
 					}
 				}
@@ -394,7 +397,7 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 					return
 				}
 			}
-			r.Header.Set("X-Authenticated-User-Id", claims.Sub)
+			setAuthHeaders(r, claims)
 			next.ServeHTTP(w, r)
 		})
 	}
