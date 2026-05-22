@@ -186,6 +186,22 @@ type Config struct {
 	PasswordResetEnabled       bool
 	PasswordResetExpirySeconds int
 
+	// Passwordless email login (OTP code + magic link).
+	//
+	// PasswordlessSignupEnabled (default true) gates auto-create: when a
+	// passwordless login verifies an email with no existing account and
+	// this is true, the account is created on the spot; when false the
+	// unknown email gets the same anti-enumeration decoy a request for a
+	// known email would produce, so the endpoint never reveals which
+	// addresses exist. Mirrors GATEWAY_PASSWORD_SIGNUP_ENABLED.
+	PasswordlessSignupEnabled bool // GATEWAY_PASSWORDLESS_SIGNUP_ENABLED (default true)
+	// OTP code lifetime, length is fixed at 6 digits.
+	PasswordlessCodeTTLSeconds int // GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS (default 300)
+	// Max verify attempts per OTP before it is invalidated (brute-force cap).
+	PasswordlessCodeMaxAttempts int // GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS (default 5)
+	// Magic-link token lifetime.
+	PasswordlessMagicLinkTTLSeconds int // GATEWAY_PASSWORDLESS_MAGIC_LINK_TTL_SECONDS (default 900)
+
 	// TOTP (2FA)
 	// 32-byte key, base64-encoded. Required in prod; dev falls back to
 	// a deterministic throwaway key.
@@ -280,11 +296,12 @@ type Config struct {
 	// Rate-limit configuration. The in-memory token bucket is keyed by
 	// client IP. quotas are requests-per-window per IP. Set to 0 to
 	// disable the per-endpoint limiter.
-	RateLimitWindowSeconds int // GATEWAY_RATE_LIMIT_WINDOW_SECONDS (default 60)
-	RateLimitSignupPerIP   int // GATEWAY_RATE_LIMIT_SIGNUP_PER_IP (default 10/min)
-	RateLimitLoginPerIP    int // GATEWAY_RATE_LIMIT_LOGIN_PER_IP (default 30/min)
-	RateLimitResetPerIP    int // GATEWAY_RATE_LIMIT_RESET_PER_IP (default 5/min)
-	RateLimitVerifyPerIP   int // GATEWAY_RATE_LIMIT_VERIFY_PER_IP (default 20/min)
+	RateLimitWindowSeconds     int // GATEWAY_RATE_LIMIT_WINDOW_SECONDS (default 60)
+	RateLimitSignupPerIP       int // GATEWAY_RATE_LIMIT_SIGNUP_PER_IP (default 10/min)
+	RateLimitLoginPerIP        int // GATEWAY_RATE_LIMIT_LOGIN_PER_IP (default 30/min)
+	RateLimitResetPerIP        int // GATEWAY_RATE_LIMIT_RESET_PER_IP (default 5/min)
+	RateLimitVerifyPerIP       int // GATEWAY_RATE_LIMIT_VERIFY_PER_IP (default 20/min)
+	RateLimitPasswordlessPerIP int // GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP (default 5/min) — RequestEmailLoginCode + RequestMagicLink
 
 	// Postgres (alternate persistence driver). When PostgresDSN is set
 	// the application bootstrapper may prefer the Postgres-backed
@@ -391,6 +408,11 @@ func Load() *Config {
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
 		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
 
+		PasswordlessSignupEnabled:       envBool("GATEWAY_PASSWORDLESS_SIGNUP_ENABLED", true),
+		PasswordlessCodeTTLSeconds:      envInt("GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS", 300),
+		PasswordlessCodeMaxAttempts:     envInt("GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS", 5),
+		PasswordlessMagicLinkTTLSeconds: envInt("GATEWAY_PASSWORDLESS_MAGIC_LINK_TTL_SECONDS", 900),
+
 		TOTPEncryptionKey:  envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),
 		TOTPIssuer:         envStr("GATEWAY_TOTP_ISSUER", "Glassa Work"),
 		TOTPRecoveryPepper: envStr("GATEWAY_TOTP_RECOVERY_PEPPER", ""),
@@ -439,11 +461,12 @@ func Load() *Config {
 			"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32,::1/128",
 		),
 
-		RateLimitWindowSeconds: envInt("GATEWAY_RATE_LIMIT_WINDOW_SECONDS", 60),
-		RateLimitSignupPerIP:   envInt("GATEWAY_RATE_LIMIT_SIGNUP_PER_IP", 10),
-		RateLimitLoginPerIP:    envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
-		RateLimitResetPerIP:    envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
-		RateLimitVerifyPerIP:   envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
+		RateLimitWindowSeconds:     envInt("GATEWAY_RATE_LIMIT_WINDOW_SECONDS", 60),
+		RateLimitSignupPerIP:       envInt("GATEWAY_RATE_LIMIT_SIGNUP_PER_IP", 10),
+		RateLimitLoginPerIP:        envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
+		RateLimitResetPerIP:        envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
+		RateLimitVerifyPerIP:       envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
+		RateLimitPasswordlessPerIP: envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
 
 		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),

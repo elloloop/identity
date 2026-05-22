@@ -48,6 +48,18 @@ const (
 	// IdentityServicePasswordLoginProcedure is the fully-qualified name of the IdentityService's
 	// PasswordLogin RPC.
 	IdentityServicePasswordLoginProcedure = "/identity.IdentityService/PasswordLogin"
+	// IdentityServiceRequestEmailLoginCodeProcedure is the fully-qualified name of the
+	// IdentityService's RequestEmailLoginCode RPC.
+	IdentityServiceRequestEmailLoginCodeProcedure = "/identity.IdentityService/RequestEmailLoginCode"
+	// IdentityServiceVerifyEmailLoginCodeProcedure is the fully-qualified name of the IdentityService's
+	// VerifyEmailLoginCode RPC.
+	IdentityServiceVerifyEmailLoginCodeProcedure = "/identity.IdentityService/VerifyEmailLoginCode"
+	// IdentityServiceRequestMagicLinkProcedure is the fully-qualified name of the IdentityService's
+	// RequestMagicLink RPC.
+	IdentityServiceRequestMagicLinkProcedure = "/identity.IdentityService/RequestMagicLink"
+	// IdentityServiceRedeemMagicLinkProcedure is the fully-qualified name of the IdentityService's
+	// RedeemMagicLink RPC.
+	IdentityServiceRedeemMagicLinkProcedure = "/identity.IdentityService/RedeemMagicLink"
 	// IdentityServiceGetCurrentUserProcedure is the fully-qualified name of the IdentityService's
 	// GetCurrentUser RPC.
 	IdentityServiceGetCurrentUserProcedure = "/identity.IdentityService/GetCurrentUser"
@@ -221,6 +233,11 @@ type IdentityServiceClient interface {
 	RedeemOAuthCode(context.Context, *connect.Request[identity.RedeemOAuthCodeRequest]) (*connect.Response[identity.RedeemOAuthCodeResponse], error)
 	PasswordSignup(context.Context, *connect.Request[identity.PasswordSignupRequest]) (*connect.Response[identity.PasswordSignupResponse], error)
 	PasswordLogin(context.Context, *connect.Request[identity.PasswordLoginRequest]) (*connect.Response[identity.PasswordLoginResponse], error)
+	// Passwordless email login (OTP code + magic link)
+	RequestEmailLoginCode(context.Context, *connect.Request[identity.RequestEmailLoginCodeRequest]) (*connect.Response[identity.RequestEmailLoginCodeResponse], error)
+	VerifyEmailLoginCode(context.Context, *connect.Request[identity.VerifyEmailLoginCodeRequest]) (*connect.Response[identity.VerifyEmailLoginCodeResponse], error)
+	RequestMagicLink(context.Context, *connect.Request[identity.RequestMagicLinkRequest]) (*connect.Response[identity.RequestMagicLinkResponse], error)
+	RedeemMagicLink(context.Context, *connect.Request[identity.RedeemMagicLinkRequest]) (*connect.Response[identity.RedeemMagicLinkResponse], error)
 	// Session / Token Auth
 	GetCurrentUser(context.Context, *connect.Request[identity.GetCurrentUserRequest]) (*connect.Response[identity.GetCurrentUserResponse], error)
 	RefreshToken(context.Context, *connect.Request[identity.RefreshTokenRequest]) (*connect.Response[identity.RefreshTokenResponse], error)
@@ -339,6 +356,30 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServicePasswordLoginProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("PasswordLogin")),
+			connect.WithClientOptions(opts...),
+		),
+		requestEmailLoginCode: connect.NewClient[identity.RequestEmailLoginCodeRequest, identity.RequestEmailLoginCodeResponse](
+			httpClient,
+			baseURL+IdentityServiceRequestEmailLoginCodeProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RequestEmailLoginCode")),
+			connect.WithClientOptions(opts...),
+		),
+		verifyEmailLoginCode: connect.NewClient[identity.VerifyEmailLoginCodeRequest, identity.VerifyEmailLoginCodeResponse](
+			httpClient,
+			baseURL+IdentityServiceVerifyEmailLoginCodeProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("VerifyEmailLoginCode")),
+			connect.WithClientOptions(opts...),
+		),
+		requestMagicLink: connect.NewClient[identity.RequestMagicLinkRequest, identity.RequestMagicLinkResponse](
+			httpClient,
+			baseURL+IdentityServiceRequestMagicLinkProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RequestMagicLink")),
+			connect.WithClientOptions(opts...),
+		),
+		redeemMagicLink: connect.NewClient[identity.RedeemMagicLinkRequest, identity.RedeemMagicLinkResponse](
+			httpClient,
+			baseURL+IdentityServiceRedeemMagicLinkProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RedeemMagicLink")),
 			connect.WithClientOptions(opts...),
 		),
 		getCurrentUser: connect.NewClient[identity.GetCurrentUserRequest, identity.GetCurrentUserResponse](
@@ -681,6 +722,10 @@ type identityServiceClient struct {
 	redeemOAuthCode               *connect.Client[identity.RedeemOAuthCodeRequest, identity.RedeemOAuthCodeResponse]
 	passwordSignup                *connect.Client[identity.PasswordSignupRequest, identity.PasswordSignupResponse]
 	passwordLogin                 *connect.Client[identity.PasswordLoginRequest, identity.PasswordLoginResponse]
+	requestEmailLoginCode         *connect.Client[identity.RequestEmailLoginCodeRequest, identity.RequestEmailLoginCodeResponse]
+	verifyEmailLoginCode          *connect.Client[identity.VerifyEmailLoginCodeRequest, identity.VerifyEmailLoginCodeResponse]
+	requestMagicLink              *connect.Client[identity.RequestMagicLinkRequest, identity.RequestMagicLinkResponse]
+	redeemMagicLink               *connect.Client[identity.RedeemMagicLinkRequest, identity.RedeemMagicLinkResponse]
 	getCurrentUser                *connect.Client[identity.GetCurrentUserRequest, identity.GetCurrentUserResponse]
 	refreshToken                  *connect.Client[identity.RefreshTokenRequest, identity.RefreshTokenResponse]
 	logout                        *connect.Client[identity.LogoutRequest, identity.LogoutResponse]
@@ -761,6 +806,26 @@ func (c *identityServiceClient) PasswordSignup(ctx context.Context, req *connect
 // PasswordLogin calls identity.IdentityService.PasswordLogin.
 func (c *identityServiceClient) PasswordLogin(ctx context.Context, req *connect.Request[identity.PasswordLoginRequest]) (*connect.Response[identity.PasswordLoginResponse], error) {
 	return c.passwordLogin.CallUnary(ctx, req)
+}
+
+// RequestEmailLoginCode calls identity.IdentityService.RequestEmailLoginCode.
+func (c *identityServiceClient) RequestEmailLoginCode(ctx context.Context, req *connect.Request[identity.RequestEmailLoginCodeRequest]) (*connect.Response[identity.RequestEmailLoginCodeResponse], error) {
+	return c.requestEmailLoginCode.CallUnary(ctx, req)
+}
+
+// VerifyEmailLoginCode calls identity.IdentityService.VerifyEmailLoginCode.
+func (c *identityServiceClient) VerifyEmailLoginCode(ctx context.Context, req *connect.Request[identity.VerifyEmailLoginCodeRequest]) (*connect.Response[identity.VerifyEmailLoginCodeResponse], error) {
+	return c.verifyEmailLoginCode.CallUnary(ctx, req)
+}
+
+// RequestMagicLink calls identity.IdentityService.RequestMagicLink.
+func (c *identityServiceClient) RequestMagicLink(ctx context.Context, req *connect.Request[identity.RequestMagicLinkRequest]) (*connect.Response[identity.RequestMagicLinkResponse], error) {
+	return c.requestMagicLink.CallUnary(ctx, req)
+}
+
+// RedeemMagicLink calls identity.IdentityService.RedeemMagicLink.
+func (c *identityServiceClient) RedeemMagicLink(ctx context.Context, req *connect.Request[identity.RedeemMagicLinkRequest]) (*connect.Response[identity.RedeemMagicLinkResponse], error) {
+	return c.redeemMagicLink.CallUnary(ctx, req)
 }
 
 // GetCurrentUser calls identity.IdentityService.GetCurrentUser.
@@ -1046,6 +1111,11 @@ type IdentityServiceHandler interface {
 	RedeemOAuthCode(context.Context, *connect.Request[identity.RedeemOAuthCodeRequest]) (*connect.Response[identity.RedeemOAuthCodeResponse], error)
 	PasswordSignup(context.Context, *connect.Request[identity.PasswordSignupRequest]) (*connect.Response[identity.PasswordSignupResponse], error)
 	PasswordLogin(context.Context, *connect.Request[identity.PasswordLoginRequest]) (*connect.Response[identity.PasswordLoginResponse], error)
+	// Passwordless email login (OTP code + magic link)
+	RequestEmailLoginCode(context.Context, *connect.Request[identity.RequestEmailLoginCodeRequest]) (*connect.Response[identity.RequestEmailLoginCodeResponse], error)
+	VerifyEmailLoginCode(context.Context, *connect.Request[identity.VerifyEmailLoginCodeRequest]) (*connect.Response[identity.VerifyEmailLoginCodeResponse], error)
+	RequestMagicLink(context.Context, *connect.Request[identity.RequestMagicLinkRequest]) (*connect.Response[identity.RequestMagicLinkResponse], error)
+	RedeemMagicLink(context.Context, *connect.Request[identity.RedeemMagicLinkRequest]) (*connect.Response[identity.RedeemMagicLinkResponse], error)
 	// Session / Token Auth
 	GetCurrentUser(context.Context, *connect.Request[identity.GetCurrentUserRequest]) (*connect.Response[identity.GetCurrentUserResponse], error)
 	RefreshToken(context.Context, *connect.Request[identity.RefreshTokenRequest]) (*connect.Response[identity.RefreshTokenResponse], error)
@@ -1160,6 +1230,30 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServicePasswordLoginProcedure,
 		svc.PasswordLogin,
 		connect.WithSchema(identityServiceMethods.ByName("PasswordLogin")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRequestEmailLoginCodeHandler := connect.NewUnaryHandler(
+		IdentityServiceRequestEmailLoginCodeProcedure,
+		svc.RequestEmailLoginCode,
+		connect.WithSchema(identityServiceMethods.ByName("RequestEmailLoginCode")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceVerifyEmailLoginCodeHandler := connect.NewUnaryHandler(
+		IdentityServiceVerifyEmailLoginCodeProcedure,
+		svc.VerifyEmailLoginCode,
+		connect.WithSchema(identityServiceMethods.ByName("VerifyEmailLoginCode")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRequestMagicLinkHandler := connect.NewUnaryHandler(
+		IdentityServiceRequestMagicLinkProcedure,
+		svc.RequestMagicLink,
+		connect.WithSchema(identityServiceMethods.ByName("RequestMagicLink")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRedeemMagicLinkHandler := connect.NewUnaryHandler(
+		IdentityServiceRedeemMagicLinkProcedure,
+		svc.RedeemMagicLink,
+		connect.WithSchema(identityServiceMethods.ByName("RedeemMagicLink")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceGetCurrentUserHandler := connect.NewUnaryHandler(
@@ -1504,6 +1598,14 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServicePasswordSignupHandler.ServeHTTP(w, r)
 		case IdentityServicePasswordLoginProcedure:
 			identityServicePasswordLoginHandler.ServeHTTP(w, r)
+		case IdentityServiceRequestEmailLoginCodeProcedure:
+			identityServiceRequestEmailLoginCodeHandler.ServeHTTP(w, r)
+		case IdentityServiceVerifyEmailLoginCodeProcedure:
+			identityServiceVerifyEmailLoginCodeHandler.ServeHTTP(w, r)
+		case IdentityServiceRequestMagicLinkProcedure:
+			identityServiceRequestMagicLinkHandler.ServeHTTP(w, r)
+		case IdentityServiceRedeemMagicLinkProcedure:
+			identityServiceRedeemMagicLinkHandler.ServeHTTP(w, r)
 		case IdentityServiceGetCurrentUserProcedure:
 			identityServiceGetCurrentUserHandler.ServeHTTP(w, r)
 		case IdentityServiceRefreshTokenProcedure:
@@ -1641,6 +1743,22 @@ func (UnimplementedIdentityServiceHandler) PasswordSignup(context.Context, *conn
 
 func (UnimplementedIdentityServiceHandler) PasswordLogin(context.Context, *connect.Request[identity.PasswordLoginRequest]) (*connect.Response[identity.PasswordLoginResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.PasswordLogin is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RequestEmailLoginCode(context.Context, *connect.Request[identity.RequestEmailLoginCodeRequest]) (*connect.Response[identity.RequestEmailLoginCodeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.RequestEmailLoginCode is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) VerifyEmailLoginCode(context.Context, *connect.Request[identity.VerifyEmailLoginCodeRequest]) (*connect.Response[identity.VerifyEmailLoginCodeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.VerifyEmailLoginCode is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RequestMagicLink(context.Context, *connect.Request[identity.RequestMagicLinkRequest]) (*connect.Response[identity.RequestMagicLinkResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.RequestMagicLink is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RedeemMagicLink(context.Context, *connect.Request[identity.RedeemMagicLinkRequest]) (*connect.Response[identity.RedeemMagicLinkResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.RedeemMagicLink is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) GetCurrentUser(context.Context, *connect.Request[identity.GetCurrentUserRequest]) (*connect.Response[identity.GetCurrentUserResponse], error) {

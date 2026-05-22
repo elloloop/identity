@@ -147,6 +147,10 @@ func (s *sdkScope) get(ctx context.Context, actor string, dst proto.Message, nod
 		return getInto[*schemapb.QrLoginSession](ctx, scope, dst, nodeID)
 	case *schemapb.OAuthOneTimeCode:
 		return getInto[*schemapb.OAuthOneTimeCode](ctx, scope, dst, nodeID)
+	case *schemapb.EmailLoginCode:
+		return getInto[*schemapb.EmailLoginCode](ctx, scope, dst, nodeID)
+	case *schemapb.MagicLinkToken:
+		return getInto[*schemapb.MagicLinkToken](ctx, scope, dst, nodeID)
 	case *schemapb.TotpCredential:
 		return getInto[*schemapb.TotpCredential](ctx, scope, dst, nodeID)
 	case *schemapb.RecoveryCode:
@@ -198,6 +202,10 @@ func (s *sdkScope) query(ctx context.Context, actor string, witness proto.Messag
 		return queryAs[*schemapb.QrLoginSession](ctx, scope, filter)
 	case *schemapb.OAuthOneTimeCode:
 		return queryAs[*schemapb.OAuthOneTimeCode](ctx, scope, filter)
+	case *schemapb.EmailLoginCode:
+		return queryAs[*schemapb.EmailLoginCode](ctx, scope, filter)
+	case *schemapb.MagicLinkToken:
+		return queryAs[*schemapb.MagicLinkToken](ctx, scope, filter)
 	case *schemapb.TotpCredential:
 		return queryAs[*schemapb.TotpCredential](ctx, scope, filter)
 	case *schemapb.RecoveryCode:
@@ -559,6 +567,10 @@ func expiresAtSweepSpec(witness proto.Message) (typeID, fieldID int, ok bool) {
 		return 25, 3, true
 	case *schemapb.OAuthOneTimeCode:
 		return 36, 3, true
+	case *schemapb.EmailLoginCode:
+		return 37, 3, true
+	case *schemapb.MagicLinkToken:
+		return 38, 4, true
 	}
 	return 0, 0, false
 }
@@ -598,6 +610,10 @@ func (s *sdkScope) deleteExpired(ctx context.Context, actor string, witness prot
 		sdk.DeleteWhere[*schemapb.LoginChallenge](plan, where, limit)
 	case *schemapb.OAuthOneTimeCode:
 		sdk.DeleteWhere[*schemapb.OAuthOneTimeCode](plan, where, limit)
+	case *schemapb.EmailLoginCode:
+		sdk.DeleteWhere[*schemapb.EmailLoginCode](plan, where, limit)
+	case *schemapb.MagicLinkToken:
+		sdk.DeleteWhere[*schemapb.MagicLinkToken](plan, where, limit)
 	default:
 		return fmt.Errorf("entdb: deleteExpired: unsupported message type %T", witness)
 	}
@@ -635,6 +651,10 @@ func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Messa
 		sdk.Delete[*schemapb.QrLoginSession](plan, nodeID)
 	case *schemapb.OAuthOneTimeCode:
 		sdk.Delete[*schemapb.OAuthOneTimeCode](plan, nodeID)
+	case *schemapb.EmailLoginCode:
+		sdk.Delete[*schemapb.EmailLoginCode](plan, nodeID)
+	case *schemapb.MagicLinkToken:
+		sdk.Delete[*schemapb.MagicLinkToken](plan, nodeID)
 	case *schemapb.TotpCredential:
 		sdk.Delete[*schemapb.TotpCredential](plan, nodeID)
 	case *schemapb.RecoveryCode:

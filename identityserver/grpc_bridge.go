@@ -94,6 +94,22 @@ func (b *grpcBridge) PasswordLogin(ctx context.Context, in *identitypb.PasswordL
 	return invoke(ctx, in, b.h.PasswordLogin)
 }
 
+func (b *grpcBridge) RequestEmailLoginCode(ctx context.Context, in *identitypb.RequestEmailLoginCodeRequest) (*identitypb.RequestEmailLoginCodeResponse, error) {
+	return invoke(ctx, in, b.h.RequestEmailLoginCode)
+}
+
+func (b *grpcBridge) VerifyEmailLoginCode(ctx context.Context, in *identitypb.VerifyEmailLoginCodeRequest) (*identitypb.VerifyEmailLoginCodeResponse, error) {
+	return invoke(ctx, in, b.h.VerifyEmailLoginCode)
+}
+
+func (b *grpcBridge) RequestMagicLink(ctx context.Context, in *identitypb.RequestMagicLinkRequest) (*identitypb.RequestMagicLinkResponse, error) {
+	return invoke(ctx, in, b.h.RequestMagicLink)
+}
+
+func (b *grpcBridge) RedeemMagicLink(ctx context.Context, in *identitypb.RedeemMagicLinkRequest) (*identitypb.RedeemMagicLinkResponse, error) {
+	return invoke(ctx, in, b.h.RedeemMagicLink)
+}
+
 // ─── Session / Token ────────────────────────────────────────────────
 
 func (b *grpcBridge) GetCurrentUser(ctx context.Context, in *identitypb.GetCurrentUserRequest) (*identitypb.GetCurrentUserResponse, error) {

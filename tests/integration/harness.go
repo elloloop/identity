@@ -609,27 +609,31 @@ func newReq[T any](msg *T, headers map[string]string) *connect.Request[T] {
 // CORS origins, etc).
 func newTestConfig() *config.Config {
 	return &config.Config{
-		DefaultTenantID:               "test-tenant",
-		IdentityMode:                  config.IdentityModeSingle,
-		AuthAllowLocal:                true,
-		PasswordSignupEnabled:         true,
-		PasswordResetEnabled:          true,
-		JWTExpirySeconds:              900,
-		RefreshExpirySeconds:          604800,
-		LoginMaxFailedAttempts:        5,
-		LoginLockoutSeconds:           900,
-		LoginChallengeExpirySeconds:   300,
-		PasskeyRPID:                   "localhost",
-		PasskeyRPName:                 "IdentityIntegrationTests",
-		PasskeyOrigin:                 "http://localhost:9002",
-		PasskeyChallengeExpirySeconds: 300,
-		QRLoginBaseURL:                "http://localhost:9002",
-		QRLoginExpirySeconds:          300,
-		TOTPIssuer:                    "Glassa Test",
-		AllowedOrigins:                "http://localhost:9002",
-		AppBaseURL:                    "https://app.test",
-		EmailTokenExpirySeconds:       3600,
-		SMTPFrom:                      "no-reply@test.local",
+		DefaultTenantID:                 "test-tenant",
+		IdentityMode:                    config.IdentityModeSingle,
+		AuthAllowLocal:                  true,
+		PasswordSignupEnabled:           true,
+		PasswordResetEnabled:            true,
+		PasswordlessSignupEnabled:       true,
+		PasswordlessCodeTTLSeconds:      300,
+		PasswordlessCodeMaxAttempts:     5,
+		PasswordlessMagicLinkTTLSeconds: 900,
+		JWTExpirySeconds:                900,
+		RefreshExpirySeconds:            604800,
+		LoginMaxFailedAttempts:          5,
+		LoginLockoutSeconds:             900,
+		LoginChallengeExpirySeconds:     300,
+		PasskeyRPID:                     "localhost",
+		PasskeyRPName:                   "IdentityIntegrationTests",
+		PasskeyOrigin:                   "http://localhost:9002",
+		PasskeyChallengeExpirySeconds:   300,
+		QRLoginBaseURL:                  "http://localhost:9002",
+		QRLoginExpirySeconds:            300,
+		TOTPIssuer:                      "Glassa Test",
+		AllowedOrigins:                  "http://localhost:9002",
+		AppBaseURL:                      "https://app.test",
+		EmailTokenExpirySeconds:         3600,
+		SMTPFrom:                        "no-reply@test.local",
 	}
 }
 
@@ -657,6 +661,8 @@ type MemRepo struct {
 	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
 	qrSessions         map[string]*service.QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
+	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
+	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
 	totpCreds          map[string]*service.TotpCredRecord
 	recoveryCodes      map[string]*service.RecoveryCodeRecord
 	loginChallenges    map[string]*service.LoginChallengeRecord
@@ -680,6 +686,8 @@ func NewMemRepo() *MemRepo {
 		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
+		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
+		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
@@ -1094,6 +1102,88 @@ func (r *MemRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, at
 		return &cp, nil
 	}
 	return nil, service.ErrOAuthCodeInvalid
+}
+
+func (r *MemRepo) UpsertEmailLoginCode(_ context.Context, rec *service.EmailLoginCodeRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.emailLoginCodes {
+		if c.Email == rec.Email {
+			delete(r.emailLoginCodes, id)
+		}
+	}
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.emailLoginCodes[id] = &cp
+	return id, nil
+}
+
+func (r *MemRepo) FindEmailLoginCodeByEmail(_ context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.emailLoginCodes {
+		if c.Email == email {
+			cp := *c
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) IncrementEmailLoginCodeAttempts(_ context.Context, nodeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.emailLoginCodes[nodeID]
+	if !ok {
+		return errors.New("email login code not found")
+	}
+	c.AttemptCount++
+	return nil
+}
+
+func (r *MemRepo) ConsumeEmailLoginCode(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.emailLoginCodes {
+		if c.Email != email {
+			continue
+		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+			return nil, service.ErrEmailLoginCodeInvalid
+		}
+		c.ConsumedAt = atMs
+		cp := *c
+		return &cp, nil
+	}
+	return nil, service.ErrEmailLoginCodeInvalid
+}
+
+func (r *MemRepo) CreateMagicLinkToken(_ context.Context, rec *service.MagicLinkTokenRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.magicLinkTokens[id] = &cp
+	return id, nil
+}
+
+func (r *MemRepo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, atMs int64) (*service.MagicLinkTokenRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, tkn := range r.magicLinkTokens {
+		if tkn.TokenHash != tokenHash {
+			continue
+		}
+		if tkn.ConsumedAt != 0 || tkn.ExpiresAt <= atMs {
+			return nil, service.ErrMagicLinkInvalid
+		}
+		tkn.ConsumedAt = atMs
+		cp := *tkn
+		return &cp, nil
+	}
+	return nil, service.ErrMagicLinkInvalid
 }
 
 // ── TOTP Credentials ──────────────────────────────────────────────
@@ -1609,6 +1699,38 @@ func (r *MemRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs int
 		}
 		if c.ExpiresAt < beforeMs {
 			delete(r.oauthOneTimeCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *MemRepo) DeleteExpiredEmailLoginCodes(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.emailLoginCodes {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.emailLoginCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *MemRepo) DeleteExpiredMagicLinkTokens(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, tkn := range r.magicLinkTokens {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if tkn.ExpiresAt < beforeMs {
+			delete(r.magicLinkTokens, id)
 			n++
 		}
 	}

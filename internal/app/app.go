@@ -126,6 +126,66 @@ func (b *Built) Stop() {
 	b.stopOnce.Do(b.stopWork)
 }
 
+// buildRateLimits maps the unauthenticated, abuse-prone RPC paths to
+// per-IP fixed-window limiters from config. The window falls back to one
+// minute when unset. Extracted from New so the wiring (which path gets
+// which quota) is unit-testable without standing up the whole app.
+func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
+	window := time.Duration(cfg.RateLimitWindowSeconds) * time.Second
+	if window <= 0 {
+		window = time.Minute
+	}
+	return []middleware.PathLimit{
+		{
+			PathPrefix: "/identity.IdentityService/PasswordSignup", Tag: "signup",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
+			// OrganizationSignup is an unauthenticated entry point that
+			// provisions a whole tenant — share the per-IP signup quota
+			// so a single source can't carve out tenants at signup speed.
+			PathPrefix: "/identity.IdentityService/OrganizationSignup", Tag: "org_signup",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/PasswordLogin", Tag: "login",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/RequestPasswordReset", Tag: "reset",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitResetPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/SendEmailVerification", Tag: "verify",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitVerifyPerIP, 0),
+		},
+		{
+			// Passwordless OTP request: unauthenticated, sends an email.
+			// Tight per-IP quota so a single source can't pump codes at a
+			// victim inbox (the per-email cooldown is the second layer).
+			PathPrefix: "/identity.IdentityService/RequestEmailLoginCode", Tag: "passwordless_code",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0),
+		},
+		{
+			// Passwordless magic-link request: same shape, same quota.
+			PathPrefix: "/identity.IdentityService/RequestMagicLink", Tag: "passwordless_link",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/BeginPasskeyLogin", Tag: "passkey_begin",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.IdentityService/VerifyTotp", Tag: "totp_verify",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+	}
+}
+
 // New assembles the identity service from injected dependencies. It
 // builds the middleware chain, the Connect-RPC service handler, and the
 // background workers — but does NOT start the workers; the caller starts
@@ -159,47 +219,7 @@ func New(deps Deps) (*Built, error) {
 	if err != nil {
 		logger.Error("trusted_proxies_invalid", zap.Error(err))
 	}
-	rateLimitWindow := time.Duration(deps.Config.RateLimitWindowSeconds) * time.Second
-	if rateLimitWindow <= 0 {
-		rateLimitWindow = time.Minute
-	}
-	rateLimits := []middleware.PathLimit{
-		{
-			PathPrefix: "/identity.IdentityService/PasswordSignup", Tag: "signup",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitSignupPerIP, 0),
-		},
-		{
-			// OrganizationSignup is an unauthenticated entry point that
-			// provisions a whole tenant — share the per-IP signup quota
-			// so a single source can't carve out tenants at signup speed.
-			PathPrefix: "/identity.IdentityService/OrganizationSignup", Tag: "org_signup",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitSignupPerIP, 0),
-		},
-		{
-			PathPrefix: "/identity.IdentityService/PasswordLogin", Tag: "login",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0),
-		},
-		{
-			PathPrefix: "/identity.IdentityService/RequestPasswordReset", Tag: "reset",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitResetPerIP, 0),
-		},
-		{
-			PathPrefix: "/identity.IdentityService/SendEmailVerification", Tag: "verify",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitVerifyPerIP, 0),
-		},
-		{
-			PathPrefix: "/identity.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0),
-		},
-		{
-			PathPrefix: "/identity.IdentityService/BeginPasskeyLogin", Tag: "passkey_begin",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0),
-		},
-		{
-			PathPrefix: "/identity.IdentityService/VerifyTotp", Tag: "totp_verify",
-			Limiter: middleware.NewFixedWindowLimiter(rateLimitWindow, deps.Config.RateLimitLoginPerIP, 0),
-		},
-	}
+	rateLimits := buildRateLimits(deps.Config)
 
 	// Surface the EntDB schema-apply gap loudly at boot so operators
 	// see exactly which node types identity expects the database to
@@ -306,7 +326,7 @@ func New(deps Deps) (*Built, error) {
 	// Browser-facing hosted OAuth routes (#126). Registered only when
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS is non-empty; the headless
 	// BeginOAuthLogin / OAuthLogin RPCs work regardless.
-	returnAllow := parseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
+	returnAllow := service.ParseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
 	if returnAllow.Enabled() {
 		logger.Info("oauth_hosted_flow_enabled", zap.Strings("allowed_return_urls", returnAllow.Entries()))
 	} else {

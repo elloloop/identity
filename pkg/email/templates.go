@@ -23,6 +23,12 @@ const (
 	// TemplateEmailChangeNotice is sent to the *old* address as a
 	// security notice that an email change has been requested.
 	TemplateEmailChangeNotice = "email_change_notice"
+	// TemplateEmailLoginCode carries the 6-digit OTP for passwordless
+	// email login.
+	TemplateEmailLoginCode = "email_login_code"
+	// TemplateMagicLink carries the clickable single-use sign-in link for
+	// passwordless email login.
+	TemplateMagicLink = "magic_link"
 )
 
 // Render returns the HTML and plain-text bodies for the given template name,

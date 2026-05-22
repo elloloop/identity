@@ -54,6 +54,38 @@ type errorRepo struct {
 	failRevokeSessionsForUser      bool
 	failGetOrganizationBySlug      bool
 	failAddOrganizationMember      bool
+	failUpsertEmailLoginCode       bool
+	failCreateMagicLinkToken       bool
+	failIncrEmailLoginCodeAttempts bool
+	failConsumeEmailLoginCode      bool
+}
+
+func (r *errorRepo) UpsertEmailLoginCode(ctx context.Context, rec *EmailLoginCodeRecord) (string, error) {
+	if r.failUpsertEmailLoginCode {
+		return "", errInjected
+	}
+	return r.fakeRepo.UpsertEmailLoginCode(ctx, rec)
+}
+
+func (r *errorRepo) CreateMagicLinkToken(ctx context.Context, rec *MagicLinkTokenRecord) (string, error) {
+	if r.failCreateMagicLinkToken {
+		return "", errInjected
+	}
+	return r.fakeRepo.CreateMagicLinkToken(ctx, rec)
+}
+
+func (r *errorRepo) IncrementEmailLoginCodeAttempts(ctx context.Context, nodeID string) error {
+	if r.failIncrEmailLoginCodeAttempts {
+		return errInjected
+	}
+	return r.fakeRepo.IncrementEmailLoginCodeAttempts(ctx, nodeID)
+}
+
+func (r *errorRepo) ConsumeEmailLoginCode(ctx context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error) {
+	if r.failConsumeEmailLoginCode {
+		return nil, errInjected
+	}
+	return r.fakeRepo.ConsumeEmailLoginCode(ctx, email, atMs)
 }
 
 func (r *errorRepo) GetOrganizationBySlug(ctx context.Context, slug string) (*Organization, error) {

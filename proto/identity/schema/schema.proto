@@ -505,6 +505,67 @@ message OAuthOneTimeCode {
     int64  consumed_at = 5 [(entdb.field) = { kind: "timestamp", pii_false: true }]; // 0 = unconsumed
 }
 
+// ─── EmailLoginCode (type_id 37) ───────────────────────────────────────
+//
+// The OTP arm of passwordless email login. RequestEmailLoginCode mints a
+// 6-digit code, stores its SHA-256 hash here keyed to the email (NOT a
+// user — the user may not exist yet), and emails the plaintext.
+// VerifyEmailLoginCode looks the row up by email, compares the hash,
+// and on a match resolves-or-creates the user and issues tokens.
+//
+// Keyed by email (unique) rather than the code hash because the code is
+// only 6 digits: a global unique index on a 6-digit value would collide
+// across users, and brute-force protection needs to find the active code
+// for an email even when the *guess* is wrong (to bump attempt_count).
+// A new request overwrites the previous code for the same email, so at
+// most one code is live per inbox at a time.
+//
+// Single-use is enforced by the consumed_at compare-and-set; brute force
+// is bounded by attempt_count — VerifyEmailLoginCode invalidates the
+// code once attempts reach the configured cap.
+message EmailLoginCode {
+    option (entdb.node) = {
+        type_id: 37
+        data_policy: DATA_POLICY_EPHEMERAL
+        description: "Single-use, short-lived OTP for passwordless email login, keyed by email."
+    };
+
+    string email         = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii: true, description: "Lowercased recipient email; at most one live code per address." }];
+    string code_hash     = 2 [(entdb.field) = { required: true, pii_false: true, description: "sha256(6-digit code); plaintext is sent only in the email." }];
+    int64  expires_at    = 3 [(entdb.field) = { required: true, kind: "timestamp", indexed: true, pii_false: true }];
+    int64  created_at    = 4 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
+    int64  consumed_at   = 5 [(entdb.field) = { kind: "timestamp", pii_false: true }]; // 0 = unconsumed
+    int64  attempt_count = 6 [(entdb.field) = { pii_false: true, description: "Failed verify attempts; the code is invalidated at the configured cap." }];
+    int64  max_attempts  = 7 [(entdb.field) = { pii_false: true, description: "Attempt cap captured at mint time so a config change doesn't move the goalposts mid-flight." }];
+}
+
+// ─── MagicLinkToken (type_id 38) ───────────────────────────────────────
+//
+// The magic-link arm of passwordless email login. RequestMagicLink mints
+// a high-entropy opaque token, stores its SHA-256 hash here bound to the
+// requested email and the (allowlist-validated) return_to, and emails the
+// clickable link. RedeemMagicLink consumes the row (consumed_at CAS from
+// 0), resolves-or-creates the user by the bound email, and issues tokens.
+//
+// Only the email + return_to + a short expiry are persisted — the token
+// plaintext lives solely in the email. Single-use is enforced by the
+// consumed_at compare-and-set so a replay (or two clicks racing) yields
+// exactly one winner; losers see Unauthenticated.
+message MagicLinkToken {
+    option (entdb.node) = {
+        type_id: 38
+        data_policy: DATA_POLICY_EPHEMERAL
+        description: "Single-use, short-lived magic-link token for passwordless email login, bound to an email."
+    };
+
+    string token_hash  = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true, description: "sha256(opaque token); plaintext is sent only in the email link." }];
+    string email       = 2 [(entdb.field) = { required: true, indexed: true, pii: true, description: "Lowercased email the link proves control of." }];
+    string return_to   = 3 [(entdb.field) = { pii_false: true, description: "Allowlist-validated app URL the redeem flow returns to." }];
+    int64  expires_at  = 4 [(entdb.field) = { required: true, kind: "timestamp", indexed: true, pii_false: true }];
+    int64  created_at  = 5 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
+    int64  consumed_at = 6 [(entdb.field) = { kind: "timestamp", pii_false: true }]; // 0 = unconsumed
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Types
 // ═══════════════════════════════════════════════════════════════════════

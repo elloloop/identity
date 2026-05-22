@@ -2089,6 +2089,212 @@ func (x *OAuthOneTimeCode) GetConsumedAt() int64 {
 	return 0
 }
 
+// ─── EmailLoginCode (type_id 37) ───────────────────────────────────────
+//
+// The OTP arm of passwordless email login. RequestEmailLoginCode mints a
+// 6-digit code, stores its SHA-256 hash here keyed to the email (NOT a
+// user — the user may not exist yet), and emails the plaintext.
+// VerifyEmailLoginCode looks the row up by email, compares the hash,
+// and on a match resolves-or-creates the user and issues tokens.
+//
+// Keyed by email (unique) rather than the code hash because the code is
+// only 6 digits: a global unique index on a 6-digit value would collide
+// across users, and brute-force protection needs to find the active code
+// for an email even when the *guess* is wrong (to bump attempt_count).
+// A new request overwrites the previous code for the same email, so at
+// most one code is live per inbox at a time.
+//
+// Single-use is enforced by the consumed_at compare-and-set; brute force
+// is bounded by attempt_count — VerifyEmailLoginCode invalidates the
+// code once attempts reach the configured cap.
+type EmailLoginCode struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	CodeHash      string                 `protobuf:"bytes,2,opt,name=code_hash,json=codeHash,proto3" json:"code_hash,omitempty"`
+	ExpiresAt     int64                  `protobuf:"varint,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ConsumedAt    int64                  `protobuf:"varint,5,opt,name=consumed_at,json=consumedAt,proto3" json:"consumed_at,omitempty"` // 0 = unconsumed
+	AttemptCount  int64                  `protobuf:"varint,6,opt,name=attempt_count,json=attemptCount,proto3" json:"attempt_count,omitempty"`
+	MaxAttempts   int64                  `protobuf:"varint,7,opt,name=max_attempts,json=maxAttempts,proto3" json:"max_attempts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EmailLoginCode) Reset() {
+	*x = EmailLoginCode{}
+	mi := &file_identity_schema_schema_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EmailLoginCode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EmailLoginCode) ProtoMessage() {}
+
+func (x *EmailLoginCode) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_schema_schema_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EmailLoginCode.ProtoReflect.Descriptor instead.
+func (*EmailLoginCode) Descriptor() ([]byte, []int) {
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *EmailLoginCode) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *EmailLoginCode) GetCodeHash() string {
+	if x != nil {
+		return x.CodeHash
+	}
+	return ""
+}
+
+func (x *EmailLoginCode) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *EmailLoginCode) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *EmailLoginCode) GetConsumedAt() int64 {
+	if x != nil {
+		return x.ConsumedAt
+	}
+	return 0
+}
+
+func (x *EmailLoginCode) GetAttemptCount() int64 {
+	if x != nil {
+		return x.AttemptCount
+	}
+	return 0
+}
+
+func (x *EmailLoginCode) GetMaxAttempts() int64 {
+	if x != nil {
+		return x.MaxAttempts
+	}
+	return 0
+}
+
+// ─── MagicLinkToken (type_id 38) ───────────────────────────────────────
+//
+// The magic-link arm of passwordless email login. RequestMagicLink mints
+// a high-entropy opaque token, stores its SHA-256 hash here bound to the
+// requested email and the (allowlist-validated) return_to, and emails the
+// clickable link. RedeemMagicLink consumes the row (consumed_at CAS from
+// 0), resolves-or-creates the user by the bound email, and issues tokens.
+//
+// Only the email + return_to + a short expiry are persisted — the token
+// plaintext lives solely in the email. Single-use is enforced by the
+// consumed_at compare-and-set so a replay (or two clicks racing) yields
+// exactly one winner; losers see Unauthenticated.
+type MagicLinkToken struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TokenHash     string                 `protobuf:"bytes,1,opt,name=token_hash,json=tokenHash,proto3" json:"token_hash,omitempty"`
+	Email         string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	ReturnTo      string                 `protobuf:"bytes,3,opt,name=return_to,json=returnTo,proto3" json:"return_to,omitempty"`
+	ExpiresAt     int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ConsumedAt    int64                  `protobuf:"varint,6,opt,name=consumed_at,json=consumedAt,proto3" json:"consumed_at,omitempty"` // 0 = unconsumed
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MagicLinkToken) Reset() {
+	*x = MagicLinkToken{}
+	mi := &file_identity_schema_schema_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MagicLinkToken) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MagicLinkToken) ProtoMessage() {}
+
+func (x *MagicLinkToken) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_schema_schema_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MagicLinkToken.ProtoReflect.Descriptor instead.
+func (*MagicLinkToken) Descriptor() ([]byte, []int) {
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *MagicLinkToken) GetTokenHash() string {
+	if x != nil {
+		return x.TokenHash
+	}
+	return ""
+}
+
+func (x *MagicLinkToken) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *MagicLinkToken) GetReturnTo() string {
+	if x != nil {
+		return x.ReturnTo
+	}
+	return ""
+}
+
+func (x *MagicLinkToken) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *MagicLinkToken) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *MagicLinkToken) GetConsumedAt() int64 {
+	if x != nil {
+		return x.ConsumedAt
+	}
+	return 0
+}
+
 type MemberOf struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -2097,7 +2303,7 @@ type MemberOf struct {
 
 func (x *MemberOf) Reset() {
 	*x = MemberOf{}
-	mi := &file_identity_schema_schema_proto_msgTypes[21]
+	mi := &file_identity_schema_schema_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2109,7 +2315,7 @@ func (x *MemberOf) String() string {
 func (*MemberOf) ProtoMessage() {}
 
 func (x *MemberOf) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[21]
+	mi := &file_identity_schema_schema_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2122,7 +2328,7 @@ func (x *MemberOf) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberOf.ProtoReflect.Descriptor instead.
 func (*MemberOf) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{21}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{23}
 }
 
 type UserPasskey struct {
@@ -2133,7 +2339,7 @@ type UserPasskey struct {
 
 func (x *UserPasskey) Reset() {
 	*x = UserPasskey{}
-	mi := &file_identity_schema_schema_proto_msgTypes[22]
+	mi := &file_identity_schema_schema_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2145,7 +2351,7 @@ func (x *UserPasskey) String() string {
 func (*UserPasskey) ProtoMessage() {}
 
 func (x *UserPasskey) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[22]
+	mi := &file_identity_schema_schema_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2158,7 +2364,7 @@ func (x *UserPasskey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPasskey.ProtoReflect.Descriptor instead.
 func (*UserPasskey) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{22}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{24}
 }
 
 type UserTotp struct {
@@ -2169,7 +2375,7 @@ type UserTotp struct {
 
 func (x *UserTotp) Reset() {
 	*x = UserTotp{}
-	mi := &file_identity_schema_schema_proto_msgTypes[23]
+	mi := &file_identity_schema_schema_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2181,7 +2387,7 @@ func (x *UserTotp) String() string {
 func (*UserTotp) ProtoMessage() {}
 
 func (x *UserTotp) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[23]
+	mi := &file_identity_schema_schema_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2194,7 +2400,7 @@ func (x *UserTotp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTotp.ProtoReflect.Descriptor instead.
 func (*UserTotp) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{23}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{25}
 }
 
 type UserRecoveryCode struct {
@@ -2205,7 +2411,7 @@ type UserRecoveryCode struct {
 
 func (x *UserRecoveryCode) Reset() {
 	*x = UserRecoveryCode{}
-	mi := &file_identity_schema_schema_proto_msgTypes[24]
+	mi := &file_identity_schema_schema_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2217,7 +2423,7 @@ func (x *UserRecoveryCode) String() string {
 func (*UserRecoveryCode) ProtoMessage() {}
 
 func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[24]
+	mi := &file_identity_schema_schema_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2230,7 +2436,7 @@ func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserRecoveryCode.ProtoReflect.Descriptor instead.
 func (*UserRecoveryCode) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{24}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{26}
 }
 
 var File_identity_schema_schema_proto protoreflect.FileDescriptor
@@ -2486,7 +2692,29 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x04 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt\x122\n" +
 	"\vconsumed_at\x18\x05 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
-	"consumedAt:]\xa2\xbb\x18Y\b$0\x04:\auser_idRJSingle-use, short-lived code handing a hosted-OAuth login back to the SPA.\">\n" +
+	"consumedAt:]\xa2\xbb\x18Y\b$0\x04:\auser_idRJSingle-use, short-lived code handing a hosted-OAuth login back to the SPA.\"\xc8\x05\n" +
+	"\x0eEmailLoginCode\x12b\n" +
+	"\x05email\x18\x01 \x01(\tBL\xb2\xbb\x18H\b\x01\x18\x01 \x01R>Lowercased recipient email; at most one live code per address.h\x01R\x05email\x12a\n" +
+	"\tcode_hash\x18\x02 \x01(\tBD\xb2\xbb\x18@\b\x01R:sha256(6-digit code); plaintext is sent only in the email.`\x01R\bcodeHash\x124\n" +
+	"\n" +
+	"expires_at\x18\x03 \x01(\x03B\x15\xb2\xbb\x18\x11\b\x01\x18\x01:\ttimestamp`\x01R\texpiresAt\x122\n" +
+	"\n" +
+	"created_at\x18\x04 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt\x122\n" +
+	"\vconsumed_at\x18\x05 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
+	"consumedAt\x12s\n" +
+	"\rattempt_count\x18\x06 \x01(\x03BN\xb2\xbb\x18JRFFailed verify attempts; the code is invalidated at the configured cap.`\x01R\fattemptCount\x12\x86\x01\n" +
+	"\fmax_attempts\x18\a \x01(\x03Bc\xb2\xbb\x18_R[Attempt cap captured at mint time so a config change doesn't move the goalposts mid-flight.`\x01R\vmaxAttempts:S\xa2\xbb\x18O\b%0\x04RISingle-use, short-lived OTP for passwordless email login, keyed by email.\"\xaf\x04\n" +
+	"\x0eMagicLinkToken\x12l\n" +
+	"\n" +
+	"token_hash\x18\x01 \x01(\tBM\xb2\xbb\x18I\b\x01\x18\x01R?sha256(opaque token); plaintext is sent only in the email link.`\x01h\x01R\ttokenHash\x12N\n" +
+	"\x05email\x18\x02 \x01(\tB8\xb2\xbb\x184\b\x01\x18\x01 \x01R,Lowercased email the link proves control of.R\x05email\x12\\\n" +
+	"\treturn_to\x18\x03 \x01(\tB?\xb2\xbb\x18;R7Allowlist-validated app URL the redeem flow returns to.`\x01R\breturnTo\x124\n" +
+	"\n" +
+	"expires_at\x18\x04 \x01(\x03B\x15\xb2\xbb\x18\x11\b\x01\x18\x01:\ttimestamp`\x01R\texpiresAt\x122\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt\x122\n" +
+	"\vconsumed_at\x18\x06 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
+	"consumedAt:c\xa2\xbb\x18_\b&0\x04RYSingle-use, short-lived magic-link token for passwordless email login, bound to an email.\">\n" +
 	"\bMemberOf:2\xaa\xbb\x18.\be\x12\tMEMBER_OFJ\x1fUser belongs to a working group\"F\n" +
 	"\vUserPasskey:7\xaa\xbb\x183\b\xd8\x01\x12\fUSER_PASSKEY0\x01J\x1eUser owns a passkey credential\"U\n" +
 	"\bUserTotp:I\xaa\xbb\x18E\b\xd9\x01\x12\tUSER_TOTP \x010\x01J1User has a TOTP credential (at most one per user)\"T\n" +
@@ -2504,7 +2732,7 @@ func file_identity_schema_schema_proto_rawDescGZIP() []byte {
 	return file_identity_schema_schema_proto_rawDescData
 }
 
-var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_identity_schema_schema_proto_goTypes = []any{
 	(*User)(nil),                       // 0: identity.schema.User
 	(*WorkingGroup)(nil),               // 1: identity.schema.WorkingGroup
@@ -2527,10 +2755,12 @@ var file_identity_schema_schema_proto_goTypes = []any{
 	(*Session)(nil),                    // 18: identity.schema.Session
 	(*IdentityVerificationRecord)(nil), // 19: identity.schema.IdentityVerificationRecord
 	(*OAuthOneTimeCode)(nil),           // 20: identity.schema.OAuthOneTimeCode
-	(*MemberOf)(nil),                   // 21: identity.schema.MemberOf
-	(*UserPasskey)(nil),                // 22: identity.schema.UserPasskey
-	(*UserTotp)(nil),                   // 23: identity.schema.UserTotp
-	(*UserRecoveryCode)(nil),           // 24: identity.schema.UserRecoveryCode
+	(*EmailLoginCode)(nil),             // 21: identity.schema.EmailLoginCode
+	(*MagicLinkToken)(nil),             // 22: identity.schema.MagicLinkToken
+	(*MemberOf)(nil),                   // 23: identity.schema.MemberOf
+	(*UserPasskey)(nil),                // 24: identity.schema.UserPasskey
+	(*UserTotp)(nil),                   // 25: identity.schema.UserTotp
+	(*UserRecoveryCode)(nil),           // 26: identity.schema.UserRecoveryCode
 }
 var file_identity_schema_schema_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -2551,7 +2781,7 @@ func file_identity_schema_schema_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_identity_schema_schema_proto_rawDesc), len(file_identity_schema_schema_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -46,6 +46,8 @@ var expectedNodeTypes = map[string]int32{
 	"OrganizationMembership":     34,
 	"Session":                    35,
 	"OAuthOneTimeCode":           36,
+	"EmailLoginCode":             37,
+	"MagicLinkToken":             38,
 }
 
 func TestApplyOrLogSchemaGap_ReturnsNilWithLogger(t *testing.T) {

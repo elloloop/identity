@@ -65,3 +65,17 @@ func (r *entRepository) DeleteExpiredOAuthOneTimeCodes(ctx context.Context, befo
 	}
 	return nil
 }
+
+func (r *entRepository) DeleteExpiredEmailLoginCodes(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.EmailLoginCode{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredEmailLoginCodes: %w", err)
+	}
+	return nil
+}
+
+func (r *entRepository) DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.MagicLinkToken{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredMagicLinkTokens: %w", err)
+	}
+	return nil
+}

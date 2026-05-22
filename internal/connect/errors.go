@@ -30,7 +30,9 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrUnauthenticated),
 		errors.Is(err, service.ErrTokenExpired),
-		errors.Is(err, service.ErrOAuthCodeInvalid):
+		errors.Is(err, service.ErrOAuthCodeInvalid),
+		errors.Is(err, service.ErrEmailLoginCodeInvalid),
+		errors.Is(err, service.ErrMagicLinkInvalid):
 		return connect.NewError(connect.CodeUnauthenticated, err)
 
 	case errors.Is(err, service.ErrInvalidArgument),

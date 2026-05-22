@@ -628,55 +628,95 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		}
 	}
 
-	// 2. Email-based lookup — first-time link of this provider to an
-	// existing local user (may have signed up via password or another
-	// provider).
+	// 2 & 3. Email-based lookup, then create. Shared with passwordless
+	// login so OAuth, OTP, and magic link all converge on ONE account per
+	// email — an email-based first-time OAuth login links to a pre-existing
+	// password/passwordless account rather than duplicating it.
+	user, isNew, err := s.resolveOrCreateUserByEmail(ctx, email, resolveOrCreateOpts{
+		name:          identity.Name,
+		avatarURL:     identity.AvatarURL,
+		emailVerified: true, // a verified provider identity proves control
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if !isNew {
+		s.applyOAuthProfileUpdates(ctx, user, identity, email, now)
+	}
+	s.linkOAuthIdentity(ctx, user.ID, identity, email, now)
+	if isNew {
+		s.logger.Info(
+			"oauth_user_provisioned",
+			zap.String("email", redactEmail(email)),
+			zap.String("user_id", user.ID),
+			zap.String("provider", identity.Provider),
+		)
+	}
+	return user, isNew, nil
+}
+
+// resolveOrCreateOpts carries the optional profile fields a create path
+// wants applied to a freshly-provisioned user. All fields are ignored
+// when an existing user is found (the existing record is authoritative;
+// callers that want to patch it do so explicitly).
+type resolveOrCreateOpts struct {
+	name          string
+	avatarURL     string
+	emailVerified bool
+}
+
+// resolveOrCreateUserByEmail is the single by-email account resolver
+// shared by every login method that authenticates with an email address
+// (OAuth, OTP, magic link). It looks the user up by email and, when none
+// exists, creates one. This is what guarantees the unified-by-email
+// invariant: a passwordless login for an address that already has a
+// password or OAuth account links to the SAME user instead of minting a
+// duplicate.
+//
+// Returns (user, isNewUser, error). isNewUser is true only when a User
+// row was created here. On a create race (a concurrent caller created the
+// row between the lookup and the insert) it re-resolves by email and
+// returns the existing row with isNewUser=false, so two simultaneous
+// first-time logins for the same email still converge on one account.
+func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email string, opts resolveOrCreateOpts) (*User, bool, error) {
 	existing, err := s.repo(ctx).FindUserByEmail(ctx, email)
 	if err != nil {
 		return nil, false, err
 	}
 	if existing != nil {
-		s.applyOAuthProfileUpdates(ctx, existing, identity, email, now)
-		s.linkOAuthIdentity(ctx, existing.ID, identity, email, now)
 		return existing, false, nil
 	}
 
-	// 3. New user.
-	displayName := fallbackDisplayName(email, identity.Name)
-	userID, err := s.repo(ctx).CreateUser(ctx, &User{
+	now := s.nowMs()
+	displayName := fallbackDisplayName(email, opts.name)
+	emailVerifiedAt := int64(0)
+	if opts.emailVerified {
+		emailVerifiedAt = now
+	}
+	newUser := &User{
 		Email:           email,
 		Name:            displayName,
-		AvatarURL:       identity.AvatarURL,
+		AvatarURL:       opts.avatarURL,
 		Role:            "member",
 		Status:          "active",
-		EmailVerified:   true,
-		EmailVerifiedAt: now,
+		EmailVerified:   opts.emailVerified,
+		EmailVerifiedAt: emailVerifiedAt,
 		CreatedAt:       msToTime(now),
 		UpdatedAt:       msToTime(now),
-	})
+	}
+	userID, err := s.repo(ctx).CreateUser(ctx, newUser)
 	if err != nil {
+		// Lost a create race: another caller inserted the same email
+		// between our lookup and insert. Re-resolve so both callers land
+		// on the one account rather than surfacing a unique-constraint
+		// error to the user.
+		if raced, lookupErr := s.repo(ctx).FindUserByEmail(ctx, email); lookupErr == nil && raced != nil {
+			return raced, false, nil
+		}
 		return nil, false, fmt.Errorf("creating user: %w", err)
 	}
-	user := &User{
-		ID:              userID,
-		Email:           email,
-		Name:            displayName,
-		AvatarURL:       identity.AvatarURL,
-		Role:            "member",
-		Status:          "active",
-		EmailVerified:   true,
-		EmailVerifiedAt: now,
-		CreatedAt:       msToTime(now),
-		UpdatedAt:       msToTime(now),
-	}
-	s.linkOAuthIdentity(ctx, userID, identity, email, now)
-	s.logger.Info(
-		"oauth_user_provisioned",
-		zap.String("email", redactEmail(email)),
-		zap.String("user_id", userID),
-		zap.String("provider", identity.Provider),
-	)
-	return user, true, nil
+	newUser.ID = userID
+	return newUser, true, nil
 }
 
 // applyOAuthProfileUpdates patches the local user record with any new

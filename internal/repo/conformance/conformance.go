@@ -850,6 +850,277 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("EmailLoginCode_UpsertFindConsume", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
+				Email: "otp@example.com", CodeHash: "hash-1",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
+			})
+			if err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+			if id == "" {
+				t.Fatal("UpsertEmailLoginCode did not return a node id")
+			}
+			got, err := r.FindEmailLoginCodeByEmail(ctx, "otp@example.com")
+			if err != nil || got == nil {
+				t.Fatalf("Find: err=%v got=%#v", err, got)
+			}
+			if got.CodeHash != "hash-1" || got.MaxAttempts != 5 {
+				t.Fatalf("Find returned wrong record: %#v", got)
+			}
+			// Consume succeeds once.
+			rec, err := r.ConsumeEmailLoginCode(ctx, "otp@example.com", 200)
+			if err != nil {
+				t.Fatalf("first Consume: want nil, got %v", err)
+			}
+			if rec == nil || rec.ConsumedAt != 200 {
+				t.Fatalf("Consume returned wrong record: %#v", rec)
+			}
+			// Replay must fail.
+			if _, err := r.ConsumeEmailLoginCode(ctx, "otp@example.com", 300); !errors.Is(err, service.ErrEmailLoginCodeInvalid) {
+				t.Fatalf("replay Consume: want ErrEmailLoginCodeInvalid, got %v", err)
+			}
+		})
+
+		t.Run("EmailLoginCode_UpsertReplacesPrevious", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
+				Email: "otp-upsert@example.com", CodeHash: "old",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
+			}); err != nil {
+				t.Fatalf("Upsert old: %v", err)
+			}
+			if _, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
+				Email: "otp-upsert@example.com", CodeHash: "new",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 200, MaxAttempts: 5,
+			}); err != nil {
+				t.Fatalf("Upsert new: %v", err)
+			}
+			got, err := r.FindEmailLoginCodeByEmail(ctx, "otp-upsert@example.com")
+			if err != nil || got == nil {
+				t.Fatalf("Find: err=%v got=%#v", err, got)
+			}
+			if got.CodeHash != "new" {
+				t.Fatalf("upsert did not replace previous code: hash=%q want new", got.CodeHash)
+			}
+		})
+
+		t.Run("EmailLoginCode_IncrementAttempts", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
+				Email: "otp-attempts@example.com", CodeHash: "h",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
+			})
+			if err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+			if err := r.IncrementEmailLoginCodeAttempts(ctx, id); err != nil {
+				t.Fatalf("Increment: %v", err)
+			}
+			if err := r.IncrementEmailLoginCodeAttempts(ctx, id); err != nil {
+				t.Fatalf("Increment 2: %v", err)
+			}
+			got, err := r.FindEmailLoginCodeByEmail(ctx, "otp-attempts@example.com")
+			if err != nil || got == nil {
+				t.Fatalf("Find: err=%v got=%#v", err, got)
+			}
+			if got.AttemptCount != 2 {
+				t.Fatalf("AttemptCount = %d, want 2", got.AttemptCount)
+			}
+		})
+
+		t.Run("EmailLoginCode_ConsumeRejectsExpiredAndMissing", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
+				Email: "otp-expired@example.com", CodeHash: "h",
+				ExpiresAt: 1_000, CreatedAt: 100, MaxAttempts: 5,
+			}); err != nil {
+				t.Fatalf("Upsert expired: %v", err)
+			}
+			if _, err := r.ConsumeEmailLoginCode(ctx, "otp-expired@example.com", 2_000); !errors.Is(err, service.ErrEmailLoginCodeInvalid) {
+				t.Fatalf("Consume expired: want ErrEmailLoginCodeInvalid, got %v", err)
+			}
+			if _, err := r.ConsumeEmailLoginCode(ctx, "otp-missing@example.com", 2_000); !errors.Is(err, service.ErrEmailLoginCodeInvalid) {
+				t.Fatalf("Consume missing: want ErrEmailLoginCodeInvalid, got %v", err)
+			}
+		})
+
+		t.Run("EmailLoginCode_ConsumeRaceSingleWinner", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
+				Email: "otp-race@example.com", CodeHash: "h",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
+			}); err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+			const N = 8
+			results := make(chan error, N)
+			start := make(chan struct{})
+			for i := 0; i < N; i++ {
+				go func() {
+					<-start
+					_, err := r.ConsumeEmailLoginCode(ctx, "otp-race@example.com", 200)
+					results <- err
+				}()
+			}
+			close(start)
+			winners, losers := 0, 0
+			for i := 0; i < N; i++ {
+				switch err := <-results; {
+				case err == nil:
+					winners++
+				case errors.Is(err, service.ErrEmailLoginCodeInvalid):
+					losers++
+				default:
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+			if winners != 1 || losers != N-1 {
+				t.Fatalf("ConsumeEmailLoginCode winners=%d losers=%d, want 1/%d", winners, losers, N-1)
+			}
+		})
+
+		t.Run("EmailLoginCode_DeleteExpired", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
+				Email: "otp-old@example.com", CodeHash: "h", ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Upsert old: %v", err)
+			}
+			if _, err := r.UpsertEmailLoginCode(ctx, &service.EmailLoginCodeRecord{
+				Email: "otp-fresh@example.com", CodeHash: "h", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Upsert fresh: %v", err)
+			}
+			if err := r.DeleteExpiredEmailLoginCodes(ctx, 5_000, 100); err != nil {
+				t.Fatalf("DeleteExpired: %v", err)
+			}
+			if got, _ := r.FindEmailLoginCodeByEmail(ctx, "otp-old@example.com"); got != nil {
+				t.Fatal("expired code survived the sweep")
+			}
+			if got, _ := r.FindEmailLoginCodeByEmail(ctx, "otp-fresh@example.com"); got == nil {
+				t.Fatal("fresh code was swept")
+			}
+			if err := r.DeleteExpiredEmailLoginCodes(ctx, 5_000, 0); err == nil {
+				t.Fatal("DeleteExpired with limit 0: want error, got nil")
+			}
+		})
+
+		t.Run("MagicLinkToken_ConsumeCAS_HappyPathAndReplay", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateMagicLinkToken(ctx, &service.MagicLinkTokenRecord{
+				TokenHash: "ml-1", Email: "ml@example.com", ReturnTo: "https://app/cb",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if id == "" {
+				t.Fatal("CreateMagicLinkToken did not return a node id")
+			}
+			rec, err := r.ConsumeMagicLinkToken(ctx, "ml-1", 200)
+			if err != nil {
+				t.Fatalf("first Consume: want nil, got %v", err)
+			}
+			if rec == nil || rec.Email != "ml@example.com" || rec.ReturnTo != "https://app/cb" {
+				t.Fatalf("Consume returned wrong record: %#v", rec)
+			}
+			if rec.ConsumedAt != 200 {
+				t.Fatalf("ConsumedAt = %d, want 200", rec.ConsumedAt)
+			}
+			if _, err := r.ConsumeMagicLinkToken(ctx, "ml-1", 300); !errors.Is(err, service.ErrMagicLinkInvalid) {
+				t.Fatalf("replay Consume: want ErrMagicLinkInvalid, got %v", err)
+			}
+		})
+
+		t.Run("MagicLinkToken_ConsumeRejectsExpiredAndMissing", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.CreateMagicLinkToken(ctx, &service.MagicLinkTokenRecord{
+				TokenHash: "ml-expired", Email: "ml-e@example.com",
+				ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create expired: %v", err)
+			}
+			if _, err := r.ConsumeMagicLinkToken(ctx, "ml-expired", 2_000); !errors.Is(err, service.ErrMagicLinkInvalid) {
+				t.Fatalf("Consume expired: want ErrMagicLinkInvalid, got %v", err)
+			}
+			if _, err := r.ConsumeMagicLinkToken(ctx, "ml-missing", 2_000); !errors.Is(err, service.ErrMagicLinkInvalid) {
+				t.Fatalf("Consume missing: want ErrMagicLinkInvalid, got %v", err)
+			}
+		})
+
+		t.Run("MagicLinkToken_ConsumeRaceSingleWinner", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.CreateMagicLinkToken(ctx, &service.MagicLinkTokenRecord{
+				TokenHash: "ml-race", Email: "ml-r@example.com",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			const N = 8
+			results := make(chan error, N)
+			start := make(chan struct{})
+			for i := 0; i < N; i++ {
+				go func() {
+					<-start
+					_, err := r.ConsumeMagicLinkToken(ctx, "ml-race", 200)
+					results <- err
+				}()
+			}
+			close(start)
+			winners, losers := 0, 0
+			for i := 0; i < N; i++ {
+				switch err := <-results; {
+				case err == nil:
+					winners++
+				case errors.Is(err, service.ErrMagicLinkInvalid):
+					losers++
+				default:
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+			if winners != 1 || losers != N-1 {
+				t.Fatalf("ConsumeMagicLinkToken winners=%d losers=%d, want 1/%d", winners, losers, N-1)
+			}
+		})
+
+		t.Run("MagicLinkToken_DeleteExpired", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.CreateMagicLinkToken(ctx, &service.MagicLinkTokenRecord{
+				TokenHash: "ml-old", Email: "ml-old@example.com", ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create old: %v", err)
+			}
+			if _, err := r.CreateMagicLinkToken(ctx, &service.MagicLinkTokenRecord{
+				TokenHash: "ml-fresh", Email: "ml-fresh@example.com", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create fresh: %v", err)
+			}
+			if err := r.DeleteExpiredMagicLinkTokens(ctx, 5_000, 100); err != nil {
+				t.Fatalf("DeleteExpired: %v", err)
+			}
+			if _, err := r.ConsumeMagicLinkToken(ctx, "ml-old", 6_000); !errors.Is(err, service.ErrMagicLinkInvalid) {
+				t.Fatalf("Consume swept token: want ErrMagicLinkInvalid, got %v", err)
+			}
+			if _, err := r.ConsumeMagicLinkToken(ctx, "ml-fresh", 6_000); err != nil {
+				t.Fatalf("Consume surviving token: want nil, got %v", err)
+			}
+			if err := r.DeleteExpiredMagicLinkTokens(ctx, 5_000, 0); err == nil {
+				t.Fatal("DeleteExpired with limit 0: want error, got nil")
+			}
+		})
+
 		t.Run("TotpCredential_CRUD", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)

@@ -63,6 +63,23 @@ import { Code } from "astro-expressive-code/components";
     or send recovery email.
   </p>
 
+  <h2>Passwordless email login</h2>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_PASSWORDLESS_SIGNUP_ENABLED</code></td><td><code>true</code></td><td>Auto-create an account on a passwordless verify for an unknown email. Set <code>false</code> to require a pre-existing account (unknown emails get the same <code>unauthenticated</code> shape — no enumeration)</td></tr>
+    <tr><td><code>GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS</code></td><td><code>300</code></td><td>One-time code lifetime</td></tr>
+    <tr><td><code>GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS</code></td><td><code>5</code></td><td>Wrong-code guesses before the code is invalidated (brute-force cap)</td></tr>
+    <tr><td><code>GATEWAY_PASSWORDLESS_MAGIC_LINK_TTL_SECONDS</code></td><td><code>900</code></td><td>Magic-link token lifetime</td></tr>
+    <tr><td><code>GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP</code></td><td><code>5</code></td><td>Per-IP/minute cap on <code>RequestEmailLoginCode</code> + <code>RequestMagicLink</code></td></tr>
+  </table>
+  <p>
+    The per-email send cooldown
+    (<code>GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS</code>) and the magic link's
+    <code>return_to</code> allowlist
+    (<code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>) also apply — see
+    <a href="/identity/docs/auth/passwordless">Passwordless</a>.
+  </p>
+
   <h2>TOTP / 2FA</h2>
   <table>
     <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>

@@ -158,6 +158,80 @@ func (h *IdentityHandler) PasswordLogin(
 	return connect.NewResponse(resp), nil
 }
 
+// ─── Passwordless Email Login RPCs ──────────────────────────────────────────
+
+// RequestEmailLoginCode emails a 6-digit OTP. The response is identical
+// whether or not the email has an account (anti-enumeration); the service
+// always returns nil for a well-formed request.
+func (h *IdentityHandler) RequestEmailLoginCode(
+	ctx context.Context,
+	req *connect.Request[identitypb.RequestEmailLoginCodeRequest],
+) (*connect.Response[identitypb.RequestEmailLoginCodeResponse], error) {
+	if err := h.auth.RequestEmailLoginCode(ctx, req.Msg.Email); err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.RequestEmailLoginCodeResponse{}), nil
+}
+
+// VerifyEmailLoginCode validates the OTP, resolves-or-creates the user by
+// email, and issues a token pair.
+func (h *IdentityHandler) VerifyEmailLoginCode(
+	ctx context.Context,
+	req *connect.Request[identitypb.VerifyEmailLoginCodeRequest],
+) (*connect.Response[identitypb.VerifyEmailLoginCodeResponse], error) {
+	ipAddr := clientIP(req.Header())
+	userAgent := clientUserAgent(req.Header())
+
+	result, err := h.auth.VerifyEmailLoginCode(ctx, req.Msg.Email, req.Msg.Code, ipAddr, userAgent)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	resp := &identitypb.VerifyEmailLoginCodeResponse{
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// RequestMagicLink emails a single-use sign-in link. A disallowed
+// return_to is rejected with InvalidArgument; everything else returns the
+// same anti-enumeration success.
+func (h *IdentityHandler) RequestMagicLink(
+	ctx context.Context,
+	req *connect.Request[identitypb.RequestMagicLinkRequest],
+) (*connect.Response[identitypb.RequestMagicLinkResponse], error) {
+	if err := h.auth.RequestMagicLink(ctx, req.Msg.Email, req.Msg.ReturnTo); err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.RequestMagicLinkResponse{}), nil
+}
+
+// RedeemMagicLink consumes the single-use token, resolves-or-creates the
+// user by the bound email, and issues a token pair plus the validated
+// return_to.
+func (h *IdentityHandler) RedeemMagicLink(
+	ctx context.Context,
+	req *connect.Request[identitypb.RedeemMagicLinkRequest],
+) (*connect.Response[identitypb.RedeemMagicLinkResponse], error) {
+	ipAddr := clientIP(req.Header())
+	userAgent := clientUserAgent(req.Header())
+
+	result, err := h.auth.RedeemMagicLink(ctx, req.Msg.Token, ipAddr, userAgent)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	resp := &identitypb.RedeemMagicLinkResponse{
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+		ReturnTo:     result.ReturnTo,
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // ─── Passkey Authentication RPCs ────────────────────────────────────────────
 
 // BeginPasskeyLogin generates PublicKeyCredentialRequestOptions for
