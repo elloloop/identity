@@ -52,6 +52,22 @@ type errorRepo struct {
 	failCreateOAuthIdentity        bool
 	failCreateSession              bool
 	failRevokeSessionsForUser      bool
+	failGetOrganizationBySlug      bool
+	failAddOrganizationMember      bool
+}
+
+func (r *errorRepo) GetOrganizationBySlug(ctx context.Context, slug string) (*Organization, error) {
+	if r.failGetOrganizationBySlug {
+		return nil, errInjected
+	}
+	return r.fakeRepo.GetOrganizationBySlug(ctx, slug)
+}
+
+func (r *errorRepo) AddOrganizationMember(ctx context.Context, m *OrganizationMembership) (string, error) {
+	if r.failAddOrganizationMember {
+		return "", errInjected
+	}
+	return r.fakeRepo.AddOrganizationMember(ctx, m)
 }
 
 func (r *errorRepo) CreateSession(ctx context.Context, s *SessionRecord) (string, error) {

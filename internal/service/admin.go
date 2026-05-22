@@ -19,7 +19,7 @@ import (
 // AdminService implements admin user-management operations.
 // All methods verify that the acting user has role=admin.
 type AdminService struct {
-	db              DB
+	bootDB          DB
 	defaultTenantID string
 	audit           *audit.Logger
 	cfg             *config.Config
@@ -39,7 +39,7 @@ func NewAdminService(db DB, tenantID string, auditLog *audit.Logger, cfg *config
 	if mailer == nil {
 		mailer = email.NewLogOnly(logger)
 	}
-	return &AdminService{db: db, defaultTenantID: tenantID, audit: auditLog, cfg: cfg, mailer: mailer, logger: logger}
+	return &AdminService{bootDB: db, defaultTenantID: tenantID, audit: auditLog, cfg: cfg, mailer: mailer, logger: logger}
 }
 
 // tenantID returns the request's resolved tenant, falling back to the
@@ -51,6 +51,19 @@ func (s *AdminService) tenantID(ctx context.Context) string {
 		return scope.TenantID
 	}
 	return s.defaultTenantID
+}
+
+// db returns the DB scoped to the request's resolved tenant. The
+// postgres driver binds its DB to a single tenant, so a per-request
+// tenant needs the scope's DB; the entdb driver's DB routes by the
+// per-call tenant id, leaves scope.DB nil, and is reached through the
+// boot-time DB with s.tenantID(ctx) passed per call. In mode=single no
+// scope is present and the boot-time DB is used directly.
+func (s *AdminService) db(ctx context.Context) DB {
+	if scope := TenantScopeFromContext(ctx); scope != nil && scope.DB != nil {
+		return scope.DB
+	}
+	return s.bootDB
 }
 
 func requireAdminActor(ctx context.Context, db DB, tenantID, actorID string) (*User, error) {
@@ -70,7 +83,7 @@ func requireAdminActor(ctx context.Context, db DB, tenantID, actorID string) (*U
 
 // requireAdmin fetches the actor's user node and checks role=admin.
 func (s *AdminService) requireAdmin(ctx context.Context, actorID string) (*User, error) {
-	return requireAdminActor(ctx, s.db, s.tenantID(ctx), actorID)
+	return requireAdminActor(ctx, s.db(ctx), s.tenantID(ctx), actorID)
 }
 
 // InviteUser creates a new user (invited or immediately active) and
@@ -101,7 +114,7 @@ func (s *AdminService) InviteUser(
 	}
 
 	// Check duplicate.
-	existing, err := s.db.QueryNodes(ctx, s.tenantID(ctx), tenantAdminActor, typeUser, map[string]any{ufEmail: email})
+	existing, err := s.db(ctx).QueryNodes(ctx, s.tenantID(ctx), tenantAdminActor, typeUser, map[string]any{ufEmail: email})
 	if err != nil {
 		return nil, fmt.Errorf("duplicate check failed: %w", err)
 	}
@@ -138,7 +151,7 @@ func (s *AdminService) InviteUser(
 
 	// Create user node.
 	userOp := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeUser, Data: userData}
-	result, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), tenantAdminActor, []entdb.Operation{userOp})
+	result, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), tenantAdminActor, []entdb.Operation{userOp})
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
@@ -156,7 +169,7 @@ func (s *AdminService) InviteUser(
 	// row create. No-op on drivers without a separate global registry
 	// (postgres, in-memory fakes).
 	if userID != "" {
-		if err := s.db.RegisterUserInTenant(ctx, s.tenantID(ctx), userID, email, name, role); err != nil {
+		if err := s.db(ctx).RegisterUserInTenant(ctx, s.tenantID(ctx), userID, email, name, role); err != nil {
 			return nil, fmt.Errorf("register invited user: %w", err)
 		}
 	}
@@ -174,7 +187,7 @@ func (s *AdminService) InviteUser(
 		invCreatedAt: now,
 	}
 	invOp := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeUserInvitation, Data: invData}
-	_, err = s.db.ExecuteAtomic(ctx, s.tenantID(ctx), tenantAdminActor, []entdb.Operation{invOp})
+	_, err = s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), tenantAdminActor, []entdb.Operation{invOp})
 	if err != nil {
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
@@ -226,7 +239,7 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		return errors.New("admins cannot deactivate themselves")
 	}
 
-	node, err := s.db.GetNode(ctx, s.tenantID(ctx), actorStr(targetUserID), typeUser, targetUserID)
+	node, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(targetUserID), typeUser, targetUserID)
 	if err != nil {
 		return fmt.Errorf("fetch user: %w", err)
 	}
@@ -239,7 +252,7 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 		Patch: map[string]any{ufStatus: "deactivated", ufDeactivatedAt: now, ufUpdatedAt: now},
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("deactivate user: %w", err)
 	}
 
@@ -261,7 +274,7 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 		return errors.New("user_id is required")
 	}
 
-	node, err := s.db.GetNode(ctx, s.tenantID(ctx), actorStr(targetUserID), typeUser, targetUserID)
+	node, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(targetUserID), typeUser, targetUserID)
 	if err != nil {
 		return fmt.Errorf("fetch user: %w", err)
 	}
@@ -274,7 +287,7 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 		Patch: map[string]any{ufStatus: "active", ufDeactivatedAt: int64(0), ufUpdatedAt: now},
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("reactivate user: %w", err)
 	}
 
@@ -296,7 +309,7 @@ func (s *AdminService) ResetUserPassword(
 		return nil, errors.New("user_id is required")
 	}
 
-	node, err := s.db.GetNode(ctx, s.tenantID(ctx), actorStr(targetUserID), typeUser, targetUserID)
+	node, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(targetUserID), typeUser, targetUserID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch user: %w", err)
 	}
@@ -317,7 +330,7 @@ func (s *AdminService) ResetUserPassword(
 			Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 			Patch: map[string]any{ufPasswordHash: hash, ufUpdatedAt: now},
 		}
-		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 			return nil, fmt.Errorf("set temp password: %w", err)
 		}
 		res.TemporaryPassword = tempPw
@@ -332,7 +345,7 @@ func (s *AdminService) ResetUserPassword(
 				prfCreatedAt: now,
 			},
 		}
-		if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), tenantAdminActor, []entdb.Operation{op}); err != nil {
+		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), tenantAdminActor, []entdb.Operation{op}); err != nil {
 			return nil, fmt.Errorf("create reset token: %w", err)
 		}
 		res.ResetToken = rawToken

@@ -166,8 +166,11 @@ GATEWAY_TENANT_HOST_BASE_DOMAIN   = <domain>   # required when "host" is a sourc
   has no cross-tenant registry concept). The memory driver does not
   support `mode=multi`.
 - **Subsequent user signups / invitation acceptances** resolve the
-  tenant from the request (see below), then add the new user as a
-  `"member"` of the existing tenant.
+  tenant from the request (see below), then add the new user to the
+  existing tenant — both as a storage-layer tenant member and, on
+  invitation redemption, as an identity-layer `OrganizationMembership`
+  member of that tenant's `Organization` with the role from the
+  invitation.
 - **Tenant resolution per request.** A middleware
   (`internal/middleware/tenant.go`, installed only in `mode=multi`)
   resolves the request's tenant from the configured, ordered sources
@@ -240,7 +243,20 @@ GATEWAY_TENANT_HOST_BASE_DOMAIN   = <domain>   # required when "host" is a sourc
    tenant. `mode=single` is unchanged (the resolver is not installed;
    the tenant stays `DefaultTenantID`). See the resolution decision-log
    entry below.
-4. Tenant-aware invitations.
+4. **Tenant-aware invitations** *(landed)* — `InviteUser` issues an
+   invitation bound to the inviting admin's resolved tenant (the
+   invitation row lives only in that tenant's data plane), gated on the
+   admin's identity `User.Role`. `AcceptInvitation` redeems the
+   invitation inside the host-resolved tenant: it activates the
+   resolve-or-create-by-email user and adds them to that tenant's
+   `Organization` via `AddOrganizationMember`, carrying the role
+   recorded on the invitation. Because the invitation only exists in its
+   issuing tenant, an invite minted for tenant A is invisible to tenant
+   B's scoped repository — a token replayed under B's host fails the
+   lookup and is rejected (`Unauthenticated`), and a tenant-A admin
+   cannot invite into B. `mode=single` is unchanged: no `Organization`
+   exists there, so redemption adds no membership. This slice completes
+   `mode=multi` (`closes #93`). See decision log §13.
 
 ### Why a flag, not separate binaries
 
@@ -360,8 +376,12 @@ control when they run — `New` starts nothing):
 
 ## What we don't promise (yet)
 
-Things this service deliberately defers, so future contributors
-don't try to fit features that don't belong:
+`mode=multi` is fully delivered as of [#93](https://github.com/elloloop/identity/issues/93):
+on-demand tenant provisioning (`OrganizationSignup`), per-request
+tenant resolution, and tenant-aware invitations all ship. The items
+below are features beyond that baseline that this service deliberately
+defers, so future contributors don't try to fit features that don't
+belong:
 
 - **Cross-product SSO.** Two products running their own identity
   deployments do not share sessions. If we ever need this, it'll be a
@@ -700,6 +720,49 @@ before you ship.
       always taken — the single-tenant path is unchanged, with no
       host/JWT inspection. Boot is fail-closed: `mode=multi` rejects an
       empty source list or a `host` source with no base domain.
+
+13. **Tenant-aware invitations: the invitation is the tenant binding,
+    redemption mints the identity-layer membership.** Issue #93 slice 4
+    (completes `mode=multi`). Choices:
+
+    - **No `tenant_id` field on the invitation — the storage scope IS
+      the binding.** Like `Organization` (decision log §2: a row exists
+      only inside its own tenant's data plane), a `UserInvitation` lives
+      in the issuing tenant's scope. `InviteUser` writes it under the
+      inviting admin's resolved tenant (`s.tenantID(ctx)`); a duplicate
+      `tenant_id` payload field would be a second source of truth that
+      can drift from the scope it already lives in. This makes
+      cross-tenant safety structural rather than a checked invariant: an
+      invitation minted for tenant A is simply not present in tenant B's
+      scoped repository, so a token replayed under B's host fails
+      `FindInvitationByHash` and is rejected (`Unauthenticated`) before
+      any user is touched, and a tenant-A admin cannot reach into B.
+
+    - **Redemption adds the identity-layer `OrganizationMembership`,
+      not just the storage member row.** `InviteUser` already registers
+      the invitee as a storage-layer tenant member (the v1.12+ actor
+      invariant). `AcceptInvitation` additionally makes them an
+      `OrganizationMembership` member of the resolved tenant's
+      `Organization` (found by slug == tenant id, §2), with the role
+      recorded on the invitation (identity's product role, independent
+      of the storage role per §4). Without this the redeemed user could
+      authenticate but would fail the middleware's membership check
+      (slice 3) on their next request, so the membership add and the
+      session issuance must be one atomic-from-the-caller operation —
+      redemption fails closed if the membership cannot be written.
+
+    - **Resolve-or-create by email is scoped to the resolved tenant.**
+      Redemption looks the user up by the invitation's `user_id` then by
+      email *within the resolved tenant's repository*. A single human
+      who is invited into two tenants becomes two separate identity
+      users — one per tenant — consistent with the 1:1 identity↔tenant
+      boundary (§2) and the deliberately-deferred "multi-tenant users"
+      item above. There is no global user lookup at redemption time.
+
+    - **`mode=single` is unchanged.** Single-mode deployments never
+      provision an `Organization`, so the org lookup returns nothing and
+      redemption adds no membership — the single-tenant invitation flow
+      is exactly as it was before this slice.
 
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

@@ -46,23 +46,38 @@ func TestServiceAccessors_PreferScope_FallBackToDefault(t *testing.T) {
 	)
 	defaultRepo := newFakeRepo()
 	scopedRepo := newFakeRepo()
+	bootDB := newFakeDB()
+	scopedDB := newFakeDB()
 
 	bg := context.Background()
-	scoped := WithTenantScope(bg, &TenantScope{TenantID: resolvedTenant, Repo: scopedRepo})
+	scoped := WithTenantScope(bg, &TenantScope{TenantID: resolvedTenant, Repo: scopedRepo, DB: scopedDB})
 
-	// tenantID-only accessors (DB-backed services scope by id per call).
-	tenantIDOnly := map[string]func(context.Context) string{
-		"AdminService":   (&AdminService{defaultTenantID: defaultTenant}).tenantID,
-		"GroupService":   (&GroupService{defaultTenantID: defaultTenant}).tenantID,
-		"HelpService":    (&HelpService{defaultTenantID: defaultTenant}).tenantID,
-		"ProfileService": (&ProfileService{defaultTenantID: defaultTenant}).tenantID,
+	// DB-backed services: tenantID(ctx) and db(ctx). The db accessor
+	// prefers the scope's tenant-scoped DB (postgres driver, whose DB
+	// binds to one tenant) and falls back to the boot-time DB otherwise
+	// (entdb driver, whose DB routes by the per-call tenant id; and
+	// mode=single). Both branches are load-bearing for tenant isolation.
+	dbAccessors := map[string]struct {
+		tenantID func(context.Context) string
+		db       func(context.Context) DB
+	}{
+		"AdminService":   {(&AdminService{defaultTenantID: defaultTenant, bootDB: bootDB}).tenantID, (&AdminService{defaultTenantID: defaultTenant, bootDB: bootDB}).db},
+		"GroupService":   {(&GroupService{defaultTenantID: defaultTenant, bootDB: bootDB}).tenantID, (&GroupService{defaultTenantID: defaultTenant, bootDB: bootDB}).db},
+		"HelpService":    {(&HelpService{defaultTenantID: defaultTenant, bootDB: bootDB}).tenantID, (&HelpService{defaultTenantID: defaultTenant, bootDB: bootDB}).db},
+		"ProfileService": {(&ProfileService{defaultTenantID: defaultTenant, bootDB: bootDB}).tenantID, (&ProfileService{defaultTenantID: defaultTenant, bootDB: bootDB}).db},
 	}
-	for name, fn := range tenantIDOnly {
-		if got := fn(bg); got != defaultTenant {
+	for name, a := range dbAccessors {
+		if got := a.tenantID(bg); got != defaultTenant {
 			t.Fatalf("%s.tenantID(no scope) = %q, want %q", name, got, defaultTenant)
 		}
-		if got := fn(scoped); got != resolvedTenant {
+		if got := a.tenantID(scoped); got != resolvedTenant {
 			t.Fatalf("%s.tenantID(scoped) = %q, want %q", name, got, resolvedTenant)
+		}
+		if got := a.db(bg); got != DB(bootDB) {
+			t.Fatalf("%s.db(no scope) must return the boot-time DB", name)
+		}
+		if got := a.db(scoped); got != DB(scopedDB) {
+			t.Fatalf("%s.db(scoped) must return the resolved tenant's DB", name)
 		}
 	}
 
@@ -100,5 +115,17 @@ func TestServiceAccessors_PreferScope_FallBackToDefault(t *testing.T) {
 	}
 	if got := auth.repo(emptyScope); got != Repository(defaultRepo) {
 		t.Fatalf("empty-scope repo must fall back to the boot-time repo")
+	}
+
+	// The entdb shape: a resolved tenant with no scoped DB. tenantID(ctx)
+	// returns the resolved tenant (so the boot-time DB is reached with
+	// the right tenant per call), while db(ctx) falls back to the boot DB.
+	admin := &AdminService{defaultTenantID: defaultTenant, bootDB: bootDB}
+	noDBScope := WithTenantScope(bg, &TenantScope{TenantID: resolvedTenant, Repo: scopedRepo, DB: nil})
+	if got := admin.tenantID(noDBScope); got != resolvedTenant {
+		t.Fatalf("no-DB scope tenantID = %q, want %q", got, resolvedTenant)
+	}
+	if got := admin.db(noDBScope); got != DB(bootDB) {
+		t.Fatalf("no-DB scope db must fall back to the boot-time DB")
 	}
 }

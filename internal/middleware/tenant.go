@@ -133,9 +133,24 @@ func (tr *TenantResolver) middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := service.WithTenantScope(r.Context(), &service.TenantScope{TenantID: resolved, Repo: repo})
+		ctx := service.WithTenantScope(r.Context(), tenantScope(resolved, repo))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// tenantScope pairs the resolved tenant id with its scoped Repository
+// and, when the backend's per-tenant Repository also implements the raw
+// service.DB interface (the postgres driver, whose DB binds to a single
+// tenant), the matching scoped DB. The entdb driver's per-tenant
+// Repository is not a DB — its DB routes by the per-call tenant id — so
+// DB stays nil there and the raw-node services pass the tenant id
+// through the boot-time DB.
+func tenantScope(tenantID string, repo service.Repository) *service.TenantScope {
+	scope := &service.TenantScope{TenantID: tenantID, Repo: repo}
+	if db, ok := repo.(service.DB); ok {
+		scope.DB = db
+	}
+	return scope
 }
 
 // serveWithScope injects a tenant scope (without a membership check) and
@@ -149,7 +164,7 @@ func (tr *TenantResolver) serveWithScope(w http.ResponseWriter, r *http.Request,
 		writeTenantError(w, http.StatusServiceUnavailable, "unavailable", "tenant backend unavailable")
 		return
 	}
-	ctx := service.WithTenantScope(r.Context(), &service.TenantScope{TenantID: tenant, Repo: repo})
+	ctx := service.WithTenantScope(r.Context(), tenantScope(tenant, repo))
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
