@@ -26,7 +26,7 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPass
 		return fmt.Errorf("password too weak: %s", strings.Join(issues, "; "))
 	}
 
-	userNode, err := s.db.GetNode(ctx, s.tenantID(ctx), actorStr(userID), typeUser, userID)
+	userNode, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(userID), typeUser, userID)
 	if err != nil {
 		return fmt.Errorf("fetch user: %w", err)
 	}
@@ -51,7 +51,7 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPass
 		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: userID,
 		Patch: map[string]any{ufPasswordHash: newHash, ufUpdatedAt: nowMs()},
 	}
-	if _, err := s.db.ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(userID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(userID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
 
@@ -70,7 +70,7 @@ func (s *ProfileService) ListAuditEvents(
 	cursor string, limit int,
 ) ([]*AuditEvent, string, error) {
 	// Admin check.
-	node, err := s.db.GetNode(ctx, s.tenantID(ctx), actorStr(actorID), typeUser, actorID)
+	node, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(actorID), typeUser, actorID)
 	if err != nil {
 		return nil, "", fmt.Errorf("fetch actor: %w", err)
 	}
@@ -103,7 +103,7 @@ func (s *ProfileService) ListAuditEvents(
 		filter[afEventType] = eventType
 	}
 
-	nodes, err := s.db.QueryNodes(ctx, s.tenantID(ctx), tenantAdminActor, typeAuditEvent, filter)
+	nodes, err := s.db(ctx).QueryNodes(ctx, s.tenantID(ctx), tenantAdminActor, typeAuditEvent, filter)
 	if err != nil {
 		return nil, "", fmt.Errorf("list audit events: %w", err)
 	}

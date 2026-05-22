@@ -862,6 +862,22 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 		return nil, fmt.Errorf("updating user: %w", err)
 	}
 
+	// In mode=multi the redeemed user must join the organisation that
+	// owns the resolved tenant, with the role recorded on the invitation.
+	// The invitation row only exists inside its issuing tenant's data
+	// plane (decision log §2: no redundant tenant_id on storage-scoped
+	// rows), so s.repo(ctx) — scoped to the host-resolved tenant — both
+	// finds the invitation above and locates the right organisation here.
+	// A token minted for tenant A is invisible to tenant B's repo, so a
+	// replay under B's host fails the FindInvitationByHash lookup before
+	// reaching this point. mode=single never provisions an Organization,
+	// so this is a no-op there and the single-tenant flow is unchanged.
+	if s.cfg.IsMultiMode() {
+		if err := s.addInvitationMembership(ctx, user.ID, inv.Role); err != nil {
+			return nil, err
+		}
+	}
+
 	// Mark invitation as accepted.
 	_ = s.repo(ctx).UpdateInvitation(ctx, inv.NodeID, map[string]any{"accepted_at": now})
 
@@ -880,6 +896,41 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 		RefreshToken: refreshToken,
 		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
+}
+
+// addInvitationMembership links a freshly-redeemed user to the
+// organisation that owns the request's resolved tenant. The org is
+// found by its slug, which is 1:1 with the tenant id (decision log §2),
+// so the redeemed user always lands in the tenant the invitation was
+// issued for and never a different one. role is the identity-layer
+// product role carried on the invitation (admin|member|guest), distinct
+// from the storage-layer TenantMember role (decision log §4).
+//
+// An already-present membership (a re-run after a partial earlier
+// accept) is tolerated; every other error fails the redemption so a
+// user is never handed a session without the membership that authorises
+// their next request through the tenant-resolution middleware.
+func (s *AuthService) addInvitationMembership(ctx context.Context, userID, role string) error {
+	tenantID := s.tenantID(ctx)
+	org, err := s.repo(ctx).GetOrganizationBySlug(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("locate organization for tenant %q: %w", tenantID, err)
+	}
+	if org == nil {
+		return fmt.Errorf("%w: no organization for tenant %q", ErrNotFound, tenantID)
+	}
+	if role == "" {
+		role = "member"
+	}
+	if _, err := s.repo(ctx).AddOrganizationMember(ctx, &OrganizationMembership{
+		OrganizationID: org.ID,
+		UserID:         userID,
+		Role:           role,
+		CreatedAtMs:    s.nowMs(),
+	}); err != nil && !errors.Is(err, ErrAlreadyExists) {
+		return fmt.Errorf("add organization member: %w", err)
+	}
+	return nil
 }
 
 // msToTime converts epoch milliseconds to time.Time.

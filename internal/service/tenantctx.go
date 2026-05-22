@@ -21,6 +21,16 @@ type TenantScope struct {
 	// that only use the DB interface (which takes the tenant id per
 	// call) — those read TenantID alone.
 	Repo Repository
+
+	// DB is a DB scoped to TenantID, for the raw-node services
+	// (admin, groups, help, profile). It is set only when the resolved
+	// tenant's backend binds its DB to a single tenant (the postgres
+	// driver's per-tenant repository, which ignores the per-call tenant
+	// id and scopes by its own bound tenant). The entdb DB routes by the
+	// per-call tenant id, so its scope leaves this nil and the services
+	// pass TenantID through the boot-time DB instead. Services read it
+	// via s.db(ctx), which falls back to the boot-time DB when nil.
+	DB DB
 }
 
 type tenantScopeCtxKey struct{}
