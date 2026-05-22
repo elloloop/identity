@@ -62,3 +62,11 @@ func (r *pgRepository) DeleteExpiredLoginChallenges(ctx context.Context, beforeM
 func (r *pgRepository) DeleteExpiredOAuthOneTimeCodes(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredOAuthOneTimeCodes", "oauth_one_time_codes", beforeMs, limit)
 }
+
+func (r *pgRepository) DeleteExpiredEmailLoginCodes(ctx context.Context, beforeMs int64, limit int) error {
+	return r.deleteExpiredBatch(ctx, "DeleteExpiredEmailLoginCodes", "email_login_codes", beforeMs, limit)
+}
+
+func (r *pgRepository) DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error {
+	return r.deleteExpiredBatch(ctx, "DeleteExpiredMagicLinkTokens", "magic_link_tokens", beforeMs, limit)
+}

@@ -64,3 +64,11 @@ class SessionKeys:
 class OAuthOneTimeCodeKeys:
     code_hash = UniqueKey[str](type_id=36, field_id=1, name="code_hash")
 
+
+class EmailLoginCodeKeys:
+    email = UniqueKey[str](type_id=37, field_id=1, name="email")
+
+
+class MagicLinkTokenKeys:
+    token_hash = UniqueKey[str](type_id=38, field_id=1, name="token_hash")
+

@@ -1,0 +1,5 @@
+Use the link below to sign in. It works once and expires in {{.ExpiresIn}}.
+
+{{.Link}}
+
+If you didn't request this, you can safely ignore this email.

@@ -252,6 +252,69 @@ message PasswordLoginResponse {
   string login_challenge_id = 7;  // id of the pending LoginChallenge; pass to VerifyTotp
 }
 
+// ─── Passwordless Email Login (OTP code + magic link) ────────────────
+// Authenticate by proving control of an email — no password. Both arms
+// resolve-or-create the single account keyed by that email, so a
+// passwordless login for an address that already has a password/OAuth
+// account links to the SAME user rather than duplicating it. Accounts
+// are created only on verify/redeem (never on request), gated by
+// GATEWAY_PASSWORDLESS_SIGNUP_ENABLED.
+
+// RequestEmailLoginCode emails a 6-digit one-time code to the address.
+// Anti-enumeration: the response is identical whether or not the email
+// already has an account (and whether or not auto-create is enabled).
+message RequestEmailLoginCodeRequest {
+  string email = 1;
+}
+
+message RequestEmailLoginCodeResponse {
+  // Always returns success (no enumeration).
+}
+
+// VerifyEmailLoginCode validates the OTP, resolves-or-creates the user
+// keyed by email, and issues a token pair. A wrong code increments the
+// per-code attempt counter; exceeding the cap invalidates the code.
+message VerifyEmailLoginCodeRequest {
+  string email = 1;
+  string code  = 2;
+}
+
+message VerifyEmailLoginCodeResponse {
+  User user            = 1;
+  string access_token  = 2;
+  string refresh_token = 3;
+  int32 expires_in     = 4;
+}
+
+// RequestMagicLink emails a clickable single-use link. return_to is
+// validated against the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist
+// (shared with the hosted OAuth flow). Anti-enumeration: identical
+// response regardless of account existence.
+message RequestMagicLinkRequest {
+  string email     = 1;
+  string return_to = 2;  // app URL to return to; must match the allowlist
+}
+
+message RequestMagicLinkResponse {
+  // Always returns success (no enumeration).
+}
+
+// RedeemMagicLink consumes the single-use token, resolves-or-creates the
+// user keyed by the bound email, and issues a token pair. A replay or an
+// expired token surfaces as CodeUnauthenticated. return_to echoes the
+// allowlist-validated app URL the SPA should navigate to.
+message RedeemMagicLinkRequest {
+  string token = 1;
+}
+
+message RedeemMagicLinkResponse {
+  User user            = 1;
+  string access_token  = 2;
+  string refresh_token = 3;
+  int32 expires_in     = 4;
+  string return_to     = 5;  // allowlist-validated app URL bound at request time
+}
+
 // ─── Session / Token Auth ───────────────────────────────────────────
 
 message GetCurrentUserRequest {}
@@ -809,6 +872,12 @@ service IdentityService {
   rpc RedeemOAuthCode(RedeemOAuthCodeRequest) returns (RedeemOAuthCodeResponse);
   rpc PasswordSignup(PasswordSignupRequest) returns (PasswordSignupResponse);
   rpc PasswordLogin(PasswordLoginRequest) returns (PasswordLoginResponse);
+
+  // Passwordless email login (OTP code + magic link)
+  rpc RequestEmailLoginCode(RequestEmailLoginCodeRequest) returns (RequestEmailLoginCodeResponse);
+  rpc VerifyEmailLoginCode(VerifyEmailLoginCodeRequest) returns (VerifyEmailLoginCodeResponse);
+  rpc RequestMagicLink(RequestMagicLinkRequest) returns (RequestMagicLinkResponse);
+  rpc RedeemMagicLink(RedeemMagicLinkRequest) returns (RedeemMagicLinkResponse);
 
   // Session / Token Auth
   rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);

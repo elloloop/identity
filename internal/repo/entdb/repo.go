@@ -1060,6 +1060,199 @@ func (r *entRepository) ConsumeOAuthOneTimeCode(ctx context.Context, codeHash st
 	return rec, nil
 }
 
+// ── Email login codes (passwordless OTP) ──────────────────────────
+
+func emailLoginCodeFromProto(id string, p *schemapb.EmailLoginCode) *service.EmailLoginCodeRecord {
+	if p == nil {
+		return nil
+	}
+	return &service.EmailLoginCodeRecord{
+		NodeID:       id,
+		Email:        p.GetEmail(),
+		CodeHash:     p.GetCodeHash(),
+		ExpiresAt:    p.GetExpiresAt(),
+		CreatedAt:    p.GetCreatedAt(),
+		ConsumedAt:   p.GetConsumedAt(),
+		AttemptCount: p.GetAttemptCount(),
+		MaxAttempts:  p.GetMaxAttempts(),
+	}
+}
+
+// UpsertEmailLoginCode replaces any existing code for the email so at
+// most one is live per address. The email field is unique, and the SDK
+// has no upsert primitive, so this deletes the prior row (if any) then
+// creates the fresh one. The brief gap between delete and create is
+// acceptable: a concurrent request for the same email simply produces a
+// second create that the unique constraint or the next read resolves to
+// one live code; OTP requests for one address do not race meaningfully.
+func (r *entRepository) UpsertEmailLoginCode(ctx context.Context, c *service.EmailLoginCodeRecord) (string, error) {
+	if c == nil {
+		return "", errors.New("repo: UpsertEmailLoginCode: nil record")
+	}
+	prev := &schemapb.EmailLoginCode{}
+	prevID, err := r.client.findByKey(ctx, systemActor, schemapb.EmailLoginCodeEmail, c.Email, prev)
+	switch {
+	case err == nil:
+		if delErr := r.client.delete(ctx, systemActor, &schemapb.EmailLoginCode{}, prevID); delErr != nil &&
+			!errors.Is(delErr, errNotFound) {
+			return "", fmt.Errorf("repo: UpsertEmailLoginCode: replace: %w", delErr)
+		}
+	case errors.Is(err, errNotFound):
+		// No prior code — fall through to create.
+	default:
+		return "", fmt.Errorf("repo: UpsertEmailLoginCode: %w", err)
+	}
+
+	msg := &schemapb.EmailLoginCode{
+		Email:        c.Email,
+		CodeHash:     c.CodeHash,
+		ExpiresAt:    c.ExpiresAt,
+		CreatedAt:    c.CreatedAt,
+		ConsumedAt:   c.ConsumedAt,
+		AttemptCount: c.AttemptCount,
+		MaxAttempts:  c.MaxAttempts,
+	}
+	id, err := r.client.create(ctx, systemActor, msg)
+	if err != nil {
+		return "", fmt.Errorf("repo: UpsertEmailLoginCode: %w", err)
+	}
+	c.NodeID = id
+	return id, nil
+}
+
+func (r *entRepository) FindEmailLoginCodeByEmail(ctx context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+	dst := &schemapb.EmailLoginCode{}
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.EmailLoginCodeEmail, email, dst)
+	if errors.Is(err, errNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repo: FindEmailLoginCodeByEmail: %w", err)
+	}
+	return emailLoginCodeFromProto(id, dst), nil
+}
+
+func (r *entRepository) IncrementEmailLoginCodeAttempts(ctx context.Context, nodeID string) error {
+	dst := &schemapb.EmailLoginCode{}
+	if err := r.client.get(ctx, systemActor, dst, nodeID); err != nil {
+		if errors.Is(err, errNotFound) {
+			return fmt.Errorf("repo: IncrementEmailLoginCodeAttempts: %w", errNotFound)
+		}
+		return fmt.Errorf("repo: IncrementEmailLoginCodeAttempts: %w", err)
+	}
+	patch := &schemapb.EmailLoginCode{AttemptCount: dst.GetAttemptCount() + 1}
+	if err := r.client.update(ctx, systemActor, nodeID, patch); err != nil {
+		return fmt.Errorf("repo: IncrementEmailLoginCodeAttempts: %w", err)
+	}
+	return nil
+}
+
+// ConsumeEmailLoginCode resolves the email's code, rejects an
+// already-consumed or expired code, then flips consumed_at via the SDK's
+// UpdateIf compare-and-set gated on consumed_at == 0 (nil precondition,
+// as for ConsumeOAuthOneTimeCode). Two replicas racing the same email
+// resolve to exactly one winner; the loser sees ErrEmailLoginCodeInvalid.
+func (r *entRepository) ConsumeEmailLoginCode(ctx context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
+	if email == "" {
+		return nil, service.ErrEmailLoginCodeInvalid
+	}
+	dst := &schemapb.EmailLoginCode{}
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.EmailLoginCodeEmail, email, dst)
+	if errors.Is(err, errNotFound) {
+		return nil, service.ErrEmailLoginCodeInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repo: ConsumeEmailLoginCode: %w", err)
+	}
+	if dst.GetConsumedAt() != 0 || dst.GetExpiresAt() <= atMs {
+		return nil, service.ErrEmailLoginCodeInvalid
+	}
+
+	patch := &schemapb.EmailLoginCode{ConsumedAt: atMs}
+	err = r.client.updateIf(ctx, systemActor, id, patch, "consumed_at", nil)
+	if errors.Is(err, errPreconditionFailed) {
+		return nil, service.ErrEmailLoginCodeInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repo: ConsumeEmailLoginCode: %w", err)
+	}
+
+	rec := emailLoginCodeFromProto(id, dst)
+	rec.ConsumedAt = atMs
+	return rec, nil
+}
+
+// ── Magic link tokens (passwordless) ──────────────────────────────
+
+func magicLinkTokenFromProto(id string, p *schemapb.MagicLinkToken) *service.MagicLinkTokenRecord {
+	if p == nil {
+		return nil
+	}
+	return &service.MagicLinkTokenRecord{
+		NodeID:     id,
+		TokenHash:  p.GetTokenHash(),
+		Email:      p.GetEmail(),
+		ReturnTo:   p.GetReturnTo(),
+		ExpiresAt:  p.GetExpiresAt(),
+		CreatedAt:  p.GetCreatedAt(),
+		ConsumedAt: p.GetConsumedAt(),
+	}
+}
+
+func (r *entRepository) CreateMagicLinkToken(ctx context.Context, t *service.MagicLinkTokenRecord) (string, error) {
+	if t == nil {
+		return "", errors.New("repo: CreateMagicLinkToken: nil record")
+	}
+	msg := &schemapb.MagicLinkToken{
+		TokenHash:  t.TokenHash,
+		Email:      t.Email,
+		ReturnTo:   t.ReturnTo,
+		ExpiresAt:  t.ExpiresAt,
+		CreatedAt:  t.CreatedAt,
+		ConsumedAt: t.ConsumedAt,
+	}
+	id, err := r.client.create(ctx, systemActor, msg)
+	if err != nil {
+		return "", fmt.Errorf("repo: CreateMagicLinkToken: %w", err)
+	}
+	t.NodeID = id
+	return id, nil
+}
+
+// ConsumeMagicLinkToken resolves the token by its unique token_hash,
+// rejects an already-consumed or expired token, then flips consumed_at
+// via UpdateIf gated on consumed_at == 0. Single-winner across replicas;
+// the loser and any replay see ErrMagicLinkInvalid.
+func (r *entRepository) ConsumeMagicLinkToken(ctx context.Context, tokenHash string, atMs int64) (*service.MagicLinkTokenRecord, error) {
+	if tokenHash == "" {
+		return nil, service.ErrMagicLinkInvalid
+	}
+	dst := &schemapb.MagicLinkToken{}
+	id, err := r.client.findByKey(ctx, systemActor, schemapb.MagicLinkTokenTokenHash, tokenHash, dst)
+	if errors.Is(err, errNotFound) {
+		return nil, service.ErrMagicLinkInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repo: ConsumeMagicLinkToken: %w", err)
+	}
+	if dst.GetConsumedAt() != 0 || dst.GetExpiresAt() <= atMs {
+		return nil, service.ErrMagicLinkInvalid
+	}
+
+	patch := &schemapb.MagicLinkToken{ConsumedAt: atMs}
+	err = r.client.updateIf(ctx, systemActor, id, patch, "consumed_at", nil)
+	if errors.Is(err, errPreconditionFailed) {
+		return nil, service.ErrMagicLinkInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repo: ConsumeMagicLinkToken: %w", err)
+	}
+
+	rec := magicLinkTokenFromProto(id, dst)
+	rec.ConsumedAt = atMs
+	return rec, nil
+}
+
 // ── TOTP credentials ──────────────────────────────────────────────
 
 func totpCredFromProto(id string, p *schemapb.TotpCredential) *service.TotpCredRecord {

@@ -24,6 +24,10 @@ const (
 	IdentityService_RedeemOAuthCode_FullMethodName               = "/identity.IdentityService/RedeemOAuthCode"
 	IdentityService_PasswordSignup_FullMethodName                = "/identity.IdentityService/PasswordSignup"
 	IdentityService_PasswordLogin_FullMethodName                 = "/identity.IdentityService/PasswordLogin"
+	IdentityService_RequestEmailLoginCode_FullMethodName         = "/identity.IdentityService/RequestEmailLoginCode"
+	IdentityService_VerifyEmailLoginCode_FullMethodName          = "/identity.IdentityService/VerifyEmailLoginCode"
+	IdentityService_RequestMagicLink_FullMethodName              = "/identity.IdentityService/RequestMagicLink"
+	IdentityService_RedeemMagicLink_FullMethodName               = "/identity.IdentityService/RedeemMagicLink"
 	IdentityService_GetCurrentUser_FullMethodName                = "/identity.IdentityService/GetCurrentUser"
 	IdentityService_RefreshToken_FullMethodName                  = "/identity.IdentityService/RefreshToken"
 	IdentityService_Logout_FullMethodName                        = "/identity.IdentityService/Logout"
@@ -91,6 +95,11 @@ type IdentityServiceClient interface {
 	RedeemOAuthCode(ctx context.Context, in *RedeemOAuthCodeRequest, opts ...grpc.CallOption) (*RedeemOAuthCodeResponse, error)
 	PasswordSignup(ctx context.Context, in *PasswordSignupRequest, opts ...grpc.CallOption) (*PasswordSignupResponse, error)
 	PasswordLogin(ctx context.Context, in *PasswordLoginRequest, opts ...grpc.CallOption) (*PasswordLoginResponse, error)
+	// Passwordless email login (OTP code + magic link)
+	RequestEmailLoginCode(ctx context.Context, in *RequestEmailLoginCodeRequest, opts ...grpc.CallOption) (*RequestEmailLoginCodeResponse, error)
+	VerifyEmailLoginCode(ctx context.Context, in *VerifyEmailLoginCodeRequest, opts ...grpc.CallOption) (*VerifyEmailLoginCodeResponse, error)
+	RequestMagicLink(ctx context.Context, in *RequestMagicLinkRequest, opts ...grpc.CallOption) (*RequestMagicLinkResponse, error)
+	RedeemMagicLink(ctx context.Context, in *RedeemMagicLinkRequest, opts ...grpc.CallOption) (*RedeemMagicLinkResponse, error)
 	// Session / Token Auth
 	GetCurrentUser(ctx context.Context, in *GetCurrentUserRequest, opts ...grpc.CallOption) (*GetCurrentUserResponse, error)
 	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error)
@@ -222,6 +231,46 @@ func (c *identityServiceClient) PasswordLogin(ctx context.Context, in *PasswordL
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PasswordLoginResponse)
 	err := c.cc.Invoke(ctx, IdentityService_PasswordLogin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RequestEmailLoginCode(ctx context.Context, in *RequestEmailLoginCodeRequest, opts ...grpc.CallOption) (*RequestEmailLoginCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestEmailLoginCodeResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RequestEmailLoginCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) VerifyEmailLoginCode(ctx context.Context, in *VerifyEmailLoginCodeRequest, opts ...grpc.CallOption) (*VerifyEmailLoginCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyEmailLoginCodeResponse)
+	err := c.cc.Invoke(ctx, IdentityService_VerifyEmailLoginCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RequestMagicLink(ctx context.Context, in *RequestMagicLinkRequest, opts ...grpc.CallOption) (*RequestMagicLinkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestMagicLinkResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RequestMagicLink_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RedeemMagicLink(ctx context.Context, in *RedeemMagicLinkRequest, opts ...grpc.CallOption) (*RedeemMagicLinkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RedeemMagicLinkResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RedeemMagicLink_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -788,6 +837,11 @@ type IdentityServiceServer interface {
 	RedeemOAuthCode(context.Context, *RedeemOAuthCodeRequest) (*RedeemOAuthCodeResponse, error)
 	PasswordSignup(context.Context, *PasswordSignupRequest) (*PasswordSignupResponse, error)
 	PasswordLogin(context.Context, *PasswordLoginRequest) (*PasswordLoginResponse, error)
+	// Passwordless email login (OTP code + magic link)
+	RequestEmailLoginCode(context.Context, *RequestEmailLoginCodeRequest) (*RequestEmailLoginCodeResponse, error)
+	VerifyEmailLoginCode(context.Context, *VerifyEmailLoginCodeRequest) (*VerifyEmailLoginCodeResponse, error)
+	RequestMagicLink(context.Context, *RequestMagicLinkRequest) (*RequestMagicLinkResponse, error)
+	RedeemMagicLink(context.Context, *RedeemMagicLinkRequest) (*RedeemMagicLinkResponse, error)
 	// Session / Token Auth
 	GetCurrentUser(context.Context, *GetCurrentUserRequest) (*GetCurrentUserResponse, error)
 	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenResponse, error)
@@ -889,6 +943,18 @@ func (UnimplementedIdentityServiceServer) PasswordSignup(context.Context, *Passw
 }
 func (UnimplementedIdentityServiceServer) PasswordLogin(context.Context, *PasswordLoginRequest) (*PasswordLoginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PasswordLogin not implemented")
+}
+func (UnimplementedIdentityServiceServer) RequestEmailLoginCode(context.Context, *RequestEmailLoginCodeRequest) (*RequestEmailLoginCodeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestEmailLoginCode not implemented")
+}
+func (UnimplementedIdentityServiceServer) VerifyEmailLoginCode(context.Context, *VerifyEmailLoginCodeRequest) (*VerifyEmailLoginCodeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyEmailLoginCode not implemented")
+}
+func (UnimplementedIdentityServiceServer) RequestMagicLink(context.Context, *RequestMagicLinkRequest) (*RequestMagicLinkResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestMagicLink not implemented")
+}
+func (UnimplementedIdentityServiceServer) RedeemMagicLink(context.Context, *RedeemMagicLinkRequest) (*RedeemMagicLinkResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RedeemMagicLink not implemented")
 }
 func (UnimplementedIdentityServiceServer) GetCurrentUser(context.Context, *GetCurrentUserRequest) (*GetCurrentUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCurrentUser not implemented")
@@ -1162,6 +1228,78 @@ func _IdentityService_PasswordLogin_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).PasswordLogin(ctx, req.(*PasswordLoginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RequestEmailLoginCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestEmailLoginCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RequestEmailLoginCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RequestEmailLoginCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RequestEmailLoginCode(ctx, req.(*RequestEmailLoginCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_VerifyEmailLoginCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyEmailLoginCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).VerifyEmailLoginCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_VerifyEmailLoginCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).VerifyEmailLoginCode(ctx, req.(*VerifyEmailLoginCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RequestMagicLink_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestMagicLinkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RequestMagicLink(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RequestMagicLink_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RequestMagicLink(ctx, req.(*RequestMagicLinkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RedeemMagicLink_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RedeemMagicLinkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RedeemMagicLink(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RedeemMagicLink_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RedeemMagicLink(ctx, req.(*RedeemMagicLinkRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2182,6 +2320,22 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PasswordLogin",
 			Handler:    _IdentityService_PasswordLogin_Handler,
+		},
+		{
+			MethodName: "RequestEmailLoginCode",
+			Handler:    _IdentityService_RequestEmailLoginCode_Handler,
+		},
+		{
+			MethodName: "VerifyEmailLoginCode",
+			Handler:    _IdentityService_VerifyEmailLoginCode_Handler,
+		},
+		{
+			MethodName: "RequestMagicLink",
+			Handler:    _IdentityService_RequestMagicLink_Handler,
+		},
+		{
+			MethodName: "RedeemMagicLink",
+			Handler:    _IdentityService_RedeemMagicLink_Handler,
 		},
 		{
 			MethodName: "GetCurrentUser",

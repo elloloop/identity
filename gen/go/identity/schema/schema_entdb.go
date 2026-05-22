@@ -36,4 +36,8 @@ var (
 	SessionSid = entdb.UniqueKey[string]{TypeID: 35, FieldID: 1, Name: "sid"}
 
 	OAuthOneTimeCodeCodeHash = entdb.UniqueKey[string]{TypeID: 36, FieldID: 1, Name: "code_hash"}
+
+	EmailLoginCodeEmail = entdb.UniqueKey[string]{TypeID: 37, FieldID: 1, Name: "email"}
+
+	MagicLinkTokenTokenHash = entdb.UniqueKey[string]{TypeID: 38, FieldID: 1, Name: "token_hash"}
 )

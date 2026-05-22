@@ -33,6 +33,8 @@ type Repo struct {
 	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
 	qrSessions         map[string]*service.QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
+	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
+	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
 	totpCreds          map[string]*service.TotpCredRecord
 	recoveryCodes      map[string]*service.RecoveryCodeRecord
 	loginChallenges    map[string]*service.LoginChallengeRecord
@@ -56,6 +58,8 @@ func New() *Repo {
 		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
+		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
+		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
@@ -524,6 +528,106 @@ func (r *Repo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, atMs 
 		return &cp, nil
 	}
 	return nil, service.ErrOAuthCodeInvalid
+}
+
+// ── Email Login Codes (passwordless OTP) ──────────────────────────
+
+// UpsertEmailLoginCode replaces any existing code for the email so at
+// most one is live per address. Keyed by email (the unique field).
+func (r *Repo) UpsertEmailLoginCode(_ context.Context, rec *service.EmailLoginCodeRecord) (string, error) {
+	if rec == nil {
+		return "", errors.New("memory: UpsertEmailLoginCode: nil record")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.emailLoginCodes {
+		if c.Email == rec.Email {
+			delete(r.emailLoginCodes, id)
+		}
+	}
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.emailLoginCodes[id] = &cp
+	return id, nil
+}
+
+func (r *Repo) FindEmailLoginCodeByEmail(_ context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.emailLoginCodes {
+		if c.Email == email {
+			cp := *c
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *Repo) IncrementEmailLoginCodeAttempts(_ context.Context, nodeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.emailLoginCodes[nodeID]
+	if !ok {
+		return fmt.Errorf("memory: IncrementEmailLoginCodeAttempts: %s not found", nodeID)
+	}
+	c.AttemptCount++
+	return nil
+}
+
+// ConsumeEmailLoginCode atomically marks the email's unconsumed,
+// unexpired code consumed and returns it. Any second caller, an expired
+// code, or a missing code returns ErrEmailLoginCodeInvalid.
+func (r *Repo) ConsumeEmailLoginCode(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.emailLoginCodes {
+		if c.Email != email {
+			continue
+		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+			return nil, service.ErrEmailLoginCodeInvalid
+		}
+		c.ConsumedAt = atMs
+		cp := *c
+		return &cp, nil
+	}
+	return nil, service.ErrEmailLoginCodeInvalid
+}
+
+// ── Magic Link Tokens (passwordless) ──────────────────────────────
+
+func (r *Repo) CreateMagicLinkToken(_ context.Context, rec *service.MagicLinkTokenRecord) (string, error) {
+	if rec == nil {
+		return "", errors.New("memory: CreateMagicLinkToken: nil record")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.magicLinkTokens[id] = &cp
+	return id, nil
+}
+
+// ConsumeMagicLinkToken atomically marks an unconsumed, unexpired token
+// consumed and returns it. A replay, an expired token, or a missing
+// token returns ErrMagicLinkInvalid.
+func (r *Repo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, atMs int64) (*service.MagicLinkTokenRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.magicLinkTokens {
+		if t.TokenHash != tokenHash {
+			continue
+		}
+		if t.ConsumedAt != 0 || t.ExpiresAt <= atMs {
+			return nil, service.ErrMagicLinkInvalid
+		}
+		t.ConsumedAt = atMs
+		cp := *t
+		return &cp, nil
+	}
+	return nil, service.ErrMagicLinkInvalid
 }
 
 // ── TOTP Credentials ──────────────────────────────────────────────
@@ -1062,6 +1166,44 @@ func (r *Repo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs int64,
 		}
 		if c.ExpiresAt < beforeMs {
 			delete(r.oauthOneTimeCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *Repo) DeleteExpiredEmailLoginCodes(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memory: DeleteExpiredEmailLoginCodes: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.emailLoginCodes {
+		if n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.emailLoginCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *Repo) DeleteExpiredMagicLinkTokens(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memory: DeleteExpiredMagicLinkTokens: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, t := range r.magicLinkTokens {
+		if n >= limit {
+			break
+		}
+		if t.ExpiresAt < beforeMs {
+			delete(r.magicLinkTokens, id)
 			n++
 		}
 	}

@@ -89,6 +89,8 @@ type fakeRepo struct {
 	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
 	qrSessions         map[string]*service.QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
+	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
+	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
 	totpCreds          map[string]*service.TotpCredRecord
 	recoveryCodes      map[string]*service.RecoveryCodeRecord
 	loginChallenges    map[string]*service.LoginChallengeRecord
@@ -116,6 +118,8 @@ func newFakeRepo() *fakeRepo {
 		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
+		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
+		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
@@ -491,6 +495,88 @@ func (r *fakeRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, a
 		return &cp, nil
 	}
 	return nil, service.ErrOAuthCodeInvalid
+}
+
+func (r *fakeRepo) UpsertEmailLoginCode(_ context.Context, rec *service.EmailLoginCodeRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.emailLoginCodes {
+		if c.Email == rec.Email {
+			delete(r.emailLoginCodes, id)
+		}
+	}
+	id := nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.emailLoginCodes[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) FindEmailLoginCodeByEmail(_ context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.emailLoginCodes {
+		if c.Email == email {
+			cp := *c
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) IncrementEmailLoginCodeAttempts(_ context.Context, nodeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.emailLoginCodes[nodeID]
+	if !ok {
+		return errors.New("email login code not found")
+	}
+	c.AttemptCount++
+	return nil
+}
+
+func (r *fakeRepo) ConsumeEmailLoginCode(_ context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.emailLoginCodes {
+		if c.Email != email {
+			continue
+		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+			return nil, service.ErrEmailLoginCodeInvalid
+		}
+		c.ConsumedAt = atMs
+		cp := *c
+		return &cp, nil
+	}
+	return nil, service.ErrEmailLoginCodeInvalid
+}
+
+func (r *fakeRepo) CreateMagicLinkToken(_ context.Context, rec *service.MagicLinkTokenRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.magicLinkTokens[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, atMs int64) (*service.MagicLinkTokenRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.magicLinkTokens {
+		if t.TokenHash != tokenHash {
+			continue
+		}
+		if t.ConsumedAt != 0 || t.ExpiresAt <= atMs {
+			return nil, service.ErrMagicLinkInvalid
+		}
+		t.ConsumedAt = atMs
+		cp := *t
+		return &cp, nil
+	}
+	return nil, service.ErrMagicLinkInvalid
 }
 
 func (r *fakeRepo) GetTotpCredential(_ context.Context, userID string) (*service.TotpCredRecord, error) {
@@ -1000,6 +1086,38 @@ func (r *fakeRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs in
 	return nil
 }
 
+func (r *fakeRepo) DeleteExpiredEmailLoginCodes(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.emailLoginCodes {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.emailLoginCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteExpiredMagicLinkTokens(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, t := range r.magicLinkTokens {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if t.ExpiresAt < beforeMs {
+			delete(r.magicLinkTokens, id)
+			n++
+		}
+	}
+	return nil
+}
+
 // ── Organizations ─────────────────────────────────────────────────
 
 func (r *fakeRepo) CreateOrganization(_ context.Context, o *service.Organization) (string, error) {
@@ -1440,24 +1558,29 @@ type testHarness struct {
 func testConfig() *config.Config {
 	// #nosec G101 -- test configuration field names contain password/passkey labels.
 	return &config.Config{
-		DefaultTenantID:               "test-tenant",
-		IdentityMode:                  config.IdentityModeSingle,
-		AuthAllowLocal:                true,
-		PasswordSignupEnabled:         true,
-		PasswordResetEnabled:          true,
-		JWTExpirySeconds:              900,
-		RefreshExpirySeconds:          604800,
-		LoginMaxFailedAttempts:        5,
-		LoginLockoutSeconds:           900,
-		LoginChallengeExpirySeconds:   300,
-		PasskeyRPID:                   "localhost",
-		PasskeyRPName:                 "Test",
-		PasskeyOrigin:                 "http://localhost:9002",
-		PasskeyChallengeExpirySeconds: 300,
-		QRLoginBaseURL:                "http://localhost:9002",
-		QRLoginExpirySeconds:          300,
-		TOTPIssuer:                    "Test",
-		PasswordResetExpirySeconds:    3600,
+		DefaultTenantID:                 "test-tenant",
+		IdentityMode:                    config.IdentityModeSingle,
+		AuthAllowLocal:                  true,
+		PasswordSignupEnabled:           true,
+		PasswordResetEnabled:            true,
+		PasswordlessSignupEnabled:       true,
+		PasswordlessCodeTTLSeconds:      300,
+		PasswordlessCodeMaxAttempts:     5,
+		PasswordlessMagicLinkTTLSeconds: 900,
+		OAuthAllowedReturnURLs:          "https://app.test/",
+		JWTExpirySeconds:                900,
+		RefreshExpirySeconds:            604800,
+		LoginMaxFailedAttempts:          5,
+		LoginLockoutSeconds:             900,
+		LoginChallengeExpirySeconds:     300,
+		PasskeyRPID:                     "localhost",
+		PasskeyRPName:                   "Test",
+		PasskeyOrigin:                   "http://localhost:9002",
+		PasskeyChallengeExpirySeconds:   300,
+		QRLoginBaseURL:                  "http://localhost:9002",
+		QRLoginExpirySeconds:            300,
+		TOTPIssuer:                      "Test",
+		PasswordResetExpirySeconds:      3600,
 	}
 }
 

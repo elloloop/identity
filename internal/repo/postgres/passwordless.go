@@ -1,0 +1,171 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+
+	"github.com/elloloop/identity/internal/service"
+)
+
+// ── Email login codes (passwordless OTP) ──────────────────────────────
+
+// UpsertEmailLoginCode replaces any existing code for the email so at
+// most one is live per address. The (tenant_id, email) unique index is
+// the upsert target: ON CONFLICT overwrites the hash, expiry, and
+// attempt counters in place, which both invalidates the previous code
+// and resets the attempt budget for the fresh one.
+func (r *pgRepository) UpsertEmailLoginCode(ctx context.Context, c *service.EmailLoginCodeRecord) (string, error) {
+	if c == nil {
+		return "", errors.New("postgres: UpsertEmailLoginCode: nil record")
+	}
+	id := c.NodeID
+	if id == "" {
+		id = newID()
+	}
+	const q = `
+		INSERT INTO email_login_codes (
+			id, tenant_id, email, code_hash,
+			expires_at_ms, created_at_ms, consumed_at_ms,
+			attempt_count, max_attempts
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (tenant_id, email) DO UPDATE SET
+			code_hash      = EXCLUDED.code_hash,
+			expires_at_ms  = EXCLUDED.expires_at_ms,
+			created_at_ms  = EXCLUDED.created_at_ms,
+			consumed_at_ms = EXCLUDED.consumed_at_ms,
+			attempt_count  = EXCLUDED.attempt_count,
+			max_attempts   = EXCLUDED.max_attempts
+		RETURNING id`
+	var outID string
+	err := r.pool.QueryRow(
+		ctx, q,
+		id, r.tenantID, c.Email, c.CodeHash,
+		c.ExpiresAt, c.CreatedAt, c.ConsumedAt,
+		c.AttemptCount, c.MaxAttempts,
+	).Scan(&outID)
+	if err != nil {
+		return "", wrapPgErr("UpsertEmailLoginCode", err)
+	}
+	c.NodeID = outID
+	return outID, nil
+}
+
+func (r *pgRepository) FindEmailLoginCodeByEmail(ctx context.Context, email string) (*service.EmailLoginCodeRecord, error) {
+	const q = `
+		SELECT id, email, code_hash, expires_at_ms, created_at_ms,
+		       consumed_at_ms, attempt_count, max_attempts
+		  FROM email_login_codes
+		 WHERE tenant_id = $1 AND email = $2`
+	var c service.EmailLoginCodeRecord
+	err := r.pool.QueryRow(ctx, q, r.tenantID, email).Scan(
+		&c.NodeID, &c.Email, &c.CodeHash, &c.ExpiresAt, &c.CreatedAt,
+		&c.ConsumedAt, &c.AttemptCount, &c.MaxAttempts,
+	)
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapPgErr("FindEmailLoginCodeByEmail", err)
+	}
+	return &c, nil
+}
+
+func (r *pgRepository) IncrementEmailLoginCodeAttempts(ctx context.Context, nodeID string) error {
+	const q = `
+		UPDATE email_login_codes
+		   SET attempt_count = attempt_count + 1
+		 WHERE tenant_id = $1 AND id = $2`
+	tag, err := r.pool.Exec(ctx, q, r.tenantID, nodeID)
+	if err != nil {
+		return wrapPgErr("IncrementEmailLoginCodeAttempts", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("postgres: IncrementEmailLoginCodeAttempts: no such row")
+	}
+	return nil
+}
+
+// ConsumeEmailLoginCode atomically marks an unconsumed, unexpired code
+// consumed via a single CAS UPDATE keyed by email. A replay, an expired
+// code, or a missing code all hit zero rows and return
+// ErrEmailLoginCodeInvalid.
+func (r *pgRepository) ConsumeEmailLoginCode(ctx context.Context, email string, atMs int64) (*service.EmailLoginCodeRecord, error) {
+	if email == "" {
+		return nil, service.ErrEmailLoginCodeInvalid
+	}
+	const q = `
+		UPDATE email_login_codes
+		   SET consumed_at_ms = $3
+		 WHERE tenant_id = $1 AND email = $2
+		   AND consumed_at_ms = 0 AND expires_at_ms > $3
+		RETURNING id, email, code_hash, expires_at_ms, created_at_ms,
+		          consumed_at_ms, attempt_count, max_attempts`
+	var c service.EmailLoginCodeRecord
+	err := r.pool.QueryRow(ctx, q, r.tenantID, email, atMs).Scan(
+		&c.NodeID, &c.Email, &c.CodeHash, &c.ExpiresAt, &c.CreatedAt,
+		&c.ConsumedAt, &c.AttemptCount, &c.MaxAttempts,
+	)
+	if noRows(err) {
+		return nil, service.ErrEmailLoginCodeInvalid
+	}
+	if err != nil {
+		return nil, wrapPgErr("ConsumeEmailLoginCode", err)
+	}
+	return &c, nil
+}
+
+// ── Magic link tokens (passwordless) ──────────────────────────────────
+
+func (r *pgRepository) CreateMagicLinkToken(ctx context.Context, t *service.MagicLinkTokenRecord) (string, error) {
+	if t == nil {
+		return "", errors.New("postgres: CreateMagicLinkToken: nil record")
+	}
+	id := t.NodeID
+	if id == "" {
+		id = newID()
+	}
+	const q = `
+		INSERT INTO magic_link_tokens (
+			id, tenant_id, token_hash, email, return_to,
+			expires_at_ms, created_at_ms, consumed_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	_, err := r.pool.Exec(
+		ctx, q,
+		id, r.tenantID, t.TokenHash, t.Email, t.ReturnTo,
+		t.ExpiresAt, t.CreatedAt, t.ConsumedAt,
+	)
+	if err != nil {
+		return "", wrapPgErr("CreateMagicLinkToken", err)
+	}
+	t.NodeID = id
+	return id, nil
+}
+
+// ConsumeMagicLinkToken atomically marks an unconsumed, unexpired token
+// consumed via a CAS UPDATE gated on the current state. A replay, an
+// expired token, or a missing token all hit zero rows and return
+// ErrMagicLinkInvalid.
+func (r *pgRepository) ConsumeMagicLinkToken(ctx context.Context, tokenHash string, atMs int64) (*service.MagicLinkTokenRecord, error) {
+	if tokenHash == "" {
+		return nil, service.ErrMagicLinkInvalid
+	}
+	const q = `
+		UPDATE magic_link_tokens
+		   SET consumed_at_ms = $3
+		 WHERE tenant_id = $1 AND token_hash = $2
+		   AND consumed_at_ms = 0 AND expires_at_ms > $3
+		RETURNING id, token_hash, email, return_to,
+		          expires_at_ms, created_at_ms, consumed_at_ms`
+	var t service.MagicLinkTokenRecord
+	err := r.pool.QueryRow(ctx, q, r.tenantID, tokenHash, atMs).Scan(
+		&t.NodeID, &t.TokenHash, &t.Email, &t.ReturnTo,
+		&t.ExpiresAt, &t.CreatedAt, &t.ConsumedAt,
+	)
+	if noRows(err) {
+		return nil, service.ErrMagicLinkInvalid
+	}
+	if err != nil {
+		return nil, wrapPgErr("ConsumeMagicLinkToken", err)
+	}
+	return &t, nil
+}

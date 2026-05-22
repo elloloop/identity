@@ -130,6 +130,30 @@ func (StubRepository) ConsumeOAuthOneTimeCode(context.Context, string, int64) (*
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) UpsertEmailLoginCode(context.Context, *EmailLoginCodeRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) FindEmailLoginCodeByEmail(context.Context, string) (*EmailLoginCodeRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) IncrementEmailLoginCodeAttempts(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) ConsumeEmailLoginCode(context.Context, string, int64) (*EmailLoginCodeRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) CreateMagicLinkToken(context.Context, *MagicLinkTokenRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) ConsumeMagicLinkToken(context.Context, string, int64) (*MagicLinkTokenRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
 func (StubRepository) GetTotpCredential(context.Context, string) (*TotpCredRecord, error) {
 	return nil, ErrServiceUnavailable
 }
@@ -283,6 +307,14 @@ func (StubRepository) DeleteExpiredLoginChallenges(context.Context, int64, int) 
 }
 
 func (StubRepository) DeleteExpiredOAuthOneTimeCodes(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredEmailLoginCodes(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredMagicLinkTokens(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }
 

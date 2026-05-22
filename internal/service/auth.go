@@ -213,6 +213,43 @@ type Repository interface {
 	CreateOAuthOneTimeCode(ctx context.Context, r *OAuthOneTimeCodeRecord) (string, error)
 	ConsumeOAuthOneTimeCode(ctx context.Context, codeHash string, atMs int64) (*OAuthOneTimeCodeRecord, error)
 
+	// Email login codes (OTP arm of passwordless email login).
+	//
+	// UpsertEmailLoginCode stores the latest code for an email, replacing
+	// any existing live code for that address so at most one is valid at a
+	// time (a re-request invalidates the previous code). It is keyed on
+	// email; the unique index makes the upsert a delete-then-create or an
+	// in-place overwrite depending on the backend.
+	//
+	// FindEmailLoginCodeByEmail returns the live row (consumed or not) so
+	// the verify path can compare the code hash, count attempts, and
+	// distinguish expired/consumed from a hash mismatch. Returns nil when
+	// no row exists for the email.
+	//
+	// IncrementEmailLoginCodeAttempts bumps attempt_count by one. Used on
+	// a wrong-code guess; the service invalidates the code once the count
+	// reaches the cap captured on the record.
+	//
+	// ConsumeEmailLoginCode is the single-winner compare-and-set: it marks
+	// the row consumed (consumed_at = atMs) only when currently unconsumed
+	// AND unexpired, returning the bound record on success. A replay, an
+	// expired code, or a missing code all return ErrEmailLoginCodeInvalid.
+	UpsertEmailLoginCode(ctx context.Context, r *EmailLoginCodeRecord) (string, error)
+	FindEmailLoginCodeByEmail(ctx context.Context, email string) (*EmailLoginCodeRecord, error)
+	IncrementEmailLoginCodeAttempts(ctx context.Context, nodeID string) error
+	ConsumeEmailLoginCode(ctx context.Context, email string, atMs int64) (*EmailLoginCodeRecord, error)
+
+	// Magic-link tokens (magic-link arm of passwordless email login).
+	//
+	// CreateMagicLinkToken stores the token-hash → (email, return_to)
+	// binding. ConsumeMagicLinkToken is the single-winner compare-and-set
+	// (same shape as ConsumeOAuthOneTimeCode): it marks the row consumed
+	// only when currently unconsumed AND unexpired, returning the bound
+	// record on success. A replay, expired, or missing token all return
+	// ErrMagicLinkInvalid.
+	CreateMagicLinkToken(ctx context.Context, r *MagicLinkTokenRecord) (string, error)
+	ConsumeMagicLinkToken(ctx context.Context, tokenHash string, atMs int64) (*MagicLinkTokenRecord, error)
+
 	// TOTP credentials
 	GetTotpCredential(ctx context.Context, userID string) (*TotpCredRecord, error)
 	CreateTotpCredential(ctx context.Context, r *TotpCredRecord) (string, error)
@@ -298,6 +335,8 @@ type Repository interface {
 	DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredOAuthOneTimeCodes(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredEmailLoginCodes(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error
 
 	// Organizations — identity-layer entity used by `mode=multi`
 	// deployments. CreateOrganization writes the Organization row and
@@ -417,6 +456,38 @@ type OAuthOneTimeCodeRecord struct {
 	NodeID     string
 	CodeHash   string
 	UserID     string
+	ExpiresAt  int64 // epoch ms
+	CreatedAt  int64 // epoch ms
+	ConsumedAt int64 // epoch ms; 0 = unconsumed
+}
+
+// EmailLoginCodeRecord is the OTP arm of passwordless email login. The
+// record is keyed by Email (at most one live code per address); a new
+// request overwrites the previous one. CodeHash is sha256 of the 6-digit
+// code. AttemptCount tracks failed verifies; once it reaches MaxAttempts
+// the code is invalidated (brute-force cap). The record carries no user
+// id — the account may not exist until VerifyEmailLoginCode resolves or
+// creates it.
+type EmailLoginCodeRecord struct {
+	NodeID       string
+	Email        string
+	CodeHash     string
+	ExpiresAt    int64 // epoch ms
+	CreatedAt    int64 // epoch ms
+	ConsumedAt   int64 // epoch ms; 0 = unconsumed
+	AttemptCount int64
+	MaxAttempts  int64
+}
+
+// MagicLinkTokenRecord is the magic-link arm of passwordless email
+// login. TokenHash is sha256 of a high-entropy opaque token; the row is
+// bound to the requested Email and the allowlist-validated ReturnTo.
+// Single-use is enforced by the ConsumedAt compare-and-set.
+type MagicLinkTokenRecord struct {
+	NodeID     string
+	TokenHash  string
+	Email      string
+	ReturnTo   string
 	ExpiresAt  int64 // epoch ms
 	CreatedAt  int64 // epoch ms
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
@@ -601,7 +672,16 @@ var (
 	// missing, expired, or already consumed. The Connect handler maps it
 	// to CodeUnauthenticated so replays and expiries look identical to a
 	// brute-force attacker.
-	ErrOAuthCodeInvalid  = errors.New("oauth one-time code is invalid or already used")
+	ErrOAuthCodeInvalid = errors.New("oauth one-time code is invalid or already used")
+	// ErrEmailLoginCodeInvalid is returned when a passwordless OTP is
+	// missing, expired, already consumed, the wrong code, or has exhausted
+	// its attempt budget. The Connect handler maps it to
+	// CodeUnauthenticated so all failure modes look identical to a
+	// brute-force attacker.
+	ErrEmailLoginCodeInvalid = errors.New("email login code is invalid or expired")
+	// ErrMagicLinkInvalid is returned when a passwordless magic-link token
+	// is missing, expired, or already consumed. Maps to CodeUnauthenticated.
+	ErrMagicLinkInvalid  = errors.New("magic link is invalid or already used")
 	ErrInvitationUsed    = errors.New("invitation has already been accepted")
 	ErrInvitationExpired = errors.New("invitation has expired")
 	ErrLocalAuthDisabled = errors.New("local auth disabled")
@@ -634,7 +714,11 @@ type AuthService struct {
 	oauthRegistry  *oauth.Registry
 	emailThrottle  *emailSendThrottle
 	signupThrottle *emailSendThrottle
-	nowFunc        func() time.Time // overridable for testing
+	// returnAllow validates the magic-link return_to against
+	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
+	// OAuth flow uses. Parsed once at construction.
+	returnAllow ReturnAllowlist
+	nowFunc     func() time.Time // overridable for testing
 }
 
 // NewAuthService creates an AuthService with all required dependencies.
@@ -706,6 +790,7 @@ func NewAuthServiceWithOAuth(
 		oauthRegistry:      oauthRegistry,
 		emailThrottle:      newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
 		signupThrottle:     newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
+		returnAllow:        ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
 		nowFunc:            time.Now,
 	}
 }

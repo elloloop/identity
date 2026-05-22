@@ -26,7 +26,7 @@ import (
 // /callback time.
 type hostedOAuthHandler struct {
 	auth      *service.AuthService
-	allowlist returnAllowlist
+	allowlist service.ReturnAllowlist
 	logger    *zap.Logger
 }
 

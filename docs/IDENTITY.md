@@ -764,5 +764,78 @@ before you ship.
       redemption adds no membership — the single-tenant invitation flow
       is exactly as it was before this slice.
 
+14. **Passwordless email login (OTP code + magic link), unified by
+    email.** Issue #136. A user can authenticate by proving control of an
+    email — no password — via a 6-digit one-time code or a clickable magic
+    link. Choices:
+
+    - **One account per email, resolved through a single shared helper.**
+      The by-email resolve-or-create logic was factored out of
+      `upsertOAuthUser` into `resolveOrCreateUserByEmail`
+      (`internal/service/auth_login.go`), and OAuth, OTP, and magic link
+      all call it. A passwordless login for an address that already has a
+      password or OAuth account links to the SAME user — it never mints a
+      duplicate. OAuth's behaviour is unchanged: it still does its
+      `(provider, sub)` fast-path lookup first, then falls through to the
+      shared helper for the email leg, then applies its profile-update and
+      identity-link side effects.
+
+    - **Accounts are created only on verify/redeem, never on request.** An
+      attacker cannot manufacture accounts for emails they don't control,
+      because the account is provisioned only after a valid code is
+      submitted or a valid link is clicked. Auto-create is gated by
+      `GATEWAY_PASSWORDLESS_SIGNUP_ENABLED` (default true, mirroring
+      `GATEWAY_PASSWORD_SIGNUP_ENABLED`). When false, an unknown email
+      that proves control still cannot log in — it returns the same
+      `Unauthenticated` shape every other failure does, so the endpoint
+      reveals nothing about which addresses exist.
+
+    - **Token storage is a small extension of the existing token
+      node-type pattern, not a new framework** (decision log discipline,
+      AGENTS.md rule 4). `EmailLoginCode` (proto type_id 37) is keyed by
+      *email* (unique), because a 6-digit code is not globally unique and
+      brute-force protection must find the active code for an address even
+      when the guess is wrong (to bump `attempt_count`); a re-request
+      overwrites the previous code so at most one is live per inbox.
+      `MagicLinkToken` (type_id 38) is keyed by a high-entropy
+      `token_hash` (unique), bound to the email and the
+      allowlist-validated `return_to` — the same single-use `consumed_at`
+      compare-and-set `OAuthOneTimeCode` uses. Both land across all three
+      backends (memory, postgres, entdb) with the conformance suite
+      extended, and both are swept by the existing GC sweeper.
+
+    - **Spam controls are layered.** Per-IP rate limits on the two Request
+      endpoints (`GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP`, default 5/min,
+      via the existing `PathLimit` middleware); a per-email send cooldown
+      reusing `GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS` so one inbox can't be
+      flooded; an OTP brute-force cap (`GATEWAY_PASSWORDLESS_CODE_MAX_
+      ATTEMPTS`, default 5) that invalidates the code once exhausted; a
+      short OTP TTL (`GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS`, default
+      300); single-use replay rejection on both arms via the `consumed_at`
+      CAS; and anti-enumeration on every Request response (identical
+      output regardless of account existence). The magic link's
+      `return_to` is validated against the same
+      `GATEWAY_OAUTH_ALLOWED_RETURN_URLS` allowlist the hosted OAuth flow
+      uses (decision log §10) — the validator
+      (`service.ReturnAllowlist`) was moved into the service package so
+      both flows share one fail-closed implementation.
+
+    - **mode=multi interaction: auto-create the user, but membership still
+      requires an invitation or org-signup.** A passwordless login
+      resolves into the request's tenant (the slice-3 resolution
+      middleware), so the auto-created user is created *inside that
+      tenant's data plane* — consistent with the 1:1 identity↔tenant
+      boundary (§2): one human authenticating passwordlessly into two
+      tenants becomes two separate identity users, one per tenant. But
+      auto-create does **not** grant organisation membership: an
+      auto-created user in `mode=multi` is not a member of any
+      `Organization` until they accept an invitation (§13) or complete
+      `OrganizationSignup` (§3). They can authenticate, but the membership
+      check in the resolution middleware still gates tenant-scoped access.
+      This keeps passwordless login a frictionless front door without
+      turning it into an unauthenticated path to org membership. In
+      `mode=single` there is no `Organization`, so the auto-created user
+      is simply a normal user of the one tenant.
+
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

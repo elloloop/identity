@@ -15,19 +15,25 @@ var AuthExemptPaths = map[string]bool{
 	// RedeemOAuthCode trades the hosted-flow one-time code for tokens;
 	// the caller is anonymous until the code is redeemed, so it cannot
 	// carry a JWT.
-	"/identity.IdentityService/RedeemOAuthCode":      true,
-	"/identity.IdentityService/PasswordLogin":        true,
-	"/identity.IdentityService/PasswordSignup":       true,
-	"/identity.IdentityService/RefreshToken":         true,
-	"/identity.IdentityService/Logout":               true,
-	"/identity.IdentityService/GetCurrentUser":       true,
-	"/identity.IdentityService/BeginPasskeyLogin":    true,
-	"/identity.IdentityService/CompletePasskeyLogin": true,
-	"/identity.IdentityService/InitiateQrLogin":      true,
-	"/identity.IdentityService/PollQrLogin":          true,
-	"/identity.IdentityService/AcceptInvitation":     true,
-	"/identity.IdentityService/RequestAdminHelp":     true,
-	"/identity.IdentityService/VerifyTotp":           true,
+	"/identity.IdentityService/RedeemOAuthCode": true,
+	"/identity.IdentityService/PasswordLogin":   true,
+	"/identity.IdentityService/PasswordSignup":  true,
+	// Passwordless email login: the caller is anonymous, proving control
+	// of an inbox via an OTP code or a magic-link token rather than a JWT.
+	"/identity.IdentityService/RequestEmailLoginCode": true,
+	"/identity.IdentityService/VerifyEmailLoginCode":  true,
+	"/identity.IdentityService/RequestMagicLink":      true,
+	"/identity.IdentityService/RedeemMagicLink":       true,
+	"/identity.IdentityService/RefreshToken":          true,
+	"/identity.IdentityService/Logout":                true,
+	"/identity.IdentityService/GetCurrentUser":        true,
+	"/identity.IdentityService/BeginPasskeyLogin":     true,
+	"/identity.IdentityService/CompletePasskeyLogin":  true,
+	"/identity.IdentityService/InitiateQrLogin":       true,
+	"/identity.IdentityService/PollQrLogin":           true,
+	"/identity.IdentityService/AcceptInvitation":      true,
+	"/identity.IdentityService/RequestAdminHelp":      true,
+	"/identity.IdentityService/VerifyTotp":            true,
 	// OrganizationSignup is the entry point for B2B multi-tenant
 	// deployments (mode=multi). The caller is by definition not yet
 	// a member of any tenant, so authentication cannot precede this

@@ -1,4 +1,4 @@
-package app
+package service
 
 import "testing"
 
@@ -18,7 +18,7 @@ func TestParseReturnAllowlist(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := parseReturnAllowlist(tt.csv)
+			a := ParseReturnAllowlist(tt.csv)
 			if a.Enabled() != tt.wantEnabled {
 				t.Errorf("Enabled() = %v, want %v", a.Enabled(), tt.wantEnabled)
 			}
@@ -32,7 +32,7 @@ func TestParseReturnAllowlist(t *testing.T) {
 func TestReturnAllowlist_Allows(t *testing.T) {
 	t.Parallel()
 
-	a := parseReturnAllowlist("https://app.example.com/,https://other.example.org/auth")
+	a := ParseReturnAllowlist("https://app.example.com/,https://other.example.org/auth")
 	tests := []struct {
 		returnTo string
 		want     bool
@@ -56,7 +56,7 @@ func TestReturnAllowlist_Allows(t *testing.T) {
 
 func TestReturnAllowlist_EmptyDeniesAll(t *testing.T) {
 	t.Parallel()
-	a := parseReturnAllowlist("")
+	a := ParseReturnAllowlist("")
 	if a.Allows("https://anything.test/") {
 		t.Error("empty allowlist allowed a return_to")
 	}
