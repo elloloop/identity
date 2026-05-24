@@ -272,7 +272,7 @@ type passthroughTransport struct {
 	searchNodesErr     error
 }
 
-func (t *passthroughTransport) QueryNodes(context.Context, string, string, int, map[string]any) ([]*sdk.Node, error) {
+func (t *passthroughTransport) QueryNodes(context.Context, string, string, int, map[string]any, int) ([]*sdk.Node, error) {
 	t.queryNodesCalled = true
 	return t.queryNodesResult, t.queryNodesErr
 }

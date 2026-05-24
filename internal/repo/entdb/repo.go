@@ -345,26 +345,86 @@ func (r *entRepository) SetUserIDVVerified(ctx context.Context, userID string, a
 	return nil
 }
 
+// IncrementFailedLoginCount atomically bumps the user's failed-login
+// counter and returns the new value. It uses a read + compare-and-set
+// retry loop so concurrent failed logins on the same account cannot lose
+// updates (a plain read-modify-write let several attempts read the same
+// base count and write the same +1, undercounting — a lockout-bypass
+// risk) and cannot error out (the exact-value visibility wait inside the
+// plain update path times out when a sibling increment supersedes the
+// written value before it is observed).
 func (r *entRepository) IncrementFailedLoginCount(ctx context.Context, userID string) (int32, error) {
 	if userID == "" {
 		return 0, errors.New("repo: IncrementFailedLoginCount: missing user id")
 	}
-	user, err := r.GetUser(ctx, userID)
-	if err != nil {
-		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: %w", err)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		user, err := r.GetUser(ctx, userID)
+		if err != nil {
+			return 0, fmt.Errorf("repo: IncrementFailedLoginCount: %w", err)
+		}
+		if user == nil {
+			return 0, errors.New("repo: IncrementFailedLoginCount: user not found")
+		}
+		if user.FailedLoginCount >= math.MaxInt32 {
+			return 0, errors.New("repo: IncrementFailedLoginCount: count overflow")
+		}
+		newCount := int32(user.FailedLoginCount + 1) // #nosec G115 -- bounds checked above.
+
+		// CAS on the current count. On entdb a proto3-zero field is absent
+		// on disk, so the 0->1 transition (and any increment right after a
+		// reset to 0) must match the "field absent" precondition (nil)
+		// rather than equals=0.
+		var expect any = int64(user.FailedLoginCount)
+		if user.FailedLoginCount == 0 {
+			expect = nil
+		}
+		patch := &schemapb.User{FailedLoginCount: int64(newCount)}
+		err = r.client.updateIfNoWait(ctx, actorStr(userID), userID, patch, "failed_login_count", expect)
+		if errors.Is(err, errPreconditionFailed) {
+			// A concurrent increment won this slot; re-read and retry.
+			if time.Now().After(deadline) {
+				return 0, errors.New("repo: IncrementFailedLoginCount: contention retry deadline exceeded")
+			}
+			continue
+		}
+		if err != nil {
+			return 0, fmt.Errorf("repo: IncrementFailedLoginCount: %w", err)
+		}
+		// Read-your-writes: wait until the count is observable as at least
+		// our value. A concurrent higher increment also satisfies this, so
+		// it can't time out the way an exact-value wait would.
+		if err := r.awaitFailedLoginCountAtLeast(ctx, userID, int64(newCount)); err != nil {
+			return 0, fmt.Errorf("repo: IncrementFailedLoginCount: %w", err)
+		}
+		return newCount, nil
 	}
-	if user == nil {
-		return 0, errors.New("repo: IncrementFailedLoginCount: user not found")
+}
+
+// awaitFailedLoginCountAtLeast blocks until a read of the user observes
+// failed_login_count >= atLeast (the entdb canonical store applies a
+// committed CAS asynchronously). Monotonic so concurrent increments only
+// help it return sooner.
+func (r *entRepository) awaitFailedLoginCountAtLeast(ctx context.Context, userID string, atLeast int64) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		u, err := r.GetUser(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if u != nil && int64(u.FailedLoginCount) >= atLeast {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("failed_login_count for %s not visible at >=%d", userID, atLeast)
+		}
+		if err := sleepOrContextDone(ctx, 50*time.Millisecond); err != nil {
+			return err
+		}
 	}
-	if user.FailedLoginCount >= math.MaxInt32 {
-		return 0, errors.New("repo: IncrementFailedLoginCount: count overflow")
-	}
-	newCount := int32(user.FailedLoginCount + 1) // #nosec G115 -- bounds checked above.
-	patch := &schemapb.User{FailedLoginCount: int64(newCount)}
-	if err := r.client.update(ctx, actorStr(userID), userID, patch); err != nil {
-		return 0, fmt.Errorf("repo: IncrementFailedLoginCount: %w", err)
-	}
-	return newCount, nil
 }
 
 func (r *entRepository) ResetFailedLoginCount(ctx context.Context, userID string) error {
@@ -1307,24 +1367,26 @@ func (r *entRepository) UpdateTotpCredential(ctx context.Context, nodeID string,
 		return errors.New("repo: UpdateTotpCredential: missing node id")
 	}
 	patch := &schemapb.TotpCredential{}
-	applied := false
+	var names []string
 	for k, v := range fields {
 		switch k {
 		case "verified":
 			patch.Verified = asBool(v)
-			applied = true
+			names = append(names, "verified")
 		case "last_used_at":
 			patch.LastUsedAt = asInt64(v)
-			applied = true
+			names = append(names, "last_used_at")
 		case "secret_encrypted":
 			patch.SecretEncrypted = asString(v)
-			applied = true
+			names = append(names, "secret_encrypted")
 		}
 	}
-	if !applied {
+	if len(names) == 0 {
 		return nil
 	}
-	if err := r.client.update(ctx, systemActor, nodeID, patch); err != nil {
+	// Explicit-fields update so "verified=false" (a proto3 zero) is sent
+	// instead of being dropped as an unset field.
+	if err := r.client.updateFields(ctx, systemActor, nodeID, patch, names...); err != nil {
 		return fmt.Errorf("repo: UpdateTotpCredential: %w", err)
 	}
 	return nil
@@ -1910,7 +1972,58 @@ func (r *entRepository) CreateIdentityVerification(ctx context.Context, rec *ser
 		return fmt.Errorf("repo: CreateIdentityVerification: %w", err)
 	}
 	rec.NodeID = id
+	if err := r.awaitIdentityVerificationVisible(ctx, rec); err != nil {
+		return fmt.Errorf("repo: CreateIdentityVerification: %w", err)
+	}
 	return nil
+}
+
+// awaitIdentityVerificationVisible blocks until a freshly created IDV
+// record is observable through both secondary read paths the service
+// fetches it by: GetIdentityVerification's verification_id unique-key
+// lookup and GetLatestIdentityVerificationForUser's user_id filter
+// query.
+//
+// sdkScope.create already waits for the node to be visible by its node
+// id, but on entdb the secondary unique-key and filter indexes are
+// applied to the canonical store asynchronously, a beat behind the node
+// itself. The IDV RPC pair issues a write immediately followed by a
+// read through one of those indexes (Begin→GetStatus by id, or
+// Begin→GetLatest by user), so without this wait the read can race the
+// index apply and observe nothing — the entdb-only read-after-write
+// flake the nightly suite kept tripping on. Waiting here upholds the
+// repository's "a write is visible to the next read" contract for the
+// access patterns IDV actually uses. On the in-memory test backend both
+// reads are synchronous, so the first poll returns immediately.
+func (r *entRepository) awaitIdentityVerificationVisible(ctx context.Context, rec *service.IdentityVerificationRecord) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		byKey, err := r.GetIdentityVerification(ctx, rec.VerificationID)
+		if err != nil {
+			return err
+		}
+		var latest *service.IdentityVerificationRecord
+		if byKey != nil {
+			latest, err = r.GetLatestIdentityVerificationForUser(ctx, rec.UserID)
+			if err != nil {
+				return err
+			}
+		}
+		// Probe both reader paths through the exact methods the service
+		// calls. The user_id filter index reflects the write once
+		// GetLatest returns a row at least as new as this one (it may be
+		// a newer concurrent record — that still means our own write is
+		// no longer racing the index apply).
+		if byKey != nil && latest != nil && latest.CreatedAt >= rec.CreatedAt {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("identity verification %s not visible after create", rec.VerificationID)
+		}
+		if err := sleepOrContextDone(ctx, 50*time.Millisecond); err != nil {
+			return err
+		}
+	}
 }
 
 func (r *entRepository) GetIdentityVerification(ctx context.Context, verificationID string) (*service.IdentityVerificationRecord, error) {

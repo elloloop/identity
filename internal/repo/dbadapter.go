@@ -151,7 +151,10 @@ func (a *dbAdapter) GetNode(ctx context.Context, tenantID, actor string, typeID 
 }
 
 func (a *dbAdapter) QueryNodes(ctx context.Context, tenantID, actor string, typeID int, filter map[string]any) ([]*sdk.Node, error) {
-	return a.transport.QueryNodes(ctx, tenantID, actor, typeID, filter)
+	// limit=0: auto-follow the keyset cursor to the complete set
+	// (tenant-shard-db v1.24.0+, ADR-029). Without it the SDK truncates
+	// at the server's per-page cap.
+	return a.transport.QueryNodes(ctx, tenantID, actor, typeID, filter, 0)
 }
 
 func (a *dbAdapter) ExecuteAtomic(ctx context.Context, tenantID, actor string, ops []sdk.Operation) (*sdk.CommitResult, error) {
