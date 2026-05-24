@@ -35,6 +35,39 @@
 // the sweep in a follow-up PR without failing the conformance suite
 // (Rule 6 — split along feature boundaries). A driver that returns a
 // different error still fails the suite.
+//
+// Beyond the per-method CRUD subtests, RunConformance also runs the
+// extended suites in consistency.go (read-your-writes through every
+// secondary index), queryedge.go (pagination past the server row cap;
+// query-before-first-write on a fresh tenant), roundtrip.go (value
+// fidelity for adversarial strings and the full int64 range), and
+// concurrency.go (no-lost-writes and read-your-writes under a writer
+// fan-out). These target cross-backend bug classes the happy-path CRUD
+// subtests don't reach.
+//
+// As of this writing the entdb driver FAILS three extended groups and
+// the failures are INTENTIONAL — each is the isolated repro of a
+// tenant-shard-db bug being fixed upstream, kept red as the tracking
+// signal (do not skip them):
+//   - RoundTrip/Int64_Fidelity: payloads marshal through structpb, so
+//     int64 values above 2^53 lose precision (float64 coercion).
+//   - Pagination/*: QueryNodes caps at ~100 rows with no cursor, so
+//     un-paginated List* reads truncate.
+//   - FreshTenant/*: a query before the tenant's first write returns a
+//     sanitized Internal error instead of an empty result.
+//   - Concurrency/ConcurrentDuplicate_OAuthIdentity_SingleRow: entdb has
+//     no composite unique constraint, so the non-atomic query-then-
+//     create guard lets concurrent (provider,sub) creates all win.
+//   - Concurrency/ConcurrentIncrement_NoLostUpdates: read-modify-write
+//     IncrementFailedLoginCount plus a value-specific visibility wait
+//     errors out / loses updates under concurrent increments.
+//   - UpdateToZeroValue/Bool_TotpVerified_TrueThenFalse: the typed
+//     update patch omits proto3 zero values, so "set false/0/''" no-ops
+//     (an identity-side gap — the raw field-id update path used by
+//     UpdateUser does not have it).
+//
+// Memory and postgres pass every group; they are the differential
+// reference for "correct".
 package conformance
 
 import (
@@ -1874,6 +1907,24 @@ func RunConformance(t *testing.T, driver Driver) {
 			t.Fatalf("ListOrganizationsForUser unknown: err=%v rows=%+v", err, none)
 		}
 	})
+
+	// Extended suites: read-your-writes visibility, pagination/limit
+	// correctness, fresh-tenant query handling, and value round-trip.
+	// These target the cross-backend bug classes (entdb secondary-index
+	// lag, query caps, unopened-tenant errors) the per-method CRUD
+	// subtests above don't stress.
+	runReadYourWritesConformance(t, driver)
+	runPaginationConformance(t, driver)
+	runFreshTenantConformance(t, driver)
+	runRoundTripConformance(t, driver)
+	runConcurrencyConformance(t, driver)
+	runMutationConformance(t, driver)
+	runKeyFidelityConformance(t, driver)
+	runSweeperBoundaryConformance(t, driver)
+	runFilteringConformance(t, driver)
+	runIdempotencyConformance(t, driver)
+	runIsolationConformance(t, driver)
+	runGetLatestConformance(t, driver)
 }
 
 // uniqueHash returns a per-call unique token-hash string. Tests use
