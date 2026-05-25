@@ -103,7 +103,7 @@ jobs:
         # ignores env vars (CLI flags only, with defaults baked into
         # the entrypoint). TCP readiness is polled by the "Wait for"
         # step below.
-        image: ghcr.io/elloloop/tenant-shard-db:1.25.0
+        image: ghcr.io/elloloop/tenant-shard-db:1.28.0
         ports:
           - 50051:50051
       postgres:
@@ -232,7 +232,7 @@ jobs:
         # ignores env vars (CLI flags only, with defaults baked into
         # the entrypoint). TCP readiness is polled by the "Wait for"
         # step below.
-        image: ghcr.io/elloloop/tenant-shard-db:1.25.0
+        image: ghcr.io/elloloop/tenant-shard-db:1.28.0
         ports:
           - 50051:50051
     steps:
