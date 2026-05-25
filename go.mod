@@ -3,7 +3,7 @@ module github.com/elloloop/identity
 go 1.25.0
 
 require (
-	connectrpc.com/connect v1.19.2
+	connectrpc.com/connect v1.20.0
 	connectrpc.com/otelconnect v0.9.0
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
