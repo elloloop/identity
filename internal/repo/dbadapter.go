@@ -180,7 +180,12 @@ func (a *dbAdapter) GetEdgesTo(ctx context.Context, tenantID, actor, toNodeID st
 }
 
 func (a *dbAdapter) SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*sdk.Node, error) {
-	return a.transport.SearchNodes(ctx, tenantID, actor, typeID, query)
+	// Search returns a single ranked page (tenant-shard-db ADR-029 FTS
+	// carve-out — no keyset auto-follow). Request a generous page and
+	// drop the has-more flag; admin search never needs deep pagination.
+	const searchPageSize = 1000
+	nodes, _, err := a.transport.SearchNodes(ctx, tenantID, actor, typeID, query, searchPageSize, 0)
+	return nodes, err
 }
 
 // RegisterUserInTenant registers userID globally and adds it as a

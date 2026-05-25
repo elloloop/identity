@@ -287,9 +287,9 @@ func (t *passthroughTransport) GetEdgesTo(context.Context, string, string, strin
 	return t.getEdgesToResult, t.getEdgesToErr
 }
 
-func (t *passthroughTransport) SearchNodes(context.Context, string, string, int, string) ([]*sdk.Node, error) {
+func (t *passthroughTransport) SearchNodes(context.Context, string, string, int, string, int32, int32) ([]*sdk.Node, bool, error) {
 	t.searchNodesCalled = true
-	return t.searchNodesResult, t.searchNodesErr
+	return t.searchNodesResult, false, t.searchNodesErr
 }
 
 func TestDBAdapter_QueryNodesDelegatesToTransport(t *testing.T) {
