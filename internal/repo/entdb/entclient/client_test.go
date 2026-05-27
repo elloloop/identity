@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
 
 	entdbopts "github.com/elloloop/identity/gen/go/entdb"
 	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
@@ -53,7 +52,7 @@ func TestSchemaMessages_CoversEveryNodeType(t *testing.T) {
 	got := map[int32]string{}
 	for _, msg := range SchemaMessages() {
 		md := msg.ProtoReflect().Descriptor()
-		opts := md.Options().(protoreflect.ProtoMessage)
+		opts := md.Options()
 		ext := proto.GetExtension(opts, entdbopts.E_Node)
 		node, ok := ext.(*entdbopts.NodeOpts)
 		if !ok || node == nil || node.GetTypeId() == 0 {
@@ -179,7 +178,7 @@ func TestSchemaMessages_DescriptorsAreUsable(t *testing.T) {
 // the conformance suite tells us at runtime.
 func TestOAuthIdentity_HasCompositeUnique(t *testing.T) {
 	md := (*schemapb.OAuthIdentity)(nil).ProtoReflect().Descriptor()
-	opts := md.Options().(protoreflect.ProtoMessage)
+	opts := md.Options()
 	ext := proto.GetExtension(opts, entdbopts.E_Node)
 	node, ok := ext.(*entdbopts.NodeOpts)
 	if !ok || node == nil {

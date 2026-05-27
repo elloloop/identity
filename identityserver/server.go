@@ -31,8 +31,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	entclient "github.com/elloloop/identity/internal/repo/entdb/entclient"
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity"
 	"github.com/elloloop/identity/internal/app"
