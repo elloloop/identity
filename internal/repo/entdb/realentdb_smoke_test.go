@@ -9,10 +9,9 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-	"github.com/stretchr/testify/require"
-
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"github.com/elloloop/identity/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRealEntDBRepositorySmoke(t *testing.T) {
@@ -21,7 +20,7 @@ func TestRealEntDBRepositorySmoke(t *testing.T) {
 		t.Skip("GATEWAY_ENTDB_ADDRESS unset - skipping real EntDB repository smoke")
 	}
 
-	client, err := sdk.NewClient(addr)
+	client, err := entclient.New(addr)
 	require.NoError(t, err)
 	require.NoError(t, client.Connect(context.Background()))
 	t.Cleanup(func() { _ = client.Close() })

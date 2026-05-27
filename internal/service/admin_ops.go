@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 )
 
 // SetUserQuota updates the storage quota for a user.

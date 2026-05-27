@@ -10,9 +10,8 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-
 	"github.com/elloloop/identity/internal/repo/conformance"
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -36,9 +35,9 @@ func TestConformance(t *testing.T) {
 		t.Skip("GATEWAY_ENTDB_ADDRESS unset — skipping entdb conformance")
 	}
 
-	client, err := sdk.NewClient(addr)
+	client, err := entclient.New(addr)
 	if err != nil {
-		t.Fatalf("sdk.NewClient: %v", err)
+		t.Fatalf("entclient.New: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

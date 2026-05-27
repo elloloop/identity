@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"

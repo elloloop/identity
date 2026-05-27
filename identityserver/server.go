@@ -31,7 +31,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	entclient "github.com/elloloop/identity/internal/repo/entdb/entclient"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity"
 	"github.com/elloloop/identity/internal/app"
@@ -261,7 +262,7 @@ func (s *Server) runShutdownFns(ctx context.Context) error {
 // Connect returning nil does not guarantee reachability; it surfaces
 // configuration errors (bad address format) early.
 func newEntDBClient(ctx context.Context, address string) (*entdb.DbClient, error) {
-	db, err := entdb.NewClient(address)
+	db, err := entclient.New(address)
 	if err != nil {
 		return nil, fmt.Errorf("entdb client: %w", err)
 	}

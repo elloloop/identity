@@ -12,7 +12,7 @@ import (
 	awskms "github.com/aws/aws-sdk-go-v2/service/kms"
 	"go.uber.org/zap"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo"

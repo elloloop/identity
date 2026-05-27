@@ -323,15 +323,21 @@ message EmailChangeToken {
 // keep the same human linked to the same local account when the
 // provider's email changes.
 //
-// Application code MUST enforce uniqueness on (provider, provider_user_id):
-// EntDB does not currently support composite unique constraints, so the
-// service layer is responsible for the duplicate check before insert.
+// Uniqueness on (provider, provider_user_id) is enforced server-side via
+// the composite_unique declaration below. The SDK attaches the schema to
+// ExecuteAtomic (ADR-031), and the server materialises a unique
+// expression index in the same WAL event as the create, so two
+// concurrent creates with the same tuple cannot both succeed.
 message OAuthIdentity {
     option (entdb.node) = {
         type_id: 31
         data_policy: DATA_POLICY_PERSONAL
         subject_field: "user_id"
         description: "Linkage between a local User and a provider-side stable identity (provider, sub)."
+        composite_unique: {
+            name: "provider_user_id"
+            fields: ["provider", "provider_user_id"]
+        }
     };
 
     string user_id            = 1 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];

@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"math"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"go.uber.org/zap"
 
 	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"

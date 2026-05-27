@@ -139,17 +139,6 @@ func runConcurrencyConformance(t *testing.T, driver Driver) {
 		// (locked) and postgres (unique index) serialize this; a
 		// query-then-create guard without a serialization point does not.
 		t.Run("ConcurrentDuplicate_OAuthIdentity_SingleRow", func(t *testing.T) {
-			if driver.Name == "entdb" {
-				// KNOWN-RED, gated so the Conformance workflow can pass on
-				// PRs. entdb has no composite unique constraint, so
-				// CreateOAuthIdentity's (provider, provider_user_id) guard
-				// is a non-atomic query-then-create and concurrent creates
-				// can both win. Tracked by elloloop/identity#141 +
-				// tenant-shard-db#566 (composite constraints). Remove this
-				// skip when ts#566 ships and is adopted. Memory and postgres
-				// still assert the invariant below.
-				t.Skip("entdb composite-uniqueness race — tracked by identity#141 / tenant-shard-db#566")
-			}
 			ctx := context.Background()
 			r := driver.NewRepo(t)
 			uid := createTestUser(t, r, "conc-dup-oa@example.com")

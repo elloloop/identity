@@ -12,11 +12,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/repo"
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
@@ -45,7 +44,7 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 		t.Fatalf("init webauthn: %v", err)
 	}
 
-	client, err := entdb.NewClient(addr)
+	client, err := entclient.New(addr)
 	if err != nil {
 		t.Fatalf("entdb.NewClient: %v", err)
 	}

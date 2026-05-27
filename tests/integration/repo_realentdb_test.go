@@ -28,9 +28,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-
 	"github.com/elloloop/identity/internal/repo/entdb"
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -40,7 +39,7 @@ func TestRealEntDB_Organization(t *testing.T) {
 		t.Skip("GATEWAY_ENTDB_ADDRESS unset — skipping realentdb organisation")
 	}
 
-	client, err := sdk.NewClient(addr)
+	client, err := entclient.New(addr)
 	require.NoError(t, err)
 	require.NoError(t, client.Connect(context.Background()))
 	t.Cleanup(func() { _ = client.Close() })

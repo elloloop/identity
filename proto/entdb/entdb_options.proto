@@ -66,6 +66,28 @@ message NodeOpts {
   repeated CapabilityImplication capability_implications = 22;
   reserved 23;
   reserved "keys";
+  // Composite (multi-field) unique constraints. Each entry declares a
+  // tuple of proto field names that must be unique across all nodes of
+  // this type; the server resolves names to numeric field_ids at
+  // schema-register time and creates a unique expression index covering
+  // the tuple. Single-field uniqueness continues to use
+  // (entdb.field).unique = true.
+  repeated UniqueConstraint composite_unique = 24;
+}
+
+// Composite uniqueness constraint on a node type — declares that the
+// listed fields, taken together as a tuple, must be unique across all
+// nodes of the type. Used by ADR-031 self-describing writes: the SDK
+// attaches this to ExecuteAtomic, the server materialises it in the
+// same WAL event before applying the data ops.
+message UniqueConstraint {
+  // Proto field names participating in the constraint. Must reference
+  // at least 2 fields (single-field uniqueness is declared via
+  // (entdb.field).unique = true).
+  repeated string fields = 1;
+  // Optional human-readable name. When omitted, the server derives one
+  // from the field ids (e.g. "f2_f3"). Surfaces in error messages.
+  string name = 2;
 }
 
 message EdgeOpts {

@@ -79,8 +79,8 @@ github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
 github.com/ebitengine/purego v0.10.0 h1:QIw4xfpWT6GWTzaW5XEKy3HXoqrJGx1ijYHzTF0/ISU=
 github.com/ebitengine/purego v0.10.0/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
-github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.32.1 h1:y8DK/wKYyxdQlVksAl4/Mgq+7EMP8lHj2oVJ41L8EJk=
-github.com/elloloop/tenant-shard-db/sdk/go/entdb v1.32.1/go.mod h1:JOqAF3IkX4K/xWfE01E+TRlBMFmjcDmrQh4NqVta+aE=
+github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2 v2.0.5 h1:eBOsZub5SZEOEt0xqGU44cXxf03MYnLxb+IVuffR5P4=
+github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2 v2.0.5/go.mod h1:E+4KljYD3gt76gisxatnj6CGqy1Jgafia4Dl4v6nCKo=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
 github.com/fxamacker/cbor/v2 v2.9.2 h1:X4Ksno9+x3cz0TZv69ec1hxP/+tymuR8PXQJyDwfh78=

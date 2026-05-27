@@ -5,7 +5,7 @@ package service
 import (
 	"context"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 )
 
 type errorDB struct {

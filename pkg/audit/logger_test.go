@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )

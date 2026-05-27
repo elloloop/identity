@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 )
 
 // fakeDB is an in-memory implementation of the DB interface for tests

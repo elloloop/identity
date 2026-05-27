@@ -29,14 +29,13 @@ import (
 	"connectrpc.com/connect"
 	"go.uber.org/zap"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-
 	identitypb "github.com/elloloop/identity/gen/go/identity"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo"
 	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -55,7 +54,7 @@ func TestOrganizationSignup_RealEntDB(t *testing.T) {
 	// not collide on tenant uniqueness.
 	slug := fmt.Sprintf("org-signup-%d", time.Now().UnixNano())
 
-	client, err := sdk.NewClient(addr)
+	client, err := entclient.New(addr)
 	if err != nil {
 		t.Fatalf("entdb.NewClient: %v", err)
 	}

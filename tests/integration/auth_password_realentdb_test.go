@@ -34,7 +34,7 @@ import (
 	"connectrpc.com/connect"
 	"go.uber.org/zap"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
@@ -103,9 +103,9 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	// don't collide on user uniqueness within a tenant.
 	tenantID := fmt.Sprintf("ci-%d", time.Now().UnixNano())
 
-	client, err := entdb.NewClient(addr)
+	client, err := entclient.New(addr)
 	if err != nil {
-		t.Fatalf("entdb.NewClient: %v", err)
+		t.Fatalf("entclient.New: %v", err)
 	}
 	if err := client.Connect(context.Background()); err != nil {
 		t.Fatalf("entdb connect: %v", err)

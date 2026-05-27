@@ -11,9 +11,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-
 	"github.com/elloloop/identity/internal/repo"
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 )
 
 func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
@@ -28,7 +27,7 @@ func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 	cfg.DefaultTenantID = fmt.Sprintf("it-realentdb-%d", time.Now().UnixNano())
 	hOpts := applyHarnessOptions(cfg, opts)
 
-	client, err := entdb.NewClient(addr)
+	client, err := entclient.New(addr)
 	if err != nil {
 		t.Fatalf("entdb.NewClient: %v", err)
 	}

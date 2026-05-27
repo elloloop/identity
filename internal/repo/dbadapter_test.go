@@ -7,7 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	entclient "github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/service"
@@ -25,7 +26,7 @@ func TestNewDBAdapter_NilClient(t *testing.T) {
 func TestNewDBAdapter_DelegatesToClientTransport(t *testing.T) {
 	t.Parallel()
 
-	client, err := sdk.NewClient("localhost:50051")
+	client, err := entclient.New("localhost:50051")
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -199,6 +200,7 @@ func (t *staleUpdateTransport) ExecuteAtomic(
 	_ string,
 	_ string,
 	ops []sdk.Operation,
+	_ ...sdk.CommitOption,
 ) (*sdk.CommitResult, error) {
 	if len(ops) != 1 {
 		return nil, nil
@@ -245,6 +247,7 @@ func (t *commitResultTransport) ExecuteAtomic(
 	string,
 	string,
 	[]sdk.Operation,
+	...sdk.CommitOption,
 ) (*sdk.CommitResult, error) {
 	return t.result, nil
 }
