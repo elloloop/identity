@@ -56,7 +56,13 @@ linters:
       - path: _test\.go
         linters:
           - nilnil
-      - path: internal/repo/conformance/conformance\.go
+      # The conformance package is a driver-agnostic test harness — its
+      # files are organised as one t.Run per scenario, which naturally
+      # pushes the per-function cyclomatic complexity high (and the
+      # package average with it). The actual logic inside each scenario
+      # is small; complexity is just an artifact of the table-driven
+      # shape.
+      - path: internal/repo/conformance/.*\.go
         linters:
           - cyclop
       # Repository lookups intentionally return nil, nil for not-found.

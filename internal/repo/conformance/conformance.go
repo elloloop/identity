@@ -62,7 +62,7 @@
 //     IncrementFailedLoginCount plus a value-specific visibility wait
 //     errors out / loses updates under concurrent increments.
 //   - UpdateToZeroValue/Bool_TotpVerified_TrueThenFalse: the typed
-//     update patch omits proto3 zero values, so "set false/0/''" no-ops
+//     update patch omits proto3 zero values, so "set false/0/”" no-ops
 //     (an identity-side gap — the raw field-id update path used by
 //     UpdateUser does not have it).
 //

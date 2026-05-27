@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	entclient "github.com/elloloop/identity/internal/repo/entdb/entclient"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/service"
