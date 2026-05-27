@@ -34,7 +34,6 @@ func TestStubRepository_ReturnsServiceUnavailable(t *testing.T) {
 		{"CreateIdentityVerification", func() error { return r.CreateIdentityVerification(ctx, nil) }},
 	}
 	for _, c := range checks {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			if err := c.call(); !errors.Is(err, ErrServiceUnavailable) {
 				t.Errorf("%s: err = %v, want ErrServiceUnavailable", c.name, err)
@@ -53,7 +52,6 @@ func TestStubRepository_ReturnsServiceUnavailable(t *testing.T) {
 		{"CreateTotpCredential", func() (string, error) { return r.CreateTotpCredential(ctx, nil) }},
 	}
 	for _, c := range stringErrChecks {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			id, err := c.call()
 			if id != "" {
