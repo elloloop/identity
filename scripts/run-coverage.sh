@@ -22,6 +22,19 @@ if [[ "${RUN_INTEGRATION_COVERAGE:-}" == "1" ]]; then
   profiles+=(cover.integration.out)
 fi
 
+# E2E suite — drives the public HTTP/JSON wire format (no Connect-Go
+# codegen import). Exercises the same handler chain as the container,
+# in-process via httptest. Contributes coverage of internal/connect,
+# internal/middleware, internal/app, internal/service, and
+# internal/repo/memory.
+if [[ "${RUN_INTEGRATION_COVERAGE:-}" == "1" ]]; then
+  go test -count=1 -tags=e2e -race -timeout=180s \
+    -coverprofile=cover.e2e.out \
+    -coverpkg="$tagged_coverpkg" \
+    ./tests/e2e/...
+  profiles+=(cover.e2e.out)
+fi
+
 if [[ -n "${GATEWAY_ENTDB_ADDRESS:-}" ]]; then
   go test -count=1 -tags=realentdb -race -timeout=300s \
     -coverprofile=cover.realentdb.out \

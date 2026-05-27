@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,33 +49,43 @@ type Harness struct {
 	Mailer   *RecordingMailer
 }
 
-// RecordingMailer captures the most recent outbound email so tests can
-// inspect tokens/codes that the service would normally only deliver
-// through SMTP.
+// RecordingMailer captures every outbound email so tests can inspect
+// tokens/codes that the service would normally only deliver through
+// SMTP. Safe for concurrent Send under -race: identity sends emails
+// from goroutines spawned by audit logging and the sweeper.
 type RecordingMailer struct {
+	mu       sync.Mutex
 	Messages []email.Message
 }
 
 // Send records the message and reports success.
 func (m *RecordingMailer) Send(_ context.Context, msg email.Message) error {
+	m.mu.Lock()
 	m.Messages = append(m.Messages, msg)
+	m.mu.Unlock()
 	return nil
 }
 
 // Latest returns the most recently delivered email, or nil if none.
 func (m *RecordingMailer) Latest() *email.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if len(m.Messages) == 0 {
 		return nil
 	}
-	return &m.Messages[len(m.Messages)-1]
+	msg := m.Messages[len(m.Messages)-1]
+	return &msg
 }
 
 // FindContaining returns the most recent email whose Text or HTML body
 // contains needle.
 func (m *RecordingMailer) FindContaining(needle string) *email.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for i := len(m.Messages) - 1; i >= 0; i-- {
 		if strings.Contains(m.Messages[i].Text, needle) || strings.Contains(m.Messages[i].HTML, needle) {
-			return &m.Messages[i]
+			msg := m.Messages[i]
+			return &msg
 		}
 	}
 	return nil
