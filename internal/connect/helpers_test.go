@@ -24,7 +24,7 @@ import (
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 )
 
 // EntDB type IDs (mirrored from internal/service/entdb.go to avoid relying on

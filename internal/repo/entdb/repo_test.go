@@ -14,7 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 
 	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 	"github.com/elloloop/identity/internal/service"
@@ -181,6 +181,38 @@ func (c *memoryEntClient) updateIf(_ context.Context, _ string, nodeID string, p
 		return errPreconditionFailed
 	}
 	existing.msg = mergePatch(existing.msg, patch)
+	c.store[nodeID] = existing
+	return nil
+}
+
+func (c *memoryEntClient) updateIfNoWait(ctx context.Context, actor string, nodeID string, patch proto.Message, field string, equals any) error {
+	// The fake is synchronous, so there is no visibility wait to skip.
+	return c.updateIf(ctx, actor, nodeID, patch, field, equals)
+}
+
+func (c *memoryEntClient) updateFields(_ context.Context, _ string, nodeID string, patch proto.Message, fields ...string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	existing, ok := c.store[nodeID]
+	if !ok {
+		return fmt.Errorf("entdb: updateFields: node %q not found", nodeID)
+	}
+	if reflect.TypeOf(existing.msg) != reflect.TypeOf(patch) {
+		return errors.New("entdb: updateFields: type mismatch")
+	}
+	out := proto.Clone(existing.msg)
+	om := out.ProtoReflect()
+	pm := patch.ProtoReflect()
+	desc := pm.Descriptor()
+	for _, f := range fields {
+		fd := desc.Fields().ByName(protoreflect.Name(f))
+		if fd == nil {
+			return fmt.Errorf("entdb: updateFields: unknown field %q on %T", f, patch)
+		}
+		// Set explicitly from the patch, including proto3 zero values.
+		om.Set(fd, pm.Get(fd))
+	}
+	existing.msg = out
 	c.store[nodeID] = existing
 	return nil
 }

@@ -9,10 +9,13 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>1. Start EntDB</h2>
   <p>
-    Identity needs an EntDB instance. The fastest way is the EntDB demo
-    container (in-memory WAL, single tenant):
+    Identity needs an EntDB instance. Identity targets the v2 line so
+    it can ride the SDK self-describing-schema mechanism (ADR-031),
+    which is what makes constraints like
+    <code>OAuthIdentity</code>'s <code>(provider, provider_user_id)</code>
+    composite uniqueness atomic across concurrent writes.
   </p>
-  <Code code={`docker run -d --name entdb -p 50051:50051 ghcr.io/elloloop/entdb:latest`} lang="bash" />
+  <Code code={`docker run -d --name entdb -p 50051:50051 ghcr.io/elloloop/tenant-shard-db:2.0.5`} lang="bash" />
 
   <h2>2. Start Identity</h2>
   <Code code={`docker run -d --name identity \\

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/elloloop/identity/internal/service"

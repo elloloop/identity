@@ -1526,9 +1526,11 @@ func (x *EmailChangeToken) GetConsumedAt() int64 {
 // keep the same human linked to the same local account when the
 // provider's email changes.
 //
-// Application code MUST enforce uniqueness on (provider, provider_user_id):
-// EntDB does not currently support composite unique constraints, so the
-// service layer is responsible for the duplicate check before insert.
+// Uniqueness on (provider, provider_user_id) is enforced server-side via
+// the composite_unique declaration below. The SDK attaches the schema to
+// ExecuteAtomic (ADR-031), and the server materialises a unique
+// expression index in the same WAL event as the create, so two
+// concurrent creates with the same tuple cannot both succeed.
 type OAuthIdentity struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	UserId          string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
@@ -2644,14 +2646,16 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x06 \x01(\x03B\b\xb2\xbb\x18\x04\b\x01`\x01R\tcreatedAt\x12'\n" +
 	"\vconsumed_at\x18\a \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\n" +
-	"consumedAt:J\xa2\xbb\x18F\b\x1e0\x04:\auser_idR7A short-lived token for email change confirmation flows\"\xef\x03\n" +
+	"consumedAt:J\xa2\xbb\x18F\b\x1e0\x04:\auser_idR7A short-lived token for email change confirmation flows\"\xa2\x04\n" +
 	"\rOAuthIdentity\x12*\n" +
 	"\auser_id\x18\x01 \x01(\tB\x11\xb2\xbb\x18\r\b\x01\x18\x01:\x03ref@\x01`\x01R\x06userId\x12G\n" +
 	"\bprovider\x18\x02 \x01(\tB+\xb2\xbb\x18'\b\x01\x10\x01\x18\x012\x1dgoogle,microsoft,github,apple`\x01R\bprovider\x12b\n" +
 	"\x10provider_user_id\x18\x03 \x01(\tB8\xb2\xbb\x184\b\x01\x18\x01 \x01R,Stable per-provider user id (e.g. OIDC sub).R\x0eproviderUserId\x12m\n" +
 	"\x12email_at_link_time\x18\x04 \x01(\tB@\xb2\xbb\x18< \x01R8Snapshot of provider email when first linked, for audit.R\x0femailAtLinkTime\x122\n" +
 	"\n" +
-	"created_at\x18\x05 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt:b\xa2\xbb\x18^\b\x1f:\auser_idRQLinkage between a local User and a provider-side stable identity (provider, sub).\"\x8e\x03\n" +
+	"created_at\x18\x05 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt:\x94\x01\xa2\xbb\x18\x8f\x01\b\x1f:\auser_idRQLinkage between a local User and a provider-side stable identity (provider, sub).\xc2\x01.\n" +
+	"\bprovider\n" +
+	"\x10provider_user_id\x12\x10provider_user_id\"\x8e\x03\n" +
 	"\fOrganization\x12_\n" +
 	"\x04slug\x18\x01 \x01(\tBK\xb2\xbb\x18G\b\x01\x10\x01\x18\x01R;URL-safe identifier; matches the tenant-shard-db tenant id.`\x01h\x01R\x04slug\x12-\n" +
 	"\fdisplay_name\x18\x02 \x01(\tB\n" +

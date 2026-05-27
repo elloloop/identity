@@ -9,10 +9,9 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-	"github.com/stretchr/testify/require"
-
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"github.com/elloloop/identity/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 // TestRealEntDB_SweeperEndToEnd covers the five DeleteExpired* methods
@@ -41,7 +40,7 @@ func TestRealEntDB_SweeperEndToEnd(t *testing.T) {
 		t.Skip("GATEWAY_ENTDB_ADDRESS unset — skipping real EntDB sweeper test")
 	}
 
-	client, err := sdk.NewClient(addr)
+	client, err := entclient.New(addr)
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

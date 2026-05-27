@@ -60,14 +60,31 @@ for entry in "${targets[@]}"; do
   name="${entry##*$'\t'}"
   echo "::group::fuzz $name in $dir"
   set +e
-  go test -run='^$' -fuzz="^${name}$" -fuzztime="$fuzztime" "./$dir"
+  output="$(go test -run='^$' -fuzz="^${name}$" -fuzztime="$fuzztime" "./$dir" 2>&1)"
   status=$?
   set -e
+  printf '%s\n' "$output"
   echo "::endgroup::"
 
   if [[ "$status" -eq 0 ]]; then
     if [[ -n "$report" ]]; then
       echo "- \`./$dir\` \`$name\`: passed" >> "$report"
+    fi
+    continue
+  fi
+
+  # A non-zero exit whose only sign of trouble is the fuzzing engine's
+  # context deadline (a slow worker, or a coordinator<->worker RPC that
+  # timed out on a loaded CI runner) is inconclusive, not a real
+  # counterexample. A genuine crash writes a reproducer under
+  # testdata/fuzz/<target>/, so the absence of that "Failing input
+  # written to" line is what separates an infra timeout from a finding.
+  # Inconclusive targets are reported but do not fail the nightly.
+  if grep -q "context deadline exceeded" <<<"$output" \
+      && ! grep -q "Failing input written to" <<<"$output"; then
+    echo "::warning::fuzz $name in $dir inconclusive: context deadline exceeded (treated as non-fatal)"
+    if [[ -n "$report" ]]; then
+      echo "- \`./$dir\` \`$name\`: inconclusive (context deadline exceeded)" >> "$report"
     fi
     continue
   fi

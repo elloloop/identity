@@ -11,10 +11,9 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-	"github.com/stretchr/testify/require"
-
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"github.com/elloloop/identity/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 // TestRealEntDB_ConsumeQrLoginSession_TwoReplicas_SingleWinner is the
@@ -43,9 +42,9 @@ func TestRealEntDB_ConsumeQrLoginSession_TwoReplicas_SingleWinner(t *testing.T) 
 	// Each replica gets its own SDK client so the redirect-cache and
 	// connection state are independent — closer to a real two-process
 	// deployment than two repositories sharing one *sdk.DbClient.
-	clientA, err := sdk.NewClient(addr)
+	clientA, err := entclient.New(addr)
 	require.NoError(t, err)
-	clientB, err := sdk.NewClient(addr)
+	clientB, err := entclient.New(addr)
 	require.NoError(t, err)
 	require.NoError(t, clientA.Connect(context.Background()))
 	require.NoError(t, clientB.Connect(context.Background()))

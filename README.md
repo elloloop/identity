@@ -24,16 +24,33 @@ responsible for authorization decisions built on that data.
 
 ## Storage
 
-All persistent state lives in [EntDB](https://github.com/elloloop/tenant-shard-db). The service reserves type IDs `1–99` in the EntDB schema:
+All persistent state lives in [EntDB](https://github.com/elloloop/tenant-shard-db). Identity targets the **v2.x line** of the server image and Go SDK — the entdb backend uses ADR-031 self-describing writes, attaching identity's schema (every `(entdb.node)`/`(entdb.edge)` message in `proto/identity/schema/schema.proto`) on the first `ExecuteAtomic` per tenant. The server enforces field types, single- and composite-unique constraints, and required-fields against that schema atomically.
 
-| type_id | Node |
-|---|---|
-| 1 | User |
-| 2 | Group |
-| 5 | RefreshToken |
-| 6 | Passkey |
-| 7 | TOTPSecret |
-| 8 | AuditEvent |
+The service reserves type IDs `1–99` in the EntDB schema. Source of truth is `proto/identity/schema/schema.proto`; current allocations:
+
+| type_id | Node | Notes |
+|---|---|---|
+| 1 | User | `email` is unique |
+| 2 | WorkingGroup | identity's group |
+| 5 | RefreshToken | `token_hash` is unique |
+| 19 | PasswordResetToken | `token_hash` is unique |
+| 20 | PasskeyCredential | `credential_id` is unique |
+| 21 | PasskeyChallenge | one-time per ceremony |
+| 22 | QrLoginSession | `session_id` is unique |
+| 23 | TotpCredential | per-user TOTP secret |
+| 24 | RecoveryCode | `code_hash` is unique |
+| 25 | LoginChallenge | `challenge_id` is unique |
+| 26 | AuditEvent | append-only |
+| 27 | UserInvitation | `token_hash`, `email` unique |
+| 28 | AdminHelpRequest | |
+| 29 | EmailVerificationToken | `token_hash` is unique |
+| 30 | EmailChangeToken | `token_hash` is unique |
+| 31 | OAuthIdentity | `(provider, provider_user_id)` is **composite unique** |
+| 32 | IdentityVerificationRecord | `verification_id` is unique |
+| 33 | Organization | `slug` is unique (`mode=multi`) |
+| 34 | OrganizationMembership | (`mode=multi`) |
+| 35 | Session | `sid` is unique |
+| 36 | OAuthOneTimeCode | hosted-OAuth handover; `code_hash` unique |
 
 Other services consuming the same EntDB instance must use type IDs `100+` to avoid collisions.
 
@@ -60,9 +77,14 @@ All config is via environment variables. See `internal/config/config.go` for the
 
 ## Deployment
 
-Pull the image and run alongside an EntDB instance:
+Pull the image and run alongside an EntDB v2.x instance:
 
 ```bash
+# 1. Run EntDB v2.x first
+docker run -d --name entdb -p 50051:50051 \
+  ghcr.io/elloloop/tenant-shard-db:2.0.5
+
+# 2. Run identity pointing at it
 docker run -p 80:80 -p 9090:9090 \
   -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \
   -e GATEWAY_DEFAULT_TENANT_ID=my-product \
@@ -71,6 +93,22 @@ docker run -p 80:80 -p 9090:9090 \
   -e GATEWAY_TOTP_ISSUER="My Product" \
   ghcr.io/elloloop/identity:0.1.0
 ```
+
+Or use `docker-compose.yml` at the repo root — it wires both services together with persistent volumes and a `wait-for-entdb` healthcheck.
+
+### Postgres backend (alternative)
+
+If you don't want to run EntDB, identity also has a postgres backend (`GATEWAY_BACKEND=postgres`):
+
+```bash
+docker run -p 80:80 -p 9090:9090 \
+  -e GATEWAY_BACKEND=postgres \
+  -e GATEWAY_TEST_POSTGRES_DSN='postgres://identity:password@db:5432/identity?sslmode=disable' \
+  -e GATEWAY_DEFAULT_TENANT_ID=my-product \
+  ghcr.io/elloloop/identity:0.1.0
+```
+
+The conformance suite asserts both backends behave identically across every Repository method — same uniqueness/ordering/error-translation semantics. The entdb backend is the recommended path for multi-tenant deployments because it gives strong per-tenant data isolation natively.
 
 ## Releasing
 

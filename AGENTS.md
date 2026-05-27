@@ -109,7 +109,7 @@ Container images, language toolchains, lockfiles, every dependency that
 gets pulled at build/run time pins to a specific patch version (or
 better, a content digest):
 
-- `ghcr.io/elloloop/tenant-shard-db:1.7.0` — never `:1`, never `:latest`
+- `ghcr.io/elloloop/tenant-shard-db:2.0.5` — never `:2`, never `:latest`
 - `postgres:16.13-alpine3.23` — never `:16-alpine`, never `:alpine`
 - `GO_VERSION: '1.25.9'` — never `'1.25'`, never `'stable'`
 - `go-version: '1.25.9'` in `actions/setup-go` — never `'1.25.x'`

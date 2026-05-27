@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -61,6 +61,20 @@ type entClient interface {
 	// unconsumed→consumed transition. Backed by the SDK's Plan.UpdateIf
 	// primitive (tenant-shard-db v1.13.1+ for the schemaless-mode fix).
 	updateIf(ctx context.Context, actor string, nodeID string, msg proto.Message, field string, equals any) error
+	// updateIfNoWait is updateIf without the post-commit read-your-writes
+	// visibility wait. For monotonic-counter CAS (failed-login
+	// increments) where many writers transition the same field in quick
+	// succession, the exact-value wait inside updateIf chases a value a
+	// later increment already moved past and times out even though the
+	// CAS committed. Callers confirm visibility with a "field >= written"
+	// poll instead, which a concurrent higher write also satisfies.
+	updateIfNoWait(ctx context.Context, actor string, nodeID string, msg proto.Message, field string, equals any) error
+	// updateFields updates an EXPLICIT set of fields, so a field can be
+	// set to its proto3 zero value (false / 0 / ""). The plain update
+	// path serializes only non-default fields, so "set verified=false"
+	// silently no-ops; updateFields names the fields on the wire
+	// (tenant-shard-db v1.25.0 Plan.UpdateFields, ADR-028 #583).
+	updateFields(ctx context.Context, actor string, nodeID string, msg proto.Message, fields ...string) error
 	delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error
 	// deleteExpired removes up to limit rows of the witness type whose
 	// expires_at is strictly less than beforeMs. Used by the GC
@@ -302,6 +316,76 @@ func (s *sdkScope) updateIf(ctx context.Context, actor string, nodeID string, ms
 		return err
 	}
 	return s.waitForPatchVisible(ctx, actor, nodeID, msg)
+}
+
+func (s *sdkScope) updateIfNoWait(ctx context.Context, actor string, nodeID string, msg proto.Message, field string, equals any) error {
+	scope, err := s.scope(actor)
+	if err != nil {
+		return err
+	}
+	plan := scope.Plan()
+	plan.UpdateIf(nodeID, msg, field, equals)
+	if _, err := plan.Commit(ctx); err != nil {
+		if errors.Is(err, sdk.ErrPreconditionFailed) {
+			return errPreconditionFailed
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *sdkScope) updateFields(ctx context.Context, actor string, nodeID string, msg proto.Message, fields ...string) error {
+	scope, err := s.scope(actor)
+	if err != nil {
+		return err
+	}
+	plan := scope.Plan()
+	plan.UpdateFields(nodeID, msg, fields...)
+	if _, err := plan.Commit(ctx); err != nil {
+		return err
+	}
+	return s.waitForFieldsVisible(ctx, actor, nodeID, msg, fields)
+}
+
+// waitForFieldsVisible polls a typed get until every named field on the
+// stored node equals the written value. Unlike waitForPatchVisible
+// (which Ranges only the set fields and so can't observe a field written
+// to its zero value), this compares the explicit field list, so a
+// false/0/"" write is confirmed visible before returning.
+func (s *sdkScope) waitForFieldsVisible(ctx context.Context, actor, nodeID string, want proto.Message, fields []string) error {
+	deadline := time.Now().Add(5 * time.Second)
+	wm := want.ProtoReflect()
+	desc := wm.Descriptor()
+	for {
+		got := newMessageLike(want)
+		err := s.get(ctx, actor, got, nodeID)
+		if err == nil {
+			gm := got.ProtoReflect()
+			matched := true
+			for _, f := range fields {
+				fd := desc.Fields().ByName(protoreflect.Name(f))
+				if fd == nil {
+					continue
+				}
+				if !gm.Get(fd).Equal(wm.Get(fd)) {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("entdb: field visibility timeout for %s", nodeID)
+		}
+		if err := sleepOrContextDone(ctx, 50*time.Millisecond); err != nil {
+			return err
+		}
+	}
 }
 
 func (s *sdkScope) ensureUserTenantMember(ctx context.Context, userID, emailAddr, name, role string) error {
@@ -722,7 +806,11 @@ func (s *sdkScope) queryViaTransport(ctx context.Context, actor string, witness 
 	if !ok {
 		return nil, false, nil
 	}
-	nodes, err := s.transport.QueryNodes(ctx, s.tenantID, actor, typeID, rawFilter)
+	// limit=0 tells the SDK (tenant-shard-db v1.24.0+, ADR-029) to
+	// auto-follow the keyset cursor to exhaustion and return the complete
+	// result set — earlier versions silently truncated at the server's
+	// per-page cap (~100), dropping rows for users/tenants past it.
+	nodes, err := s.transport.QueryNodes(ctx, s.tenantID, actor, typeID, rawFilter, 0)
 	if err != nil {
 		// tenant-shard-db v1.12.x returns FailedPrecondition
 		// "tenant not opened" on a QueryNodes against a tenant that

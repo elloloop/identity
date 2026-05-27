@@ -6,7 +6,7 @@ import (
 	"context"
 	"testing"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 )
 
 // ensureRealEntDBTenant registers a tenant in the global registry

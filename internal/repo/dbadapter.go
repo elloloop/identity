@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -151,7 +151,10 @@ func (a *dbAdapter) GetNode(ctx context.Context, tenantID, actor string, typeID 
 }
 
 func (a *dbAdapter) QueryNodes(ctx context.Context, tenantID, actor string, typeID int, filter map[string]any) ([]*sdk.Node, error) {
-	return a.transport.QueryNodes(ctx, tenantID, actor, typeID, filter)
+	// limit=0: auto-follow the keyset cursor to the complete set
+	// (tenant-shard-db v1.24.0+, ADR-029). Without it the SDK truncates
+	// at the server's per-page cap.
+	return a.transport.QueryNodes(ctx, tenantID, actor, typeID, filter, 0)
 }
 
 func (a *dbAdapter) ExecuteAtomic(ctx context.Context, tenantID, actor string, ops []sdk.Operation) (*sdk.CommitResult, error) {
@@ -177,7 +180,12 @@ func (a *dbAdapter) GetEdgesTo(ctx context.Context, tenantID, actor, toNodeID st
 }
 
 func (a *dbAdapter) SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*sdk.Node, error) {
-	return a.transport.SearchNodes(ctx, tenantID, actor, typeID, query)
+	// Search returns a single ranked page (tenant-shard-db ADR-029 FTS
+	// carve-out — no keyset auto-follow). Request a generous page and
+	// drop the has-more flag; admin search never needs deep pagination.
+	const searchPageSize = 1000
+	nodes, _, err := a.transport.SearchNodes(ctx, tenantID, actor, typeID, query, searchPageSize, 0)
+	return nodes, err
 }
 
 // RegisterUserInTenant registers userID globally and adds it as a

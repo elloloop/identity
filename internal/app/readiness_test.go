@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 )
 
 // stubDB is a no-op service.DB that records the last QueryNodes call.

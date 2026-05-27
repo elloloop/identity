@@ -103,4 +103,97 @@ message BeginOAuthLoginResponse {
     <code>ResetUserPassword</code>. After that they can log in with either
     provider.
   </p>
+
+  <h2>Duplicate-link safety: composite uniqueness</h2>
+  <p>
+    The link between a local user and a provider-side identity is stored
+    as an <code>OAuthIdentity</code> row keyed on
+    <code>(provider, provider_user_id)</code>. That tuple is declared
+    <code>composite_unique</code> in <code>schema.proto</code>, so the
+    storage layer enforces "at most one local user per provider-side
+    identity" atomically — two concurrent <code>OAuthLogin</code> calls
+    that race to link the same Google account onto two different local
+    accounts will collide on a real unique index on the entdb backend
+    (ADR-031 self-describing writes) and on the unique index on the
+    postgres backend, and exactly one of them succeeds. The repository
+    keeps a pre-query to surface the friendly
+    <code>composite unique violated (google, &lt;sub&gt;)</code> error
+    message, but the pre-query is not how the invariant is enforced.
+  </p>
+
+  <h2>Hosted OAuth flow (Firebase-style)</h2>
+  <p>
+    On top of the headless RPCs above, identity also exposes a fully
+    server-owned OAuth flow that handles the provider redirects and
+    callbacks for you. Two plain HTTP routes (not Connect-RPC) drive
+    it — the browser is 302-redirected through them:
+  </p>
+  <ul>
+    <li>
+      <code>GET /oauth/start/{`{provider}`}?return_to=...</code> — mints
+      the state token, builds the provider authorization URL, and
+      redirects the browser to it.
+    </li>
+    <li>
+      <code>GET /oauth/callback/{`{provider}`}</code> — receives the
+      provider's authorization code, exchanges it through the same
+      <code>OAuthLogin</code> internals, mints an opaque single-use code
+      (<code>OAuthOneTimeCode</code>, 60s TTL), and 302-redirects to
+      <code>return_to?code=&lt;otc&gt;</code>.
+    </li>
+  </ul>
+  <p>
+    The SPA then exchanges the one-time code for tokens via the
+    <code>RedeemOAuthCode</code> RPC. No token material is persisted at
+    rest — only the user id is stored alongside the
+    <code>code_hash</code>, so a leaked code store is useless after the
+    60s window or a single redeem.
+  </p>
+
+  <h3>Enabling the hosted flow</h3>
+  <p>
+    The hosted flow is <strong>off by default</strong>. Enable it by
+    setting an allowlist of <code>return_to</code> origins / prefixes:
+  </p>
+  <Code code={`-e GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com,https://staging.example.com`} lang="bash" />
+  <p>
+    A <code>return_to</code> must equal or be prefixed by an allowlist
+    entry; anything else is rejected with HTTP 400 at
+    <code>/oauth/start</code> before any provider round-trip. Empty (the
+    default) disables the routes entirely — they return 404 and only the
+    headless RPCs work. The single provider-facing redirect URI registered
+    with each provider is
+    <code>&lt;identity-origin&gt;/oauth/callback/&lt;provider&gt;</code>,
+    so you configure it once per provider and reuse it across all your
+    SPA origins (which appear only in the <code>return_to</code>
+    allowlist, not at the provider).
+  </p>
+
+  <h3>End-to-end browser walkthrough</h3>
+  <Code code={`// 1. SPA kicks off the flow by sending the user to /oauth/start.
+//    No state-token round-trip on the client; identity owns it.
+window.location.href =
+  "https://auth.example.com/oauth/start/google" +
+  "?return_to=" + encodeURIComponent("https://app.example.com/oauth/done");
+
+// 2. Provider redirects back to /oauth/callback/google with ?code=...
+//    Identity exchanges, links/creates the OAuthIdentity row, mints
+//    a one-time code, and redirects to return_to with ?code=otc_...
+
+// 3. /oauth/done in the SPA: exchange the otc for real tokens.
+const params = new URLSearchParams(window.location.search);
+const otc = params.get("code");
+const { user, accessToken, refreshToken } = await client.redeemOAuthCode({
+  code: otc,
+});
+
+storeTokens(accessToken, refreshToken);
+window.location.replace("/dashboard");`} lang="typescript" />
+  <p>
+    See decision log §10 in <a href="https://github.com/elloloop/identity/blob/main/docs/IDENTITY.md"><code>docs/IDENTITY.md</code></a>
+    for the design rationale (why a one-time code rather than a
+    fragment-token or cookie, why <code>return_to</code> is a separate
+    signed artifact rather than a state-token claim, and why the
+    allowlist is fail-closed).
+  </p>
 </DocsLayout>

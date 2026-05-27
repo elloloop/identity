@@ -360,8 +360,15 @@ type NodeOpts struct {
 	ExtensionCapabilityEnum string                   `protobuf:"bytes,20,opt,name=extension_capability_enum,json=extensionCapabilityEnum,proto3" json:"extension_capability_enum,omitempty"`
 	CapabilityMappings      []*CapabilityMapping     `protobuf:"bytes,21,rep,name=capability_mappings,json=capabilityMappings,proto3" json:"capability_mappings,omitempty"`
 	CapabilityImplications  []*CapabilityImplication `protobuf:"bytes,22,rep,name=capability_implications,json=capabilityImplications,proto3" json:"capability_implications,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// Composite (multi-field) unique constraints. Each entry declares a
+	// tuple of proto field names that must be unique across all nodes of
+	// this type; the server resolves names to numeric field_ids at
+	// schema-register time and creates a unique expression index covering
+	// the tuple. Single-field uniqueness continues to use
+	// (entdb.field).unique = true.
+	CompositeUnique []*UniqueConstraint `protobuf:"bytes,24,rep,name=composite_unique,json=compositeUnique,proto3" json:"composite_unique,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *NodeOpts) Reset() {
@@ -492,6 +499,75 @@ func (x *NodeOpts) GetCapabilityImplications() []*CapabilityImplication {
 	return nil
 }
 
+func (x *NodeOpts) GetCompositeUnique() []*UniqueConstraint {
+	if x != nil {
+		return x.CompositeUnique
+	}
+	return nil
+}
+
+// Composite uniqueness constraint on a node type — declares that the
+// listed fields, taken together as a tuple, must be unique across all
+// nodes of the type. Used by ADR-031 self-describing writes: the SDK
+// attaches this to ExecuteAtomic, the server materialises it in the
+// same WAL event before applying the data ops.
+type UniqueConstraint struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Proto field names participating in the constraint. Must reference
+	// at least 2 fields (single-field uniqueness is declared via
+	// (entdb.field).unique = true).
+	Fields []string `protobuf:"bytes,1,rep,name=fields,proto3" json:"fields,omitempty"`
+	// Optional human-readable name. When omitted, the server derives one
+	// from the field ids (e.g. "f2_f3"). Surfaces in error messages.
+	Name          string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UniqueConstraint) Reset() {
+	*x = UniqueConstraint{}
+	mi := &file_entdb_entdb_options_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UniqueConstraint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UniqueConstraint) ProtoMessage() {}
+
+func (x *UniqueConstraint) ProtoReflect() protoreflect.Message {
+	mi := &file_entdb_entdb_options_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UniqueConstraint.ProtoReflect.Descriptor instead.
+func (*UniqueConstraint) Descriptor() ([]byte, []int) {
+	return file_entdb_entdb_options_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *UniqueConstraint) GetFields() []string {
+	if x != nil {
+		return x.Fields
+	}
+	return nil
+}
+
+func (x *UniqueConstraint) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 type EdgeOpts struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	EdgeId         int32                  `protobuf:"varint,1,opt,name=edge_id,json=edgeId,proto3" json:"edge_id,omitempty"`
@@ -510,7 +586,7 @@ type EdgeOpts struct {
 
 func (x *EdgeOpts) Reset() {
 	*x = EdgeOpts{}
-	mi := &file_entdb_entdb_options_proto_msgTypes[3]
+	mi := &file_entdb_entdb_options_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -522,7 +598,7 @@ func (x *EdgeOpts) String() string {
 func (*EdgeOpts) ProtoMessage() {}
 
 func (x *EdgeOpts) ProtoReflect() protoreflect.Message {
-	mi := &file_entdb_entdb_options_proto_msgTypes[3]
+	mi := &file_entdb_entdb_options_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -535,7 +611,7 @@ func (x *EdgeOpts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EdgeOpts.ProtoReflect.Descriptor instead.
 func (*EdgeOpts) Descriptor() ([]byte, []int) {
-	return file_entdb_entdb_options_proto_rawDescGZIP(), []int{3}
+	return file_entdb_entdb_options_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *EdgeOpts) GetEdgeId() int32 {
@@ -629,7 +705,7 @@ type FieldOpts struct {
 
 func (x *FieldOpts) Reset() {
 	*x = FieldOpts{}
-	mi := &file_entdb_entdb_options_proto_msgTypes[4]
+	mi := &file_entdb_entdb_options_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -641,7 +717,7 @@ func (x *FieldOpts) String() string {
 func (*FieldOpts) ProtoMessage() {}
 
 func (x *FieldOpts) ProtoReflect() protoreflect.Message {
-	mi := &file_entdb_entdb_options_proto_msgTypes[4]
+	mi := &file_entdb_entdb_options_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -654,7 +730,7 @@ func (x *FieldOpts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FieldOpts.ProtoReflect.Descriptor instead.
 func (*FieldOpts) Descriptor() ([]byte, []int) {
-	return file_entdb_entdb_options_proto_rawDescGZIP(), []int{4}
+	return file_entdb_entdb_options_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *FieldOpts) GetRequired() bool {
@@ -808,7 +884,7 @@ const file_entdb_entdb_options_proto_rawDesc = "" +
 	"\x03ext\x18\x02 \x01(\x05R\x03ext\x128\n" +
 	"\fimplies_core\x18\x03 \x03(\x0e2\x15.entdb.CoreCapabilityR\vimpliesCore\x12\x1f\n" +
 	"\vimplies_ext\x18\x04 \x03(\x05R\n" +
-	"impliesExt\"\xe3\x04\n" +
+	"impliesExt\"\xa7\x05\n" +
 	"\bNodeOpts\x12\x17\n" +
 	"\atype_id\x18\x01 \x01(\x05R\x06typeId\x12\x16\n" +
 	"\x06public\x18\x02 \x01(\bR\x06public\x12%\n" +
@@ -828,7 +904,11 @@ const file_entdb_entdb_options_proto_rawDesc = "" +
 	"deprecated\x12:\n" +
 	"\x19extension_capability_enum\x18\x14 \x01(\tR\x17extensionCapabilityEnum\x12I\n" +
 	"\x13capability_mappings\x18\x15 \x03(\v2\x18.entdb.CapabilityMappingR\x12capabilityMappings\x12U\n" +
-	"\x17capability_implications\x18\x16 \x03(\v2\x1c.entdb.CapabilityImplicationR\x16capabilityImplicationsJ\x04\b\x17\x10\x18R\x04keys\"\x88\x03\n" +
+	"\x17capability_implications\x18\x16 \x03(\v2\x1c.entdb.CapabilityImplicationR\x16capabilityImplications\x12B\n" +
+	"\x10composite_unique\x18\x18 \x03(\v2\x17.entdb.UniqueConstraintR\x0fcompositeUniqueJ\x04\b\x17\x10\x18R\x04keys\">\n" +
+	"\x10UniqueConstraint\x12\x16\n" +
+	"\x06fields\x18\x01 \x03(\tR\x06fields\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\x88\x03\n" +
 	"\bEdgeOpts\x12\x17\n" +
 	"\aedge_id\x18\x01 \x01(\x05R\x06edgeId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12'\n" +
@@ -901,7 +981,7 @@ func file_entdb_entdb_options_proto_rawDescGZIP() []byte {
 }
 
 var file_entdb_entdb_options_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_entdb_entdb_options_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_entdb_entdb_options_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_entdb_entdb_options_proto_goTypes = []any{
 	(DataPolicy)(0),                     // 0: entdb.DataPolicy
 	(SubjectExitPolicy)(0),              // 1: entdb.SubjectExitPolicy
@@ -909,10 +989,11 @@ var file_entdb_entdb_options_proto_goTypes = []any{
 	(*CapabilityMapping)(nil),           // 3: entdb.CapabilityMapping
 	(*CapabilityImplication)(nil),       // 4: entdb.CapabilityImplication
 	(*NodeOpts)(nil),                    // 5: entdb.NodeOpts
-	(*EdgeOpts)(nil),                    // 6: entdb.EdgeOpts
-	(*FieldOpts)(nil),                   // 7: entdb.FieldOpts
-	(*descriptorpb.MessageOptions)(nil), // 8: google.protobuf.MessageOptions
-	(*descriptorpb.FieldOptions)(nil),   // 9: google.protobuf.FieldOptions
+	(*UniqueConstraint)(nil),            // 6: entdb.UniqueConstraint
+	(*EdgeOpts)(nil),                    // 7: entdb.EdgeOpts
+	(*FieldOpts)(nil),                   // 8: entdb.FieldOpts
+	(*descriptorpb.MessageOptions)(nil), // 9: google.protobuf.MessageOptions
+	(*descriptorpb.FieldOptions)(nil),   // 10: google.protobuf.FieldOptions
 }
 var file_entdb_entdb_options_proto_depIdxs = []int32{
 	2,  // 0: entdb.CapabilityMapping.required_core:type_name -> entdb.CoreCapability
@@ -921,19 +1002,20 @@ var file_entdb_entdb_options_proto_depIdxs = []int32{
 	0,  // 3: entdb.NodeOpts.data_policy:type_name -> entdb.DataPolicy
 	3,  // 4: entdb.NodeOpts.capability_mappings:type_name -> entdb.CapabilityMapping
 	4,  // 5: entdb.NodeOpts.capability_implications:type_name -> entdb.CapabilityImplication
-	0,  // 6: entdb.EdgeOpts.data_policy:type_name -> entdb.DataPolicy
-	1,  // 7: entdb.EdgeOpts.on_subject_exit:type_name -> entdb.SubjectExitPolicy
-	8,  // 8: entdb.node:extendee -> google.protobuf.MessageOptions
-	8,  // 9: entdb.edge:extendee -> google.protobuf.MessageOptions
-	9,  // 10: entdb.field:extendee -> google.protobuf.FieldOptions
-	5,  // 11: entdb.node:type_name -> entdb.NodeOpts
-	6,  // 12: entdb.edge:type_name -> entdb.EdgeOpts
-	7,  // 13: entdb.field:type_name -> entdb.FieldOpts
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	11, // [11:14] is the sub-list for extension type_name
-	8,  // [8:11] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	6,  // 6: entdb.NodeOpts.composite_unique:type_name -> entdb.UniqueConstraint
+	0,  // 7: entdb.EdgeOpts.data_policy:type_name -> entdb.DataPolicy
+	1,  // 8: entdb.EdgeOpts.on_subject_exit:type_name -> entdb.SubjectExitPolicy
+	9,  // 9: entdb.node:extendee -> google.protobuf.MessageOptions
+	9,  // 10: entdb.edge:extendee -> google.protobuf.MessageOptions
+	10, // 11: entdb.field:extendee -> google.protobuf.FieldOptions
+	5,  // 12: entdb.node:type_name -> entdb.NodeOpts
+	7,  // 13: entdb.edge:type_name -> entdb.EdgeOpts
+	8,  // 14: entdb.field:type_name -> entdb.FieldOpts
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	12, // [12:15] is the sub-list for extension type_name
+	9,  // [9:12] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_entdb_entdb_options_proto_init() }
@@ -947,7 +1029,7 @@ func file_entdb_entdb_options_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_entdb_entdb_options_proto_rawDesc), len(file_entdb_entdb_options_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 3,
 			NumServices:   0,
 		},

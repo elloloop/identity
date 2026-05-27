@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	entdbpkg "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	entdbpkg "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 
 	"github.com/elloloop/identity/pkg/passwords"
 	"github.com/elloloop/identity/pkg/totp"

@@ -98,13 +98,21 @@ tenant-shard-db tenant. We never multiplex multiple identity tenants
 into one EntDB tenant or split one identity tenant across two EntDB
 tenants. The two layers' tenant identifiers are the same string.
 
-**tenant-shard-db is schemaless.** It stores opaque
-`(type_id, field_id, value)` tuples; the proto schema (field names,
-types, indexes) lives in `proto/identity/schema/schema.proto` and is
-known only to identity. tenant-shard-db doesn't validate field shapes,
-doesn't enforce identity's own role/status semantics, and isn't
-involved in any identity-layer policy decision beyond "is this actor
-allowed to write to this tenant."
+**tenant-shard-db stores opaque `(type_id, field_id, value)` tuples.**
+The proto schema (field names, types, indexes, composite-unique
+tuples) lives in `proto/identity/schema/schema.proto` and is owned by
+identity. As of tenant-shard-db v2 (ADR-031) the Go SDK auto-attaches
+that schema to the first `ExecuteAtomic` per tenant, and the server
+materialises a per-tenant registry — type ids, field options,
+composite-unique indexes — in the same WAL event as the first data
+ops. After that the server enforces field types, unique constraints,
+and required-fields server-atomically; identity no longer relies on
+"check before insert" guards alone for those invariants. See decision
+log §15 for the migration and what changed.
+
+tenant-shard-db still doesn't enforce identity's own role/status
+semantics, and isn't involved in any identity-layer policy decision
+beyond "is this actor allowed to write to this tenant."
 
 ## Configuration: the mode knob
 
@@ -310,15 +318,28 @@ manages "can write to this scope or not."
 
 - **Proto schema** — `proto/identity/schema/schema.proto`. Declares
   every node type (`User`, `RefreshToken`, `PasswordResetToken`,
-  `PasskeyCredential`, `Organization`, …) with field types, indexes,
-  uniqueness, and PII tagging. Generated Go code lives in
-  `gen/go/identity/schema/`.
+  `PasskeyCredential`, `Organization`, `OAuthIdentity`, …) with field
+  types, indexes, single-field uniqueness, composite uniqueness, and
+  PII tagging. Generated Go code lives in `gen/go/identity/schema/`.
+- **SDK construction** — `internal/repo/entdb/entclient.New(...)` is
+  the only entry point identity uses to dial the tenant-shard-db Go
+  SDK. It wraps `sdk.NewClient` with `sdk.WithSchema(...)` pre-filled
+  by `SchemaMessages()` — one zero-valued instance of every
+  `(entdb.node)`/`(entdb.edge)` message in `schema.proto`. The SDK
+  reads the proto descriptors at runtime, derives a name-free
+  `SchemaDescriptor` + fingerprint, and rides them on the first
+  `ExecuteAtomic` per tenant; the server materialises the registry
+  in the same WAL event before the data ops (ADR-031). Embedders
+  wiring their own `*sdk.DbClient` can pull the same list via
+  `entclient.SchemaMessages()`.
 - **Repo wiring** — `internal/repo/entdb/` translates between
   identity's domain types (`service.User`, `service.RefreshTokenRecord`,
   …) and the proto messages, then issues operations against the
   tenant-shard-db SDK.
-- **tenant-shard-db** — stores opaque tuples. It does not need a copy
-  of our schema (the database is schemaless by design).
+- **tenant-shard-db** — stores opaque `(type_id, field_id, value)`
+  tuples on the WAL; it learns identity's schema from the SDK
+  auto-attach (above) and enforces field types, single- and composite-
+  unique constraints, and required-field validation against it.
 
 The `Organization` node (type_id 33) and `OrganizationMembership` node
 (type_id 34) are the identity-layer storage for `mode=multi`
@@ -332,12 +353,12 @@ uses for `ListOrganizationsForUser`; the tenant-shard-db `TenantMember`
 table remains the storage-layer source of truth for write
 authorisation.
 
-When v1.12+ of the Go server reimplementation lands a schema-loader
-hook, identity will register the proto-extracted schema with the
-server at startup. Until then, identity targets the Python server
-image (≤ 1.10.x) which doesn't require client-side schema
-registration. See `docs/v1.12-migration.md` (TODO) for the migration
-plan when upstream is ready.
+`OAuthIdentity` (type_id 31) carries a `(entdb.node).composite_unique`
+declaration on `(provider, provider_user_id)`. Two concurrent
+`CreateOAuthIdentity` calls for the same provider tuple collide on the
+server-materialised unique index (ADR-031) — the repository's
+pre-query is kept as a fast path for friendly errors and for the
+in-memory fake, not as the only enforcement.
 
 ## Runtime
 
@@ -423,12 +444,17 @@ before you ship.
    tenant-shard-db's `TenantMember.Role`.** They evolve
    independently. An identity admin demoted to member shouldn't lose
    their write rights at the storage layer (or vice-versa).
-5. **tenant-shard-db remains schemaless from identity's view.** The
-   proto schema is identity's contract with itself; the database
-   never validates against it. When tenant-shard-db ships
-   schema-extraction-and-loading, identity uploads the schema as a
-   bootstrap step, but the database still treats its content as
-   opaque storage.
+5. **tenant-shard-db enforces identity's schema as of v2 (ADR-031).**
+   Through v1.x the storage layer was schemaless and identity's proto
+   was a contract with itself; the database accepted any bytes. The
+   v2 release inverted that: the SDK auto-attaches identity's
+   `SchemaDescriptor` to `ExecuteAtomic` so the server materialises
+   the schema and enforces field types, unique constraints, and
+   required-fields per tenant. The proto file at
+   `proto/identity/schema/schema.proto` is still identity-owned and
+   the only place schema changes are made; what changed is that
+   adding an invariant there (`required`, `unique`, `composite_unique`)
+   now actually binds at the storage layer. See §15 for the migration.
 6. **JWT signing is a pluggable `jwt.Signer` interface, default
    file-backed.** Issue #90. The OSS image must work with no external
    KMS dependency, so the default backend reads a JSON keys file on
@@ -474,8 +500,8 @@ before you ship.
    trade-off. Adding a third model in the future means a new value
    on this knob, not a translation layer wrapping the existing ones.
 8. **`OrganizationSignup` rollback is best-effort compensating
-   deletes, not transactional.** tenant-shard-db (through v1.14.0
-   today) does not expose a `DeleteTenant` primitive, so once
+   deletes, not transactional.** tenant-shard-db does not expose a
+   `DeleteTenant` primitive (true through at least v2.0.5), so once
    `Admin.CreateTenant`
    has succeeded the tenant exists in the storage layer until an
    operator removes it out-of-band. Identity's `OrganizationSignup`
@@ -836,6 +862,59 @@ before you ship.
       turning it into an unauthenticated path to org membership. In
       `mode=single` there is no `Organization`, so the auto-created user
       is simply a normal user of the one tenant.
+
+15. **tenant-shard-db v2.0.5 alignment — self-describing schema,
+    server-atomic composite uniqueness.** The v2.0.5 bump (SDK +
+    server image) reworked two seams that had stayed unchanged across
+    every v1.x release:
+
+    - **Schema attach moves into the SDK (ADR-031).** identity no
+      longer treats the storage layer as a "schemaless tuple store" —
+      `internal/repo/entdb/entclient.New` wraps `sdk.NewClient` with
+      `sdk.WithSchema(SchemaMessages()...)`, registering one
+      zero-valued instance of every `(entdb.node)`/`(entdb.edge)`
+      message in `schema.proto` (25 messages, 21 nodes + 4 edges).
+      The SDK derives a name-free `SchemaDescriptor` + fingerprint
+      from the proto descriptors; on the first `ExecuteAtomic` per
+      tenant it rides them on the call, the server prepends a
+      `register_schema` WAL op (establish-or-reject) before the data
+      ops, and the registry — type ids, field options, composite-
+      unique indexes — is rebuilt deterministically on replay. After
+      the server confirms the matching fingerprint the descriptor is
+      omitted (lean steady state) and re-attached on `SCHEMA_MISMATCH`.
+      Every production entry point (`identityserver.New`) and every
+      realentdb test/integration harness goes through `entclient.New`
+      so the schema attaches consistently; embedders wiring their own
+      `*sdk.DbClient` can pull the same list via
+      `entclient.SchemaMessages()`.
+
+    - **Composite uniqueness on `OAuthIdentity` is server-atomic.**
+      `OAuthIdentity` declares
+      `(entdb.node).composite_unique = { name: "provider_user_id",
+      fields: ["provider", "provider_user_id"] }`. Two concurrent
+      `CreateOAuthIdentity` calls for the same tuple now collide on
+      the server-materialised unique index instead of racing past a
+      query-then-create guard (identity#141). The repository keeps a
+      pre-query inside `CreateOAuthIdentity` so the *common* "already
+      linked" case returns the friendly composite-violation error
+      instead of the generic `UniqueConstraintError` from the create
+      itself, and so the in-memory fake (which has no schema path)
+      keeps the same observable behavior. The conformance suite's
+      `ConcurrentDuplicate_OAuthIdentity_SingleRow` subtest asserts
+      "exactly one winner among 64 concurrent identical creates" on
+      memory, postgres, **and** entdb.
+
+      `OrganizationMembership` could be promoted the same way (its
+      "exactly one (org, user) row" invariant is structurally
+      identical), but real membership writes are administrator-
+      initiated and naturally serialised, so the service-layer pre-
+      check stays sufficient. The path is open if a future flow ever
+      needs concurrent-safe membership creates.
+
+    Module path migrated for major-version 2:
+    `github.com/elloloop/tenant-shard-db/sdk/go/entdb` →
+    `.../sdk/go/entdb/v2` (Go's semantic-import-versioning rule). The
+    `entclient` wrapper keeps every call site free of that detail.
 
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

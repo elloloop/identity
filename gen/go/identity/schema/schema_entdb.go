@@ -3,7 +3,7 @@
 
 package schema
 
-import "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+import "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 
 var (
 	UserEmail = entdb.UniqueKey[string]{TypeID: 1, FieldID: 1, Name: "email"}

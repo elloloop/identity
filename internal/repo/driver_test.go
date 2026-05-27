@@ -6,7 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	entclient "github.com/elloloop/identity/internal/repo/entdb/entclient"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"go.uber.org/zap"
 )
 
@@ -75,7 +76,7 @@ func TestBuild_EntDBHappyPath(t *testing.T) {
 	// to construct without a server. We only assert Build returns a
 	// non-nil Built; the actual reads/writes against the unconnected
 	// client live in the real-entdb integration tests.
-	client, err := sdk.NewClient("localhost:50051")
+	client, err := entclient.New("localhost:50051")
 	if err != nil {
 		t.Fatalf("sdk.NewClient: %v", err)
 	}

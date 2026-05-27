@@ -7,7 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	entclient "github.com/elloloop/identity/internal/repo/entdb/entclient"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/service"
@@ -25,7 +26,7 @@ func TestNewDBAdapter_NilClient(t *testing.T) {
 func TestNewDBAdapter_DelegatesToClientTransport(t *testing.T) {
 	t.Parallel()
 
-	client, err := sdk.NewClient("localhost:50051")
+	client, err := entclient.New("localhost:50051")
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -199,6 +200,7 @@ func (t *staleUpdateTransport) ExecuteAtomic(
 	_ string,
 	_ string,
 	ops []sdk.Operation,
+	_ ...sdk.CommitOption,
 ) (*sdk.CommitResult, error) {
 	if len(ops) != 1 {
 		return nil, nil
@@ -245,6 +247,7 @@ func (t *commitResultTransport) ExecuteAtomic(
 	string,
 	string,
 	[]sdk.Operation,
+	...sdk.CommitOption,
 ) (*sdk.CommitResult, error) {
 	return t.result, nil
 }
@@ -272,7 +275,7 @@ type passthroughTransport struct {
 	searchNodesErr     error
 }
 
-func (t *passthroughTransport) QueryNodes(context.Context, string, string, int, map[string]any) ([]*sdk.Node, error) {
+func (t *passthroughTransport) QueryNodes(context.Context, string, string, int, map[string]any, int) ([]*sdk.Node, error) {
 	t.queryNodesCalled = true
 	return t.queryNodesResult, t.queryNodesErr
 }
@@ -287,9 +290,9 @@ func (t *passthroughTransport) GetEdgesTo(context.Context, string, string, strin
 	return t.getEdgesToResult, t.getEdgesToErr
 }
 
-func (t *passthroughTransport) SearchNodes(context.Context, string, string, int, string) ([]*sdk.Node, error) {
+func (t *passthroughTransport) SearchNodes(context.Context, string, string, int, string, int32, int32) ([]*sdk.Node, bool, error) {
 	t.searchNodesCalled = true
-	return t.searchNodesResult, t.searchNodesErr
+	return t.searchNodesResult, false, t.searchNodesErr
 }
 
 func TestDBAdapter_QueryNodesDelegatesToTransport(t *testing.T) {

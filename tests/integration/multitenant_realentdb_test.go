@@ -9,10 +9,9 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
-
 	"github.com/elloloop/identity/internal/repo"
 	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -25,7 +24,7 @@ func newMultiTenantBackend(t *testing.T) *multiTenantBackend {
 		return nil
 	}
 
-	client, err := sdk.NewClient(addr)
+	client, err := entclient.New(addr)
 	if err != nil {
 		t.Fatalf("entdb.NewClient: %v", err)
 	}

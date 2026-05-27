@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb"
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"go.opentelemetry.io/otel/attribute"
 	"google.golang.org/protobuf/proto"
 
@@ -86,6 +86,21 @@ func (t *tracedClient) updateIf(ctx context.Context, actor string, nodeID string
 	attrs := append(entAttrs(actor, msg, nodeID), attribute.String("entdb.precondition_field", field))
 	ctx, end := observability.StartClient(ctx, "entdb.updateIf", attrs...)
 	err := t.inner.updateIf(ctx, actor, nodeID, msg, field, equals)
+	end(err)
+	return err
+}
+
+func (t *tracedClient) updateIfNoWait(ctx context.Context, actor string, nodeID string, msg proto.Message, field string, equals any) error {
+	attrs := append(entAttrs(actor, msg, nodeID), attribute.String("entdb.precondition_field", field))
+	ctx, end := observability.StartClient(ctx, "entdb.updateIfNoWait", attrs...)
+	err := t.inner.updateIfNoWait(ctx, actor, nodeID, msg, field, equals)
+	end(err)
+	return err
+}
+
+func (t *tracedClient) updateFields(ctx context.Context, actor string, nodeID string, msg proto.Message, fields ...string) error {
+	ctx, end := observability.StartClient(ctx, "entdb.updateFields", entAttrs(actor, msg, nodeID)...)
+	err := t.inner.updateFields(ctx, actor, nodeID, msg, fields...)
 	end(err)
 	return err
 }
