@@ -23,9 +23,9 @@ import (
 // systemActor is the actor used for cross-user lookups (uniqueness
 // queries, system bookkeeping) where there is no specific user.
 //
-// tenant-shard-db v1.12 enforces actor-scoped row visibility: a
-// `user:X` actor only sees rows X created. Cross-user reads (e.g.
-// FindUserByEmail, the OAuth composite-uniqueness dup-check, the
+// tenant-shard-db enforces actor-scoped row visibility: a `user:X`
+// actor only sees rows X created. Cross-user reads (e.g.
+// FindUserByEmail, the OAuth composite-uniqueness pre-check, the
 // duplicate-user cleanup wait) MUST use a tenant-admin actor.
 // `system:admin` is the upstream's tenant-admin namespace: it does
 // not need to be a registered user, has tenant-wide read/write, and
@@ -1882,9 +1882,16 @@ func (r *entRepository) CreateOAuthIdentity(ctx context.Context, oi *service.OAu
 	if oi == nil {
 		return errors.New("repo: CreateOAuthIdentity: nil record")
 	}
-	// EntDB does not yet support composite unique constraints; the
-	// service layer enforces (provider, provider_user_id) uniqueness
-	// by checking before insert.
+	// Server-side composite uniqueness on (provider, provider_user_id)
+	// is enforced atomically by the entdb server: OAuthIdentity declares
+	// (entdb.node).composite_unique = {provider, provider_user_id} and
+	// the SDK auto-attaches the schema to ExecuteAtomic (ADR-031), so
+	// concurrent creates with the same tuple collide on a real unique
+	// index. We still pre-query here so the *common* "already linked"
+	// case returns the friendly composite-violation message instead of
+	// the generic UniqueConstraintError surfaced by the SDK on the
+	// create itself, and so the in-memory fake (which has no schema
+	// path) keeps the same observable behavior.
 	dups, err := r.client.query(ctx, systemActor, &schemapb.OAuthIdentity{}, map[string]any{"provider": oi.Provider, "provider_user_id": oi.ProviderUserID})
 	if err != nil {
 		return fmt.Errorf("repo: CreateOAuthIdentity dup-check: %w", err)
@@ -2212,9 +2219,12 @@ func (r *entRepository) AddOrganizationMember(ctx context.Context, m *service.Or
 	if m.OrganizationID == "" || m.UserID == "" {
 		return "", fmt.Errorf("%w: missing organization_id or user_id", service.ErrInvalidArgument)
 	}
-	// EntDB does not provide composite unique constraints, so the
-	// service layer enforces "exactly one (org, user) row" by checking
-	// before insert. The check uses the same query path as
+	// "Exactly one (organization_id, user_id) row" is enforced by a
+	// service-layer pre-check. OrganizationMembership could be promoted
+	// to a (entdb.node).composite_unique declaration — the same path
+	// OAuthIdentity uses now (ADR-031 self-describing schema) — but
+	// real membership writes are administrator-initiated and naturally
+	// serialised, so the pre-check is sufficient. The query mirrors
 	// ListOrganizationsForUser so the secondary index is exercised.
 	rows, err := r.client.query(ctx, actorStr(m.UserID), &schemapb.OrganizationMembership{}, map[string]any{
 		"organization_id": m.OrganizationID,
