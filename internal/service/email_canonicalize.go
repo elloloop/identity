@@ -37,28 +37,28 @@ var reservedTLDs = map[string]struct{}{
 // not to be exhaustive. Deployers extend it via
 // GATEWAY_DISPOSABLE_EMAIL_DOMAINS (CSV) when they need more.
 var disposableDomains = map[string]struct{}{
-	"mailinator.com":   {},
-	"10minutemail.com": {},
+	"mailinator.com":    {},
+	"10minutemail.com":  {},
 	"guerrillamail.com": {},
-	"sharklasers.com":  {}, // guerrillamail alias
-	"yopmail.com":      {},
-	"tempmail.org":     {},
-	"trashmail.com":    {},
-	"dispostable.com":  {},
-	"maildrop.cc":      {},
-	"getnada.com":      {},
+	"sharklasers.com":   {}, // guerrillamail alias
+	"yopmail.com":       {},
+	"tempmail.org":      {},
+	"trashmail.com":     {},
+	"dispostable.com":   {},
+	"maildrop.cc":       {},
+	"getnada.com":       {},
 	"throwawaymail.com": {},
-	"fakeinbox.com":    {},
-	"mintemail.com":    {},
-	"mailnesia.com":    {},
+	"fakeinbox.com":     {},
+	"mintemail.com":     {},
+	"mailnesia.com":     {},
 }
 
 // gmailDomains are the addresses that share the @gmail.com inbox.
 // Dot-stripping in the local part only applies here — most non-Google
 // SMTP servers treat dots as significant.
 var gmailDomains = map[string]bool{
-	"gmail.com":       true,
-	"googlemail.com":  true,
+	"gmail.com":      true,
+	"googlemail.com": true,
 }
 
 // canonicalizeEmail returns the canonical form used for duplicate
@@ -188,7 +188,7 @@ func validateEmailFormat(addr string) error {
 		domainCanon = ascii
 	}
 	if _, banned := disposableDomains[domainCanon]; banned {
-		return fmt.Errorf("disposable email addresses are not allowed")
+		return errors.New("disposable email addresses are not allowed")
 	}
 	return nil
 }
