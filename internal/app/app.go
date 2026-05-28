@@ -302,7 +302,7 @@ func New(deps Deps) (*Built, error) {
 	adminSvc := service.NewAdminService(deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
-	profileSvc := service.NewProfileService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
+	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 
 	var idvSvc *service.IdentityVerificationService
 	if deps.IDVProvider != nil {

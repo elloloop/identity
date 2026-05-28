@@ -108,6 +108,7 @@ type fakeRepo struct {
 	errFindUser   error
 	errCreateUser error
 	errIssueToken error // makes CreateRefreshToken fail
+	errGetUser    error // makes GetUser fail
 }
 
 func newFakeRepo() *fakeRepo {
@@ -152,6 +153,9 @@ func (r *fakeRepo) FindUserByEmail(_ context.Context, email string) (*service.Us
 func (r *fakeRepo) GetUser(_ context.Context, userID string) (*service.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.errGetUser != nil {
+		return nil, r.errGetUser
+	}
 	u, ok := r.users[userID]
 	if !ok {
 		return nil, nil
@@ -1621,7 +1625,7 @@ func newHarnessWithOAuthRegistry(t *testing.T, registry *oauth.Registry) *testHa
 	adminSvc := service.NewAdminService(db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
-	profSvc := service.NewProfileService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
+	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 
 	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, cfg)
 

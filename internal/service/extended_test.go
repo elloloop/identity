@@ -1787,7 +1787,7 @@ func TestNewServices_NilLoggerIsSafe(t *testing.T) {
 	h := NewHelpService(db, "t", nil, nil)
 	assert.NotNil(t, h)
 
-	p := NewProfileService(db, "t", nil, nil)
+	p := NewProfileService(StubRepository{}, db, "t", nil, nil)
 	assert.NotNil(t, p)
 }
 
