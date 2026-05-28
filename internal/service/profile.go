@@ -17,17 +17,38 @@ import (
 // password, and audit log operations.
 type ProfileService struct {
 	bootDB          DB
+	defaultRepo     Repository
 	defaultTenantID string
 	audit           *audit.Logger
 	logger          *zap.Logger
 }
 
 // NewProfileService creates a ProfileService.
-func NewProfileService(db DB, tenantID string, auditLog *audit.Logger, logger *zap.Logger) *ProfileService {
+//
+// The repo argument may be nil — in that case only the DB-backed paths
+// work (Sessions, AuditEvents). Profile/password operations need repo
+// to be set; nil triggers ErrServiceUnavailable at call time, the same
+// shape the no-persistence stub takes.
+func NewProfileService(repo Repository, db DB, tenantID string, auditLog *audit.Logger, logger *zap.Logger) *ProfileService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &ProfileService{bootDB: db, defaultTenantID: tenantID, audit: auditLog, logger: logger}
+	return &ProfileService{
+		bootDB:          db,
+		defaultRepo:     repo,
+		defaultTenantID: tenantID,
+		audit:           auditLog,
+		logger:          logger,
+	}
+}
+
+// repo returns the Repository scoped to the request's resolved tenant,
+// falling back to the boot-time Repository in mode=single.
+func (s *ProfileService) repo(ctx context.Context) Repository {
+	if scope := TenantScopeFromContext(ctx); scope != nil && scope.Repo != nil {
+		return scope.Repo
+	}
+	return s.defaultRepo
 }
 
 // tenantID returns the request's resolved tenant, falling back to the
@@ -50,46 +71,55 @@ func (s *ProfileService) db(ctx context.Context) DB {
 }
 
 // UpdateProfile updates the authenticated user's name and/or avatar.
+// Routes through the Repository interface (which every backend
+// implements fully) rather than the low-level DB.GetNode/ExecuteAtomic
+// pair (which the memory backend stubs out as ErrServiceUnavailable).
 func (s *ProfileService) UpdateProfile(ctx context.Context, userID, name, avatarURL string) (*User, error) {
 	if userID == "" {
 		return nil, errors.New("user_id is required")
 	}
 
-	node, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(userID), typeUser, userID)
+	repo := s.repo(ctx)
+	if repo == nil {
+		return nil, ErrServiceUnavailable
+	}
+
+	user, err := repo.GetUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch user: %w", err)
 	}
-	if node == nil {
+	if user == nil {
 		return nil, errors.New("user not found")
 	}
 
-	patch := map[string]any{ufUpdatedAt: nowMs()}
+	// Repository.UpdateUser takes field-name keys (matching the canonical
+	// Repository.UpdateUser pattern used by AuthService for OAuth upserts
+	// and invitation redemption — every backend implements those keys).
+	patch := map[string]any{"updated_at": nowMs()}
 	if n := strings.TrimSpace(name); n != "" {
-		patch[ufName] = n
+		patch["name"] = n
 	}
 	if a := strings.TrimSpace(avatarURL); a != "" {
-		patch[ufAvatarURL] = a
+		patch["avatar_url"] = a
 	}
 
-	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: userID, Patch: patch}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(userID), []entdb.Operation{op}); err != nil {
+	if err := repo.UpdateUser(ctx, userID, patch); err != nil {
 		return nil, fmt.Errorf("update profile: %w", err)
 	}
 
-	// Re-fetch.
-	updated, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(userID), typeUser, userID)
+	updated, err := repo.GetUser(ctx, userID)
 	if err != nil || updated == nil {
-		// Fallback: apply patch manually.
-		u := userFromNode(node)
+		// Fallback: apply patch on the pre-update snapshot so callers
+		// still see their submitted values even if the re-fetch races.
 		if n := strings.TrimSpace(name); n != "" {
-			u.Name = n
+			user.Name = n
 		}
 		if a := strings.TrimSpace(avatarURL); a != "" {
-			u.AvatarURL = a
+			user.AvatarURL = a
 		}
-		return u, nil
+		return user, nil
 	}
-	return userFromNode(updated), nil
+	return updated, nil
 }
 
 // ListMySessions returns all active sessions for the user.

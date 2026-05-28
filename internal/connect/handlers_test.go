@@ -1211,6 +1211,11 @@ func TestProfileHandlers_HappyAndError(t *testing.T) {
 	ctx := context.Background()
 	pwHash := mustHash(t, strongPW)
 	h.db.addUserWithPassword("u-1", "u@e.com", "U", "member", "active", pwHash)
+	// ProfileService.UpdateProfile now routes through Repository (the
+	// memory backend stubs out the low-level DB.GetNode the previous
+	// shape used). Mirror the fixture into fakeRepo so the call resolves
+	// the user there too.
+	h.repo.seedUser(&service.User{ID: "u-1", Email: "u@e.com", Name: "U", Role: "member", Status: "active", PasswordHash: pwHash})
 
 	// UpdateProfile.
 	upd, err := h.client.UpdateProfile(ctx, authedReq(connect.NewRequest(&identitypb.UpdateProfileRequest{
@@ -1558,17 +1563,20 @@ func TestProfileAndPasskeyPostAuthErrors(t *testing.T) {
 	ctx := context.Background()
 	pwHash := mustHash(t, strongPW)
 	u := h.repo.seedUser(&service.User{Email: "p@e.com", Status: "active", Role: "member", PasswordHash: pwHash})
-	// Also create a corresponding user in fakeDB so ProfileService.UpdateProfile
-	// (which uses db.GetNode) can find it.
 	h.db.addUserWithPassword(u.ID, u.Email, u.Name, u.Role, u.Status, pwHash)
 
-	// UpdateProfile success path now succeeds; force fail by breaking db.
-	h.db.err = errors.New("db down")
+	// UpdateProfile now routes through Repository — break the repo's
+	// GetUser to exercise the error path.
+	h.repo.errGetUser = errors.New("repo down")
 	if _, err := h.client.UpdateProfile(ctx, authedReq(connect.NewRequest(&identitypb.UpdateProfileRequest{
 		Name: "NewName",
 	}), u.ID)); err == nil {
-		t.Fatal("expected update-profile err with broken db")
+		t.Fatal("expected update-profile err with broken repo")
 	}
+	h.repo.errGetUser = nil
+
+	// ListMySessions still uses the DB interface — break that.
+	h.db.err = errors.New("db down")
 	if _, err := h.client.ListMySessions(ctx, authedReq(connect.NewRequest(&identitypb.ListMySessionsRequest{}), u.ID)); err == nil {
 		t.Fatal("expected list-sessions err with broken db")
 	}

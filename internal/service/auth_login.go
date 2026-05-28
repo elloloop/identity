@@ -85,8 +85,8 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		return nil, ErrSignupDisabled
 	}
 	email = strings.TrimSpace(strings.ToLower(email))
-	if !strings.Contains(email, "@") {
-		return nil, fmt.Errorf("%w: invalid email", ErrInvalidArgument)
+	if err := validateEmailFormat(email); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
@@ -260,8 +260,8 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return nil, ErrLocalAuthDisabled
 	}
 	email = strings.TrimSpace(strings.ToLower(email))
-	if !strings.Contains(email, "@") {
-		return nil, fmt.Errorf("%w: invalid email", ErrInvalidArgument)
+	if err := validateEmailFormat(email); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)

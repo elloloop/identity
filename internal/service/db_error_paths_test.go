@@ -32,7 +32,9 @@ func newHelpWithDB(db DB) *HelpService {
 }
 
 func newProfileWithDB(db DB) *ProfileService {
-	return NewProfileService(db, "test-tenant",
+	// Tests in this file probe DB error paths only — Repository can
+	// be left as a stub returning ErrServiceUnavailable.
+	return NewProfileService(StubRepository{}, db, "test-tenant",
 		audit.NewLogger(nil, "test", zap.NewNop()), zap.NewNop())
 }
 
@@ -311,27 +313,18 @@ func TestHelpResolveRequest_ExecuteFails(t *testing.T) {
 
 // ── ProfileService DB errors ───────────────────────────────────────────
 
-func TestProfileUpdateProfile_ExecuteFails(t *testing.T) {
+// TestProfileUpdateProfile_RepoUnavailable confirms UpdateProfile
+// returns ErrServiceUnavailable when the Repository is the no-op
+// stub (deployer hasn't wired a real backend). Replaces the older
+// DB-driven failExecuteAtomic / failGetNodeAfter tests, which probed
+// a code path that no longer exists — UpdateProfile now goes through
+// Repository.GetUser / UpdateUser, not the low-level
+// DB.GetNode / ExecuteAtomic pair.
+func TestProfileUpdateProfile_RepoUnavailable(t *testing.T) {
 	db := newErrorDB()
-	db.addUser("user-1", "u@test.com", "U", "member", "active")
-	db.failExecuteAtomic = true
 	svc := newProfileWithDB(db)
-
 	_, err := svc.UpdateProfile(context.Background(), "user-1", "Name", "")
-	require.Error(t, err)
-}
-
-func TestProfileUpdateProfile_RefetchFallback(t *testing.T) {
-	// Update succeeds, but GetNode on the refetch fails → fallback path.
-	db := newErrorDB()
-	db.addUser("user-1", "u@test.com", "U", "member", "active")
-	// First GetNode (initial fetch) succeeds; second (refetch) fails.
-	db.failGetNodeAfter = 2
-	svc := newProfileWithDB(db)
-
-	user, err := svc.UpdateProfile(context.Background(), "user-1", "New Name", "https://x.png")
-	require.NoError(t, err)
-	require.NotNil(t, user)
+	require.ErrorIs(t, err, ErrServiceUnavailable)
 }
 
 func TestProfileListSessions_QueryFails(t *testing.T) {

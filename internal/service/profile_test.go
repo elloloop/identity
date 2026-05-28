@@ -14,7 +14,64 @@ import (
 
 func newTestProfileService(db *fakeDB) *ProfileService {
 	auditLog := audit.NewLogger(nil, "test-tenant", zap.NewNop())
-	return NewProfileService(db, "test-tenant", auditLog, zap.NewNop())
+	return NewProfileService(fakeRepoOverFakeDB{db: db}, db, "test-tenant", auditLog, zap.NewNop())
+}
+
+// fakeRepoOverFakeDB is the minimal Repository facade ProfileService
+// actually needs (GetUser + UpdateUser). It embeds StubRepository to
+// satisfy the rest of the interface and delegates the User-touching
+// methods to the underlying fakeDB so existing tests that
+// addUser/inspect through the fakeDB still see consistent state.
+type fakeRepoOverFakeDB struct {
+	StubRepository
+	db *fakeDB
+}
+
+func (f fakeRepoOverFakeDB) GetUser(ctx context.Context, userID string) (*User, error) {
+	node, err := f.db.GetNode(ctx, "", "", typeUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	if node == nil {
+		return nil, nil
+	}
+	return userFromNode(node), nil
+}
+
+// nameToUFKey maps the Repository.UpdateUser canonical field names
+// (the keys AuthService and ProfileService write) to the ufXXX
+// payload keys fakeDB stores users under. New fields must be added
+// here when a Repository.UpdateUser call site introduces them.
+var nameToUFKey = map[string]string{
+	"name":           ufName,
+	"avatar_url":     ufAvatarURL,
+	"email":          ufEmail,
+	"password_hash":  ufPasswordHash,
+	"status":         ufStatus,
+	"totp_required":  ufTOTPRequired,
+	"updated_at":     ufUpdatedAt,
+	"last_login_at":  ufLastLoginAt,
+	"recovery_email": ufRecoveryEmail,
+}
+
+func (f fakeRepoOverFakeDB) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
+	if f.db.err != nil {
+		return f.db.err
+	}
+	f.db.mu.Lock()
+	defer f.db.mu.Unlock()
+	node, ok := f.db.nodes[userID]
+	if !ok || node.TypeID != typeUser {
+		return errors.New("user not found")
+	}
+	for k, v := range fields {
+		if uf, ok := nameToUFKey[k]; ok {
+			node.Payload[uf] = v
+		} else {
+			node.Payload[k] = v
+		}
+	}
+	return nil
 }
 
 func TestProfileService_UpdateProfile_HappyPath(t *testing.T) {
