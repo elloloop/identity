@@ -120,8 +120,8 @@ func TestMultiTenant_CrossTenantIsolation_RealBackend(t *testing.T) {
 	stamp := time.Now().UnixNano()
 	slugA := fmt.Sprintf("mt-a-%d", stamp)
 	slugB := fmt.Sprintf("mt-b-%d", stamp)
-	emailA := fmt.Sprintf("alice+%d@a.test", stamp)
-	emailB := fmt.Sprintf("bob+%d@b.test", stamp)
+	emailA := fmt.Sprintf("alice-%d@a.example.com", stamp)
+	emailB := fmt.Sprintf("bob-%d@b.example.com", stamp)
 
 	// Step 2: create tenant A and tenant B.
 	respA, err := connectClient.OrganizationSignup(context.Background(), connect.NewRequest(&identitypb.OrganizationSignupRequest{
@@ -262,9 +262,9 @@ func TestMultiTenant_TenantScopedInvitation_RealBackend(t *testing.T) {
 	stamp := time.Now().UnixNano()
 	slugA := fmt.Sprintf("inv-a-%d", stamp)
 	slugB := fmt.Sprintf("inv-b-%d", stamp)
-	adminAEmail := fmt.Sprintf("admin-a+%d@a.test", stamp)
-	adminBEmail := fmt.Sprintf("admin-b+%d@b.test", stamp)
-	bobEmail := fmt.Sprintf("bob+%d@x.test", stamp)
+	adminAEmail := fmt.Sprintf("admin-a-%d@a.example.com", stamp)
+	adminBEmail := fmt.Sprintf("admin-b-%d@b.example.com", stamp)
+	bobEmail := fmt.Sprintf("bob-%d@x.example.com", stamp)
 
 	// Step 2: create tenant A and tenant B, each with its own admin.
 	respA, err := connectClient.OrganizationSignup(context.Background(), connect.NewRequest(&identitypb.OrganizationSignupRequest{
