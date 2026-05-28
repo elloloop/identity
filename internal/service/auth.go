@@ -1080,7 +1080,7 @@ func validateEmailFormat(addr string) error {
 	}
 	parsed, err := mail.ParseAddress(addr)
 	if err != nil {
-		return fmt.Errorf("invalid email: %v", err)
+		return fmt.Errorf("invalid email: %w", err)
 	}
 	// net/mail allows display-name forms ("Alice <a@x.com>"); the
 	// service stores the raw address, so reject anything the parser

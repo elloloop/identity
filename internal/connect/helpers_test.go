@@ -109,7 +109,6 @@ type fakeRepo struct {
 	errCreateUser error
 	errIssueToken error // makes CreateRefreshToken fail
 	errGetUser    error // makes GetUser fail
-	errUpdateUser error // makes UpdateUser fail
 }
 
 func newFakeRepo() *fakeRepo {
