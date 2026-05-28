@@ -27,8 +27,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 
 	"github.com/elloloop/identity/identityserver"
@@ -115,11 +113,17 @@ func run() error {
 	// The host adds its own routes alongside identity's:
 	//   mux.HandleFunc("/healthz", myHealth)
 
-	// h2c lets the demo serve gRPC over plaintext HTTP/2; a production host
-	// terminates TLS (or sits behind a proxy that does) and can drop h2c.
+	// Unencrypted HTTP/2 (h2c) lets the demo serve gRPC over plaintext;
+	// a production host terminates TLS (or sits behind a proxy that
+	// does) and removes the SetUnencryptedHTTP2 call. The Protocols
+	// field (Go 1.24+) replaces the older golang.org/x/net/http2/h2c
+	// wrapper, which was deprecated in x/net v0.55+.
+	protocols := new(http.Protocols)
+	protocols.SetUnencryptedHTTP2(true)
 	httpSrv := &http.Server{
 		Addr:              "127.0.0.1:8080",
-		Handler:           h2c.NewHandler(mux, &http2.Server{}),
+		Handler:           mux,
+		Protocols:         protocols,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	httpErr := make(chan error, 1)
