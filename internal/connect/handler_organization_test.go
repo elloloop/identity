@@ -78,7 +78,7 @@ func TestOrganizationSignup_SingleMode_ReturnsUnimplemented(t *testing.T) {
 	req := connect.NewRequest(&identitypb.OrganizationSignupRequest{
 		Slug:          "acmecorp",
 		DisplayName:   "Acme Corp",
-		AdminEmail:    "owner@acme.test",
+		AdminEmail:    "owner@acme.example.com",
 		AdminPassword: "MyStr0ng!Pass",
 		AdminName:     "Owner",
 	})
@@ -106,7 +106,7 @@ func TestOrganizationSignup_MultiMode_NilService_ReturnsUnimplemented(t *testing
 	req := connect.NewRequest(&identitypb.OrganizationSignupRequest{
 		Slug:          "acmecorp",
 		DisplayName:   "Acme Corp",
-		AdminEmail:    "owner@acme.test",
+		AdminEmail:    "owner@acme.example.com",
 		AdminPassword: "MyStr0ng!Pass",
 		AdminName:     "Owner",
 	})
@@ -130,7 +130,7 @@ func TestOrganizationSignup_MultiMode_HappyPath(t *testing.T) {
 	req := connect.NewRequest(&identitypb.OrganizationSignupRequest{
 		Slug:          "acmecorp",
 		DisplayName:   "Acme Corp",
-		AdminEmail:    "owner@acme.test",
+		AdminEmail:    "owner@acme.example.com",
 		AdminPassword: "MyStr0ng!Pass",
 		AdminName:     "Owner",
 	})
@@ -141,7 +141,7 @@ func TestOrganizationSignup_MultiMode_HappyPath(t *testing.T) {
 	if resp.Msg.Organization == nil || resp.Msg.Organization.Slug != "acmecorp" {
 		t.Fatalf("expected organization 'acmecorp', got %#v", resp.Msg.Organization)
 	}
-	if resp.Msg.AdminUser == nil || resp.Msg.AdminUser.Email != "owner@acme.test" {
+	if resp.Msg.AdminUser == nil || resp.Msg.AdminUser.Email != "owner@acme.example.com" {
 		t.Fatalf("expected admin user 'owner@acme.test', got %#v", resp.Msg.AdminUser)
 	}
 	if resp.Msg.AccessToken == "" || resp.Msg.RefreshToken == "" {
@@ -156,7 +156,7 @@ func TestOrganizationSignup_MultiMode_InvalidSlug_ReturnsInvalidArgument(t *test
 	req := connect.NewRequest(&identitypb.OrganizationSignupRequest{
 		Slug:          "BAD SLUG!",
 		DisplayName:   "Acme",
-		AdminEmail:    "owner@acme.test",
+		AdminEmail:    "owner@acme.example.com",
 		AdminPassword: "MyStr0ng!Pass",
 	})
 	_, err := srv.client.OrganizationSignup(context.Background(), req)

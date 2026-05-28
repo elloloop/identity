@@ -142,7 +142,7 @@ func TestOrganizationSignup_RealPostgres(t *testing.T) {
 	httpClient := srv.Client()
 	connectClient := identityconnectgen.NewIdentityServiceClient(httpClient, srv.URL)
 
-	emailAddr := fmt.Sprintf("owner+%d@acme.test", time.Now().UnixNano())
+	emailAddr := fmt.Sprintf("owner-%d@acme.example.com", time.Now().UnixNano())
 
 	resp, err := connectClient.OrganizationSignup(context.Background(), connect.NewRequest(&identitypb.OrganizationSignupRequest{
 		Slug:          slug,

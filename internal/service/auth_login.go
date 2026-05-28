@@ -88,6 +88,10 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	if err := validateEmailFormat(email); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
+	// Canonicalize for dedup + storage: dot-stripping for @gmail.com /
+	// @googlemail.com local parts, universal '+' tag stripping,
+	// googlemail.com → gmail.com. One human ↔ one account.
+	email = canonicalizeEmail(email)
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
@@ -263,6 +267,11 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	if err := validateEmailFormat(email); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
+	// Canonicalize the lookup key so alice.smith@gmail.com and
+	// alicesmith@gmail.com both resolve to the one User row stored
+	// under the canonical form. PasswordSignup writes the canonical
+	// form, so lookup must use the same.
+	email = canonicalizeEmail(email)
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}

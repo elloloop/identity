@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/mail"
 	"strings"
 	"time"
 
@@ -1052,57 +1051,9 @@ func validatePasswordStrength(pw string) error {
 	return nil
 }
 
-// validateEmailFormat rejects obviously-malformed addresses before the
-// service stores them. It is intentionally stricter than RFC-5322
-// (which net/mail.ParseAddress alone accepts: `alice@example` with no
-// TLD passes the RFC but is not deliverable on the public internet).
-// Identity stores the email AS the username for password+OAuth flows
-// and uses it as the destination for password-reset / magic-link
-// emails, so an unreachable address breaks every recovery path.
-//
-// Rules:
-//   - Non-empty after trim+lowercase (caller already does this).
-//   - Parses through net/mail.ParseAddress with no display name.
-//   - Has exactly one '@'.
-//   - The domain contains at least one '.'.
-//   - The domain does not start or end with '.'.
-//   - No whitespace anywhere.
-func validateEmailFormat(addr string) error {
-	if addr == "" {
-		return errors.New("email is required")
-	}
-	if strings.ContainsAny(addr, " \t\r\n") {
-		return errors.New("email must not contain whitespace")
-	}
-	at := strings.Count(addr, "@")
-	if at != 1 {
-		return errors.New("email must contain exactly one '@'")
-	}
-	parsed, err := mail.ParseAddress(addr)
-	if err != nil {
-		return fmt.Errorf("invalid email: %w", err)
-	}
-	// net/mail allows display-name forms ("Alice <a@x.com>"); the
-	// service stores the raw address, so reject anything the parser
-	// rewrote.
-	if parsed.Address != addr {
-		return errors.New("invalid email")
-	}
-	local, domain, _ := strings.Cut(addr, "@")
-	if local == "" {
-		return errors.New("email local part is empty")
-	}
-	if strings.HasPrefix(local, ".") || strings.HasSuffix(local, ".") {
-		return errors.New("email local part must not start or end with '.'")
-	}
-	if domain == "" || !strings.Contains(domain, ".") {
-		return errors.New("email domain must contain a '.'")
-	}
-	if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
-		return errors.New("email domain must not start or end with '.'")
-	}
-	return nil
-}
+// validateEmailFormat + canonicalizeEmail live in email_canonicalize.go
+// so the surface they cover (format, length, reserved TLDs, disposable
+// providers, Gmail-style normalization) is in one place.
 
 // friendlyDeviceName collapses a User-Agent string into a short display name.
 func friendlyDeviceName(userAgent string) string {

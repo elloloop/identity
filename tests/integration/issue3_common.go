@@ -144,7 +144,11 @@ func issue3Email(t *testing.T, email string) string {
 	if at <= 0 || at == len(email)-1 {
 		t.Fatalf("invalid issue3 email %q", email)
 	}
-	return fmt.Sprintf("%s+%s%s", email[:at], issue3Slug(t.Name()), email[at:])
+	// Use '-' rather than '+' so the per-test slug doesn't get stripped
+	// by the service-layer Gmail-style canonicalization (which drops
+	// everything after '+' in the local part). The slug-via-hyphen
+	// still gives every test a unique local part for isolation.
+	return fmt.Sprintf("%s-%s%s", email[:at], issue3Slug(t.Name()), email[at:])
 }
 
 func issue3Slug(s string) string {

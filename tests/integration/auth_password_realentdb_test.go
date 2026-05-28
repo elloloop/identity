@@ -185,7 +185,7 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	connectClient := identityconnectgen.NewIdentityServiceClient(httpClient, srv.URL)
 
 	ctx := context.Background()
-	emailAddr := fmt.Sprintf("alice+%d@example.com", time.Now().UnixNano())
+	emailAddr := fmt.Sprintf("alice-%d@example.com", time.Now().UnixNano())
 
 	signup, err := connectClient.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
 		Email:    emailAddr,
