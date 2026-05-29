@@ -189,6 +189,9 @@ func (s *AuthService) mintOAuthOneTimeCode(ctx context.Context, userID string) (
 // replay, an expired code, or an unknown code all return
 // ErrOAuthCodeInvalid.
 func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAgent string) (*LoginResult, error) {
+	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
+		return nil, ErrOAuthDisabled
+	}
 	if strings.TrimSpace(code) == "" {
 		return nil, ErrOAuthCodeInvalid
 	}
