@@ -5,6 +5,7 @@ package e2e
 import (
 	"net/http"
 	"testing"
+	"time"
 )
 
 // TestE2E_AdminHelpFlow drives the admin help request creation, listing, and resolution.
@@ -28,7 +29,7 @@ func TestE2E_AdminHelpFlow(t *testing.T) {
 
 	// 3. List Help Requests
 	resp, status = h.rpcCall(t, "ListHelpRequests", map[string]any{
-		"statusFilter": "pending",
+		"statusFilter": "HELP_REQUEST_STATUS_PENDING",
 		"limit":        10,
 	}, at)
 	if status != http.StatusOK {
@@ -56,23 +57,37 @@ func TestE2E_AdminHelpFlow(t *testing.T) {
 		t.Fatalf("ResolveHelpRequest status=%d, body=%v", status, resp)
 	}
 
-	// 5. Verify it is no longer pending
-	resp, _ = h.rpcCall(t, "ListHelpRequests", map[string]any{
-		"statusFilter": "pending",
-		"limit":        10,
-	}, at)
-	requests, _ = resp["requests"].([]any)
-	if len(requests) != 0 {
-		t.Errorf("expected 0 pending help requests, got %d", len(requests))
+	// 5. Verify it is no longer pending (with retry for eventual consistency)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		resp, _ = h.rpcCall(t, "ListHelpRequests", map[string]any{
+			"statusFilter": "HELP_REQUEST_STATUS_PENDING",
+			"limit":        10,
+		}, at)
+		requests, _ = resp["requests"].([]any)
+		if len(requests) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected 0 pending help requests, got %d", len(requests))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
-	// 6. Verify it is listed under resolved status
-	resp, _ = h.rpcCall(t, "ListHelpRequests", map[string]any{
-		"statusFilter": "resolved",
-		"limit":        10,
-	}, at)
-	requests, _ = resp["requests"].([]any)
-	if len(requests) != 1 {
-		t.Fatalf("expected 1 resolved help request, got %d", len(requests))
+	// 6. Verify it is listed under resolved status (with retry for eventual consistency)
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		resp, _ = h.rpcCall(t, "ListHelpRequests", map[string]any{
+			"statusFilter": "HELP_REQUEST_STATUS_RESOLVED",
+			"limit":        10,
+		}, at)
+		requests, _ = resp["requests"].([]any)
+		if len(requests) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected 1 resolved help request, got %d", len(requests))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
