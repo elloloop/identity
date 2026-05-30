@@ -495,7 +495,7 @@ func TestInviteUser_FiresInvitationEmail(t *testing.T) {
 	cfg.SMTPFrom = "no-reply@test.local"
 	cfg.TOTPIssuer = "Identity Test"
 	rec := &recordingTransport{}
-	svc := NewAdminService(db, "test-tenant",
+	svc := NewAdminService(newFakeRepo(), db, "test-tenant",
 		audit.NewLogger(nil, "test", zap.NewNop()),
 		cfg, rec, zap.NewNop())
 

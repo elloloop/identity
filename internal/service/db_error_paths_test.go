@@ -16,7 +16,19 @@ import (
 )
 
 func newAdminWithDB(db DB) *AdminService {
-	return NewAdminService(db, "test-tenant",
+	// DB-error-path tests in this file do not reach the Repository
+	// surface; a stub keeps the cascade methods returning a clean
+	// error if they are ever hit unexpectedly.
+	return NewAdminService(StubRepository{}, db, "test-tenant",
+		audit.NewLogger(nil, "test", zap.NewNop()),
+		config.Load(), nil, zap.NewNop())
+}
+
+// newAdminWithDBRepo builds an AdminService backed by both a fakeDB
+// (admin authorization + graph reads) and a Repository (cascade +
+// revocation), for the DeleteUser error-path tests.
+func newAdminWithDBRepo(db DB, repo Repository) *AdminService {
+	return NewAdminService(repo, db, "test-tenant",
 		audit.NewLogger(nil, "test", zap.NewNop()),
 		config.Load(), nil, zap.NewNop())
 }
@@ -147,6 +159,34 @@ func TestAdminResetUserPassword_ExecuteFails_TokenPath(t *testing.T) {
 	svc := newAdminWithDB(db)
 
 	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "target-1", false)
+	require.Error(t, err)
+}
+
+func TestAdminDeleteUser_GetUserFails(t *testing.T) {
+	db := newErrorDB()
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	repo := newErrorRepo()
+	repo.users["target-1"] = &User{ID: "target-1", Email: "t@test.com", Status: "active"}
+	repo.failGetUser = true
+	svc := newAdminWithDBRepo(db, repo)
+
+	err := svc.DeleteUser(context.Background(), "admin-1", "target-1")
+	require.Error(t, err)
+	// Target must survive when the existence check errors out.
+	repo.failGetUser = false
+	u, _ := repo.GetUser(context.Background(), "target-1")
+	require.NotNil(t, u)
+}
+
+func TestAdminDeleteUser_RepoDeleteFails(t *testing.T) {
+	db := newErrorDB()
+	db.addUser("admin-1", "a@test.com", "A", "admin", "active")
+	repo := newErrorRepo()
+	repo.users["target-1"] = &User{ID: "target-1", Email: "t@test.com", Status: "active"}
+	repo.failDeleteUser = true
+	svc := newAdminWithDBRepo(db, repo)
+
+	err := svc.DeleteUser(context.Background(), "admin-1", "target-1")
 	require.Error(t, err)
 }
 

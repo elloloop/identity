@@ -42,6 +42,10 @@ func (StubRepository) UpdateUser(context.Context, string, map[string]any) error 
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) DeleteUser(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) IncrementFailedLoginCount(context.Context, string) (int32, error) {
 	return 0, ErrServiceUnavailable
 }

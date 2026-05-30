@@ -773,6 +773,99 @@ func (r *MemRepo) UpdateUser(_ context.Context, userID string, fields map[string
 	return nil
 }
 
+// DeleteUser physically removes the user and every user-owned row,
+// mirroring the production memory driver. Idempotent; email-keyed
+// login codes / magic-link tokens are out of scope (no user_id).
+func (r *MemRepo) DeleteUser(_ context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, t := range r.refreshTokens {
+		if t.UserID == userID {
+			delete(r.refreshTokens, id)
+		}
+	}
+	for id, s := range r.sessions {
+		if s.UserID == userID {
+			delete(r.sessions, id)
+		}
+	}
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
+	}
+	for id, c := range r.passkeyChallenges {
+		if c.UserID == userID {
+			delete(r.passkeyChallenges, id)
+		}
+	}
+	for id, s := range r.qrSessions {
+		if s.UserID == userID {
+			delete(r.qrSessions, id)
+		}
+	}
+	for id, c := range r.oauthOneTimeCodes {
+		if c.UserID == userID {
+			delete(r.oauthOneTimeCodes, id)
+		}
+	}
+	for id, c := range r.totpCreds {
+		if c.UserID == userID {
+			delete(r.totpCreds, id)
+		}
+	}
+	for id, c := range r.recoveryCodes {
+		if c.UserID == userID {
+			delete(r.recoveryCodes, id)
+		}
+	}
+	for id, c := range r.loginChallenges {
+		if c.UserID == userID {
+			delete(r.loginChallenges, id)
+		}
+	}
+	for id, inv := range r.invitations {
+		if inv.UserID == userID {
+			delete(r.invitations, id)
+		}
+	}
+	for id, t := range r.passwordResets {
+		if t.UserID == userID {
+			delete(r.passwordResets, id)
+		}
+	}
+	for id, t := range r.emailVerifications {
+		if t.UserID == userID {
+			delete(r.emailVerifications, id)
+		}
+	}
+	for id, t := range r.emailChanges {
+		if t.UserID == userID {
+			delete(r.emailChanges, id)
+		}
+	}
+	for id, oi := range r.oauthIdentities {
+		if oi.UserID == userID {
+			delete(r.oauthIdentities, id)
+		}
+	}
+	for id, rec := range r.idvRecords {
+		if rec.UserID == userID {
+			delete(r.idvRecords, id)
+		}
+	}
+	for id, m := range r.orgMembers {
+		if m.UserID == userID {
+			delete(r.orgMembers, id)
+		}
+	}
+	delete(r.users, userID)
+	return nil
+}
+
 func (r *MemRepo) IncrementFailedLoginCount(_ context.Context, userID string) (int32, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

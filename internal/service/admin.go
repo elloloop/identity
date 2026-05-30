@@ -20,6 +20,7 @@ import (
 // All methods verify that the acting user has role=admin.
 type AdminService struct {
 	bootDB          DB
+	defaultRepo     Repository
 	defaultTenantID string
 	audit           *audit.Logger
 	cfg             *config.Config
@@ -29,17 +30,33 @@ type AdminService struct {
 
 // NewAdminService creates an AdminService.
 //
+// The repo handle backs the cascade-aware paths (DeleteUser, and the
+// session/refresh-token revocation done by DeactivateUser); the DB
+// handle backs the admin-authorization read and the existing
+// invite/deactivate/reactivate/reset graph writes. This mirrors the
+// dual-handle ProfileService(repo, db, …) pattern.
+//
 // mailer may be nil; if nil, a log-only transport is substituted so
 // invitation emails are at least visible in the logs during local dev.
 // Email-side-effect failures never block the surrounding RPC.
-func NewAdminService(db DB, tenantID string, auditLog *audit.Logger, cfg *config.Config, mailer email.Transport, logger *zap.Logger) *AdminService {
+func NewAdminService(repo Repository, db DB, tenantID string, auditLog *audit.Logger, cfg *config.Config, mailer email.Transport, logger *zap.Logger) *AdminService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	if mailer == nil {
 		mailer = email.NewLogOnly(logger)
 	}
-	return &AdminService{bootDB: db, defaultTenantID: tenantID, audit: auditLog, cfg: cfg, mailer: mailer, logger: logger}
+	return &AdminService{bootDB: db, defaultRepo: repo, defaultTenantID: tenantID, audit: auditLog, cfg: cfg, mailer: mailer, logger: logger}
+}
+
+// repo returns the Repository scoped to the request's resolved tenant,
+// falling back to the boot-time Repository in mode=single (mirrors
+// ProfileService.repo).
+func (s *AdminService) repo(ctx context.Context) Repository {
+	if scope := TenantScopeFromContext(ctx); scope != nil && scope.Repo != nil {
+		return scope.Repo
+	}
+	return s.defaultRepo
 }
 
 // tenantID returns the request's resolved tenant, falling back to the
@@ -227,7 +244,10 @@ func (s *AdminService) InviteUser(
 	}, nil
 }
 
-// DeactivateUser marks a user as deactivated and revokes sessions.
+// DeactivateUser marks a user as deactivated, then revokes their
+// active sessions and deletes their refresh tokens so the suspension
+// takes effect immediately rather than at the next token's natural
+// expiry. The user row is retained (reversible via ReactivateUser).
 func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID, reason string) error {
 	if _, err := s.requireAdmin(ctx, actorID); err != nil {
 		return err
@@ -254,6 +274,13 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 	}
 	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("deactivate user: %w", err)
+	}
+
+	if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, targetUserID); err != nil {
+		return fmt.Errorf("deactivate user: revoke refresh tokens: %w", err)
+	}
+	if err := s.repo(ctx).RevokeSessionsForUser(ctx, targetUserID, now); err != nil {
+		return fmt.Errorf("deactivate user: revoke sessions: %w", err)
 	}
 
 	s.audit.Log(
