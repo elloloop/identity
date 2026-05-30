@@ -1301,3 +1301,167 @@ func TestSEC4_RevokeSessionsForUser_RevokesEveryUnrevokedSessionInWindow(t *test
 		}
 	}
 }
+
+// errDrainInjected is the sentinel the failing drain clients below
+// return so the tests can confirm DeleteUser propagated the wrapped
+// cause rather than masking it.
+var errDrainInjected = errors.New("injected drain error")
+
+// failingQueryClient wraps memoryEntClient and makes query fail for one
+// witness proto type, simulating a backend whose per-user enumeration
+// errors mid-cascade. Used to cover drainDeleteByUser's query-error
+// branch through DeleteUser.
+type failingQueryClient struct {
+	*memoryEntClient
+	failType reflect.Type
+}
+
+func (c *failingQueryClient) query(ctx context.Context, actor string, witness proto.Message, filter map[string]any) ([]queriedNode, error) {
+	if reflect.TypeOf(witness) == c.failType {
+		return nil, errDrainInjected
+	}
+	return c.memoryEntClient.query(ctx, actor, witness, filter)
+}
+
+// failingDeleteClient wraps memoryEntClient and makes delete fail for
+// one witness proto type, simulating a backend that enumerates a user's
+// rows fine but errors when removing one. Used to cover
+// drainDeleteByUser's delete-error branch through DeleteUser.
+type failingDeleteClient struct {
+	*memoryEntClient
+	failType reflect.Type
+}
+
+func (c *failingDeleteClient) delete(ctx context.Context, actor string, witness proto.Message, nodeID string) error {
+	if reflect.TypeOf(witness) == c.failType {
+		return errDrainInjected
+	}
+	return c.memoryEntClient.delete(ctx, actor, witness, nodeID)
+}
+
+// TestDeleteUser_DrainQueryError asserts that when a per-user drain
+// query fails, DeleteUser stops and returns the wrapped "<label> query"
+// error rather than continuing to delete the node.
+func TestDeleteUser_DrainQueryError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := newMemoryEntClient()
+	mem.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u-1"}}
+	mem.store["u-1"] = storedNode{msg: &schemapb.User{Email: "u@e.com"}}
+	repo := &entRepository{
+		client:   &failingQueryClient{memoryEntClient: mem, failType: reflect.TypeOf(&schemapb.RefreshToken{})},
+		tenantID: "t",
+	}
+
+	err := repo.DeleteUser(ctx, "u-1")
+	if err == nil {
+		t.Fatal("expected drain query error, got nil")
+	}
+	if !errors.Is(err, errDrainInjected) {
+		t.Fatalf("error %v does not wrap the injected query error", err)
+	}
+	if !strings.Contains(err.Error(), "refresh_token query") {
+		t.Fatalf("error %q does not name the failing drain query", err.Error())
+	}
+	// The user node must survive an aborted cascade.
+	if _, ok := mem.store["u-1"]; !ok {
+		t.Fatal("user node must not be deleted when the cascade aborts")
+	}
+}
+
+// TestDeleteUser_DrainDeleteError asserts that when a per-user drain
+// delete fails, DeleteUser stops and returns the wrapped
+// "<label> delete" error.
+func TestDeleteUser_DrainDeleteError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := newMemoryEntClient()
+	mem.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u-1"}}
+	mem.store["u-1"] = storedNode{msg: &schemapb.User{Email: "u@e.com"}}
+	repo := &entRepository{
+		client:   &failingDeleteClient{memoryEntClient: mem, failType: reflect.TypeOf(&schemapb.RefreshToken{})},
+		tenantID: "t",
+	}
+
+	err := repo.DeleteUser(ctx, "u-1")
+	if err == nil {
+		t.Fatal("expected drain delete error, got nil")
+	}
+	if !errors.Is(err, errDrainInjected) {
+		t.Fatalf("error %v does not wrap the injected delete error", err)
+	}
+	if !strings.Contains(err.Error(), "refresh_token delete") {
+		t.Fatalf("error %q does not name the failing drain delete", err.Error())
+	}
+	if _, ok := mem.store["u-1"]; !ok {
+		t.Fatal("user node must not be deleted when the cascade aborts")
+	}
+}
+
+// TestDeleteUser_DrainsEveryUserOwnedType is the entdb-driver
+// counterpart to the memory cascade test: it seeds one row of every
+// user_id-indexed type DeleteUser drains, plus the user node, then
+// asserts the store is empty afterwards (idempotent, full cascade).
+func TestDeleteUser_DrainsEveryUserOwnedType(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := newMemoryEntClient()
+	mem.store["u-1"] = storedNode{msg: &schemapb.User{Email: "u@e.com"}}
+	mem.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u-1"}}
+	mem.store["sess"] = storedNode{msg: &schemapb.Session{Sid: "s", UserId: "u-1"}}
+	mem.store["oi"] = storedNode{msg: &schemapb.OAuthIdentity{UserId: "u-1"}}
+	mem.store["pk"] = storedNode{msg: &schemapb.PasskeyCredential{UserId: "u-1"}}
+	mem.store["totp"] = storedNode{msg: &schemapb.TotpCredential{UserId: "u-1"}}
+	mem.store["rc"] = storedNode{msg: &schemapb.RecoveryCode{UserId: "u-1"}}
+	mem.store["idv"] = storedNode{msg: &schemapb.IdentityVerificationRecord{UserId: "u-1"}}
+	mem.store["mem"] = storedNode{msg: &schemapb.OrganizationMembership{UserId: "u-1"}}
+	repo := &entRepository{client: mem, tenantID: "t"}
+
+	if err := repo.DeleteUser(ctx, "u-1"); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	if len(mem.store) != 0 {
+		t.Fatalf("after cascade: %d rows remain, want 0: %#v", len(mem.store), mem.store)
+	}
+	// Idempotent: a second delete of the now-missing user is a no-op.
+	if err := repo.DeleteUser(ctx, "u-1"); err != nil {
+		t.Fatalf("DeleteUser (idempotent re-run): %v", err)
+	}
+}
+
+// TestDeleteUser_EmptyUserIDIsNoOp covers the userID=="" early return:
+// no drains run and no node delete is attempted.
+func TestDeleteUser_EmptyUserIDIsNoOp(t *testing.T) {
+	t.Parallel()
+	mem := newMemoryEntClient()
+	mem.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u-1"}}
+	repo := &entRepository{client: mem, tenantID: "t"}
+
+	if err := repo.DeleteUser(context.Background(), ""); err != nil {
+		t.Fatalf("DeleteUser(\"\") must be a no-op, got %v", err)
+	}
+	if _, ok := mem.store["rt"]; !ok {
+		t.Fatal("no-op delete must not touch other users' rows")
+	}
+}
+
+// TestDeleteUser_DrainCeilingError covers drainDeleteByUser's
+// bulkDrainMaxIterations safety stop when reached through DeleteUser:
+// a backend that never actually deletes makes the drain query return
+// the same refresh-token row forever, so DeleteUser must give up with
+// a "drain ceiling" error rather than spin.
+func TestDeleteUser_DrainCeilingError(t *testing.T) {
+	t.Parallel()
+	mem := newMemoryEntClient()
+	mem.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u-1"}}
+	mem.store["u-1"] = storedNode{msg: &schemapb.User{Email: "u@e.com"}}
+	repo := &entRepository{client: &nondeletingClient{memoryEntClient: mem}, tenantID: "t"}
+
+	err := repo.DeleteUser(context.Background(), "u-1")
+	if err == nil {
+		t.Fatal("expected drain-ceiling error, got nil")
+	}
+	if !strings.Contains(err.Error(), "drain ceiling") {
+		t.Fatalf("error %q does not mention drain ceiling", err.Error())
+	}
+}

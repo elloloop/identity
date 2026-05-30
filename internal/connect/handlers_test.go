@@ -1512,6 +1512,26 @@ func TestAdminHandlers_PostAuthErrors(t *testing.T) {
 	}
 }
 
+// TestDeleteUser_NotFoundMapsToConnectCode asserts that the DeleteUser
+// handler maps the service's ErrNotFound (deleting a user that does not
+// exist in the repo) to a NotFound connect code via toConnectError —
+// the handler's error return path.
+func TestDeleteUser_NotFoundMapsToConnectCode(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.db.addUser("admin-1", "a@e.com", "A", "admin", "active")
+
+	_, err := h.client.DeleteUser(ctx, authedReq(connect.NewRequest(&identitypb.DeleteUserRequest{
+		UserId: "ghost",
+	}), "admin-1"))
+	if err == nil {
+		t.Fatal("expected error deleting a non-existent user")
+	}
+	if got := connectCodeOf(err); got != connect.CodeNotFound {
+		t.Fatalf("expected CodeNotFound, got %v: %v", got, err)
+	}
+}
+
 func TestGroupHandlers_PostAuthErrors(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

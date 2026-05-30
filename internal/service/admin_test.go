@@ -440,3 +440,97 @@ func TestAdminService_DeleteUser_EmptyTarget(t *testing.T) {
 		t.Fatalf("expected user_id-required error, got %v", err)
 	}
 }
+
+// ── DeleteUser repository error branches ───────────────────────────────
+//
+// Each case drives one failure injected into the repo so the
+// corresponding wrap in AdminService.DeleteUser is exercised and the
+// returned error carries the right context. The errorRepo embeds the
+// happy fakeRepo, so only the targeted call fails.
+
+func TestAdminService_DeleteUser_FetchUserError(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	repo := &errorRepo{fakeRepo: newFakeRepo(), failGetUser: true}
+	repo.users["target-1"] = &User{ID: "target-1", Email: "target@test.com", Status: "active"}
+	svc := newTestAdminServiceWithRepo(db, repo)
+
+	err := svc.DeleteUser(context.Background(), "admin-1", "target-1")
+	if err == nil || !strings.Contains(err.Error(), "fetch user") {
+		t.Fatalf("expected fetch-user error, got %v", err)
+	}
+}
+
+func TestAdminService_DeleteUser_RevokeRefreshTokensError(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	repo := &errorRepo{fakeRepo: newFakeRepo(), failDeleteRefreshTokensForUser: true}
+	repo.users["target-1"] = &User{ID: "target-1", Email: "target@test.com", Status: "active"}
+	svc := newTestAdminServiceWithRepo(db, repo)
+
+	err := svc.DeleteUser(context.Background(), "admin-1", "target-1")
+	if err == nil || !strings.Contains(err.Error(), "revoke refresh tokens") {
+		t.Fatalf("expected revoke-refresh-tokens error, got %v", err)
+	}
+	// The user must survive a failed cascade.
+	if u, _ := repo.GetUser(context.Background(), "target-1"); u == nil {
+		t.Fatal("target must survive a failed delete cascade")
+	}
+}
+
+func TestAdminService_DeleteUser_RevokeSessionsError(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	repo := &errorRepo{fakeRepo: newFakeRepo(), failRevokeSessionsForUser: true}
+	repo.users["target-1"] = &User{ID: "target-1", Email: "target@test.com", Status: "active"}
+	svc := newTestAdminServiceWithRepo(db, repo)
+
+	err := svc.DeleteUser(context.Background(), "admin-1", "target-1")
+	if err == nil || !strings.Contains(err.Error(), "revoke sessions") {
+		t.Fatalf("expected revoke-sessions error, got %v", err)
+	}
+}
+
+func TestAdminService_DeleteUser_DeleteUserError(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	repo := &errorRepo{fakeRepo: newFakeRepo(), failDeleteUser: true}
+	repo.users["target-1"] = &User{ID: "target-1", Email: "target@test.com", Status: "active"}
+	svc := newTestAdminServiceWithRepo(db, repo)
+
+	err := svc.DeleteUser(context.Background(), "admin-1", "target-1")
+	if err == nil || !strings.Contains(err.Error(), "delete user") {
+		t.Fatalf("expected delete-user error, got %v", err)
+	}
+}
+
+// ── DeactivateUser revoke error branches ───────────────────────────────
+//
+// DeactivateUser revokes refresh tokens and sessions AFTER flipping the
+// status row. These cover the two new revoke wraps' error paths.
+
+func TestAdminService_DeactivateUser_RevokeRefreshTokensError(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	db.addUser("target-1", "target@test.com", "Target", "member", "active")
+	repo := &errorRepo{fakeRepo: newFakeRepo(), failDeleteRefreshTokensForUser: true}
+	svc := newTestAdminServiceWithRepo(db, repo)
+
+	err := svc.DeactivateUser(context.Background(), "admin-1", "target-1", "leaving")
+	if err == nil || !strings.Contains(err.Error(), "deactivate user: revoke refresh tokens") {
+		t.Fatalf("expected deactivate revoke-refresh-tokens error, got %v", err)
+	}
+}
+
+func TestAdminService_DeactivateUser_RevokeSessionsError(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	db.addUser("target-1", "target@test.com", "Target", "member", "active")
+	repo := &errorRepo{fakeRepo: newFakeRepo(), failRevokeSessionsForUser: true}
+	svc := newTestAdminServiceWithRepo(db, repo)
+
+	err := svc.DeactivateUser(context.Background(), "admin-1", "target-1", "leaving")
+	if err == nil || !strings.Contains(err.Error(), "deactivate user: revoke sessions") {
+		t.Fatalf("expected deactivate revoke-sessions error, got %v", err)
+	}
+}
