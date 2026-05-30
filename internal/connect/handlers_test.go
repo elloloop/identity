@@ -457,7 +457,12 @@ func TestOAuthLogin_LocalDisabled(t *testing.T) {
 }
 
 func TestRedeemOAuthCode_UnknownCodeUnauthenticated(t *testing.T) {
-	h := newHarness(t)
+	// OAuth must be enabled for the unknown-code path to be reachable;
+	// with it disabled the handler short-circuits to Unavailable (see
+	// TestRedeemOAuthCode_DisabledUnavailable).
+	registry := oauth.NewRegistry()
+	registry.Register("google", connectOAuthExchanger{})
+	h := newHarnessWithOAuthRegistry(t, registry)
 	_, err := h.client.RedeemOAuthCode(context.Background(),
 		connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: "does-not-exist"}))
 	if err == nil {
@@ -465,6 +470,22 @@ func TestRedeemOAuthCode_UnknownCodeUnauthenticated(t *testing.T) {
 	}
 	if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
 		t.Fatalf("RedeemOAuthCode unknown code = %v, want Unauthenticated", got)
+	}
+}
+
+// TestRedeemOAuthCode_DisabledUnavailable locks in #156: with OAuth
+// disabled (no registry), RedeemOAuthCode fails fast with Unavailable —
+// the same guard BeginOAuthLogin/OAuthLogin use — instead of leaking an
+// Unauthenticated "invalid code" status from the code lookup.
+func TestRedeemOAuthCode_DisabledUnavailable(t *testing.T) {
+	h := newHarness(t)
+	_, err := h.client.RedeemOAuthCode(context.Background(),
+		connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: "does-not-exist"}))
+	if err == nil {
+		t.Fatal("expected error redeeming with OAuth disabled")
+	}
+	if got := connectCodeOf(err); got != connect.CodeUnavailable {
+		t.Fatalf("RedeemOAuthCode OAuth-disabled = %v, want Unavailable", got)
 	}
 }
 
