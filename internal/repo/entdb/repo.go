@@ -15,6 +15,7 @@ import (
 	"time"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"google.golang.org/protobuf/proto"
 
 	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 	"github.com/elloloop/identity/internal/service"
@@ -290,6 +291,71 @@ func (r *entRepository) deleteUser(ctx context.Context, nodeID string) error {
 		return err
 	}
 	return nil
+}
+
+// drainDeleteByUser removes every row of the witness type whose
+// user_id equals userID, draining in a loop so a user with more than
+// the server's per-query row cap (SEC-4, #530) still gets every row
+// deleted. A fresh witness instance is allocated per query so the
+// caller can pass a zero-value prototype. bulkDrainMaxIterations is the
+// safety stop.
+func (r *entRepository) drainDeleteByUser(ctx context.Context, userID string, newWitness func() proto.Message, label string) error {
+	for i := 0; i < bulkDrainMaxIterations; i++ {
+		rows, err := r.client.query(ctx, systemActor, newWitness(), map[string]any{"user_id": userID})
+		if err != nil {
+			return fmt.Errorf("repo: DeleteUser: %s query: %w", label, err)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		for _, row := range rows {
+			if err := r.client.delete(ctx, actorStr(userID), newWitness(), row.NodeID); err != nil &&
+				!errors.Is(err, errNotFound) {
+				return fmt.Errorf("repo: DeleteUser: %s delete: %w", label, err)
+			}
+		}
+	}
+	return fmt.Errorf("repo: DeleteUser: %s exceeded %d-iteration drain ceiling for user %q", label, bulkDrainMaxIterations, userID)
+}
+
+// DeleteUser physically removes the user node and drains every durable
+// user-owned record. "Durable" means the entdb schema indexes the type
+// by user_id so it can be enumerated and removed — these carry the
+// persistent identity/auth material (sessions, tokens, credentials,
+// linked identities, org memberships).
+//
+// The short-lived, hash/id-keyed tokens (password-reset, email-change,
+// email-verification, passkey/login challenges, qr sessions, oauth
+// one-time codes, invitations) are deliberately NOT indexed by user_id
+// in the schema, so they cannot be enumerated per-user here. They are
+// reaped by the TTL sweepers (see sweeper.go), reference a now-deleted
+// user, and never block reuse of the freed email — so leaving them to
+// expire is safe. Audit events have no user_id edge and are retained
+// for accountability. Idempotent: a missing user drains zero rows and
+// the node delete is a no-op.
+func (r *entRepository) DeleteUser(ctx context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	drains := []struct {
+		label      string
+		newWitness func() proto.Message
+	}{
+		{"refresh_token", func() proto.Message { return &schemapb.RefreshToken{} }},
+		{"session", func() proto.Message { return &schemapb.Session{} }},
+		{"oauth_identity", func() proto.Message { return &schemapb.OAuthIdentity{} }},
+		{"passkey_credential", func() proto.Message { return &schemapb.PasskeyCredential{} }},
+		{"totp_credential", func() proto.Message { return &schemapb.TotpCredential{} }},
+		{"recovery_code", func() proto.Message { return &schemapb.RecoveryCode{} }},
+		{"identity_verification", func() proto.Message { return &schemapb.IdentityVerificationRecord{} }},
+		{"organization_membership", func() proto.Message { return &schemapb.OrganizationMembership{} }},
+	}
+	for _, d := range drains {
+		if err := r.drainDeleteByUser(ctx, userID, d.newWitness, d.label); err != nil {
+			return err
+		}
+	}
+	return r.deleteUser(ctx, userID)
 }
 
 func (r *entRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {

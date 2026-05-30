@@ -58,6 +58,14 @@ type errorRepo struct {
 	failCreateMagicLinkToken       bool
 	failIncrEmailLoginCodeAttempts bool
 	failConsumeEmailLoginCode      bool
+	failDeleteUser                 bool
+}
+
+func (r *errorRepo) DeleteUser(ctx context.Context, userID string) error {
+	if r.failDeleteUser {
+		return errInjected
+	}
+	return r.fakeRepo.DeleteUser(ctx, userID)
 }
 
 func (r *errorRepo) UpsertEmailLoginCode(ctx context.Context, rec *EmailLoginCodeRecord) (string, error) {

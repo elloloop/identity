@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+
+	"github.com/elloloop/identity/pkg/audit"
 )
 
 // SetUserQuota updates the storage quota for a user.
@@ -117,9 +119,51 @@ func (s *AdminService) GetUser(ctx context.Context, actorID, userID string) (*Us
 		return nil, fmt.Errorf("get user: %w", err)
 	}
 	if node == nil {
-		return nil, errors.New("user not found")
+		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	return userFromNode(node), nil
+}
+
+// DeleteUser physically removes a user and cascades all user-owned
+// records (sessions, refresh/login challenges, passkeys, totp,
+// recovery codes, oauth identities, qr sessions, one-time codes, idv
+// records, invitations, and the password/email-verification/
+// email-change tokens). After it, GetUser returns NotFound and the
+// email is reusable. Audit events are retained for accountability.
+//
+// Active sessions and refresh tokens are revoked BEFORE the cascade so
+// any in-flight access token is dead immediately rather than at its
+// natural expiry.
+func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID string) error {
+	if _, err := s.requireAdmin(ctx, actorID); err != nil {
+		return err
+	}
+	if targetUserID == "" {
+		return errors.New("user_id is required")
+	}
+	if targetUserID == actorID {
+		return errors.New("admins cannot delete themselves")
+	}
+	u, err := s.repo(ctx).GetUser(ctx, targetUserID)
+	if err != nil {
+		return fmt.Errorf("fetch user: %w", err)
+	}
+	if u == nil {
+		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	now := nowMs()
+	if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, targetUserID); err != nil {
+		return fmt.Errorf("delete user: revoke refresh tokens: %w", err)
+	}
+	if err := s.repo(ctx).RevokeSessionsForUser(ctx, targetUserID, now); err != nil {
+		return fmt.Errorf("delete user: revoke sessions: %w", err)
+	}
+	if err := s.repo(ctx).DeleteUser(ctx, targetUserID); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	s.audit.Log(ctx, audit.EventUserDeleted,
+		audit.WithActor(actorID), audit.WithTarget(targetUserID), audit.WithSuccess(true))
+	return nil
 }
 
 // UpdateUser patches name, role, and/or avatar_url for a user.
