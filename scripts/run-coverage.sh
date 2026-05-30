@@ -27,8 +27,14 @@ fi
 # in-process via httptest. Contributes coverage of internal/connect,
 # internal/middleware, internal/app, internal/service, and
 # internal/repo/memory.
+#
+# Timeout is 600s (not 180s): every test boots a full app.New and dials
+# its own entdb connection, and the suite runs under -race. On a 2-core
+# CI runner the whole-suite wall-clock is ~230s, so the old 180s budget
+# timed out there even though the suite passes (~37s on a dev box). 600s
+# matches the headroom the realentdb/realpostgres suites already use.
 if [[ "${RUN_INTEGRATION_COVERAGE:-}" == "1" ]]; then
-  go test -count=1 -tags=e2e -race -timeout=180s \
+  go test -count=1 -tags=e2e -race -timeout=600s \
     -coverprofile=cover.e2e.out \
     -coverpkg="$tagged_coverpkg" \
     ./tests/e2e/...
