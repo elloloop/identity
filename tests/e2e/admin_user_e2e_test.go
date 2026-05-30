@@ -5,6 +5,7 @@ package e2e
 import (
 	"net/http"
 	"testing"
+	"time"
 )
 
 // TestE2E_Admin_InviteAcceptLogin drives user invitation, acceptance, and login.
@@ -178,16 +179,25 @@ func TestE2E_Admin_UserCRUD(t *testing.T) {
 		t.Fatalf("SetUserQuota status=%d, body=%v", status, resp)
 	}
 
-	// Get User to check quota
-	resp, _ = h.rpcCall(t, "GetUser", map[string]any{"userId": userID}, at)
-	fetchedUser, _ = resp["user"].(map[string]any)
-	if quota, _ := fetchedUser["quotaBytes"].(float64); int64(quota) != 50000 {
-		t.Errorf("quotaBytes = %v, want 50000", quota)
+	// Get User to check quota (with retry for eventual consistency)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		resp, _ = h.rpcCall(t, "GetUser", map[string]any{"userId": userID}, at)
+		fetchedUser, _ = resp["user"].(map[string]any)
+		quotaStr, _ := fetchedUser["quotaBytes"].(string)
+		if quotaStr == "50000" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("quotaBytes = %q, want \"50000\"", quotaStr)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	// 7. Reset User Password
 	resp, status = h.rpcCall(t, "ResetUserPassword", map[string]any{
-		"userId": userID,
+		"userId":               userID,
+		"generateTempPassword": true,
 	}, at)
 	if status != http.StatusOK {
 		t.Fatalf("ResetUserPassword status=%d, body=%v", status, resp)
@@ -211,9 +221,16 @@ func TestE2E_Admin_UserCRUD(t *testing.T) {
 		t.Fatalf("DeleteUser status=%d, body=%v", status, resp)
 	}
 
-	// Verify GetUser returns non-200
-	_, status = h.rpcCall(t, "GetUser", map[string]any{"userId": userID}, at)
-	if status == http.StatusOK {
-		t.Fatalf("GetUser unexpectedly succeeded after deletion")
+	// Verify GetUser returns non-200 (with retry for eventual consistency)
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		_, status = h.rpcCall(t, "GetUser", map[string]any{"userId": userID}, at)
+		if status != http.StatusOK {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("GetUser unexpectedly succeeded after deletion")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
