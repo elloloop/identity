@@ -3,7 +3,7 @@
 // Package e2e drives the identity service over its public HTTP/JSON
 // Connect-RPC wire format — what a downstream JS or Python client sees.
 // Tests boot the same handler chain cmd/identity/main.go serves (via
-// internal/app + a memory backend) on an in-process httptest server,
+// internal/app + a real EntDB backend) on an in-process httptest server,
 // then exercise it with a plain *http.Client + encoding/json. There is
 // no import of the Connect-Go client codegen, deliberately — that's
 // what distinguishes these tests from tests/integration: the surface
@@ -22,19 +22,27 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/config"
-	"github.com/elloloop/identity/internal/repo/memory"
+	"github.com/elloloop/identity/internal/repo"
+	"github.com/elloloop/identity/internal/repo/entdb/entclient"
+	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
+	"github.com/elloloop/identity/pkg/passwords"
 )
 
 // Harness is the bag of resources returned by StartServer. Tests do
@@ -47,6 +55,8 @@ type Harness struct {
 	TenantID string
 	Server   *httptest.Server
 	Mailer   *RecordingMailer
+	Repo     service.Repository
+	DB       service.DB
 }
 
 // RecordingMailer captures every outbound email so tests can inspect
@@ -91,11 +101,16 @@ func (m *RecordingMailer) FindContaining(needle string) *email.Message {
 	return nil
 }
 
-// StartServer boots identity with memory-backend defaults sufficient for
+// StartServer boots identity with real-backend defaults sufficient for
 // black-box HTTP testing. The server is torn down via t.Cleanup so a
 // test never leaks resources between cases.
 func StartServer(t *testing.T) *Harness {
 	t.Helper()
+
+	addr := os.Getenv("GATEWAY_ENTDB_ADDRESS")
+	if addr == "" {
+		addr = "localhost:50051"
+	}
 
 	tenantID := fmt.Sprintf("e2e-%d", time.Now().UnixNano())
 
@@ -129,7 +144,26 @@ func StartServer(t *testing.T) *Harness {
 		OAuthAllowedReturnURLs:        "http://localhost",
 	}
 
-	store := memory.New()
+	client, err := entclient.New(addr)
+	if err != nil {
+		t.Fatalf("entdb.NewClient: %v", err)
+	}
+	if err := client.Connect(context.Background()); err != nil {
+		t.Fatalf("entdb connect: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	ensureRealEntDBTenant(t, client, tenantID)
+
+	builtRepo, err := repo.Build(context.Background(), repo.Config{
+		Driver:      repo.DriverEntDB,
+		EntDBClient: client,
+		TenantID:    tenantID,
+	}, zap.NewNop())
+	if err != nil {
+		t.Fatalf("repo.Build: %v", err)
+	}
+
 	mailer := &RecordingMailer{}
 	signer := jwttest.NewSigner(t, "e2e-kid")
 
@@ -146,8 +180,8 @@ func StartServer(t *testing.T) *Harness {
 		Config:             cfg,
 		Logger:             zap.NewNop(),
 		Signer:             signer,
-		Repo:               store,
-		DB:                 store,
+		Repo:               builtRepo.Repository,
+		DB:                 builtRepo.DB,
 		Passkeys:           pkSvc,
 		TOTPKey:            []byte("01234567890123456789012345678901"),
 		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
@@ -168,7 +202,31 @@ func StartServer(t *testing.T) *Harness {
 		TenantID: tenantID,
 		Server:   srv,
 		Mailer:   mailer,
+		Repo:     builtRepo.Repository,
+		DB:       builtRepo.DB,
 	}
+}
+
+// ensureRealEntDBTenant registers a tenant in the global registry
+func ensureRealEntDBTenant(t *testing.T, client *sdk.DbClient, tenantID string) {
+	t.Helper()
+	ctx := context.Background()
+
+	admin := client.Admin()
+	if _, err := admin.CreateTenant(ctx, "system:admin", tenantID, tenantID); err != nil && !realEntDBIsAlreadyExists(err) {
+		t.Fatalf("admin.CreateTenant(%q): %v", tenantID, err)
+	}
+}
+
+func realEntDBIsAlreadyExists(err error) bool {
+	if err == nil {
+		return false
+	}
+	if st, ok := status.FromError(err); ok {
+		return st.Code() == codes.AlreadyExists
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "ALREADY_EXISTS") || strings.Contains(msg, "already exists")
 }
 
 // rpcCall posts an RPC request and decodes the JSON response. If the
@@ -256,4 +314,34 @@ func (h *Harness) HealthCheck(t *testing.T, path string) int {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode
+}
+
+// SeedUser adds a user directly to the store for testing.
+func (h *Harness) SeedUser(t *testing.T, email, name, role, status, plainPassword string) string {
+	t.Helper()
+
+	email = strings.ToLower(email)
+	passwordHash := ""
+	if plainPassword != "" {
+		var err error
+		passwordHash, err = passwords.Hash(plainPassword)
+		if err != nil {
+			t.Fatalf("hash password for %s: %v", email, err)
+		}
+	}
+
+	now := time.Now()
+	id, err := h.Repo.CreateUser(context.Background(), &service.User{
+		Email:        email,
+		Name:         name,
+		Role:         role,
+		Status:       status,
+		PasswordHash: passwordHash,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	})
+	if err != nil {
+		t.Fatalf("SeedUser(%s): %v", email, err)
+	}
+	return id
 }
