@@ -1778,7 +1778,7 @@ func TestNewServices_NilLoggerIsSafe(t *testing.T) {
 	assert.NotNil(t, a)
 
 	db := newFakeDB()
-	ad := NewAdminService(db, "t", nil, cfg, nil, nil)
+	ad := NewAdminService(newFakeRepo(), db, "t", nil, cfg, nil, nil)
 	assert.NotNil(t, ad)
 
 	g := NewGroupService(db, "t", nil, nil)

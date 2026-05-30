@@ -245,6 +245,63 @@ func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map
 	return nil
 }
 
+// userDeleteNonFKTables lists the user-keyed tables whose user_id column
+// has no FK to users(id) — they default to ” so they can legitimately
+// hold rows with no owning user (pre-account email verification,
+// anonymous QR sessions, pending invitations). DeleteUser removes their
+// rows explicitly; the FK ON DELETE CASCADE on every other user-keyed
+// table fires automatically when the users row is deleted.
+var userDeleteNonFKTables = []string{
+	"email_verification_tokens",
+	"passkey_challenges",
+	"qr_login_sessions",
+	"user_invitations",
+}
+
+// DeleteUser physically removes the user and cascades all user-owned
+// rows inside one transaction. The four non-FK tables are deleted
+// explicitly; the DELETE FROM users then triggers ON DELETE CASCADE for
+// refresh_tokens, sessions, password_reset_tokens, email_change_tokens,
+// oauth_identities, passkeys, totp_secrets, recovery_codes,
+// login_challenges, oauth_one_time_codes, identity_verifications,
+// organization_members, and group_memberships. audit_events has no FK
+// to users and is retained for accountability. The email-keyed
+// email_login_codes / magic_link_tokens are out of scope (no user_id).
+//
+// A user who owns an organization (organizations.owner_user_id is
+// ON DELETE RESTRICT) cannot be deleted; the FK violation surfaces to
+// the caller rather than orphaning the org. It is idempotent: deleting
+// a non-existent user touches zero rows and returns nil.
+func (r *pgRepository) DeleteUser(ctx context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return wrapPgErr("DeleteUser", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, tbl := range userDeleteNonFKTables {
+		if _, err := tx.Exec(ctx,
+			fmt.Sprintf(`DELETE FROM %s WHERE tenant_id = $1 AND user_id = $2`, tbl),
+			r.tenantID, userID); err != nil {
+			return wrapPgErr("DeleteUser("+tbl+")", err)
+		}
+	}
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM users WHERE tenant_id = $1 AND id = $2`,
+		r.tenantID, userID); err != nil {
+		return wrapPgErr("DeleteUser(users)", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return wrapPgErr("DeleteUser", err)
+	}
+	return nil
+}
+
 // ── Lockout state ─────────────────────────────────────────────────
 
 func (r *pgRepository) IncrementFailedLoginCount(ctx context.Context, userID string) (int32, error) {

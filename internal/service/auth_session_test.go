@@ -55,6 +55,45 @@ func TestModeTTL_DeleteRefreshTokensForUser_LeavesAccessTokenAlive(t *testing.T)
 	assert.NoError(t, err, "in-flight access token must verify in mode=ttl after refresh revocation")
 }
 
+// ── RefreshToken account-status re-check ───────────────────────────────
+
+func TestRefreshToken_DeactivatedUser_Rejected(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+
+	result, err := svc.PasswordSignup(context.Background(), "deact@example.com", strongPW, "", "")
+	require.NoError(t, err)
+
+	user, err := repo.FindUserByEmail(context.Background(), "deact@example.com")
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateUser(context.Background(), user.ID, map[string]any{"status": "deactivated"}))
+
+	_, access, refresh, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAccountNotActive)
+	assert.Empty(t, access, "no access token must be minted for a deactivated user")
+	assert.Empty(t, refresh, "no refresh token must be minted for a deactivated user")
+}
+
+func TestRefreshToken_LockedUser_Rejected(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+
+	result, err := svc.PasswordSignup(context.Background(), "locked@example.com", strongPW, "", "")
+	require.NoError(t, err)
+
+	user, err := repo.FindUserByEmail(context.Background(), "locked@example.com")
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateUser(context.Background(), user.ID, map[string]any{
+		"locked_until": svc.nowMs() + 60_000,
+	}))
+
+	_, access, _, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAccountLocked)
+	assert.Empty(t, access, "no access token must be minted for a locked user")
+}
+
 // ── mode=session opt-in ────────────────────────────────────────────────
 
 func newSessionModeService(t *testing.T, repo *fakeRepo) *AuthService {

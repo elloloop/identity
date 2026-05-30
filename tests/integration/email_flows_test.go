@@ -214,7 +214,10 @@ func TestEmail_InviteUser_SendsInvitationEmail(t *testing.T) {
 	cfg := newTestConfig()
 	cfg.AppBaseURL = "https://app.test"
 	cfg.SMTPFrom = "no-reply@test.local"
-	svc := service.NewAdminService(db, "test-tenant",
+	// InviteUser uses the DB (graph) handle, not the Repository handle,
+	// so a stub repo is sufficient here; it fails loudly if that ever
+	// changes.
+	svc := service.NewAdminService(service.StubRepository{}, db, "test-tenant",
 		audit.NewLogger(nil, "test-tenant", zap.NewNop()),
 		cfg, mailer, zap.NewNop())
 

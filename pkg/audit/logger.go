@@ -77,6 +77,7 @@ const (
 	EventUserInvited        EventType = "user_invited"
 	EventUserDeactivated    EventType = "user_deactivated"
 	EventUserReactivated    EventType = "user_reactivated"
+	EventUserDeleted        EventType = "user_deleted"
 	EventAdminResetPassword EventType = "admin_reset_password"
 	EventOAuthLogin         EventType = "oauth_login"
 	EventQrLoginApproved    EventType = "qr_login_approved"
@@ -105,6 +106,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventUserInvited:        {},
 	EventUserDeactivated:    {},
 	EventUserReactivated:    {},
+	EventUserDeleted:        {},
 	EventAdminResetPassword: {},
 	EventOAuthLogin:         {},
 	EventQrLoginApproved:    {},
@@ -351,7 +353,8 @@ func (l *Logger) enqueueAsync(ctx context.Context, event EventType, ops []entdb.
 		// that's the whole point of async mode.
 		n := l.dropped.Add(1)
 		if n == 1 || n%1000 == 0 {
-			l.logger.Warn("audit_log_dropped_queue_full",
+			l.logger.Warn(
+				"audit_log_dropped_queue_full",
 				zap.String("event_type", string(event)),
 				zap.Uint64("total_dropped", n),
 			)
@@ -385,7 +388,8 @@ func (l *Logger) flush() {
 func (l *Logger) writeOne(op asyncOp) {
 	defer func() {
 		if r := recover(); r != nil {
-			l.logger.Error("audit_log_async_panic",
+			l.logger.Error(
+				"audit_log_async_panic",
 				zap.String("event_type", string(op.event)),
 				zap.Any("panic", r),
 			)
@@ -393,7 +397,8 @@ func (l *Logger) writeOne(op asyncOp) {
 	}()
 	_, err := l.writer.ExecuteAtomic(op.ctx, op.tenant, "system:admin", op.ops)
 	if err != nil {
-		l.logger.Error("audit_log_async_failed",
+		l.logger.Error(
+			"audit_log_async_failed",
 			zap.String("event_type", string(op.event)),
 			zap.Error(err),
 		)

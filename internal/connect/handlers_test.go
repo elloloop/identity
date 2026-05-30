@@ -948,12 +948,20 @@ func TestAdminHandlers_FullFlow(t *testing.T) {
 		t.Fatalf("reactivate: %v", err)
 	}
 
-	// DeleteUser delegates to DeactivateUser.
+	// DeleteUser physically removes the user via the Repository
+	// cascade. The connect harness uses a separate fakeRepo from the
+	// fakeDB graph path that InviteUser wrote to, so the target user
+	// must exist in the repo for the cascade's existence check.
+	h.repo.seedUser(&service.User{ID: newUserID, Email: "n@e.com", Status: "invited", Role: "member"})
 	_, err = h.client.DeleteUser(ctx, authedReq(connect.NewRequest(&identitypb.DeleteUserRequest{
 		UserId: newUserID,
 	}), "admin-1"))
 	if err != nil {
 		t.Fatalf("delete user: %v", err)
+	}
+	// After the hard-delete the repo no longer holds the user.
+	if u, _ := h.repo.GetUser(ctx, newUserID); u != nil {
+		t.Fatalf("user must be deleted from repo, got %#v", u)
 	}
 }
 
