@@ -321,6 +321,98 @@ func (r *fakeRepo) DeleteRefreshTokensForUser(_ context.Context, userID string) 
 	return nil
 }
 
+// DeleteUser mirrors the memory cascade over the fake's maps. Audit
+// events have no map here; email-keyed codes are left untouched.
+func (r *fakeRepo) DeleteUser(_ context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, t := range r.refreshTokens {
+		if t.UserID == userID {
+			delete(r.refreshTokens, id)
+		}
+	}
+	for id, s := range r.sessions {
+		if s.UserID == userID {
+			delete(r.sessions, id)
+		}
+	}
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
+	}
+	for id, c := range r.passkeyChallenges {
+		if c.UserID == userID {
+			delete(r.passkeyChallenges, id)
+		}
+	}
+	for id, s := range r.qrSessions {
+		if s.UserID == userID {
+			delete(r.qrSessions, id)
+		}
+	}
+	for id, c := range r.oauthOneTimeCodes {
+		if c.UserID == userID {
+			delete(r.oauthOneTimeCodes, id)
+		}
+	}
+	for id, c := range r.totpCreds {
+		if c.UserID == userID {
+			delete(r.totpCreds, id)
+		}
+	}
+	for id, c := range r.recoveryCodes {
+		if c.UserID == userID {
+			delete(r.recoveryCodes, id)
+		}
+	}
+	for id, c := range r.loginChallenges {
+		if c.UserID == userID {
+			delete(r.loginChallenges, id)
+		}
+	}
+	for id, inv := range r.invitations {
+		if inv.UserID == userID {
+			delete(r.invitations, id)
+		}
+	}
+	for id, t := range r.passwordResets {
+		if t.UserID == userID {
+			delete(r.passwordResets, id)
+		}
+	}
+	for id, t := range r.emailVerifications {
+		if t.UserID == userID {
+			delete(r.emailVerifications, id)
+		}
+	}
+	for id, t := range r.emailChanges {
+		if t.UserID == userID {
+			delete(r.emailChanges, id)
+		}
+	}
+	for id, oi := range r.oauthIdentities {
+		if oi.UserID == userID {
+			delete(r.oauthIdentities, id)
+		}
+	}
+	for id, rec := range r.idvRecords {
+		if rec.UserID == userID {
+			delete(r.idvRecords, id)
+		}
+	}
+	for id, m := range r.orgMembers {
+		if m.UserID == userID {
+			delete(r.orgMembers, id)
+		}
+	}
+	delete(r.users, userID)
+	return nil
+}
+
 func (r *fakeRepo) ConsumeRefreshTokenByHash(_ context.Context, hash string, atMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1622,7 +1714,7 @@ func newHarnessWithOAuthRegistry(t *testing.T, registry *oauth.Registry) *testHa
 	totpRecoveryPepper := []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH")
 
 	authSvc := service.NewAuthServiceWithOAuth(repo, cfg, kr, pkSvc, auditLog, totpKey, totpRecoveryPepper, nil, zap.NewNop(), registry)
-	adminSvc := service.NewAdminService(db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
+	adminSvc := service.NewAdminService(repo, db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())

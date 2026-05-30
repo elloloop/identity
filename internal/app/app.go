@@ -299,7 +299,7 @@ func New(deps Deps) (*Built, error) {
 		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, logger,
 		oauthRegistry,
 	)
-	adminSvc := service.NewAdminService(deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)
+	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultTenantID, auditLog, logger)

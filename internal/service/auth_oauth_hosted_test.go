@@ -115,6 +115,13 @@ func TestHostedOAuth_Complete_ProviderMismatchRejected(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
 
+func TestRedeemOAuthCode_DisabledNoRegistry(t *testing.T) {
+	svc := newTestAuthServiceNoOAuth(t, newFakeRepo())
+	_, err := svc.RedeemOAuthCode(context.Background(), "any-code", "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrOAuthDisabled))
+}
+
 func TestRedeemOAuthCode_UnknownCode(t *testing.T) {
 	svc := newTestAuthService(t, newFakeRepo())
 	_, err := svc.RedeemOAuthCode(context.Background(), "nonexistent", "", "")

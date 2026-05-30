@@ -117,6 +117,22 @@ type Repository interface {
 	GetUser(ctx context.Context, userID string) (*User, error)
 	CreateUser(ctx context.Context, u *User) (string, error) // returns node ID
 	UpdateUser(ctx context.Context, userID string, fields map[string]any) error
+	// DeleteUser physically removes the user and all DURABLE user-owned
+	// records: sessions, refresh tokens, oauth identities, passkey
+	// credentials, totp credentials, recovery codes, identity
+	// verifications, and organization memberships. After it, GetUser
+	// returns nil and the email is reusable for a new CreateUser.
+	//
+	// Short-lived, hash/id-keyed tokens (password-reset, email-change,
+	// email-verification, passkey/login challenges, qr sessions, oauth
+	// one-time codes, invitations) and the email-keyed login codes /
+	// magic-link tokens are NOT guaranteed to be removed synchronously:
+	// some backends (entdb) do not index them by user and rely on the
+	// TTL sweepers to reap them. This is safe — they expire quickly,
+	// reference a now-deleted user, and never block email reuse.
+	// audit_events are retained for accountability. Idempotent:
+	// deleting a non-existent user returns nil.
+	DeleteUser(ctx context.Context, userID string) error
 
 	// Lockout state. These are dedicated methods (rather than UpdateUser
 	// patches) so the persistence layer can implement them as single
@@ -1197,6 +1213,15 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	}
 	if user == nil {
 		return nil, "", "", fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+
+	// Re-enforce account status on every refresh: a user deactivated
+	// (or locked, or IDV-revoked) after the original login must not be
+	// able to mint fresh access tokens by replaying a still-valid
+	// refresh token. A hard-deleted user is already covered above (the
+	// refresh row is gone, so the lookup returns nil → unauthenticated).
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return nil, "", "", err
 	}
 
 	accessToken, newRefresh, err := s.issueTokens(ctx, user, ipAddr, userAgent)

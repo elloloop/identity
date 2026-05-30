@@ -1546,6 +1546,131 @@ func RunConformance(t *testing.T, driver Driver) {
 				t.Fatalf("Latest unknown user: err=%v rec=%#v", err, latest)
 			}
 		})
+
+		t.Run("DeleteUser_RemovesUserAndDurableRecords", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+
+			uid := createTestUser(t, r, "del@example.com")
+
+			// A second user owns the organization so the postgres
+			// owner_user_id ON DELETE RESTRICT FK does not block the
+			// delete of `uid`; `uid` is only a member.
+			ownerID := createTestUser(t, r, "owner@example.com")
+
+			// Seed one row of every DURABLE user-owned type keyed to uid.
+			// The contract (Repository.DeleteUser) requires only durable
+			// records to be removed synchronously. Short-lived hash/id-keyed
+			// tokens (password-reset, email verification/change, passkey and
+			// login challenges, qr sessions, oauth one-time codes) are NOT
+			// asserted here: they are TTL-swept and some backends (entdb) do
+			// not index them by user, so eager removal is not guaranteed.
+			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "del-rt", UserID: uid, ExpiresAt: 9_000_000_000_000}); err != nil {
+				t.Fatalf("CreateRefreshToken: %v", err)
+			}
+			if _, err := r.CreateSession(ctx, &service.SessionRecord{SID: "del-sid", UserID: uid, CreatedAtMs: 100}); err != nil {
+				t.Fatalf("CreateSession: %v", err)
+			}
+			if err := r.CreateOAuthIdentity(ctx, &service.OAuthIdentity{UserID: uid, Provider: "google", ProviderUserID: "g-del", EmailAtLinkTime: "del@example.com", CreatedAt: 100}); err != nil {
+				t.Fatalf("CreateOAuthIdentity: %v", err)
+			}
+			if _, err := r.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{CredentialID: "del-cred", UserID: uid, PublicKey: "pk", CreatedAt: 100}); err != nil {
+				t.Fatalf("CreatePasskeyCredential: %v", err)
+			}
+			if _, err := r.CreateTotpCredential(ctx, &service.TotpCredRecord{UserID: uid, SecretEncrypted: "s", Verified: true, CreatedAt: 100}); err != nil {
+				t.Fatalf("CreateTotpCredential: %v", err)
+			}
+			if _, err := r.CreateRecoveryCode(ctx, &service.RecoveryCodeRecord{UserID: uid, CodeHash: "del-rc", CreatedAt: 100}); err != nil {
+				t.Fatalf("CreateRecoveryCode: %v", err)
+			}
+			if err := r.CreateIdentityVerification(ctx, &service.IdentityVerificationRecord{VerificationID: "del-idv", UserID: uid, Provider: "stub", Status: service.IDVStatusPending, CreatedAt: 100, UpdatedAt: 100}); err != nil {
+				t.Fatalf("CreateIdentityVerification: %v", err)
+			}
+			orgID, err := r.CreateOrganization(ctx, &service.Organization{Slug: "del-org", DisplayName: "Del Org", OwnerUserID: ownerID, CreatedAtMs: 100, UpdatedAtMs: 100})
+			if err != nil {
+				t.Fatalf("CreateOrganization: %v", err)
+			}
+			if _, err := r.AddOrganizationMember(ctx, &service.OrganizationMembership{OrganizationID: orgID, UserID: uid, Role: "member", CreatedAtMs: 100}); err != nil {
+				t.Fatalf("AddOrganizationMember: %v", err)
+			}
+
+			// Second user with its own rows to prove scope isolation.
+			keepUID := createTestUser(t, r, "keep@example.com")
+			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "keep-rt", UserID: keepUID, ExpiresAt: 9_000_000_000_000}); err != nil {
+				t.Fatalf("CreateRefreshToken keep: %v", err)
+			}
+			if _, err := r.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{CredentialID: "keep-cred", UserID: keepUID, PublicKey: "pk", CreatedAt: 100}); err != nil {
+				t.Fatalf("CreatePasskeyCredential keep: %v", err)
+			}
+
+			if err := r.DeleteUser(ctx, uid); err != nil {
+				t.Fatalf("DeleteUser: %v", err)
+			}
+
+			// User gone.
+			if got, err := r.GetUser(ctx, uid); err != nil || got != nil {
+				t.Fatalf("GetUser after delete: err=%v rec=%#v", err, got)
+			}
+			if got, err := r.FindUserByEmail(ctx, "del@example.com"); err != nil || got != nil {
+				t.Fatalf("FindUserByEmail after delete: err=%v rec=%#v", err, got)
+			}
+
+			// Every durable record gone.
+			if rec, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, "del-rt"); err != nil || rec != nil {
+				t.Fatalf("refresh token survived: err=%v rec=%#v", err, rec)
+			}
+			if rec, err := r.GetSessionBySid(ctx, "del-sid"); err != nil || rec != nil {
+				t.Fatalf("session survived: err=%v rec=%#v", err, rec)
+			}
+			if recs, err := r.ListOAuthIdentitiesForUser(ctx, uid); err != nil || len(recs) != 0 {
+				t.Fatalf("oauth identities survived: err=%v recs=%#v", err, recs)
+			}
+			if recs, err := r.ListPasskeyCredentials(ctx, uid); err != nil || len(recs) != 0 {
+				t.Fatalf("passkey credentials survived: err=%v recs=%#v", err, recs)
+			}
+			if rec, err := r.GetTotpCredential(ctx, uid); err != nil || rec != nil {
+				t.Fatalf("totp credential survived: err=%v rec=%#v", err, rec)
+			}
+			if rec, err := r.FindRecoveryCodeByHash(ctx, uid, "del-rc"); err != nil || rec != nil {
+				t.Fatalf("recovery code survived: err=%v rec=%#v", err, rec)
+			}
+			if rec, err := r.GetLatestIdentityVerificationForUser(ctx, uid); err != nil || rec != nil {
+				t.Fatalf("identity verification survived: err=%v rec=%#v", err, rec)
+			}
+			if orgs, err := r.ListOrganizationsForUser(ctx, uid); err != nil || len(orgs) != 0 {
+				t.Fatalf("org membership survived: err=%v orgs=%#v", err, orgs)
+			}
+
+			// Second user's rows survive.
+			if rec, err := r.FindRefreshTokenByHashIncludingConsumed(ctx, "keep-rt"); err != nil || rec == nil {
+				t.Fatalf("keep user's refresh token must survive: err=%v rec=%#v", err, rec)
+			}
+			if recs, err := r.ListPasskeyCredentials(ctx, keepUID); err != nil || len(recs) != 1 {
+				t.Fatalf("keep user's passkey must survive: err=%v recs=%#v", err, recs)
+			}
+
+			// Email reusable.
+			newID, err := r.CreateUser(ctx, &service.User{Email: "del@example.com", Status: "active", Role: "member"})
+			if err != nil {
+				t.Fatalf("re-CreateUser with reused email: %v", err)
+			}
+			if newID == "" || newID == uid {
+				t.Fatalf("re-CreateUser: newID=%q must be non-empty and != old uid %q", newID, uid)
+			}
+		})
+
+		t.Run("DeleteUser_NonExistentIsNoop", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			keepUID := createTestUser(t, r, "untouched@example.com")
+
+			if err := r.DeleteUser(ctx, "no-such-user"); err != nil {
+				t.Fatalf("DeleteUser non-existent: want nil, got %v", err)
+			}
+			if got, err := r.GetUser(ctx, keepUID); err != nil || got == nil {
+				t.Fatalf("pre-existing user must survive: err=%v rec=%#v", err, got)
+			}
+		})
 	})
 
 	// ── Sweeper subtests ────────────────────────────────────────────
