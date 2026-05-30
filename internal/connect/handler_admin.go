@@ -235,9 +235,9 @@ func (h *IdentityHandler) CreateUser(
 	return connect.NewResponse(resp), nil
 }
 
-// DeleteUser deletes a user. Admin only.
-// Delegates to DeactivateUser since the service layer does not provide
-// hard-delete — deactivation is the supported removal path.
+// DeleteUser physically removes a user and cascades all user-owned
+// records (sessions, tokens, passkeys, etc.). Audit events are
+// retained. Admin only.
 func (h *IdentityHandler) DeleteUser(
 	ctx context.Context,
 	req *connect.Request[identitypb.DeleteUserRequest],
@@ -247,8 +247,7 @@ func (h *IdentityHandler) DeleteUser(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	err := h.admin.DeactivateUser(ctx, callerID, req.Msg.UserId, "deleted via DeleteUser RPC")
-	if err != nil {
+	if err := h.admin.DeleteUser(ctx, callerID, req.Msg.UserId); err != nil {
 		return nil, toConnectError(err)
 	}
 
