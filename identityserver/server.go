@@ -187,6 +187,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		EmailTransport:      opts.EmailTransport,
 		OAuthRegistry:       opts.OAuthRegistry,
 		IDVProvider:         idvProvider,
+		CaptchaVerifier:     opts.CaptchaVerifier,
 		MetricsRegistry:     opts.MetricsRegistry,
 		TenantAdmin:         tenantAdmin,
 		RepositoryForTenant: repoForTenant,

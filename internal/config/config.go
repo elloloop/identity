@@ -41,6 +41,18 @@ const (
 	RevocationModeTTLAccessTokenCap = 900
 )
 
+// CAPTCHA provider names accepted in GATEWAY_CAPTCHA_PROVIDER. They mirror
+// the captcha.Provider* constants; config validates against these without
+// importing pkg/captcha (config has no dependencies on the service tree).
+const (
+	CaptchaProviderTurnstile   = "turnstile"
+	CaptchaProviderRecaptchaV3 = "recaptcha_v3"
+
+	// DefaultCaptchaRecaptchaScoreThreshold is the reCAPTCHA v3 score below
+	// which a response is rejected when no threshold is configured.
+	DefaultCaptchaRecaptchaScoreThreshold = 0.5
+)
+
 // Config holds all identity service configuration.
 type Config struct {
 	// Server
@@ -180,6 +192,24 @@ type Config struct {
 	// is offered but not required) to match the existing email-verified
 	// pattern. Tenants that need stricter onboarding flip this on.
 	IDVRequired bool
+
+	// CAPTCHA verification on unauthenticated endpoints. CaptchaEnabled is
+	// the global on/off; when off the no-op verifier is wired and the
+	// per-endpoint toggles are ignored. CaptchaProvider selects the
+	// implementation in pkg/captcha ("turnstile" or "recaptcha_v3"); the
+	// matching secret must be set. The per-endpoint toggles let a deployer
+	// enforce CAPTCHA on a subset of the gated endpoints (all default true,
+	// so enabling CAPTCHA gates every endpoint unless one is flipped off).
+	CaptchaEnabled                 bool    // GATEWAY_CAPTCHA_ENABLED (default false)
+	CaptchaProvider                string  // GATEWAY_CAPTCHA_PROVIDER ("turnstile" | "recaptcha_v3" | "")
+	CaptchaTurnstileSecret         string  // GATEWAY_CAPTCHA_TURNSTILE_SECRET
+	CaptchaRecaptchaSecret         string  // GATEWAY_CAPTCHA_RECAPTCHA_SECRET
+	CaptchaRecaptchaScoreThreshold float64 // GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD (default 0.5)
+	CaptchaEnforcePasswordSignup   bool    // GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP (default true)
+	CaptchaEnforcePasswordLogin    bool    // GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN (default true)
+	CaptchaEnforcePasswordReset    bool    // GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET (default true)
+	CaptchaEnforceEmailLoginCode   bool    // GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE (default true)
+	CaptchaEnforceMagicLink        bool    // GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK (default true)
 
 	// Password
 	PasswordSignupEnabled      bool
@@ -403,6 +433,17 @@ func Load() *Config {
 		IDVAzureKey:           envStr("GATEWAY_IDV_AZURE_KEY", ""),
 		IDVAzureSessionTTLSec: envInt("GATEWAY_IDV_AZURE_SESSION_TTL_SECONDS", 600),
 		IDVRequired:           envBool("GATEWAY_IDV_REQUIRED", false),
+
+		CaptchaEnabled:                 envBool("GATEWAY_CAPTCHA_ENABLED", false),
+		CaptchaProvider:                envStr("GATEWAY_CAPTCHA_PROVIDER", ""),
+		CaptchaTurnstileSecret:         envStr("GATEWAY_CAPTCHA_TURNSTILE_SECRET", ""),
+		CaptchaRecaptchaSecret:         envStr("GATEWAY_CAPTCHA_RECAPTCHA_SECRET", ""),
+		CaptchaRecaptchaScoreThreshold: envFloat("GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD", DefaultCaptchaRecaptchaScoreThreshold),
+		CaptchaEnforcePasswordSignup:   envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP", true),
+		CaptchaEnforcePasswordLogin:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN", true),
+		CaptchaEnforcePasswordReset:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET", true),
+		CaptchaEnforceEmailLoginCode:   envBool("GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE", true),
+		CaptchaEnforceMagicLink:        envBool("GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK", true),
 
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
@@ -675,6 +716,45 @@ func (c *Config) Validate() error {
 				RevocationModeTTL,
 			)
 		}
+	}
+
+	if err := c.validateCaptcha(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateCaptcha enforces the CAPTCHA invariants: a deployment that turns
+// CAPTCHA on must name a supported provider, supply that provider's secret,
+// and (for reCAPTCHA v3) configure a score threshold within [0,1]. A
+// disabled deployment is unconstrained — the no-op verifier is wired and
+// the provider/secret fields are ignored.
+func (c *Config) validateCaptcha() error {
+	if !c.CaptchaEnabled {
+		return nil
+	}
+
+	switch c.CaptchaProvider {
+	case CaptchaProviderTurnstile:
+		if c.CaptchaTurnstileSecret == "" {
+			return fmt.Errorf("config: GATEWAY_CAPTCHA_ENABLED=true with provider %q requires GATEWAY_CAPTCHA_TURNSTILE_SECRET", CaptchaProviderTurnstile)
+		}
+	case CaptchaProviderRecaptchaV3:
+		if c.CaptchaRecaptchaSecret == "" {
+			return fmt.Errorf("config: GATEWAY_CAPTCHA_ENABLED=true with provider %q requires GATEWAY_CAPTCHA_RECAPTCHA_SECRET", CaptchaProviderRecaptchaV3)
+		}
+		if c.CaptchaRecaptchaScoreThreshold < 0 || c.CaptchaRecaptchaScoreThreshold > 1 {
+			return fmt.Errorf(
+				"config: GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD=%v must be in [0,1]",
+				c.CaptchaRecaptchaScoreThreshold,
+			)
+		}
+	default:
+		return fmt.Errorf(
+			"config: GATEWAY_CAPTCHA_ENABLED=true requires GATEWAY_CAPTCHA_PROVIDER to be one of: %q, %q; got %q",
+			CaptchaProviderTurnstile, CaptchaProviderRecaptchaV3, c.CaptchaProvider,
+		)
 	}
 
 	return nil

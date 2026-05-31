@@ -227,6 +227,7 @@ message PasswordSignupRequest {
   string email    = 1;
   string password = 2;
   string recovery_email = 3;  // Optional: used for password reset flow
+  string captcha_token = 4;   // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 }
 
 message PasswordSignupResponse {
@@ -240,6 +241,7 @@ message PasswordSignupResponse {
 message PasswordLoginRequest {
   string email    = 1;
   string password = 2;
+  string captcha_token = 3;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 }
 
 message PasswordLoginResponse {
@@ -265,6 +267,7 @@ message PasswordLoginResponse {
 // already has an account (and whether or not auto-create is enabled).
 message RequestEmailLoginCodeRequest {
   string email = 1;
+  string captcha_token = 2;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 }
 
 message RequestEmailLoginCodeResponse {
@@ -293,6 +296,7 @@ message VerifyEmailLoginCodeResponse {
 message RequestMagicLinkRequest {
   string email     = 1;
   string return_to = 2;  // app URL to return to; must match the allowlist
+  string captcha_token = 3;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 }
 
 message RequestMagicLinkResponse {
@@ -365,6 +369,7 @@ message ChangePasswordResponse {}
 // or, if none is set, the request silently succeeds (no enumeration).
 message RequestPasswordResetRequest {
   string email = 1;
+  string captcha_token = 2;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 }
 
 message RequestPasswordResetResponse {
