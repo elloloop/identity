@@ -21,6 +21,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/captcha"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -1689,15 +1690,37 @@ func testKeyRing(t *testing.T) *jwttest.Signer {
 // connect client and the underlying fakes for assertions.
 func newHarness(t *testing.T) *testHarness {
 	t.Helper()
-	return newHarnessWithOAuthRegistry(t, nil)
+	return newHarnessWith(t, nil, nil, nil)
 }
 
 func newHarnessWithOAuthRegistry(t *testing.T, registry *oauth.Registry) *testHarness {
+	t.Helper()
+	return newHarnessWith(t, registry, nil, nil)
+}
+
+// newHarnessWithCaptcha builds a harness whose handler enforces CAPTCHA via
+// the supplied verifier and a config produced by mutating testConfig (so a
+// test can flip CaptchaEnabled and the per-endpoint toggles). A nil mutate
+// leaves the default config; a nil verifier exercises the disabled path.
+func newHarnessWithCaptcha(t *testing.T, verifier captcha.Verifier, mutate func(*config.Config)) *testHarness {
+	t.Helper()
+	return newHarnessWith(t, nil, verifier, mutate)
+}
+
+func newHarnessWith(
+	t *testing.T,
+	registry *oauth.Registry,
+	captchaVerifier captcha.Verifier,
+	mutate func(*config.Config),
+) *testHarness {
 	t.Helper()
 
 	repo := newFakeRepo()
 	db := newFakeDB()
 	cfg := testConfig()
+	if mutate != nil {
+		mutate(cfg)
+	}
 	kr := testKeyRing(t)
 
 	pkSvc, err := passkeys.NewWebAuthnService(passkeys.Config{
@@ -1719,7 +1742,7 @@ func newHarnessWithOAuthRegistry(t *testing.T, registry *oauth.Registry) *testHa
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 
-	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, cfg)
+	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, captchaVerifier, cfg)
 
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)

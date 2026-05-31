@@ -2202,6 +2202,7 @@ type PasswordSignupRequest struct {
 	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
 	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
 	RecoveryEmail string                 `protobuf:"bytes,3,opt,name=recovery_email,json=recoveryEmail,proto3" json:"recovery_email,omitempty"` // Optional: used for password reset flow
+	CaptchaToken  string                 `protobuf:"bytes,4,opt,name=captcha_token,json=captchaToken,proto3" json:"captcha_token,omitempty"`    // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2253,6 +2254,13 @@ func (x *PasswordSignupRequest) GetPassword() string {
 func (x *PasswordSignupRequest) GetRecoveryEmail() string {
 	if x != nil {
 		return x.RecoveryEmail
+	}
+	return ""
+}
+
+func (x *PasswordSignupRequest) GetCaptchaToken() string {
+	if x != nil {
+		return x.CaptchaToken
 	}
 	return ""
 }
@@ -2337,6 +2345,7 @@ type PasswordLoginRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
 	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	CaptchaToken  string                 `protobuf:"bytes,3,opt,name=captcha_token,json=captchaToken,proto3" json:"captcha_token,omitempty"` // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2381,6 +2390,13 @@ func (x *PasswordLoginRequest) GetEmail() string {
 func (x *PasswordLoginRequest) GetPassword() string {
 	if x != nil {
 		return x.Password
+	}
+	return ""
+}
+
+func (x *PasswordLoginRequest) GetCaptchaToken() string {
+	if x != nil {
+		return x.CaptchaToken
 	}
 	return ""
 }
@@ -2483,6 +2499,7 @@ func (x *PasswordLoginResponse) GetLoginChallengeId() string {
 type RequestEmailLoginCodeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	CaptchaToken  string                 `protobuf:"bytes,2,opt,name=captcha_token,json=captchaToken,proto3" json:"captcha_token,omitempty"` // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2520,6 +2537,13 @@ func (*RequestEmailLoginCodeRequest) Descriptor() ([]byte, []int) {
 func (x *RequestEmailLoginCodeRequest) GetEmail() string {
 	if x != nil {
 		return x.Email
+	}
+	return ""
+}
+
+func (x *RequestEmailLoginCodeRequest) GetCaptchaToken() string {
+	if x != nil {
+		return x.CaptchaToken
 	}
 	return ""
 }
@@ -2690,7 +2714,8 @@ func (x *VerifyEmailLoginCodeResponse) GetExpiresIn() int32 {
 type RequestMagicLinkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
-	ReturnTo      string                 `protobuf:"bytes,2,opt,name=return_to,json=returnTo,proto3" json:"return_to,omitempty"` // app URL to return to; must match the allowlist
+	ReturnTo      string                 `protobuf:"bytes,2,opt,name=return_to,json=returnTo,proto3" json:"return_to,omitempty"`             // app URL to return to; must match the allowlist
+	CaptchaToken  string                 `protobuf:"bytes,3,opt,name=captcha_token,json=captchaToken,proto3" json:"captcha_token,omitempty"` // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2735,6 +2760,13 @@ func (x *RequestMagicLinkRequest) GetEmail() string {
 func (x *RequestMagicLinkRequest) GetReturnTo() string {
 	if x != nil {
 		return x.ReturnTo
+	}
+	return ""
+}
+
+func (x *RequestMagicLinkRequest) GetCaptchaToken() string {
+	if x != nil {
+		return x.CaptchaToken
 	}
 	return ""
 }
@@ -3354,6 +3386,7 @@ func (*ChangePasswordResponse) Descriptor() ([]byte, []int) {
 type RequestPasswordResetRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	CaptchaToken  string                 `protobuf:"bytes,2,opt,name=captcha_token,json=captchaToken,proto3" json:"captcha_token,omitempty"` // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3391,6 +3424,13 @@ func (*RequestPasswordResetRequest) Descriptor() ([]byte, []int) {
 func (x *RequestPasswordResetRequest) GetEmail() string {
 	if x != nil {
 		return x.Email
+	}
+	return ""
+}
+
+func (x *RequestPasswordResetRequest) GetCaptchaToken() string {
+	if x != nil {
+		return x.CaptchaToken
 	}
 	return ""
 }
@@ -7908,21 +7948,23 @@ const file_identity_identity_proto_rawDesc = "" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"p\n" +
+	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"\x95\x01\n" +
 	"\x15PasswordSignupRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12%\n" +
-	"\x0erecovery_email\x18\x03 \x01(\tR\rrecoveryEmail\"\xbe\x01\n" +
+	"\x0erecovery_email\x18\x03 \x01(\tR\rrecoveryEmail\x12#\n" +
+	"\rcaptcha_token\x18\x04 \x01(\tR\fcaptchaToken\"\xbe\x01\n" +
 	"\x16PasswordSignupResponse\x12\x19\n" +
 	"\bid_token\x18\x01 \x01(\tR\aidToken\x12\"\n" +
 	"\x04user\x18\x02 \x01(\v2\x0e.identity.UserR\x04user\x12!\n" +
 	"\faccess_token\x18\x03 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x04 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x05 \x01(\x05R\texpiresIn\"H\n" +
+	"expires_in\x18\x05 \x01(\x05R\texpiresIn\"m\n" +
 	"\x14PasswordLoginRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"\x90\x02\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\x12#\n" +
+	"\rcaptcha_token\x18\x03 \x01(\tR\fcaptchaToken\"\x90\x02\n" +
 	"\x15PasswordLoginResponse\x12\x19\n" +
 	"\bid_token\x18\x01 \x01(\tR\aidToken\x12\"\n" +
 	"\x04user\x18\x02 \x01(\v2\x0e.identity.UserR\x04user\x12!\n" +
@@ -7931,9 +7973,10 @@ const file_identity_identity_proto_rawDesc = "" +
 	"\n" +
 	"expires_in\x18\x05 \x01(\x05R\texpiresIn\x12#\n" +
 	"\rtotp_required\x18\x06 \x01(\bR\ftotpRequired\x12,\n" +
-	"\x12login_challenge_id\x18\a \x01(\tR\x10loginChallengeId\"4\n" +
+	"\x12login_challenge_id\x18\a \x01(\tR\x10loginChallengeId\"Y\n" +
 	"\x1cRequestEmailLoginCodeRequest\x12\x14\n" +
-	"\x05email\x18\x01 \x01(\tR\x05email\"\x1f\n" +
+	"\x05email\x18\x01 \x01(\tR\x05email\x12#\n" +
+	"\rcaptcha_token\x18\x02 \x01(\tR\fcaptchaToken\"\x1f\n" +
 	"\x1dRequestEmailLoginCodeResponse\"G\n" +
 	"\x1bVerifyEmailLoginCodeRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
@@ -7943,10 +7986,11 @@ const file_identity_identity_proto_rawDesc = "" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"L\n" +
+	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"q\n" +
 	"\x17RequestMagicLinkRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1b\n" +
-	"\treturn_to\x18\x02 \x01(\tR\breturnTo\"\x1a\n" +
+	"\treturn_to\x18\x02 \x01(\tR\breturnTo\x12#\n" +
+	"\rcaptcha_token\x18\x03 \x01(\tR\fcaptchaToken\"\x1a\n" +
 	"\x18RequestMagicLinkResponse\".\n" +
 	"\x16RedeemMagicLinkRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\"\xc1\x01\n" +
@@ -7978,9 +8022,10 @@ const file_identity_identity_proto_rawDesc = "" +
 	"\x15ChangePasswordRequest\x12)\n" +
 	"\x10current_password\x18\x01 \x01(\tR\x0fcurrentPassword\x12!\n" +
 	"\fnew_password\x18\x02 \x01(\tR\vnewPassword\"\x18\n" +
-	"\x16ChangePasswordResponse\"3\n" +
+	"\x16ChangePasswordResponse\"X\n" +
 	"\x1bRequestPasswordResetRequest\x12\x14\n" +
-	"\x05email\x18\x01 \x01(\tR\x05email\"\x1e\n" +
+	"\x05email\x18\x01 \x01(\tR\x05email\x12#\n" +
+	"\rcaptcha_token\x18\x02 \x01(\tR\fcaptchaToken\"\x1e\n" +
 	"\x1cRequestPasswordResetResponse\"V\n" +
 	"\x1bConfirmPasswordResetRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12!\n" +
