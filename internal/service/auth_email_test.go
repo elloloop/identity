@@ -70,7 +70,7 @@ func newAuthSvcWithMailerForRepo(t *testing.T, repo Repository) (*AuthService, *
 	rec := &recordingTransport{}
 	svc := NewAuthService(repo, cfg, kr, pkSvc,
 		audit.NewLogger(nil, "test", zap.NewNop()),
-		testTotpKey(), testTotpRecoveryPepper(), rec, zap.NewNop())
+		testTotpKey(), testTotpRecoveryPepper(), rec, nil, zap.NewNop())
 	return svc, rec
 }
 

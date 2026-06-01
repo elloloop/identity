@@ -8,6 +8,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -202,6 +203,33 @@ type Config struct {
 	// Magic-link token lifetime.
 	PasswordlessMagicLinkTTLSeconds int // GATEWAY_PASSWORDLESS_MAGIC_LINK_TTL_SECONDS (default 900)
 
+	// Phone verification (SMS OTP). Standalone phone-ownership
+	// verification for an already-authenticated user — not yet a login
+	// factor. Disabled by default; when SMSEnabled is true a provider and
+	// its credentials must be set (enforced by Validate).
+	SMSEnabled  bool   // GATEWAY_SMS_ENABLED (default false)
+	SMSProvider string // GATEWAY_SMS_PROVIDER: twilio | sns | azure
+
+	// Twilio credentials (SMSProvider == twilio).
+	SMSTwilioAccountSID string // GATEWAY_SMS_TWILIO_ACCOUNT_SID
+	SMSTwilioAuthToken  string // GATEWAY_SMS_TWILIO_AUTH_TOKEN
+	SMSTwilioFrom       string // GATEWAY_SMS_TWILIO_FROM
+
+	// AWS SNS credentials (SMSProvider == sns).
+	SMSAWSRegion          string // GATEWAY_SMS_AWS_REGION
+	SMSAWSAccessKeyID     string // GATEWAY_SMS_AWS_ACCESS_KEY_ID
+	SMSAWSSecretAccessKey string // GATEWAY_SMS_AWS_SECRET_ACCESS_KEY
+	SMSAWSSenderID        string // GATEWAY_SMS_AWS_SENDER_ID (optional)
+
+	// Azure Communication Services credentials (SMSProvider == azure).
+	SMSAzureConnectionString string // GATEWAY_SMS_AZURE_CONNECTION_STRING
+	SMSAzureFrom             string // GATEWAY_SMS_AZURE_FROM
+
+	// Phone-verification OTP policy (mirrors the Passwordless* knobs).
+	PhoneCodeTTLSeconds      int // GATEWAY_PHONE_CODE_TTL_SECONDS (default 300)
+	PhoneCodeMaxAttempts     int // GATEWAY_PHONE_CODE_MAX_ATTEMPTS (default 5)
+	PhoneCodeCooldownSeconds int // GATEWAY_PHONE_CODE_COOLDOWN_SECONDS (default 60)
+
 	// TOTP (2FA)
 	// 32-byte key, base64-encoded. Required in prod; dev falls back to
 	// a deterministic throwaway key.
@@ -302,6 +330,7 @@ type Config struct {
 	RateLimitResetPerIP        int // GATEWAY_RATE_LIMIT_RESET_PER_IP (default 5/min)
 	RateLimitVerifyPerIP       int // GATEWAY_RATE_LIMIT_VERIFY_PER_IP (default 20/min)
 	RateLimitPasswordlessPerIP int // GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP (default 5/min) — RequestEmailLoginCode + RequestMagicLink
+	RateLimitPhonePerIP        int // GATEWAY_RATE_LIMIT_PHONE_PER_IP (default 5/min) — RequestPhoneVerification
 
 	// Postgres (alternate persistence driver). When PostgresDSN is set
 	// the application bootstrapper may prefer the Postgres-backed
@@ -413,6 +442,21 @@ func Load() *Config {
 		PasswordlessCodeMaxAttempts:     envInt("GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS", 5),
 		PasswordlessMagicLinkTTLSeconds: envInt("GATEWAY_PASSWORDLESS_MAGIC_LINK_TTL_SECONDS", 900),
 
+		SMSEnabled:               envBool("GATEWAY_SMS_ENABLED", false),
+		SMSProvider:              strings.ToLower(envStr("GATEWAY_SMS_PROVIDER", "")),
+		SMSTwilioAccountSID:      envStr("GATEWAY_SMS_TWILIO_ACCOUNT_SID", ""),
+		SMSTwilioAuthToken:       envStr("GATEWAY_SMS_TWILIO_AUTH_TOKEN", ""),
+		SMSTwilioFrom:            envStr("GATEWAY_SMS_TWILIO_FROM", ""),
+		SMSAWSRegion:             envStr("GATEWAY_SMS_AWS_REGION", ""),
+		SMSAWSAccessKeyID:        envStr("GATEWAY_SMS_AWS_ACCESS_KEY_ID", ""),
+		SMSAWSSecretAccessKey:    envStr("GATEWAY_SMS_AWS_SECRET_ACCESS_KEY", ""),
+		SMSAWSSenderID:           envStr("GATEWAY_SMS_AWS_SENDER_ID", ""),
+		SMSAzureConnectionString: envStr("GATEWAY_SMS_AZURE_CONNECTION_STRING", ""),
+		SMSAzureFrom:             envStr("GATEWAY_SMS_AZURE_FROM", ""),
+		PhoneCodeTTLSeconds:      envInt("GATEWAY_PHONE_CODE_TTL_SECONDS", 300),
+		PhoneCodeMaxAttempts:     envInt("GATEWAY_PHONE_CODE_MAX_ATTEMPTS", 5),
+		PhoneCodeCooldownSeconds: envInt("GATEWAY_PHONE_CODE_COOLDOWN_SECONDS", 60),
+
 		TOTPEncryptionKey:  envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),
 		TOTPIssuer:         envStr("GATEWAY_TOTP_ISSUER", "Glassa Work"),
 		TOTPRecoveryPepper: envStr("GATEWAY_TOTP_RECOVERY_PEPPER", ""),
@@ -467,6 +511,7 @@ func Load() *Config {
 		RateLimitResetPerIP:        envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
 		RateLimitVerifyPerIP:       envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
 		RateLimitPasswordlessPerIP: envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
+		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
 
 		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
@@ -500,6 +545,15 @@ const (
 func (c *Config) IsMultiMode() bool {
 	return c.IdentityMode == IdentityModeMulti
 }
+
+// SMS provider names for GATEWAY_SMS_PROVIDER. Firebase/Google are
+// intentionally out of scope — those are client-SDK flows, not server
+// REST APIs.
+const (
+	SMSProviderTwilio = "twilio"
+	SMSProviderSNS    = "sns"
+	SMSProviderAzure  = "azure"
+)
 
 // Per-request tenant-resolution source names for
 // GATEWAY_TENANT_RESOLUTION_SOURCES (mode=multi only). See
@@ -677,6 +731,46 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if err := c.validateSMS(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateSMS enforces the SMS-provider invariant: when phone
+// verification is enabled, the provider must be one of the supported
+// values and its required credentials must be set. Failing closed at
+// boot beats a runtime "send to nowhere".
+func (c *Config) validateSMS() error {
+	if !c.SMSEnabled {
+		return nil
+	}
+	switch c.SMSProvider {
+	case SMSProviderTwilio:
+		if c.SMSTwilioAccountSID == "" || c.SMSTwilioAuthToken == "" || c.SMSTwilioFrom == "" {
+			return errors.New(
+				"config: GATEWAY_SMS_PROVIDER=twilio requires GATEWAY_SMS_TWILIO_ACCOUNT_SID, GATEWAY_SMS_TWILIO_AUTH_TOKEN, and GATEWAY_SMS_TWILIO_FROM",
+			)
+		}
+	case SMSProviderSNS:
+		if c.SMSAWSRegion == "" || c.SMSAWSAccessKeyID == "" || c.SMSAWSSecretAccessKey == "" {
+			return errors.New(
+				"config: GATEWAY_SMS_PROVIDER=sns requires GATEWAY_SMS_AWS_REGION, GATEWAY_SMS_AWS_ACCESS_KEY_ID, and GATEWAY_SMS_AWS_SECRET_ACCESS_KEY",
+			)
+		}
+	case SMSProviderAzure:
+		if c.SMSAzureConnectionString == "" || c.SMSAzureFrom == "" {
+			return errors.New(
+				"config: GATEWAY_SMS_PROVIDER=azure requires GATEWAY_SMS_AZURE_CONNECTION_STRING and GATEWAY_SMS_AZURE_FROM",
+			)
+		}
+	default:
+		return fmt.Errorf(
+			"config: GATEWAY_SMS_ENABLED=true requires GATEWAY_SMS_PROVIDER to be one of %q, %q, %q; got %q",
+			SMSProviderTwilio, SMSProviderSNS, SMSProviderAzure, c.SMSProvider,
+		)
+	}
 	return nil
 }
 

@@ -34,7 +34,7 @@ func newTestAuthServiceMulti(t *testing.T, repo Repository) *AuthService {
 	return NewAuthServiceWithOAuth(
 		repo, cfg, kr, passkeysSvc,
 		audit.NewLogger(nil, "test", nil),
-		testTotpKey(), testTotpRecoveryPepper(), email.NewLogOnly(zap.NewNop()), zap.NewNop(),
+		testTotpKey(), testTotpRecoveryPepper(), email.NewLogOnly(zap.NewNop()), nil, zap.NewNop(),
 		oauth.NewRegistry(),
 	)
 }

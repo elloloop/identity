@@ -35,6 +35,9 @@ message User {
   int64 locked_until = 16;                // epoch ms; 0 = not locked, future = locked until
   bool idv_verified = 17;                 // Latest identity verification has reached APPROVED status.
   int64 idv_verified_at = 18;             // epoch ms; 0 = never verified
+  string phone_number = 19;               // E.164 phone number the user has verified ownership of
+  bool phone_verified = 20;               // true once an SMS OTP for phone_number was confirmed
+  int64 phone_verified_at = 21;           // epoch ms; 0 = never verified
 }
 
 message CreateUserRequest {
@@ -313,6 +316,31 @@ message RedeemMagicLinkResponse {
   string refresh_token = 3;
   int32 expires_in     = 4;
   string return_to     = 5;  // allowlist-validated app URL bound at request time
+}
+
+// ─── Phone verification (SMS OTP) ───────────────────────────────────
+//
+// RequestPhoneVerification and VerifyPhoneCode prove the authenticated
+// caller (identified by the access-token `sub`, not a field here) owns a
+// phone number. RequestPhoneVerification texts a 6-digit code to the
+// supplied number; VerifyPhoneCode confirms it and marks the user's
+// phone verified. Both require auth.
+
+message RequestPhoneVerificationRequest {
+  string phone_number = 1;  // E.164 number to verify (e.g. "+14155550123")
+}
+
+message RequestPhoneVerificationResponse {
+  // Empty: the code is delivered out of band via SMS.
+}
+
+message VerifyPhoneCodeRequest {
+  string phone_number = 1;  // must match the number the code was sent to
+  string code         = 2;  // the 6-digit OTP from the SMS
+}
+
+message VerifyPhoneCodeResponse {
+  User user = 1;  // the updated user with phone_verified=true
 }
 
 // ─── Session / Token Auth ───────────────────────────────────────────
@@ -878,6 +906,10 @@ service IdentityService {
   rpc VerifyEmailLoginCode(VerifyEmailLoginCodeRequest) returns (VerifyEmailLoginCodeResponse);
   rpc RequestMagicLink(RequestMagicLinkRequest) returns (RequestMagicLinkResponse);
   rpc RedeemMagicLink(RedeemMagicLinkRequest) returns (RedeemMagicLinkResponse);
+
+  // Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+  rpc RequestPhoneVerification(RequestPhoneVerificationRequest) returns (RequestPhoneVerificationResponse);
+  rpc VerifyPhoneCode(VerifyPhoneCodeRequest) returns (VerifyPhoneCodeResponse);
 
   // Session / Token Auth
   rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);

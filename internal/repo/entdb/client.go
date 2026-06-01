@@ -165,6 +165,8 @@ func (s *sdkScope) get(ctx context.Context, actor string, dst proto.Message, nod
 		return getInto[*schemapb.EmailLoginCode](ctx, scope, dst, nodeID)
 	case *schemapb.MagicLinkToken:
 		return getInto[*schemapb.MagicLinkToken](ctx, scope, dst, nodeID)
+	case *schemapb.PhoneVerificationCode:
+		return getInto[*schemapb.PhoneVerificationCode](ctx, scope, dst, nodeID)
 	case *schemapb.TotpCredential:
 		return getInto[*schemapb.TotpCredential](ctx, scope, dst, nodeID)
 	case *schemapb.RecoveryCode:
@@ -220,6 +222,8 @@ func (s *sdkScope) query(ctx context.Context, actor string, witness proto.Messag
 		return queryAs[*schemapb.EmailLoginCode](ctx, scope, filter)
 	case *schemapb.MagicLinkToken:
 		return queryAs[*schemapb.MagicLinkToken](ctx, scope, filter)
+	case *schemapb.PhoneVerificationCode:
+		return queryAs[*schemapb.PhoneVerificationCode](ctx, scope, filter)
 	case *schemapb.TotpCredential:
 		return queryAs[*schemapb.TotpCredential](ctx, scope, filter)
 	case *schemapb.RecoveryCode:
@@ -655,6 +659,8 @@ func expiresAtSweepSpec(witness proto.Message) (typeID, fieldID int, ok bool) {
 		return 37, 3, true
 	case *schemapb.MagicLinkToken:
 		return 38, 4, true
+	case *schemapb.PhoneVerificationCode:
+		return 39, 4, true
 	}
 	return 0, 0, false
 }
@@ -698,6 +704,8 @@ func (s *sdkScope) deleteExpired(ctx context.Context, actor string, witness prot
 		sdk.DeleteWhere[*schemapb.EmailLoginCode](plan, where, limit)
 	case *schemapb.MagicLinkToken:
 		sdk.DeleteWhere[*schemapb.MagicLinkToken](plan, where, limit)
+	case *schemapb.PhoneVerificationCode:
+		sdk.DeleteWhere[*schemapb.PhoneVerificationCode](plan, where, limit)
 	default:
 		return fmt.Errorf("entdb: deleteExpired: unsupported message type %T", witness)
 	}
@@ -739,6 +747,8 @@ func (s *sdkScope) delete(ctx context.Context, actor string, witness proto.Messa
 		sdk.Delete[*schemapb.EmailLoginCode](plan, nodeID)
 	case *schemapb.MagicLinkToken:
 		sdk.Delete[*schemapb.MagicLinkToken](plan, nodeID)
+	case *schemapb.PhoneVerificationCode:
+		sdk.Delete[*schemapb.PhoneVerificationCode](plan, nodeID)
 	case *schemapb.TotpCredential:
 		sdk.Delete[*schemapb.TotpCredential](plan, nodeID)
 	case *schemapb.RecoveryCode:
@@ -855,6 +865,7 @@ var (
 	rawQuerySpecIdentityVerificationRecord = rawQueryFieldSpec{32, map[string]string{"user_id": "2"}}
 	rawQuerySpecOrganizationMembership     = rawQueryFieldSpec{34, map[string]string{"organization_id": "1", "user_id": "2"}}
 	rawQuerySpecSession                    = rawQueryFieldSpec{35, map[string]string{"sid": "1", "user_id": "2"}}
+	rawQuerySpecPhoneVerificationCode      = rawQueryFieldSpec{39, map[string]string{"user_id": "1"}}
 )
 
 func rawQueryFieldSpecFor(witness proto.Message) (rawQueryFieldSpec, bool) {
@@ -877,6 +888,8 @@ func rawQueryFieldSpecFor(witness proto.Message) (rawQueryFieldSpec, bool) {
 		return rawQuerySpecOrganizationMembership, true
 	case *schemapb.Session:
 		return rawQuerySpecSession, true
+	case *schemapb.PhoneVerificationCode:
+		return rawQuerySpecPhoneVerificationCode, true
 	default:
 		return rawQueryFieldSpec{}, false
 	}

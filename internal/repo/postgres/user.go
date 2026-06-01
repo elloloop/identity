@@ -22,8 +22,21 @@ const userColumns = `
 	failed_login_count, locked_until_ms,
 	email_verified, email_verified_at_ms,
 	idv_verified, idv_verified_at_ms,
+	phone_number, phone_verified, phone_verified_at_ms,
 	last_login_at_ms,
 	created_at_ms, updated_at_ms`
+
+// userColumnsPrefixed returns userColumns with every column qualified by
+// the given table alias (e.g. "u"). Used by joins that select the user
+// columns alongside another table so the shared column list — and its
+// scanUser ordering — stays the single source of truth.
+func userColumnsPrefixed(alias string) string {
+	cols := strings.Split(userColumns, ",")
+	for i, c := range cols {
+		cols[i] = alias + "." + strings.TrimSpace(c)
+	}
+	return strings.Join(cols, ", ")
+}
 
 // scanUser reads one row in userColumns order into a *service.User.
 func scanUser(row pgx.Row) (*service.User, error) {
@@ -33,8 +46,11 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		quotaBytes, lockedUntilMs                              int64
 		failedLoginCount                                       int64
 		emailVerifiedAtMs, idvVerifiedAtMs, lastLoginAtMs      int64
+		phoneVerifiedAtMs                                      int64
 		emailVerified, idvVerified, totpRequired               bool
+		phoneVerified                                          bool
 		id, email, name, role, avatar, status, recovery, phash string
+		phoneNumber                                            string
 	)
 	if err := row.Scan(
 		&id, &email, &name, &role, &avatar, &status, &recovery,
@@ -42,6 +58,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		&failedLoginCount, &lockedUntilMs,
 		&emailVerified, &emailVerifiedAtMs,
 		&idvVerified, &idvVerifiedAtMs,
+		&phoneNumber, &phoneVerified, &phoneVerifiedAtMs,
 		&lastLoginAtMs,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
@@ -63,6 +80,9 @@ func scanUser(row pgx.Row) (*service.User, error) {
 	u.EmailVerifiedAt = emailVerifiedAtMs
 	u.IDVVerified = idvVerified
 	u.IDVVerifiedAt = idvVerifiedAtMs
+	u.PhoneNumber = phoneNumber
+	u.PhoneVerified = phoneVerified
+	u.PhoneVerifiedAt = phoneVerifiedAtMs
 	u.LastLoginAtMs = lastLoginAtMs
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
@@ -138,6 +158,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			failed_login_count, locked_until_ms,
 			email_verified, email_verified_at_ms,
 			idv_verified, idv_verified_at_ms,
+			phone_number, phone_verified, phone_verified_at_ms,
 			last_login_at_ms,
 			created_at_ms, updated_at_ms
 		) VALUES (
@@ -146,8 +167,9 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			$12, $13,
 			$14, $15,
 			$16, $17,
-			$18,
-			$19, $20
+			$18, $19, $20,
+			$21,
+			$22, $23
 		)`
 	_, err := r.pool.Exec(
 		ctx, q,
@@ -156,6 +178,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 		int64(u.FailedLoginCount), u.LockedUntil,
 		u.EmailVerified, u.EmailVerifiedAt,
 		u.IDVVerified, u.IDVVerifiedAt,
+		u.PhoneNumber, u.PhoneVerified, u.PhoneVerifiedAt,
 		u.LastLoginAtMs,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	)
@@ -189,6 +212,9 @@ var userFieldColumns = map[string]struct {
 	"email_verified_at":  {"email_verified_at_ms", "int64"},
 	"idv_verified":       {"idv_verified", "bool"},
 	"idv_verified_at":    {"idv_verified_at_ms", "int64"},
+	"phone_number":       {"phone_number", "string"},
+	"phone_verified":     {"phone_verified", "bool"},
+	"phone_verified_at":  {"phone_verified_at_ms", "int64"},
 }
 
 func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
@@ -264,9 +290,10 @@ var userDeleteNonFKTables = []string{
 // refresh_tokens, sessions, password_reset_tokens, email_change_tokens,
 // oauth_identities, passkeys, totp_secrets, recovery_codes,
 // login_challenges, oauth_one_time_codes, identity_verifications,
-// organization_members, and group_memberships. audit_events has no FK
-// to users and is retained for accountability. The email-keyed
-// email_login_codes / magic_link_tokens are out of scope (no user_id).
+// phone_verification_codes, organization_members, and group_memberships.
+// audit_events has no FK to users and is retained for accountability.
+// The email-keyed email_login_codes / magic_link_tokens are out of scope
+// (no user_id).
 //
 // A user who owns an organization (organizations.owner_user_id is
 // ON DELETE RESTRICT) cannot be deleted; the FK violation surfaces to
@@ -380,6 +407,23 @@ func (r *pgRepository) SetUserIDVVerified(ctx context.Context, userID string, at
 		 WHERE tenant_id = $1 AND id = $2`
 	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, atMs); err != nil {
 		return wrapPgErr("SetUserIDVVerified", err)
+	}
+	return nil
+}
+
+func (r *pgRepository) SetUserPhoneVerified(ctx context.Context, userID, phoneNumber string, atMs int64) error {
+	if userID == "" {
+		return errors.New("postgres: SetUserPhoneVerified: missing user id")
+	}
+	const q = `
+		UPDATE users
+		   SET phone_number = $3,
+		       phone_verified = TRUE,
+		       phone_verified_at_ms = $4,
+		       updated_at_ms = $4
+		 WHERE tenant_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, phoneNumber, atMs); err != nil {
+		return wrapPgErr("SetUserPhoneVerified", err)
 	}
 	return nil
 }

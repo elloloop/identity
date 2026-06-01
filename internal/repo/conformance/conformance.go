@@ -199,13 +199,16 @@ func RunConformance(t *testing.T, driver Driver) {
 
 			now := time.UnixMilli(1_700_000_000_000)
 			id, err := r.CreateUser(ctx, &service.User{
-				Email:        "alice@example.com",
-				Name:         "Alice",
-				Status:       "active",
-				Role:         "member",
-				PasswordHash: "h-1",
-				CreatedAt:    now,
-				UpdatedAt:    now,
+				Email:           "alice@example.com",
+				Name:            "Alice",
+				Status:          "active",
+				Role:            "member",
+				PasswordHash:    "h-1",
+				PhoneNumber:     "+14155550100",
+				PhoneVerified:   true,
+				PhoneVerifiedAt: 99,
+				CreatedAt:       now,
+				UpdatedAt:       now,
 			})
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
@@ -230,6 +233,10 @@ func RunConformance(t *testing.T, driver Driver) {
 			if got.PasswordHash != "h-1" {
 				t.Fatalf("FindUserByEmail password_hash = %q, want %q",
 					got.PasswordHash, "h-1")
+			}
+			if got.PhoneNumber != "+14155550100" || !got.PhoneVerified || got.PhoneVerifiedAt != 99 {
+				t.Fatalf("FindUserByEmail phone round-trip: number=%q verified=%v at=%d",
+					got.PhoneNumber, got.PhoneVerified, got.PhoneVerifiedAt)
 			}
 
 			byID, err := r.GetUser(ctx, id)
@@ -272,6 +279,9 @@ func RunConformance(t *testing.T, driver Driver) {
 				"recovery_email":    "r@example.com",
 				"email_verified":    true,
 				"email_verified_at": int64(123),
+				"phone_number":      "+14155550123",
+				"phone_verified":    true,
+				"phone_verified_at": int64(456),
 			}); err != nil {
 				t.Fatalf("UpdateUser: %v", err)
 			}
@@ -284,6 +294,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 			if !got.EmailVerified || got.EmailVerifiedAt != 123 {
 				t.Fatalf("UpdateUser email_verified round-trip: verified=%v at=%d", got.EmailVerified, got.EmailVerifiedAt)
+			}
+			if got.PhoneNumber != "+14155550123" || !got.PhoneVerified || got.PhoneVerifiedAt != 456 {
+				t.Fatalf("UpdateUser phone round-trip: number=%q verified=%v at=%d", got.PhoneNumber, got.PhoneVerified, got.PhoneVerifiedAt)
 			}
 		})
 
@@ -1333,6 +1346,197 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("SetUserPhoneVerified", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id, err := r.CreateUser(ctx, &service.User{Email: "pv@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			got, _ := r.GetUser(ctx, id)
+			if got == nil || got.PhoneVerified || got.PhoneNumber != "" || got.PhoneVerifiedAt != 0 {
+				t.Fatalf("pre-Set: %+v", got)
+			}
+			if err := r.SetUserPhoneVerified(ctx, id, "+14155550199", 888); err != nil {
+				t.Fatalf("SetUserPhoneVerified: %v", err)
+			}
+			got, _ = r.GetUser(ctx, id)
+			if got == nil || !got.PhoneVerified || got.PhoneNumber != "+14155550199" || got.PhoneVerifiedAt != 888 {
+				t.Fatalf("after Set: %+v", got)
+			}
+		})
+
+		t.Run("PhoneVerificationCode_UpsertFindConsume", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid := createTestUser(t, r, "pvc@example.com")
+			id, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
+				UserID: uid, PhoneNumber: "+14155550123", CodeHash: "hash-1",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
+			})
+			if err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+			if id == "" {
+				t.Fatal("UpsertPhoneVerificationCode did not return a node id")
+			}
+			got, err := r.FindPhoneVerificationCodeByUser(ctx, uid)
+			if err != nil || got == nil {
+				t.Fatalf("Find: err=%v got=%#v", err, got)
+			}
+			if got.CodeHash != "hash-1" || got.PhoneNumber != "+14155550123" || got.MaxAttempts != 5 {
+				t.Fatalf("Find returned wrong record: %#v", got)
+			}
+			// Consume succeeds once.
+			rec, err := r.ConsumePhoneVerificationCode(ctx, uid, 200)
+			if err != nil {
+				t.Fatalf("first Consume: want nil, got %v", err)
+			}
+			if rec == nil || rec.ConsumedAt != 200 {
+				t.Fatalf("Consume returned wrong record: %#v", rec)
+			}
+			// Replay must fail.
+			if _, err := r.ConsumePhoneVerificationCode(ctx, uid, 300); !errors.Is(err, service.ErrPhoneCodeInvalid) {
+				t.Fatalf("replay Consume: want ErrPhoneCodeInvalid, got %v", err)
+			}
+		})
+
+		t.Run("PhoneVerificationCode_UpsertReplacesPrevious", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid := createTestUser(t, r, "pvc-upsert@example.com")
+			if _, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
+				UserID: uid, PhoneNumber: "+14155550123", CodeHash: "old",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
+			}); err != nil {
+				t.Fatalf("Upsert old: %v", err)
+			}
+			if _, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
+				UserID: uid, PhoneNumber: "+14155550123", CodeHash: "new",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 200, MaxAttempts: 5,
+			}); err != nil {
+				t.Fatalf("Upsert new: %v", err)
+			}
+			got, err := r.FindPhoneVerificationCodeByUser(ctx, uid)
+			if err != nil || got == nil {
+				t.Fatalf("Find: err=%v got=%#v", err, got)
+			}
+			if got.CodeHash != "new" {
+				t.Fatalf("upsert did not replace previous code: hash=%q want new", got.CodeHash)
+			}
+		})
+
+		t.Run("PhoneVerificationCode_IncrementAttempts", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid := createTestUser(t, r, "pvc-attempts@example.com")
+			id, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
+				UserID: uid, PhoneNumber: "+14155550123", CodeHash: "h",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
+			})
+			if err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+			if err := r.IncrementPhoneVerificationCodeAttempts(ctx, id); err != nil {
+				t.Fatalf("Increment: %v", err)
+			}
+			if err := r.IncrementPhoneVerificationCodeAttempts(ctx, id); err != nil {
+				t.Fatalf("Increment 2: %v", err)
+			}
+			got, err := r.FindPhoneVerificationCodeByUser(ctx, uid)
+			if err != nil || got == nil {
+				t.Fatalf("Find: err=%v got=%#v", err, got)
+			}
+			if got.AttemptCount != 2 {
+				t.Fatalf("AttemptCount = %d, want 2", got.AttemptCount)
+			}
+		})
+
+		t.Run("PhoneVerificationCode_ConsumeRejectsExpiredAndMissing", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid := createTestUser(t, r, "pvc-expired@example.com")
+			if _, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
+				UserID: uid, PhoneNumber: "+14155550123", CodeHash: "h",
+				ExpiresAt: 1_000, CreatedAt: 100, MaxAttempts: 5,
+			}); err != nil {
+				t.Fatalf("Upsert expired: %v", err)
+			}
+			if _, err := r.ConsumePhoneVerificationCode(ctx, uid, 2_000); !errors.Is(err, service.ErrPhoneCodeInvalid) {
+				t.Fatalf("Consume expired: want ErrPhoneCodeInvalid, got %v", err)
+			}
+			missingUID := createTestUser(t, r, "pvc-missing@example.com")
+			if _, err := r.ConsumePhoneVerificationCode(ctx, missingUID, 2_000); !errors.Is(err, service.ErrPhoneCodeInvalid) {
+				t.Fatalf("Consume missing: want ErrPhoneCodeInvalid, got %v", err)
+			}
+		})
+
+		t.Run("PhoneVerificationCode_ConsumeRaceSingleWinner", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			uid := createTestUser(t, r, "pvc-race@example.com")
+			if _, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
+				UserID: uid, PhoneNumber: "+14155550123", CodeHash: "h",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5,
+			}); err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+			const N = 8
+			results := make(chan error, N)
+			start := make(chan struct{})
+			for i := 0; i < N; i++ {
+				go func() {
+					<-start
+					_, err := r.ConsumePhoneVerificationCode(ctx, uid, 200)
+					results <- err
+				}()
+			}
+			close(start)
+			winners, losers := 0, 0
+			for i := 0; i < N; i++ {
+				switch err := <-results; {
+				case err == nil:
+					winners++
+				case errors.Is(err, service.ErrPhoneCodeInvalid):
+					losers++
+				default:
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+			if winners != 1 || losers != N-1 {
+				t.Fatalf("ConsumePhoneVerificationCode winners=%d losers=%d, want 1/%d", winners, losers, N-1)
+			}
+		})
+
+		t.Run("PhoneVerificationCode_DeleteExpired", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			oldUID := createTestUser(t, r, "pvc-old@example.com")
+			freshUID := createTestUser(t, r, "pvc-fresh@example.com")
+			if _, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
+				UserID: oldUID, PhoneNumber: "+14155550111", CodeHash: "h", ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Upsert old: %v", err)
+			}
+			if _, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
+				UserID: freshUID, PhoneNumber: "+14155550222", CodeHash: "h", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Upsert fresh: %v", err)
+			}
+			if err := r.DeleteExpiredPhoneVerificationCodes(ctx, 5_000, 100); err != nil {
+				t.Fatalf("DeleteExpired: %v", err)
+			}
+			if got, _ := r.FindPhoneVerificationCodeByUser(ctx, oldUID); got != nil {
+				t.Fatal("expired code survived the sweep")
+			}
+			if got, _ := r.FindPhoneVerificationCodeByUser(ctx, freshUID); got == nil {
+				t.Fatal("fresh code was swept")
+			}
+			if err := r.DeleteExpiredPhoneVerificationCodes(ctx, 5_000, 0); err == nil {
+				t.Fatal("DeleteExpired with limit 0: want error, got nil")
+			}
+		})
+
 		t.Run("SetUserIDVVerified", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
@@ -1586,6 +1790,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err := r.CreateIdentityVerification(ctx, &service.IdentityVerificationRecord{VerificationID: "del-idv", UserID: uid, Provider: "stub", Status: service.IDVStatusPending, CreatedAt: 100, UpdatedAt: 100}); err != nil {
 				t.Fatalf("CreateIdentityVerification: %v", err)
 			}
+			if _, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{UserID: uid, PhoneNumber: "+14155550133", CodeHash: "del-pvc", ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5}); err != nil {
+				t.Fatalf("UpsertPhoneVerificationCode: %v", err)
+			}
 			orgID, err := r.CreateOrganization(ctx, &service.Organization{Slug: "del-org", DisplayName: "Del Org", OwnerUserID: ownerID, CreatedAtMs: 100, UpdatedAtMs: 100})
 			if err != nil {
 				t.Fatalf("CreateOrganization: %v", err)
@@ -1636,6 +1843,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 			if rec, err := r.GetLatestIdentityVerificationForUser(ctx, uid); err != nil || rec != nil {
 				t.Fatalf("identity verification survived: err=%v rec=%#v", err, rec)
+			}
+			if rec, err := r.FindPhoneVerificationCodeByUser(ctx, uid); err != nil || rec != nil {
+				t.Fatalf("phone verification code survived: err=%v rec=%#v", err, rec)
 			}
 			if orgs, err := r.ListOrganizationsForUser(ctx, uid); err != nil || len(orgs) != 0 {
 				t.Fatalf("org membership survived: err=%v orgs=%#v", err, orgs)

@@ -75,7 +75,7 @@ func newTestAuthServiceWithAudit(t *testing.T, repo *fakeRepo, writer *recording
 	return NewAuthServiceWithOAuth(
 		repo, cfg, kr, passkeysSvc,
 		audit.NewLogger(writer, "test-tenant", nil),
-		testTotpKey(), testTotpRecoveryPepper(), email.NewLogOnly(zap.NewNop()), zap.NewNop(),
+		testTotpKey(), testTotpRecoveryPepper(), email.NewLogOnly(zap.NewNop()), nil, zap.NewNop(),
 		defaultTestOAuthRegistry(),
 	)
 }
@@ -106,6 +106,7 @@ type fakeRepo struct {
 	oauthOneTimeCodes  map[string]*OAuthOneTimeCodeRecord
 	emailLoginCodes    map[string]*EmailLoginCodeRecord
 	magicLinkTokens    map[string]*MagicLinkTokenRecord
+	phoneVerifyCodes   map[string]*PhoneVerificationCodeRecord
 	totpCreds          map[string]*TotpCredRecord
 	recoveryCodes      map[string]*RecoveryCodeRecord
 	loginChallenges    map[string]*LoginChallengeRecord
@@ -130,6 +131,7 @@ func newFakeRepo() *fakeRepo {
 		oauthOneTimeCodes:  make(map[string]*OAuthOneTimeCodeRecord),
 		emailLoginCodes:    make(map[string]*EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*MagicLinkTokenRecord),
+		phoneVerifyCodes:   make(map[string]*PhoneVerificationCodeRecord),
 		totpCreds:          make(map[string]*TotpCredRecord),
 		recoveryCodes:      make(map[string]*RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*LoginChallengeRecord),
@@ -712,6 +714,74 @@ func (r *fakeRepo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, at
 	return nil, ErrMagicLinkInvalid
 }
 
+func (r *fakeRepo) UpsertPhoneVerificationCode(_ context.Context, rec *PhoneVerificationCodeRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.phoneVerifyCodes {
+		if c.UserID == rec.UserID {
+			delete(r.phoneVerifyCodes, id)
+		}
+	}
+	id := nextNodeID()
+	rec.NodeID = id
+	cp := *rec
+	r.phoneVerifyCodes[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*PhoneVerificationCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.phoneVerifyCodes {
+		if c.UserID == userID {
+			cp := *c
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.phoneVerifyCodes[nodeID]
+	if !ok {
+		return errors.New("phone verification code not found")
+	}
+	c.AttemptCount++
+	return nil
+}
+
+func (r *fakeRepo) ConsumePhoneVerificationCode(_ context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.phoneVerifyCodes {
+		if c.UserID != userID {
+			continue
+		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+			return nil, ErrPhoneCodeInvalid
+		}
+		c.ConsumedAt = atMs
+		cp := *c
+		return &cp, nil
+	}
+	return nil, ErrPhoneCodeInvalid
+}
+
+func (r *fakeRepo) SetUserPhoneVerified(_ context.Context, userID, phoneNumber string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.PhoneNumber = phoneNumber
+	u.PhoneVerified = true
+	u.PhoneVerifiedAt = atMs
+	return nil
+}
+
 // ── TOTP Credentials ───────────────────────────────────────────────────
 
 func (r *fakeRepo) GetTotpCredential(_ context.Context, userID string) (*TotpCredRecord, error) {
@@ -949,7 +1019,7 @@ func newTestAuthServiceWithRegistry(t *testing.T, repo *fakeRepo, reg *oauth.Reg
 	return NewAuthServiceWithOAuth(
 		repo, cfg, kr, passkeysSvc,
 		audit.NewLogger(nil, "test", nil),
-		testTotpKey(), testTotpRecoveryPepper(), email.NewLogOnly(zap.NewNop()), zap.NewNop(),
+		testTotpKey(), testTotpRecoveryPepper(), email.NewLogOnly(zap.NewNop()), nil, zap.NewNop(),
 		reg,
 	)
 }
@@ -1452,6 +1522,22 @@ func (r *fakeRepo) DeleteExpiredMagicLinkTokens(_ context.Context, beforeMs int6
 		}
 		if t.ExpiresAt < beforeMs {
 			delete(r.magicLinkTokens, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteExpiredPhoneVerificationCodes(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.phoneVerifyCodes {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.phoneVerifyCodes, id)
 			n++
 		}
 	}

@@ -35,6 +35,7 @@ type Repo struct {
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
 	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
+	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
 	totpCreds          map[string]*service.TotpCredRecord
 	recoveryCodes      map[string]*service.RecoveryCodeRecord
 	loginChallenges    map[string]*service.LoginChallengeRecord
@@ -60,6 +61,7 @@ func New() *Repo {
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
+		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
@@ -186,95 +188,45 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 // is idempotent (a missing user is a no-op). The email-keyed login
 // codes / magic-link tokens are intentionally left untouched (they
 // carry no user_id and are short-lived pre-account artifacts); the
-// audit store has no in-memory equivalent so nothing to retain.
+// audit store has no in-memory equivalent so nothing to retain. The
+// phone-verification codes are user-keyed and durable, so they are
+// drained here like the other user-owned types.
 func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 	if userID == "" {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for id, t := range r.refreshTokens {
-		if t.UserID == userID {
-			delete(r.refreshTokens, id)
-		}
-	}
-	for id, s := range r.sessions {
-		if s.UserID == userID {
-			delete(r.sessions, id)
-		}
-	}
-	for id, c := range r.passkeyCreds {
-		if c.UserID == userID {
-			delete(r.passkeyCreds, id)
-		}
-	}
-	for id, c := range r.passkeyChallenges {
-		if c.UserID == userID {
-			delete(r.passkeyChallenges, id)
-		}
-	}
-	for id, s := range r.qrSessions {
-		if s.UserID == userID {
-			delete(r.qrSessions, id)
-		}
-	}
-	for id, c := range r.oauthOneTimeCodes {
-		if c.UserID == userID {
-			delete(r.oauthOneTimeCodes, id)
-		}
-	}
-	for id, c := range r.totpCreds {
-		if c.UserID == userID {
-			delete(r.totpCreds, id)
-		}
-	}
-	for id, c := range r.recoveryCodes {
-		if c.UserID == userID {
-			delete(r.recoveryCodes, id)
-		}
-	}
-	for id, c := range r.loginChallenges {
-		if c.UserID == userID {
-			delete(r.loginChallenges, id)
-		}
-	}
-	for id, inv := range r.invitations {
-		if inv.UserID == userID {
-			delete(r.invitations, id)
-		}
-	}
-	for id, t := range r.passwordResets {
-		if t.UserID == userID {
-			delete(r.passwordResets, id)
-		}
-	}
-	for id, t := range r.emailVerifications {
-		if t.UserID == userID {
-			delete(r.emailVerifications, id)
-		}
-	}
-	for id, t := range r.emailChanges {
-		if t.UserID == userID {
-			delete(r.emailChanges, id)
-		}
-	}
-	for id, oi := range r.oauthIdentities {
-		if oi.UserID == userID {
-			delete(r.oauthIdentities, id)
-		}
-	}
-	for id, rec := range r.idvRecords {
-		if rec.UserID == userID {
-			delete(r.idvRecords, id)
-		}
-	}
-	for id, m := range r.orgMembers {
-		if m.UserID == userID {
-			delete(r.orgMembers, id)
-		}
-	}
+	deleteByUser(r.refreshTokens, userID, func(t *service.RefreshTokenRecord) string { return t.UserID })
+	deleteByUser(r.sessions, userID, func(s *service.SessionRecord) string { return s.UserID })
+	deleteByUser(r.passkeyCreds, userID, func(c *service.PasskeyCredRecord) string { return c.UserID })
+	deleteByUser(r.passkeyChallenges, userID, func(c *service.PasskeyChallengeRecord) string { return c.UserID })
+	deleteByUser(r.qrSessions, userID, func(s *service.QrLoginSessionRecord) string { return s.UserID })
+	deleteByUser(r.oauthOneTimeCodes, userID, func(c *service.OAuthOneTimeCodeRecord) string { return c.UserID })
+	deleteByUser(r.totpCreds, userID, func(c *service.TotpCredRecord) string { return c.UserID })
+	deleteByUser(r.recoveryCodes, userID, func(c *service.RecoveryCodeRecord) string { return c.UserID })
+	deleteByUser(r.loginChallenges, userID, func(c *service.LoginChallengeRecord) string { return c.UserID })
+	deleteByUser(r.invitations, userID, func(i *service.InvitationRecord) string { return i.UserID })
+	deleteByUser(r.passwordResets, userID, func(t *service.PasswordResetToken) string { return t.UserID })
+	deleteByUser(r.emailVerifications, userID, func(t *service.EmailVerificationToken) string { return t.UserID })
+	deleteByUser(r.emailChanges, userID, func(t *service.EmailChangeToken) string { return t.UserID })
+	deleteByUser(r.oauthIdentities, userID, func(o *service.OAuthIdentity) string { return o.UserID })
+	deleteByUser(r.idvRecords, userID, func(rec *service.IdentityVerificationRecord) string { return rec.UserID })
+	deleteByUser(r.orgMembers, userID, func(m *service.OrganizationMembership) string { return m.UserID })
+	deleteByUser(r.phoneVerifyCodes, userID, func(c *service.PhoneVerificationCodeRecord) string { return c.UserID })
 	delete(r.users, userID)
 	return nil
+}
+
+// deleteByUser removes every entry of m whose record's user id (read via
+// userID) equals want. Shared by DeleteUser so each user-owned map drains
+// with one call instead of an inline loop per type.
+func deleteByUser[V any](m map[string]V, want string, userID func(V) string) {
+	for id, v := range m {
+		if userID(v) == want {
+			delete(m, id)
+		}
+	}
 }
 
 func (r *Repo) IncrementFailedLoginCount(_ context.Context, userID string) (int32, error) {
@@ -363,6 +315,19 @@ func applyUserFields(u *service.User, fields map[string]any) {
 				u.EmailVerifiedAt = x
 			case int:
 				u.EmailVerifiedAt = int64(x)
+			}
+		case "phone_number":
+			u.PhoneNumber, _ = v.(string)
+		case "phone_verified":
+			if b, ok := v.(bool); ok {
+				u.PhoneVerified = b
+			}
+		case "phone_verified_at":
+			switch x := v.(type) {
+			case int64:
+				u.PhoneVerifiedAt = x
+			case int:
+				u.PhoneVerifiedAt = int64(x)
 			}
 		}
 	}
@@ -723,6 +688,84 @@ func (r *Repo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, atMs i
 		return &cp, nil
 	}
 	return nil, service.ErrMagicLinkInvalid
+}
+
+// ── Phone Verification Codes (SMS OTP) ─────────────────────────────
+
+// UpsertPhoneVerificationCode replaces any existing code for the user so
+// at most one is live per user. Keyed by user_id.
+func (r *Repo) UpsertPhoneVerificationCode(_ context.Context, rec *service.PhoneVerificationCodeRecord) (string, error) {
+	if rec == nil {
+		return "", errors.New("memory: UpsertPhoneVerificationCode: nil record")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.phoneVerifyCodes {
+		if c.UserID == rec.UserID {
+			delete(r.phoneVerifyCodes, id)
+		}
+	}
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.phoneVerifyCodes[id] = &cp
+	return id, nil
+}
+
+func (r *Repo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*service.PhoneVerificationCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.phoneVerifyCodes {
+		if c.UserID == userID {
+			cp := *c
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *Repo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.phoneVerifyCodes[nodeID]
+	if !ok {
+		return fmt.Errorf("memory: IncrementPhoneVerificationCodeAttempts: %s not found", nodeID)
+	}
+	c.AttemptCount++
+	return nil
+}
+
+// ConsumePhoneVerificationCode atomically marks the user's unconsumed,
+// unexpired code consumed and returns it. Any second caller, an expired
+// code, or a missing code returns ErrPhoneCodeInvalid.
+func (r *Repo) ConsumePhoneVerificationCode(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.phoneVerifyCodes {
+		if c.UserID != userID {
+			continue
+		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+			return nil, service.ErrPhoneCodeInvalid
+		}
+		c.ConsumedAt = atMs
+		cp := *c
+		return &cp, nil
+	}
+	return nil, service.ErrPhoneCodeInvalid
+}
+
+func (r *Repo) SetUserPhoneVerified(_ context.Context, userID, phoneNumber string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.PhoneNumber = phoneNumber
+	u.PhoneVerified = true
+	u.PhoneVerifiedAt = atMs
+	return nil
 }
 
 // ── TOTP Credentials ──────────────────────────────────────────────
@@ -1299,6 +1342,25 @@ func (r *Repo) DeleteExpiredMagicLinkTokens(_ context.Context, beforeMs int64, l
 		}
 		if t.ExpiresAt < beforeMs {
 			delete(r.magicLinkTokens, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *Repo) DeleteExpiredPhoneVerificationCodes(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memory: DeleteExpiredPhoneVerificationCodes: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.phoneVerifyCodes {
+		if n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.phoneVerifyCodes, id)
 			n++
 		}
 	}

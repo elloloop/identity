@@ -70,3 +70,7 @@ func (r *pgRepository) DeleteExpiredEmailLoginCodes(ctx context.Context, beforeM
 func (r *pgRepository) DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredMagicLinkTokens", "magic_link_tokens", beforeMs, limit)
 }
+
+func (r *pgRepository) DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error {
+	return r.deleteExpiredBatch(ctx, "DeleteExpiredPhoneVerificationCodes", "phone_verification_codes", beforeMs, limit)
+}

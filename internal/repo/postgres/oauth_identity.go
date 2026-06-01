@@ -13,14 +13,8 @@ func (r *pgRepository) FindUserByProviderID(ctx context.Context, provider, provi
 	if provider == "" || providerUserID == "" {
 		return nil, nil
 	}
-	const q = `
-		SELECT u.id, u.email, u.name, u.role, u.avatar_url, u.status, u.recovery_email,
-		       u.password_hash, u.quota_bytes, u.totp_required,
-		       u.failed_login_count, u.locked_until_ms,
-		       u.email_verified, u.email_verified_at_ms,
-		       u.idv_verified, u.idv_verified_at_ms,
-		       u.last_login_at_ms,
-		       u.created_at_ms, u.updated_at_ms
+	q := `
+		SELECT ` + userColumnsPrefixed("u") + `
 		  FROM oauth_identities oi
 		  JOIN users u ON u.id = oi.user_id AND u.tenant_id = oi.tenant_id
 		 WHERE oi.tenant_id = $1

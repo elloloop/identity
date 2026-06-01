@@ -98,6 +98,9 @@ func userFromProto(id string, p *schemapb.User) *service.User {
 		EmailVerifiedAt:  p.GetEmailVerifiedAt(),
 		IDVVerified:      p.GetIdvVerified(),
 		IDVVerifiedAt:    p.GetIdvVerifiedAt(),
+		PhoneNumber:      p.GetPhoneNumber(),
+		PhoneVerified:    p.GetPhoneVerified(),
+		PhoneVerifiedAt:  p.GetPhoneVerifiedAt(),
 		LastLoginAtMs:    p.GetLastLoginAt(),
 		CreatedAt:        time.UnixMilli(p.GetCreatedAt()),
 		UpdatedAt:        time.UnixMilli(p.GetUpdatedAt()),
@@ -169,6 +172,9 @@ func (r *entRepository) CreateUser(ctx context.Context, u *service.User) (string
 		EmailVerifiedAt:  u.EmailVerifiedAt,
 		IdvVerified:      u.IDVVerified,
 		IdvVerifiedAt:    u.IDVVerifiedAt,
+		PhoneNumber:      u.PhoneNumber,
+		PhoneVerified:    u.PhoneVerified,
+		PhoneVerifiedAt:  u.PhoneVerifiedAt,
 		CreatedAt:        u.CreatedAt.UnixMilli(),
 		UpdatedAt:        u.UpdatedAt.UnixMilli(),
 	}
@@ -348,6 +354,7 @@ func (r *entRepository) DeleteUser(ctx context.Context, userID string) error {
 		{"totp_credential", func() proto.Message { return &schemapb.TotpCredential{} }},
 		{"recovery_code", func() proto.Message { return &schemapb.RecoveryCode{} }},
 		{"identity_verification", func() proto.Message { return &schemapb.IdentityVerificationRecord{} }},
+		{"phone_verification_code", func() proto.Message { return &schemapb.PhoneVerificationCode{} }},
 		{"organization_membership", func() proto.Message { return &schemapb.OrganizationMembership{} }},
 	}
 	for _, d := range drains {
@@ -407,6 +414,22 @@ func (r *entRepository) SetUserIDVVerified(ctx context.Context, userID string, a
 	}
 	if err := r.client.update(ctx, actorStr(userID), userID, patch); err != nil {
 		return fmt.Errorf("repo: SetUserIDVVerified: %w", err)
+	}
+	return nil
+}
+
+func (r *entRepository) SetUserPhoneVerified(ctx context.Context, userID, phoneNumber string, atMs int64) error {
+	if userID == "" {
+		return errors.New("repo: SetUserPhoneVerified: missing user id")
+	}
+	patch := &schemapb.User{
+		PhoneNumber:     phoneNumber,
+		PhoneVerified:   true,
+		PhoneVerifiedAt: atMs,
+		UpdatedAt:       atMs,
+	}
+	if err := r.client.update(ctx, actorStr(userID), userID, patch); err != nil {
+		return fmt.Errorf("repo: SetUserPhoneVerified: %w", err)
 	}
 	return nil
 }
@@ -600,6 +623,15 @@ func applyUserFields(dst *schemapb.User, fields map[string]any) bool {
 		case "email_verified_at":
 			dst.EmailVerifiedAt = asInt64(v)
 			applied = true
+		case "phone_number":
+			dst.PhoneNumber = asString(v)
+			applied = true
+		case "phone_verified":
+			dst.PhoneVerified = asBool(v)
+			applied = true
+		case "phone_verified_at":
+			dst.PhoneVerifiedAt = asInt64(v)
+			applied = true
 		}
 	}
 	return applied
@@ -667,6 +699,12 @@ func userFieldPatch(fields map[string]any) map[string]any {
 			patch["18"] = asBool(v)
 		case "email_verified_at":
 			patch["19"] = asInt64(v)
+		case "phone_number":
+			patch["22"] = asString(v)
+		case "phone_verified":
+			patch["23"] = asBool(v)
+		case "phone_verified_at":
+			patch["24"] = asInt64(v)
 		}
 	}
 	return patch

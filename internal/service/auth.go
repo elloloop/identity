@@ -33,6 +33,7 @@ import (
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/identity/pkg/passwords"
+	"github.com/elloloop/identity/pkg/sms"
 	"github.com/elloloop/identity/pkg/totp"
 )
 
@@ -59,6 +60,9 @@ type User struct {
 	EmailVerifiedAt  int64 // epoch ms
 	IDVVerified      bool  // latest identity verification reached APPROVED
 	IDVVerifiedAt    int64 // epoch ms; 0 = never verified
+	PhoneNumber      string
+	PhoneVerified    bool
+	PhoneVerifiedAt  int64 // epoch ms; 0 = never verified
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -266,6 +270,36 @@ type Repository interface {
 	CreateMagicLinkToken(ctx context.Context, r *MagicLinkTokenRecord) (string, error)
 	ConsumeMagicLinkToken(ctx context.Context, tokenHash string, atMs int64) (*MagicLinkTokenRecord, error)
 
+	// Phone verification codes (SMS-OTP phone-ownership verification).
+	//
+	// UpsertPhoneVerificationCode stores the latest code for a user,
+	// replacing any existing live code for that user so at most one is
+	// valid at a time (a re-request invalidates the previous code). It is
+	// keyed on user_id.
+	//
+	// FindPhoneVerificationCodeByUser returns the live row (consumed or
+	// not) so the verify path can compare the code hash, count attempts,
+	// and distinguish expired/consumed from a hash mismatch. Returns nil
+	// when no row exists for the user.
+	//
+	// IncrementPhoneVerificationCodeAttempts bumps attempt_count by one,
+	// used on a wrong-code guess; the service invalidates the code once
+	// the count reaches the cap captured on the record.
+	//
+	// ConsumePhoneVerificationCode is the single-winner compare-and-set:
+	// it marks the row consumed (consumed_at = atMs) only when currently
+	// unconsumed AND unexpired, returning the bound record on success. A
+	// replay, an expired code, or a missing code all return
+	// ErrPhoneCodeInvalid.
+	//
+	// SetUserPhoneVerified records the verified phone on the user and
+	// flips phone_verified, mirroring SetUserEmailVerified.
+	UpsertPhoneVerificationCode(ctx context.Context, r *PhoneVerificationCodeRecord) (string, error)
+	FindPhoneVerificationCodeByUser(ctx context.Context, userID string) (*PhoneVerificationCodeRecord, error)
+	IncrementPhoneVerificationCodeAttempts(ctx context.Context, nodeID string) error
+	ConsumePhoneVerificationCode(ctx context.Context, userID string, atMs int64) (*PhoneVerificationCodeRecord, error)
+	SetUserPhoneVerified(ctx context.Context, userID, phoneNumber string, atMs int64) error
+
 	// TOTP credentials
 	GetTotpCredential(ctx context.Context, userID string) (*TotpCredRecord, error)
 	CreateTotpCredential(ctx context.Context, r *TotpCredRecord) (string, error)
@@ -353,6 +387,7 @@ type Repository interface {
 	DeleteExpiredOAuthOneTimeCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredEmailLoginCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error
 
 	// Organizations — identity-layer entity used by `mode=multi`
 	// deployments. CreateOrganization writes the Organization row and
@@ -507,6 +542,25 @@ type MagicLinkTokenRecord struct {
 	ExpiresAt  int64 // epoch ms
 	CreatedAt  int64 // epoch ms
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
+}
+
+// PhoneVerificationCodeRecord is the SMS-OTP arm of phone-ownership
+// verification. The record is keyed by UserID (at most one live code per
+// user); a new request overwrites the previous one. CodeHash is sha256
+// of the 6-digit code. AttemptCount tracks failed verifies; once it
+// reaches MaxAttempts the code is invalidated (brute-force cap). Unlike
+// EmailLoginCodeRecord this always carries a UserID — the caller is an
+// already-authenticated user proving ownership of PhoneNumber.
+type PhoneVerificationCodeRecord struct {
+	NodeID       string
+	UserID       string
+	PhoneNumber  string
+	CodeHash     string
+	ExpiresAt    int64 // epoch ms
+	CreatedAt    int64 // epoch ms
+	ConsumedAt   int64 // epoch ms; 0 = unconsumed
+	AttemptCount int64
+	MaxAttempts  int64
 }
 
 // TotpCredRecord represents a stored TOTP credential.
@@ -697,12 +751,25 @@ var (
 	ErrEmailLoginCodeInvalid = errors.New("email login code is invalid or expired")
 	// ErrMagicLinkInvalid is returned when a passwordless magic-link token
 	// is missing, expired, or already consumed. Maps to CodeUnauthenticated.
-	ErrMagicLinkInvalid  = errors.New("magic link is invalid or already used")
-	ErrInvitationUsed    = errors.New("invitation has already been accepted")
-	ErrInvitationExpired = errors.New("invitation has expired")
-	ErrLocalAuthDisabled = errors.New("local auth disabled")
-	ErrOAuthDisabled     = errors.New("oauth login is not configured")
-	ErrSignupDisabled    = errors.New("signup is disabled for this deployment")
+	ErrMagicLinkInvalid = errors.New("magic link is invalid or already used")
+	// ErrPhoneCodeInvalid is returned when an SMS-OTP phone-verification
+	// code is missing, expired, already consumed, the wrong code, or has
+	// exhausted its attempt budget. The Connect handler maps it to
+	// CodeUnauthenticated so all failure modes look identical to a
+	// brute-force attacker.
+	ErrPhoneCodeInvalid = errors.New("phone verification code is invalid or expired")
+	// ErrSMSDisabled is returned by the phone-verification RPCs when
+	// GATEWAY_SMS_ENABLED is false. Maps to CodeUnavailable.
+	ErrSMSDisabled = errors.New("sms phone verification is not configured")
+	// ErrPhoneAlreadyVerified is returned by RequestPhoneVerification when
+	// the caller has already verified the same number. Maps to
+	// CodeAlreadyExists.
+	ErrPhoneAlreadyVerified = errors.New("phone number is already verified")
+	ErrInvitationUsed       = errors.New("invitation has already been accepted")
+	ErrInvitationExpired    = errors.New("invitation has expired")
+	ErrLocalAuthDisabled    = errors.New("local auth disabled")
+	ErrOAuthDisabled        = errors.New("oauth login is not configured")
+	ErrSignupDisabled       = errors.New("signup is disabled for this deployment")
 	// ErrUnimplemented signals that the requested RPC is intentionally
 	// disabled in the current deployment mode (e.g. OrganizationSignup
 	// in mode=single per docs/IDENTITY.md decision log §3). The Connect
@@ -723,6 +790,7 @@ type AuthService struct {
 	totpKey            []byte
 	totpRecoveryPepper []byte
 	mailer             email.Transport
+	smsSender          sms.Sender
 	logger             *zap.Logger
 	// oauthRegistry holds per-provider Exchangers. May be nil; in that
 	// case OAuthLogin returns ErrOAuthDisabled. A non-nil but empty
@@ -730,6 +798,7 @@ type AuthService struct {
 	oauthRegistry  *oauth.Registry
 	emailThrottle  *emailSendThrottle
 	signupThrottle *emailSendThrottle
+	phoneThrottle  *emailSendThrottle
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
 	// OAuth flow uses. Parsed once at construction.
@@ -752,9 +821,10 @@ func NewAuthService(
 	totpKey []byte,
 	totpRecoveryPepper []byte,
 	mailer email.Transport,
+	smsSender sms.Sender,
 	logger *zap.Logger,
 ) *AuthService {
-	return NewAuthServiceWithOAuth(repo, cfg, signer, passkeysSvc, auditLogger, totpKey, totpRecoveryPepper, mailer, logger, nil)
+	return NewAuthServiceWithOAuth(repo, cfg, signer, passkeysSvc, auditLogger, totpKey, totpRecoveryPepper, mailer, smsSender, logger, nil)
 }
 
 // NewAuthServiceWithOAuth is the extended constructor that injects an
@@ -768,6 +838,7 @@ func NewAuthServiceWithOAuth(
 	totpKey []byte,
 	totpRecoveryPepper []byte,
 	mailer email.Transport,
+	smsSender sms.Sender,
 	logger *zap.Logger,
 	oauthRegistry *oauth.Registry,
 ) *AuthService {
@@ -776,6 +847,9 @@ func NewAuthServiceWithOAuth(
 	}
 	if mailer == nil {
 		mailer = email.NewLogOnly(logger)
+	}
+	if smsSender == nil {
+		smsSender = sms.NewLogOnly(logger)
 	}
 	if !cfg.PasswordSignupEnabled {
 		logger.Warn("password_signup_disabled")
@@ -802,10 +876,12 @@ func NewAuthServiceWithOAuth(
 		totpKey:            totpKey,
 		totpRecoveryPepper: totpRecoveryPepper,
 		mailer:             mailer,
+		smsSender:          smsSender,
 		logger:             logger,
 		oauthRegistry:      oauthRegistry,
 		emailThrottle:      newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
 		signupThrottle:     newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
+		phoneThrottle:      newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
 		returnAllow:        ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
 		nowFunc:            time.Now,
 	}

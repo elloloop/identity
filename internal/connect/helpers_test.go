@@ -91,6 +91,7 @@ type fakeRepo struct {
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
 	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
+	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
 	totpCreds          map[string]*service.TotpCredRecord
 	recoveryCodes      map[string]*service.RecoveryCodeRecord
 	loginChallenges    map[string]*service.LoginChallengeRecord
@@ -121,6 +122,7 @@ func newFakeRepo() *fakeRepo {
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
+		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
@@ -675,6 +677,74 @@ func (r *fakeRepo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, at
 	return nil, service.ErrMagicLinkInvalid
 }
 
+func (r *fakeRepo) UpsertPhoneVerificationCode(_ context.Context, rec *service.PhoneVerificationCodeRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.phoneVerifyCodes {
+		if c.UserID == rec.UserID {
+			delete(r.phoneVerifyCodes, id)
+		}
+	}
+	id := nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.phoneVerifyCodes[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*service.PhoneVerificationCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.phoneVerifyCodes {
+		if c.UserID == userID {
+			cp := *c
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.phoneVerifyCodes[nodeID]
+	if !ok {
+		return errors.New("phone verification code not found")
+	}
+	c.AttemptCount++
+	return nil
+}
+
+func (r *fakeRepo) ConsumePhoneVerificationCode(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.phoneVerifyCodes {
+		if c.UserID != userID {
+			continue
+		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+			return nil, service.ErrPhoneCodeInvalid
+		}
+		c.ConsumedAt = atMs
+		cp := *c
+		return &cp, nil
+	}
+	return nil, service.ErrPhoneCodeInvalid
+}
+
+func (r *fakeRepo) SetUserPhoneVerified(_ context.Context, userID, phoneNumber string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.PhoneNumber = phoneNumber
+	u.PhoneVerified = true
+	u.PhoneVerifiedAt = atMs
+	return nil
+}
+
 func (r *fakeRepo) GetTotpCredential(_ context.Context, userID string) (*service.TotpCredRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1214,6 +1284,22 @@ func (r *fakeRepo) DeleteExpiredMagicLinkTokens(_ context.Context, beforeMs int6
 	return nil
 }
 
+func (r *fakeRepo) DeleteExpiredPhoneVerificationCodes(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.phoneVerifyCodes {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.phoneVerifyCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
 // ── Organizations ─────────────────────────────────────────────────
 
 func (r *fakeRepo) CreateOrganization(_ context.Context, o *service.Organization) (string, error) {
@@ -1713,7 +1799,7 @@ func newHarnessWithOAuthRegistry(t *testing.T, registry *oauth.Registry) *testHa
 	totpKey := []byte("01234567890123456789012345678901")
 	totpRecoveryPepper := []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH")
 
-	authSvc := service.NewAuthServiceWithOAuth(repo, cfg, kr, pkSvc, auditLog, totpKey, totpRecoveryPepper, nil, zap.NewNop(), registry)
+	authSvc := service.NewAuthServiceWithOAuth(repo, cfg, kr, pkSvc, auditLog, totpKey, totpRecoveryPepper, nil, nil, zap.NewNop(), registry)
 	adminSvc := service.NewAdminService(repo, db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())

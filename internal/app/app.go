@@ -30,6 +30,7 @@ import (
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
+	"github.com/elloloop/identity/pkg/sms"
 )
 
 // Deps groups the injectable dependencies required to build the
@@ -69,6 +70,12 @@ type Deps struct {
 	// transport from cfg via buildEmailTransport (so production code
 	// only needs to populate this when a test wants a custom recorder).
 	EmailTransport email.Transport
+
+	// SMSSender delivers outbound SMS for phone verification. If nil, New
+	// constructs a sender from cfg via buildSMSSender — a log-only sender
+	// when GATEWAY_SMS_ENABLED is false, otherwise the configured
+	// provider (Twilio / SNS / Azure).
+	SMSSender sms.Sender
 
 	// OAuthRegistry holds the per-provider Exchangers used for OAuth
 	// login. May be nil — in that case OAuthLogin returns
@@ -170,6 +177,13 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// Passwordless magic-link request: same shape, same quota.
 			PathPrefix: "/identity.IdentityService/RequestMagicLink", Tag: "passwordless_link",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0),
+		},
+		{
+			// Phone-verification OTP request: authenticated, but each call
+			// sends an SMS, so a tight per-IP quota bounds cost/abuse (the
+			// per-user cooldown is the second layer).
+			PathPrefix: "/identity.IdentityService/RequestPhoneVerification", Tag: "phone_verify",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0),
 		},
 		{
 			PathPrefix: "/identity.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
@@ -288,6 +302,14 @@ func New(deps Deps) (*Built, error) {
 	}
 	mailer = observability.WrapMailer(mailer)
 
+	smsSender := deps.SMSSender
+	if smsSender == nil {
+		smsSender, err = buildSMSSender(deps.Config, logger)
+		if err != nil {
+			return nil, fmt.Errorf("sms sender: %w", err)
+		}
+	}
+
 	oauthRegistry := deps.OAuthRegistry
 	if oauthRegistry == nil {
 		oauthRegistry = buildOAuthRegistry(deps.Config, logger)
@@ -296,7 +318,7 @@ func New(deps Deps) (*Built, error) {
 
 	authSvc := service.NewAuthServiceWithOAuth(
 		repo, deps.Config, deps.Signer, deps.Passkeys,
-		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, logger,
+		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, smsSender, logger,
 		oauthRegistry,
 	)
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)
