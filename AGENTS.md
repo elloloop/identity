@@ -130,7 +130,49 @@ When upstream releases a new patch, **bump the pin in a deliberate
 commit** with a clear changelog reference. Renovate / Dependabot can
 open the PR; a human reviews and merges.
 
-## 11. When in doubt, prefer fewer lines, fewer files, fewer abstractions.
+## 11. Run the four-reviewer gate on every PR.
+
+Every PR is reviewed from four independent principal-level perspectives
+before merge. Each reviewer signs off only on their own dimension; a
+clean gate needs all four.
+
+1. **Security principal** — authentication/authorization, input
+   validation, injection, secrets and key handling, crypto, supply
+   chain, data exposure, abuse and rate-limiting, and the blast radius
+   of a compromise.
+2. **Performance principal** — algorithmic complexity, N+1s and
+   hot-path allocations, query/index shape, locking and contention,
+   payload size, and behaviour under load.
+3. **Product manager** — does the change deliver the intended user
+   value; are the semantics, UX, and error messages right; is anything
+   half-finished or an unflagged breaking change; is the scope what was
+   asked for.
+4. **Code-quality principal** — the rules in this file: root-cause
+   fixes, no shims, dead code deleted, tests that prove the behaviour,
+   clear naming, the right level of abstraction, maintainability.
+
+The gate runs as an agent workflow (`.claude/workflows/review-gate.js`)
+**inside the Claude Code agent harness** — it depends on harness
+primitives (`agent()`, `parallel()`), so it is not a plain `node`
+script and external contributors cannot run it directly. It is a
+**maintainer step**: the maintainer handling a PR (including PRs from
+outside contributors) runs it and is accountable for resolving every
+blocker and major finding before merge. The four reviewers run in
+parallel against the PR diff and a synthesis posts one consolidated
+review with a per-dimension verdict.
+
+Run it on every PR — `Workflow({name: 'review-gate', args: <pr-number>})`.
+
+The gate is **advisory**: it posts a `--comment` review and never
+auto-approves or blocks the merge. It must never be granted
+approve/merge authority. On this repo — a single-maintainer project
+where the sole code owner cannot approve their own PRs — the required
+**merge gate is the CI status checks (§10) plus a clean four-reviewer
+gate run** with its blockers and majors resolved; the maintainer merges
+on that basis. When a second maintainer joins, restore a required human
+approval on top. The gate runs alongside CI, never instead of it.
+
+## 12. When in doubt, prefer fewer lines, fewer files, fewer abstractions.
 
 The job is not to add code — it is to express the system clearly. If
 two paths are equally correct, pick the one that deletes more.

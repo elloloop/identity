@@ -14,7 +14,13 @@
 
 # OS
 .DS_Store
-.claude/
+# Local Claude state (worktrees, settings) is ignored, but shared agent
+# workflows checked into the repo are tracked. Re-including a path under
+# an ignored dir requires un-ignoring each parent first.
+/.claude/*
+!/.claude/workflows/
+/.claude/workflows/*
+!/.claude/workflows/*.js
 
 # Load-test run artifacts
 tests/load/results/
