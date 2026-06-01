@@ -47,6 +47,7 @@ func TestSchemaMessages_CoversEveryNodeType(t *testing.T) {
 		36: "OAuthOneTimeCode",
 		37: "EmailLoginCode",
 		38: "MagicLinkToken",
+		39: "PhoneVerificationCode",
 	}
 
 	got := map[int32]string{}
@@ -126,7 +127,7 @@ func TestSchemaMessages_NoNilEntries(t *testing.T) {
 // number of messages should equal the count of node types (23) plus
 // edge types (4) = 27 messages registered.
 func TestSchemaMessages_StableLength(t *testing.T) {
-	const wantNodes = 23
+	const wantNodes = 24
 	const wantEdges = 4
 	msgs := SchemaMessages()
 	if len(msgs) != wantNodes+wantEdges {
