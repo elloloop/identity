@@ -188,6 +188,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		SMSSender:           opts.SMSSender,
 		OAuthRegistry:       opts.OAuthRegistry,
 		IDVProvider:         idvProvider,
+		CaptchaVerifier:     opts.CaptchaVerifier,
 		MetricsRegistry:     opts.MetricsRegistry,
 		TenantAdmin:         tenantAdmin,
 		RepositoryForTenant: repoForTenant,

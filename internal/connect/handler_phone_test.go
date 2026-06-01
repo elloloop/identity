@@ -76,7 +76,7 @@ func newPhoneHarness(t *testing.T, sender sms.Sender) *testHarness {
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 
-	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, cfg)
+	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, cfg)
 
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)

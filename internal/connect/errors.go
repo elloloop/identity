@@ -22,7 +22,9 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
 
-	case errors.Is(err, service.ErrPermissionDenied):
+	case errors.Is(err, service.ErrPermissionDenied),
+		errors.Is(err, service.ErrCaptchaRequired),
+		errors.Is(err, service.ErrCaptchaFailed):
 		return connect.NewError(connect.CodePermissionDenied, err)
 
 	case errors.Is(err, service.ErrAlreadyExists),

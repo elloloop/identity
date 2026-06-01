@@ -770,6 +770,13 @@ var (
 	ErrLocalAuthDisabled    = errors.New("local auth disabled")
 	ErrOAuthDisabled        = errors.New("oauth login is not configured")
 	ErrSignupDisabled       = errors.New("signup is disabled for this deployment")
+	// ErrCaptchaRequired is returned when CAPTCHA is enforced on an
+	// endpoint but the request carried no captcha token. ErrCaptchaFailed
+	// is returned when the supplied token was rejected by the provider.
+	// Both map to CodePermissionDenied so a forged token and a missing one
+	// look the same to a client.
+	ErrCaptchaRequired = errors.New("captcha token required")
+	ErrCaptchaFailed   = errors.New("captcha verification failed")
 	// ErrUnimplemented signals that the requested RPC is intentionally
 	// disabled in the current deployment mode (e.g. OrganizationSignup
 	// in mode=single per docs/IDENTITY.md decision log §3). The Connect

@@ -6,6 +6,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/pkg/captcha"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/idv"
 	"github.com/elloloop/identity/pkg/jwt"
@@ -84,6 +85,11 @@ type Options struct {
 	// builds the Config.IDVProvider backend (which may itself be
 	// disabled, leaving the IDV RPCs Unimplemented).
 	IDVProvider idv.Provider
+
+	// CaptchaVerifier gates the unauthenticated auth endpoints. nil builds
+	// the Config.CaptchaProvider backend (the no-op verifier when CAPTCHA
+	// is disabled).
+	CaptchaVerifier captcha.Verifier
 
 	// TenantAdmin and RepositoryForTenant back the mode=multi
 	// OrganizationSignup RPC. When nil and Config.IdentityMode=="multi",
