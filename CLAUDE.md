@@ -16,6 +16,11 @@ Highlights for quick recall:
   Conformance suites get extended, not bypassed.
 - **Clean commit messages.** Imperative mood, no AI attribution, no
   references to inaccessible context.
+- **Four-reviewer gate on every PR.** Every PR is reviewed from four
+  principal perspectives — security, performance, product, and code
+  quality — before merge. Run the gate workflow
+  (`Workflow({name: 'review-gate', args: <pr-number>})`) on each PR you
+  open and clear its blockers. It runs alongside CI, not instead of it.
 
 If existing code violates these rules and your change touches it, fix
 the violation as part of your change. Do not preserve the wrong pattern.

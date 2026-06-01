@@ -130,7 +130,36 @@ When upstream releases a new patch, **bump the pin in a deliberate
 commit** with a clear changelog reference. Renovate / Dependabot can
 open the PR; a human reviews and merges.
 
-## 11. When in doubt, prefer fewer lines, fewer files, fewer abstractions.
+## 11. Every PR passes the four-reviewer gate before merge.
+
+No PR merges until it has been reviewed from four independent
+principal-level perspectives. Each reviewer signs off only on their own
+dimension; a clean gate needs all four.
+
+1. **Security principal** — authentication/authorization, input
+   validation, injection, secrets and key handling, crypto, supply
+   chain, data exposure, abuse and rate-limiting, and the blast radius
+   of a compromise.
+2. **Performance principal** — algorithmic complexity, N+1s and
+   hot-path allocations, query/index shape, locking and contention,
+   payload size, and behaviour under load.
+3. **Product manager** — does the change deliver the intended user
+   value; are the semantics, UX, and error messages right; is anything
+   half-finished or an unflagged breaking change; is the scope what was
+   asked for.
+4. **Code-quality principal** — the rules in this file: root-cause
+   fixes, no shims, dead code deleted, tests that prove the behaviour,
+   clear naming, the right level of abstraction, maintainability.
+
+The gate runs as an agent workflow (`.claude/workflows/review-gate.js`):
+the four reviewers run in parallel against the PR diff and a synthesis
+posts one consolidated review with a per-dimension verdict. Run it on
+every PR you open — `Workflow({name: 'review-gate', args: <pr-number>})`
+— and resolve every blocker and major finding before merge. It is an
+agent-run gate that runs alongside CI; it does not replace the required
+status checks.
+
+## 12. When in doubt, prefer fewer lines, fewer files, fewer abstractions.
 
 The job is not to add code — it is to express the system clearly. If
 two paths are equally correct, pick the one that deletes more.
