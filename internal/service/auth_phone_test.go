@@ -5,9 +5,11 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/identity/pkg/sms"
@@ -301,5 +303,60 @@ func TestVerifyPhoneCode_SMSDisabled(t *testing.T) {
 	uid := seedPhoneUser(t, repo, "v-disabled@example.com")
 	if _, err := svc.VerifyPhoneCode(context.Background(), uid, "+14155550123", "123456"); !errors.Is(err, ErrSMSDisabled) {
 		t.Fatalf("want ErrSMSDisabled, got %v", err)
+	}
+}
+
+func TestNormalizePhone(t *testing.T) {
+	cases := []struct {
+		in    string
+		want  string
+		valid bool
+	}{
+		{"+15551234567", "+15551234567", true},
+		{"  +15551234567  ", "+15551234567", true},
+		{"15551234567", "15551234567", false}, // no leading +
+		{"+", "+", false},                     // too short
+		{"+1555abc4567", "+1555abc4567", false},
+		{"", "", false},
+		{"+1", "+1", true},
+	}
+	for _, c := range cases {
+		got, ok := normalizePhone(c.in)
+		if got != c.want || ok != c.valid {
+			t.Errorf("normalizePhone(%q) = (%q,%v), want (%q,%v)", c.in, got, ok, c.want, c.valid)
+		}
+	}
+}
+
+func TestRedactPhone(t *testing.T) {
+	cases := map[string]string{
+		"+15551234567": "+1********67",
+		"+123":         "***", // <= 4 chars
+		"":             "***",
+		"+123456":      "+1***56",
+	}
+	for in, want := range cases {
+		if got := redactPhone(in); got != want {
+			t.Errorf("redactPhone(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestPhoneCodeTTLAndAttempts(t *testing.T) {
+	// Configured values win.
+	s := &AuthService{cfg: &config.Config{PhoneCodeTTLSeconds: 120, PhoneCodeMaxAttempts: 7}}
+	if got := s.phoneCodeTTL(); got != 120*time.Second {
+		t.Errorf("phoneCodeTTL configured = %v, want 120s", got)
+	}
+	if got := s.phoneCodeMaxAttempts(); got != 7 {
+		t.Errorf("phoneCodeMaxAttempts configured = %d, want 7", got)
+	}
+	// Zero falls back to defaults.
+	d := &AuthService{cfg: &config.Config{}}
+	if got := d.phoneCodeTTL(); got != defaultPhoneCodeTTL {
+		t.Errorf("phoneCodeTTL default = %v, want %v", got, defaultPhoneCodeTTL)
+	}
+	if got := d.phoneCodeMaxAttempts(); got != defaultCodeMaxAttempts {
+		t.Errorf("phoneCodeMaxAttempts default = %d, want %d", got, defaultCodeMaxAttempts)
 	}
 }
