@@ -60,6 +60,7 @@ func SchemaMessages() []proto.Message {
 		(*schemapb.OAuthOneTimeCode)(nil),           // 36
 		(*schemapb.EmailLoginCode)(nil),             // 37
 		(*schemapb.MagicLinkToken)(nil),             // 38
+		(*schemapb.PhoneVerificationCode)(nil),      // 39
 
 		// Edges.
 		(*schemapb.MemberOf)(nil),

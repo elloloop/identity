@@ -174,6 +174,7 @@ func (s *sweeper) targets() []nodeTypeSweeper {
 		{"oauth_one_time_codes", s.repo.DeleteExpiredOAuthOneTimeCodes},
 		{"email_login_codes", s.repo.DeleteExpiredEmailLoginCodes},
 		{"magic_link_tokens", s.repo.DeleteExpiredMagicLinkTokens},
+		{"phone_verification_codes", s.repo.DeleteExpiredPhoneVerificationCodes},
 	}
 }
 

@@ -364,7 +364,7 @@ func newTestAuthServiceErr(t *testing.T, repo *errorRepo) *AuthService {
 	return NewAuthServiceWithOAuth(
 		repo, cfg, kr, passkeysSvc,
 		audit.NewLogger(nil, "test", nil),
-		testTotpKey(), testTotpRecoveryPepper(), nil, zap.NewNop(),
+		testTotpKey(), testTotpRecoveryPepper(), nil, nil, zap.NewNop(),
 		defaultTestOAuthRegistry(),
 	)
 }

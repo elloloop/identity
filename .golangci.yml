@@ -69,7 +69,7 @@ linters:
       - path: internal/repo/memory/repo\.go
         linters:
           - nilnil
-      - path: internal/repo/entdb/repo\.go
+      - path: internal/repo/entdb/.*\.go
         linters:
           - nilnil
       - path: internal/repo/postgres/.*\.go

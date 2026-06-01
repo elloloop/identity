@@ -60,6 +60,12 @@ const (
 	// IdentityServiceRedeemMagicLinkProcedure is the fully-qualified name of the IdentityService's
 	// RedeemMagicLink RPC.
 	IdentityServiceRedeemMagicLinkProcedure = "/identity.IdentityService/RedeemMagicLink"
+	// IdentityServiceRequestPhoneVerificationProcedure is the fully-qualified name of the
+	// IdentityService's RequestPhoneVerification RPC.
+	IdentityServiceRequestPhoneVerificationProcedure = "/identity.IdentityService/RequestPhoneVerification"
+	// IdentityServiceVerifyPhoneCodeProcedure is the fully-qualified name of the IdentityService's
+	// VerifyPhoneCode RPC.
+	IdentityServiceVerifyPhoneCodeProcedure = "/identity.IdentityService/VerifyPhoneCode"
 	// IdentityServiceGetCurrentUserProcedure is the fully-qualified name of the IdentityService's
 	// GetCurrentUser RPC.
 	IdentityServiceGetCurrentUserProcedure = "/identity.IdentityService/GetCurrentUser"
@@ -238,6 +244,9 @@ type IdentityServiceClient interface {
 	VerifyEmailLoginCode(context.Context, *connect.Request[identity.VerifyEmailLoginCodeRequest]) (*connect.Response[identity.VerifyEmailLoginCodeResponse], error)
 	RequestMagicLink(context.Context, *connect.Request[identity.RequestMagicLinkRequest]) (*connect.Response[identity.RequestMagicLinkResponse], error)
 	RedeemMagicLink(context.Context, *connect.Request[identity.RedeemMagicLinkRequest]) (*connect.Response[identity.RedeemMagicLinkResponse], error)
+	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	RequestPhoneVerification(context.Context, *connect.Request[identity.RequestPhoneVerificationRequest]) (*connect.Response[identity.RequestPhoneVerificationResponse], error)
+	VerifyPhoneCode(context.Context, *connect.Request[identity.VerifyPhoneCodeRequest]) (*connect.Response[identity.VerifyPhoneCodeResponse], error)
 	// Session / Token Auth
 	GetCurrentUser(context.Context, *connect.Request[identity.GetCurrentUserRequest]) (*connect.Response[identity.GetCurrentUserResponse], error)
 	RefreshToken(context.Context, *connect.Request[identity.RefreshTokenRequest]) (*connect.Response[identity.RefreshTokenResponse], error)
@@ -380,6 +389,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceRedeemMagicLinkProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("RedeemMagicLink")),
+			connect.WithClientOptions(opts...),
+		),
+		requestPhoneVerification: connect.NewClient[identity.RequestPhoneVerificationRequest, identity.RequestPhoneVerificationResponse](
+			httpClient,
+			baseURL+IdentityServiceRequestPhoneVerificationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RequestPhoneVerification")),
+			connect.WithClientOptions(opts...),
+		),
+		verifyPhoneCode: connect.NewClient[identity.VerifyPhoneCodeRequest, identity.VerifyPhoneCodeResponse](
+			httpClient,
+			baseURL+IdentityServiceVerifyPhoneCodeProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("VerifyPhoneCode")),
 			connect.WithClientOptions(opts...),
 		),
 		getCurrentUser: connect.NewClient[identity.GetCurrentUserRequest, identity.GetCurrentUserResponse](
@@ -726,6 +747,8 @@ type identityServiceClient struct {
 	verifyEmailLoginCode          *connect.Client[identity.VerifyEmailLoginCodeRequest, identity.VerifyEmailLoginCodeResponse]
 	requestMagicLink              *connect.Client[identity.RequestMagicLinkRequest, identity.RequestMagicLinkResponse]
 	redeemMagicLink               *connect.Client[identity.RedeemMagicLinkRequest, identity.RedeemMagicLinkResponse]
+	requestPhoneVerification      *connect.Client[identity.RequestPhoneVerificationRequest, identity.RequestPhoneVerificationResponse]
+	verifyPhoneCode               *connect.Client[identity.VerifyPhoneCodeRequest, identity.VerifyPhoneCodeResponse]
 	getCurrentUser                *connect.Client[identity.GetCurrentUserRequest, identity.GetCurrentUserResponse]
 	refreshToken                  *connect.Client[identity.RefreshTokenRequest, identity.RefreshTokenResponse]
 	logout                        *connect.Client[identity.LogoutRequest, identity.LogoutResponse]
@@ -826,6 +849,16 @@ func (c *identityServiceClient) RequestMagicLink(ctx context.Context, req *conne
 // RedeemMagicLink calls identity.IdentityService.RedeemMagicLink.
 func (c *identityServiceClient) RedeemMagicLink(ctx context.Context, req *connect.Request[identity.RedeemMagicLinkRequest]) (*connect.Response[identity.RedeemMagicLinkResponse], error) {
 	return c.redeemMagicLink.CallUnary(ctx, req)
+}
+
+// RequestPhoneVerification calls identity.IdentityService.RequestPhoneVerification.
+func (c *identityServiceClient) RequestPhoneVerification(ctx context.Context, req *connect.Request[identity.RequestPhoneVerificationRequest]) (*connect.Response[identity.RequestPhoneVerificationResponse], error) {
+	return c.requestPhoneVerification.CallUnary(ctx, req)
+}
+
+// VerifyPhoneCode calls identity.IdentityService.VerifyPhoneCode.
+func (c *identityServiceClient) VerifyPhoneCode(ctx context.Context, req *connect.Request[identity.VerifyPhoneCodeRequest]) (*connect.Response[identity.VerifyPhoneCodeResponse], error) {
+	return c.verifyPhoneCode.CallUnary(ctx, req)
 }
 
 // GetCurrentUser calls identity.IdentityService.GetCurrentUser.
@@ -1116,6 +1149,9 @@ type IdentityServiceHandler interface {
 	VerifyEmailLoginCode(context.Context, *connect.Request[identity.VerifyEmailLoginCodeRequest]) (*connect.Response[identity.VerifyEmailLoginCodeResponse], error)
 	RequestMagicLink(context.Context, *connect.Request[identity.RequestMagicLinkRequest]) (*connect.Response[identity.RequestMagicLinkResponse], error)
 	RedeemMagicLink(context.Context, *connect.Request[identity.RedeemMagicLinkRequest]) (*connect.Response[identity.RedeemMagicLinkResponse], error)
+	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	RequestPhoneVerification(context.Context, *connect.Request[identity.RequestPhoneVerificationRequest]) (*connect.Response[identity.RequestPhoneVerificationResponse], error)
+	VerifyPhoneCode(context.Context, *connect.Request[identity.VerifyPhoneCodeRequest]) (*connect.Response[identity.VerifyPhoneCodeResponse], error)
 	// Session / Token Auth
 	GetCurrentUser(context.Context, *connect.Request[identity.GetCurrentUserRequest]) (*connect.Response[identity.GetCurrentUserResponse], error)
 	RefreshToken(context.Context, *connect.Request[identity.RefreshTokenRequest]) (*connect.Response[identity.RefreshTokenResponse], error)
@@ -1254,6 +1290,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceRedeemMagicLinkProcedure,
 		svc.RedeemMagicLink,
 		connect.WithSchema(identityServiceMethods.ByName("RedeemMagicLink")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRequestPhoneVerificationHandler := connect.NewUnaryHandler(
+		IdentityServiceRequestPhoneVerificationProcedure,
+		svc.RequestPhoneVerification,
+		connect.WithSchema(identityServiceMethods.ByName("RequestPhoneVerification")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceVerifyPhoneCodeHandler := connect.NewUnaryHandler(
+		IdentityServiceVerifyPhoneCodeProcedure,
+		svc.VerifyPhoneCode,
+		connect.WithSchema(identityServiceMethods.ByName("VerifyPhoneCode")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceGetCurrentUserHandler := connect.NewUnaryHandler(
@@ -1606,6 +1654,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceRequestMagicLinkHandler.ServeHTTP(w, r)
 		case IdentityServiceRedeemMagicLinkProcedure:
 			identityServiceRedeemMagicLinkHandler.ServeHTTP(w, r)
+		case IdentityServiceRequestPhoneVerificationProcedure:
+			identityServiceRequestPhoneVerificationHandler.ServeHTTP(w, r)
+		case IdentityServiceVerifyPhoneCodeProcedure:
+			identityServiceVerifyPhoneCodeHandler.ServeHTTP(w, r)
 		case IdentityServiceGetCurrentUserProcedure:
 			identityServiceGetCurrentUserHandler.ServeHTTP(w, r)
 		case IdentityServiceRefreshTokenProcedure:
@@ -1759,6 +1811,14 @@ func (UnimplementedIdentityServiceHandler) RequestMagicLink(context.Context, *co
 
 func (UnimplementedIdentityServiceHandler) RedeemMagicLink(context.Context, *connect.Request[identity.RedeemMagicLinkRequest]) (*connect.Response[identity.RedeemMagicLinkResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.RedeemMagicLink is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RequestPhoneVerification(context.Context, *connect.Request[identity.RequestPhoneVerificationRequest]) (*connect.Response[identity.RequestPhoneVerificationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.RequestPhoneVerification is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) VerifyPhoneCode(context.Context, *connect.Request[identity.VerifyPhoneCodeRequest]) (*connect.Response[identity.VerifyPhoneCodeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.VerifyPhoneCode is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) GetCurrentUser(context.Context, *connect.Request[identity.GetCurrentUserRequest]) (*connect.Response[identity.GetCurrentUserResponse], error) {

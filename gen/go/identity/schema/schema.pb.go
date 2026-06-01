@@ -55,6 +55,9 @@ type User struct {
 	EmailVerifiedAt  int64                  `protobuf:"varint,19,opt,name=email_verified_at,json=emailVerifiedAt,proto3" json:"email_verified_at,omitempty"`
 	IdvVerified      bool                   `protobuf:"varint,20,opt,name=idv_verified,json=idvVerified,proto3" json:"idv_verified,omitempty"`
 	IdvVerifiedAt    int64                  `protobuf:"varint,21,opt,name=idv_verified_at,json=idvVerifiedAt,proto3" json:"idv_verified_at,omitempty"`
+	PhoneNumber      string                 `protobuf:"bytes,22,opt,name=phone_number,json=phoneNumber,proto3" json:"phone_number,omitempty"`
+	PhoneVerified    bool                   `protobuf:"varint,23,opt,name=phone_verified,json=phoneVerified,proto3" json:"phone_verified,omitempty"`
+	PhoneVerifiedAt  int64                  `protobuf:"varint,24,opt,name=phone_verified_at,json=phoneVerifiedAt,proto3" json:"phone_verified_at,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -232,6 +235,27 @@ func (x *User) GetIdvVerified() bool {
 func (x *User) GetIdvVerifiedAt() int64 {
 	if x != nil {
 		return x.IdvVerifiedAt
+	}
+	return 0
+}
+
+func (x *User) GetPhoneNumber() string {
+	if x != nil {
+		return x.PhoneNumber
+	}
+	return ""
+}
+
+func (x *User) GetPhoneVerified() bool {
+	if x != nil {
+		return x.PhoneVerified
+	}
+	return false
+}
+
+func (x *User) GetPhoneVerifiedAt() int64 {
+	if x != nil {
+		return x.PhoneVerifiedAt
 	}
 	return 0
 }
@@ -2297,6 +2321,106 @@ func (x *MagicLinkToken) GetConsumedAt() int64 {
 	return 0
 }
 
+type PhoneVerificationCode struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	PhoneNumber   string                 `protobuf:"bytes,2,opt,name=phone_number,json=phoneNumber,proto3" json:"phone_number,omitempty"`
+	CodeHash      string                 `protobuf:"bytes,3,opt,name=code_hash,json=codeHash,proto3" json:"code_hash,omitempty"`
+	ExpiresAt     int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ConsumedAt    int64                  `protobuf:"varint,6,opt,name=consumed_at,json=consumedAt,proto3" json:"consumed_at,omitempty"` // 0 = unconsumed
+	AttemptCount  int64                  `protobuf:"varint,7,opt,name=attempt_count,json=attemptCount,proto3" json:"attempt_count,omitempty"`
+	MaxAttempts   int64                  `protobuf:"varint,8,opt,name=max_attempts,json=maxAttempts,proto3" json:"max_attempts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PhoneVerificationCode) Reset() {
+	*x = PhoneVerificationCode{}
+	mi := &file_identity_schema_schema_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PhoneVerificationCode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PhoneVerificationCode) ProtoMessage() {}
+
+func (x *PhoneVerificationCode) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_schema_schema_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PhoneVerificationCode.ProtoReflect.Descriptor instead.
+func (*PhoneVerificationCode) Descriptor() ([]byte, []int) {
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *PhoneVerificationCode) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *PhoneVerificationCode) GetPhoneNumber() string {
+	if x != nil {
+		return x.PhoneNumber
+	}
+	return ""
+}
+
+func (x *PhoneVerificationCode) GetCodeHash() string {
+	if x != nil {
+		return x.CodeHash
+	}
+	return ""
+}
+
+func (x *PhoneVerificationCode) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *PhoneVerificationCode) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *PhoneVerificationCode) GetConsumedAt() int64 {
+	if x != nil {
+		return x.ConsumedAt
+	}
+	return 0
+}
+
+func (x *PhoneVerificationCode) GetAttemptCount() int64 {
+	if x != nil {
+		return x.AttemptCount
+	}
+	return 0
+}
+
+func (x *PhoneVerificationCode) GetMaxAttempts() int64 {
+	if x != nil {
+		return x.MaxAttempts
+	}
+	return 0
+}
+
 type MemberOf struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -2305,7 +2429,7 @@ type MemberOf struct {
 
 func (x *MemberOf) Reset() {
 	*x = MemberOf{}
-	mi := &file_identity_schema_schema_proto_msgTypes[23]
+	mi := &file_identity_schema_schema_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2317,7 +2441,7 @@ func (x *MemberOf) String() string {
 func (*MemberOf) ProtoMessage() {}
 
 func (x *MemberOf) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[23]
+	mi := &file_identity_schema_schema_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2330,7 +2454,7 @@ func (x *MemberOf) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberOf.ProtoReflect.Descriptor instead.
 func (*MemberOf) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{23}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{24}
 }
 
 type UserPasskey struct {
@@ -2341,7 +2465,7 @@ type UserPasskey struct {
 
 func (x *UserPasskey) Reset() {
 	*x = UserPasskey{}
-	mi := &file_identity_schema_schema_proto_msgTypes[24]
+	mi := &file_identity_schema_schema_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2353,7 +2477,7 @@ func (x *UserPasskey) String() string {
 func (*UserPasskey) ProtoMessage() {}
 
 func (x *UserPasskey) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[24]
+	mi := &file_identity_schema_schema_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2366,7 +2490,7 @@ func (x *UserPasskey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPasskey.ProtoReflect.Descriptor instead.
 func (*UserPasskey) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{24}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{25}
 }
 
 type UserTotp struct {
@@ -2377,7 +2501,7 @@ type UserTotp struct {
 
 func (x *UserTotp) Reset() {
 	*x = UserTotp{}
-	mi := &file_identity_schema_schema_proto_msgTypes[25]
+	mi := &file_identity_schema_schema_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2389,7 +2513,7 @@ func (x *UserTotp) String() string {
 func (*UserTotp) ProtoMessage() {}
 
 func (x *UserTotp) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[25]
+	mi := &file_identity_schema_schema_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2402,7 +2526,7 @@ func (x *UserTotp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTotp.ProtoReflect.Descriptor instead.
 func (*UserTotp) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{25}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{26}
 }
 
 type UserRecoveryCode struct {
@@ -2413,7 +2537,7 @@ type UserRecoveryCode struct {
 
 func (x *UserRecoveryCode) Reset() {
 	*x = UserRecoveryCode{}
-	mi := &file_identity_schema_schema_proto_msgTypes[26]
+	mi := &file_identity_schema_schema_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2425,7 +2549,7 @@ func (x *UserRecoveryCode) String() string {
 func (*UserRecoveryCode) ProtoMessage() {}
 
 func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_schema_schema_proto_msgTypes[26]
+	mi := &file_identity_schema_schema_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2438,14 +2562,14 @@ func (x *UserRecoveryCode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserRecoveryCode.ProtoReflect.Descriptor instead.
 func (*UserRecoveryCode) Descriptor() ([]byte, []int) {
-	return file_identity_schema_schema_proto_rawDescGZIP(), []int{26}
+	return file_identity_schema_schema_proto_rawDescGZIP(), []int{27}
 }
 
 var File_identity_schema_schema_proto protoreflect.FileDescriptor
 
 const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
-	"\x1cidentity/schema/schema.proto\x12\x0fidentity.schema\x1a\x19entdb/entdb_options.proto\"\xdf\b\n" +
+	"\x1cidentity/schema/schema.proto\x12\x0fidentity.schema\x1a\x19entdb/entdb_options.proto\"\xf6\t\n" +
 	"\x04User\x12\"\n" +
 	"\x05email\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x10\x01 \x01h\x01R\x05email\x12\x1e\n" +
 	"\x04name\x18\x02 \x01(\tB\n" +
@@ -2475,7 +2599,10 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\x0eemail_verified\x18\x12 \x01(\bB\x0f\xb2\xbb\x18\v\x18\x01J\x05false`\x01R\remailVerified\x122\n" +
 	"\x11email_verified_at\x18\x13 \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\x0femailVerifiedAt\x122\n" +
 	"\fidv_verified\x18\x14 \x01(\bB\x0f\xb2\xbb\x18\v\x18\x01J\x05false`\x01R\vidvVerified\x12.\n" +
-	"\x0fidv_verified_at\x18\x15 \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\ridvVerifiedAt: \xa2\xbb\x18\x1c\b\x01:\x02idR\x14A user in the system\"\xa1\x02\n" +
+	"\x0fidv_verified_at\x18\x15 \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\ridvVerifiedAt\x12)\n" +
+	"\fphone_number\x18\x16 \x01(\tB\x06\xb2\xbb\x18\x02 \x01R\vphoneNumber\x126\n" +
+	"\x0ephone_verified\x18\x17 \x01(\bB\x0f\xb2\xbb\x18\v\x18\x01J\x05false`\x01R\rphoneVerified\x122\n" +
+	"\x11phone_verified_at\x18\x18 \x01(\x03B\x06\xb2\xbb\x18\x02`\x01R\x0fphoneVerifiedAt: \xa2\xbb\x18\x1c\b\x01:\x02idR\x14A user in the system\"\xa1\x02\n" +
 	"\fWorkingGroup\x12\x1c\n" +
 	"\x04name\x18\x01 \x01(\tB\b\xb2\xbb\x18\x04\b\x01\x10\x01R\x04name\x12(\n" +
 	"\vdescription\x18\x02 \x01(\tB\x06\xb2\xbb\x18\x02\x10\x01R\vdescription\x12*\n" +
@@ -2718,7 +2845,19 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x05 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt\x122\n" +
 	"\vconsumed_at\x18\x06 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
-	"consumedAt:c\xa2\xbb\x18_\b&0\x04RYSingle-use, short-lived magic-link token for passwordless email login, bound to an email.\">\n" +
+	"consumedAt:c\xa2\xbb\x18_\b&0\x04RYSingle-use, short-lived magic-link token for passwordless email login, bound to an email.\"\xf2\x05\n" +
+	"\x15PhoneVerificationCode\x12Z\n" +
+	"\auser_id\x18\x01 \x01(\tBA\xb2\xbb\x18=\b\x01\x18\x01:\x03ref@\x01R,Owning user; at most one live code per user.`\x01h\x01R\x06userId\x12U\n" +
+	"\fphone_number\x18\x02 \x01(\tB2\xb2\xbb\x18.\b\x01 \x01R(E.164 number the code proves control of.R\vphoneNumber\x12_\n" +
+	"\tcode_hash\x18\x03 \x01(\tBB\xb2\xbb\x18>\b\x01R8sha256(6-digit code); plaintext is sent only in the SMS.`\x01R\bcodeHash\x124\n" +
+	"\n" +
+	"expires_at\x18\x04 \x01(\x03B\x15\xb2\xbb\x18\x11\b\x01\x18\x01:\ttimestamp`\x01R\texpiresAt\x122\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\x03B\x13\xb2\xbb\x18\x0f\b\x01:\ttimestamp`\x01R\tcreatedAt\x122\n" +
+	"\vconsumed_at\x18\x06 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
+	"consumedAt\x12s\n" +
+	"\rattempt_count\x18\a \x01(\x03BN\xb2\xbb\x18JRFFailed verify attempts; the code is invalidated at the configured cap.`\x01R\fattemptCount\x12M\n" +
+	"\fmax_attempts\x18\b \x01(\x03B*\xb2\xbb\x18&R\"Attempt cap captured at mint time.`\x01R\vmaxAttempts:c\xa2\xbb\x18_\b'0\x04:\auser_idRPSingle-use, short-lived SMS OTP for phone-ownership verification, keyed by user.\">\n" +
 	"\bMemberOf:2\xaa\xbb\x18.\be\x12\tMEMBER_OFJ\x1fUser belongs to a working group\"F\n" +
 	"\vUserPasskey:7\xaa\xbb\x183\b\xd8\x01\x12\fUSER_PASSKEY0\x01J\x1eUser owns a passkey credential\"U\n" +
 	"\bUserTotp:I\xaa\xbb\x18E\b\xd9\x01\x12\tUSER_TOTP \x010\x01J1User has a TOTP credential (at most one per user)\"T\n" +
@@ -2736,7 +2875,7 @@ func file_identity_schema_schema_proto_rawDescGZIP() []byte {
 	return file_identity_schema_schema_proto_rawDescData
 }
 
-var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_identity_schema_schema_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_identity_schema_schema_proto_goTypes = []any{
 	(*User)(nil),                       // 0: identity.schema.User
 	(*WorkingGroup)(nil),               // 1: identity.schema.WorkingGroup
@@ -2761,10 +2900,11 @@ var file_identity_schema_schema_proto_goTypes = []any{
 	(*OAuthOneTimeCode)(nil),           // 20: identity.schema.OAuthOneTimeCode
 	(*EmailLoginCode)(nil),             // 21: identity.schema.EmailLoginCode
 	(*MagicLinkToken)(nil),             // 22: identity.schema.MagicLinkToken
-	(*MemberOf)(nil),                   // 23: identity.schema.MemberOf
-	(*UserPasskey)(nil),                // 24: identity.schema.UserPasskey
-	(*UserTotp)(nil),                   // 25: identity.schema.UserTotp
-	(*UserRecoveryCode)(nil),           // 26: identity.schema.UserRecoveryCode
+	(*PhoneVerificationCode)(nil),      // 23: identity.schema.PhoneVerificationCode
+	(*MemberOf)(nil),                   // 24: identity.schema.MemberOf
+	(*UserPasskey)(nil),                // 25: identity.schema.UserPasskey
+	(*UserTotp)(nil),                   // 26: identity.schema.UserTotp
+	(*UserRecoveryCode)(nil),           // 27: identity.schema.UserRecoveryCode
 }
 var file_identity_schema_schema_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -2785,7 +2925,7 @@ func file_identity_schema_schema_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_identity_schema_schema_proto_rawDesc), len(file_identity_schema_schema_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

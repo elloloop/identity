@@ -85,35 +85,40 @@ const (
 	EventAdminHelpRequested EventType = "admin_help_requested"
 	EventAdminHelpResolved  EventType = "admin_help_resolved"
 	EventOrganizationSignup EventType = "organization_signup"
+
+	EventPhoneVerificationRequested EventType = "phone_verification_requested"
+	EventPhoneVerified              EventType = "phone_verified"
 )
 
 // validEventTypes is the canonical set of known event type strings.
 var validEventTypes = map[EventType]struct{}{
-	EventLoginSuccess:       {},
-	EventLoginFailure:       {},
-	EventLoginLocked:        {},
-	EventAccountLocked:      {},
-	EventLogout:             {},
-	EventPasswordChanged:    {},
-	EventPasswordReset:      {},
-	EventTotpEnabled:        {},
-	EventTotpDisabled:       {},
-	EventTotpVerified:       {},
-	EventPasskeyAdded:       {},
-	EventPasskeyRemoved:     {},
-	EventPasskeyUsed:        {},
-	EventSessionRevoked:     {},
-	EventUserInvited:        {},
-	EventUserDeactivated:    {},
-	EventUserReactivated:    {},
-	EventUserDeleted:        {},
-	EventAdminResetPassword: {},
-	EventOAuthLogin:         {},
-	EventQrLoginApproved:    {},
-	EventQrLoginRejected:    {},
-	EventAdminHelpRequested: {},
-	EventAdminHelpResolved:  {},
-	EventOrganizationSignup: {},
+	EventLoginSuccess:               {},
+	EventLoginFailure:               {},
+	EventLoginLocked:                {},
+	EventAccountLocked:              {},
+	EventLogout:                     {},
+	EventPasswordChanged:            {},
+	EventPasswordReset:              {},
+	EventTotpEnabled:                {},
+	EventTotpDisabled:               {},
+	EventTotpVerified:               {},
+	EventPasskeyAdded:               {},
+	EventPasskeyRemoved:             {},
+	EventPasskeyUsed:                {},
+	EventSessionRevoked:             {},
+	EventUserInvited:                {},
+	EventUserDeactivated:            {},
+	EventUserReactivated:            {},
+	EventUserDeleted:                {},
+	EventAdminResetPassword:         {},
+	EventOAuthLogin:                 {},
+	EventQrLoginApproved:            {},
+	EventQrLoginRejected:            {},
+	EventAdminHelpRequested:         {},
+	EventAdminHelpResolved:          {},
+	EventOrganizationSignup:         {},
+	EventPhoneVerificationRequested: {},
+	EventPhoneVerified:              {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

@@ -158,6 +158,26 @@ func (StubRepository) ConsumeMagicLinkToken(context.Context, string, int64) (*Ma
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) UpsertPhoneVerificationCode(context.Context, *PhoneVerificationCodeRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) FindPhoneVerificationCodeByUser(context.Context, string) (*PhoneVerificationCodeRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) IncrementPhoneVerificationCodeAttempts(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) ConsumePhoneVerificationCode(context.Context, string, int64) (*PhoneVerificationCodeRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) SetUserPhoneVerified(context.Context, string, string, int64) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) GetTotpCredential(context.Context, string) (*TotpCredRecord, error) {
 	return nil, ErrServiceUnavailable
 }
@@ -319,6 +339,10 @@ func (StubRepository) DeleteExpiredEmailLoginCodes(context.Context, int64, int) 
 }
 
 func (StubRepository) DeleteExpiredMagicLinkTokens(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredPhoneVerificationCodes(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }
 

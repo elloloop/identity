@@ -28,6 +28,8 @@ const (
 	IdentityService_VerifyEmailLoginCode_FullMethodName          = "/identity.IdentityService/VerifyEmailLoginCode"
 	IdentityService_RequestMagicLink_FullMethodName              = "/identity.IdentityService/RequestMagicLink"
 	IdentityService_RedeemMagicLink_FullMethodName               = "/identity.IdentityService/RedeemMagicLink"
+	IdentityService_RequestPhoneVerification_FullMethodName      = "/identity.IdentityService/RequestPhoneVerification"
+	IdentityService_VerifyPhoneCode_FullMethodName               = "/identity.IdentityService/VerifyPhoneCode"
 	IdentityService_GetCurrentUser_FullMethodName                = "/identity.IdentityService/GetCurrentUser"
 	IdentityService_RefreshToken_FullMethodName                  = "/identity.IdentityService/RefreshToken"
 	IdentityService_Logout_FullMethodName                        = "/identity.IdentityService/Logout"
@@ -100,6 +102,9 @@ type IdentityServiceClient interface {
 	VerifyEmailLoginCode(ctx context.Context, in *VerifyEmailLoginCodeRequest, opts ...grpc.CallOption) (*VerifyEmailLoginCodeResponse, error)
 	RequestMagicLink(ctx context.Context, in *RequestMagicLinkRequest, opts ...grpc.CallOption) (*RequestMagicLinkResponse, error)
 	RedeemMagicLink(ctx context.Context, in *RedeemMagicLinkRequest, opts ...grpc.CallOption) (*RedeemMagicLinkResponse, error)
+	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	RequestPhoneVerification(ctx context.Context, in *RequestPhoneVerificationRequest, opts ...grpc.CallOption) (*RequestPhoneVerificationResponse, error)
+	VerifyPhoneCode(ctx context.Context, in *VerifyPhoneCodeRequest, opts ...grpc.CallOption) (*VerifyPhoneCodeResponse, error)
 	// Session / Token Auth
 	GetCurrentUser(ctx context.Context, in *GetCurrentUserRequest, opts ...grpc.CallOption) (*GetCurrentUserResponse, error)
 	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error)
@@ -271,6 +276,26 @@ func (c *identityServiceClient) RedeemMagicLink(ctx context.Context, in *RedeemM
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RedeemMagicLinkResponse)
 	err := c.cc.Invoke(ctx, IdentityService_RedeemMagicLink_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RequestPhoneVerification(ctx context.Context, in *RequestPhoneVerificationRequest, opts ...grpc.CallOption) (*RequestPhoneVerificationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestPhoneVerificationResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RequestPhoneVerification_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) VerifyPhoneCode(ctx context.Context, in *VerifyPhoneCodeRequest, opts ...grpc.CallOption) (*VerifyPhoneCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyPhoneCodeResponse)
+	err := c.cc.Invoke(ctx, IdentityService_VerifyPhoneCode_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -842,6 +867,9 @@ type IdentityServiceServer interface {
 	VerifyEmailLoginCode(context.Context, *VerifyEmailLoginCodeRequest) (*VerifyEmailLoginCodeResponse, error)
 	RequestMagicLink(context.Context, *RequestMagicLinkRequest) (*RequestMagicLinkResponse, error)
 	RedeemMagicLink(context.Context, *RedeemMagicLinkRequest) (*RedeemMagicLinkResponse, error)
+	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
+	RequestPhoneVerification(context.Context, *RequestPhoneVerificationRequest) (*RequestPhoneVerificationResponse, error)
+	VerifyPhoneCode(context.Context, *VerifyPhoneCodeRequest) (*VerifyPhoneCodeResponse, error)
 	// Session / Token Auth
 	GetCurrentUser(context.Context, *GetCurrentUserRequest) (*GetCurrentUserResponse, error)
 	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenResponse, error)
@@ -955,6 +983,12 @@ func (UnimplementedIdentityServiceServer) RequestMagicLink(context.Context, *Req
 }
 func (UnimplementedIdentityServiceServer) RedeemMagicLink(context.Context, *RedeemMagicLinkRequest) (*RedeemMagicLinkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RedeemMagicLink not implemented")
+}
+func (UnimplementedIdentityServiceServer) RequestPhoneVerification(context.Context, *RequestPhoneVerificationRequest) (*RequestPhoneVerificationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestPhoneVerification not implemented")
+}
+func (UnimplementedIdentityServiceServer) VerifyPhoneCode(context.Context, *VerifyPhoneCodeRequest) (*VerifyPhoneCodeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyPhoneCode not implemented")
 }
 func (UnimplementedIdentityServiceServer) GetCurrentUser(context.Context, *GetCurrentUserRequest) (*GetCurrentUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCurrentUser not implemented")
@@ -1300,6 +1334,42 @@ func _IdentityService_RedeemMagicLink_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).RedeemMagicLink(ctx, req.(*RedeemMagicLinkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RequestPhoneVerification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestPhoneVerificationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RequestPhoneVerification(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RequestPhoneVerification_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RequestPhoneVerification(ctx, req.(*RequestPhoneVerificationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_VerifyPhoneCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyPhoneCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).VerifyPhoneCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_VerifyPhoneCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).VerifyPhoneCode(ctx, req.(*VerifyPhoneCodeRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2336,6 +2406,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RedeemMagicLink",
 			Handler:    _IdentityService_RedeemMagicLink_Handler,
+		},
+		{
+			MethodName: "RequestPhoneVerification",
+			Handler:    _IdentityService_RequestPhoneVerification_Handler,
+		},
+		{
+			MethodName: "VerifyPhoneCode",
+			Handler:    _IdentityService_VerifyPhoneCode_Handler,
 		},
 		{
 			MethodName: "GetCurrentUser",

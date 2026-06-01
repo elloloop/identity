@@ -51,6 +51,9 @@ message User {
     int64  email_verified_at  = 19 [(entdb.field) = { pii_false: true }];
     bool   idv_verified       = 20 [(entdb.field) = { default_value: "false", pii_false: true, indexed: true }];
     int64  idv_verified_at    = 21 [(entdb.field) = { pii_false: true }];
+    string phone_number       = 22 [(entdb.field) = { pii: true }];
+    bool   phone_verified     = 23 [(entdb.field) = { default_value: "false", pii_false: true, indexed: true }];
+    int64  phone_verified_at  = 24 [(entdb.field) = { pii_false: true }];
 }
 
 // ─── WorkingGroup (type_id 2) ──────────────────────────────────────────
@@ -570,6 +573,26 @@ message MagicLinkToken {
     int64  expires_at  = 4 [(entdb.field) = { required: true, kind: "timestamp", indexed: true, pii_false: true }];
     int64  created_at  = 5 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
     int64  consumed_at = 6 [(entdb.field) = { kind: "timestamp", pii_false: true }]; // 0 = unconsumed
+}
+
+// ─── PhoneVerificationCode (type_id 39) ────────────────────────────────
+
+message PhoneVerificationCode {
+    option (entdb.node) = {
+        type_id: 39
+        data_policy: DATA_POLICY_EPHEMERAL
+        subject_field: "user_id"
+        description: "Single-use, short-lived SMS OTP for phone-ownership verification, keyed by user."
+    };
+
+    string user_id       = 1 [(entdb.field) = { required: true, unique: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true, description: "Owning user; at most one live code per user." }];
+    string phone_number  = 2 [(entdb.field) = { required: true, pii: true, description: "E.164 number the code proves control of." }];
+    string code_hash     = 3 [(entdb.field) = { required: true, pii_false: true, description: "sha256(6-digit code); plaintext is sent only in the SMS." }];
+    int64  expires_at    = 4 [(entdb.field) = { required: true, kind: "timestamp", indexed: true, pii_false: true }];
+    int64  created_at    = 5 [(entdb.field) = { required: true, kind: "timestamp", pii_false: true }];
+    int64  consumed_at   = 6 [(entdb.field) = { kind: "timestamp", pii_false: true }]; // 0 = unconsumed
+    int64  attempt_count = 7 [(entdb.field) = { pii_false: true, description: "Failed verify attempts; the code is invalidated at the configured cap." }];
+    int64  max_attempts  = 8 [(entdb.field) = { pii_false: true, description: "Attempt cap captured at mint time." }];
 }
 
 // ═══════════════════════════════════════════════════════════════════════

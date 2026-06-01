@@ -1765,7 +1765,7 @@ func TestNewAuthService_ShortPepperPanics(t *testing.T) {
 	kr := testKeyRing(t)
 
 	assert.Panics(t, func() {
-		_ = NewAuthService(repo, cfg, kr, nil, nil, testTotpKey(), []byte("too-short"), nil, nil)
+		_ = NewAuthService(repo, cfg, kr, nil, nil, testTotpKey(), []byte("too-short"), nil, nil, nil)
 	}, "AuthService must refuse a short recovery pepper rather than silently accept it")
 }
 
@@ -1774,7 +1774,7 @@ func TestNewServices_NilLoggerIsSafe(t *testing.T) {
 	cfg := testConfig()
 	kr := testKeyRing(t)
 
-	a := NewAuthService(repo, cfg, kr, nil, nil, testTotpKey(), testTotpRecoveryPepper(), nil, nil)
+	a := NewAuthService(repo, cfg, kr, nil, nil, testTotpKey(), testTotpRecoveryPepper(), nil, nil, nil)
 	assert.NotNil(t, a)
 
 	db := newFakeDB()

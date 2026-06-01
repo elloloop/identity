@@ -663,6 +663,7 @@ type MemRepo struct {
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
 	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
+	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
 	totpCreds          map[string]*service.TotpCredRecord
 	recoveryCodes      map[string]*service.RecoveryCodeRecord
 	loginChallenges    map[string]*service.LoginChallengeRecord
@@ -688,6 +689,7 @@ func NewMemRepo() *MemRepo {
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
+		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
 		totpCreds:          make(map[string]*service.TotpCredRecord),
 		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
 		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
@@ -860,6 +862,11 @@ func (r *MemRepo) DeleteUser(_ context.Context, userID string) error {
 	for id, m := range r.orgMembers {
 		if m.UserID == userID {
 			delete(r.orgMembers, id)
+		}
+	}
+	for id, c := range r.phoneVerifyCodes {
+		if c.UserID == userID {
+			delete(r.phoneVerifyCodes, id)
 		}
 	}
 	delete(r.users, userID)
@@ -1277,6 +1284,74 @@ func (r *MemRepo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, atM
 		return &cp, nil
 	}
 	return nil, service.ErrMagicLinkInvalid
+}
+
+func (r *MemRepo) UpsertPhoneVerificationCode(_ context.Context, rec *service.PhoneVerificationCodeRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.phoneVerifyCodes {
+		if c.UserID == rec.UserID {
+			delete(r.phoneVerifyCodes, id)
+		}
+	}
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.phoneVerifyCodes[id] = &cp
+	return id, nil
+}
+
+func (r *MemRepo) FindPhoneVerificationCodeByUser(_ context.Context, userID string) (*service.PhoneVerificationCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.phoneVerifyCodes {
+		if c.UserID == userID {
+			cp := *c
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) IncrementPhoneVerificationCodeAttempts(_ context.Context, nodeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.phoneVerifyCodes[nodeID]
+	if !ok {
+		return fmt.Errorf("phone verification code %s not found", nodeID)
+	}
+	c.AttemptCount++
+	return nil
+}
+
+func (r *MemRepo) ConsumePhoneVerificationCode(_ context.Context, userID string, atMs int64) (*service.PhoneVerificationCodeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.phoneVerifyCodes {
+		if c.UserID != userID {
+			continue
+		}
+		if c.ConsumedAt != 0 || c.ExpiresAt <= atMs {
+			return nil, service.ErrPhoneCodeInvalid
+		}
+		c.ConsumedAt = atMs
+		cp := *c
+		return &cp, nil
+	}
+	return nil, service.ErrPhoneCodeInvalid
+}
+
+func (r *MemRepo) SetUserPhoneVerified(_ context.Context, userID, phoneNumber string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok {
+		return fmt.Errorf("user %s not found", userID)
+	}
+	u.PhoneNumber = phoneNumber
+	u.PhoneVerified = true
+	u.PhoneVerifiedAt = atMs
+	return nil
 }
 
 // ── TOTP Credentials ──────────────────────────────────────────────
@@ -1824,6 +1899,22 @@ func (r *MemRepo) DeleteExpiredMagicLinkTokens(_ context.Context, beforeMs int64
 		}
 		if tkn.ExpiresAt < beforeMs {
 			delete(r.magicLinkTokens, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *MemRepo) DeleteExpiredPhoneVerificationCodes(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.phoneVerifyCodes {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.phoneVerifyCodes, id)
 			n++
 		}
 	}

@@ -27,14 +27,16 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrCaptchaFailed):
 		return connect.NewError(connect.CodePermissionDenied, err)
 
-	case errors.Is(err, service.ErrAlreadyExists):
+	case errors.Is(err, service.ErrAlreadyExists),
+		errors.Is(err, service.ErrPhoneAlreadyVerified):
 		return connect.NewError(connect.CodeAlreadyExists, err)
 
 	case errors.Is(err, service.ErrUnauthenticated),
 		errors.Is(err, service.ErrTokenExpired),
 		errors.Is(err, service.ErrOAuthCodeInvalid),
 		errors.Is(err, service.ErrEmailLoginCodeInvalid),
-		errors.Is(err, service.ErrMagicLinkInvalid):
+		errors.Is(err, service.ErrMagicLinkInvalid),
+		errors.Is(err, service.ErrPhoneCodeInvalid):
 		return connect.NewError(connect.CodeUnauthenticated, err)
 
 	case errors.Is(err, service.ErrInvalidArgument),
@@ -76,7 +78,8 @@ func toConnectError(err error) *connect.Error {
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrLocalAuthDisabled),
-		errors.Is(err, service.ErrOAuthDisabled):
+		errors.Is(err, service.ErrOAuthDisabled),
+		errors.Is(err, service.ErrSMSDisabled):
 		return connect.NewError(connect.CodeUnavailable, err)
 
 	case errors.Is(err, service.ErrUnimplemented):

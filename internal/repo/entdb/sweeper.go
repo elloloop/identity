@@ -79,3 +79,10 @@ func (r *entRepository) DeleteExpiredMagicLinkTokens(ctx context.Context, before
 	}
 	return nil
 }
+
+func (r *entRepository) DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.PhoneVerificationCode{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredPhoneVerificationCodes: %w", err)
+	}
+	return nil
+}

@@ -185,6 +185,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		TOTPKey:             totpKey,
 		TOTPRecoveryPepper:  totpRecoveryPepper,
 		EmailTransport:      opts.EmailTransport,
+		SMSSender:           opts.SMSSender,
 		OAuthRegistry:       opts.OAuthRegistry,
 		IDVProvider:         idvProvider,
 		CaptchaVerifier:     opts.CaptchaVerifier,

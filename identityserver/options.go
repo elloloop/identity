@@ -11,6 +11,7 @@ import (
 	"github.com/elloloop/identity/pkg/idv"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
+	"github.com/elloloop/identity/pkg/sms"
 )
 
 // Config is the full identity configuration, re-exported so embedding
@@ -70,6 +71,11 @@ type Options struct {
 	// EmailTransport delivers outbound mail. nil builds a transport from
 	// the SMTP settings in Config (falling back to log-only).
 	EmailTransport email.Transport
+
+	// SMSSender delivers outbound SMS for phone verification. nil builds a
+	// sender from the GATEWAY_SMS_* settings in Config (log-only when SMS
+	// is disabled).
+	SMSSender sms.Sender
 
 	// OAuthRegistry holds the per-provider exchangers. nil builds one
 	// from the OAuth client credentials in Config.
