@@ -165,9 +165,12 @@ Run it on every PR — `Workflow({name: 'review-gate', args: <pr-number>})`.
 
 The gate is **advisory**: it posts a `--comment` review and never
 auto-approves or blocks the merge. It must never be granted
-approve/merge authority — merge protection comes only from the required
-human review and the CI status checks (§10). The gate runs alongside
-those, not instead of them.
+approve/merge authority. On this repo — a single-maintainer project
+where the sole code owner cannot approve their own PRs — the required
+**merge gate is the CI status checks (§10) plus a clean four-reviewer
+gate run** with its blockers and majors resolved; the maintainer merges
+on that basis. When a second maintainer joins, restore a required human
+approval on top. The gate runs alongside CI, never instead of it.
 
 ## 12. When in doubt, prefer fewer lines, fewer files, fewer abstractions.
 
