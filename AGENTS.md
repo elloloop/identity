@@ -130,11 +130,11 @@ When upstream releases a new patch, **bump the pin in a deliberate
 commit** with a clear changelog reference. Renovate / Dependabot can
 open the PR; a human reviews and merges.
 
-## 11. Every PR passes the four-reviewer gate before merge.
+## 11. Run the four-reviewer gate on every PR.
 
-No PR merges until it has been reviewed from four independent
-principal-level perspectives. Each reviewer signs off only on their own
-dimension; a clean gate needs all four.
+Every PR is reviewed from four independent principal-level perspectives
+before merge. Each reviewer signs off only on their own dimension; a
+clean gate needs all four.
 
 1. **Security principal** — authentication/authorization, input
    validation, injection, secrets and key handling, crypto, supply
@@ -151,13 +151,23 @@ dimension; a clean gate needs all four.
    fixes, no shims, dead code deleted, tests that prove the behaviour,
    clear naming, the right level of abstraction, maintainability.
 
-The gate runs as an agent workflow (`.claude/workflows/review-gate.js`):
-the four reviewers run in parallel against the PR diff and a synthesis
-posts one consolidated review with a per-dimension verdict. Run it on
-every PR you open — `Workflow({name: 'review-gate', args: <pr-number>})`
-— and resolve every blocker and major finding before merge. It is an
-agent-run gate that runs alongside CI; it does not replace the required
-status checks.
+The gate runs as an agent workflow (`.claude/workflows/review-gate.js`)
+**inside the Claude Code agent harness** — it depends on harness
+primitives (`agent()`, `parallel()`), so it is not a plain `node`
+script and external contributors cannot run it directly. It is a
+**maintainer step**: the maintainer handling a PR (including PRs from
+outside contributors) runs it and is accountable for resolving every
+blocker and major finding before merge. The four reviewers run in
+parallel against the PR diff and a synthesis posts one consolidated
+review with a per-dimension verdict.
+
+Run it on every PR — `Workflow({name: 'review-gate', args: <pr-number>})`.
+
+The gate is **advisory**: it posts a `--comment` review and never
+auto-approves or blocks the merge. It must never be granted
+approve/merge authority — merge protection comes only from the required
+human review and the CI status checks (§10). The gate runs alongside
+those, not instead of them.
 
 ## 12. When in doubt, prefer fewer lines, fewer files, fewer abstractions.
 
