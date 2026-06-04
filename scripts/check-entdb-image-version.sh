@@ -38,8 +38,8 @@ sdk_minor="$((10#${sdk_rest%%.*}))"
 
 # ── Self-discover every pinned server image across tracked files ─────────
 # git grep restricts to tracked files (so vendored/build junk is ignored).
-mapfile -t pins < <(git grep -hoE 'tenant-shard-db:[0-9]+\.[0-9]+\.[0-9]+' -- \
-  ':!scripts/check-entdb-image-version.sh' | sed -E 's/.*://' | sort -u)
+mapfile -t pins < <(git grep -hoE 'tenant-shard-db:v?[0-9]+\.[0-9]+\.[0-9]+' -- \
+  ':!scripts/check-entdb-image-version.sh' | sed -E 's/.*:v?//' | sort -u)
 
 if [[ ${#pins[@]} -eq 0 ]]; then
   echo "check-entdb-image: no server-image pins found — nothing to check" >&2
