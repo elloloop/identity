@@ -169,8 +169,10 @@ false positive / already handled?"). Only survivors become confirmed
 blockers — this prevents blocking a merge on a plausible-but-wrong
 finding.
 
-**Gate decision:** APPROVED iff every selected reviewer returned APPROVE
-and there are zero confirmed blockers; otherwise BLOCKED.
+**Gate decision:** APPROVED iff zero confirmed blockers survive
+verification and no selected reviewer is missing — a reviewer's raw
+REQUEST_CHANGES whose blocking findings were all refuted does not block.
+Otherwise BLOCKED.
 
 The gate runs as an agent workflow (`.claude/workflows/review-gate.js`)
 **inside the Claude Code agent harness** — it depends on harness

@@ -1,6 +1,6 @@
 export const meta = {
   name: 'review-gate',
-  description: 'Multi-agent PR merge gate: Triage classifies the diff, then 5 always-on reviewers (Product, Security, Performance, Maintainability, Correctness) plus conditional Contract/Migration and Accessibility reviewers run in parallel; every blocking finding is adversarially re-verified to kill false positives. APPROVED only when all selected reviewers approve and zero confirmed blockers remain.',
+  description: 'Multi-agent PR merge gate: Triage classifies the diff, then 5 always-on reviewers (Product, Security, Performance, Maintainability, Correctness) plus conditional Contract/Migration and Accessibility reviewers run in parallel; every blocking finding is adversarially re-verified to kill false positives. APPROVED when zero confirmed blockers survive verification and no selected reviewer is missing (a refuted blocking finding does not block).',
   whenToUse: 'Run on every PR before merge (AGENTS.md §11). Pass the PR number as args, e.g. Workflow({name: "review-gate", args: <pr-number>}).',
   phases: [
     { title: 'Triage' },
@@ -100,23 +100,23 @@ log(`Triage: touchesContract=${touchesContract} touchesUI=${touchesUI}`)
 // overlap), plus the two conditional reviewers when the diff warrants them.
 const ALWAYS_ON = [
   {
-    key: 'product', label: 'product', dimension: 'Product',
+    label: 'product', dimension: 'Product',
     prompt: `You are a PRINCIPAL PRODUCT reviewer. You OWN: user/business value, scope, UX gaps, missing empty/error/loading states, and shippability. Does the change deliver the intended outcome and match the linked issue/PR description? Are semantics, defaults, error messages, and status codes right for the consumer? Is anything half-finished, stubbed, or silently scoped down? Is there an unflagged breaking change or migration risk? This repo ships an OSS Docker image others deploy — is configurability appropriate and is documentation/changelog owed? Do NOT review code style, perf, or security — other reviewers own those.`,
   },
   {
-    key: 'security', label: 'security', dimension: 'Security',
+    label: 'security', dimension: 'Security',
     prompt: `You are a PRINCIPAL SECURITY reviewer. You OWN: authn/authz, secrets/key handling, injection (SQL/command/path/template/header) and XSS/SSRF, open-redirect, webhook/signature verification, idempotency/replay, data exposure & PII in logs/responses/errors, enumeration & timing oracles, crypto (randomness, constant-time compares, token entropy, hashing at rest), abuse/rate-limiting, and supply-chain (new deps, pinning per AGENTS.md §10). Flag missing security tests. Do NOT review style/perf/product unless it creates a security risk.`,
   },
   {
-    key: 'performance', label: 'performance', dimension: 'Performance',
+    label: 'performance', dimension: 'Performance',
     prompt: `You are a PRINCIPAL PERFORMANCE reviewer. You OWN: hot-path cost, N+1 / redundant I/O, blocking work on a request path, allocations and avoidable copies, payload size and over-fetching, query/index efficiency (does a new filter hit an index; is a new column/table indexed where queried), lock scope & contention, goroutine/connection lifecycle and leaks, and behaviour under load. Flag missing load/bench coverage where it matters. Do NOT review style/security/product.`,
   },
   {
-    key: 'maintainability', label: 'maintainability', dimension: 'Maintainability',
+    label: 'maintainability', dimension: 'Maintainability',
     prompt: `You are a PRINCIPAL MAINTAINABILITY reviewer, holding the line on this repo's AGENTS.md rules. You OWN: clarity/naming, duplication (DRY-of-knowledge), right abstraction/altitude (§3/§4), test coverage of the NEW logic (§6/§7 — impl must ship with tests; conformance extended not bypassed), idiomatic fit, dead code left behind (§2), no shims/patches/compat layers (§1 = blocker), comments explaining why not what (§5), and generated code coming from the generator not hand edits. Do NOT hunt runtime bugs (Correctness owns that) or review perf/security.`,
   },
   {
-    key: 'correctness', label: 'correctness', dimension: 'Correctness',
+    label: 'correctness', dimension: 'Correctness',
     prompt: `You are a PRINCIPAL CORRECTNESS reviewer doing PURE BUG-HUNTING. You OWN: off-by-one, nil/pointer deref, inverted conditionals, data races and concurrency bugs, resource leaks (unclosed rows/conns/files, leaked goroutines), integer overflow, unhandled/ swallowed errors that change behaviour, edge cases (empty input, zero, max, unicode), and broken invariants. Trace the actual code paths and callers, not just the diff. Do NOT comment on style, perf, product, or security framing — only "is this code correct."`,
   },
 ]
@@ -124,13 +124,13 @@ const ALWAYS_ON = [
 const CONDITIONAL = []
 if (touchesContract) {
   CONDITIONAL.push({
-    key: 'contract', label: 'contract-migration', dimension: 'Contract & Migration',
+    label: 'contract-migration', dimension: 'Contract & Migration',
     prompt: `You are a PRINCIPAL CONTRACT & DATA-MIGRATION reviewer. This repo's contract surface is ConnectRPC + Protobuf (proto3) with a single IdentityService, generated code under gen/go/** (regenerated via \`buf generate\`, never hand-edited), and a self-describing entdb graph schema (proto/identity/schema, with GLOBAL stable type_ids and field_ids that must never be renumbered/reused) plus Postgres migrations under internal/repo/postgres/migrations. You OWN: wire compatibility (no renumbered or reused proto field tags / entdb field_ids / type_ids; no removed RPCs or changed RPC signatures without an additive path), generated-code drift (gen/go matches the proto; \`buf generate\` is idempotent; new entdb node types are registered in entclient SchemaMessages + the guard tests), buf-breaking concerns, and DB migration forward+backward safety (a migration that can't roll back, or that locks/rewrites a hot table, or whose down-migration loses data). This OSS server has no shared staging env — a breaking contract change ships straight to operators. Do NOT review general code style/perf.`,
   })
 }
 if (touchesUI) {
   CONDITIONAL.push({
-    key: 'a11y', label: 'accessibility-ux', dimension: 'Accessibility & UX',
+    label: 'accessibility-ux', dimension: 'Accessibility & UX',
     prompt: `You are a PRINCIPAL ACCESSIBILITY & UX reviewer for the project's documentation site (Astro static site under docs-site/, plain HTML/CSS/Astro components, no heavy SPA framework). You OWN: keyboard operability & visible focus, ARIA roles/labels and semantic HTML, colour contrast (WCAG AA), hit-target sizes, screen-reader text for icons/images (alt text), reduced-motion support, complete states (loading/empty/error where the page fetches), and i18n/RTL where relevant. Judge against WCAG 2.1 AA. Do NOT review backend code, perf, or security.`,
   })
 }
@@ -164,7 +164,6 @@ const reviews = REVIEWERS.map((r, i) => {
   const got = reviewedRaw[i]
   if (!got || !Array.isArray(got.findings)) {
     return {
-      key: r.key,
       dimension: r.dimension,
       verdict: 'REQUEST_CHANGES',
       summary: `The ${r.dimension} reviewer did not return a usable result; the gate cannot pass without every selected reviewer.`,
@@ -172,7 +171,7 @@ const reviews = REVIEWERS.map((r, i) => {
       missing: true,
     }
   }
-  return { key: r.key, dimension: r.dimension, ...got }
+  return { dimension: r.dimension, ...got }
 })
 
 // ── Phase 3: Verify ──────────────────────────────────────────────────────
