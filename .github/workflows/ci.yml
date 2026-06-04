@@ -67,6 +67,10 @@ jobs:
             echo "go.mod / go.sum out of sync — run 'go mod tidy' locally and commit the result." >&2
             exit 1
           fi
+      # Guard against entdb SDK / server-image drift (#180): a bumped SDK
+      # must not run against an older pinned server image in CI.
+      - name: entdb SDK / server-image version guard
+        run: bash scripts/check-entdb-image-version.sh
 
   # ---------------------------------------------------------------------------
   # 2. Vulnerability scan — Go's official CVE checker.
@@ -103,7 +107,7 @@ jobs:
         # ignores env vars (CLI flags only, with defaults baked into
         # the entrypoint). TCP readiness is polled by the "Wait for"
         # step below.
-        image: ghcr.io/elloloop/tenant-shard-db:2.0.5
+        image: ghcr.io/elloloop/tenant-shard-db:2.5.0
         ports:
           - 50051:50051
       postgres:
@@ -238,7 +242,7 @@ jobs:
         # ignores env vars (CLI flags only, with defaults baked into
         # the entrypoint). TCP readiness is polled by the "Wait for"
         # step below.
-        image: ghcr.io/elloloop/tenant-shard-db:2.0.5
+        image: ghcr.io/elloloop/tenant-shard-db:2.5.0
         ports:
           - 50051:50051
     steps:
