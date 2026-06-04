@@ -154,8 +154,14 @@ jobs:
       - name: Coverage summary
         run: go tool cover -func=cover.out | tail -n 30
 
-      - name: Coverage gate (internal/ >= 86%)
-        run: bash scripts/coverage-gate.sh cover.out 85 internal/
+      # internal/ coverage is genuinely ~85% but the -race run is
+      # nondeterministic about which driver/error branches execute, so
+      # the merged statement count jitters ~±4 (8965–8969 / 10548) run
+      # to run. An 85% line sat dead-centre of that jitter and failed
+      # unrelated PRs at random; 84% keeps a real floor without the
+      # coin-flip. Per-package gates in .coverage-gates.yml stay strict.
+      - name: Coverage gate (internal/ >= 84%)
+        run: bash scripts/coverage-gate.sh cover.out 84 internal/
 
       - name: Coverage gate (pkg/ >= 88%)
         run: bash scripts/coverage-gate.sh cover.out 88 pkg/
