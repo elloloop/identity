@@ -82,7 +82,7 @@ Pull the image and run alongside an EntDB v2.x instance:
 ```bash
 # 1. Run EntDB v2.x first
 docker run -d --name entdb -p 50051:50051 \
-  ghcr.io/elloloop/tenant-shard-db:2.0.5
+  ghcr.io/elloloop/tenant-shard-db:2.5.0
 
 # 2. Run identity pointing at it
 docker run -p 80:80 -p 9090:9090 \

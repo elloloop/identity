@@ -29,7 +29,7 @@ services:
     # so the healthcheck cannot exec python in-container. Identity
     # `depends_on` is degraded to `service_started`; the service
     # reconnects on demand if entdb isn't accepting RPCs yet.
-    image: ghcr.io/elloloop/tenant-shard-db:2.0.5
+    image: ghcr.io/elloloop/tenant-shard-db:2.5.0
     ports:
       - "50051:50051"
     volumes:
