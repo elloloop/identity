@@ -2316,6 +2316,20 @@ func (r *entRepository) ListOrganizationsForUser(ctx context.Context, userID str
 	return out, nil
 }
 
+// CountOrganizationsOwnedBy returns how many organizations the user owns.
+// Queries Organization by its indexed owner_user_id field (registered in
+// rawQuerySpecOrganization so the reliable transport path is used).
+func (r *entRepository) CountOrganizationsOwnedBy(ctx context.Context, userID string) (int, error) {
+	if userID == "" {
+		return 0, nil
+	}
+	rows, err := r.client.query(ctx, actorStr(userID), &schemapb.Organization{}, map[string]any{"owner_user_id": userID})
+	if err != nil {
+		return 0, fmt.Errorf("repo: CountOrganizationsOwnedBy: %w", err)
+	}
+	return len(rows), nil
+}
+
 func (r *entRepository) AddOrganizationMember(ctx context.Context, m *service.OrganizationMembership) (string, error) {
 	if m == nil {
 		return "", errors.New("repo: AddOrganizationMember: nil membership")

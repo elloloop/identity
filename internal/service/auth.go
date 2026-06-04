@@ -403,6 +403,12 @@ type Repository interface {
 	GetOrganization(ctx context.Context, orgID string) (*Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (*Organization, error)
 	ListOrganizationsForUser(ctx context.Context, userID string) ([]*Organization, error)
+	// CountOrganizationsOwnedBy returns how many organizations the user
+	// owns (Organization.OwnerUserID == userID). DeleteUser uses it to
+	// reject deleting an org owner rather than orphaning the org —
+	// uniformly across drivers, matching the postgres owner_user_id
+	// ON DELETE RESTRICT FK (which remains a backstop).
+	CountOrganizationsOwnedBy(ctx context.Context, userID string) (int, error)
 	// AddOrganizationMember inserts the (org, user, role) membership
 	// row. Returns ErrAlreadyExists if the user is already a member
 	// of the organisation. Used by OrganizationSignup (slice 2) and
@@ -722,22 +728,26 @@ type OrganizationMembership struct {
 // ── Sentinel errors ────────────────────────────────────────────────────
 
 var (
-	ErrUnauthenticated   = errors.New("unauthenticated")
-	ErrPermissionDenied  = errors.New("permission denied")
-	ErrInvalidArgument   = errors.New("invalid argument")
-	ErrNotFound          = errors.New("not found")
-	ErrAlreadyExists     = errors.New("already exists")
-	ErrAccountLocked     = errors.New("account locked")
-	ErrNoPasswordSet     = errors.New("no password set for this account")
-	ErrAccountNotActive  = errors.New("account is not active")
-	ErrInvitationPending = errors.New("account has not completed invitation")
-	ErrIDVRequired       = errors.New("identity verification required")
-	ErrWeakPassword      = errors.New("password does not meet strength requirements")
-	ErrTotpRequired      = errors.New("totp required")
-	ErrTokenExpired      = errors.New("token expired")
-	ErrInvalidTotpCode   = errors.New("invalid totp code")
-	ErrQrLoginExpired    = errors.New("qr login session expired")
-	ErrQrLoginNotPending = errors.New("qr login session is not pending")
+	ErrUnauthenticated  = errors.New("unauthenticated")
+	ErrPermissionDenied = errors.New("permission denied")
+	ErrInvalidArgument  = errors.New("invalid argument")
+	ErrNotFound         = errors.New("not found")
+	ErrAlreadyExists    = errors.New("already exists")
+	// ErrUserOwnsOrganization is returned by DeleteUser when the target
+	// still owns one or more organizations. Maps to CodeFailedPrecondition
+	// — transfer or delete the organizations first.
+	ErrUserOwnsOrganization = errors.New("user owns an organization")
+	ErrAccountLocked        = errors.New("account locked")
+	ErrNoPasswordSet        = errors.New("no password set for this account")
+	ErrAccountNotActive     = errors.New("account is not active")
+	ErrInvitationPending    = errors.New("account has not completed invitation")
+	ErrIDVRequired          = errors.New("identity verification required")
+	ErrWeakPassword         = errors.New("password does not meet strength requirements")
+	ErrTotpRequired         = errors.New("totp required")
+	ErrTokenExpired         = errors.New("token expired")
+	ErrInvalidTotpCode      = errors.New("invalid totp code")
+	ErrQrLoginExpired       = errors.New("qr login session expired")
+	ErrQrLoginNotPending    = errors.New("qr login session is not pending")
 	// ErrOAuthCodeInvalid is returned when a hosted-flow one-time code is
 	// missing, expired, or already consumed. The Connect handler maps it
 	// to CodeUnauthenticated so replays and expiries look identical to a

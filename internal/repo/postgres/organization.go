@@ -137,6 +137,19 @@ func (r *pgRepository) ListOrganizationsForUser(ctx context.Context, userID stri
 	return out, nil
 }
 
+// CountOrganizationsOwnedBy returns how many organizations the user owns.
+func (r *pgRepository) CountOrganizationsOwnedBy(ctx context.Context, userID string) (int, error) {
+	if userID == "" {
+		return 0, nil
+	}
+	const q = `SELECT count(*) FROM organizations WHERE tenant_id = $1 AND owner_user_id = $2`
+	var n int
+	if err := r.pool.QueryRow(ctx, q, r.tenantID, userID).Scan(&n); err != nil {
+		return 0, wrapPgErr("CountOrganizationsOwnedBy", err)
+	}
+	return n, nil
+}
+
 func (r *pgRepository) AddOrganizationMember(ctx context.Context, m *service.OrganizationMembership) (string, error) {
 	if m == nil {
 		return "", errors.New("postgres: AddOrganizationMember: nil membership")

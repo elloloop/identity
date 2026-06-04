@@ -362,6 +362,10 @@ func (StubRepository) ListOrganizationsForUser(context.Context, string) ([]*Orga
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) CountOrganizationsOwnedBy(context.Context, string) (int, error) {
+	return 0, ErrServiceUnavailable
+}
+
 func (StubRepository) AddOrganizationMember(context.Context, *OrganizationMembership) (string, error) {
 	return "", ErrServiceUnavailable
 }
