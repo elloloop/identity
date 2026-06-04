@@ -130,36 +130,57 @@ When upstream releases a new patch, **bump the pin in a deliberate
 commit** with a clear changelog reference. Renovate / Dependabot can
 open the PR; a human reviews and merges.
 
-## 11. Run the four-reviewer gate on every PR.
+## 11. Run the PR review gate on every PR.
 
-Every PR is reviewed from four independent principal-level perspectives
-before merge. Each reviewer signs off only on their own dimension; a
-clean gate needs all four.
+Every PR is reviewed by a multi-agent gate in three phases — **Triage →
+Review → Verify** — before merge.
 
-1. **Security principal** — authentication/authorization, input
-   validation, injection, secrets and key handling, crypto, supply
-   chain, data exposure, abuse and rate-limiting, and the blast radius
-   of a compromise.
-2. **Performance principal** — algorithmic complexity, N+1s and
-   hot-path allocations, query/index shape, locking and contention,
-   payload size, and behaviour under load.
-3. **Product manager** — does the change deliver the intended user
-   value; are the semantics, UX, and error messages right; is anything
-   half-finished or an unflagged breaking change; is the scope what was
-   asked for.
-4. **Code-quality principal** — the rules in this file: root-cause
-   fixes, no shims, dead code deleted, tests that prove the behaviour,
-   clear naming, the right level of abstraction, maintainability.
+**Triage** classifies the diff (does it touch the contract/data surface;
+does it touch UI), failing open if it can't tell.
+
+**Review** runs reviewers in parallel, each owning ONE distinct
+responsibility (no overlap). Five are always on:
+
+1. **Product** — user/business value, scope, UX gaps, missing
+   empty/error/loading states, shippability.
+2. **Security** — authn/authz, secrets, injection/XSS/SSRF,
+   open-redirect, signature/replay, data exposure, supply-chain.
+3. **Performance** — hot-path cost, N+1/redundant I/O, blocking work,
+   allocations, payload size, query/index efficiency, behaviour at load.
+4. **Maintainability** — the rules in this file: clarity/naming, no
+   shims (§1), dead code deleted (§2), right altitude (§3/§4), tests
+   that prove new logic (§6/§7), idiomatic fit.
+5. **Correctness** — pure bug-hunting: off-by-one, nil deref, inverted
+   conditionals, races, leaks, overflow, edge cases, broken invariants.
+
+Two more are added only when the diff warrants them:
+
+- **Contract & Migration** — when proto/API/`gen/**`/entdb-schema or a
+  DB migration changes: wire compatibility (no renumbered/reused proto
+  tags or entdb field_ids/type_ids), generated-code drift, RPC signature
+  breaks, migration forward+backward safety.
+- **Accessibility & UX** — when UI files (`docs-site/**`, `*.astro`,
+  etc.) change: keyboard/focus/ARIA, contrast, hit targets,
+  screen-reader text, reduced-motion, complete states, i18n/RTL.
+
+**Verify** hands every finding a reviewer marked *blocking* to a fresh,
+skeptical agent prompted to refute it ("real and merge-blocking, or a
+false positive / already handled?"). Only survivors become confirmed
+blockers — this prevents blocking a merge on a plausible-but-wrong
+finding.
+
+**Gate decision:** APPROVED iff zero confirmed blockers survive
+verification and no selected reviewer is missing — a reviewer's raw
+REQUEST_CHANGES whose blocking findings were all refuted does not block.
+Otherwise BLOCKED.
 
 The gate runs as an agent workflow (`.claude/workflows/review-gate.js`)
 **inside the Claude Code agent harness** — it depends on harness
-primitives (`agent()`, `parallel()`), so it is not a plain `node`
-script and external contributors cannot run it directly. It is a
-**maintainer step**: the maintainer handling a PR (including PRs from
-outside contributors) runs it and is accountable for resolving every
-blocker and major finding before merge. The four reviewers run in
-parallel against the PR diff and a synthesis posts one consolidated
-review with a per-dimension verdict.
+primitives (`agent()`, `parallel()`), so it is not a plain `node` script
+and external contributors cannot run it directly. It is a **maintainer
+step**: the maintainer handling a PR (including PRs from outside
+contributors) runs it and is accountable for resolving every confirmed
+blocker before merge.
 
 Run it on every PR — `Workflow({name: 'review-gate', args: <pr-number>})`.
 
@@ -167,10 +188,11 @@ The gate is **advisory**: it posts a `--comment` review and never
 auto-approves or blocks the merge. It must never be granted
 approve/merge authority. On this repo — a single-maintainer project
 where the sole code owner cannot approve their own PRs — the required
-**merge gate is the CI status checks (§10) plus a clean four-reviewer
-gate run** with its blockers and majors resolved; the maintainer merges
-on that basis. When a second maintainer joins, restore a required human
-approval on top. The gate runs alongside CI, never instead of it.
+**merge gate is the CI status checks (§10) plus a clean review-gate run**
+with its confirmed blockers resolved; the maintainer merges on that
+basis. When a second maintainer joins, restore a required human approval
+on top. The gate runs alongside CI, never instead of it. It complements,
+and does not replace, an ad-hoc `/code-review`-style pass.
 
 ## 12. When in doubt, prefer fewer lines, fewer files, fewer abstractions.
 

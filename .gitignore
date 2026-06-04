@@ -21,6 +21,7 @@
 !/.claude/workflows/
 /.claude/workflows/*
 !/.claude/workflows/*.js
+!/.claude/workflows/*.mjs
 
 # Load-test run artifacts
 tests/load/results/
