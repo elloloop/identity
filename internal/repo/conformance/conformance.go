@@ -1762,13 +1762,17 @@ func RunConformance(t *testing.T, driver Driver) {
 			// delete of `uid`; `uid` is only a member.
 			ownerID := createTestUser(t, r, "owner@example.com")
 
-			// Seed one row of every DURABLE user-owned type keyed to uid.
-			// The contract (Repository.DeleteUser) requires only durable
-			// records to be removed synchronously. Short-lived hash/id-keyed
-			// tokens (password-reset, email verification/change, passkey and
-			// login challenges, qr sessions, oauth one-time codes) are NOT
-			// asserted here: they are TTL-swept and some backends (entdb) do
-			// not index them by user, so eager removal is not guaranteed.
+			// Seed one row of every user-owned type keyed to uid — both the
+			// durable identity/auth records AND the short-lived tokens
+			// (password-reset, email verification/change, passkey and login
+			// challenges, qr sessions, oauth one-time codes), which are now
+			// user_id-indexed on every driver (#168) and so must be drained
+			// eagerly rather than left to the TTL sweepers. Invitations are
+			// the one user-keyed ephemeral not seeded here — Repository
+			// exposes no create method for them (they are written via the
+			// entdb graph) — but they remain in the entdb drain list. The
+			// email-keyed login codes / magic-link tokens carry no user_id
+			// and are left to the sweepers by design.
 			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "del-rt", UserID: uid, ExpiresAt: 9_000_000_000_000}); err != nil {
 				t.Fatalf("CreateRefreshToken: %v", err)
 			}
@@ -1792,6 +1796,31 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 			if _, err := r.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{UserID: uid, PhoneNumber: "+14155550133", CodeHash: "del-pvc", ExpiresAt: 9_000_000_000_000, CreatedAt: 100, MaxAttempts: 5}); err != nil {
 				t.Fatalf("UpsertPhoneVerificationCode: %v", err)
+			}
+			// Short-lived, user_id-indexed tokens. As of #168 these are
+			// drained eagerly by DeleteUser on every driver rather than left
+			// to the TTL sweepers, so each one is asserted gone below.
+			if err := r.CreatePasswordResetToken(ctx, &service.PasswordResetToken{TokenHash: "del-prt", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
+				t.Fatalf("CreatePasswordResetToken: %v", err)
+			}
+			if err := r.CreateEmailVerificationToken(ctx, &service.EmailVerificationToken{TokenHash: "del-evt", UserID: uid, Email: "del@example.com", ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
+				t.Fatalf("CreateEmailVerificationToken: %v", err)
+			}
+			if err := r.CreateEmailChangeToken(ctx, &service.EmailChangeToken{TokenHash: "del-ect", UserID: uid, OldEmail: "del@example.com", NewEmail: "del2@example.com", ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
+				t.Fatalf("CreateEmailChangeToken: %v", err)
+			}
+			pkChalID, err := r.CreatePasskeyChallenge(ctx, &service.PasskeyChallengeRecord{Challenge: "del-pkc", UserID: uid, ChallengeType: "authentication", ExpiresAt: 9_000_000_000_000, CreatedAt: 100})
+			if err != nil {
+				t.Fatalf("CreatePasskeyChallenge: %v", err)
+			}
+			if _, err := r.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{SessionID: "del-qr", Status: "approved", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100, UpdatedAt: 100}); err != nil {
+				t.Fatalf("CreateQrLoginSession: %v", err)
+			}
+			if _, err := r.CreateLoginChallenge(ctx, &service.LoginChallengeRecord{ChallengeID: "del-lc", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
+				t.Fatalf("CreateLoginChallenge: %v", err)
+			}
+			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{CodeHash: "del-otc", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
+				t.Fatalf("CreateOAuthOneTimeCode: %v", err)
 			}
 			orgID, err := r.CreateOrganization(ctx, &service.Organization{Slug: "del-org", DisplayName: "Del Org", OwnerUserID: ownerID, CreatedAtMs: 100, UpdatedAtMs: 100})
 			if err != nil {
@@ -1846,6 +1875,30 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 			if rec, err := r.FindPhoneVerificationCodeByUser(ctx, uid); err != nil || rec != nil {
 				t.Fatalf("phone verification code survived: err=%v rec=%#v", err, rec)
+			}
+			// Every short-lived user-keyed token drained eagerly (#168).
+			if rec, err := r.FindPasswordResetTokenByHash(ctx, "del-prt"); err != nil || rec != nil {
+				t.Fatalf("password reset token survived: err=%v rec=%#v", err, rec)
+			}
+			if rec, err := r.FindEmailVerificationTokenByHash(ctx, "del-evt"); err != nil || rec != nil {
+				t.Fatalf("email verification token survived: err=%v rec=%#v", err, rec)
+			}
+			if rec, err := r.FindEmailChangeTokenByHash(ctx, "del-ect"); err != nil || rec != nil {
+				t.Fatalf("email change token survived: err=%v rec=%#v", err, rec)
+			}
+			if rec, err := r.GetPasskeyChallenge(ctx, pkChalID); err != nil || rec != nil {
+				t.Fatalf("passkey challenge survived: err=%v rec=%#v", err, rec)
+			}
+			if rec, err := r.FindQrLoginSession(ctx, "del-qr"); err != nil || rec != nil {
+				t.Fatalf("qr login session survived: err=%v rec=%#v", err, rec)
+			}
+			if rec, err := r.GetLoginChallengeByChallengeID(ctx, "del-lc"); err != nil || rec != nil {
+				t.Fatalf("login challenge survived: err=%v rec=%#v", err, rec)
+			}
+			// ConsumeOAuthOneTimeCode returns a non-nil record only if the
+			// row outlived the drain (it is unconsumed and unexpired at t=200).
+			if rec, _ := r.ConsumeOAuthOneTimeCode(ctx, "del-otc", 200); rec != nil {
+				t.Fatalf("oauth one-time code survived: rec=%#v", rec)
 			}
 			if orgs, err := r.ListOrganizationsForUser(ctx, uid); err != nil || len(orgs) != 0 {
 				t.Fatalf("org membership survived: err=%v orgs=%#v", err, orgs)

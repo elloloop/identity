@@ -1398,15 +1398,22 @@ func TestDeleteUser_DrainDeleteError(t *testing.T) {
 	}
 }
 
-// TestDeleteUser_DrainsEveryUserOwnedType is the entdb-driver
-// counterpart to the memory cascade test: it seeds one row of every
-// user_id-indexed type DeleteUser drains, plus the user node, then
-// asserts the store is empty afterwards (idempotent, full cascade).
+// TestDeleteUser_DrainsEveryUserOwnedType seeds one row of every
+// user_id-keyed type DeleteUser drains — the durable identity/auth
+// records plus the short-lived tokens made drainable in #168 — then
+// asserts the store is empty afterwards (full cascade, idempotent).
+//
+// This is also the only test that pins the user_invitation drain: the
+// cross-driver conformance suite cannot seed an invitation because
+// Repository exposes no invitation create method (they are written via
+// the entdb graph), but here the row is placed directly in the backing
+// store, so the len==0 assertion proves DeleteUser removes it.
 func TestDeleteUser_DrainsEveryUserOwnedType(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	mem := newMemoryEntClient()
 	mem.store["u-1"] = storedNode{msg: &schemapb.User{Email: "u@e.com"}}
+	// Durable, user_id-indexed records.
 	mem.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u-1"}}
 	mem.store["sess"] = storedNode{msg: &schemapb.Session{Sid: "s", UserId: "u-1"}}
 	mem.store["oi"] = storedNode{msg: &schemapb.OAuthIdentity{UserId: "u-1"}}
@@ -1414,7 +1421,18 @@ func TestDeleteUser_DrainsEveryUserOwnedType(t *testing.T) {
 	mem.store["totp"] = storedNode{msg: &schemapb.TotpCredential{UserId: "u-1"}}
 	mem.store["rc"] = storedNode{msg: &schemapb.RecoveryCode{UserId: "u-1"}}
 	mem.store["idv"] = storedNode{msg: &schemapb.IdentityVerificationRecord{UserId: "u-1"}}
+	mem.store["pvc"] = storedNode{msg: &schemapb.PhoneVerificationCode{UserId: "u-1"}}
 	mem.store["mem"] = storedNode{msg: &schemapb.OrganizationMembership{UserId: "u-1"}}
+	// Short-lived tokens drained eagerly as of #168 — including
+	// user_invitation, which only this test can seed.
+	mem.store["prt"] = storedNode{msg: &schemapb.PasswordResetToken{UserId: "u-1"}}
+	mem.store["evt"] = storedNode{msg: &schemapb.EmailVerificationToken{UserId: "u-1"}}
+	mem.store["ect"] = storedNode{msg: &schemapb.EmailChangeToken{UserId: "u-1"}}
+	mem.store["pkc"] = storedNode{msg: &schemapb.PasskeyChallenge{UserId: "u-1"}}
+	mem.store["qr"] = storedNode{msg: &schemapb.QrLoginSession{UserId: "u-1"}}
+	mem.store["lc"] = storedNode{msg: &schemapb.LoginChallenge{UserId: "u-1"}}
+	mem.store["inv"] = storedNode{msg: &schemapb.UserInvitation{UserId: "u-1"}}
+	mem.store["otc"] = storedNode{msg: &schemapb.OAuthOneTimeCode{UserId: "u-1"}}
 	repo := &entRepository{client: mem, tenantID: "t"}
 
 	if err := repo.DeleteUser(ctx, "u-1"); err != nil {

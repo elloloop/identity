@@ -867,6 +867,18 @@ var (
 	rawQuerySpecOrganizationMembership     = rawQueryFieldSpec{34, map[string]string{"organization_id": "1", "user_id": "2"}}
 	rawQuerySpecSession                    = rawQueryFieldSpec{35, map[string]string{"sid": "1", "user_id": "2"}}
 	rawQuerySpecPhoneVerificationCode      = rawQueryFieldSpec{39, map[string]string{"user_id": "1"}}
+	// Ephemeral token types drained per-user by DeleteUser instead of being
+	// left to the TTL sweepers (#168). Each has user_id indexed in the
+	// schema; this raw-transport spec is what makes the per-user query
+	// reliable (the queryAs fallback is not).
+	rawQuerySpecPasswordResetToken     = rawQueryFieldSpec{19, map[string]string{"user_id": "2"}}
+	rawQuerySpecPasskeyChallenge       = rawQueryFieldSpec{21, map[string]string{"user_id": "2"}}
+	rawQuerySpecQrLoginSession         = rawQueryFieldSpec{22, map[string]string{"user_id": "3"}}
+	rawQuerySpecLoginChallenge         = rawQueryFieldSpec{25, map[string]string{"user_id": "2"}}
+	rawQuerySpecUserInvitation         = rawQueryFieldSpec{27, map[string]string{"user_id": "3"}}
+	rawQuerySpecEmailVerificationToken = rawQueryFieldSpec{29, map[string]string{"user_id": "2"}}
+	rawQuerySpecEmailChangeToken       = rawQueryFieldSpec{30, map[string]string{"user_id": "2"}}
+	rawQuerySpecOAuthOneTimeCode       = rawQueryFieldSpec{36, map[string]string{"user_id": "2"}}
 )
 
 func rawQueryFieldSpecFor(witness proto.Message) (rawQueryFieldSpec, bool) {
@@ -893,6 +905,22 @@ func rawQueryFieldSpecFor(witness proto.Message) (rawQueryFieldSpec, bool) {
 		return rawQuerySpecSession, true
 	case *schemapb.PhoneVerificationCode:
 		return rawQuerySpecPhoneVerificationCode, true
+	case *schemapb.PasswordResetToken:
+		return rawQuerySpecPasswordResetToken, true
+	case *schemapb.PasskeyChallenge:
+		return rawQuerySpecPasskeyChallenge, true
+	case *schemapb.QrLoginSession:
+		return rawQuerySpecQrLoginSession, true
+	case *schemapb.LoginChallenge:
+		return rawQuerySpecLoginChallenge, true
+	case *schemapb.UserInvitation:
+		return rawQuerySpecUserInvitation, true
+	case *schemapb.EmailVerificationToken:
+		return rawQuerySpecEmailVerificationToken, true
+	case *schemapb.EmailChangeToken:
+		return rawQuerySpecEmailChangeToken, true
+	case *schemapb.OAuthOneTimeCode:
+		return rawQuerySpecOAuthOneTimeCode, true
 	default:
 		return rawQueryFieldSpec{}, false
 	}

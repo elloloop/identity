@@ -121,21 +121,28 @@ type Repository interface {
 	GetUser(ctx context.Context, userID string) (*User, error)
 	CreateUser(ctx context.Context, u *User) (string, error) // returns node ID
 	UpdateUser(ctx context.Context, userID string, fields map[string]any) error
-	// DeleteUser physically removes the user and all DURABLE user-owned
-	// records: sessions, refresh tokens, oauth identities, passkey
-	// credentials, totp credentials, recovery codes, identity
-	// verifications, and organization memberships. After it, GetUser
-	// returns nil and the email is reusable for a new CreateUser.
+	// DeleteUser physically removes the user and every user_id-keyed
+	// record, synchronously, on every driver. This covers the durable
+	// identity/auth material — sessions, refresh tokens, oauth identities,
+	// passkey credentials, totp credentials, recovery codes, identity
+	// verifications, phone verification codes, and organization
+	// memberships — and, as of #168, the short-lived tokens too:
+	// password-reset, email-verification/change, passkey and login
+	// challenges, qr sessions, oauth one-time codes, and invitations.
+	// After it, GetUser returns nil and the email is reusable for a new
+	// CreateUser.
 	//
-	// Short-lived, hash/id-keyed tokens (password-reset, email-change,
-	// email-verification, passkey/login challenges, qr sessions, oauth
-	// one-time codes, invitations) and the email-keyed login codes /
-	// magic-link tokens are NOT guaranteed to be removed synchronously:
-	// some backends (entdb) do not index them by user and rely on the
-	// TTL sweepers to reap them. This is safe — they expire quickly,
-	// reference a now-deleted user, and never block email reuse.
-	// audit_events are retained for accountability. Idempotent:
-	// deleting a non-existent user returns nil.
+	// The only artifacts NOT removed synchronously are the email-keyed
+	// login codes / magic-link tokens, which carry no user_id and so
+	// cannot be enumerated per-user; they are reaped by the TTL sweepers —
+	// safe, since they expire quickly, reference a now-deleted user, and
+	// never block email reuse. audit_events are retained for
+	// accountability. Idempotent: deleting a non-existent user returns nil.
+	//
+	// (Invitations are drained but are the one user_id-keyed type the
+	// cross-driver conformance suite cannot seed/assert — Repository
+	// exposes no invitation create method; they are written via the entdb
+	// graph.)
 	DeleteUser(ctx context.Context, userID string) error
 
 	// Lockout state. These are dedicated methods (rather than UpdateUser
