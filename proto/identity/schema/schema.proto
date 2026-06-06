@@ -143,7 +143,7 @@ message PasskeyChallenge {
     };
 
     string challenge      = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
-    string user_id        = 2 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string user_id        = 2 [(entdb.field) = { indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
     string challenge_type = 3 [(entdb.field) = { enum_values: "registration,authentication", pii_false: true }];
     int64  expires_at     = 4 [(entdb.field) = { kind: "timestamp", indexed: true, pii_false: true }];
     int64  created_at     = 5 [(entdb.field) = { kind: "timestamp", pii_false: true }];
@@ -160,7 +160,7 @@ message QrLoginSession {
 
     string session_id             = 1  [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
     string status                 = 2  [(entdb.field) = { enum_values: "pending,approved,rejected,expired,consumed", indexed: true, pii_false: true }];
-    string user_id                = 3  [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string user_id                = 3  [(entdb.field) = { indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
     string new_device_info        = 4  [(entdb.field) = { pii: true }];
     string new_device_ip          = 5  [(entdb.field) = { pii: true }];
     string new_device_user_agent  = 6  [(entdb.field) = { pii: true }];
@@ -218,7 +218,7 @@ message LoginChallenge {
     };
 
     string challenge_id = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
-    string user_id      = 2 [(entdb.field) = { required: true, kind: "ref", ref_type_id: 1, pii_false: true }];
+    string user_id      = 2 [(entdb.field) = { required: true, indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
     int64  expires_at   = 3 [(entdb.field) = { kind: "timestamp", indexed: true, pii_false: true }];
     int64  created_at   = 4 [(entdb.field) = { kind: "timestamp", pii_false: true }];
 }
@@ -254,7 +254,7 @@ message UserInvitation {
 
     string token_hash  = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
     string email       = 2 [(entdb.field) = { required: true, unique: true, indexed: true, searchable: true, pii: true }];
-    string user_id     = 3 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string user_id     = 3 [(entdb.field) = { indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
     string invited_by  = 4 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
     string role        = 5 [(entdb.field) = { enum_values: "admin,member,guest", pii_false: true }];
     int64  expires_at  = 6 [(entdb.field) = { kind: "timestamp", pii_false: true }];
@@ -293,7 +293,7 @@ message EmailVerificationToken {
     };
 
     string token_hash  = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
-    string user_id     = 2 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string user_id     = 2 [(entdb.field) = { indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
     string email       = 3 [(entdb.field) = { required: true, indexed: true, pii: true }];
     int64  expires_at  = 4 [(entdb.field) = { required: true, kind: "timestamp", indexed: true, pii_false: true }];
     int64  created_at  = 5 [(entdb.field) = { required: true, pii_false: true }];
@@ -311,7 +311,7 @@ message EmailChangeToken {
     };
 
     string token_hash  = 1 [(entdb.field) = { required: true, unique: true, indexed: true, pii_false: true }];
-    string user_id     = 2 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
+    string user_id     = 2 [(entdb.field) = { indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
     string old_email   = 3 [(entdb.field) = { pii: true }];
     string new_email   = 4 [(entdb.field) = { pii: true }];
     int64  expires_at  = 5 [(entdb.field) = { required: true, kind: "timestamp", indexed: true, pii_false: true }];

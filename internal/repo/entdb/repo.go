@@ -324,21 +324,20 @@ func (r *entRepository) drainDeleteByUser(ctx context.Context, userID string, ne
 	return fmt.Errorf("repo: DeleteUser: %s exceeded %d-iteration drain ceiling for user %q", label, bulkDrainMaxIterations, userID)
 }
 
-// DeleteUser physically removes the user node and drains every durable
-// user-owned record. "Durable" means the entdb schema indexes the type
-// by user_id so it can be enumerated and removed — these carry the
-// persistent identity/auth material (sessions, tokens, credentials,
-// linked identities, org memberships).
-//
-// The short-lived, hash/id-keyed tokens (password-reset, email-change,
-// email-verification, passkey/login challenges, qr sessions, oauth
-// one-time codes, invitations) are deliberately NOT indexed by user_id
-// in the schema, so they cannot be enumerated per-user here. They are
-// reaped by the TTL sweepers (see sweeper.go), reference a now-deleted
-// user, and never block reuse of the freed email — so leaving them to
-// expire is safe. Audit events have no user_id edge and are retained
-// for accountability. Idempotent: a missing user drains zero rows and
-// the node delete is a no-op.
+// DeleteUser physically removes the user node and drains every
+// user-owned record keyed by user_id. Each drained type has its user_id
+// field indexed in the schema so it can be enumerated and removed — this
+// now covers both the durable identity/auth material (sessions, tokens,
+// credentials, linked identities, org memberships) AND the short-lived
+// tokens (password-reset, email-verification/change, passkey/login
+// challenges, qr sessions, invitations, oauth one-time codes), which are
+// indexed by user_id as of #168 so they are drained eagerly rather than
+// left to the TTL sweepers. The only ephemeral artifacts NOT drained here
+// are the email-keyed login codes / magic-link tokens, which carry no
+// user_id; they are reaped by the sweepers (they reference a now-deleted
+// user and never block email reuse). Audit events have no user_id edge
+// and are retained for accountability. Idempotent: a missing user drains
+// zero rows and the node delete is a no-op.
 func (r *entRepository) DeleteUser(ctx context.Context, userID string) error {
 	if userID == "" {
 		return nil
@@ -356,6 +355,19 @@ func (r *entRepository) DeleteUser(ctx context.Context, userID string) error {
 		{"identity_verification", func() proto.Message { return &schemapb.IdentityVerificationRecord{} }},
 		{"phone_verification_code", func() proto.Message { return &schemapb.PhoneVerificationCode{} }},
 		{"organization_membership", func() proto.Message { return &schemapb.OrganizationMembership{} }},
+		// Ephemeral tokens, now user_id-indexed (#168) so they drain here
+		// instead of waiting for the TTL sweepers. oauth_one_time_code was
+		// already user_id-indexed but had been omitted from the drain — the
+		// memory and postgres drivers remove it on DeleteUser, so entdb does
+		// too.
+		{"password_reset_token", func() proto.Message { return &schemapb.PasswordResetToken{} }},
+		{"email_verification_token", func() proto.Message { return &schemapb.EmailVerificationToken{} }},
+		{"email_change_token", func() proto.Message { return &schemapb.EmailChangeToken{} }},
+		{"passkey_challenge", func() proto.Message { return &schemapb.PasskeyChallenge{} }},
+		{"qr_login_session", func() proto.Message { return &schemapb.QrLoginSession{} }},
+		{"login_challenge", func() proto.Message { return &schemapb.LoginChallenge{} }},
+		{"user_invitation", func() proto.Message { return &schemapb.UserInvitation{} }},
+		{"oauth_one_time_code", func() proto.Message { return &schemapb.OAuthOneTimeCode{} }},
 	}
 	for _, d := range drains {
 		if err := r.drainDeleteByUser(ctx, userID, d.newWitness, d.label); err != nil {
