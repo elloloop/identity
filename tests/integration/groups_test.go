@@ -132,6 +132,55 @@ func TestGroup_MemberRoundTrip_E2E(t *testing.T) {
 	}
 }
 
+// TestGroup_DeleteDrainsMemberEdges_E2E proves DeleteGroup removes the
+// inbound MEMBER_OF edges along with the group node. Before the fix the
+// edges dangled on the graph backend, so ListGroupMembers on the deleted
+// group still resolved the orphaned member.
+func TestGroup_DeleteDrainsMemberEdges_E2E(t *testing.T) {
+	t.Parallel()
+
+	h := StartIssue3Server(t)
+	ctx := context.Background()
+	adminEmail := issue3Email(t, "admin@example.com")
+	memberEmail := issue3Email(t, "member@example.com")
+
+	seedIssue3User(t, h, adminEmail, "Admin", "admin", "active", issue3Password)
+	memberID := seedIssue3User(t, h, memberEmail, "Member", "member", "active", issue3Password)
+	admin := h.AuthedClient(loginViaPassword(t, h, adminEmail, issue3Password).AccessToken)
+
+	created, err := admin.CreateGroup(ctx, connect.NewRequest(&identitypb.CreateGroupRequest{
+		Name:        "Doomed",
+		Description: "deleted while it still has a member",
+	}))
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	groupID := created.Msg.GetGroup().GetId()
+
+	if _, err := admin.AddGroupMember(ctx, connect.NewRequest(&identitypb.AddGroupMemberRequest{
+		GroupId: groupID,
+		UserId:  memberID,
+	})); err != nil {
+		t.Fatalf("AddGroupMember: %v", err)
+	}
+
+	if _, err := admin.DeleteGroup(ctx, connect.NewRequest(&identitypb.DeleteGroupRequest{GroupId: groupID})); err != nil {
+		t.Fatalf("DeleteGroup: %v", err)
+	}
+
+	// The MEMBER_OF edge must be gone with the node; a dangling edge would
+	// still resolve the member here.
+	members, err := admin.ListGroupMembers(ctx, connect.NewRequest(&identitypb.ListGroupMembersRequest{
+		GroupId: groupID,
+	}))
+	if err != nil {
+		t.Fatalf("ListGroupMembers after delete: %v", err)
+	}
+	if len(members.Msg.Members) != 0 {
+		t.Fatalf("DeleteGroup left %d dangling MEMBER_OF edge(s), want 0", len(members.Msg.Members))
+	}
+}
+
 func TestGroup_NonAdminDenied(t *testing.T) {
 	t.Parallel()
 

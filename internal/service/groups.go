@@ -128,8 +128,27 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string)
 		return errors.New("group_id is required")
 	}
 
-	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeWorkingGroup, NodeID: groupID}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	// Drain the inbound MEMBER_OF edges in the same atomic op set as the
+	// node delete, so deleting a group never leaves dangling memberships on
+	// the graph backend (the symmetric counterpart of the DeleteUser drain).
+	// The read is a cross-user query — every member's edge — so it MUST use
+	// tenantAdminActor: under entdb's actor-scoped visibility a per-user
+	// actor returns zero rows for another user's edges, which would silently
+	// skip the cleanup. This matches ListGroupMembers. The write uses the
+	// admin's actor, since the admin is the acting principal.
+	edges, err := s.db(ctx).GetEdgesTo(ctx, s.tenantID(ctx), tenantAdminActor, groupID, edgeMemberOf)
+	if err != nil {
+		return fmt.Errorf("delete group: list members: %w", err)
+	}
+	ops := make([]entdb.Operation, 0, len(edges)+1)
+	for _, e := range edges {
+		ops = append(ops, entdb.Operation{
+			Type: entdb.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
+			FromNodeID: e.FromNodeID, ToNodeID: groupID,
+		})
+	}
+	ops = append(ops, entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeWorkingGroup, NodeID: groupID})
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), ops); err != nil {
 		return fmt.Errorf("delete group: %w", err)
 	}
 

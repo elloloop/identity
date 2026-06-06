@@ -18,11 +18,12 @@ type fakeDB struct {
 	seq   int64
 	err   error // if set, all calls return this error
 
-	// lastEdgesFromActor records the actor passed to the most recent
-	// GetEdgesFrom call, so tests can assert cross-user reads use
-	// tenantAdminActor (a per-user actor would silently return zero rows
-	// on real entdb).
+	// lastEdgesFromActor / lastEdgesToActor record the actor passed to the
+	// most recent GetEdgesFrom / GetEdgesTo call, so tests can assert
+	// cross-user reads use tenantAdminActor (a per-user actor would silently
+	// return zero rows on real entdb).
 	lastEdgesFromActor string
+	lastEdgesToActor   string
 }
 
 func newFakeDB() *fakeDB {
@@ -142,9 +143,10 @@ func (f *fakeDB) GetEdgesFrom(_ context.Context, _, actor, fromNodeID string, ed
 	return result, nil
 }
 
-func (f *fakeDB) GetEdgesTo(_ context.Context, _, _, toNodeID string, edgeTypeID int) ([]*entdb.Edge, error) {
+func (f *fakeDB) GetEdgesTo(_ context.Context, _, actor, toNodeID string, edgeTypeID int) ([]*entdb.Edge, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lastEdgesToActor = actor
 	if f.err != nil {
 		return nil, f.err
 	}

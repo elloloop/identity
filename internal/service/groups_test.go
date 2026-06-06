@@ -90,6 +90,53 @@ func TestGroupService_DeleteGroup_HappyPath(t *testing.T) {
 	}
 }
 
+func TestGroupService_DeleteGroup_DrainsMemberEdges(t *testing.T) {
+	ctx := context.Background()
+	db := newFakeDB()
+	seedGroupAdmin(db)
+	db.addGroup("grp-1", "ToDelete", "")
+	db.addGroup("grp-2", "Keep", "")
+	db.addUser("user-1", "alice@test.com", "Alice", "member", "active")
+	db.addUser("user-2", "bob@test.com", "Bob", "member", "active")
+	svc := newTestGroupService(db)
+
+	// Two members in grp-1, plus an unrelated membership in grp-2 that
+	// must survive the delete of grp-1.
+	for _, uid := range []string{"user-1", "user-2"} {
+		if err := svc.AddGroupMember(ctx, "admin-1", "grp-1", uid); err != nil {
+			t.Fatalf("AddGroupMember(%s): %v", uid, err)
+		}
+	}
+	if err := svc.AddGroupMember(ctx, "admin-1", "grp-2", "user-1"); err != nil {
+		t.Fatalf("AddGroupMember(grp-2): %v", err)
+	}
+
+	if err := svc.DeleteGroup(ctx, "admin-1", "grp-1"); err != nil {
+		t.Fatalf("DeleteGroup: %v", err)
+	}
+
+	// The cross-user edge read MUST use the tenant-admin actor; a per-user
+	// actor would silently return zero rows on real entdb and leave the
+	// MEMBER_OF edges dangling. The fake ignores the actor for filtering,
+	// so only this assertion catches that regression.
+	if got := db.lastEdgesToActor; got != tenantAdminActor {
+		t.Fatalf("GetEdgesTo actor = %q, want %q (cross-user read must use tenant-admin)", got, tenantAdminActor)
+	}
+
+	// The group node is gone.
+	if node, _ := db.GetNode(ctx, "", "", typeWorkingGroup, "grp-1"); node != nil {
+		t.Error("expected group to be deleted")
+	}
+	// Every inbound membership edge to grp-1 is drained.
+	if edges, err := db.GetEdgesTo(ctx, "t", tenantAdminActor, "grp-1", edgeMemberOf); err != nil || len(edges) != 0 {
+		t.Fatalf("grp-1 memberships must be drained: err=%v edges=%#v", err, edges)
+	}
+	// The unrelated grp-2 membership survives.
+	if edges, err := db.GetEdgesTo(ctx, "t", tenantAdminActor, "grp-2", edgeMemberOf); err != nil || len(edges) != 1 {
+		t.Fatalf("grp-2 membership must survive: err=%v edges=%#v", err, edges)
+	}
+}
+
 func TestGroupService_DeleteGroup_EmptyID(t *testing.T) {
 	db := newFakeDB()
 	seedGroupAdmin(db)
