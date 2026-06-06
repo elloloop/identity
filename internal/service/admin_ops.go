@@ -128,8 +128,9 @@ func (s *AdminService) GetUser(ctx context.Context, actorID, userID string) (*Us
 // records (sessions, refresh/login challenges, passkeys, totp,
 // recovery codes, oauth identities, qr sessions, one-time codes, idv
 // records, invitations, and the password/email-verification/
-// email-change tokens). After it, GetUser returns NotFound and the
-// email is reusable. Audit events are retained for accountability.
+// email-change tokens), plus the user's group MEMBER_OF edges. After
+// it, GetUser returns NotFound and the email is reusable. Audit events
+// are retained for accountability.
 //
 // Active sessions and refresh tokens are revoked BEFORE the cascade so
 // any in-flight access token is dead immediately rather than at its
@@ -158,11 +159,48 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 	if err := s.repo(ctx).RevokeSessionsForUser(ctx, targetUserID, now); err != nil {
 		return fmt.Errorf("delete user: revoke sessions: %w", err)
 	}
+	// Group membership is a graph MEMBER_OF edge, not a Repository record,
+	// so the repo cascade below cannot reach it. Drain the edges here,
+	// before the cascade, so a deleted user never leaves dangling
+	// memberships on the graph backend.
+	if err := s.deleteGroupMembershipsForUser(ctx, actorID, targetUserID); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
 	if err := s.repo(ctx).DeleteUser(ctx, targetUserID); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
 	s.audit.Log(ctx, audit.EventUserDeleted,
 		audit.WithActor(actorID), audit.WithTarget(targetUserID), audit.WithSuccess(true))
+	return nil
+}
+
+// deleteGroupMembershipsForUser removes every MEMBER_OF edge from the
+// user to a group, mirroring RemoveGroupMember. It is a no-op when the
+// user belongs to no groups.
+func (s *AdminService) deleteGroupMembershipsForUser(ctx context.Context, actorID, userID string) error {
+	// The read is a cross-user query (the target's outgoing edges), so it
+	// MUST use tenantAdminActor — under entdb's actor-scoped visibility a
+	// per-user actor silently returns zero rows for another user's edges,
+	// which would make this cleanup a no-op. This matches ListGroupMembers.
+	// The write below uses the admin's actor, since the admin is the acting
+	// principal (matching RemoveGroupMember).
+	edges, err := s.db(ctx).GetEdgesFrom(ctx, s.tenantID(ctx), tenantAdminActor, userID, edgeMemberOf)
+	if err != nil {
+		return fmt.Errorf("list group memberships: %w", err)
+	}
+	if len(edges) == 0 {
+		return nil
+	}
+	ops := make([]entdb.Operation, 0, len(edges))
+	for _, e := range edges {
+		ops = append(ops, entdb.Operation{
+			Type: entdb.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
+			FromNodeID: userID, ToNodeID: e.ToNodeID,
+		})
+	}
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), ops); err != nil {
+		return fmt.Errorf("clean group memberships: %w", err)
+	}
 	return nil
 }
 

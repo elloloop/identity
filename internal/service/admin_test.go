@@ -8,6 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 )
@@ -386,6 +388,60 @@ func TestAdminService_DeleteUser_HappyPath(t *testing.T) {
 	// Audit event emitted.
 	if n := writer.countByEventType(string(audit.EventUserDeleted)); n != 1 {
 		t.Fatalf("expected 1 user_deleted audit event, got %d", n)
+	}
+}
+
+func TestAdminService_DeleteUser_CleansGroupMemberOfEdges(t *testing.T) {
+	ctx := context.Background()
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+
+	repo := newFakeRepo()
+	repo.users["target-1"] = &User{ID: "target-1", Email: "g@test.com", Status: "active"}
+
+	// Seed two MEMBER_OF edges from the target user to two groups, plus
+	// an unrelated user's edge that must survive.
+	seed := []entdb.Operation{
+		{Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf, FromNodeID: "target-1", ToNodeID: "grp-1"},
+		{Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf, FromNodeID: "target-1", ToNodeID: "grp-2"},
+		{Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf, FromNodeID: "other-user", ToNodeID: "grp-1"},
+	}
+	if _, err := db.ExecuteAtomic(ctx, "t", "system:admin", seed); err != nil {
+		t.Fatalf("seed edges: %v", err)
+	}
+
+	svc := newTestAdminServiceWithRepo(db, repo)
+	if err := svc.DeleteUser(ctx, "admin-1", "target-1"); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+
+	// The cross-user edge read MUST use the tenant-admin actor; a per-user
+	// actor (user:<admin>) would silently return zero rows on real entdb
+	// and make this cleanup a no-op. Asserting it here catches a
+	// regression that the edge-existence checks below cannot (the fake
+	// ignores the actor for filtering).
+	if got := db.lastEdgesFromActor; got != tenantAdminActor {
+		t.Fatalf("GetEdgesFrom actor = %q, want %q (cross-user read must use tenant-admin)", got, tenantAdminActor)
+	}
+
+	// The target's memberships are gone. (The membership edges were seeded
+	// by system:admin while the delete is driven by admin-1 — the realistic
+	// different-creator case.)
+	if edges, err := db.GetEdgesFrom(ctx, "t", "system:admin", "target-1", edgeMemberOf); err != nil || len(edges) != 0 {
+		t.Fatalf("target memberships must be cleaned: err=%v edges=%#v", err, edges)
+	}
+	// grp-1 no longer has the target, but still has the unrelated user.
+	edgesTo, err := db.GetEdgesTo(ctx, "t", "system:admin", "grp-1", edgeMemberOf)
+	if err != nil {
+		t.Fatalf("GetEdgesTo: %v", err)
+	}
+	for _, e := range edgesTo {
+		if e.FromNodeID == "target-1" {
+			t.Fatalf("grp-1 still references the deleted user")
+		}
+	}
+	if len(edgesTo) != 1 || edgesTo[0].FromNodeID != "other-user" {
+		t.Fatalf("unrelated membership must survive, got %#v", edgesTo)
 	}
 }
 
