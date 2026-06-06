@@ -11,7 +11,7 @@ import (
 )
 
 // TestSweepers_DeleteExpiredOnMemoryClient is the in-memory backstop
-// for the EntDB sweeper: it runs the five DeleteExpired* methods
+// for the EntDB sweeper: it runs the DeleteExpired* methods
 // against the memoryEntClient fake (which mirrors the real SDK
 // scope's deleteExpired behaviour). The conformance suite repeats
 // these assertions end-to-end against the real EntDB server when
@@ -85,6 +85,32 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 				return r.DeleteExpiredLoginChallenges(ctx, beforeMs, limit)
 			},
 		},
+		{
+			name: "QrLoginSessions",
+			seed: func(c *memoryEntClient, key string, expiresAt int64) {
+				c.store[key] = storedNode{msg: &schemapb.QrLoginSession{
+					SessionId: key, ExpiresAt: expiresAt,
+				}}
+			},
+			callSweep: func(r *entRepository, beforeMs int64, limit int) error {
+				return r.DeleteExpiredQrLoginSessions(ctx, beforeMs, limit)
+			},
+		},
+		{
+			// Invitations are the one user-keyed ephemeral the
+			// cross-driver conformance suite cannot seed (Repository has
+			// no invitation create method), so this in-memory case is the
+			// only seeded-then-swept coverage for the invitation sweep.
+			name: "Invitations",
+			seed: func(c *memoryEntClient, key string, expiresAt int64) {
+				c.store[key] = storedNode{msg: &schemapb.UserInvitation{
+					TokenHash: key, ExpiresAt: expiresAt,
+				}}
+			},
+			callSweep: func(r *entRepository, beforeMs int64, limit int) error {
+				return r.DeleteExpiredInvitations(ctx, beforeMs, limit)
+			},
+		},
 	}
 
 	for _, tt := range cases {
@@ -139,7 +165,7 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 // postgres backend enforces: a sweeper batch with no cap could hold a
 // transaction open over an unbounded result set, so an accidentally
 // non-positive batch size surfaces as an error rather than a silent
-// "delete everything." The five methods all dispatch through the same
+// "delete everything." The methods all dispatch through the same
 // entClient.deleteExpired path, so one example per call is enough.
 func TestSweepers_RejectsNonPositiveLimit(t *testing.T) {
 	t.Parallel()
@@ -161,6 +187,12 @@ func TestSweepers_RejectsNonPositiveLimit(t *testing.T) {
 		}
 		if err := repo.DeleteExpiredLoginChallenges(ctx, 1, limit); err == nil {
 			t.Fatalf("DeleteExpiredLoginChallenges limit=%d: want error, got nil", limit)
+		}
+		if err := repo.DeleteExpiredQrLoginSessions(ctx, 1, limit); err == nil {
+			t.Fatalf("DeleteExpiredQrLoginSessions limit=%d: want error, got nil", limit)
+		}
+		if err := repo.DeleteExpiredInvitations(ctx, 1, limit); err == nil {
+			t.Fatalf("DeleteExpiredInvitations limit=%d: want error, got nil", limit)
 		}
 	}
 }
@@ -185,6 +217,8 @@ func TestExpiresAtSweepSpec(t *testing.T) {
 		{&schemapb.EmailVerificationToken{}, 29, 4, true},
 		{&schemapb.EmailChangeToken{}, 30, 5, true},
 		{&schemapb.LoginChallenge{}, 25, 3, true},
+		{&schemapb.QrLoginSession{}, 22, 8, true},
+		{&schemapb.UserInvitation{}, 27, 6, true},
 		// A non-sweep type must return ok=false so a new sweeper
 		// target can never silently skip — the calling code reports
 		// an "unsupported message type" error.

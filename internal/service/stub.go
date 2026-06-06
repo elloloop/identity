@@ -346,6 +346,14 @@ func (StubRepository) DeleteExpiredPhoneVerificationCodes(context.Context, int64
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) DeleteExpiredQrLoginSessions(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredInvitations(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) CreateOrganization(context.Context, *Organization) (string, error) {
 	return "", ErrServiceUnavailable
 }

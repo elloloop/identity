@@ -165,7 +165,7 @@ message QrLoginSession {
     string new_device_ip          = 5  [(entdb.field) = { pii: true }];
     string new_device_user_agent  = 6  [(entdb.field) = { pii: true }];
     string approved_device_info   = 7  [(entdb.field) = { pii: true }];
-    int64  expires_at             = 8  [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  expires_at             = 8  [(entdb.field) = { kind: "timestamp", indexed: true, pii_false: true }];
     int64  created_at             = 9  [(entdb.field) = { kind: "timestamp", pii_false: true }];
     int64  updated_at             = 10 [(entdb.field) = { kind: "timestamp", pii_false: true }];
     // sha256(poll_secret); the plaintext is returned only to the initiating
@@ -257,7 +257,7 @@ message UserInvitation {
     string user_id     = 3 [(entdb.field) = { indexed: true, kind: "ref", ref_type_id: 1, pii_false: true }];
     string invited_by  = 4 [(entdb.field) = { kind: "ref", ref_type_id: 1, pii_false: true }];
     string role        = 5 [(entdb.field) = { enum_values: "admin,member,guest", pii_false: true }];
-    int64  expires_at  = 6 [(entdb.field) = { kind: "timestamp", pii_false: true }];
+    int64  expires_at  = 6 [(entdb.field) = { kind: "timestamp", indexed: true, pii_false: true }];
     int64  accepted_at = 7 [(entdb.field) = { kind: "timestamp", pii_false: true }];
     int64  created_at  = 8 [(entdb.field) = { kind: "timestamp", pii_false: true }];
 }

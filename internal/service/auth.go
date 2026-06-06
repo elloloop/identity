@@ -395,6 +395,8 @@ type Repository interface {
 	DeleteExpiredEmailLoginCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredQrLoginSessions(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error
 
 	// Organizations — identity-layer entity used by `mode=multi`
 	// deployments. CreateOrganization writes the Organization row and

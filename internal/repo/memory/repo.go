@@ -1367,6 +1367,44 @@ func (r *Repo) DeleteExpiredPhoneVerificationCodes(_ context.Context, beforeMs i
 	return nil
 }
 
+func (r *Repo) DeleteExpiredQrLoginSessions(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memory: DeleteExpiredQrLoginSessions: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, s := range r.qrSessions {
+		if n >= limit {
+			break
+		}
+		if s.ExpiresAt < beforeMs {
+			delete(r.qrSessions, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *Repo) DeleteExpiredInvitations(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memory: DeleteExpiredInvitations: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, inv := range r.invitations {
+		if n >= limit {
+			break
+		}
+		if inv.ExpiresAt < beforeMs {
+			delete(r.invitations, id)
+			n++
+		}
+	}
+	return nil
+}
+
 // ── Organizations ─────────────────────────────────────────────────
 
 func (r *Repo) CreateOrganization(_ context.Context, o *service.Organization) (string, error) {

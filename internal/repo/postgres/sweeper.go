@@ -74,3 +74,11 @@ func (r *pgRepository) DeleteExpiredMagicLinkTokens(ctx context.Context, beforeM
 func (r *pgRepository) DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredPhoneVerificationCodes", "phone_verification_codes", beforeMs, limit)
 }
+
+func (r *pgRepository) DeleteExpiredQrLoginSessions(ctx context.Context, beforeMs int64, limit int) error {
+	return r.deleteExpiredBatch(ctx, "DeleteExpiredQrLoginSessions", "qr_login_sessions", beforeMs, limit)
+}
+
+func (r *pgRepository) DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error {
+	return r.deleteExpiredBatch(ctx, "DeleteExpiredInvitations", "user_invitations", beforeMs, limit)
+}

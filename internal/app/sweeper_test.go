@@ -30,9 +30,9 @@ func readCounter(c prometheus.Counter) float64 {
 }
 
 // mockSweepRepo is a Repository stand-in that records sweep calls.
-// Only the five DeleteExpired* methods are exercised by the
-// sweeper; embedding StubRepository covers everything else with
-// ErrServiceUnavailable.
+// It overrides every DeleteExpired* method the sweeper calls so the
+// recorded count matches len(targets); embedding StubRepository covers
+// the rest of the Repository surface with ErrServiceUnavailable.
 type mockSweepRepo struct {
 	service.StubRepository
 
@@ -77,6 +77,30 @@ func (m *mockSweepRepo) DeleteExpiredLoginChallenges(_ context.Context, b int64,
 	return m.sweep(b, l)
 }
 
+func (m *mockSweepRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
+func (m *mockSweepRepo) DeleteExpiredEmailLoginCodes(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
+func (m *mockSweepRepo) DeleteExpiredMagicLinkTokens(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
+func (m *mockSweepRepo) DeleteExpiredPhoneVerificationCodes(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
+func (m *mockSweepRepo) DeleteExpiredQrLoginSessions(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
+func (m *mockSweepRepo) DeleteExpiredInvitations(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
 func TestSweeper_DisabledWhenIntervalIsZero(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	s := newSweeper(&mockSweepRepo{}, 0, 100, 30, logger)
@@ -93,7 +117,7 @@ func TestSweeper_DisabledWhenIntervalNegative(t *testing.T) {
 	}
 }
 
-func TestSweeper_RunOnceCallsAllFiveMethods(t *testing.T) {
+func TestSweeper_RunOnceCallsEveryMethod(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
 	s := newSweeper(repo, 1, 50, 30, logger)
@@ -106,8 +130,8 @@ func TestSweeper_RunOnceCallsAllFiveMethods(t *testing.T) {
 
 	s.runOnce(context.Background())
 
-	if got := repo.calls.Load(); got != 5 {
-		t.Fatalf("expected 5 sweep calls (one per node type), got %d", got)
+	if got, want := repo.calls.Load(), int64(len(s.targets())); got != want {
+		t.Fatalf("expected %d sweep calls (one per node type), got %d", want, got)
 	}
 	expectedBefore := fixedNow.Add(-30 * time.Second).UnixMilli()
 	if got := repo.lastBefore.Load(); got != expectedBefore {
@@ -128,11 +152,11 @@ func TestSweeper_SkipNotImplementedLogsOncePerNodeType(t *testing.T) {
 		s.runOnce(context.Background())
 	}
 
-	// All five node types should be in the logged-once map.
+	// Every node type should be in the logged-once map exactly once.
 	s.skipMu.Lock()
 	defer s.skipMu.Unlock()
-	if len(s.skipLogged) != 5 {
-		t.Fatalf("expected 5 skip-logged entries, got %d", len(s.skipLogged))
+	if got, want := len(s.skipLogged), len(s.targets()); got != want {
+		t.Fatalf("expected %d skip-logged entries, got %d", want, got)
 	}
 }
 

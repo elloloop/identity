@@ -2150,6 +2150,44 @@ func RunConformance(t *testing.T, driver Driver) {
 		runSweepCase(t, "WebAuthnChallenges", r.DeleteExpiredWebAuthnChallenges, seedExpired, seedUnexpired, stillPresent)
 	})
 
+	t.Run("DeleteExpiredQrLoginSessions", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+		var keptSessionID string
+		seedExpired := func(t *testing.T) {
+			t.Helper()
+			if _, err := r.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{
+				SessionID: uniqueHash("qr-exp"), Status: "pending",
+				ExpiresAt: 1_000, CreatedAt: 100, UpdatedAt: 100,
+			}); err != nil {
+				t.Fatalf("seed expired: %v", err)
+			}
+		}
+		seedUnexpired := func(t *testing.T) {
+			t.Helper()
+			keptSessionID = uniqueHash("qr-keep")
+			if _, err := r.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{
+				SessionID: keptSessionID, Status: "pending",
+				ExpiresAt: 100_000, CreatedAt: 200, UpdatedAt: 200,
+			}); err != nil {
+				t.Fatalf("seed unexpired: %v", err)
+			}
+		}
+		stillPresent := func(t *testing.T) bool {
+			t.Helper()
+			got, err := r.FindQrLoginSession(ctx, keptSessionID)
+			if err != nil {
+				t.Fatalf("Find kept: %v", err)
+			}
+			return got != nil
+		}
+		runSweepCase(t, "QrLoginSessions", r.DeleteExpiredQrLoginSessions, seedExpired, seedUnexpired, stillPresent)
+	})
+
+	// DeleteExpiredInvitations is not exercised here: Repository exposes no
+	// invitation create method to seed one (invitations are written via the
+	// entdb graph). The entdb driver's sweeper unit test covers it directly.
+
 	t.Run("DeleteExpired_RejectsNonPositiveLimit", func(t *testing.T) {
 		// A non-positive limit could leave the underlying delete
 		// statement with no cap. Every Repository implementation must
@@ -2174,6 +2212,12 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 			if err := r.DeleteExpiredEmailVerificationTokens(ctx, 1, limit); err == nil {
 				t.Errorf("DeleteExpiredEmailVerificationTokens limit=%d: want error, got nil", limit)
+			}
+			if err := r.DeleteExpiredQrLoginSessions(ctx, 1, limit); err == nil {
+				t.Errorf("DeleteExpiredQrLoginSessions limit=%d: want error, got nil", limit)
+			}
+			if err := r.DeleteExpiredInvitations(ctx, 1, limit); err == nil {
+				t.Errorf("DeleteExpiredInvitations limit=%d: want error, got nil", limit)
 			}
 		}
 	})

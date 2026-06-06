@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
+	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
-// TestRealEntDB_SweeperEndToEnd covers the five DeleteExpired* methods
+// TestRealEntDB_SweeperEndToEnd covers the DeleteExpired* methods
 // against a live tenant-shard-db server. The conformance suite
 // (TestConformance in realentdb_conformance_test.go) already exercises
 // the happy path generically; this test focuses on:
@@ -231,6 +232,65 @@ func TestRealEntDB_SweeperEndToEnd(t *testing.T) {
 			got, err := repo.FindEmailChangeTokenByHash(ctx, fmt.Sprintf("ect-exp-%d", i))
 			require.NoError(t, err)
 			require.Nil(t, got, "expired ect-exp-%d should be gone", i)
+		}
+	})
+
+	t.Run("QrLoginSessions", func(t *testing.T) {
+		for i := 0; i < 2; i++ {
+			_, err := repo.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{
+				SessionID: fmt.Sprintf("qr-exp-%d", i), Status: "pending",
+				ExpiresAt: 1_000, CreatedAt: 500, UpdatedAt: 500,
+			})
+			require.NoError(t, err)
+		}
+		_, err := repo.CreateQrLoginSession(ctx, &service.QrLoginSessionRecord{
+			SessionID: "qr-keep", Status: "pending",
+			ExpiresAt: 100_000, CreatedAt: 500, UpdatedAt: 500,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, repo.DeleteExpiredQrLoginSessions(ctx, 5_000, 10))
+
+		got, err := repo.FindQrLoginSession(ctx, "qr-keep")
+		require.NoError(t, err)
+		require.NotNil(t, got, "unexpired qr login session was incorrectly deleted")
+		for i := 0; i < 2; i++ {
+			got, err := repo.FindQrLoginSession(ctx, fmt.Sprintf("qr-exp-%d", i))
+			require.NoError(t, err)
+			require.Nil(t, got, "expired qr-exp-%d should be gone", i)
+		}
+	})
+
+	t.Run("Invitations", func(t *testing.T) {
+		// Invitations have no Repository create method (they are written
+		// via the entdb graph), so seed the nodes directly through a raw
+		// scope. This is the only live coverage of the invitation sweep.
+		scope := newSDKScope(client, tenantID)
+		for i := 0; i < 2; i++ {
+			_, err := scope.create(ctx, systemActor, &schemapb.UserInvitation{
+				TokenHash: fmt.Sprintf("inv-exp-%d", i),
+				Email:     fmt.Sprintf("inv-exp-%d@example.com", i),
+				UserId:    uid,
+				ExpiresAt: 1_000,
+				CreatedAt: 500,
+			})
+			require.NoError(t, err)
+		}
+		_, err := scope.create(ctx, systemActor, &schemapb.UserInvitation{
+			TokenHash: "inv-keep", Email: "inv-keep@example.com", UserId: uid,
+			ExpiresAt: 100_000, CreatedAt: 500,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, repo.DeleteExpiredInvitations(ctx, 5_000, 10))
+
+		got, err := repo.FindInvitationByHash(ctx, "inv-keep")
+		require.NoError(t, err)
+		require.NotNil(t, got, "unexpired invitation was incorrectly deleted")
+		for i := 0; i < 2; i++ {
+			got, err := repo.FindInvitationByHash(ctx, fmt.Sprintf("inv-exp-%d", i))
+			require.NoError(t, err)
+			require.Nil(t, got, "expired inv-exp-%d should be gone", i)
 		}
 	})
 
