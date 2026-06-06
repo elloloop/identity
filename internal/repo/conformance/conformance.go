@@ -1881,6 +1881,37 @@ func RunConformance(t *testing.T, driver Driver) {
 				t.Fatalf("pre-existing user must survive: err=%v rec=%#v", err, got)
 			}
 		})
+
+		t.Run("CountOrganizationsOwnedBy", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			ownerID := createTestUser(t, r, "owner-count@example.com")
+			otherID := createTestUser(t, r, "other-count@example.com")
+
+			// No orgs yet.
+			if n, err := r.CountOrganizationsOwnedBy(ctx, ownerID); err != nil || n != 0 {
+				t.Fatalf("owner with no orgs: n=%d err=%v, want 0", n, err)
+			}
+
+			if _, err := r.CreateOrganization(ctx, &service.Organization{Slug: "cnt-a", DisplayName: "A", OwnerUserID: ownerID, CreatedAtMs: 100, UpdatedAtMs: 100}); err != nil {
+				t.Fatalf("CreateOrganization A: %v", err)
+			}
+			if n, err := r.CountOrganizationsOwnedBy(ctx, ownerID); err != nil || n != 1 {
+				t.Fatalf("after 1 org: n=%d err=%v, want 1", n, err)
+			}
+
+			if _, err := r.CreateOrganization(ctx, &service.Organization{Slug: "cnt-b", DisplayName: "B", OwnerUserID: ownerID, CreatedAtMs: 100, UpdatedAtMs: 100}); err != nil {
+				t.Fatalf("CreateOrganization B: %v", err)
+			}
+			if n, err := r.CountOrganizationsOwnedBy(ctx, ownerID); err != nil || n != 2 {
+				t.Fatalf("after 2 orgs: n=%d err=%v, want 2", n, err)
+			}
+
+			// A non-owner (member or stranger) owns nothing.
+			if n, err := r.CountOrganizationsOwnedBy(ctx, otherID); err != nil || n != 0 {
+				t.Fatalf("non-owner: n=%d err=%v, want 0", n, err)
+			}
+		})
 	})
 
 	// ── Sweeper subtests ────────────────────────────────────────────

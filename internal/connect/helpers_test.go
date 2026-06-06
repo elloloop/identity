@@ -1367,6 +1367,18 @@ func (r *fakeRepo) ListOrganizationsForUser(_ context.Context, userID string) ([
 	return out, nil
 }
 
+func (r *fakeRepo) CountOrganizationsOwnedBy(_ context.Context, userID string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, o := range r.orgs {
+		if o.OwnerUserID == userID {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (r *fakeRepo) AddOrganizationMember(_ context.Context, m *service.OrganizationMembership) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
