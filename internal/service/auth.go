@@ -128,16 +128,21 @@ type Repository interface {
 	// verifications, phone verification codes, and organization
 	// memberships — and, as of #168, the short-lived tokens too:
 	// password-reset, email-verification/change, passkey and login
-	// challenges, qr sessions, and oauth one-time codes. After it, GetUser
-	// returns nil and the email is reusable for a new CreateUser.
+	// challenges, qr sessions, oauth one-time codes, and invitations.
+	// After it, GetUser returns nil and the email is reusable for a new
+	// CreateUser.
 	//
-	// The only artifacts NOT removed synchronously are the ones a deleted
-	// user cannot be enumerated by: invitations (no Repository create
-	// method; written via the entdb graph) and the email-keyed login codes
-	// / magic-link tokens (no user_id). These are reaped by the TTL
-	// sweepers — safe, since they expire quickly, reference a now-deleted
-	// user, and never block email reuse. audit_events are retained for
+	// The only artifacts NOT removed synchronously are the email-keyed
+	// login codes / magic-link tokens, which carry no user_id and so
+	// cannot be enumerated per-user; they are reaped by the TTL sweepers —
+	// safe, since they expire quickly, reference a now-deleted user, and
+	// never block email reuse. audit_events are retained for
 	// accountability. Idempotent: deleting a non-existent user returns nil.
+	//
+	// (Invitations are drained but are the one user_id-keyed type the
+	// cross-driver conformance suite cannot seed/assert — Repository
+	// exposes no invitation create method; they are written via the entdb
+	// graph.)
 	DeleteUser(ctx context.Context, userID string) error
 
 	// Lockout state. These are dedicated methods (rather than UpdateUser
