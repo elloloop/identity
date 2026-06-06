@@ -178,7 +178,13 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 // user to a group, mirroring RemoveGroupMember. It is a no-op when the
 // user belongs to no groups.
 func (s *AdminService) deleteGroupMembershipsForUser(ctx context.Context, actorID, userID string) error {
-	edges, err := s.db(ctx).GetEdgesFrom(ctx, s.tenantID(ctx), actorStr(actorID), userID, edgeMemberOf)
+	// The read is a cross-user query (the target's outgoing edges), so it
+	// MUST use tenantAdminActor — under entdb's actor-scoped visibility a
+	// per-user actor silently returns zero rows for another user's edges,
+	// which would make this cleanup a no-op. This matches ListGroupMembers.
+	// The write below uses the admin's actor, since the admin is the acting
+	// principal (matching RemoveGroupMember).
+	edges, err := s.db(ctx).GetEdgesFrom(ctx, s.tenantID(ctx), tenantAdminActor, userID, edgeMemberOf)
 	if err != nil {
 		return fmt.Errorf("list group memberships: %w", err)
 	}

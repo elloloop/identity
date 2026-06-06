@@ -415,7 +415,18 @@ func TestAdminService_DeleteUser_CleansGroupMemberOfEdges(t *testing.T) {
 		t.Fatalf("DeleteUser: %v", err)
 	}
 
-	// The target's memberships are gone.
+	// The cross-user edge read MUST use the tenant-admin actor; a per-user
+	// actor (user:<admin>) would silently return zero rows on real entdb
+	// and make this cleanup a no-op. Asserting it here catches a
+	// regression that the edge-existence checks below cannot (the fake
+	// ignores the actor for filtering).
+	if got := db.lastEdgesFromActor; got != tenantAdminActor {
+		t.Fatalf("GetEdgesFrom actor = %q, want %q (cross-user read must use tenant-admin)", got, tenantAdminActor)
+	}
+
+	// The target's memberships are gone. (The membership edges were seeded
+	// by system:admin while the delete is driven by admin-1 — the realistic
+	// different-creator case.)
 	if edges, err := db.GetEdgesFrom(ctx, "t", "system:admin", "target-1", edgeMemberOf); err != nil || len(edges) != 0 {
 		t.Fatalf("target memberships must be cleaned: err=%v edges=%#v", err, edges)
 	}
