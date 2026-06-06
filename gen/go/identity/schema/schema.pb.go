@@ -2667,7 +2667,7 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x04 \x01(\x03B\x13\xb2\xbb\x18\x0f\x18\x01:\ttimestamp`\x01R\texpiresAt\x120\n" +
 	"\n" +
-	"created_at\x18\x05 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt:M\xa2\xbb\x18I\b\x150\x04RCA short-lived WebAuthn challenge for registration or authentication\"\xf9\x04\n" +
+	"created_at\x18\x05 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt:M\xa2\xbb\x18I\b\x150\x04RCA short-lived WebAuthn challenge for registration or authentication\"\xfb\x04\n" +
 	"\x0eQrLoginSession\x12+\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\tsessionId\x12L\n" +
@@ -2676,9 +2676,9 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\x0fnew_device_info\x18\x04 \x01(\tB\x06\xb2\xbb\x18\x02 \x01R\rnewDeviceInfo\x12*\n" +
 	"\rnew_device_ip\x18\x05 \x01(\tB\x06\xb2\xbb\x18\x02 \x01R\vnewDeviceIp\x129\n" +
 	"\x15new_device_user_agent\x18\x06 \x01(\tB\x06\xb2\xbb\x18\x02 \x01R\x12newDeviceUserAgent\x128\n" +
-	"\x14approved_device_info\x18\a \x01(\tB\x06\xb2\xbb\x18\x02 \x01R\x12approvedDeviceInfo\x120\n" +
+	"\x14approved_device_info\x18\a \x01(\tB\x06\xb2\xbb\x18\x02 \x01R\x12approvedDeviceInfo\x122\n" +
 	"\n" +
-	"expires_at\x18\b \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\texpiresAt\x120\n" +
+	"expires_at\x18\b \x01(\x03B\x13\xb2\xbb\x18\x0f\x18\x01:\ttimestamp`\x01R\texpiresAt\x120\n" +
 	"\n" +
 	"created_at\x18\t \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\tcreatedAt\x120\n" +
 	"\n" +
@@ -2720,7 +2720,7 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\asuccess\x18\x06 \x01(\bB\b\xb2\xbb\x18\x04\x18\x01`\x01R\asuccess\x12J\n" +
 	"\adetails\x18\a \x01(\tB0\xb2\xbb\x18,:\x04jsonR\"JSON blob with event-specific data`\x01R\adetails\x122\n" +
 	"\n" +
-	"created_at\x18\b \x01(\x03B\x13\xb2\xbb\x18\x0f\x18\x01:\ttimestamp`\x01R\tcreatedAt:>\xa2\xbb\x18:\b\x1a0\x03:\ractor_user_idR%An immutable security audit log entry\"\xcb\x03\n" +
+	"created_at\x18\b \x01(\x03B\x13\xb2\xbb\x18\x0f\x18\x01:\ttimestamp`\x01R\tcreatedAt:>\xa2\xbb\x18:\b\x1a0\x03:\ractor_user_idR%An immutable security audit log entry\"\xcd\x03\n" +
 	"\x0eUserInvitation\x12+\n" +
 	"\n" +
 	"token_hash\x18\x01 \x01(\tB\f\xb2\xbb\x18\b\b\x01\x18\x01`\x01h\x01R\ttokenHash\x12$\n" +
@@ -2729,9 +2729,9 @@ const file_identity_schema_schema_proto_rawDesc = "" +
 	"\auser_id\x18\x03 \x01(\tB\x0f\xb2\xbb\x18\v\x18\x01:\x03ref@\x01`\x01R\x06userId\x12,\n" +
 	"\n" +
 	"invited_by\x18\x04 \x01(\tB\r\xb2\xbb\x18\t:\x03ref@\x01`\x01R\tinvitedBy\x12.\n" +
-	"\x04role\x18\x05 \x01(\tB\x1a\xb2\xbb\x18\x162\x12admin,member,guest`\x01R\x04role\x120\n" +
+	"\x04role\x18\x05 \x01(\tB\x1a\xb2\xbb\x18\x162\x12admin,member,guest`\x01R\x04role\x122\n" +
 	"\n" +
-	"expires_at\x18\x06 \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\texpiresAt\x122\n" +
+	"expires_at\x18\x06 \x01(\x03B\x13\xb2\xbb\x18\x0f\x18\x01:\ttimestamp`\x01R\texpiresAt\x122\n" +
 	"\vaccepted_at\x18\a \x01(\x03B\x11\xb2\xbb\x18\r:\ttimestamp`\x01R\n" +
 	"acceptedAt\x120\n" +
 	"\n" +

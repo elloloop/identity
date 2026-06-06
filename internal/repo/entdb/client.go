@@ -661,6 +661,10 @@ func expiresAtSweepSpec(witness proto.Message) (typeID, fieldID int, ok bool) {
 		return 38, 4, true
 	case *schemapb.PhoneVerificationCode:
 		return 39, 4, true
+	case *schemapb.QrLoginSession:
+		return 22, 8, true
+	case *schemapb.UserInvitation:
+		return 27, 6, true
 	}
 	return 0, 0, false
 }
@@ -706,6 +710,10 @@ func (s *sdkScope) deleteExpired(ctx context.Context, actor string, witness prot
 		sdk.DeleteWhere[*schemapb.MagicLinkToken](plan, where, limit)
 	case *schemapb.PhoneVerificationCode:
 		sdk.DeleteWhere[*schemapb.PhoneVerificationCode](plan, where, limit)
+	case *schemapb.QrLoginSession:
+		sdk.DeleteWhere[*schemapb.QrLoginSession](plan, where, limit)
+	case *schemapb.UserInvitation:
+		sdk.DeleteWhere[*schemapb.UserInvitation](plan, where, limit)
 	default:
 		return fmt.Errorf("entdb: deleteExpired: unsupported message type %T", witness)
 	}

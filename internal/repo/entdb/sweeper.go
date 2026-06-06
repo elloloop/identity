@@ -7,7 +7,7 @@ import (
 	schemapb "github.com/elloloop/identity/gen/go/identity/schema"
 )
 
-// The five DeleteExpired* sweepers drop up to limit rows whose
+// Each DeleteExpired* sweeper drops up to limit rows whose
 // expires_at is strictly less than beforeMs. Each one dispatches
 // through entClient.deleteExpired, which in turn issues a single
 // OpDeleteWhere op via tenant-shard-db v1.14.0's single-RPC sweeper
@@ -83,6 +83,20 @@ func (r *entRepository) DeleteExpiredMagicLinkTokens(ctx context.Context, before
 func (r *entRepository) DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error {
 	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.PhoneVerificationCode{}, beforeMs, limit); err != nil {
 		return fmt.Errorf("repo: DeleteExpiredPhoneVerificationCodes: %w", err)
+	}
+	return nil
+}
+
+func (r *entRepository) DeleteExpiredQrLoginSessions(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.QrLoginSession{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredQrLoginSessions: %w", err)
+	}
+	return nil
+}
+
+func (r *entRepository) DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error {
+	if err := r.client.deleteExpired(ctx, systemActor, &schemapb.UserInvitation{}, beforeMs, limit); err != nil {
+		return fmt.Errorf("repo: DeleteExpiredInvitations: %w", err)
 	}
 	return nil
 }

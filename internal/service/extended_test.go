@@ -1731,6 +1731,24 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	if err := r.DeleteExpiredLoginChallenges(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredLoginChallenges: %v", err)
 	}
+	if err := r.DeleteExpiredOAuthOneTimeCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredOAuthOneTimeCodes: %v", err)
+	}
+	if err := r.DeleteExpiredEmailLoginCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredEmailLoginCodes: %v", err)
+	}
+	if err := r.DeleteExpiredMagicLinkTokens(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredMagicLinkTokens: %v", err)
+	}
+	if err := r.DeleteExpiredPhoneVerificationCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredPhoneVerificationCodes: %v", err)
+	}
+	if err := r.DeleteExpiredQrLoginSessions(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredQrLoginSessions: %v", err)
+	}
+	if err := r.DeleteExpiredInvitations(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredInvitations: %v", err)
+	}
 }
 
 func TestStubDB_AllMethodsReturnUnavailable(t *testing.T) {

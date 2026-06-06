@@ -1301,6 +1301,38 @@ func (r *fakeRepo) DeleteExpiredPhoneVerificationCodes(_ context.Context, before
 	return nil
 }
 
+func (r *fakeRepo) DeleteExpiredQrLoginSessions(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, s := range r.qrSessions {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if s.ExpiresAt < beforeMs {
+			delete(r.qrSessions, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteExpiredInvitations(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, inv := range r.invitations {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if inv.ExpiresAt < beforeMs {
+			delete(r.invitations, id)
+			n++
+		}
+	}
+	return nil
+}
+
 // ── Organizations ─────────────────────────────────────────────────
 
 func (r *fakeRepo) CreateOrganization(_ context.Context, o *service.Organization) (string, error) {

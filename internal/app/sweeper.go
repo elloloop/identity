@@ -14,9 +14,9 @@ import (
 
 // Prometheus metrics for the sweeper. Counters are namespaced under
 // "identity_" to match the existing convention; the node_type label
-// values are one of the five sweeper-target node types so operators
-// can scope alerts to "email_verification_tokens piling up" without
-// matching the whole sweep.
+// value is one of the sweeper-target node types (see targets) so
+// operators can scope alerts to "email_verification_tokens piling up"
+// without matching the whole sweep.
 //
 // tenant-shard-db v1.14.0's OpDeleteWhere primitive (#540) does not
 // return a deleted-row count, so the sweeper no longer publishes a
@@ -60,8 +60,8 @@ func initSweeperMetrics() {
 }
 
 // nodeTypeSweeper pairs a label value with the Repository call that
-// deletes its expired rows. Adding a sixth node type means one entry
-// here plus the matching Repository method.
+// deletes its expired rows. Adding a node type means one entry in
+// targets() plus the matching Repository method.
 type nodeTypeSweeper struct {
 	name string
 	fn   func(ctx context.Context, beforeMs int64, limit int) error
@@ -161,9 +161,9 @@ func (s *sweeper) runOnce(ctx context.Context) {
 	}
 }
 
-// targets returns the five node-type sweepers in a deterministic
-// order. Defined as a method rather than a package-level var because
-// the function values close over s.repo.
+// targets returns the node-type sweepers in a deterministic order.
+// Defined as a method rather than a package-level var because the
+// function values close over s.repo.
 func (s *sweeper) targets() []nodeTypeSweeper {
 	return []nodeTypeSweeper{
 		{"webauthn_challenges", s.repo.DeleteExpiredWebAuthnChallenges},
@@ -175,6 +175,8 @@ func (s *sweeper) targets() []nodeTypeSweeper {
 		{"email_login_codes", s.repo.DeleteExpiredEmailLoginCodes},
 		{"magic_link_tokens", s.repo.DeleteExpiredMagicLinkTokens},
 		{"phone_verification_codes", s.repo.DeleteExpiredPhoneVerificationCodes},
+		{"qr_login_sessions", s.repo.DeleteExpiredQrLoginSessions},
+		{"user_invitations", s.repo.DeleteExpiredInvitations},
 	}
 }
 
