@@ -59,3 +59,42 @@ func TestBuildRateLimits_PasswordlessPathsLimited(t *testing.T) {
 		assert.Equal(t, http.StatusTooManyRequests, codes[2], "%s req 3 over quota", p)
 	}
 }
+
+// TestBuildRateLimits_InstanceSignupLimited asserts the unauthenticated
+// mode=single first-admin bootstrap shares the per-IP signup quota and
+// actually 429s once exceeded — without it, the pre-bootstrap bcrypt +
+// full-user-scan path is an unthrottled CPU/DB-DoS surface.
+func TestBuildRateLimits_InstanceSignupLimited(t *testing.T) {
+	cfg := &config.Config{
+		RateLimitWindowSeconds: 60,
+		RateLimitSignupPerIP:   2,
+		// Other quotas non-zero so unrelated paths stay enabled.
+		RateLimitLoginPerIP:        30,
+		RateLimitResetPerIP:        5,
+		RateLimitVerifyPerIP:       20,
+		RateLimitPasswordlessPerIP: 5,
+	}
+	limits := buildRateLimits(cfg)
+
+	const path = "/identity.IdentityService/InstanceSignup"
+	byPath := map[string]middleware.PathLimit{}
+	for _, l := range limits {
+		byPath[l.PathPrefix] = l
+	}
+	require.Contains(t, byPath, path, "InstanceSignup must have a rate limit")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	codes := make([]int, 3)
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, "9.9.9.9")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		codes[i] = w.Code
+	}
+	assert.Equal(t, http.StatusOK, codes[0], "req 1")
+	assert.Equal(t, http.StatusOK, codes[1], "req 2")
+	assert.Equal(t, http.StatusTooManyRequests, codes[2], "req 3 over quota")
+}

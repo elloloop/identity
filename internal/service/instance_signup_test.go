@@ -74,7 +74,8 @@ func TestInstanceSignup_CreatesFirstAdmin(t *testing.T) {
 func TestInstanceSignup_RejectedWhenAdminExists(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRepo()
-	svc := newTestAuthService(t, repo)
+	writer := newRecordingAuditWriter()
+	svc := newTestAuthServiceWithAudit(t, repo, writer)
 
 	if _, err := svc.InstanceSignup(ctx, "first@example.com", instanceBootstrapPassword, ""); err != nil {
 		t.Fatalf("first InstanceSignup: %v", err)
@@ -85,6 +86,12 @@ func TestInstanceSignup_RejectedWhenAdminExists(t *testing.T) {
 	_, err := svc.InstanceSignup(ctx, "second@example.com", instanceBootstrapPassword, "")
 	if !errors.Is(err, ErrInstanceAlreadyInitialized) {
 		t.Fatalf("second InstanceSignup err = %v, want ErrInstanceAlreadyInitialized", err)
+	}
+
+	// The rejection must be audited (one success + one rejection event) so
+	// post-bootstrap probing of the endpoint is observable.
+	if got := writer.countByEventType(string(audit.EventInstanceSignup)); got != 2 {
+		t.Fatalf("instance_signup audit events = %d, want 2 (1 success + 1 rejection)", got)
 	}
 }
 

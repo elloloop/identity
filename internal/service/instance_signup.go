@@ -62,6 +62,17 @@ func (s *AuthService) InstanceSignup(ctx context.Context, email, password, name 
 		return nil, fmt.Errorf("checking for existing admin: %w", err)
 	}
 	if hasAdmin {
+		// Record the rejection so post-bootstrap probing of this endpoint
+		// is observable (the call is unauthenticated, so there is no actor).
+		s.logger.Warn("instance_signup_rejected_already_initialized")
+		s.audit.Log(
+			ctx, audit.EventInstanceSignup,
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{
+				"reason":    "already_initialized",
+				"tenant_id": s.tenantID(ctx),
+			}),
+		)
 		return nil, ErrInstanceAlreadyInitialized
 	}
 

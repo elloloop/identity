@@ -144,6 +144,16 @@ GATEWAY_TENANT_HOST_BASE_DOMAIN   = <domain>   # required when "host" is a sourc
   running instance. The tenant row itself is opened lazily on first
   write (the storage layer treats an unopened `DefaultTenantID` as
   "no rows yet").
+  - *Operational notes.* Because `InstanceSignup` is unauthenticated
+    until the first admin exists, **bootstrap the instance before
+    exposing it to untrusted networks** — otherwise a network-adjacent
+    caller could win the race and claim admin (inherent to any
+    unauthenticated bootstrap; shared with `OrganizationSignup`). It is
+    per-IP rate-limited like the other signup endpoints. It always
+    provisions a **password** admin and returns a working session even
+    when `AuthAllowLocal` is disabled, but in that case the admin must
+    use a non-password method (e.g. OAuth on the same email) for
+    subsequent logins.
 - **Every signup** writes the new User into the same `DefaultTenantID`.
   The repo layer also registers the new user globally in
   tenant-shard-db and adds them as a `"member"` of `DefaultTenantID`

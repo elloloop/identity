@@ -150,8 +150,12 @@ func (r *entRepository) GetUser(ctx context.Context, userID string) (*service.Us
 // enumerates users via the raw node transport with an empty filter,
 // which auto-follows the keyset cursor to the complete set (limit=0,
 // ADR-029) — so the guard is not fooled by a server-side page cap on
-// instances that already hold many members. Short-circuits on the
-// first admin found.
+// instances that already hold many members. The in-memory scan returns
+// on the first admin, but the query has already materialised the full
+// user set, so the read is O(users) regardless of where the admin sits;
+// role is not an indexed field, so there is no cheaper push-down today.
+// That cost is acceptable because the guard runs at most once per
+// bootstrap attempt and the InstanceSignup path is per-IP rate-limited.
 func (r *entRepository) HasAnyAdmin(ctx context.Context) (bool, error) {
 	rows, err := r.client.query(ctx, systemActor, &schemapb.User{}, nil)
 	if err != nil {

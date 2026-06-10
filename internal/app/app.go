@@ -162,6 +162,16 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
+			// InstanceSignup is the mode=single first-admin bootstrap:
+			// unauthenticated and, until an admin exists, it runs bcrypt
+			// (and a full user enumeration on the entdb driver) on every
+			// call. The self-disabling guard bounds neither request rate
+			// nor per-request cost, so share the per-IP signup quota to cap
+			// the pre-bootstrap CPU/DB-DoS window — mirroring OrganizationSignup.
+			PathPrefix: "/identity.IdentityService/InstanceSignup", Tag: "instance_signup",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.IdentityService/PasswordLogin", Tag: "login",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
