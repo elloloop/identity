@@ -329,6 +329,39 @@ func TestSessionAuthMiddleware_RejectsRevokedSID(t *testing.T) {
 	}
 }
 
+// TestSessionAuthMiddleware_InstanceSignup_ExemptNoToken_Passes is the
+// mode=session counterpart of the AuthMiddleware bootstrap test: with a
+// non-nil session cache the chain takes the session-aware branch, and the
+// unauthenticated InstanceSignup bootstrap must still pass through rather
+// than being 401-rejected.
+func TestSessionAuthMiddleware_InstanceSignup_ExemptNoToken_Passes(t *testing.T) {
+	t.Parallel()
+	keyRing, _ := newTestKeyRing(t)
+	cache := NewSessionCache(newStubLookup(), 60*time.Second, nil)
+
+	var called bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := SessionAuthMiddleware(keyRing, "tenant-1", "", false, cache)(next)
+
+	// No Authorization header — the fresh-instance bootstrap case.
+	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/InstanceSignup", nil)
+	rw := httptest.NewRecorder()
+	mw.ServeHTTP(rw, req)
+
+	if !called {
+		t.Fatal("InstanceSignup must reach the handler without a token")
+	}
+	if rw.Code == http.StatusUnauthorized {
+		t.Fatalf("InstanceSignup must not be 401-rejected; body = %q", rw.Body.String())
+	}
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rw.Code)
+	}
+}
+
 func TestSessionAuthMiddleware_AcceptsActiveSID(t *testing.T) {
 	t.Parallel()
 	keyRing, kid := newTestKeyRing(t)

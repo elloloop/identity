@@ -106,13 +106,15 @@ func (s *AuthService) InstanceSignup(ctx context.Context, email, password, name 
 		return nil, err
 	}
 
+	// The actor/target id already identifies the new admin; mirror
+	// OrganizationSignup and keep the raw email out of the audit detail
+	// map (it is PII and the row is keyed on the user id anyway).
 	s.audit.Log(
 		ctx, audit.EventInstanceSignup,
 		audit.WithActor(userID),
 		audit.WithTarget(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
-			"email":     email,
 			"tenant_id": s.tenantID(ctx),
 		}),
 	)

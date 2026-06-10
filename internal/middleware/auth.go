@@ -40,6 +40,14 @@ var AuthExemptPaths = map[string]bool{
 	// call. The handler itself enforces the mode guard (returns
 	// Unimplemented in mode=single per docs/IDENTITY.md §3).
 	"/identity.IdentityService/OrganizationSignup": true,
+	// InstanceSignup is the first-admin bootstrap for single-tenant
+	// deployments (mode=single). On a fresh instance there are no users
+	// and therefore no JWT, so authentication cannot precede this call.
+	// The handler self-disables once any admin exists (returns
+	// FailedPrecondition) and returns Unimplemented in mode=multi, so the
+	// exemption does not widen the attack surface beyond the documented
+	// one-time bootstrap. See docs/IDENTITY.md mode=single bootstrap.
+	"/identity.IdentityService/InstanceSignup": true,
 	// Email + reset flows are unauthenticated by design — the user is
 	// either anonymous (forgot password) or proving control of an
 	// inbox via a token rather than via a JWT.

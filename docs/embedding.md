@@ -137,6 +137,17 @@ the HTTP surface at `/.well-known/jwks.json`; a native-gRPC-only host
 either mounts `Handler()` on a side port for JWKS or distributes the keys
 out of band.
 
+> **`mode=single` bootstrap.** `InstanceSignup` (the first-admin
+> bootstrap) is one of those unauthenticated RPCs: a fresh instance has
+> zero users, so the caller cannot carry a JWT. The HTTP surface exempts
+> it automatically (`AuthExemptPaths`), but a native-gRPC host's auth
+> interceptor must let it through **without** a token — an interceptor
+> that hard-rejects token-less calls would make the bootstrap
+> unreachable. The RPC self-disables once an admin exists, so this does
+> not widen the host's exposure beyond the one-time bootstrap. The
+> `authInterceptor` above already does the right thing: it only *adds*
+> the user-id header when a token verifies and never rejects.
+
 ## Lifecycle
 
 ```go
