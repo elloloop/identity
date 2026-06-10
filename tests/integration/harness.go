@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -747,6 +748,17 @@ func (r *MemRepo) GetUser(_ context.Context, userID string) (*service.User, erro
 	}
 	cp := *u
 	return &cp, nil
+}
+
+func (r *MemRepo) HasAnyAdmin(_ context.Context) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, u := range r.users {
+		if strings.EqualFold(u.Role, "admin") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error) {

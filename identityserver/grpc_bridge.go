@@ -332,6 +332,10 @@ func (b *grpcBridge) OrganizationSignup(ctx context.Context, in *identitypb.Orga
 	return invoke(ctx, in, b.h.OrganizationSignup)
 }
 
+func (b *grpcBridge) InstanceSignup(ctx context.Context, in *identitypb.InstanceSignupRequest) (*identitypb.InstanceSignupResponse, error) {
+	return invoke(ctx, in, b.h.InstanceSignup)
+}
+
 // ─── Admin user management ──────────────────────────────────────────
 
 func (b *grpcBridge) InviteUser(ctx context.Context, in *identitypb.InviteUserRequest) (*identitypb.InviteUserResponse, error) {

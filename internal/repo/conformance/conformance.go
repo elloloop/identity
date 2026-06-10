@@ -264,6 +264,48 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("HasAnyAdmin", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+
+			// Fresh tenant: no admin yet — the bootstrap guard must be open.
+			has, err := r.HasAnyAdmin(ctx)
+			if err != nil {
+				t.Fatalf("HasAnyAdmin empty: %v", err)
+			}
+			if has {
+				t.Fatal("HasAnyAdmin empty: want false, got true")
+			}
+
+			// A non-admin user must NOT trip the guard.
+			if _, err := r.CreateUser(ctx, &service.User{
+				Email: "member@example.com", Status: "active", Role: "member",
+			}); err != nil {
+				t.Fatalf("CreateUser member: %v", err)
+			}
+			has, err = r.HasAnyAdmin(ctx)
+			if err != nil {
+				t.Fatalf("HasAnyAdmin after member: %v", err)
+			}
+			if has {
+				t.Fatal("HasAnyAdmin after member: want false, got true")
+			}
+
+			// Once an admin exists, the guard must close — permanently.
+			if _, err := r.CreateUser(ctx, &service.User{
+				Email: "admin@example.com", Status: "active", Role: "admin",
+			}); err != nil {
+				t.Fatalf("CreateUser admin: %v", err)
+			}
+			has, err = r.HasAnyAdmin(ctx)
+			if err != nil {
+				t.Fatalf("HasAnyAdmin after admin: %v", err)
+			}
+			if !has {
+				t.Fatal("HasAnyAdmin after admin: want true, got false")
+			}
+		})
+
 		t.Run("UserUpdate_FieldRoundTrip", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)

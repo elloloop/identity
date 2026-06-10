@@ -211,6 +211,9 @@ const (
 	// IdentityServiceOrganizationSignupProcedure is the fully-qualified name of the IdentityService's
 	// OrganizationSignup RPC.
 	IdentityServiceOrganizationSignupProcedure = "/identity.IdentityService/OrganizationSignup"
+	// IdentityServiceInstanceSignupProcedure is the fully-qualified name of the IdentityService's
+	// InstanceSignup RPC.
+	IdentityServiceInstanceSignupProcedure = "/identity.IdentityService/InstanceSignup"
 	// IdentityServiceInviteUserProcedure is the fully-qualified name of the IdentityService's
 	// InviteUser RPC.
 	IdentityServiceInviteUserProcedure = "/identity.IdentityService/InviteUser"
@@ -316,6 +319,12 @@ type IdentityServiceClient interface {
 	// the admin user globally, and creates the identity-layer
 	// Organization + admin User rows scoped to the new tenant.
 	OrganizationSignup(context.Context, *connect.Request[identity.OrganizationSignupRequest]) (*connect.Response[identity.OrganizationSignupResponse], error)
+	// Instance bootstrap (mode=single only — returns Unimplemented in
+	// mode=multi). Unauthenticated, but self-disabling: succeeds only
+	// while no admin exists, creating the first role=admin user in the
+	// default tenant and returning a logged-in session. Once any admin
+	// exists it returns FailedPrecondition.
+	InstanceSignup(context.Context, *connect.Request[identity.InstanceSignupRequest]) (*connect.Response[identity.InstanceSignupResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error)
@@ -697,6 +706,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("OrganizationSignup")),
 			connect.WithClientOptions(opts...),
 		),
+		instanceSignup: connect.NewClient[identity.InstanceSignupRequest, identity.InstanceSignupResponse](
+			httpClient,
+			baseURL+IdentityServiceInstanceSignupProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("InstanceSignup")),
+			connect.WithClientOptions(opts...),
+		),
 		inviteUser: connect.NewClient[identity.InviteUserRequest, identity.InviteUserResponse](
 			httpClient,
 			baseURL+IdentityServiceInviteUserProcedure,
@@ -798,6 +813,7 @@ type identityServiceClient struct {
 	removeGroupMember             *connect.Client[identity.RemoveGroupMemberRequest, identity.RemoveGroupMemberResponse]
 	listGroupMembers              *connect.Client[identity.ListGroupMembersRequest, identity.ListGroupMembersResponse]
 	organizationSignup            *connect.Client[identity.OrganizationSignupRequest, identity.OrganizationSignupResponse]
+	instanceSignup                *connect.Client[identity.InstanceSignupRequest, identity.InstanceSignupResponse]
 	inviteUser                    *connect.Client[identity.InviteUserRequest, identity.InviteUserResponse]
 	acceptInvitation              *connect.Client[identity.AcceptInvitationRequest, identity.AcceptInvitationResponse]
 	deactivateUser                *connect.Client[identity.DeactivateUserRequest, identity.DeactivateUserResponse]
@@ -1106,6 +1122,11 @@ func (c *identityServiceClient) OrganizationSignup(ctx context.Context, req *con
 	return c.organizationSignup.CallUnary(ctx, req)
 }
 
+// InstanceSignup calls identity.IdentityService.InstanceSignup.
+func (c *identityServiceClient) InstanceSignup(ctx context.Context, req *connect.Request[identity.InstanceSignupRequest]) (*connect.Response[identity.InstanceSignupResponse], error) {
+	return c.instanceSignup.CallUnary(ctx, req)
+}
+
 // InviteUser calls identity.IdentityService.InviteUser.
 func (c *identityServiceClient) InviteUser(ctx context.Context, req *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error) {
 	return c.inviteUser.CallUnary(ctx, req)
@@ -1221,6 +1242,12 @@ type IdentityServiceHandler interface {
 	// the admin user globally, and creates the identity-layer
 	// Organization + admin User rows scoped to the new tenant.
 	OrganizationSignup(context.Context, *connect.Request[identity.OrganizationSignupRequest]) (*connect.Response[identity.OrganizationSignupResponse], error)
+	// Instance bootstrap (mode=single only — returns Unimplemented in
+	// mode=multi). Unauthenticated, but self-disabling: succeeds only
+	// while no admin exists, creating the first role=admin user in the
+	// default tenant and returning a logged-in session. Once any admin
+	// exists it returns FailedPrecondition.
+	InstanceSignup(context.Context, *connect.Request[identity.InstanceSignupRequest]) (*connect.Response[identity.InstanceSignupResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error)
@@ -1598,6 +1625,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("OrganizationSignup")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceInstanceSignupHandler := connect.NewUnaryHandler(
+		IdentityServiceInstanceSignupProcedure,
+		svc.InstanceSignup,
+		connect.WithSchema(identityServiceMethods.ByName("InstanceSignup")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceInviteUserHandler := connect.NewUnaryHandler(
 		IdentityServiceInviteUserProcedure,
 		svc.InviteUser,
@@ -1756,6 +1789,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceListGroupMembersHandler.ServeHTTP(w, r)
 		case IdentityServiceOrganizationSignupProcedure:
 			identityServiceOrganizationSignupHandler.ServeHTTP(w, r)
+		case IdentityServiceInstanceSignupProcedure:
+			identityServiceInstanceSignupHandler.ServeHTTP(w, r)
 		case IdentityServiceInviteUserProcedure:
 			identityServiceInviteUserHandler.ServeHTTP(w, r)
 		case IdentityServiceAcceptInvitationProcedure:
@@ -2015,6 +2050,10 @@ func (UnimplementedIdentityServiceHandler) ListGroupMembers(context.Context, *co
 
 func (UnimplementedIdentityServiceHandler) OrganizationSignup(context.Context, *connect.Request[identity.OrganizationSignupRequest]) (*connect.Response[identity.OrganizationSignupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.OrganizationSignup is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) InstanceSignup(context.Context, *connect.Request[identity.InstanceSignupRequest]) (*connect.Response[identity.InstanceSignupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.InstanceSignup is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) InviteUser(context.Context, *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error) {

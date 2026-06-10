@@ -43,6 +43,34 @@ func (h *IdentityHandler) OrganizationSignup(
 	return connect.NewResponse(resp), nil
 }
 
+// InstanceSignup bootstraps the first admin of a single-tenant
+// deployment. It is unauthenticated but self-disabling: the service
+// layer rejects it once any admin exists (ErrInstanceAlreadyInitialized
+// → CodeFailedPrecondition) and in mode=multi (ErrUnimplemented →
+// CodeUnimplemented), so this handler simply delegates and maps errors.
+func (h *IdentityHandler) InstanceSignup(
+	ctx context.Context,
+	req *connect.Request[identitypb.InstanceSignupRequest],
+) (*connect.Response[identitypb.InstanceSignupResponse], error) {
+	result, err := h.auth.InstanceSignup(
+		ctx,
+		req.Msg.AdminEmail,
+		req.Msg.AdminPassword,
+		req.Msg.AdminName,
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	resp := &identitypb.InstanceSignupResponse{
+		AdminUser:    userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // organizationToProto converts the service-layer Organization to the
 // proto wire message.
 func organizationToProto(o *service.Organization) *identitypb.Organization {

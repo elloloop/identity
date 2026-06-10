@@ -126,6 +126,19 @@ func (r *pgRepository) GetUser(ctx context.Context, userID string) (*service.Use
 	return u, nil
 }
 
+// HasAnyAdmin reports whether the tenant has at least one user with
+// role=='admin' (case-insensitive, mirroring requireAdmin). EXISTS
+// short-circuits on the first match, so an unindexed role column is
+// fine for this at-most-once-per-bootstrap guard.
+func (r *pgRepository) HasAnyAdmin(ctx context.Context) (bool, error) {
+	const q = `SELECT EXISTS(SELECT 1 FROM users WHERE tenant_id = $1 AND lower(role) = 'admin')`
+	var exists bool
+	if err := r.pool.QueryRow(ctx, q, r.tenantID).Scan(&exists); err != nil {
+		return false, wrapPgErr("HasAnyAdmin", err)
+	}
+	return exists, nil
+}
+
 func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string, error) {
 	if u == nil {
 		return "", errors.New("postgres: CreateUser: nil user")

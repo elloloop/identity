@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -156,6 +157,19 @@ func (r *Repo) GetUser(_ context.Context, userID string) (*service.User, error) 
 	}
 	cp := *u
 	return &cp, nil
+}
+
+// HasAnyAdmin reports whether any stored user has Role=="admin"
+// (case-insensitive, mirroring requireAdmin).
+func (r *Repo) HasAnyAdmin(_ context.Context) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, u := range r.users {
+		if strings.EqualFold(u.Role, "admin") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {

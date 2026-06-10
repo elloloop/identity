@@ -38,6 +38,10 @@ func (StubRepository) CreateUser(context.Context, *User) (string, error) {
 	return "", ErrServiceUnavailable
 }
 
+func (StubRepository) HasAnyAdmin(context.Context) (bool, error) {
+	return false, ErrServiceUnavailable
+}
+
 func (StubRepository) UpdateUser(context.Context, string, map[string]any) error {
 	return ErrServiceUnavailable
 }

@@ -153,6 +153,17 @@ func (r *fakeRepo) FindUserByEmail(_ context.Context, email string) (*service.Us
 	return nil, nil
 }
 
+func (r *fakeRepo) HasAnyAdmin(_ context.Context) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, u := range r.users {
+		if strings.EqualFold(u.Role, "admin") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *fakeRepo) GetUser(_ context.Context, userID string) (*service.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

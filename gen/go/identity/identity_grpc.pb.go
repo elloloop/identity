@@ -79,6 +79,7 @@ const (
 	IdentityService_RemoveGroupMember_FullMethodName             = "/identity.IdentityService/RemoveGroupMember"
 	IdentityService_ListGroupMembers_FullMethodName              = "/identity.IdentityService/ListGroupMembers"
 	IdentityService_OrganizationSignup_FullMethodName            = "/identity.IdentityService/OrganizationSignup"
+	IdentityService_InstanceSignup_FullMethodName                = "/identity.IdentityService/InstanceSignup"
 	IdentityService_InviteUser_FullMethodName                    = "/identity.IdentityService/InviteUser"
 	IdentityService_AcceptInvitation_FullMethodName              = "/identity.IdentityService/AcceptInvitation"
 	IdentityService_DeactivateUser_FullMethodName                = "/identity.IdentityService/DeactivateUser"
@@ -174,6 +175,12 @@ type IdentityServiceClient interface {
 	// the admin user globally, and creates the identity-layer
 	// Organization + admin User rows scoped to the new tenant.
 	OrganizationSignup(ctx context.Context, in *OrganizationSignupRequest, opts ...grpc.CallOption) (*OrganizationSignupResponse, error)
+	// Instance bootstrap (mode=single only — returns Unimplemented in
+	// mode=multi). Unauthenticated, but self-disabling: succeeds only
+	// while no admin exists, creating the first role=admin user in the
+	// default tenant and returning a logged-in session. Once any admin
+	// exists it returns FailedPrecondition.
+	InstanceSignup(ctx context.Context, in *InstanceSignupRequest, opts ...grpc.CallOption) (*InstanceSignupResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*InviteUserResponse, error)
@@ -792,6 +799,16 @@ func (c *identityServiceClient) OrganizationSignup(ctx context.Context, in *Orga
 	return out, nil
 }
 
+func (c *identityServiceClient) InstanceSignup(ctx context.Context, in *InstanceSignupRequest, opts ...grpc.CallOption) (*InstanceSignupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InstanceSignupResponse)
+	err := c.cc.Invoke(ctx, IdentityService_InstanceSignup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) InviteUser(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*InviteUserResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InviteUserResponse)
@@ -939,6 +956,12 @@ type IdentityServiceServer interface {
 	// the admin user globally, and creates the identity-layer
 	// Organization + admin User rows scoped to the new tenant.
 	OrganizationSignup(context.Context, *OrganizationSignupRequest) (*OrganizationSignupResponse, error)
+	// Instance bootstrap (mode=single only — returns Unimplemented in
+	// mode=multi). Unauthenticated, but self-disabling: succeeds only
+	// while no admin exists, creating the first role=admin user in the
+	// default tenant and returning a logged-in session. Once any admin
+	// exists it returns FailedPrecondition.
+	InstanceSignup(context.Context, *InstanceSignupRequest) (*InstanceSignupResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error)
@@ -1136,6 +1159,9 @@ func (UnimplementedIdentityServiceServer) ListGroupMembers(context.Context, *Lis
 }
 func (UnimplementedIdentityServiceServer) OrganizationSignup(context.Context, *OrganizationSignupRequest) (*OrganizationSignupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method OrganizationSignup not implemented")
+}
+func (UnimplementedIdentityServiceServer) InstanceSignup(context.Context, *InstanceSignupRequest) (*InstanceSignupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InstanceSignup not implemented")
 }
 func (UnimplementedIdentityServiceServer) InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InviteUser not implemented")
@@ -2256,6 +2282,24 @@ func _IdentityService_OrganizationSignup_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_InstanceSignup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InstanceSignupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).InstanceSignup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_InstanceSignup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).InstanceSignup(ctx, req.(*InstanceSignupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_InviteUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(InviteUserRequest)
 	if err := dec(in); err != nil {
@@ -2610,6 +2654,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OrganizationSignup",
 			Handler:    _IdentityService_OrganizationSignup_Handler,
+		},
+		{
+			MethodName: "InstanceSignup",
+			Handler:    _IdentityService_InstanceSignup_Handler,
 		},
 		{
 			MethodName: "InviteUser",

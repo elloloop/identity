@@ -130,10 +130,20 @@ GATEWAY_TENANT_HOST_BASE_DOMAIN   = <domain>   # required when "host" is a sourc
 
 ### `mode=single` (B2C, easyloops shape)
 
-- **At startup**, the service ensures `DefaultTenantID` exists in
-  tenant-shard-db (idempotent bootstrap: create tenant if missing,
-  create system user if missing, add system user as admin member of
-  the tenant if missing).
+- **Bootstrap & the first admin.** There is no startup-time admin
+  seeding. A fresh deployment has zero admins, and because self-serve
+  signup only ever mints `role=member` while every admin RPC requires
+  an existing `role=admin` user (`requireAdmin` gates on the identity
+  product role — *not* the storage-layer tenant-membership role, which
+  is a separate axis), the first admin is created out of the normal
+  signup flow by the **`InstanceSignup`** RPC. It is unauthenticated
+  but self-disabling: it succeeds only while no admin exists (creating
+  the first `role=admin` user in `DefaultTenantID` and returning a
+  logged-in session), and returns `FailedPrecondition` forever after —
+  so it cannot be replayed to mint additional admins or take over a
+  running instance. The tenant row itself is opened lazily on first
+  write (the storage layer treats an unopened `DefaultTenantID` as
+  "no rows yet").
 - **Every signup** writes the new User into the same `DefaultTenantID`.
   The repo layer also registers the new user globally in
   tenant-shard-db and adds them as a `"member"` of `DefaultTenantID`
@@ -293,10 +303,12 @@ host/JWT.
 3. Then dispatch into the same per-user onboarding flow above with
    role `"admin"` (or whichever role upstream models org-owners as).
 
-Single mode startup bootstrap is structurally the same as the
-`OrganizationSignup` shape, except it runs once at boot rather than
-per-request, and it uses the configured `DefaultTenantID` rather than
-a user-supplied one.
+Single-mode first-admin bootstrap (`InstanceSignup`) is structurally a
+trimmed `OrganizationSignup`: it skips tenant creation (the tenant is
+the configured `DefaultTenantID`) and the Organization/Membership rows
+(single mode has no organisation concept), guards on "no admin exists
+yet" (`Repository.HasAnyAdmin`) instead of slug uniqueness, then runs
+the same per-user onboarding with role `"admin"` and issues a session.
 
 ## Identity's role model vs tenant-shard-db's role model
 

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
@@ -142,6 +143,26 @@ func (r *entRepository) GetUser(ctx context.Context, userID string) (*service.Us
 		return nil, fmt.Errorf("repo: GetUser: %w", err)
 	}
 	return userFromProto(userID, dst), nil
+}
+
+// HasAnyAdmin reports whether any user in the tenant has
+// Role=="admin" (case-insensitive, mirroring requireAdmin). It
+// enumerates users via the raw node transport with an empty filter,
+// which auto-follows the keyset cursor to the complete set (limit=0,
+// ADR-029) — so the guard is not fooled by a server-side page cap on
+// instances that already hold many members. Short-circuits on the
+// first admin found.
+func (r *entRepository) HasAnyAdmin(ctx context.Context) (bool, error) {
+	rows, err := r.client.query(ctx, systemActor, &schemapb.User{}, nil)
+	if err != nil {
+		return false, fmt.Errorf("repo: HasAnyAdmin: %w", err)
+	}
+	for _, row := range rows {
+		if u, ok := row.Message.(*schemapb.User); ok && strings.EqualFold(u.Role, "admin") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *entRepository) CreateUser(ctx context.Context, u *service.User) (string, error) {

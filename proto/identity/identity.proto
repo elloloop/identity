@@ -896,6 +896,32 @@ message OrganizationSignupResponse {
   int32 expires_in = 5;
 }
 
+// ─── Instance bootstrap (mode=single only) ──────────────────────────
+// One-time first-admin bootstrap for single-tenant deployments. Solves
+// the chicken-and-egg problem: every admin RPC requires an existing
+// role=admin user, but self-serve signup only ever mints role=member,
+// so a fresh instance would otherwise have no way to create its first
+// admin. InstanceSignup is callable WITHOUT authentication, but ONLY
+// while the deployment has zero admin users — once any admin exists it
+// permanently returns FailedPrecondition, so it cannot be used to mint
+// additional admins or to take over a running instance.
+//
+// Disabled in mode=multi (returns Unimplemented); there the equivalent
+// entry point is OrganizationSignup, which makes the org founder admin.
+
+message InstanceSignupRequest {
+  string admin_email = 1;
+  string admin_password = 2;
+  string admin_name = 3;                            // Optional; defaults to local-part of email
+}
+
+message InstanceSignupResponse {
+  User admin_user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  int32 expires_in = 4;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────
 
 service IdentityService {
@@ -1000,6 +1026,13 @@ service IdentityService {
   // the admin user globally, and creates the identity-layer
   // Organization + admin User rows scoped to the new tenant.
   rpc OrganizationSignup(OrganizationSignupRequest) returns (OrganizationSignupResponse);
+
+  // Instance bootstrap (mode=single only — returns Unimplemented in
+  // mode=multi). Unauthenticated, but self-disabling: succeeds only
+  // while no admin exists, creating the first role=admin user in the
+  // default tenant and returning a logged-in session. Once any admin
+  // exists it returns FailedPrecondition.
+  rpc InstanceSignup(InstanceSignupRequest) returns (InstanceSignupResponse);
 
   // Admin user management (caller must have role=admin). Enforced in the
   // servicer via _require_admin(ctx); all admin RPCs audit-log their actions.

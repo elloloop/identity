@@ -145,6 +145,17 @@ type Repository interface {
 	// graph.)
 	DeleteUser(ctx context.Context, userID string) error
 
+	// HasAnyAdmin reports whether the tenant has at least one user with
+	// identity product Role=="admin". It is the self-disabling guard for
+	// the single-mode InstanceSignup bootstrap: the first-admin RPC is
+	// permitted only while this returns false. The check is a domain
+	// query (not a storage-layer membership lookup) — it inspects
+	// User.Role, the same field requireAdmin gates on. Implementations
+	// enumerate the full user set (or short-circuit on the first admin);
+	// correctness, not speed, is what matters here since it runs at most
+	// once per bootstrap attempt on an otherwise un-provisioned instance.
+	HasAnyAdmin(ctx context.Context) (bool, error)
+
 	// Lockout state. These are dedicated methods (rather than UpdateUser
 	// patches) so the persistence layer can implement them as single
 	// atomic writes — important for racing concurrent failed-login
@@ -751,12 +762,18 @@ var (
 	ErrAccountNotActive     = errors.New("account is not active")
 	ErrInvitationPending    = errors.New("account has not completed invitation")
 	ErrIDVRequired          = errors.New("identity verification required")
-	ErrWeakPassword         = errors.New("password does not meet strength requirements")
-	ErrTotpRequired         = errors.New("totp required")
-	ErrTokenExpired         = errors.New("token expired")
-	ErrInvalidTotpCode      = errors.New("invalid totp code")
-	ErrQrLoginExpired       = errors.New("qr login session expired")
-	ErrQrLoginNotPending    = errors.New("qr login session is not pending")
+	// ErrInstanceAlreadyInitialized is returned by InstanceSignup when the
+	// single-mode deployment already has at least one admin user. The
+	// bootstrap RPC self-disables once that holds, so the Connect handler
+	// maps this to CodeFailedPrecondition ("the no-admin precondition is
+	// no longer met").
+	ErrInstanceAlreadyInitialized = errors.New("instance already initialized: an admin already exists")
+	ErrWeakPassword               = errors.New("password does not meet strength requirements")
+	ErrTotpRequired               = errors.New("totp required")
+	ErrTokenExpired               = errors.New("token expired")
+	ErrInvalidTotpCode            = errors.New("invalid totp code")
+	ErrQrLoginExpired             = errors.New("qr login session expired")
+	ErrQrLoginNotPending          = errors.New("qr login session is not pending")
 	// ErrOAuthCodeInvalid is returned when a hosted-flow one-time code is
 	// missing, expired, or already consumed. The Connect handler maps it
 	// to CodeUnauthenticated so replays and expiries look identical to a

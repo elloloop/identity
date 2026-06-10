@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -170,6 +171,17 @@ func (r *fakeRepo) GetUser(_ context.Context, userID string) (*User, error) {
 	}
 	cp := *u
 	return &cp, nil
+}
+
+func (r *fakeRepo) HasAnyAdmin(_ context.Context) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, u := range r.users {
+		if strings.EqualFold(u.Role, "admin") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {

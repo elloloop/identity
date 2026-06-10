@@ -68,6 +68,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrInvitationPending),
 		errors.Is(err, service.ErrSignupDisabled),
 		errors.Is(err, service.ErrUserOwnsOrganization),
+		errors.Is(err, service.ErrInstanceAlreadyInitialized),
 		errors.Is(err, service.ErrIDVRequired):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 

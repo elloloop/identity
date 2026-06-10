@@ -85,6 +85,7 @@ const (
 	EventAdminHelpRequested EventType = "admin_help_requested"
 	EventAdminHelpResolved  EventType = "admin_help_resolved"
 	EventOrganizationSignup EventType = "organization_signup"
+	EventInstanceSignup     EventType = "instance_signup"
 
 	EventPhoneVerificationRequested EventType = "phone_verification_requested"
 	EventPhoneVerified              EventType = "phone_verified"
@@ -117,6 +118,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventAdminHelpRequested:         {},
 	EventAdminHelpResolved:          {},
 	EventOrganizationSignup:         {},
+	EventInstanceSignup:             {},
 	EventPhoneVerificationRequested: {},
 	EventPhoneVerified:              {},
 }
