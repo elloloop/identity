@@ -6,8 +6,13 @@ import { Code } from "astro-expressive-code/components";
 <DocsLayout title="Database & Migrations">
   <h1>Database &amp; Migrations</h1>
   <p>
-    Identity stores all durable state in <strong>PostgreSQL</strong>. The schema
-    is managed by versioned, embedded migrations applied with
+    Identity's default backend is <strong>EntDB</strong> (tenant-shard-db),
+    where the storage layer owns the schema — those deployments have no SQL
+    migrations and can skip this page. <strong>This page applies when you run
+    Identity on the Postgres driver</strong>
+    (<code>GATEWAY_REPO_DRIVER=postgres</code>). On that driver Identity stores
+    its durable state in PostgreSQL, and the schema is managed by versioned,
+    embedded migrations applied with
     <a href="https://github.com/golang-migrate/migrate">golang-migrate</a>. The
     <code>.sql</code> files are compiled into the binary, so the image is
     self-contained — operators never ship migration files separately.
@@ -108,14 +113,12 @@ spec:
           env:
             - name: GATEWAY_POSTGRES_DSN
               valueFrom: { secretKeyRef: { name: identity-db, key: dsn } }`} lang="yaml" title="migrate-before-deploy Job" />
-  <aside>
-    <strong>Note — <code>migrate</code> subcommand.</strong> A binary
-    subcommand that runs the embedded migrations and exits
-    (<code>identity migrate</code>) is the clean way to drive mode B from the
-    image alone. Until it lands, run golang-migrate's CLI against the repo's
-    <code>internal/repo/postgres/migrations</code> directory with the same DSN,
-    or use mode A.
-  </aside>
+  <blockquote>
+    The <code>migrate</code> subcommand (<code>identity migrate</code>) runs the
+    embedded migrations and exits — it is the supported way to drive Mode B from
+    the image alone, as the Job above does. A typo'd subcommand exits non-zero
+    rather than starting the server, so a one-shot migrate Job never hangs.
+  </blockquote>
 
   <h2>Upgrading to a new release</h2>
   <ul>

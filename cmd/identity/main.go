@@ -49,6 +49,13 @@ func main() {
 		syncLogger(logger)
 		os.Exit(code)
 	}
+	if unknownSubcommand(os.Args) {
+		logger.Error("identity_unknown_subcommand",
+			zap.String("arg", os.Args[1]),
+			zap.String("usage", "identity [migrate]"))
+		syncLogger(logger)
+		os.Exit(2)
+	}
 
 	defer syncLogger(logger)
 

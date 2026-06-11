@@ -26,6 +26,24 @@ func TestMigrateRequested(t *testing.T) {
 	}
 }
 
+func TestUnknownSubcommand(t *testing.T) {
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"identity"}, false},
+		{[]string{"identity", "migrate"}, false},
+		{[]string{"identity", "serve"}, true},
+		{[]string{"identity", "migate"}, true},
+	}
+	for _, c := range cases {
+		if got := unknownSubcommand(c.args); got != c.want {
+			t.Errorf("unknownSubcommand(%v) = %v, want %v", c.args, got, c.want)
+		}
+	}
+}
+
 // TestRunMigrate_NoDSN_Returns1 exercises the command path without a
 // database: a missing Postgres DSN must yield a non-zero exit code, not a
 // panic.
