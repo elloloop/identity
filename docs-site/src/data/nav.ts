@@ -39,6 +39,7 @@ export const sidebarSections: NavSection[] = [
     title: "Installation",
     items: [
       { label: "Docker", href: `${BASE}/docs/installation/docker` },
+      { label: "Database & Migrations", href: `${BASE}/docs/installation/database-migrations` },
       { label: "Configuration", href: `${BASE}/docs/installation/configuration` },
       { label: "JWT Keys", href: `${BASE}/docs/installation/jwt-keys` },
     ],

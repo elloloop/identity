@@ -37,10 +37,21 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer syncLogger(logger)
 
 	opts := identityserver.OptionsFromEnv()
 	opts.Logger = logger
+
+	// `identity migrate` runs pending Postgres migrations and exits,
+	// without starting the server (the deploy-step path). It flushes the
+	// logger explicitly because os.Exit skips deferred calls.
+	if migrateRequested(os.Args) {
+		code := runMigrate(opts, logger)
+		syncLogger(logger)
+		os.Exit(code)
+	}
+
+	defer syncLogger(logger)
+
 	cfg := opts.Config
 
 	logger.Info(
