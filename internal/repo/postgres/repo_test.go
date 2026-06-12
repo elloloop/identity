@@ -167,6 +167,15 @@ func truncateAll(ctx context.Context, dsn string) error {
 			password_reset_tokens,
 			sessions,
 			refresh_tokens,
+			tenant_invitations,
+			tenant_memberships,
+			login_policies,
+			domains,
+			tenants,
+			project_auth_domains,
+			project_credentials,
+			platform_admins,
+			projects,
 			users
 		RESTART IDENTITY CASCADE`
 	_, err = pool.Exec(ctx, stmt)
