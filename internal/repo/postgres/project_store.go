@@ -205,6 +205,66 @@ func (s *ProjectStore) GetProjectByStorageScope(ctx context.Context, storageScop
 	return p, nil
 }
 
+// EnsureDefaultProject idempotently ensures the default Project exists,
+// mapped onto the given storage scope (typically GATEWAY_DEFAULT_TENANT_ID).
+// It is safe to call on every boot and from multiple instances at once: it
+// returns the existing project when one is already present (looked up by id,
+// then by storage scope), and otherwise creates it, tolerating a concurrent
+// creator (an ErrAlreadyExists race is resolved by re-reading the row).
+//
+// The default project is a logical control-plane entity that POINTS AT the
+// storage scope via StorageScopeID — it is not the same value as the storage
+// id, and the two must not be conflated.
+//
+// If the storage scope is already mapped to a project (storage_scope_id is
+// globally unique), that existing project is returned even when its id
+// differs from projectID — the scope binding wins and no second project is
+// created for the same scope.
+func (s *ProjectStore) EnsureDefaultProject(ctx context.Context, projectID, storageScopeID, name string) (*Project, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("%w: missing default project id", service.ErrInvalidArgument)
+	}
+	if storageScopeID == "" {
+		return nil, fmt.Errorf("%w: missing storage_scope_id", service.ErrInvalidArgument)
+	}
+	// Already present, by id or by the storage scope it maps onto?
+	if existing, err := s.GetProjectByID(ctx, projectID); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
+	}
+	if existing, err := s.GetProjectByStorageScope(ctx, storageScopeID); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
+	}
+	// Create it. A concurrent creator that inserted between the lookups above
+	// and this insert surfaces as ErrAlreadyExists; resolve the race by
+	// re-reading and returning the winner's row. Any error from that re-read
+	// is propagated, not masked behind the original conflict.
+	p := &Project{ID: projectID, StorageScopeID: storageScopeID, Name: name, Status: projectStatusActive}
+	if _, err := s.CreateProject(ctx, p); err != nil {
+		if !errors.Is(err, service.ErrAlreadyExists) {
+			return nil, err
+		}
+		if existing, gErr := s.GetProjectByID(ctx, projectID); gErr != nil {
+			return nil, gErr
+		} else if existing != nil {
+			return existing, nil
+		}
+		if existing, gErr := s.GetProjectByStorageScope(ctx, storageScopeID); gErr != nil {
+			return nil, gErr
+		} else if existing != nil {
+			return existing, nil
+		}
+		// ErrAlreadyExists yet neither lookup resolves the row (a different
+		// unique constraint, or the racing row was already removed) — surface
+		// the original conflict.
+		return nil, err
+	}
+	return p, nil
+}
+
 // ── project_credentials ───────────────────────────────────────────────
 
 // #nosec G101 -- this is a SQL column list (secret_hash is a column name),
