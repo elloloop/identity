@@ -80,7 +80,7 @@ func (tr *TenantResolver) middleware(next http.Handler) http.Handler {
 		resolved, ok := tr.pick(hostTenant, jwtTenant)
 		if !ok {
 			// host and jwt disagree — a cross-tenant token reuse.
-			writeTenantError(w, http.StatusForbidden, "permission_denied",
+			writeConnectError(w, http.StatusForbidden, "permission_denied",
 				"tenant mismatch between host and token")
 			return
 		}
@@ -106,7 +106,7 @@ func (tr *TenantResolver) middleware(next http.Handler) http.Handler {
 
 		// Authenticated request: a tenant must resolve.
 		if resolved == "" {
-			writeTenantError(w, http.StatusForbidden, "permission_denied",
+			writeConnectError(w, http.StatusForbidden, "permission_denied",
 				"unable to resolve tenant for request")
 			return
 		}
@@ -114,7 +114,7 @@ func (tr *TenantResolver) middleware(next http.Handler) http.Handler {
 		repo := tr.repoForTenant(resolved)
 		if repo == nil {
 			tr.logger.Error("tenant_repo_factory_nil", zap.String("tenant_id", resolved))
-			writeTenantError(w, http.StatusServiceUnavailable, "unavailable",
+			writeConnectError(w, http.StatusServiceUnavailable, "unavailable",
 				"tenant backend unavailable")
 			return
 		}
@@ -123,12 +123,12 @@ func (tr *TenantResolver) middleware(next http.Handler) http.Handler {
 		if err != nil {
 			tr.logger.Error("tenant_membership_check_failed",
 				zap.String("tenant_id", resolved), zap.Error(err))
-			writeTenantError(w, http.StatusServiceUnavailable, "unavailable",
+			writeConnectError(w, http.StatusServiceUnavailable, "unavailable",
 				"tenant membership check failed")
 			return
 		}
 		if !member {
-			writeTenantError(w, http.StatusForbidden, "permission_denied",
+			writeConnectError(w, http.StatusForbidden, "permission_denied",
 				"user is not a member of the resolved tenant")
 			return
 		}
@@ -161,7 +161,7 @@ func (tr *TenantResolver) serveWithScope(w http.ResponseWriter, r *http.Request,
 	repo := tr.repoForTenant(tenant)
 	if repo == nil {
 		tr.logger.Error("tenant_repo_factory_nil", zap.String("tenant_id", tenant))
-		writeTenantError(w, http.StatusServiceUnavailable, "unavailable", "tenant backend unavailable")
+		writeConnectError(w, http.StatusServiceUnavailable, "unavailable", "tenant backend unavailable")
 		return
 	}
 	ctx := service.WithTenantScope(r.Context(), tenantScope(tenant, repo))
@@ -254,10 +254,11 @@ func isTenantProvisioningPath(path string) bool {
 	return path == "/identity.IdentityService/OrganizationSignup"
 }
 
-// writeTenantError emits the same JSON error shape the auth middleware
+// writeConnectError emits the same JSON error shape the auth middleware
 // uses so Connect maps the HTTP status onto the matching RPC code
-// (403 → PermissionDenied, 503 → Unavailable).
-func writeTenantError(w http.ResponseWriter, status int, code, msg string) {
+// (401 → Unauthenticated, 403 → PermissionDenied, 503 → Unavailable). It
+// is shared by the tenant- and project-resolution middleware.
+func writeConnectError(w http.ResponseWriter, status int, code, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	http.Error(w, `{"code":"`+code+`","message":"`+msg+`"}`, status)
 }

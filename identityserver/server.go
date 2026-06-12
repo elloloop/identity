@@ -38,6 +38,7 @@ import (
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/repo"
+	"github.com/elloloop/identity/internal/service"
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
@@ -140,6 +141,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 
 	authRepo, dbAdapter := opts.Repo, opts.DB
+	var projectResolver service.ProjectResolver
 	if authRepo == nil || dbAdapter == nil {
 		built, buildErr := repo.Build(ctx, repo.Config{
 			Driver:              repo.Driver(cfg.RepoDriver),
@@ -154,6 +156,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 			return nil, fmt.Errorf("repo build: %w", buildErr)
 		}
 		authRepo, dbAdapter = built.Repository, built.DB
+		projectResolver = built.ProjectResolver()
 
 		// Seed the control-plane default project (postgres only; entdb/
 		// memory have no control plane, so built.ProjectStore is nil). The
@@ -207,6 +210,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		MetricsRegistry:     opts.MetricsRegistry,
 		TenantAdmin:         tenantAdmin,
 		RepositoryForTenant: repoForTenant,
+		ProjectResolver:     projectResolver,
 	})
 	if err != nil {
 		s.cleanupOnError(ctx)
