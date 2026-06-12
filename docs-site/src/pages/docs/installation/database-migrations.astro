@@ -56,6 +56,16 @@ import { Code } from "astro-expressive-code/components";
     the latest in order, then the service starts. It is idempotent — booting
     again is a no-op.
   </p>
+  <p>
+    After migrations are in place, the service seeds a control-plane
+    <strong>default project</strong> on every boot (idempotently): id
+    <code>GATEWAY_DEFAULT_PROJECT_ID</code> (default <code>default</code>),
+    mapped onto the <code>GATEWAY_DEFAULT_TENANT_ID</code> storage scope. If
+    you run migrations as a separate step rather than on boot, run them
+    <em>before</em> starting the server — otherwise boot fails fast with a hint
+    to run <code>identity migrate</code>, because the <code>projects</code>
+    table (migration <code>0013</code>) does not yet exist.
+  </p>
 
   <h2>How migrations work</h2>
   <ul>

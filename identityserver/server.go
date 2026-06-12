@@ -142,16 +142,31 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	authRepo, dbAdapter := opts.Repo, opts.DB
 	if authRepo == nil || dbAdapter == nil {
 		built, buildErr := repo.Build(ctx, repo.Config{
-			Driver:      repo.Driver(cfg.RepoDriver),
-			EntDBClient: entdbClient,
-			TenantID:    cfg.DefaultTenantID,
-			PostgresDSN: cfg.PostgresDSN,
+			Driver:              repo.Driver(cfg.RepoDriver),
+			EntDBClient:         entdbClient,
+			TenantID:            cfg.DefaultTenantID,
+			PostgresDSN:         cfg.PostgresDSN,
+			PostgresMaxConns:    cfg.PostgresMaxConns,
+			PostgresAutoMigrate: cfg.PostgresAutoMigrate,
 		}, logger)
 		if buildErr != nil {
 			s.cleanupOnError(ctx)
 			return nil, fmt.Errorf("repo build: %w", buildErr)
 		}
 		authRepo, dbAdapter = built.Repository, built.DB
+
+		// Seed the control-plane default project (postgres only; entdb/
+		// memory have no control plane, so built.ProjectStore is nil). The
+		// project is the zero-config isolation entity later slices pin
+		// requests to, and maps onto the DefaultTenantID storage scope. Its
+		// table comes from migration 0013, so a postgres deployment must
+		// have run `identity migrate` (or set GATEWAY_POSTGRES_AUTO_MIGRATE)
+		// before first boot — surfaced fail-fast below rather than as a
+		// confusing error on the first request.
+		if err := ensureDefaultProject(ctx, built, &cfg, logger); err != nil {
+			s.cleanupOnError(ctx)
+			return nil, err
+		}
 	}
 
 	idvProvider := opts.IDVProvider
@@ -199,6 +214,36 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	s.built = built
 	return s, nil
+}
+
+// defaultProjectName is the human-readable name stamped on the
+// auto-seeded default project.
+const defaultProjectName = "Default Project"
+
+// ensureDefaultProject idempotently seeds the control-plane default
+// project when identity built a postgres-backed repository. It is a no-op
+// for entdb/memory (built.ProjectStore is nil) and when
+// DefaultProjectID is explicitly blank. The project's id is
+// DefaultProjectID; it maps onto the DefaultTenantID storage scope. Any
+// error fails boot (fail-fast) with a hint to run migrations, since a
+// missing projects table means migration 0013 was never applied.
+func ensureDefaultProject(ctx context.Context, built *repo.Built, cfg *Config, logger *zap.Logger) error {
+	if built.ProjectStore == nil || cfg.DefaultProjectID == "" {
+		return nil
+	}
+	proj, err := built.ProjectStore.EnsureDefaultProject(
+		ctx, cfg.DefaultProjectID, cfg.DefaultTenantID, defaultProjectName,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"default project bootstrap (run `identity migrate` if the projects table is missing): %w",
+			err,
+		)
+	}
+	logger.Info("default_project_ensured",
+		zap.String("project_id", proj.ID),
+		zap.String("storage_scope_id", proj.StorageScopeID))
+	return nil
 }
 
 // Handler returns the identity HTTP handler: the full middleware chain

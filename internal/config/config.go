@@ -73,6 +73,14 @@ type Config struct {
 	// Tenant
 	DefaultTenantID string
 
+	// DefaultProjectID is the id of the control-plane Project the service
+	// seeds on boot (postgres driver) and pins zero-config requests to. It
+	// is a logical control-plane entity that MAPS ONTO the storage scope
+	// DefaultTenantID — the two are distinct values and must not be
+	// conflated. Driven by GATEWAY_DEFAULT_PROJECT_ID (default "default").
+	// Only the postgres driver has a control plane; entdb/memory ignore it.
+	DefaultProjectID string
+
 	// IdentityMode selects the per-deployment tenancy shape — "single"
 	// (one tenant for the whole deployment, B2C) or "multi" (one tenant
 	// per customer organisation, B2B). Driven by GATEWAY_IDENTITY_MODE.
@@ -425,8 +433,9 @@ func Load() *Config {
 		RepoDriver:   envStr("GATEWAY_REPO_DRIVER", "entdb"),
 		EntDBAddress: envStr("GATEWAY_ENTDB_ADDRESS", "entdb:50051"),
 
-		DefaultTenantID: envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
-		IdentityMode:    envStr("GATEWAY_IDENTITY_MODE", "single"),
+		DefaultTenantID:  envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
+		DefaultProjectID: envStr("GATEWAY_DEFAULT_PROJECT_ID", "default"),
+		IdentityMode:     envStr("GATEWAY_IDENTITY_MODE", "single"),
 
 		TenantHostBaseDomain:    envStr("GATEWAY_TENANT_HOST_BASE_DOMAIN", ""),
 		TenantResolutionSources: envStr("GATEWAY_TENANT_RESOLUTION_SOURCES", "host,jwt"),
