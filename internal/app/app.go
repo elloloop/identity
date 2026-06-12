@@ -24,6 +24,7 @@ import (
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/internal/app/ui"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/captcha"
 	"github.com/elloloop/identity/pkg/email"
@@ -367,6 +368,9 @@ func New(deps Deps) (*Built, error) {
 	mux := http.NewServeMux()
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
 	mux.Handle(path, svcHandler)
+
+	// Default auth UI (login/signup)
+	mux.Handle("/auth/", ui.Handler())
 
 	// Browser-facing hosted OAuth routes (#126). Registered only when
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS is non-empty; the headless
