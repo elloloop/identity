@@ -1,0 +1,183 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Database & Migrations">
+  <h1>Database &amp; Migrations</h1>
+  <p>
+    Identity's default backend is <strong>EntDB</strong> (tenant-shard-db),
+    where the storage layer owns the schema — those deployments have no SQL
+    migrations and can skip this page. <strong>This page applies when you run
+    Identity on the Postgres driver</strong>
+    (<code>GATEWAY_REPO_DRIVER=postgres</code>). On that driver Identity stores
+    its durable state in PostgreSQL, and the schema is managed by versioned,
+    embedded migrations applied with
+    <a href="https://github.com/golang-migrate/migrate">golang-migrate</a>. The
+    <code>.sql</code> files are compiled into the binary, so the image is
+    self-contained — operators never ship migration files separately.
+  </p>
+
+  <h2>Connection</h2>
+  <p>Three environment variables configure the datastore:</p>
+  <ul>
+    <li><code>GATEWAY_POSTGRES_DSN</code> — required. Standard libpq URL.</li>
+    <li><code>GATEWAY_POSTGRES_MAX_CONNS</code> — pool size. Default <code>25</code>.</li>
+    <li>
+      <code>GATEWAY_POSTGRES_AUTO_MIGRATE</code> — apply pending migrations on
+      boot. Default <code>false</code>.
+    </li>
+  </ul>
+  <Code code={`GATEWAY_POSTGRES_DSN="postgres://identity:secret@db:5432/identity?sslmode=require"`} lang="bash" />
+
+  <h2>First-time setup</h2>
+  <p>Three steps. The database starts empty; migrations create every table.</p>
+
+  <h3>1 — Create an empty database</h3>
+  <Code code={`createdb identity
+# or: CREATE DATABASE identity; with a dedicated, least-privileged role
+# that owns the schema (the migration runner needs DDL on this database).`} lang="bash" />
+
+  <h3>2 — Point identity at it</h3>
+  <Code code={`-e GATEWAY_POSTGRES_DSN="postgres://identity:secret@db:5432/identity?sslmode=require"`} lang="bash" />
+
+  <h3>3 — Apply the schema</h3>
+  <p>
+    Either let the service migrate on first boot, or run migrations as a
+    separate step (see <a href="#running-migrations">Running migrations</a>).
+    The simplest first run:
+  </p>
+  <Code code={`docker run --rm \\
+  -e GATEWAY_POSTGRES_DSN="postgres://identity:secret@db:5432/identity?sslmode=require" \\
+  -e GATEWAY_POSTGRES_AUTO_MIGRATE=true \\
+  ghcr.io/elloloop/identity:latest`} lang="bash" title="first boot — creates the full schema" />
+  <p>
+    On this boot the runner applies every migration from <code>0001</code> to
+    the latest in order, then the service starts. It is idempotent — booting
+    again is a no-op.
+  </p>
+
+  <h2>How migrations work</h2>
+  <ul>
+    <li>
+      <strong>Versioned + forward-ordered.</strong> Files are numbered
+      (<code>0001_init.up.sql</code>, <code>0002_…</code>, …) with a matching
+      <code>.down.sql</code>. They apply strictly in order.
+    </li>
+    <li>
+      <strong>Tracked.</strong> A <code>schema_migrations</code> table records
+      the current version, so only <em>pending</em> migrations run on any boot.
+    </li>
+    <li>
+      <strong>Idempotent.</strong> Re-running against an up-to-date database
+      does nothing (<code>ErrNoChange</code> is swallowed).
+    </li>
+    <li>
+      <strong>Multi-replica safe.</strong> golang-migrate takes a Postgres
+      advisory lock for the duration of a run, so if ten replicas boot at once
+      exactly one applies the migrations and the rest wait, then no-op. No
+      double-apply, no race.
+    </li>
+  </ul>
+
+  <h2 id="running-migrations">Running migrations</h2>
+  <p>Two supported modes — pick one per environment.</p>
+
+  <h3>A — Auto on boot (single-container / dev)</h3>
+  <p>
+    Set <code>GATEWAY_POSTGRES_AUTO_MIGRATE=true</code>. The service migrates
+    before serving traffic. Simplest, and safe even with several replicas
+    (the advisory lock serialises them). Recommended for single-container
+    deployments and local/dev.
+  </p>
+
+  <h3>B — Explicit step (production / fleets)</h3>
+  <p>
+    Keep <code>GATEWAY_POSTGRES_AUTO_MIGRATE=false</code> and run migrations
+    <em>once, before</em> rolling out the new application version, so the schema
+    is ready before any new-version replica serves. In Kubernetes this is a
+    <code>Job</code> (or an init container) gated ahead of the rollout:
+  </p>
+  <Code code={`apiVersion: batch/v1
+kind: Job
+metadata:
+  name: identity-migrate
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ghcr.io/elloloop/identity:1.2.0   # the version you are deploying
+          args: ["migrate"]                          # run migrations, then exit
+          env:
+            - name: GATEWAY_POSTGRES_DSN
+              valueFrom: { secretKeyRef: { name: identity-db, key: dsn } }`} lang="yaml" title="migrate-before-deploy Job" />
+  <blockquote>
+    The <code>migrate</code> subcommand (<code>identity migrate</code>) runs the
+    embedded migrations and exits — it is the supported way to drive Mode B from
+    the image alone, as the Job above does. A typo'd subcommand exits non-zero
+    rather than starting the server, so a one-shot migrate Job never hangs.
+  </blockquote>
+
+  <h2>Upgrading to a new release</h2>
+  <ul>
+    <li>
+      A release that changes the schema ships <strong>new</strong> numbered
+      migration files. Older ones never change.
+    </li>
+    <li>
+      Each release's notes carry a <strong>Migrations</strong> line: "none", or
+      the versions added and whether any are long-running / destructive.
+    </li>
+    <li>
+      On upgrade, only the <em>pending</em> migrations apply (mode A on boot, or
+      mode B as your step); already-applied versions are skipped.
+    </li>
+    <li>
+      Migrations are <strong>forward-only</strong> in production. <code>.down</code>
+      files exist for local rollback and tests; prefer a forward fix in prod.
+    </li>
+  </ul>
+
+  <h2>Data migrations — your existing data is preserved</h2>
+  <p>
+    Migrations run arbitrary SQL, so a change that must <em>transform</em>
+    existing rows ships the data step in the same migration as the schema step.
+    Existing data is updated in place, never dropped. The convention for a
+    change that touches live data is <strong>expand → backfill → contract</strong>:
+  </p>
+  <Code code={`-- 0013_add_email_verified.up.sql  (expand)
+ALTER TABLE users ADD COLUMN email_verified boolean NOT NULL DEFAULT false;
+
+-- backfill existing rows in the same migration
+UPDATE users SET email_verified = true
+WHERE id IN (SELECT user_id FROM email_verification_tokens WHERE consumed_at <> 0);`} lang="sql" title="schema + data in one migration" />
+  <p>For a <strong>zero-downtime</strong> change to a column live code reads, split it across releases so the old and new app versions both work during the rollout:</p>
+  <ol>
+    <li><strong>Expand</strong> (release N): add the new column/table, nullable; start writing it.</li>
+    <li><strong>Backfill</strong> (release N, batched): populate existing rows.</li>
+    <li><strong>Contract</strong> (release N+1, after every replica is on N): switch reads, then drop the old column.</li>
+  </ol>
+  <p>
+    Before a destructive or long-running production migration: <strong>take a
+    backup / snapshot</strong> (e.g. <code>pg_dump</code> or a volume snapshot),
+    and run large backfills in batches to avoid long table locks.
+  </p>
+
+  <h2>The Projects / Tenants migration (redesign)</h2>
+  <p>
+    When the Project / Tenant / Domain model lands it arrives as ordinary
+    migrations, and existing single-tenant data is preserved, not reset:
+  </p>
+  <ul>
+    <li>a <strong>default Project</strong> row is created, mapped to your current <code>GATEWAY_DEFAULT_TENANT_ID</code> storage scope;</li>
+    <li><code>project_id</code> is <strong>backfilled</strong> on every existing row to that default Project;</li>
+    <li><strong>Tenants</strong> are formed (latent) from the email domains already present in <code>users</code>, skipping public providers;</li>
+    <li>the retired <code>organizations</code> / <code>organization_memberships</code> tables are exported for the workspace service, then dropped.</li>
+  </ul>
+  <p>
+    It is a standard expand-backfill-contract sequence — your users, tokens,
+    passkeys, and audit history carry forward unchanged.
+  </p>
+</DocsLayout>
