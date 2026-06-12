@@ -29,6 +29,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.DefaultTenantID != "local" {
 		t.Errorf("DefaultTenantID: want local, got %q", cfg.DefaultTenantID)
 	}
+	if cfg.DefaultProjectID != "default" {
+		t.Errorf("DefaultProjectID: want default, got %q", cfg.DefaultProjectID)
+	}
 	if cfg.JWTExpirySeconds != 900 {
 		t.Errorf("JWTExpirySeconds: want 900, got %d", cfg.JWTExpirySeconds)
 	}
@@ -93,6 +96,7 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_GRPC_PORT", "9999")
 	t.Setenv("GATEWAY_ENTDB_ADDRESS", "custom-entdb:50055")
 	t.Setenv("GATEWAY_DEFAULT_TENANT_ID", "prod-tenant")
+	t.Setenv("GATEWAY_DEFAULT_PROJECT_ID", "prod-project")
 	t.Setenv("GATEWAY_JWT_EXPIRY_SECONDS", "1800")
 	t.Setenv("GATEWAY_AUTH_ALLOW_LOCAL", "false")
 	t.Setenv("GATEWAY_PASSWORD_SIGNUP_ENABLED", "false")
@@ -110,6 +114,9 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	}
 	if cfg.DefaultTenantID != "prod-tenant" {
 		t.Errorf("DefaultTenantID: want prod-tenant, got %q", cfg.DefaultTenantID)
+	}
+	if cfg.DefaultProjectID != "prod-project" {
+		t.Errorf("DefaultProjectID: want prod-project, got %q", cfg.DefaultProjectID)
 	}
 	if cfg.JWTExpirySeconds != 1800 {
 		t.Errorf("JWTExpirySeconds: want 1800, got %d", cfg.JWTExpirySeconds)

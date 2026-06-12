@@ -21,6 +21,10 @@ func TestBuildMemoryDriver(t *testing.T) {
 	if built == nil || built.Repository == nil || built.DB == nil {
 		t.Fatalf("Build memory returned incomplete result: %#v", built)
 	}
+	// The control plane is postgres-only; memory has none.
+	if built.ProjectStore != nil {
+		t.Errorf("Build memory: ProjectStore = %v, want nil", built.ProjectStore)
+	}
 }
 
 func TestBuildMemoryDriver_AcceptsExplicitLogger(t *testing.T) {
@@ -90,5 +94,9 @@ func TestBuild_EntDBHappyPath(t *testing.T) {
 	}
 	if built == nil || built.Repository == nil || built.DB == nil {
 		t.Fatalf("Build entdb returned incomplete result: %+v", built)
+	}
+	// The control plane is postgres-only; entdb has none.
+	if built.ProjectStore != nil {
+		t.Errorf("Build entdb: ProjectStore = %v, want nil", built.ProjectStore)
 	}
 }

@@ -25,6 +25,7 @@ import { Code } from "astro-expressive-code/components";
     <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
     <tr><td><code>GATEWAY_ENTDB_ADDRESS</code></td><td><code>entdb:50051</code></td><td>EntDB gRPC endpoint</td></tr>
     <tr><td><code>GATEWAY_DEFAULT_TENANT_ID</code></td><td><code>local</code></td><td>Tenant ID used for every operation; clients passing a different one are rejected</td></tr>
+    <tr><td><code>GATEWAY_DEFAULT_PROJECT_ID</code></td><td><code>default</code></td><td>Postgres only. ID of the control-plane project seeded on first boot, mapped onto <code>GATEWAY_DEFAULT_TENANT_ID</code>. The EntDB driver has no control plane and ignores this.</td></tr>
   </table>
 
   <h2>JWT</h2>

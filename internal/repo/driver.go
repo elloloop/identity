@@ -58,6 +58,13 @@ type Config struct {
 type Built struct {
 	Repository service.Repository
 	DB         service.DB
+
+	// ProjectStore is the control-plane registry store. It is non-nil
+	// ONLY for the postgres driver — projects are a control-plane concern
+	// and entdb/memory have no control plane. The composition root uses it
+	// to seed the default project on boot. It shares Repository's pool, so
+	// closing the repository releases it too; do not close it separately.
+	ProjectStore *pgrepo.ProjectStore
 }
 
 // Build returns a Built configured per cfg.Driver.
@@ -110,8 +117,9 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		}
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
 		return &Built{
-			Repository: pgRepo,
-			DB:         pgRepo,
+			Repository:   pgRepo,
+			DB:           pgRepo,
+			ProjectStore: pgrepo.NewProjectStore(pgRepo),
 		}, nil
 	default:
 		return nil, fmt.Errorf("repo: Build: unknown driver %q", cfg.Driver)
