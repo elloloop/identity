@@ -67,6 +67,18 @@ type Built struct {
 	ProjectStore *pgrepo.ProjectStore
 }
 
+// ProjectResolver returns the control-plane project resolver as a
+// driver-agnostic interface, or a true nil when this build has no control
+// plane (entdb/memory). It exists so callers avoid the typed-nil trap:
+// assigning a nil *ProjectStore straight into a service.ProjectResolver
+// variable yields a non-nil interface wrapping a nil pointer.
+func (b *Built) ProjectResolver() service.ProjectResolver {
+	if b.ProjectStore == nil {
+		return nil
+	}
+	return b.ProjectStore
+}
+
 // Build returns a Built configured per cfg.Driver.
 func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) {
 	if logger == nil {

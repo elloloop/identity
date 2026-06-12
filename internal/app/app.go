@@ -62,6 +62,14 @@ type Deps struct {
 	// in-memory Repo keyed on tenant id.
 	RepositoryForTenant service.RepositoryForTenant
 
+	// ProjectResolver resolves a request's control-plane project from its
+	// credential key or Host header (see middleware.NewProjectResolver).
+	// Non-nil only for the postgres driver; when nil the project-resolution
+	// middleware pins every request to the configured default project. The
+	// production binary wires the postgres control-plane store; tests pass
+	// a fake or nil.
+	ProjectResolver service.ProjectResolver
+
 	// TOTPRecoveryPepper is the HMAC-SHA-256 key used to hash and
 	// verify recovery codes. Must be >= totp.MinRecoveryPepperBytes
 	// bytes long; the binary refuses to start otherwise.
@@ -389,13 +397,17 @@ func New(deps Deps) (*Built, error) {
 	}
 
 	// Order (outermost runs first on request path):
-	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → auth → tenant → metrics → Connect
+	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → project → auth → tenant → metrics → Connect
 	// client-IP must precede rate-limit (the limiter keys on the
 	// resolved IP) and health must precede client-IP so liveness probes
-	// from kubelets cannot be rate-limited. The tenant resolver sits
+	// from kubelets cannot be rate-limited. The project resolver sits just
+	// outside auth so the resolved project is available to auth/tenant and
+	// the service layer (it does not depend on the authenticated user — it
+	// keys on the credential header or Host). The tenant resolver sits
 	// just inside auth so it can read the verified user-id / tenant
 	// headers, and just outside metrics so the resolved-tenant rejection
-	// is counted. In mode=single it is an identity pass-through.
+	// is counted. In mode=single the tenant resolver is an identity
+	// pass-through; the project resolver pins the default project.
 	// metrics sits just outside the Connect mux so it observes every
 	// RPC's final status, including any failure synthesized by the
 	// otelconnect interceptor.
@@ -405,6 +417,9 @@ func New(deps Deps) (*Built, error) {
 	chain = middleware.SessionAuthMiddleware(
 		deps.Signer, authExpectedTenant, deps.Config.JWTAudience,
 		deps.Config.JWTRequireAudience, sessionCache,
+	)(chain)
+	chain = middleware.NewProjectResolver(
+		deps.Config.DefaultProjectID, deps.Config.DefaultTenantID, deps.ProjectResolver, logger,
 	)(chain)
 	chain = middleware.JWKSMiddleware(deps.Signer)(chain)
 	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)

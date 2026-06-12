@@ -135,6 +135,99 @@ func runEnsureDefaultProjectSmoke(t *testing.T, dsn string) {
 	require.Equal(t, "default", winner.ID)
 }
 
+// TestProjectResolver_Smoke runs the service.ProjectResolver round-trip
+// against a live Postgres pointed to by GATEWAY_TEST_POSTGRES_DSN (CI's
+// coverage job), skipping when unset. The dockerpostgres container test
+// runs the same body locally.
+func TestProjectResolver_Smoke(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping ProjectResolver smoke test")
+	}
+	runProjectResolverSmoke(t, dsn)
+}
+
+// runProjectResolverSmoke asserts credential- and hostname-based project
+// resolution, including the miss cases the middleware relies on: unknown
+// key/host, revoked credential, and suspended project all resolve to
+// (nil, nil) rather than an error.
+func runProjectResolverSmoke(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	store := newProjectStore(ctx, t, dsn)
+
+	// Active project with an active credential and a serving hostname.
+	projID, err := store.CreateProject(ctx, &Project{StorageScopeID: "scope-live", Name: "Live"})
+	require.NoError(t, err)
+	credID, err := store.CreateProjectCredential(ctx, &ProjectCredential{
+		ProjectID: projID, Kind: "publishable", PublicID: "pk_live",
+	})
+	require.NoError(t, err)
+	_, err = store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
+		ProjectID: projID, Hostname: "auth.live.test", IsPrimary: true,
+	})
+	require.NoError(t, err)
+
+	// ── credential resolution ───────────────────────────────────────
+	got, err := store.ResolveByCredential(ctx, "pk_live")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, projID, got.ID)
+	require.Equal(t, "scope-live", got.StorageScopeID)
+
+	// Unknown / blank key → clean miss.
+	miss, err := store.ResolveByCredential(ctx, "pk_unknown")
+	require.NoError(t, err)
+	require.Nil(t, miss)
+	miss, err = store.ResolveByCredential(ctx, "")
+	require.NoError(t, err)
+	require.Nil(t, miss)
+
+	// Revoked credential → miss (a revoked key must not resolve).
+	require.NoError(t, store.RevokeProjectCredential(ctx, credID, 0))
+	miss, err = store.ResolveByCredential(ctx, "pk_live")
+	require.NoError(t, err)
+	require.Nil(t, miss, "a revoked credential must not resolve a project")
+
+	// ── hostname resolution (case-insensitive) ──────────────────────
+	got, err = store.ResolveByHostname(ctx, "AUTH.LIVE.TEST")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, projID, got.ID)
+
+	// Unknown / blank host → clean miss.
+	miss, err = store.ResolveByHostname(ctx, "nope.test")
+	require.NoError(t, err)
+	require.Nil(t, miss)
+	miss, err = store.ResolveByHostname(ctx, "")
+	require.NoError(t, err)
+	require.Nil(t, miss)
+
+	// ── suspended project → miss on both paths ──────────────────────
+	suspID, err := store.CreateProject(ctx, &Project{
+		StorageScopeID: "scope-susp", Name: "Suspended", Status: "suspended",
+	})
+	require.NoError(t, err)
+	_, err = store.CreateProjectCredential(ctx, &ProjectCredential{
+		ProjectID: suspID, Kind: "publishable", PublicID: "pk_susp",
+	})
+	require.NoError(t, err)
+	_, err = store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
+		ProjectID: suspID, Hostname: "auth.susp.test", IsPrimary: true,
+	})
+	require.NoError(t, err)
+
+	miss, err = store.ResolveByCredential(ctx, "pk_susp")
+	require.NoError(t, err)
+	require.Nil(t, miss, "a suspended project must not resolve by credential")
+	miss, err = store.ResolveByHostname(ctx, "auth.susp.test")
+	require.NoError(t, err)
+	require.Nil(t, miss, "a suspended project must not resolve by hostname")
+}
+
 // runProjectStoreSmoke is the shared driver-specific body: it wipes the
 // control-plane tables, builds the store, and asserts every round-trip plus
 // every control-plane uniqueness rule from migration 0013. truncateAll runs
