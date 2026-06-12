@@ -62,3 +62,13 @@ func TestProjectStore_Container(t *testing.T) {
 	dsn := startPostgresContainer(ctx, t)
 	runProjectStoreSmoke(t, dsn)
 }
+
+// TestProjectStore_EnsureDefaultProject_Container runs the default-project
+// bootstrap body against a throwaway Postgres container.
+func TestProjectStore_EnsureDefaultProject_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runEnsureDefaultProjectSmoke(t, dsn)
+}

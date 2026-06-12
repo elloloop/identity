@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,6 +45,94 @@ func TestProjectStore_Smoke(t *testing.T) {
 		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping ProjectStore smoke test")
 	}
 	runProjectStoreSmoke(t, dsn)
+}
+
+// TestProjectStore_EnsureDefaultProject_Smoke runs the default-project
+// bootstrap against a live Postgres pointed to by GATEWAY_TEST_POSTGRES_DSN
+// (CI's coverage job), skipping when unset. The dockerpostgres container test
+// runs the same body locally.
+func TestProjectStore_EnsureDefaultProject_Smoke(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping EnsureDefaultProject smoke test")
+	}
+	runEnsureDefaultProjectSmoke(t, dsn)
+}
+
+// runEnsureDefaultProjectSmoke asserts EnsureDefaultProject is idempotent,
+// resolves an occupied storage scope to the existing project (even under a
+// different id), and validates its arguments.
+func runEnsureDefaultProjectSmoke(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	store := newProjectStore(ctx, t, dsn)
+
+	// First call creates the default project mapped onto the storage scope.
+	p1, err := store.EnsureDefaultProject(ctx, "default", "local", "Default Project")
+	require.NoError(t, err)
+	require.NotNil(t, p1)
+	require.Equal(t, "default", p1.ID)
+	require.Equal(t, "local", p1.StorageScopeID)
+	require.Equal(t, projectStatusActive, p1.Status)
+
+	// Idempotent: a second identical call returns the same row, not a duplicate.
+	p2, err := store.EnsureDefaultProject(ctx, "default", "local", "Default Project")
+	require.NoError(t, err)
+	require.Equal(t, p1.ID, p2.ID)
+
+	// A different id but the same storage scope resolves the existing project
+	// (storage_scope_id is globally unique) rather than failing or duplicating.
+	p3, err := store.EnsureDefaultProject(ctx, "other-id", "local", "Other")
+	require.NoError(t, err)
+	require.Equal(t, p1.ID, p3.ID)
+
+	// Idempotent again after the existing project is found by id (not scope).
+	p4, err := store.EnsureDefaultProject(ctx, "default", "other-scope", "Default Project")
+	require.NoError(t, err)
+	require.Equal(t, p1.ID, p4.ID)
+	require.Equal(t, "local", p4.StorageScopeID, "the id lookup wins; the scope arg does not rebind")
+
+	// Validation guards.
+	_, err = store.EnsureDefaultProject(ctx, "", "local", "")
+	require.ErrorIs(t, err, service.ErrInvalidArgument, "empty project id")
+	_, err = store.EnsureDefaultProject(ctx, "default", "", "")
+	require.ErrorIs(t, err, service.ErrInvalidArgument, "empty storage scope")
+
+	// A dead context surfaces the lookup error rather than swallowing it.
+	dead, cancelDead := context.WithCancel(ctx)
+	cancelDead()
+	_, err = store.EnsureDefaultProject(dead, "default", "local", "")
+	require.Error(t, err, "a cancelled context must surface the lookup error")
+
+	// Concurrent boot: many instances calling at once on a clean scope must
+	// converge on a single row — exactly one wins the insert, the rest resolve
+	// the ErrAlreadyExists race by re-reading. None errors; all agree.
+	require.NoError(t, truncateAll(ctx, dsn))
+	const racers = 8
+	var wg sync.WaitGroup
+	got := make([]*Project, racers)
+	errs := make([]error, racers)
+	for i := range racers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			got[i], errs[i] = store.EnsureDefaultProject(ctx, "default", "race-scope", "Default Project")
+		}(i)
+	}
+	wg.Wait()
+	for i := range racers {
+		require.NoError(t, errs[i], "racer %d", i)
+		require.NotNil(t, got[i], "racer %d", i)
+		require.Equal(t, "default", got[i].ID, "racer %d resolved a different project", i)
+	}
+	// Exactly one project row exists for the contended scope.
+	winner, err := store.GetProjectByStorageScope(ctx, "race-scope")
+	require.NoError(t, err)
+	require.NotNil(t, winner)
+	require.Equal(t, "default", winner.ID)
 }
 
 // runProjectStoreSmoke is the shared driver-specific body: it wipes the
