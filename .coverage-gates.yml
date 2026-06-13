@@ -6,6 +6,10 @@ include:
 
 packages:
   internal/app: 90
+  # ui.Handler's only uncovered statement is the fs.Sub panic, which cannot
+  # trigger for a build-time embed (the test covers the served path). 75 is
+  # the achievable max without forcing unreachable defensive code.
+  internal/app/ui: 75
   internal/config: 98
   internal/connect: 94
   internal/middleware: 98
