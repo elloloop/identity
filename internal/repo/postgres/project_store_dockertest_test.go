@@ -92,3 +92,13 @@ func TestTenantDomainStore_Container(t *testing.T) {
 	dsn := startPostgresContainer(ctx, t)
 	runTenantDomainSmoke(t, dsn)
 }
+
+// TestLoginPolicyStore_Container runs the login-policy store body against a
+// throwaway Postgres container.
+func TestLoginPolicyStore_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runLoginPolicySmoke(t, dsn)
+}
