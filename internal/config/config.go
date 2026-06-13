@@ -301,6 +301,15 @@ type Config struct {
 	// Default email domain
 	DefaultEmailDomain string
 
+	// PublicEmailDomains extends the built-in set of consumer/public email
+	// providers (gmail, outlook, yahoo, …) used by IsPublicEmailDomain. A
+	// verified email under a public domain does NOT imply company
+	// affiliation, so a tenant is never auto-formed from one. Comma-
+	// separated; entries are punycode-canonicalised. Driven by
+	// GATEWAY_PUBLIC_EMAIL_DOMAINS (default empty — the built-in set
+	// already covers the major global providers).
+	PublicEmailDomains string
+
 	// CORS
 	AllowedOrigins string
 
@@ -525,6 +534,7 @@ func Load() *Config {
 		LoginLockoutSeconds:    envInt("GATEWAY_LOGIN_LOCKOUT_SECONDS", 900),
 
 		DefaultEmailDomain: envStr("GATEWAY_DEFAULT_EMAIL_DOMAIN", "glassa.work"),
+		PublicEmailDomains: envStr("GATEWAY_PUBLIC_EMAIL_DOMAINS", ""),
 
 		AllowedOrigins: envStr("GATEWAY_ALLOWED_ORIGINS", "http://localhost:9002,http://localhost:3000"),
 

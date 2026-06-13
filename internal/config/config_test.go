@@ -32,6 +32,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.DefaultProjectID != "default" {
 		t.Errorf("DefaultProjectID: want default, got %q", cfg.DefaultProjectID)
 	}
+	if cfg.PublicEmailDomains != "" {
+		t.Errorf("PublicEmailDomains: want empty default, got %q", cfg.PublicEmailDomains)
+	}
 	if cfg.JWTExpirySeconds != 900 {
 		t.Errorf("JWTExpirySeconds: want 900, got %d", cfg.JWTExpirySeconds)
 	}
