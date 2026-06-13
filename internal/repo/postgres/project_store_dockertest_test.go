@@ -102,3 +102,13 @@ func TestLoginPolicyStore_Container(t *testing.T) {
 	dsn := startPostgresContainer(ctx, t)
 	runLoginPolicySmoke(t, dsn)
 }
+
+// TestMembershipStore_Container runs the membership + invitation store body
+// against a throwaway Postgres container.
+func TestMembershipStore_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runMembershipSmoke(t, dsn)
+}
