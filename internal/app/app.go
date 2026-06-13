@@ -427,7 +427,8 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.JWTRequireAudience, sessionCache,
 	)(chain)
 	chain = middleware.NewProjectResolver(
-		deps.Config.DefaultProjectID, deps.Config.DefaultTenantID, deps.ProjectResolver, logger,
+		deps.Config.DefaultProjectID, deps.Config.DefaultTenantID,
+		deps.Config.DefaultPrimaryAuthDomain(), deps.ProjectResolver, logger,
 	)(chain)
 	chain = middleware.JWKSMiddleware(deps.Signer)(chain)
 	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)

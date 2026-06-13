@@ -28,7 +28,7 @@ func (s *ProjectStore) ResolveByCredential(ctx context.Context, publicID string)
 	if err != nil {
 		return nil, err
 	}
-	return activeResolved(proj), nil
+	return s.resolved(ctx, proj)
 }
 
 // ResolveByHostname resolves the active project a serving hostname maps
@@ -39,15 +39,41 @@ func (s *ProjectStore) ResolveByHostname(ctx context.Context, hostname string) (
 	if err != nil {
 		return nil, err
 	}
-	return activeResolved(proj), nil
+	return s.resolved(ctx, proj)
 }
 
-// activeResolved maps an active project to a ResolvedProject, or returns
-// nil for a nil or suspended project — a resolution miss. A suspended
-// project must never resolve a request.
-func activeResolved(p *Project) *service.ResolvedProject {
+// resolved maps an active project to a ResolvedProject, loading its primary
+// auth-domain (for branded link building). It returns nil for a nil or
+// suspended project — a resolution miss; a suspended project must never
+// resolve a request.
+func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.ResolvedProject, error) {
 	if p == nil || p.Status != projectStatusActive {
-		return nil
+		return nil, nil
 	}
-	return &service.ResolvedProject{ID: p.ID, StorageScopeID: p.StorageScopeID}
+	primary, err := s.primaryAuthHostname(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &service.ResolvedProject{
+		ID:                p.ID,
+		StorageScopeID:    p.StorageScopeID,
+		PrimaryAuthDomain: primary,
+	}, nil
+}
+
+// primaryAuthHostname returns the project's primary serving hostname, or ""
+// when it has none.
+func (s *ProjectStore) primaryAuthHostname(ctx context.Context, projectID string) (string, error) {
+	const q = `SELECT hostname FROM project_auth_domains
+		WHERE project_id = $1 AND is_primary
+		LIMIT 1`
+	var hostname string
+	err := s.pool.QueryRow(ctx, q, projectID).Scan(&hostname)
+	if noRows(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", wrapPgErr("primaryAuthHostname", err)
+	}
+	return hostname, nil
 }

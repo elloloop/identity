@@ -60,7 +60,7 @@ const (
 func serve(t *testing.T, resolver service.ProjectResolver, defaultID, defaultScope string, mutate func(*http.Request)) (*httptest.ResponseRecorder, *projectScopeCapture) {
 	t.Helper()
 	cap := &projectScopeCapture{}
-	h := NewProjectResolver(defaultID, defaultScope, resolver, nil)(cap.handler())
+	h := NewProjectResolver(defaultID, defaultScope, "", resolver, nil)(cap.handler())
 	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
 	if mutate != nil {
 		mutate(req)
@@ -80,6 +80,38 @@ func TestProjectResolver_NilResolver_PinsDefault(t *testing.T) {
 	require.NotNil(t, cap.scope)
 	assert.Equal(t, defProjectID, cap.scope.ProjectID)
 	assert.Equal(t, defScopeID, cap.scope.StorageScopeID)
+}
+
+// The default-project pin carries the configured default primary
+// auth-domain, so branded links work zero-config without a per-request DB
+// lookup.
+func TestProjectResolver_DefaultPin_CarriesPrimaryAuthDomain(t *testing.T) {
+	cap := &projectScopeCapture{}
+	h := NewProjectResolver(defProjectID, defScopeID, "auth.appa.com", nil, nil)(cap.handler())
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, "auth.appa.com", cap.scope.PrimaryAuthDomain)
+}
+
+// A resolved project carries the primary auth-domain the resolver returned.
+func TestProjectResolver_Resolved_CarriesPrimaryAuthDomain(t *testing.T) {
+	resolver := &fakeProjectResolver{
+		byHost: map[string]*service.ResolvedProject{
+			"auth.acme.test": {ID: "proj-acme", StorageScopeID: "scope-acme", PrimaryAuthDomain: "auth.acme.test"},
+		},
+	}
+	rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
+		r.Host = "auth.acme.test"
+	})
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, "proj-acme", cap.scope.ProjectID)
+	assert.Equal(t, "auth.acme.test", cap.scope.PrimaryAuthDomain)
 }
 
 // With neither a resolver nor a default project, the middleware is a no-op

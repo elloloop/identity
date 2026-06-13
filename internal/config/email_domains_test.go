@@ -23,6 +23,13 @@ func TestDefaultProjectAuthDomainList(t *testing.T) {
 		if got := c.DefaultProjectAuthDomainList(); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("DefaultProjectAuthDomainList(%q) = %v, want %v", tc.in, got, tc.want)
 		}
+		wantPrimary := ""
+		if len(tc.want) > 0 {
+			wantPrimary = tc.want[0]
+		}
+		if got := c.DefaultPrimaryAuthDomain(); got != wantPrimary {
+			t.Errorf("DefaultPrimaryAuthDomain(%q) = %q, want %q", tc.in, got, wantPrimary)
+		}
 	}
 }
 

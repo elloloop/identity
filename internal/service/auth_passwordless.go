@@ -230,7 +230,7 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 		return nil
 	}
 
-	link := fmt.Sprintf("%s/auth/magic-link?token=%s", s.appBaseURL(), rawToken)
+	link := fmt.Sprintf("%s/auth/magic-link?token=%s", s.appBaseURL(ctx), rawToken)
 	html, text, err := email.Render(email.TemplateMagicLink, map[string]any{
 		"Link":      link,
 		"ExpiresIn": formatExpiresIn(ttl),
