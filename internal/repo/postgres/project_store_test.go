@@ -39,6 +39,61 @@ func newProjectStore(ctx context.Context, t *testing.T, dsn string) *ProjectStor
 // it skips when unset so the default unit-test job passes without a backend.
 // The testcontainers-driven TestProjectStore_Container (dockerpostgres tag)
 // runs the same body locally without a pre-provisioned database.
+func TestProjectStore_EnsureAuthDomain_Smoke(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping EnsureAuthDomain smoke test")
+	}
+	runEnsureAuthDomainSmoke(t, dsn)
+}
+
+// runEnsureAuthDomainSmoke asserts the idempotent, boot-time auth-domain
+// seed: first call creates a verified primary domain; re-seeding is a no-op;
+// the host resolves to its project; and seeding the same host for a
+// different project is rejected.
+func runEnsureAuthDomainSmoke(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	store := newProjectStore(ctx, t, dsn)
+
+	projA, err := store.CreateProject(ctx, &Project{StorageScopeID: "scope-ead-a", Name: "A"})
+	require.NoError(t, err)
+	projB, err := store.CreateProject(ctx, &Project{StorageScopeID: "scope-ead-b", Name: "B"})
+	require.NoError(t, err)
+
+	// Seed a verified primary auth-domain.
+	require.NoError(t, store.EnsureAuthDomain(ctx, projA, "auth.appa.test", true, 12345))
+	resolved, err := store.GetProjectByAuthHostname(ctx, "auth.appa.test")
+	require.NoError(t, err)
+	require.NotNil(t, resolved)
+	require.Equal(t, projA, resolved.ID)
+
+	// Idempotent: re-seeding the same host for the same project is a no-op.
+	require.NoError(t, store.EnsureAuthDomain(ctx, projA, "AUTH.APPA.TEST", true, 99999))
+	domains, err := store.ListProjectAuthDomains(ctx, projA)
+	require.NoError(t, err)
+	require.Len(t, domains, 1, "re-seeding must not duplicate the domain")
+	require.True(t, domains[0].IsPrimary)
+	require.Equal(t, int64(12345), domains[0].VerifiedAtMs, "re-seed does not overwrite the first seed")
+
+	// A second, non-primary host for the same project.
+	require.NoError(t, store.EnsureAuthDomain(ctx, projA, "login.appa.test", false, 12345))
+	domains, err = store.ListProjectAuthDomains(ctx, projA)
+	require.NoError(t, err)
+	require.Len(t, domains, 2)
+
+	// Seeding the same host for a DIFFERENT project is rejected.
+	err = store.EnsureAuthDomain(ctx, projB, "auth.appa.test", true, 12345)
+	require.Error(t, err, "a host owned by another project must not be re-seeded")
+
+	// Argument validation.
+	require.ErrorIs(t, store.EnsureAuthDomain(ctx, "", "h.test", false, 0), service.ErrInvalidArgument)
+	require.ErrorIs(t, store.EnsureAuthDomain(ctx, projA, "", false, 0), service.ErrInvalidArgument)
+}
+
 func TestProjectStore_Smoke(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
 	if dsn == "" {

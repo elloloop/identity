@@ -81,6 +81,17 @@ type Config struct {
 	// Only the postgres driver has a control plane; entdb/memory ignore it.
 	DefaultProjectID string
 
+	// DefaultProjectAuthDomains is a comma-separated list of serving
+	// hostnames seeded onto the default project at boot (postgres driver),
+	// so the Host→project resolver maps these branded hostnames to the
+	// default project. The FIRST entry is the primary auth-domain (used to
+	// build branded links and cookie domains); the rest are additional
+	// serving hosts. All are seeded VERIFIED — they are deployer-owned (a
+	// customer-supplied custom domain goes through DNS verification
+	// instead). Empty disables seeding. Driven by
+	// GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS.
+	DefaultProjectAuthDomains string
+
 	// IdentityMode selects the per-deployment tenancy shape — "single"
 	// (one tenant for the whole deployment, B2C) or "multi" (one tenant
 	// per customer organisation, B2B). Driven by GATEWAY_IDENTITY_MODE.
@@ -442,9 +453,10 @@ func Load() *Config {
 		RepoDriver:   envStr("GATEWAY_REPO_DRIVER", "entdb"),
 		EntDBAddress: envStr("GATEWAY_ENTDB_ADDRESS", "entdb:50051"),
 
-		DefaultTenantID:  envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
-		DefaultProjectID: envStr("GATEWAY_DEFAULT_PROJECT_ID", "default"),
-		IdentityMode:     envStr("GATEWAY_IDENTITY_MODE", "single"),
+		DefaultTenantID:           envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
+		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", "default"),
+		DefaultProjectAuthDomains: envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
+		IdentityMode:              envStr("GATEWAY_IDENTITY_MODE", "single"),
 
 		TenantHostBaseDomain:    envStr("GATEWAY_TENANT_HOST_BASE_DOMAIN", ""),
 		TenantResolutionSources: envStr("GATEWAY_TENANT_RESOLUTION_SOURCES", "host,jwt"),
@@ -646,6 +658,23 @@ func (c *Config) TenantResolutionSourceList() []string {
 				out = append(out, s)
 			}
 		}
+	}
+	return out
+}
+
+// DefaultProjectAuthDomainList returns the configured default-project auth
+// domains, lower-cased and de-duplicated, in order — the first entry is the
+// primary. Blank entries are dropped; an empty config yields nil.
+func (c *Config) DefaultProjectAuthDomainList() []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, raw := range strings.Split(c.DefaultProjectAuthDomains, ",") {
+		h := strings.ToLower(strings.TrimSpace(raw))
+		if h == "" || seen[h] {
+			continue
+		}
+		seen[h] = true
+		out = append(out, h)
 	}
 	return out
 }

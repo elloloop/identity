@@ -437,6 +437,50 @@ func (s *ProjectStore) CreateProjectAuthDomain(ctx context.Context, d *ProjectAu
 	return id, nil
 }
 
+// EnsureAuthDomain idempotently ensures hostname is a serving auth-domain of
+// projectID. It is safe to call on every boot: if the hostname already
+// exists it is a no-op when it belongs to projectID, and an error when it
+// belongs to a DIFFERENT project (a misconfiguration the operator must
+// resolve). verifiedAtMs marks the domain verified at seed time — used for
+// deployer-owned domains, which need no DNS challenge. A concurrent creator
+// is tolerated by re-reading the winner. Note: passing isPrimary=true when
+// the project already has a different primary surfaces ErrAlreadyExists (the
+// per-project primary partial-unique); changing the primary host is an
+// explicit reconfiguration, not a silent re-seed.
+func (s *ProjectStore) EnsureAuthDomain(ctx context.Context, projectID, hostname string, isPrimary bool, verifiedAtMs int64) error {
+	if projectID == "" {
+		return fmt.Errorf("%w: missing project id", service.ErrInvalidArgument)
+	}
+	if hostname == "" {
+		return fmt.Errorf("%w: missing hostname", service.ErrInvalidArgument)
+	}
+	owner, err := s.GetProjectByAuthHostname(ctx, hostname)
+	if err != nil {
+		return err
+	}
+	if owner != nil {
+		if owner.ID != projectID {
+			return fmt.Errorf("auth domain %q already belongs to project %q", hostname, owner.ID)
+		}
+		return nil // already seeded for this project
+	}
+	if _, err := s.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
+		ProjectID:    projectID,
+		Hostname:     hostname,
+		IsPrimary:    isPrimary,
+		VerifiedAtMs: verifiedAtMs,
+	}); err != nil {
+		// On a lost race the row now exists for this project; treat as success.
+		if errors.Is(err, service.ErrAlreadyExists) {
+			if owner, gErr := s.GetProjectByAuthHostname(ctx, hostname); gErr == nil && owner != nil && owner.ID == projectID {
+				return nil
+			}
+		}
+		return err
+	}
+	return nil
+}
+
 // GetProjectByAuthHostname resolves a project from a request's Host header.
 // The hostname match is case-insensitive (lower(hostname)), matching the
 // global unique index, so one host resolves to exactly one project. Returns
