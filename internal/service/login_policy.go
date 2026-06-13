@@ -1,0 +1,50 @@
+package service
+
+import "context"
+
+// LoginPolicy controls HOW the members of a claimed Tenant authenticate —
+// never WHETHER. It is consulted on the login path for a user whose email
+// domain belongs to a claimed tenant; an absent or empty policy fails safe
+// to email-OTP so a misconfiguration never locks anyone out.
+//
+// Like Tenant/Domain it is per-project governance state, postgres-backed,
+// and addressed by (projectID, tenantID) — at most one policy per tenant.
+
+// Login method tokens used in LoginPolicy.AllowedMethods (a comma-separated
+// list). Empty AllowedMethods means "no restriction" — the caller falls
+// back to its safe default rather than locking the tenant out.
+const (
+	LoginMethodEmailOTP = "email_otp"
+	LoginMethodPassword = "password"
+	LoginMethodOAuth    = "oauth"
+	LoginMethodPasskey  = "passkey"
+	LoginMethodSSO      = "sso"
+)
+
+// LoginPolicy is a claimed tenant's authentication policy.
+type LoginPolicy struct {
+	ID        string
+	ProjectID string
+	TenantID  string
+	// AllowedMethods is a comma-separated allow-list of login method
+	// tokens (see LoginMethod*). Empty means no restriction.
+	AllowedMethods string
+	// SSORequired forces SSO; SSOConnectionJSON carries the connection
+	// config (IdP metadata) as a JSON object.
+	SSORequired       bool
+	SSOConnectionJSON string
+	// Require2FA forces a second factor after the primary method.
+	Require2FA  bool
+	CreatedAtMs int64
+	UpdatedAtMs int64
+}
+
+// LoginPolicyStore persists at most one LoginPolicy per (project, tenant).
+type LoginPolicyStore interface {
+	// UpsertLoginPolicy inserts or replaces the policy for
+	// (ProjectID, TenantID). Both are required. Returns the row id.
+	UpsertLoginPolicy(ctx context.Context, p *LoginPolicy) (string, error)
+	// GetLoginPolicy returns the policy for (projectID, tenantID), or
+	// (nil, nil) when none is set.
+	GetLoginPolicy(ctx context.Context, projectID, tenantID string) (*LoginPolicy, error)
+}
