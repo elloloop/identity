@@ -679,6 +679,16 @@ func (c *Config) DefaultProjectAuthDomainList() []string {
 	return out
 }
 
+// DefaultPrimaryAuthDomain returns the default project's primary serving
+// hostname — the first entry of DefaultProjectAuthDomainList — or "" when
+// none is configured.
+func (c *Config) DefaultPrimaryAuthDomain() string {
+	if hosts := c.DefaultProjectAuthDomainList(); len(hosts) > 0 {
+		return hosts[0]
+	}
+	return ""
+}
+
 // JWTExpiry returns the JWT expiry as a time.Duration.
 func (c *Config) JWTExpiry() time.Duration {
 	return time.Duration(c.JWTExpirySeconds) * time.Second

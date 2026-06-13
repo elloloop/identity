@@ -232,6 +232,7 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	require.NotNil(t, got)
 	require.Equal(t, projID, got.ID)
 	require.Equal(t, "scope-live", got.StorageScopeID)
+	require.Equal(t, "auth.live.test", got.PrimaryAuthDomain, "resolver loads the primary auth-domain for branded links")
 
 	// Unknown / blank key → clean miss.
 	miss, err := store.ResolveByCredential(ctx, "pk_unknown")

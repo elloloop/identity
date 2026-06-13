@@ -31,19 +31,23 @@ const ProjectKeyHeader = "X-Project-Key"
 // scope rather than being rejected, so non-project deployments are
 // untouched.
 type ProjectResolver struct {
-	defaultProjectID string
-	defaultScopeID   string
-	resolver         service.ProjectResolver
-	logger           *zap.Logger
+	defaultProjectID      string
+	defaultScopeID        string
+	defaultPrimaryAuthDom string
+	resolver              service.ProjectResolver
+	logger                *zap.Logger
 }
 
 // NewProjectResolver builds the middleware. defaultProjectID /
 // defaultScopeID are the default project's id and storage scope (the
 // configured GATEWAY_DEFAULT_PROJECT_ID / GATEWAY_DEFAULT_TENANT_ID);
-// resolver may be nil (drivers without a control plane). When there is
-// nothing to do — no resolver and no default project — the returned
-// middleware is a no-op pass-through.
-func NewProjectResolver(defaultProjectID, defaultScopeID string, resolver service.ProjectResolver, logger *zap.Logger) func(http.Handler) http.Handler {
+// defaultPrimaryAuthDomain is the default project's primary serving
+// hostname (the first GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS entry), carried
+// on the default-pin scope so branded links work zero-config without a
+// per-request lookup. resolver may be nil (drivers without a control
+// plane). When there is nothing to do — no resolver and no default project
+// — the returned middleware is a no-op pass-through.
+func NewProjectResolver(defaultProjectID, defaultScopeID, defaultPrimaryAuthDomain string, resolver service.ProjectResolver, logger *zap.Logger) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -51,10 +55,11 @@ func NewProjectResolver(defaultProjectID, defaultScopeID string, resolver servic
 		return func(next http.Handler) http.Handler { return next }
 	}
 	pr := &ProjectResolver{
-		defaultProjectID: defaultProjectID,
-		defaultScopeID:   defaultScopeID,
-		resolver:         resolver,
-		logger:           logger,
+		defaultProjectID:      defaultProjectID,
+		defaultScopeID:        defaultScopeID,
+		defaultPrimaryAuthDom: defaultPrimaryAuthDomain,
+		resolver:              resolver,
+		logger:                logger,
 	}
 	return pr.middleware
 }
@@ -111,13 +116,18 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 		return nil, true
 	}
 	return &service.ProjectScope{
-		ProjectID:      pr.defaultProjectID,
-		StorageScopeID: pr.defaultScopeID,
+		ProjectID:         pr.defaultProjectID,
+		StorageScopeID:    pr.defaultScopeID,
+		PrimaryAuthDomain: pr.defaultPrimaryAuthDom,
 	}, true
 }
 
 func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
-	return &service.ProjectScope{ProjectID: rp.ID, StorageScopeID: rp.StorageScopeID}
+	return &service.ProjectScope{
+		ProjectID:         rp.ID,
+		StorageScopeID:    rp.StorageScopeID,
+		PrimaryAuthDomain: rp.PrimaryAuthDomain,
+	}
 }
 
 // requestHost returns the lower-cased request host with any port stripped,

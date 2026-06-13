@@ -93,7 +93,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 		return fmt.Errorf("creating email change token: %w", err)
 	}
 
-	link := fmt.Sprintf("%s/auth/confirm-email-change?token=%s", s.appBaseURL(), rawToken)
+	link := fmt.Sprintf("%s/auth/confirm-email-change?token=%s", s.appBaseURL(ctx), rawToken)
 	expiresStr := formatExpiresIn(expiry)
 
 	// Verification email to the NEW address — only here is the token

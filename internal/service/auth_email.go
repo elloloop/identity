@@ -23,9 +23,17 @@ func (s *AuthService) emailTokenExpiry() time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
-// appBaseURL returns the public app base URL with any trailing slash
-// trimmed, so callers can simply concatenate "/auth/foo".
-func (s *AuthService) appBaseURL() string {
+// appBaseURL returns the public app base URL for the request's project,
+// with any trailing slash trimmed, so callers can simply concatenate
+// "/auth/foo". When the request resolved to a project with a primary
+// auth-domain, links are built on that branded hostname
+// (https://<primary-auth-domain>) so a user sees a URL on the product's
+// own domain. Otherwise it falls back to the configured GATEWAY_APP_BASE_URL
+// (or a localhost dev default).
+func (s *AuthService) appBaseURL(ctx context.Context) string {
+	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.PrimaryAuthDomain != "" {
+		return "https://" + scope.PrimaryAuthDomain
+	}
 	u := strings.TrimRight(s.cfg.AppBaseURL, "/")
 	if u == "" {
 		u = "http://localhost:9002"
@@ -106,7 +114,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		return nil
 	}
 
-	link := fmt.Sprintf("%s/auth/reset-password?token=%s", s.appBaseURL(), rawToken)
+	link := fmt.Sprintf("%s/auth/reset-password?token=%s", s.appBaseURL(ctx), rawToken)
 	html, text, err := email.Render(email.TemplatePasswordReset, map[string]any{
 		"UserName":  displayNameOrEmail(user),
 		"Link":      link,
@@ -255,7 +263,7 @@ func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) 
 		return fmt.Errorf("creating verification token: %w", err)
 	}
 
-	link := fmt.Sprintf("%s/auth/verify-email?token=%s", s.appBaseURL(), rawToken)
+	link := fmt.Sprintf("%s/auth/verify-email?token=%s", s.appBaseURL(ctx), rawToken)
 	html, text, err := email.Render(email.TemplateEmailVerification, map[string]any{
 		"UserName":  displayNameOrEmail(user),
 		"Link":      link,

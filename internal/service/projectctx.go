@@ -19,6 +19,13 @@ type ProjectScope struct {
 	// It is distinct from ProjectID (a project is a logical entity that
 	// points at a storage scope) and must not be conflated with it.
 	StorageScopeID string
+
+	// PrimaryAuthDomain is the project's primary serving hostname, when one
+	// is configured. The service builds branded links (email verification,
+	// password reset, magic-link, …) from it so a user sees a URL on the
+	// product's own domain. Empty when the project has no auth-domain, in
+	// which case the service falls back to its configured base URL.
+	PrimaryAuthDomain string
 }
 
 type projectScopeCtxKey struct{}
@@ -46,8 +53,9 @@ func ProjectScopeFromContext(ctx context.Context) *ProjectScope {
 // driver-agnostic value so the resolver contract does not leak a concrete
 // store type into the middleware or app wiring.
 type ResolvedProject struct {
-	ID             string
-	StorageScopeID string
+	ID                string
+	StorageScopeID    string
+	PrimaryAuthDomain string
 }
 
 // ProjectResolver resolves a request's project from the credentials it
