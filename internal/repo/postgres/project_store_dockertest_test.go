@@ -82,3 +82,13 @@ func TestProjectResolver_Container(t *testing.T) {
 	dsn := startPostgresContainer(ctx, t)
 	runProjectResolverSmoke(t, dsn)
 }
+
+// TestTenantDomainStore_Container runs the tenant + domain store body
+// against a throwaway Postgres container.
+func TestTenantDomainStore_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runTenantDomainSmoke(t, dsn)
+}
