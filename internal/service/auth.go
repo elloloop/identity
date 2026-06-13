@@ -926,6 +926,18 @@ func (s *AuthService) tenantID(ctx context.Context) string {
 	return s.defaultTenantID
 }
 
+// projectID returns the control-plane project the request resolved to (set
+// by the project-resolution middleware), falling back to the configured
+// default project. Empty only when no default project is configured (the
+// entdb/memory deployments with no control plane), in which case the token
+// simply carries no project claim.
+func (s *AuthService) projectID(ctx context.Context) string {
+	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.ProjectID != "" {
+		return scope.ProjectID
+	}
+	return s.cfg.DefaultProjectID
+}
+
 // repo returns the Repository scoped to the request's resolved tenant,
 // falling back to the boot-time Repository in mode=single.
 func (s *AuthService) repo(ctx context.Context) Repository {
@@ -989,6 +1001,7 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 		Name:      user.Name,
 		Role:      user.Role,
 		Tenant:    s.tenantID(ctx),
+		Project:   s.projectID(ctx),
 		AvatarURL: user.AvatarURL,
 	}
 	if s.cfg.JWTAudience != "" {

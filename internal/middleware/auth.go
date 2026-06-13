@@ -138,6 +138,13 @@ const AuthenticatedUserIDHeader = "X-Authenticated-User-Id"
 // host-derived tenant without re-verifying the token.
 const AuthenticatedTenantHeader = "X-Authenticated-Tenant"
 
+// AuthenticatedProjectHeader carries the verified `project` claim from the
+// auth middleware to the project-scope guard. The handler layer never
+// reads it directly; it exists so the guard can cross-check the
+// JWT-asserted project against the resolved project without re-verifying
+// the token.
+const AuthenticatedProjectHeader = "X-Authenticated-Project"
+
 // setAuthHeaders writes the verified identity headers from claims. Only
 // called after VerifyAccessToken succeeds, so the values are trusted.
 func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
@@ -145,13 +152,18 @@ func setAuthHeaders(r *http.Request, claims *jwtpkg.Claims) {
 	if claims.Tenant != "" {
 		r.Header.Set(AuthenticatedTenantHeader, claims.Tenant)
 	}
+	if claims.Project != "" {
+		r.Header.Set(AuthenticatedProjectHeader, claims.Project)
+	}
 }
 
 // clearAuthHeaders removes any inbound copies of the identity headers so
-// an external client cannot inject them to impersonate a user or tenant.
+// an external client cannot inject them to impersonate a user, tenant, or
+// project.
 func clearAuthHeaders(r *http.Request) {
 	r.Header.Del(AuthenticatedUserIDHeader)
 	r.Header.Del(AuthenticatedTenantHeader)
+	r.Header.Del(AuthenticatedProjectHeader)
 }
 
 // extractBearerToken returns the token portion of an "Authorization: Bearer <token>"

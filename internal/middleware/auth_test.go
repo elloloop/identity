@@ -169,6 +169,34 @@ func TestAuthMiddleware_RequiredPath_ValidToken_InjectsUserID(t *testing.T) {
 	assert.Equal(t, "user-99", userID)
 }
 
+// A token carrying a project claim surfaces it as X-Authenticated-Project
+// so the project-scope guard can cross-check it.
+func TestAuthMiddleware_ValidToken_InjectsProject(t *testing.T) {
+	kr := testSigner(t)
+	token, err := kr.SignAccessToken(context.Background(), jwtpkg.Claims{
+		Sub: "user-99", Email: "test@example.com", Role: "member",
+		Tenant: "tenant-1", Project: "proj-xyz",
+	}, 15*time.Minute)
+	require.NoError(t, err)
+
+	var gotProject string
+	handler := AuthMiddleware(kr, "", "", false)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotProject = r.Header.Get(AuthenticatedProjectHeader)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	// An inbound spoofed header must be cleared before the verified one is set.
+	req.Header.Set(AuthenticatedProjectHeader, "spoofed")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "proj-xyz", gotProject, "verified project claim must be surfaced")
+}
+
 func TestAuthMiddleware_RequiredPath_ExpiredToken_Returns401(t *testing.T) {
 	kr := testSigner(t)
 	// Create a token that has already expired (negative duration effectively means

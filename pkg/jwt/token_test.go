@@ -22,6 +22,7 @@ func TestCreateAndVerify(t *testing.T) {
 		Name:      "Alice Smith",
 		Role:      "admin",
 		Tenant:    "tenant-abc",
+		Project:   "proj-xyz",
 		AvatarURL: "https://example.com/avatar.png",
 	}
 
@@ -36,9 +37,25 @@ func TestCreateAndVerify(t *testing.T) {
 	assert.Equal(t, "Alice Smith", got.Name)
 	assert.Equal(t, "admin", got.Role)
 	assert.Equal(t, "tenant-abc", got.Tenant)
+	assert.Equal(t, "proj-xyz", got.Project)
 	assert.Equal(t, "https://example.com/avatar.png", got.AvatarURL)
 	assert.True(t, got.IssuedAt > 0)
 	assert.True(t, got.ExpiresAt > got.IssuedAt)
+}
+
+// A token minted before the project model (no Project claim) round-trips
+// with an empty Project — the claim is omitted, not a forced "".
+func TestCreateAndVerify_NoProjectClaim(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+
+	tokenStr, err := s.SignAccessToken(context.Background(), Claims{
+		Sub: "u", Email: "a@b.com", Role: "member", Tenant: "t",
+	}, 15*time.Minute)
+	require.NoError(t, err)
+
+	got, err := VerifyAccessToken(tokenStr, s, "", "", false)
+	require.NoError(t, err)
+	assert.Empty(t, got.Project, "a token with no project claim verifies with empty Project")
 }
 
 func TestVerify_ExpiredToken(t *testing.T) {
