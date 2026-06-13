@@ -1,6 +1,30 @@
 package config
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+func TestDefaultProjectAuthDomainList(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"   ", nil},
+		{"auth.appa.com", []string{"auth.appa.com"}},
+		{"auth.appA.com, Login.appB.com ,", []string{"auth.appa.com", "login.appb.com"}},
+		{"a.com,a.com,b.com", []string{"a.com", "b.com"}}, // de-duped, order kept
+	}
+	for _, tc := range cases {
+		c := &Config{DefaultProjectAuthDomains: tc.in}
+		if got := c.DefaultProjectAuthDomainList(); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("DefaultProjectAuthDomainList(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
 
 func TestIsPublicEmailDomain_BuiltIn(t *testing.T) {
 	t.Parallel()

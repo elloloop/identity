@@ -170,6 +170,14 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 			s.cleanupOnError(ctx)
 			return nil, err
 		}
+
+		// Seed the default project's branded serving hostnames from config
+		// (GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS) so the Host→project resolver
+		// maps them to the default project. Deployer-owned, so seeded verified.
+		if err := ensureProjectAuthDomains(ctx, built, &cfg, logger); err != nil {
+			s.cleanupOnError(ctx)
+			return nil, err
+		}
 	}
 
 	idvProvider := opts.IDVProvider
@@ -247,6 +255,35 @@ func ensureDefaultProject(ctx context.Context, built *repo.Built, cfg *Config, l
 	logger.Info("default_project_ensured",
 		zap.String("project_id", proj.ID),
 		zap.String("storage_scope_id", proj.StorageScopeID))
+	return nil
+}
+
+// ensureProjectAuthDomains idempotently seeds the default project's branded
+// serving hostnames from GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS — the first
+// entry is the primary (drives branded link/cookie building), the rest are
+// additional serving hosts. All are seeded VERIFIED: they are deployer-owned
+// (a customer-supplied custom domain goes through DNS verification instead).
+// A no-op when there is no control plane, no default project, or no domains
+// configured. Any error fails boot, like the project bootstrap.
+func ensureProjectAuthDomains(ctx context.Context, built *repo.Built, cfg *Config, logger *zap.Logger) error {
+	if built.ProjectStore == nil || cfg.DefaultProjectID == "" {
+		return nil
+	}
+	hosts := cfg.DefaultProjectAuthDomainList()
+	if len(hosts) == 0 {
+		return nil
+	}
+	verifiedAt := time.Now().UnixMilli()
+	for i, host := range hosts {
+		isPrimary := i == 0
+		if err := built.ProjectStore.EnsureAuthDomain(ctx, cfg.DefaultProjectID, host, isPrimary, verifiedAt); err != nil {
+			return fmt.Errorf("seed auth domain %q: %w", host, err)
+		}
+		logger.Info("project_auth_domain_seeded",
+			zap.String("project_id", cfg.DefaultProjectID),
+			zap.String("hostname", host),
+			zap.Bool("primary", isPrimary))
+	}
 	return nil
 }
 
