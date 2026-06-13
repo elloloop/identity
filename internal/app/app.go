@@ -19,12 +19,12 @@ import (
 	"go.uber.org/zap"
 
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
+	"github.com/elloloop/identity/internal/app/ui"
 	"github.com/elloloop/identity/internal/config"
 	identityconnect "github.com/elloloop/identity/internal/connect"
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/service"
-	"github.com/elloloop/identity/internal/app/ui"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/captcha"
 	"github.com/elloloop/identity/pkg/email"
@@ -401,7 +401,7 @@ func New(deps Deps) (*Built, error) {
 	}
 
 	// Order (outermost runs first on request path):
-	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → project → auth → tenant → metrics → Connect
+	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → project → auth → project-guard → tenant → metrics → Connect
 	// client-IP must precede rate-limit (the limiter keys on the
 	// resolved IP) and health must precede client-IP so liveness probes
 	// from kubelets cannot be rate-limited. The project resolver sits just
@@ -418,6 +418,10 @@ func New(deps Deps) (*Built, error) {
 	var chain http.Handler = mux
 	chain = middleware.MetricsMiddleware(rpcMetrics)(chain)
 	chain = middleware.NewTenantResolver(deps.Config, deps.RepositoryForTenant, logger)(chain)
+	// Project-scope guard runs just after auth (which surfaces the verified
+	// project) and before tenant resolution, rejecting an access token
+	// replayed across projects.
+	chain = middleware.NewProjectScopeGuard()(chain)
 	chain = middleware.SessionAuthMiddleware(
 		deps.Signer, authExpectedTenant, deps.Config.JWTAudience,
 		deps.Config.JWTRequireAudience, sessionCache,

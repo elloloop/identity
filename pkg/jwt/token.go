@@ -21,11 +21,16 @@ import (
 // cost). The claim is JSON-named `sid` so it lines up with OAuth /
 // OIDC tooling that already understands the `sid` convention.
 type Claims struct {
-	Sub       string   `json:"sub"`
-	Email     string   `json:"email"`
-	Name      string   `json:"name"`
-	Role      string   `json:"role"`
-	Tenant    string   `json:"tenant"`
+	Sub    string `json:"sub"`
+	Email  string `json:"email"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	Tenant string `json:"tenant"`
+	// Project is the control-plane project the token was minted for. It
+	// scopes the token to one project so a token minted under project A is
+	// rejected on a request resolved to project B (cross-project reuse).
+	// Omitted from tokens minted before the project model (empty).
+	Project   string   `json:"project,omitempty"`
 	AvatarURL string   `json:"avatar_url"`
 	SID       string   `json:"sid,omitempty"`
 	Audience  []string `json:"aud,omitempty"`
@@ -49,6 +54,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 		"avatar_url": c.AvatarURL,
 		"iat":        iat,
 		"exp":        exp,
+	}
+	if c.Project != "" {
+		m["project"] = c.Project
 	}
 	if c.SID != "" {
 		m["sid"] = c.SID
@@ -148,6 +156,9 @@ func VerifyAccessToken(tokenStr string, kp KeyProvider, expectedTenant, expected
 	}
 	if v, ok := tok.Get("tenant"); ok {
 		claims.Tenant, _ = v.(string)
+	}
+	if v, ok := tok.Get("project"); ok {
+		claims.Project, _ = v.(string)
 	}
 	if v, ok := tok.Get("avatar_url"); ok {
 		claims.AvatarURL, _ = v.(string)
