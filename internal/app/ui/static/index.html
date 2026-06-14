@@ -209,6 +209,9 @@
     </div>
 
     <script>
+        {{.JSONConfig}}
+        const config = window.serverConfig || { passwordSignupEnabled: true };
+
         let isLogin = true;
         const form = document.getElementById('auth-form');
         const title = document.getElementById('title');
@@ -219,6 +222,10 @@
         const errorMsg = document.getElementById('error-message');
         const successMsg = document.getElementById('success-message');
         const resultData = document.getElementById('result-data');
+
+        if (!config.passwordSignupEnabled) {
+            document.querySelector('.toggle-mode').style.display = 'none';
+        }
 
         toggleLink.addEventListener('click', () => {
             isLogin = !isLogin;
