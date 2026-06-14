@@ -96,6 +96,14 @@ type Options struct {
 	// New builds them from Config.RepoDriver. Ignored in mode=single.
 	TenantAdmin         service.TenantAdmin
 	RepositoryForTenant service.RepositoryForTenant
+
+	// DNSResolver is the TXT-lookup boundary VerifyDomain uses to confirm a
+	// custom domain's ownership challenge. nil defaults to net.DefaultResolver
+	// — the production behaviour. A host (or a full-stack test) supplies its
+	// own resolver to verify domains without touching real DNS. Has effect
+	// only on the postgres control-plane driver, where the DomainService is
+	// wired; other drivers leave the domain RPCs Unimplemented.
+	DNSResolver service.DNSResolver
 }
 
 // OptionsFromEnv loads Options from the environment exactly as the

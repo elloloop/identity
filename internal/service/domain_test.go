@@ -257,7 +257,7 @@ func (f *fakeDNSResolver) LookupTXT(_ context.Context, host string) ([]string, e
 	return f.records[host], nil
 }
 
-var _ dnsResolver = (*fakeDNSResolver)(nil)
+var _ DNSResolver = (*fakeDNSResolver)(nil)
 
 // ── Harness ────────────────────────────────────────────────────────────
 
