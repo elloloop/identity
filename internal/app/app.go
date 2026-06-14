@@ -399,7 +399,7 @@ func New(deps Deps) (*Built, error) {
 	mux.Handle(path, svcHandler)
 
 	// Default auth UI (login/signup)
-	mux.Handle("/auth/", ui.Handler())
+	mux.Handle("/auth/", ui.Handler(deps.Config))
 
 	// Browser-facing hosted OAuth routes (#126). Registered only when
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS is non-empty; the headless
