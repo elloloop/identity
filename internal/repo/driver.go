@@ -65,6 +65,11 @@ type Built struct {
 	// to seed the default project on boot. It shares Repository's pool, so
 	// closing the repository releases it too; do not close it separately.
 	ProjectStore *pgrepo.ProjectStore
+
+	// AutoFormStore auto-forms a company tenant from a new user's email
+	// domain at signup. Non-nil ONLY for the postgres driver; shares
+	// Repository's pool.
+	AutoFormStore *pgrepo.AutoFormStore
 }
 
 // ProjectResolver returns the control-plane project resolver as a
@@ -77,6 +82,16 @@ func (b *Built) ProjectResolver() service.ProjectResolver {
 		return nil
 	}
 	return b.ProjectStore
+}
+
+// TenantAutoFormer returns the tenant auto-formation store as a
+// driver-agnostic interface, or a true nil when this build has no control
+// plane (entdb/memory) — avoiding the typed-nil trap.
+func (b *Built) TenantAutoFormer() service.TenantAutoFormStore {
+	if b.AutoFormStore == nil {
+		return nil
+	}
+	return b.AutoFormStore
 }
 
 // Build returns a Built configured per cfg.Driver.
@@ -129,9 +144,10 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		}
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
 		return &Built{
-			Repository:   pgRepo,
-			DB:           pgRepo,
-			ProjectStore: pgrepo.NewProjectStore(pgRepo),
+			Repository:    pgRepo,
+			DB:            pgRepo,
+			ProjectStore:  pgrepo.NewProjectStore(pgRepo),
+			AutoFormStore: pgrepo.NewAutoFormStore(pgRepo),
 		}, nil
 	default:
 		return nil, fmt.Errorf("repo: Build: unknown driver %q", cfg.Driver)
