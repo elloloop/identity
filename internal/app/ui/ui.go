@@ -40,7 +40,9 @@ func Handler(cfg *config.Config) http.Handler {
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]any{
-		"JSONConfig": template.JS("window.serverConfig = " + string(b) + ";"),
+		// b is json.Marshal of a static configData struct (a single bool),
+		// with no user-controlled input, so injecting it unescaped is safe.
+		"JSONConfig": template.JS("window.serverConfig = " + string(b) + ";"), //nolint:gosec // G203: static server-generated config, no user input
 	}); err != nil {
 		panic(err)
 	}
