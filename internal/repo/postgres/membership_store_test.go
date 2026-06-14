@@ -27,7 +27,7 @@ func newMembershipFixture(ctx context.Context, t *testing.T, dsn string) (ms *Me
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)
 
-	projectID, err = NewProjectStore(repo).CreateProject(ctx, &Project{StorageScopeID: "scope-mem", Name: "Mem"})
+	projectID, err = NewProjectStore(repo).createProject(ctx, &Project{StorageScopeID: "scope-mem", Name: "Mem"})
 	require.NoError(t, err)
 	tenantID, err = NewTenantStore(repo).CreateTenant(ctx, &service.Tenant{
 		ProjectID: projectID, Status: service.TenantStatusClaimed,

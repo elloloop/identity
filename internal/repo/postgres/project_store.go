@@ -116,11 +116,14 @@ func scanProject(row pgx.Row) (*Project, error) {
 	return &p, nil
 }
 
-// CreateProject inserts a project. StorageScopeID is required and globally
+// createProject inserts a project. StorageScopeID is required and globally
 // unique; a duplicate surfaces service.ErrAlreadyExists. The id is
 // caller-supplied (random hex when empty) so it is known without a
 // RETURNING round-trip; the assigned id is written back to p.ID.
-func (s *ProjectStore) CreateProject(ctx context.Context, p *Project) (string, error) {
+//
+// It is the internal, row-typed primitive shared by EnsureDefaultProject and
+// the exported service.ControlPlaneProjectStore adapter (project_admin.go).
+func (s *ProjectStore) createProject(ctx context.Context, p *Project) (string, error) {
 	if p == nil {
 		return "", errors.New("postgres: CreateProject: nil project")
 	}
@@ -243,7 +246,7 @@ func (s *ProjectStore) EnsureDefaultProject(ctx context.Context, projectID, stor
 	// re-reading and returning the winner's row. Any error from that re-read
 	// is propagated, not masked behind the original conflict.
 	p := &Project{ID: projectID, StorageScopeID: storageScopeID, Name: name, Status: projectStatusActive}
-	if _, err := s.CreateProject(ctx, p); err != nil {
+	if _, err := s.createProject(ctx, p); err != nil {
 		if !errors.Is(err, service.ErrAlreadyExists) {
 			return nil, err
 		}
@@ -284,11 +287,14 @@ func scanProjectCredential(row pgx.Row) (*ProjectCredential, error) {
 	return &c, nil
 }
 
-// CreateProjectCredential inserts a lookup credential for a project.
+// createProjectCredential inserts a lookup credential for a project.
 // PublicID is required and globally unique; a duplicate surfaces
 // service.ErrAlreadyExists. The id is caller-supplied (random hex when
 // empty) and written back to c.ID.
-func (s *ProjectStore) CreateProjectCredential(ctx context.Context, c *ProjectCredential) (string, error) {
+//
+// It is the internal, row-typed primitive the exported
+// service.ControlPlaneProjectStore adapter (project_admin.go) delegates to.
+func (s *ProjectStore) createProjectCredential(ctx context.Context, c *ProjectCredential) (string, error) {
 	if c == nil {
 		return "", errors.New("postgres: CreateProjectCredential: nil credential")
 	}

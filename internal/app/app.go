@@ -92,6 +92,14 @@ type Deps struct {
 	// not constructed and the membership RPCs return Unimplemented.
 	InvitationStore service.InvitationStore
 
+	// ControlPlaneStore is the project write-store backing the control-plane
+	// admin RPCs (AdminCreateProject and friends). Non-nil ONLY for the
+	// postgres driver; when nil (together with the tenant/membership stores)
+	// the ControlPlaneAdminService is not constructed and the admin RPCs
+	// return Unimplemented. Even when wired, the surface stays disabled until
+	// Config.AdminAPISecret is set.
+	ControlPlaneStore service.ControlPlaneProjectStore
+
 	// LoginGovernance is the read-side bundle the login path consults to
 	// enforce a claimed tenant's LoginPolicy. Non-nil only for the postgres
 	// driver (the only one with a governance plane); when nil, login imposes
@@ -395,7 +403,8 @@ func New(deps Deps) (*Built, error) {
 	orgSignupSvc := buildOrganizationSignupService(deps, auditLog, logger)
 	domainSvc := buildDomainService(deps, logger)
 	membershipSvc := buildMembershipService(deps, repo, mailer, logger)
-	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, orgSignupSvc, domainSvc, membershipSvc, captchaVerifier, deps.Config)
+	controlAdminSvc := buildControlPlaneAdminService(deps, logger)
+	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, orgSignupSvc, domainSvc, membershipSvc, controlAdminSvc, captchaVerifier, deps.Config)
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {
@@ -593,6 +602,33 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 		mailer,
 		mailDeliveryConfigured(deps),
 		deps.Config,
+		logger,
+	)
+}
+
+// buildControlPlaneAdminService returns the wired ControlPlaneAdminService
+// backing the platform-operator admin RPCs, or nil when the control-plane
+// stores are absent (entdb/memory have no control plane). The Connect handler
+// treats nil as "disabled" and returns CodeUnimplemented.
+//
+// The service is constructed even when no admin secret is configured: in that
+// case it is constructed-but-disabled and every admin RPC returns
+// Unimplemented (the secret check short-circuits on an empty secret). This
+// keeps the "off by default" guarantee in one place — the service's
+// constant-time authorize — rather than splitting it across the wiring.
+func buildControlPlaneAdminService(deps Deps, logger *zap.Logger) *service.ControlPlaneAdminService {
+	if deps.ControlPlaneStore == nil || deps.TenantStore == nil || deps.MembershipStore == nil {
+		return nil
+	}
+	secret := ""
+	if deps.Config != nil {
+		secret = deps.Config.AdminAPISecret
+	}
+	return service.NewControlPlaneAdminService(
+		secret,
+		deps.ControlPlaneStore,
+		deps.TenantStore,
+		deps.MembershipStore,
 		logger,
 	)
 }

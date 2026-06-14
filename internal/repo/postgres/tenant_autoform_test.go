@@ -29,7 +29,7 @@ func newAutoFormFixture(ctx context.Context, t *testing.T, dsn string) (
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)
 
-	projectID, err = NewProjectStore(repo).CreateProject(ctx, &Project{StorageScopeID: "scope-af", Name: "AF"})
+	projectID, err = NewProjectStore(repo).createProject(ctx, &Project{StorageScopeID: "scope-af", Name: "AF"})
 	require.NoError(t, err)
 
 	var n int

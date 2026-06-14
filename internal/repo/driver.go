@@ -99,6 +99,17 @@ func (b *Built) ProjectResolver() service.ProjectResolver {
 	return b.ProjectStore
 }
 
+// ControlPlaneStore returns the control-plane project write-store as the
+// driver-agnostic service.ControlPlaneProjectStore the admin RPCs use, or a
+// true nil when this build has no control plane (entdb/memory) — avoiding the
+// typed-nil trap.
+func (b *Built) ControlPlaneStore() service.ControlPlaneProjectStore {
+	if b.ProjectStore == nil {
+		return nil
+	}
+	return b.ProjectStore
+}
+
 // TenantAutoFormer returns the tenant auto-formation store as a
 // driver-agnostic interface, or a true nil when this build has no control
 // plane (entdb/memory) — avoiding the typed-nil trap.

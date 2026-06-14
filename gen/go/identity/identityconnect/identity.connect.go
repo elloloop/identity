@@ -253,6 +253,21 @@ const (
 	// IdentityServiceSetUserQuotaProcedure is the fully-qualified name of the IdentityService's
 	// SetUserQuota RPC.
 	IdentityServiceSetUserQuotaProcedure = "/identity.IdentityService/SetUserQuota"
+	// IdentityServiceAdminCreateProjectProcedure is the fully-qualified name of the IdentityService's
+	// AdminCreateProject RPC.
+	IdentityServiceAdminCreateProjectProcedure = "/identity.IdentityService/AdminCreateProject"
+	// IdentityServiceAdminCreateProjectCredentialProcedure is the fully-qualified name of the
+	// IdentityService's AdminCreateProjectCredential RPC.
+	IdentityServiceAdminCreateProjectCredentialProcedure = "/identity.IdentityService/AdminCreateProjectCredential"
+	// IdentityServiceAdminAddProjectAuthDomainProcedure is the fully-qualified name of the
+	// IdentityService's AdminAddProjectAuthDomain RPC.
+	IdentityServiceAdminAddProjectAuthDomainProcedure = "/identity.IdentityService/AdminAddProjectAuthDomain"
+	// IdentityServiceAdminCreateTenantProcedure is the fully-qualified name of the IdentityService's
+	// AdminCreateTenant RPC.
+	IdentityServiceAdminCreateTenantProcedure = "/identity.IdentityService/AdminCreateTenant"
+	// IdentityServiceAdminAddTenantAdminProcedure is the fully-qualified name of the IdentityService's
+	// AdminAddTenantAdmin RPC.
+	IdentityServiceAdminAddTenantAdminProcedure = "/identity.IdentityService/AdminAddTenantAdmin"
 )
 
 // IdentityServiceClient is a client for the identity.IdentityService service.
@@ -369,6 +384,15 @@ type IdentityServiceClient interface {
 	ReactivateUser(context.Context, *connect.Request[identity.ReactivateUserRequest]) (*connect.Response[identity.ReactivateUserResponse], error)
 	ResetUserPassword(context.Context, *connect.Request[identity.ResetUserPasswordRequest]) (*connect.Response[identity.ResetUserPasswordResponse], error)
 	SetUserQuota(context.Context, *connect.Request[identity.SetUserQuotaRequest]) (*connect.Response[identity.SetUserQuotaResponse], error)
+	// Control-plane admin (redesign). PLATFORM-operator RPCs that provision
+	// projects/tenants/credentials out-of-band. Authenticated by the shared
+	// admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
+	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
+	AdminCreateProject(context.Context, *connect.Request[identity.AdminCreateProjectRequest]) (*connect.Response[identity.AdminCreateProjectResponse], error)
+	AdminCreateProjectCredential(context.Context, *connect.Request[identity.AdminCreateProjectCredentialRequest]) (*connect.Response[identity.AdminCreateProjectCredentialResponse], error)
+	AdminAddProjectAuthDomain(context.Context, *connect.Request[identity.AdminAddProjectAuthDomainRequest]) (*connect.Response[identity.AdminAddProjectAuthDomainResponse], error)
+	AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error)
+	AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error)
 }
 
 // NewIdentityServiceClient constructs a client for the identity.IdentityService service. By
@@ -826,6 +850,36 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("SetUserQuota")),
 			connect.WithClientOptions(opts...),
 		),
+		adminCreateProject: connect.NewClient[identity.AdminCreateProjectRequest, identity.AdminCreateProjectResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminCreateProjectProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminCreateProject")),
+			connect.WithClientOptions(opts...),
+		),
+		adminCreateProjectCredential: connect.NewClient[identity.AdminCreateProjectCredentialRequest, identity.AdminCreateProjectCredentialResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminCreateProjectCredentialProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminCreateProjectCredential")),
+			connect.WithClientOptions(opts...),
+		),
+		adminAddProjectAuthDomain: connect.NewClient[identity.AdminAddProjectAuthDomainRequest, identity.AdminAddProjectAuthDomainResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminAddProjectAuthDomainProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminAddProjectAuthDomain")),
+			connect.WithClientOptions(opts...),
+		),
+		adminCreateTenant: connect.NewClient[identity.AdminCreateTenantRequest, identity.AdminCreateTenantResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminCreateTenantProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminCreateTenant")),
+			connect.WithClientOptions(opts...),
+		),
+		adminAddTenantAdmin: connect.NewClient[identity.AdminAddTenantAdminRequest, identity.AdminAddTenantAdminResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminAddTenantAdminProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminAddTenantAdmin")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -905,6 +959,11 @@ type identityServiceClient struct {
 	reactivateUser                *connect.Client[identity.ReactivateUserRequest, identity.ReactivateUserResponse]
 	resetUserPassword             *connect.Client[identity.ResetUserPasswordRequest, identity.ResetUserPasswordResponse]
 	setUserQuota                  *connect.Client[identity.SetUserQuotaRequest, identity.SetUserQuotaResponse]
+	adminCreateProject            *connect.Client[identity.AdminCreateProjectRequest, identity.AdminCreateProjectResponse]
+	adminCreateProjectCredential  *connect.Client[identity.AdminCreateProjectCredentialRequest, identity.AdminCreateProjectCredentialResponse]
+	adminAddProjectAuthDomain     *connect.Client[identity.AdminAddProjectAuthDomainRequest, identity.AdminAddProjectAuthDomainResponse]
+	adminCreateTenant             *connect.Client[identity.AdminCreateTenantRequest, identity.AdminCreateTenantResponse]
+	adminAddTenantAdmin           *connect.Client[identity.AdminAddTenantAdminRequest, identity.AdminAddTenantAdminResponse]
 }
 
 // BeginOAuthLogin calls identity.IdentityService.BeginOAuthLogin.
@@ -1277,6 +1336,31 @@ func (c *identityServiceClient) SetUserQuota(ctx context.Context, req *connect.R
 	return c.setUserQuota.CallUnary(ctx, req)
 }
 
+// AdminCreateProject calls identity.IdentityService.AdminCreateProject.
+func (c *identityServiceClient) AdminCreateProject(ctx context.Context, req *connect.Request[identity.AdminCreateProjectRequest]) (*connect.Response[identity.AdminCreateProjectResponse], error) {
+	return c.adminCreateProject.CallUnary(ctx, req)
+}
+
+// AdminCreateProjectCredential calls identity.IdentityService.AdminCreateProjectCredential.
+func (c *identityServiceClient) AdminCreateProjectCredential(ctx context.Context, req *connect.Request[identity.AdminCreateProjectCredentialRequest]) (*connect.Response[identity.AdminCreateProjectCredentialResponse], error) {
+	return c.adminCreateProjectCredential.CallUnary(ctx, req)
+}
+
+// AdminAddProjectAuthDomain calls identity.IdentityService.AdminAddProjectAuthDomain.
+func (c *identityServiceClient) AdminAddProjectAuthDomain(ctx context.Context, req *connect.Request[identity.AdminAddProjectAuthDomainRequest]) (*connect.Response[identity.AdminAddProjectAuthDomainResponse], error) {
+	return c.adminAddProjectAuthDomain.CallUnary(ctx, req)
+}
+
+// AdminCreateTenant calls identity.IdentityService.AdminCreateTenant.
+func (c *identityServiceClient) AdminCreateTenant(ctx context.Context, req *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error) {
+	return c.adminCreateTenant.CallUnary(ctx, req)
+}
+
+// AdminAddTenantAdmin calls identity.IdentityService.AdminAddTenantAdmin.
+func (c *identityServiceClient) AdminAddTenantAdmin(ctx context.Context, req *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error) {
+	return c.adminAddTenantAdmin.CallUnary(ctx, req)
+}
+
 // IdentityServiceHandler is an implementation of the identity.IdentityService service.
 type IdentityServiceHandler interface {
 	// Authentication
@@ -1391,6 +1475,15 @@ type IdentityServiceHandler interface {
 	ReactivateUser(context.Context, *connect.Request[identity.ReactivateUserRequest]) (*connect.Response[identity.ReactivateUserResponse], error)
 	ResetUserPassword(context.Context, *connect.Request[identity.ResetUserPasswordRequest]) (*connect.Response[identity.ResetUserPasswordResponse], error)
 	SetUserQuota(context.Context, *connect.Request[identity.SetUserQuotaRequest]) (*connect.Response[identity.SetUserQuotaResponse], error)
+	// Control-plane admin (redesign). PLATFORM-operator RPCs that provision
+	// projects/tenants/credentials out-of-band. Authenticated by the shared
+	// admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
+	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
+	AdminCreateProject(context.Context, *connect.Request[identity.AdminCreateProjectRequest]) (*connect.Response[identity.AdminCreateProjectResponse], error)
+	AdminCreateProjectCredential(context.Context, *connect.Request[identity.AdminCreateProjectCredentialRequest]) (*connect.Response[identity.AdminCreateProjectCredentialResponse], error)
+	AdminAddProjectAuthDomain(context.Context, *connect.Request[identity.AdminAddProjectAuthDomainRequest]) (*connect.Response[identity.AdminAddProjectAuthDomainResponse], error)
+	AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error)
+	AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error)
 }
 
 // NewIdentityServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -1844,6 +1937,36 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("SetUserQuota")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceAdminCreateProjectHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminCreateProjectProcedure,
+		svc.AdminCreateProject,
+		connect.WithSchema(identityServiceMethods.ByName("AdminCreateProject")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAdminCreateProjectCredentialHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminCreateProjectCredentialProcedure,
+		svc.AdminCreateProjectCredential,
+		connect.WithSchema(identityServiceMethods.ByName("AdminCreateProjectCredential")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAdminAddProjectAuthDomainHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminAddProjectAuthDomainProcedure,
+		svc.AdminAddProjectAuthDomain,
+		connect.WithSchema(identityServiceMethods.ByName("AdminAddProjectAuthDomain")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAdminCreateTenantHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminCreateTenantProcedure,
+		svc.AdminCreateTenant,
+		connect.WithSchema(identityServiceMethods.ByName("AdminCreateTenant")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAdminAddTenantAdminHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminAddTenantAdminProcedure,
+		svc.AdminAddTenantAdmin,
+		connect.WithSchema(identityServiceMethods.ByName("AdminAddTenantAdmin")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/identity.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case IdentityServiceBeginOAuthLoginProcedure:
@@ -1994,6 +2117,16 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceResetUserPasswordHandler.ServeHTTP(w, r)
 		case IdentityServiceSetUserQuotaProcedure:
 			identityServiceSetUserQuotaHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminCreateProjectProcedure:
+			identityServiceAdminCreateProjectHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminCreateProjectCredentialProcedure:
+			identityServiceAdminCreateProjectCredentialHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminAddProjectAuthDomainProcedure:
+			identityServiceAdminAddProjectAuthDomainHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminCreateTenantProcedure:
+			identityServiceAdminCreateTenantHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminAddTenantAdminProcedure:
+			identityServiceAdminAddTenantAdminHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2297,4 +2430,24 @@ func (UnimplementedIdentityServiceHandler) ResetUserPassword(context.Context, *c
 
 func (UnimplementedIdentityServiceHandler) SetUserQuota(context.Context, *connect.Request[identity.SetUserQuotaRequest]) (*connect.Response[identity.SetUserQuotaResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.SetUserQuota is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminCreateProject(context.Context, *connect.Request[identity.AdminCreateProjectRequest]) (*connect.Response[identity.AdminCreateProjectResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.AdminCreateProject is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminCreateProjectCredential(context.Context, *connect.Request[identity.AdminCreateProjectCredentialRequest]) (*connect.Response[identity.AdminCreateProjectCredentialResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.AdminCreateProjectCredential is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminAddProjectAuthDomain(context.Context, *connect.Request[identity.AdminAddProjectAuthDomainRequest]) (*connect.Response[identity.AdminAddProjectAuthDomainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.AdminAddProjectAuthDomain is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.AdminCreateTenant is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.AdminAddTenantAdmin is not implemented"))
 }

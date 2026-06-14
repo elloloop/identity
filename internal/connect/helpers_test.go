@@ -1872,7 +1872,7 @@ func newHarnessWith(
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 
-	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, nil, captchaVerifier, cfg)
+	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, nil, nil, captchaVerifier, cfg)
 
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)

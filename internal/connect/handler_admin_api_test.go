@@ -1,0 +1,227 @@
+package connect
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"connectrpc.com/connect"
+	"go.uber.org/zap"
+
+	identitypb "github.com/elloloop/identity/gen/go/identity"
+	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
+	"github.com/elloloop/identity/internal/middleware"
+	"github.com/elloloop/identity/internal/service"
+)
+
+const handlerAdminSecret = "handler-operator-secret"
+
+// adminControlStore is a minimal in-memory service.ControlPlaneProjectStore
+// for the admin handler tests. It records the project/credential ids it mints
+// and the last auth-domain it was asked to ensure.
+type adminControlStore struct {
+	nextID     int
+	lastDomain struct {
+		projectID string
+		hostname  string
+		isPrimary bool
+	}
+}
+
+func (s *adminControlStore) mint(prefix string) string {
+	s.nextID++
+	switch s.nextID {
+	case 1:
+		return prefix + "-1"
+	default:
+		return prefix + "-n"
+	}
+}
+
+func (s *adminControlStore) CreateProject(_ context.Context, p *service.AdminProject) (string, error) {
+	id := s.mint("proj")
+	p.ID = id
+	return id, nil
+}
+
+func (s *adminControlStore) CreateProjectCredential(_ context.Context, c *service.AdminProjectCredential) (string, error) {
+	id := s.mint("cred")
+	c.ID = id
+	return id, nil
+}
+
+func (s *adminControlStore) EnsureAuthDomain(_ context.Context, projectID, hostname string, isPrimary bool, _ int64) error {
+	s.lastDomain.projectID = projectID
+	s.lastDomain.hostname = hostname
+	s.lastDomain.isPrimary = isPrimary
+	return nil
+}
+
+var _ service.ControlPlaneProjectStore = (*adminControlStore)(nil)
+
+// startAdminServer mounts a handler whose only wired service is the
+// control-plane admin one (built with the given secret), or nil to simulate
+// the no-control-plane build.
+func startAdminServer(t *testing.T, svc *service.ControlPlaneAdminService) identityconnectgen.IdentityServiceClient {
+	t.Helper()
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, svc, nil, testConfig())
+	mux := http.NewServeMux()
+	path, handler := identityconnectgen.NewIdentityServiceHandler(h)
+	mux.Handle(path, handler)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return identityconnectgen.NewIdentityServiceClient(srv.Client(), srv.URL)
+}
+
+func newAdminControlSvc(secret string) (*service.ControlPlaneAdminService, *adminControlStore, *connectMembershipStore) {
+	store := &adminControlStore{}
+	members := &connectMembershipStore{}
+	svc := service.NewControlPlaneAdminService(secret, store, &connectTenantStore{}, members, zap.NewNop())
+	return svc, store, members
+}
+
+// withAdminSecret returns a request carrying the operator's admin secret.
+func withAdminSecret[T any](msg *T, secret string) *connect.Request[T] {
+	req := connect.NewRequest(msg)
+	if secret != "" {
+		req.Header().Set(middleware.AdminAPISecretHeader, secret)
+	}
+	return req
+}
+
+// ── nil service (no control plane) → Unimplemented ───────────────────────
+
+func TestAdminRPCs_NilService_ReturnUnimplemented(t *testing.T) {
+	t.Parallel()
+	client := startAdminServer(t, nil)
+	ctx := context.Background()
+
+	_, err := client.AdminCreateProject(ctx, withAdminSecret(&identitypb.AdminCreateProjectRequest{StorageScopeId: "s"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = client.AdminCreateProjectCredential(ctx, withAdminSecret(&identitypb.AdminCreateProjectCredentialRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = client.AdminAddProjectAuthDomain(ctx, withAdminSecret(&identitypb.AdminAddProjectAuthDomainRequest{ProjectId: "p", Hostname: "h.example.com"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = client.AdminCreateTenant(ctx, withAdminSecret(&identitypb.AdminCreateTenantRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+
+	_, err = client.AdminAddTenantAdmin(ctx, withAdminSecret(&identitypb.AdminAddTenantAdminRequest{ProjectId: "p", TenantId: "t", UserId: "u"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+}
+
+// ── secret configured but unset on this build (empty secret) → Unimplemented
+
+func TestAdminRPCs_SecretDisabled_ReturnUnimplemented(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newAdminControlSvc("") // empty secret disables the surface
+	client := startAdminServer(t, svc)
+
+	_, err := client.AdminCreateProject(context.Background(),
+		withAdminSecret(&identitypb.AdminCreateProjectRequest{StorageScopeId: "s"}, "whatever"))
+	requireCode(t, err, connect.CodeUnimplemented)
+}
+
+// ── wrong / missing secret → PermissionDenied ────────────────────────────
+
+func TestAdminRPCs_BadSecret_Denied(t *testing.T) {
+	t.Parallel()
+	svc, store, _ := newAdminControlSvc(handlerAdminSecret)
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	// Every RPC rejects a wrong secret (exercising each handler's error path
+	// through toConnectError → PermissionDenied).
+	_, err := client.AdminCreateProject(ctx,
+		withAdminSecret(&identitypb.AdminCreateProjectRequest{StorageScopeId: "s"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+
+	_, err = client.AdminCreateProjectCredential(ctx,
+		withAdminSecret(&identitypb.AdminCreateProjectCredentialRequest{ProjectId: "p"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+
+	_, err = client.AdminAddProjectAuthDomain(ctx,
+		withAdminSecret(&identitypb.AdminAddProjectAuthDomainRequest{ProjectId: "p", Hostname: "h.example.com"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+
+	_, err = client.AdminCreateTenant(ctx,
+		withAdminSecret(&identitypb.AdminCreateTenantRequest{ProjectId: "p"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+
+	_, err = client.AdminAddTenantAdmin(ctx,
+		withAdminSecret(&identitypb.AdminAddTenantAdminRequest{ProjectId: "p", TenantId: "t", UserId: "u"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+
+	// Missing secret header entirely is likewise denied.
+	_, err = client.AdminCreateProject(ctx,
+		connect.NewRequest(&identitypb.AdminCreateProjectRequest{StorageScopeId: "s"}))
+	requireCode(t, err, connect.CodePermissionDenied)
+
+	if store.nextID != 0 {
+		t.Fatal("a denied call must not reach the store")
+	}
+}
+
+// ── correct secret → full provisioning flow through the handler ──────────
+
+func TestAdminRPCs_HappyPath_Handler(t *testing.T) {
+	t.Parallel()
+	svc, store, members := newAdminControlSvc(handlerAdminSecret)
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	proj, err := client.AdminCreateProject(ctx,
+		withAdminSecret(&identitypb.AdminCreateProjectRequest{Name: "Acme", StorageScopeId: "scope-1"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminCreateProject: %v", err)
+	}
+	if proj.Msg.GetProjectId() == "" {
+		t.Fatal("expected a project id")
+	}
+
+	cred, err := client.AdminCreateProjectCredential(ctx,
+		withAdminSecret(&identitypb.AdminCreateProjectCredentialRequest{ProjectId: proj.Msg.GetProjectId(), Kind: service.CredentialKindSecret}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminCreateProjectCredential: %v", err)
+	}
+	if cred.Msg.GetRawKey() == "" || cred.Msg.GetPublicId() == "" || cred.Msg.GetCredentialId() == "" {
+		t.Fatalf("credential response incomplete: %+v", cred.Msg)
+	}
+
+	if _, err := client.AdminAddProjectAuthDomain(ctx,
+		withAdminSecret(&identitypb.AdminAddProjectAuthDomainRequest{ProjectId: proj.Msg.GetProjectId(), Hostname: "auth.acme.test", IsPrimary: true}, handlerAdminSecret)); err != nil {
+		t.Fatalf("AdminAddProjectAuthDomain: %v", err)
+	}
+	if store.lastDomain.hostname != "auth.acme.test" || !store.lastDomain.isPrimary {
+		t.Fatalf("auth domain not ensured: %+v", store.lastDomain)
+	}
+
+	if _, err := client.AdminCreateTenant(ctx,
+		withAdminSecret(&identitypb.AdminCreateTenantRequest{ProjectId: proj.Msg.GetProjectId(), Name: "Acme Inc", PrimaryDomain: "acme.test"}, handlerAdminSecret)); err != nil {
+		t.Fatalf("AdminCreateTenant: %v", err)
+	}
+
+	// connectTenantStore mints no id, so the admin supplies the tenant id
+	// explicitly (the handler-layer assertion is the secret gate + wiring,
+	// not the tenant store's id generation — that is the e2e's job).
+	admin, err := client.AdminAddTenantAdmin(ctx,
+		withAdminSecret(&identitypb.AdminAddTenantAdminRequest{
+			ProjectId: proj.Msg.GetProjectId(),
+			TenantId:  "tenant-1",
+			UserId:    "user-1",
+			Role:      service.RoleOwner,
+		}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminAddTenantAdmin: %v", err)
+	}
+	m := admin.Msg.GetMembership()
+	if m.GetUserId() != "user-1" || m.GetRole() != service.RoleOwner || m.GetSource() != service.MembershipSourceAdded {
+		t.Fatalf("membership = %+v", m)
+	}
+	if members.upserted == nil || members.upserted.UserID != "user-1" {
+		t.Fatalf("membership not upserted: %+v", members.upserted)
+	}
+}
