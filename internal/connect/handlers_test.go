@@ -160,7 +160,7 @@ func TestHeaderHelpers(t *testing.T) {
 }
 
 func TestNewIdentityHandler(t *testing.T) {
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if h == nil {
 		t.Fatal("expected non-nil handler")
 	}

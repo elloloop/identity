@@ -896,6 +896,53 @@ message OrganizationSignupResponse {
   int32 expires_in = 5;
 }
 
+// ─── Tenant domains (redesign) ───────────────────────────────────────
+
+// Domain is an email domain bound to a Tenant within the caller's
+// Project. Verifying it (DNS TXT or email) flips its status to verified
+// and claims the owning tenant.
+message Domain {
+  string id = 1;
+  string tenant_id = 2;
+  string domain = 3;
+  string verification_method = 4;      // "dns_txt" | "email"
+  string status = 5;                   // "pending" | "verified" | "failed"
+  google.protobuf.Timestamp verified_at = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message CreateDomainRequest {
+  string tenant_id = 1;
+  string domain = 2;
+  string verification_method = 3;      // "dns_txt" | "email"
+}
+
+message CreateDomainResponse {
+  Domain domain = 1;
+  // The DNS TXT challenge the caller must publish before VerifyDomain
+  // succeeds. Populated for verification_method = "dns_txt"; empty for
+  // "email" (which verifies by an out-of-band confirmation link).
+  string dns_txt_name = 2;             // host the TXT record is published on
+  string dns_txt_value = 3;            // exact TXT value to publish
+}
+
+message VerifyDomainRequest {
+  string domain_id = 1;
+}
+
+message VerifyDomainResponse {
+  Domain domain = 1;
+}
+
+message ListTenantDomainsRequest {
+  string tenant_id = 1;
+}
+
+message ListTenantDomainsResponse {
+  repeated Domain domains = 1;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────
 
 service IdentityService {
@@ -1000,6 +1047,16 @@ service IdentityService {
   // the admin user globally, and creates the identity-layer
   // Organization + admin User rows scoped to the new tenant.
   rpc OrganizationSignup(OrganizationSignupRequest) returns (OrganizationSignupResponse);
+
+  // Tenant domains (redesign). Authenticated, project-scoped, and gated
+  // on the caller being an owner/admin member of the target tenant — with
+  // one exception: VerifyDomain on a still-latent tenant that has no
+  // members yet is open, so the first verifier becomes its owner.
+  // Available only on the postgres control-plane driver; entdb/memory
+  // deployments return Unimplemented.
+  rpc CreateDomain(CreateDomainRequest) returns (CreateDomainResponse);
+  rpc VerifyDomain(VerifyDomainRequest) returns (VerifyDomainResponse);
+  rpc ListTenantDomains(ListTenantDomainsRequest) returns (ListTenantDomainsResponse);
 
   // Admin user management (caller must have role=admin). Enforced in the
   // servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
