@@ -332,6 +332,20 @@ func (b *grpcBridge) OrganizationSignup(ctx context.Context, in *identitypb.Orga
 	return invoke(ctx, in, b.h.OrganizationSignup)
 }
 
+// ─── Tenant domains ─────────────────────────────────────────────────
+
+func (b *grpcBridge) CreateDomain(ctx context.Context, in *identitypb.CreateDomainRequest) (*identitypb.CreateDomainResponse, error) {
+	return invoke(ctx, in, b.h.CreateDomain)
+}
+
+func (b *grpcBridge) VerifyDomain(ctx context.Context, in *identitypb.VerifyDomainRequest) (*identitypb.VerifyDomainResponse, error) {
+	return invoke(ctx, in, b.h.VerifyDomain)
+}
+
+func (b *grpcBridge) ListTenantDomains(ctx context.Context, in *identitypb.ListTenantDomainsRequest) (*identitypb.ListTenantDomainsResponse, error) {
+	return invoke(ctx, in, b.h.ListTenantDomains)
+}
+
 // ─── Admin user management ──────────────────────────────────────────
 
 func (b *grpcBridge) InviteUser(ctx context.Context, in *identitypb.InviteUserRequest) (*identitypb.InviteUserResponse, error) {

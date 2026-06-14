@@ -76,6 +76,15 @@ type Deps struct {
 	// with a governance plane); when nil, signup does not auto-form tenants.
 	TenantAutoFormer service.TenantAutoFormStore
 
+	// DomainStore, TenantStore and MembershipStore back the tenant
+	// domain-verification RPCs (CreateDomain / VerifyDomain /
+	// ListTenantDomains). All three are non-nil ONLY for the postgres
+	// driver (the only one with a governance plane); when any is nil the
+	// DomainService is not constructed and those RPCs return Unimplemented.
+	DomainStore     service.DomainStore
+	TenantStore     service.TenantStore
+	MembershipStore service.MembershipStore
+
 	// TOTPRecoveryPepper is the HMAC-SHA-256 key used to hash and
 	// verify recovery codes. Must be >= totp.MinRecoveryPepperBytes
 	// bytes long; the binary refuses to start otherwise.
@@ -363,7 +372,8 @@ func New(deps Deps) (*Built, error) {
 	}
 
 	orgSignupSvc := buildOrganizationSignupService(deps, auditLog, logger)
-	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, orgSignupSvc, captchaVerifier, deps.Config)
+	domainSvc := buildDomainService(deps, logger)
+	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, orgSignupSvc, domainSvc, captchaVerifier, deps.Config)
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {
@@ -515,6 +525,25 @@ func buildOrganizationSignupService(deps Deps, auditLog *audit.Logger, logger *z
 		deps.Config,
 		deps.Signer,
 		auditLog,
+		logger,
+	)
+}
+
+// buildDomainService returns the wired DomainService backing the tenant
+// domain-verification RPCs, or nil when the governance stores are absent
+// (entdb/memory have no control plane). The Connect handler treats nil as
+// "disabled" and returns CodeUnimplemented. A nil DNS resolver lets
+// NewDomainService default to net.DefaultResolver.
+func buildDomainService(deps Deps, logger *zap.Logger) *service.DomainService {
+	if deps.DomainStore == nil || deps.TenantStore == nil || deps.MembershipStore == nil {
+		return nil
+	}
+	return service.NewDomainService(
+		deps.DomainStore,
+		deps.TenantStore,
+		deps.MembershipStore,
+		nil,
+		deps.Config,
 		logger,
 	)
 }

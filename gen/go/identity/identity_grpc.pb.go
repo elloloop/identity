@@ -79,6 +79,9 @@ const (
 	IdentityService_RemoveGroupMember_FullMethodName             = "/identity.IdentityService/RemoveGroupMember"
 	IdentityService_ListGroupMembers_FullMethodName              = "/identity.IdentityService/ListGroupMembers"
 	IdentityService_OrganizationSignup_FullMethodName            = "/identity.IdentityService/OrganizationSignup"
+	IdentityService_CreateDomain_FullMethodName                  = "/identity.IdentityService/CreateDomain"
+	IdentityService_VerifyDomain_FullMethodName                  = "/identity.IdentityService/VerifyDomain"
+	IdentityService_ListTenantDomains_FullMethodName             = "/identity.IdentityService/ListTenantDomains"
 	IdentityService_InviteUser_FullMethodName                    = "/identity.IdentityService/InviteUser"
 	IdentityService_AcceptInvitation_FullMethodName              = "/identity.IdentityService/AcceptInvitation"
 	IdentityService_DeactivateUser_FullMethodName                = "/identity.IdentityService/DeactivateUser"
@@ -174,6 +177,15 @@ type IdentityServiceClient interface {
 	// the admin user globally, and creates the identity-layer
 	// Organization + admin User rows scoped to the new tenant.
 	OrganizationSignup(ctx context.Context, in *OrganizationSignupRequest, opts ...grpc.CallOption) (*OrganizationSignupResponse, error)
+	// Tenant domains (redesign). Authenticated, project-scoped, and gated
+	// on the caller being an owner/admin member of the target tenant — with
+	// one exception: VerifyDomain on a still-latent tenant that has no
+	// members yet is open, so the first verifier becomes its owner.
+	// Available only on the postgres control-plane driver; entdb/memory
+	// deployments return Unimplemented.
+	CreateDomain(ctx context.Context, in *CreateDomainRequest, opts ...grpc.CallOption) (*CreateDomainResponse, error)
+	VerifyDomain(ctx context.Context, in *VerifyDomainRequest, opts ...grpc.CallOption) (*VerifyDomainResponse, error)
+	ListTenantDomains(ctx context.Context, in *ListTenantDomainsRequest, opts ...grpc.CallOption) (*ListTenantDomainsResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*InviteUserResponse, error)
@@ -792,6 +804,36 @@ func (c *identityServiceClient) OrganizationSignup(ctx context.Context, in *Orga
 	return out, nil
 }
 
+func (c *identityServiceClient) CreateDomain(ctx context.Context, in *CreateDomainRequest, opts ...grpc.CallOption) (*CreateDomainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateDomainResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CreateDomain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) VerifyDomain(ctx context.Context, in *VerifyDomainRequest, opts ...grpc.CallOption) (*VerifyDomainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyDomainResponse)
+	err := c.cc.Invoke(ctx, IdentityService_VerifyDomain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListTenantDomains(ctx context.Context, in *ListTenantDomainsRequest, opts ...grpc.CallOption) (*ListTenantDomainsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTenantDomainsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListTenantDomains_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) InviteUser(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*InviteUserResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InviteUserResponse)
@@ -939,6 +981,15 @@ type IdentityServiceServer interface {
 	// the admin user globally, and creates the identity-layer
 	// Organization + admin User rows scoped to the new tenant.
 	OrganizationSignup(context.Context, *OrganizationSignupRequest) (*OrganizationSignupResponse, error)
+	// Tenant domains (redesign). Authenticated, project-scoped, and gated
+	// on the caller being an owner/admin member of the target tenant — with
+	// one exception: VerifyDomain on a still-latent tenant that has no
+	// members yet is open, so the first verifier becomes its owner.
+	// Available only on the postgres control-plane driver; entdb/memory
+	// deployments return Unimplemented.
+	CreateDomain(context.Context, *CreateDomainRequest) (*CreateDomainResponse, error)
+	VerifyDomain(context.Context, *VerifyDomainRequest) (*VerifyDomainResponse, error)
+	ListTenantDomains(context.Context, *ListTenantDomainsRequest) (*ListTenantDomainsResponse, error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error)
@@ -1136,6 +1187,15 @@ func (UnimplementedIdentityServiceServer) ListGroupMembers(context.Context, *Lis
 }
 func (UnimplementedIdentityServiceServer) OrganizationSignup(context.Context, *OrganizationSignupRequest) (*OrganizationSignupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method OrganizationSignup not implemented")
+}
+func (UnimplementedIdentityServiceServer) CreateDomain(context.Context, *CreateDomainRequest) (*CreateDomainResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateDomain not implemented")
+}
+func (UnimplementedIdentityServiceServer) VerifyDomain(context.Context, *VerifyDomainRequest) (*VerifyDomainResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyDomain not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListTenantDomains(context.Context, *ListTenantDomainsRequest) (*ListTenantDomainsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTenantDomains not implemented")
 }
 func (UnimplementedIdentityServiceServer) InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InviteUser not implemented")
@@ -2256,6 +2316,60 @@ func _IdentityService_OrganizationSignup_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_CreateDomain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateDomainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CreateDomain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CreateDomain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CreateDomain(ctx, req.(*CreateDomainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_VerifyDomain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyDomainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).VerifyDomain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_VerifyDomain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).VerifyDomain(ctx, req.(*VerifyDomainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListTenantDomains_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTenantDomainsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListTenantDomains(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListTenantDomains_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListTenantDomains(ctx, req.(*ListTenantDomainsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_InviteUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(InviteUserRequest)
 	if err := dec(in); err != nil {
@@ -2610,6 +2724,18 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OrganizationSignup",
 			Handler:    _IdentityService_OrganizationSignup_Handler,
+		},
+		{
+			MethodName: "CreateDomain",
+			Handler:    _IdentityService_CreateDomain_Handler,
+		},
+		{
+			MethodName: "VerifyDomain",
+			Handler:    _IdentityService_VerifyDomain_Handler,
+		},
+		{
+			MethodName: "ListTenantDomains",
+			Handler:    _IdentityService_ListTenantDomains_Handler,
 		},
 		{
 			MethodName: "InviteUser",

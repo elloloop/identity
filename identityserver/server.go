@@ -143,6 +143,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	authRepo, dbAdapter := opts.Repo, opts.DB
 	var projectResolver service.ProjectResolver
 	var tenantAutoFormer service.TenantAutoFormStore
+	var domainStore service.DomainStore
+	var tenantStore service.TenantStore
+	var membershipStore service.MembershipStore
 	if authRepo == nil || dbAdapter == nil {
 		built, buildErr := repo.Build(ctx, repo.Config{
 			Driver:              repo.Driver(cfg.RepoDriver),
@@ -159,6 +162,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		authRepo, dbAdapter = built.Repository, built.DB
 		projectResolver = built.ProjectResolver()
 		tenantAutoFormer = built.TenantAutoFormer()
+		domainStore = built.DomainStoreIface()
+		tenantStore = built.TenantStoreIface()
+		membershipStore = built.MembershipStoreIface()
 
 		// Seed the control-plane default project (postgres only; entdb/
 		// memory have no control plane, so built.ProjectStore is nil). The
@@ -222,6 +228,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		RepositoryForTenant: repoForTenant,
 		ProjectResolver:     projectResolver,
 		TenantAutoFormer:    tenantAutoFormer,
+		DomainStore:         domainStore,
+		TenantStore:         tenantStore,
+		MembershipStore:     membershipStore,
 	})
 	if err != nil {
 		s.cleanupOnError(ctx)

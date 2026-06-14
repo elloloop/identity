@@ -211,6 +211,15 @@ const (
 	// IdentityServiceOrganizationSignupProcedure is the fully-qualified name of the IdentityService's
 	// OrganizationSignup RPC.
 	IdentityServiceOrganizationSignupProcedure = "/identity.IdentityService/OrganizationSignup"
+	// IdentityServiceCreateDomainProcedure is the fully-qualified name of the IdentityService's
+	// CreateDomain RPC.
+	IdentityServiceCreateDomainProcedure = "/identity.IdentityService/CreateDomain"
+	// IdentityServiceVerifyDomainProcedure is the fully-qualified name of the IdentityService's
+	// VerifyDomain RPC.
+	IdentityServiceVerifyDomainProcedure = "/identity.IdentityService/VerifyDomain"
+	// IdentityServiceListTenantDomainsProcedure is the fully-qualified name of the IdentityService's
+	// ListTenantDomains RPC.
+	IdentityServiceListTenantDomainsProcedure = "/identity.IdentityService/ListTenantDomains"
 	// IdentityServiceInviteUserProcedure is the fully-qualified name of the IdentityService's
 	// InviteUser RPC.
 	IdentityServiceInviteUserProcedure = "/identity.IdentityService/InviteUser"
@@ -316,6 +325,15 @@ type IdentityServiceClient interface {
 	// the admin user globally, and creates the identity-layer
 	// Organization + admin User rows scoped to the new tenant.
 	OrganizationSignup(context.Context, *connect.Request[identity.OrganizationSignupRequest]) (*connect.Response[identity.OrganizationSignupResponse], error)
+	// Tenant domains (redesign). Authenticated, project-scoped, and gated
+	// on the caller being an owner/admin member of the target tenant — with
+	// one exception: VerifyDomain on a still-latent tenant that has no
+	// members yet is open, so the first verifier becomes its owner.
+	// Available only on the postgres control-plane driver; entdb/memory
+	// deployments return Unimplemented.
+	CreateDomain(context.Context, *connect.Request[identity.CreateDomainRequest]) (*connect.Response[identity.CreateDomainResponse], error)
+	VerifyDomain(context.Context, *connect.Request[identity.VerifyDomainRequest]) (*connect.Response[identity.VerifyDomainResponse], error)
+	ListTenantDomains(context.Context, *connect.Request[identity.ListTenantDomainsRequest]) (*connect.Response[identity.ListTenantDomainsResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error)
@@ -697,6 +715,24 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("OrganizationSignup")),
 			connect.WithClientOptions(opts...),
 		),
+		createDomain: connect.NewClient[identity.CreateDomainRequest, identity.CreateDomainResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateDomainProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateDomain")),
+			connect.WithClientOptions(opts...),
+		),
+		verifyDomain: connect.NewClient[identity.VerifyDomainRequest, identity.VerifyDomainResponse](
+			httpClient,
+			baseURL+IdentityServiceVerifyDomainProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("VerifyDomain")),
+			connect.WithClientOptions(opts...),
+		),
+		listTenantDomains: connect.NewClient[identity.ListTenantDomainsRequest, identity.ListTenantDomainsResponse](
+			httpClient,
+			baseURL+IdentityServiceListTenantDomainsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListTenantDomains")),
+			connect.WithClientOptions(opts...),
+		),
 		inviteUser: connect.NewClient[identity.InviteUserRequest, identity.InviteUserResponse](
 			httpClient,
 			baseURL+IdentityServiceInviteUserProcedure,
@@ -798,6 +834,9 @@ type identityServiceClient struct {
 	removeGroupMember             *connect.Client[identity.RemoveGroupMemberRequest, identity.RemoveGroupMemberResponse]
 	listGroupMembers              *connect.Client[identity.ListGroupMembersRequest, identity.ListGroupMembersResponse]
 	organizationSignup            *connect.Client[identity.OrganizationSignupRequest, identity.OrganizationSignupResponse]
+	createDomain                  *connect.Client[identity.CreateDomainRequest, identity.CreateDomainResponse]
+	verifyDomain                  *connect.Client[identity.VerifyDomainRequest, identity.VerifyDomainResponse]
+	listTenantDomains             *connect.Client[identity.ListTenantDomainsRequest, identity.ListTenantDomainsResponse]
 	inviteUser                    *connect.Client[identity.InviteUserRequest, identity.InviteUserResponse]
 	acceptInvitation              *connect.Client[identity.AcceptInvitationRequest, identity.AcceptInvitationResponse]
 	deactivateUser                *connect.Client[identity.DeactivateUserRequest, identity.DeactivateUserResponse]
@@ -1106,6 +1145,21 @@ func (c *identityServiceClient) OrganizationSignup(ctx context.Context, req *con
 	return c.organizationSignup.CallUnary(ctx, req)
 }
 
+// CreateDomain calls identity.IdentityService.CreateDomain.
+func (c *identityServiceClient) CreateDomain(ctx context.Context, req *connect.Request[identity.CreateDomainRequest]) (*connect.Response[identity.CreateDomainResponse], error) {
+	return c.createDomain.CallUnary(ctx, req)
+}
+
+// VerifyDomain calls identity.IdentityService.VerifyDomain.
+func (c *identityServiceClient) VerifyDomain(ctx context.Context, req *connect.Request[identity.VerifyDomainRequest]) (*connect.Response[identity.VerifyDomainResponse], error) {
+	return c.verifyDomain.CallUnary(ctx, req)
+}
+
+// ListTenantDomains calls identity.IdentityService.ListTenantDomains.
+func (c *identityServiceClient) ListTenantDomains(ctx context.Context, req *connect.Request[identity.ListTenantDomainsRequest]) (*connect.Response[identity.ListTenantDomainsResponse], error) {
+	return c.listTenantDomains.CallUnary(ctx, req)
+}
+
 // InviteUser calls identity.IdentityService.InviteUser.
 func (c *identityServiceClient) InviteUser(ctx context.Context, req *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error) {
 	return c.inviteUser.CallUnary(ctx, req)
@@ -1221,6 +1275,15 @@ type IdentityServiceHandler interface {
 	// the admin user globally, and creates the identity-layer
 	// Organization + admin User rows scoped to the new tenant.
 	OrganizationSignup(context.Context, *connect.Request[identity.OrganizationSignupRequest]) (*connect.Response[identity.OrganizationSignupResponse], error)
+	// Tenant domains (redesign). Authenticated, project-scoped, and gated
+	// on the caller being an owner/admin member of the target tenant — with
+	// one exception: VerifyDomain on a still-latent tenant that has no
+	// members yet is open, so the first verifier becomes its owner.
+	// Available only on the postgres control-plane driver; entdb/memory
+	// deployments return Unimplemented.
+	CreateDomain(context.Context, *connect.Request[identity.CreateDomainRequest]) (*connect.Response[identity.CreateDomainResponse], error)
+	VerifyDomain(context.Context, *connect.Request[identity.VerifyDomainRequest]) (*connect.Response[identity.VerifyDomainResponse], error)
+	ListTenantDomains(context.Context, *connect.Request[identity.ListTenantDomainsRequest]) (*connect.Response[identity.ListTenantDomainsResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error)
@@ -1598,6 +1661,24 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("OrganizationSignup")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceCreateDomainHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateDomainProcedure,
+		svc.CreateDomain,
+		connect.WithSchema(identityServiceMethods.ByName("CreateDomain")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceVerifyDomainHandler := connect.NewUnaryHandler(
+		IdentityServiceVerifyDomainProcedure,
+		svc.VerifyDomain,
+		connect.WithSchema(identityServiceMethods.ByName("VerifyDomain")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListTenantDomainsHandler := connect.NewUnaryHandler(
+		IdentityServiceListTenantDomainsProcedure,
+		svc.ListTenantDomains,
+		connect.WithSchema(identityServiceMethods.ByName("ListTenantDomains")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceInviteUserHandler := connect.NewUnaryHandler(
 		IdentityServiceInviteUserProcedure,
 		svc.InviteUser,
@@ -1756,6 +1837,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceListGroupMembersHandler.ServeHTTP(w, r)
 		case IdentityServiceOrganizationSignupProcedure:
 			identityServiceOrganizationSignupHandler.ServeHTTP(w, r)
+		case IdentityServiceCreateDomainProcedure:
+			identityServiceCreateDomainHandler.ServeHTTP(w, r)
+		case IdentityServiceVerifyDomainProcedure:
+			identityServiceVerifyDomainHandler.ServeHTTP(w, r)
+		case IdentityServiceListTenantDomainsProcedure:
+			identityServiceListTenantDomainsHandler.ServeHTTP(w, r)
 		case IdentityServiceInviteUserProcedure:
 			identityServiceInviteUserHandler.ServeHTTP(w, r)
 		case IdentityServiceAcceptInvitationProcedure:
@@ -2015,6 +2102,18 @@ func (UnimplementedIdentityServiceHandler) ListGroupMembers(context.Context, *co
 
 func (UnimplementedIdentityServiceHandler) OrganizationSignup(context.Context, *connect.Request[identity.OrganizationSignupRequest]) (*connect.Response[identity.OrganizationSignupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.OrganizationSignup is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CreateDomain(context.Context, *connect.Request[identity.CreateDomainRequest]) (*connect.Response[identity.CreateDomainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.CreateDomain is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) VerifyDomain(context.Context, *connect.Request[identity.VerifyDomainRequest]) (*connect.Response[identity.VerifyDomainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.VerifyDomain is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListTenantDomains(context.Context, *connect.Request[identity.ListTenantDomainsRequest]) (*connect.Response[identity.ListTenantDomainsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.ListTenantDomains is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) InviteUser(context.Context, *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error) {

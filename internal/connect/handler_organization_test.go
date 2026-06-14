@@ -36,7 +36,7 @@ func startSingleModeServer(t *testing.T) *orgSignupServer {
 	t.Helper()
 	cfg := testConfig()
 	cfg.IdentityMode = config.IdentityModeSingle
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, cfg)
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, cfg)
 	return startOrgSignupServer(t, h, cfg)
 }
 
@@ -54,7 +54,7 @@ func startMultiModeServer(t *testing.T) *orgSignupServer {
 	keyRing := testKeyRing(t)
 
 	orgSvc := service.NewOrganizationSignupService(admin, repos.factory(), cfg, keyRing, auditLog, zap.NewNop())
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, orgSvc, nil, cfg)
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, orgSvc, nil, nil, cfg)
 	srv := startOrgSignupServer(t, h, cfg)
 	srv.cfg = cfg
 	return srv
@@ -100,7 +100,7 @@ func TestOrganizationSignup_MultiMode_NilService_ReturnsUnimplemented(t *testing
 	cfg := testConfig()
 	cfg.IdentityMode = config.IdentityModeMulti
 	// Multi-mode config but nil orgSignup wiring (e.g. boot guard didn't run).
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, cfg)
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, cfg)
 	srv := startOrgSignupServer(t, h, cfg)
 
 	req := connect.NewRequest(&identitypb.OrganizationSignupRequest{
