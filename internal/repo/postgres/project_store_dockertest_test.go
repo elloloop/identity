@@ -122,3 +122,13 @@ func TestProjectStore_EnsureAuthDomain_Container(t *testing.T) {
 	dsn := startPostgresContainer(ctx, t)
 	runEnsureAuthDomainSmoke(t, dsn)
 }
+
+// TestAutoFormStore_Container runs the tenant auto-formation body (incl.
+// the concurrent-race convergence) against a throwaway Postgres container.
+func TestAutoFormStore_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runAutoFormSmoke(t, dsn)
+}
