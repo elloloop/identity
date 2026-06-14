@@ -17,6 +17,11 @@ const (
 	TemplatePasswordReset     = "password_reset"
 	TemplateEmailVerification = "email_verification"
 	TemplateInvitation        = "invitation"
+	// TemplateTenantInvitation invites a recipient to join a redesign Tenant
+	// (the company-governance entity), distinct from the admin-provisioning
+	// TemplateInvitation. Carries the tenant name, the role offered, and the
+	// raw-token acceptance link.
+	TemplateTenantInvitation = "tenant_invitation"
 	// TemplateEmailChangeVerify is sent to the *new* address with the
 	// verification link to confirm the email change.
 	TemplateEmailChangeVerify = "email_change_verify"

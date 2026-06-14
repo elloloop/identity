@@ -37,6 +37,7 @@ type IdentityHandler struct {
 	idv       *service.IdentityVerificationService
 	orgSignup *service.OrganizationSignupService
 	domains   *service.DomainService
+	members   *service.MembershipService
 	captcha   captcha.Verifier
 	cfg       *config.Config
 }
@@ -49,6 +50,9 @@ type IdentityHandler struct {
 //
 // domains is optional: nil (entdb/memory, which have no control plane)
 // causes the tenant-domain RPCs to return CodeUnimplemented.
+//
+// members is optional: nil (entdb/memory, which have no control plane)
+// causes the tenant-membership/invitation RPCs to return CodeUnimplemented.
 //
 // captchaVerifier is optional: a nil verifier is treated as disabled, so
 // the CAPTCHA gate behaves as a no-op regardless of the per-endpoint
@@ -63,6 +67,7 @@ func NewIdentityHandler(
 	idv *service.IdentityVerificationService,
 	orgSignup *service.OrganizationSignupService,
 	domains *service.DomainService,
+	members *service.MembershipService,
 	captchaVerifier captcha.Verifier,
 	cfg *config.Config,
 ) *IdentityHandler {
@@ -75,6 +80,7 @@ func NewIdentityHandler(
 		idv:       idv,
 		orgSignup: orgSignup,
 		domains:   domains,
+		members:   members,
 		captcha:   captchaVerifier,
 		cfg:       cfg,
 	}

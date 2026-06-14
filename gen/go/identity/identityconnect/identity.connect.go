@@ -220,6 +220,21 @@ const (
 	// IdentityServiceListTenantDomainsProcedure is the fully-qualified name of the IdentityService's
 	// ListTenantDomains RPC.
 	IdentityServiceListTenantDomainsProcedure = "/identity.IdentityService/ListTenantDomains"
+	// IdentityServiceCreateTenantInvitationProcedure is the fully-qualified name of the
+	// IdentityService's CreateTenantInvitation RPC.
+	IdentityServiceCreateTenantInvitationProcedure = "/identity.IdentityService/CreateTenantInvitation"
+	// IdentityServiceAcceptTenantInvitationProcedure is the fully-qualified name of the
+	// IdentityService's AcceptTenantInvitation RPC.
+	IdentityServiceAcceptTenantInvitationProcedure = "/identity.IdentityService/AcceptTenantInvitation"
+	// IdentityServiceListTenantInvitationsProcedure is the fully-qualified name of the
+	// IdentityService's ListTenantInvitations RPC.
+	IdentityServiceListTenantInvitationsProcedure = "/identity.IdentityService/ListTenantInvitations"
+	// IdentityServiceListTenantMembersProcedure is the fully-qualified name of the IdentityService's
+	// ListTenantMembers RPC.
+	IdentityServiceListTenantMembersProcedure = "/identity.IdentityService/ListTenantMembers"
+	// IdentityServiceRemoveTenantMemberProcedure is the fully-qualified name of the IdentityService's
+	// RemoveTenantMember RPC.
+	IdentityServiceRemoveTenantMemberProcedure = "/identity.IdentityService/RemoveTenantMember"
 	// IdentityServiceInviteUserProcedure is the fully-qualified name of the IdentityService's
 	// InviteUser RPC.
 	IdentityServiceInviteUserProcedure = "/identity.IdentityService/InviteUser"
@@ -334,6 +349,18 @@ type IdentityServiceClient interface {
 	CreateDomain(context.Context, *connect.Request[identity.CreateDomainRequest]) (*connect.Response[identity.CreateDomainResponse], error)
 	VerifyDomain(context.Context, *connect.Request[identity.VerifyDomainRequest]) (*connect.Response[identity.VerifyDomainResponse], error)
 	ListTenantDomains(context.Context, *connect.Request[identity.ListTenantDomainsRequest]) (*connect.Response[identity.ListTenantDomainsResponse], error)
+	// Tenant membership (redesign). Authenticated, project-scoped, and —
+	// except for AcceptTenantInvitation — gated on the caller being an
+	// owner/admin member of the target tenant. AcceptTenantInvitation is the
+	// redeemer's own action: any authenticated caller may redeem a token, but
+	// only for an invitation addressed to their own account email. Available
+	// only on the postgres control-plane driver; entdb/memory deployments
+	// return Unimplemented.
+	CreateTenantInvitation(context.Context, *connect.Request[identity.CreateTenantInvitationRequest]) (*connect.Response[identity.CreateTenantInvitationResponse], error)
+	AcceptTenantInvitation(context.Context, *connect.Request[identity.AcceptTenantInvitationRequest]) (*connect.Response[identity.AcceptTenantInvitationResponse], error)
+	ListTenantInvitations(context.Context, *connect.Request[identity.ListTenantInvitationsRequest]) (*connect.Response[identity.ListTenantInvitationsResponse], error)
+	ListTenantMembers(context.Context, *connect.Request[identity.ListTenantMembersRequest]) (*connect.Response[identity.ListTenantMembersResponse], error)
+	RemoveTenantMember(context.Context, *connect.Request[identity.RemoveTenantMemberRequest]) (*connect.Response[identity.RemoveTenantMemberResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error)
@@ -733,6 +760,36 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("ListTenantDomains")),
 			connect.WithClientOptions(opts...),
 		),
+		createTenantInvitation: connect.NewClient[identity.CreateTenantInvitationRequest, identity.CreateTenantInvitationResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateTenantInvitationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateTenantInvitation")),
+			connect.WithClientOptions(opts...),
+		),
+		acceptTenantInvitation: connect.NewClient[identity.AcceptTenantInvitationRequest, identity.AcceptTenantInvitationResponse](
+			httpClient,
+			baseURL+IdentityServiceAcceptTenantInvitationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AcceptTenantInvitation")),
+			connect.WithClientOptions(opts...),
+		),
+		listTenantInvitations: connect.NewClient[identity.ListTenantInvitationsRequest, identity.ListTenantInvitationsResponse](
+			httpClient,
+			baseURL+IdentityServiceListTenantInvitationsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListTenantInvitations")),
+			connect.WithClientOptions(opts...),
+		),
+		listTenantMembers: connect.NewClient[identity.ListTenantMembersRequest, identity.ListTenantMembersResponse](
+			httpClient,
+			baseURL+IdentityServiceListTenantMembersProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListTenantMembers")),
+			connect.WithClientOptions(opts...),
+		),
+		removeTenantMember: connect.NewClient[identity.RemoveTenantMemberRequest, identity.RemoveTenantMemberResponse](
+			httpClient,
+			baseURL+IdentityServiceRemoveTenantMemberProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RemoveTenantMember")),
+			connect.WithClientOptions(opts...),
+		),
 		inviteUser: connect.NewClient[identity.InviteUserRequest, identity.InviteUserResponse](
 			httpClient,
 			baseURL+IdentityServiceInviteUserProcedure,
@@ -837,6 +894,11 @@ type identityServiceClient struct {
 	createDomain                  *connect.Client[identity.CreateDomainRequest, identity.CreateDomainResponse]
 	verifyDomain                  *connect.Client[identity.VerifyDomainRequest, identity.VerifyDomainResponse]
 	listTenantDomains             *connect.Client[identity.ListTenantDomainsRequest, identity.ListTenantDomainsResponse]
+	createTenantInvitation        *connect.Client[identity.CreateTenantInvitationRequest, identity.CreateTenantInvitationResponse]
+	acceptTenantInvitation        *connect.Client[identity.AcceptTenantInvitationRequest, identity.AcceptTenantInvitationResponse]
+	listTenantInvitations         *connect.Client[identity.ListTenantInvitationsRequest, identity.ListTenantInvitationsResponse]
+	listTenantMembers             *connect.Client[identity.ListTenantMembersRequest, identity.ListTenantMembersResponse]
+	removeTenantMember            *connect.Client[identity.RemoveTenantMemberRequest, identity.RemoveTenantMemberResponse]
 	inviteUser                    *connect.Client[identity.InviteUserRequest, identity.InviteUserResponse]
 	acceptInvitation              *connect.Client[identity.AcceptInvitationRequest, identity.AcceptInvitationResponse]
 	deactivateUser                *connect.Client[identity.DeactivateUserRequest, identity.DeactivateUserResponse]
@@ -1160,6 +1222,31 @@ func (c *identityServiceClient) ListTenantDomains(ctx context.Context, req *conn
 	return c.listTenantDomains.CallUnary(ctx, req)
 }
 
+// CreateTenantInvitation calls identity.IdentityService.CreateTenantInvitation.
+func (c *identityServiceClient) CreateTenantInvitation(ctx context.Context, req *connect.Request[identity.CreateTenantInvitationRequest]) (*connect.Response[identity.CreateTenantInvitationResponse], error) {
+	return c.createTenantInvitation.CallUnary(ctx, req)
+}
+
+// AcceptTenantInvitation calls identity.IdentityService.AcceptTenantInvitation.
+func (c *identityServiceClient) AcceptTenantInvitation(ctx context.Context, req *connect.Request[identity.AcceptTenantInvitationRequest]) (*connect.Response[identity.AcceptTenantInvitationResponse], error) {
+	return c.acceptTenantInvitation.CallUnary(ctx, req)
+}
+
+// ListTenantInvitations calls identity.IdentityService.ListTenantInvitations.
+func (c *identityServiceClient) ListTenantInvitations(ctx context.Context, req *connect.Request[identity.ListTenantInvitationsRequest]) (*connect.Response[identity.ListTenantInvitationsResponse], error) {
+	return c.listTenantInvitations.CallUnary(ctx, req)
+}
+
+// ListTenantMembers calls identity.IdentityService.ListTenantMembers.
+func (c *identityServiceClient) ListTenantMembers(ctx context.Context, req *connect.Request[identity.ListTenantMembersRequest]) (*connect.Response[identity.ListTenantMembersResponse], error) {
+	return c.listTenantMembers.CallUnary(ctx, req)
+}
+
+// RemoveTenantMember calls identity.IdentityService.RemoveTenantMember.
+func (c *identityServiceClient) RemoveTenantMember(ctx context.Context, req *connect.Request[identity.RemoveTenantMemberRequest]) (*connect.Response[identity.RemoveTenantMemberResponse], error) {
+	return c.removeTenantMember.CallUnary(ctx, req)
+}
+
 // InviteUser calls identity.IdentityService.InviteUser.
 func (c *identityServiceClient) InviteUser(ctx context.Context, req *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error) {
 	return c.inviteUser.CallUnary(ctx, req)
@@ -1284,6 +1371,18 @@ type IdentityServiceHandler interface {
 	CreateDomain(context.Context, *connect.Request[identity.CreateDomainRequest]) (*connect.Response[identity.CreateDomainResponse], error)
 	VerifyDomain(context.Context, *connect.Request[identity.VerifyDomainRequest]) (*connect.Response[identity.VerifyDomainResponse], error)
 	ListTenantDomains(context.Context, *connect.Request[identity.ListTenantDomainsRequest]) (*connect.Response[identity.ListTenantDomainsResponse], error)
+	// Tenant membership (redesign). Authenticated, project-scoped, and —
+	// except for AcceptTenantInvitation — gated on the caller being an
+	// owner/admin member of the target tenant. AcceptTenantInvitation is the
+	// redeemer's own action: any authenticated caller may redeem a token, but
+	// only for an invitation addressed to their own account email. Available
+	// only on the postgres control-plane driver; entdb/memory deployments
+	// return Unimplemented.
+	CreateTenantInvitation(context.Context, *connect.Request[identity.CreateTenantInvitationRequest]) (*connect.Response[identity.CreateTenantInvitationResponse], error)
+	AcceptTenantInvitation(context.Context, *connect.Request[identity.AcceptTenantInvitationRequest]) (*connect.Response[identity.AcceptTenantInvitationResponse], error)
+	ListTenantInvitations(context.Context, *connect.Request[identity.ListTenantInvitationsRequest]) (*connect.Response[identity.ListTenantInvitationsResponse], error)
+	ListTenantMembers(context.Context, *connect.Request[identity.ListTenantMembersRequest]) (*connect.Response[identity.ListTenantMembersResponse], error)
+	RemoveTenantMember(context.Context, *connect.Request[identity.RemoveTenantMemberRequest]) (*connect.Response[identity.RemoveTenantMemberResponse], error)
 	// Admin user management (caller must have role=admin). Enforced in the
 	// servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
 	InviteUser(context.Context, *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error)
@@ -1679,6 +1778,36 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("ListTenantDomains")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceCreateTenantInvitationHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateTenantInvitationProcedure,
+		svc.CreateTenantInvitation,
+		connect.WithSchema(identityServiceMethods.ByName("CreateTenantInvitation")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAcceptTenantInvitationHandler := connect.NewUnaryHandler(
+		IdentityServiceAcceptTenantInvitationProcedure,
+		svc.AcceptTenantInvitation,
+		connect.WithSchema(identityServiceMethods.ByName("AcceptTenantInvitation")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListTenantInvitationsHandler := connect.NewUnaryHandler(
+		IdentityServiceListTenantInvitationsProcedure,
+		svc.ListTenantInvitations,
+		connect.WithSchema(identityServiceMethods.ByName("ListTenantInvitations")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListTenantMembersHandler := connect.NewUnaryHandler(
+		IdentityServiceListTenantMembersProcedure,
+		svc.ListTenantMembers,
+		connect.WithSchema(identityServiceMethods.ByName("ListTenantMembers")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRemoveTenantMemberHandler := connect.NewUnaryHandler(
+		IdentityServiceRemoveTenantMemberProcedure,
+		svc.RemoveTenantMember,
+		connect.WithSchema(identityServiceMethods.ByName("RemoveTenantMember")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceInviteUserHandler := connect.NewUnaryHandler(
 		IdentityServiceInviteUserProcedure,
 		svc.InviteUser,
@@ -1843,6 +1972,16 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceVerifyDomainHandler.ServeHTTP(w, r)
 		case IdentityServiceListTenantDomainsProcedure:
 			identityServiceListTenantDomainsHandler.ServeHTTP(w, r)
+		case IdentityServiceCreateTenantInvitationProcedure:
+			identityServiceCreateTenantInvitationHandler.ServeHTTP(w, r)
+		case IdentityServiceAcceptTenantInvitationProcedure:
+			identityServiceAcceptTenantInvitationHandler.ServeHTTP(w, r)
+		case IdentityServiceListTenantInvitationsProcedure:
+			identityServiceListTenantInvitationsHandler.ServeHTTP(w, r)
+		case IdentityServiceListTenantMembersProcedure:
+			identityServiceListTenantMembersHandler.ServeHTTP(w, r)
+		case IdentityServiceRemoveTenantMemberProcedure:
+			identityServiceRemoveTenantMemberHandler.ServeHTTP(w, r)
 		case IdentityServiceInviteUserProcedure:
 			identityServiceInviteUserHandler.ServeHTTP(w, r)
 		case IdentityServiceAcceptInvitationProcedure:
@@ -2114,6 +2253,26 @@ func (UnimplementedIdentityServiceHandler) VerifyDomain(context.Context, *connec
 
 func (UnimplementedIdentityServiceHandler) ListTenantDomains(context.Context, *connect.Request[identity.ListTenantDomainsRequest]) (*connect.Response[identity.ListTenantDomainsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.ListTenantDomains is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CreateTenantInvitation(context.Context, *connect.Request[identity.CreateTenantInvitationRequest]) (*connect.Response[identity.CreateTenantInvitationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.CreateTenantInvitation is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AcceptTenantInvitation(context.Context, *connect.Request[identity.AcceptTenantInvitationRequest]) (*connect.Response[identity.AcceptTenantInvitationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.AcceptTenantInvitation is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListTenantInvitations(context.Context, *connect.Request[identity.ListTenantInvitationsRequest]) (*connect.Response[identity.ListTenantInvitationsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.ListTenantInvitations is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListTenantMembers(context.Context, *connect.Request[identity.ListTenantMembersRequest]) (*connect.Response[identity.ListTenantMembersResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.ListTenantMembers is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RemoveTenantMember(context.Context, *connect.Request[identity.RemoveTenantMemberRequest]) (*connect.Response[identity.RemoveTenantMemberResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.RemoveTenantMember is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) InviteUser(context.Context, *connect.Request[identity.InviteUserRequest]) (*connect.Response[identity.InviteUserResponse], error) {

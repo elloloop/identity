@@ -146,6 +146,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	var domainStore service.DomainStore
 	var tenantStore service.TenantStore
 	var membershipStore service.MembershipStore
+	var invitationStore service.InvitationStore
 	var loginGovernance *service.LoginGovernance
 	if authRepo == nil || dbAdapter == nil {
 		built, buildErr := repo.Build(ctx, repo.Config{
@@ -166,6 +167,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		domainStore = built.DomainStoreIface()
 		tenantStore = built.TenantStoreIface()
 		membershipStore = built.MembershipStoreIface()
+		invitationStore = built.InvitationStoreIface()
 		loginGovernance = built.LoginGovernance()
 
 		// Seed the control-plane default project (postgres only; entdb/
@@ -233,6 +235,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		DomainStore:         domainStore,
 		TenantStore:         tenantStore,
 		MembershipStore:     membershipStore,
+		InvitationStore:     invitationStore,
 		LoginGovernance:     loginGovernance,
 		DNSResolver:         opts.DNSResolver,
 	})
