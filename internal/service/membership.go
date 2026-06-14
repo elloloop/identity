@@ -110,3 +110,20 @@ type InvitationStore interface {
 	// newest first.
 	ListInvitationsForTenant(ctx context.Context, projectID, tenantID string) ([]*TenantInvitation, error)
 }
+
+// TenantAutoFormStore is the transactional auto-formation primitive: it
+// turns "a user signed up with a company email domain" into the governance
+// rows that represent it, atomically and idempotently.
+type TenantAutoFormStore interface {
+	// EnsureTenantForDomain idempotently ensures a latent Tenant and its
+	// email Domain exist for (projectID, domain), then records a
+	// domain-derived membership for userID. One tenant per email domain
+	// within a project is enforced transactionally — the tenant and domain
+	// are created in a single transaction, so a lost race against a
+	// concurrent signer rolls BOTH back (no orphan tenant) and the winner's
+	// tenant is used. Returns the resolved tenant id.
+	//
+	// The caller must only invoke this for a non-public domain (see
+	// config.IsPublicEmailDomain); the store does not re-check.
+	EnsureTenantForDomain(ctx context.Context, projectID, domain, userID string) (string, error)
+}
