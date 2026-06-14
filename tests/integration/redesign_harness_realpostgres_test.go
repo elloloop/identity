@@ -83,6 +83,7 @@ type governanceStores struct {
 	tenants     service.TenantStore
 	domains     service.DomainStore
 	memberships service.MembershipStore
+	invitations service.InvitationStore
 	policies    service.LoginPolicyStore
 }
 
@@ -172,6 +173,7 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 			tenants:     built.TenantStoreIface(),
 			domains:     built.DomainStoreIface(),
 			memberships: built.MembershipStoreIface(),
+			invitations: built.InvitationStoreIface(),
 			policies:    built.LoginPolicyStore,
 		},
 	}

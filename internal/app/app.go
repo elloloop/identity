@@ -85,6 +85,13 @@ type Deps struct {
 	TenantStore     service.TenantStore
 	MembershipStore service.MembershipStore
 
+	// InvitationStore backs the tenant-invitation RPCs
+	// (CreateTenantInvitation / AcceptTenantInvitation /
+	// ListTenantInvitations). Non-nil ONLY for the postgres driver; when nil
+	// (together with the membership/tenant stores) the MembershipService is
+	// not constructed and the membership RPCs return Unimplemented.
+	InvitationStore service.InvitationStore
+
 	// LoginGovernance is the read-side bundle the login path consults to
 	// enforce a claimed tenant's LoginPolicy. Non-nil only for the postgres
 	// driver (the only one with a governance plane); when nil, login imposes
@@ -387,7 +394,8 @@ func New(deps Deps) (*Built, error) {
 
 	orgSignupSvc := buildOrganizationSignupService(deps, auditLog, logger)
 	domainSvc := buildDomainService(deps, logger)
-	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, orgSignupSvc, domainSvc, captchaVerifier, deps.Config)
+	membershipSvc := buildMembershipService(deps, repo, mailer, logger)
+	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, orgSignupSvc, domainSvc, membershipSvc, captchaVerifier, deps.Config)
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {
@@ -560,6 +568,54 @@ func buildDomainService(deps Deps, logger *zap.Logger) *service.DomainService {
 		deps.Config,
 		logger,
 	)
+}
+
+// buildMembershipService returns the wired MembershipService backing the
+// tenant invitation/membership RPCs, or nil when the governance stores are
+// absent (entdb/memory have no control plane). The Connect handler treats nil
+// as "disabled" and returns CodeUnimplemented.
+//
+// mailerConfigured tells the service whether outbound mail actually delivers
+// (a real transport is wired, not just the log-only fallback). When it does
+// not, CreateTenantInvitation returns the raw token in its response so a
+// headless deployment can still complete the flow. users is the boot-time
+// repository — the redesign governance plane is a single postgres control
+// database, so there is no per-tenant repo to scope user lookups to.
+func buildMembershipService(deps Deps, users service.UserDirectory, mailer email.Transport, logger *zap.Logger) *service.MembershipService {
+	if deps.InvitationStore == nil || deps.MembershipStore == nil || deps.TenantStore == nil {
+		return nil
+	}
+	return service.NewMembershipService(
+		deps.InvitationStore,
+		deps.MembershipStore,
+		deps.TenantStore,
+		users,
+		mailer,
+		mailDeliveryConfigured(deps),
+		deps.Config,
+		logger,
+	)
+}
+
+// mailDeliveryConfigured reports whether outbound mail actually delivers, as
+// opposed to the log-only fallback buildEmailTransport returns when nothing is
+// configured. It is true when either:
+//   - a custom EmailTransport was injected (a host or test wiring a real
+//     transport — the only reason to inject one is to deliver), or
+//   - the config wires a real SMTP provider (single host or the JSON chain),
+//     mirroring buildEmailTransport's provider selection.
+//
+// When false, CreateTenantInvitation surfaces the raw token in its response so
+// a deployment with no delivery channel can still hand it over out-of-band.
+func mailDeliveryConfigured(deps Deps) bool {
+	if deps.EmailTransport != nil {
+		return true
+	}
+	cfg := deps.Config
+	if cfg == nil {
+		return false
+	}
+	return cfg.SMTPHost != "" || cfg.SMTPProviders != ""
 }
 
 // wrapOAuthRegistry returns a registry whose Exchangers are wrapped

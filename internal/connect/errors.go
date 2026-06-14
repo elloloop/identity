@@ -75,6 +75,9 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrInvitationExpired):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
+	case errors.Is(err, service.ErrLastOwner):
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+
 	case errors.Is(err, service.ErrQrLoginNotPending):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 

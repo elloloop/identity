@@ -943,6 +943,80 @@ message ListTenantDomainsResponse {
   repeated Domain domains = 1;
 }
 
+// TenantMembership is a user's materialized relationship to a Tenant within
+// the caller's Project.
+message TenantMembership {
+  string id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+  string source = 4;                   // "domain" | "invited" | "added"
+  string role = 5;                     // "member" | "admin" | "owner"
+  string status = 6;                   // "active" | "pending" | "inactive"
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// TenantInvitation is a pending offer to join a Tenant, addressed to an
+// email. The raw redemption token is never exposed here — it travels only
+// in the invitation email.
+message TenantInvitation {
+  string id = 1;
+  string tenant_id = 2;
+  string email = 3;
+  string invited_by = 4;
+  string role = 5;                     // "member" | "admin" | "owner"
+  string status = 6;                   // "pending" | "accepted" | "revoked" | "expired"
+  google.protobuf.Timestamp expires_at = 7;
+  google.protobuf.Timestamp accepted_at = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message CreateTenantInvitationRequest {
+  string tenant_id = 1;
+  string email = 2;
+  string role = 3;                     // "member" (default) | "admin" | "owner"
+}
+
+message CreateTenantInvitationResponse {
+  TenantInvitation invitation = 1;
+  // raw_token is the unhashed redemption token. It is populated ONLY when
+  // no mailer is configured (so a headless/dev deployment can still drive
+  // the flow); when an email was dispatched it is empty, because the token
+  // belongs in the recipient's inbox, not the API response.
+  string raw_token = 2;
+}
+
+message AcceptTenantInvitationRequest {
+  string token = 1;
+}
+
+message AcceptTenantInvitationResponse {
+  TenantMembership membership = 1;
+}
+
+message ListTenantInvitationsRequest {
+  string tenant_id = 1;
+}
+
+message ListTenantInvitationsResponse {
+  repeated TenantInvitation invitations = 1;
+}
+
+message ListTenantMembersRequest {
+  string tenant_id = 1;
+}
+
+message ListTenantMembersResponse {
+  repeated TenantMembership members = 1;
+}
+
+message RemoveTenantMemberRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message RemoveTenantMemberResponse {}
+
 // ─── Service ─────────────────────────────────────────────────────────
 
 service IdentityService {
@@ -1057,6 +1131,19 @@ service IdentityService {
   rpc CreateDomain(CreateDomainRequest) returns (CreateDomainResponse);
   rpc VerifyDomain(VerifyDomainRequest) returns (VerifyDomainResponse);
   rpc ListTenantDomains(ListTenantDomainsRequest) returns (ListTenantDomainsResponse);
+
+  // Tenant membership (redesign). Authenticated, project-scoped, and —
+  // except for AcceptTenantInvitation — gated on the caller being an
+  // owner/admin member of the target tenant. AcceptTenantInvitation is the
+  // redeemer's own action: any authenticated caller may redeem a token, but
+  // only for an invitation addressed to their own account email. Available
+  // only on the postgres control-plane driver; entdb/memory deployments
+  // return Unimplemented.
+  rpc CreateTenantInvitation(CreateTenantInvitationRequest) returns (CreateTenantInvitationResponse);
+  rpc AcceptTenantInvitation(AcceptTenantInvitationRequest) returns (AcceptTenantInvitationResponse);
+  rpc ListTenantInvitations(ListTenantInvitationsRequest) returns (ListTenantInvitationsResponse);
+  rpc ListTenantMembers(ListTenantMembersRequest) returns (ListTenantMembersResponse);
+  rpc RemoveTenantMember(RemoveTenantMemberRequest) returns (RemoveTenantMemberResponse);
 
   // Admin user management (caller must have role=admin). Enforced in the
   // servicer via _require_admin(ctx); all admin RPCs audit-log their actions.

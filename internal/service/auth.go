@@ -801,6 +801,11 @@ var (
 	// in mode=single per docs/IDENTITY.md decision log §3). The Connect
 	// handler layer maps this to CodeUnimplemented.
 	ErrUnimplemented = errors.New("operation unimplemented in this deployment mode")
+	// ErrLastOwner is returned by RemoveTenantMember when removing the target
+	// would strand the tenant with no active owner. The caller is permitted
+	// to remove members (so PermissionDenied is wrong); this is a state
+	// precondition, mapped to CodeFailedPrecondition.
+	ErrLastOwner = errors.New("cannot remove the last owner of a tenant")
 )
 
 // ── AuthService ────────────────────────────────────────────────────────

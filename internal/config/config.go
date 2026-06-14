@@ -351,6 +351,11 @@ type Config struct {
 	// How long an email-verification or password-reset token is valid for.
 	EmailTokenExpirySeconds int // GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS (default 86400)
 
+	// How long a tenant-membership invitation is valid for before it must be
+	// reissued. Longer than an email token because joining a team is a less
+	// time-sensitive action than a password reset.
+	TenantInvitationExpirySeconds int // GATEWAY_TENANT_INVITATION_EXPIRY_SECONDS (default 604800 = 7 days)
+
 	// Per-recipient cooldown between transactional email sends. Defeats
 	// inbox-bombing via repeated unauthenticated RequestPasswordReset /
 	// SendEmailVerification calls. In-memory per replica.
@@ -566,6 +571,9 @@ func Load() *Config {
 
 		AppBaseURL:                 envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
 		EmailTokenExpirySeconds:    envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
+		// 604800 = 7 days; team invitations are less time-sensitive than
+		// password resets.
+		TenantInvitationExpirySeconds: envInt("GATEWAY_TENANT_INVITATION_EXPIRY_SECONDS", 604800),
 		EmailSendCooldownSeconds:   envInt("GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS", 60),
 		SignupEmailCooldownSeconds: envInt("GATEWAY_SIGNUP_EMAIL_COOLDOWN_SECONDS", 60),
 		AuditQueueSize:             envInt("GATEWAY_AUDIT_QUEUE_SIZE", 4096),

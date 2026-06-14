@@ -81,6 +81,10 @@ type Built struct {
 	TenantStore      *pgrepo.TenantStore
 	MembershipStore  *pgrepo.MembershipStore
 	LoginPolicyStore *pgrepo.LoginPolicyStore
+
+	// InvitationStore backs the tenant-invitation RPCs. Non-nil ONLY for the
+	// postgres driver; shares Repository's pool.
+	InvitationStore *pgrepo.InvitationStore
 }
 
 // ProjectResolver returns the control-plane project resolver as a
@@ -133,6 +137,16 @@ func (b *Built) MembershipStoreIface() service.MembershipStore {
 		return nil
 	}
 	return b.MembershipStore
+}
+
+// InvitationStoreIface returns the invitation governance store as a
+// driver-agnostic interface, or a true nil when this build has no control
+// plane (entdb/memory) — avoiding the typed-nil trap.
+func (b *Built) InvitationStoreIface() service.InvitationStore {
+	if b.InvitationStore == nil {
+		return nil
+	}
+	return b.InvitationStore
 }
 
 // LoginGovernance returns the read-side governance bundle the login path
@@ -208,6 +222,7 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 			TenantStore:      pgrepo.NewTenantStore(pgRepo),
 			MembershipStore:  pgrepo.NewMembershipStore(pgRepo),
 			LoginPolicyStore: pgrepo.NewLoginPolicyStore(pgRepo),
+			InvitationStore:  pgrepo.NewInvitationStore(pgRepo),
 		}, nil
 	default:
 		return nil, fmt.Errorf("repo: Build: unknown driver %q", cfg.Driver)

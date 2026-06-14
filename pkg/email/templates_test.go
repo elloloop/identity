@@ -69,6 +69,29 @@ func TestRenderInvitation(t *testing.T) {
 	}
 }
 
+func TestRenderTenantInvitation(t *testing.T) {
+	t.Parallel()
+	html, text, err := Render(TemplateTenantInvitation, map[string]any{
+		"UserName":    "Erin",
+		"InviterName": "Frank",
+		"TenantName":  "Globex",
+		"Role":        "admin",
+		"ExpiresIn":   "7 days",
+		"Link":        "https://example.com/invite?t=bar",
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, want := range []string{"Erin", "Frank", "Globex", "admin", "7 days", "https://example.com/invite?t=bar"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("html missing %q", want)
+		}
+		if !strings.Contains(text, want) {
+			t.Errorf("text missing %q", want)
+		}
+	}
+}
+
 func TestRenderHTMLAutoEscaping(t *testing.T) {
 	t.Parallel()
 	html, _, err := Render(TemplatePasswordReset, map[string]any{
