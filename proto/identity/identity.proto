@@ -1017,6 +1017,77 @@ message RemoveTenantMemberRequest {
 
 message RemoveTenantMemberResponse {}
 
+// ─── Control-plane admin (redesign) ──────────────────────────────────
+//
+// These are PLATFORM-operator RPCs used to provision projects, tenants and
+// credentials out-of-band. They are NOT user-authenticated: the caller
+// proves it is the operator by presenting the shared admin secret in the
+// "X-Admin-Secret" header (constant-time compared against
+// GATEWAY_ADMIN_API_SECRET). When that env var is unset the RPCs are
+// DISABLED and return UNIMPLEMENTED, so a deployer who never configures the
+// secret cannot have them reached.
+
+message AdminCreateProjectRequest {
+  string name = 1;
+  // storage_scope_id maps the new project onto a physical storage scope (a
+  // shard), exactly as the default project maps onto GATEWAY_DEFAULT_TENANT_ID.
+  // Required and globally unique.
+  string storage_scope_id = 2;
+}
+
+message AdminCreateProjectResponse {
+  string project_id = 1;
+}
+
+message AdminCreateProjectCredentialRequest {
+  string project_id = 1;
+  // kind selects the credential type: "publishable" (a public lookup key,
+  // no secret) or "secret" (a key whose secret half is shown ONCE).
+  string kind = 2;
+}
+
+message AdminCreateProjectCredentialResponse {
+  string credential_id = 1;
+  // public_id is the non-secret lookup key (safe to embed in clients).
+  string public_id = 2;
+  // raw_key is the full credential, returned ONCE at creation and never
+  // again — only its hash is stored. Empty for a publishable kind, which
+  // has no secret half.
+  string raw_key = 3;
+}
+
+message AdminAddProjectAuthDomainRequest {
+  string project_id = 1;
+  string hostname = 2;
+  // is_primary makes this the project's primary serving host (used to build
+  // branded links). At most one primary per project.
+  bool is_primary = 3;
+}
+
+message AdminAddProjectAuthDomainResponse {}
+
+message AdminCreateTenantRequest {
+  string project_id = 1;
+  string name = 2;
+  string primary_domain = 3;
+}
+
+message AdminCreateTenantResponse {
+  string tenant_id = 1;
+}
+
+message AdminAddTenantAdminRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+  // role grants tenant administration: "owner" (default) or "admin".
+  string role = 4;
+}
+
+message AdminAddTenantAdminResponse {
+  TenantMembership membership = 1;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────
 
 service IdentityService {
@@ -1153,4 +1224,14 @@ service IdentityService {
   rpc ReactivateUser(ReactivateUserRequest) returns (ReactivateUserResponse);
   rpc ResetUserPassword(ResetUserPasswordRequest) returns (ResetUserPasswordResponse);
   rpc SetUserQuota(SetUserQuotaRequest) returns (SetUserQuotaResponse);
+
+  // Control-plane admin (redesign). PLATFORM-operator RPCs that provision
+  // projects/tenants/credentials out-of-band. Authenticated by the shared
+  // admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
+  // (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
+  rpc AdminCreateProject(AdminCreateProjectRequest) returns (AdminCreateProjectResponse);
+  rpc AdminCreateProjectCredential(AdminCreateProjectCredentialRequest) returns (AdminCreateProjectCredentialResponse);
+  rpc AdminAddProjectAuthDomain(AdminAddProjectAuthDomainRequest) returns (AdminAddProjectAuthDomainResponse);
+  rpc AdminCreateTenant(AdminCreateTenantRequest) returns (AdminCreateTenantResponse);
+  rpc AdminAddTenantAdmin(AdminAddTenantAdminRequest) returns (AdminAddTenantAdminResponse);
 }

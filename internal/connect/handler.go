@@ -38,8 +38,13 @@ type IdentityHandler struct {
 	orgSignup *service.OrganizationSignupService
 	domains   *service.DomainService
 	members   *service.MembershipService
-	captcha   captcha.Verifier
-	cfg       *config.Config
+	// controlAdmin backs the control-plane admin RPCs (AdminCreateProject and
+	// friends), authenticated by the shared admin secret rather than a user
+	// JWT. nil on entdb/memory (no control plane) and when no secret is
+	// configured — both disable the surface (CodeUnimplemented).
+	controlAdmin *service.ControlPlaneAdminService
+	captcha      captcha.Verifier
+	cfg          *config.Config
 }
 
 // NewIdentityHandler creates a new IdentityHandler wired to the service
@@ -53,6 +58,9 @@ type IdentityHandler struct {
 //
 // members is optional: nil (entdb/memory, which have no control plane)
 // causes the tenant-membership/invitation RPCs to return CodeUnimplemented.
+//
+// controlAdmin is optional: nil (entdb/memory, or no configured admin secret)
+// causes the control-plane admin RPCs to return CodeUnimplemented.
 //
 // captchaVerifier is optional: a nil verifier is treated as disabled, so
 // the CAPTCHA gate behaves as a no-op regardless of the per-endpoint
@@ -68,21 +76,23 @@ func NewIdentityHandler(
 	orgSignup *service.OrganizationSignupService,
 	domains *service.DomainService,
 	members *service.MembershipService,
+	controlAdmin *service.ControlPlaneAdminService,
 	captchaVerifier captcha.Verifier,
 	cfg *config.Config,
 ) *IdentityHandler {
 	return &IdentityHandler{
-		auth:      auth,
-		admin:     admin,
-		groups:    groups,
-		help:      help,
-		profile:   profile,
-		idv:       idv,
-		orgSignup: orgSignup,
-		domains:   domains,
-		members:   members,
-		captcha:   captchaVerifier,
-		cfg:       cfg,
+		auth:         auth,
+		admin:        admin,
+		groups:       groups,
+		help:         help,
+		profile:      profile,
+		idv:          idv,
+		orgSignup:    orgSignup,
+		domains:      domains,
+		members:      members,
+		controlAdmin: controlAdmin,
+		captcha:      captchaVerifier,
+		cfg:          cfg,
 	}
 }
 

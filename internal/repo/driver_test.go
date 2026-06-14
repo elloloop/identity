@@ -40,6 +40,9 @@ func assertNoGovernancePlane(t *testing.T, built *Built, driver string) {
 	if af := built.TenantAutoFormer(); af != nil {
 		t.Errorf("Build %s: TenantAutoFormer() = %v, want true nil", driver, af)
 	}
+	if cp := built.ControlPlaneStore(); cp != nil {
+		t.Errorf("Build %s: ControlPlaneStore() = %v, want true nil", driver, cp)
+	}
 	if g := built.LoginGovernance(); g != nil {
 		t.Errorf("Build %s: LoginGovernance() = %v, want true nil", driver, g)
 	}

@@ -93,6 +93,11 @@ const (
 	IdentityService_ReactivateUser_FullMethodName                = "/identity.IdentityService/ReactivateUser"
 	IdentityService_ResetUserPassword_FullMethodName             = "/identity.IdentityService/ResetUserPassword"
 	IdentityService_SetUserQuota_FullMethodName                  = "/identity.IdentityService/SetUserQuota"
+	IdentityService_AdminCreateProject_FullMethodName            = "/identity.IdentityService/AdminCreateProject"
+	IdentityService_AdminCreateProjectCredential_FullMethodName  = "/identity.IdentityService/AdminCreateProjectCredential"
+	IdentityService_AdminAddProjectAuthDomain_FullMethodName     = "/identity.IdentityService/AdminAddProjectAuthDomain"
+	IdentityService_AdminCreateTenant_FullMethodName             = "/identity.IdentityService/AdminCreateTenant"
+	IdentityService_AdminAddTenantAdmin_FullMethodName           = "/identity.IdentityService/AdminAddTenantAdmin"
 )
 
 // IdentityServiceClient is the client API for IdentityService service.
@@ -211,6 +216,15 @@ type IdentityServiceClient interface {
 	ReactivateUser(ctx context.Context, in *ReactivateUserRequest, opts ...grpc.CallOption) (*ReactivateUserResponse, error)
 	ResetUserPassword(ctx context.Context, in *ResetUserPasswordRequest, opts ...grpc.CallOption) (*ResetUserPasswordResponse, error)
 	SetUserQuota(ctx context.Context, in *SetUserQuotaRequest, opts ...grpc.CallOption) (*SetUserQuotaResponse, error)
+	// Control-plane admin (redesign). PLATFORM-operator RPCs that provision
+	// projects/tenants/credentials out-of-band. Authenticated by the shared
+	// admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
+	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
+	AdminCreateProject(ctx context.Context, in *AdminCreateProjectRequest, opts ...grpc.CallOption) (*AdminCreateProjectResponse, error)
+	AdminCreateProjectCredential(ctx context.Context, in *AdminCreateProjectCredentialRequest, opts ...grpc.CallOption) (*AdminCreateProjectCredentialResponse, error)
+	AdminAddProjectAuthDomain(ctx context.Context, in *AdminAddProjectAuthDomainRequest, opts ...grpc.CallOption) (*AdminAddProjectAuthDomainResponse, error)
+	AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error)
+	AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error)
 }
 
 type identityServiceClient struct {
@@ -961,6 +975,56 @@ func (c *identityServiceClient) SetUserQuota(ctx context.Context, in *SetUserQuo
 	return out, nil
 }
 
+func (c *identityServiceClient) AdminCreateProject(ctx context.Context, in *AdminCreateProjectRequest, opts ...grpc.CallOption) (*AdminCreateProjectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminCreateProjectResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminCreateProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AdminCreateProjectCredential(ctx context.Context, in *AdminCreateProjectCredentialRequest, opts ...grpc.CallOption) (*AdminCreateProjectCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminCreateProjectCredentialResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminCreateProjectCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AdminAddProjectAuthDomain(ctx context.Context, in *AdminAddProjectAuthDomainRequest, opts ...grpc.CallOption) (*AdminAddProjectAuthDomainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminAddProjectAuthDomainResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminAddProjectAuthDomain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminCreateTenantResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminCreateTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminAddTenantAdminResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminAddTenantAdmin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IdentityServiceServer is the server API for IdentityService service.
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
@@ -1077,6 +1141,15 @@ type IdentityServiceServer interface {
 	ReactivateUser(context.Context, *ReactivateUserRequest) (*ReactivateUserResponse, error)
 	ResetUserPassword(context.Context, *ResetUserPasswordRequest) (*ResetUserPasswordResponse, error)
 	SetUserQuota(context.Context, *SetUserQuotaRequest) (*SetUserQuotaResponse, error)
+	// Control-plane admin (redesign). PLATFORM-operator RPCs that provision
+	// projects/tenants/credentials out-of-band. Authenticated by the shared
+	// admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
+	// (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
+	AdminCreateProject(context.Context, *AdminCreateProjectRequest) (*AdminCreateProjectResponse, error)
+	AdminCreateProjectCredential(context.Context, *AdminCreateProjectCredentialRequest) (*AdminCreateProjectCredentialResponse, error)
+	AdminAddProjectAuthDomain(context.Context, *AdminAddProjectAuthDomainRequest) (*AdminAddProjectAuthDomainResponse, error)
+	AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error)
+	AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
 }
 
@@ -1308,6 +1381,21 @@ func (UnimplementedIdentityServiceServer) ResetUserPassword(context.Context, *Re
 }
 func (UnimplementedIdentityServiceServer) SetUserQuota(context.Context, *SetUserQuotaRequest) (*SetUserQuotaResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetUserQuota not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminCreateProject(context.Context, *AdminCreateProjectRequest) (*AdminCreateProjectResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminCreateProject not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminCreateProjectCredential(context.Context, *AdminCreateProjectCredentialRequest) (*AdminCreateProjectCredentialResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminCreateProjectCredential not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminAddProjectAuthDomain(context.Context, *AdminAddProjectAuthDomainRequest) (*AdminAddProjectAuthDomainResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminAddProjectAuthDomain not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminCreateTenant not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminAddTenantAdmin not implemented")
 }
 func (UnimplementedIdentityServiceServer) mustEmbedUnimplementedIdentityServiceServer() {}
 func (UnimplementedIdentityServiceServer) testEmbeddedByValue()                         {}
@@ -2662,6 +2750,96 @@ func _IdentityService_SetUserQuota_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_AdminCreateProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminCreateProjectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminCreateProject(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminCreateProject_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminCreateProject(ctx, req.(*AdminCreateProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AdminCreateProjectCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminCreateProjectCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminCreateProjectCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminCreateProjectCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminCreateProjectCredential(ctx, req.(*AdminCreateProjectCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AdminAddProjectAuthDomain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminAddProjectAuthDomainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminAddProjectAuthDomain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminAddProjectAuthDomain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminAddProjectAuthDomain(ctx, req.(*AdminAddProjectAuthDomainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AdminCreateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminCreateTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminCreateTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminCreateTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminCreateTenant(ctx, req.(*AdminCreateTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AdminAddTenantAdmin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminAddTenantAdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminAddTenantAdmin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminAddTenantAdmin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminAddTenantAdmin(ctx, req.(*AdminAddTenantAdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IdentityService_ServiceDesc is the grpc.ServiceDesc for IdentityService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2964,6 +3142,26 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetUserQuota",
 			Handler:    _IdentityService_SetUserQuota_Handler,
+		},
+		{
+			MethodName: "AdminCreateProject",
+			Handler:    _IdentityService_AdminCreateProject_Handler,
+		},
+		{
+			MethodName: "AdminCreateProjectCredential",
+			Handler:    _IdentityService_AdminCreateProjectCredential_Handler,
+		},
+		{
+			MethodName: "AdminAddProjectAuthDomain",
+			Handler:    _IdentityService_AdminAddProjectAuthDomain_Handler,
+		},
+		{
+			MethodName: "AdminCreateTenant",
+			Handler:    _IdentityService_AdminCreateTenant_Handler,
+		},
+		{
+			MethodName: "AdminAddTenantAdmin",
+			Handler:    _IdentityService_AdminAddTenantAdmin_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

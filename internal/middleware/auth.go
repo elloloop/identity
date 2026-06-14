@@ -49,9 +49,21 @@ var AuthExemptPaths = map[string]bool{
 	// ConfirmEmailChange is consumed by clicking a link in the new
 	// email's inbox — the user may not be currently signed in.
 	"/identity.IdentityService/ConfirmEmailChange": true,
-	"/.well-known/jwks.json":                       true,
-	"/health":                                      true,
-	"/healthz":                                     true,
+	// Control-plane admin RPCs are PLATFORM-operator operations, NOT
+	// user-authenticated: there is no user JWT for a platform operator. They
+	// are exempt from JWT enforcement, but they are NOT unauthenticated — the
+	// admin handler authenticates each call by constant-time-comparing the
+	// X-Admin-Secret header against GATEWAY_ADMIN_API_SECRET, and the whole
+	// surface is disabled (CodeUnimplemented) when that secret is unset. So
+	// the secret check, not the JWT, is their auth.
+	"/identity.IdentityService/AdminCreateProject":           true,
+	"/identity.IdentityService/AdminCreateProjectCredential": true,
+	"/identity.IdentityService/AdminAddProjectAuthDomain":    true,
+	"/identity.IdentityService/AdminCreateTenant":            true,
+	"/identity.IdentityService/AdminAddTenantAdmin":          true,
+	"/.well-known/jwks.json":                                 true,
+	"/health":                                                true,
+	"/healthz":                                               true,
 }
 
 // hostedOAuthPrefix is the path prefix for the browser-facing hosted

@@ -81,6 +81,23 @@ type Config struct {
 	// Only the postgres driver has a control plane; entdb/memory ignore it.
 	DefaultProjectID string
 
+	// AdminAPISecret is the shared secret that authenticates the
+	// control-plane admin RPCs (AdminCreateProject and friends), which a
+	// PLATFORM operator uses to provision projects/tenants out-of-band.
+	// These RPCs are NOT user-authenticated: a caller proves it is the
+	// operator by presenting this exact value in the
+	// middleware.AdminAPISecretHeader header, compared in constant time.
+	//
+	// Empty (the default) DISABLES the admin RPCs entirely — they return
+	// CodeUnimplemented — so a deployer who never sets it cannot have them
+	// reached. Driven by GATEWAY_ADMIN_API_SECRET. Only the postgres driver
+	// has a control plane; entdb/memory ignore it.
+	//
+	// TODO(redesign): the shared secret is the shipped mechanism. Future
+	// work hardens this with mTLS client-certificate auth and an optional
+	// internal-only listener port bound away from the public RPC surface.
+	AdminAPISecret string
+
 	// DefaultProjectAuthDomains is a comma-separated list of serving
 	// hostnames seeded onto the default project at boot (postgres driver),
 	// so the Host→project resolver maps these branded hostnames to the
@@ -460,6 +477,7 @@ func Load() *Config {
 
 		DefaultTenantID:           envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
 		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", "default"),
+		AdminAPISecret:            envStr("GATEWAY_ADMIN_API_SECRET", ""),
 		DefaultProjectAuthDomains: envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
 		IdentityMode:              envStr("GATEWAY_IDENTITY_MODE", "single"),
 
@@ -569,14 +587,14 @@ func Load() *Config {
 		SMTPTLS:       envBool("GATEWAY_SMTP_TLS", true),
 		SMTPProviders: envStr("GATEWAY_SMTP_PROVIDERS", ""),
 
-		AppBaseURL:                 envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
-		EmailTokenExpirySeconds:    envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
+		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
+		EmailTokenExpirySeconds: envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
 		// 604800 = 7 days; team invitations are less time-sensitive than
 		// password resets.
 		TenantInvitationExpirySeconds: envInt("GATEWAY_TENANT_INVITATION_EXPIRY_SECONDS", 604800),
-		EmailSendCooldownSeconds:   envInt("GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS", 60),
-		SignupEmailCooldownSeconds: envInt("GATEWAY_SIGNUP_EMAIL_COOLDOWN_SECONDS", 60),
-		AuditQueueSize:             envInt("GATEWAY_AUDIT_QUEUE_SIZE", 4096),
+		EmailSendCooldownSeconds:      envInt("GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS", 60),
+		SignupEmailCooldownSeconds:    envInt("GATEWAY_SIGNUP_EMAIL_COOLDOWN_SECONDS", 60),
+		AuditQueueSize:                envInt("GATEWAY_AUDIT_QUEUE_SIZE", 4096),
 
 		HTTPMaxBodyBytes: int64(envInt("GATEWAY_HTTP_MAX_BODY_BYTES", 1<<20)),
 

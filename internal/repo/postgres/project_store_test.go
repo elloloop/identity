@@ -59,9 +59,9 @@ func runEnsureAuthDomainSmoke(t *testing.T, dsn string) {
 	require.NoError(t, truncateAll(ctx, dsn))
 	store := newProjectStore(ctx, t, dsn)
 
-	projA, err := store.CreateProject(ctx, &Project{StorageScopeID: "scope-ead-a", Name: "A"})
+	projA, err := store.createProject(ctx, &Project{StorageScopeID: "scope-ead-a", Name: "A"})
 	require.NoError(t, err)
-	projB, err := store.CreateProject(ctx, &Project{StorageScopeID: "scope-ead-b", Name: "B"})
+	projB, err := store.createProject(ctx, &Project{StorageScopeID: "scope-ead-b", Name: "B"})
 	require.NoError(t, err)
 
 	// Seed a verified primary auth-domain.
@@ -215,9 +215,9 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	store := newProjectStore(ctx, t, dsn)
 
 	// Active project with an active credential and a serving hostname.
-	projID, err := store.CreateProject(ctx, &Project{StorageScopeID: "scope-live", Name: "Live"})
+	projID, err := store.createProject(ctx, &Project{StorageScopeID: "scope-live", Name: "Live"})
 	require.NoError(t, err)
-	credID, err := store.CreateProjectCredential(ctx, &ProjectCredential{
+	credID, err := store.createProjectCredential(ctx, &ProjectCredential{
 		ProjectID: projID, Kind: "publishable", PublicID: "pk_live",
 	})
 	require.NoError(t, err)
@@ -263,11 +263,11 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	require.Nil(t, miss)
 
 	// ── suspended project → miss on both paths ──────────────────────
-	suspID, err := store.CreateProject(ctx, &Project{
+	suspID, err := store.createProject(ctx, &Project{
 		StorageScopeID: "scope-susp", Name: "Suspended", Status: "suspended",
 	})
 	require.NoError(t, err)
-	_, err = store.CreateProjectCredential(ctx, &ProjectCredential{
+	_, err = store.createProjectCredential(ctx, &ProjectCredential{
 		ProjectID: suspID, Kind: "publishable", PublicID: "pk_susp",
 	})
 	require.NoError(t, err)
@@ -297,7 +297,7 @@ func runProjectStoreSmoke(t *testing.T, dsn string) {
 	store := newProjectStore(ctx, t, dsn)
 
 	// ── project round-trip ──────────────────────────────────────────
-	projID, err := store.CreateProject(ctx, &Project{
+	projID, err := store.createProject(ctx, &Project{
 		StorageScopeID: "scope-a",
 		Name:           "Acme",
 		ConfigJSON:     `{"login_methods":["email_otp"]}`,
@@ -330,14 +330,14 @@ func runProjectStoreSmoke(t *testing.T, dsn string) {
 	require.Nil(t, miss)
 
 	// Default config_json is "{}" when omitted.
-	bareID, err := store.CreateProject(ctx, &Project{StorageScopeID: "scope-bare"})
+	bareID, err := store.createProject(ctx, &Project{StorageScopeID: "scope-bare"})
 	require.NoError(t, err)
 	bare, err := store.GetProjectByID(ctx, bareID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{}`, bare.ConfigJSON)
 
 	// ── credential round-trip ───────────────────────────────────────
-	credID, err := store.CreateProjectCredential(ctx, &ProjectCredential{
+	credID, err := store.createProjectCredential(ctx, &ProjectCredential{
 		ProjectID: projID,
 		Kind:      "publishable",
 		PublicID:  "pk_live_abc",
@@ -416,12 +416,12 @@ func runProjectStoreSmoke(t *testing.T, dsn string) {
 	// ── uniqueness rules (migration 0013) ───────────────────────────
 
 	// Duplicate storage_scope_id → ErrAlreadyExists (projects_storage_scope_uidx).
-	_, err = store.CreateProject(ctx, &Project{StorageScopeID: "scope-a", Name: "Dup"})
+	_, err = store.createProject(ctx, &Project{StorageScopeID: "scope-a", Name: "Dup"})
 	require.ErrorIs(t, err, service.ErrAlreadyExists, "duplicate storage_scope_id must conflict")
 
 	// Duplicate credential public_id → ErrAlreadyExists
 	// (project_credentials_public_id_uidx), even across projects.
-	_, err = store.CreateProjectCredential(ctx, &ProjectCredential{
+	_, err = store.createProjectCredential(ctx, &ProjectCredential{
 		ProjectID: bareID,
 		Kind:      "secret",
 		PublicID:  "pk_live_abc",
@@ -456,9 +456,9 @@ func runProjectStoreSmoke(t *testing.T, dsn string) {
 
 	// ── argument validation (no container round-trip needed, but kept
 	// here so the store's guards are covered alongside the live path) ──
-	_, err = store.CreateProject(ctx, &Project{})
+	_, err = store.createProject(ctx, &Project{})
 	require.ErrorIs(t, err, service.ErrInvalidArgument)
-	_, err = store.CreateProjectCredential(ctx, &ProjectCredential{ProjectID: projID, Kind: "secret"})
+	_, err = store.createProjectCredential(ctx, &ProjectCredential{ProjectID: projID, Kind: "secret"})
 	require.ErrorIs(t, err, service.ErrInvalidArgument)
 	_, err = store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{ProjectID: projID})
 	require.ErrorIs(t, err, service.ErrInvalidArgument)

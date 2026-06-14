@@ -44,6 +44,11 @@ func TestBuild_PostgresProjectStore(t *testing.T) {
 	if built.LoginGovernance() == nil {
 		t.Fatal("Build postgres: LoginGovernance() is nil, want non-nil governance bundle")
 	}
+	// The control-plane admin write-store accessor is non-nil for postgres —
+	// it backs the AdminCreateProject family.
+	if built.ControlPlaneStore() == nil {
+		t.Fatal("Build postgres: ControlPlaneStore() is nil, want non-nil admin store")
+	}
 
 	// The store shares the repository's pool and is functional: a project
 	// seeded through it round-trips. Distinct id/scope keep this test from

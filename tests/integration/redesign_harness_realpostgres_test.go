@@ -46,6 +46,12 @@ import (
 // this name must resolve to the default project (flow 2).
 const brandedAuthDomain = "auth.acme.test"
 
+// harnessAdminSecret is the shared control-plane admin secret the harness
+// configures (GATEWAY_ADMIN_API_SECRET), so the admin RPCs are ENABLED for
+// the operator-provisioning e2e. Only that e2e presents it; every other
+// redesign test ignores the admin surface entirely.
+const harnessAdminSecret = "it-operator-admin-secret"
+
 // fakeDNSResolver is the injected TXT-lookup boundary for VerifyDomain. Its
 // record set is mutable so a test can publish the exact challenge it got
 // from CreateDomain, then point the resolver at the wrong/no value to drive
@@ -85,6 +91,10 @@ type governanceStores struct {
 	memberships service.MembershipStore
 	invitations service.InvitationStore
 	policies    service.LoginPolicyStore
+	// projects is the control-plane resolver, so the admin e2e can assert a
+	// newly-registered auth-domain host resolves to the freshly-created
+	// project — the same resolution the project middleware performs.
+	projects service.ProjectResolver
 }
 
 // RedesignHarness is a full-stack, postgres-backed identity service plus the
@@ -175,6 +185,7 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 			memberships: built.MembershipStoreIface(),
 			invitations: built.InvitationStoreIface(),
 			policies:    built.LoginPolicyStore,
+			projects:    built.ProjectResolver(),
 		},
 	}
 }
@@ -193,6 +204,7 @@ func newRedesignTestConfig(dsn, projectID, tenantID string) config.Config {
 	base.DefaultProjectID = projectID
 	base.DefaultTenantID = tenantID
 	base.DefaultProjectAuthDomains = brandedAuthDomain
+	base.AdminAPISecret = harnessAdminSecret
 	base.AuthAllowLocal = true
 	base.PasswordSignupEnabled = true
 	base.PasswordlessSignupEnabled = true

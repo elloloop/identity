@@ -32,6 +32,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.DefaultProjectID != "default" {
 		t.Errorf("DefaultProjectID: want default, got %q", cfg.DefaultProjectID)
 	}
+	if cfg.AdminAPISecret != "" {
+		t.Errorf("AdminAPISecret: want empty default (admin RPCs disabled), got %q", cfg.AdminAPISecret)
+	}
 	if cfg.PublicEmailDomains != "" {
 		t.Errorf("PublicEmailDomains: want empty default, got %q", cfg.PublicEmailDomains)
 	}
@@ -100,6 +103,7 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_ENTDB_ADDRESS", "custom-entdb:50055")
 	t.Setenv("GATEWAY_DEFAULT_TENANT_ID", "prod-tenant")
 	t.Setenv("GATEWAY_DEFAULT_PROJECT_ID", "prod-project")
+	t.Setenv("GATEWAY_ADMIN_API_SECRET", "operator-secret")
 	t.Setenv("GATEWAY_JWT_EXPIRY_SECONDS", "1800")
 	t.Setenv("GATEWAY_AUTH_ALLOW_LOCAL", "false")
 	t.Setenv("GATEWAY_PASSWORD_SIGNUP_ENABLED", "false")
@@ -120,6 +124,9 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	}
 	if cfg.DefaultProjectID != "prod-project" {
 		t.Errorf("DefaultProjectID: want prod-project, got %q", cfg.DefaultProjectID)
+	}
+	if cfg.AdminAPISecret != "operator-secret" {
+		t.Errorf("AdminAPISecret: want operator-secret, got %q", cfg.AdminAPISecret)
 	}
 	if cfg.JWTExpirySeconds != 1800 {
 		t.Errorf("JWTExpirySeconds: want 1800, got %d", cfg.JWTExpirySeconds)

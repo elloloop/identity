@@ -54,9 +54,9 @@ func runTenantDomainSmoke(t *testing.T, dsn string) {
 	projects, tenants, domains := newTenantDomainStores(ctx, t, dsn)
 
 	// Two projects, to prove project-scoping.
-	projA, err := projects.CreateProject(ctx, &Project{StorageScopeID: "scope-A", Name: "A"})
+	projA, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-A", Name: "A"})
 	require.NoError(t, err)
-	projB, err := projects.CreateProject(ctx, &Project{StorageScopeID: "scope-B", Name: "B"})
+	projB, err := projects.createProject(ctx, &Project{StorageScopeID: "scope-B", Name: "B"})
 	require.NoError(t, err)
 
 	// ── tenant round-trip ───────────────────────────────────────────

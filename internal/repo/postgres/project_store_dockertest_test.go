@@ -123,6 +123,16 @@ func TestProjectStore_EnsureAuthDomain_Container(t *testing.T) {
 	runEnsureAuthDomainSmoke(t, dsn)
 }
 
+// TestControlPlaneAdminStore_Container runs the service-typed control-plane
+// admin store body against a throwaway Postgres container.
+func TestControlPlaneAdminStore_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runControlPlaneAdminSmoke(t, dsn)
+}
+
 // TestAutoFormStore_Container runs the tenant auto-formation body (incl.
 // the concurrent-race convergence) against a throwaway Postgres container.
 func TestAutoFormStore_Container(t *testing.T) {
