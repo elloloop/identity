@@ -71,12 +71,16 @@ type Built struct {
 	// Repository's pool.
 	AutoFormStore *pgrepo.AutoFormStore
 
-	// DomainStore, TenantStore and MembershipStore back the tenant
-	// domain-verification RPCs. Non-nil ONLY for the postgres driver; all
-	// three share Repository's pool.
-	DomainStore     *pgrepo.DomainStore
-	TenantStore     *pgrepo.TenantStore
-	MembershipStore *pgrepo.MembershipStore
+	// DomainStore, TenantStore, MembershipStore and LoginPolicyStore are the
+	// per-project governance stores. They back the tenant domain-verification
+	// RPCs (DomainStore/TenantStore/MembershipStore) and the login path's
+	// LoginPolicy enforcement (TenantStore/DomainStore/LoginPolicyStore).
+	// Non-nil ONLY for the postgres driver (the only one with a governance
+	// plane); each shares Repository's pool.
+	DomainStore      *pgrepo.DomainStore
+	TenantStore      *pgrepo.TenantStore
+	MembershipStore  *pgrepo.MembershipStore
+	LoginPolicyStore *pgrepo.LoginPolicyStore
 }
 
 // ProjectResolver returns the control-plane project resolver as a
@@ -131,6 +135,21 @@ func (b *Built) MembershipStoreIface() service.MembershipStore {
 	return b.MembershipStore
 }
 
+// LoginGovernance returns the read-side governance bundle the login path
+// consults to enforce a claimed tenant's LoginPolicy, or a true nil when
+// this build has no governance plane (entdb/memory). Returning nil — rather
+// than a bundle of typed-nil stores — keeps AuthService's nil check honest.
+func (b *Built) LoginGovernance() *service.LoginGovernance {
+	if b.TenantStore == nil || b.DomainStore == nil || b.LoginPolicyStore == nil {
+		return nil
+	}
+	return &service.LoginGovernance{
+		Domains:  b.DomainStore,
+		Tenants:  b.TenantStore,
+		Policies: b.LoginPolicyStore,
+	}
+}
+
 // Build returns a Built configured per cfg.Driver.
 func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) {
 	if logger == nil {
@@ -181,13 +200,14 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		}
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
 		return &Built{
-			Repository:      pgRepo,
-			DB:              pgRepo,
-			ProjectStore:    pgrepo.NewProjectStore(pgRepo),
-			AutoFormStore:   pgrepo.NewAutoFormStore(pgRepo),
-			DomainStore:     pgrepo.NewDomainStore(pgRepo),
-			TenantStore:     pgrepo.NewTenantStore(pgRepo),
-			MembershipStore: pgrepo.NewMembershipStore(pgRepo),
+			Repository:       pgRepo,
+			DB:               pgRepo,
+			ProjectStore:     pgrepo.NewProjectStore(pgRepo),
+			AutoFormStore:    pgrepo.NewAutoFormStore(pgRepo),
+			DomainStore:      pgrepo.NewDomainStore(pgRepo),
+			TenantStore:      pgrepo.NewTenantStore(pgRepo),
+			MembershipStore:  pgrepo.NewMembershipStore(pgRepo),
+			LoginPolicyStore: pgrepo.NewLoginPolicyStore(pgRepo),
 		}, nil
 	default:
 		return nil, fmt.Errorf("repo: Build: unknown driver %q", cfg.Driver)

@@ -25,6 +25,24 @@ func TestBuildMemoryDriver(t *testing.T) {
 	if built.ProjectStore != nil {
 		t.Errorf("Build memory: ProjectStore = %v, want nil", built.ProjectStore)
 	}
+	assertNoGovernancePlane(t, built, "memory")
+}
+
+// assertNoGovernancePlane verifies a control-plane-free driver's accessors
+// return true nils (not interfaces wrapping typed-nil pointers) so the
+// service layer's `== nil` checks behave. Covers ProjectResolver,
+// TenantAutoFormer and LoginGovernance together.
+func assertNoGovernancePlane(t *testing.T, built *Built, driver string) {
+	t.Helper()
+	if r := built.ProjectResolver(); r != nil {
+		t.Errorf("Build %s: ProjectResolver() = %v, want true nil", driver, r)
+	}
+	if af := built.TenantAutoFormer(); af != nil {
+		t.Errorf("Build %s: TenantAutoFormer() = %v, want true nil", driver, af)
+	}
+	if g := built.LoginGovernance(); g != nil {
+		t.Errorf("Build %s: LoginGovernance() = %v, want true nil", driver, g)
+	}
 }
 
 func TestBuildMemoryDriver_AcceptsExplicitLogger(t *testing.T) {
@@ -99,4 +117,5 @@ func TestBuild_EntDBHappyPath(t *testing.T) {
 	if built.ProjectStore != nil {
 		t.Errorf("Build entdb: ProjectStore = %v, want nil", built.ProjectStore)
 	}
+	assertNoGovernancePlane(t, built, "entdb")
 }

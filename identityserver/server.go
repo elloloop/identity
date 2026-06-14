@@ -146,6 +146,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	var domainStore service.DomainStore
 	var tenantStore service.TenantStore
 	var membershipStore service.MembershipStore
+	var loginGovernance *service.LoginGovernance
 	if authRepo == nil || dbAdapter == nil {
 		built, buildErr := repo.Build(ctx, repo.Config{
 			Driver:              repo.Driver(cfg.RepoDriver),
@@ -165,6 +166,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		domainStore = built.DomainStoreIface()
 		tenantStore = built.TenantStoreIface()
 		membershipStore = built.MembershipStoreIface()
+		loginGovernance = built.LoginGovernance()
 
 		// Seed the control-plane default project (postgres only; entdb/
 		// memory have no control plane, so built.ProjectStore is nil). The
@@ -231,6 +233,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		DomainStore:         domainStore,
 		TenantStore:         tenantStore,
 		MembershipStore:     membershipStore,
+		LoginGovernance:     loginGovernance,
 	})
 	if err != nil {
 		s.cleanupOnError(ctx)

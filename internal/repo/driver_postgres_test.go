@@ -34,6 +34,17 @@ func TestBuild_PostgresProjectStore(t *testing.T) {
 		t.Fatal("Build postgres: ProjectStore is nil, want non-nil control-plane store")
 	}
 
+	// The login-governance plane is postgres-only too: Build wires the
+	// tenant/domain/policy read stores and the bundle accessor returns a
+	// non-nil LoginGovernance the auth service enforces against.
+	if built.TenantStore == nil || built.DomainStore == nil || built.LoginPolicyStore == nil {
+		t.Fatalf("Build postgres: governance stores nil (tenant=%v domain=%v policy=%v)",
+			built.TenantStore, built.DomainStore, built.LoginPolicyStore)
+	}
+	if built.LoginGovernance() == nil {
+		t.Fatal("Build postgres: LoginGovernance() is nil, want non-nil governance bundle")
+	}
+
 	// The store shares the repository's pool and is functional: a project
 	// seeded through it round-trips. Distinct id/scope keep this test from
 	// colliding with the postgres package's own control-plane tests on the

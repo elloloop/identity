@@ -302,6 +302,13 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr, 
 		invalidErr = ErrMagicLinkInvalid
 	}
 
+	// Both passwordless arms — OTP and magic link — prove control of the
+	// email before reaching here, so they are the one governance method
+	// (email_otp). Consult the tenant's LoginPolicy before issuing tokens.
+	if err := s.enforceLoginPolicy(ctx, emailAddr, LoginMethodEmailOTP); err != nil {
+		return nil, err
+	}
+
 	if !s.cfg.PasswordlessSignupEnabled {
 		existing, err := s.repo(ctx).FindUserByEmail(ctx, emailAddr)
 		if err != nil {
