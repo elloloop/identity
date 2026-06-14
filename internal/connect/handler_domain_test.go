@@ -109,8 +109,8 @@ func (s *connectMembershipStore) RemoveMembership(context.Context, string, strin
 	return nil
 }
 
-// connectFakeResolver structurally satisfies the service package's
-// (unexported) dnsResolver parameter of NewDomainService. Its record set
+// connectFakeResolver satisfies the service package's DNSResolver
+// parameter of NewDomainService. Its record set
 // is mutable so a test can publish the exact challenge it received back
 // from CreateDomain before calling VerifyDomain.
 type connectFakeResolver struct {

@@ -234,6 +234,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		TenantStore:         tenantStore,
 		MembershipStore:     membershipStore,
 		LoginGovernance:     loginGovernance,
+		DNSResolver:         opts.DNSResolver,
 	})
 	if err != nil {
 		s.cleanupOnError(ctx)

@@ -30,10 +30,12 @@ import (
 // and the verifier (to publish) without persisting a per-domain token.
 const domainVerifyTXTPrefix = "identity-domain-verify="
 
-// dnsResolver looks up DNS TXT records. It is the single I/O boundary of
-// VerifyDomain, injected so tests verify the success/failure logic against
-// a fake instead of real DNS. *net.Resolver satisfies it.
-type dnsResolver interface {
+// DNSResolver looks up DNS TXT records. It is the single I/O boundary of
+// VerifyDomain, injected so callers (and tests) can supply the lookup
+// implementation instead of always hitting real DNS. *net.Resolver
+// satisfies it; the embedding API (identityserver.Options.DNSResolver)
+// threads a custom one through for full-stack tests against a real DB.
+type DNSResolver interface {
 	LookupTXT(ctx context.Context, host string) ([]string, error)
 }
 
@@ -42,19 +44,19 @@ type DomainService struct {
 	domains     DomainStore
 	tenants     TenantStore
 	memberships MembershipStore
-	resolver    dnsResolver
+	resolver    DNSResolver
 	cfg         *config.Config
 	logger      *zap.Logger
 }
 
 // NewDomainService wires a DomainService. resolver may be nil, in which
-// case net.DefaultResolver is used — tests inject a fake to drive the
-// TXT-present / TXT-absent paths without touching real DNS.
+// case net.DefaultResolver is used — callers inject a custom resolver to
+// drive the TXT-present / TXT-absent paths without touching real DNS.
 func NewDomainService(
 	domains DomainStore,
 	tenants TenantStore,
 	memberships MembershipStore,
-	resolver dnsResolver,
+	resolver DNSResolver,
 	cfg *config.Config,
 	logger *zap.Logger,
 ) *DomainService {

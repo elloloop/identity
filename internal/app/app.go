@@ -91,6 +91,13 @@ type Deps struct {
 	// no policy restriction.
 	LoginGovernance *service.LoginGovernance
 
+	// DNSResolver is the TXT-lookup boundary VerifyDomain uses to confirm a
+	// domain's ownership challenge. nil defaults to net.DefaultResolver
+	// (production). The embedding API threads a custom resolver through here
+	// so a full-stack test can publish the deterministic challenge without
+	// touching real DNS.
+	DNSResolver service.DNSResolver
+
 	// TOTPRecoveryPepper is the HMAC-SHA-256 key used to hash and
 	// verify recovery codes. Must be >= totp.MinRecoveryPepperBytes
 	// bytes long; the binary refuses to start otherwise.
@@ -539,7 +546,7 @@ func buildOrganizationSignupService(deps Deps, auditLog *audit.Logger, logger *z
 // buildDomainService returns the wired DomainService backing the tenant
 // domain-verification RPCs, or nil when the governance stores are absent
 // (entdb/memory have no control plane). The Connect handler treats nil as
-// "disabled" and returns CodeUnimplemented. A nil DNS resolver lets
+// "disabled" and returns CodeUnimplemented. A nil deps.DNSResolver lets
 // NewDomainService default to net.DefaultResolver.
 func buildDomainService(deps Deps, logger *zap.Logger) *service.DomainService {
 	if deps.DomainStore == nil || deps.TenantStore == nil || deps.MembershipStore == nil {
@@ -549,7 +556,7 @@ func buildDomainService(deps Deps, logger *zap.Logger) *service.DomainService {
 		deps.DomainStore,
 		deps.TenantStore,
 		deps.MembershipStore,
-		nil,
+		deps.DNSResolver,
 		deps.Config,
 		logger,
 	)
