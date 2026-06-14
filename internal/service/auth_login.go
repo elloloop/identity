@@ -157,6 +157,9 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	}
 	s.logger.Info("local_signup_success", zap.String("email", redactEmail(email)), zap.String("user_id", userID))
 
+	// Best-effort: auto-form a company tenant from the email domain.
+	s.maybeAutoFormTenant(ctx, user)
+
 	// Best-effort: fire a verification email. Failures are logged but
 	// must never fail signup itself.
 	if err := s.SendEmailVerification(ctx, userID); err != nil {
@@ -725,6 +728,11 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email stri
 		return nil, false, fmt.Errorf("creating user: %w", err)
 	}
 	newUser.ID = userID
+
+	// Best-effort: auto-form a company tenant from the email domain. Only on
+	// a genuinely new account (a raced/existing user returned above).
+	s.maybeAutoFormTenant(ctx, newUser)
+
 	return newUser, true, nil
 }
 

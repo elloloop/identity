@@ -830,6 +830,21 @@ type AuthService struct {
 	// OAuth flow uses. Parsed once at construction.
 	returnAllow ReturnAllowlist
 	nowFunc     func() time.Time // overridable for testing
+
+	// autoFormer, when set (postgres driver only), auto-forms a tenant from
+	// a new user's company email domain at signup. nil disables the
+	// behaviour — the constructor leaves it nil; app.New sets it via
+	// WithTenantAutoFormer. It is an optional, set-once dependency, kept off
+	// the already-wide constructor.
+	autoFormer TenantAutoFormStore
+}
+
+// WithTenantAutoFormer wires the optional tenant auto-formation store and
+// returns the service for chaining. app.New calls it once at construction
+// (with the postgres store, or nil for drivers without a control plane).
+func (s *AuthService) WithTenantAutoFormer(af TenantAutoFormStore) *AuthService {
+	s.autoFormer = af
+	return s
 }
 
 // NewAuthService creates an AuthService with all required dependencies.
@@ -936,6 +951,31 @@ func (s *AuthService) projectID(ctx context.Context) string {
 		return scope.ProjectID
 	}
 	return s.cfg.DefaultProjectID
+}
+
+// maybeAutoFormTenant auto-forms a company tenant from a newly-created
+// user's email domain, when auto-formation is wired (postgres driver). It
+// is a no-op for a personal/public email domain (gmail, outlook, …), since
+// those never imply a company. Auto-formation is best-effort: a failure is
+// logged but never fails the signup — the user's account already exists.
+func (s *AuthService) maybeAutoFormTenant(ctx context.Context, user *User) {
+	if s.autoFormer == nil || user == nil {
+		return
+	}
+	projectID := s.projectID(ctx)
+	if projectID == "" {
+		return
+	}
+	_, domain, ok := strings.Cut(user.Email, "@")
+	if !ok || domain == "" || s.cfg.IsPublicEmailDomain(domain) {
+		return
+	}
+	if _, err := s.autoFormer.EnsureTenantForDomain(ctx, projectID, domain, user.ID); err != nil {
+		s.logger.Warn("tenant_autoform_failed",
+			zap.String("project_id", projectID),
+			zap.String("user_id", user.ID),
+			zap.Error(err))
+	}
 }
 
 // repo returns the Repository scoped to the request's resolved tenant,

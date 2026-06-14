@@ -71,6 +71,11 @@ type Deps struct {
 	// a fake or nil.
 	ProjectResolver service.ProjectResolver
 
+	// TenantAutoFormer auto-forms a company tenant from a new user's email
+	// domain at signup. Non-nil only for the postgres driver (the only one
+	// with a governance plane); when nil, signup does not auto-form tenants.
+	TenantAutoFormer service.TenantAutoFormStore
+
 	// TOTPRecoveryPepper is the HMAC-SHA-256 key used to hash and
 	// verify recovery codes. Must be >= totp.MinRecoveryPepperBytes
 	// bytes long; the binary refuses to start otherwise.
@@ -336,7 +341,7 @@ func New(deps Deps) (*Built, error) {
 		repo, deps.Config, deps.Signer, deps.Passkeys,
 		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, smsSender, logger,
 		oauthRegistry,
-	)
+	).WithTenantAutoFormer(deps.TenantAutoFormer)
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
