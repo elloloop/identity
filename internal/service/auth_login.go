@@ -575,6 +575,13 @@ func (s *AuthService) OAuthLogin(
 		return nil, err
 	}
 
+	// The provider has proven control of the email; consult the tenant's
+	// LoginPolicy before issuing tokens so a tenant that disallows oauth is
+	// honoured here too — not just on the password / passwordless paths.
+	if err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodOAuth); err != nil {
+		return nil, err
+	}
+
 	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info(
 		"oauth_login_success",

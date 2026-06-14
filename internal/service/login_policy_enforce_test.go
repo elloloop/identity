@@ -18,12 +18,12 @@ import (
 // for tenants/policies. Each store can also be forced to error so the
 // fail-safe paths are exercised.
 
-type fakeDomainStore struct {
+type lpDomainStore struct {
 	byName map[string]*Domain // key: projectID + "|" + domainName
 	err    error
 }
 
-func (f *fakeDomainStore) GetDomainByName(_ context.Context, projectID, domain string) (*Domain, error) {
+func (f *lpDomainStore) GetDomainByName(_ context.Context, projectID, domain string) (*Domain, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -32,38 +32,38 @@ func (f *fakeDomainStore) GetDomainByName(_ context.Context, projectID, domain s
 
 // The remaining DomainStore methods are unused by enforcement; they satisfy
 // the interface so the fake is assignable to LoginGovernance.Domains.
-func (f *fakeDomainStore) CreateDomain(context.Context, *Domain) (string, error) { return "", nil }
+func (f *lpDomainStore) CreateDomain(context.Context, *Domain) (string, error) { return "", nil }
 
-func (f *fakeDomainStore) GetDomain(context.Context, string, string) (*Domain, error) {
+func (f *lpDomainStore) GetDomain(context.Context, string, string) (*Domain, error) {
 	return nil, nil
 }
 
-func (f *fakeDomainStore) SetDomainStatus(context.Context, string, string, string, int64) error {
+func (f *lpDomainStore) SetDomainStatus(context.Context, string, string, string, int64) error {
 	return nil
 }
 
-func (f *fakeDomainStore) ListDomainsByTenant(context.Context, string, string) ([]*Domain, error) {
+func (f *lpDomainStore) ListDomainsByTenant(context.Context, string, string) ([]*Domain, error) {
 	return nil, nil
 }
 
-type fakeTenantStore struct {
+type lpTenantStore struct {
 	byID map[string]*Tenant // key: projectID + "|" + tenantID
 	err  error
 }
 
-func (f *fakeTenantStore) GetTenant(_ context.Context, projectID, tenantID string) (*Tenant, error) {
+func (f *lpTenantStore) GetTenant(_ context.Context, projectID, tenantID string) (*Tenant, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.byID[projectID+"|"+tenantID], nil
 }
 
-func (f *fakeTenantStore) CreateTenant(context.Context, *Tenant) (string, error) { return "", nil }
-func (f *fakeTenantStore) GetTenantByPrimaryDomain(context.Context, string, string) (*Tenant, error) {
+func (f *lpTenantStore) CreateTenant(context.Context, *Tenant) (string, error) { return "", nil }
+func (f *lpTenantStore) GetTenantByPrimaryDomain(context.Context, string, string) (*Tenant, error) {
 	return nil, nil
 }
-func (f *fakeTenantStore) SetTenantStatus(context.Context, string, string, string) error { return nil }
-func (f *fakeTenantStore) ListTenants(context.Context, string) ([]*Tenant, error)        { return nil, nil }
+func (f *lpTenantStore) SetTenantStatus(context.Context, string, string, string) error { return nil }
+func (f *lpTenantStore) ListTenants(context.Context, string) ([]*Tenant, error)        { return nil, nil }
 
 type fakePolicyStore struct {
 	byTenant map[string]*LoginPolicy // key: projectID + "|" + tenantID
@@ -82,8 +82,8 @@ func (f *fakePolicyStore) UpsertLoginPolicy(context.Context, *LoginPolicy) (stri
 }
 
 var (
-	_ DomainStore      = (*fakeDomainStore)(nil)
-	_ TenantStore      = (*fakeTenantStore)(nil)
+	_ DomainStore      = (*lpDomainStore)(nil)
+	_ TenantStore      = (*lpTenantStore)(nil)
 	_ LoginPolicyStore = (*fakePolicyStore)(nil)
 )
 
@@ -92,16 +92,26 @@ var (
 func claimedPasswordOnlyGovernance() *LoginGovernance {
 	const project, tenant, domain = "proj-1", "tenant-acme", "acme.com"
 	return &LoginGovernance{
-		Domains: &fakeDomainStore{byName: map[string]*Domain{
+		Domains: &lpDomainStore{byName: map[string]*Domain{
 			project + "|" + domain: {ProjectID: project, TenantID: tenant, Domain: domain, Status: DomainStatusVerified},
 		}},
-		Tenants: &fakeTenantStore{byID: map[string]*Tenant{
+		Tenants: &lpTenantStore{byID: map[string]*Tenant{
 			project + "|" + tenant: {ID: tenant, ProjectID: project, Status: TenantStatusClaimed},
 		}},
 		Policies: &fakePolicyStore{byTenant: map[string]*LoginPolicy{
 			project + "|" + tenant: {ProjectID: project, TenantID: tenant, AllowedMethods: LoginMethodPassword},
 		}},
 	}
+}
+
+// withAllowedMethods returns a claimed-tenant governance bundle for
+// acme.com whose policy permits exactly the given methods — a convenience
+// over claimedPasswordOnlyGovernance for tests that need a different
+// allow-list (e.g. one that permits oauth but not password).
+func withAllowedMethods(methods string) *LoginGovernance {
+	g := claimedPasswordOnlyGovernance()
+	g.Policies.(*fakePolicyStore).byTenant["proj-1|tenant-acme"].AllowedMethods = methods
+	return g
 }
 
 // ── enforceLoginPolicy ──────────────────────────────────────────────────
@@ -135,6 +145,21 @@ func TestEnforceLoginPolicy_AllowedMethodsTokenNormalization(t *testing.T) {
 	require.ErrorIs(t, svc.enforceLoginPolicy(ctx, "alice@acme.com", LoginMethodOAuth), ErrPermissionDenied)
 }
 
+// A password-only policy denies every other distinct authentication method
+// — oauth and passkey included — so the allow-list cannot be sidestepped by
+// switching method. (The end-to-end passkey path requires a real WebAuthn
+// assertion and is not unit-testable; the enforcement decision is.)
+func TestEnforceLoginPolicy_PasswordOnlyDeniesOtherMethods(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
+	ctx := withProject("proj-1")
+
+	for _, method := range []string{LoginMethodOAuth, LoginMethodPasskey, LoginMethodSSO} {
+		require.ErrorIs(t, svc.enforceLoginPolicy(ctx, "alice@acme.com", method), ErrPermissionDenied,
+			"%s must be denied for a password-only tenant", method)
+	}
+}
+
 // A nil governance bundle (entdb/memory) imposes no restriction.
 func TestEnforceLoginPolicy_NilBundle_NoOp(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
@@ -164,7 +189,7 @@ func TestEnforceLoginPolicy_UnknownDomain_NoRestriction(t *testing.T) {
 func TestEnforceLoginPolicy_UnverifiedDomain_NoRestriction(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	g := claimedPasswordOnlyGovernance()
-	g.Domains.(*fakeDomainStore).byName["proj-1|acme.com"].Status = DomainStatusPending
+	g.Domains.(*lpDomainStore).byName["proj-1|acme.com"].Status = DomainStatusPending
 	svc.WithLoginGovernance(g)
 	require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
 }
@@ -174,7 +199,7 @@ func TestEnforceLoginPolicy_UnverifiedDomain_NoRestriction(t *testing.T) {
 func TestEnforceLoginPolicy_LatentTenant_NoRestriction(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	g := claimedPasswordOnlyGovernance()
-	g.Tenants.(*fakeTenantStore).byID["proj-1|tenant-acme"].Status = TenantStatusLatent
+	g.Tenants.(*lpTenantStore).byID["proj-1|tenant-acme"].Status = TenantStatusLatent
 	svc.WithLoginGovernance(g)
 	require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
 }
@@ -213,7 +238,7 @@ func TestEnforceLoginPolicy_LookupErrors_FailSafe(t *testing.T) {
 	t.Run("domain lookup error", func(t *testing.T) {
 		svc, _, _ := newAuthSvcWithMailer(t)
 		g := claimedPasswordOnlyGovernance()
-		g.Domains.(*fakeDomainStore).err = boom
+		g.Domains.(*lpDomainStore).err = boom
 		svc.WithLoginGovernance(g)
 		require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
 	})
@@ -221,7 +246,7 @@ func TestEnforceLoginPolicy_LookupErrors_FailSafe(t *testing.T) {
 	t.Run("tenant lookup error", func(t *testing.T) {
 		svc, _, _ := newAuthSvcWithMailer(t)
 		g := claimedPasswordOnlyGovernance()
-		g.Tenants.(*fakeTenantStore).err = boom
+		g.Tenants.(*lpTenantStore).err = boom
 		svc.WithLoginGovernance(g)
 		require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
 	})
@@ -282,4 +307,52 @@ func TestVerifyEmailLoginCode_NoGovernance_Allowed(t *testing.T) {
 	res, err := svc.VerifyEmailLoginCode(ctx, "alice@acme.com", code, "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, res.AccessToken)
+}
+
+// OAuthLogin is denied when the tenant's policy omits oauth — the allow-list
+// governs every distinct authentication method, not just password/otp. The
+// denial is ErrPermissionDenied (HOW), not an account-existence error.
+func TestOAuthLogin_DeniedByPolicy(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
+
+	code := fakeOAuthCode("alice@acme.com", "Alice", "", "google")
+	_, err := svc.OAuthLogin(withProject("proj-1"), code, "google", "https://app/cb", "", "", "", "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied,
+		"oauth must be denied for a password-only tenant")
+}
+
+// OAuthLogin is permitted when the tenant's policy includes oauth.
+func TestOAuthLogin_AllowedByPolicy(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.WithLoginGovernance(withAllowedMethods(LoginMethodOAuth))
+
+	code := fakeOAuthCode("alice@acme.com", "Alice", "", "google")
+	res, err := svc.OAuthLogin(withProject("proj-1"), code, "google", "https://app/cb", "", "", "", "", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, res.AccessToken)
+}
+
+// The hosted-flow redeem honours the same policy: a password-only tenant
+// denies a code minted from an oauth login.
+func TestRedeemOAuthCode_DeniedByPolicy(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := withProject("proj-1")
+
+	begin, err := svc.BeginHostedOAuth(ctx, "google",
+		"https://identity.test/oauth/callback/google", "https://app.test/finish")
+	require.NoError(t, err)
+	cb, err := svc.CompleteHostedOAuth(ctx, "google",
+		fakeOAuthCode("alice@acme.com", "Alice", "", "google"),
+		stateTokenFromAuthURL(t, begin.AuthorizationURL), "1.2.3.4", "test-agent")
+	require.NoError(t, err)
+
+	// Policy is consulted at redeem, the point tokens would be issued.
+	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
+	_, err = svc.RedeemOAuthCode(ctx, cb.Code, "1.2.3.4", "test-agent")
+	require.ErrorIs(t, err, ErrPermissionDenied,
+		"oauth redeem must be denied for a password-only tenant")
 }

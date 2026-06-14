@@ -216,6 +216,13 @@ func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAge
 		return nil, err
 	}
 
+	// The hosted code was minted only after a verified provider login, so
+	// this is an oauth authentication; consult the tenant's LoginPolicy
+	// before issuing tokens, matching the headless OAuthLogin path.
+	if err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodOAuth); err != nil {
+		return nil, err
+	}
+
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
 	if err != nil {
 		return nil, err

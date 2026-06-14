@@ -278,6 +278,14 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, err
 	}
 
+	// Consult the tenant's LoginPolicy before issuing tokens. A passkey is a
+	// distinct authentication method, so a tenant that disallows it via its
+	// AllowedMethods allow-list must be honoured here too — otherwise the
+	// allow-list could be bypassed by enrolling and using a passkey.
+	if err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodPasskey); err != nil {
+		return nil, err
+	}
+
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
 	if err != nil {
 		return nil, err
