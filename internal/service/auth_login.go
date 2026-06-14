@@ -373,6 +373,13 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return nil, err
 	}
 
+	// Credentials are proven; consult the tenant's LoginPolicy. This runs
+	// only after authentication so a denial never reveals account existence,
+	// and before tokens are issued so a disallowed method yields no session.
+	if err := s.enforceLoginPolicy(ctx, email, LoginMethodPassword); err != nil {
+		return nil, err
+	}
+
 	// Password verified -- reset failed-attempt counters.
 	s.resetFailedLogin(ctx, user)
 
@@ -565,6 +572,13 @@ func (s *AuthService) OAuthLogin(
 	}
 
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return nil, err
+	}
+
+	// The provider has proven control of the email; consult the tenant's
+	// LoginPolicy before issuing tokens so a tenant that disallows oauth is
+	// honoured here too — not just on the password / passwordless paths.
+	if err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodOAuth); err != nil {
 		return nil, err
 	}
 

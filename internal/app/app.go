@@ -85,6 +85,12 @@ type Deps struct {
 	TenantStore     service.TenantStore
 	MembershipStore service.MembershipStore
 
+	// LoginGovernance is the read-side bundle the login path consults to
+	// enforce a claimed tenant's LoginPolicy. Non-nil only for the postgres
+	// driver (the only one with a governance plane); when nil, login imposes
+	// no policy restriction.
+	LoginGovernance *service.LoginGovernance
+
 	// TOTPRecoveryPepper is the HMAC-SHA-256 key used to hash and
 	// verify recovery codes. Must be >= totp.MinRecoveryPepperBytes
 	// bytes long; the binary refuses to start otherwise.
@@ -350,7 +356,8 @@ func New(deps Deps) (*Built, error) {
 		repo, deps.Config, deps.Signer, deps.Passkeys,
 		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, smsSender, logger,
 		oauthRegistry,
-	).WithTenantAutoFormer(deps.TenantAutoFormer)
+	).WithTenantAutoFormer(deps.TenantAutoFormer).
+		WithLoginGovernance(deps.LoginGovernance)
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)

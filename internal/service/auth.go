@@ -837,6 +837,14 @@ type AuthService struct {
 	// WithTenantAutoFormer. It is an optional, set-once dependency, kept off
 	// the already-wide constructor.
 	autoFormer TenantAutoFormStore
+
+	// governance, when set (postgres driver only), is the read-side bundle
+	// the login path consults to enforce a claimed tenant's LoginPolicy. nil
+	// disables enforcement — the constructor leaves it nil; app.New sets it
+	// via WithLoginGovernance. Like autoFormer it is an optional, set-once
+	// dependency kept off the already-wide constructor. Enforcement fails
+	// safe: any nil store, miss, or lookup error imposes no restriction.
+	governance *LoginGovernance
 }
 
 // WithTenantAutoFormer wires the optional tenant auto-formation store and
@@ -844,6 +852,16 @@ type AuthService struct {
 // (with the postgres store, or nil for drivers without a control plane).
 func (s *AuthService) WithTenantAutoFormer(af TenantAutoFormStore) *AuthService {
 	s.autoFormer = af
+	return s
+}
+
+// WithLoginGovernance wires the optional login-governance bundle (the
+// Domain/Tenant/LoginPolicy read stores) the login path consults to enforce
+// a claimed tenant's LoginPolicy, and returns the service for chaining.
+// app.New calls it once at construction (with the postgres stores, or nil
+// for drivers without a governance plane). A nil bundle disables enforcement.
+func (s *AuthService) WithLoginGovernance(g *LoginGovernance) *AuthService {
+	s.governance = g
 	return s
 }
 
