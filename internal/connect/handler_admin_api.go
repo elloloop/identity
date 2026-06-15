@@ -132,6 +132,24 @@ func (h *IdentityHandler) ListProjectAuthDomains(
 	return connect.NewResponse(&identitypb.ListProjectAuthDomainsResponse{Domains: out}), nil
 }
 
+// SetPrimaryAuthDomain promotes a VERIFIED custom auth-domain to the project's
+// primary serving host, atomically demoting the current primary. Operator-only.
+func (h *IdentityHandler) SetPrimaryAuthDomain(
+	ctx context.Context,
+	req *connect.Request[identitypb.SetPrimaryAuthDomainRequest],
+) (*connect.Response[identitypb.SetPrimaryAuthDomainResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	d, err := h.controlAdmin.SetPrimaryAuthDomain(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Hostname)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.SetPrimaryAuthDomainResponse{
+		Domain: authDomainToProto(d),
+	}), nil
+}
+
 // authDomainToProto maps a service auth-domain value to its proto message. A
 // nil input yields nil (the field is simply omitted).
 func authDomainToProto(d *service.AdminProjectAuthDomain) *identitypb.ProjectAuthDomain {

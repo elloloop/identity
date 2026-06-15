@@ -1043,11 +1043,11 @@ message ProjectAuthDomain {
 message AddProjectAuthDomainRequest {
   string project_id = 1;
   string hostname = 2;
-  // is_primary is reserved for a planned follow-up that promotes an already
-  // verified custom auth-domain to the project's primary serving host. It is
-  // NOT yet honored: a request with is_primary=true is rejected with
-  // InvalidArgument. Add a custom domain non-primary, verify it, then (once the
-  // follow-up lands) promote it to primary.
+  // is_primary is RESERVED and NOT honored here: a request with is_primary=true
+  // is rejected with InvalidArgument. A custom domain is always added
+  // non-primary. To make a verified custom domain the project's primary serving
+  // host, add it non-primary, verify it, then call SetPrimaryAuthDomain —
+  // promotion requires a verified domain and is applied atomically.
   bool is_primary = 3;
 }
 
@@ -1076,6 +1076,15 @@ message ListProjectAuthDomainsRequest {
 
 message ListProjectAuthDomainsResponse {
   repeated ProjectAuthDomain domains = 1;
+}
+
+message SetPrimaryAuthDomainRequest {
+  string project_id = 1;
+  string hostname = 2;
+}
+
+message SetPrimaryAuthDomainResponse {
+  ProjectAuthDomain domain = 1;
 }
 
 message AdminCreateTenantRequest {
@@ -1274,6 +1283,10 @@ service IdentityService {
   rpc AddProjectAuthDomain(AddProjectAuthDomainRequest) returns (AddProjectAuthDomainResponse);
   rpc VerifyProjectAuthDomain(VerifyProjectAuthDomainRequest) returns (VerifyProjectAuthDomainResponse);
   rpc ListProjectAuthDomains(ListProjectAuthDomainsRequest) returns (ListProjectAuthDomainsResponse);
+  // SetPrimaryAuthDomain promotes a VERIFIED custom auth-domain to the
+  // project's primary serving host, atomically demoting the current primary in
+  // the same transaction. Only a verified domain may be promoted.
+  rpc SetPrimaryAuthDomain(SetPrimaryAuthDomainRequest) returns (SetPrimaryAuthDomainResponse);
   rpc AdminCreateTenant(AdminCreateTenantRequest) returns (AdminCreateTenantResponse);
   rpc AdminAddTenantAdmin(AdminAddTenantAdminRequest) returns (AdminAddTenantAdminResponse);
 

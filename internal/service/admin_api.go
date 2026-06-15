@@ -122,6 +122,12 @@ type ControlPlaneProjectStore interface {
 	// auth-domain, making it resolve. A hostname the project does not own
 	// surfaces ErrNotFound.
 	SetAuthDomainVerified(ctx context.Context, projectID, hostname string, verifiedAtMs int64) error
+	// SetPrimaryAuthDomain promotes a project's VERIFIED auth-domain to its
+	// primary serving host, atomically demoting the current primary in one
+	// transaction so the per-project primary uniqueness is never violated. An
+	// unverified target surfaces ErrAuthDomainNotVerified; a hostname the
+	// project does not own surfaces ErrNotFound.
+	SetPrimaryAuthDomain(ctx context.Context, projectID, hostname string) (*AdminProjectAuthDomain, error)
 }
 
 // ControlPlaneAdminService provisions control-plane resources on behalf of a
@@ -305,18 +311,17 @@ type RegisteredAuthDomain struct {
 // without a conflict. A hostname owned by a DIFFERENT project surfaces the
 // store's ErrAlreadyExists.
 //
-// isPrimary=true is rejected with ErrInvalidArgument: promoting a custom
-// auth-domain to primary is a planned follow-up, not yet supported. A custom
-// domain is always added NON-primary here. (Honoring it would be a half-built
-// path: the partial-unique primary index would reject a second primary as a
-// misleading AlreadyExists, and verification never promotes primary — so a
-// newly-added primary could never actually become primary.)
+// isPrimary=true is rejected with ErrInvalidArgument: a custom domain is always
+// added NON-primary here, because an unverified host must not resolve, let
+// alone drive branded links. To make a custom domain primary, add it
+// non-primary, verify it, then call SetPrimaryAuthDomain — which promotes only
+// a verified domain and atomically demotes the current primary.
 func (s *ControlPlaneAdminService) AddProjectAuthDomain(ctx context.Context, secret, projectID, hostname string, isPrimary bool) (*RegisteredAuthDomain, error) {
 	if err := s.authorize(secret); err != nil {
 		return nil, err
 	}
 	if isPrimary {
-		return nil, fmt.Errorf("%w: promoting a custom auth-domain to primary is not yet supported; add it non-primary, verify it, then set primary once the follow-up lands", ErrInvalidArgument)
+		return nil, fmt.Errorf("%w: a custom auth-domain is added non-primary; verify it, then call SetPrimaryAuthDomain to promote it", ErrInvalidArgument)
 	}
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
@@ -395,6 +400,29 @@ func (s *ControlPlaneAdminService) VerifyProjectAuthDomain(ctx context.Context, 
 		}
 	}
 	return d, nil
+}
+
+// SetPrimaryAuthDomain promotes a VERIFIED custom auth-domain to the project's
+// primary serving host. The store demotes the current primary and promotes the
+// target in a SINGLE transaction, so the per-project primary uniqueness is
+// never violated, even under concurrent promotions. Only a verified domain may
+// be promoted (an unverified target is ErrAuthDomainNotVerified); a hostname
+// the project does not own is ErrNotFound. The returned record reflects the
+// newly-promoted (now primary) host, which the resolver's primaryAuthHostname /
+// PrimaryAuthDomain then surfaces.
+func (s *ControlPlaneAdminService) SetPrimaryAuthDomain(ctx context.Context, secret, projectID, hostname string) (*AdminProjectAuthDomain, error) {
+	if err := s.authorize(secret); err != nil {
+		return nil, err
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
+	}
+	hostname, err := normalizeAuthHostname(hostname)
+	if err != nil {
+		return nil, err
+	}
+	return s.projects.SetPrimaryAuthDomain(ctx, projectID, hostname)
 }
 
 // ListProjectAuthDomains returns every auth-domain of a project, primary-first

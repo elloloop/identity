@@ -56,6 +56,7 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.IdentityService/AddProjectAuthDomain":         true,
 	"/identity.IdentityService/VerifyProjectAuthDomain":      true,
 	"/identity.IdentityService/ListProjectAuthDomains":       true,
+	"/identity.IdentityService/SetPrimaryAuthDomain":         true,
 	"/identity.IdentityService/AdminCreateTenant":            true,
 	"/identity.IdentityService/AdminAddTenantAdmin":          true,
 	"/.well-known/jwks.json":                                 true,

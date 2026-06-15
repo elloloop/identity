@@ -594,6 +594,73 @@ func (s *ProjectStore) SetProjectAuthDomainVerified(ctx context.Context, project
 	return nil
 }
 
+// SetPrimaryProjectAuthDomain promotes a project's VERIFIED auth-domain to its
+// primary serving host, atomically demoting the current primary in the SAME
+// transaction so the per-project partial-unique primary index is never violated
+// — even under concurrent promotions (both lock the same project's rows, so
+// they serialize rather than colliding on the index). Only a verified
+// (verified_at_ms > 0) domain may be promoted: an unverified target is
+// ErrAuthDomainNotVerified. A hostname the project does not own is ErrNotFound.
+// Promoting the already-primary host is a no-op that returns its record.
+func (s *ProjectStore) SetPrimaryProjectAuthDomain(ctx context.Context, projectID, hostname string) (*ProjectAuthDomain, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
+	}
+	if hostname == "" {
+		return nil, fmt.Errorf("%w: missing hostname", service.ErrInvalidArgument)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, wrapPgErr("SetPrimaryProjectAuthDomain begin", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Lock the target row so a concurrent promotion of the same project
+	// serializes here rather than racing the partial-unique primary index.
+	const selectQ = `SELECT ` + projectAuthDomainColumns + `
+		FROM project_auth_domains
+		WHERE project_id = $1 AND lower(hostname) = lower($2)
+		FOR UPDATE`
+	target, err := scanProjectAuthDomain(tx.QueryRow(ctx, selectQ, projectID, hostname))
+	if noRows(err) {
+		return nil, fmt.Errorf("%w: auth domain", service.ErrNotFound)
+	}
+	if err != nil {
+		return nil, wrapPgErr("SetPrimaryProjectAuthDomain select", err)
+	}
+	if target.VerifiedAtMs <= 0 {
+		return nil, fmt.Errorf("%w: %q", service.ErrAuthDomainNotVerified, hostname)
+	}
+	if target.IsPrimary {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, wrapPgErr("SetPrimaryProjectAuthDomain commit", err)
+		}
+		return target, nil
+	}
+
+	// Demote the current primary (if any) BEFORE promoting the target, so the
+	// partial-unique index never sees two primaries at once.
+	const demoteQ = `UPDATE project_auth_domains
+		SET is_primary = false
+		WHERE project_id = $1 AND is_primary AND id <> $2`
+	if _, err := tx.Exec(ctx, demoteQ, projectID, target.ID); err != nil {
+		return nil, wrapPgErr("SetPrimaryProjectAuthDomain demote", err)
+	}
+	const promoteQ = `UPDATE project_auth_domains
+		SET is_primary = true
+		WHERE id = $1
+		RETURNING ` + projectAuthDomainColumns
+	promoted, err := scanProjectAuthDomain(tx.QueryRow(ctx, promoteQ, target.ID))
+	if err != nil {
+		return nil, wrapPgErr("SetPrimaryProjectAuthDomain promote", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, wrapPgErr("SetPrimaryProjectAuthDomain commit", err)
+	}
+	return promoted, nil
+}
+
 // ListProjectAuthDomains returns every auth domain for a project, ordered
 // primary-first then by creation time, so callers can pick the
 // link-building host deterministically. An unknown project yields an empty

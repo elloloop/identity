@@ -97,6 +97,19 @@ func (s *ProjectStore) SetAuthDomainVerified(ctx context.Context, projectID, hos
 	return s.SetProjectAuthDomainVerified(ctx, projectID, hostname, verifiedAtMs)
 }
 
+// SetPrimaryAuthDomain promotes a project's VERIFIED auth-domain to primary,
+// atomically demoting the current primary, and returns the promoted record as
+// the admin service's value type. An unverified target surfaces
+// service.ErrAuthDomainNotVerified; a hostname the project does not own
+// surfaces service.ErrNotFound.
+func (s *ProjectStore) SetPrimaryAuthDomain(ctx context.Context, projectID, hostname string) (*service.AdminProjectAuthDomain, error) {
+	d, err := s.SetPrimaryProjectAuthDomain(ctx, projectID, hostname)
+	if err != nil {
+		return nil, err
+	}
+	return authDomainToService(d), nil
+}
+
 // authDomainToService maps the store row to the driver-agnostic admin value.
 func authDomainToService(d *ProjectAuthDomain) *service.AdminProjectAuthDomain {
 	return &service.AdminProjectAuthDomain{
