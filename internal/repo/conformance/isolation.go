@@ -76,8 +76,8 @@ func runIsolationConformance(t *testing.T, driver Driver) {
 //
 // It asserts, for two projects A and B sharing one store: the same email is
 // creatable under each (uniqueness is per-project, not global); each project
-// reads back only its own row (by email and by id); a list in one project
-// never returns the other's row; and deleting the user in A leaves B's user
+// reads back only its own row (by email and by id); a cross-project GetUser
+// never surfaces the other's data; and deleting the user in A leaves B's user
 // intact. A leak here is a cross-project data exposure — the most serious
 // class of bug for the converged model.
 //

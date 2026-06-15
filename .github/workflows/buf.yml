@@ -31,4 +31,4 @@ jobs:
 
       - name: buf breaking
         if: github.event_name != 'push'
-        run: buf breaking --against '.git#branch=origin/main' --against-config buf.yaml --path proto/identity/identity.proto
+        run: buf breaking --against '.git#branch=origin/main' --against-config buf.yaml --path proto/identity/identity.proto --path proto/identity/schema/schema.proto

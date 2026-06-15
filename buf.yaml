@@ -15,16 +15,19 @@ breaking:
   use:
     - FILE
   # Intentional, documented breaking change (v1.0 cleanup): the legacy
-  # OrganizationSignup RPC and its Organization / OrganizationSignupRequest /
-  # OrganizationSignupResponse messages were removed because the
-  # Project/Tenant/Domain model supersedes them. These ignore_only entries
-  # are scoped to identity.proto and to ONLY the two deletion rules, so every
-  # other breaking guarantee (renumbered tags, reused field ids, signature
-  # changes on surviving RPCs) stays enforced. Remove these entries once the
-  # removal has landed on the baseline branch buf breaking runs against —
-  # they are dead weight after this change merges.
+  # OrganizationSignup RPC (identity.proto) and the retired entdb node types
+  # Organization / OrganizationMembership (schema.proto, type_ids 33/34) were
+  # removed because the Project/Tenant/Domain model supersedes them. These
+  # ignore_only entries are scoped to the two deletion rules on exactly the
+  # two files that delete, so every other breaking guarantee (renumbered
+  # tags, reused field ids, signature changes on surviving RPCs, reused
+  # type_ids) stays enforced. The entclient guard test additionally backstops
+  # type_id reuse on schema.proto. Remove these entries once the removal has
+  # landed on the baseline branch buf breaking runs against — they are dead
+  # weight after this change merges.
   ignore_only:
     RPC_NO_DELETE:
       - proto/identity/identity.proto
     MESSAGE_NO_DELETE:
       - proto/identity/identity.proto
+      - proto/identity/schema/schema.proto
