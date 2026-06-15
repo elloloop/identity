@@ -8,6 +8,7 @@ import (
 )
 
 func TestE2E_Group_CRUDRoundTrip(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 
@@ -94,6 +95,7 @@ func TestE2E_Group_CRUDRoundTrip(t *testing.T) {
 }
 
 func TestE2E_Group_MemberRoundTrip(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 

@@ -72,6 +72,7 @@ func TestE2E_RevokeSession_RejectsUnknownID(t *testing.T) {
 
 // TestE2E_Session_HappyFlow exercises session listing and individual / bulk revocation.
 func TestE2E_Session_HappyFlow(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 	email := "sess-happy@example.com"
@@ -131,6 +132,7 @@ func TestE2E_Session_HappyFlow(t *testing.T) {
 
 // TestE2E_Session_SignOutEverywhere verifies SignOutEverywhere endpoint.
 func TestE2E_Session_SignOutEverywhere(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 	email := "sess-signout@example.com"
