@@ -18,12 +18,35 @@ import (
 // trivial to grow if a new method is genuinely needed. When OTel is
 // disabled the global no-op tracer is in effect and the only cost is
 // the dispatch through observability.StartClient.
+//
+// A tracedPool also carries the projectID it is bound to and injects it
+// into the context of every pool operation (withProjectGUC) so the pool's
+// PrepareConn hook sets the app.current_project_id GUC the migration-0016
+// RLS policies read. WithProject derives a new tracedPool view that shares
+// the same underlying *pgxpool.Pool but carries a different projectID, so
+// two project scopes can share one connection pool without one scope's GUC
+// leaking into the other's queries (PrepareConn always re-sets it at
+// acquire time — see rls.go).
 type tracedPool struct {
-	inner *pgxpool.Pool
+	inner     *pgxpool.Pool
+	projectID string
 }
 
-func newTracedPool(p *pgxpool.Pool) *tracedPool {
-	return &tracedPool{inner: p}
+func newTracedPool(p *pgxpool.Pool, projectID string) *tracedPool {
+	return &tracedPool{inner: p, projectID: projectID}
+}
+
+// forProject returns a tracedPool view sharing this pool's underlying
+// connection pool but bound to a different project. The shared *pgxpool.Pool
+// is NOT duplicated, so the derived view must not be Closed independently.
+func (p *tracedPool) forProject(projectID string) *tracedPool {
+	return &tracedPool{inner: p.inner, projectID: projectID}
+}
+
+// scopeCtx injects this pool's bound project into ctx so the PrepareConn
+// hook scopes the acquired connection's RLS GUC to it.
+func (p *tracedPool) scopeCtx(ctx context.Context) context.Context {
+	return withProjectGUC(ctx, p.projectID)
 }
 
 func (p *tracedPool) Close() {
@@ -34,6 +57,7 @@ func (p *tracedPool) Close() {
 }
 
 func (p *tracedPool) Ping(ctx context.Context) error {
+	ctx = p.scopeCtx(ctx)
 	ctx, end := observability.StartClient(ctx, "postgres.Ping",
 		attribute.String("db.system", "postgresql"),
 	)
@@ -43,6 +67,7 @@ func (p *tracedPool) Ping(ctx context.Context) error {
 }
 
 func (p *tracedPool) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	ctx = p.scopeCtx(ctx)
 	ctx, end := observability.StartClient(ctx, "postgres.Exec", sqlAttrs(sql)...)
 	tag, err := p.inner.Exec(ctx, sql, args...)
 	end(err)
@@ -50,6 +75,7 @@ func (p *tracedPool) Exec(ctx context.Context, sql string, args ...any) (pgconn.
 }
 
 func (p *tracedPool) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	ctx = p.scopeCtx(ctx)
 	ctx, end := observability.StartClient(ctx, "postgres.Query", sqlAttrs(sql)...)
 	rows, err := p.inner.Query(ctx, sql, args...)
 	// rows are streamed and the caller closes them — we end the span
@@ -60,6 +86,7 @@ func (p *tracedPool) Query(ctx context.Context, sql string, args ...any) (pgx.Ro
 }
 
 func (p *tracedPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	ctx = p.scopeCtx(ctx)
 	ctx, end := observability.StartClient(ctx, "postgres.QueryRow", sqlAttrs(sql)...)
 	row := p.inner.QueryRow(ctx, sql, args...)
 	end(nil)
@@ -67,6 +94,7 @@ func (p *tracedPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.
 }
 
 func (p *tracedPool) Begin(ctx context.Context) (pgx.Tx, error) {
+	ctx = p.scopeCtx(ctx)
 	ctx, end := observability.StartClient(ctx, "postgres.Begin",
 		attribute.String("db.system", "postgresql"),
 	)

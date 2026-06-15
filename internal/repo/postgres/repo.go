@@ -51,12 +51,20 @@ func New(ctx context.Context, cfg Config) (*pgRepository, error) {
 	if cfg.ConnTimeout > 0 {
 		poolCfg.ConnConfig.ConnectTimeout = cfg.ConnTimeout
 	}
+	// RLS defense-in-depth (migration 0016): set the app.current_project_id
+	// GUC on every connection the pool hands out, scoped to the acquiring
+	// repository's project (read from the acquire context, injected by the
+	// tracedPool). PrepareConn runs on EVERY Acquire — including the implicit
+	// acquire inside pool.Query/Exec/QueryRow/Begin — so it covers all query
+	// paths and re-sets the GUC each time, which prevents a pooled connection
+	// from carrying one project's scope into another project's query (rls.go).
+	poolCfg.PrepareConn = prepareConnForRLS
 
 	rawPool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: open pool: %w", err)
 	}
-	pool := newTracedPool(rawPool)
+	pool := newTracedPool(rawPool, cfg.ProjectID)
 
 	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -90,6 +98,11 @@ func (r *pgRepository) WithProject(projectID string) service.Repository {
 	cp := *r
 	cp.projectID = projectID
 	cp.cfg.ProjectID = projectID
+	// Derive a tracedPool view bound to the new project. It shares the same
+	// underlying *pgxpool.Pool (no new connections), but carries projectID so
+	// every query it issues sets the app.current_project_id RLS GUC to this
+	// project — not the project the base repository was bound to.
+	cp.pool = r.pool.forProject(projectID)
 	return &cp
 }
 
