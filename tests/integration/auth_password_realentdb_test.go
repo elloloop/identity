@@ -126,7 +126,11 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	dbAdapter := built.DB
 
 	cfg := &config.Config{
-		DefaultTenantID:               tenantID,
+		DefaultTenantID: tenantID,
+		// Pin the boot-default project to the provisioned entdb partition so
+		// the service layer (requestProjectID → WithProject → SDK Tenant)
+		// reads/writes under the same non-empty partition this test created.
+		DefaultProjectID:              tenantID,
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

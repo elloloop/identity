@@ -255,6 +255,20 @@ func New(deps Deps) (*Built, error) {
 		return nil, err
 	}
 
+	// Normalize an empty DefaultProjectID to a non-empty default. The env
+	// loader (config.Load) already defaults GATEWAY_DEFAULT_PROJECT_ID, but
+	// struct-literal Configs — every test harness and every embedding caller
+	// that builds Config directly — bypass that. This value becomes the
+	// boot-default project shard id for the audit logger and every service
+	// below (and, via requestProjectID, the entdb partition key / postgres
+	// WHERE project_id), so it must never be "": entdb rejects an empty
+	// partition key outright, and a data-plane row written under "" has no
+	// valid project. Default it rather than reject it, mirroring how the
+	// env loader defaults DefaultTenantID, so embedding ergonomics hold.
+	if deps.Config.DefaultProjectID == "" {
+		deps.Config.DefaultProjectID = config.DefaultProjectIDFallback
+	}
+
 	allowedOrigins, err := middleware.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
 	if err != nil {
 		return nil, fmt.Errorf("cors config invalid: %w", err)

@@ -54,6 +54,13 @@ const (
 	DefaultCaptchaRecaptchaScoreThreshold = 0.5
 )
 
+// DefaultProjectIDFallback is the project id used when none is configured.
+// It is the env-loader default for GATEWAY_DEFAULT_PROJECT_ID and the value
+// app.New normalizes an empty DefaultProjectID to, so a directly-constructed
+// Config (tests, embedding callers) never reaches the repo boundary with an
+// empty project shard id. The single source of truth for this literal.
+const DefaultProjectIDFallback = "default"
+
 // Config holds all identity service configuration.
 type Config struct {
 	// Server
@@ -451,7 +458,7 @@ func Load() *Config {
 		EntDBAddress: envStr("GATEWAY_ENTDB_ADDRESS", "entdb:50051"),
 
 		DefaultTenantID:           envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
-		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", "default"),
+		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", DefaultProjectIDFallback),
 		AdminAPISecret:            envStr("GATEWAY_ADMIN_API_SECRET", ""),
 		DefaultProjectAuthDomains: envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
 

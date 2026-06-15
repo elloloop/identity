@@ -24,7 +24,14 @@ func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 	}
 
 	cfg := newTestConfig()
-	cfg.DefaultTenantID = fmt.Sprintf("it-realentdb-%d", time.Now().UnixNano())
+	uniq := fmt.Sprintf("it-realentdb-%d", time.Now().UnixNano())
+	cfg.DefaultTenantID = uniq
+	// The data-plane partitions on the project id (ADR-0002), and the entdb
+	// SDK partition key must be non-empty and pre-provisioned. Pin the
+	// boot-default project to the same id we provision below so the service
+	// layer (requestProjectID → WithProject → SDK Tenant) operates under the
+	// partition this harness actually created, not the global "default".
+	cfg.DefaultProjectID = uniq
 	hOpts := applyHarnessOptions(cfg, opts)
 
 	client, err := entclient.New(addr)
@@ -36,12 +43,12 @@ func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
-	ensureRealEntDBTenant(t, client, cfg.DefaultTenantID)
+	ensureRealEntDBTenant(t, client, cfg.DefaultProjectID)
 
 	built, err := repo.Build(context.Background(), repo.Config{
 		Driver:      repo.DriverEntDB,
 		EntDBClient: client,
-		ProjectID:   cfg.DefaultTenantID,
+		ProjectID:   cfg.DefaultProjectID,
 	}, zap.NewNop())
 	if err != nil {
 		t.Fatalf("repo.Build: %v", err)
