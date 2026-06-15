@@ -26,7 +26,23 @@ const (
 	selToggle  = `#toggle-link`
 	selError   = `#error-message`
 	selSuccess = `#success-message`
+
+	// Submit-button labels the page renders per mode (index.html sets these in
+	// the toggle handler). Used as a barrier to confirm the form-mode toggle's
+	// async click handler has run before we fill and submit.
+	submitTextSignup = "Sign up"
 )
+
+// waitSubmitText returns an Action that blocks until the submit button's text
+// equals want — i.e. the page's toggle handler has flipped the form mode. It
+// polls in-page rather than sleeping, so it is robust on slow CI runners.
+func waitSubmitText(want string) chromedp.Action {
+	js := fmt.Sprintf(
+		`(() => { const b = document.querySelector(%q); return !!b && b.textContent.trim() === %q; })()`,
+		selSubmit, want,
+	)
+	return chromedp.Poll(js, nil)
+}
 
 // newBrowser opens a headless Chrome context bound to the host binary, with a
 // timeout. The returned cancel funcs tear the browser down.
@@ -41,6 +57,10 @@ func newBrowser(t *testing.T) context.Context {
 			chromedp.ExecPath(execPath),
 			// Required for CI/root containers; harmless locally.
 			chromedp.NoSandbox,
+			// GPU is unavailable on headless CI runners; without this the first
+			// renderer init can stall. (DefaultExecAllocatorOptions already sets
+			// --disable-dev-shm-usage and headless.)
+			chromedp.DisableGPU,
 		)...,
 	)
 	t.Cleanup(allocCancel)
@@ -50,6 +70,14 @@ func newBrowser(t *testing.T) context.Context {
 
 	ctx, timeoutCancel := context.WithTimeout(browserCtx, browserTimeout)
 	t.Cleanup(timeoutCancel)
+
+	// chromedp starts the browser lazily on the first action. Force the launch
+	// here (still inside the bounded ctx) so the websocket handshake is not
+	// folded into — and does not race — the first Navigate of a test. On a
+	// resource-constrained CI runner the cold start right after the postgres
+	// container boots is the slowest moment; isolating it makes the first
+	// in-test action deterministic.
+	require.NoError(t, chromedp.Run(ctx), "warm up browser")
 	return ctx
 }
 
@@ -70,9 +98,16 @@ func signupViaUI(t *testing.T, ctx context.Context, email, password string) {
 	err := chromedp.Run(
 		ctx,
 		chromedp.WaitVisible(selToggle, chromedp.ByID),
-		// The page boots in login mode; the toggle switches it to signup.
+		// The page boots in login mode; the toggle switches it to signup. The
+		// submit button is already visible in login mode, so WaitVisible on it
+		// is not a barrier — it returns immediately and races the toggle's
+		// click handler. Wait until the handler has actually flipped the form
+		// into signup mode (the submit label becomes "Sign up") before filling
+		// and submitting, so a slow CI runner never POSTs PasswordLogin for a
+		// not-yet-created user by accident.
 		chromedp.Click(selToggle, chromedp.ByID),
 		chromedp.WaitVisible(selSubmit, chromedp.ByID),
+		waitSubmitText(submitTextSignup),
 		chromedp.SendKeys(selEmail, email, chromedp.ByID),
 		chromedp.SendKeys(selPass, password, chromedp.ByID),
 		chromedp.Click(selSubmit, chromedp.ByID),
