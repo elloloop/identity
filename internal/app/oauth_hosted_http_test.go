@@ -60,7 +60,6 @@ func newHostedTestHandler(t *testing.T, allowlist string, reg *oauth.Registry) h
 	built, err := New(Deps{
 		Config: &config.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
 			DefaultTenantID:        "tenant",
-			IdentityMode:           config.IdentityModeSingle,
 			AuthAllowLocal:         true,
 			AllowedOrigins:         "http://localhost:9002",
 			JWTExpirySeconds:       900,

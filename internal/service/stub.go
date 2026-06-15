@@ -354,30 +354,6 @@ func (StubRepository) DeleteExpiredInvitations(context.Context, int64, int) erro
 	return ErrServiceUnavailable
 }
 
-func (StubRepository) CreateOrganization(context.Context, *Organization) (string, error) {
-	return "", ErrServiceUnavailable
-}
-
-func (StubRepository) GetOrganization(context.Context, string) (*Organization, error) {
-	return nil, ErrServiceUnavailable
-}
-
-func (StubRepository) GetOrganizationBySlug(context.Context, string) (*Organization, error) {
-	return nil, ErrServiceUnavailable
-}
-
-func (StubRepository) ListOrganizationsForUser(context.Context, string) ([]*Organization, error) {
-	return nil, ErrServiceUnavailable
-}
-
-func (StubRepository) CountOrganizationsOwnedBy(context.Context, string) (int, error) {
-	return 0, ErrServiceUnavailable
-}
-
-func (StubRepository) AddOrganizationMember(context.Context, *OrganizationMembership) (string, error) {
-	return "", ErrServiceUnavailable
-}
-
 func (StubRepository) CreateSession(context.Context, *SessionRecord) (string, error) {
 	return "", ErrServiceUnavailable
 }

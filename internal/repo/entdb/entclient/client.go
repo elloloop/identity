@@ -54,8 +54,6 @@ func SchemaMessages() []proto.Message {
 		(*schemapb.EmailChangeToken)(nil),           // 30
 		(*schemapb.OAuthIdentity)(nil),              // 31 (composite_unique on provider+provider_user_id)
 		(*schemapb.IdentityVerificationRecord)(nil), // 32
-		(*schemapb.Organization)(nil),               // 33
-		(*schemapb.OrganizationMembership)(nil),     // 34
 		(*schemapb.Session)(nil),                    // 35
 		(*schemapb.OAuthOneTimeCode)(nil),           // 36
 		(*schemapb.EmailLoginCode)(nil),             // 37

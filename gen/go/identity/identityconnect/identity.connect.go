@@ -208,9 +208,6 @@ const (
 	// IdentityServiceListGroupMembersProcedure is the fully-qualified name of the IdentityService's
 	// ListGroupMembers RPC.
 	IdentityServiceListGroupMembersProcedure = "/identity.IdentityService/ListGroupMembers"
-	// IdentityServiceOrganizationSignupProcedure is the fully-qualified name of the IdentityService's
-	// OrganizationSignup RPC.
-	IdentityServiceOrganizationSignupProcedure = "/identity.IdentityService/OrganizationSignup"
 	// IdentityServiceCreateDomainProcedure is the fully-qualified name of the IdentityService's
 	// CreateDomain RPC.
 	IdentityServiceCreateDomainProcedure = "/identity.IdentityService/CreateDomain"
@@ -350,11 +347,6 @@ type IdentityServiceClient interface {
 	AddGroupMember(context.Context, *connect.Request[identity.AddGroupMemberRequest]) (*connect.Response[identity.AddGroupMemberResponse], error)
 	RemoveGroupMember(context.Context, *connect.Request[identity.RemoveGroupMemberRequest]) (*connect.Response[identity.RemoveGroupMemberResponse], error)
 	ListGroupMembers(context.Context, *connect.Request[identity.ListGroupMembersRequest]) (*connect.Response[identity.ListGroupMembersResponse], error)
-	// Organization signup (mode=multi only — returns Unimplemented in
-	// mode=single). Creates a new tenant in tenant-shard-db, registers
-	// the admin user globally, and creates the identity-layer
-	// Organization + admin User rows scoped to the new tenant.
-	OrganizationSignup(context.Context, *connect.Request[identity.OrganizationSignupRequest]) (*connect.Response[identity.OrganizationSignupResponse], error)
 	// Tenant domains (redesign). Authenticated, project-scoped, and gated
 	// on the caller being an owner/admin member of the target tenant — with
 	// one exception: VerifyDomain on a still-latent tenant that has no
@@ -760,12 +752,6 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("ListGroupMembers")),
 			connect.WithClientOptions(opts...),
 		),
-		organizationSignup: connect.NewClient[identity.OrganizationSignupRequest, identity.OrganizationSignupResponse](
-			httpClient,
-			baseURL+IdentityServiceOrganizationSignupProcedure,
-			connect.WithSchema(identityServiceMethods.ByName("OrganizationSignup")),
-			connect.WithClientOptions(opts...),
-		),
 		createDomain: connect.NewClient[identity.CreateDomainRequest, identity.CreateDomainResponse](
 			httpClient,
 			baseURL+IdentityServiceCreateDomainProcedure,
@@ -944,7 +930,6 @@ type identityServiceClient struct {
 	addGroupMember                *connect.Client[identity.AddGroupMemberRequest, identity.AddGroupMemberResponse]
 	removeGroupMember             *connect.Client[identity.RemoveGroupMemberRequest, identity.RemoveGroupMemberResponse]
 	listGroupMembers              *connect.Client[identity.ListGroupMembersRequest, identity.ListGroupMembersResponse]
-	organizationSignup            *connect.Client[identity.OrganizationSignupRequest, identity.OrganizationSignupResponse]
 	createDomain                  *connect.Client[identity.CreateDomainRequest, identity.CreateDomainResponse]
 	verifyDomain                  *connect.Client[identity.VerifyDomainRequest, identity.VerifyDomainResponse]
 	listTenantDomains             *connect.Client[identity.ListTenantDomainsRequest, identity.ListTenantDomainsResponse]
@@ -1261,11 +1246,6 @@ func (c *identityServiceClient) ListGroupMembers(ctx context.Context, req *conne
 	return c.listGroupMembers.CallUnary(ctx, req)
 }
 
-// OrganizationSignup calls identity.IdentityService.OrganizationSignup.
-func (c *identityServiceClient) OrganizationSignup(ctx context.Context, req *connect.Request[identity.OrganizationSignupRequest]) (*connect.Response[identity.OrganizationSignupResponse], error) {
-	return c.organizationSignup.CallUnary(ctx, req)
-}
-
 // CreateDomain calls identity.IdentityService.CreateDomain.
 func (c *identityServiceClient) CreateDomain(ctx context.Context, req *connect.Request[identity.CreateDomainRequest]) (*connect.Response[identity.CreateDomainResponse], error) {
 	return c.createDomain.CallUnary(ctx, req)
@@ -1441,11 +1421,6 @@ type IdentityServiceHandler interface {
 	AddGroupMember(context.Context, *connect.Request[identity.AddGroupMemberRequest]) (*connect.Response[identity.AddGroupMemberResponse], error)
 	RemoveGroupMember(context.Context, *connect.Request[identity.RemoveGroupMemberRequest]) (*connect.Response[identity.RemoveGroupMemberResponse], error)
 	ListGroupMembers(context.Context, *connect.Request[identity.ListGroupMembersRequest]) (*connect.Response[identity.ListGroupMembersResponse], error)
-	// Organization signup (mode=multi only — returns Unimplemented in
-	// mode=single). Creates a new tenant in tenant-shard-db, registers
-	// the admin user globally, and creates the identity-layer
-	// Organization + admin User rows scoped to the new tenant.
-	OrganizationSignup(context.Context, *connect.Request[identity.OrganizationSignupRequest]) (*connect.Response[identity.OrganizationSignupResponse], error)
 	// Tenant domains (redesign). Authenticated, project-scoped, and gated
 	// on the caller being an owner/admin member of the target tenant — with
 	// one exception: VerifyDomain on a still-latent tenant that has no
@@ -1847,12 +1822,6 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("ListGroupMembers")),
 		connect.WithHandlerOptions(opts...),
 	)
-	identityServiceOrganizationSignupHandler := connect.NewUnaryHandler(
-		IdentityServiceOrganizationSignupProcedure,
-		svc.OrganizationSignup,
-		connect.WithSchema(identityServiceMethods.ByName("OrganizationSignup")),
-		connect.WithHandlerOptions(opts...),
-	)
 	identityServiceCreateDomainHandler := connect.NewUnaryHandler(
 		IdentityServiceCreateDomainProcedure,
 		svc.CreateDomain,
@@ -2087,8 +2056,6 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceRemoveGroupMemberHandler.ServeHTTP(w, r)
 		case IdentityServiceListGroupMembersProcedure:
 			identityServiceListGroupMembersHandler.ServeHTTP(w, r)
-		case IdentityServiceOrganizationSignupProcedure:
-			identityServiceOrganizationSignupHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateDomainProcedure:
 			identityServiceCreateDomainHandler.ServeHTTP(w, r)
 		case IdentityServiceVerifyDomainProcedure:
@@ -2370,10 +2337,6 @@ func (UnimplementedIdentityServiceHandler) RemoveGroupMember(context.Context, *c
 
 func (UnimplementedIdentityServiceHandler) ListGroupMembers(context.Context, *connect.Request[identity.ListGroupMembersRequest]) (*connect.Response[identity.ListGroupMembersResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.ListGroupMembers is not implemented"))
-}
-
-func (UnimplementedIdentityServiceHandler) OrganizationSignup(context.Context, *connect.Request[identity.OrganizationSignupRequest]) (*connect.Response[identity.OrganizationSignupResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.OrganizationSignup is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) CreateDomain(context.Context, *connect.Request[identity.CreateDomainRequest]) (*connect.Response[identity.CreateDomainResponse], error) {

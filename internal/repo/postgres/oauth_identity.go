@@ -16,12 +16,12 @@ func (r *pgRepository) FindUserByProviderID(ctx context.Context, provider, provi
 	q := `
 		SELECT ` + userColumnsPrefixed("u") + `
 		  FROM oauth_identities oi
-		  JOIN users u ON u.id = oi.user_id AND u.tenant_id = oi.tenant_id
-		 WHERE oi.tenant_id = $1
+		  JOIN users u ON u.id = oi.user_id AND u.project_id = oi.project_id
+		 WHERE oi.project_id = $1
 		   AND oi.provider = $2
 		   AND oi.provider_user_id = $3
 		 LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, r.tenantID, provider, providerUserID)
+	row := r.pool.QueryRow(ctx, q, r.projectID, provider, providerUserID)
 	u, err := scanUser(row)
 	if noRows(err) {
 		return nil, nil
@@ -42,12 +42,12 @@ func (r *pgRepository) CreateOAuthIdentity(ctx context.Context, oi *service.OAut
 	}
 	const q = `
 		INSERT INTO oauth_identities (
-			id, tenant_id, user_id, provider, provider_user_id,
+			id, project_id, user_id, provider, provider_user_id,
 			email_at_link_time, created_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, oi.UserID, oi.Provider, oi.ProviderUserID,
+		id, r.projectID, oi.UserID, oi.Provider, oi.ProviderUserID,
 		oi.EmailAtLinkTime, oi.CreatedAt,
 	)
 	if err != nil {
@@ -64,9 +64,9 @@ func (r *pgRepository) ListOAuthIdentitiesForUser(ctx context.Context, userID st
 	const q = `
 		SELECT id, user_id, provider, provider_user_id, email_at_link_time, created_at_ms
 		  FROM oauth_identities
-		 WHERE tenant_id = $1 AND user_id = $2
+		 WHERE project_id = $1 AND user_id = $2
 		 ORDER BY created_at_ms ASC`
-	rows, err := r.pool.Query(ctx, q, r.tenantID, userID)
+	rows, err := r.pool.Query(ctx, q, r.projectID, userID)
 	if err != nil {
 		return nil, wrapPgErr("ListOAuthIdentitiesForUser", err)
 	}

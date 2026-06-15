@@ -117,7 +117,7 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	built, err := repo.Build(context.Background(), repo.Config{
 		Driver:      repo.DriverEntDB,
 		EntDBClient: client,
-		TenantID:    tenantID,
+		ProjectID:   tenantID,
 	}, nil)
 	if err != nil {
 		t.Fatalf("repo.Build: %v", err)
@@ -126,8 +126,11 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	dbAdapter := built.DB
 
 	cfg := &config.Config{
-		DefaultTenantID:               tenantID,
-		IdentityMode:                  config.IdentityModeSingle,
+		DefaultTenantID: tenantID,
+		// Pin the boot-default project to the provisioned entdb partition so
+		// the service layer (requestProjectID → WithProject → SDK Tenant)
+		// reads/writes under the same non-empty partition this test created.
+		DefaultProjectID:              tenantID,
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

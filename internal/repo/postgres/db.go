@@ -250,9 +250,9 @@ func (r *pgRepository) GetEdgesFrom(ctx context.Context, _, _ string, fromNodeID
 	rows, err := r.pool.Query(ctx, `
 		SELECT user_id, group_id
 		  FROM group_memberships
-		 WHERE tenant_id = $1 AND user_id = $2
+		 WHERE project_id = $1 AND user_id = $2
 		 ORDER BY group_id ASC
-	`, r.tenantID, fromNodeID)
+	`, r.projectID, fromNodeID)
 	if err != nil {
 		return nil, wrapPgErr("GetEdgesFrom", err)
 	}
@@ -279,9 +279,9 @@ func (r *pgRepository) GetEdgesTo(ctx context.Context, _, _ string, toNodeID str
 	rows, err := r.pool.Query(ctx, `
 		SELECT user_id, group_id
 		  FROM group_memberships
-		 WHERE tenant_id = $1 AND group_id = $2
+		 WHERE project_id = $1 AND group_id = $2
 		 ORDER BY user_id ASC
-	`, r.tenantID, toNodeID)
+	`, r.projectID, toNodeID)
 	if err != nil {
 		return nil, wrapPgErr("GetEdgesTo", err)
 	}
@@ -312,10 +312,10 @@ func (r *pgRepository) SearchNodes(ctx context.Context, _, _ string, typeID int,
 		rows, err := r.pool.Query(ctx, `
 			SELECT `+userColumns+`
 			  FROM users
-			 WHERE tenant_id = $1
+			 WHERE project_id = $1
 			   AND (lower(email) LIKE $2 OR lower(name) LIKE $2)
 			 ORDER BY created_at_ms ASC, id ASC
-		`, r.tenantID, q)
+		`, r.projectID, q)
 		if err != nil {
 			return nil, wrapPgErr("SearchNodes", err)
 		}
@@ -336,10 +336,10 @@ func (r *pgRepository) SearchNodes(ctx context.Context, _, _ string, typeID int,
 		rows, err := r.pool.Query(ctx, `
 			SELECT id, name, description, created_by, created_at_ms, updated_at_ms
 			  FROM groups
-			 WHERE tenant_id = $1
+			 WHERE project_id = $1
 			   AND (lower(name) LIKE $2 OR lower(description) LIKE $2)
 			 ORDER BY created_at_ms ASC, id ASC
-		`, r.tenantID, q)
+		`, r.projectID, q)
 		if err != nil {
 			return nil, wrapPgErr("SearchNodes", err)
 		}
@@ -420,7 +420,7 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 		_, err := tx.Exec(
 			ctx, `
 			INSERT INTO users (
-				id, tenant_id, email, name, role, avatar_url, status,
+				id, project_id, email, name, role, avatar_url, status,
 				recovery_email, password_hash, quota_bytes, totp_required,
 				failed_login_count, locked_until_ms,
 				email_verified, email_verified_at_ms,
@@ -434,7 +434,7 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 				$16, $17, $18, $19,
 				$20, $21
 			)
-		`, id, r.tenantID, email, name, role, avatarURL, status,
+		`, id, r.projectID, email, name, role, avatarURL, status,
 			recoveryEmail, passwordHash, quotaBytes, totpRequired,
 			failedLoginCount, lockedUntil,
 			emailVerified, emailVerifiedAt,
@@ -463,9 +463,9 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 		}
 
 		_, err := tx.Exec(ctx, `
-			INSERT INTO groups (id, tenant_id, name, description, created_by, created_at_ms, updated_at_ms)
+			INSERT INTO groups (id, project_id, name, description, created_by, created_at_ms, updated_at_ms)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, id, r.tenantID, name, description, createdBy, createdAt, updatedAt)
+		`, id, r.projectID, name, description, createdBy, createdAt, updatedAt)
 		if err != nil {
 			return "", wrapPgErr("ExecuteAtomic(create group)", err)
 		}
@@ -485,10 +485,10 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 
 		_, err := tx.Exec(ctx, `
 			INSERT INTO password_reset_tokens (
-				id, tenant_id, token_hash, user_id, email,
+				id, project_id, token_hash, user_id, email,
 				expires_at_ms, created_at_ms, consumed_at_ms
 			) VALUES ($1, $2, $3, $4, '', $5, $6, 0)
-		`, id, r.tenantID, tokenHash, userID, expiresAt, createdAt)
+		`, id, r.projectID, tokenHash, userID, expiresAt, createdAt)
 		if err != nil {
 			return "", wrapPgErr("ExecuteAtomic(create password reset)", err)
 		}
@@ -515,10 +515,10 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 
 		_, err := tx.Exec(ctx, `
 			INSERT INTO user_invitations (
-				id, tenant_id, token_hash, email, user_id, invited_by, role,
+				id, project_id, token_hash, email, user_id, invited_by, role,
 				expires_at_ms, accepted_at_ms, created_at_ms
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		`, id, r.tenantID, tokenHash, email, userID, invitedBy, role, expiresAt, acceptedAt, createdAt)
+		`, id, r.projectID, tokenHash, email, userID, invitedBy, role, expiresAt, acceptedAt, createdAt)
 		if err != nil {
 			return "", wrapPgErr("ExecuteAtomic(create invitation)", err)
 		}
@@ -545,10 +545,10 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 
 		_, err := tx.Exec(ctx, `
 			INSERT INTO audit_events (
-				id, tenant_id, event_type, actor, target, ip_address, user_agent,
+				id, project_id, event_type, actor, target, ip_address, user_agent,
 				success, details, occurred_at_ms
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ($9)::jsonb, $10)
-		`, id, r.tenantID, eventType, actorUserID, targetUserID, ipAddress, userAgent, success, details, createdAt)
+		`, id, r.projectID, eventType, actorUserID, targetUserID, ipAddress, userAgent, success, details, createdAt)
 		if err != nil {
 			return "", wrapPgErr("ExecuteAtomic(create audit event)", err)
 		}
@@ -576,10 +576,10 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 
 		_, err := tx.Exec(ctx, `
 			INSERT INTO admin_help_requests (
-				id, tenant_id, email, reason, source_ip, user_agent, status,
+				id, project_id, email, reason, source_ip, user_agent, status,
 				resolved_by, resolution_notes, resolved_at_ms, created_at_ms
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		`, id, r.tenantID, email, reason, sourceIP, userAgent, status, resolvedBy, resolutionNotes, resolvedAt, createdAt)
+		`, id, r.projectID, email, reason, sourceIP, userAgent, status, resolvedBy, resolutionNotes, resolvedAt, createdAt)
 		if err != nil {
 			return "", wrapPgErr("ExecuteAtomic(create admin help request)", err)
 		}
@@ -592,11 +592,11 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 func (r *pgRepository) updateAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.Operation) error {
 	switch op.TypeID {
 	case dbTypeUser:
-		return updateBySpecs(ctx, tx, r.tenantID, "users", op.NodeID, op.Patch, userQueryFields)
+		return updateBySpecs(ctx, tx, r.projectID, "users", op.NodeID, op.Patch, userQueryFields)
 	case dbTypeWorkingGroup:
-		return updateBySpecs(ctx, tx, r.tenantID, "groups", op.NodeID, op.Patch, groupQueryFields)
+		return updateBySpecs(ctx, tx, r.projectID, "groups", op.NodeID, op.Patch, groupQueryFields)
 	case dbTypeAdminHelpReq:
-		return updateBySpecs(ctx, tx, r.tenantID, "admin_help_requests", op.NodeID, op.Patch, map[string]dbFieldSpec{
+		return updateBySpecs(ctx, tx, r.projectID, "admin_help_requests", op.NodeID, op.Patch, map[string]dbFieldSpec{
 			dbHfEmail:           {col: "email", kind: dbKindString},
 			dbHfReason:          {col: "reason", kind: dbKindString},
 			dbHfSourceIP:        {col: "source_ip", kind: dbKindString},
@@ -607,17 +607,17 @@ func (r *pgRepository) updateAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 			dbHfResolvedAt:      {col: "resolved_at_ms", kind: dbKindInt64},
 		})
 	case dbTypePasskey:
-		return updateBySpecs(ctx, tx, r.tenantID, "passkeys", op.NodeID, op.Patch, map[string]dbFieldSpec{
+		return updateBySpecs(ctx, tx, r.projectID, "passkeys", op.NodeID, op.Patch, map[string]dbFieldSpec{
 			dbPkfDeviceName: {col: "device_name", kind: dbKindString},
 			dbPkfLastUsedAt: {col: "last_used_at_ms", kind: dbKindInt64},
 			"4":             {col: "sign_count", kind: dbKindInt64},
 		})
 	case dbTypePasskeyChallenge:
-		return updateBySpecs(ctx, tx, r.tenantID, "passkey_challenges", op.NodeID, op.Patch, map[string]dbFieldSpec{
+		return updateBySpecs(ctx, tx, r.projectID, "passkey_challenges", op.NodeID, op.Patch, map[string]dbFieldSpec{
 			"1": {col: "challenge", kind: dbKindString},
 		})
 	case dbTypeQrLoginSession:
-		return updateBySpecs(ctx, tx, r.tenantID, "qr_login_sessions", op.NodeID, op.Patch, map[string]dbFieldSpec{
+		return updateBySpecs(ctx, tx, r.projectID, "qr_login_sessions", op.NodeID, op.Patch, map[string]dbFieldSpec{
 			"2":  {col: "status", kind: dbKindString},
 			"3":  {col: "user_id", kind: dbKindString},
 			"7":  {col: "approved_device_info", kind: dbKindString},
@@ -641,7 +641,7 @@ func (r *pgRepository) deleteAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 	default:
 		return fmt.Errorf("postgres: ExecuteAtomic(delete): unsupported type_id %d", op.TypeID)
 	}
-	_, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE tenant_id = $1 AND id = $2`, table), r.tenantID, op.NodeID)
+	_, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE project_id = $1 AND id = $2`, table), r.projectID, op.NodeID)
 	if err != nil {
 		return wrapPgErr("ExecuteAtomic(delete)", err)
 	}
@@ -653,9 +653,9 @@ func (r *pgRepository) createAtomicEdge(ctx context.Context, tx pgx.Tx, op sdk.O
 		return fmt.Errorf("postgres: ExecuteAtomic(create edge): unsupported edge_type_id %d", op.EdgeTypeID)
 	}
 	_, err := tx.Exec(ctx, `
-		INSERT INTO group_memberships (tenant_id, group_id, user_id, created_at_ms)
+		INSERT INTO group_memberships (project_id, group_id, user_id, created_at_ms)
 		VALUES ($1, $2, $3, $4)
-	`, r.tenantID, op.ToNodeID, op.FromNodeID, nowMs())
+	`, r.projectID, op.ToNodeID, op.FromNodeID, nowMs())
 	if err != nil {
 		return wrapPgErr("ExecuteAtomic(create edge)", err)
 	}
@@ -668,8 +668,8 @@ func (r *pgRepository) deleteAtomicEdge(ctx context.Context, tx pgx.Tx, op sdk.O
 	}
 	_, err := tx.Exec(ctx, `
 		DELETE FROM group_memberships
-		 WHERE tenant_id = $1 AND group_id = $2 AND user_id = $3
-	`, r.tenantID, op.ToNodeID, op.FromNodeID)
+		 WHERE project_id = $1 AND group_id = $2 AND user_id = $3
+	`, r.projectID, op.ToNodeID, op.FromNodeID)
 	if err != nil {
 		return wrapPgErr("ExecuteAtomic(delete edge)", err)
 	}
@@ -685,7 +685,7 @@ func (r *pgRepository) getUserNode(ctx context.Context, userID string) (*sdk.Nod
 }
 
 func (r *pgRepository) queryUserNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
-	query, args := buildSelectQuery(`SELECT `+userColumns+` FROM users WHERE tenant_id = $1`, r.tenantID, filter, userQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
+	query, args := buildSelectQuery(`SELECT `+userColumns+` FROM users WHERE project_id = $1`, r.projectID, filter, userQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, wrapPgErr("QueryNodes(users)", err)
@@ -710,8 +710,8 @@ func (r *pgRepository) getGroupNode(ctx context.Context, groupID string) (*sdk.N
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, name, description, created_by, created_at_ms, updated_at_ms
 		  FROM groups
-		 WHERE tenant_id = $1 AND id = $2
-	`, r.tenantID, groupID)
+		 WHERE project_id = $1 AND id = $2
+	`, r.projectID, groupID)
 	node, err := scanGroupNode(row)
 	if noRows(err) {
 		return nil, nil
@@ -726,8 +726,8 @@ func (r *pgRepository) queryGroupNodes(ctx context.Context, filter map[string]an
 	query, args := buildSelectQuery(`
 		SELECT id, name, description, created_by, created_at_ms, updated_at_ms
 		  FROM groups
-		 WHERE tenant_id = $1
-	`, r.tenantID, filter, groupQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
+		 WHERE project_id = $1
+	`, r.projectID, filter, groupQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, wrapPgErr("QueryNodes(groups)", err)
@@ -752,8 +752,8 @@ func (r *pgRepository) getRefreshTokenNode(ctx context.Context, nodeID string) (
 	row := r.pool.QueryRow(ctx, `
 		SELECT `+refreshTokenColumns+`
 		  FROM refresh_tokens
-		 WHERE tenant_id = $1 AND id = $2
-	`, r.tenantID, nodeID)
+		 WHERE project_id = $1 AND id = $2
+	`, r.projectID, nodeID)
 	rec, err := scanRefreshToken(row)
 	if noRows(err) {
 		return nil, nil
@@ -765,7 +765,7 @@ func (r *pgRepository) getRefreshTokenNode(ctx context.Context, nodeID string) (
 }
 
 func (r *pgRepository) queryRefreshTokenNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
-	query, args := buildSelectQuery(`SELECT `+refreshTokenColumns+` FROM refresh_tokens WHERE tenant_id = $1`, r.tenantID, filter, refreshQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
+	query, args := buildSelectQuery(`SELECT `+refreshTokenColumns+` FROM refresh_tokens WHERE project_id = $1`, r.projectID, filter, refreshQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, wrapPgErr("QueryNodes(refresh tokens)", err)
@@ -787,7 +787,7 @@ func (r *pgRepository) queryRefreshTokenNodes(ctx context.Context, filter map[st
 }
 
 func (r *pgRepository) queryPasswordResetNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
-	query, args := buildSelectQuery(`SELECT id, token_hash, user_id, expires_at_ms, created_at_ms, consumed_at_ms FROM password_reset_tokens WHERE tenant_id = $1`, r.tenantID, filter, map[string]dbFieldSpec{
+	query, args := buildSelectQuery(`SELECT id, token_hash, user_id, expires_at_ms, created_at_ms, consumed_at_ms FROM password_reset_tokens WHERE project_id = $1`, r.projectID, filter, map[string]dbFieldSpec{
 		dbPrfTokenHash: {col: "token_hash", kind: dbKindString},
 		dbPrfUserID:    {col: "user_id", kind: dbKindString},
 		dbPrfExpiresAt: {col: "expires_at_ms", kind: dbKindInt64},
@@ -817,8 +817,8 @@ func (r *pgRepository) getPasskeyNode(ctx context.Context, nodeID string) (*sdk.
 	row := r.pool.QueryRow(ctx, `
 		SELECT `+passkeyColumns+`
 		  FROM passkeys
-		 WHERE tenant_id = $1 AND id = $2
-	`, r.tenantID, nodeID)
+		 WHERE project_id = $1 AND id = $2
+	`, r.projectID, nodeID)
 	rec, err := scanPasskey(row)
 	if noRows(err) {
 		return nil, nil
@@ -830,7 +830,7 @@ func (r *pgRepository) getPasskeyNode(ctx context.Context, nodeID string) (*sdk.
 }
 
 func (r *pgRepository) queryPasskeyNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
-	query, args := buildSelectQuery(`SELECT `+passkeyColumns+` FROM passkeys WHERE tenant_id = $1`, r.tenantID, filter, passkeyQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
+	query, args := buildSelectQuery(`SELECT `+passkeyColumns+` FROM passkeys WHERE project_id = $1`, r.projectID, filter, passkeyQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, wrapPgErr("QueryNodes(passkeys)", err)
@@ -855,8 +855,8 @@ func (r *pgRepository) getAuditEventNode(ctx context.Context, nodeID string) (*s
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, event_type, actor, target, ip_address, user_agent, success, details::text, occurred_at_ms
 		  FROM audit_events
-		 WHERE tenant_id = $1 AND id = $2
-	`, r.tenantID, nodeID)
+		 WHERE project_id = $1 AND id = $2
+	`, r.projectID, nodeID)
 	node, err := scanAuditEventNode(row)
 	if noRows(err) {
 		return nil, nil
@@ -871,8 +871,8 @@ func (r *pgRepository) queryAuditEventNodes(ctx context.Context, filter map[stri
 	query, args := buildSelectQuery(`
 		SELECT id, event_type, actor, target, ip_address, user_agent, success, details::text, occurred_at_ms
 		  FROM audit_events
-		 WHERE tenant_id = $1
-	`, r.tenantID, filter, auditQueryFields, ` ORDER BY occurred_at_ms DESC, id DESC`)
+		 WHERE project_id = $1
+	`, r.projectID, filter, auditQueryFields, ` ORDER BY occurred_at_ms DESC, id DESC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, wrapPgErr("QueryNodes(audit events)", err)
@@ -897,8 +897,8 @@ func (r *pgRepository) getHelpRequestNode(ctx context.Context, nodeID string) (*
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, email, reason, source_ip, user_agent, status, resolved_by, resolution_notes, resolved_at_ms, created_at_ms
 		  FROM admin_help_requests
-		 WHERE tenant_id = $1 AND id = $2
-	`, r.tenantID, nodeID)
+		 WHERE project_id = $1 AND id = $2
+	`, r.projectID, nodeID)
 	node, err := scanHelpRequestNode(row)
 	if noRows(err) {
 		return nil, nil
@@ -913,8 +913,8 @@ func (r *pgRepository) queryHelpRequestNodes(ctx context.Context, filter map[str
 	query, args := buildSelectQuery(`
 		SELECT id, email, reason, source_ip, user_agent, status, resolved_by, resolution_notes, resolved_at_ms, created_at_ms
 		  FROM admin_help_requests
-		 WHERE tenant_id = $1
-	`, r.tenantID, filter, helpQueryFields, ` ORDER BY created_at_ms DESC, id DESC`)
+		 WHERE project_id = $1
+	`, r.projectID, filter, helpQueryFields, ` ORDER BY created_at_ms DESC, id DESC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, wrapPgErr("QueryNodes(admin help requests)", err)
@@ -1081,10 +1081,10 @@ func scanHelpRequestNode(row interface{ Scan(...any) error }) (*sdk.Node, error)
 	}, nil
 }
 
-func buildSelectQuery(base string, tenantID string, filter map[string]any, specs map[string]dbFieldSpec, suffix string) (string, []any) {
+func buildSelectQuery(base string, projectID string, filter map[string]any, specs map[string]dbFieldSpec, suffix string) (string, []any) {
 	var sb strings.Builder
 	sb.WriteString(base)
-	args := []any{tenantID}
+	args := []any{projectID}
 	idx := 2
 	for fieldID, value := range filter {
 		spec, ok := specs[fieldID]
@@ -1126,7 +1126,7 @@ func buildSelectQuery(base string, tenantID string, filter map[string]any, specs
 	return sb.String(), args
 }
 
-func updateBySpecs(ctx context.Context, tx pgx.Tx, tenantID, table, nodeID string, fields map[string]any, specs map[string]dbFieldSpec) error {
+func updateBySpecs(ctx context.Context, tx pgx.Tx, projectID, table, nodeID string, fields map[string]any, specs map[string]dbFieldSpec) error {
 	sets := make([]string, 0, len(fields))
 	args := make([]any, 0, len(fields)+2)
 	idx := 1
@@ -1163,10 +1163,10 @@ func updateBySpecs(ctx context.Context, tx pgx.Tx, tenantID, table, nodeID strin
 	if len(sets) == 0 {
 		return nil
 	}
-	args = append(args, tenantID, nodeID)
+	args = append(args, projectID, nodeID)
 	_, err := tx.Exec(
 		ctx,
-		fmt.Sprintf(`UPDATE %s SET %s WHERE tenant_id = $%d AND id = $%d`, table, strings.Join(sets, ", "), idx, idx+1),
+		fmt.Sprintf(`UPDATE %s SET %s WHERE project_id = $%d AND id = $%d`, table, strings.Join(sets, ", "), idx, idx+1),
 		args...,
 	)
 	if err != nil {

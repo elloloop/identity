@@ -30,15 +30,21 @@ func TestRealPostgres_Session_CRUDAndRevoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	tenantID := "realpg-sess-" + time.Now().Format("150405.000000")
+	projectID := "realpg-sess-" + time.Now().Format("150405.000000")
 	cfg := postgres.Config{
 		DSN:         dsn,
 		MaxConns:    5,
 		ConnTimeout: 5 * time.Second,
 		AutoMigrate: true,
-		TenantID:    tenantID,
+		ProjectID:   projectID,
 	}
 	repo, err := postgres.New(ctx, cfg)
+	require.NoError(t, err)
+
+	// Seed the projects(id) row the project_id FK (migration 0015) needs.
+	_, err = postgres.NewProjectStore(repo).EnsureDefaultProject(
+		ctx, projectID, "scope-"+projectID, "realpg-sess",
+	)
 	require.NoError(t, err)
 
 	now := time.Now()

@@ -12,11 +12,40 @@ to write code in this repo. This document says *what* the code is.
 
 ---
 
+## v1.0 breaking changes (read first if you upgraded)
+
+v1.0 is the Project/Tenant/Domain redesign (ADR-0001..0009). It removed
+several pre-v1.0 features that older copies of this document still
+described as live. Upgrading from a pre-v1.0 deployment is a **breaking
+schema reset — there is no in-place data migration in this release** (a
+legacy-data migration script and Postgres row-level-security hardening
+are tracked v1.1 follow-ups). What changed:
+
+- **`OrganizationSignup` removed**, along with the `Organization` /
+  `OrganizationMembership` storage. Multitenancy is now modelled by
+  **Projects** (the isolation shard) with **Tenants** auto-formed from
+  verified email domains inside a project (ADR-0002, ADR-0004).
+- **`mode=single | multi` removed**, together with its env vars
+  (`GATEWAY_IDENTITY_MODE`, `GATEWAY_TENANT_HOST_BASE_DOMAIN`,
+  `GATEWAY_TENANT_RESOLUTION_SOURCES`). There is one code path now: every
+  request resolves a **Project** first, then a **Tenant**.
+- **Data-plane storage re-keyed `tenant_id` → `project_id`** (ADR-0002);
+  `project_id` is the leading column of every data-plane index.
+- **`TenantAdmin` / `RepositoryForTenant` embedding options removed**;
+  the per-project repository is resolved internally from the request's
+  project scope (`RepositoryForProject`).
+
+The decision log at the end of this document still records the pre-v1.0
+rationale where it remains useful as history; the ADRs under
+[`docs/adr/`](./adr/) supersede the entries they reference.
+
+---
+
 ## One-line summary
 
 Identity is a **reusable, Firebase-style authentication and account
-service**. One codebase, deployed per product, configured at boot to
-match that product's tenancy model.
+service**. One codebase, deployed per product; multitenancy is resolved
+per request as **Project → Tenant**, not chosen by a boot-time mode flag.
 
 ## What identity is for
 
@@ -44,259 +73,147 @@ It is **not**:
 
 ## The products it's designed for
 
-Two concrete shapes today, both pre-launch. The configuration model is
-designed so any new product fits into one of these shapes (or grows a
-new third shape we add deliberately, not by accident).
+Two concrete shapes today, both pre-launch. The Project/Tenant model is
+designed so any new product fits into one of these shapes. Both run the
+**same** code path — the difference is how many tenants form inside a
+project, not a boot-time mode.
 
-### Shape 1 — B2C single-tenant
+### Shape 1 — B2C, one project, consumer signups
 
 **Example:** [easyloops.app](https://easyloops.app) (coursera-/
 pluralsight-style learning product).
 
-- The product has **one tenant for its entire lifetime.** Every
-  end-user signing up becomes a member of that one tenant.
-- There is no notion of "customer organisation" at the identity layer.
-  If the product has groups, classes, teams etc., those are application-
-  level concepts owned by the product, not by identity.
+- The product is **one Project.** Every end-user signing up joins that
+  project's global user pool, keyed by email (ADR-0003).
+- Consumer signups (gmail/outlook/…) do **not** form a tenant — public
+  email domains never imply a company. If the product has groups,
+  classes, teams etc., those are application-level concepts owned by the
+  product (or the separate workspace service), not by identity.
 - Signup is self-serve; scale is millions of end-users.
-- Multi-user accounts (an admin managing other users) are out of scope.
 
-### Shape 2 — B2B multi-tenant SaaS
+### Shape 2 — B2B, tenants auto-form from email domains
 
 **Example:** [glassa.work](https://glassa.work) (Microsoft-Workspace /
 Google-Workspace-style productivity suite — email, productivity tools).
 
-- The product has **many tenants per deployment**, one per customer
-  organisation (acmecorp, betaco, …).
-- Each customer organisation maps **1:1** to a tenant. Strong data-
-  layer isolation: a bug in one tenant's flow can't leak into another.
-- Onboarding splits into two flows:
-  1. **Organisation signup** — a new customer signs up; we create a
-     fresh tenant, register the admin user, mark them as the tenant's
-     owner.
-  2. **User signup / invitation** — an existing tenant's admin invites
-     someone or someone signs up via the tenant's signup link; we add
-     them as a member of that existing tenant.
-- Per-request tenant resolution is required: a request from
-  `acmecorp.glassa.work` operates against tenant `acmecorp`.
+- The product is **one Project per customer-shard** (or a single project
+  serving many companies). **Tenants** form automatically: the first user
+  of a non-public email domain (`acme.com`) auto-creates a `latent`
+  tenant; it becomes `claimed` once that domain is verified (ADR-0004).
+- Membership is derived from a verified domain or materialised by an
+  explicit invite / admin grant (`tenant_memberships`). There is no
+  "organisation" object — a Tenant IS the company entity.
+- Onboarding:
+  1. **Domain self-service** — a user with a company email signs up; the
+     tenant auto-forms; once a domain owner verifies the domain, other
+     domain users are members by derivation.
+  2. **Invitation** — a tenant admin invites someone by email
+     (`InviteUser` / `AcceptInvitation`, backed by `tenant_invitations`).
+- Per-request resolution is **Project first, then Tenant**: the project
+  is resolved from an `X-Project-Key` credential or the `Host` header (a
+  project auth-domain), and the tenant from the authenticated user's
+  email domain / membership.
 
-## Tenancy model: identity vs tenant-shard-db
+## Tenancy model: Project, Tenant, storage scope
 
-The identity service stores its data in [tenant-shard-db
-(EntDB)](https://github.com/elloloop/tenant-shard-db). The two have
-distinct concepts of "tenant" that must not be confused.
+The redesign keeps three "tenant-like" concepts strictly distinct
+(ADR-0002; full table in [`docs/redesign/schema.md`](./redesign/schema.md)):
 
-| | Identity layer | tenant-shard-db (EntDB) |
-|---|---|---|
-| What "tenant" means | A logical account scope for the product | A physical data-isolation unit (per-tenant SQLite + WAL stream) |
-| Who creates one | Product wiring or org-signup RPC | `Admin.CreateTenant` on the storage layer |
-| When | Per deployment (single) or per customer org (multi) | At identity-layer tenant creation time |
-| Membership | Implicit in identity's User row (`tenant_id` scope) | Explicit `Admin.AddTenantMember(tenant, user, role)` rows |
+| Concept | Plane | What it is | Cardinality |
+|---|---|---|---|
+| **Storage scope** | physical | The physical shard the data lives on (a tenant-shard-db tenant, or a Postgres scope). Equals `GATEWAY_DEFAULT_TENANT_ID` for the default project. | 1 per Project |
+| **Project** | control plane | A *logical* control-plane isolation entity (a Firebase project). Maps onto exactly one storage scope, but `Project.id != storage_scope_id`. | 1 per storage scope |
+| **Tenant** | data plane | A *logical* company entity, auto-formed per verified non-public email domain. | many per Project |
 
-**Mapping is always 1:1.** Every identity-layer tenant is exactly one
-tenant-shard-db tenant. We never multiplex multiple identity tenants
-into one EntDB tenant or split one identity tenant across two EntDB
-tenants. The two layers' tenant identifiers are the same string.
+The **Project is the isolation shard** (ADR-0002 inverted the old
+"tenant = shard" model). Every data-plane row carries `project_id` as the
+leading column of every unique and secondary index; a mandatory
+`WHERE project_id = $1` predicate is injected once at the repository
+boundary (`RepositoryForProject`). The old `tenant_id`-keyed storage and
+the `mode=single | multi` boot flag are gone.
 
-**tenant-shard-db stores opaque `(type_id, field_id, value)` tuples.**
-The proto schema (field names, types, indexes, composite-unique
-tuples) lives in `proto/identity/schema/schema.proto` and is owned by
-identity. As of tenant-shard-db v2 (ADR-031) the Go SDK auto-attaches
-that schema to the first `ExecuteAtomic` per tenant, and the server
-materialises a per-tenant registry — type ids, field options,
-composite-unique indexes — in the same WAL event as the first data
-ops. After that the server enforces field types, unique constraints,
-and required-fields server-atomically; identity no longer relies on
-"check before insert" guards alone for those invariants. See decision
-log §15 for the migration and what changed.
+**Resolution is Project-then-Tenant, per request.** The project-resolution
+middleware (`internal/middleware/project.go`) resolves the project in this
+precedence:
 
-tenant-shard-db still doesn't enforce identity's own role/status
-semantics, and isn't involved in any identity-layer policy decision
-beyond "is this actor allowed to write to this tenant."
+1. the **`X-Project-Key`** credential header (a publishable/secret/mTLS
+   key's `public_id`); an explicit key that does not resolve is rejected
+   (`Unauthenticated`), never silently downgraded;
+2. the request **`Host`**, matched against a `project_auth_domains`
+   hostname (a serving hostname like `auth.easyloops.app` — NOT a tenant
+   email domain);
+3. the **default project** (the zero-config pin: `GATEWAY_DEFAULT_PROJECT_ID`,
+   default `"default"`, mapped onto the `GATEWAY_DEFAULT_TENANT_ID`
+   storage scope).
 
-## Configuration: the mode knob
+Only the **postgres** driver has a control plane (the `projects` /
+`project_credentials` / `project_auth_domains` registry); the entdb and
+memory drivers run with a nil resolver, so every request pins to the
+default project (steps 1–2 are skipped). The resolved project scope rides
+the request context; services read it to pick the per-project repository.
 
-A single config knob picks which shape a deployment runs in. Every
-other tenant-related decision derives from it.
+Once the project is fixed, the **Tenant** is the user's company entity
+inside that project, derived from their verified email domain or from a
+materialised `tenant_memberships` row. A user with a `gmail.com`/`outlook.com`
+address forms no tenant — public providers are blocklisted at signup,
+domain-verify, and derived-membership (`GATEWAY_PUBLIC_EMAIL_DOMAINS`
+extends the built-in set).
+
+**The storage layer** (Postgres or tenant-shard-db/EntDB) stores the data.
+For EntDB the proto schema in `proto/identity/schema/schema.proto` is
+auto-attached by the SDK (ADR-031) on the first `ExecuteAtomic` per shard,
+and the server enforces field types, unique constraints, and required
+fields atomically. See decision log §15 for that migration.
+
+## Configuration: Project resolution, not a mode flag
+
+There is no boot-time tenancy mode. The relevant knobs:
 
 ```
-GATEWAY_IDENTITY_MODE = single | multi   # default: single
-GATEWAY_DEFAULT_TENANT_ID = <string>     # required when mode=single
-
-# Per-request tenant resolution (mode=multi only; see below):
-GATEWAY_TENANT_RESOLUTION_SOURCES = host,jwt   # ordered precedence; default "host,jwt"
-GATEWAY_TENANT_HOST_BASE_DOMAIN   = <domain>   # required when "host" is a source
+GATEWAY_REPO_DRIVER                 = postgres | entdb | memory  # postgres has the control plane
+GATEWAY_DEFAULT_PROJECT_ID          = <string>   # default "default"; the seeded control-plane Project id
+GATEWAY_DEFAULT_TENANT_ID           = <string>   # the storage scope the default project maps onto
+GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS= <csv>      # serving hostnames seeded (verified) on the default project; first is primary
+GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane admin RPCs; empty disables them
+GATEWAY_PUBLIC_EMAIL_DOMAINS        = <csv>      # extra public domains that never auto-form a tenant
 ```
 
-### `mode=single` (B2C, easyloops shape)
+On boot, the postgres driver seeds the default `Project` (mapped onto the
+`DefaultTenantID` storage scope) and any `DefaultProjectAuthDomains`
+(seeded verified, since they are deployer-owned). Additional projects,
+credentials, and tenants are provisioned out-of-band by a platform
+operator through the control-plane admin RPCs (`AdminCreateProject`,
+`AdminCreateProjectCredential`, `AdminCreateTenant`, `AdminAddTenantAdmin`),
+which authenticate via the `GATEWAY_ADMIN_API_SECRET` shared secret rather
+than a user token. With the secret empty (the default) those RPCs return
+`CodeUnimplemented`, so a deployer who never sets it cannot reach them.
 
-- **At startup**, the service ensures `DefaultTenantID` exists in
-  tenant-shard-db (idempotent bootstrap: create tenant if missing,
-  create system user if missing, add system user as admin member of
-  the tenant if missing).
-- **Every signup** writes the new User into the same `DefaultTenantID`.
-  The repo layer also registers the new user globally in
-  tenant-shard-db and adds them as a `"member"` of `DefaultTenantID`
-  so that user-as-actor writes (refresh tokens, passkeys, audit events
-  scoped to the user) are accepted by the storage layer.
-- The `OrganizationSignup` RPC is disabled in this mode (returns
-  `Unimplemented`). There is no organisation concept at the identity
-  layer.
-- **Tenant resolution:** every authenticated request operates on
-  `DefaultTenantID`. We don't inspect host header or JWT claims for a
-  tenant.
+### Why one code path, not a mode flag
 
-### `mode=multi` (B2B, glassa.work shape)
+Same code, same tests, same release. A single-project B2C deployment and a
+many-tenant B2B deployment run the identical Project-then-Tenant
+resolution; the difference is data (how many tenants auto-form), not a
+boot flag. The pre-v1.0 `mode=single | multi` fork is gone (ADR-0002).
 
-- **No startup tenant bootstrap.** Tenants are created on demand by
-  the `OrganizationSignup` RPC.
-- **`OrganizationSignup`** is the entry point: it takes an organisation
-  name + the first admin user's credentials. The service creates the
-  tenant in tenant-shard-db via `Admin.CreateTenant(slug, displayName)`,
-  then writes the identity-layer admin `User` row inside the new
-  tenant — the typed `Repository.CreateUser` path already handles
-  global-registry registration (`Admin.CreateUser`) + adding the
-  user as a `"member"` of the tenant (the v1.12+ actor invariant).
-  Identity then promotes the storage-layer role to `"admin"` via
-  `Admin.ChangeMemberRole` (a decision independent of identity's
-  product role — see decision log §4), persists an `Organization`
-  row (proto type_id 33), and links the admin via an
-  `OrganizationMembership` row (type_id 34) so it can later answer
-  "which organisations does this user belong to?" without re-querying
-  the storage layer.
-- **Required wiring.** `app.New` rejects `mode=multi` at boot if either
-  the `TenantAdmin` (cross-tenant admin handle) or the
-  `RepositoryForTenant` (per-tenant repo factory) is missing. The
-  entdb driver wires the full `TenantAdmin` against tenant-shard-db's
-  `Admin` handle. The postgres driver wires a degenerate
-  `PostgresTenantAdmin` (slug uniqueness is enforced in-process plus
-  by the `organizations.(tenant_id, slug)` unique index — postgres
-  has no cross-tenant registry concept). The memory driver does not
-  support `mode=multi`.
-- **Subsequent user signups / invitation acceptances** resolve the
-  tenant from the request (see below), then add the new user to the
-  existing tenant — both as a storage-layer tenant member and, on
-  invitation redemption, as an identity-layer `OrganizationMembership`
-  member of that tenant's `Organization` with the role from the
-  invitation.
-- **Tenant resolution per request.** A middleware
-  (`internal/middleware/tenant.go`, installed only in `mode=multi`)
-  resolves the request's tenant from the configured, ordered sources
-  in `GATEWAY_TENANT_RESOLUTION_SOURCES` (default `host,jwt`):
-  - **`host`** — a subdomain of `GATEWAY_TENANT_HOST_BASE_DOMAIN`
-    (`acmecorp.glassa.work` → tenant `acmecorp` when the base is
-    `glassa.work`). Only a single subdomain label maps to a tenant; the
-    apex domain and deeper nesting resolve to no tenant.
-  - **`jwt`** — the access token's **`tenant`** claim. Identity reuses
-    the existing `tenant` claim that every token already carries (the
-    org slug in `mode=multi`); it does **not** add a separate `tid`
-    claim (decision log entry below).
+## Onboarding flows
 
-  The first source that yields a non-empty tenant wins. When both
-  sources produce a value they must agree — a host that disagrees with
-  the token's `tenant` claim is cross-tenant token reuse and is
-  rejected with `PermissionDenied`. The resolver then verifies, via the
-  slice-1 `ListOrganizationsForUser` membership view scoped to the
-  resolved tenant, that the authenticated caller belongs to that tenant
-  before any RPC runs; a non-member is rejected with `PermissionDenied`.
-  The resolved tenant (plus a `Repository` scoped to it) is threaded
-  through the request context so every handler/service call operates on
-  the caller's tenant instead of a hardcoded default.
+Every signup creates a `User` inside the resolved project's data plane,
+keyed by email (one identity per person per project — ADR-0003). The repo
+layer writes the user under the project scope; there is no separate
+storage-layer "tenant member" registration step in the redesigned model.
 
-  Three request classes are handled distinctly:
-  - **`OrganizationSignup`** provisions a brand-new tenant; it has no
-    tenant to resolve and passes through with no scope (the service
-    uses its own per-tenant repository factory).
-  - **Unauthenticated, tenant-scoped paths** (e.g. `PasswordLogin`,
-    `RequestPasswordReset`) get a tenant scope resolved from the host
-    so the service finds the user inside the right tenant, but skip the
-    membership check (the caller is proving identity, not asserting it).
-  - **Authenticated paths** require a resolved tenant, a matching
-    `tenant` claim, and a verified membership before serving.
+A **Tenant** forms as a side effect, not via a dedicated signup RPC:
 
-  Boot is fail-closed: `mode=multi` rejects an empty
-  `GATEWAY_TENANT_RESOLUTION_SOURCES`, and rejects a `host` source with
-  no `GATEWAY_TENANT_HOST_BASE_DOMAIN`.
+1. A user signs up with a non-public email domain (`acme.com`).
+2. If no tenant exists for that domain in the project, a `latent` tenant
+   plus a `pending` `domains` row are created.
+3. When a domain owner verifies the domain, the tenant becomes `claimed`
+   and other users of that domain are members by derivation.
 
-  In `mode=single` the middleware is never installed: the tenant is
-  always `DefaultTenantID`, a clean constant, with no host/JWT
-  inspection and no per-request lookup.
-
-`mode=multi` lands across four feature-bounded slices on
-[#93](https://github.com/elloloop/identity/issues/93):
-
-1. **Organization foundation** *(landed)* — proto types, repo
-   methods (`CreateOrganization`, `GetOrganization`,
-   `GetOrganizationBySlug`, `ListOrganizationsForUser`,
-   `AddOrganizationMember`) across all three backends, conformance
-   suite coverage, postgres migration `0007_add_organizations`.
-2. **`OrganizationSignup` RPC + multi-mode config flag** *(landed)* —
-   `GATEWAY_IDENTITY_MODE=single|multi` selected at boot;
-   `OrganizationSignup` RPC wired only in `mode=multi` and returns
-   `CodeUnimplemented` in `mode=single` (decision log §3). The RPC
-   provisions the tenant in tenant-shard-db (`Admin.CreateTenant`),
-   then writes the identity-layer Organization + admin User +
-   OrganizationMembership rows inside that new tenant via a per-tenant
-   `Repository` (factory wired by the binary). The admin user is
-   created through the typed repo path (which already handles the
-   v1.12+ global-registry registration + default `"member"` tenant
-   role), then promoted to `"admin"` at the storage layer via
-   `Admin.ChangeMemberRole` — keeping the storage-layer role decision
-   independent of identity's product role per decision log §4.
-3. **Per-request tenant resolution middleware** *(landed)* —
-   `internal/middleware/tenant.go` resolves the request tenant from the
-   configured host/jwt sources, verifies the caller's membership of the
-   resolved tenant, and threads a tenant-scoped `Repository` + tenant id
-   through the request context so every handler scopes to the caller's
-   tenant. `mode=single` is unchanged (the resolver is not installed;
-   the tenant stays `DefaultTenantID`). See the resolution decision-log
-   entry below.
-4. **Tenant-aware invitations** *(landed)* — `InviteUser` issues an
-   invitation bound to the inviting admin's resolved tenant (the
-   invitation row lives only in that tenant's data plane), gated on the
-   admin's identity `User.Role`. `AcceptInvitation` redeems the
-   invitation inside the host-resolved tenant: it activates the
-   resolve-or-create-by-email user and adds them to that tenant's
-   `Organization` via `AddOrganizationMember`, carrying the role
-   recorded on the invitation. Because the invitation only exists in its
-   issuing tenant, an invite minted for tenant A is invisible to tenant
-   B's scoped repository — a token replayed under B's host fails the
-   lookup and is rejected (`Unauthenticated`), and a tenant-A admin
-   cannot invite into B. `mode=single` is unchanged: no `Organization`
-   exists there, so redemption adds no membership. This slice completes
-   `mode=multi` (`closes #93`). See decision log §13.
-
-### Why a flag, not separate binaries
-
-Same code, same tests, same release. Two deployments differ only in
-config. The product chooses its shape; identity doesn't fork.
-
-## Onboarding flows (the things you'll be tempted to write twice)
-
-The repo layer (`internal/repo/entdb/`) treats every signup the same:
-on `CreateUser`, after the tenant-scoped User row commits, it also:
-
-1. Registers the new user in tenant-shard-db's global user registry
-   (`Admin.CreateUser`), and
-2. Adds the user as a member of the scoped tenant
-   (`Admin.AddTenantMember(scope.tenantID, userID, "member")`).
-
-This works the same in both modes. The *mode* only changes which
-tenant id the scope holds — in single mode it's always
-`DefaultTenantID`; in multi mode it's resolved per request from the
-host/JWT.
-
-`OrganizationSignup` (multi mode only) sits one layer above:
-
-1. Resolve / generate the new tenant id.
-2. Call `Admin.CreateTenant(tenantID, orgDisplayName)`.
-3. Then dispatch into the same per-user onboarding flow above with
-   role `"admin"` (or whichever role upstream models org-owners as).
-
-Single mode startup bootstrap is structurally the same as the
-`OrganizationSignup` shape, except it runs once at boot rather than
-per-request, and it uses the configured `DefaultTenantID` rather than
-a user-supplied one.
+Explicit membership is added by **invitation** (`InviteUser` /
+`AcceptInvitation`, backed by `tenant_invitations`) or by a platform
+operator's `AdminAddTenantAdmin` grant — both write a `tenant_memberships`
+row whose materialised `status` is authoritative over derived membership.
 
 ## Identity's role model vs tenant-shard-db's role model
 
@@ -317,8 +234,8 @@ manages "can write to this scope or not."
 ## What the schema lives in
 
 - **Proto schema** — `proto/identity/schema/schema.proto`. Declares
-  every node type (`User`, `RefreshToken`, `PasswordResetToken`,
-  `PasskeyCredential`, `Organization`, `OAuthIdentity`, …) with field
+  every EntDB node type (`User`, `RefreshToken`, `PasswordResetToken`,
+  `PasskeyCredential`, `OAuthIdentity`, `Session`, …) with field
   types, indexes, single-field uniqueness, composite uniqueness, and
   PII tagging. Generated Go code lives in `gen/go/identity/schema/`.
 - **SDK construction** — `internal/repo/entdb/entclient.New(...)` is
@@ -341,17 +258,13 @@ manages "can write to this scope or not."
   auto-attach (above) and enforces field types, single- and composite-
   unique constraints, and required-field validation against it.
 
-The `Organization` node (type_id 33) and `OrganizationMembership` node
-(type_id 34) are the identity-layer storage for `mode=multi`
-deployments. The `Organization.slug` field is the URL-safe identifier
-deployers expose to end-users (e.g. `acmecorp.example.com` → slug
-`acmecorp`); identity reuses the slug AS the tenant-id passed to
-`Admin.CreateTenant`, so slug uniqueness collisions surface at signup
-time as an EntDB error. `OrganizationMembership` is a per-tenant
-secondary index keyed on `(organization_id, user_id)` that identity
-uses for `ListOrganizationsForUser`; the tenant-shard-db `TenantMember`
-table remains the storage-layer source of truth for write
-authorisation.
+The `Organization` / `OrganizationMembership` node types were **removed in
+v1.0** (type_ids 33 and 34 are retired and unallocated). The company
+entity is now the **Tenant**, and membership is the `tenant_memberships`
+table in the per-project data plane — not an EntDB node type. Project,
+Tenant, Domain, login-policy, membership, and invitation state live in the
+Postgres control plane / data plane described in
+[`docs/redesign/schema.md`](./redesign/schema.md).
 
 `OAuthIdentity` (type_id 31) carries a `(entdb.node).composite_unique`
 declaration on `(provider, provider_user_id)`. Two concurrent
@@ -388,41 +301,37 @@ control when they run — `New` starts nothing):
 
 - **One identity deployment per product.** glassa.work runs its own
   identity; easyloops.app runs its own. They share zero infrastructure
-  beyond what they happen to colocate. There is no "one identity
-  serves both products" mode — that's what `OrganizationSignup` looks
-  like *within* a multi-mode deployment, not *across* deployments.
-- Each deployment has its own tenant-shard-db backend (Postgres in
-  pre-launch; EntDB once the migration completes).
-- Each deployment is configured for exactly one mode at boot.
+  beyond what they happen to colocate. There is no "one identity serves
+  both products" mode — one deployment can host many **Projects**, but a
+  deployment is still per-product, not cross-product.
+- Each deployment has its own datastore — **Postgres** (which carries the
+  Project/Tenant/Domain control plane) or tenant-shard-db/EntDB.
+- A deployment serves every Project on the same code path; projects are
+  resolved per request, not chosen at boot.
 
 ## What we don't promise (yet)
 
-`mode=multi` is fully delivered as of [#93](https://github.com/elloloop/identity/issues/93):
-on-demand tenant provisioning (`OrganizationSignup`), per-request
-tenant resolution, and tenant-aware invitations all ship. The items
-below are features beyond that baseline that this service deliberately
-defers, so future contributors don't try to fit features that don't
-belong:
+The Project/Tenant/Domain model is delivered. The items below are
+deliberately deferred so future contributors don't try to fit features
+that don't belong:
 
+- **In-place upgrade from pre-v1.0 data.** v1.0 is a breaking schema reset
+  with no automatic data migration. A legacy-data migration script (to
+  materialise one `Project` per old org-shard and backfill `project_id`)
+  and Postgres row-level-security hardening are tracked **v1.1**
+  follow-ups (ADR-0002, ADR-0007).
 - **Cross-product SSO.** Two products running their own identity
   deployments do not share sessions. If we ever need this, it'll be a
-  separate service (an IdP that the per-product identities consume),
-  not a flag on this one.
-- **Multi-tenant users.** A single user belonging to two organisations
-  inside the same multi-mode deployment is not modelled. We add it
-  when a concrete product requires it.
-- **Federated identity migration.** Importing accounts from an
-  existing IdP (Auth0, Cognito, custom) is out of scope. Per-product
-  one-shot import scripts are fine; a general-purpose migration RPC
-  is not.
-- **Session-based revocation in `mode=multi`.**
-  `GATEWAY_REVOCATION_MODE=session` is not yet tenant-scoped — the
-  session cache + `GetSessionBySid` lookup run against the boot-time
-  (`DefaultTenantID`) repository, while `mode=multi` sessions live in
-  per-request tenants. The config validator rejects the combination at
-  boot rather than silently looking sessions up in the wrong tenant;
-  `mode=multi` deployments use the default `mode=ttl` revocation.
-  Tenant-scoping the session lookup is a future slice.
+  separate service (an IdP that the per-product identities consume).
+- **Multi-tenant users.** A single user belonging to two tenants in the
+  same project is constrained by the per-project, login-by-email pool
+  (ADR-0003); cross-project user federation is not modelled.
+- **Workspaces / fine-grained authorization.** Workspaces, workspace
+  membership, and ReBAC authorization are a **separate service**
+  (ADR-0001). Identity stops at AuthN + Project/Tenant membership.
+- **Federated identity migration.** Importing accounts from an existing
+  IdP (Auth0, Cognito, custom) is out of scope. Per-product one-shot
+  import scripts are fine; a general-purpose migration RPC is not.
 
 ## Decision log — read this before changing the tenancy model
 
@@ -430,16 +339,19 @@ The choices below are deliberate. If you're tempted to undo one,
 write down what new constraint forced your hand and tell the team
 before you ship.
 
-1. **Per-deployment mode flag, not per-request.** Mixing single and
-   multi semantics in one running service makes auth surface
-   reasoning impossible. Each deployment is one or the other.
-2. **Identity tenant ↔ tenant-shard-db tenant is 1:1.** No
-   multiplexing, no splitting. The boundaries align so debugging and
-   data-export tools stay simple.
-3. **Single-mode never exposes `OrganizationSignup`.** Even if a
-   single-mode deployment has only one tenant, the RPC stays
-   `Unimplemented` so a misconfigured client can't accidentally
-   create a second one.
+1. ~~**Per-deployment mode flag, not per-request.**~~ **Superseded by
+   [ADR-0002](./adr/0002-project-is-the-isolation-shard.md).** The
+   `mode=single | multi` boot flag is removed. One code path resolves a
+   **Project** (shard), then a **Tenant** (logical), per request.
+2. ~~**Identity tenant ↔ tenant-shard-db tenant is 1:1.**~~ **Superseded
+   by [ADR-0002](./adr/0002-project-is-the-isolation-shard.md).** The
+   isolation shard is now the **Project** (one storage scope per Project,
+   `Project.id != storage_scope_id`); many logical Tenants live inside a
+   Project. The old "one tenant == one shard, same string" rule is gone.
+3. ~~**Single-mode never exposes `OrganizationSignup`.**~~ **Removed in
+   v1.0.** `OrganizationSignup` and the `Organization` concept no longer
+   exist; the company entity is the **Tenant**, which auto-forms from a
+   verified email domain (ADR-0004) rather than being created by an RPC.
 4. **Identity's `User.Role` does not flow into
    tenant-shard-db's `TenantMember.Role`.** They evolve
    independently. An identity admin demoted to member shouldn't lose
@@ -499,23 +411,12 @@ before you ship.
    an OSS server image: the deployer-not-the-vendor picks the
    trade-off. Adding a third model in the future means a new value
    on this knob, not a translation layer wrapping the existing ones.
-8. **`OrganizationSignup` rollback is best-effort compensating
-   deletes, not transactional.** tenant-shard-db does not expose a
-   `DeleteTenant` primitive (true through at least v2.0.5), so once
-   `Admin.CreateTenant`
-   has succeeded the tenant exists in the storage layer until an
-   operator removes it out-of-band. Identity's `OrganizationSignup`
-   rolls back what it can — the per-tenant `Admin.RemoveTenantMember`
-   call — and leaves the empty tenant in place. The next signup
-   attempt with the same slug fails at `Admin.CreateTenant` with
-   `AlreadyExists`, which the caller surfaces to the deployer's
-   signup UI. We accepted this over a "tenant in pending state"
-   marker because (a) the empty-tenant footprint is tiny and
-   (b) introducing the marker would require a new schema-aware
-   primitive upstream — a larger change than is justified for a
-   failure mode that should be rare. If a deployer needs reliable
-   cleanup of half-created tenants, that's a candidate upstream
-   feature on tenant-shard-db, not an identity-layer workaround.
+8. ~~**`OrganizationSignup` rollback is best-effort compensating
+   deletes, not transactional.**~~ **Removed in v1.0.** `OrganizationSignup`
+   and the on-demand `Admin.CreateTenant` tenant-provisioning flow no
+   longer exist; tenants auto-form from verified email domains (ADR-0004)
+   and projects are provisioned by the control-plane admin RPCs. The
+   half-created-tenant rollback problem this entry described is moot.
 9. **tenant-shard-db v1.14.0 alignment — sweeper contract, page
    cap, typed errors.** The v1.14.0 bump (SDK + server image)
    reworked three identity-side seams:
@@ -570,13 +471,12 @@ before you ship.
      deliberately, because that count is an abuse signal worth
      alerting on rather than silently iterating through. The
      other unbounded list endpoints (`ListPasskeyCredentials`,
-     `ListOAuthIdentitiesForUser`, `ListOrganizationsForUser`,
-     the OAuth dup-checks, the duplicate-user safety net
-     `queryUsersByEmail`) are bounded by reasonable per-user
-     counts (well under 1000) and accept the server-side cap as
-     the implicit limit. If a deployer starts hitting the cap on
-     a list endpoint that's a product issue (a single user
-     shouldn't legitimately accumulate 1000+ orgs or passkeys),
+     `ListOAuthIdentitiesForUser`, the OAuth dup-checks, the
+     duplicate-user safety net `queryUsersByEmail`) are bounded by
+     reasonable per-user counts (well under 1000) and accept the
+     server-side cap as the implicit limit. If a deployer starts
+     hitting the cap on a list endpoint that's a product issue (a
+     single user shouldn't legitimately accumulate 1000+ passkeys),
      not a cap-tuning issue.
    - **Typed error matching for `ALREADY_EXISTS` (#533, SEC-5).**
      The v1.14.0 SDK now wraps every gRPC status from the
@@ -700,95 +600,33 @@ before you ship.
       identically to embedding identity over HTTP, with no wiring
       duplicated between the binary and the library.
 
-12. **Per-request tenant resolution: host/jwt sources, JWT reuses the
-    existing `tenant` claim, membership checked at the middleware.**
-    Issue #93 slice 3. `mode=multi` resolves the request tenant in a
-    middleware (`internal/middleware/tenant.go`) from the configured,
-    ordered sources in `GATEWAY_TENANT_RESOLUTION_SOURCES` (default
-    `host,jwt`). Choices:
+12. ~~**Per-request tenant resolution: host/jwt sources, JWT reuses the
+    existing `tenant` claim, membership checked at the middleware.**~~
+    **Superseded by [ADR-0002](./adr/0002-project-is-the-isolation-shard.md)
+    (ADR-0009 covers per-project serving auth-domains).** The
+    `internal/middleware/tenant.go` resolver and its
+    `GATEWAY_TENANT_RESOLUTION_SOURCES` / `GATEWAY_TENANT_HOST_BASE_DOMAIN`
+    config are removed. Resolution is now **Project-then-Tenant**: the
+    project-resolution middleware (`internal/middleware/project.go`)
+    resolves the project from an `X-Project-Key` credential, the `Host`
+    header (a `project_auth_domains` hostname), or the default-project pin,
+    and threads a project scope through the request context. The access
+    token carries both a `tenant` and a `project` claim, surfaced to the
+    project-scope guard via internal headers so the token is verified once.
+    The logical Tenant is then derived from the user's verified email
+    domain / `tenant_memberships` row.
 
-    - **No new `tid` claim — reuse the existing `tenant` claim.** Every
-      access token already carries a `tenant` claim (the org slug in
-      `mode=multi`). Adding a parallel `tid` claim would be two fields
-      meaning the same thing, with a window for them to disagree. The
-      `jwt` resolution source reads the existing `tenant` claim; the
-      auth middleware surfaces the verified value to the resolver via an
-      internal request header so the token is not verified twice.
-
-    - **Host wins by default, but host and JWT must agree.** The
-      default precedence is `host,jwt`: the host subdomain is the
-      user-facing tenant boundary, so it is consulted first. When both a
-      host tenant and a token tenant are present they must be equal — a
-      host that disagrees with the token's tenant is cross-tenant token
-      reuse and is rejected (`PermissionDenied`) rather than silently
-      preferring one. A deployer that fronts identity without per-tenant
-      hostnames sets `GATEWAY_TENANT_RESOLUTION_SOURCES=jwt`.
-
-    - **Membership is verified in the middleware, before the handler.**
-      Once a request is authenticated and a tenant resolved, the
-      middleware checks the caller is an organisation member of the
-      resolved tenant (slice-1 `ListOrganizationsForUser`, scoped to
-      that tenant) before any RPC runs; a non-member gets
-      `PermissionDenied`. Putting the check at the chain boundary keeps
-      every handler free of repeated membership boilerplate and makes
-      the cross-tenant guarantee one auditable place. Unauthenticated,
-      tenant-scoped paths (login, password reset) get a tenant scope but
-      skip the member check — the caller is proving identity, not
-      asserting it — and `OrganizationSignup`, which creates the tenant,
-      is resolved past entirely.
-
-    - **The resolved tenant rides the request context; single mode stays
-      a constant.** The middleware injects a tenant id + a tenant-scoped
-      `Repository` into the context; services read it via small accessors
-      (`s.tenantID(ctx)` / `s.repo(ctx)`) that fall back to the boot-time
-      `DefaultTenantID` / boot Repository when no scope is present. In
-      `mode=single` the resolver is never installed, so that fallback is
-      always taken — the single-tenant path is unchanged, with no
-      host/JWT inspection. Boot is fail-closed: `mode=multi` rejects an
-      empty source list or a `host` source with no base domain.
-
-13. **Tenant-aware invitations: the invitation is the tenant binding,
-    redemption mints the identity-layer membership.** Issue #93 slice 4
-    (completes `mode=multi`). Choices:
-
-    - **No `tenant_id` field on the invitation — the storage scope IS
-      the binding.** Like `Organization` (decision log §2: a row exists
-      only inside its own tenant's data plane), a `UserInvitation` lives
-      in the issuing tenant's scope. `InviteUser` writes it under the
-      inviting admin's resolved tenant (`s.tenantID(ctx)`); a duplicate
-      `tenant_id` payload field would be a second source of truth that
-      can drift from the scope it already lives in. This makes
-      cross-tenant safety structural rather than a checked invariant: an
-      invitation minted for tenant A is simply not present in tenant B's
-      scoped repository, so a token replayed under B's host fails
-      `FindInvitationByHash` and is rejected (`Unauthenticated`) before
-      any user is touched, and a tenant-A admin cannot reach into B.
-
-    - **Redemption adds the identity-layer `OrganizationMembership`,
-      not just the storage member row.** `InviteUser` already registers
-      the invitee as a storage-layer tenant member (the v1.12+ actor
-      invariant). `AcceptInvitation` additionally makes them an
-      `OrganizationMembership` member of the resolved tenant's
-      `Organization` (found by slug == tenant id, §2), with the role
-      recorded on the invitation (identity's product role, independent
-      of the storage role per §4). Without this the redeemed user could
-      authenticate but would fail the middleware's membership check
-      (slice 3) on their next request, so the membership add and the
-      session issuance must be one atomic-from-the-caller operation —
-      redemption fails closed if the membership cannot be written.
-
-    - **Resolve-or-create by email is scoped to the resolved tenant.**
-      Redemption looks the user up by the invitation's `user_id` then by
-      email *within the resolved tenant's repository*. A single human
-      who is invited into two tenants becomes two separate identity
-      users — one per tenant — consistent with the 1:1 identity↔tenant
-      boundary (§2) and the deliberately-deferred "multi-tenant users"
-      item above. There is no global user lookup at redemption time.
-
-    - **`mode=single` is unchanged.** Single-mode deployments never
-      provision an `Organization`, so the org lookup returns nothing and
-      redemption adds no membership — the single-tenant invitation flow
-      is exactly as it was before this slice.
+13. ~~**Tenant-aware invitations: the invitation is the tenant binding,
+    redemption mints the identity-layer membership.**~~ **Reworked for
+    v1.0.** `Organization` / `OrganizationMembership` are removed.
+    `InviteUser` / `AcceptInvitation` now operate on `tenant_invitations`
+    and `tenant_memberships` (both `project_id`-scoped, see
+    [`docs/redesign/schema.md`](./redesign/schema.md)): an invite is bound
+    to a `(project_id, tenant_id)`; redemption resolves-or-creates the
+    user by email inside the project's data plane and writes a
+    `tenant_memberships` row whose materialised `status` overrides derived
+    domain membership. Cross-tenant safety is still structural — the invite
+    only exists in its issuing `(project, tenant)` scope.
 
 14. **Passwordless email login (OTP code + magic link), unified by
     email.** Issue #136. A user can authenticate by proving control of an
@@ -846,22 +684,18 @@ before you ship.
       (`service.ReturnAllowlist`) was moved into the service package so
       both flows share one fail-closed implementation.
 
-    - **mode=multi interaction: auto-create the user, but membership still
-      requires an invitation or org-signup.** A passwordless login
-      resolves into the request's tenant (the slice-3 resolution
-      middleware), so the auto-created user is created *inside that
-      tenant's data plane* — consistent with the 1:1 identity↔tenant
-      boundary (§2): one human authenticating passwordlessly into two
-      tenants becomes two separate identity users, one per tenant. But
-      auto-create does **not** grant organisation membership: an
-      auto-created user in `mode=multi` is not a member of any
-      `Organization` until they accept an invitation (§13) or complete
-      `OrganizationSignup` (§3). They can authenticate, but the membership
-      check in the resolution middleware still gates tenant-scoped access.
+    - **Project/Tenant interaction: auto-create the user, but tenant
+      membership still requires a verified domain, an invitation, or an
+      admin grant.** A passwordless login resolves into the request's
+      project (the project-resolution middleware), so the auto-created
+      user is created *inside that project's data plane* — one identity
+      per person per project (ADR-0003). Auto-create does **not** grant
+      tenant membership: the user belongs to a Tenant only by deriving
+      from a verified email domain (ADR-0004) or by a `tenant_memberships`
+      row written via invitation (§13) or admin grant. They can
+      authenticate, but tenant-scoped access is still gated on membership.
       This keeps passwordless login a frictionless front door without
-      turning it into an unauthenticated path to org membership. In
-      `mode=single` there is no `Organization`, so the auto-created user
-      is simply a normal user of the one tenant.
+      turning it into an unauthenticated path to tenant membership.
 
 15. **tenant-shard-db v2.0.5 alignment — self-describing schema,
     server-atomic composite uniqueness.** The v2.0.5 bump (SDK +
@@ -873,7 +707,7 @@ before you ship.
       `internal/repo/entdb/entclient.New` wraps `sdk.NewClient` with
       `sdk.WithSchema(SchemaMessages()...)`, registering one
       zero-valued instance of every `(entdb.node)`/`(entdb.edge)`
-      message in `schema.proto` (25 messages, 21 nodes + 4 edges).
+      message in `schema.proto` (26 messages, 22 nodes + 4 edges).
       The SDK derives a name-free `SchemaDescriptor` + fingerprint
       from the proto descriptors; on the first `ExecuteAtomic` per
       tenant it rides them on the call, the server prepends a
@@ -904,12 +738,12 @@ before you ship.
       "exactly one winner among 64 concurrent identical creates" on
       memory, postgres, **and** entdb.
 
-      `OrganizationMembership` could be promoted the same way (its
-      "exactly one (org, user) row" invariant is structurally
-      identical), but real membership writes are administrator-
-      initiated and naturally serialised, so the service-layer pre-
-      check stays sufficient. The path is open if a future flow ever
-      needs concurrent-safe membership creates.
+      A `tenant_memberships` row could be promoted the same way (its
+      "exactly one (project, tenant, user) row" invariant is
+      structurally identical), but real membership writes are
+      administrator-/invitation-initiated and naturally serialised, so
+      the service-layer pre-check stays sufficient. The path is open if a
+      future flow ever needs concurrent-safe membership creates.
 
     Module path migrated for major-version 2:
     `github.com/elloloop/tenant-shard-db/sdk/go/entdb` →

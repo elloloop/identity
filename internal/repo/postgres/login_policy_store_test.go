@@ -21,7 +21,7 @@ func newLoginPolicyFixture(ctx context.Context, t *testing.T, dsn string) (store
 		MaxConns:    5,
 		ConnTimeout: 5 * time.Second,
 		AutoMigrate: true,
-		TenantID:    "control-plane",
+		ProjectID:   "control-plane",
 	})
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)

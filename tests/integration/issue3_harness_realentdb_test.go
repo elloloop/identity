@@ -31,6 +31,10 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 	tenantID := fmt.Sprintf("issue3-realentdb-%d", time.Now().UnixNano())
 	cfg := newIssue3TestConfig()
 	cfg.DefaultTenantID = tenantID
+	// The data-plane binds to the project (ADR-0002); the entdb partition is
+	// provisioned under tenantID, so the default project must resolve to it or
+	// the service layer reads/writes a partition that was never created.
+	cfg.DefaultProjectID = tenantID
 	cfg.PasswordResetExpirySeconds = 3600
 
 	signer := jwttest.NewSigner(t, "issue-3-realentdb-test-kid")
@@ -58,7 +62,7 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 	built, err := repo.Build(context.Background(), repo.Config{
 		Driver:      repo.DriverEntDB,
 		EntDBClient: client,
-		TenantID:    tenantID,
+		ProjectID:   tenantID,
 	}, zap.NewNop())
 	if err != nil {
 		t.Fatalf("repo.Build: %v", err)

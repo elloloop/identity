@@ -23,38 +23,6 @@ func TestProfileService_UpdateProfile_NilRepoStub(t *testing.T) {
 	}
 }
 
-// TestProfileService_UpdateProfile_ScopedRepo exercises the request-
-// scoped Repository branch of s.repo(ctx). In mode=multi the
-// resolution middleware injects a per-request scope; this test
-// asserts UpdateProfile uses the scoped repo (and ignores the boot
-// repo, which would otherwise win).
-func TestProfileService_UpdateProfile_ScopedRepo(t *testing.T) {
-	t.Parallel()
-
-	// Boot repo is a stub that would fail; the scoped repo is the one
-	// that should be used. If the scope is bypassed, the call returns
-	// ErrServiceUnavailable from the stub.
-	bootDB := newFakeDB()
-	scopedDB := newFakeDB()
-	scopedDB.addUser("u-1", "scoped@test.com", "Scoped User", "member", "active")
-
-	svc := NewProfileService(StubRepository{}, bootDB, "boot-tenant",
-		audit.NewLogger(nil, "test", zap.NewNop()), zap.NewNop())
-
-	scope := &TenantScope{
-		TenantID: "scoped-tenant",
-		Repo:     fakeRepoOverFakeDB{db: scopedDB},
-	}
-	ctx := WithTenantScope(context.Background(), scope)
-	user, err := svc.UpdateProfile(ctx, "u-1", "Scoped Updated", "")
-	if err != nil {
-		t.Fatalf("scoped UpdateProfile: %v", err)
-	}
-	if user.Name != "Scoped Updated" {
-		t.Errorf("name = %q, want %q", user.Name, "Scoped Updated")
-	}
-}
-
 // TestProfileService_UpdateProfile_RefetchFallback covers the fallback
 // path: UpdateUser succeeded but the post-update GetUser returned nil
 // or an error. UpdateProfile must still return a usable User (the

@@ -22,10 +22,15 @@ func newMembershipFixture(ctx context.Context, t *testing.T, dsn string) (ms *Me
 		MaxConns:    5,
 		ConnTimeout: 5 * time.Second,
 		AutoMigrate: true,
-		TenantID:    "control-plane",
+		ProjectID:   "control-plane",
 	})
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)
+
+	// The repo binds to the "control-plane" project; the users it creates
+	// carry project_id="control-plane", which must exist for the FK added in
+	// migration 0015.
+	seedProject(ctx, t, repo, "control-plane")
 
 	projectID, err = NewProjectStore(repo).createProject(ctx, &Project{StorageScopeID: "scope-mem", Name: "Mem"})
 	require.NoError(t, err)

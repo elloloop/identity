@@ -30,12 +30,12 @@ func (r *pgRepository) CreateEmailVerificationToken(ctx context.Context, t *serv
 	}
 	const q = `
 		INSERT INTO email_verification_tokens (
-			id, tenant_id, token_hash, user_id, email,
+			id, project_id, token_hash, user_id, email,
 			expires_at_ms, created_at_ms, consumed_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, t.TokenHash, t.UserID, t.Email,
+		id, r.projectID, t.TokenHash, t.UserID, t.Email,
 		t.ExpiresAt, t.CreatedAt, t.ConsumedAt,
 	)
 	if err != nil {
@@ -52,9 +52,9 @@ func (r *pgRepository) FindEmailVerificationTokenByHash(ctx context.Context, tok
 	const q = `
 		SELECT id, token_hash, user_id, email, expires_at_ms, created_at_ms, consumed_at_ms
 		  FROM email_verification_tokens
-		 WHERE tenant_id = $1 AND token_hash = $2
+		 WHERE project_id = $1 AND token_hash = $2
 		 LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, r.tenantID, tokenHash)
+	row := r.pool.QueryRow(ctx, q, r.projectID, tokenHash)
 	t, err := scanEmailVerification(row)
 	if noRows(err) {
 		return nil, nil
@@ -72,8 +72,8 @@ func (r *pgRepository) MarkEmailVerificationTokenConsumed(ctx context.Context, t
 	const q = `
 		UPDATE email_verification_tokens
 		   SET consumed_at_ms = $3
-		 WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, tokenID, atMs); err != nil {
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, tokenID, atMs); err != nil {
 		return wrapPgErr("MarkEmailVerificationTokenConsumed", err)
 	}
 	return nil

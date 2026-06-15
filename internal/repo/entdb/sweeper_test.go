@@ -117,7 +117,7 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := newMemoryEntClient()
-			repo := &entRepository{client: c, tenantID: "t"}
+			repo := &entRepository{client: c, projectID: "t"}
 
 			tt.seed(c, "exp-1", 1_000)
 			tt.seed(c, "exp-2", 2_000)
@@ -170,7 +170,7 @@ func TestSweepers_DeleteExpiredOnMemoryClient(t *testing.T) {
 func TestSweepers_RejectsNonPositiveLimit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := &entRepository{client: newMemoryEntClient(), tenantID: "t"}
+	repo := &entRepository{client: newMemoryEntClient(), projectID: "t"}
 
 	for _, limit := range []int{0, -1} {
 		if err := repo.DeleteExpiredWebAuthnChallenges(ctx, 1, limit); err == nil {

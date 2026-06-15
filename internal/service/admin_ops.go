@@ -27,7 +27,7 @@ func (s *AdminService) SetUserQuota(ctx context.Context, actorID, targetUserID s
 		return errors.New("quota_bytes must be non-negative")
 	}
 
-	node, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(targetUserID), typeUser, targetUserID)
+	node, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(targetUserID), typeUser, targetUserID)
 	if err != nil {
 		return fmt.Errorf("fetch user: %w", err)
 	}
@@ -39,7 +39,7 @@ func (s *AdminService) SetUserQuota(ctx context.Context, actorID, targetUserID s
 		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 		Patch: map[string]any{ufQuotaBytes: quotaBytes, ufUpdatedAt: nowMs()},
 	}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("set quota: %w", err)
 	}
 	return nil
@@ -67,7 +67,7 @@ func (s *AdminService) ListUsers(
 		}
 	}
 
-	nodes, err := s.db(ctx).QueryNodes(ctx, s.tenantID(ctx), tenantAdminActor, typeUser, nil)
+	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), tenantAdminActor, typeUser, nil)
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("list users: %w", err)
 	}
@@ -114,7 +114,7 @@ func (s *AdminService) GetUser(ctx context.Context, actorID, userID string) (*Us
 	if _, err := s.requireAdmin(ctx, actorID); err != nil {
 		return nil, err
 	}
-	node, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(userID), typeUser, userID)
+	node, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(userID), typeUser, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
 	}
@@ -152,15 +152,6 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 	if u == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
-	// Reject deleting a user who still owns organizations, before any
-	// revocation or cascade — orphaning an org's owner is never correct.
-	// Enforced uniformly across drivers (postgres also has an
-	// owner_user_id ON DELETE RESTRICT FK as a backstop).
-	if owned, err := s.repo(ctx).CountOrganizationsOwnedBy(ctx, targetUserID); err != nil {
-		return fmt.Errorf("delete user: check organization ownership: %w", err)
-	} else if owned > 0 {
-		return fmt.Errorf("%w: user owns %d organization(s)", ErrUserOwnsOrganization, owned)
-	}
 	now := nowMs()
 	if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, targetUserID); err != nil {
 		return fmt.Errorf("delete user: revoke refresh tokens: %w", err)
@@ -193,7 +184,7 @@ func (s *AdminService) deleteGroupMembershipsForUser(ctx context.Context, actorI
 	// which would make this cleanup a no-op. This matches ListGroupMembers.
 	// The write below uses the admin's actor, since the admin is the acting
 	// principal (matching RemoveGroupMember).
-	edges, err := s.db(ctx).GetEdgesFrom(ctx, s.tenantID(ctx), tenantAdminActor, userID, edgeMemberOf)
+	edges, err := s.db(ctx).GetEdgesFrom(ctx, s.projectID(ctx), tenantAdminActor, userID, edgeMemberOf)
 	if err != nil {
 		return fmt.Errorf("list group memberships: %w", err)
 	}
@@ -207,7 +198,7 @@ func (s *AdminService) deleteGroupMembershipsForUser(ctx context.Context, actorI
 			FromNodeID: userID, ToNodeID: e.ToNodeID,
 		})
 	}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), ops); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), ops); err != nil {
 		return fmt.Errorf("clean group memberships: %w", err)
 	}
 	return nil
@@ -234,12 +225,12 @@ func (s *AdminService) UpdateUser(ctx context.Context, actorID, userID, name, ro
 	}
 
 	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: userID, Patch: patch}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
 
 	// Re-fetch to return the updated user.
-	node, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(userID), typeUser, userID)
+	node, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(userID), typeUser, userID)
 	if err != nil {
 		return nil, fmt.Errorf("re-fetch user: %w", err)
 	}

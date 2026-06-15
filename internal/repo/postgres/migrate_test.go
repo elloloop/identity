@@ -39,7 +39,7 @@ func TestMigrate_AppliesAndIdempotent(t *testing.T) {
 	// The migrated schema is usable: a read against a migrated table
 	// succeeds and returns no rows on an empty database.
 	ctx := context.Background()
-	r, err := New(ctx, Config{DSN: dsn, MaxConns: 5, TenantID: "migrate-test"})
+	r, err := New(ctx, Config{DSN: dsn, MaxConns: 5, ProjectID: "migrate-test"})
 	if err != nil {
 		t.Fatalf("New after migrate: %v", err)
 	}

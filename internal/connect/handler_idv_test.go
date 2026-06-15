@@ -28,7 +28,7 @@ func newIDVHarness(t *testing.T, provider idv.Provider) (identityconnect.Identit
 	}
 
 	idvSvc := service.NewIdentityVerificationService(repo, provider, "tenant-1", zap.NewNop())
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, idvSvc, nil, nil, nil, nil, nil, testConfig())
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, idvSvc, nil, nil, nil, nil, testConfig())
 
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)
@@ -168,7 +168,7 @@ func TestIDVRecordToProto_PopulatesAllFields(t *testing.T) {
 		NodeID:            "node-1",
 		VerificationID:    "v-1",
 		UserID:            "u-1",
-		TenantID:          "t-1",
+		ProjectID:         "t-1",
 		Provider:          "stub",
 		ProviderSessionID: "sess-1",
 		Status:            service.IDVStatusRejected,
@@ -234,7 +234,7 @@ func TestHandler_GetIdentityVerificationStatus_NotFound(t *testing.T) {
 func TestHandler_GetIdentityVerificationStatus_DisabledWhenServiceNil(t *testing.T) {
 	t.Parallel()
 
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, testConfig())
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, testConfig())
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)
 	mux.Handle(path, handler)
@@ -257,7 +257,7 @@ func TestHandler_GetIdentityVerificationStatus_DisabledWhenServiceNil(t *testing
 func TestHandler_IDV_DisabledWhenServiceNil(t *testing.T) {
 	t.Parallel()
 
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, testConfig())
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, testConfig())
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)
 	mux.Handle(path, handler)

@@ -19,12 +19,12 @@ func (r *pgRepository) CreateRecoveryCode(ctx context.Context, c *service.Recove
 	}
 	const q = `
 		INSERT INTO recovery_codes (
-			id, tenant_id, user_id, code_hash, used,
+			id, project_id, user_id, code_hash, used,
 			created_at_ms, used_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, c.UserID, c.CodeHash, c.Used,
+		id, r.projectID, c.UserID, c.CodeHash, c.Used,
 		c.CreatedAt, c.UsedAt,
 	)
 	if err != nil {
@@ -41,10 +41,10 @@ func (r *pgRepository) FindRecoveryCodeByHash(ctx context.Context, userID, hash 
 	const q = `
 		SELECT id, user_id, code_hash, used, created_at_ms, used_at_ms
 		  FROM recovery_codes
-		 WHERE tenant_id = $1 AND user_id = $2 AND code_hash = $3
+		 WHERE project_id = $1 AND user_id = $2 AND code_hash = $3
 		 LIMIT 1`
 	var c service.RecoveryCodeRecord
-	err := r.pool.QueryRow(ctx, q, r.tenantID, userID, hash).Scan(
+	err := r.pool.QueryRow(ctx, q, r.projectID, userID, hash).Scan(
 		&c.NodeID, &c.UserID, &c.CodeHash, &c.Used, &c.CreatedAt, &c.UsedAt,
 	)
 	if noRows(err) {
@@ -100,8 +100,8 @@ func (r *pgRepository) UpdateRecoveryCode(ctx context.Context, nodeID string, fi
 	if len(sets) == 0 {
 		return nil
 	}
-	args = append(args, r.tenantID, nodeID)
-	q := fmt.Sprintf(`UPDATE recovery_codes SET %s WHERE tenant_id = $%d AND id = $%d`,
+	args = append(args, r.projectID, nodeID)
+	q := fmt.Sprintf(`UPDATE recovery_codes SET %s WHERE project_id = $%d AND id = $%d`,
 		strings.Join(sets, ", "), idx, idx+1)
 	if _, err := r.pool.Exec(ctx, q, args...); err != nil {
 		return wrapPgErr("UpdateRecoveryCode", err)
@@ -113,8 +113,8 @@ func (r *pgRepository) DeleteRecoveryCodesForUser(ctx context.Context, userID st
 	if userID == "" {
 		return nil
 	}
-	const q = `DELETE FROM recovery_codes WHERE tenant_id = $1 AND user_id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID); err != nil {
+	const q = `DELETE FROM recovery_codes WHERE project_id = $1 AND user_id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, userID); err != nil {
 		return wrapPgErr("DeleteRecoveryCodesForUser", err)
 	}
 	return nil

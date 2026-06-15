@@ -12,7 +12,7 @@ func TestConfigFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_POSTGRES_CONN_TIMEOUT_MS", "2500")
 	t.Setenv("GATEWAY_POSTGRES_AUTO_MIGRATE", "no")
 
-	cfg := ConfigFromEnv("tenant-1")
+	cfg := ConfigFromEnv("project-1")
 	if cfg.DSN != "postgres://example.com:5432/identity" {
 		t.Fatalf("DSN = %q", cfg.DSN)
 	}
@@ -25,8 +25,8 @@ func TestConfigFromEnv(t *testing.T) {
 	if cfg.AutoMigrate {
 		t.Fatal("AutoMigrate = true")
 	}
-	if cfg.TenantID != "tenant-1" {
-		t.Fatalf("TenantID = %q", cfg.TenantID)
+	if cfg.ProjectID != "project-1" {
+		t.Fatalf("ProjectID = %q", cfg.ProjectID)
 	}
 }
 
@@ -48,7 +48,7 @@ func TestConfigFromEnvDefaultsInvalidValues(t *testing.T) {
 }
 
 func TestConfigApplyDefaultsAndValidate(t *testing.T) {
-	cfg := Config{DSN: "postgres://example.com:5432/identity", TenantID: "tenant"}
+	cfg := Config{DSN: "postgres://example.com:5432/identity", ProjectID: "project"}
 	cfg.applyDefaults()
 	if cfg.MaxConns != DefaultMaxConns {
 		t.Fatalf("MaxConns = %d", cfg.MaxConns)
@@ -64,10 +64,10 @@ func TestConfigApplyDefaultsAndValidate(t *testing.T) {
 	if err := nilCfg.validate(); err == nil || !strings.Contains(err.Error(), "nil config") {
 		t.Fatalf("nil validate error = %v", err)
 	}
-	if err := (&Config{TenantID: "tenant"}).validate(); err == nil || !strings.Contains(err.Error(), "DSN") {
+	if err := (&Config{ProjectID: "project"}).validate(); err == nil || !strings.Contains(err.Error(), "DSN") {
 		t.Fatalf("missing DSN error = %v", err)
 	}
-	if err := (&Config{DSN: "postgres://example.com:5432/identity"}).validate(); err == nil || !strings.Contains(err.Error(), "TenantID") {
-		t.Fatalf("missing tenant error = %v", err)
+	if err := (&Config{DSN: "postgres://example.com:5432/identity"}).validate(); err == nil || !strings.Contains(err.Error(), "ProjectID") {
+		t.Fatalf("missing project error = %v", err)
 	}
 }

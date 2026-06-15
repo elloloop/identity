@@ -24,7 +24,7 @@ func TestBuild_PostgresProjectStore(t *testing.T) {
 	built, err := Build(ctx, Config{
 		Driver:              DriverPostgres,
 		PostgresDSN:         dsn,
-		TenantID:            "repo-build-scope",
+		ProjectID:           "repo-build-scope",
 		PostgresAutoMigrate: true,
 	}, nil)
 	if err != nil {

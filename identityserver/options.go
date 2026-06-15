@@ -91,12 +91,6 @@ type Options struct {
 	// is disabled).
 	CaptchaVerifier captcha.Verifier
 
-	// TenantAdmin and RepositoryForTenant back the mode=multi
-	// OrganizationSignup RPC. When nil and Config.IdentityMode=="multi",
-	// New builds them from Config.RepoDriver. Ignored in mode=single.
-	TenantAdmin         service.TenantAdmin
-	RepositoryForTenant service.RepositoryForTenant
-
 	// DNSResolver is the TXT-lookup boundary VerifyDomain uses to confirm a
 	// custom domain's ownership challenge. nil defaults to net.DefaultResolver
 	// — the production behaviour. A host (or a full-stack test) supplies its

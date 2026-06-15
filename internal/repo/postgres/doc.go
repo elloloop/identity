@@ -30,12 +30,16 @@
 // to true (or GATEWAY_POSTGRES_AUTO_MIGRATE=true) only for local dev
 // and single-replica environments.
 //
-// # Multi-tenancy
+// # Project isolation (ADR-0002)
 //
-// Every table carries a tenant_id text not null column and uniqueness
-// constraints are scoped to (tenant_id, ...). A pgRepository instance
-// is constructed with a single tenant_id and writes/reads only that
-// tenant's rows.
+// The Project is identity's storage shard. Every data-plane table carries a
+// project_id text not null column (FK to projects(id)) and uniqueness
+// constraints are scoped to (project_id, ...). A pgRepository instance is
+// bound to a single project_id and writes/reads only that project's rows;
+// per-request scopes are derived via WithProject. The logical-tenant
+// tenant_id columns on the governance tables (domains, login_policies,
+// tenant_memberships, tenant_invitations) reference tenants(id) and are a
+// separate concept from this storage shard.
 //
 // # Error mapping
 //

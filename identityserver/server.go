@@ -80,16 +80,12 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	s.shutdownFns = append(s.shutdownFns, otelShutdown)
 
-	// EntDB client. Built once and shared by the repository adapter and
-	// the mode=multi tenant-admin wiring. Only needed when New itself
-	// builds the persistence layer against the entdb driver; an injected
-	// Repo/DB pair or a non-entdb driver leaves it nil.
+	// EntDB client. Built once and shared by the repository adapter. Only
+	// needed when New itself builds the persistence layer against the entdb
+	// driver; an injected Repo/DB pair or a non-entdb driver leaves it nil.
 	var entdbClient *entdb.DbClient
 	needsEntDBClient := opts.Repo == nil && opts.DB == nil &&
 		repo.Driver(cfg.RepoDriver) == repo.DriverEntDB
-	needsEntDBClient = needsEntDBClient ||
-		(cfg.IsMultiMode() && opts.TenantAdmin == nil && opts.RepositoryForTenant == nil &&
-			repo.Driver(cfg.RepoDriver) == repo.DriverEntDB)
 	if needsEntDBClient {
 		entdbClient, err = newEntDBClient(ctx, cfg.EntDBAddress)
 		if err != nil {
@@ -151,9 +147,15 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	var loginGovernance *service.LoginGovernance
 	if authRepo == nil || dbAdapter == nil {
 		built, buildErr := repo.Build(ctx, repo.Config{
-			Driver:              repo.Driver(cfg.RepoDriver),
-			EntDBClient:         entdbClient,
-			TenantID:            cfg.DefaultTenantID,
+			Driver:      repo.Driver(cfg.RepoDriver),
+			EntDBClient: entdbClient,
+			// The boot-default Repository/DB binds to the default project
+			// (ADR-0002): the Project is the storage shard, so the data-plane
+			// partition is DefaultProjectID, NOT the DefaultTenantID storage
+			// scope. ensureDefaultProject (below) seeds a Project row whose id
+			// equals DefaultProjectID so rows written under this binding are
+			// readable and the FK to projects(id) is satisfied.
+			ProjectID:           cfg.DefaultProjectID,
 			PostgresDSN:         cfg.PostgresDSN,
 			PostgresMaxConns:    cfg.PostgresMaxConns,
 			PostgresAutoMigrate: cfg.PostgresAutoMigrate,
@@ -203,44 +205,33 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		}
 	}
 
-	tenantAdmin, repoForTenant := opts.TenantAdmin, opts.RepositoryForTenant
-	if cfg.IsMultiMode() && tenantAdmin == nil && repoForTenant == nil {
-		tenantAdmin, repoForTenant, err = buildMultiModeWiring(ctx, &cfg, entdbClient, logger)
-		if err != nil {
-			s.cleanupOnError(ctx)
-			return nil, fmt.Errorf("multi-mode wiring: %w", err)
-		}
-	}
-
 	// app.New starts no goroutines; its background workers (sweeper, audit
 	// flusher) own their root context, created and cancelled by
 	// Start/Shutdown, not the construction ctx.
 	built, err := app.New(app.Deps{ //nolint:contextcheck // workers own their context, not New's ctx
-		Config:              &cfg,
-		Logger:              logger,
-		Signer:              signer,
-		Repo:                authRepo,
-		DB:                  dbAdapter,
-		Passkeys:            webauthnSvc,
-		TOTPKey:             totpKey,
-		TOTPRecoveryPepper:  totpRecoveryPepper,
-		EmailTransport:      opts.EmailTransport,
-		SMSSender:           opts.SMSSender,
-		OAuthRegistry:       opts.OAuthRegistry,
-		IDVProvider:         idvProvider,
-		CaptchaVerifier:     opts.CaptchaVerifier,
-		MetricsRegistry:     opts.MetricsRegistry,
-		TenantAdmin:         tenantAdmin,
-		RepositoryForTenant: repoForTenant,
-		ProjectResolver:     projectResolver,
-		TenantAutoFormer:    tenantAutoFormer,
-		DomainStore:         domainStore,
-		TenantStore:         tenantStore,
-		MembershipStore:     membershipStore,
-		InvitationStore:     invitationStore,
-		ControlPlaneStore:   controlPlaneStore,
-		LoginGovernance:     loginGovernance,
-		DNSResolver:         opts.DNSResolver,
+		Config:             &cfg,
+		Logger:             logger,
+		Signer:             signer,
+		Repo:               authRepo,
+		DB:                 dbAdapter,
+		Passkeys:           webauthnSvc,
+		TOTPKey:            totpKey,
+		TOTPRecoveryPepper: totpRecoveryPepper,
+		EmailTransport:     opts.EmailTransport,
+		SMSSender:          opts.SMSSender,
+		OAuthRegistry:      opts.OAuthRegistry,
+		IDVProvider:        idvProvider,
+		CaptchaVerifier:    opts.CaptchaVerifier,
+		MetricsRegistry:    opts.MetricsRegistry,
+		ProjectResolver:    projectResolver,
+		TenantAutoFormer:   tenantAutoFormer,
+		DomainStore:        domainStore,
+		TenantStore:        tenantStore,
+		MembershipStore:    membershipStore,
+		InvitationStore:    invitationStore,
+		ControlPlaneStore:  controlPlaneStore,
+		LoginGovernance:    loginGovernance,
+		DNSResolver:        opts.DNSResolver,
 	})
 	if err != nil {
 		s.cleanupOnError(ctx)

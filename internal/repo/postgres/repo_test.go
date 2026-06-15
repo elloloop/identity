@@ -52,18 +52,47 @@ func TestConformance(t *testing.T) {
 		Name: "postgres",
 		NewRepo: func(t *testing.T) service.Repository {
 			t.Helper()
+			// Each repo binds to a fresh project (its storage shard). The
+			// project_id → projects(id) FK (migration 0015) requires the row
+			// to exist before any data-plane write, so seed it here — in
+			// production EnsureDefaultProject does the equivalent at boot.
+			projectID := fmt.Sprintf("postgres-conformance-%d", time.Now().UnixNano())
 			fresh, err := New(ctx, Config{
 				DSN:         dsn,
 				MaxConns:    5,
 				ConnTimeout: 5 * time.Second,
 				AutoMigrate: true,
-				TenantID:    fmt.Sprintf("postgres-conformance-%d", time.Now().UnixNano()),
+				ProjectID:   projectID,
 			})
 			require.NoError(t, err)
 			t.Cleanup(fresh.Close)
+			seedProject(ctx, t, fresh, projectID)
 			return fresh
 		},
+		// Binding a project on postgres seeds its projects(id) row (the
+		// project_id FK target from migration 0015) and rebinds the shared
+		// pool to it via WithProject, exercising the real per-request scoping.
+		BindProject: func(t *testing.T, base service.Repository, projectID string) service.Repository {
+			t.Helper()
+			pg := base.(*pgRepository)
+			seedProject(ctx, t, pg, projectID)
+			return pg.WithProject(projectID)
+		},
 	})
+}
+
+// seedProject inserts the projects(id) row a project-scoped data-plane write
+// needs to satisfy the project_id foreign key added in migration 0015. The
+// storage scope is derived from the id so two distinct projects never
+// collide on the projects.storage_scope_id unique index.
+func seedProject(ctx context.Context, t *testing.T, repo *pgRepository, projectID string) {
+	t.Helper()
+	_, err := NewProjectStore(repo).createProject(ctx, &Project{
+		ID:             projectID,
+		StorageScopeID: "scope-" + projectID,
+		Name:           projectID,
+	})
+	require.NoError(t, err)
 }
 
 // runRepositorySmoke is the shared driver-specific smoke body called
@@ -73,7 +102,7 @@ func TestConformance(t *testing.T) {
 // body only covers checks where the Postgres driver layers on top of
 // the contract (case-insensitive emails, pg unique-constraint→
 // ErrAlreadyExists translation).
-func runRepositorySmoke(t *testing.T, dsn, tenantID string) {
+func runRepositorySmoke(t *testing.T, dsn, projectID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -85,11 +114,12 @@ func runRepositorySmoke(t *testing.T, dsn, tenantID string) {
 		MaxConns:    5,
 		ConnTimeout: 5 * time.Second,
 		AutoMigrate: true,
-		TenantID:    tenantID,
+		ProjectID:   projectID,
 	}
 	repo, err := New(ctx, cfg)
 	require.NoError(t, err)
 	defer repo.Close()
+	seedProject(ctx, t, repo, projectID)
 
 	now := time.Now()
 	id, err := repo.CreateUser(ctx, &service.User{
@@ -159,8 +189,6 @@ func truncateAll(ctx context.Context, dsn string) error {
 			audit_events,
 			group_memberships,
 			groups,
-			organization_members,
-			organizations,
 			oauth_identities,
 			email_change_tokens,
 			email_verification_tokens,
@@ -195,7 +223,7 @@ func TestPostgres_ConfigValidation(t *testing.T) {
 	cfg.DSN = "postgres://x:y@localhost:5432/db"
 	require.Error(t, cfg.validate(), "missing tenant must fail")
 
-	cfg.TenantID = "test"
+	cfg.ProjectID = "test"
 	require.NoError(t, cfg.validate())
 }
 
@@ -210,16 +238,17 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 
 	require.NoError(t, truncateAll(ctx, dsn))
 
-	tenantID := fmt.Sprintf("db-tenant-%d", time.Now().UnixNano())
+	projectID := fmt.Sprintf("db-project-%d", time.Now().UnixNano())
 	repo, err := New(ctx, Config{
 		DSN:         dsn,
 		MaxConns:    5,
 		ConnTimeout: 5 * time.Second,
 		AutoMigrate: true,
-		TenantID:    tenantID,
+		ProjectID:   projectID,
 	})
 	require.NoError(t, err)
 	defer repo.Close()
+	seedProject(ctx, t, repo, projectID)
 
 	userID := "db-user-1"
 	groupID := "db-group-1"
@@ -228,7 +257,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	qrID := "db-qr-1"
 	createdAt := int64(1_700_000_000_000)
 
-	result, err := repo.ExecuteAtomic(ctx, tenantID, "actor", []sdk.Operation{
+	result, err := repo.ExecuteAtomic(ctx, projectID, "actor", []sdk.Operation{
 		{
 			Type:   sdk.OpCreateNode,
 			TypeID: dbTypeUser,
@@ -368,22 +397,22 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	userNode, err := repo.GetNode(ctx, tenantID, "actor", dbTypeUser, userID)
+	userNode, err := repo.GetNode(ctx, projectID, "actor", dbTypeUser, userID)
 	require.NoError(t, err)
 	require.Equal(t, "db-user@example.com", userNode.Payload[dbUfEmail])
-	groupNode, err := repo.GetNode(ctx, tenantID, "actor", dbTypeWorkingGroup, groupID)
+	groupNode, err := repo.GetNode(ctx, projectID, "actor", dbTypeWorkingGroup, groupID)
 	require.NoError(t, err)
 	require.Equal(t, "Core Team", groupNode.Payload[dbGfName])
-	refreshNode, err := repo.GetNode(ctx, tenantID, "actor", dbTypeRefreshToken, refreshID)
+	refreshNode, err := repo.GetNode(ctx, projectID, "actor", dbTypeRefreshToken, refreshID)
 	require.NoError(t, err)
 	require.Equal(t, "refresh-hash", refreshNode.Payload[dbRfTokenHash])
-	passkeyNode, err := repo.GetNode(ctx, tenantID, "actor", dbTypePasskey, passkeyID)
+	passkeyNode, err := repo.GetNode(ctx, projectID, "actor", dbTypePasskey, passkeyID)
 	require.NoError(t, err)
 	require.Equal(t, "passkey-lookup-id", passkeyNode.Payload[dbPkfCredentialID])
-	auditNode, err := repo.GetNode(ctx, tenantID, "actor", dbTypeAuditEvent, "db-audit-1")
+	auditNode, err := repo.GetNode(ctx, projectID, "actor", dbTypeAuditEvent, "db-audit-1")
 	require.NoError(t, err)
 	require.Equal(t, "user.created", auditNode.Payload[dbAfEventType])
-	helpNode, err := repo.GetNode(ctx, tenantID, "actor", dbTypeAdminHelpReq, "db-help-1")
+	helpNode, err := repo.GetNode(ctx, projectID, "actor", dbTypeAdminHelpReq, "db-help-1")
 	require.NoError(t, err)
 	require.Equal(t, "help@example.com", helpNode.Payload[dbHfEmail])
 
@@ -395,27 +424,27 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	requireQueryCount(ctx, t, repo, dbTypeAuditEvent, map[string]any{dbAfEventType: "user.created", dbAfSuccess: true}, 1)
 	requireQueryCount(ctx, t, repo, dbTypeAdminHelpReq, map[string]any{dbHfEmail: "HELP@EXAMPLE.COM", dbHfStatus: "pending"}, 1)
 
-	foundUsers, err := repo.SearchNodes(ctx, tenantID, "actor", dbTypeUser, "db-user")
+	foundUsers, err := repo.SearchNodes(ctx, projectID, "actor", dbTypeUser, "db-user")
 	require.NoError(t, err)
 	require.Len(t, foundUsers, 1)
-	foundGroups, err := repo.SearchNodes(ctx, tenantID, "actor", dbTypeWorkingGroup, "product")
+	foundGroups, err := repo.SearchNodes(ctx, projectID, "actor", dbTypeWorkingGroup, "product")
 	require.NoError(t, err)
 	require.Len(t, foundGroups, 1)
-	empty, err := repo.SearchNodes(ctx, tenantID, "actor", dbTypeUser, "   ")
+	empty, err := repo.SearchNodes(ctx, projectID, "actor", dbTypeUser, "   ")
 	require.NoError(t, err)
 	require.Nil(t, empty)
 
-	edgesFrom, err := repo.GetEdgesFrom(ctx, tenantID, "actor", userID, dbEdgeMemberOf)
+	edgesFrom, err := repo.GetEdgesFrom(ctx, projectID, "actor", userID, dbEdgeMemberOf)
 	require.NoError(t, err)
 	require.Len(t, edgesFrom, 1)
-	edgesTo, err := repo.GetEdgesTo(ctx, tenantID, "actor", groupID, dbEdgeMemberOf)
+	edgesTo, err := repo.GetEdgesTo(ctx, projectID, "actor", groupID, dbEdgeMemberOf)
 	require.NoError(t, err)
 	require.Len(t, edgesTo, 1)
-	otherEdges, err := repo.GetEdgesFrom(ctx, tenantID, "actor", userID, 999)
+	otherEdges, err := repo.GetEdgesFrom(ctx, projectID, "actor", userID, 999)
 	require.NoError(t, err)
 	require.Nil(t, otherEdges)
 
-	_, err = repo.ExecuteAtomic(ctx, tenantID, "actor", []sdk.Operation{
+	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []sdk.Operation{
 		{Type: sdk.OpUpdateNode, TypeID: dbTypeUser, NodeID: userID, Patch: map[string]any{dbUfName: "DB User Updated", dbUfQuotaBytes: int64(2048)}},
 		{Type: sdk.OpUpdateNode, TypeID: dbTypeWorkingGroup, NodeID: groupID, Patch: map[string]any{dbGfDescription: "Updated description"}},
 		{Type: sdk.OpUpdateNode, TypeID: dbTypeAdminHelpReq, NodeID: "db-help-1", Patch: map[string]any{dbHfStatus: "resolved", dbHfResolvedBy: userID, dbHfResolvedAt: createdAt + 4000}},
@@ -428,31 +457,31 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	require.Equal(t, "DB User Updated", updatedUser.Name)
 	require.EqualValues(t, 2048, updatedUser.QuotaBytes)
 
-	_, err = repo.ExecuteAtomic(ctx, tenantID, "actor", []sdk.Operation{
+	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []sdk.Operation{
 		{Type: sdk.OpDeleteEdge, EdgeTypeID: dbEdgeMemberOf, FromNodeID: userID, ToNodeID: groupID},
 		{Type: sdk.OpDeleteNode, TypeID: dbTypePasskey, NodeID: passkeyID},
 		{Type: sdk.OpDeleteNode, TypeID: dbTypeRefreshToken, NodeID: refreshID},
 		{Type: sdk.OpDeleteNode, TypeID: dbTypeWorkingGroup, NodeID: groupID},
 	})
 	require.NoError(t, err)
-	edgesAfterDelete, err := repo.GetEdgesFrom(ctx, tenantID, "actor", userID, dbEdgeMemberOf)
+	edgesAfterDelete, err := repo.GetEdgesFrom(ctx, projectID, "actor", userID, dbEdgeMemberOf)
 	require.NoError(t, err)
 	require.Empty(t, edgesAfterDelete)
 
-	_, err = repo.GetNode(ctx, tenantID, "actor", 999, "anything")
+	_, err = repo.GetNode(ctx, projectID, "actor", 999, "anything")
 	require.Error(t, err)
-	_, err = repo.QueryNodes(ctx, tenantID, "actor", 999, nil)
+	_, err = repo.QueryNodes(ctx, projectID, "actor", 999, nil)
 	require.Error(t, err)
-	_, err = repo.SearchNodes(ctx, tenantID, "actor", 999, "anything")
+	_, err = repo.SearchNodes(ctx, projectID, "actor", 999, "anything")
 	require.Error(t, err)
-	_, err = repo.ExecuteAtomic(ctx, tenantID, "actor", []sdk.Operation{{Type: sdk.OpCreateNode, TypeID: 999}})
+	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []sdk.Operation{{Type: sdk.OpCreateNode, TypeID: 999}})
 	require.Error(t, err)
 }
 
 func requireQueryCount(ctx context.Context, t *testing.T, repo *pgRepository, typeID int, filter map[string]any, want int) {
 	t.Helper()
 
-	nodes, err := repo.QueryNodes(ctx, repo.tenantID, "actor", typeID, filter)
+	nodes, err := repo.QueryNodes(ctx, repo.projectID, "actor", typeID, filter)
 	require.NoError(t, err)
 	require.Len(t, nodes, want)
 }

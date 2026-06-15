@@ -7,7 +7,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -47,21 +46,6 @@ type Deps struct {
 	DB       service.DB
 	Passkeys *passkeys.WebAuthnService
 	TOTPKey  []byte
-
-	// TenantAdmin is the cross-tenant admin handle backing the
-	// `mode=multi` OrganizationSignup RPC. Required when
-	// Config.IdentityMode == "multi"; ignored in single mode. The
-	// production binary wires repo.NewTenantAdmin(entdbClient);
-	// integration tests pass a fake.
-	TenantAdmin service.TenantAdmin
-
-	// RepositoryForTenant is the factory OrganizationSignup uses to
-	// obtain a Repository scoped to the freshly-created tenant. When
-	// nil, the handler treats `mode=multi` as not yet wired and
-	// returns CodeUnimplemented. The production binary wires a closure
-	// over the entdb client; tests pass a closure returning an
-	// in-memory Repo keyed on tenant id.
-	RepositoryForTenant service.RepositoryForTenant
 
 	// ProjectResolver resolves a request's control-plane project from its
 	// credential key or Host header (see middleware.NewProjectResolver).
@@ -206,13 +190,6 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
-			// OrganizationSignup is an unauthenticated entry point that
-			// provisions a whole tenant — share the per-IP signup quota
-			// so a single source can't carve out tenants at signup speed.
-			PathPrefix: "/identity.IdentityService/OrganizationSignup", Tag: "org_signup",
-			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
-		},
-		{
 			PathPrefix: "/identity.IdentityService/PasswordLogin", Tag: "login",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
@@ -277,8 +254,19 @@ func New(deps Deps) (*Built, error) {
 	if err := deps.Config.Validate(); err != nil {
 		return nil, err
 	}
-	if err := validateIdentityMode(deps, logger); err != nil {
-		return nil, err
+
+	// Normalize an empty DefaultProjectID to a non-empty default. The env
+	// loader (config.Load) already defaults GATEWAY_DEFAULT_PROJECT_ID, but
+	// struct-literal Configs — every test harness and every embedding caller
+	// that builds Config directly — bypass that. This value becomes the
+	// boot-default project shard id for the audit logger and every service
+	// below (and, via requestProjectID, the entdb partition key / postgres
+	// WHERE project_id), so it must never be "": entdb rejects an empty
+	// partition key outright, and a data-plane row written under "" has no
+	// valid project. Default it rather than reject it, mirroring how the
+	// env loader defaults DefaultTenantID, so embedding ergonomics hold.
+	if deps.Config.DefaultProjectID == "" {
+		deps.Config.DefaultProjectID = config.DefaultProjectIDFallback
 	}
 
 	allowedOrigins, err := middleware.ParseAllowedOrigins(deps.Config.AllowedOrigins, true)
@@ -300,7 +288,11 @@ func New(deps Deps) (*Built, error) {
 		logger.Error("schema_descriptor_invalid", zap.Error(err))
 	}
 
-	auditLog := audit.NewLogger(deps.DB, deps.Config.DefaultTenantID, logger)
+	// The audit logger is a boot-scoped singleton; it writes audit_events
+	// under the default project's storage partition (ADR-0002 — the Project
+	// is the data-plane shard), matching the boot-default Repository/DB
+	// binding. Per-request audit project scoping is a follow-up.
+	auditLog := audit.NewLogger(deps.DB, deps.Config.DefaultProjectID, logger)
 
 	// Garbage-collection sweeper for expired ephemeral rows (#94).
 	// Disabled when SweeperIntervalSeconds <= 0 — deployers who
@@ -380,15 +372,15 @@ func New(deps Deps) (*Built, error) {
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance)
-	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)
-	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
-	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
-	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
+	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger)
+	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
+	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
+	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 
 	var idvSvc *service.IdentityVerificationService
 	if deps.IDVProvider != nil {
 		idvSvc = service.NewIdentityVerificationService(
-			repo, observability.WrapIDVProvider(deps.IDVProvider), deps.Config.DefaultTenantID, logger,
+			repo, observability.WrapIDVProvider(deps.IDVProvider), deps.Config.DefaultProjectID, logger,
 		)
 	}
 
@@ -400,11 +392,10 @@ func New(deps Deps) (*Built, error) {
 		}
 	}
 
-	orgSignupSvc := buildOrganizationSignupService(deps, auditLog, logger)
 	domainSvc := buildDomainService(deps, logger)
 	membershipSvc := buildMembershipService(deps, repo, mailer, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, logger)
-	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, orgSignupSvc, domainSvc, membershipSvc, controlAdminSvc, captchaVerifier, deps.Config)
+	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, captchaVerifier, deps.Config)
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {
@@ -435,38 +426,25 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf("rpc metrics: %w", err)
 	}
 
-	// In mode=single every token's "tenant" claim must equal
-	// DefaultTenantID, so the auth middleware pins it. In mode=multi
-	// tokens carry per-tenant claims (the org slug), so the auth
-	// middleware can't pin a single tenant — the TenantResolver
-	// middleware cross-checks the claim against the resolved tenant
-	// instead. See docs/IDENTITY.md decision log on tenant resolution.
+	// Every token's "tenant" claim must equal the internal storage tenant
+	// key (DefaultTenantID), so the auth middleware pins it.
 	authExpectedTenant := deps.Config.DefaultTenantID
-	if deps.Config.IsMultiMode() {
-		authExpectedTenant = ""
-	}
 
 	// Order (outermost runs first on request path):
-	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → project → auth → project-guard → tenant → metrics → Connect
+	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → project → auth → project-guard → metrics → Connect
 	// client-IP must precede rate-limit (the limiter keys on the
 	// resolved IP) and health must precede client-IP so liveness probes
 	// from kubelets cannot be rate-limited. The project resolver sits just
-	// outside auth so the resolved project is available to auth/tenant and
-	// the service layer (it does not depend on the authenticated user — it
-	// keys on the credential header or Host). The tenant resolver sits
-	// just inside auth so it can read the verified user-id / tenant
-	// headers, and just outside metrics so the resolved-tenant rejection
-	// is counted. In mode=single the tenant resolver is an identity
-	// pass-through; the project resolver pins the default project.
-	// metrics sits just outside the Connect mux so it observes every
-	// RPC's final status, including any failure synthesized by the
-	// otelconnect interceptor.
+	// outside auth so the resolved project is available to auth and the
+	// service layer (it does not depend on the authenticated user — it
+	// keys on the credential header or Host); it pins the default project
+	// when no control-plane resolver is wired. metrics sits just outside
+	// the Connect mux so it observes every RPC's final status, including
+	// any failure synthesized by the otelconnect interceptor.
 	var chain http.Handler = mux
 	chain = middleware.MetricsMiddleware(rpcMetrics)(chain)
-	chain = middleware.NewTenantResolver(deps.Config, deps.RepositoryForTenant, logger)(chain)
 	// Project-scope guard runs just after auth (which surfaces the verified
-	// project) and before tenant resolution, rejecting an access token
-	// replayed across projects.
+	// project), rejecting an access token replayed across projects.
 	chain = middleware.NewProjectScopeGuard()(chain)
 	chain = middleware.SessionAuthMiddleware(
 		deps.Signer, authExpectedTenant, deps.Config.JWTAudience,
@@ -510,54 +488,6 @@ func buildConnectHandlerOptions(cfg *config.Config) ([]connect.HandlerOption, er
 		return nil, err
 	}
 	return []connect.HandlerOption{connect.WithInterceptors(interceptor)}, nil
-}
-
-// validateIdentityMode enforces the per-deployment mode invariants at
-// boot. mode=single requires a DefaultTenantID (the bootstrap tenant
-// it pins all signups to). mode=multi requires the TenantAdmin and
-// RepositoryForTenant wiring so OrganizationSignup is actually
-// reachable; unrecognised modes are rejected outright to keep the
-// auth-surface reasoning unambiguous (decision log §1).
-func validateIdentityMode(deps Deps, logger *zap.Logger) error {
-	if deps.Config == nil {
-		return errors.New("identity mode: nil config")
-	}
-	mode := deps.Config.IdentityMode
-	switch mode {
-	case config.IdentityModeSingle:
-		if deps.Config.DefaultTenantID == "" {
-			return errors.New("identity mode=single requires GATEWAY_DEFAULT_TENANT_ID")
-		}
-		logger.Info("identity_mode_selected", zap.String("mode", mode), zap.String("default_tenant_id", deps.Config.DefaultTenantID))
-		return nil
-	case config.IdentityModeMulti:
-		if deps.TenantAdmin == nil || deps.RepositoryForTenant == nil {
-			return errors.New("identity mode=multi requires TenantAdmin and RepositoryForTenant")
-		}
-		logger.Info("identity_mode_selected", zap.String("mode", mode))
-		return nil
-	default:
-		return fmt.Errorf("identity mode: unknown value %q (expected %q or %q)",
-			mode, config.IdentityModeSingle, config.IdentityModeMulti)
-	}
-}
-
-// buildOrganizationSignupService returns the wired
-// OrganizationSignupService in `mode=multi`, or nil in `mode=single`.
-// The Connect handler treats nil as "disabled" and returns
-// CodeUnimplemented (per decision log §3).
-func buildOrganizationSignupService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *service.OrganizationSignupService {
-	if !deps.Config.IsMultiMode() {
-		return nil
-	}
-	return service.NewOrganizationSignupService(
-		deps.TenantAdmin,
-		deps.RepositoryForTenant,
-		deps.Config,
-		deps.Signer,
-		auditLog,
-		logger,
-	)
 }
 
 // buildDomainService returns the wired DomainService backing the tenant

@@ -21,12 +21,12 @@ import (
 // provider's own session id is stored alongside but never returned to
 // the client.
 type IdentityVerificationService struct {
-	defaultRepo     Repository
-	provider        idv.Provider
-	defaultTenantID string
-	clock           func() time.Time
-	newID           func() string
-	logger          *zap.Logger
+	defaultRepo      Repository
+	provider         idv.Provider
+	defaultProjectID string
+	clock            func() time.Time
+	newID            func() string
+	logger           *zap.Logger
 }
 
 // NewIdentityVerificationService constructs the service. clock and
@@ -34,38 +34,32 @@ type IdentityVerificationService struct {
 func NewIdentityVerificationService(
 	repo Repository,
 	provider idv.Provider,
-	tenantID string,
+	projectID string,
 	logger *zap.Logger,
 ) *IdentityVerificationService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &IdentityVerificationService{
-		defaultRepo:     repo,
-		provider:        provider,
-		defaultTenantID: tenantID,
-		clock:           time.Now,
-		newID:           newVerificationID,
-		logger:          logger,
+		defaultRepo:      repo,
+		provider:         provider,
+		defaultProjectID: projectID,
+		clock:            time.Now,
+		newID:            newVerificationID,
+		logger:           logger,
 	}
 }
 
-// tenantID returns the request's resolved tenant, falling back to the
-// boot-time DefaultTenantID in mode=single (decision log §1).
-func (s *IdentityVerificationService) tenantID(ctx context.Context) string {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.TenantID != "" {
-		return scope.TenantID
-	}
-	return s.defaultTenantID
+// projectID returns the storage shard (project) the request operates under:
+// the per-request ProjectScope when present, else the boot default.
+func (s *IdentityVerificationService) projectID(ctx context.Context) string {
+	return requestProjectID(ctx, s.defaultProjectID)
 }
 
-// repo returns the Repository scoped to the request's resolved tenant,
-// falling back to the boot-time Repository in mode=single.
+// repo returns the Repository bound to the request's project (ADR-0002),
+// falling back to the boot-default project when no scope is present.
 func (s *IdentityVerificationService) repo(ctx context.Context) Repository {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.Repo != nil {
-		return scope.Repo
-	}
-	return s.defaultRepo
+	return scopedRepository(ctx, s.defaultRepo, s.defaultProjectID)
 }
 
 // BeginIdentityVerification creates a new verification session for
@@ -91,7 +85,7 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 
 	sess, err := s.provider.BeginVerification(ctx, idv.Request{
 		UserID:      userID,
-		TenantID:    s.tenantID(ctx),
+		TenantID:    s.projectID(ctx),
 		Email:       user.Email,
 		DisplayName: user.Name,
 	})
@@ -109,7 +103,7 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 	rec := &IdentityVerificationRecord{
 		VerificationID:    s.newID(),
 		UserID:            userID,
-		TenantID:          s.tenantID(ctx),
+		ProjectID:         s.projectID(ctx),
 		Provider:          s.provider.Name(),
 		ProviderSessionID: sess.ProviderSessionID,
 		Status:            IDVStatusPending,

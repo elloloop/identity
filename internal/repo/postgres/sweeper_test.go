@@ -30,16 +30,17 @@ func TestPostgres_SweeperRespectsLimitAndGrace(t *testing.T) {
 
 	require.NoError(t, truncateAll(ctx, dsn))
 
-	tenant := fmt.Sprintf("sweep-tenant-%d", time.Now().UnixNano())
+	projectID := fmt.Sprintf("sweep-project-%d", time.Now().UnixNano())
 	repo, err := New(ctx, Config{
 		DSN:         dsn,
 		MaxConns:    5,
 		ConnTimeout: 5 * time.Second,
 		AutoMigrate: true,
-		TenantID:    tenant,
+		ProjectID:   projectID,
 	})
 	require.NoError(t, err)
 	defer repo.Close()
+	seedProject(ctx, t, repo, projectID)
 
 	// Seed a parent user so FK constraints on tokens are satisfied.
 	now := time.Now().UnixMilli()
@@ -68,9 +69,10 @@ func TestPostgres_SweeperRespectsLimitAndGrace(t *testing.T) {
 		// same table.
 		count := func(hashPrefix string) int {
 			var n int
-			require.NoError(t, repo.pool.QueryRow(ctx,
-				`SELECT COUNT(*) FROM password_reset_tokens WHERE tenant_id=$1 AND token_hash LIKE $2`,
-				tenant, hashPrefix+"%",
+			require.NoError(t, repo.pool.QueryRow(
+				ctx,
+				`SELECT COUNT(*) FROM password_reset_tokens WHERE project_id=$1 AND token_hash LIKE $2`,
+				projectID, hashPrefix+"%",
 			).Scan(&n))
 			return n
 		}

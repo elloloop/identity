@@ -53,7 +53,6 @@ func run() error {
 		Logger: logger,
 		Config: identityserver.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
 			RepoDriver:                    "memory",
-			IdentityMode:                  "single",
 			DefaultTenantID:               "demo",
 			AuthAllowLocal:                true,
 			PasswordSignupEnabled:         true,

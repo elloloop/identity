@@ -68,33 +68,6 @@ func runPaginationConformance(t *testing.T, driver Driver) {
 			}
 		})
 
-		t.Run("Organizations_ListForUserReturnsAll", func(t *testing.T) {
-			ctx := context.Background()
-			r := driver.NewRepo(t)
-			uid := createTestUser(t, r, "page-org@example.com")
-			for i := 0; i < paginationRows; i++ {
-				orgID, err := r.CreateOrganization(ctx, &service.Organization{
-					Slug: fmt.Sprintf("page-org-%d", i), DisplayName: "Org", OwnerUserID: uid,
-					CreatedAtMs: int64(100 + i), UpdatedAtMs: int64(100 + i),
-				})
-				if err != nil {
-					t.Fatalf("CreateOrganization %d: %v", i, err)
-				}
-				if _, err := r.AddOrganizationMember(ctx, &service.OrganizationMembership{
-					OrganizationID: orgID, UserID: uid, Role: "member", CreatedAtMs: int64(100 + i),
-				}); err != nil {
-					t.Fatalf("AddOrganizationMember %d: %v", i, err)
-				}
-			}
-			orgs, err := r.ListOrganizationsForUser(ctx, uid)
-			if err != nil {
-				t.Fatalf("ListOrganizationsForUser: %v", err)
-			}
-			if len(orgs) != paginationRows {
-				t.Fatalf("ListOrganizationsForUser returned %d of %d orgs — list read does not page past the server cap", len(orgs), paginationRows)
-			}
-		})
-
 		t.Run("RefreshTokens_DeleteForUserDrainsAll", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
@@ -179,18 +152,6 @@ func runFreshTenantConformance(t *testing.T, driver Driver) {
 			}
 			if len(got) != 0 {
 				t.Errorf("ListPasskeyCredentials on fresh tenant: want 0 rows, got %d", len(got))
-			}
-		})
-
-		t.Run("ListOrganizationsForUser", func(t *testing.T) {
-			ctx := context.Background()
-			r := driver.NewRepo(t)
-			got, err := r.ListOrganizationsForUser(ctx, "no-such-user")
-			if err != nil {
-				t.Errorf("ListOrganizationsForUser on fresh tenant: want empty, got err=%v", err)
-			}
-			if len(got) != 0 {
-				t.Errorf("ListOrganizationsForUser on fresh tenant: want 0 rows, got %d", len(got))
 			}
 		})
 

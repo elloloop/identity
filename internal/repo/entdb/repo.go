@@ -37,8 +37,17 @@ const systemActor = "system:admin"
 // entRepository is the EntDB-backed implementation of
 // service.Repository.
 type entRepository struct {
-	client   entClient
-	tenantID string
+	client entClient
+	// projectID is the storage shard this repository is bound to
+	// (ADR-0002). The Project is identity's isolation shard, so the SDK
+	// partition (entClient scope) is keyed by the project id. Per-request
+	// scopes are derived via WithProject.
+	projectID string
+	// newScope rebinds the underlying SDK scope to a different project,
+	// sharing the same connection. It is captured at construction so
+	// WithProject can produce a sibling without the repository needing to
+	// hold the raw *sdk.DbClient.
+	newScope func(projectID string) entClient
 }
 
 type rawUpdateClient interface {
@@ -59,12 +68,31 @@ type rawUpdateClient interface {
 const bulkDrainMaxIterations = 100
 
 // NewRepository constructs an EntDB-backed Repository using the SDK's
-// public typed surface. The returned repository wraps every entClient
+// public typed surface. projectID is the storage shard the repository
+// binds to (ADR-0002 — the Project is identity's isolation shard, so it
+// drives the SDK partition). The returned repository wraps every entClient
 // call in an OpenTelemetry span (no-op when OTel is disabled).
-func NewRepository(client *sdk.DbClient, tenantID string) service.Repository {
+func NewRepository(client *sdk.DbClient, projectID string) service.Repository {
+	newScope := func(pid string) entClient {
+		return newTracedClient(newSDKScope(client, pid))
+	}
 	return &entRepository{
-		client:   newTracedClient(newSDKScope(client, tenantID)),
-		tenantID: tenantID,
+		client:    newScope(projectID),
+		projectID: projectID,
+		newScope:  newScope,
+	}
+}
+
+// WithProject returns a Repository sharing this store's underlying SDK
+// client but partitioned on a different project (ADR-0002). The per-request
+// project-resolution path uses it so every backend honours the resolved
+// project; the returned value shares the connection and must not be closed
+// independently.
+func (r *entRepository) WithProject(projectID string) service.Repository {
+	return &entRepository{
+		client:    r.newScope(projectID),
+		projectID: projectID,
+		newScope:  r.newScope,
 	}
 }
 
@@ -354,7 +382,6 @@ func (r *entRepository) DeleteUser(ctx context.Context, userID string) error {
 		{"recovery_code", func() proto.Message { return &schemapb.RecoveryCode{} }},
 		{"identity_verification", func() proto.Message { return &schemapb.IdentityVerificationRecord{} }},
 		{"phone_verification_code", func() proto.Message { return &schemapb.PhoneVerificationCode{} }},
-		{"organization_membership", func() proto.Message { return &schemapb.OrganizationMembership{} }},
 		// Ephemeral tokens, now user_id-indexed (#168) so they drain here
 		// instead of waiting for the TTL sweepers. oauth_one_time_code was
 		// already user_id-indexed but had been omitted from the drain — the
@@ -2048,12 +2075,11 @@ func (r *entRepository) ListOAuthIdentitiesForUser(ctx context.Context, userID s
 // ── Identity-verification records ─────────────────────────────────
 
 // identityVerificationFromProto rehydrates a *service.IdentityVerificationRecord
-// from the wire payload. tenantID is the repository's tenant scope —
-// the proto has no tenant_id field because identity-tenant ↔ entdb-tenant
-// is 1:1 (per docs/IDENTITY.md): the storage scope IS the tenant. Reads
-// always know which tenant they're reading from, so the field is
-// synthesised here rather than persisted on every row.
-func identityVerificationFromProto(id, tenantID string, p *schemapb.IdentityVerificationRecord) *service.IdentityVerificationRecord {
+// from the wire payload. projectID is the repository's storage shard
+// (ADR-0002) — the proto has no project_id field because the shard IS the
+// partition the SDK reads under, so it is synthesised here rather than
+// persisted on every row.
+func identityVerificationFromProto(id, projectID string, p *schemapb.IdentityVerificationRecord) *service.IdentityVerificationRecord {
 	if p == nil {
 		return nil
 	}
@@ -2061,7 +2087,7 @@ func identityVerificationFromProto(id, tenantID string, p *schemapb.IdentityVeri
 		NodeID:            id,
 		VerificationID:    p.GetVerificationId(),
 		UserID:            p.GetUserId(),
-		TenantID:          tenantID,
+		ProjectID:         projectID,
 		Provider:          p.GetProvider(),
 		ProviderSessionID: p.GetProviderSessionId(),
 		Status:            p.GetStatus(),
@@ -2161,7 +2187,7 @@ func (r *entRepository) GetIdentityVerification(ctx context.Context, verificatio
 	if err != nil {
 		return nil, fmt.Errorf("repo: GetIdentityVerification: %w", err)
 	}
-	return identityVerificationFromProto(id, r.tenantID, dst), nil
+	return identityVerificationFromProto(id, r.projectID, dst), nil
 }
 
 func (r *entRepository) GetLatestIdentityVerificationForUser(ctx context.Context, userID string) (*service.IdentityVerificationRecord, error) {
@@ -2174,7 +2200,7 @@ func (r *entRepository) GetLatestIdentityVerificationForUser(ctx context.Context
 	}
 	var latest *service.IdentityVerificationRecord
 	for _, row := range rows {
-		rec := identityVerificationFromProto(row.NodeID, r.tenantID, row.Message.(*schemapb.IdentityVerificationRecord))
+		rec := identityVerificationFromProto(row.NodeID, r.projectID, row.Message.(*schemapb.IdentityVerificationRecord))
 		if latest == nil || rec.CreatedAt > latest.CreatedAt {
 			latest = rec
 		}
@@ -2205,187 +2231,6 @@ func (r *entRepository) UpdateIdentityVerificationStatus(ctx context.Context, ve
 	return nil
 }
 
-// ── Organizations ─────────────────────────────────────────────────
-
-func organizationFromProto(id string, p *schemapb.Organization) *service.Organization {
-	if p == nil {
-		return nil
-	}
-	return &service.Organization{
-		ID:          id,
-		Slug:        p.GetSlug(),
-		DisplayName: p.GetDisplayName(),
-		OwnerUserID: p.GetOwnerUserId(),
-		CreatedAtMs: p.GetCreatedAt(),
-		UpdatedAtMs: p.GetUpdatedAt(),
-	}
-}
-
-func organizationMembershipFromProto(id string, p *schemapb.OrganizationMembership) *service.OrganizationMembership {
-	if p == nil {
-		return nil
-	}
-	return &service.OrganizationMembership{
-		NodeID:         id,
-		OrganizationID: p.GetOrganizationId(),
-		UserID:         p.GetUserId(),
-		Role:           p.GetRole(),
-		CreatedAtMs:    p.GetCreatedAt(),
-	}
-}
-
-func (r *entRepository) CreateOrganization(ctx context.Context, o *service.Organization) (string, error) {
-	if o == nil {
-		return "", errors.New("repo: CreateOrganization: nil organization")
-	}
-	if o.Slug == "" {
-		return "", fmt.Errorf("%w: missing slug", service.ErrInvalidArgument)
-	}
-	now := time.Now().UnixMilli()
-	if o.CreatedAtMs == 0 {
-		o.CreatedAtMs = now
-	}
-	if o.UpdatedAtMs == 0 {
-		o.UpdatedAtMs = o.CreatedAtMs
-	}
-	// Slug uniqueness is declared on the proto field, so EntDB rejects
-	// duplicates at insert time. We pre-check anyway to translate the
-	// upstream error into service.ErrAlreadyExists for callers.
-	if existing, err := r.GetOrganizationBySlug(ctx, o.Slug); err != nil {
-		return "", err
-	} else if existing != nil {
-		return "", fmt.Errorf("%w: slug %q", service.ErrAlreadyExists, o.Slug)
-	}
-	msg := &schemapb.Organization{
-		Slug:        o.Slug,
-		DisplayName: o.DisplayName,
-		OwnerUserId: o.OwnerUserID,
-		CreatedAt:   o.CreatedAtMs,
-		UpdatedAt:   o.UpdatedAtMs,
-	}
-	id, err := r.client.create(ctx, actorStr(o.OwnerUserID), msg)
-	if err != nil {
-		return "", fmt.Errorf("repo: CreateOrganization: %w", err)
-	}
-	o.ID = id
-	return id, nil
-}
-
-func (r *entRepository) GetOrganization(ctx context.Context, orgID string) (*service.Organization, error) {
-	if orgID == "" {
-		return nil, nil
-	}
-	dst := &schemapb.Organization{}
-	if err := r.client.get(ctx, systemActor, dst, orgID); err != nil {
-		if errors.Is(err, errNotFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("repo: GetOrganization: %w", err)
-	}
-	return organizationFromProto(orgID, dst), nil
-}
-
-func (r *entRepository) GetOrganizationBySlug(ctx context.Context, slug string) (*service.Organization, error) {
-	if slug == "" {
-		return nil, nil
-	}
-	dst := &schemapb.Organization{}
-	id, err := r.client.findByKey(ctx, systemActor, schemapb.OrganizationSlug, slug, dst)
-	if errors.Is(err, errNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("repo: GetOrganizationBySlug: %w", err)
-	}
-	return organizationFromProto(id, dst), nil
-}
-
-func (r *entRepository) ListOrganizationsForUser(ctx context.Context, userID string) ([]*service.Organization, error) {
-	if userID == "" {
-		return nil, nil
-	}
-	rows, err := r.client.query(ctx, actorStr(userID), &schemapb.OrganizationMembership{}, map[string]any{"user_id": userID})
-	if err != nil {
-		return nil, fmt.Errorf("repo: ListOrganizationsForUser: %w", err)
-	}
-	out := make([]*service.Organization, 0, len(rows))
-	seen := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		mem := organizationMembershipFromProto(row.NodeID, row.Message.(*schemapb.OrganizationMembership))
-		if _, dup := seen[mem.OrganizationID]; dup {
-			continue
-		}
-		seen[mem.OrganizationID] = struct{}{}
-		org, err := r.GetOrganization(ctx, mem.OrganizationID)
-		if err != nil {
-			return nil, fmt.Errorf("repo: ListOrganizationsForUser: %w", err)
-		}
-		if org == nil {
-			continue
-		}
-		out = append(out, org)
-	}
-	return out, nil
-}
-
-// CountOrganizationsOwnedBy returns how many organizations the user owns.
-// Queries Organization by its indexed owner_user_id field (registered in
-// rawQuerySpecOrganization so the reliable transport path is used).
-func (r *entRepository) CountOrganizationsOwnedBy(ctx context.Context, userID string) (int, error) {
-	if userID == "" {
-		return 0, nil
-	}
-	rows, err := r.client.query(ctx, actorStr(userID), &schemapb.Organization{}, map[string]any{"owner_user_id": userID})
-	if err != nil {
-		return 0, fmt.Errorf("repo: CountOrganizationsOwnedBy: %w", err)
-	}
-	return len(rows), nil
-}
-
-func (r *entRepository) AddOrganizationMember(ctx context.Context, m *service.OrganizationMembership) (string, error) {
-	if m == nil {
-		return "", errors.New("repo: AddOrganizationMember: nil membership")
-	}
-	if m.OrganizationID == "" || m.UserID == "" {
-		return "", fmt.Errorf("%w: missing organization_id or user_id", service.ErrInvalidArgument)
-	}
-	// "Exactly one (organization_id, user_id) row" is enforced by a
-	// service-layer pre-check. OrganizationMembership could be promoted
-	// to a (entdb.node).composite_unique declaration — the same path
-	// OAuthIdentity uses now (ADR-031 self-describing schema) — but
-	// real membership writes are administrator-initiated and naturally
-	// serialised, so the pre-check is sufficient. The query mirrors
-	// ListOrganizationsForUser so the secondary index is exercised.
-	rows, err := r.client.query(ctx, actorStr(m.UserID), &schemapb.OrganizationMembership{}, map[string]any{
-		"organization_id": m.OrganizationID,
-		"user_id":         m.UserID,
-	})
-	if err != nil {
-		return "", fmt.Errorf("repo: AddOrganizationMember dup-check: %w", err)
-	}
-	if len(rows) > 0 {
-		return "", fmt.Errorf("%w: %s already in %s", service.ErrAlreadyExists, m.UserID, m.OrganizationID)
-	}
-	if m.CreatedAtMs == 0 {
-		m.CreatedAtMs = time.Now().UnixMilli()
-	}
-	if m.Role == "" {
-		m.Role = "member"
-	}
-	msg := &schemapb.OrganizationMembership{
-		OrganizationId: m.OrganizationID,
-		UserId:         m.UserID,
-		Role:           m.Role,
-		CreatedAt:      m.CreatedAtMs,
-	}
-	id, err := r.client.create(ctx, actorStr(m.UserID), msg)
-	if err != nil {
-		return "", fmt.Errorf("repo: AddOrganizationMember: %w", err)
-	}
-	m.NodeID = id
-	return id, nil
-}
-
 // ── Sessions ──────────────────────────────────────────────────────
 
 func sessionFromProto(id string, p *schemapb.Session) *service.SessionRecord {
@@ -2414,10 +2259,9 @@ func (r *entRepository) CreateSession(ctx context.Context, s *service.SessionRec
 	if s.CreatedAtMs == 0 {
 		s.CreatedAtMs = time.Now().UnixMilli()
 	}
-	// Mirror CreateOrganization's pre-check pattern: EntDB enforces
-	// sid uniqueness on the wire, but the underlying SDK error type
-	// is opaque from the repo layer. The pre-check translates the
-	// collision into the canonical service.ErrAlreadyExists for the
+	// EntDB enforces sid uniqueness on the wire, but the underlying SDK
+	// error type is opaque from the repo layer. The pre-check translates
+	// the collision into the canonical service.ErrAlreadyExists for the
 	// service layer + conformance suite.
 	if existing, err := r.GetSessionBySid(ctx, s.SID); err != nil {
 		return "", err

@@ -33,9 +33,9 @@ func (r *pgRepository) FindRefreshTokenByHash(ctx context.Context, hash string) 
 	}
 	const q = `SELECT ` + refreshTokenColumns + `
 		FROM refresh_tokens
-		WHERE tenant_id = $1 AND token_hash = $2 AND consumed_at_ms = 0
+		WHERE project_id = $1 AND token_hash = $2 AND consumed_at_ms = 0
 		LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, r.tenantID, hash)
+	row := r.pool.QueryRow(ctx, q, r.projectID, hash)
 	t, err := scanRefreshToken(row)
 	if noRows(err) {
 		return nil, nil
@@ -52,9 +52,9 @@ func (r *pgRepository) FindRefreshTokenByHashIncludingConsumed(ctx context.Conte
 	}
 	const q = `SELECT ` + refreshTokenColumns + `
 		FROM refresh_tokens
-		WHERE tenant_id = $1 AND token_hash = $2
+		WHERE project_id = $1 AND token_hash = $2
 		LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, r.tenantID, hash)
+	row := r.pool.QueryRow(ctx, q, r.projectID, hash)
 	t, err := scanRefreshToken(row)
 	if noRows(err) {
 		return nil, nil
@@ -75,7 +75,7 @@ func (r *pgRepository) CreateRefreshToken(ctx context.Context, t *service.Refres
 	}
 	const q = `
 		INSERT INTO refresh_tokens (
-			id, tenant_id, token_hash, user_id,
+			id, project_id, token_hash, user_id,
 			device_info, device_name, ip_address, user_agent,
 			expires_at_ms, created_at_ms, last_used_at_ms, consumed_at_ms
 		) VALUES (
@@ -85,7 +85,7 @@ func (r *pgRepository) CreateRefreshToken(ctx context.Context, t *service.Refres
 		)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, t.TokenHash, t.UserID,
+		id, r.projectID, t.TokenHash, t.UserID,
 		t.DeviceInfo, t.DeviceName, t.IPAddress, t.UserAgent,
 		t.ExpiresAt, t.CreatedAt, t.LastUsedAt, t.ConsumedAtMs,
 	)
@@ -100,8 +100,8 @@ func (r *pgRepository) DeleteRefreshToken(ctx context.Context, nodeID string) er
 	if nodeID == "" {
 		return nil
 	}
-	const q = `DELETE FROM refresh_tokens WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, nodeID); err != nil {
+	const q = `DELETE FROM refresh_tokens WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, nodeID); err != nil {
 		return wrapPgErr("DeleteRefreshToken", err)
 	}
 	return nil
@@ -111,8 +111,8 @@ func (r *pgRepository) DeleteRefreshTokensForUser(ctx context.Context, userID st
 	if userID == "" {
 		return nil
 	}
-	const q = `DELETE FROM refresh_tokens WHERE tenant_id = $1 AND user_id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID); err != nil {
+	const q = `DELETE FROM refresh_tokens WHERE project_id = $1 AND user_id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, userID); err != nil {
 		return wrapPgErr("DeleteRefreshTokensForUser", err)
 	}
 	return nil
@@ -129,8 +129,8 @@ func (r *pgRepository) ConsumeRefreshTokenByHash(ctx context.Context, hash strin
 	const q = `
 		UPDATE refresh_tokens
 		   SET consumed_at_ms = $3
-		 WHERE tenant_id = $1 AND token_hash = $2 AND consumed_at_ms = 0`
-	tag, err := r.pool.Exec(ctx, q, r.tenantID, hash, atMs)
+		 WHERE project_id = $1 AND token_hash = $2 AND consumed_at_ms = 0`
+	tag, err := r.pool.Exec(ctx, q, r.projectID, hash, atMs)
 	if err != nil {
 		return wrapPgErr("ConsumeRefreshTokenByHash", err)
 	}

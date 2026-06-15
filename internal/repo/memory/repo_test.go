@@ -20,6 +20,13 @@ func TestConformance(t *testing.T) {
 		NewRepo: func(_ *testing.T) service.Repository {
 			return memory.New()
 		},
+		// Memory has no control plane, so binding a project is just the
+		// WithProject scope switch — each project gets its own isolated store.
+		BindProject: func(_ *testing.T, base service.Repository, projectID string) service.Repository {
+			return base.(interface {
+				WithProject(string) service.Repository
+			}).WithProject(projectID)
+		},
 	})
 }
 

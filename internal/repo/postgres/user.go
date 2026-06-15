@@ -95,9 +95,9 @@ func (r *pgRepository) FindUserByEmail(ctx context.Context, email string) (*serv
 	}
 	const q = `SELECT ` + userColumns + `
 		FROM users
-		WHERE tenant_id = $1 AND lower(email) = lower($2)
+		WHERE project_id = $1 AND lower(email) = lower($2)
 		LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, r.tenantID, email)
+	row := r.pool.QueryRow(ctx, q, r.projectID, email)
 	u, err := scanUser(row)
 	if noRows(err) {
 		return nil, nil
@@ -114,8 +114,8 @@ func (r *pgRepository) GetUser(ctx context.Context, userID string) (*service.Use
 	}
 	const q = `SELECT ` + userColumns + `
 		FROM users
-		WHERE tenant_id = $1 AND id = $2`
-	row := r.pool.QueryRow(ctx, q, r.tenantID, userID)
+		WHERE project_id = $1 AND id = $2`
+	row := r.pool.QueryRow(ctx, q, r.projectID, userID)
 	u, err := scanUser(row)
 	if noRows(err) {
 		return nil, nil
@@ -153,7 +153,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 
 	const q = `
 		INSERT INTO users (
-			id, tenant_id, email, name, role, avatar_url, status,
+			id, project_id, email, name, role, avatar_url, status,
 			recovery_email, password_hash, quota_bytes, totp_required,
 			failed_login_count, locked_until_ms,
 			email_verified, email_verified_at_ms,
@@ -173,7 +173,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 		)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, u.Email, u.Name, role, u.AvatarURL, status,
+		id, r.projectID, u.Email, u.Name, role, u.AvatarURL, status,
 		u.RecoveryEmail, u.PasswordHash, u.QuotaBytes, u.TotpRequired,
 		int64(u.FailedLoginCount), u.LockedUntil,
 		u.EmailVerified, u.EmailVerifiedAt,
@@ -260,9 +260,9 @@ func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map
 	if len(sets) == 0 {
 		return nil
 	}
-	args = append(args, r.tenantID, userID)
+	args = append(args, r.projectID, userID)
 	q := fmt.Sprintf(
-		`UPDATE users SET %s WHERE tenant_id = $%d AND id = $%d`,
+		`UPDATE users SET %s WHERE project_id = $%d AND id = $%d`,
 		strings.Join(sets, ", "), idx, idx+1,
 	)
 	if _, err := r.pool.Exec(ctx, q, args...); err != nil {
@@ -290,15 +290,13 @@ var userDeleteNonFKTables = []string{
 // refresh_tokens, sessions, password_reset_tokens, email_change_tokens,
 // oauth_identities, passkeys, totp_secrets, recovery_codes,
 // login_challenges, oauth_one_time_codes, identity_verifications,
-// phone_verification_codes, organization_members, and group_memberships.
+// phone_verification_codes, and group_memberships.
 // audit_events has no FK to users and is retained for accountability.
 // The email-keyed email_login_codes / magic_link_tokens are out of scope
 // (no user_id).
 //
-// A user who owns an organization (organizations.owner_user_id is
-// ON DELETE RESTRICT) cannot be deleted; the FK violation surfaces to
-// the caller rather than orphaning the org. It is idempotent: deleting
-// a non-existent user touches zero rows and returns nil.
+// It is idempotent: deleting a non-existent user touches zero rows and
+// returns nil.
 func (r *pgRepository) DeleteUser(ctx context.Context, userID string) error {
 	if userID == "" {
 		return nil
@@ -311,15 +309,15 @@ func (r *pgRepository) DeleteUser(ctx context.Context, userID string) error {
 
 	for _, tbl := range userDeleteNonFKTables {
 		if _, err := tx.Exec(ctx,
-			fmt.Sprintf(`DELETE FROM %s WHERE tenant_id = $1 AND user_id = $2`, tbl),
-			r.tenantID, userID); err != nil {
+			fmt.Sprintf(`DELETE FROM %s WHERE project_id = $1 AND user_id = $2`, tbl),
+			r.projectID, userID); err != nil {
 			return wrapPgErr("DeleteUser("+tbl+")", err)
 		}
 	}
 
 	if _, err := tx.Exec(ctx,
-		`DELETE FROM users WHERE tenant_id = $1 AND id = $2`,
-		r.tenantID, userID); err != nil {
+		`DELETE FROM users WHERE project_id = $1 AND id = $2`,
+		r.projectID, userID); err != nil {
 		return wrapPgErr("DeleteUser(users)", err)
 	}
 
@@ -338,10 +336,10 @@ func (r *pgRepository) IncrementFailedLoginCount(ctx context.Context, userID str
 	const q = `
 		UPDATE users
 		   SET failed_login_count = failed_login_count + 1
-		 WHERE tenant_id = $1 AND id = $2
+		 WHERE project_id = $1 AND id = $2
 		RETURNING failed_login_count`
 	var newCount int64
-	err := r.pool.QueryRow(ctx, q, r.tenantID, userID).Scan(&newCount)
+	err := r.pool.QueryRow(ctx, q, r.projectID, userID).Scan(&newCount)
 	if noRows(err) {
 		return 0, errors.New("postgres: IncrementFailedLoginCount: user not found")
 	}
@@ -361,8 +359,8 @@ func (r *pgRepository) ResetFailedLoginCount(ctx context.Context, userID string)
 	const q = `
 		UPDATE users
 		   SET failed_login_count = 0, locked_until_ms = 0
-		 WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID); err != nil {
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, userID); err != nil {
 		return wrapPgErr("ResetFailedLoginCount", err)
 	}
 	return nil
@@ -372,8 +370,8 @@ func (r *pgRepository) SetUserLockedUntil(ctx context.Context, userID string, lo
 	if userID == "" {
 		return errors.New("postgres: SetUserLockedUntil: missing user id")
 	}
-	const q = `UPDATE users SET locked_until_ms = $3 WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, lockedUntilMs); err != nil {
+	const q = `UPDATE users SET locked_until_ms = $3 WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, userID, lockedUntilMs); err != nil {
 		return wrapPgErr("SetUserLockedUntil", err)
 	}
 	return nil
@@ -388,8 +386,8 @@ func (r *pgRepository) SetUserEmailVerified(ctx context.Context, userID string, 
 		   SET email_verified = TRUE,
 		       email_verified_at_ms = $3,
 		       updated_at_ms = $3
-		 WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, atMs); err != nil {
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, userID, atMs); err != nil {
 		return wrapPgErr("SetUserEmailVerified", err)
 	}
 	return nil
@@ -404,8 +402,8 @@ func (r *pgRepository) SetUserIDVVerified(ctx context.Context, userID string, at
 		   SET idv_verified = TRUE,
 		       idv_verified_at_ms = $3,
 		       updated_at_ms = $3
-		 WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, atMs); err != nil {
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, userID, atMs); err != nil {
 		return wrapPgErr("SetUserIDVVerified", err)
 	}
 	return nil
@@ -421,8 +419,8 @@ func (r *pgRepository) SetUserPhoneVerified(ctx context.Context, userID, phoneNu
 		       phone_verified = TRUE,
 		       phone_verified_at_ms = $4,
 		       updated_at_ms = $4
-		 WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, phoneNumber, atMs); err != nil {
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, userID, phoneNumber, atMs); err != nil {
 		return wrapPgErr("SetUserPhoneVerified", err)
 	}
 	return nil
@@ -438,8 +436,8 @@ func (r *pgRepository) UpdateUserEmail(ctx context.Context, userID, newEmail str
 		       email_verified = TRUE,
 		       email_verified_at_ms = $4,
 		       updated_at_ms = $4
-		 WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, newEmail, atMs); err != nil {
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, userID, newEmail, atMs); err != nil {
 		return wrapPgErr("UpdateUserEmail", err)
 	}
 	return nil

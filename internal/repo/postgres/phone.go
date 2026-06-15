@@ -10,7 +10,7 @@ import (
 // ── Phone verification codes (SMS OTP) ────────────────────────────────
 
 // UpsertPhoneVerificationCode replaces any existing code for the user so
-// at most one is live per user. The (tenant_id, user_id) unique index is
+// at most one is live per user. The (project_id, user_id) unique index is
 // the upsert target: ON CONFLICT overwrites the hash, expiry, and
 // attempt counters in place, which both invalidates the previous code
 // and resets the attempt budget for the fresh one.
@@ -24,11 +24,11 @@ func (r *pgRepository) UpsertPhoneVerificationCode(ctx context.Context, c *servi
 	}
 	const q = `
 		INSERT INTO phone_verification_codes (
-			id, tenant_id, user_id, phone_number, code_hash,
+			id, project_id, user_id, phone_number, code_hash,
 			expires_at_ms, created_at_ms, consumed_at_ms,
 			attempt_count, max_attempts
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+		ON CONFLICT (project_id, user_id) DO UPDATE SET
 			phone_number   = EXCLUDED.phone_number,
 			code_hash      = EXCLUDED.code_hash,
 			expires_at_ms  = EXCLUDED.expires_at_ms,
@@ -40,7 +40,7 @@ func (r *pgRepository) UpsertPhoneVerificationCode(ctx context.Context, c *servi
 	var outID string
 	err := r.pool.QueryRow(
 		ctx, q,
-		id, r.tenantID, c.UserID, c.PhoneNumber, c.CodeHash,
+		id, r.projectID, c.UserID, c.PhoneNumber, c.CodeHash,
 		c.ExpiresAt, c.CreatedAt, c.ConsumedAt,
 		c.AttemptCount, c.MaxAttempts,
 	).Scan(&outID)
@@ -56,9 +56,9 @@ func (r *pgRepository) FindPhoneVerificationCodeByUser(ctx context.Context, user
 		SELECT id, user_id, phone_number, code_hash, expires_at_ms,
 		       created_at_ms, consumed_at_ms, attempt_count, max_attempts
 		  FROM phone_verification_codes
-		 WHERE tenant_id = $1 AND user_id = $2`
+		 WHERE project_id = $1 AND user_id = $2`
 	var c service.PhoneVerificationCodeRecord
-	err := r.pool.QueryRow(ctx, q, r.tenantID, userID).Scan(
+	err := r.pool.QueryRow(ctx, q, r.projectID, userID).Scan(
 		&c.NodeID, &c.UserID, &c.PhoneNumber, &c.CodeHash, &c.ExpiresAt,
 		&c.CreatedAt, &c.ConsumedAt, &c.AttemptCount, &c.MaxAttempts,
 	)
@@ -75,8 +75,8 @@ func (r *pgRepository) IncrementPhoneVerificationCodeAttempts(ctx context.Contex
 	const q = `
 		UPDATE phone_verification_codes
 		   SET attempt_count = attempt_count + 1
-		 WHERE tenant_id = $1 AND id = $2`
-	tag, err := r.pool.Exec(ctx, q, r.tenantID, nodeID)
+		 WHERE project_id = $1 AND id = $2`
+	tag, err := r.pool.Exec(ctx, q, r.projectID, nodeID)
 	if err != nil {
 		return wrapPgErr("IncrementPhoneVerificationCodeAttempts", err)
 	}
@@ -97,12 +97,12 @@ func (r *pgRepository) ConsumePhoneVerificationCode(ctx context.Context, userID 
 	const q = `
 		UPDATE phone_verification_codes
 		   SET consumed_at_ms = $3
-		 WHERE tenant_id = $1 AND user_id = $2
+		 WHERE project_id = $1 AND user_id = $2
 		   AND consumed_at_ms = 0 AND expires_at_ms > $3
 		RETURNING id, user_id, phone_number, code_hash, expires_at_ms,
 		          created_at_ms, consumed_at_ms, attempt_count, max_attempts`
 	var c service.PhoneVerificationCodeRecord
-	err := r.pool.QueryRow(ctx, q, r.tenantID, userID, atMs).Scan(
+	err := r.pool.QueryRow(ctx, q, r.projectID, userID, atMs).Scan(
 		&c.NodeID, &c.UserID, &c.PhoneNumber, &c.CodeHash, &c.ExpiresAt,
 		&c.CreatedAt, &c.ConsumedAt, &c.AttemptCount, &c.MaxAttempts,
 	)

@@ -458,41 +458,6 @@ func TestAdminService_DeleteUser_CannotSelf(t *testing.T) {
 	}
 }
 
-func TestAdminService_DeleteUser_RejectsOrgOwner(t *testing.T) {
-	ctx := context.Background()
-	db := newFakeDB()
-	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
-
-	repo := newFakeRepo()
-	repo.users["owner-1"] = &User{ID: "owner-1", Email: "owner@test.com", Status: "active"}
-	// owner-1 still owns an org — the delete must be rejected.
-	if _, err := repo.CreateOrganization(ctx, &Organization{Slug: "acme", DisplayName: "Acme", OwnerUserID: "owner-1"}); err != nil {
-		t.Fatalf("seed org: %v", err)
-	}
-	// Seed a session so we can prove it is NOT revoked when the delete is rejected.
-	if _, err := repo.CreateSession(ctx, &SessionRecord{SID: "sid-1", UserID: "owner-1", CreatedAtMs: 100}); err != nil {
-		t.Fatalf("seed session: %v", err)
-	}
-
-	writer := newRecordingAuditWriter()
-	svc := newTestAdminServiceWithAudit(db, repo, writer)
-
-	err := svc.DeleteUser(ctx, "admin-1", "owner-1")
-	if !errors.Is(err, ErrUserOwnsOrganization) {
-		t.Fatalf("want ErrUserOwnsOrganization, got %v", err)
-	}
-	// The user, the org, and the session all survive; no delete audit event.
-	if u, _ := repo.GetUser(ctx, "owner-1"); u == nil {
-		t.Fatal("owner must still exist after a rejected delete")
-	}
-	if sess, _ := repo.GetSessionBySid(ctx, "sid-1"); sess == nil {
-		t.Fatal("session must NOT be revoked when the delete is rejected")
-	}
-	if n := writer.countByEventType(string(audit.EventUserDeleted)); n != 0 {
-		t.Fatalf("no user_deleted audit event expected, got %d", n)
-	}
-}
-
 func TestAdminService_DeleteUser_NotFound(t *testing.T) {
 	db := newFakeDB()
 	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")

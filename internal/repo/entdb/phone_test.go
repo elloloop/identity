@@ -17,7 +17,7 @@ import (
 func TestPhoneVerificationCode_MemoryClient(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := &entRepository{client: newMemoryEntClient(), tenantID: "t"}
+	repo := &entRepository{client: newMemoryEntClient(), projectID: "t"}
 
 	id, err := repo.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
 		UserID: "u-1", PhoneNumber: "+14155550123", CodeHash: "h1",
@@ -77,7 +77,7 @@ func TestSetUserPhoneVerified_MemoryClient(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	mem := newMemoryEntClient()
-	repo := &entRepository{client: mem, tenantID: "t"}
+	repo := &entRepository{client: mem, projectID: "t"}
 
 	uid, err := repo.CreateUser(ctx, &service.User{Email: "pv@example.com", Status: "active"})
 	if err != nil {
@@ -98,7 +98,7 @@ func TestSetUserPhoneVerified_MemoryClient(t *testing.T) {
 func TestDeleteExpiredPhoneVerificationCodes_MemoryClient(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := &entRepository{client: newMemoryEntClient(), tenantID: "t"}
+	repo := &entRepository{client: newMemoryEntClient(), projectID: "t"}
 
 	if _, err := repo.UpsertPhoneVerificationCode(ctx, &service.PhoneVerificationCodeRecord{
 		UserID: "old", PhoneNumber: "+14155550111", CodeHash: "h", ExpiresAt: 1_000, CreatedAt: 100,

@@ -16,42 +16,36 @@ import (
 // GroupService implements working-group CRUD and membership operations.
 // The underlying EntDB node type is WorkingGroup (type_id 2).
 type GroupService struct {
-	bootDB          DB
-	defaultTenantID string
-	audit           *audit.Logger
-	logger          *zap.Logger
+	bootDB           DB
+	defaultProjectID string
+	audit            *audit.Logger
+	logger           *zap.Logger
 }
 
 // NewGroupService creates a GroupService.
-func NewGroupService(db DB, tenantID string, auditLog *audit.Logger, logger *zap.Logger) *GroupService {
+func NewGroupService(db DB, projectID string, auditLog *audit.Logger, logger *zap.Logger) *GroupService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &GroupService{bootDB: db, defaultTenantID: tenantID, audit: auditLog, logger: logger}
+	return &GroupService{bootDB: db, defaultProjectID: projectID, audit: auditLog, logger: logger}
 }
 
-// tenantID returns the request's resolved tenant, falling back to the
-// boot-time DefaultTenantID in mode=single (decision log §1).
-func (s *GroupService) tenantID(ctx context.Context) string {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.TenantID != "" {
-		return scope.TenantID
-	}
-	return s.defaultTenantID
+// projectID returns the storage shard (project) the request operates under:
+// the per-request ProjectScope when present, else the boot default. It is
+// the partition argument the entdb DB transport keys on (the postgres DB
+// ignores it and filters on its WithProject-bound project instead).
+func (s *GroupService) projectID(ctx context.Context) string {
+	return requestProjectID(ctx, s.defaultProjectID)
 }
 
-// db returns the DB scoped to the request's resolved tenant (see the
-// AdminService.db comment for why the two drivers differ); it falls
-// back to the boot-time DB in mode=single.
+// db returns the DB bound to the request's project.
 func (s *GroupService) db(ctx context.Context) DB {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.DB != nil {
-		return scope.DB
-	}
-	return s.bootDB
+	return scopedDB(ctx, s.bootDB, s.defaultProjectID)
 }
 
 // CreateGroup creates a new working group.
 func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, description string) (*Group, error) {
-	if _, err := requireAdminActor(ctx, s.db(ctx), s.tenantID(ctx), actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID); err != nil {
 		return nil, err
 	}
 	name = strings.TrimSpace(name)
@@ -68,7 +62,7 @@ func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, descripti
 		gfUpdatedAt:   now,
 	}
 	op := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeWorkingGroup, Data: data}
-	result, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op})
+	result, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op})
 	if err != nil {
 		return nil, fmt.Errorf("create group: %w", err)
 	}
@@ -88,7 +82,7 @@ func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, descripti
 
 // UpdateGroup patches name and/or description of a group.
 func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, description string) (*Group, error) {
-	if _, err := requireAdminActor(ctx, s.db(ctx), s.tenantID(ctx), actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID); err != nil {
 		return nil, err
 	}
 	if groupID == "" {
@@ -104,12 +98,12 @@ func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, 
 	}
 
 	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeWorkingGroup, NodeID: groupID, Patch: patch}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return nil, fmt.Errorf("update group: %w", err)
 	}
 
 	// Re-fetch.
-	node, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), tenantAdminActor, typeWorkingGroup, groupID)
+	node, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), tenantAdminActor, typeWorkingGroup, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("re-fetch group: %w", err)
 	}
@@ -121,7 +115,7 @@ func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, 
 
 // DeleteGroup deletes a working group.
 func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string) error {
-	if _, err := requireAdminActor(ctx, s.db(ctx), s.tenantID(ctx), actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID); err != nil {
 		return err
 	}
 	if groupID == "" {
@@ -136,7 +130,7 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string)
 	// actor returns zero rows for another user's edges, which would silently
 	// skip the cleanup. This matches ListGroupMembers. The write uses the
 	// admin's actor, since the admin is the acting principal.
-	edges, err := s.db(ctx).GetEdgesTo(ctx, s.tenantID(ctx), tenantAdminActor, groupID, edgeMemberOf)
+	edges, err := s.db(ctx).GetEdgesTo(ctx, s.projectID(ctx), tenantAdminActor, groupID, edgeMemberOf)
 	if err != nil {
 		return fmt.Errorf("delete group: list members: %w", err)
 	}
@@ -148,7 +142,7 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string)
 		})
 	}
 	ops = append(ops, entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeWorkingGroup, NodeID: groupID})
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), ops); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), ops); err != nil {
 		return fmt.Errorf("delete group: %w", err)
 	}
 
@@ -158,7 +152,7 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string)
 
 // ListGroups returns a paginated list of groups.
 func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, limit int) ([]*Group, string, error) {
-	if _, err := requireAdminActor(ctx, s.db(ctx), s.tenantID(ctx), actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID); err != nil {
 		return nil, "", err
 	}
 	if limit <= 0 {
@@ -171,7 +165,7 @@ func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, l
 		}
 	}
 
-	nodes, err := s.db(ctx).QueryNodes(ctx, s.tenantID(ctx), tenantAdminActor, typeWorkingGroup, nil)
+	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), tenantAdminActor, typeWorkingGroup, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("list groups: %w", err)
 	}
@@ -199,7 +193,7 @@ func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, l
 
 // AddGroupMember creates a MEMBER_OF edge from user to group.
 func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, userID string) error {
-	if _, err := requireAdminActor(ctx, s.db(ctx), s.tenantID(ctx), actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID); err != nil {
 		return err
 	}
 	if groupID == "" || userID == "" {
@@ -210,7 +204,7 @@ func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, use
 		Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf,
 		FromNodeID: userID, ToNodeID: groupID,
 	}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("add group member: %w", err)
 	}
 
@@ -223,7 +217,7 @@ func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, use
 
 // RemoveGroupMember deletes the MEMBER_OF edge from user to group.
 func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, userID string) error {
-	if _, err := requireAdminActor(ctx, s.db(ctx), s.tenantID(ctx), actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID); err != nil {
 		return err
 	}
 	if groupID == "" || userID == "" {
@@ -234,7 +228,7 @@ func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, 
 		Type: entdb.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
 		FromNodeID: userID, ToNodeID: groupID,
 	}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("remove group member: %w", err)
 	}
 
@@ -248,21 +242,21 @@ func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, 
 // ListGroupMembers returns all users that belong to a group via
 // MEMBER_OF edges.
 func (s *GroupService) ListGroupMembers(ctx context.Context, actorID, groupID string) ([]*User, error) {
-	if _, err := requireAdminActor(ctx, s.db(ctx), s.tenantID(ctx), actorID); err != nil {
+	if _, err := requireAdminActor(ctx, s.db(ctx), s.projectID(ctx), actorID); err != nil {
 		return nil, err
 	}
 	if groupID == "" {
 		return nil, errors.New("group_id is required")
 	}
 
-	edges, err := s.db(ctx).GetEdgesTo(ctx, s.tenantID(ctx), tenantAdminActor, groupID, edgeMemberOf)
+	edges, err := s.db(ctx).GetEdgesTo(ctx, s.projectID(ctx), tenantAdminActor, groupID, edgeMemberOf)
 	if err != nil {
 		return nil, fmt.Errorf("list group members: %w", err)
 	}
 
 	users := make([]*User, 0, len(edges))
 	for _, e := range edges {
-		userNode, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), tenantAdminActor, typeUser, e.FromNodeID)
+		userNode, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), tenantAdminActor, typeUser, e.FromNodeID)
 		if err != nil || userNode == nil {
 			continue
 		}

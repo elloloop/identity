@@ -143,3 +143,12 @@ func requestHost(r *http.Request) string {
 	}
 	return host
 }
+
+// writeConnectError emits the same JSON error shape the auth middleware
+// uses so Connect maps the HTTP status onto the matching RPC code
+// (401 → Unauthenticated, 403 → PermissionDenied, 503 → Unavailable). It
+// is shared by the project-resolution and project-scope-guard middleware.
+func writeConnectError(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	http.Error(w, `{"code":"`+code+`","message":"`+msg+`"}`, status)
+}

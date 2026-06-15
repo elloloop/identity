@@ -29,15 +29,14 @@ import (
 // Each method delegates to the appropriate service, translating between
 // proto and service-layer types.
 type IdentityHandler struct {
-	auth      *service.AuthService
-	admin     *service.AdminService
-	groups    *service.GroupService
-	help      *service.HelpService
-	profile   *service.ProfileService
-	idv       *service.IdentityVerificationService
-	orgSignup *service.OrganizationSignupService
-	domains   *service.DomainService
-	members   *service.MembershipService
+	auth    *service.AuthService
+	admin   *service.AdminService
+	groups  *service.GroupService
+	help    *service.HelpService
+	profile *service.ProfileService
+	idv     *service.IdentityVerificationService
+	domains *service.DomainService
+	members *service.MembershipService
 	// controlAdmin backs the control-plane admin RPCs (AdminCreateProject and
 	// friends), authenticated by the shared admin secret rather than a user
 	// JWT. nil on entdb/memory (no control plane) and when no secret is
@@ -50,8 +49,6 @@ type IdentityHandler struct {
 // NewIdentityHandler creates a new IdentityHandler wired to the service
 // layer. idv is optional: pass nil in deployments that do not need
 // identity verification, and the IDV RPCs will return CodeUnimplemented.
-// orgSignup is optional: nil (or a deployment not in mode=multi) causes
-// the OrganizationSignup RPC to return CodeUnimplemented.
 //
 // domains is optional: nil (entdb/memory, which have no control plane)
 // causes the tenant-domain RPCs to return CodeUnimplemented.
@@ -73,7 +70,6 @@ func NewIdentityHandler(
 	help *service.HelpService,
 	profile *service.ProfileService,
 	idv *service.IdentityVerificationService,
-	orgSignup *service.OrganizationSignupService,
 	domains *service.DomainService,
 	members *service.MembershipService,
 	controlAdmin *service.ControlPlaneAdminService,
@@ -87,7 +83,6 @@ func NewIdentityHandler(
 		help:         help,
 		profile:      profile,
 		idv:          idv,
-		orgSignup:    orgSignup,
 		domains:      domains,
 		members:      members,
 		controlAdmin: controlAdmin,

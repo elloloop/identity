@@ -316,40 +316,6 @@ func runReadYourWritesConformance(t *testing.T, driver Driver) {
 				}
 			}
 		})
-
-		t.Run("Organization_BySlug_AndListForUser", func(t *testing.T) {
-			ctx := context.Background()
-			r := driver.NewRepo(t)
-			for i := 0; i < readYourWritesIterations; i++ {
-				owner := createTestUser(t, r, fmt.Sprintf("ryw-org-%d@example.com", i))
-				slug := fmt.Sprintf("ryw-org-%d", i)
-				orgID, err := r.CreateOrganization(ctx, &service.Organization{
-					Slug: slug, DisplayName: "Org", OwnerUserID: owner, CreatedAtMs: 100, UpdatedAtMs: 100,
-				})
-				if err != nil {
-					t.Fatalf("iter %d: CreateOrganization: %v", i, err)
-				}
-				bySlug, err := r.GetOrganizationBySlug(ctx, slug)
-				if err != nil {
-					t.Fatalf("iter %d: GetOrganizationBySlug: %v", i, err)
-				}
-				if bySlug == nil {
-					t.Fatalf("iter %d: read-after-write miss: org %q not found by slug immediately after create", i, slug)
-				}
-				if _, err := r.AddOrganizationMember(ctx, &service.OrganizationMembership{
-					OrganizationID: orgID, UserID: owner, Role: "admin", CreatedAtMs: 100,
-				}); err != nil {
-					t.Fatalf("iter %d: AddOrganizationMember: %v", i, err)
-				}
-				orgs, err := r.ListOrganizationsForUser(ctx, owner)
-				if err != nil {
-					t.Fatalf("iter %d: ListOrganizationsForUser: %v", i, err)
-				}
-				if len(orgs) != 1 {
-					t.Fatalf("iter %d: read-after-write miss: ListOrganizationsForUser len = %d, want 1 immediately after AddMember", i, len(orgs))
-				}
-			}
-		})
 	})
 }
 

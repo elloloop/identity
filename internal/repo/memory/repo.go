@@ -23,7 +23,23 @@ import (
 )
 
 // Repo is the in-memory implementation of service.Repository.
+//
+// Project isolation (ADR-0002): each Repo instance owns an independent set
+// of data-plane maps, so two projects share no rows and uniqueness (e.g.
+// email) is per-project, mirroring the postgres `WHERE project_id = $1`
+// boundary and the entdb per-project SDK partition. WithProject returns the
+// sibling Repo for a given project, lazily created and memoised in a shared
+// registry so repeated lookups of the same project reuse one store.
 type Repo struct {
+	// projectID is the storage shard this Repo instance is bound to. The
+	// boot-default instance carries the empty string; siblings carry the
+	// resolved project id.
+	projectID string
+	// registry is shared by every sibling produced via WithProject so they
+	// can find one another by project id. The boot Repo creates it; each
+	// sibling points at the same map.
+	registry *projectRegistry
+
 	mu sync.Mutex
 
 	seq                int64
@@ -45,13 +61,37 @@ type Repo struct {
 	emailChanges       map[string]*service.EmailChangeToken
 	oauthIdentities    map[string]*service.OAuthIdentity
 	idvRecords         map[string]*service.IdentityVerificationRecord
-	orgs               map[string]*service.Organization
-	orgMembers         map[string]*service.OrganizationMembership
 	sessions           map[string]*service.SessionRecord
 }
 
-// New returns an empty Repo.
+// projectRegistry memoises the per-project Repo siblings produced by
+// WithProject so repeated lookups of one project reuse a single store. It
+// is shared (by pointer) across every sibling of a New()-rooted Repo.
+type projectRegistry struct {
+	mu       sync.Mutex
+	byID     map[string]*Repo
+	makeRepo func(projectID string) *Repo
+}
+
+// New returns an empty Repo bound to the boot-default project (the empty
+// project id). Data written without an explicit project scope lands here;
+// WithProject derives isolated siblings for other projects.
 func New() *Repo {
+	reg := &projectRegistry{byID: make(map[string]*Repo)}
+	reg.makeRepo = func(projectID string) *Repo {
+		r := newStore()
+		r.projectID = projectID
+		r.registry = reg
+		return r
+	}
+	root := reg.makeRepo("")
+	reg.byID[""] = root
+	return root
+}
+
+// newStore allocates a Repo with empty, independent data-plane maps. It
+// carries no project binding or registry; New / WithProject set those.
+func newStore() *Repo {
 	return &Repo{
 		users:              make(map[string]*service.User),
 		refreshTokens:      make(map[string]*service.RefreshTokenRecord),
@@ -71,10 +111,29 @@ func New() *Repo {
 		emailChanges:       make(map[string]*service.EmailChangeToken),
 		oauthIdentities:    make(map[string]*service.OAuthIdentity),
 		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
-		orgs:               make(map[string]*service.Organization),
-		orgMembers:         make(map[string]*service.OrganizationMembership),
 		sessions:           make(map[string]*service.SessionRecord),
 	}
+}
+
+// WithProject returns the Repo bound to projectID, mirroring the postgres
+// `WHERE project_id = $1` boundary and the entdb per-project SDK partition
+// (ADR-0002). Each project gets a fully independent store, so two projects
+// never see each other's rows and a unique key (email) is scoped per
+// project. The sibling is memoised so repeated calls for one project return
+// the same store; passing this Repo's own project id returns itself.
+func (r *Repo) WithProject(projectID string) service.Repository {
+	if projectID == r.projectID {
+		return r
+	}
+	reg := r.registry
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	if sibling, ok := reg.byID[projectID]; ok {
+		return sibling
+	}
+	sibling := reg.makeRepo(projectID)
+	reg.byID[projectID] = sibling
+	return sibling
 }
 
 func (r *Repo) nextID() string {
@@ -212,7 +271,6 @@ func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 	deleteByUser(r.emailChanges, userID, func(t *service.EmailChangeToken) string { return t.UserID })
 	deleteByUser(r.oauthIdentities, userID, func(o *service.OAuthIdentity) string { return o.UserID })
 	deleteByUser(r.idvRecords, userID, func(rec *service.IdentityVerificationRecord) string { return rec.UserID })
-	deleteByUser(r.orgMembers, userID, func(m *service.OrganizationMembership) string { return m.UserID })
 	deleteByUser(r.phoneVerifyCodes, userID, func(c *service.PhoneVerificationCodeRecord) string { return c.UserID })
 	delete(r.users, userID)
 	return nil
@@ -1403,121 +1461,6 @@ func (r *Repo) DeleteExpiredInvitations(_ context.Context, beforeMs int64, limit
 		}
 	}
 	return nil
-}
-
-// ── Organizations ─────────────────────────────────────────────────
-
-func (r *Repo) CreateOrganization(_ context.Context, o *service.Organization) (string, error) {
-	if o == nil {
-		return "", errors.New("memory: CreateOrganization: nil organization")
-	}
-	if o.Slug == "" {
-		return "", fmt.Errorf("%w: missing slug", service.ErrInvalidArgument)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, existing := range r.orgs {
-		if existing.Slug == o.Slug {
-			return "", fmt.Errorf("%w: slug %q", service.ErrAlreadyExists, o.Slug)
-		}
-	}
-	id := r.nextID()
-	o.ID = id
-	cp := *o
-	r.orgs[id] = &cp
-	return id, nil
-}
-
-func (r *Repo) GetOrganization(_ context.Context, orgID string) (*service.Organization, error) {
-	if orgID == "" {
-		return nil, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	o, ok := r.orgs[orgID]
-	if !ok {
-		return nil, nil
-	}
-	cp := *o
-	return &cp, nil
-}
-
-func (r *Repo) GetOrganizationBySlug(_ context.Context, slug string) (*service.Organization, error) {
-	if slug == "" {
-		return nil, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, o := range r.orgs {
-		if o.Slug == slug {
-			cp := *o
-			return &cp, nil
-		}
-	}
-	return nil, nil
-}
-
-func (r *Repo) ListOrganizationsForUser(_ context.Context, userID string) ([]*service.Organization, error) {
-	if userID == "" {
-		return nil, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var out []*service.Organization
-	seen := make(map[string]struct{})
-	for _, m := range r.orgMembers {
-		if m.UserID != userID {
-			continue
-		}
-		if _, dup := seen[m.OrganizationID]; dup {
-			continue
-		}
-		seen[m.OrganizationID] = struct{}{}
-		o, ok := r.orgs[m.OrganizationID]
-		if !ok {
-			continue
-		}
-		cp := *o
-		out = append(out, &cp)
-	}
-	return out, nil
-}
-
-// CountOrganizationsOwnedBy returns how many organizations the user owns.
-func (r *Repo) CountOrganizationsOwnedBy(_ context.Context, userID string) (int, error) {
-	if userID == "" {
-		return 0, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	n := 0
-	for _, o := range r.orgs {
-		if o.OwnerUserID == userID {
-			n++
-		}
-	}
-	return n, nil
-}
-
-func (r *Repo) AddOrganizationMember(_ context.Context, m *service.OrganizationMembership) (string, error) {
-	if m == nil {
-		return "", errors.New("memory: AddOrganizationMember: nil membership")
-	}
-	if m.OrganizationID == "" || m.UserID == "" {
-		return "", fmt.Errorf("%w: missing organization_id or user_id", service.ErrInvalidArgument)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, existing := range r.orgMembers {
-		if existing.OrganizationID == m.OrganizationID && existing.UserID == m.UserID {
-			return "", fmt.Errorf("%w: %s already in %s", service.ErrAlreadyExists, m.UserID, m.OrganizationID)
-		}
-	}
-	id := r.nextID()
-	m.NodeID = id
-	cp := *m
-	r.orgMembers[id] = &cp
-	return id, nil
 }
 
 // ── Sessions ──────────────────────────────────────────────────────
