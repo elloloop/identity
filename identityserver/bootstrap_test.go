@@ -12,7 +12,7 @@ import (
 )
 
 // TestEnsureDefaultProject_NoControlPlane covers the postgres-only guard:
-// when the built repository has no control plane (entdb/memory →
+// when the built repository has no control plane (memory →
 // ProjectStore nil), the bootstrap is a no-op and never errors. No
 // database is required.
 func TestEnsureDefaultProject_NoControlPlane(t *testing.T) {
@@ -20,7 +20,7 @@ func TestEnsureDefaultProject_NoControlPlane(t *testing.T) {
 
 	err := ensureDefaultProject(
 		context.Background(),
-		&repo.Built{}, // ProjectStore nil, as for memory/entdb
+		&repo.Built{}, // ProjectStore nil, as for memory
 		&Config{DefaultProjectID: "default", DefaultTenantID: "local"},
 		zap.NewNop(),
 	)

@@ -30,7 +30,7 @@ type Config = config.Config
 // Two construction modes:
 //
 //   - Env/container parity: take OptionsFromEnv() and tweak fields. New
-//     builds the EntDB/Postgres repository, the JWT signer, the WebAuthn
+//     builds the Postgres repository, the JWT signer, the WebAuthn
 //     service, the IDV provider, and OpenTelemetry from Config exactly as
 //     cmd/identity does.
 //
@@ -38,7 +38,7 @@ type Config = config.Config
 //     EmailTransport, OAuthRegistry, IDVProvider). New uses whatever is
 //     supplied and only builds the adapters left nil. This is how a host
 //     that already owns a database, or a test, mounts identity without a
-//     real EntDB.
+//     a real Postgres database.
 type Options struct {
 	// Config holds every env-driven setting (ports, tenant, JWT,
 	// revocation mode, OAuth credentials, OTel, sweeper, etc.). Required.

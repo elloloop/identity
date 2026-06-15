@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/elloloop/identity/internal/service"
@@ -179,7 +179,7 @@ var (
 	}
 )
 
-func (r *pgRepository) GetNode(ctx context.Context, _, _ string, typeID int, nodeID string) (*sdk.Node, error) {
+func (r *pgRepository) GetNode(ctx context.Context, _, _ string, typeID int, nodeID string) (*graph.Node, error) {
 	switch typeID {
 	case dbTypeUser:
 		return r.getUserNode(ctx, nodeID)
@@ -198,7 +198,7 @@ func (r *pgRepository) GetNode(ctx context.Context, _, _ string, typeID int, nod
 	}
 }
 
-func (r *pgRepository) QueryNodes(ctx context.Context, _, _ string, typeID int, filter map[string]any) ([]*sdk.Node, error) {
+func (r *pgRepository) QueryNodes(ctx context.Context, _, _ string, typeID int, filter map[string]any) ([]*graph.Node, error) {
 	switch typeID {
 	case dbTypeUser:
 		return r.queryUserNodes(ctx, filter)
@@ -219,7 +219,7 @@ func (r *pgRepository) QueryNodes(ctx context.Context, _, _ string, typeID int, 
 	}
 }
 
-func (r *pgRepository) ExecuteAtomic(ctx context.Context, _, _ string, ops []sdk.Operation) (*sdk.CommitResult, error) {
+func (r *pgRepository) ExecuteAtomic(ctx context.Context, _, _ string, ops []graph.Operation) (*graph.CommitResult, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, wrapPgErr("ExecuteAtomic", err)
@@ -240,10 +240,10 @@ func (r *pgRepository) ExecuteAtomic(ctx context.Context, _, _ string, ops []sdk
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr("ExecuteAtomic", err)
 	}
-	return &sdk.CommitResult{Success: true, Applied: true, CreatedNodeIDs: createdIDs}, nil
+	return &graph.CommitResult{Success: true, Applied: true, CreatedNodeIDs: createdIDs}, nil
 }
 
-func (r *pgRepository) GetEdgesFrom(ctx context.Context, _, _ string, fromNodeID string, edgeTypeID int) ([]*sdk.Edge, error) {
+func (r *pgRepository) GetEdgesFrom(ctx context.Context, _, _ string, fromNodeID string, edgeTypeID int) ([]*graph.Edge, error) {
 	if edgeTypeID != dbEdgeMemberOf {
 		return nil, nil
 	}
@@ -258,13 +258,13 @@ func (r *pgRepository) GetEdgesFrom(ctx context.Context, _, _ string, fromNodeID
 	}
 	defer rows.Close()
 
-	var out []*sdk.Edge
+	var out []*graph.Edge
 	for rows.Next() {
 		var fromID, toID string
 		if err := rows.Scan(&fromID, &toID); err != nil {
 			return nil, wrapPgErr("GetEdgesFrom", err)
 		}
-		out = append(out, &sdk.Edge{EdgeTypeID: dbEdgeMemberOf, FromNodeID: fromID, ToNodeID: toID})
+		out = append(out, &graph.Edge{EdgeTypeID: dbEdgeMemberOf, FromNodeID: fromID, ToNodeID: toID})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, wrapPgErr("GetEdgesFrom", err)
@@ -272,7 +272,7 @@ func (r *pgRepository) GetEdgesFrom(ctx context.Context, _, _ string, fromNodeID
 	return out, nil
 }
 
-func (r *pgRepository) GetEdgesTo(ctx context.Context, _, _ string, toNodeID string, edgeTypeID int) ([]*sdk.Edge, error) {
+func (r *pgRepository) GetEdgesTo(ctx context.Context, _, _ string, toNodeID string, edgeTypeID int) ([]*graph.Edge, error) {
 	if edgeTypeID != dbEdgeMemberOf {
 		return nil, nil
 	}
@@ -287,13 +287,13 @@ func (r *pgRepository) GetEdgesTo(ctx context.Context, _, _ string, toNodeID str
 	}
 	defer rows.Close()
 
-	var out []*sdk.Edge
+	var out []*graph.Edge
 	for rows.Next() {
 		var fromID, toID string
 		if err := rows.Scan(&fromID, &toID); err != nil {
 			return nil, wrapPgErr("GetEdgesTo", err)
 		}
-		out = append(out, &sdk.Edge{EdgeTypeID: dbEdgeMemberOf, FromNodeID: fromID, ToNodeID: toID})
+		out = append(out, &graph.Edge{EdgeTypeID: dbEdgeMemberOf, FromNodeID: fromID, ToNodeID: toID})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, wrapPgErr("GetEdgesTo", err)
@@ -301,7 +301,7 @@ func (r *pgRepository) GetEdgesTo(ctx context.Context, _, _ string, toNodeID str
 	return out, nil
 }
 
-func (r *pgRepository) SearchNodes(ctx context.Context, _, _ string, typeID int, query string) ([]*sdk.Node, error) {
+func (r *pgRepository) SearchNodes(ctx context.Context, _, _ string, typeID int, query string) ([]*graph.Node, error) {
 	q := "%" + strings.ToLower(strings.TrimSpace(query)) + "%"
 	if q == "%%" {
 		return nil, nil
@@ -320,7 +320,7 @@ func (r *pgRepository) SearchNodes(ctx context.Context, _, _ string, typeID int,
 			return nil, wrapPgErr("SearchNodes", err)
 		}
 		defer rows.Close()
-		var out []*sdk.Node
+		var out []*graph.Node
 		for rows.Next() {
 			u, err := scanUser(rows)
 			if err != nil {
@@ -344,7 +344,7 @@ func (r *pgRepository) SearchNodes(ctx context.Context, _, _ string, typeID int,
 			return nil, wrapPgErr("SearchNodes", err)
 		}
 		defer rows.Close()
-		var out []*sdk.Node
+		var out []*graph.Node
 		for rows.Next() {
 			node, err := scanGroupNode(rows)
 			if err != nil {
@@ -361,24 +361,24 @@ func (r *pgRepository) SearchNodes(ctx context.Context, _, _ string, typeID int,
 	}
 }
 
-func (r *pgRepository) applyAtomicOp(ctx context.Context, tx pgx.Tx, op sdk.Operation) (string, error) {
+func (r *pgRepository) applyAtomicOp(ctx context.Context, tx pgx.Tx, op graph.Operation) (string, error) {
 	switch op.Type {
-	case sdk.OpCreateNode:
+	case graph.OpCreateNode:
 		return r.createAtomicNode(ctx, tx, op)
-	case sdk.OpUpdateNode:
+	case graph.OpUpdateNode:
 		return "", r.updateAtomicNode(ctx, tx, op)
-	case sdk.OpDeleteNode:
+	case graph.OpDeleteNode:
 		return "", r.deleteAtomicNode(ctx, tx, op)
-	case sdk.OpCreateEdge:
+	case graph.OpCreateEdge:
 		return "", r.createAtomicEdge(ctx, tx, op)
-	case sdk.OpDeleteEdge:
+	case graph.OpDeleteEdge:
 		return "", r.deleteAtomicEdge(ctx, tx, op)
 	default:
 		return "", fmt.Errorf("postgres: ExecuteAtomic: unsupported op type %v", op.Type)
 	}
 }
 
-func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.Operation) (string, error) {
+func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op graph.Operation) (string, error) {
 	switch op.TypeID {
 	case dbTypeUser:
 		id := op.NodeID
@@ -589,7 +589,7 @@ func (r *pgRepository) createAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 	}
 }
 
-func (r *pgRepository) updateAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.Operation) error {
+func (r *pgRepository) updateAtomicNode(ctx context.Context, tx pgx.Tx, op graph.Operation) error {
 	switch op.TypeID {
 	case dbTypeUser:
 		return updateBySpecs(ctx, tx, r.projectID, "users", op.NodeID, op.Patch, userQueryFields)
@@ -629,7 +629,7 @@ func (r *pgRepository) updateAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 	}
 }
 
-func (r *pgRepository) deleteAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.Operation) error {
+func (r *pgRepository) deleteAtomicNode(ctx context.Context, tx pgx.Tx, op graph.Operation) error {
 	var table string
 	switch op.TypeID {
 	case dbTypeWorkingGroup:
@@ -648,7 +648,7 @@ func (r *pgRepository) deleteAtomicNode(ctx context.Context, tx pgx.Tx, op sdk.O
 	return nil
 }
 
-func (r *pgRepository) createAtomicEdge(ctx context.Context, tx pgx.Tx, op sdk.Operation) error {
+func (r *pgRepository) createAtomicEdge(ctx context.Context, tx pgx.Tx, op graph.Operation) error {
 	if op.EdgeTypeID != dbEdgeMemberOf {
 		return fmt.Errorf("postgres: ExecuteAtomic(create edge): unsupported edge_type_id %d", op.EdgeTypeID)
 	}
@@ -662,7 +662,7 @@ func (r *pgRepository) createAtomicEdge(ctx context.Context, tx pgx.Tx, op sdk.O
 	return nil
 }
 
-func (r *pgRepository) deleteAtomicEdge(ctx context.Context, tx pgx.Tx, op sdk.Operation) error {
+func (r *pgRepository) deleteAtomicEdge(ctx context.Context, tx pgx.Tx, op graph.Operation) error {
 	if op.EdgeTypeID != dbEdgeMemberOf {
 		return fmt.Errorf("postgres: ExecuteAtomic(delete edge): unsupported edge_type_id %d", op.EdgeTypeID)
 	}
@@ -676,7 +676,7 @@ func (r *pgRepository) deleteAtomicEdge(ctx context.Context, tx pgx.Tx, op sdk.O
 	return nil
 }
 
-func (r *pgRepository) getUserNode(ctx context.Context, userID string) (*sdk.Node, error) {
+func (r *pgRepository) getUserNode(ctx context.Context, userID string) (*graph.Node, error) {
 	u, err := r.GetUser(ctx, userID)
 	if err != nil || u == nil {
 		return nil, err
@@ -684,7 +684,7 @@ func (r *pgRepository) getUserNode(ctx context.Context, userID string) (*sdk.Nod
 	return userNodeFromRecord(u), nil
 }
 
-func (r *pgRepository) queryUserNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
+func (r *pgRepository) queryUserNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
 	query, args := buildSelectQuery(`SELECT `+userColumns+` FROM users WHERE project_id = $1`, r.projectID, filter, userQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -692,7 +692,7 @@ func (r *pgRepository) queryUserNodes(ctx context.Context, filter map[string]any
 	}
 	defer rows.Close()
 
-	var out []*sdk.Node
+	var out []*graph.Node
 	for rows.Next() {
 		u, err := scanUser(rows)
 		if err != nil {
@@ -706,7 +706,7 @@ func (r *pgRepository) queryUserNodes(ctx context.Context, filter map[string]any
 	return out, nil
 }
 
-func (r *pgRepository) getGroupNode(ctx context.Context, groupID string) (*sdk.Node, error) {
+func (r *pgRepository) getGroupNode(ctx context.Context, groupID string) (*graph.Node, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, name, description, created_by, created_at_ms, updated_at_ms
 		  FROM groups
@@ -722,7 +722,7 @@ func (r *pgRepository) getGroupNode(ctx context.Context, groupID string) (*sdk.N
 	return node, nil
 }
 
-func (r *pgRepository) queryGroupNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
+func (r *pgRepository) queryGroupNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
 	query, args := buildSelectQuery(`
 		SELECT id, name, description, created_by, created_at_ms, updated_at_ms
 		  FROM groups
@@ -734,7 +734,7 @@ func (r *pgRepository) queryGroupNodes(ctx context.Context, filter map[string]an
 	}
 	defer rows.Close()
 
-	var out []*sdk.Node
+	var out []*graph.Node
 	for rows.Next() {
 		node, err := scanGroupNode(rows)
 		if err != nil {
@@ -748,7 +748,7 @@ func (r *pgRepository) queryGroupNodes(ctx context.Context, filter map[string]an
 	return out, nil
 }
 
-func (r *pgRepository) getRefreshTokenNode(ctx context.Context, nodeID string) (*sdk.Node, error) {
+func (r *pgRepository) getRefreshTokenNode(ctx context.Context, nodeID string) (*graph.Node, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT `+refreshTokenColumns+`
 		  FROM refresh_tokens
@@ -764,7 +764,7 @@ func (r *pgRepository) getRefreshTokenNode(ctx context.Context, nodeID string) (
 	return refreshTokenNodeFromRecord(rec), nil
 }
 
-func (r *pgRepository) queryRefreshTokenNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
+func (r *pgRepository) queryRefreshTokenNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
 	query, args := buildSelectQuery(`SELECT `+refreshTokenColumns+` FROM refresh_tokens WHERE project_id = $1`, r.projectID, filter, refreshQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -772,7 +772,7 @@ func (r *pgRepository) queryRefreshTokenNodes(ctx context.Context, filter map[st
 	}
 	defer rows.Close()
 
-	var out []*sdk.Node
+	var out []*graph.Node
 	for rows.Next() {
 		rec, err := scanRefreshToken(rows)
 		if err != nil {
@@ -786,7 +786,7 @@ func (r *pgRepository) queryRefreshTokenNodes(ctx context.Context, filter map[st
 	return out, nil
 }
 
-func (r *pgRepository) queryPasswordResetNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
+func (r *pgRepository) queryPasswordResetNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
 	query, args := buildSelectQuery(`SELECT id, token_hash, user_id, expires_at_ms, created_at_ms, consumed_at_ms FROM password_reset_tokens WHERE project_id = $1`, r.projectID, filter, map[string]dbFieldSpec{
 		dbPrfTokenHash: {col: "token_hash", kind: dbKindString},
 		dbPrfUserID:    {col: "user_id", kind: dbKindString},
@@ -799,7 +799,7 @@ func (r *pgRepository) queryPasswordResetNodes(ctx context.Context, filter map[s
 	}
 	defer rows.Close()
 
-	var out []*sdk.Node
+	var out []*graph.Node
 	for rows.Next() {
 		rec, err := scanPasswordReset(rows)
 		if err != nil {
@@ -813,7 +813,7 @@ func (r *pgRepository) queryPasswordResetNodes(ctx context.Context, filter map[s
 	return out, nil
 }
 
-func (r *pgRepository) getPasskeyNode(ctx context.Context, nodeID string) (*sdk.Node, error) {
+func (r *pgRepository) getPasskeyNode(ctx context.Context, nodeID string) (*graph.Node, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT `+passkeyColumns+`
 		  FROM passkeys
@@ -829,7 +829,7 @@ func (r *pgRepository) getPasskeyNode(ctx context.Context, nodeID string) (*sdk.
 	return passkeyNodeFromRecord(rec), nil
 }
 
-func (r *pgRepository) queryPasskeyNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
+func (r *pgRepository) queryPasskeyNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
 	query, args := buildSelectQuery(`SELECT `+passkeyColumns+` FROM passkeys WHERE project_id = $1`, r.projectID, filter, passkeyQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -837,7 +837,7 @@ func (r *pgRepository) queryPasskeyNodes(ctx context.Context, filter map[string]
 	}
 	defer rows.Close()
 
-	var out []*sdk.Node
+	var out []*graph.Node
 	for rows.Next() {
 		rec, err := scanPasskey(rows)
 		if err != nil {
@@ -851,7 +851,7 @@ func (r *pgRepository) queryPasskeyNodes(ctx context.Context, filter map[string]
 	return out, nil
 }
 
-func (r *pgRepository) getAuditEventNode(ctx context.Context, nodeID string) (*sdk.Node, error) {
+func (r *pgRepository) getAuditEventNode(ctx context.Context, nodeID string) (*graph.Node, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, event_type, actor, target, ip_address, user_agent, success, details::text, occurred_at_ms
 		  FROM audit_events
@@ -867,7 +867,7 @@ func (r *pgRepository) getAuditEventNode(ctx context.Context, nodeID string) (*s
 	return node, nil
 }
 
-func (r *pgRepository) queryAuditEventNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
+func (r *pgRepository) queryAuditEventNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
 	query, args := buildSelectQuery(`
 		SELECT id, event_type, actor, target, ip_address, user_agent, success, details::text, occurred_at_ms
 		  FROM audit_events
@@ -879,7 +879,7 @@ func (r *pgRepository) queryAuditEventNodes(ctx context.Context, filter map[stri
 	}
 	defer rows.Close()
 
-	var out []*sdk.Node
+	var out []*graph.Node
 	for rows.Next() {
 		node, err := scanAuditEventNode(rows)
 		if err != nil {
@@ -893,7 +893,7 @@ func (r *pgRepository) queryAuditEventNodes(ctx context.Context, filter map[stri
 	return out, nil
 }
 
-func (r *pgRepository) getHelpRequestNode(ctx context.Context, nodeID string) (*sdk.Node, error) {
+func (r *pgRepository) getHelpRequestNode(ctx context.Context, nodeID string) (*graph.Node, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, email, reason, source_ip, user_agent, status, resolved_by, resolution_notes, resolved_at_ms, created_at_ms
 		  FROM admin_help_requests
@@ -909,7 +909,7 @@ func (r *pgRepository) getHelpRequestNode(ctx context.Context, nodeID string) (*
 	return node, nil
 }
 
-func (r *pgRepository) queryHelpRequestNodes(ctx context.Context, filter map[string]any) ([]*sdk.Node, error) {
+func (r *pgRepository) queryHelpRequestNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
 	query, args := buildSelectQuery(`
 		SELECT id, email, reason, source_ip, user_agent, status, resolved_by, resolution_notes, resolved_at_ms, created_at_ms
 		  FROM admin_help_requests
@@ -921,7 +921,7 @@ func (r *pgRepository) queryHelpRequestNodes(ctx context.Context, filter map[str
 	}
 	defer rows.Close()
 
-	var out []*sdk.Node
+	var out []*graph.Node
 	for rows.Next() {
 		node, err := scanHelpRequestNode(rows)
 		if err != nil {
@@ -935,11 +935,11 @@ func (r *pgRepository) queryHelpRequestNodes(ctx context.Context, filter map[str
 	return out, nil
 }
 
-func userNodeFromRecord(u *service.User) *sdk.Node {
+func userNodeFromRecord(u *service.User) *graph.Node {
 	if u == nil {
 		return nil
 	}
-	return &sdk.Node{
+	return &graph.Node{
 		NodeID: u.ID,
 		TypeID: dbTypeUser,
 		Payload: map[string]any{
@@ -963,11 +963,11 @@ func userNodeFromRecord(u *service.User) *sdk.Node {
 	}
 }
 
-func refreshTokenNodeFromRecord(rec *service.RefreshTokenRecord) *sdk.Node {
+func refreshTokenNodeFromRecord(rec *service.RefreshTokenRecord) *graph.Node {
 	if rec == nil {
 		return nil
 	}
-	return &sdk.Node{
+	return &graph.Node{
 		NodeID: rec.NodeID,
 		TypeID: dbTypeRefreshToken,
 		Payload: map[string]any{
@@ -985,11 +985,11 @@ func refreshTokenNodeFromRecord(rec *service.RefreshTokenRecord) *sdk.Node {
 	}
 }
 
-func passkeyNodeFromRecord(rec *service.PasskeyCredRecord) *sdk.Node {
+func passkeyNodeFromRecord(rec *service.PasskeyCredRecord) *graph.Node {
 	if rec == nil {
 		return nil
 	}
-	return &sdk.Node{
+	return &graph.Node{
 		NodeID: rec.NodeID,
 		TypeID: dbTypePasskey,
 		Payload: map[string]any{
@@ -1003,8 +1003,8 @@ func passkeyNodeFromRecord(rec *service.PasskeyCredRecord) *sdk.Node {
 	}
 }
 
-func passwordResetNodeFromRecord(rec *service.PasswordResetToken) *sdk.Node {
-	return &sdk.Node{
+func passwordResetNodeFromRecord(rec *service.PasswordResetToken) *graph.Node {
+	return &graph.Node{
 		NodeID: rec.NodeID,
 		TypeID: dbTypePasswordReset,
 		Payload: map[string]any{
@@ -1016,13 +1016,13 @@ func passwordResetNodeFromRecord(rec *service.PasswordResetToken) *sdk.Node {
 	}
 }
 
-func scanGroupNode(row interface{ Scan(...any) error }) (*sdk.Node, error) {
+func scanGroupNode(row interface{ Scan(...any) error }) (*graph.Node, error) {
 	var id, name, description, createdBy string
 	var createdAt, updatedAt int64
 	if err := row.Scan(&id, &name, &description, &createdBy, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
-	return &sdk.Node{
+	return &graph.Node{
 		NodeID: id,
 		TypeID: dbTypeWorkingGroup,
 		Payload: map[string]any{
@@ -1035,14 +1035,14 @@ func scanGroupNode(row interface{ Scan(...any) error }) (*sdk.Node, error) {
 	}, nil
 }
 
-func scanAuditEventNode(row interface{ Scan(...any) error }) (*sdk.Node, error) {
+func scanAuditEventNode(row interface{ Scan(...any) error }) (*graph.Node, error) {
 	var id, eventType, actorUserID, targetUserID, ipAddress, userAgent, details string
 	var success bool
 	var createdAt int64
 	if err := row.Scan(&id, &eventType, &actorUserID, &targetUserID, &ipAddress, &userAgent, &success, &details, &createdAt); err != nil {
 		return nil, err
 	}
-	return &sdk.Node{
+	return &graph.Node{
 		NodeID: id,
 		TypeID: dbTypeAuditEvent,
 		Payload: map[string]any{
@@ -1058,13 +1058,13 @@ func scanAuditEventNode(row interface{ Scan(...any) error }) (*sdk.Node, error) 
 	}, nil
 }
 
-func scanHelpRequestNode(row interface{ Scan(...any) error }) (*sdk.Node, error) {
+func scanHelpRequestNode(row interface{ Scan(...any) error }) (*graph.Node, error) {
 	var id, email, reason, sourceIP, userAgent, status, resolvedBy, resolutionNotes string
 	var resolvedAt, createdAt int64
 	if err := row.Scan(&id, &email, &reason, &sourceIP, &userAgent, &status, &resolvedBy, &resolutionNotes, &resolvedAt, &createdAt); err != nil {
 		return nil, err
 	}
-	return &sdk.Node{
+	return &graph.Node{
 		NodeID: id,
 		TypeID: dbTypeAdminHelpReq,
 		Payload: map[string]any{

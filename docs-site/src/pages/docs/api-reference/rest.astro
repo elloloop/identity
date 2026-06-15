@@ -1,0 +1,46 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { DOCS_VERSION_LABEL } from "../../../version";
+
+// Both the OpenAPI spec and the pinned Scalar standalone bundle are copied
+// into public/ by the prebuild step (scripts/prepare-openapi.mjs): the spec
+// from the buf-generated gen/openapi spec, the bundle from the version-pinned
+// @scalar/api-reference package. Self-hosted, no runtime CDN dependency.
+const base = import.meta.env.BASE_URL;
+const specUrl = `${base}/openapi/identity.openapi.yaml`.replace(/\/{2,}/g, "/");
+const scalarStandalone = `${base}/scalar/standalone.js`.replace(/\/{2,}/g, "/");
+---
+
+<DocsLayout title="API Reference">
+  <h1>API Reference</h1>
+  <p>
+    Interactive reference for every RPC on
+    <code>identity.IdentityService</code>, generated directly from
+    <a href="https://github.com/elloloop/identity/blob/main/proto/identity/identity.proto"><code>proto/identity/identity.proto</code></a>
+    so it never drifts from the wire contract. Showing
+    <strong>{DOCS_VERSION_LABEL}</strong>.
+  </p>
+  <p>
+    For the conceptual overview of how the Connect/gRPC transport works
+    (method paths, JSON field naming, auth headers), see the
+    <a href="/identity/docs/api-reference/grpc">gRPC Reference</a>.
+  </p>
+
+  <div id="scalar-api-reference" class="not-prose"></div>
+</DocsLayout>
+
+<script define:vars={{ specUrl, scalarStandalone }}>
+  function mount() {
+    // Scalar global is attached by the standalone bundle.
+    if (typeof window.Scalar?.createApiReference !== "function") return false;
+    window.Scalar.createApiReference("#scalar-api-reference", {
+      url: specUrl,
+    });
+    return true;
+  }
+
+  const s = document.createElement("script");
+  s.src = scalarStandalone;
+  s.addEventListener("load", mount);
+  document.head.appendChild(s);
+</script>

@@ -151,9 +151,8 @@ func TestBootSmoke(t *testing.T) {
 	//                            bind a gRPC listener, to avoid the default
 	//                            50051 colliding with anything else on the
 	//                            host.
-	//    GATEWAY_ENTDB_ADDRESS — entdb client uses lazy gRPC dial, so a bogus
-	//                            loopback:port is fine for boot; the binary
-	//                            does not block on connecting.
+	//    GATEWAY_REPO_DRIVER=memory — boot against the in-process store so
+	//                            the smoke test needs no external datastore.
 	//    GATEWAY_DEFAULT_TENANT_ID — exercise the dev default explicitly.
 	//    GATEWAY_JWT_SIGNER + GATEWAY_JWT_KEYS_FILE unset — triggers the
 	//                            auto-generated dev RSA key path, which
@@ -164,7 +163,7 @@ func TestBootSmoke(t *testing.T) {
 		"GATEWAY_CONNECT_PORT="+strconv.Itoa(connectPort),
 		"GATEWAY_METRICS_PORT="+strconv.Itoa(metricsPort),
 		"GATEWAY_GRPC_PORT="+strconv.Itoa(freePort(t)),
-		"GATEWAY_ENTDB_ADDRESS=127.0.0.1:1",
+		"GATEWAY_REPO_DRIVER=memory",
 		"GATEWAY_DEFAULT_TENANT_ID=smoke-test",
 	)
 	// Strip any pre-existing JWT/TOTP env so we genuinely exercise the

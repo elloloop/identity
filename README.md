@@ -1,6 +1,6 @@
 # Identity
 
-Authentication and user-management service. Deploys as a single container; pulls a pinned image, points at a datastore (Postgres or EntDB), exposes Connect-RPC over HTTP/JSON.
+Authentication and user-management service. Deploys as a single container; pulls a pinned image, points at a Postgres datastore, exposes Connect-RPC over HTTP/JSON.
 
 Treat this like [tenant-shard-db](https://github.com/elloloop/tenant-shard-db): one image, deployed once per product, fully isolated user pools.
 
@@ -50,9 +50,16 @@ responsible for authorization decisions built on that data.
 
 ## Storage
 
-Identity persists to Postgres (the recommended backend, which carries the Project/Tenant/Domain control plane) or to [EntDB](https://github.com/elloloop/tenant-shard-db). For EntDB, identity targets the **v2.x line** of the server image and Go SDK — the entdb backend uses ADR-031 self-describing writes, attaching identity's schema (every `(entdb.node)`/`(entdb.edge)` message in `proto/identity/schema/schema.proto`) on the first `ExecuteAtomic` per tenant. The server enforces field types, single- and composite-unique constraints, and required-fields against that schema atomically.
+Identity persists to **Postgres** — the primary datastore, which carries
+the Project/Tenant/Domain control plane. An in-memory driver
+(`GATEWAY_REPO_DRIVER=memory`) is available for local development and tests.
+Both drivers implement the same graph-shaped repository contract and are
+held to one [conformance suite](internal/repo/conformance) (identical
+uniqueness/ordering/error-translation semantics across every method).
 
-The service reserves type IDs `1–99` in the EntDB schema. Source of truth is `proto/identity/schema/schema.proto`; current allocations:
+The service models its data as a small set of graph node types, addressed
+by stable numeric `type_id`. The relational drivers map these onto tables;
+the service layer treats node IDs as opaque strings. Current allocations:
 
 | type_id | Node | Notes |
 |---|---|---|
@@ -81,10 +88,9 @@ The service reserves type IDs `1–99` in the EntDB schema. Source of truth is `
 
 Type IDs `33` and `34` (formerly `Organization` / `OrganizationMembership`)
 are retired and unallocated — organizations were dropped in v1.0. Project,
-Tenant, Domain, and membership state live in the Postgres control plane and
-per-project data plane, not in the EntDB type registry above.
-
-Other services consuming the same EntDB instance must use type IDs `100+` to avoid collisions.
+Tenant, Domain, and membership state live in dedicated Postgres tables in
+the control plane and per-project data plane, not in the node-type registry
+above.
 
 ## Configuration
 
@@ -92,7 +98,10 @@ All config is via environment variables. See `internal/config/config.go` for the
 
 | Var | Purpose |
 |---|---|
-| `GATEWAY_ENTDB_ADDRESS` | EntDB endpoint (e.g. `entdb:50051`) |
+| `GATEWAY_REPO_DRIVER` | Persistence backend: `postgres` (default), `sqlite`, or `memory` (local dev / tests) |
+| `GATEWAY_POSTGRES_DSN` | Postgres connection string (required for the `postgres` driver) |
+| `GATEWAY_SQLITE_PATH` | SQLite database file path (when `GATEWAY_REPO_DRIVER=sqlite`). Required — set it to `:memory:` explicitly for an ephemeral in-process database; there is no implicit default. File-backed databases open in WAL mode (`synchronous=NORMAL`) so concurrent reads don't serialize behind writes |
+| `GATEWAY_SQLITE_MAX_CONNS` | Connection-pool size for a file-backed SQLite database (default `4`). Ignored for `:memory:`, which is pinned to a single connection |
 | `GATEWAY_DEFAULT_TENANT_ID` | Storage scope ID (the physical shard) the default project maps onto |
 | `GATEWAY_DEFAULT_PROJECT_ID` | ID of the control-plane Project seeded on boot and used to pin zero-config requests (default `default`) |
 | `GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS` | Comma-separated serving hostnames seeded (verified) onto the default project; the first is primary. Lets the `Host` header resolve to the default project |
@@ -111,16 +120,23 @@ All config is via environment variables. See `internal/config/config.go` for the
 
 ## Deployment
 
-Pull the image and run alongside an EntDB v2.x instance:
+Pull the image and run it alongside a Postgres instance. Postgres carries
+the Project/Tenant/Domain control plane; the `memory` driver pins every
+request to the default project (no control-plane project registry), so it
+suits local dev and tests rather than production.
 
 ```bash
-# 1. Run EntDB v2.x first
-docker run -d --name entdb -p 50051:50051 \
-  ghcr.io/elloloop/tenant-shard-db:2.5.0
+# 1. Run Postgres first
+docker run -d --name identity-db -p 5432:5432 \
+  -e POSTGRES_USER=identity -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=identity \
+  postgres:16.13-alpine3.23
 
-# 2. Run identity pointing at it
+# 2. Run identity pointing at it (apply migrations once, then serve)
 docker run -p 80:80 -p 9090:9090 \
-  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \
+  -e GATEWAY_REPO_DRIVER=postgres \
+  -e GATEWAY_POSTGRES_DSN='postgres://identity:password@identity-db:5432/identity?sslmode=disable' \
+  -e GATEWAY_POSTGRES_AUTO_MIGRATE=true \
   -e GATEWAY_DEFAULT_TENANT_ID=my-product \
   -e GATEWAY_PASSKEY_RP_ID=my-product.com \
   -e GATEWAY_PASSKEY_ORIGIN=https://my-product.com \
@@ -128,24 +144,47 @@ docker run -p 80:80 -p 9090:9090 \
   ghcr.io/elloloop/identity:0.1.0
 ```
 
-Or use `docker-compose.yml` at the repo root — it wires both services together with persistent volumes and a `wait-for-entdb` healthcheck.
+In production, run migrations out-of-band as a separate step
+(`identity migrate`) rather than relying on `GATEWAY_POSTGRES_AUTO_MIGRATE`
+on a rolling deploy. Or use `docker-compose.yml` at the repo root — it
+wires identity to Postgres with a persistent volume and a health-gated
+`depends_on`.
 
-### Postgres backend (alternative)
+### SQLite backend (lightweight / embedded)
 
-Postgres is the recommended datastore for the Project/Tenant/Domain
-control plane (it is the only driver with a control plane; the entdb and
-memory drivers pin every request to the default project). Select it with
-`GATEWAY_REPO_DRIVER=postgres`:
+For embedded, single-node, and development deployments, identity ships a
+**pure-Go SQLite** driver ([modernc.org/sqlite](https://modernc.org/sqlite),
+no cgo — cross-compiles cleanly). It runs the per-project data plane in a
+single file (or fully in-process) with no external service. Like the entdb
+and memory drivers it is single-project (pinned to the default project — the
+Project/Tenant/Domain control plane is Postgres-only); unlike them it
+persists to durable SQL. Select it with `GATEWAY_REPO_DRIVER=sqlite`:
 
 ```bash
 docker run -p 80:80 -p 9090:9090 \
-  -e GATEWAY_REPO_DRIVER=postgres \
-  -e GATEWAY_POSTGRES_DSN='postgres://identity:password@db:5432/identity?sslmode=disable' \
+  -e GATEWAY_REPO_DRIVER=sqlite \
+  -e GATEWAY_SQLITE_PATH=/data/identity.db \
   -e GATEWAY_DEFAULT_TENANT_ID=my-product \
+  -v identity-data:/data \
   ghcr.io/elloloop/identity:0.1.0
 ```
 
-The conformance suite asserts both backends behave identically across every Repository method — same uniqueness/ordering/error-translation semantics. Postgres is the recommended backend for the Project/Tenant/Domain control plane; the entdb and memory drivers run the per-project data plane pinned to the default project (no control-plane project registry).
+Set `GATEWAY_SQLITE_PATH=:memory:` for an ephemeral in-process database
+(tests / throwaway dev). The SQLite driver passes the same conformance
+suite as Postgres and memory — identical uniqueness, ordering, and
+`ErrNotFound`/`ErrAlreadyExists`/`ErrInvalidArgument` semantics. There is no
+Row-Level Security on SQLite (that stays Postgres-only defense-in-depth); the
+mandatory `WHERE project_id = $1` repo boundary is the backend-agnostic
+isolation.
+
+Backend tiers at a glance:
+
+| Driver | `GATEWAY_REPO_DRIVER` | Use case | Control plane |
+| --- | --- | --- | --- |
+| Postgres | `postgres` | Production, multi-node | Yes (Project/Tenant/Domain) |
+| SQLite | `sqlite` | Embedded, single-node, dev | No (single-project) |
+| EntDB | `entdb` | tenant-shard-db deployments | No (single-project) |
+| memory | `memory` | Tests, smoke | No (single-project) |
 
 ## Releasing
 

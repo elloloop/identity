@@ -52,9 +52,9 @@ func TestIDV_StubProvider_HappyPath(t *testing.T) {
 	if got := verif.GetStatus(); got != identitypb.IdentityVerificationStatus_IDENTITY_VERIFICATION_STATUS_APPROVED {
 		t.Fatalf("status = %v; want APPROVED", got)
 	}
-	// Per docs/IDENTITY.md the identity-tenant ↔ entdb-tenant mapping is
+	// Per docs/IDENTITY.md the identity-tenant ↔ storage-tenant mapping is
 	// 1:1, so every persisted IDV record carries the scope's tenant id.
-	// On the entdb backend the proto has no tenant_id field, so the repo
+	// On the graph backend the proto has no tenant_id field, so the repo
 	// synthesises it from the scope on read; this assertion catches a
 	// regression where the field stops being populated end-to-end.
 	if got := verif.GetTenantId(); got == "" {

@@ -69,10 +69,10 @@ linters:
       - path: internal/repo/memory/repo\.go
         linters:
           - nilnil
-      - path: internal/repo/entdb/.*\.go
+      - path: internal/repo/postgres/.*\.go
         linters:
           - nilnil
-      - path: internal/repo/postgres/.*\.go
+      - path: internal/repo/sqlite/.*\.go
         linters:
           - nilnil
       - path: pkg/oauth/oidc\.go

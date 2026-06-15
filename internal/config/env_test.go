@@ -20,7 +20,7 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"GRPCPort", cfg.GRPCPort, 50051},
 		{"ConnectPort", cfg.ConnectPort, 80},
 		{"MetricsPort", cfg.MetricsPort, 9090},
-		{"EntDBAddress", cfg.EntDBAddress, "entdb:50051"},
+		{"RepoDriver", cfg.RepoDriver, "postgres"},
 		{"DefaultTenantID", cfg.DefaultTenantID, "local"},
 		{"EmailServiceHost", cfg.EmailServiceHost, "email-service"},
 		{"EmailServicePort", cfg.EmailServicePort, 50053},

@@ -177,9 +177,9 @@ CREATE TABLE tenant_invitations (
 CREATE UNIQUE INDEX tenant_invitations_project_token_uidx
     ON tenant_invitations (project_id, token_hash);
 -- One open invite per (project, tenant, email); defense-in-depth. Authoritative
--- enforcement is the atomic revoke-then-insert at the repo boundary (entdb/
--- memory cannot express partial-unique, and must match these semantics in the
--- conformance suite).
+-- enforcement is the atomic revoke-then-insert at the repo boundary (the
+-- memory driver cannot express partial-unique, and must match these semantics
+-- in the conformance suite).
 CREATE UNIQUE INDEX tenant_invitations_open_email_uidx
     ON tenant_invitations (project_id, tenant_id, lower(email))
     WHERE status = 'pending';

@@ -20,7 +20,7 @@ import (
 )
 
 // newTestServer builds a Server backed by an in-memory repository and a
-// test signer, so the mount tests run with no external EntDB, file
+// test signer, so the mount tests run with no external datastore, file
 // signer, or OTel exporter. Workers are started and drained via t.Cleanup.
 func newTestServer(t *testing.T) *identityserver.Server {
 	t.Helper()

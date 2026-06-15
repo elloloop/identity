@@ -1038,7 +1038,7 @@ func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
 
 func TestCreateFirstPlatformAdmin_UnimplementedWithoutStore(t *testing.T) {
 	t.Parallel()
-	// Built without a PlatformAdminStore (the entdb/memory shape).
+	// Built without a PlatformAdminStore (the memory shape).
 	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil)
 	if _, err := svc.CreateFirstPlatformAdmin(context.Background(), "ops@acme.com", ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("no store: err = %v, want ErrUnimplemented", err)

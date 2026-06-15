@@ -84,7 +84,7 @@ func TestPasswordSignup_AutoFormError_DoesNotFailSignup(t *testing.T) {
 	require.Len(t, af.calls, 1)
 }
 
-// With no auto-former wired (entdb/memory), signup proceeds untouched.
+// With no auto-former wired (memory), signup proceeds untouched.
 func TestPasswordSignup_NoAutoFormer_NoOp(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	// autoFormer left nil.

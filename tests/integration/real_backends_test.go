@@ -1,4 +1,4 @@
-//go:build integration && (realentdb || realpostgres)
+//go:build integration && realpostgres
 
 package integration
 
@@ -19,7 +19,7 @@ import (
 func withSharedTenant(tenantID string) HarnessOption {
 	return WithConfig(func(cfg *config.Config) {
 		cfg.DefaultTenantID = tenantID
-		// The data-plane binds to the project (ADR-0002); on real entdb the
+		// The data-plane binds to the project (ADR-0002); on a real backend the
 		// partition is provisioned under tenantID, so the default project must
 		// resolve to it too — otherwise reads/writes hit an unprovisioned scope.
 		cfg.DefaultProjectID = tenantID

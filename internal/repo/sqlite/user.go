@@ -1,0 +1,410 @@
+package sqlite
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"strings"
+	"time"
+
+	"github.com/elloloop/identity/internal/service"
+)
+
+// userColumns is the canonical SELECT list for the users table, listed once
+// so every reader decodes the same column ordering (mirrors the postgres
+// driver). SQLite stores booleans as INTEGER 0/1, so scanUser reads the bool
+// columns into int64 and converts — database/sql does not coerce int->bool.
+const userColumns = `
+	id, email, name, role, avatar_url, status, recovery_email,
+	password_hash, quota_bytes, totp_required,
+	failed_login_count, locked_until_ms,
+	email_verified, email_verified_at_ms,
+	idv_verified, idv_verified_at_ms,
+	phone_number, phone_verified, phone_verified_at_ms,
+	last_login_at_ms,
+	created_at_ms, updated_at_ms`
+
+// userColumnsPrefixed qualifies every column with the given table alias so
+// joins keep the shared column list — and scanUser ordering — authoritative.
+func userColumnsPrefixed(alias string) string {
+	cols := strings.Split(userColumns, ",")
+	for i, c := range cols {
+		cols[i] = alias + "." + strings.TrimSpace(c)
+	}
+	return strings.Join(cols, ", ")
+}
+
+func scanUser(s scanner) (*service.User, error) {
+	var (
+		u                                                      service.User
+		createdAtMs, updatedAtMs                               int64
+		quotaBytes, lockedUntilMs                              int64
+		failedLoginCount                                       int64
+		emailVerifiedAtMs, idvVerifiedAtMs, lastLoginAtMs      int64
+		phoneVerifiedAtMs                                      int64
+		emailVerified, idvVerified, totpRequired               int64
+		phoneVerified                                          int64
+		id, email, name, role, avatar, status, recovery, phash string
+		phoneNumber                                            string
+	)
+	if err := s.Scan(
+		&id, &email, &name, &role, &avatar, &status, &recovery,
+		&phash, &quotaBytes, &totpRequired,
+		&failedLoginCount, &lockedUntilMs,
+		&emailVerified, &emailVerifiedAtMs,
+		&idvVerified, &idvVerifiedAtMs,
+		&phoneNumber, &phoneVerified, &phoneVerifiedAtMs,
+		&lastLoginAtMs,
+		&createdAtMs, &updatedAtMs,
+	); err != nil {
+		return nil, err
+	}
+	u.ID = id
+	u.Email = email
+	u.Name = name
+	u.Role = role
+	u.AvatarURL = avatar
+	u.Status = status
+	u.RecoveryEmail = recovery
+	u.PasswordHash = phash
+	u.QuotaBytes = quotaBytes
+	u.TotpRequired = totpRequired != 0
+	u.FailedLoginCount = int(failedLoginCount)
+	u.LockedUntil = lockedUntilMs
+	u.EmailVerified = emailVerified != 0
+	u.EmailVerifiedAt = emailVerifiedAtMs
+	u.IDVVerified = idvVerified != 0
+	u.IDVVerifiedAt = idvVerifiedAtMs
+	u.PhoneNumber = phoneNumber
+	u.PhoneVerified = phoneVerified != 0
+	u.PhoneVerifiedAt = phoneVerifiedAtMs
+	u.LastLoginAtMs = lastLoginAtMs
+	u.CreatedAt = time.UnixMilli(createdAtMs)
+	u.UpdatedAt = time.UnixMilli(updatedAtMs)
+	return &u, nil
+}
+
+func (r *sqliteRepository) FindUserByEmail(ctx context.Context, email string) (*service.User, error) {
+	if email == "" {
+		return nil, nil
+	}
+	const q = `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND lower(email) = lower($2)
+		LIMIT 1`
+	u, err := scanUser(r.db.QueryRow(ctx, q, r.projectID, email))
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapErr("FindUserByEmail", err)
+	}
+	return u, nil
+}
+
+func (r *sqliteRepository) GetUser(ctx context.Context, userID string) (*service.User, error) {
+	if userID == "" {
+		return nil, nil
+	}
+	const q = `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND id = $2`
+	u, err := scanUser(r.db.QueryRow(ctx, q, r.projectID, userID))
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapErr("GetUser", err)
+	}
+	return u, nil
+}
+
+func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (string, error) {
+	if u == nil {
+		return "", errors.New("sqlite: CreateUser: nil user")
+	}
+	now := nowMs()
+	if u.CreatedAt.IsZero() {
+		u.CreatedAt = time.UnixMilli(now)
+	}
+	if u.UpdatedAt.IsZero() {
+		u.UpdatedAt = u.CreatedAt
+	}
+	id := u.ID
+	if id == "" {
+		id = newID()
+	}
+	role := u.Role
+	if role == "" {
+		role = "member"
+	}
+	status := u.Status
+	if status == "" {
+		status = "active"
+	}
+	const q = `
+		INSERT INTO users (
+			id, project_id, email, name, role, avatar_url, status,
+			recovery_email, password_hash, quota_bytes, totp_required,
+			failed_login_count, locked_until_ms,
+			email_verified, email_verified_at_ms,
+			idv_verified, idv_verified_at_ms,
+			phone_number, phone_verified, phone_verified_at_ms,
+			last_login_at_ms,
+			created_at_ms, updated_at_ms
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7,
+			$8, $9, $10, $11,
+			$12, $13,
+			$14, $15,
+			$16, $17,
+			$18, $19, $20,
+			$21,
+			$22, $23
+		)`
+	_, err := r.db.Exec(
+		ctx, q,
+		id, r.projectID, u.Email, u.Name, role, u.AvatarURL, status,
+		u.RecoveryEmail, u.PasswordHash, u.QuotaBytes, u.TotpRequired,
+		int64(u.FailedLoginCount), u.LockedUntil,
+		u.EmailVerified, u.EmailVerifiedAt,
+		u.IDVVerified, u.IDVVerifiedAt,
+		u.PhoneNumber, u.PhoneVerified, u.PhoneVerifiedAt,
+		u.LastLoginAtMs,
+		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
+	)
+	if err != nil {
+		return "", wrapErr("CreateUser", err)
+	}
+	u.ID = id
+	return id, nil
+}
+
+// userFieldColumns maps service-layer field names to (column, value-coercer).
+// Unknown keys are dropped to match the other drivers' behaviour.
+var userFieldColumns = map[string]struct {
+	col  string
+	kind string // "string" | "bool" | "int64"
+}{
+	"email":              {"email", "string"},
+	"name":               {"name", "string"},
+	"role":               {"role", "string"},
+	"avatar_url":         {"avatar_url", "string"},
+	"password_hash":      {"password_hash", "string"},
+	"totp_required":      {"totp_required", "bool"},
+	"failed_login_count": {"failed_login_count", "int64"},
+	"locked_until":       {"locked_until_ms", "int64"},
+	"status":             {"status", "string"},
+	"recovery_email":     {"recovery_email", "string"},
+	"quota_bytes":        {"quota_bytes", "int64"},
+	"last_login_at":      {"last_login_at_ms", "int64"},
+	"updated_at":         {"updated_at_ms", "int64"},
+	"email_verified":     {"email_verified", "bool"},
+	"email_verified_at":  {"email_verified_at_ms", "int64"},
+	"idv_verified":       {"idv_verified", "bool"},
+	"idv_verified_at":    {"idv_verified_at_ms", "int64"},
+	"phone_number":       {"phone_number", "string"},
+	"phone_verified":     {"phone_verified", "bool"},
+	"phone_verified_at":  {"phone_verified_at_ms", "int64"},
+}
+
+func (r *sqliteRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
+	if userID == "" {
+		return errors.New("sqlite: UpdateUser: missing user id")
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	sets := make([]string, 0, len(fields))
+	args := make([]any, 0, len(fields)+2)
+	idx := 1
+	for k, v := range fields {
+		spec, ok := userFieldColumns[k]
+		if !ok {
+			continue
+		}
+		var arg any
+		switch spec.kind {
+		case "string":
+			s, ok := nullableString(v)
+			if !ok {
+				continue
+			}
+			arg = s
+		case "bool":
+			b, ok := nullableBool(v)
+			if !ok {
+				continue
+			}
+			arg = b
+		case "int64":
+			n, ok := nullableInt64(v)
+			if !ok {
+				continue
+			}
+			arg = n
+		}
+		sets = append(sets, fmt.Sprintf("%s = $%d", spec.col, idx))
+		args = append(args, arg)
+		idx++
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, r.projectID, userID)
+	q := fmt.Sprintf(
+		`UPDATE users SET %s WHERE project_id = $%d AND id = $%d`,
+		strings.Join(sets, ", "), idx, idx+1,
+	)
+	if _, err := r.db.Exec(ctx, q, args...); err != nil {
+		return wrapErr("UpdateUser", err)
+	}
+	return nil
+}
+
+// userDeleteNonFKTables lists the user-keyed tables whose user_id column has
+// no FK to users(id) — they default to ” so they can legitimately hold rows
+// with no owning user. DeleteUser removes their rows explicitly; the FK ON
+// DELETE CASCADE on every other user-keyed table fires automatically when the
+// users row is deleted (foreign_keys is enabled per-connection).
+var userDeleteNonFKTables = []string{
+	"email_verification_tokens",
+	"passkey_challenges",
+	"qr_login_sessions",
+	"user_invitations",
+}
+
+func (r *sqliteRepository) DeleteUser(ctx context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	t, err := r.db.Begin(ctx)
+	if err != nil {
+		return wrapErr("DeleteUser", err)
+	}
+	defer func() { _ = t.Rollback(ctx) }()
+
+	for _, tbl := range userDeleteNonFKTables {
+		if _, err := t.Exec(ctx,
+			fmt.Sprintf(`DELETE FROM %s WHERE project_id = $1 AND user_id = $2`, tbl),
+			r.projectID, userID); err != nil {
+			return wrapErr("DeleteUser("+tbl+")", err)
+		}
+	}
+	if _, err := t.Exec(ctx,
+		`DELETE FROM users WHERE project_id = $1 AND id = $2`,
+		r.projectID, userID); err != nil {
+		return wrapErr("DeleteUser(users)", err)
+	}
+	if err := t.Commit(ctx); err != nil {
+		return wrapErr("DeleteUser", err)
+	}
+	return nil
+}
+
+// ── Lockout state ─────────────────────────────────────────────────
+
+func (r *sqliteRepository) IncrementFailedLoginCount(ctx context.Context, userID string) (int32, error) {
+	if userID == "" {
+		return 0, errors.New("sqlite: IncrementFailedLoginCount: missing user id")
+	}
+	const q = `
+		UPDATE users
+		   SET failed_login_count = failed_login_count + 1
+		 WHERE project_id = $1 AND id = $2
+		RETURNING failed_login_count`
+	var newCount int64
+	err := r.db.QueryRow(ctx, q, r.projectID, userID).Scan(&newCount)
+	if noRows(err) {
+		return 0, errors.New("sqlite: IncrementFailedLoginCount: user not found")
+	}
+	if err != nil {
+		return 0, wrapErr("IncrementFailedLoginCount", err)
+	}
+	if newCount > int64(math.MaxInt32) {
+		return 0, errors.New("sqlite: IncrementFailedLoginCount: count overflow")
+	}
+	return int32(newCount), nil // #nosec G115 -- bounds checked above.
+}
+
+func (r *sqliteRepository) ResetFailedLoginCount(ctx context.Context, userID string) error {
+	if userID == "" {
+		return errors.New("sqlite: ResetFailedLoginCount: missing user id")
+	}
+	const q = `
+		UPDATE users
+		   SET failed_login_count = 0, locked_until_ms = 0
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.db.Exec(ctx, q, r.projectID, userID); err != nil {
+		return wrapErr("ResetFailedLoginCount", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) SetUserLockedUntil(ctx context.Context, userID string, lockedUntilMs int64) error {
+	if userID == "" {
+		return errors.New("sqlite: SetUserLockedUntil: missing user id")
+	}
+	const q = `UPDATE users SET locked_until_ms = $3 WHERE project_id = $1 AND id = $2`
+	if _, err := r.db.Exec(ctx, q, r.projectID, userID, lockedUntilMs); err != nil {
+		return wrapErr("SetUserLockedUntil", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) SetUserEmailVerified(ctx context.Context, userID string, atMs int64) error {
+	if userID == "" {
+		return errors.New("sqlite: SetUserEmailVerified: missing user id")
+	}
+	const q = `
+		UPDATE users
+		   SET email_verified = 1, email_verified_at_ms = $3, updated_at_ms = $3
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.db.Exec(ctx, q, r.projectID, userID, atMs); err != nil {
+		return wrapErr("SetUserEmailVerified", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) SetUserIDVVerified(ctx context.Context, userID string, atMs int64) error {
+	if userID == "" {
+		return errors.New("sqlite: SetUserIDVVerified: missing user id")
+	}
+	const q = `
+		UPDATE users
+		   SET idv_verified = 1, idv_verified_at_ms = $3, updated_at_ms = $3
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.db.Exec(ctx, q, r.projectID, userID, atMs); err != nil {
+		return wrapErr("SetUserIDVVerified", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) SetUserPhoneVerified(ctx context.Context, userID, phoneNumber string, atMs int64) error {
+	if userID == "" {
+		return errors.New("sqlite: SetUserPhoneVerified: missing user id")
+	}
+	const q = `
+		UPDATE users
+		   SET phone_number = $3, phone_verified = 1, phone_verified_at_ms = $4, updated_at_ms = $4
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.db.Exec(ctx, q, r.projectID, userID, phoneNumber, atMs); err != nil {
+		return wrapErr("SetUserPhoneVerified", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) UpdateUserEmail(ctx context.Context, userID, newEmail string, atMs int64) error {
+	if userID == "" {
+		return errors.New("sqlite: UpdateUserEmail: missing user id")
+	}
+	const q = `
+		UPDATE users
+		   SET email = $3, email_verified = 1, email_verified_at_ms = $4, updated_at_ms = $4
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.db.Exec(ctx, q, r.projectID, userID, newEmail, atMs); err != nil {
+		return wrapErr("UpdateUserEmail", err)
+	}
+	return nil
+}

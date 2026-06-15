@@ -5,14 +5,23 @@ plugins:
     out: gen/go
     opt:
       - paths=source_relative
-      - Mentdb/entdb_options.proto=github.com/elloloop/identity/gen/go/entdb
   - remote: buf.build/connectrpc/go:v1.19.0
     out: gen/go
     opt:
       - paths=source_relative
-      - Mentdb/entdb_options.proto=github.com/elloloop/identity/gen/go/entdb
   - remote: buf.build/grpc/go:v1.5.1
     out: gen/go
     opt:
       - paths=source_relative
-      - Mentdb/entdb_options.proto=github.com/elloloop/identity/gen/go/entdb
+  # OpenAPI 3.1 spec for the Connect/JSON-over-HTTP surface, rendered by the
+  # docs site (Scalar). The remote plugin can't read a local base file, so
+  # info.title / info.version are stamped onto the generated spec by the
+  # docs-site prebuild step (scripts/prepare-openapi.mjs), sourcing the
+  # version from the repo VERSION file — the single source of truth shared
+  # with the docs VersionPill.
+  - remote: buf.build/community/sudorandom-connect-openapi:v0.25.7
+    out: gen/openapi
+    opt:
+      - format=yaml
+      - path=identity.openapi.yaml
+      - with-streaming

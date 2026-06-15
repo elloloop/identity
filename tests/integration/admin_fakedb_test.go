@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -20,13 +20,13 @@ import (
 // importable across packages.
 type adminFakeDB struct {
 	mu    sync.Mutex
-	nodes map[string]*entdb.Node
-	edges []*entdb.Edge
+	nodes map[string]*graph.Node
+	edges []*graph.Edge
 	seq   int64
 }
 
 func newAdminFakeDB() *adminFakeDB {
-	return &adminFakeDB{nodes: make(map[string]*entdb.Node)}
+	return &adminFakeDB{nodes: make(map[string]*graph.Node)}
 }
 
 const (
@@ -46,7 +46,7 @@ func (f *adminFakeDB) nextID() string {
 func (f *adminFakeDB) addUser(id, email, name, role, status string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nodes[id] = &entdb.Node{
+	f.nodes[id] = &graph.Node{
 		NodeID: id, TypeID: adminTypeUser,
 		Payload: map[string]any{
 			adminUfEmail: email, adminUfName: name,
@@ -55,7 +55,7 @@ func (f *adminFakeDB) addUser(id, email, name, role, status string) {
 	}
 }
 
-func (f *adminFakeDB) GetNode(_ context.Context, _, _ string, typeID int, nodeID string) (*entdb.Node, error) {
+func (f *adminFakeDB) GetNode(_ context.Context, _, _ string, typeID int, nodeID string) (*graph.Node, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n, ok := f.nodes[nodeID]
@@ -65,10 +65,10 @@ func (f *adminFakeDB) GetNode(_ context.Context, _, _ string, typeID int, nodeID
 	return n, nil
 }
 
-func (f *adminFakeDB) QueryNodes(_ context.Context, _, _ string, typeID int, filter map[string]any) ([]*entdb.Node, error) {
+func (f *adminFakeDB) QueryNodes(_ context.Context, _, _ string, typeID int, filter map[string]any) ([]*graph.Node, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var out []*entdb.Node
+	var out []*graph.Node
 	for _, n := range f.nodes {
 		if n.TypeID != typeID {
 			continue
@@ -88,37 +88,37 @@ func (f *adminFakeDB) QueryNodes(_ context.Context, _, _ string, typeID int, fil
 	return out, nil
 }
 
-func (f *adminFakeDB) ExecuteAtomic(_ context.Context, _, _ string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+func (f *adminFakeDB) ExecuteAtomic(_ context.Context, _, _ string, ops []graph.Operation) (*graph.CommitResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var created []string
 	for _, op := range ops {
 		switch op.Type {
-		case entdb.OpCreateNode:
+		case graph.OpCreateNode:
 			id := f.nextID()
-			f.nodes[id] = &entdb.Node{
+			f.nodes[id] = &graph.Node{
 				NodeID: id, TypeID: op.TypeID,
 				Payload: copyPayload(op.Data),
 			}
 			created = append(created, id)
-		case entdb.OpUpdateNode:
+		case graph.OpUpdateNode:
 			n, ok := f.nodes[op.NodeID]
 			if ok && n.TypeID == op.TypeID {
 				for k, v := range op.Patch {
 					n.Payload[k] = v
 				}
 			}
-		case entdb.OpDeleteNode:
+		case graph.OpDeleteNode:
 			delete(f.nodes, op.NodeID)
 		}
 	}
-	return &entdb.CommitResult{Success: true, Applied: true, CreatedNodeIDs: created}, nil
+	return &graph.CommitResult{Success: true, Applied: true, CreatedNodeIDs: created}, nil
 }
 
-func (f *adminFakeDB) GetEdgesFrom(_ context.Context, _, _, fromNodeID string, edgeTypeID int) ([]*entdb.Edge, error) {
+func (f *adminFakeDB) GetEdgesFrom(_ context.Context, _, _, fromNodeID string, edgeTypeID int) ([]*graph.Edge, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var out []*entdb.Edge
+	var out []*graph.Edge
 	for _, e := range f.edges {
 		if e.EdgeTypeID == edgeTypeID && e.FromNodeID == fromNodeID {
 			out = append(out, e)
@@ -127,10 +127,10 @@ func (f *adminFakeDB) GetEdgesFrom(_ context.Context, _, _, fromNodeID string, e
 	return out, nil
 }
 
-func (f *adminFakeDB) GetEdgesTo(_ context.Context, _, _, toNodeID string, edgeTypeID int) ([]*entdb.Edge, error) {
+func (f *adminFakeDB) GetEdgesTo(_ context.Context, _, _, toNodeID string, edgeTypeID int) ([]*graph.Edge, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var out []*entdb.Edge
+	var out []*graph.Edge
 	for _, e := range f.edges {
 		if e.EdgeTypeID == edgeTypeID && e.ToNodeID == toNodeID {
 			out = append(out, e)
@@ -139,11 +139,11 @@ func (f *adminFakeDB) GetEdgesTo(_ context.Context, _, _, toNodeID string, edgeT
 	return out, nil
 }
 
-func (f *adminFakeDB) SearchNodes(_ context.Context, _, _ string, typeID int, query string) ([]*entdb.Node, error) {
+func (f *adminFakeDB) SearchNodes(_ context.Context, _, _ string, typeID int, query string) ([]*graph.Node, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	q := strings.ToLower(query)
-	var out []*entdb.Node
+	var out []*graph.Node
 	for _, n := range f.nodes {
 		if n.TypeID != typeID {
 			continue

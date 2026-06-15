@@ -8,7 +8,7 @@ import (
 )
 
 // runIsolationConformance asserts tenant isolation: two independently
-// constructed repositories (each a distinct tenant on entdb/postgres, a
+// constructed repositories (each a distinct tenant on postgres, a
 // distinct store on memory) must not see each other's rows, and a
 // unique key (email) is scoped per tenant, not global. A leak here is a
 // cross-tenant data exposure — the most serious class of bug for a

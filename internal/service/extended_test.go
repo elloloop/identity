@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	entdbpkg "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/pkg/passwords"
 	"github.com/elloloop/identity/pkg/totp"
@@ -1853,8 +1853,8 @@ func TestActorStr(t *testing.T) {
 }
 
 // mkAuditNode builds an audit-event node payload for tests.
-func mkAuditNode(id, eventType, actor, target string, createdAt int64, details string) *entdbpkg.Node {
-	return &entdbpkg.Node{
+func mkAuditNode(id, eventType, actor, target string, createdAt int64, details string) *graph.Node {
+	return &graph.Node{
 		NodeID: id,
 		TypeID: typeAuditEvent,
 		Payload: map[string]any{

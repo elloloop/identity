@@ -1,4 +1,4 @@
-//go:build integration && !realentdb && !realpostgres
+//go:build integration && !realpostgres
 
 package integration
 
@@ -13,7 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
 	"github.com/elloloop/identity/internal/app"
@@ -72,15 +72,15 @@ type issue3DB struct {
 	audit *RecordingDB
 
 	mu     sync.Mutex
-	groups map[string]*entdb.Node
-	edges  []*entdb.Edge
+	groups map[string]*graph.Node
+	edges  []*graph.Edge
 }
 
 func newIssue3DB(repo *MemRepo, audit *RecordingDB) *issue3DB {
 	return &issue3DB{
 		repo:   repo,
 		audit:  audit,
-		groups: make(map[string]*entdb.Node),
+		groups: make(map[string]*graph.Node),
 	}
 }
 
@@ -138,7 +138,7 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 	}
 }
 
-func (d *issue3DB) GetNode(_ context.Context, _, _ string, typeID int, nodeID string) (*entdb.Node, error) {
+func (d *issue3DB) GetNode(_ context.Context, _, _ string, typeID int, nodeID string) (*graph.Node, error) {
 	switch typeID {
 	case issue3TypeUser:
 		d.repo.mu.Lock()
@@ -177,12 +177,12 @@ func (d *issue3DB) GetNode(_ context.Context, _, _ string, typeID int, nodeID st
 	}
 }
 
-func (d *issue3DB) QueryNodes(_ context.Context, _, _ string, typeID int, filter map[string]any) ([]*entdb.Node, error) {
+func (d *issue3DB) QueryNodes(_ context.Context, _, _ string, typeID int, filter map[string]any) ([]*graph.Node, error) {
 	switch typeID {
 	case issue3TypeUser:
 		d.repo.mu.Lock()
 		defer d.repo.mu.Unlock()
-		var out []*entdb.Node
+		var out []*graph.Node
 		for _, u := range d.repo.users {
 			n := issue3UserNode(u)
 			if issue3MatchFilter(n.Payload, filter) {
@@ -193,7 +193,7 @@ func (d *issue3DB) QueryNodes(_ context.Context, _, _ string, typeID int, filter
 	case issue3TypeWorkingGroup:
 		d.mu.Lock()
 		defer d.mu.Unlock()
-		var out []*entdb.Node
+		var out []*graph.Node
 		for _, n := range d.groups {
 			if issue3MatchFilter(n.Payload, filter) {
 				out = append(out, issue3CloneNode(n))
@@ -203,7 +203,7 @@ func (d *issue3DB) QueryNodes(_ context.Context, _, _ string, typeID int, filter
 	case issue3TypeUserInvitation:
 		d.repo.mu.Lock()
 		defer d.repo.mu.Unlock()
-		var out []*entdb.Node
+		var out []*graph.Node
 		for _, inv := range d.repo.invitations {
 			n := issue3InvitationNode(inv)
 			if issue3MatchFilter(n.Payload, filter) {
@@ -216,7 +216,7 @@ func (d *issue3DB) QueryNodes(_ context.Context, _, _ string, typeID int, filter
 	}
 }
 
-func (d *issue3DB) ExecuteAtomic(ctx context.Context, tenantID, actor string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+func (d *issue3DB) ExecuteAtomic(ctx context.Context, tenantID, actor string, ops []graph.Operation) (*graph.CommitResult, error) {
 	if issue3IsAuditWrite(ops) {
 		return d.audit.ExecuteAtomic(ctx, tenantID, actor, ops)
 	}
@@ -224,7 +224,7 @@ func (d *issue3DB) ExecuteAtomic(ctx context.Context, tenantID, actor string, op
 	var createdIDs []string
 	for _, op := range ops {
 		switch op.Type {
-		case entdb.OpCreateNode:
+		case graph.OpCreateNode:
 			createdID, err := d.createNode(op)
 			if err != nil {
 				return nil, err
@@ -232,23 +232,23 @@ func (d *issue3DB) ExecuteAtomic(ctx context.Context, tenantID, actor string, op
 			if createdID != "" {
 				createdIDs = append(createdIDs, createdID)
 			}
-		case entdb.OpUpdateNode:
+		case graph.OpUpdateNode:
 			if err := d.updateNode(op); err != nil {
 				return nil, err
 			}
-		case entdb.OpDeleteNode:
+		case graph.OpDeleteNode:
 			if err := d.deleteNode(op); err != nil {
 				return nil, err
 			}
-		case entdb.OpCreateEdge:
+		case graph.OpCreateEdge:
 			d.mu.Lock()
-			d.edges = append(d.edges, &entdb.Edge{
+			d.edges = append(d.edges, &graph.Edge{
 				EdgeTypeID: op.EdgeTypeID,
 				FromNodeID: op.FromNodeID,
 				ToNodeID:   op.ToNodeID,
 			})
 			d.mu.Unlock()
-		case entdb.OpDeleteEdge:
+		case graph.OpDeleteEdge:
 			d.mu.Lock()
 			keep := d.edges[:0]
 			for _, e := range d.edges {
@@ -262,21 +262,21 @@ func (d *issue3DB) ExecuteAtomic(ctx context.Context, tenantID, actor string, op
 		}
 	}
 
-	return &entdb.CommitResult{
+	return &graph.CommitResult{
 		Success:        true,
 		Applied:        true,
 		CreatedNodeIDs: createdIDs,
 	}, nil
 }
 
-func (d *issue3DB) GetEdgesFrom(_ context.Context, _, _ string, fromNodeID string, edgeTypeID int) ([]*entdb.Edge, error) {
+func (d *issue3DB) GetEdgesFrom(_ context.Context, _, _ string, fromNodeID string, edgeTypeID int) ([]*graph.Edge, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	var out []*entdb.Edge
+	var out []*graph.Edge
 	for _, e := range d.edges {
 		if e.EdgeTypeID == edgeTypeID && e.FromNodeID == fromNodeID {
-			out = append(out, &entdb.Edge{
+			out = append(out, &graph.Edge{
 				EdgeTypeID: e.EdgeTypeID,
 				FromNodeID: e.FromNodeID,
 				ToNodeID:   e.ToNodeID,
@@ -286,14 +286,14 @@ func (d *issue3DB) GetEdgesFrom(_ context.Context, _, _ string, fromNodeID strin
 	return out, nil
 }
 
-func (d *issue3DB) GetEdgesTo(_ context.Context, _, _ string, toNodeID string, edgeTypeID int) ([]*entdb.Edge, error) {
+func (d *issue3DB) GetEdgesTo(_ context.Context, _, _ string, toNodeID string, edgeTypeID int) ([]*graph.Edge, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	var out []*entdb.Edge
+	var out []*graph.Edge
 	for _, e := range d.edges {
 		if e.EdgeTypeID == edgeTypeID && e.ToNodeID == toNodeID {
-			out = append(out, &entdb.Edge{
+			out = append(out, &graph.Edge{
 				EdgeTypeID: e.EdgeTypeID,
 				FromNodeID: e.FromNodeID,
 				ToNodeID:   e.ToNodeID,
@@ -303,7 +303,7 @@ func (d *issue3DB) GetEdgesTo(_ context.Context, _, _ string, toNodeID string, e
 	return out, nil
 }
 
-func (d *issue3DB) SearchNodes(_ context.Context, _, _ string, typeID int, query string) ([]*entdb.Node, error) {
+func (d *issue3DB) SearchNodes(_ context.Context, _, _ string, typeID int, query string) ([]*graph.Node, error) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	if q == "" {
 		return nil, nil
@@ -313,7 +313,7 @@ func (d *issue3DB) SearchNodes(_ context.Context, _, _ string, typeID int, query
 	case issue3TypeUser:
 		d.repo.mu.Lock()
 		defer d.repo.mu.Unlock()
-		var out []*entdb.Node
+		var out []*graph.Node
 		for _, u := range d.repo.users {
 			n := issue3UserNode(u)
 			if issue3MatchesQuery(n.Payload, q) {
@@ -324,7 +324,7 @@ func (d *issue3DB) SearchNodes(_ context.Context, _, _ string, typeID int, query
 	case issue3TypeWorkingGroup:
 		d.mu.Lock()
 		defer d.mu.Unlock()
-		var out []*entdb.Node
+		var out []*graph.Node
 		for _, n := range d.groups {
 			if issue3MatchesQuery(n.Payload, q) {
 				out = append(out, issue3CloneNode(n))
@@ -343,7 +343,7 @@ func (d *issue3DB) RegisterUserInTenant(_ context.Context, _, _, _, _, _ string)
 	return nil
 }
 
-func (d *issue3DB) createNode(op entdb.Operation) (string, error) {
+func (d *issue3DB) createNode(op graph.Operation) (string, error) {
 	switch op.TypeID {
 	case issue3TypeUser:
 		d.repo.mu.Lock()
@@ -398,7 +398,7 @@ func (d *issue3DB) createNode(op entdb.Operation) (string, error) {
 		d.repo.mu.Unlock()
 
 		d.mu.Lock()
-		d.groups[id] = &entdb.Node{
+		d.groups[id] = &graph.Node{
 			NodeID: id,
 			TypeID: issue3TypeWorkingGroup,
 			Payload: map[string]any{
@@ -416,7 +416,7 @@ func (d *issue3DB) createNode(op entdb.Operation) (string, error) {
 	}
 }
 
-func (d *issue3DB) updateNode(op entdb.Operation) error {
+func (d *issue3DB) updateNode(op graph.Operation) error {
 	switch op.TypeID {
 	case issue3TypeUser:
 		d.repo.mu.Lock()
@@ -476,7 +476,7 @@ func (d *issue3DB) updateNode(op entdb.Operation) error {
 	return nil
 }
 
-func (d *issue3DB) deleteNode(op entdb.Operation) error {
+func (d *issue3DB) deleteNode(op graph.Operation) error {
 	if op.TypeID != issue3TypeWorkingGroup {
 		return nil
 	}
@@ -495,19 +495,19 @@ func (d *issue3DB) deleteNode(op entdb.Operation) error {
 	return nil
 }
 
-func issue3IsAuditWrite(ops []entdb.Operation) bool {
+func issue3IsAuditWrite(ops []graph.Operation) bool {
 	if len(ops) == 0 {
 		return false
 	}
 	for _, op := range ops {
-		if op.Type != entdb.OpCreateNode || op.TypeID != issue3TypeAuditEvent {
+		if op.Type != graph.OpCreateNode || op.TypeID != issue3TypeAuditEvent {
 			return false
 		}
 	}
 	return true
 }
 
-func issue3UserNode(u *service.User) *entdb.Node {
+func issue3UserNode(u *service.User) *graph.Node {
 	payload := map[string]any{
 		issue3UfEmail:         u.Email,
 		issue3UfName:          u.Name,
@@ -521,11 +521,11 @@ func issue3UserNode(u *service.User) *entdb.Node {
 		issue3UfQuotaBytes:    u.QuotaBytes,
 		issue3UfLastLoginAt:   u.LastLoginAtMs,
 	}
-	return &entdb.Node{NodeID: u.ID, TypeID: issue3TypeUser, Payload: payload}
+	return &graph.Node{NodeID: u.ID, TypeID: issue3TypeUser, Payload: payload}
 }
 
-func issue3InvitationNode(inv *service.InvitationRecord) *entdb.Node {
-	return &entdb.Node{
+func issue3InvitationNode(inv *service.InvitationRecord) *graph.Node {
+	return &graph.Node{
 		NodeID: inv.NodeID,
 		TypeID: issue3TypeUserInvitation,
 		Payload: map[string]any{
@@ -541,8 +541,8 @@ func issue3InvitationNode(inv *service.InvitationRecord) *entdb.Node {
 	}
 }
 
-func issue3PasswordResetNode(reset *service.PasswordResetToken) *entdb.Node {
-	return &entdb.Node{
+func issue3PasswordResetNode(reset *service.PasswordResetToken) *graph.Node {
+	return &graph.Node{
 		NodeID: reset.NodeID,
 		TypeID: issue3TypePasswordReset,
 		Payload: map[string]any{
@@ -554,11 +554,11 @@ func issue3PasswordResetNode(reset *service.PasswordResetToken) *entdb.Node {
 	}
 }
 
-func issue3CloneNode(n *entdb.Node) *entdb.Node {
+func issue3CloneNode(n *graph.Node) *graph.Node {
 	if n == nil {
 		return nil
 	}
-	return &entdb.Node{
+	return &graph.Node{
 		NodeID:  n.NodeID,
 		TypeID:  n.TypeID,
 		Payload: issue3CopyMap(n.Payload),

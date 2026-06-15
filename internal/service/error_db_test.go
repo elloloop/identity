@@ -5,7 +5,7 @@ package service
 import (
 	"context"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 )
 
 type errorDB struct {
@@ -31,7 +31,7 @@ func newErrorDB() *errorDB {
 	return &errorDB{fakeDB: newFakeDB()}
 }
 
-func (d *errorDB) GetNode(ctx context.Context, t, a string, tid int, nid string) (*entdb.Node, error) {
+func (d *errorDB) GetNode(ctx context.Context, t, a string, tid int, nid string) (*graph.Node, error) {
 	d.getNodeCount++
 	if d.failGetNode || (d.failGetNodeAfter > 0 && d.getNodeCount >= d.failGetNodeAfter) {
 		return nil, errInjected
@@ -39,7 +39,7 @@ func (d *errorDB) GetNode(ctx context.Context, t, a string, tid int, nid string)
 	return d.fakeDB.GetNode(ctx, t, a, tid, nid)
 }
 
-func (d *errorDB) QueryNodes(ctx context.Context, t, a string, tid int, f map[string]any) ([]*entdb.Node, error) {
+func (d *errorDB) QueryNodes(ctx context.Context, t, a string, tid int, f map[string]any) ([]*graph.Node, error) {
 	d.queryCount++
 	if d.failQueryNodes || (d.failQueryAfter > 0 && d.queryCount >= d.failQueryAfter) {
 		return nil, errInjected
@@ -47,7 +47,7 @@ func (d *errorDB) QueryNodes(ctx context.Context, t, a string, tid int, f map[st
 	return d.fakeDB.QueryNodes(ctx, t, a, tid, f)
 }
 
-func (d *errorDB) ExecuteAtomic(ctx context.Context, t, a string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+func (d *errorDB) ExecuteAtomic(ctx context.Context, t, a string, ops []graph.Operation) (*graph.CommitResult, error) {
 	d.executeCount++
 	if d.failExecuteAtomic || (d.failExecuteAfter > 0 && d.executeCount >= d.failExecuteAfter) {
 		return nil, errInjected
@@ -55,21 +55,21 @@ func (d *errorDB) ExecuteAtomic(ctx context.Context, t, a string, ops []entdb.Op
 	return d.fakeDB.ExecuteAtomic(ctx, t, a, ops)
 }
 
-func (d *errorDB) GetEdgesFrom(ctx context.Context, t, a, fid string, eid int) ([]*entdb.Edge, error) {
+func (d *errorDB) GetEdgesFrom(ctx context.Context, t, a, fid string, eid int) ([]*graph.Edge, error) {
 	if d.failGetEdgesFrom {
 		return nil, errInjected
 	}
 	return d.fakeDB.GetEdgesFrom(ctx, t, a, fid, eid)
 }
 
-func (d *errorDB) GetEdgesTo(ctx context.Context, t, a, tid string, eid int) ([]*entdb.Edge, error) {
+func (d *errorDB) GetEdgesTo(ctx context.Context, t, a, tid string, eid int) ([]*graph.Edge, error) {
 	if d.failGetEdgesTo {
 		return nil, errInjected
 	}
 	return d.fakeDB.GetEdgesTo(ctx, t, a, tid, eid)
 }
 
-func (d *errorDB) SearchNodes(ctx context.Context, t, a string, tid int, q string) ([]*entdb.Node, error) {
+func (d *errorDB) SearchNodes(ctx context.Context, t, a string, tid int, q string) ([]*graph.Node, error) {
 	if d.failSearchNodes {
 		return nil, errInjected
 	}

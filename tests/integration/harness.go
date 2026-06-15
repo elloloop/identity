@@ -5,7 +5,7 @@
 // harness builds the same wiring used by cmd/identity/main.go via
 // internal/app, but lets each build-tagged StartServer choose the
 // backing store so the same test suite can run against memory,
-// Postgres, and EntDB.
+// and Postgres.
 package integration
 
 import (
@@ -21,7 +21,7 @@ import (
 	"connectrpc.com/connect"
 	"go.uber.org/zap"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
 	"github.com/elloloop/identity/internal/app"
@@ -256,10 +256,29 @@ func (h *Harness) WaitForUser(t *testing.T, email string, predicate func(*servic
 	}
 }
 
+// testInspector is the optional test-support surface a Repository driver may
+// expose so the integration harness can count/update rows without the EntDB
+// node/edge graph. The MemRepo has its own fast-path (below); SQL drivers that
+// do not implement the EntDB graph (sqlite) satisfy this interface so the same
+// suite runs on them. Drivers that DO have a real graph (postgres, entdb) leave
+// it unimplemented and fall through to the h.DB.QueryNodes path.
+type testInspector interface {
+	CountRefreshTokensForUserTest(ctx context.Context, userID string) (int, error)
+	CountUsersByEmailTest(ctx context.Context, email string) (int, error)
+	CountPasswordResetTokensForUserTest(ctx context.Context, userID string) (int, error)
+}
+
 func (h *Harness) CountRefreshTokensForUser(t *testing.T, userID string) int {
 	t.Helper()
 	if repo, ok := h.Repo.(*MemRepo); ok {
 		return repo.CountRefreshTokensForUser(userID)
+	}
+	if insp, ok := h.Repo.(testInspector); ok {
+		n, err := insp.CountRefreshTokensForUserTest(context.Background(), userID)
+		if err != nil {
+			t.Fatalf("CountRefreshTokensForUserTest(%q): %v", userID, err)
+		}
+		return n
 	}
 	return h.queryNodeCount(t, testTypeRefreshToken, map[string]any{
 		testRefreshUserIDField: userID,
@@ -279,6 +298,13 @@ func (h *Harness) CountUsersByEmail(t *testing.T, email string) int {
 		}
 		return n
 	}
+	if insp, ok := h.Repo.(testInspector); ok {
+		n, err := insp.CountUsersByEmailTest(context.Background(), email)
+		if err != nil {
+			t.Fatalf("CountUsersByEmailTest(%q): %v", email, err)
+		}
+		return n
+	}
 	return h.queryNodeCount(t, testTypeUser, map[string]any{
 		testUserEmailField: email,
 	})
@@ -294,6 +320,13 @@ func (h *Harness) CountPasswordResetTokensForUser(t *testing.T, userID string) i
 			if tok.UserID == userID {
 				n++
 			}
+		}
+		return n
+	}
+	if insp, ok := h.Repo.(testInspector); ok {
+		n, err := insp.CountPasswordResetTokensForUserTest(context.Background(), userID)
+		if err != nil {
+			t.Fatalf("CountPasswordResetTokensForUserTest(%q): %v", userID, err)
 		}
 		return n
 	}
@@ -561,13 +594,38 @@ func (h *Harness) waitForPasskeyChallengeValue(t *testing.T, challengeID, want s
 	}
 }
 
+// testNodeUpdater is the optional test-support surface for in-place node
+// patches on drivers without the EntDB graph (sqlite). It maps the two node
+// types the harness mutates (passkey challenges, qr login sessions) onto the
+// driver's typed update methods.
+type testNodeUpdater interface {
+	UpdatePasskeyChallengeTest(ctx context.Context, nodeID string, patch map[string]any) error
+	UpdateQrLoginSessionTest(ctx context.Context, nodeID string, patch map[string]any) error
+}
+
 func (h *Harness) updateNode(t *testing.T, typeID int, nodeID string, patch map[string]any) {
 	t.Helper()
 
+	if upd, ok := h.Repo.(testNodeUpdater); ok {
+		var err error
+		switch typeID {
+		case testTypePasskeyChallenge:
+			err = upd.UpdatePasskeyChallengeTest(context.Background(), nodeID, patch)
+		case testTypeQrLoginSession:
+			err = upd.UpdateQrLoginSessionTest(context.Background(), nodeID, patch)
+		default:
+			t.Fatalf("updateNode: testNodeUpdater has no mapping for type=%d", typeID)
+		}
+		if err != nil {
+			t.Fatalf("updateNode(type=%d node=%q): %v", typeID, nodeID, err)
+		}
+		return
+	}
+
 	// Use the tenant-admin actor so updates cross user boundaries
 	// without ACCESS_DENIED on v1.12+ — see queryNodeCount above.
-	_, err := h.DB.ExecuteAtomic(context.Background(), h.TenantID, "system:admin", []entdb.Operation{{
-		Type:   entdb.OpUpdateNode,
+	_, err := h.DB.ExecuteAtomic(context.Background(), h.TenantID, "system:admin", []graph.Operation{{
+		Type:   graph.OpUpdateNode,
 		TypeID: typeID,
 		NodeID: nodeID,
 		Patch:  patch,
@@ -2023,6 +2081,6 @@ func (r *MemRepo) CountSessionsForUser(userID string) (active, revoked int) {
 // compile-time interface assertion
 var _ service.Repository = (*MemRepo)(nil)
 
-// silence unused import when entdb is only referenced via the
+// silence unused import when graph is only referenced via the
 // service.DB stub; keep the import line stable for future replacement.
-var _ = (*entdb.Node)(nil)
+var _ = (*graph.Node)(nil)
