@@ -1,0 +1,10 @@
+# Generates a self-hosted, navigable HTML proto reference via protoc-gen-doc.
+# Output lands in docs-site/public/proto/ so GitHub Pages serves it at
+# /identity/proto/ alongside the Scalar/OpenAPI reference. Regenerated in the
+# docs deploy workflow; the output directory is gitignored (build artifact).
+version: v2
+plugins:
+  - remote: buf.build/community/pseudomuto-doc:v1.5.1
+    out: docs-site/public/proto
+    opt:
+      - html,index.html

@@ -6,6 +6,9 @@ on:
     paths:
       - 'docs-site/**'
       - '.github/workflows/docs.yml'
+      - 'proto/**'
+      - 'buf.yaml'
+      - 'buf.gen.docs.yaml'
   workflow_dispatch:
 
 permissions:
@@ -33,6 +36,14 @@ jobs:
         uses: pnpm/action-setup@v6
         with:
           version: 10
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: '1.66.0'
+
+      - name: Generate proto HTML reference
+        run: buf generate --template buf.gen.docs.yaml
 
       - name: Install dependencies
         working-directory: docs-site
