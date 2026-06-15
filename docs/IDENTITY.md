@@ -177,7 +177,18 @@ GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS= <csv>      # serving hostnames seeded (ver
 GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN= <bool>     # default true; primary auth-domain (branded links) must be DNS-verified. false lets an unverified is_primary host drive links
 GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane admin RPCs; empty disables them
 GATEWAY_PUBLIC_EMAIL_DOMAINS        = <csv>      # extra public domains that never auto-form a tenant
+GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS = <int>  # default 30; in-process cache for credential/Host→project resolution; 0 disables
+GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES = <int>  # default 10000; LRU bound on cached resolution keys
 ```
+
+Per-request project resolution (credential-key→project and Host→project)
+runs ahead of the rate limiter and on every CORS preflight, so each
+uncached request would issue 2-3 control-plane queries — a DoS-amplification
+and scaling liability. A short-TTL, LRU-bounded in-process cache fronts both
+resolution paths. The TTL is deliberately short so a suspended project or
+revoked credential is never served stale beyond it; there is no explicit
+invalidation. The cache caches misses as well as hits (so a flood of unknown
+keys cannot bypass it) but never caches transient store errors.
 
 On boot, the postgres driver seeds the default `Project` (mapped onto the
 `DefaultTenantID` storage scope) and any `DefaultProjectAuthDomains`

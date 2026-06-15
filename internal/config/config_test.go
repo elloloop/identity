@@ -41,6 +41,15 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.JWTExpirySeconds != 900 {
 		t.Errorf("JWTExpirySeconds: want 900, got %d", cfg.JWTExpirySeconds)
 	}
+	if cfg.ProjectResolutionCacheTTLSeconds != 30 {
+		t.Errorf("ProjectResolutionCacheTTLSeconds: want 30, got %d", cfg.ProjectResolutionCacheTTLSeconds)
+	}
+	if cfg.ProjectResolutionCacheTTL() != 30*time.Second {
+		t.Errorf("ProjectResolutionCacheTTL: want 30s, got %s", cfg.ProjectResolutionCacheTTL())
+	}
+	if cfg.ProjectResolutionCacheMaxEntries != 10000 {
+		t.Errorf("ProjectResolutionCacheMaxEntries: want 10000, got %d", cfg.ProjectResolutionCacheMaxEntries)
+	}
 	if cfg.PasswordSignupEnabled != true {
 		t.Errorf("PasswordSignupEnabled: want true, got %v", cfg.PasswordSignupEnabled)
 	}

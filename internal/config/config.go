@@ -188,6 +188,22 @@ type Config struct {
 	// row. Effective only when RevocationMode == RevocationModeSession.
 	SessionCacheTTLSeconds int
 
+	// ProjectResolutionCacheTTLSeconds bounds how long a per-request
+	// project resolution (credential-key→project and Host→project) may be
+	// served from the in-process cache before being re-read from the
+	// control-plane store. Project resolution runs ahead of the rate
+	// limiter and on every CORS preflight, so caching it removes 2-3
+	// uncached DB queries from the hot path. Kept short so a suspended
+	// project or revoked credential is never served stale beyond the TTL.
+	// 0 = disabled: every request resolves against the store.
+	ProjectResolutionCacheTTLSeconds int
+
+	// ProjectResolutionCacheMaxEntries bounds the number of distinct
+	// resolution keys (credential ids + hostnames) held in the cache,
+	// evicting the least-recently-used entry past the bound so the cache
+	// cannot grow unbounded under hostile or high-cardinality traffic.
+	ProjectResolutionCacheMaxEntries int
+
 	// OAuth providers. Identity does the code exchange for these
 	// providers itself — see pkg/oauth. A provider is enabled only
 	// when BOTH the ID and secret are non-empty.
@@ -490,6 +506,9 @@ func Load() *Config {
 
 		RevocationMode:         revocationModeFromEnv("GATEWAY_REVOCATION_MODE", RevocationModeTTL),
 		SessionCacheTTLSeconds: envInt("GATEWAY_SESSION_CACHE_TTL_SECONDS", 60),
+
+		ProjectResolutionCacheTTLSeconds: envInt("GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS", 30),
+		ProjectResolutionCacheMaxEntries: envInt("GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES", 10000),
 
 		GoogleClientID:        envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", envStr("GATEWAY_GOOGLE_CLIENT_ID", "")),
 		GoogleClientSecret:    envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", envStr("GATEWAY_GOOGLE_CLIENT_SECRET", "")),
@@ -850,6 +869,12 @@ func (c *Config) validateCaptcha() error {
 // 0 means strict mode (read on every request).
 func (c *Config) SessionCacheTTL() time.Duration {
 	return time.Duration(c.SessionCacheTTLSeconds) * time.Second
+}
+
+// ProjectResolutionCacheTTL returns the configured project-resolution cache
+// TTL as a time.Duration. 0 means disabled (resolve on every request).
+func (c *Config) ProjectResolutionCacheTTL() time.Duration {
+	return time.Duration(c.ProjectResolutionCacheTTLSeconds) * time.Second
 }
 
 // envBool reads a boolean environment variable. Recognises "true",

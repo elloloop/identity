@@ -486,7 +486,13 @@ func New(deps Deps) (*Built, error) {
 	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
 	chain = middleware.NewProjectResolver(
 		deps.Config.DefaultProjectID, deps.Config.DefaultTenantID,
-		deps.Config.DefaultPrimaryAuthDomain(), deps.ProjectResolver, logger,
+		deps.Config.DefaultPrimaryAuthDomain(),
+		service.NewCachingProjectResolver(
+			deps.ProjectResolver,
+			deps.Config.ProjectResolutionCacheTTL(),
+			deps.Config.ProjectResolutionCacheMaxEntries,
+		),
+		logger,
 	)(chain)
 	chain = middleware.HealthMiddleware(newDBReadinessProbe(deps.DB), chain)
 	chain = middleware.RecoverMiddleware(logger)(chain)
