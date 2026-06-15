@@ -7,8 +7,8 @@ import { Code } from "astro-expressive-code/components";
   <h1>Identity</h1>
   <p>
     Authentication and user-management as a single, deployable container.
-    Pull a pinned image, point it at an
-    <a href="https://github.com/elloloop/tenant-shard-db">EntDB</a> instance,
+    Pull a pinned image, point it at a datastore (Postgres for production,
+    or embedded SQLite for a single node),
     and you have email/password signup, passkeys, TOTP, OAuth, JWT issuance,
     sessions, and an admin user-management surface — all over Connect-RPC
     on HTTP/JSON.
@@ -24,41 +24,42 @@ import { Code } from "astro-expressive-code/components";
     <li><strong>JWT issuance</strong> with key rotation, plus <code>/.well-known/jwks.json</code> for downstream services</li>
     <li><strong>Sessions</strong> — list, revoke, sign-out-everywhere</li>
     <li><strong>Admin user management</strong> — invite, deactivate, reactivate, reset password, set quota</li>
-    <li><strong>Groups</strong> + membership edges (graph-backed)</li>
+    <li><strong>Groups</strong> + membership</li>
     <li><strong>Audit log</strong> of all auth events</li>
   </ul>
 
   <h2>How it deploys</h2>
   <p>
-    One container, one image, one EntDB. Treat it like
-    <a href="https://github.com/elloloop/tenant-shard-db">tenant-shard-db</a>:
-    deploy it once per product, fully isolated user pool. The container
+    One container, one image, one datastore. Deploy it once per product —
+    each Project is a fully isolated user pool. The container
     listens on <code>:80</code> for Connect-RPC, <code>:9090</code> for
     Prometheus metrics.
   </p>
 
   <Code code={`docker run -p 80:80 -p 9090:9090 \\
-  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \\
-  -e GATEWAY_DEFAULT_TENANT_ID=my-product \\
+  -e GATEWAY_REPO_DRIVER=postgres \\
+  -e GATEWAY_POSTGRES_DSN=postgres://identity:secret@postgres:5432/identity \\
+  -e GATEWAY_DEFAULT_PROJECT_ID=proj_my_product \\
   -e GATEWAY_PASSKEY_RP_ID=my-product.com \\
   -e GATEWAY_PASSKEY_ORIGIN=https://my-product.com \\
   -e GATEWAY_TOTP_ISSUER="My Product" \\
-  ghcr.io/elloloop/identity:0.1.0`} lang="bash" title="docker run" />
+  ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="docker run" />
 
   <h2>Storage layout</h2>
   <p>
-    All persistent state lives in EntDB. Identity reserves the type IDs
-    <code>1–99</code> in the EntDB schema; other services consuming the same
-    EntDB instance must use type IDs <code>100+</code> to avoid collisions.
+    All persistent state lives in the datastore (Postgres or SQLite) as
+    plain relational tables. Every row is scoped by <code>project_id</code>,
+    which is the isolation boundary — multiple Projects can share one
+    Postgres instance without seeing each other's data.
   </p>
   <table>
-    <tr><th>type_id</th><th>Node</th></tr>
-    <tr><td>1</td><td>User</td></tr>
-    <tr><td>2</td><td>Group</td></tr>
-    <tr><td>5</td><td>RefreshToken</td></tr>
-    <tr><td>6</td><td>Passkey</td></tr>
-    <tr><td>7</td><td>TOTPSecret</td></tr>
-    <tr><td>8</td><td>AuditEvent</td></tr>
+    <tr><th>Table</th><th>Holds</th></tr>
+    <tr><td>users</td><td>Identities, one per <code>(project_id, email)</code></td></tr>
+    <tr><td>groups</td><td>Groups and memberships</td></tr>
+    <tr><td>refresh_tokens</td><td>Sessions (hashed refresh tokens)</td></tr>
+    <tr><td>passkeys</td><td>WebAuthn credentials</td></tr>
+    <tr><td>totp_secrets</td><td>Encrypted TOTP secrets</td></tr>
+    <tr><td>audit_events</td><td>Append-only audit log</td></tr>
   </table>
 
   <h2>Where to next</h2>

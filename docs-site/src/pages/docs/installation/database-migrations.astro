@@ -6,12 +6,14 @@ import { Code } from "astro-expressive-code/components";
 <DocsLayout title="Database & Migrations">
   <h1>Database &amp; Migrations</h1>
   <p>
-    Identity's primary backend is <strong>Postgres</strong>
-    (<code>GATEWAY_REPO_DRIVER=postgres</code>, the default). The in-memory
-    driver keeps no durable state and can skip this page. On the Postgres
-    driver Identity stores
-    its durable state in PostgreSQL, and the schema is managed by versioned,
-    embedded migrations applied with
+    Identity's default backend is <strong>Postgres</strong>
+    (<code>GATEWAY_REPO_DRIVER=postgres</code>) — the recommended driver for
+    production and multi-node deployments. <strong>This page applies to the
+    Postgres driver.</strong> The embedded SQLite driver
+    (<code>GATEWAY_REPO_DRIVER=sqlite</code>) manages its own schema on first
+    open, and the in-memory driver is schemaless — those deployments can skip
+    this page. On Postgres, Identity stores its durable state in PostgreSQL and
+    the schema is managed by versioned, embedded migrations applied with
     <a href="https://github.com/golang-migrate/migrate">golang-migrate</a>. The
     <code>.sql</code> files are compiled into the binary, so the image is
     self-contained — operators never ship migration files separately.
@@ -49,7 +51,7 @@ import { Code } from "astro-expressive-code/components";
   <Code code={`docker run --rm \\
   -e GATEWAY_POSTGRES_DSN="postgres://identity:secret@db:5432/identity?sslmode=require" \\
   -e GATEWAY_POSTGRES_AUTO_MIGRATE=true \\
-  ghcr.io/elloloop/identity:latest`} lang="bash" title="first boot — creates the full schema" />
+  ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="first boot — creates the full schema" />
   <p>
     On this boot the runner applies every migration from <code>0001</code> to
     the latest in order, then the service starts. It is idempotent — booting
@@ -59,7 +61,7 @@ import { Code } from "astro-expressive-code/components";
     After migrations are in place, the service seeds a control-plane
     <strong>default project</strong> on every boot (idempotently): id
     <code>GATEWAY_DEFAULT_PROJECT_ID</code> (default <code>default</code>),
-    mapped onto the <code>GATEWAY_DEFAULT_TENANT_ID</code> storage scope. If
+    which owns the deployment's storage scope. If
     you run migrations as a separate step rather than on boot, run them
     <em>before</em> starting the server — otherwise boot fails fast with a hint
     to run <code>identity migrate</code>, because the <code>projects</code>
@@ -180,7 +182,7 @@ WHERE id IN (SELECT user_id FROM email_verification_tokens WHERE consumed_at <> 
     migrations, and existing single-tenant data is preserved, not reset:
   </p>
   <ul>
-    <li>a <strong>default Project</strong> row is created, mapped to your current <code>GATEWAY_DEFAULT_TENANT_ID</code> storage scope;</li>
+    <li>a <strong>default Project</strong> row is created (id <code>GATEWAY_DEFAULT_PROJECT_ID</code>), owning the deployment's storage scope;</li>
     <li><code>project_id</code> is <strong>backfilled</strong> on every existing row to that default Project;</li>
     <li><strong>Tenants</strong> are formed (latent) from the email domains already present in <code>users</code>, skipping public providers;</li>
     <li>the retired <code>organizations</code> / <code>organization_memberships</code> tables are exported for the workspace service, then dropped.</li>

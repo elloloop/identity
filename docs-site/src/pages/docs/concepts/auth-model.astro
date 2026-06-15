@@ -32,11 +32,13 @@ import { Code } from "astro-expressive-code/components";
   <Code code={`{
   "iss": "identity",
   "sub": "user_01HZ...",       // user ID
-  "tenant": "my-product",       // GATEWAY_DEFAULT_TENANT_ID
-  "role": "admin",              // "admin" | "member" | "guest"
+  "email": "alice@acme.com",   // login key — see Projects, Tenants & Domains
+  "project": "proj_01HZ...",   // Project (isolation shard) the user belongs to
+  "tenant": "acme",            // logical tenant, derived from verified domain
+  "role": "admin",             // "admin" | "member" | "guest"
+  "sid": "sess_01HZ...",       // session ID
   "iat": 1730000000,
-  "exp": 1730000900,
-  "jti": "..."
+  "exp": 1730000900
 }`} lang="json" />
   <p>
     Access tokens intentionally carry identity and a coarse

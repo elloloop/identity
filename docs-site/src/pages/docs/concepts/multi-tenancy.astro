@@ -3,59 +3,109 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
 import { Code } from "astro-expressive-code/components";
 ---
 
-<DocsLayout title="Multi-Tenancy">
-  <h1>Multi-Tenancy</h1>
+<DocsLayout title="Projects, Tenants & Domains">
+  <h1>Projects, Tenants &amp; Domains</h1>
   <p>
-    Identity is <strong>single-tenant per deployment</strong>. The model is:
-    one container, one user pool, one tenant ID. The
-    <code>tenant_id</code> field on RPC messages is a defence-in-depth check
-    against the configured default — not a tenant selector.
-  </p>
-
-  <h2>Why per-product, not per-customer</h2>
-  <p>
-    The cost of a fresh container is small (0.25 vCPU, 256 MB), and EntDB is
-    already tenant-sharded. Running one Identity per product gives:
+    Identity separates three concepts that older versions conflated into a
+    single "tenant". Getting them straight is the key to the whole isolation
+    model:
   </p>
   <ul>
-    <li><strong>User-pool isolation</strong> — Alice in product A cannot accidentally see product B's user list.</li>
-    <li><strong>Independent JWT issuers</strong> — each product has its own <code>iss</code> claim, its own JWKS, its own key rotation cadence.</li>
-    <li><strong>Independent OAuth client credentials</strong> — each product can register its own Google / Microsoft client.</li>
-    <li><strong>Independent passkey RP ID</strong> — passkeys are scoped to a domain; products on different domains must have different RP IDs anyway.</li>
+    <li>
+      <strong>Project</strong> — the isolation boundary. Think of it as a
+      Firebase project: one user pool, one set of credentials, one JWT issuer.
+      Each Project maps onto exactly one storage scope (one shard).
+    </li>
+    <li>
+      <strong>Tenant</strong> — a logical company entity <em>inside</em> a
+      Project. Tenants are formed automatically, one per verified email domain
+      (e.g. <code>acme.com</code>). A single Project can hold many Tenants.
+    </li>
+    <li>
+      <strong>Domain</strong> — a verified DNS domain. Verifying
+      <code>acme.com</code> is what materializes the <code>acme</code> Tenant
+      and lets identity attribute <code>alice@acme.com</code> to it.
+    </li>
   </ul>
 
-  <h2>The <code>tenant_id</code> field</h2>
+  <h2>The Project is the isolation shard</h2>
   <p>
-    Many RPC messages carry <code>tenant_id</code> for compatibility with
-    multi-tenant graph DBs. Identity validates it equals
-    <code>GATEWAY_DEFAULT_TENANT_ID</code> and rejects the request
-    otherwise. There is no path that lets a caller specify an arbitrary
-    tenant.
+    The Project — not the tenant — is the unit of physical isolation. All
+    per-request resolution starts by resolving the Project (the shard), either
+    by API credential (<code>public_id</code> on a publishable / secret /
+    mTLS credential) or by the <code>Host</code> header matching a configured
+    project auth-domain. The Tenant is resolved <em>afterward</em>, from the
+    authenticated user's email domain.
+  </p>
+  <p>
+    This inversion means a single B2C product (millions of users, no company
+    concept) and a B2B product (many company tenants) use the same model: one
+    Project per product, Tenants grow underneath it without re-sharding.
   </p>
 
-  <h2>Sharing one EntDB across products</h2>
+  <h2>The user pool is per Project; login is always by email</h2>
   <p>
-    EntDB instances can host many tenants. Two Identity deployments
-    pointing at the same EntDB stay isolated as long as they use
-    distinct <code>GATEWAY_DEFAULT_TENANT_ID</code> values:
+    Users belong to a <strong>Project</strong>, not a Tenant. Uniqueness is
+    <code>(project_id, lower(email))</code> — exactly one identity per person
+    per Project, no matter how many company domains they touch. Authentication
+    always resolves the identity by <code>(project_id, email)</code> first; the
+    Tenant is derived afterward from the verified email domain and membership.
+    The Tenant is never an input to login.
   </p>
-  <Code code={`# Product A
+  <Code
+    code={`# A user proves: "I am alice@acme.com in project P"
+# identity then derives: "...and acme.com is the Acme tenant"
+PasswordLogin(project=P, email="alice@acme.com", password=...)
+  -> identity (project_id=P, email=alice@acme.com)
+  -> tenant   (acme, derived from the verified acme.com domain)`}
+    lang="bash"
+  />
+
+  <h2>Per-project serving domains</h2>
+  <p>
+    A Project can serve auth on one or more hostnames
+    (<em>project auth-domains</em>). Incoming requests without an explicit
+    credential are resolved to a Project by matching the <code>Host</code>
+    header against <code>project_auth_domains.hostname</code>. One domain per
+    project is marked primary (used to build links such as magic-link and
+    OAuth callback URLs). The domain-management RPCs
+    (<code>CreateDomain</code>, <code>VerifyDomain</code>,
+    <code>AddProjectAuthDomain</code>, <code>SetPrimaryAuthDomain</code>) are
+    documented in the API reference.
+  </p>
+
+  <h2>One Project per deployment, many on one datastore</h2>
+  <p>
+    A single Identity container serves one default Project, configured at
+    startup. Multiple Projects can share one Postgres instance and stay fully
+    isolated — every repository query is scoped by
+    <code>WHERE project_id = $1</code>, which is the real isolation boundary and
+    is backend-agnostic. On Postgres, row-level security adds defence-in-depth
+    on top; the per-query project scope is what guarantees isolation on every
+    backend.
+  </p>
+  <Code
+    code={`# Two products sharing one Postgres, isolated by Project
+# Product A
 docker run ... \\
-  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \\
-  -e GATEWAY_DEFAULT_TENANT_ID=product-a \\
-  ghcr.io/elloloop/identity:0.1.0
+  -e GATEWAY_REPO_DRIVER=postgres \\
+  -e GATEWAY_POSTGRES_DSN=postgres://.../identity \\
+  -e GATEWAY_DEFAULT_PROJECT_ID=proj_product_a \\
+  ghcr.io/elloloop/identity:1.2.0
 
 # Product B
 docker run ... \\
-  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \\
-  -e GATEWAY_DEFAULT_TENANT_ID=product-b \\
-  ghcr.io/elloloop/identity:0.1.0`} lang="bash" />
+  -e GATEWAY_REPO_DRIVER=postgres \\
+  -e GATEWAY_POSTGRES_DSN=postgres://.../identity \\
+  -e GATEWAY_DEFAULT_PROJECT_ID=proj_product_b \\
+  ghcr.io/elloloop/identity:1.2.0`}
+    lang="bash"
+  />
 
-  <h2>Type ID reservations</h2>
   <p>
-    Identity reserves EntDB type IDs <code>1–99</code>. Other services
-    sharing the same EntDB must use type IDs <code>100+</code>. The
-    reservation is global (across tenants) because EntDB schemas are
-    cluster-wide.
+    See <a href="/identity/docs/concepts/auth-model">Auth model</a> for how the Project
+    and Tenant appear in JWT claims, and
+    <a href="/identity/docs/installation/configuration">Configuration</a> for the full
+    set of <code>GATEWAY_*</code> variables.
   </p>
 </DocsLayout>

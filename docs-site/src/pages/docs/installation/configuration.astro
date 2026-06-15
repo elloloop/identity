@@ -8,8 +8,10 @@ import { Code } from "astro-expressive-code/components";
   <p>
     All configuration is via environment variables with the
     <code>GATEWAY_</code> prefix. Defaults are tuned for local development;
-    production deployments must override at minimum the Postgres DSN, the
-    JWT key ring, the passkey RP ID/origin, and the TOTP encryption key.
+    production deployments must override at minimum the datastore driver and
+    its connection (e.g. <code>GATEWAY_REPO_DRIVER=postgres</code> +
+    <code>GATEWAY_POSTGRES_DSN</code>), the JWT key ring, the passkey RP
+    ID/origin, and the TOTP encryption key.
   </p>
 
   <h2>Server ports</h2>
@@ -20,15 +22,28 @@ import { Code } from "astro-expressive-code/components";
     <tr><td><code>GATEWAY_METRICS_PORT</code></td><td><code>9090</code></td><td>Prometheus <code>/metrics</code></td></tr>
   </table>
 
-  <h2>Storage</h2>
+  <h2>Datastore</h2>
+  <p>
+    The backing store is selected with <code>GATEWAY_REPO_DRIVER</code>. All
+    drivers pass the same conformance suite (identical uniqueness, ordering, and
+    error semantics), so behaviour does not change between them — only
+    operational characteristics do.
+  </p>
+  <table>
+    <tr><th>Driver</th><th>Use for</th><th>Notes</th></tr>
+    <tr><td><code>postgres</code></td><td>Production, multi-node</td><td>The recommended backend. Full control plane (projects, credentials, auth-domains, governance) and row-level security defence-in-depth.</td></tr>
+    <tr><td><code>sqlite</code></td><td>Embedded, single-node, dev</td><td>Pure-Go (<code>modernc.org/sqlite</code>, no cgo) — cross-compiles cleanly and runs in-process from a single file or <code>:memory:</code>. Ideal for the embeddable library and small self-host deployments.</td></tr>
+    <tr><td><code>memory</code></td><td>Tests / smoke</td><td>Non-durable; state is lost on restart.</td></tr>
+  </table>
   <table>
     <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_REPO_DRIVER</code></td><td><code>postgres</code></td><td>Persistence driver: <code>postgres</code> (the primary datastore) or <code>memory</code> (local dev / tests)</td></tr>
-    <tr><td><code>GATEWAY_POSTGRES_DSN</code></td><td><em>(empty)</em></td><td>Postgres connection string. Required for the <code>postgres</code> driver</td></tr>
-    <tr><td><code>GATEWAY_POSTGRES_AUTO_MIGRATE</code></td><td><code>false</code></td><td>Apply pending migrations on connect. Prefer running <code>identity migrate</code> out-of-band in production</td></tr>
-    <tr><td><code>GATEWAY_DEFAULT_TENANT_ID</code></td><td><code>local</code></td><td>Tenant ID used for every operation; clients passing a different one are rejected</td></tr>
-    <tr><td><code>GATEWAY_DEFAULT_PROJECT_ID</code></td><td><code>default</code></td><td>ID of the control-plane project seeded on first boot, mapped onto <code>GATEWAY_DEFAULT_TENANT_ID</code>. The <code>memory</code> driver has no control plane and ignores this.</td></tr>
-    <tr><td><code>GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS</code></td><td><em>(empty)</em></td><td>Postgres only. Comma-separated branded login hostnames seeded onto the default project at boot, so the service resolves these hosts to it. The first is the primary (drives branded links). Seeded verified (deployer-owned); customer-supplied domains use DNS verification instead.</td></tr>
+    <tr><td><code>GATEWAY_REPO_DRIVER</code></td><td><code>postgres</code></td><td>One of <code>postgres</code>, <code>sqlite</code>, <code>memory</code>.</td></tr>
+    <tr><td><code>GATEWAY_POSTGRES_DSN</code></td><td><em>(empty)</em></td><td>Postgres connection string, e.g. <code>postgres://user:pass@host:5432/identity?sslmode=disable</code>. Required when <code>GATEWAY_REPO_DRIVER=postgres</code>.</td></tr>
+    <tr><td><code>GATEWAY_POSTGRES_MAX_CONNS</code></td><td><code>25</code></td><td>Connection-pool size.</td></tr>
+    <tr><td><code>GATEWAY_POSTGRES_AUTO_MIGRATE</code></td><td><code>false</code></td><td>Run pending migrations on connect. See <a href="/identity/docs/installation/database-migrations">Database migrations</a>.</td></tr>
+    <tr><td><code>GATEWAY_SQLITE_PATH</code></td><td><code>:memory:</code></td><td>SQLite file path (or <code>:memory:</code>). Used when <code>GATEWAY_REPO_DRIVER=sqlite</code>.</td></tr>
+    <tr><td><code>GATEWAY_DEFAULT_PROJECT_ID</code></td><td><code>default</code></td><td>ID of the control-plane <a href="/identity/docs/concepts/multi-tenancy">Project</a> seeded on first boot.</td></tr>
+    <tr><td><code>GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS</code></td><td><em>(empty)</em></td><td>Comma-separated branded login hostnames seeded onto the default project at boot, so the service resolves these hosts to it. The first is the primary (drives branded links). Seeded verified (deployer-owned); customer-supplied domains use DNS verification instead.</td></tr>
     <tr><td><code>GATEWAY_PUBLIC_EMAIL_DOMAINS</code></td><td><em>(empty)</em></td><td>Comma-separated extra consumer/public email domains (beyond the built-in gmail/outlook/yahoo/… set). A verified address under a public domain never auto-forms a company tenant.</td></tr>
   </table>
 

@@ -6,7 +6,8 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>What is Identity</h1>
   <p>
     Identity is a single-container authentication and user-management service
-    backed by <a href="https://github.com/elloloop/tenant-shard-db">EntDB</a>.
+    backed by a relational datastore (Postgres for production, embedded SQLite
+    for a single node, in-memory for tests).
     It is the auth half of the
     <em>"two-container product"</em> shape: one container owns user data and
     issues JWTs; one container per product owns the product data.
@@ -15,15 +16,16 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>Design goals</h2>
   <ul>
     <li>
-      <strong>One image, deployed once per product.</strong> The default tenant
-      ID (<code>GATEWAY_DEFAULT_TENANT_ID</code>) gives every deployment its
-      own user pool. Two products sharing one EntDB still get isolation
-      because EntDB is tenant-sharded.
+      <strong>One image, deployed once per product.</strong> Each deployment
+      serves a Project (<code>GATEWAY_DEFAULT_PROJECT_ID</code>), and the
+      Project is the isolation boundary — its own user pool. Two products
+      sharing one Postgres still get isolation because every query is scoped
+      by <code>WHERE project_id = $1</code>.
     </li>
     <li>
       <strong>Stateless service container.</strong> All durable state is in
-      EntDB. The Identity container can be replaced or scaled horizontally
-      without data migration.
+      the datastore (Postgres or SQLite). The Identity container can be
+      replaced or scaled horizontally without data migration.
     </li>
     <li>
       <strong>Standards-shaped tokens.</strong> Access tokens are RS256 JWTs
@@ -43,7 +45,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
       <strong>Not an authorization server.</strong> Identity issues JWTs with
       a coarse <code>role</code> claim (<code>admin</code> /
       <code>member</code> / <code>guest</code>); fine-grained access control
-      is the consuming service's responsibility (or EntDB's ACL layer).
+      is the consuming service's responsibility.
     </li>
     <li>
       <strong>Not an OAuth IdP.</strong> Identity <em>consumes</em> OAuth
@@ -51,9 +53,10 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
       an OAuth provider for third parties.
     </li>
     <li>
-      <strong>Not multi-tenant by itself.</strong> One deployment serves one
-      tenant. The "<code>tenant_id</code>" on every RPC is a defence-in-depth
-      check against the configured default; not a tenant selector.
+      <strong>One Project per deployment.</strong> A deployment serves one
+      default Project, and the Project is the isolation shard. Tenants form
+      automatically underneath it, one per verified email domain — they are
+      derived from the authenticated user, never a login input.
     </li>
   </ul>
 

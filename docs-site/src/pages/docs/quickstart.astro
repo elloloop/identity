@@ -5,37 +5,48 @@ import { Code } from "astro-expressive-code/components";
 
 <DocsLayout title="Quick Start">
   <h1>Quick Start</h1>
-  <p>Run Identity locally against a Postgres container, then sign up a user and verify the access token.</p>
+  <p>Run Identity locally with the embedded SQLite backend — no external services — then sign up a user and verify the access token.</p>
 
-  <h2>1. Start Postgres</h2>
+  <h2>1. Start Identity (SQLite, fastest start)</h2>
   <p>
-    Identity persists to Postgres — the primary datastore, which carries
-    the Project/Tenant/Domain control plane and enforces constraints like
-    <code>OAuthIdentity</code>'s <code>(provider, provider_user_id)</code>
-    composite uniqueness atomically across concurrent writes.
+    The quickest way to run is the embedded SQLite backend
+    (<code>GATEWAY_REPO_DRIVER=sqlite</code>, pure-Go
+    <code>modernc.org/sqlite</code>). It needs no external database — point
+    <code>GATEWAY_SQLITE_PATH</code> at a file on a mounted volume so data
+    survives restarts (use <code>:memory:</code> for a throwaway instance).
   </p>
-  <Code code={`docker run -d --name identity-db -p 5432:5432 \\
-  -e POSTGRES_USER=identity -e POSTGRES_PASSWORD=identity \\
-  -e POSTGRES_DB=identity \\
-  postgres:16.13-alpine3.23`} lang="bash" />
-
-  <h2>2. Start Identity</h2>
   <Code code={`docker run -d --name identity \\
   -p 80:80 -p 9090:9090 \\
-  --link identity-db \\
-  -e GATEWAY_REPO_DRIVER=postgres \\
-  -e GATEWAY_POSTGRES_DSN=postgres://identity:identity@identity-db:5432/identity?sslmode=disable \\
-  -e GATEWAY_POSTGRES_AUTO_MIGRATE=true \\
-  -e GATEWAY_DEFAULT_TENANT_ID=local \\
+  -v identity-data:/data \\
+  -e GATEWAY_REPO_DRIVER=sqlite \\
+  -e GATEWAY_SQLITE_PATH=/data/identity.db \\
+  -e GATEWAY_DEFAULT_PROJECT_ID=proj_local \\
   -e GATEWAY_PASSKEY_RP_ID=localhost \\
   -e GATEWAY_PASSKEY_ORIGIN=http://localhost \\
   -e GATEWAY_AUTH_ALLOW_LOCAL=true \\
-  ghcr.io/elloloop/identity:0.1.0`} lang="bash" title="docker run" />
+  ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="docker run (sqlite)" />
   <p>
     With no <code>GATEWAY_JWT_KEYS</code> set, Identity auto-generates a
     throwaway RSA key on startup and logs <code>auto_generating_dev_rsa_key</code>.
     See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a> for production setup.
   </p>
+
+  <h2>2. Production: use Postgres</h2>
+  <p>
+    For multi-node or production deployments, run against Postgres
+    (<code>GATEWAY_REPO_DRIVER=postgres</code>) instead. Start a Postgres
+    and point Identity at it with a DSN:
+  </p>
+  <Code code={`docker run -d --name identity \\
+  -p 80:80 -p 9090:9090 \\
+  -e GATEWAY_REPO_DRIVER=postgres \\
+  -e GATEWAY_POSTGRES_DSN=postgres://identity:secret@postgres:5432/identity \\
+  -e GATEWAY_POSTGRES_AUTO_MIGRATE=true \\
+  -e GATEWAY_DEFAULT_PROJECT_ID=proj_local \\
+  -e GATEWAY_PASSKEY_RP_ID=localhost \\
+  -e GATEWAY_PASSKEY_ORIGIN=http://localhost \\
+  -e GATEWAY_AUTH_ALLOW_LOCAL=true \\
+  ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="docker run (postgres)" />
 
   <h2>3. Sign up a user</h2>
   <p>

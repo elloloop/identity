@@ -103,7 +103,9 @@ import { Code } from "astro-expressive-code/components";
     </li>
     <li>
       Run <code>SignOutEverywhere</code> on every user (no admin RPC for
-      this; do it directly via EntDB to delete every refresh token).
+      this; do it directly against the datastore — e.g. a SQL
+      <code>DELETE</code> over the refresh-token table — to delete every
+      refresh token).
     </li>
     <li>
       Restore the normal JWT expiry once the kill is confirmed.

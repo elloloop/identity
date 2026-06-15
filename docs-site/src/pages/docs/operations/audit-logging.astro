@@ -6,7 +6,7 @@ import { Code } from "astro-expressive-code/components";
 <DocsLayout title="Audit Logging">
   <h1>Audit Logging</h1>
   <p>
-    Identity writes an <code>AuditEvent</code> node to EntDB for every
+    Identity writes an <code>AuditEvent</code> row to the datastore for every
     security-relevant action. The <code>pkg/audit</code> logger is
     append-only — events are never updated or deleted. Admins query the
     log via <code>ListAuditEvents</code>.
@@ -53,14 +53,15 @@ import { Code } from "astro-expressive-code/components";
   <h2>Retention</h2>
   <p>
     Identity does not delete audit events. Retention is the operator's
-    responsibility — typically a periodic EntDB job that prunes events
-    older than the compliance window. Because the events are graph nodes,
-    a simple time-bucketed query + delete is sufficient.
+    responsibility — typically a periodic job that prunes events
+    older than the compliance window. Because the events are plain
+    relational rows, a simple time-bucketed <code>DELETE</code> is
+    sufficient.
   </p>
 
   <h2>Forwarding</h2>
   <p>
-    The audit logger writes to EntDB and to the standard structured zap
+    The audit logger writes to the datastore and to the standard structured zap
     logger. To forward to a SIEM, scrape the container's stdout with your
     log collector — every event also surfaces as a structured log line
     tagged <code>audit_event</code>.

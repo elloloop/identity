@@ -29,11 +29,11 @@ import { Code } from "astro-expressive-code/components";
   <h3>Notable startup events</h3>
   <table>
     <tr><th>Event</th><th>When</th></tr>
-    <tr><td><code>identity_service_starting</code></td><td>Process boot, pre-EntDB</td></tr>
+    <tr><td><code>identity_service_starting</code></td><td>Process boot, before the datastore connection</td></tr>
     <tr><td><code>jwt_key_ring_loaded</code></td><td>Production keys loaded successfully</td></tr>
     <tr><td><code>auto_generating_dev_rsa_key</code></td><td>No <code>GATEWAY_JWT_KEYS</code> set — using a throwaway key (warning)</td></tr>
     <tr><td><code>using_dev_totp_encryption_key</code></td><td>No <code>GATEWAY_TOTP_ENCRYPTION_KEY</code> set (warning)</td></tr>
-    <tr><td><code>using_stub_persistence</code></td><td>The current build still wires <code>service.StubRepository</code> / <code>service.StubDB</code>; RPCs return "service unavailable" until the EntDB-backed <code>internal/repo</code> adapter is wired in. (See <code>cmd/identity/main.go</code>.)</td></tr>
+    <tr><td><code>repo_driver_selected</code></td><td>The datastore driver chosen by <code>GATEWAY_REPO_DRIVER</code> (<code>postgres</code> / <code>sqlite</code> / <code>memory</code>) is built and connected. The <code>driver</code> field names the active backend.</td></tr>
     <tr><td><code>identity_service_started</code></td><td>HTTP listener accepting connections</td></tr>
     <tr><td><code>identity_service_shutting_down</code></td><td>Received SIGTERM/SIGINT</td></tr>
   </table>
@@ -44,8 +44,8 @@ curl -sf http://localhost/health
 curl -sf http://localhost/healthz`} lang="bash" />
   <p>
     Both are exempt from auth and CORS. There is no readiness probe
-    distinct from liveness; if the EntDB connection fails, the process
-    exits with <code>entdb_connect_failed</code>.
+    distinct from liveness; if the datastore connection fails at boot, the
+    process exits with <code>identity_server_init_failed</code>.
   </p>
 
   <h2>Metrics</h2>
@@ -63,14 +63,14 @@ curl -sf http://localhost/healthz`} lang="bash" />
     <li><strong>Auth attempt rate</strong> grouped by RPC name — login, signup, refresh — split by success / failure.</li>
     <li><strong>Lockout rate</strong> from the <code>account_locked</code> audit-event log line.</li>
     <li><strong>JWKS fetches</strong> — high traffic on <code>/.well-known/jwks.json</code> typically means downstream services are not caching.</li>
-    <li><strong>EntDB latency</strong> — request tail latencies should track EntDB tail latencies; a divergence usually means goroutine contention in the service layer.</li>
+    <li><strong>Datastore latency</strong> — request tail latencies should track datastore (Postgres/SQLite) tail latencies; a divergence usually means goroutine contention in the service layer.</li>
   </ul>
 
   <h2>Alerts</h2>
   <ul>
     <li><strong>Auto-generated key in prod.</strong> Alert on any occurrence of <code>auto_generating_dev_rsa_key</code> or <code>using_dev_totp_encryption_key</code> in production logs.</li>
-    <li><strong>Stub persistence in prod.</strong> Alert on <code>using_stub_persistence</code> — the EntDB-backed repo must be wired before exposing the service to users.</li>
+    <li><strong>Wrong backend in prod.</strong> Alert if <code>repo_driver_selected</code> reports anything other than <code>postgres</code> in production — <code>sqlite</code> is single-node only and <code>memory</code> is non-durable.</li>
     <li><strong>Spike in lockouts.</strong> A burst of <code>password_login_failed</code> followed by <code>account_locked</code> on multiple users typically means a credential-stuffing attack.</li>
-    <li><strong>EntDB unreachable.</strong> Repeated <code>entdb_connect_failed</code> at boot is a hard outage; the process exits and the orchestrator restarts.</li>
+    <li><strong>Datastore unreachable.</strong> Repeated <code>identity_server_init_failed</code> at boot is a hard outage; the process exits and the orchestrator restarts.</li>
   </ul>
 </DocsLayout>

@@ -23,14 +23,15 @@ import { Code } from "astro-expressive-code/components";
   <Code code={`# In a shared "auth" cluster
 docker run -d --name identity \\
   -p 80:80 -p 9090:9090 \\
-  -e GATEWAY_ENTDB_ADDRESS=entdb.svc:50051 \\
-  -e GATEWAY_DEFAULT_TENANT_ID=acme \\
+  -e GATEWAY_REPO_DRIVER=postgres \\
+  -e GATEWAY_POSTGRES_DSN=postgres://identity:secret@postgres.svc:5432/identity \\
+  -e GATEWAY_DEFAULT_PROJECT_ID=proj_acme \\
   -e GATEWAY_PASSKEY_RP_ID=acme.com \\
   -e GATEWAY_PASSKEY_ORIGIN=https://app.acme.com \\
   -e GATEWAY_ALLOWED_ORIGINS="https://app.acme.com,https://admin.acme.com,https://auth.acme.com" \\
   -e GATEWAY_JWT_KEYS="$(cat keyring.json)" \\
   -e GATEWAY_TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)" \\
-  ghcr.io/elloloop/identity:0.1.0`} lang="bash" title="identity (auth cluster)" />
+  ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="identity (auth cluster)" />
   <p>
     Note <code>GATEWAY_PASSKEY_RP_ID</code> is the parent domain
     (<code>acme.com</code>): passkeys registered on
