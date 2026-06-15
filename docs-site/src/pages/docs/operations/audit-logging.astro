@@ -41,7 +41,7 @@ import { Code } from "astro-expressive-code/components";
     <code>ListAuditEvents</code> is admin-only and supports filtering by
     actor, target, event type, and a time range, plus cursor pagination.
   </p>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/ListAuditEvents \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/ListAuditEvents \\
   -H "Authorization: Bearer $ADMIN_TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{

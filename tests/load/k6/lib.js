@@ -99,7 +99,7 @@ export function rpc(method, payload, extra = {}) {
     ? http.expectedStatuses.apply(null, extra.expectedStatuses)
     : undefined;
   return http.post(
-    `${baseURL}/identity.IdentityService/${method}`,
+    `${baseURL}/identity.v1.IdentityService/${method}`,
     JSON.stringify(payload),
     {
       headers,

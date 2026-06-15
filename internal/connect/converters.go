@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"math"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/service"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

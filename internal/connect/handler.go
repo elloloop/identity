@@ -13,8 +13,8 @@
 //
 // Expected generated import paths:
 //
-//	identitypb      "github.com/elloloop/identity/gen/go/identity"
-//	identityconnect "github.com/elloloop/identity/gen/go/identity/identityconnect"
+//	identitypb      "github.com/elloloop/identity/gen/go/identity/v1"
+//	identityconnect "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 package connect
 
 import (

@@ -36,7 +36,7 @@ openssl rand -base64 32`} lang="bash" />
   <p>The user must be authenticated. Two-step ceremony:</p>
 
   <h3>1. Begin setup</h3>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/BeginTotpSetup \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/BeginTotpSetup \\
   -H "Authorization: Bearer $TOKEN" \\
   -H 'Content-Type: application/json' -d '{}'`} lang="bash" />
   <Code code={`{
@@ -55,7 +55,7 @@ openssl rand -base64 32`} lang="bash" />
     Enrollment is not active until the user proves they scanned the secret
     correctly:
   </p>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/VerifyTotpSetup \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/VerifyTotpSetup \\
   -H "Authorization: Bearer $TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{"code":"123456"}'`} lang="bash" />
@@ -67,14 +67,14 @@ openssl rand -base64 32`} lang="bash" />
 
   <h2>Login with TOTP</h2>
   <Code code={`# 1. Password check returns a challenge instead of tokens.
-LOGIN=$(curl -sX POST http://localhost/identity.IdentityService/PasswordLogin \\
+LOGIN=$(curl -sX POST http://localhost/identity.v1.IdentityService/PasswordLogin \\
   -H 'Content-Type: application/json' \\
   -d '{"email":"alice@example.com","password":"correct horse battery"}')
 
 CHALLENGE=$(echo "$LOGIN" | jq -r .loginChallengeId)
 
 # 2. Submit the 6-digit TOTP (or a recovery code).
-curl -sX POST http://localhost/identity.IdentityService/VerifyTotp \\
+curl -sX POST http://localhost/identity.v1.IdentityService/VerifyTotp \\
   -H 'Content-Type: application/json' \\
   -d "{\\"loginChallengeId\\":\\"$CHALLENGE\\",\\"code\\":\\"123456\\"}"`} lang="bash" />
   <p>

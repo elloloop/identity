@@ -31,7 +31,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/repo"

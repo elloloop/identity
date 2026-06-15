@@ -81,10 +81,10 @@ func MetricsMiddleware(m *RPCMetrics) func(http.Handler) http.Handler {
 }
 
 // rpcMethodFromPath returns "RpcName" for a Connect path of the form
-// "/identity.IdentityService/RpcName". Returns ok=false for any other
+// "/identity.v1.IdentityService/RpcName". Returns ok=false for any other
 // path (health checks, JWKS, /metrics).
 func rpcMethodFromPath(path string) (string, bool) {
-	const prefix = "/identity.IdentityService/"
+	const prefix = "/identity.v1.IdentityService/"
 	if !strings.HasPrefix(path, prefix) {
 		return "", false
 	}

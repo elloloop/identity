@@ -9,7 +9,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/stretchr/testify/require"
 
-	pb "github.com/elloloop/identity/gen/go/identity"
+	pb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/jwt"
 )

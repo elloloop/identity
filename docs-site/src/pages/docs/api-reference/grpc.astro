@@ -12,14 +12,14 @@ import { Code } from "astro-expressive-code/components";
   </p>
   <p>
     All RPCs live on the single service
-    <code>identity.IdentityService</code>. The wire transports is
+    <code>identity.v1.IdentityService</code>. The wire transports is
     Connect-RPC over HTTP/JSON; the underlying schema is plain protobuf.
     Method paths take the shape
-    <code>/identity.IdentityService/&lt;Method&gt;</code>.
+    <code>/identity.v1.IdentityService/&lt;Method&gt;</code>.
   </p>
   <p>
     The canonical schema lives at
-    <a href="https://github.com/elloloop/identity/blob/main/proto/identity/identity.proto"><code>proto/identity/identity.proto</code></a>.
+    <a href="https://github.com/elloloop/identity/blob/main/proto/identity/v1/identity.proto"><code>proto/identity/v1/identity.proto</code></a>.
     This page summarises the surface; consult the .proto for exact field
     types and reservations.
   </p>
@@ -148,8 +148,8 @@ import { Code } from "astro-expressive-code/components";
   </table>
 
   <h2>Calling Connect-RPC over JSON</h2>
-  <Code code={`# Generic shape — every RPC is a POST to /identity.IdentityService/<Method>
-curl -sX POST http://localhost/identity.IdentityService/PasswordLogin \\
+  <Code code={`# Generic shape — every RPC is a POST to /identity.v1.IdentityService/<Method>
+curl -sX POST http://localhost/identity.v1.IdentityService/PasswordLogin \\
   -H 'Content-Type: application/json' \\
   -d '{"email":"alice@example.com","password":"..."}'`} lang="bash" />
 

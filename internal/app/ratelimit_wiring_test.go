@@ -33,8 +33,8 @@ func TestBuildRateLimits_PasswordlessPathsLimited(t *testing.T) {
 		byPath[l.PathPrefix] = l
 	}
 	for _, p := range []string{
-		"/identity.IdentityService/RequestEmailLoginCode",
-		"/identity.IdentityService/RequestMagicLink",
+		"/identity.v1.IdentityService/RequestEmailLoginCode",
+		"/identity.v1.IdentityService/RequestMagicLink",
 	} {
 		require.Contains(t, byPath, p, "passwordless path %s must have a rate limit", p)
 	}
@@ -43,8 +43,8 @@ func TestBuildRateLimits_PasswordlessPathsLimited(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	for _, p := range []string{
-		"/identity.IdentityService/RequestEmailLoginCode",
-		"/identity.IdentityService/RequestMagicLink",
+		"/identity.v1.IdentityService/RequestEmailLoginCode",
+		"/identity.v1.IdentityService/RequestMagicLink",
 	} {
 		codes := make([]int, 3)
 		for i := 0; i < 3; i++ {
@@ -65,7 +65,7 @@ func TestBuildRateLimits_PasswordlessPathsLimited(t *testing.T) {
 // returns 429 once exceeded — so the one non-secret-gated admin endpoint
 // cannot be hammered while it is open on a fresh deployment.
 func TestBuildRateLimits_FirstAdminBootstrapLimited(t *testing.T) {
-	const path = "/identity.IdentityService/CreateFirstPlatformAdmin"
+	const path = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
 	cfg := &config.Config{
 		RateLimitWindowSeconds:  60,
 		RateLimitBootstrapPerIP: 2,

@@ -8,7 +8,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 )
 
 func TestGroup_CRUDRoundTrip_E2E(t *testing.T) {

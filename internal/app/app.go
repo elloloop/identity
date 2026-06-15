@@ -17,7 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
-	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
+	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/internal/app/ui"
 	"github.com/elloloop/identity/internal/config"
 	identityconnect "github.com/elloloop/identity/internal/connect"
@@ -194,50 +194,50 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	}
 	return []middleware.PathLimit{
 		{
-			PathPrefix: "/identity.IdentityService/PasswordSignup", Tag: "signup",
+			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
-			PathPrefix: "/identity.IdentityService/PasswordLogin", Tag: "login",
+			PathPrefix: "/identity.v1.IdentityService/PasswordLogin", Tag: "login",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
-			PathPrefix: "/identity.IdentityService/RequestPasswordReset", Tag: "reset",
+			PathPrefix: "/identity.v1.IdentityService/RequestPasswordReset", Tag: "reset",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitResetPerIP, 0),
 		},
 		{
-			PathPrefix: "/identity.IdentityService/SendEmailVerification", Tag: "verify",
+			PathPrefix: "/identity.v1.IdentityService/SendEmailVerification", Tag: "verify",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitVerifyPerIP, 0),
 		},
 		{
 			// Passwordless OTP request: unauthenticated, sends an email.
 			// Tight per-IP quota so a single source can't pump codes at a
 			// victim inbox (the per-email cooldown is the second layer).
-			PathPrefix: "/identity.IdentityService/RequestEmailLoginCode", Tag: "passwordless_code",
+			PathPrefix: "/identity.v1.IdentityService/RequestEmailLoginCode", Tag: "passwordless_code",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0),
 		},
 		{
 			// Passwordless magic-link request: same shape, same quota.
-			PathPrefix: "/identity.IdentityService/RequestMagicLink", Tag: "passwordless_link",
+			PathPrefix: "/identity.v1.IdentityService/RequestMagicLink", Tag: "passwordless_link",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0),
 		},
 		{
 			// Phone-verification OTP request: authenticated, but each call
 			// sends an SMS, so a tight per-IP quota bounds cost/abuse (the
 			// per-user cooldown is the second layer).
-			PathPrefix: "/identity.IdentityService/RequestPhoneVerification", Tag: "phone_verify",
+			PathPrefix: "/identity.v1.IdentityService/RequestPhoneVerification", Tag: "phone_verify",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0),
 		},
 		{
-			PathPrefix: "/identity.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
+			PathPrefix: "/identity.v1.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
-			PathPrefix: "/identity.IdentityService/BeginPasskeyLogin", Tag: "passkey_begin",
+			PathPrefix: "/identity.v1.IdentityService/BeginPasskeyLogin", Tag: "passkey_begin",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
-			PathPrefix: "/identity.IdentityService/VerifyTotp", Tag: "totp_verify",
+			PathPrefix: "/identity.v1.IdentityService/VerifyTotp", Tag: "totp_verify",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
@@ -246,7 +246,7 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// while open (a fresh deployment) it must not be hammerable — a
 			// tight per-IP quota bounds brute-force / probe traffic against the
 			// ungated endpoint.
-			PathPrefix: "/identity.IdentityService/CreateFirstPlatformAdmin", Tag: "first_admin_bootstrap",
+			PathPrefix: "/identity.v1.IdentityService/CreateFirstPlatformAdmin", Tag: "first_admin_bootstrap",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitBootstrapPerIP, 0),
 		},
 	}

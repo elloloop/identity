@@ -10,39 +10,39 @@ import (
 // AuthExemptPaths lists URL paths that do not require a valid JWT.
 // Connect-Go uses the proto service/method as the URL path.
 var AuthExemptPaths = map[string]bool{
-	"/identity.IdentityService/BeginOAuthLogin": true,
-	"/identity.IdentityService/OAuthLogin":      true,
+	"/identity.v1.IdentityService/BeginOAuthLogin": true,
+	"/identity.v1.IdentityService/OAuthLogin":      true,
 	// RedeemOAuthCode trades the hosted-flow one-time code for tokens;
 	// the caller is anonymous until the code is redeemed, so it cannot
 	// carry a JWT.
-	"/identity.IdentityService/RedeemOAuthCode": true,
-	"/identity.IdentityService/PasswordLogin":   true,
-	"/identity.IdentityService/PasswordSignup":  true,
+	"/identity.v1.IdentityService/RedeemOAuthCode": true,
+	"/identity.v1.IdentityService/PasswordLogin":   true,
+	"/identity.v1.IdentityService/PasswordSignup":  true,
 	// Passwordless email login: the caller is anonymous, proving control
 	// of an inbox via an OTP code or a magic-link token rather than a JWT.
-	"/identity.IdentityService/RequestEmailLoginCode": true,
-	"/identity.IdentityService/VerifyEmailLoginCode":  true,
-	"/identity.IdentityService/RequestMagicLink":      true,
-	"/identity.IdentityService/RedeemMagicLink":       true,
-	"/identity.IdentityService/RefreshToken":          true,
-	"/identity.IdentityService/Logout":                true,
-	"/identity.IdentityService/GetCurrentUser":        true,
-	"/identity.IdentityService/BeginPasskeyLogin":     true,
-	"/identity.IdentityService/CompletePasskeyLogin":  true,
-	"/identity.IdentityService/InitiateQrLogin":       true,
-	"/identity.IdentityService/PollQrLogin":           true,
-	"/identity.IdentityService/AcceptInvitation":      true,
-	"/identity.IdentityService/RequestAdminHelp":      true,
-	"/identity.IdentityService/VerifyTotp":            true,
+	"/identity.v1.IdentityService/RequestEmailLoginCode": true,
+	"/identity.v1.IdentityService/VerifyEmailLoginCode":  true,
+	"/identity.v1.IdentityService/RequestMagicLink":      true,
+	"/identity.v1.IdentityService/RedeemMagicLink":       true,
+	"/identity.v1.IdentityService/RefreshToken":          true,
+	"/identity.v1.IdentityService/Logout":                true,
+	"/identity.v1.IdentityService/GetCurrentUser":        true,
+	"/identity.v1.IdentityService/BeginPasskeyLogin":     true,
+	"/identity.v1.IdentityService/CompletePasskeyLogin":  true,
+	"/identity.v1.IdentityService/InitiateQrLogin":       true,
+	"/identity.v1.IdentityService/PollQrLogin":           true,
+	"/identity.v1.IdentityService/AcceptInvitation":      true,
+	"/identity.v1.IdentityService/RequestAdminHelp":      true,
+	"/identity.v1.IdentityService/VerifyTotp":            true,
 	// Email + reset flows are unauthenticated by design — the user is
 	// either anonymous (forgot password) or proving control of an
 	// inbox via a token rather than via a JWT.
-	"/identity.IdentityService/RequestPasswordReset": true,
-	"/identity.IdentityService/ConfirmPasswordReset": true,
-	"/identity.IdentityService/VerifyEmail":          true,
+	"/identity.v1.IdentityService/RequestPasswordReset": true,
+	"/identity.v1.IdentityService/ConfirmPasswordReset": true,
+	"/identity.v1.IdentityService/VerifyEmail":          true,
 	// ConfirmEmailChange is consumed by clicking a link in the new
 	// email's inbox — the user may not be currently signed in.
-	"/identity.IdentityService/ConfirmEmailChange": true,
+	"/identity.v1.IdentityService/ConfirmEmailChange": true,
 	// Control-plane admin RPCs are PLATFORM-operator operations, NOT
 	// user-authenticated: there is no user JWT for a platform operator. They
 	// are exempt from JWT enforcement, but they are NOT unauthenticated — the
@@ -50,18 +50,18 @@ var AuthExemptPaths = map[string]bool{
 	// X-Admin-Secret header against GATEWAY_ADMIN_API_SECRET, and the whole
 	// surface is disabled (CodeUnimplemented) when that secret is unset. So
 	// the secret check, not the JWT, is their auth.
-	"/identity.IdentityService/AdminCreateProject":           true,
-	"/identity.IdentityService/AdminCreateProjectCredential": true,
-	"/identity.IdentityService/AdminAddProjectAuthDomain":    true,
-	"/identity.IdentityService/AddProjectAuthDomain":         true,
-	"/identity.IdentityService/VerifyProjectAuthDomain":      true,
-	"/identity.IdentityService/ListProjectAuthDomains":       true,
-	"/identity.IdentityService/SetPrimaryAuthDomain":         true,
-	"/identity.IdentityService/AdminCreateTenant":            true,
-	"/identity.IdentityService/AdminAddTenantAdmin":          true,
-	"/.well-known/jwks.json":                                 true,
-	"/health":                                                true,
-	"/healthz":                                               true,
+	"/identity.v1.IdentityService/AdminCreateProject":           true,
+	"/identity.v1.IdentityService/AdminCreateProjectCredential": true,
+	"/identity.v1.IdentityService/AdminAddProjectAuthDomain":    true,
+	"/identity.v1.IdentityService/AddProjectAuthDomain":         true,
+	"/identity.v1.IdentityService/VerifyProjectAuthDomain":      true,
+	"/identity.v1.IdentityService/ListProjectAuthDomains":       true,
+	"/identity.v1.IdentityService/SetPrimaryAuthDomain":         true,
+	"/identity.v1.IdentityService/AdminCreateTenant":            true,
+	"/identity.v1.IdentityService/AdminAddTenantAdmin":          true,
+	"/.well-known/jwks.json":                                    true,
+	"/health":                                                   true,
+	"/healthz":                                                  true,
 }
 
 // hostedOAuthPrefix is the path prefix for the browser-facing hosted

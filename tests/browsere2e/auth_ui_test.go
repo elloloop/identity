@@ -222,7 +222,7 @@ func authenticatedCurrentUserEmail(t *testing.T, ctx context.Context, email, pas
 	// than a bare timeout.
 	js := fmt.Sprintf(`
 		(async () => {
-			const login = await fetch('/identity.IdentityService/PasswordLogin', {
+			const login = await fetch('/identity.v1.IdentityService/PasswordLogin', {
 				method: 'POST',
 				headers: {'Content-Type': 'application/json'},
 				body: JSON.stringify({email: %q, password: %q}),
@@ -231,7 +231,7 @@ func authenticatedCurrentUserEmail(t *testing.T, ctx context.Context, email, pas
 			if (!login.ok) return 'ERR:login:' + JSON.stringify(loginBody);
 			const token = loginBody.accessToken || loginBody.access_token;
 			if (!token) return 'ERR:no-token';
-			const me = await fetch('/identity.IdentityService/GetCurrentUser', {
+			const me = await fetch('/identity.v1.IdentityService/GetCurrentUser', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json',

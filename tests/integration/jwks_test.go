@@ -14,7 +14,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	jwtoken "github.com/lestrrat-go/jwx/v2/jwt"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 )
 
 // TestJWKS_EndpointReturnsValidSet verifies the JWKS endpoint is

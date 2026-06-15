@@ -65,7 +65,7 @@ func TestHealth_OtherPath_PassesThrough(t *testing.T) {
 	})
 	handler := HealthMiddleware(nil, inner)
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	assert.True(t, called, "inner handler should be called for non-health paths")

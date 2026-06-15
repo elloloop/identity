@@ -135,7 +135,7 @@ func TestE2E_RPCContentType(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost,
-				h.BaseURL+"/identity.IdentityService/PasswordSignup",
+				h.BaseURL+"/identity.v1.IdentityService/PasswordSignup",
 				readerOf(`{"email":"ct@example.com","password":"Sw0rdfish!42"}`))
 			req.Header.Set("Content-Type", tc.contentType)
 			resp, err := h.HTTP.Do(req)
@@ -190,7 +190,7 @@ func TestE2E_CORS_Preflight(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			req, _ := http.NewRequestWithContext(context.Background(), http.MethodOptions, h.BaseURL+"/identity.IdentityService/PasswordSignup", nil)
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodOptions, h.BaseURL+"/identity.v1.IdentityService/PasswordSignup", nil)
 			req.Header.Set("Origin", tc.origin)
 			req.Header.Set("Access-Control-Request-Method", "POST")
 			req.Header.Set("Access-Control-Request-Headers", "content-type")

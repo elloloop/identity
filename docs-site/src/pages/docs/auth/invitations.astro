@@ -20,7 +20,7 @@ import { Code } from "astro-expressive-code/components";
     the user — typically as an email link of the form
     <code>https://app.example.com/accept?token=&lt;invitation_token&gt;</code>.
   </p>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/InviteUser \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/InviteUser \\
   -H "Authorization: Bearer $ADMIN_TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{
@@ -40,7 +40,7 @@ import { Code } from "astro-expressive-code/components";
     user <code>USER_STATUS_ACTIVE</code>, retires the invitation token,
     and returns a fresh access + refresh pair.
   </p>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/AcceptInvitation \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/AcceptInvitation \\
   -H 'Content-Type: application/json' \\
   -d '{
     "invitationToken": "inv_...",
@@ -56,7 +56,7 @@ import { Code } from "astro-expressive-code/components";
     password off out of band; the user signs in and is expected to change
     it.
   </p>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/InviteUser \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/InviteUser \\
   -H "Authorization: Bearer $ADMIN_TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{

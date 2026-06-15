@@ -38,7 +38,7 @@ func mustParse(t *testing.T, raw string) []string {
 func TestCORS_AllowedOrigin_SetsHeaders(t *testing.T) {
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002,http://localhost:3000"))(nopHandler())
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Origin", "http://localhost:9002")
 	rec := httptest.NewRecorder()
 
@@ -52,7 +52,7 @@ func TestCORS_AllowedOrigin_SetsHeaders(t *testing.T) {
 func TestCORS_DisallowedOrigin_NoHeaders(t *testing.T) {
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Origin", "http://evil.example.com")
 	rec := httptest.NewRecorder()
 
@@ -93,7 +93,7 @@ func TestCORS_PortDifference_Rejected(t *testing.T) {
 
 func TestCORS_Preflight_Returns204(t *testing.T) {
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
-	req := httptest.NewRequest(http.MethodOptions, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Origin", "http://localhost:9002")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -103,7 +103,7 @@ func TestCORS_Preflight_Returns204(t *testing.T) {
 
 func TestCORS_Preflight_SetsAllowMethods(t *testing.T) {
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
-	req := httptest.NewRequest(http.MethodOptions, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Origin", "http://localhost:9002")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -139,7 +139,7 @@ func TestCORS_ProjectOrigin_Allowed_GlobalFloorPreserved(t *testing.T) {
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
 
 	for _, origin := range []string{"http://localhost:9002", "https://app-a.example.com"} {
-		req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+		req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 		req.Header.Set("Origin", origin)
 		req = withProjectOrigins(req, "https://app-a.example.com")
 		rec := httptest.NewRecorder()
@@ -154,7 +154,7 @@ func TestCORS_ProjectOrigin_OtherProjectOrigin_Rejected(t *testing.T) {
 	// allowed: only the resolved project's list plus the global floor apply.
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Origin", "https://app-b.example.com")
 	req = withProjectOrigins(req, "https://app-a.example.com")
 	rec := httptest.NewRecorder()
@@ -185,7 +185,7 @@ func TestCORS_ProjectOrigin_Preflight_Returns204WithHeaders(t *testing.T) {
 	// a project origin must be echoed on the preflight too.
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
 
-	req := httptest.NewRequest(http.MethodOptions, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Origin", "https://app-a.example.com")
 	req = withProjectOrigins(req, "https://app-a.example.com")
 	rec := httptest.NewRecorder()

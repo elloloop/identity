@@ -290,7 +290,7 @@ func TestSessionAuthMiddleware_TTLMode_NoLookup(t *testing.T) {
 
 	mw := SessionAuthMiddleware(keyRing, "tenant-1", "", false, nil)(next)
 	token := mintTokenWithSID(t, keyRing, kid, "user-1", "tenant-1", "")
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/Echo", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/Echo", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rw := httptest.NewRecorder()
 	mw.ServeHTTP(rw, req)
@@ -316,7 +316,7 @@ func TestSessionAuthMiddleware_RejectsRevokedSID(t *testing.T) {
 	mw := SessionAuthMiddleware(keyRing, "tenant-1", "", false, cache)(next)
 
 	token := mintTokenWithSID(t, keyRing, kid, "user-1", "tenant-1", "sid-revoked")
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/Echo", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/Echo", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rw := httptest.NewRecorder()
 	mw.ServeHTTP(rw, req)
@@ -344,7 +344,7 @@ func TestSessionAuthMiddleware_AcceptsActiveSID(t *testing.T) {
 	mw := SessionAuthMiddleware(keyRing, "tenant-1", "", false, cache)(next)
 
 	token := mintTokenWithSID(t, keyRing, kid, "user-1", "tenant-1", "sid-ok")
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/Echo", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/Echo", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rw := httptest.NewRecorder()
 	mw.ServeHTTP(rw, req)
@@ -375,7 +375,7 @@ func TestSessionAuthMiddleware_TokenWithoutSIDPassesThroughInSessionMode(t *test
 	mw := SessionAuthMiddleware(keyRing, "tenant-1", "", false, cache)(next)
 
 	token := mintTokenWithSID(t, keyRing, kid, "user-1", "tenant-1", "") // no sid
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/Echo", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/Echo", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rw := httptest.NewRecorder()
 	mw.ServeHTTP(rw, req)
@@ -514,7 +514,7 @@ func TestSessionAuthMiddleware_MissingAuthorizationHeader(t *testing.T) {
 	mw := SessionAuthMiddleware(kr, "", "", false, cache)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("next called without auth header")
 	}))
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/Echo", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/Echo", nil)
 	rw := httptest.NewRecorder()
 	mw.ServeHTTP(rw, req)
 	if rw.Code != http.StatusUnauthorized {
@@ -530,7 +530,7 @@ func TestSessionAuthMiddleware_InvalidToken(t *testing.T) {
 	mw := SessionAuthMiddleware(kr, "", "", false, cache)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("next called with invalid token")
 	}))
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/Echo", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/Echo", nil)
 	req.Header.Set("Authorization", "Bearer not-a-jwt")
 	rw := httptest.NewRecorder()
 	mw.ServeHTTP(rw, req)
@@ -549,7 +549,7 @@ func TestSessionAuthMiddleware_LookupErrorReturns503(t *testing.T) {
 		t.Fatal("next called on lookup error")
 	}))
 	token := mintTokenWithSID(t, kr, kid, "u1", "tenant-1", "sid-x")
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/Echo", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/Echo", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rw := httptest.NewRecorder()
 	mw.ServeHTTP(rw, req)
@@ -572,7 +572,7 @@ func TestSessionAuthMiddleware_ExemptPath_RevokedSessionStripsHeader(t *testing.
 	mw := SessionAuthMiddleware(kr, "tenant-1", "", false, cache)(next)
 
 	token := mintTokenWithSID(t, kr, kid, "u1", "tenant-1", "sid-revoked")
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rw := httptest.NewRecorder()
 	mw.ServeHTTP(rw, req)
@@ -597,7 +597,7 @@ func TestSessionAuthMiddleware_ExemptPath_ActiveSessionSetsHeader(t *testing.T) 
 	})
 	mw := SessionAuthMiddleware(kr, "tenant-1", "", false, cache)(next)
 	token := mintTokenWithSID(t, kr, kid, "u1", "tenant-1", "sid-ok")
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rw := httptest.NewRecorder()
 	mw.ServeHTTP(rw, req)
@@ -617,7 +617,7 @@ func TestSessionAuthMiddleware_ExemptPath_TokenWithoutSIDSetsHeader(t *testing.T
 	})
 	mw := SessionAuthMiddleware(kr, "tenant-1", "", false, cache)(next)
 	token := mintTokenWithSID(t, kr, kid, "u1", "tenant-1", "")
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rw := httptest.NewRecorder()
 	mw.ServeHTTP(rw, req)

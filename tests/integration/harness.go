@@ -23,7 +23,7 @@ import (
 
 	"github.com/elloloop/identity/internal/graph"
 
-	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
+	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
