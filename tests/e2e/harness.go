@@ -115,7 +115,12 @@ func StartServer(t *testing.T) *Harness {
 	tenantID := fmt.Sprintf("e2e-%d", time.Now().UnixNano())
 
 	cfg := &config.Config{
-		DefaultTenantID:               tenantID,
+		DefaultTenantID: tenantID,
+		// The data-plane binds to the project (ADR-0002); the entdb partition
+		// is provisioned under tenantID, so the boot-default project must
+		// resolve to it — otherwise the service layer reads/writes the
+		// unprovisioned "default" partition (entdb NOT_FOUND).
+		DefaultProjectID:              tenantID,
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,
