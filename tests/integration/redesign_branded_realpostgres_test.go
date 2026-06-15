@@ -25,7 +25,7 @@ func TestRedesign_BrandedResolution_ProjectToken(t *testing.T) {
 	// Sign up via the BRANDED host so the request resolves to the default
 	// project by Host→auth-domain (not the zero-config default pin). If
 	// branded resolution were broken the token would carry no/other project.
-	branded := h.ClientWithHost(brandedAuthDomain, nil)
+	branded := h.ClientWithHost(h.BrandedAuthDomain, nil)
 	signup, err := branded.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
 		Email:    email,
 		Password: validPassword,

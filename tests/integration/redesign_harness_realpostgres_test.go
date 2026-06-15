@@ -41,10 +41,15 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-// brandedAuthDomain is the default project's branded serving hostname,
-// seeded via GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS. A request whose Host is
-// this name must resolve to the default project (flow 2).
-const brandedAuthDomain = "auth.acme.test"
+// brandedAuthDomainSuffix is appended to the per-run unique token to form
+// each harness's branded serving hostname, seeded via
+// GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS. The hostname must be unique per
+// harness instance because project_auth_domains.hostname is globally unique:
+// a fixed name would collide with a prior run's default project when the
+// whole TestRedesign_ControlPlaneAdmin* set runs in one process against a
+// shared control-plane Postgres. A request whose Host is this name resolves
+// to the harness's default project (flow 2).
+const brandedAuthDomainSuffix = ".auth.acme.test"
 
 // harnessAdminSecret is the shared control-plane admin secret the harness
 // configures (GATEWAY_ADMIN_API_SECRET), so the admin RPCs are ENABLED for
@@ -108,6 +113,11 @@ type RedesignHarness struct {
 
 	ProjectID string
 	TenantID  string
+	// BrandedAuthDomain is this harness's per-run unique branded serving
+	// hostname (seeded into the default project). Tests that exercise
+	// Host→auth-domain resolution must use this, not a shared constant, so
+	// the globally-unique hostname index doesn't collide across runs.
+	BrandedAuthDomain string
 
 	DNS    *fakeDNSResolver
 	Mailer *RecordingMailer
@@ -132,8 +142,9 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 	uniq := fmt.Sprintf("it-redesign-%d", time.Now().UnixNano())
 	tenantID := uniq
 	projectID := uniq
+	brandedAuthDomain := uniq + brandedAuthDomainSuffix
 
-	cfg := newRedesignTestConfig(dsn, projectID, tenantID)
+	cfg := newRedesignTestConfig(dsn, projectID, tenantID, brandedAuthDomain)
 
 	dns := newFakeDNSResolver()
 	mailer := NewRecordingMailer()
@@ -174,13 +185,14 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 	}
 
 	return &RedesignHarness{
-		BaseURL:   httpSrv.URL,
-		HTTP:      httpSrv.Client(),
-		Client:    identityconnectgen.NewIdentityServiceClient(httpSrv.Client(), httpSrv.URL),
-		ProjectID: projectID,
-		TenantID:  tenantID,
-		DNS:       dns,
-		Mailer:    mailer,
+		BaseURL:           httpSrv.URL,
+		HTTP:              httpSrv.Client(),
+		Client:            identityconnectgen.NewIdentityServiceClient(httpSrv.Client(), httpSrv.URL),
+		ProjectID:         projectID,
+		TenantID:          tenantID,
+		BrandedAuthDomain: brandedAuthDomain,
+		DNS:               dns,
+		Mailer:            mailer,
 		Stores: governanceStores{
 			tenants:     built.TenantStoreIface(),
 			domains:     built.DomainStoreIface(),
@@ -197,7 +209,7 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 // a branded auth domain, local-password auth, and both password and
 // passwordless signup on. Borrows the non-governance defaults from
 // newTestConfig so the two harnesses agree on expiries/limits.
-func newRedesignTestConfig(dsn, projectID, tenantID string) config.Config {
+func newRedesignTestConfig(dsn, projectID, tenantID, brandedAuthDomain string) config.Config {
 	base := newTestConfig()
 	base.RepoDriver = string(repo.DriverPostgres)
 	base.PostgresDSN = dsn
