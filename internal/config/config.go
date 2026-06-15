@@ -116,6 +116,18 @@ type Config struct {
 	// GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS.
 	DefaultProjectAuthDomains string
 
+	// RequireVerifiedAuthDomain governs whether an UNVERIFIED custom
+	// auth-domain marked is_primary may become a project's primary
+	// auth-domain — the host that drives branded link URLs (magic links,
+	// invitations) and cookie domains. When true (the safe default), the
+	// primary-auth-domain selection requires verified_at_ms > 0, so only a
+	// DNS-verified host can drive branded links, matching the verified-only
+	// Host→project resolver and the proto contract on is_primary. identity
+	// is a library/OSS server, so whether to trust an unverified is_primary
+	// host is the deployer's policy: set this false to opt in. Driven by
+	// GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN, default true.
+	RequireVerifiedAuthDomain bool
+
 	// Email service (internal gRPC)
 	EmailServiceHost string
 	EmailServicePort int
@@ -461,6 +473,7 @@ func Load() *Config {
 		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", DefaultProjectIDFallback),
 		AdminAPISecret:            envStr("GATEWAY_ADMIN_API_SECRET", ""),
 		DefaultProjectAuthDomains: envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
+		RequireVerifiedAuthDomain: envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
 
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),

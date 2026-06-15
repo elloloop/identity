@@ -18,6 +18,15 @@ import (
 // testcontainers-driven container test (see project_store_dockertest_test.go).
 func newProjectStore(ctx context.Context, t *testing.T, dsn string) *ProjectStore {
 	t.Helper()
+	return newProjectStoreWith(ctx, t, dsn, true)
+}
+
+// newProjectStoreWith is newProjectStore with an explicit
+// requireVerifiedAuthDomain, so resolver tests can exercise both the safe
+// default (verified-only primary auth-domain) and the opt-in (unverified
+// is_primary allowed) policy.
+func newProjectStoreWith(ctx context.Context, t *testing.T, dsn string, requireVerifiedAuthDomain bool) *ProjectStore {
+	t.Helper()
 	repo, err := New(ctx, Config{
 		DSN:         dsn,
 		MaxConns:    5,
@@ -30,7 +39,7 @@ func newProjectStore(ctx context.Context, t *testing.T, dsn string) *ProjectStor
 	})
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)
-	return NewProjectStore(repo)
+	return NewProjectStore(repo, requireVerifiedAuthDomain)
 }
 
 // TestProjectStore_Smoke runs the control-plane store round-trip against a
@@ -226,7 +235,7 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	})
 	require.NoError(t, err)
 	_, err = store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
-		ProjectID: projID, Hostname: "auth.live.test", IsPrimary: true,
+		ProjectID: projID, Hostname: "auth.live.test", IsPrimary: true, VerifiedAtMs: 1,
 	})
 	require.NoError(t, err)
 
@@ -263,6 +272,26 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	require.NotNil(t, got)
 	require.Equal(t, projID, got.ID)
 
+	// An UNVERIFIED custom domain (verified_at_ms = 0) must NOT resolve, even
+	// though the row exists and is owned by the active project.
+	_, err = store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
+		ProjectID: projID, Hostname: "pending.live.test",
+	})
+	require.NoError(t, err)
+	miss, err = store.ResolveByHostname(ctx, "pending.live.test")
+	require.NoError(t, err)
+	require.Nil(t, miss, "an unverified custom domain must not resolve")
+	noProj, err := store.GetProjectByAuthHostname(ctx, "pending.live.test")
+	require.NoError(t, err)
+	require.Nil(t, noProj, "GetProjectByAuthHostname must filter on verified")
+
+	// Verifying the pending domain flips it to resolving.
+	require.NoError(t, store.SetProjectAuthDomainVerified(ctx, projID, "PENDING.LIVE.TEST", 4242))
+	got, err = store.ResolveByHostname(ctx, "pending.live.test")
+	require.NoError(t, err)
+	require.NotNil(t, got, "a verified custom domain resolves")
+	require.Equal(t, projID, got.ID)
+
 	// Unknown / blank host → clean miss.
 	miss, err = store.ResolveByHostname(ctx, "nope.test")
 	require.NoError(t, err)
@@ -281,7 +310,7 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	})
 	require.NoError(t, err)
 	_, err = store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
-		ProjectID: suspID, Hostname: "auth.susp.test", IsPrimary: true,
+		ProjectID: suspID, Hostname: "auth.susp.test", IsPrimary: true, VerifiedAtMs: 1,
 	})
 	require.NoError(t, err)
 
@@ -291,6 +320,75 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	miss, err = store.ResolveByHostname(ctx, "auth.susp.test")
 	require.NoError(t, err)
 	require.Nil(t, miss, "a suspended project must not resolve by hostname")
+}
+
+// TestPrimaryAuthDomainPolicy_Smoke runs the verified-auth-domain policy body
+// against a live Postgres pointed to by GATEWAY_TEST_POSTGRES_DSN (CI's
+// coverage job), skipping when unset. The dockerpostgres container test runs
+// the same body locally.
+func TestPrimaryAuthDomainPolicy_Smoke(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping primary auth-domain policy smoke test")
+	}
+	runPrimaryAuthDomainPolicySmoke(t, dsn)
+}
+
+// runPrimaryAuthDomainPolicySmoke pins the verified-auth-domain requirement:
+// an UNVERIFIED is_primary custom domain must NOT become a resolved project's
+// PrimaryAuthDomain when requireVerifiedAuthDomain is true (the safe default,
+// so it never drives branded link URLs), but DOES when a deployer opts out by
+// setting it false. The resolution path itself (which project a host maps to)
+// is asserted by runProjectResolverSmoke; this body isolates the
+// link-building primary-domain selection the review gate flagged.
+func runPrimaryAuthDomainPolicySmoke(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+
+	// Seed once with the default store, then read back through stores built
+	// under each policy. The seeding store's policy is irrelevant to writes.
+	seed := newProjectStore(ctx, t, dsn)
+	projID, err := seed.createProject(ctx, &Project{StorageScopeID: "scope-policy", Name: "Policy"})
+	require.NoError(t, err)
+	_, err = seed.createProjectCredential(ctx, &ProjectCredential{
+		ProjectID: projID, Kind: "publishable", PublicID: "pk_policy",
+	})
+	require.NoError(t, err)
+	// is_primary but UNVERIFIED (verified_at_ms = 0): a customer custom domain
+	// that has been marked primary but not yet passed DNS verification.
+	_, err = seed.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
+		ProjectID: projID, Hostname: "unverified.primary.test", IsPrimary: true,
+	})
+	require.NoError(t, err)
+
+	// Default policy (require verified): the unverified is_primary host must
+	// NOT surface as PrimaryAuthDomain.
+	strict := newProjectStoreWith(ctx, t, dsn, true)
+	got, err := strict.ResolveByCredential(ctx, "pk_policy")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, projID, got.ID)
+	require.Empty(t, got.PrimaryAuthDomain,
+		"default policy: an unverified is_primary host must not drive branded links")
+
+	// Opt-out policy (allow unverified): the same host DOES surface.
+	lax := newProjectStoreWith(ctx, t, dsn, false)
+	got, err = lax.ResolveByCredential(ctx, "pk_policy")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "unverified.primary.test", got.PrimaryAuthDomain,
+		"opt-out policy: an unverified is_primary host drives branded links")
+
+	// Once the host is verified, both policies surface it.
+	require.NoError(t, seed.SetProjectAuthDomainVerified(ctx, projID, "unverified.primary.test", 7777))
+	got, err = strict.ResolveByCredential(ctx, "pk_policy")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "unverified.primary.test", got.PrimaryAuthDomain,
+		"default policy: a verified is_primary host drives branded links")
 }
 
 // runProjectStoreSmoke is the shared driver-specific body: it wipes the
@@ -383,22 +481,26 @@ func runProjectStoreSmoke(t *testing.T, dsn string) {
 	require.NoError(t, store.RevokeProjectCredential(ctx, "no-such-cred", 0))
 
 	// ── auth-domain round-trip ──────────────────────────────────────
+	// Seeded verified (verified_at_ms > 0) so it resolves; the verified
+	// filter is exercised separately in runProjectResolverSmoke.
 	primaryID, err := store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
-		ProjectID: projID,
-		Hostname:  "auth.acme.test",
-		IsPrimary: true,
+		ProjectID:    projID,
+		Hostname:     "auth.acme.test",
+		IsPrimary:    true,
+		VerifiedAtMs: 1,
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, primaryID)
 
 	secondaryID, err := store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
-		ProjectID: projID,
-		Hostname:  "login.acme.test",
+		ProjectID:    projID,
+		Hostname:     "login.acme.test",
+		VerifiedAtMs: 1,
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, secondaryID)
 
-	// Case-insensitive Host → project resolution.
+	// Case-insensitive Host → project resolution (verified domains only).
 	resolved, err := store.GetProjectByAuthHostname(ctx, "AUTH.ACME.TEST")
 	require.NoError(t, err)
 	require.NotNil(t, resolved)

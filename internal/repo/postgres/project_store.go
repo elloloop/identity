@@ -78,14 +78,20 @@ const (
 // connection pool.
 type ProjectStore struct {
 	pool *tracedPool
+	// requireVerifiedAuthDomain restricts the primary auth-domain (the host
+	// that drives branded link URLs) to DNS-verified hostnames. See
+	// primaryAuthHostname.
+	requireVerifiedAuthDomain bool
 }
 
 // NewProjectStore builds a control-plane store that shares the given
 // repository's connection pool. The store must NOT be closed
 // independently — closing the owning *pgRepository releases the pool for
-// every derived store.
-func NewProjectStore(r *pgRepository) *ProjectStore {
-	return &ProjectStore{pool: r.pool}
+// every derived store. requireVerifiedAuthDomain, when true, restricts the
+// resolved primary auth-domain to DNS-verified hostnames (see
+// primaryAuthHostname).
+func NewProjectStore(r *pgRepository, requireVerifiedAuthDomain bool) *ProjectStore {
+	return &ProjectStore{pool: r.pool, requireVerifiedAuthDomain: requireVerifiedAuthDomain}
 }
 
 // columnsPrefixed qualifies every comma-separated column in cols with the
@@ -460,13 +466,13 @@ func (s *ProjectStore) EnsureAuthDomain(ctx context.Context, projectID, hostname
 	if hostname == "" {
 		return fmt.Errorf("%w: missing hostname", service.ErrInvalidArgument)
 	}
-	owner, err := s.GetProjectByAuthHostname(ctx, hostname)
+	ownerID, err := s.authHostnameOwner(ctx, hostname)
 	if err != nil {
 		return err
 	}
-	if owner != nil {
-		if owner.ID != projectID {
-			return fmt.Errorf("auth domain %q already belongs to project %q", hostname, owner.ID)
+	if ownerID != "" {
+		if ownerID != projectID {
+			return fmt.Errorf("auth domain %q already belongs to project %q", hostname, ownerID)
 		}
 		return nil // already seeded for this project
 	}
@@ -478,7 +484,7 @@ func (s *ProjectStore) EnsureAuthDomain(ctx context.Context, projectID, hostname
 	}); err != nil {
 		// On a lost race the row now exists for this project; treat as success.
 		if errors.Is(err, service.ErrAlreadyExists) {
-			if owner, gErr := s.GetProjectByAuthHostname(ctx, hostname); gErr == nil && owner != nil && owner.ID == projectID {
+			if ownerID, gErr := s.authHostnameOwner(ctx, hostname); gErr == nil && ownerID == projectID {
 				return nil
 			}
 		}
@@ -487,10 +493,35 @@ func (s *ProjectStore) EnsureAuthDomain(ctx context.Context, projectID, hostname
 	return nil
 }
 
+// authHostnameOwner returns the project id that owns a hostname (any state,
+// verified or not), or "" when no project does. Unlike GetProjectByAuthHostname
+// it does NOT filter on verified — the global hostname-uniqueness invariant
+// applies to unverified rows too, so EnsureAuthDomain must see a pending,
+// not-yet-verified registration to detect a cross-project conflict.
+func (s *ProjectStore) authHostnameOwner(ctx context.Context, hostname string) (string, error) {
+	if hostname == "" {
+		return "", nil
+	}
+	const q = `SELECT project_id FROM project_auth_domains
+		WHERE lower(hostname) = lower($1)`
+	var projectID string
+	err := s.pool.QueryRow(ctx, q, hostname).Scan(&projectID)
+	if noRows(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", wrapPgErr("authHostnameOwner", err)
+	}
+	return projectID, nil
+}
+
 // GetProjectByAuthHostname resolves a project from a request's Host header.
 // The hostname match is case-insensitive (lower(hostname)), matching the
-// global unique index, so one host resolves to exactly one project. Returns
-// (nil, nil) when no auth domain matches the host.
+// global unique index, so one host resolves to exactly one project. Only a
+// VERIFIED auth-domain (verified_at_ms > 0) resolves: a customer-registered
+// custom domain stays non-resolving until its DNS-TXT ownership challenge is
+// proven, so an attacker cannot point an unverified hostname at a project.
+// Returns (nil, nil) when no verified auth domain matches the host.
 func (s *ProjectStore) GetProjectByAuthHostname(ctx context.Context, hostname string) (*Project, error) {
 	if hostname == "" {
 		return nil, nil
@@ -498,7 +529,7 @@ func (s *ProjectStore) GetProjectByAuthHostname(ctx context.Context, hostname st
 	q := `SELECT ` + projectColumnsP + `
 		FROM project_auth_domains d
 		JOIN projects p ON p.id = d.project_id
-		WHERE lower(d.hostname) = lower($1)`
+		WHERE lower(d.hostname) = lower($1) AND d.verified_at_ms > 0`
 	p, err := scanProject(s.pool.QueryRow(ctx, q, hostname))
 	if noRows(err) {
 		return nil, nil
@@ -507,6 +538,60 @@ func (s *ProjectStore) GetProjectByAuthHostname(ctx context.Context, hostname st
 		return nil, wrapPgErr("GetProjectByAuthHostname", err)
 	}
 	return p, nil
+}
+
+// GetProjectAuthDomain returns a project's auth-domain by hostname
+// (case-insensitive), or (nil, nil) when the project has no such domain. It
+// is scoped to projectID — a hostname owned by a different project is a miss
+// — so the custom-domain RPCs only ever read/verify a project's own domains.
+// Unlike GetProjectByAuthHostname it does NOT filter on verified, so the
+// caller can observe (and verify) a still-unverified domain.
+func (s *ProjectStore) GetProjectAuthDomain(ctx context.Context, projectID, hostname string) (*ProjectAuthDomain, error) {
+	if projectID == "" || hostname == "" {
+		return nil, nil
+	}
+	const q = `SELECT ` + projectAuthDomainColumns + `
+		FROM project_auth_domains
+		WHERE project_id = $1 AND lower(hostname) = lower($2)`
+	d, err := scanProjectAuthDomain(s.pool.QueryRow(ctx, q, projectID, hostname))
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapPgErr("GetProjectAuthDomain", err)
+	}
+	return d, nil
+}
+
+// SetProjectAuthDomainVerified stamps verified_at_ms on a project's
+// auth-domain, flipping it from non-resolving to resolving. verifiedAtMs must
+// be > 0 (the resolver treats 0 as unverified); atMs defaulting is the
+// caller's job. The update is scoped to projectID so one project cannot mark
+// another's domain verified. A hostname the project does not own affects no
+// row and surfaces ErrNotFound, so a caller can distinguish a no-op verify
+// from a successful one.
+func (s *ProjectStore) SetProjectAuthDomainVerified(ctx context.Context, projectID, hostname string, verifiedAtMs int64) error {
+	if projectID == "" {
+		return fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
+	}
+	if hostname == "" {
+		return fmt.Errorf("%w: missing hostname", service.ErrInvalidArgument)
+	}
+	if verifiedAtMs <= 0 {
+		return fmt.Errorf("%w: verified_at_ms must be positive", service.ErrInvalidArgument)
+	}
+	const q = `
+		UPDATE project_auth_domains
+		   SET verified_at_ms = $3
+		 WHERE project_id = $1 AND lower(hostname) = lower($2)`
+	tag, err := s.pool.Exec(ctx, q, projectID, hostname, verifiedAtMs)
+	if err != nil {
+		return wrapPgErr("SetProjectAuthDomainVerified", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: auth domain", service.ErrNotFound)
+	}
+	return nil
 }
 
 // ListProjectAuthDomains returns every auth domain for a project, ordered

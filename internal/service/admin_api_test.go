@@ -18,7 +18,8 @@ import (
 type fakeControlPlaneStore struct {
 	projects    map[string]*AdminProject
 	credentials map[string]*AdminProjectCredential
-	authDomains map[string]string // hostname → projectID
+	authDomains map[string]string                             // hostname → projectID (ownership, any state)
+	domainRows  map[string]map[string]*AdminProjectAuthDomain // projectID → hostname → row
 	createErr   error
 	credErr     error
 	domainErr   error
@@ -36,6 +37,7 @@ func newFakeControlPlaneStore() *fakeControlPlaneStore {
 		projects:    map[string]*AdminProject{},
 		credentials: map[string]*AdminProjectCredential{},
 		authDomains: map[string]string{},
+		domainRows:  map[string]map[string]*AdminProjectAuthDomain{},
 	}
 }
 
@@ -81,11 +83,73 @@ func (f *fakeControlPlaneStore) EnsureAuthDomain(_ context.Context, projectID, h
 	if owner, ok := f.authDomains[hostname]; ok && owner != projectID {
 		return ErrAlreadyExists
 	}
-	f.authDomains[hostname] = projectID
+	f.putDomain(projectID, hostname, isPrimary, verifiedAtMs)
 	f.lastDomain.projectID = projectID
 	f.lastDomain.hostname = hostname
 	f.lastDomain.isPrimary = isPrimary
 	f.lastDomain.verifiedAtMs = verifiedAtMs
+	return nil
+}
+
+func (f *fakeControlPlaneStore) putDomain(projectID, hostname string, isPrimary bool, verifiedAtMs int64) {
+	f.authDomains[hostname] = projectID
+	if f.domainRows[projectID] == nil {
+		f.domainRows[projectID] = map[string]*AdminProjectAuthDomain{}
+	}
+	f.domainRows[projectID][hostname] = &AdminProjectAuthDomain{
+		Hostname:     hostname,
+		IsPrimary:    isPrimary,
+		VerifiedAtMs: verifiedAtMs,
+	}
+}
+
+func (f *fakeControlPlaneStore) CreateAuthDomain(_ context.Context, projectID, hostname string, isPrimary bool) error {
+	if f.domainErr != nil {
+		return f.domainErr
+	}
+	if owner, ok := f.authDomains[hostname]; ok && owner != projectID {
+		return ErrAlreadyExists
+	}
+	if _, ok := f.domainRows[projectID][hostname]; ok {
+		return ErrAlreadyExists
+	}
+	f.putDomain(projectID, hostname, isPrimary, 0) // unverified
+	return nil
+}
+
+func (f *fakeControlPlaneStore) GetAuthDomain(_ context.Context, projectID, hostname string) (*AdminProjectAuthDomain, error) {
+	if f.domainErr != nil {
+		return nil, f.domainErr
+	}
+	d := f.domainRows[projectID][hostname]
+	if d == nil {
+		return nil, nil
+	}
+	cp := *d
+	return &cp, nil
+}
+
+func (f *fakeControlPlaneStore) ListAuthDomains(_ context.Context, projectID string) ([]*AdminProjectAuthDomain, error) {
+	if f.domainErr != nil {
+		return nil, f.domainErr
+	}
+	var out []*AdminProjectAuthDomain
+	for _, d := range f.domainRows[projectID] {
+		cp := *d
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (f *fakeControlPlaneStore) SetAuthDomainVerified(_ context.Context, projectID, hostname string, verifiedAtMs int64) error {
+	if f.domainErr != nil {
+		return f.domainErr
+	}
+	d := f.domainRows[projectID][hostname]
+	if d == nil {
+		return ErrNotFound
+	}
+	d.VerifiedAtMs = verifiedAtMs
 	return nil
 }
 
@@ -154,6 +218,7 @@ type adminFixture struct {
 	tenants  *fakeTenantStore
 	members  *fakeMembershipStore
 	admins   *fakePlatformAdminStore
+	dns      *fakeDNSResolver
 }
 
 func newAdminFixture(secret string) *adminFixture {
@@ -161,12 +226,14 @@ func newAdminFixture(secret string) *adminFixture {
 	t := newFakeTenantStore()
 	m := newFakeMembershipStore()
 	a := newFakePlatformAdminStore()
+	dns := &fakeDNSResolver{records: map[string][]string{}}
 	return &adminFixture{
-		svc:      NewControlPlaneAdminService(secret, p, t, m, a, nil),
+		svc:      NewControlPlaneAdminService(secret, p, t, m, a, dns, nil),
 		projects: p,
 		tenants:  t,
 		members:  m,
 		admins:   a,
+		dns:      dns,
 	}
 }
 
@@ -461,6 +528,216 @@ func TestControlPlaneAdmin_AddTenantAdmin_RequiresIDs(t *testing.T) {
 	}
 }
 
+// ── customer custom auth-domains: add → verify → list ────────────────────
+
+func TestControlPlaneAdmin_AddCustomAuthDomain_Unverified(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	reg, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "  Auth.Customer.COM ", false)
+	if err != nil {
+		t.Fatalf("AddProjectAuthDomain: %v", err)
+	}
+	if reg.Domain.Hostname != "auth.customer.com" {
+		t.Fatalf("hostname not normalized: %q", reg.Domain.Hostname)
+	}
+	if reg.Domain.VerifiedAtMs != 0 {
+		t.Fatalf("a customer domain must start unverified, got verified_at_ms=%d", reg.Domain.VerifiedAtMs)
+	}
+	// The TXT challenge is deterministic and prefixed.
+	if reg.TXTName != "auth.customer.com" {
+		t.Fatalf("txt name = %q, want the hostname", reg.TXTName)
+	}
+	if !strings.HasPrefix(reg.TXTValue, authDomainVerifyTXTPrefix) {
+		t.Fatalf("txt value %q lacks prefix %q", reg.TXTValue, authDomainVerifyTXTPrefix)
+	}
+	// Re-adding returns the SAME deterministic challenge, no conflict.
+	reg2, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", false)
+	if err != nil {
+		t.Fatalf("re-add: %v", err)
+	}
+	if reg2.TXTValue != reg.TXTValue {
+		t.Fatalf("re-issued challenge %q differs from %q", reg2.TXTValue, reg.TXTValue)
+	}
+}
+
+func TestControlPlaneAdmin_AddCustomAuthDomain_Primary_Rejected(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	// Promoting a custom auth-domain to primary is a planned follow-up: a
+	// request with is_primary=true is rejected, and registers nothing.
+	if _, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", true); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("AddProjectAuthDomain(is_primary=true): err = %v, want ErrInvalidArgument", err)
+	}
+	d, err := f.projects.GetAuthDomain(ctx, "proj-1", "auth.customer.com")
+	if err != nil {
+		t.Fatalf("GetAuthDomain: %v", err)
+	}
+	if d != nil {
+		t.Fatalf("a rejected primary add must register nothing, got %+v", d)
+	}
+
+	// The default (is_primary=false) still works end to end: add registers the
+	// domain NON-primary and unverified, verification flips verified_at_ms.
+	reg, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", false)
+	if err != nil {
+		t.Fatalf("AddProjectAuthDomain(is_primary=false): %v", err)
+	}
+	if reg.Domain.IsPrimary {
+		t.Fatal("a custom auth-domain must be added non-primary")
+	}
+	if reg.Domain.VerifiedAtMs != 0 {
+		t.Fatalf("must start unverified, got verified_at_ms=%d", reg.Domain.VerifiedAtMs)
+	}
+	f.dns.records["auth.customer.com"] = []string{reg.TXTValue}
+	verified, err := f.svc.VerifyProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com")
+	if err != nil {
+		t.Fatalf("VerifyProjectAuthDomain: %v", err)
+	}
+	if verified.VerifiedAtMs <= 0 {
+		t.Fatalf("verify must stamp verified_at_ms positive, got %d", verified.VerifiedAtMs)
+	}
+}
+
+func TestControlPlaneAdmin_VerifyCustomAuthDomain_WrongOrMissingTXT_StaysUnverified(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	_, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", false)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	// No TXT record at all → verification failure, domain stays unverified.
+	if _, err := f.svc.VerifyProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com"); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("missing TXT: err = %v, want ErrPermissionDenied", err)
+	}
+	d, _ := f.projects.GetAuthDomain(ctx, "proj-1", "auth.customer.com")
+	if d.VerifiedAtMs != 0 {
+		t.Fatalf("domain must stay unverified after a failed verify, got %d", d.VerifiedAtMs)
+	}
+
+	// A wrong TXT value → still fails.
+	f.dns.records["auth.customer.com"] = []string{"some-other-value", authDomainVerifyTXTPrefix + "deadbeef"}
+	if _, err := f.svc.VerifyProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com"); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("wrong TXT: err = %v, want ErrPermissionDenied", err)
+	}
+	d, _ = f.projects.GetAuthDomain(ctx, "proj-1", "auth.customer.com")
+	if d.VerifiedAtMs != 0 {
+		t.Fatal("domain must stay unverified after a wrong-TXT verify")
+	}
+}
+
+func TestControlPlaneAdmin_VerifyCustomAuthDomain_CorrectTXT_FlipsVerified(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	reg, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", false)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	// Publish the exact challenge.
+	f.dns.records["auth.customer.com"] = []string{"unrelated", reg.TXTValue}
+
+	d, err := f.svc.VerifyProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com")
+	if err != nil {
+		t.Fatalf("verify with correct TXT: %v", err)
+	}
+	if d.VerifiedAtMs <= 0 {
+		t.Fatalf("verified_at_ms must be stamped positive, got %d", d.VerifiedAtMs)
+	}
+
+	// Re-verify is idempotent and does not move the timestamp.
+	first := d.VerifiedAtMs
+	d2, err := f.svc.VerifyProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com")
+	if err != nil {
+		t.Fatalf("re-verify: %v", err)
+	}
+	if d2.VerifiedAtMs != first {
+		t.Fatalf("re-verify moved the timestamp: %d → %d", first, d2.VerifiedAtMs)
+	}
+}
+
+func TestControlPlaneAdmin_VerifyCustomAuthDomain_UnknownHost_NotFound(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	if _, err := f.svc.VerifyProjectAuthDomain(context.Background(), testAdminSecret, "proj-1", "never.added.com"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("verify unknown host: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestControlPlaneAdmin_ListCustomAuthDomains(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	if _, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "a.customer.com", false); err != nil {
+		t.Fatalf("add a: %v", err)
+	}
+	if _, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "b.customer.com", false); err != nil {
+		t.Fatalf("add b: %v", err)
+	}
+	got, err := f.svc.ListProjectAuthDomains(ctx, testAdminSecret, "proj-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("listed %d domains, want 2", len(got))
+	}
+}
+
+func TestControlPlaneAdmin_CustomDomainRPCs_ValidateArgs(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	if _, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "  ", "h.example.com", false); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("blank project id: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "p", "no-dot", false); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("invalid hostname: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.svc.VerifyProjectAuthDomain(ctx, testAdminSecret, "p", "  "); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("blank hostname: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.svc.ListProjectAuthDomains(ctx, testAdminSecret, " "); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("blank project id (list): err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestControlPlaneAdmin_CustomDomainRPCs_Gated(t *testing.T) {
+	t.Parallel()
+	// Disabled surface → Unimplemented.
+	dis := newAdminFixture("")
+	ctx := context.Background()
+	if _, err := dis.svc.AddProjectAuthDomain(ctx, "x", "p", "h.example.com", false); !errors.Is(err, ErrUnimplemented) {
+		t.Fatalf("AddProjectAuthDomain disabled: err = %v, want ErrUnimplemented", err)
+	}
+	if _, err := dis.svc.VerifyProjectAuthDomain(ctx, "x", "p", "h.example.com"); !errors.Is(err, ErrUnimplemented) {
+		t.Fatalf("VerifyProjectAuthDomain disabled: err = %v, want ErrUnimplemented", err)
+	}
+	if _, err := dis.svc.ListProjectAuthDomains(ctx, "x", "p"); !errors.Is(err, ErrUnimplemented) {
+		t.Fatalf("ListProjectAuthDomains disabled: err = %v, want ErrUnimplemented", err)
+	}
+
+	// Wrong secret → PermissionDenied.
+	en := newAdminFixture(testAdminSecret)
+	if _, err := en.svc.AddProjectAuthDomain(ctx, "wrong", "p", "h.example.com", false); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("AddProjectAuthDomain wrong secret: err = %v, want ErrPermissionDenied", err)
+	}
+	if _, err := en.svc.VerifyProjectAuthDomain(ctx, "wrong", "p", "h.example.com"); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("VerifyProjectAuthDomain wrong secret: err = %v, want ErrPermissionDenied", err)
+	}
+	if _, err := en.svc.ListProjectAuthDomains(ctx, "wrong", "p"); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("ListProjectAuthDomains wrong secret: err = %v, want ErrPermissionDenied", err)
+	}
+}
+
 // ── store errors propagate (after a successful auth) ─────────────────────
 
 func TestControlPlaneAdmin_StoreErrorsPropagate(t *testing.T) {
@@ -637,7 +914,7 @@ func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
 func TestCreateFirstPlatformAdmin_UnimplementedWithoutStore(t *testing.T) {
 	t.Parallel()
 	// Built without a PlatformAdminStore (the entdb/memory shape).
-	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil)
+	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil)
 	if _, err := svc.CreateFirstPlatformAdmin(context.Background(), "ops@acme.com", ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("no store: err = %v, want ErrUnimplemented", err)
 	}

@@ -155,6 +155,109 @@ func TestRedesign_ControlPlaneAdmin_ProvisioningFlow(t *testing.T) {
 	}
 }
 
+// TestRedesign_ControlPlaneAdmin_CustomAuthDomainFlow drives the customer
+// custom-domain lifecycle over the wire against a real Postgres:
+//
+//	AddProjectAuthDomain (unverified, returns TXT challenge) → resolver REJECTS
+//	→ VerifyProjectAuthDomain with the published TXT → resolver RESOLVES.
+//
+// It proves the security invariant: an unverified customer-owned hostname must
+// not resolve to its project until DNS ownership is proven.
+func TestRedesign_ControlPlaneAdmin_CustomAuthDomainFlow(t *testing.T) {
+	h := startRedesignHarness(t)
+	ctx := context.Background()
+	admin := h.adminClient(harnessAdminSecret)
+
+	unique := time.Now().UnixNano()
+	scope := fmt.Sprintf("custom-scope-%d", unique)
+	projResp, err := admin.AdminCreateProject(ctx, connect.NewRequest(&identitypb.AdminCreateProjectRequest{
+		Name:           "Custom Domain Co",
+		StorageScopeId: scope,
+	}))
+	if err != nil {
+		t.Fatalf("AdminCreateProject: %v", err)
+	}
+	projectID := projResp.Msg.GetProjectId()
+
+	host := fmt.Sprintf("custom-%d.customer.test", unique)
+
+	// 0. The customer RPC rejects is_primary=true: promoting a custom
+	// auth-domain to primary is not yet supported, so it is the documented
+	// InvalidArgument contract rather than a silent half-built path.
+	if _, err := admin.AddProjectAuthDomain(ctx, connect.NewRequest(&identitypb.AddProjectAuthDomainRequest{
+		ProjectId: projectID,
+		Hostname:  host,
+		IsPrimary: true,
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("AddProjectAuthDomain(is_primary=true): code = %v, want InvalidArgument", connect.CodeOf(err))
+	}
+
+	// 1. Register the custom domain non-primary — unverified, with a TXT challenge.
+	addResp, err := admin.AddProjectAuthDomain(ctx, connect.NewRequest(&identitypb.AddProjectAuthDomainRequest{
+		ProjectId: projectID,
+		Hostname:  host,
+		IsPrimary: false,
+	}))
+	if err != nil {
+		t.Fatalf("AddProjectAuthDomain: %v", err)
+	}
+	if addResp.Msg.GetDomain().GetVerifiedAtMs() != 0 {
+		t.Fatalf("custom domain must start unverified, got %d", addResp.Msg.GetDomain().GetVerifiedAtMs())
+	}
+	challenge := addResp.Msg.GetTxtValue()
+	if challenge == "" {
+		t.Fatal("AddProjectAuthDomain returned no TXT challenge")
+	}
+
+	// 2. An unverified custom domain must NOT resolve.
+	if resolved, err := h.Stores.projects.ResolveByHostname(ctx, host); err != nil {
+		t.Fatalf("ResolveByHostname (unverified): %v", err)
+	} else if resolved != nil {
+		t.Fatalf("unverified custom domain %q must not resolve, got %+v", host, resolved)
+	}
+
+	// 3. Verify without the TXT published → PermissionDenied, stays unverified.
+	if _, err := admin.VerifyProjectAuthDomain(ctx, connect.NewRequest(&identitypb.VerifyProjectAuthDomainRequest{
+		ProjectId: projectID,
+		Hostname:  host,
+	})); connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("verify without TXT: code = %v, want PermissionDenied", connect.CodeOf(err))
+	}
+
+	// 4. Publish the challenge and verify → succeeds.
+	h.DNS.publish(host, challenge)
+	verResp, err := admin.VerifyProjectAuthDomain(ctx, connect.NewRequest(&identitypb.VerifyProjectAuthDomainRequest{
+		ProjectId: projectID,
+		Hostname:  host,
+	}))
+	if err != nil {
+		t.Fatalf("VerifyProjectAuthDomain: %v", err)
+	}
+	if verResp.Msg.GetDomain().GetVerifiedAtMs() <= 0 {
+		t.Fatalf("verified_at_ms not stamped: %+v", verResp.Msg.GetDomain())
+	}
+
+	// 5. The verified custom domain now resolves to its project.
+	resolved, err := h.Stores.projects.ResolveByHostname(ctx, host)
+	if err != nil {
+		t.Fatalf("ResolveByHostname (verified): %v", err)
+	}
+	if resolved == nil || resolved.ID != projectID {
+		t.Fatalf("verified custom domain %q resolved to %+v, want project %q", host, resolved, projectID)
+	}
+
+	// 6. ListProjectAuthDomains reflects the verified domain.
+	listResp, err := admin.ListProjectAuthDomains(ctx, connect.NewRequest(&identitypb.ListProjectAuthDomainsRequest{
+		ProjectId: projectID,
+	}))
+	if err != nil {
+		t.Fatalf("ListProjectAuthDomains: %v", err)
+	}
+	if len(listResp.Msg.GetDomains()) != 1 || listResp.Msg.GetDomains()[0].GetHostname() != host {
+		t.Fatalf("list = %+v, want one domain %q", listResp.Msg.GetDomains(), host)
+	}
+}
+
 // TestRedesign_ControlPlaneAdmin_BadSecretDenied asserts that a missing or
 // wrong admin secret is rejected (PermissionDenied) and provisions nothing,
 // even though the surface is ENABLED (the harness configures a secret).

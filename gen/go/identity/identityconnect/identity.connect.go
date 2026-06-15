@@ -259,6 +259,15 @@ const (
 	// IdentityServiceAdminAddProjectAuthDomainProcedure is the fully-qualified name of the
 	// IdentityService's AdminAddProjectAuthDomain RPC.
 	IdentityServiceAdminAddProjectAuthDomainProcedure = "/identity.IdentityService/AdminAddProjectAuthDomain"
+	// IdentityServiceAddProjectAuthDomainProcedure is the fully-qualified name of the IdentityService's
+	// AddProjectAuthDomain RPC.
+	IdentityServiceAddProjectAuthDomainProcedure = "/identity.IdentityService/AddProjectAuthDomain"
+	// IdentityServiceVerifyProjectAuthDomainProcedure is the fully-qualified name of the
+	// IdentityService's VerifyProjectAuthDomain RPC.
+	IdentityServiceVerifyProjectAuthDomainProcedure = "/identity.IdentityService/VerifyProjectAuthDomain"
+	// IdentityServiceListProjectAuthDomainsProcedure is the fully-qualified name of the
+	// IdentityService's ListProjectAuthDomains RPC.
+	IdentityServiceListProjectAuthDomainsProcedure = "/identity.IdentityService/ListProjectAuthDomains"
 	// IdentityServiceAdminCreateTenantProcedure is the fully-qualified name of the IdentityService's
 	// AdminCreateTenant RPC.
 	IdentityServiceAdminCreateTenantProcedure = "/identity.IdentityService/AdminCreateTenant"
@@ -386,6 +395,12 @@ type IdentityServiceClient interface {
 	AdminCreateProject(context.Context, *connect.Request[identity.AdminCreateProjectRequest]) (*connect.Response[identity.AdminCreateProjectResponse], error)
 	AdminCreateProjectCredential(context.Context, *connect.Request[identity.AdminCreateProjectCredentialRequest]) (*connect.Response[identity.AdminCreateProjectCredentialResponse], error)
 	AdminAddProjectAuthDomain(context.Context, *connect.Request[identity.AdminAddProjectAuthDomainRequest]) (*connect.Response[identity.AdminAddProjectAuthDomainResponse], error)
+	// Customer-owned custom auth-domains: a project registers a serving
+	// hostname, proves ownership via a DNS TXT challenge, then it resolves.
+	// An unverified custom domain does NOT resolve requests.
+	AddProjectAuthDomain(context.Context, *connect.Request[identity.AddProjectAuthDomainRequest]) (*connect.Response[identity.AddProjectAuthDomainResponse], error)
+	VerifyProjectAuthDomain(context.Context, *connect.Request[identity.VerifyProjectAuthDomainRequest]) (*connect.Response[identity.VerifyProjectAuthDomainResponse], error)
+	ListProjectAuthDomains(context.Context, *connect.Request[identity.ListProjectAuthDomainsRequest]) (*connect.Response[identity.ListProjectAuthDomainsResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error)
 	AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error)
 	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
@@ -861,6 +876,24 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminAddProjectAuthDomain")),
 			connect.WithClientOptions(opts...),
 		),
+		addProjectAuthDomain: connect.NewClient[identity.AddProjectAuthDomainRequest, identity.AddProjectAuthDomainResponse](
+			httpClient,
+			baseURL+IdentityServiceAddProjectAuthDomainProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AddProjectAuthDomain")),
+			connect.WithClientOptions(opts...),
+		),
+		verifyProjectAuthDomain: connect.NewClient[identity.VerifyProjectAuthDomainRequest, identity.VerifyProjectAuthDomainResponse](
+			httpClient,
+			baseURL+IdentityServiceVerifyProjectAuthDomainProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("VerifyProjectAuthDomain")),
+			connect.WithClientOptions(opts...),
+		),
+		listProjectAuthDomains: connect.NewClient[identity.ListProjectAuthDomainsRequest, identity.ListProjectAuthDomainsResponse](
+			httpClient,
+			baseURL+IdentityServiceListProjectAuthDomainsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListProjectAuthDomains")),
+			connect.WithClientOptions(opts...),
+		),
 		adminCreateTenant: connect.NewClient[identity.AdminCreateTenantRequest, identity.AdminCreateTenantResponse](
 			httpClient,
 			baseURL+IdentityServiceAdminCreateTenantProcedure,
@@ -960,6 +993,9 @@ type identityServiceClient struct {
 	adminCreateProject            *connect.Client[identity.AdminCreateProjectRequest, identity.AdminCreateProjectResponse]
 	adminCreateProjectCredential  *connect.Client[identity.AdminCreateProjectCredentialRequest, identity.AdminCreateProjectCredentialResponse]
 	adminAddProjectAuthDomain     *connect.Client[identity.AdminAddProjectAuthDomainRequest, identity.AdminAddProjectAuthDomainResponse]
+	addProjectAuthDomain          *connect.Client[identity.AddProjectAuthDomainRequest, identity.AddProjectAuthDomainResponse]
+	verifyProjectAuthDomain       *connect.Client[identity.VerifyProjectAuthDomainRequest, identity.VerifyProjectAuthDomainResponse]
+	listProjectAuthDomains        *connect.Client[identity.ListProjectAuthDomainsRequest, identity.ListProjectAuthDomainsResponse]
 	adminCreateTenant             *connect.Client[identity.AdminCreateTenantRequest, identity.AdminCreateTenantResponse]
 	adminAddTenantAdmin           *connect.Client[identity.AdminAddTenantAdminRequest, identity.AdminAddTenantAdminResponse]
 	createFirstPlatformAdmin      *connect.Client[identity.CreateFirstPlatformAdminRequest, identity.CreateFirstPlatformAdminResponse]
@@ -1345,6 +1381,21 @@ func (c *identityServiceClient) AdminAddProjectAuthDomain(ctx context.Context, r
 	return c.adminAddProjectAuthDomain.CallUnary(ctx, req)
 }
 
+// AddProjectAuthDomain calls identity.IdentityService.AddProjectAuthDomain.
+func (c *identityServiceClient) AddProjectAuthDomain(ctx context.Context, req *connect.Request[identity.AddProjectAuthDomainRequest]) (*connect.Response[identity.AddProjectAuthDomainResponse], error) {
+	return c.addProjectAuthDomain.CallUnary(ctx, req)
+}
+
+// VerifyProjectAuthDomain calls identity.IdentityService.VerifyProjectAuthDomain.
+func (c *identityServiceClient) VerifyProjectAuthDomain(ctx context.Context, req *connect.Request[identity.VerifyProjectAuthDomainRequest]) (*connect.Response[identity.VerifyProjectAuthDomainResponse], error) {
+	return c.verifyProjectAuthDomain.CallUnary(ctx, req)
+}
+
+// ListProjectAuthDomains calls identity.IdentityService.ListProjectAuthDomains.
+func (c *identityServiceClient) ListProjectAuthDomains(ctx context.Context, req *connect.Request[identity.ListProjectAuthDomainsRequest]) (*connect.Response[identity.ListProjectAuthDomainsResponse], error) {
+	return c.listProjectAuthDomains.CallUnary(ctx, req)
+}
+
 // AdminCreateTenant calls identity.IdentityService.AdminCreateTenant.
 func (c *identityServiceClient) AdminCreateTenant(ctx context.Context, req *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error) {
 	return c.adminCreateTenant.CallUnary(ctx, req)
@@ -1476,6 +1527,12 @@ type IdentityServiceHandler interface {
 	AdminCreateProject(context.Context, *connect.Request[identity.AdminCreateProjectRequest]) (*connect.Response[identity.AdminCreateProjectResponse], error)
 	AdminCreateProjectCredential(context.Context, *connect.Request[identity.AdminCreateProjectCredentialRequest]) (*connect.Response[identity.AdminCreateProjectCredentialResponse], error)
 	AdminAddProjectAuthDomain(context.Context, *connect.Request[identity.AdminAddProjectAuthDomainRequest]) (*connect.Response[identity.AdminAddProjectAuthDomainResponse], error)
+	// Customer-owned custom auth-domains: a project registers a serving
+	// hostname, proves ownership via a DNS TXT challenge, then it resolves.
+	// An unverified custom domain does NOT resolve requests.
+	AddProjectAuthDomain(context.Context, *connect.Request[identity.AddProjectAuthDomainRequest]) (*connect.Response[identity.AddProjectAuthDomainResponse], error)
+	VerifyProjectAuthDomain(context.Context, *connect.Request[identity.VerifyProjectAuthDomainRequest]) (*connect.Response[identity.VerifyProjectAuthDomainResponse], error)
+	ListProjectAuthDomains(context.Context, *connect.Request[identity.ListProjectAuthDomainsRequest]) (*connect.Response[identity.ListProjectAuthDomainsResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error)
 	AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error)
 	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
@@ -1947,6 +2004,24 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("AdminAddProjectAuthDomain")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceAddProjectAuthDomainHandler := connect.NewUnaryHandler(
+		IdentityServiceAddProjectAuthDomainProcedure,
+		svc.AddProjectAuthDomain,
+		connect.WithSchema(identityServiceMethods.ByName("AddProjectAuthDomain")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceVerifyProjectAuthDomainHandler := connect.NewUnaryHandler(
+		IdentityServiceVerifyProjectAuthDomainProcedure,
+		svc.VerifyProjectAuthDomain,
+		connect.WithSchema(identityServiceMethods.ByName("VerifyProjectAuthDomain")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListProjectAuthDomainsHandler := connect.NewUnaryHandler(
+		IdentityServiceListProjectAuthDomainsProcedure,
+		svc.ListProjectAuthDomains,
+		connect.WithSchema(identityServiceMethods.ByName("ListProjectAuthDomains")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceAdminCreateTenantHandler := connect.NewUnaryHandler(
 		IdentityServiceAdminCreateTenantProcedure,
 		svc.AdminCreateTenant,
@@ -2119,6 +2194,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminCreateProjectCredentialHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminAddProjectAuthDomainProcedure:
 			identityServiceAdminAddProjectAuthDomainHandler.ServeHTTP(w, r)
+		case IdentityServiceAddProjectAuthDomainProcedure:
+			identityServiceAddProjectAuthDomainHandler.ServeHTTP(w, r)
+		case IdentityServiceVerifyProjectAuthDomainProcedure:
+			identityServiceVerifyProjectAuthDomainHandler.ServeHTTP(w, r)
+		case IdentityServiceListProjectAuthDomainsProcedure:
+			identityServiceListProjectAuthDomainsHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminCreateTenantProcedure:
 			identityServiceAdminCreateTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminAddTenantAdminProcedure:
@@ -2436,6 +2517,18 @@ func (UnimplementedIdentityServiceHandler) AdminCreateProjectCredential(context.
 
 func (UnimplementedIdentityServiceHandler) AdminAddProjectAuthDomain(context.Context, *connect.Request[identity.AdminAddProjectAuthDomainRequest]) (*connect.Response[identity.AdminAddProjectAuthDomainResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.AdminAddProjectAuthDomain is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AddProjectAuthDomain(context.Context, *connect.Request[identity.AddProjectAuthDomainRequest]) (*connect.Response[identity.AddProjectAuthDomainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.AddProjectAuthDomain is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) VerifyProjectAuthDomain(context.Context, *connect.Request[identity.VerifyProjectAuthDomainRequest]) (*connect.Response[identity.VerifyProjectAuthDomainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.VerifyProjectAuthDomain is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListProjectAuthDomains(context.Context, *connect.Request[identity.ListProjectAuthDomainsRequest]) (*connect.Response[identity.ListProjectAuthDomainsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.ListProjectAuthDomains is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error) {

@@ -91,11 +91,19 @@ func projectCORSOrigins(p *Project) ([]string, error) {
 }
 
 // primaryAuthHostname returns the project's primary serving hostname, or ""
-// when it has none.
+// when it has none. When requireVerifiedAuthDomain is set (the safe default),
+// an unverified is_primary host is ignored so only a DNS-verified hostname can
+// drive branded link URLs — matching the verified-only Host→project resolver
+// (GetProjectByAuthHostname) and the proto contract on is_primary. When unset,
+// a deployer has opted into letting an unverified is_primary host drive
+// branded links.
 func (s *ProjectStore) primaryAuthHostname(ctx context.Context, projectID string) (string, error) {
-	const q = `SELECT hostname FROM project_auth_domains
-		WHERE project_id = $1 AND is_primary
-		LIMIT 1`
+	q := `SELECT hostname FROM project_auth_domains
+		WHERE project_id = $1 AND is_primary`
+	if s.requireVerifiedAuthDomain {
+		q += ` AND verified_at_ms > 0`
+	}
+	q += ` LIMIT 1`
 	var hostname string
 	err := s.pool.QueryRow(ctx, q, projectID).Scan(&hostname)
 	if noRows(err) {

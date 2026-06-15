@@ -315,26 +315,42 @@ func (s *DomainService) requireProject(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("%w: no project in request scope", ErrPermissionDenied)
 }
 
-// dnsTXTChallenge returns the TXT record name and value a domain must
-// publish to prove ownership. The name is the domain itself; the value is
-// deterministic per (project, domain), so no per-domain token is stored.
-func dnsTXTChallenge(projectID, domain string) (name, value string) {
-	digest := sha256Hex(projectID + ":" + strings.ToLower(domain))
-	return domain, domainVerifyTXTPrefix + digest
+// txtOwnershipChallenge returns the TXT record name and value a host must
+// publish to prove ownership, under the given verification prefix. The name is
+// the host itself; the value is deterministic per (project, host), so no
+// per-host token is stored. Shared by email-domain verification
+// (dnsTXTChallenge) and custom auth-domain verification (authDomainTXTChallenge
+// in admin_api.go) — the same proof shape, differing only by prefix.
+func txtOwnershipChallenge(prefix, projectID, host string) (name, value string) {
+	digest := sha256Hex(projectID + ":" + strings.ToLower(host))
+	return host, prefix + digest
 }
 
-// normalizeDomain lower-cases, trims, and strips a trailing dot from an
-// email domain, rejecting blanks and anything with whitespace, a scheme,
-// an '@', or no dot at all.
+// dnsTXTChallenge returns the TXT record name and value an email domain must
+// publish to prove ownership.
+func dnsTXTChallenge(projectID, domain string) (name, value string) {
+	return txtOwnershipChallenge(domainVerifyTXTPrefix, projectID, domain)
+}
+
+// normalizeHostname lower-cases, trims, and strips a trailing dot from a host,
+// rejecting blanks and anything with whitespace, a scheme, an '@', or no dot at
+// all — the shape a real fully-qualified hostname/domain must take. label names
+// the value in error messages ("domain" / "hostname"). Shared by email-domain
+// (normalizeDomain) and custom auth-domain (normalizeAuthHostname) validation.
+func normalizeHostname(label, host string) (string, error) {
+	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if h == "" {
+		return "", fmt.Errorf("%w: missing %s", ErrInvalidArgument, label)
+	}
+	if strings.ContainsAny(h, " \t/@:") || !strings.Contains(h, ".") {
+		return "", fmt.Errorf("%w: invalid %s %q", ErrInvalidArgument, label, host)
+	}
+	return h, nil
+}
+
+// normalizeDomain validates an email domain.
 func normalizeDomain(domain string) (string, error) {
-	d := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
-	if d == "" {
-		return "", fmt.Errorf("%w: missing domain", ErrInvalidArgument)
-	}
-	if strings.ContainsAny(d, " \t/@:") || !strings.Contains(d, ".") {
-		return "", fmt.Errorf("%w: invalid domain %q", ErrInvalidArgument, domain)
-	}
-	return d, nil
+	return normalizeHostname("domain", domain)
 }
 
 // normalizeVerificationMethod defaults a blank method to DNS-TXT and

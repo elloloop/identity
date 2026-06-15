@@ -22,11 +22,21 @@ const handlerAdminSecret = "handler-operator-secret"
 // and the last auth-domain it was asked to ensure.
 type adminControlStore struct {
 	nextID     int
+	domains    map[string]*service.AdminProjectAuthDomain // hostname → row
 	lastDomain struct {
 		projectID string
 		hostname  string
 		isPrimary bool
 	}
+}
+
+// adminDNSResolver is a fixed-record TXT resolver for the handler tests.
+type adminDNSResolver struct {
+	txt map[string][]string
+}
+
+func (r *adminDNSResolver) LookupTXT(_ context.Context, host string) ([]string, error) {
+	return r.txt[host], nil
 }
 
 func (s *adminControlStore) mint(prefix string) string {
@@ -55,6 +65,44 @@ func (s *adminControlStore) EnsureAuthDomain(_ context.Context, projectID, hostn
 	s.lastDomain.projectID = projectID
 	s.lastDomain.hostname = hostname
 	s.lastDomain.isPrimary = isPrimary
+	return nil
+}
+
+func (s *adminControlStore) CreateAuthDomain(_ context.Context, projectID, hostname string, isPrimary bool) error {
+	if s.domains == nil {
+		s.domains = map[string]*service.AdminProjectAuthDomain{}
+	}
+	s.domains[hostname] = &service.AdminProjectAuthDomain{Hostname: hostname, IsPrimary: isPrimary}
+	s.lastDomain.projectID = projectID
+	s.lastDomain.hostname = hostname
+	s.lastDomain.isPrimary = isPrimary
+	return nil
+}
+
+func (s *adminControlStore) GetAuthDomain(_ context.Context, _, hostname string) (*service.AdminProjectAuthDomain, error) {
+	d := s.domains[hostname]
+	if d == nil {
+		return nil, nil
+	}
+	cp := *d
+	return &cp, nil
+}
+
+func (s *adminControlStore) ListAuthDomains(_ context.Context, _ string) ([]*service.AdminProjectAuthDomain, error) {
+	var out []*service.AdminProjectAuthDomain
+	for _, d := range s.domains {
+		cp := *d
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (s *adminControlStore) SetAuthDomainVerified(_ context.Context, _, hostname string, verifiedAtMs int64) error {
+	d := s.domains[hostname]
+	if d == nil {
+		return service.ErrNotFound
+	}
+	d.VerifiedAtMs = verifiedAtMs
 	return nil
 }
 
@@ -101,7 +149,7 @@ var _ service.PlatformAdminStore = (*connectPlatformAdminStore)(nil)
 func newAdminControlSvc(secret string) (*service.ControlPlaneAdminService, *adminControlStore, *connectMembershipStore) {
 	store := &adminControlStore{}
 	members := &connectMembershipStore{}
-	svc := service.NewControlPlaneAdminService(secret, store, &connectTenantStore{}, members, &connectPlatformAdminStore{}, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(secret, store, &connectTenantStore{}, members, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, zap.NewNop())
 	return svc, store, members
 }
 
@@ -189,6 +237,69 @@ func TestAdminRPCs_BadSecret_Denied(t *testing.T) {
 	}
 }
 
+// ── customer custom auth-domain flow through the handler ─────────────────
+
+func TestAdminRPCs_CustomAuthDomain_Handler(t *testing.T) {
+	t.Parallel()
+	store := &adminControlStore{}
+	dns := &adminDNSResolver{txt: map[string][]string{}}
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &connectPlatformAdminStore{}, dns, zap.NewNop())
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	// Add a custom domain → unverified, with a TXT challenge.
+	add, err := client.AddProjectAuthDomain(ctx,
+		withAdminSecret(&identitypb.AddProjectAuthDomainRequest{ProjectId: "proj-1", Hostname: "auth.customer.test", IsPrimary: false}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AddProjectAuthDomain: %v", err)
+	}
+	if add.Msg.GetDomain().GetVerifiedAtMs() != 0 {
+		t.Fatalf("custom domain must start unverified, got %d", add.Msg.GetDomain().GetVerifiedAtMs())
+	}
+	if add.Msg.GetTxtValue() == "" || add.Msg.GetTxtName() != "auth.customer.test" {
+		t.Fatalf("challenge incomplete: %+v", add.Msg)
+	}
+
+	// Verify without the TXT published → PermissionDenied, stays unverified.
+	_, err = client.VerifyProjectAuthDomain(ctx,
+		withAdminSecret(&identitypb.VerifyProjectAuthDomainRequest{ProjectId: "proj-1", Hostname: "auth.customer.test"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodePermissionDenied)
+
+	// Publish the challenge → verify succeeds, domain flips verified.
+	dns.txt["auth.customer.test"] = []string{add.Msg.GetTxtValue()}
+	ver, err := client.VerifyProjectAuthDomain(ctx,
+		withAdminSecret(&identitypb.VerifyProjectAuthDomainRequest{ProjectId: "proj-1", Hostname: "auth.customer.test"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("VerifyProjectAuthDomain: %v", err)
+	}
+	if ver.Msg.GetDomain().GetVerifiedAtMs() <= 0 {
+		t.Fatalf("verified_at_ms not stamped: %+v", ver.Msg.GetDomain())
+	}
+
+	// List returns the domain.
+	list, err := client.ListProjectAuthDomains(ctx,
+		withAdminSecret(&identitypb.ListProjectAuthDomainsRequest{ProjectId: "proj-1"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("ListProjectAuthDomains: %v", err)
+	}
+	if len(list.Msg.GetDomains()) != 1 {
+		t.Fatalf("listed %d domains, want 1", len(list.Msg.GetDomains()))
+	}
+}
+
+func TestAdminRPCs_CustomAuthDomain_NilService_Unimplemented(t *testing.T) {
+	t.Parallel()
+	client := startAdminServer(t, nil)
+	ctx := context.Background()
+
+	_, err := client.AddProjectAuthDomain(ctx, withAdminSecret(&identitypb.AddProjectAuthDomainRequest{ProjectId: "p", Hostname: "h.example.com"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.VerifyProjectAuthDomain(ctx, withAdminSecret(&identitypb.VerifyProjectAuthDomainRequest{ProjectId: "p", Hostname: "h.example.com"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.ListProjectAuthDomains(ctx, withAdminSecret(&identitypb.ListProjectAuthDomainsRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+}
+
 // ── correct secret → full provisioning flow through the handler ──────────
 
 func TestAdminRPCs_HappyPath_Handler(t *testing.T) {
@@ -258,7 +369,7 @@ func TestAdminRPCs_HappyPath_Handler(t *testing.T) {
 func startBootstrapServer(t *testing.T) (identityconnectgen.IdentityServiceClient, *connectPlatformAdminStore) {
 	t.Helper()
 	admins := &connectPlatformAdminStore{}
-	svc := service.NewControlPlaneAdminService("", &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, admins, zap.NewNop())
+	svc := service.NewControlPlaneAdminService("", &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, zap.NewNop())
 	return startAdminServer(t, svc), admins
 }
 

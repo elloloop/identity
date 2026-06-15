@@ -590,6 +590,7 @@ func buildControlPlaneAdminService(deps Deps, logger *zap.Logger) *service.Contr
 		deps.TenantStore,
 		deps.MembershipStore,
 		deps.PlatformAdminStore,
+		deps.DNSResolver,
 		logger,
 	)
 }

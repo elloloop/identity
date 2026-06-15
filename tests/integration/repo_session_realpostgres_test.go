@@ -42,7 +42,7 @@ func TestRealPostgres_Session_CRUDAndRevoke(t *testing.T) {
 	require.NoError(t, err)
 
 	// Seed the projects(id) row the project_id FK (migration 0015) needs.
-	_, err = postgres.NewProjectStore(repo).EnsureDefaultProject(
+	_, err = postgres.NewProjectStore(repo, true).EnsureDefaultProject(
 		ctx, projectID, "scope-"+projectID, "realpg-sess",
 	)
 	require.NoError(t, err)

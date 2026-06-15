@@ -1028,6 +1028,56 @@ message AdminAddProjectAuthDomainRequest {
 
 message AdminAddProjectAuthDomainResponse {}
 
+// ProjectAuthDomain is a project's serving hostname as returned by the
+// customer-facing custom-domain RPCs. verified_at_ms is 0 until ownership is
+// proven (a deployer-seeded or operator-vouched domain is pre-verified); an
+// unverified domain does NOT resolve requests.
+message ProjectAuthDomain {
+  string hostname = 1;
+  bool is_primary = 2;
+  // verified_at_ms is the epoch-millis the domain's ownership was proven, or 0
+  // when it is still unverified (and therefore non-resolving).
+  int64 verified_at_ms = 3;
+}
+
+message AddProjectAuthDomainRequest {
+  string project_id = 1;
+  string hostname = 2;
+  // is_primary is reserved for a planned follow-up that promotes an already
+  // verified custom auth-domain to the project's primary serving host. It is
+  // NOT yet honored: a request with is_primary=true is rejected with
+  // InvalidArgument. Add a custom domain non-primary, verify it, then (once the
+  // follow-up lands) promote it to primary.
+  bool is_primary = 3;
+}
+
+message AddProjectAuthDomainResponse {
+  ProjectAuthDomain domain = 1;
+  // txt_name is the DNS record name (the hostname itself) the caller must
+  // create a TXT record on to prove ownership.
+  string txt_name = 2;
+  // txt_value is the exact TXT record value to publish. It is deterministic
+  // per (project, hostname), so re-issuing returns the same challenge.
+  string txt_value = 3;
+}
+
+message VerifyProjectAuthDomainRequest {
+  string project_id = 1;
+  string hostname = 2;
+}
+
+message VerifyProjectAuthDomainResponse {
+  ProjectAuthDomain domain = 1;
+}
+
+message ListProjectAuthDomainsRequest {
+  string project_id = 1;
+}
+
+message ListProjectAuthDomainsResponse {
+  repeated ProjectAuthDomain domains = 1;
+}
+
 message AdminCreateTenantRequest {
   string project_id = 1;
   string name = 2;
@@ -1218,6 +1268,12 @@ service IdentityService {
   rpc AdminCreateProject(AdminCreateProjectRequest) returns (AdminCreateProjectResponse);
   rpc AdminCreateProjectCredential(AdminCreateProjectCredentialRequest) returns (AdminCreateProjectCredentialResponse);
   rpc AdminAddProjectAuthDomain(AdminAddProjectAuthDomainRequest) returns (AdminAddProjectAuthDomainResponse);
+  // Customer-owned custom auth-domains: a project registers a serving
+  // hostname, proves ownership via a DNS TXT challenge, then it resolves.
+  // An unverified custom domain does NOT resolve requests.
+  rpc AddProjectAuthDomain(AddProjectAuthDomainRequest) returns (AddProjectAuthDomainResponse);
+  rpc VerifyProjectAuthDomain(VerifyProjectAuthDomainRequest) returns (VerifyProjectAuthDomainResponse);
+  rpc ListProjectAuthDomains(ListProjectAuthDomainsRequest) returns (ListProjectAuthDomainsResponse);
   rpc AdminCreateTenant(AdminCreateTenantRequest) returns (AdminCreateTenantResponse);
   rpc AdminAddTenantAdmin(AdminAddTenantAdminRequest) returns (AdminAddTenantAdminResponse);
 

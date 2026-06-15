@@ -26,7 +26,7 @@ func newLoginPolicyFixture(ctx context.Context, t *testing.T, dsn string) (store
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)
 
-	projectID, err = NewProjectStore(repo).createProject(ctx, &Project{StorageScopeID: "scope-lp", Name: "LP"})
+	projectID, err = NewProjectStore(repo, true).createProject(ctx, &Project{StorageScopeID: "scope-lp", Name: "LP"})
 	require.NoError(t, err)
 
 	// Seed the tenant the login_policies FK targets via the tenant store.

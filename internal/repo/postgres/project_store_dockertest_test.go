@@ -83,6 +83,16 @@ func TestProjectResolver_Container(t *testing.T) {
 	runProjectResolverSmoke(t, dsn)
 }
 
+// TestPrimaryAuthDomainPolicy_Container runs the verified-auth-domain policy
+// body against a throwaway Postgres container.
+func TestPrimaryAuthDomainPolicy_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runPrimaryAuthDomainPolicySmoke(t, dsn)
+}
+
 // TestTenantDomainStore_Container runs the tenant + domain store body
 // against a throwaway Postgres container.
 func TestTenantDomainStore_Container(t *testing.T) {
@@ -142,6 +152,17 @@ func TestPlatformAdminStore_Container(t *testing.T) {
 
 	dsn := startPostgresContainer(ctx, t)
 	runPlatformAdminSmoke(t, dsn)
+}
+
+// TestCustomAuthDomainStore_Container runs the customer custom-domain store
+// body (add unverified → resolver rejects → verify → resolves) against a
+// throwaway Postgres container.
+func TestCustomAuthDomainStore_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runCustomAuthDomainSmoke(t, dsn)
 }
 
 // TestAutoFormStore_Container runs the tenant auto-formation body (incl.

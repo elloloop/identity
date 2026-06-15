@@ -33,7 +33,7 @@ func newAutoFormFixture(ctx context.Context, t *testing.T, dsn string) (
 	// seed that project so the project_id FK (migration 0015) is satisfied.
 	seedProject(ctx, t, repo, "control-plane")
 
-	projectID, err = NewProjectStore(repo).createProject(ctx, &Project{StorageScopeID: "scope-af", Name: "AF"})
+	projectID, err = NewProjectStore(repo, true).createProject(ctx, &Project{StorageScopeID: "scope-af", Name: "AF"})
 	require.NoError(t, err)
 
 	var n int
