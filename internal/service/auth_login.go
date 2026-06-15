@@ -376,24 +376,19 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	// Credentials are proven; consult the tenant's LoginPolicy. This runs
 	// only after authentication so a denial never reveals account existence,
 	// and before tokens are issued so a disallowed method yields no session.
-	if err := s.enforceLoginPolicy(ctx, email, LoginMethodPassword); err != nil {
+	decision, err := s.enforceLoginPolicy(ctx, email, LoginMethodPassword)
+	if err != nil {
 		return nil, err
 	}
 
 	// Password verified -- reset failed-attempt counters.
 	s.resetFailedLogin(ctx, user)
 
-	// 2FA branch: TOTP required.
-	if user.TotpRequired {
-		challengeID, err := s.issueLoginChallenge(ctx, user.ID)
-		if err != nil {
-			return nil, err
-		}
-		return &LoginResult{
-			User:             user,
-			TotpRequired:     true,
-			LoginChallengeID: challengeID,
-		}, nil
+	// 2FA branch: TOTP required, either because the user enrolled it or
+	// because the tenant's LoginPolicy mandates a second factor for this
+	// single-factor primary method.
+	if user.TotpRequired || decision.RequireSecondFactor {
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor)
 	}
 
 	s.updateLastLogin(ctx, user.ID)
@@ -578,8 +573,14 @@ func (s *AuthService) OAuthLogin(
 	// The provider has proven control of the email; consult the tenant's
 	// LoginPolicy before issuing tokens so a tenant that disallows oauth is
 	// honoured here too — not just on the password / passwordless paths.
-	if err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodOAuth); err != nil {
+	decision, err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodOAuth)
+	if err != nil {
 		return nil, err
+	}
+	// OAuth is a single-factor primary: a Require2FA tenant must complete a
+	// second factor before full tokens are minted.
+	if user.TotpRequired || decision.RequireSecondFactor {
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor)
 	}
 
 	s.updateLastLogin(ctx, user.ID)

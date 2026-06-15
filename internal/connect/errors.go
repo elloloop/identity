@@ -52,9 +52,11 @@ func toConnectError(err error) *connect.Error {
 		// (which would be CodeUnavailable).
 		return connect.NewError(connect.CodeResourceExhausted, err)
 
-	case errors.Is(err, service.ErrTotpRequired):
-		// Not really an error — the client must call VerifyTotp next.
-		// Use FailedPrecondition to signal "you need to do something else first".
+	case errors.Is(err, service.ErrTotpRequired),
+		errors.Is(err, service.ErrSSORequired):
+		// Not really an error — the client must do something else next
+		// (call VerifyTotp, or start the tenant's SSO flow). Use
+		// FailedPrecondition to signal "you need to do something else first".
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrQrLoginExpired):

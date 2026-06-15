@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elloloop/identity/pkg/passwords"
+	"github.com/elloloop/identity/pkg/totp"
 )
 
 // ── Fake governance stores ─────────────────────────────────────────────
@@ -114,6 +115,55 @@ func withAllowedMethods(methods string) *LoginGovernance {
 	return g
 }
 
+// enforceErr drops the policy decision and returns only the error, so the
+// many fail-safe assertions that care only about allow/deny stay terse. Tests
+// that inspect the second-factor decision call enforceLoginPolicy directly.
+func enforceErr(ctx context.Context, t *testing.T, svc *AuthService, email, method string) error {
+	t.Helper()
+	_, err := svc.enforceLoginPolicy(ctx, email, method)
+	return err
+}
+
+// withSSORequired returns a claimed-tenant governance bundle for acme.com
+// whose policy mandates SSO. AllowedMethods is left empty so the test proves
+// SSO-required blocks on its own, independent of any allow-list.
+func withSSORequired() *LoginGovernance {
+	g := claimedPasswordOnlyGovernance()
+	p := g.Policies.(*fakePolicyStore).byTenant["proj-1|tenant-acme"]
+	p.AllowedMethods = ""
+	p.SSORequired = true
+	p.SSOConnectionJSON = `{"type":"saml","idp":"https://idp.acme.com"}`
+	return g
+}
+
+// withRequire2FA returns a claimed-tenant governance bundle for acme.com
+// whose policy mandates a second factor. AllowedMethods is left empty so the
+// requirement is proven on its own.
+func withRequire2FA() *LoginGovernance {
+	g := claimedPasswordOnlyGovernance()
+	p := g.Policies.(*fakePolicyStore).byTenant["proj-1|tenant-acme"]
+	p.AllowedMethods = ""
+	p.Require2FA = true
+	return g
+}
+
+// seedVerifiedTotp enrolls a verified TOTP credential for the user so a
+// Require2FA login can complete its second-factor step.
+func seedVerifiedTotp(t *testing.T, repo *fakeRepo, userID string) {
+	t.Helper()
+	encrypted, err := totp.EncryptSecret("JBSWY3DPEHPK3PXP", testTotpKey())
+	require.NoError(t, err)
+	repo.mu.Lock()
+	id := nextNodeID()
+	repo.totpCreds[id] = &TotpCredRecord{
+		NodeID:          id,
+		UserID:          userID,
+		SecretEncrypted: encrypted,
+		Verified:        true,
+	}
+	repo.mu.Unlock()
+}
+
 // ── enforceLoginPolicy ──────────────────────────────────────────────────
 
 // A claimed tenant with a password-only policy rejects an email_otp login but
@@ -123,10 +173,10 @@ func TestEnforceLoginPolicy_PasswordOnlyTenant(t *testing.T) {
 	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
 	ctx := withProject("proj-1")
 
-	require.NoError(t, svc.enforceLoginPolicy(ctx, "alice@acme.com", LoginMethodPassword),
+	require.NoError(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodPassword),
 		"password is on the allow-list and must pass")
 
-	err := svc.enforceLoginPolicy(ctx, "alice@acme.com", LoginMethodEmailOTP)
+	err := enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodEmailOTP)
 	require.ErrorIs(t, err, ErrPermissionDenied,
 		"email_otp is not on the allow-list and must be denied")
 }
@@ -140,9 +190,9 @@ func TestEnforceLoginPolicy_AllowedMethodsTokenNormalization(t *testing.T) {
 	svc.WithLoginGovernance(g)
 	ctx := withProject("proj-1")
 
-	require.NoError(t, svc.enforceLoginPolicy(ctx, "alice@acme.com", LoginMethodPassword))
-	require.NoError(t, svc.enforceLoginPolicy(ctx, "alice@acme.com", LoginMethodEmailOTP))
-	require.ErrorIs(t, svc.enforceLoginPolicy(ctx, "alice@acme.com", LoginMethodOAuth), ErrPermissionDenied)
+	require.NoError(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodPassword))
+	require.NoError(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodEmailOTP))
+	require.ErrorIs(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodOAuth), ErrPermissionDenied)
 }
 
 // A password-only policy denies every other distinct authentication method
@@ -155,7 +205,7 @@ func TestEnforceLoginPolicy_PasswordOnlyDeniesOtherMethods(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	for _, method := range []string{LoginMethodOAuth, LoginMethodPasskey, LoginMethodSSO} {
-		require.ErrorIs(t, svc.enforceLoginPolicy(ctx, "alice@acme.com", method), ErrPermissionDenied,
+		require.ErrorIs(t, enforceErr(ctx, t, svc, "alice@acme.com", method), ErrPermissionDenied,
 			"%s must be denied for a password-only tenant", method)
 	}
 }
@@ -164,7 +214,7 @@ func TestEnforceLoginPolicy_PasswordOnlyDeniesOtherMethods(t *testing.T) {
 func TestEnforceLoginPolicy_NilBundle_NoOp(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	// governance left nil.
-	require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
+	require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodEmailOTP))
 }
 
 // With no resolved project there is nothing to scope the lookup to.
@@ -172,7 +222,7 @@ func TestEnforceLoginPolicy_NoProject_NoOp(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
 	// cfg.DefaultProjectID is empty and no scope is set.
-	require.NoError(t, svc.enforceLoginPolicy(context.Background(), "alice@acme.com", LoginMethodEmailOTP))
+	require.NoError(t, enforceErr(context.Background(), t, svc, "alice@acme.com", LoginMethodEmailOTP))
 }
 
 // A domain unknown to the project (e.g. a public/consumer domain) is not
@@ -181,7 +231,7 @@ func TestEnforceLoginPolicy_UnknownDomain_NoRestriction(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
 	ctx := withProject("proj-1")
-	require.NoError(t, svc.enforceLoginPolicy(ctx, "bob@gmail.com", LoginMethodEmailOTP))
+	require.NoError(t, enforceErr(ctx, t, svc, "bob@gmail.com", LoginMethodEmailOTP))
 }
 
 // A pending (unverified) domain governs nothing — its tenant has not been
@@ -191,7 +241,7 @@ func TestEnforceLoginPolicy_UnverifiedDomain_NoRestriction(t *testing.T) {
 	g := claimedPasswordOnlyGovernance()
 	g.Domains.(*lpDomainStore).byName["proj-1|acme.com"].Status = DomainStatusPending
 	svc.WithLoginGovernance(g)
-	require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
+	require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodEmailOTP))
 }
 
 // A latent (unclaimed) tenant governs nothing even when its domain row exists
@@ -201,7 +251,7 @@ func TestEnforceLoginPolicy_LatentTenant_NoRestriction(t *testing.T) {
 	g := claimedPasswordOnlyGovernance()
 	g.Tenants.(*lpTenantStore).byID["proj-1|tenant-acme"].Status = TenantStatusLatent
 	svc.WithLoginGovernance(g)
-	require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
+	require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodEmailOTP))
 }
 
 // A claimed tenant with no policy row imposes no restriction (fail safe).
@@ -210,7 +260,7 @@ func TestEnforceLoginPolicy_NoPolicy_NoRestriction(t *testing.T) {
 	g := claimedPasswordOnlyGovernance()
 	delete(g.Policies.(*fakePolicyStore).byTenant, "proj-1|tenant-acme")
 	svc.WithLoginGovernance(g)
-	require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
+	require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodEmailOTP))
 }
 
 // A policy with an empty AllowedMethods list imposes no restriction — an
@@ -220,14 +270,14 @@ func TestEnforceLoginPolicy_EmptyAllowedMethods_NoRestriction(t *testing.T) {
 	g := claimedPasswordOnlyGovernance()
 	g.Policies.(*fakePolicyStore).byTenant["proj-1|tenant-acme"].AllowedMethods = "   "
 	svc.WithLoginGovernance(g)
-	require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
+	require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodEmailOTP))
 }
 
 // A malformed email with no domain part is not governed.
 func TestEnforceLoginPolicy_NoDomainPart_NoRestriction(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
-	require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice", LoginMethodEmailOTP))
+	require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice", LoginMethodEmailOTP))
 }
 
 // Every lookup error fails safe: a domain/tenant/policy store outage must
@@ -240,7 +290,7 @@ func TestEnforceLoginPolicy_LookupErrors_FailSafe(t *testing.T) {
 		g := claimedPasswordOnlyGovernance()
 		g.Domains.(*lpDomainStore).err = boom
 		svc.WithLoginGovernance(g)
-		require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
+		require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodEmailOTP))
 	})
 
 	t.Run("tenant lookup error", func(t *testing.T) {
@@ -248,7 +298,7 @@ func TestEnforceLoginPolicy_LookupErrors_FailSafe(t *testing.T) {
 		g := claimedPasswordOnlyGovernance()
 		g.Tenants.(*lpTenantStore).err = boom
 		svc.WithLoginGovernance(g)
-		require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
+		require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodEmailOTP))
 	})
 
 	t.Run("policy lookup error", func(t *testing.T) {
@@ -256,7 +306,7 @@ func TestEnforceLoginPolicy_LookupErrors_FailSafe(t *testing.T) {
 		g := claimedPasswordOnlyGovernance()
 		g.Policies.(*fakePolicyStore).err = boom
 		svc.WithLoginGovernance(g)
-		require.NoError(t, svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodEmailOTP))
+		require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodEmailOTP))
 	})
 }
 
@@ -355,4 +405,145 @@ func TestRedeemOAuthCode_DeniedByPolicy(t *testing.T) {
 	_, err = svc.RedeemOAuthCode(ctx, cb.Code, "1.2.3.4", "test-agent")
 	require.ErrorIs(t, err, ErrPermissionDenied,
 		"oauth redeem must be denied for a password-only tenant")
+}
+
+// ── SSORequired ─────────────────────────────────────────────────────────
+
+// An SSO-required tenant blocks every non-SSO method with ErrSSORequired,
+// steering the user to the SSO connection rather than revealing anything
+// about the account.
+func TestEnforceLoginPolicy_SSORequired_BlocksNonSSOMethods(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(withSSORequired())
+	ctx := withProject("proj-1")
+
+	for _, method := range []string{
+		LoginMethodPassword, LoginMethodEmailOTP, LoginMethodOAuth, LoginMethodPasskey,
+	} {
+		err := enforceErr(ctx, t, svc, "alice@acme.com", method)
+		require.ErrorIs(t, err, ErrSSORequired,
+			"%s must be blocked for an sso-required tenant", method)
+	}
+}
+
+// The SSO method itself is never blocked by SSORequired — it is the one
+// permitted path.
+func TestEnforceLoginPolicy_SSORequired_AllowsSSO(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(withSSORequired())
+	require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodSSO))
+}
+
+// SSO-required outranks the allow-list: even a method the allow-list happens
+// to name is still blocked when SSO is required.
+func TestEnforceLoginPolicy_SSORequired_OutranksAllowList(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	g := withSSORequired()
+	g.Policies.(*fakePolicyStore).byTenant["proj-1|tenant-acme"].AllowedMethods = LoginMethodPassword
+	svc.WithLoginGovernance(g)
+	err := enforceErr(withProject("proj-1"), t, svc, "alice@acme.com", LoginMethodPassword)
+	require.ErrorIs(t, err, ErrSSORequired)
+}
+
+// A public-domain (ungoverned) user is unaffected by another tenant's
+// SSO-required policy.
+func TestEnforceLoginPolicy_SSORequired_PublicDomainUnaffected(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(withSSORequired())
+	require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "bob@gmail.com", LoginMethodPassword))
+}
+
+// End-to-end: PasswordLogin of an sso-required tenant's user is blocked with
+// ErrSSORequired before any token is issued.
+func TestPasswordLogin_SSORequired_Blocked(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(withSSORequired())
+	pwHash, _ := passwords.Hash("Str0ng!Passw0rd")
+	seedUser(repo, "alice@acme.com", pwHash, "active")
+
+	_, err := svc.PasswordLogin(withProject("proj-1"), "alice@acme.com", "Str0ng!Passw0rd", "", "")
+	require.ErrorIs(t, err, ErrSSORequired,
+		"password login must be blocked for an sso-required tenant")
+}
+
+// ── Require2FA ──────────────────────────────────────────────────────────
+
+// enforceLoginPolicy signals a second-factor requirement for a single-factor
+// primary (password/email_otp/oauth) when the tenant mandates 2FA.
+func TestEnforceLoginPolicy_Require2FA_PrimaryMethodsNeedSecondFactor(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(withRequire2FA())
+	ctx := withProject("proj-1")
+
+	for _, method := range []string{LoginMethodPassword, LoginMethodEmailOTP, LoginMethodOAuth} {
+		decision, err := svc.enforceLoginPolicy(ctx, "alice@acme.com", method)
+		require.NoError(t, err)
+		require.True(t, decision.RequireSecondFactor,
+			"%s is single-factor and must owe a second factor under Require2FA", method)
+	}
+}
+
+// A passkey is already a strong factor, so a Require2FA tenant does not owe a
+// further step for it.
+func TestEnforceLoginPolicy_Require2FA_PasskeySatisfiesOnItsOwn(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(withRequire2FA())
+	decision, err := svc.enforceLoginPolicy(withProject("proj-1"), "alice@acme.com", LoginMethodPasskey)
+	require.NoError(t, err)
+	require.False(t, decision.RequireSecondFactor,
+		"a passkey assertion satisfies 2FA on its own")
+}
+
+// A public-domain user is unaffected by a tenant's Require2FA policy.
+func TestEnforceLoginPolicy_Require2FA_PublicDomainUnaffected(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(withRequire2FA())
+	decision, err := svc.enforceLoginPolicy(withProject("proj-1"), "bob@gmail.com", LoginMethodPassword)
+	require.NoError(t, err)
+	require.False(t, decision.RequireSecondFactor)
+}
+
+// End-to-end: a Require2FA tenant's user whose password is correct and who
+// has an enrolled second factor is forced into the 2FA step — no tokens are
+// minted, a login challenge is returned instead.
+func TestPasswordLogin_Require2FA_ForcesSecondFactorStep(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(withRequire2FA())
+	pwHash, _ := passwords.Hash("Str0ng!Passw0rd")
+	u := seedUser(repo, "alice@acme.com", pwHash, "active")
+	seedVerifiedTotp(t, repo, u.ID)
+
+	res, err := svc.PasswordLogin(withProject("proj-1"), "alice@acme.com", "Str0ng!Passw0rd", "", "")
+	require.NoError(t, err)
+	require.True(t, res.TotpRequired, "policy must force the second-factor step")
+	require.NotEmpty(t, res.LoginChallengeID)
+	require.Empty(t, res.AccessToken, "no tokens are minted until 2FA completes")
+}
+
+// A Require2FA tenant whose user has not enrolled any second factor cannot
+// complete the 2FA step — the login is blocked with ErrTotpRequired, steering
+// the user to enroll, never silently bypassing the policy.
+func TestPasswordLogin_Require2FA_NoFactorEnrolled_Blocks(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(withRequire2FA())
+	pwHash, _ := passwords.Hash("Str0ng!Passw0rd")
+	seedUser(repo, "alice@acme.com", pwHash, "active")
+
+	_, err := svc.PasswordLogin(withProject("proj-1"), "alice@acme.com", "Str0ng!Passw0rd", "", "")
+	require.ErrorIs(t, err, ErrTotpRequired,
+		"a 2FA-required user with no enrolled factor must be steered to enroll, not let through")
+}
+
+// A public-domain user under no governing policy completes a plain password
+// login — the 2FA enforcement is purely additive.
+func TestPasswordLogin_Require2FA_PublicDomainUnaffected(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(withRequire2FA())
+	pwHash, _ := passwords.Hash("Str0ng!Passw0rd")
+	seedUser(repo, "bob@gmail.com", pwHash, "active")
+
+	res, err := svc.PasswordLogin(withProject("proj-1"), "bob@gmail.com", "Str0ng!Passw0rd", "", "")
+	require.NoError(t, err)
+	require.False(t, res.TotpRequired)
+	require.NotEmpty(t, res.AccessToken)
 }

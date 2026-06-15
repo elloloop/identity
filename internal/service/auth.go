@@ -689,6 +689,12 @@ var (
 	ErrIDVRequired       = errors.New("identity verification required")
 	ErrWeakPassword      = errors.New("password does not meet strength requirements")
 	ErrTotpRequired      = errors.New("totp required")
+	// ErrSSORequired is returned when a claimed tenant's LoginPolicy mandates
+	// single sign-on and the caller attempted a non-SSO method. Like
+	// ErrTotpRequired it is a "do something else first" signal rather than a
+	// hard failure, so the Connect handler maps it to CodeFailedPrecondition,
+	// steering the client to the tenant's SSO connection.
+	ErrSSORequired       = errors.New("sso required for this domain")
 	ErrTokenExpired      = errors.New("token expired")
 	ErrInvalidTotpCode   = errors.New("invalid totp code")
 	ErrQrLoginExpired    = errors.New("qr login session expired")
