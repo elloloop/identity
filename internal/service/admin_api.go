@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/elloloop/identity/pkg/passwords"
 )
 
 // ControlPlaneAdminService implements the redesign's control-plane admin
@@ -96,8 +98,12 @@ type ControlPlaneAdminService struct {
 	projects    ControlPlaneProjectStore
 	tenants     TenantStore
 	memberships MembershipStore
-	logger      *zap.Logger
-	nowFunc     func() int64
+	// admins backs the zero-config first-admin bootstrap. nil when this build
+	// has no control plane (entdb/memory), which makes CreateFirstPlatformAdmin
+	// return ErrUnimplemented.
+	admins  PlatformAdminStore
+	logger  *zap.Logger
+	nowFunc func() int64
 }
 
 // NewControlPlaneAdminService wires the admin service. An empty secret
@@ -111,6 +117,7 @@ func NewControlPlaneAdminService(
 	projects ControlPlaneProjectStore,
 	tenants TenantStore,
 	memberships MembershipStore,
+	admins PlatformAdminStore,
 	logger *zap.Logger,
 ) *ControlPlaneAdminService {
 	if logger == nil {
@@ -121,6 +128,7 @@ func NewControlPlaneAdminService(
 		projects:    projects,
 		tenants:     tenants,
 		memberships: memberships,
+		admins:      admins,
 		logger:      logger,
 		nowFunc:     func() int64 { return time.Now().UnixMilli() },
 	}
@@ -296,6 +304,84 @@ func (s *ControlPlaneAdminService) AdminAddTenantAdmin(ctx context.Context, secr
 	}
 	m.ID = id
 	return m, nil
+}
+
+// BootstrappedAdmin is the result of CreateFirstPlatformAdmin: the created
+// admin's id and canonical email, plus GeneratedPassword — a server-minted
+// password shown EXACTLY once, and only when the caller supplied no password.
+// When the caller supplied their own password, GeneratedPassword is empty.
+type BootstrappedAdmin struct {
+	ID                string
+	Email             string
+	GeneratedPassword string
+}
+
+// CreateFirstPlatformAdmin is the zero-config bootstrap that establishes the
+// FIRST platform admin on a fresh deployment. It is the one Admin RPC that is
+// NOT secret-gated: a brand-new deployer has configured nothing yet, so
+// gating it on GATEWAY_ADMIN_API_SECRET would make standing up the first
+// operator impossible. Instead it is self-securing — it succeeds ONLY while
+// the platform_admins table is empty and PERMANENTLY closes
+// (ErrPlatformAdminExists → FailedPrecondition) once any admin exists, so it
+// can never be replayed to escalate privilege on a provisioned deployment.
+//
+// The emptiness check and the insert are one atomic, serialized store
+// operation (admins.CreateFirstPlatformAdmin), so two concurrent bootstraps
+// create exactly one admin and the loser is rejected — there is no
+// check-then-write window.
+//
+// When password is blank the server generates a strong one and returns it
+// once in GeneratedPassword; when supplied it must satisfy the password
+// strength policy (else ErrWeakPassword → InvalidArgument). Only the bcrypt
+// hash is ever stored. When no control plane is wired (entdb/memory have no
+// platform_admins table) it returns ErrUnimplemented.
+func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context, email, password string) (*BootstrappedAdmin, error) {
+	if s.admins == nil {
+		return nil, ErrUnimplemented
+	}
+	email = strings.TrimSpace(email)
+	if err := validateEmailFormat(email); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+	}
+	canonicalEmail := canonicalizeEmail(email)
+
+	// A blank password means "generate one"; a supplied one must be strong.
+	// The generated password is returned to the caller exactly once.
+	generated := ""
+	if strings.TrimSpace(password) == "" {
+		password = generateTempPassword()
+		generated = password
+	} else if err := validatePasswordStrength(password); err != nil {
+		return nil, err
+	}
+
+	hash, err := passwords.Hash(password)
+	if err != nil {
+		return nil, fmt.Errorf("hashing bootstrap admin password: %w", err)
+	}
+
+	admin := &PlatformAdmin{
+		Email:        canonicalEmail,
+		PasswordHash: hash,
+		Status:       PlatformAdminStatusActive,
+		CreatedAtMs:  s.nowFunc(),
+	}
+	created, err := s.admins.CreateFirstPlatformAdmin(ctx, admin)
+	if err != nil {
+		return nil, err
+	}
+	if !created {
+		// The table was not empty: an admin already exists, so the bootstrap
+		// is permanently closed. This is the privilege-escalation guard.
+		return nil, ErrPlatformAdminExists
+	}
+
+	s.logger.Info("platform_admin_bootstrapped", zap.String("admin_id", admin.ID), zap.String("email", canonicalEmail))
+	return &BootstrappedAdmin{
+		ID:                admin.ID,
+		Email:             canonicalEmail,
+		GeneratedPassword: generated,
+	}, nil
 }
 
 // normalizeCredentialKind defaults a blank kind to publishable and returns

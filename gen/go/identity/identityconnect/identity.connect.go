@@ -265,6 +265,9 @@ const (
 	// IdentityServiceAdminAddTenantAdminProcedure is the fully-qualified name of the IdentityService's
 	// AdminAddTenantAdmin RPC.
 	IdentityServiceAdminAddTenantAdminProcedure = "/identity.IdentityService/AdminAddTenantAdmin"
+	// IdentityServiceCreateFirstPlatformAdminProcedure is the fully-qualified name of the
+	// IdentityService's CreateFirstPlatformAdmin RPC.
+	IdentityServiceCreateFirstPlatformAdminProcedure = "/identity.IdentityService/CreateFirstPlatformAdmin"
 )
 
 // IdentityServiceClient is a client for the identity.IdentityService service.
@@ -385,6 +388,10 @@ type IdentityServiceClient interface {
 	AdminAddProjectAuthDomain(context.Context, *connect.Request[identity.AdminAddProjectAuthDomainRequest]) (*connect.Response[identity.AdminAddProjectAuthDomainResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error)
 	AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error)
+	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
+	// succeeds only while platform_admins is empty, then permanently closes
+	// (FAILED_PRECONDITION). Postgres-only; entdb/memory return UNIMPLEMENTED.
+	CreateFirstPlatformAdmin(context.Context, *connect.Request[identity.CreateFirstPlatformAdminRequest]) (*connect.Response[identity.CreateFirstPlatformAdminResponse], error)
 }
 
 // NewIdentityServiceClient constructs a client for the identity.IdentityService service. By
@@ -866,6 +873,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminAddTenantAdmin")),
 			connect.WithClientOptions(opts...),
 		),
+		createFirstPlatformAdmin: connect.NewClient[identity.CreateFirstPlatformAdminRequest, identity.CreateFirstPlatformAdminResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateFirstPlatformAdminProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateFirstPlatformAdmin")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -949,6 +962,7 @@ type identityServiceClient struct {
 	adminAddProjectAuthDomain     *connect.Client[identity.AdminAddProjectAuthDomainRequest, identity.AdminAddProjectAuthDomainResponse]
 	adminCreateTenant             *connect.Client[identity.AdminCreateTenantRequest, identity.AdminCreateTenantResponse]
 	adminAddTenantAdmin           *connect.Client[identity.AdminAddTenantAdminRequest, identity.AdminAddTenantAdminResponse]
+	createFirstPlatformAdmin      *connect.Client[identity.CreateFirstPlatformAdminRequest, identity.CreateFirstPlatformAdminResponse]
 }
 
 // BeginOAuthLogin calls identity.IdentityService.BeginOAuthLogin.
@@ -1341,6 +1355,11 @@ func (c *identityServiceClient) AdminAddTenantAdmin(ctx context.Context, req *co
 	return c.adminAddTenantAdmin.CallUnary(ctx, req)
 }
 
+// CreateFirstPlatformAdmin calls identity.IdentityService.CreateFirstPlatformAdmin.
+func (c *identityServiceClient) CreateFirstPlatformAdmin(ctx context.Context, req *connect.Request[identity.CreateFirstPlatformAdminRequest]) (*connect.Response[identity.CreateFirstPlatformAdminResponse], error) {
+	return c.createFirstPlatformAdmin.CallUnary(ctx, req)
+}
+
 // IdentityServiceHandler is an implementation of the identity.IdentityService service.
 type IdentityServiceHandler interface {
 	// Authentication
@@ -1459,6 +1478,10 @@ type IdentityServiceHandler interface {
 	AdminAddProjectAuthDomain(context.Context, *connect.Request[identity.AdminAddProjectAuthDomainRequest]) (*connect.Response[identity.AdminAddProjectAuthDomainResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error)
 	AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error)
+	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
+	// succeeds only while platform_admins is empty, then permanently closes
+	// (FAILED_PRECONDITION). Postgres-only; entdb/memory return UNIMPLEMENTED.
+	CreateFirstPlatformAdmin(context.Context, *connect.Request[identity.CreateFirstPlatformAdminRequest]) (*connect.Response[identity.CreateFirstPlatformAdminResponse], error)
 }
 
 // NewIdentityServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -1936,6 +1959,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("AdminAddTenantAdmin")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceCreateFirstPlatformAdminHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateFirstPlatformAdminProcedure,
+		svc.CreateFirstPlatformAdmin,
+		connect.WithSchema(identityServiceMethods.ByName("CreateFirstPlatformAdmin")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/identity.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case IdentityServiceBeginOAuthLoginProcedure:
@@ -2094,6 +2123,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminCreateTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminAddTenantAdminProcedure:
 			identityServiceAdminAddTenantAdminHandler.ServeHTTP(w, r)
+		case IdentityServiceCreateFirstPlatformAdminProcedure:
+			identityServiceCreateFirstPlatformAdminHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2413,4 +2444,8 @@ func (UnimplementedIdentityServiceHandler) AdminCreateTenant(context.Context, *c
 
 func (UnimplementedIdentityServiceHandler) AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.AdminAddTenantAdmin is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CreateFirstPlatformAdmin(context.Context, *connect.Request[identity.CreateFirstPlatformAdminRequest]) (*connect.Response[identity.CreateFirstPlatformAdminResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.CreateFirstPlatformAdmin is not implemented"))
 }

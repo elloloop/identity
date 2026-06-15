@@ -9365,6 +9365,137 @@ func (x *AdminAddTenantAdminResponse) GetMembership() *TenantMembership {
 	return nil
 }
 
+// CreateFirstPlatformAdmin is the zero-config bootstrap that establishes the
+// FIRST platform admin on a fresh deployment. Unlike every other Admin* RPC
+// it is NOT authenticated by the shared admin secret — its whole purpose is
+// to let a brand-new deployer who has not yet configured anything stand up
+// the initial operator account. It is self-securing instead: it succeeds
+// ONLY while the platform_admins table is empty, and once any admin exists
+// the path is permanently closed (FAILED_PRECONDITION), so it can never be
+// used to escalate privilege on an already-provisioned deployment. The
+// emptiness check + insert are atomic, so two racing bootstraps create
+// exactly one admin and the loser is rejected.
+//
+// It is available only on the postgres control-plane driver; entdb/memory
+// deployments (which have no platform_admins table) return UNIMPLEMENTED.
+type CreateFirstPlatformAdminRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Email string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	// password is optional. When blank the server generates a strong one and
+	// returns it ONCE in generated_password; when supplied it must meet the
+	// password-strength policy or the call is rejected (INVALID_ARGUMENT).
+	Password      string `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateFirstPlatformAdminRequest) Reset() {
+	*x = CreateFirstPlatformAdminRequest{}
+	mi := &file_identity_identity_proto_msgTypes[166]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateFirstPlatformAdminRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateFirstPlatformAdminRequest) ProtoMessage() {}
+
+func (x *CreateFirstPlatformAdminRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_identity_proto_msgTypes[166]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateFirstPlatformAdminRequest.ProtoReflect.Descriptor instead.
+func (*CreateFirstPlatformAdminRequest) Descriptor() ([]byte, []int) {
+	return file_identity_identity_proto_rawDescGZIP(), []int{166}
+}
+
+func (x *CreateFirstPlatformAdminRequest) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *CreateFirstPlatformAdminRequest) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+type CreateFirstPlatformAdminResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	AdminId string                 `protobuf:"bytes,1,opt,name=admin_id,json=adminId,proto3" json:"admin_id,omitempty"`
+	Email   string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	// generated_password carries a server-generated password shown EXACTLY
+	// once, and only when the request left password blank. It is empty when
+	// the caller supplied their own password.
+	GeneratedPassword string `protobuf:"bytes,3,opt,name=generated_password,json=generatedPassword,proto3" json:"generated_password,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *CreateFirstPlatformAdminResponse) Reset() {
+	*x = CreateFirstPlatformAdminResponse{}
+	mi := &file_identity_identity_proto_msgTypes[167]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateFirstPlatformAdminResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateFirstPlatformAdminResponse) ProtoMessage() {}
+
+func (x *CreateFirstPlatformAdminResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_identity_proto_msgTypes[167]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateFirstPlatformAdminResponse.ProtoReflect.Descriptor instead.
+func (*CreateFirstPlatformAdminResponse) Descriptor() ([]byte, []int) {
+	return file_identity_identity_proto_rawDescGZIP(), []int{167}
+}
+
+func (x *CreateFirstPlatformAdminResponse) GetAdminId() string {
+	if x != nil {
+		return x.AdminId
+	}
+	return ""
+}
+
+func (x *CreateFirstPlatformAdminResponse) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *CreateFirstPlatformAdminResponse) GetGeneratedPassword() string {
+	if x != nil {
+		return x.GeneratedPassword
+	}
+	return ""
+}
+
 var File_identity_identity_proto protoreflect.FileDescriptor
 
 const file_identity_identity_proto_rawDesc = "" +
@@ -10015,7 +10146,14 @@ const file_identity_identity_proto_rawDesc = "" +
 	"\x1bAdminAddTenantAdminResponse\x12:\n" +
 	"\n" +
 	"membership\x18\x01 \x01(\v2\x1a.identity.TenantMembershipR\n" +
-	"membership*\x92\x01\n" +
+	"membership\"S\n" +
+	"\x1fCreateFirstPlatformAdminRequest\x12\x14\n" +
+	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"\x82\x01\n" +
+	" CreateFirstPlatformAdminResponse\x12\x19\n" +
+	"\badmin_id\x18\x01 \x01(\tR\aadminId\x12\x14\n" +
+	"\x05email\x18\x02 \x01(\tR\x05email\x12-\n" +
+	"\x12generated_password\x18\x03 \x01(\tR\x11generatedPassword*\x92\x01\n" +
 	"\n" +
 	"UserStatus\x12\x1b\n" +
 	"\x17USER_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
@@ -10041,7 +10179,7 @@ const file_identity_identity_proto_rawDesc = "" +
 	"\x18QR_LOGIN_STATUS_APPROVED\x10\x02\x12\x1c\n" +
 	"\x18QR_LOGIN_STATUS_REJECTED\x10\x03\x12\x1b\n" +
 	"\x17QR_LOGIN_STATUS_EXPIRED\x10\x04\x12\x1c\n" +
-	"\x18QR_LOGIN_STATUS_CONSUMED\x10\x052\xa57\n" +
+	"\x18QR_LOGIN_STATUS_CONSUMED\x10\x052\x988\n" +
 	"\x0fIdentityService\x12V\n" +
 	"\x0fBeginOAuthLogin\x12 .identity.BeginOAuthLoginRequest\x1a!.identity.BeginOAuthLoginResponse\x12G\n" +
 	"\n" +
@@ -10127,7 +10265,8 @@ const file_identity_identity_proto_rawDesc = "" +
 	"\x1cAdminCreateProjectCredential\x12-.identity.AdminCreateProjectCredentialRequest\x1a..identity.AdminCreateProjectCredentialResponse\x12t\n" +
 	"\x19AdminAddProjectAuthDomain\x12*.identity.AdminAddProjectAuthDomainRequest\x1a+.identity.AdminAddProjectAuthDomainResponse\x12\\\n" +
 	"\x11AdminCreateTenant\x12\".identity.AdminCreateTenantRequest\x1a#.identity.AdminCreateTenantResponse\x12b\n" +
-	"\x13AdminAddTenantAdmin\x12$.identity.AdminAddTenantAdminRequest\x1a%.identity.AdminAddTenantAdminResponseB7Z5github.com/elloloop/identity/gen/go/identity;identityb\x06proto3"
+	"\x13AdminAddTenantAdmin\x12$.identity.AdminAddTenantAdminRequest\x1a%.identity.AdminAddTenantAdminResponse\x12q\n" +
+	"\x18CreateFirstPlatformAdmin\x12).identity.CreateFirstPlatformAdminRequest\x1a*.identity.CreateFirstPlatformAdminResponseB7Z5github.com/elloloop/identity/gen/go/identity;identityb\x06proto3"
 
 var (
 	file_identity_identity_proto_rawDescOnce sync.Once
@@ -10142,7 +10281,7 @@ func file_identity_identity_proto_rawDescGZIP() []byte {
 }
 
 var file_identity_identity_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_identity_identity_proto_msgTypes = make([]protoimpl.MessageInfo, 166)
+var file_identity_identity_proto_msgTypes = make([]protoimpl.MessageInfo, 168)
 var file_identity_identity_proto_goTypes = []any{
 	(UserStatus)(0),                               // 0: identity.UserStatus
 	(IdentityVerificationStatus)(0),               // 1: identity.IdentityVerificationStatus
@@ -10314,19 +10453,21 @@ var file_identity_identity_proto_goTypes = []any{
 	(*AdminCreateTenantResponse)(nil),             // 167: identity.AdminCreateTenantResponse
 	(*AdminAddTenantAdminRequest)(nil),            // 168: identity.AdminAddTenantAdminRequest
 	(*AdminAddTenantAdminResponse)(nil),           // 169: identity.AdminAddTenantAdminResponse
-	(*timestamppb.Timestamp)(nil),                 // 170: google.protobuf.Timestamp
+	(*CreateFirstPlatformAdminRequest)(nil),       // 170: identity.CreateFirstPlatformAdminRequest
+	(*CreateFirstPlatformAdminResponse)(nil),      // 171: identity.CreateFirstPlatformAdminResponse
+	(*timestamppb.Timestamp)(nil),                 // 172: google.protobuf.Timestamp
 }
 var file_identity_identity_proto_depIdxs = []int32{
-	170, // 0: identity.User.created_at:type_name -> google.protobuf.Timestamp
-	170, // 1: identity.User.updated_at:type_name -> google.protobuf.Timestamp
+	172, // 0: identity.User.created_at:type_name -> google.protobuf.Timestamp
+	172, // 1: identity.User.updated_at:type_name -> google.protobuf.Timestamp
 	0,   // 2: identity.User.status:type_name -> identity.UserStatus
 	4,   // 3: identity.CreateUserResponse.user:type_name -> identity.User
 	4,   // 4: identity.GetUserResponse.user:type_name -> identity.User
 	4,   // 5: identity.UpdateUserResponse.user:type_name -> identity.User
 	0,   // 6: identity.ListUsersRequest.status_filter:type_name -> identity.UserStatus
 	4,   // 7: identity.ListUsersResponse.users:type_name -> identity.User
-	170, // 8: identity.Group.created_at:type_name -> google.protobuf.Timestamp
-	170, // 9: identity.Group.updated_at:type_name -> google.protobuf.Timestamp
+	172, // 8: identity.Group.created_at:type_name -> google.protobuf.Timestamp
+	172, // 9: identity.Group.updated_at:type_name -> google.protobuf.Timestamp
 	15,  // 10: identity.CreateGroupResponse.group:type_name -> identity.Group
 	15,  // 11: identity.UpdateGroupResponse.group:type_name -> identity.Group
 	15,  // 12: identity.ListGroupsResponse.groups:type_name -> identity.Group
@@ -10344,47 +10485,47 @@ var file_identity_identity_proto_depIdxs = []int32{
 	4,   // 24: identity.VerifyEmailResponse.user:type_name -> identity.User
 	4,   // 25: identity.ConfirmEmailChangeResponse.user:type_name -> identity.User
 	1,   // 26: identity.IdentityVerification.status:type_name -> identity.IdentityVerificationStatus
-	170, // 27: identity.IdentityVerification.created_at:type_name -> google.protobuf.Timestamp
-	170, // 28: identity.IdentityVerification.updated_at:type_name -> google.protobuf.Timestamp
-	170, // 29: identity.IdentityVerification.completed_at:type_name -> google.protobuf.Timestamp
-	170, // 30: identity.BeginIdentityVerificationResponse.expires_at:type_name -> google.protobuf.Timestamp
+	172, // 27: identity.IdentityVerification.created_at:type_name -> google.protobuf.Timestamp
+	172, // 28: identity.IdentityVerification.updated_at:type_name -> google.protobuf.Timestamp
+	172, // 29: identity.IdentityVerification.completed_at:type_name -> google.protobuf.Timestamp
+	172, // 30: identity.BeginIdentityVerificationResponse.expires_at:type_name -> google.protobuf.Timestamp
 	74,  // 31: identity.GetIdentityVerificationStatusResponse.verification:type_name -> identity.IdentityVerification
 	2,   // 32: identity.AdminHelpRequest.status:type_name -> identity.HelpRequestStatus
-	170, // 33: identity.AdminHelpRequest.resolved_at:type_name -> google.protobuf.Timestamp
-	170, // 34: identity.AdminHelpRequest.created_at:type_name -> google.protobuf.Timestamp
+	172, // 33: identity.AdminHelpRequest.resolved_at:type_name -> google.protobuf.Timestamp
+	172, // 34: identity.AdminHelpRequest.created_at:type_name -> google.protobuf.Timestamp
 	2,   // 35: identity.ListHelpRequestsRequest.status_filter:type_name -> identity.HelpRequestStatus
 	79,  // 36: identity.ListHelpRequestsResponse.requests:type_name -> identity.AdminHelpRequest
 	79,  // 37: identity.ResolveHelpRequestResponse.request:type_name -> identity.AdminHelpRequest
-	170, // 38: identity.PasskeyCredentialInfo.created_at:type_name -> google.protobuf.Timestamp
-	170, // 39: identity.PasskeyCredentialInfo.last_used_at:type_name -> google.protobuf.Timestamp
+	172, // 38: identity.PasskeyCredentialInfo.created_at:type_name -> google.protobuf.Timestamp
+	172, // 39: identity.PasskeyCredentialInfo.last_used_at:type_name -> google.protobuf.Timestamp
 	86,  // 40: identity.CompletePasskeyRegistrationResponse.credential:type_name -> identity.PasskeyCredentialInfo
 	4,   // 41: identity.CompletePasskeyLoginResponse.user:type_name -> identity.User
 	86,  // 42: identity.ListPasskeysResponse.credentials:type_name -> identity.PasskeyCredentialInfo
 	3,   // 43: identity.GetQrLoginSessionResponse.status:type_name -> identity.QrLoginStatus
-	170, // 44: identity.GetQrLoginSessionResponse.expires_at:type_name -> google.protobuf.Timestamp
+	172, // 44: identity.GetQrLoginSessionResponse.expires_at:type_name -> google.protobuf.Timestamp
 	3,   // 45: identity.ApproveQrLoginResponse.status:type_name -> identity.QrLoginStatus
 	3,   // 46: identity.PollQrLoginResponse.status:type_name -> identity.QrLoginStatus
 	4,   // 47: identity.PollQrLoginResponse.user:type_name -> identity.User
 	4,   // 48: identity.VerifyTotpResponse.user:type_name -> identity.User
-	170, // 49: identity.Session.created_at:type_name -> google.protobuf.Timestamp
-	170, // 50: identity.Session.last_used_at:type_name -> google.protobuf.Timestamp
-	170, // 51: identity.Session.expires_at:type_name -> google.protobuf.Timestamp
+	172, // 49: identity.Session.created_at:type_name -> google.protobuf.Timestamp
+	172, // 50: identity.Session.last_used_at:type_name -> google.protobuf.Timestamp
+	172, // 51: identity.Session.expires_at:type_name -> google.protobuf.Timestamp
 	117, // 52: identity.ListMySessionsResponse.sessions:type_name -> identity.Session
-	170, // 53: identity.AuditEvent.created_at:type_name -> google.protobuf.Timestamp
+	172, // 53: identity.AuditEvent.created_at:type_name -> google.protobuf.Timestamp
 	126, // 54: identity.ListAuditEventsResponse.events:type_name -> identity.AuditEvent
 	4,   // 55: identity.InviteUserResponse.user:type_name -> identity.User
 	4,   // 56: identity.AcceptInvitationResponse.user:type_name -> identity.User
-	170, // 57: identity.Domain.verified_at:type_name -> google.protobuf.Timestamp
-	170, // 58: identity.Domain.created_at:type_name -> google.protobuf.Timestamp
-	170, // 59: identity.Domain.updated_at:type_name -> google.protobuf.Timestamp
+	172, // 57: identity.Domain.verified_at:type_name -> google.protobuf.Timestamp
+	172, // 58: identity.Domain.created_at:type_name -> google.protobuf.Timestamp
+	172, // 59: identity.Domain.updated_at:type_name -> google.protobuf.Timestamp
 	141, // 60: identity.CreateDomainResponse.domain:type_name -> identity.Domain
 	141, // 61: identity.VerifyDomainResponse.domain:type_name -> identity.Domain
 	141, // 62: identity.ListTenantDomainsResponse.domains:type_name -> identity.Domain
-	170, // 63: identity.TenantMembership.created_at:type_name -> google.protobuf.Timestamp
-	170, // 64: identity.TenantMembership.updated_at:type_name -> google.protobuf.Timestamp
-	170, // 65: identity.TenantInvitation.expires_at:type_name -> google.protobuf.Timestamp
-	170, // 66: identity.TenantInvitation.accepted_at:type_name -> google.protobuf.Timestamp
-	170, // 67: identity.TenantInvitation.created_at:type_name -> google.protobuf.Timestamp
+	172, // 63: identity.TenantMembership.created_at:type_name -> google.protobuf.Timestamp
+	172, // 64: identity.TenantMembership.updated_at:type_name -> google.protobuf.Timestamp
+	172, // 65: identity.TenantInvitation.expires_at:type_name -> google.protobuf.Timestamp
+	172, // 66: identity.TenantInvitation.accepted_at:type_name -> google.protobuf.Timestamp
+	172, // 67: identity.TenantInvitation.created_at:type_name -> google.protobuf.Timestamp
 	149, // 68: identity.CreateTenantInvitationResponse.invitation:type_name -> identity.TenantInvitation
 	148, // 69: identity.AcceptTenantInvitationResponse.membership:type_name -> identity.TenantMembership
 	149, // 70: identity.ListTenantInvitationsResponse.invitations:type_name -> identity.TenantInvitation
@@ -10468,86 +10609,88 @@ var file_identity_identity_proto_depIdxs = []int32{
 	164, // 148: identity.IdentityService.AdminAddProjectAuthDomain:input_type -> identity.AdminAddProjectAuthDomainRequest
 	166, // 149: identity.IdentityService.AdminCreateTenant:input_type -> identity.AdminCreateTenantRequest
 	168, // 150: identity.IdentityService.AdminAddTenantAdmin:input_type -> identity.AdminAddTenantAdminRequest
-	31,  // 151: identity.IdentityService.BeginOAuthLogin:output_type -> identity.BeginOAuthLoginResponse
-	33,  // 152: identity.IdentityService.OAuthLogin:output_type -> identity.OAuthLoginResponse
-	35,  // 153: identity.IdentityService.RedeemOAuthCode:output_type -> identity.RedeemOAuthCodeResponse
-	37,  // 154: identity.IdentityService.PasswordSignup:output_type -> identity.PasswordSignupResponse
-	39,  // 155: identity.IdentityService.PasswordLogin:output_type -> identity.PasswordLoginResponse
-	41,  // 156: identity.IdentityService.RequestEmailLoginCode:output_type -> identity.RequestEmailLoginCodeResponse
-	43,  // 157: identity.IdentityService.VerifyEmailLoginCode:output_type -> identity.VerifyEmailLoginCodeResponse
-	45,  // 158: identity.IdentityService.RequestMagicLink:output_type -> identity.RequestMagicLinkResponse
-	47,  // 159: identity.IdentityService.RedeemMagicLink:output_type -> identity.RedeemMagicLinkResponse
-	49,  // 160: identity.IdentityService.RequestPhoneVerification:output_type -> identity.RequestPhoneVerificationResponse
-	51,  // 161: identity.IdentityService.VerifyPhoneCode:output_type -> identity.VerifyPhoneCodeResponse
-	53,  // 162: identity.IdentityService.GetCurrentUser:output_type -> identity.GetCurrentUserResponse
-	55,  // 163: identity.IdentityService.RefreshToken:output_type -> identity.RefreshTokenResponse
-	57,  // 164: identity.IdentityService.Logout:output_type -> identity.LogoutResponse
-	59,  // 165: identity.IdentityService.UpdateProfile:output_type -> identity.UpdateProfileResponse
-	61,  // 166: identity.IdentityService.ChangePassword:output_type -> identity.ChangePasswordResponse
-	63,  // 167: identity.IdentityService.RequestPasswordReset:output_type -> identity.RequestPasswordResetResponse
-	65,  // 168: identity.IdentityService.ConfirmPasswordReset:output_type -> identity.ConfirmPasswordResetResponse
-	67,  // 169: identity.IdentityService.SendEmailVerification:output_type -> identity.SendEmailVerificationResponse
-	69,  // 170: identity.IdentityService.VerifyEmail:output_type -> identity.VerifyEmailResponse
-	71,  // 171: identity.IdentityService.RequestEmailChange:output_type -> identity.RequestEmailChangeResponse
-	73,  // 172: identity.IdentityService.ConfirmEmailChange:output_type -> identity.ConfirmEmailChangeResponse
-	76,  // 173: identity.IdentityService.BeginIdentityVerification:output_type -> identity.BeginIdentityVerificationResponse
-	78,  // 174: identity.IdentityService.GetIdentityVerificationStatus:output_type -> identity.GetIdentityVerificationStatusResponse
-	81,  // 175: identity.IdentityService.RequestAdminHelp:output_type -> identity.RequestAdminHelpResponse
-	83,  // 176: identity.IdentityService.ListHelpRequests:output_type -> identity.ListHelpRequestsResponse
-	85,  // 177: identity.IdentityService.ResolveHelpRequest:output_type -> identity.ResolveHelpRequestResponse
-	88,  // 178: identity.IdentityService.BeginPasskeyRegistration:output_type -> identity.BeginPasskeyRegistrationResponse
-	90,  // 179: identity.IdentityService.CompletePasskeyRegistration:output_type -> identity.CompletePasskeyRegistrationResponse
-	92,  // 180: identity.IdentityService.BeginPasskeyLogin:output_type -> identity.BeginPasskeyLoginResponse
-	94,  // 181: identity.IdentityService.CompletePasskeyLogin:output_type -> identity.CompletePasskeyLoginResponse
-	96,  // 182: identity.IdentityService.ListPasskeys:output_type -> identity.ListPasskeysResponse
-	98,  // 183: identity.IdentityService.DeletePasskey:output_type -> identity.DeletePasskeyResponse
-	100, // 184: identity.IdentityService.InitiateQrLogin:output_type -> identity.InitiateQrLoginResponse
-	102, // 185: identity.IdentityService.GetQrLoginSession:output_type -> identity.GetQrLoginSessionResponse
-	104, // 186: identity.IdentityService.ApproveQrLogin:output_type -> identity.ApproveQrLoginResponse
-	106, // 187: identity.IdentityService.PollQrLogin:output_type -> identity.PollQrLoginResponse
-	108, // 188: identity.IdentityService.BeginTotpSetup:output_type -> identity.BeginTotpSetupResponse
-	110, // 189: identity.IdentityService.VerifyTotpSetup:output_type -> identity.VerifyTotpSetupResponse
-	112, // 190: identity.IdentityService.DisableTotp:output_type -> identity.DisableTotpResponse
-	114, // 191: identity.IdentityService.VerifyTotp:output_type -> identity.VerifyTotpResponse
-	116, // 192: identity.IdentityService.RegenerateRecoveryCodes:output_type -> identity.RegenerateRecoveryCodesResponse
-	119, // 193: identity.IdentityService.ListMySessions:output_type -> identity.ListMySessionsResponse
-	121, // 194: identity.IdentityService.RevokeSession:output_type -> identity.RevokeSessionResponse
-	123, // 195: identity.IdentityService.RevokeAllSessions:output_type -> identity.RevokeAllSessionsResponse
-	125, // 196: identity.IdentityService.SignOutEverywhere:output_type -> identity.SignOutEverywhereResponse
-	128, // 197: identity.IdentityService.ListAuditEvents:output_type -> identity.ListAuditEventsResponse
-	6,   // 198: identity.IdentityService.CreateUser:output_type -> identity.CreateUserResponse
-	8,   // 199: identity.IdentityService.GetUser:output_type -> identity.GetUserResponse
-	10,  // 200: identity.IdentityService.UpdateUser:output_type -> identity.UpdateUserResponse
-	12,  // 201: identity.IdentityService.DeleteUser:output_type -> identity.DeleteUserResponse
-	14,  // 202: identity.IdentityService.ListUsers:output_type -> identity.ListUsersResponse
-	17,  // 203: identity.IdentityService.CreateGroup:output_type -> identity.CreateGroupResponse
-	19,  // 204: identity.IdentityService.UpdateGroup:output_type -> identity.UpdateGroupResponse
-	21,  // 205: identity.IdentityService.DeleteGroup:output_type -> identity.DeleteGroupResponse
-	23,  // 206: identity.IdentityService.ListGroups:output_type -> identity.ListGroupsResponse
-	25,  // 207: identity.IdentityService.AddGroupMember:output_type -> identity.AddGroupMemberResponse
-	27,  // 208: identity.IdentityService.RemoveGroupMember:output_type -> identity.RemoveGroupMemberResponse
-	29,  // 209: identity.IdentityService.ListGroupMembers:output_type -> identity.ListGroupMembersResponse
-	143, // 210: identity.IdentityService.CreateDomain:output_type -> identity.CreateDomainResponse
-	145, // 211: identity.IdentityService.VerifyDomain:output_type -> identity.VerifyDomainResponse
-	147, // 212: identity.IdentityService.ListTenantDomains:output_type -> identity.ListTenantDomainsResponse
-	151, // 213: identity.IdentityService.CreateTenantInvitation:output_type -> identity.CreateTenantInvitationResponse
-	153, // 214: identity.IdentityService.AcceptTenantInvitation:output_type -> identity.AcceptTenantInvitationResponse
-	155, // 215: identity.IdentityService.ListTenantInvitations:output_type -> identity.ListTenantInvitationsResponse
-	157, // 216: identity.IdentityService.ListTenantMembers:output_type -> identity.ListTenantMembersResponse
-	159, // 217: identity.IdentityService.RemoveTenantMember:output_type -> identity.RemoveTenantMemberResponse
-	130, // 218: identity.IdentityService.InviteUser:output_type -> identity.InviteUserResponse
-	132, // 219: identity.IdentityService.AcceptInvitation:output_type -> identity.AcceptInvitationResponse
-	134, // 220: identity.IdentityService.DeactivateUser:output_type -> identity.DeactivateUserResponse
-	136, // 221: identity.IdentityService.ReactivateUser:output_type -> identity.ReactivateUserResponse
-	138, // 222: identity.IdentityService.ResetUserPassword:output_type -> identity.ResetUserPasswordResponse
-	140, // 223: identity.IdentityService.SetUserQuota:output_type -> identity.SetUserQuotaResponse
-	161, // 224: identity.IdentityService.AdminCreateProject:output_type -> identity.AdminCreateProjectResponse
-	163, // 225: identity.IdentityService.AdminCreateProjectCredential:output_type -> identity.AdminCreateProjectCredentialResponse
-	165, // 226: identity.IdentityService.AdminAddProjectAuthDomain:output_type -> identity.AdminAddProjectAuthDomainResponse
-	167, // 227: identity.IdentityService.AdminCreateTenant:output_type -> identity.AdminCreateTenantResponse
-	169, // 228: identity.IdentityService.AdminAddTenantAdmin:output_type -> identity.AdminAddTenantAdminResponse
-	151, // [151:229] is the sub-list for method output_type
-	73,  // [73:151] is the sub-list for method input_type
+	170, // 151: identity.IdentityService.CreateFirstPlatformAdmin:input_type -> identity.CreateFirstPlatformAdminRequest
+	31,  // 152: identity.IdentityService.BeginOAuthLogin:output_type -> identity.BeginOAuthLoginResponse
+	33,  // 153: identity.IdentityService.OAuthLogin:output_type -> identity.OAuthLoginResponse
+	35,  // 154: identity.IdentityService.RedeemOAuthCode:output_type -> identity.RedeemOAuthCodeResponse
+	37,  // 155: identity.IdentityService.PasswordSignup:output_type -> identity.PasswordSignupResponse
+	39,  // 156: identity.IdentityService.PasswordLogin:output_type -> identity.PasswordLoginResponse
+	41,  // 157: identity.IdentityService.RequestEmailLoginCode:output_type -> identity.RequestEmailLoginCodeResponse
+	43,  // 158: identity.IdentityService.VerifyEmailLoginCode:output_type -> identity.VerifyEmailLoginCodeResponse
+	45,  // 159: identity.IdentityService.RequestMagicLink:output_type -> identity.RequestMagicLinkResponse
+	47,  // 160: identity.IdentityService.RedeemMagicLink:output_type -> identity.RedeemMagicLinkResponse
+	49,  // 161: identity.IdentityService.RequestPhoneVerification:output_type -> identity.RequestPhoneVerificationResponse
+	51,  // 162: identity.IdentityService.VerifyPhoneCode:output_type -> identity.VerifyPhoneCodeResponse
+	53,  // 163: identity.IdentityService.GetCurrentUser:output_type -> identity.GetCurrentUserResponse
+	55,  // 164: identity.IdentityService.RefreshToken:output_type -> identity.RefreshTokenResponse
+	57,  // 165: identity.IdentityService.Logout:output_type -> identity.LogoutResponse
+	59,  // 166: identity.IdentityService.UpdateProfile:output_type -> identity.UpdateProfileResponse
+	61,  // 167: identity.IdentityService.ChangePassword:output_type -> identity.ChangePasswordResponse
+	63,  // 168: identity.IdentityService.RequestPasswordReset:output_type -> identity.RequestPasswordResetResponse
+	65,  // 169: identity.IdentityService.ConfirmPasswordReset:output_type -> identity.ConfirmPasswordResetResponse
+	67,  // 170: identity.IdentityService.SendEmailVerification:output_type -> identity.SendEmailVerificationResponse
+	69,  // 171: identity.IdentityService.VerifyEmail:output_type -> identity.VerifyEmailResponse
+	71,  // 172: identity.IdentityService.RequestEmailChange:output_type -> identity.RequestEmailChangeResponse
+	73,  // 173: identity.IdentityService.ConfirmEmailChange:output_type -> identity.ConfirmEmailChangeResponse
+	76,  // 174: identity.IdentityService.BeginIdentityVerification:output_type -> identity.BeginIdentityVerificationResponse
+	78,  // 175: identity.IdentityService.GetIdentityVerificationStatus:output_type -> identity.GetIdentityVerificationStatusResponse
+	81,  // 176: identity.IdentityService.RequestAdminHelp:output_type -> identity.RequestAdminHelpResponse
+	83,  // 177: identity.IdentityService.ListHelpRequests:output_type -> identity.ListHelpRequestsResponse
+	85,  // 178: identity.IdentityService.ResolveHelpRequest:output_type -> identity.ResolveHelpRequestResponse
+	88,  // 179: identity.IdentityService.BeginPasskeyRegistration:output_type -> identity.BeginPasskeyRegistrationResponse
+	90,  // 180: identity.IdentityService.CompletePasskeyRegistration:output_type -> identity.CompletePasskeyRegistrationResponse
+	92,  // 181: identity.IdentityService.BeginPasskeyLogin:output_type -> identity.BeginPasskeyLoginResponse
+	94,  // 182: identity.IdentityService.CompletePasskeyLogin:output_type -> identity.CompletePasskeyLoginResponse
+	96,  // 183: identity.IdentityService.ListPasskeys:output_type -> identity.ListPasskeysResponse
+	98,  // 184: identity.IdentityService.DeletePasskey:output_type -> identity.DeletePasskeyResponse
+	100, // 185: identity.IdentityService.InitiateQrLogin:output_type -> identity.InitiateQrLoginResponse
+	102, // 186: identity.IdentityService.GetQrLoginSession:output_type -> identity.GetQrLoginSessionResponse
+	104, // 187: identity.IdentityService.ApproveQrLogin:output_type -> identity.ApproveQrLoginResponse
+	106, // 188: identity.IdentityService.PollQrLogin:output_type -> identity.PollQrLoginResponse
+	108, // 189: identity.IdentityService.BeginTotpSetup:output_type -> identity.BeginTotpSetupResponse
+	110, // 190: identity.IdentityService.VerifyTotpSetup:output_type -> identity.VerifyTotpSetupResponse
+	112, // 191: identity.IdentityService.DisableTotp:output_type -> identity.DisableTotpResponse
+	114, // 192: identity.IdentityService.VerifyTotp:output_type -> identity.VerifyTotpResponse
+	116, // 193: identity.IdentityService.RegenerateRecoveryCodes:output_type -> identity.RegenerateRecoveryCodesResponse
+	119, // 194: identity.IdentityService.ListMySessions:output_type -> identity.ListMySessionsResponse
+	121, // 195: identity.IdentityService.RevokeSession:output_type -> identity.RevokeSessionResponse
+	123, // 196: identity.IdentityService.RevokeAllSessions:output_type -> identity.RevokeAllSessionsResponse
+	125, // 197: identity.IdentityService.SignOutEverywhere:output_type -> identity.SignOutEverywhereResponse
+	128, // 198: identity.IdentityService.ListAuditEvents:output_type -> identity.ListAuditEventsResponse
+	6,   // 199: identity.IdentityService.CreateUser:output_type -> identity.CreateUserResponse
+	8,   // 200: identity.IdentityService.GetUser:output_type -> identity.GetUserResponse
+	10,  // 201: identity.IdentityService.UpdateUser:output_type -> identity.UpdateUserResponse
+	12,  // 202: identity.IdentityService.DeleteUser:output_type -> identity.DeleteUserResponse
+	14,  // 203: identity.IdentityService.ListUsers:output_type -> identity.ListUsersResponse
+	17,  // 204: identity.IdentityService.CreateGroup:output_type -> identity.CreateGroupResponse
+	19,  // 205: identity.IdentityService.UpdateGroup:output_type -> identity.UpdateGroupResponse
+	21,  // 206: identity.IdentityService.DeleteGroup:output_type -> identity.DeleteGroupResponse
+	23,  // 207: identity.IdentityService.ListGroups:output_type -> identity.ListGroupsResponse
+	25,  // 208: identity.IdentityService.AddGroupMember:output_type -> identity.AddGroupMemberResponse
+	27,  // 209: identity.IdentityService.RemoveGroupMember:output_type -> identity.RemoveGroupMemberResponse
+	29,  // 210: identity.IdentityService.ListGroupMembers:output_type -> identity.ListGroupMembersResponse
+	143, // 211: identity.IdentityService.CreateDomain:output_type -> identity.CreateDomainResponse
+	145, // 212: identity.IdentityService.VerifyDomain:output_type -> identity.VerifyDomainResponse
+	147, // 213: identity.IdentityService.ListTenantDomains:output_type -> identity.ListTenantDomainsResponse
+	151, // 214: identity.IdentityService.CreateTenantInvitation:output_type -> identity.CreateTenantInvitationResponse
+	153, // 215: identity.IdentityService.AcceptTenantInvitation:output_type -> identity.AcceptTenantInvitationResponse
+	155, // 216: identity.IdentityService.ListTenantInvitations:output_type -> identity.ListTenantInvitationsResponse
+	157, // 217: identity.IdentityService.ListTenantMembers:output_type -> identity.ListTenantMembersResponse
+	159, // 218: identity.IdentityService.RemoveTenantMember:output_type -> identity.RemoveTenantMemberResponse
+	130, // 219: identity.IdentityService.InviteUser:output_type -> identity.InviteUserResponse
+	132, // 220: identity.IdentityService.AcceptInvitation:output_type -> identity.AcceptInvitationResponse
+	134, // 221: identity.IdentityService.DeactivateUser:output_type -> identity.DeactivateUserResponse
+	136, // 222: identity.IdentityService.ReactivateUser:output_type -> identity.ReactivateUserResponse
+	138, // 223: identity.IdentityService.ResetUserPassword:output_type -> identity.ResetUserPasswordResponse
+	140, // 224: identity.IdentityService.SetUserQuota:output_type -> identity.SetUserQuotaResponse
+	161, // 225: identity.IdentityService.AdminCreateProject:output_type -> identity.AdminCreateProjectResponse
+	163, // 226: identity.IdentityService.AdminCreateProjectCredential:output_type -> identity.AdminCreateProjectCredentialResponse
+	165, // 227: identity.IdentityService.AdminAddProjectAuthDomain:output_type -> identity.AdminAddProjectAuthDomainResponse
+	167, // 228: identity.IdentityService.AdminCreateTenant:output_type -> identity.AdminCreateTenantResponse
+	169, // 229: identity.IdentityService.AdminAddTenantAdmin:output_type -> identity.AdminAddTenantAdminResponse
+	171, // 230: identity.IdentityService.CreateFirstPlatformAdmin:output_type -> identity.CreateFirstPlatformAdminResponse
+	152, // [152:231] is the sub-list for method output_type
+	73,  // [73:152] is the sub-list for method input_type
 	73,  // [73:73] is the sub-list for extension type_name
 	73,  // [73:73] is the sub-list for extension extendee
 	0,   // [0:73] is the sub-list for field type_name
@@ -10564,7 +10707,7 @@ func file_identity_identity_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_identity_identity_proto_rawDesc), len(file_identity_identity_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   166,
+			NumMessages:   168,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -1050,6 +1050,36 @@ message AdminAddTenantAdminResponse {
   TenantMembership membership = 1;
 }
 
+// CreateFirstPlatformAdmin is the zero-config bootstrap that establishes the
+// FIRST platform admin on a fresh deployment. Unlike every other Admin* RPC
+// it is NOT authenticated by the shared admin secret — its whole purpose is
+// to let a brand-new deployer who has not yet configured anything stand up
+// the initial operator account. It is self-securing instead: it succeeds
+// ONLY while the platform_admins table is empty, and once any admin exists
+// the path is permanently closed (FAILED_PRECONDITION), so it can never be
+// used to escalate privilege on an already-provisioned deployment. The
+// emptiness check + insert are atomic, so two racing bootstraps create
+// exactly one admin and the loser is rejected.
+//
+// It is available only on the postgres control-plane driver; entdb/memory
+// deployments (which have no platform_admins table) return UNIMPLEMENTED.
+message CreateFirstPlatformAdminRequest {
+  string email = 1;
+  // password is optional. When blank the server generates a strong one and
+  // returns it ONCE in generated_password; when supplied it must meet the
+  // password-strength policy or the call is rejected (INVALID_ARGUMENT).
+  string password = 2;
+}
+
+message CreateFirstPlatformAdminResponse {
+  string admin_id = 1;
+  string email = 2;
+  // generated_password carries a server-generated password shown EXACTLY
+  // once, and only when the request left password blank. It is empty when
+  // the caller supplied their own password.
+  string generated_password = 3;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────
 
 service IdentityService {
@@ -1190,4 +1220,9 @@ service IdentityService {
   rpc AdminAddProjectAuthDomain(AdminAddProjectAuthDomainRequest) returns (AdminAddProjectAuthDomainResponse);
   rpc AdminCreateTenant(AdminCreateTenantRequest) returns (AdminCreateTenantResponse);
   rpc AdminAddTenantAdmin(AdminAddTenantAdminRequest) returns (AdminAddTenantAdminResponse);
+
+  // Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
+  // succeeds only while platform_admins is empty, then permanently closes
+  // (FAILED_PRECONDITION). Postgres-only; entdb/memory return UNIMPLEMENTED.
+  rpc CreateFirstPlatformAdmin(CreateFirstPlatformAdminRequest) returns (CreateFirstPlatformAdminResponse);
 }

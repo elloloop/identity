@@ -90,6 +90,11 @@ type Built struct {
 	// InvitationStore backs the tenant-invitation RPCs. Non-nil ONLY for the
 	// postgres driver; shares Repository's pool.
 	InvitationStore *pgrepo.InvitationStore
+
+	// PlatformAdminStore backs the zero-config first-admin bootstrap
+	// (CreateFirstPlatformAdmin). Non-nil ONLY for the postgres driver (the
+	// only one with a platform_admins table); shares Repository's pool.
+	PlatformAdminStore *pgrepo.PlatformAdminStore
 }
 
 // ProjectResolver returns the control-plane project resolver as a
@@ -165,6 +170,16 @@ func (b *Built) InvitationStoreIface() service.InvitationStore {
 	return b.InvitationStore
 }
 
+// PlatformAdminStoreIface returns the platform-admin store as a
+// driver-agnostic interface, or a true nil when this build has no control
+// plane (entdb/memory) — avoiding the typed-nil trap.
+func (b *Built) PlatformAdminStoreIface() service.PlatformAdminStore {
+	if b.PlatformAdminStore == nil {
+		return nil
+	}
+	return b.PlatformAdminStore
+}
+
 // LoginGovernance returns the read-side governance bundle the login path
 // consults to enforce a claimed tenant's LoginPolicy, or a true nil when
 // this build has no governance plane (entdb/memory). Returning nil — rather
@@ -230,15 +245,16 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		}
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
 		return &Built{
-			Repository:       pgRepo,
-			DB:               pgRepo,
-			ProjectStore:     pgrepo.NewProjectStore(pgRepo),
-			AutoFormStore:    pgrepo.NewAutoFormStore(pgRepo),
-			DomainStore:      pgrepo.NewDomainStore(pgRepo),
-			TenantStore:      pgrepo.NewTenantStore(pgRepo),
-			MembershipStore:  pgrepo.NewMembershipStore(pgRepo),
-			LoginPolicyStore: pgrepo.NewLoginPolicyStore(pgRepo),
-			InvitationStore:  pgrepo.NewInvitationStore(pgRepo),
+			Repository:         pgRepo,
+			DB:                 pgRepo,
+			ProjectStore:       pgrepo.NewProjectStore(pgRepo),
+			AutoFormStore:      pgrepo.NewAutoFormStore(pgRepo),
+			DomainStore:        pgrepo.NewDomainStore(pgRepo),
+			TenantStore:        pgrepo.NewTenantStore(pgRepo),
+			MembershipStore:    pgrepo.NewMembershipStore(pgRepo),
+			LoginPolicyStore:   pgrepo.NewLoginPolicyStore(pgRepo),
+			InvitationStore:    pgrepo.NewInvitationStore(pgRepo),
+			PlatformAdminStore: pgrepo.NewPlatformAdminStore(pgRepo),
 		}, nil
 	default:
 		return nil, fmt.Errorf("repo: Build: unknown driver %q", cfg.Driver)

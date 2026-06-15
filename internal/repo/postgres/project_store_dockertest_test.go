@@ -133,6 +133,17 @@ func TestControlPlaneAdminStore_Container(t *testing.T) {
 	runControlPlaneAdminSmoke(t, dsn)
 }
 
+// TestPlatformAdminStore_Container runs the zero-config first-admin bootstrap
+// body (incl. the concurrent exactly-one race) against a throwaway Postgres
+// container.
+func TestPlatformAdminStore_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runPlatformAdminSmoke(t, dsn)
+}
+
 // TestAutoFormStore_Container runs the tenant auto-formation body (incl.
 // the concurrent-race convergence) against a throwaway Postgres container.
 func TestAutoFormStore_Container(t *testing.T) {

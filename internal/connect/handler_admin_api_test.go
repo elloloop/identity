@@ -74,10 +74,34 @@ func startAdminServer(t *testing.T, svc *service.ControlPlaneAdminService) ident
 	return identityconnectgen.NewIdentityServiceClient(srv.Client(), srv.URL)
 }
 
+// connectPlatformAdminStore is a minimal in-memory service.PlatformAdminStore
+// for the admin handler tests. It inserts the first admin and reports
+// created=false thereafter, mirroring the store's one-time contract.
+type connectPlatformAdminStore struct {
+	count int
+}
+
+func (s *connectPlatformAdminStore) CreateFirstPlatformAdmin(_ context.Context, a *service.PlatformAdmin) (bool, error) {
+	if s.count > 0 {
+		return false, nil
+	}
+	s.count++
+	if a.ID == "" {
+		a.ID = "admin-1"
+	}
+	return true, nil
+}
+
+func (s *connectPlatformAdminStore) CountPlatformAdmins(_ context.Context) (int, error) {
+	return s.count, nil
+}
+
+var _ service.PlatformAdminStore = (*connectPlatformAdminStore)(nil)
+
 func newAdminControlSvc(secret string) (*service.ControlPlaneAdminService, *adminControlStore, *connectMembershipStore) {
 	store := &adminControlStore{}
 	members := &connectMembershipStore{}
-	svc := service.NewControlPlaneAdminService(secret, store, &connectTenantStore{}, members, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(secret, store, &connectTenantStore{}, members, &connectPlatformAdminStore{}, zap.NewNop())
 	return svc, store, members
 }
 
@@ -224,4 +248,60 @@ func TestAdminRPCs_HappyPath_Handler(t *testing.T) {
 	if members.upserted == nil || members.upserted.UserID != "user-1" {
 		t.Fatalf("membership not upserted: %+v", members.upserted)
 	}
+}
+
+// ── zero-config first-admin bootstrap through the handler ────────────────
+
+// startBootstrapServer mounts a handler whose control-admin service is built
+// with an EMPTY secret (the fresh-deployer shape) but a real platform-admin
+// store, proving the bootstrap RPC works WITHOUT a configured admin secret.
+func startBootstrapServer(t *testing.T) (identityconnectgen.IdentityServiceClient, *connectPlatformAdminStore) {
+	t.Helper()
+	admins := &connectPlatformAdminStore{}
+	svc := service.NewControlPlaneAdminService("", &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, admins, zap.NewNop())
+	return startAdminServer(t, svc), admins
+}
+
+func TestCreateFirstPlatformAdmin_NilService_Unimplemented(t *testing.T) {
+	t.Parallel()
+	client := startAdminServer(t, nil)
+	_, err := client.CreateFirstPlatformAdmin(context.Background(),
+		connect.NewRequest(&identitypb.CreateFirstPlatformAdminRequest{Email: "ops@acme.com"}))
+	requireCode(t, err, connect.CodeUnimplemented)
+}
+
+func TestCreateFirstPlatformAdmin_NoSecretRequired_HappyPath(t *testing.T) {
+	t.Parallel()
+	client, admins := startBootstrapServer(t)
+	ctx := context.Background()
+
+	// No admin-secret header at all — the bootstrap is intentionally ungated.
+	resp, err := client.CreateFirstPlatformAdmin(ctx,
+		connect.NewRequest(&identitypb.CreateFirstPlatformAdminRequest{Email: "ops@acme.com"}))
+	if err != nil {
+		t.Fatalf("CreateFirstPlatformAdmin: %v", err)
+	}
+	if resp.Msg.GetAdminId() == "" || resp.Msg.GetEmail() != "ops@acme.com" {
+		t.Fatalf("response = %+v", resp.Msg)
+	}
+	if resp.Msg.GetGeneratedPassword() == "" {
+		t.Fatal("blank password should yield a generated one in the response")
+	}
+	if admins.count != 1 {
+		t.Fatalf("admin count = %d, want 1", admins.count)
+	}
+}
+
+func TestCreateFirstPlatformAdmin_SecondCall_FailedPrecondition(t *testing.T) {
+	t.Parallel()
+	client, _ := startBootstrapServer(t)
+	ctx := context.Background()
+
+	if _, err := client.CreateFirstPlatformAdmin(ctx,
+		connect.NewRequest(&identitypb.CreateFirstPlatformAdminRequest{Email: "first@acme.com"})); err != nil {
+		t.Fatalf("first bootstrap: %v", err)
+	}
+	_, err := client.CreateFirstPlatformAdmin(ctx,
+		connect.NewRequest(&identitypb.CreateFirstPlatformAdminRequest{Email: "second@acme.com"}))
+	requireCode(t, err, connect.CodeFailedPrecondition)
 }
