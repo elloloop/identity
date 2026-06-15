@@ -66,7 +66,7 @@ export const sidebarSections: NavSection[] = [
     title: "API Reference",
     items: [
       { label: "API Reference (OpenAPI)", href: `${BASE}/docs/api-reference/rest` },
-      { label: "Proto Reference (HTML)", href: `${BASE}/proto/` },
+      { label: "Proto Reference", href: `${BASE}/docs/api-reference/proto` },
       { label: "gRPC Services", href: `${BASE}/docs/api-reference/grpc` },
     ],
   },
