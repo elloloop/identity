@@ -77,8 +77,8 @@ values, a test covers it, and the analyzer/formatter are clean.
 - **Test command (all):** `make test` (`go test -count=1 -race -timeout=1200s ./...`)
 - **Test command (single):** `go test -run '^TestName$' ./internal/path/to/pkg`
 - **Format command:** `gofumpt` (enforced via golangci-lint `formatters`); run `golangci-lint run --fix` or `gofumpt -w .`
-- **Run an app:** `go build ./...` then run `cmd/identity`; or `docker compose up` (entdb + postgres + identity)
+- **Run an app:** `go build ./...` then run `cmd/identity`; or `docker compose up` (postgres + identity)
 - **Repo layout:** `cmd/identity` (main), `internal/` (app, config, connect, middleware, observability, repo, service), `pkg/` (audit, email, idv, jwt, oauth, passkeys, passwords, totp), `proto/` + `gen/go` (proto + generated), `identityserver/` (mountable server), `tests/` (e2e, integration, load, policy, smoke)
-- **State management / data layer conventions:** `internal/repo` drivers (memory, postgres, entdb) behind `service.Repository`; all drivers must satisfy `internal/repo/conformance` identically (same uniqueness/ordering/error semantics); EntDB is the recommended multi-tenant backend
-- **Generated files NOT to hand-edit:** `gen/go/**` (buf-generated from `proto/`, regenerate via buf.gen.yaml — pinned plugins); `gen/go/identity/schema/schema_entdb.{go,py}`
+- **State management / data layer conventions:** `internal/repo` drivers (postgres, memory) behind `service.Repository`; both drivers must satisfy `internal/repo/conformance` identically (same uniqueness/ordering/error semantics); Postgres is the primary datastore and the only driver with a control plane (memory pins every request to the default project)
+- **Generated files NOT to hand-edit:** `gen/go/**` (buf-generated from `proto/`, regenerate via buf.gen.yaml — pinned plugins)
 - **Other gotchas worth recording:** pin every external version exactly (no floating tags — see AGENTS.md §10); config is env-only (`internal/config/config.go`, `GATEWAY_*` vars); conformance suite must stay green across all drivers; `go.mod`/`go.sum` must be tidy (`make tidy-check`)

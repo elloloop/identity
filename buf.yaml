@@ -8,26 +8,22 @@ lint:
     - STANDARD
   except:
     - PACKAGE_VERSION_SUFFIX
-  ignore:
-    - proto/entdb/entdb_options.proto
 
 breaking:
   use:
     - FILE
   # Intentional, documented breaking change (v1.0 cleanup): the legacy
-  # OrganizationSignup RPC (identity.proto) and the retired entdb node types
-  # Organization / OrganizationMembership (schema.proto, type_ids 33/34) were
-  # removed because the Project/Tenant/Domain model supersedes them. These
-  # ignore_only entries are scoped to the two deletion rules on exactly the
-  # two files that delete, so every other breaking guarantee (renumbered
-  # tags, reused field ids, signature changes on surviving RPCs, reused
-  # type_ids) stays enforced. The entclient guard test additionally backstops
-  # type_id reuse on schema.proto. Remove these entries once the removal has
-  # landed on the baseline branch buf breaking runs against — they are dead
-  # weight after this change merges.
+  # OrganizationSignup RPC (identity.proto) was removed because the
+  # Project/Tenant/Domain model supersedes it. The retired EntDB schema
+  # (proto/identity/schema/schema.proto, proto/entdb/entdb_options.proto)
+  # was deleted wholesale when the entdb graph backend was removed —
+  # Postgres is the primary datastore and the relational drivers carry
+  # their own type/field-id constants, so the proto schema descriptor is
+  # dead. These ignore_only entries are scoped to the deletion rules on
+  # exactly the affected files, so every other breaking guarantee
+  # (renumbered tags, reused field ids, signature changes on surviving
+  # RPCs) stays enforced. Remove these entries once the removal has
+  # landed on the baseline branch buf breaking runs against.
   ignore_only:
     RPC_NO_DELETE:
       - proto/identity/identity.proto
-    MESSAGE_NO_DELETE:
-      - proto/identity/identity.proto
-      - proto/identity/schema/schema.proto

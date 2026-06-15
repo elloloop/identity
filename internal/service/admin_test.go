@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
@@ -401,10 +401,10 @@ func TestAdminService_DeleteUser_CleansGroupMemberOfEdges(t *testing.T) {
 
 	// Seed two MEMBER_OF edges from the target user to two groups, plus
 	// an unrelated user's edge that must survive.
-	seed := []entdb.Operation{
-		{Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf, FromNodeID: "target-1", ToNodeID: "grp-1"},
-		{Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf, FromNodeID: "target-1", ToNodeID: "grp-2"},
-		{Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf, FromNodeID: "other-user", ToNodeID: "grp-1"},
+	seed := []graph.Operation{
+		{Type: graph.OpCreateEdge, EdgeTypeID: edgeMemberOf, FromNodeID: "target-1", ToNodeID: "grp-1"},
+		{Type: graph.OpCreateEdge, EdgeTypeID: edgeMemberOf, FromNodeID: "target-1", ToNodeID: "grp-2"},
+		{Type: graph.OpCreateEdge, EdgeTypeID: edgeMemberOf, FromNodeID: "other-user", ToNodeID: "grp-1"},
 	}
 	if _, err := db.ExecuteAtomic(ctx, "t", "system:admin", seed); err != nil {
 		t.Fatalf("seed edges: %v", err)
@@ -416,7 +416,7 @@ func TestAdminService_DeleteUser_CleansGroupMemberOfEdges(t *testing.T) {
 	}
 
 	// The cross-user edge read MUST use the tenant-admin actor; a per-user
-	// actor (user:<admin>) would silently return zero rows on real entdb
+	// actor (user:<admin>) would silently return zero rows on a graph backend
 	// and make this cleanup a no-op. Asserting it here catches a
 	// regression that the edge-existence checks below cannot (the fake
 	// ignores the actor for filtering).

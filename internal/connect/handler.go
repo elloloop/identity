@@ -39,7 +39,7 @@ type IdentityHandler struct {
 	members *service.MembershipService
 	// controlAdmin backs the control-plane admin RPCs (AdminCreateProject and
 	// friends), authenticated by the shared admin secret rather than a user
-	// JWT. nil on entdb/memory (no control plane) and when no secret is
+	// JWT. nil on memory (no control plane) and when no secret is
 	// configured — both disable the surface (CodeUnimplemented).
 	controlAdmin *service.ControlPlaneAdminService
 	captcha      captcha.Verifier
@@ -50,13 +50,13 @@ type IdentityHandler struct {
 // layer. idv is optional: pass nil in deployments that do not need
 // identity verification, and the IDV RPCs will return CodeUnimplemented.
 //
-// domains is optional: nil (entdb/memory, which have no control plane)
+// domains is optional: nil (memory, which has no control plane)
 // causes the tenant-domain RPCs to return CodeUnimplemented.
 //
-// members is optional: nil (entdb/memory, which have no control plane)
+// members is optional: nil (memory, which has no control plane)
 // causes the tenant-membership/invitation RPCs to return CodeUnimplemented.
 //
-// controlAdmin is optional: nil (entdb/memory, or no configured admin secret)
+// controlAdmin is optional: nil (memory, or no configured admin secret)
 // causes the control-plane admin RPCs to return CodeUnimplemented.
 //
 // captchaVerifier is optional: a nil verifier is treated as disabled, so

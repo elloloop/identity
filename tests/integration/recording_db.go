@@ -6,7 +6,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -28,7 +28,7 @@ type RecordingDB struct {
 type AuditCall struct {
 	TenantID string
 	Actor    string
-	Ops      []entdb.Operation
+	Ops      []graph.Operation
 }
 
 // NewRecordingDB returns an empty RecordingDB.
@@ -67,10 +67,10 @@ func (d *RecordingDB) CountByEventType(eventType string) int {
 
 // ExecuteAtomic records the call and returns a successful no-op
 // result. Returning success keeps audit logger logs at the success
-// level, mirroring real EntDB behaviour.
-func (d *RecordingDB) ExecuteAtomic(_ context.Context, tenantID, actor string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+// level, mirroring the graph DB behaviour.
+func (d *RecordingDB) ExecuteAtomic(_ context.Context, tenantID, actor string, ops []graph.Operation) (*graph.CommitResult, error) {
 	d.mu.Lock()
-	cp := make([]entdb.Operation, len(ops))
+	cp := make([]graph.Operation, len(ops))
 	copy(cp, ops)
 	d.events = append(d.events, AuditCall{
 		TenantID: tenantID,
@@ -78,30 +78,30 @@ func (d *RecordingDB) ExecuteAtomic(_ context.Context, tenantID, actor string, o
 		Ops:      cp,
 	})
 	d.mu.Unlock()
-	return &entdb.CommitResult{}, nil
+	return &graph.CommitResult{}, nil
 }
 
 // The remaining methods are unused by the integration suite but must
 // satisfy service.DB. They mirror service.StubDB's "service unavailable"
 // behaviour so any accidental call surfaces clearly.
 
-func (d *RecordingDB) GetNode(context.Context, string, string, int, string) (*entdb.Node, error) {
+func (d *RecordingDB) GetNode(context.Context, string, string, int, string) (*graph.Node, error) {
 	return nil, service.ErrServiceUnavailable
 }
 
-func (d *RecordingDB) QueryNodes(context.Context, string, string, int, map[string]any) ([]*entdb.Node, error) {
+func (d *RecordingDB) QueryNodes(context.Context, string, string, int, map[string]any) ([]*graph.Node, error) {
 	return nil, service.ErrServiceUnavailable
 }
 
-func (d *RecordingDB) GetEdgesFrom(context.Context, string, string, string, int) ([]*entdb.Edge, error) {
+func (d *RecordingDB) GetEdgesFrom(context.Context, string, string, string, int) ([]*graph.Edge, error) {
 	return nil, service.ErrServiceUnavailable
 }
 
-func (d *RecordingDB) GetEdgesTo(context.Context, string, string, string, int) ([]*entdb.Edge, error) {
+func (d *RecordingDB) GetEdgesTo(context.Context, string, string, string, int) ([]*graph.Edge, error) {
 	return nil, service.ErrServiceUnavailable
 }
 
-func (d *RecordingDB) SearchNodes(context.Context, string, string, int, string) ([]*entdb.Node, error) {
+func (d *RecordingDB) SearchNodes(context.Context, string, string, int, string) ([]*graph.Node, error) {
 	return nil, service.ErrServiceUnavailable
 }
 

@@ -36,7 +36,7 @@ func TestBuildMembershipService(t *testing.T) {
 		t.Fatal("all stores present: want non-nil MembershipService, got nil")
 	}
 
-	// Missing any one store ⇒ nil (entdb/memory have no governance plane).
+	// Missing any one store ⇒ nil (the memory driver has no governance plane).
 	for name, mutate := range map[string]func(*Deps){
 		"no invitation store": func(d *Deps) { d.InvitationStore = nil },
 		"no membership store": func(d *Deps) { d.MembershipStore = nil },

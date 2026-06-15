@@ -25,9 +25,9 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
 
   <h2>Minimal run</h2>
   <Code code={`docker run --rm -p 80:80 -p 9090:9090 \\
-  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \\
+  -e GATEWAY_REPO_DRIVER=memory \\
   -e GATEWAY_DEFAULT_TENANT_ID=local \\
-  ghcr.io/elloloop/identity:0.1.0`} lang="bash" title="dev (auto-generated JWT key)" />
+  ghcr.io/elloloop/identity:0.1.0`} lang="bash" title="dev (in-memory store, auto-generated JWT key)" />
   <p>
     With no <code>GATEWAY_JWT_KEYS</code> set, the container generates an
     ephemeral RSA key and logs <code>auto_generating_dev_rsa_key</code>.
@@ -39,7 +39,8 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
   <Code code={`docker run -d --restart=always \\
   --name identity \\
   -p 80:80 -p 9090:9090 \\
-  -e GATEWAY_ENTDB_ADDRESS=entdb.svc:50051 \\
+  -e GATEWAY_REPO_DRIVER=postgres \\
+  -e GATEWAY_POSTGRES_DSN="postgres://identity:password@db.svc:5432/identity?sslmode=disable" \\
   -e GATEWAY_DEFAULT_TENANT_ID=acme \\
   -e GATEWAY_PASSKEY_RP_ID=acme.example.com \\
   -e GATEWAY_PASSKEY_ORIGIN=https://acme.example.com \\
@@ -78,18 +79,24 @@ docker run --rm -p 80:80 identity:dev`} lang="bash" />
   <Code code={`version: "3.8"
 
 services:
-  entdb:
-    image: ghcr.io/elloloop/tenant-shard-db:2.5.0
-    ports: ["50051:50051"]
+  postgres:
+    image: postgres:16.13-alpine3.23
+    environment:
+      POSTGRES_USER: identity
+      POSTGRES_PASSWORD: identity
+      POSTGRES_DB: identity
+    ports: ["5432:5432"]
 
   identity:
     image: ghcr.io/elloloop/identity:0.1.0
-    depends_on: [entdb]
+    depends_on: [postgres]
     ports:
       - "80:80"
       - "9090:9090"
     environment:
-      GATEWAY_ENTDB_ADDRESS: entdb:50051
+      GATEWAY_REPO_DRIVER: postgres
+      GATEWAY_POSTGRES_DSN: postgres://identity:identity@postgres:5432/identity?sslmode=disable
+      GATEWAY_POSTGRES_AUTO_MIGRATE: "true"
       GATEWAY_DEFAULT_TENANT_ID: local
       GATEWAY_AUTH_ALLOW_LOCAL: "true"
       GATEWAY_PASSKEY_RP_ID: localhost

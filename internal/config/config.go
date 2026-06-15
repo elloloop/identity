@@ -69,13 +69,10 @@ type Config struct {
 	MetricsPort int
 
 	// Persistence driver. Selects which Repository / DB
-	// implementation the binary wires up — "entdb" (default), "memory"
-	// for an in-process store useful for local dev, or "postgres"
-	// once the Postgres driver lands. Driven by GATEWAY_REPO_DRIVER.
+	// implementation the binary wires up — "postgres" (default, the
+	// primary datastore) or "memory" for an in-process store useful for
+	// local dev and tests. Driven by GATEWAY_REPO_DRIVER.
 	RepoDriver string
-
-	// EntDB
-	EntDBAddress string
 
 	// Tenant
 	DefaultTenantID string
@@ -85,7 +82,7 @@ type Config struct {
 	// is a logical control-plane entity that MAPS ONTO the storage scope
 	// DefaultTenantID — the two are distinct values and must not be
 	// conflated. Driven by GATEWAY_DEFAULT_PROJECT_ID (default "default").
-	// Only the postgres driver has a control plane; entdb/memory ignore it.
+	// Only the postgres driver has a control plane; the memory driver ignores it.
 	DefaultProjectID string
 
 	// AdminAPISecret is the shared secret that authenticates the
@@ -98,7 +95,7 @@ type Config struct {
 	// Empty (the default) DISABLES the admin RPCs entirely — they return
 	// CodeUnimplemented — so a deployer who never sets it cannot have them
 	// reached. Driven by GATEWAY_ADMIN_API_SECRET. Only the postgres driver
-	// has a control plane; entdb/memory ignore it.
+	// has a control plane; the memory driver ignores it.
 	//
 	// TODO(redesign): the shared secret is the shipped mechanism. Future
 	// work hardens this with mTLS client-certificate auth and an optional
@@ -396,7 +393,7 @@ type Config struct {
 	SignupEmailCooldownSeconds int // GATEWAY_SIGNUP_EMAIL_COOLDOWN_SECONDS (default 60)
 
 	// Audit log queue depth for the async flusher. Drops happen if the
-	// auth hot path produces events faster than EntDB can absorb them.
+	// auth hot path produces events faster than the datastore can absorb them.
 	// Surface via audit.Logger.DroppedCount() on a metric.
 	AuditQueueSize int // GATEWAY_AUDIT_QUEUE_SIZE (default 4096)
 
@@ -423,10 +420,9 @@ type Config struct {
 	RateLimitPhonePerIP        int // GATEWAY_RATE_LIMIT_PHONE_PER_IP (default 5/min) — RequestPhoneVerification
 	RateLimitBootstrapPerIP    int // GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP (default 5/min) — CreateFirstPlatformAdmin
 
-	// Postgres (alternate persistence driver). When PostgresDSN is set
-	// the application bootstrapper may prefer the Postgres-backed
-	// repository over EntDB; the actual driver selection lives in the
-	// internal/repo package.
+	// Postgres (the primary persistence driver). PostgresDSN is required
+	// when RepoDriver is "postgres" (the default); the actual driver
+	// selection lives in the internal/repo package.
 	//
 	//   GATEWAY_POSTGRES_DSN          e.g. "postgres://user:pass@host:5432/identity?sslmode=disable"
 	//   GATEWAY_POSTGRES_MAX_CONNS    pool size, default 25
@@ -483,8 +479,7 @@ func Load() *Config {
 		ConnectPort: envInt("GATEWAY_CONNECT_PORT", 80),
 		MetricsPort: envInt("GATEWAY_METRICS_PORT", 9090),
 
-		RepoDriver:   envStr("GATEWAY_REPO_DRIVER", "entdb"),
-		EntDBAddress: envStr("GATEWAY_ENTDB_ADDRESS", "entdb:50051"),
+		RepoDriver: envStr("GATEWAY_REPO_DRIVER", "postgres"),
 
 		DefaultTenantID:           envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
 		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", DefaultProjectIDFallback),

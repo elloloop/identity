@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
@@ -33,7 +33,7 @@ func NewHelpService(db DB, projectID string, auditLog *audit.Logger, logger *zap
 
 // projectID returns the storage shard (project) the request operates under:
 // the per-request ProjectScope when present, else the boot default. It is
-// the partition argument the entdb DB transport keys on (the postgres DB
+// the partition argument the graph DB transport keys on (the postgres DB
 // ignores it and filters on its WithProject-bound project instead).
 func (s *HelpService) projectID(ctx context.Context) string {
 	return requestProjectID(ctx, s.defaultProjectID)
@@ -96,8 +96,8 @@ func (s *HelpService) RequestAdminHelp(
 		hfCreatedAt:       now,
 	}
 
-	op := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeAdminHelpReq, Data: data}
-	result, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []entdb.Operation{op})
+	op := graph.Operation{Type: graph.OpCreateNode, TypeID: typeAdminHelpReq, Data: data}
+	result, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []graph.Operation{op})
 	if err != nil {
 		s.logger.Error("admin_help_create_failed", zap.String("email", redactEmail(email)), zap.Error(err))
 		// Best-effort: still return nil.
@@ -158,7 +158,7 @@ func (s *HelpService) ListHelpRequests(
 	if end > totalCount {
 		end = totalCount
 	}
-	var page []*entdb.Node
+	var page []*graph.Node
 	if offset < totalCount {
 		page = nodes[offset:end]
 	}
@@ -224,8 +224,8 @@ func (s *HelpService) ResolveHelpRequest(
 		hfResolvedAt:      now,
 	}
 
-	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeAdminHelpReq, NodeID: requestID, Patch: patch}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	op := graph.Operation{Type: graph.OpUpdateNode, TypeID: typeAdminHelpReq, NodeID: requestID, Patch: patch}
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 		return nil, fmt.Errorf("resolve help request: %w", err)
 	}
 

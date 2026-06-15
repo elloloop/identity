@@ -7,9 +7,9 @@
 --
 --   * IDs. Every table uses a TEXT primary key, not UUID. Internally we
 --     populate it with `gen_random_uuid()::text` so callers see normal
---     UUID strings, but the column type stays TEXT to mirror the
---     semantics of EntDB's NodeID — the service layer treats node IDs
---     as opaque strings and the in-memory driver also issues string IDs.
+--     UUID strings, but the column type stays TEXT because the service
+--     layer treats node IDs as opaque strings and the in-memory driver
+--     also issues string IDs.
 --     (gen_random_uuid lives in pgcrypto on PG <13; on PG 13+ it is in
 --     core, so no extension is required for postgres:16-alpine.)
 --

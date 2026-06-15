@@ -11,7 +11,7 @@ import (
 // LoginGovernance is the read-side bundle the login path consults to enforce
 // a claimed tenant's LoginPolicy. It is postgres-only governance state, set
 // once via AuthService.WithLoginGovernance; drivers without a governance
-// plane (entdb/memory) leave it nil and impose no restriction.
+// plane (memory) leave it nil and impose no restriction.
 //
 // It is deliberately read-only — enforcement never mutates governance state —
 // and groups the three stores the lookup walks (domain → tenant → policy) so

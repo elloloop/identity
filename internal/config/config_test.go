@@ -23,8 +23,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.MetricsPort != 9090 {
 		t.Errorf("MetricsPort: want 9090, got %d", cfg.MetricsPort)
 	}
-	if cfg.EntDBAddress != "entdb:50051" {
-		t.Errorf("EntDBAddress: want entdb:50051, got %q", cfg.EntDBAddress)
+	if cfg.RepoDriver != "postgres" {
+		t.Errorf("RepoDriver: want postgres, got %q", cfg.RepoDriver)
 	}
 	if cfg.DefaultTenantID != "local" {
 		t.Errorf("DefaultTenantID: want local, got %q", cfg.DefaultTenantID)
@@ -109,7 +109,7 @@ func TestLoad_SweeperDisabledWhenIntervalZero(t *testing.T) {
 func TestLoad_OverrideFromEnv(t *testing.T) {
 	clearGatewayEnv(t)
 	t.Setenv("GATEWAY_GRPC_PORT", "9999")
-	t.Setenv("GATEWAY_ENTDB_ADDRESS", "custom-entdb:50055")
+	t.Setenv("GATEWAY_REPO_DRIVER", "memory")
 	t.Setenv("GATEWAY_DEFAULT_TENANT_ID", "prod-tenant")
 	t.Setenv("GATEWAY_DEFAULT_PROJECT_ID", "prod-project")
 	t.Setenv("GATEWAY_ADMIN_API_SECRET", "operator-secret")
@@ -125,8 +125,8 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	if cfg.GRPCPort != 9999 {
 		t.Errorf("GRPCPort: want 9999, got %d", cfg.GRPCPort)
 	}
-	if cfg.EntDBAddress != "custom-entdb:50055" {
-		t.Errorf("EntDBAddress: want custom-entdb:50055, got %q", cfg.EntDBAddress)
+	if cfg.RepoDriver != "memory" {
+		t.Errorf("RepoDriver: want memory, got %q", cfg.RepoDriver)
 	}
 	if cfg.DefaultTenantID != "prod-tenant" {
 		t.Errorf("DefaultTenantID: want prod-tenant, got %q", cfg.DefaultTenantID)

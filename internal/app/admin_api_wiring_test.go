@@ -58,7 +58,7 @@ func TestBuildControlPlaneAdminService(t *testing.T) {
 		t.Fatal("nil config implies no secret ⇒ disabled")
 	}
 
-	// Missing any one store ⇒ nil (entdb/memory have no control plane).
+	// Missing any one store ⇒ nil (the memory driver has no control plane).
 	for name, mutate := range map[string]func(*Deps){
 		"no control-plane store": func(d *Deps) { d.ControlPlaneStore = nil },
 		"no tenant store":        func(d *Deps) { d.TenantStore = nil },

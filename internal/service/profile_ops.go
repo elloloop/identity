@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -47,11 +47,11 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPass
 		return fmt.Errorf("hash new password: %w", err)
 	}
 
-	op := entdb.Operation{
-		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: userID,
+	op := graph.Operation{
+		Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: userID,
 		Patch: map[string]any{ufPasswordHash: newHash, ufUpdatedAt: nowMs()},
 	}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(userID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(userID), []graph.Operation{op}); err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
 
@@ -109,7 +109,7 @@ func (s *ProfileService) ListAuditEvents(
 	}
 
 	// Apply time-range filters in memory.
-	var filtered []*entdb.Node
+	var filtered []*graph.Node
 	for _, n := range nodes {
 		created := pi64(n.Payload, afCreatedAt)
 		if startTime > 0 && created < startTime {
@@ -126,7 +126,7 @@ func (s *ProfileService) ListAuditEvents(
 	if end > totalCount {
 		end = totalCount
 	}
-	var page []*entdb.Node
+	var page []*graph.Node
 	if offset < totalCount {
 		page = filtered[offset:end]
 	}
@@ -142,7 +142,7 @@ func (s *ProfileService) ListAuditEvents(
 	return events, nextCursor, nil
 }
 
-func auditEventFromNode(n *entdb.Node) *AuditEvent {
+func auditEventFromNode(n *graph.Node) *AuditEvent {
 	if n == nil {
 		return nil
 	}

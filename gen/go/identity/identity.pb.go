@@ -9851,7 +9851,7 @@ func (x *AdminAddTenantAdminResponse) GetMembership() *TenantMembership {
 // emptiness check + insert are atomic, so two racing bootstraps create
 // exactly one admin and the loser is rejected.
 //
-// It is available only on the postgres control-plane driver; entdb/memory
+// It is available only on the postgres control-plane driver; the memory driver
 // deployments (which have no platform_admins table) return UNIMPLEMENTED.
 type CreateFirstPlatformAdminRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`

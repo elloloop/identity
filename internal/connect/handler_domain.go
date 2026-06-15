@@ -11,7 +11,7 @@ import (
 
 // CreateDomain registers a pending email domain on a tenant and returns the
 // DNS TXT challenge the caller must publish. Available only on the postgres
-// control-plane driver; nil service (entdb/memory) returns Unimplemented.
+// control-plane driver; nil service (memory) returns Unimplemented.
 func (h *IdentityHandler) CreateDomain(
 	ctx context.Context,
 	req *connect.Request[identitypb.CreateDomainRequest],

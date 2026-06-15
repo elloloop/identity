@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -23,14 +23,14 @@ type fakeWriter struct {
 type fakeCall struct {
 	TenantID string
 	Actor    string
-	Ops      []entdb.Operation
+	Ops      []graph.Operation
 }
 
 func (f *fakeWriter) ExecuteAtomic(
 	_ context.Context,
 	tenantID, actor string,
-	ops []entdb.Operation,
-) (*entdb.CommitResult, error) {
+	ops []graph.Operation,
+) (*graph.CommitResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, fakeCall{
 		TenantID: tenantID,
@@ -46,7 +46,7 @@ func (f *fakeWriter) ExecuteAtomic(
 	if rerr != nil {
 		return nil, rerr
 	}
-	return &entdb.CommitResult{Success: true, Applied: true}, nil
+	return &graph.CommitResult{Success: true, Applied: true}, nil
 }
 
 func (f *fakeWriter) lastCall() fakeCall {
@@ -86,7 +86,7 @@ func TestLog_CreatesNode(t *testing.T) {
 		t.Fatalf("expected 1 operation, got %d", len(call.Ops))
 	}
 	op := call.Ops[0]
-	if op.Type != entdb.OpCreateNode {
+	if op.Type != graph.OpCreateNode {
 		t.Errorf("expected OpCreateNode, got %v", op.Type)
 	}
 	if op.TypeID != 26 {
@@ -121,9 +121,9 @@ func TestLog_NeverPanics(t *testing.T) {
 	}
 }
 
-// TestLog_NeverReturnsError verifies that EntDB errors are swallowed.
+// TestLog_NeverReturnsError verifies that datastore errors are swallowed.
 func TestLog_NeverReturnsError(t *testing.T) {
-	w := &fakeWriter{returnErr: errors.New("entdb unavailable")}
+	w := &fakeWriter{returnErr: errors.New("datastore unavailable")}
 	core, logs := observer.New(zap.ErrorLevel)
 	logger := zap.New(core)
 	l := NewLogger(w, "t", logger)
@@ -455,7 +455,7 @@ func TestWriteOne_RecoversFromPanic(t *testing.T) {
 }
 
 func TestWriteOne_LogsTransportError(t *testing.T) {
-	w := &fakeWriter{returnErr: errors.New("entdb unreachable")}
+	w := &fakeWriter{returnErr: errors.New("datastore unreachable")}
 	l := NewLogger(w, "t", nil)
 	stop := l.StartAsync(8)
 	l.Log(context.Background(), EventLoginSuccess, WithActor("u"))

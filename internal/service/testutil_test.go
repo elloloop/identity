@@ -13,7 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
@@ -36,8 +36,8 @@ func newRecordingAuditWriter() *recordingAuditWriter {
 }
 
 func (w *recordingAuditWriter) ExecuteAtomic(
-	_ context.Context, _, _ string, ops []entdb.Operation,
-) (*entdb.CommitResult, error) {
+	_ context.Context, _, _ string, ops []graph.Operation,
+) (*graph.CommitResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, op := range ops {
@@ -45,7 +45,7 @@ func (w *recordingAuditWriter) ExecuteAtomic(
 			w.events = append(w.events, et)
 		}
 	}
-	return &entdb.CommitResult{}, nil
+	return &graph.CommitResult{}, nil
 }
 
 func (w *recordingAuditWriter) countByEventType(eventType string) int {

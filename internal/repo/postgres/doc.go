@@ -1,7 +1,7 @@
 // Package postgres provides a Postgres-backed implementation of
 // service.Repository for the identity service.
 //
-// This is an alternative to the EntDB-backed repository. The two are
+// This is an alternative to the original graph-backed repository. The two are
 // interchangeable from the AuthService's point of view: both implement
 // the same service.Repository interface.
 //
@@ -46,5 +46,5 @@
 // Postgres unique-violation errors (SQLSTATE 23505) are mapped to
 // service.ErrAlreadyExists by errors.go::wrapPgErr. ErrNoRows is
 // surfaced as a nil result (not an error), matching the existing
-// in-memory and EntDB drivers.
+// in-memory driver.
 package postgres

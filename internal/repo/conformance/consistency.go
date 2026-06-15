@@ -11,7 +11,7 @@ import (
 // readYourWritesIterations is the per-entity loop count for the
 // read-your-writes subtests. The bug these target — a create whose
 // secondary index (unique-key or filter) has not caught up by the time
-// the very next read runs — is probabilistic: on entdb the IDV
+// the very next read runs — is probabilistic: on a remote graph backend the IDV
 // user_id filter missed ~50% of immediate reads, but a less-loaded
 // index might miss only occasionally. Looping makes a low per-iteration
 // miss rate p detectable: P(detect) = 1 - (1-p)^N, so N=50 catches even
@@ -25,16 +25,16 @@ const readYourWritesIterations = 50
 //
 // This is the generalization of the IDV read-after-write flake
 // (TestIDV_StubProvider_LatestForUser): sdkScope.create waits for
-// node-id visibility, but secondary indexes on entdb are applied
+// node-id visibility, but secondary indexes on a remote graph backend are applied
 // asynchronously, a beat behind. Any repo method that reads back a
 // just-written row through a secondary index can therefore race the
 // index apply. Each subtest creates a fresh row and immediately reads
 // it back through one secondary path, looped, so a backend that lets
 // the index lag fails loudly and attributably
-// (e.g. TestConformance/entdb/ReadYourWrites_OAuthIdentity_ByProviderID).
+// (e.g. TestConformance/postgres/ReadYourWrites_OAuthIdentity_ByProviderID).
 //
 // Memory and postgres are synchronous, so they pass on the first
-// iteration; the value is the cross-backend guard against entdb (and
+// iteration; the value is the cross-backend guard against a remote graph backend (and
 // any future driver) regressing read-your-writes.
 func runReadYourWritesConformance(t *testing.T, driver Driver) {
 	t.Helper()

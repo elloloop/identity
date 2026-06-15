@@ -1,8 +1,7 @@
 # Local development stack for the identity service.
 #
 # Brings up two services:
-#   - entdb     : tenant-shard graph database (gRPC on :50051), backed by
-#                 an in-process WAL (no Kafka / S3 needed). Data is held
+#   - postgres  : the primary datastore (Postgres on :5432). Data is held
 #                 in a named volume so it survives container restarts but
 #                 is wiped by `docker compose down -v`.
 #   - identity  : the identity service itself, built from this repo.
@@ -13,7 +12,7 @@
 #   curl http://localhost:8080/health
 #   curl http://localhost:8080/.well-known/jwks.json | jq .
 #   docker compose logs -f identity
-#   docker compose down -v        # stop and wipe the entdb volume
+#   docker compose down -v        # stop and wipe the postgres volume
 #
 # Notes:
 #   - SMTP is intentionally unset; the service falls back to the LogOnly
@@ -24,25 +23,6 @@
 #     served at /.well-known/jwks.json.
 
 services:
-  entdb:
-    # tenant-shard-db v1.12+ is a distroless image (no shell/python),
-    # so the healthcheck cannot exec python in-container. Identity
-    # `depends_on` is degraded to `service_started`; the service
-    # reconnects on demand if entdb isn't accepting RPCs yet.
-    image: ghcr.io/elloloop/tenant-shard-db:2.5.0
-    ports:
-      - "50051:50051"
-    volumes:
-      - entdb-data:/var/lib/entdb
-
-  # Alternate persistence driver. The identity service can run on
-  # Postgres instead of EntDB by setting:
-  #
-  #   GATEWAY_REPO_DRIVER=postgres
-  #   GATEWAY_POSTGRES_DSN=postgres://identity:identity@postgres:5432/identity?sslmode=disable
-  #
-  # Pending migrations are applied automatically on first connect when
-  # GATEWAY_POSTGRES_AUTO_MIGRATE=true (the default).
   postgres:
     image: postgres:16.13-alpine3.23
     environment:
@@ -64,10 +44,13 @@ services:
       context: .
       target: server
     depends_on:
-      entdb:
-        condition: service_started
+      postgres:
+        condition: service_healthy
     environment:
-      GATEWAY_ENTDB_ADDRESS: entdb:50051
+      GATEWAY_REPO_DRIVER: postgres
+      GATEWAY_POSTGRES_DSN: postgres://identity:identity@postgres:5432/identity?sslmode=disable
+      # Pending migrations are applied automatically on first connect.
+      GATEWAY_POSTGRES_AUTO_MIGRATE: "true"
       GATEWAY_DEFAULT_TENANT_ID: local
       GATEWAY_APP_BASE_URL: http://localhost:8080
       # SMTP_* intentionally unset — falls back to LogOnly transport.
@@ -78,5 +61,4 @@ services:
       - "9090:9090"
 
 volumes:
-  entdb-data:
   postgres-data:

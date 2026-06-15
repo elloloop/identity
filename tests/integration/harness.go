@@ -5,7 +5,7 @@
 // harness builds the same wiring used by cmd/identity/main.go via
 // internal/app, but lets each build-tagged StartServer choose the
 // backing store so the same test suite can run against memory,
-// Postgres, and EntDB.
+// and Postgres.
 package integration
 
 import (
@@ -21,7 +21,7 @@ import (
 	"connectrpc.com/connect"
 	"go.uber.org/zap"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
 	"github.com/elloloop/identity/internal/app"
@@ -566,8 +566,8 @@ func (h *Harness) updateNode(t *testing.T, typeID int, nodeID string, patch map[
 
 	// Use the tenant-admin actor so updates cross user boundaries
 	// without ACCESS_DENIED on v1.12+ — see queryNodeCount above.
-	_, err := h.DB.ExecuteAtomic(context.Background(), h.TenantID, "system:admin", []entdb.Operation{{
-		Type:   entdb.OpUpdateNode,
+	_, err := h.DB.ExecuteAtomic(context.Background(), h.TenantID, "system:admin", []graph.Operation{{
+		Type:   graph.OpUpdateNode,
 		TypeID: typeID,
 		NodeID: nodeID,
 		Patch:  patch,
@@ -2023,6 +2023,6 @@ func (r *MemRepo) CountSessionsForUser(userID string) (active, revoked int) {
 // compile-time interface assertion
 var _ service.Repository = (*MemRepo)(nil)
 
-// silence unused import when entdb is only referenced via the
+// silence unused import when graph is only referenced via the
 // service.DB stub; keep the import line stable for future replacement.
-var _ = (*entdb.Node)(nil)
+var _ = (*graph.Node)(nil)

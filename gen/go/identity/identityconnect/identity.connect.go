@@ -366,7 +366,7 @@ type IdentityServiceClient interface {
 	// on the caller being an owner/admin member of the target tenant — with
 	// one exception: VerifyDomain on a still-latent tenant that has no
 	// members yet is open, so the first verifier becomes its owner.
-	// Available only on the postgres control-plane driver; entdb/memory
+	// Available only on the postgres control-plane driver; the memory driver
 	// deployments return Unimplemented.
 	CreateDomain(context.Context, *connect.Request[identity.CreateDomainRequest]) (*connect.Response[identity.CreateDomainResponse], error)
 	VerifyDomain(context.Context, *connect.Request[identity.VerifyDomainRequest]) (*connect.Response[identity.VerifyDomainResponse], error)
@@ -376,7 +376,7 @@ type IdentityServiceClient interface {
 	// owner/admin member of the target tenant. AcceptTenantInvitation is the
 	// redeemer's own action: any authenticated caller may redeem a token, but
 	// only for an invitation addressed to their own account email. Available
-	// only on the postgres control-plane driver; entdb/memory deployments
+	// only on the postgres control-plane driver; memory deployments
 	// return Unimplemented.
 	CreateTenantInvitation(context.Context, *connect.Request[identity.CreateTenantInvitationRequest]) (*connect.Response[identity.CreateTenantInvitationResponse], error)
 	AcceptTenantInvitation(context.Context, *connect.Request[identity.AcceptTenantInvitationRequest]) (*connect.Response[identity.AcceptTenantInvitationResponse], error)
@@ -412,7 +412,7 @@ type IdentityServiceClient interface {
 	AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error)
 	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
 	// succeeds only while platform_admins is empty, then permanently closes
-	// (FAILED_PRECONDITION). Postgres-only; entdb/memory return UNIMPLEMENTED.
+	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *connect.Request[identity.CreateFirstPlatformAdminRequest]) (*connect.Response[identity.CreateFirstPlatformAdminResponse], error)
 }
 
@@ -1514,7 +1514,7 @@ type IdentityServiceHandler interface {
 	// on the caller being an owner/admin member of the target tenant — with
 	// one exception: VerifyDomain on a still-latent tenant that has no
 	// members yet is open, so the first verifier becomes its owner.
-	// Available only on the postgres control-plane driver; entdb/memory
+	// Available only on the postgres control-plane driver; the memory driver
 	// deployments return Unimplemented.
 	CreateDomain(context.Context, *connect.Request[identity.CreateDomainRequest]) (*connect.Response[identity.CreateDomainResponse], error)
 	VerifyDomain(context.Context, *connect.Request[identity.VerifyDomainRequest]) (*connect.Response[identity.VerifyDomainResponse], error)
@@ -1524,7 +1524,7 @@ type IdentityServiceHandler interface {
 	// owner/admin member of the target tenant. AcceptTenantInvitation is the
 	// redeemer's own action: any authenticated caller may redeem a token, but
 	// only for an invitation addressed to their own account email. Available
-	// only on the postgres control-plane driver; entdb/memory deployments
+	// only on the postgres control-plane driver; memory deployments
 	// return Unimplemented.
 	CreateTenantInvitation(context.Context, *connect.Request[identity.CreateTenantInvitationRequest]) (*connect.Response[identity.CreateTenantInvitationResponse], error)
 	AcceptTenantInvitation(context.Context, *connect.Request[identity.AcceptTenantInvitationRequest]) (*connect.Response[identity.AcceptTenantInvitationResponse], error)
@@ -1560,7 +1560,7 @@ type IdentityServiceHandler interface {
 	AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error)
 	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
 	// succeeds only while platform_admins is empty, then permanently closes
-	// (FAILED_PRECONDITION). Postgres-only; entdb/memory return UNIMPLEMENTED.
+	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *connect.Request[identity.CreateFirstPlatformAdminRequest]) (*connect.Response[identity.CreateFirstPlatformAdminResponse], error)
 }
 

@@ -28,7 +28,7 @@ import (
 // deployer who never sets GATEWAY_ADMIN_API_SECRET cannot have these RPCs
 // reached.
 //
-// Like the other governance services it is postgres-only: entdb/memory have
+// Like the other governance services it is postgres-only: memory have
 // no control plane, so the app constructs no ControlPlaneAdminService and the
 // handler returns Unimplemented.
 //
@@ -140,7 +140,7 @@ type ControlPlaneAdminService struct {
 	tenants     TenantStore
 	memberships MembershipStore
 	// admins backs the zero-config first-admin bootstrap. nil when this build
-	// has no control plane (entdb/memory), which makes CreateFirstPlatformAdmin
+	// has no control plane (memory), which makes CreateFirstPlatformAdmin
 	// return ErrUnimplemented.
 	admins PlatformAdminStore
 	// resolver is the DNS TXT-lookup boundary VerifyProjectAuthDomain uses to
@@ -571,7 +571,7 @@ type BootstrappedAdmin struct {
 // When password is blank the server generates a strong one and returns it
 // once in GeneratedPassword; when supplied it must satisfy the password
 // strength policy (else ErrWeakPassword → InvalidArgument). Only the bcrypt
-// hash is ever stored. When no control plane is wired (entdb/memory have no
+// hash is ever stored. When no control plane is wired (memory have no
 // platform_admins table) it returns ErrUnimplemented.
 func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context, email, password string) (*BootstrappedAdmin, error) {
 	if s.admins == nil {

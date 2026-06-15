@@ -6,28 +6,28 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 )
 
 // fakeDB is an in-memory implementation of the DB interface for tests
 // of AdminService, GroupService, HelpService, and ProfileService.
 type fakeDB struct {
 	mu    sync.Mutex
-	nodes map[string]*entdb.Node // nodeID -> node
-	edges []*entdb.Edge
+	nodes map[string]*graph.Node // nodeID -> node
+	edges []*graph.Edge
 	seq   int64
 	err   error // if set, all calls return this error
 
 	// lastEdgesFromActor / lastEdgesToActor record the actor passed to the
 	// most recent GetEdgesFrom / GetEdgesTo call, so tests can assert
 	// cross-user reads use tenantAdminActor (a per-user actor would silently
-	// return zero rows on real entdb).
+	// return zero rows on a graph backend).
 	lastEdgesFromActor string
 	lastEdgesToActor   string
 }
 
 func newFakeDB() *fakeDB {
-	return &fakeDB{nodes: make(map[string]*entdb.Node)}
+	return &fakeDB{nodes: make(map[string]*graph.Node)}
 }
 
 func (f *fakeDB) nextID() string {
@@ -35,7 +35,7 @@ func (f *fakeDB) nextID() string {
 	return fmt.Sprintf("fdb-node-%d", f.seq)
 }
 
-func (f *fakeDB) GetNode(_ context.Context, _, _ string, typeID int, nodeID string) (*entdb.Node, error) {
+func (f *fakeDB) GetNode(_ context.Context, _, _ string, typeID int, nodeID string) (*graph.Node, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
@@ -48,13 +48,13 @@ func (f *fakeDB) GetNode(_ context.Context, _, _ string, typeID int, nodeID stri
 	return n, nil
 }
 
-func (f *fakeDB) QueryNodes(_ context.Context, _, _ string, typeID int, filter map[string]any) ([]*entdb.Node, error) {
+func (f *fakeDB) QueryNodes(_ context.Context, _, _ string, typeID int, filter map[string]any) ([]*graph.Node, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}
-	var result []*entdb.Node
+	var result []*graph.Node
 	for _, n := range f.nodes {
 		if n.TypeID != typeID {
 			continue
@@ -82,7 +82,7 @@ func fakeMatchFilter(payload map[string]any, filter map[string]any) bool {
 	return true
 }
 
-func (f *fakeDB) ExecuteAtomic(_ context.Context, _, _ string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+func (f *fakeDB) ExecuteAtomic(_ context.Context, _, _ string, ops []graph.Operation) (*graph.CommitResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
@@ -91,31 +91,31 @@ func (f *fakeDB) ExecuteAtomic(_ context.Context, _, _ string, ops []entdb.Opera
 	var createdIDs []string
 	for _, op := range ops {
 		switch op.Type {
-		case entdb.OpCreateNode:
+		case graph.OpCreateNode:
 			id := f.nextID()
-			f.nodes[id] = &entdb.Node{
+			f.nodes[id] = &graph.Node{
 				NodeID:  id,
 				TypeID:  op.TypeID,
 				Payload: fdbCopyMap(op.Data),
 			}
 			createdIDs = append(createdIDs, id)
-		case entdb.OpUpdateNode:
+		case graph.OpUpdateNode:
 			n, ok := f.nodes[op.NodeID]
 			if ok && n.TypeID == op.TypeID {
 				for k, v := range op.Patch {
 					n.Payload[k] = v
 				}
 			}
-		case entdb.OpDeleteNode:
+		case graph.OpDeleteNode:
 			delete(f.nodes, op.NodeID)
-		case entdb.OpCreateEdge:
-			f.edges = append(f.edges, &entdb.Edge{
+		case graph.OpCreateEdge:
+			f.edges = append(f.edges, &graph.Edge{
 				EdgeTypeID: op.EdgeTypeID,
 				FromNodeID: op.FromNodeID,
 				ToNodeID:   op.ToNodeID,
 			})
-		case entdb.OpDeleteEdge:
-			var keep []*entdb.Edge
+		case graph.OpDeleteEdge:
+			var keep []*graph.Edge
 			for _, e := range f.edges {
 				if e.EdgeTypeID != op.EdgeTypeID || e.FromNodeID != op.FromNodeID || e.ToNodeID != op.ToNodeID {
 					keep = append(keep, e)
@@ -124,17 +124,17 @@ func (f *fakeDB) ExecuteAtomic(_ context.Context, _, _ string, ops []entdb.Opera
 			f.edges = keep
 		}
 	}
-	return &entdb.CommitResult{Success: true, Applied: true, CreatedNodeIDs: createdIDs}, nil
+	return &graph.CommitResult{Success: true, Applied: true, CreatedNodeIDs: createdIDs}, nil
 }
 
-func (f *fakeDB) GetEdgesFrom(_ context.Context, _, actor, fromNodeID string, edgeTypeID int) ([]*entdb.Edge, error) {
+func (f *fakeDB) GetEdgesFrom(_ context.Context, _, actor, fromNodeID string, edgeTypeID int) ([]*graph.Edge, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lastEdgesFromActor = actor
 	if f.err != nil {
 		return nil, f.err
 	}
-	var result []*entdb.Edge
+	var result []*graph.Edge
 	for _, e := range f.edges {
 		if e.EdgeTypeID == edgeTypeID && e.FromNodeID == fromNodeID {
 			result = append(result, e)
@@ -143,14 +143,14 @@ func (f *fakeDB) GetEdgesFrom(_ context.Context, _, actor, fromNodeID string, ed
 	return result, nil
 }
 
-func (f *fakeDB) GetEdgesTo(_ context.Context, _, actor, toNodeID string, edgeTypeID int) ([]*entdb.Edge, error) {
+func (f *fakeDB) GetEdgesTo(_ context.Context, _, actor, toNodeID string, edgeTypeID int) ([]*graph.Edge, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lastEdgesToActor = actor
 	if f.err != nil {
 		return nil, f.err
 	}
-	var result []*entdb.Edge
+	var result []*graph.Edge
 	for _, e := range f.edges {
 		if e.EdgeTypeID == edgeTypeID && e.ToNodeID == toNodeID {
 			result = append(result, e)
@@ -159,14 +159,14 @@ func (f *fakeDB) GetEdgesTo(_ context.Context, _, actor, toNodeID string, edgeTy
 	return result, nil
 }
 
-func (f *fakeDB) SearchNodes(_ context.Context, _, _ string, typeID int, query string) ([]*entdb.Node, error) {
+func (f *fakeDB) SearchNodes(_ context.Context, _, _ string, typeID int, query string) ([]*graph.Node, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}
 	q := strings.ToLower(query)
-	var result []*entdb.Node
+	var result []*graph.Node
 	for _, n := range f.nodes {
 		if n.TypeID != typeID {
 			continue
@@ -193,7 +193,7 @@ func (f *fakeDB) RegisterUserInTenant(_ context.Context, _, _, _, _, _ string) e
 func (f *fakeDB) addUser(id, email, name, role, status string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nodes[id] = &entdb.Node{
+	f.nodes[id] = &graph.Node{
 		NodeID: id,
 		TypeID: typeUser,
 		Payload: map[string]any{
@@ -208,7 +208,7 @@ func (f *fakeDB) addUser(id, email, name, role, status string) {
 func (f *fakeDB) addUserWithPassword(id, email, name, role, status, pwHash string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nodes[id] = &entdb.Node{
+	f.nodes[id] = &graph.Node{
 		NodeID: id,
 		TypeID: typeUser,
 		Payload: map[string]any{
@@ -224,7 +224,7 @@ func (f *fakeDB) addUserWithPassword(id, email, name, role, status, pwHash strin
 func (f *fakeDB) addHelpRequest(id, email, status string, createdAt int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nodes[id] = &entdb.Node{
+	f.nodes[id] = &graph.Node{
 		NodeID: id,
 		TypeID: typeAdminHelpReq,
 		Payload: map[string]any{
@@ -238,7 +238,7 @@ func (f *fakeDB) addHelpRequest(id, email, status string, createdAt int64) {
 func (f *fakeDB) addRefreshToken(id, userID string, expiresAt int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nodes[id] = &entdb.Node{
+	f.nodes[id] = &graph.Node{
 		NodeID: id,
 		TypeID: typeRefreshToken,
 		Payload: map[string]any{
@@ -252,7 +252,7 @@ func (f *fakeDB) addRefreshToken(id, userID string, expiresAt int64) {
 func (f *fakeDB) addPasskey(id, userID, credentialID, deviceName string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nodes[id] = &entdb.Node{
+	f.nodes[id] = &graph.Node{
 		NodeID: id,
 		TypeID: typePasskeyCredCred,
 		Payload: map[string]any{
@@ -266,7 +266,7 @@ func (f *fakeDB) addPasskey(id, userID, credentialID, deviceName string) {
 func (f *fakeDB) addGroup(id, name, description string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nodes[id] = &entdb.Node{
+	f.nodes[id] = &graph.Node{
 		NodeID: id,
 		TypeID: typeWorkingGroup,
 		Payload: map[string]any{

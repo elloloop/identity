@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/internal/repo/conformance"
 	"github.com/elloloop/identity/internal/service"
@@ -257,9 +257,9 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	qrID := "db-qr-1"
 	createdAt := int64(1_700_000_000_000)
 
-	result, err := repo.ExecuteAtomic(ctx, projectID, "actor", []sdk.Operation{
+	result, err := repo.ExecuteAtomic(ctx, projectID, "actor", []graph.Operation{
 		{
-			Type:   sdk.OpCreateNode,
+			Type:   graph.OpCreateNode,
 			TypeID: dbTypeUser,
 			NodeID: userID,
 			Data: map[string]any{
@@ -285,7 +285,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 			},
 		},
 		{
-			Type:   sdk.OpCreateNode,
+			Type:   graph.OpCreateNode,
 			TypeID: dbTypeWorkingGroup,
 			NodeID: groupID,
 			Data: map[string]any{
@@ -297,7 +297,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 			},
 		},
 		{
-			Type:   sdk.OpCreateNode,
+			Type:   graph.OpCreateNode,
 			TypeID: dbTypePasswordReset,
 			NodeID: "db-reset-1",
 			Data: map[string]any{
@@ -308,7 +308,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 			},
 		},
 		{
-			Type:   sdk.OpCreateNode,
+			Type:   graph.OpCreateNode,
 			TypeID: dbTypeInvitation,
 			NodeID: "db-invitation-1",
 			Data: map[string]any{
@@ -323,7 +323,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 			},
 		},
 		{
-			Type:   sdk.OpCreateNode,
+			Type:   graph.OpCreateNode,
 			TypeID: dbTypeAuditEvent,
 			NodeID: "db-audit-1",
 			Data: map[string]any{
@@ -338,7 +338,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 			},
 		},
 		{
-			Type:   sdk.OpCreateNode,
+			Type:   graph.OpCreateNode,
 			TypeID: dbTypeAdminHelpReq,
 			NodeID: "db-help-1",
 			Data: map[string]any{
@@ -352,7 +352,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 			},
 		},
 		{
-			Type:       sdk.OpCreateEdge,
+			Type:       graph.OpCreateEdge,
 			EdgeTypeID: dbEdgeMemberOf,
 			FromNodeID: userID,
 			ToNodeID:   groupID,
@@ -444,12 +444,12 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, otherEdges)
 
-	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []sdk.Operation{
-		{Type: sdk.OpUpdateNode, TypeID: dbTypeUser, NodeID: userID, Patch: map[string]any{dbUfName: "DB User Updated", dbUfQuotaBytes: int64(2048)}},
-		{Type: sdk.OpUpdateNode, TypeID: dbTypeWorkingGroup, NodeID: groupID, Patch: map[string]any{dbGfDescription: "Updated description"}},
-		{Type: sdk.OpUpdateNode, TypeID: dbTypeAdminHelpReq, NodeID: "db-help-1", Patch: map[string]any{dbHfStatus: "resolved", dbHfResolvedBy: userID, dbHfResolvedAt: createdAt + 4000}},
-		{Type: sdk.OpUpdateNode, TypeID: dbTypePasskey, NodeID: passkeyID, Patch: map[string]any{dbPkfDeviceName: "renamed key", dbPkfLastUsedAt: createdAt + 5000, "4": int64(2)}},
-		{Type: sdk.OpUpdateNode, TypeID: dbTypeQrLoginSession, NodeID: qrID, Patch: map[string]any{"2": "approved", "3": userID, "7": "approved device", "8": createdAt + 6000, "10": createdAt + 7000}},
+	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []graph.Operation{
+		{Type: graph.OpUpdateNode, TypeID: dbTypeUser, NodeID: userID, Patch: map[string]any{dbUfName: "DB User Updated", dbUfQuotaBytes: int64(2048)}},
+		{Type: graph.OpUpdateNode, TypeID: dbTypeWorkingGroup, NodeID: groupID, Patch: map[string]any{dbGfDescription: "Updated description"}},
+		{Type: graph.OpUpdateNode, TypeID: dbTypeAdminHelpReq, NodeID: "db-help-1", Patch: map[string]any{dbHfStatus: "resolved", dbHfResolvedBy: userID, dbHfResolvedAt: createdAt + 4000}},
+		{Type: graph.OpUpdateNode, TypeID: dbTypePasskey, NodeID: passkeyID, Patch: map[string]any{dbPkfDeviceName: "renamed key", dbPkfLastUsedAt: createdAt + 5000, "4": int64(2)}},
+		{Type: graph.OpUpdateNode, TypeID: dbTypeQrLoginSession, NodeID: qrID, Patch: map[string]any{"2": "approved", "3": userID, "7": "approved device", "8": createdAt + 6000, "10": createdAt + 7000}},
 	})
 	require.NoError(t, err)
 	updatedUser, err := repo.GetUser(ctx, userID)
@@ -457,11 +457,11 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	require.Equal(t, "DB User Updated", updatedUser.Name)
 	require.EqualValues(t, 2048, updatedUser.QuotaBytes)
 
-	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []sdk.Operation{
-		{Type: sdk.OpDeleteEdge, EdgeTypeID: dbEdgeMemberOf, FromNodeID: userID, ToNodeID: groupID},
-		{Type: sdk.OpDeleteNode, TypeID: dbTypePasskey, NodeID: passkeyID},
-		{Type: sdk.OpDeleteNode, TypeID: dbTypeRefreshToken, NodeID: refreshID},
-		{Type: sdk.OpDeleteNode, TypeID: dbTypeWorkingGroup, NodeID: groupID},
+	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []graph.Operation{
+		{Type: graph.OpDeleteEdge, EdgeTypeID: dbEdgeMemberOf, FromNodeID: userID, ToNodeID: groupID},
+		{Type: graph.OpDeleteNode, TypeID: dbTypePasskey, NodeID: passkeyID},
+		{Type: graph.OpDeleteNode, TypeID: dbTypeRefreshToken, NodeID: refreshID},
+		{Type: graph.OpDeleteNode, TypeID: dbTypeWorkingGroup, NodeID: groupID},
 	})
 	require.NoError(t, err)
 	edgesAfterDelete, err := repo.GetEdgesFrom(ctx, projectID, "actor", userID, dbEdgeMemberOf)
@@ -474,7 +474,7 @@ func TestPostgres_DBAtomicQueriesAndEdges(t *testing.T) {
 	require.Error(t, err)
 	_, err = repo.SearchNodes(ctx, projectID, "actor", 999, "anything")
 	require.Error(t, err)
-	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []sdk.Operation{{Type: sdk.OpCreateNode, TypeID: 999}})
+	_, err = repo.ExecuteAtomic(ctx, projectID, "actor", []graph.Operation{{Type: graph.OpCreateNode, TypeID: 999}})
 	require.Error(t, err)
 }
 

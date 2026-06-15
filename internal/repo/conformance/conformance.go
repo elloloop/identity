@@ -1,8 +1,8 @@
 // Package conformance is a driver-agnostic test suite for
 // service.Repository implementations.
 //
-// The aim is to give every Repository driver — entdb, postgres,
-// memory — a single source of truth for "does this driver honour the
+// The aim is to give every Repository driver — postgres, memory —
+// a single source of truth for "does this driver honour the
 // contract the service layer relies on?". A new driver runs:
 //
 //	conformance.RunConformance(t, conformance.Driver{
@@ -25,12 +25,12 @@
 // The suite is backend-agnostic: every subtest that touches a
 // user-scoped row creates its User via CreateUser first. Drivers that
 // enforce foreign-key constraints (Postgres) pass without any test-
-// seam shim, and drivers that don't enforce FKs (memory, EntDB) still
+// seam shim, and drivers that don't enforce FKs (memory) still
 // exercise the same code path.
 //
 // Sweeper subtests (DeleteExpired*) accept either a real deletion or
 // service.ErrSweepNotImplemented. Every backend currently in tree
-// (memory, postgres, entdb) implements the real sweep; the exemption
+// (memory, postgres) implements the real sweep; the exemption
 // is retained so a new backend can land its CRUD methods first and
 // the sweep in a follow-up PR without failing the conformance suite
 // (Rule 6 — split along feature boundaries). A driver that returns a
@@ -45,29 +45,9 @@
 // fan-out). These target cross-backend bug classes the happy-path CRUD
 // subtests don't reach.
 //
-// As of this writing the entdb driver FAILS three extended groups and
-// the failures are INTENTIONAL — each is the isolated repro of a
-// tenant-shard-db bug being fixed upstream, kept red as the tracking
-// signal (do not skip them):
-//   - RoundTrip/Int64_Fidelity: payloads marshal through structpb, so
-//     int64 values above 2^53 lose precision (float64 coercion).
-//   - Pagination/*: QueryNodes caps at ~100 rows with no cursor, so
-//     un-paginated List* reads truncate.
-//   - FreshTenant/*: a query before the tenant's first write returns a
-//     sanitized Internal error instead of an empty result.
-//   - Concurrency/ConcurrentDuplicate_OAuthIdentity_SingleRow: entdb has
-//     no composite unique constraint, so the non-atomic query-then-
-//     create guard lets concurrent (provider,sub) creates all win.
-//   - Concurrency/ConcurrentIncrement_NoLostUpdates: read-modify-write
-//     IncrementFailedLoginCount plus a value-specific visibility wait
-//     errors out / loses updates under concurrent increments.
-//   - UpdateToZeroValue/Bool_TotpVerified_TrueThenFalse: the typed
-//     update patch omits proto3 zero values, so "set false/0/”" no-ops
-//     (an identity-side gap — the raw field-id update path used by
-//     UpdateUser does not have it).
-//
-// Memory and postgres pass every group; they are the differential
-// reference for "correct".
+// Both in-tree drivers — memory and postgres — pass every group; they
+// are the differential reference for "correct". A new driver is held to
+// the same bar.
 package conformance
 
 import (
@@ -85,7 +65,7 @@ import (
 type Driver struct {
 	// Name appears in every subtest path emitted by the suite, e.g.
 	// `TestConformance/postgres/UserCRUD`. Use the same names CI
-	// surfaces as check names — `memory`, `postgres`, `entdb`.
+	// surfaces as check names — `memory`, `postgres`.
 	Name string
 
 	// NewRepo returns a freshly-constructed Repository with empty
@@ -100,7 +80,7 @@ type Driver struct {
 	// store rather than two independently-constructed repos. Drivers whose
 	// data-plane FK requires the project row to exist first (postgres) seed
 	// it here before returning base.WithProject(projectID); drivers without a
-	// control plane (memory, entdb) just return base.WithProject(projectID).
+	// control plane (memory) just return base.WithProject(projectID).
 	// When nil, the cross-project isolation subtest skips for this driver.
 	BindProject func(t *testing.T, base service.Repository, projectID string) service.Repository
 }
@@ -1774,8 +1754,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			// user_id-indexed on every driver (#168) and so must be drained
 			// eagerly rather than left to the TTL sweepers. Invitations are
 			// the one user-keyed ephemeral not seeded here — Repository
-			// exposes no create method for them (they are written via the
-			// entdb graph) — but they remain in the entdb drain list. The
+			// exposes no create method for them (they are written through the
+			// service-layer graph operations) — but they remain in the drain
+			// list. The
 			// email-keyed login codes / magic-link tokens carry no user_id
 			// and are left to the sweepers by design.
 			if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{TokenHash: "del-rt", UserID: uid, ExpiresAt: 9_000_000_000_000}); err != nil {
@@ -1934,8 +1915,8 @@ func RunConformance(t *testing.T, driver Driver) {
 	// ── Sweeper subtests ────────────────────────────────────────────
 	// Drivers that signal service.ErrSweepNotImplemented from a
 	// DeleteExpired* method are exempted from the deletion assertions
-	// (see runSweepCase). Every backend in tree (memory, postgres,
-	// entdb) currently implements the real sweep, so the skip branch
+	// (see runSweepCase). Every backend in tree (memory, postgres)
+	// currently implements the real sweep, so the skip branch
 	// is unused — the exemption remains for any future backend that
 	// lands its CRUD methods ahead of its sweep.
 
@@ -2149,8 +2130,9 @@ func RunConformance(t *testing.T, driver Driver) {
 	})
 
 	// DeleteExpiredInvitations is not exercised here: Repository exposes no
-	// invitation create method to seed one (invitations are written via the
-	// entdb graph). The entdb driver's sweeper unit test covers it directly.
+	// invitation create method to seed one (invitations are written through the
+	// service-layer graph operations). The postgres driver's sweeper unit test
+	// covers it directly.
 
 	t.Run("DeleteExpired_RejectsNonPositiveLimit", func(t *testing.T) {
 		// A non-positive limit could leave the underlying delete
@@ -2188,7 +2170,7 @@ func RunConformance(t *testing.T, driver Driver) {
 
 	// Extended suites: read-your-writes visibility, pagination/limit
 	// correctness, fresh-tenant query handling, and value round-trip.
-	// These target the cross-backend bug classes (entdb secondary-index
+	// These target the cross-backend bug classes (secondary-index
 	// lag, query caps, unopened-tenant errors) the per-method CRUD
 	// subtests above don't stress.
 	runReadYourWritesConformance(t, driver)

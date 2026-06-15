@@ -2,7 +2,7 @@
 //
 // These stubs return ErrServiceUnavailable for every operation. They
 // exist so the identity service binary can start and serve health
-// checks / JWKS even when the EntDB persistence adapter has not yet
+// checks / JWKS even when the persistence adapter has not yet
 // been wired up. Any RPC that touches persistence will receive a
 // clean "service unavailable" error instead of a nil-pointer panic.
 package service
@@ -11,7 +11,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 )
 
 // ErrServiceUnavailable is returned by stub implementations.
@@ -20,7 +20,7 @@ var ErrServiceUnavailable = errors.New("identity: persistence layer not configur
 // ── StubRepository ────────────────────────────────────────────────────
 
 // StubRepository implements Repository but returns ErrServiceUnavailable
-// for every method. Use it as a placeholder until the EntDB-backed
+// for every method. Use it as a placeholder until the real
 // repository is implemented.
 type StubRepository struct{}
 
@@ -378,27 +378,27 @@ type StubDB struct{}
 
 var _ DB = (*StubDB)(nil)
 
-func (StubDB) GetNode(context.Context, string, string, int, string) (*entdb.Node, error) {
+func (StubDB) GetNode(context.Context, string, string, int, string) (*graph.Node, error) {
 	return nil, ErrServiceUnavailable
 }
 
-func (StubDB) QueryNodes(context.Context, string, string, int, map[string]any) ([]*entdb.Node, error) {
+func (StubDB) QueryNodes(context.Context, string, string, int, map[string]any) ([]*graph.Node, error) {
 	return nil, ErrServiceUnavailable
 }
 
-func (StubDB) ExecuteAtomic(context.Context, string, string, []entdb.Operation) (*entdb.CommitResult, error) {
+func (StubDB) ExecuteAtomic(context.Context, string, string, []graph.Operation) (*graph.CommitResult, error) {
 	return nil, ErrServiceUnavailable
 }
 
-func (StubDB) GetEdgesFrom(context.Context, string, string, string, int) ([]*entdb.Edge, error) {
+func (StubDB) GetEdgesFrom(context.Context, string, string, string, int) ([]*graph.Edge, error) {
 	return nil, ErrServiceUnavailable
 }
 
-func (StubDB) GetEdgesTo(context.Context, string, string, string, int) ([]*entdb.Edge, error) {
+func (StubDB) GetEdgesTo(context.Context, string, string, string, int) ([]*graph.Edge, error) {
 	return nil, ErrServiceUnavailable
 }
 
-func (StubDB) SearchNodes(context.Context, string, string, int, string) ([]*entdb.Node, error) {
+func (StubDB) SearchNodes(context.Context, string, string, int, string) ([]*graph.Node, error) {
 	return nil, ErrServiceUnavailable
 }
 
