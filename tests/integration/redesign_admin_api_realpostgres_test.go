@@ -181,11 +181,22 @@ func TestRedesign_ControlPlaneAdmin_CustomAuthDomainFlow(t *testing.T) {
 
 	host := fmt.Sprintf("custom-%d.customer.test", unique)
 
-	// 1. Register the custom domain — unverified, with a TXT challenge.
-	addResp, err := admin.AddProjectAuthDomain(ctx, connect.NewRequest(&identitypb.AddProjectAuthDomainRequest{
+	// 0. The customer RPC rejects is_primary=true: promoting a custom
+	// auth-domain to primary is not yet supported, so it is the documented
+	// InvalidArgument contract rather than a silent half-built path.
+	if _, err := admin.AddProjectAuthDomain(ctx, connect.NewRequest(&identitypb.AddProjectAuthDomainRequest{
 		ProjectId: projectID,
 		Hostname:  host,
 		IsPrimary: true,
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("AddProjectAuthDomain(is_primary=true): code = %v, want InvalidArgument", connect.CodeOf(err))
+	}
+
+	// 1. Register the custom domain non-primary — unverified, with a TXT challenge.
+	addResp, err := admin.AddProjectAuthDomain(ctx, connect.NewRequest(&identitypb.AddProjectAuthDomainRequest{
+		ProjectId: projectID,
+		Hostname:  host,
+		IsPrimary: false,
 	}))
 	if err != nil {
 		t.Fatalf("AddProjectAuthDomain: %v", err)
