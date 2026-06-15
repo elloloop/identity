@@ -3,11 +3,21 @@
 // Package e2e drives the identity service over its public HTTP/JSON
 // Connect-RPC wire format — what a downstream JS or Python client sees.
 // Tests boot the same handler chain cmd/identity/main.go serves (via
-// internal/app + a real EntDB backend) on an in-process httptest server,
+// internal/app + a real repo backend) on an in-process httptest server,
 // then exercise it with a plain *http.Client + encoding/json. There is
 // no import of the Connect-Go client codegen, deliberately — that's
 // what distinguishes these tests from tests/integration: the surface
 // here is HTTP-only, exactly what a third-party client speaks.
+//
+// The backend is selected by the GATEWAY_E2E_BACKEND env var:
+//
+//   - "postgres" (default) boots a throwaway postgres:16.13-alpine3.23
+//     testcontainer, auto-migrates it, and seeds the default project. This
+//     is the authoritative CI gate: the postgres driver implements the
+//     graph-DB read path (service.DB QueryNodes/GetNode) so admin/group/
+//     session/help/audit listing tests RUN here.
+//   - "memory" boots the in-process memory driver — no Docker, fast smoke
+//     signal. The graph-DB-only tests self-skip on it (see requireGraphDB).
 //
 // Each test owns its own httptest server (the identity handler is
 // cheap to construct) and uses a per-test tenant id, so cases never
@@ -29,21 +39,42 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo"
-	"github.com/elloloop/identity/internal/repo/entdb/entclient"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
 	"github.com/elloloop/identity/pkg/passwords"
 )
+
+// backendEnv selects the repo backend the harness boots. Postgres is the
+// authoritative gate (implements the graph-DB read path); memory is the fast
+// no-Docker smoke. Unset defaults to postgres.
+const (
+	backendEnv      = "GATEWAY_E2E_BACKEND"
+	backendPostgres = "postgres"
+	backendMemory   = "memory"
+)
+
+// e2eBackend resolves the configured backend, defaulting to postgres.
+func e2eBackend() string {
+	if b := os.Getenv(backendEnv); b != "" {
+		return b
+	}
+	return backendPostgres
+}
+
+// sharedPostgresDSN is the sslmode=disable DSN of the single postgres
+// testcontainer booted once per package run by TestMain. The suite has 55+
+// top-level tests, most running t.Parallel(); a container-per-test would spin
+// up dozens of postgres instances at once and exhaust the runner (manifesting
+// as flaky container startup). Instead one container is shared and each test
+// gets an isolated project partition (unique DefaultProjectID via WithProject),
+// which is how the postgres driver scopes data-plane storage.
+var sharedPostgresDSN string
 
 // Harness is the bag of resources returned by StartServer. Tests do
 // `POST <BaseURL>/identity.IdentityService/<Method>` with a JSON body
@@ -101,25 +132,75 @@ func (m *RecordingMailer) FindContaining(needle string) *email.Message {
 	return nil
 }
 
-// StartServer boots identity with real-backend defaults sufficient for
-// black-box HTTP testing. The server is torn down via t.Cleanup so a
-// test never leaks resources between cases.
-func StartServer(t *testing.T) *Harness {
+// buildBackend builds the repo for the configured backend. For postgres it
+// boots a testcontainer, auto-migrates, and seeds the projects(id) FK row the
+// data-plane writes require. For memory it builds the in-process driver. The
+// returned *repo.Built has a project-scopeable Repository in both cases.
+func buildBackend(t *testing.T, cfg *config.Config) *repo.Built {
 	t.Helper()
 
-	addr := os.Getenv("GATEWAY_ENTDB_ADDRESS")
-	if addr == "" {
-		addr = "localhost:50051"
+	switch backend := e2eBackend(); backend {
+	case backendMemory:
+		built, err := repo.Build(context.Background(), repo.Config{
+			Driver: repo.DriverMemory,
+		}, zap.NewNop())
+		if err != nil {
+			t.Fatalf("repo.Build memory: %v", err)
+		}
+		return built
+
+	case backendPostgres:
+		if sharedPostgresDSN == "" {
+			t.Fatalf("shared postgres DSN unset — TestMain did not boot a container")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+
+		// TestMain already migrated the shared schema; per-test builders just
+		// connect to it (no AutoMigrate, so parallel tests never race the DDL).
+		built, err := repo.Build(ctx, repo.Config{
+			Driver:              repo.DriverPostgres,
+			PostgresDSN:         sharedPostgresDSN,
+			PostgresMaxConns:    5,
+			PostgresAutoMigrate: false,
+			ProjectID:           cfg.DefaultProjectID,
+		}, zap.NewNop())
+		if err != nil {
+			t.Fatalf("repo.Build postgres: %v", err)
+		}
+		if closer, ok := built.Repository.(interface{ Close() }); ok {
+			t.Cleanup(closer.Close)
+		}
+		// Each test owns an isolated project partition; seed its projects(id)
+		// row so the project_id FK chain accepts data-plane writes.
+		if _, err := built.ProjectStore.EnsureDefaultProject(
+			ctx, cfg.DefaultProjectID, cfg.DefaultTenantID, "e2e",
+		); err != nil {
+			t.Fatalf("EnsureDefaultProject: %v", err)
+		}
+		return built
+
+	default:
+		t.Fatalf("unknown %s=%q (want %q or %q)", backendEnv, backend, backendPostgres, backendMemory)
+		return nil
 	}
+}
+
+// StartServer boots identity on the configured repo backend (GATEWAY_E2E_BACKEND:
+// "postgres" default, "memory" smoke) with defaults sufficient for black-box
+// HTTP testing. The server is torn down via t.Cleanup so a test never leaks
+// resources between cases.
+func StartServer(t *testing.T) *Harness {
+	t.Helper()
 
 	tenantID := fmt.Sprintf("e2e-%d", time.Now().UnixNano())
 
 	cfg := &config.Config{
 		DefaultTenantID: tenantID,
-		// The data-plane binds to the project (ADR-0002); the entdb partition
-		// is provisioned under tenantID, so the boot-default project must
-		// resolve to it — otherwise the service layer reads/writes the
-		// unprovisioned "default" partition (entdb NOT_FOUND).
+		// The data-plane binds to the project (ADR-0002). Both backends accept
+		// this id; we point the default project at the same id as the tenant so
+		// the service layer reads/writes a single consistent store (postgres
+		// seeds the projects(id) FK row below; memory tolerates any id).
 		DefaultProjectID:              tenantID,
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
@@ -148,24 +229,24 @@ func StartServer(t *testing.T) *Harness {
 		OAuthAllowedReturnURLs:        "http://localhost",
 	}
 
-	client, err := entclient.New(addr)
-	if err != nil {
-		t.Fatalf("entdb.NewClient: %v", err)
-	}
-	if err := client.Connect(context.Background()); err != nil {
-		t.Fatalf("entdb connect: %v", err)
-	}
-	t.Cleanup(func() { _ = client.Close() })
+	builtRepo := buildBackend(t, cfg)
 
-	ensureRealEntDBTenant(t, client, tenantID)
-
-	builtRepo, err := repo.Build(context.Background(), repo.Config{
-		Driver:      repo.DriverEntDB,
-		EntDBClient: client,
-		ProjectID:   tenantID,
-	}, zap.NewNop())
-	if err != nil {
-		t.Fatalf("repo.Build: %v", err)
+	// The project-resolution middleware binds every request to
+	// cfg.DefaultProjectID (no resolver → default-project pin), so the
+	// service layer reads/writes the tenantID partition. Bind the harness's
+	// direct-access Repo/DB to that SAME partition so SeedUser and other test
+	// helpers land where the RPC handlers look — otherwise they'd write the
+	// boot-default ("") sibling and requests would never see the seeded rows.
+	scopedRepo, ok := builtRepo.Repository.(interface {
+		WithProject(string) service.Repository
+	})
+	if !ok {
+		t.Fatalf("repo does not implement WithProject")
+	}
+	harnessRepo := scopedRepo.WithProject(tenantID)
+	harnessDB, ok := harnessRepo.(service.DB)
+	if !ok {
+		t.Fatalf("scoped repo does not implement service.DB")
 	}
 
 	mailer := &RecordingMailer{}
@@ -186,6 +267,7 @@ func StartServer(t *testing.T) *Harness {
 		Signer:             signer,
 		Repo:               builtRepo.Repository,
 		DB:                 builtRepo.DB,
+		ProjectResolver:    builtRepo.ProjectResolver(),
 		Passkeys:           pkSvc,
 		TOTPKey:            []byte("01234567890123456789012345678901"),
 		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
@@ -206,31 +288,27 @@ func StartServer(t *testing.T) *Harness {
 		TenantID: tenantID,
 		Server:   srv,
 		Mailer:   mailer,
-		Repo:     builtRepo.Repository,
-		DB:       builtRepo.DB,
+		Repo:     harnessRepo,
+		DB:       harnessDB,
 	}
 }
 
-// ensureRealEntDBTenant registers a tenant in the global registry
-func ensureRealEntDBTenant(t *testing.T, client *sdk.DbClient, tenantID string) {
+// requireGraphDB guards a test that exercises a service path implemented via
+// the graph-DB read path (service.DB: QueryNodes / GetNode by node type): admin
+// user CRUD/invite, group CRUD/membership, help-request listing, audit-log
+// querying, and session listing/sign-out-everywhere.
+//
+// The postgres backend (the authoritative gate) implements those, so these
+// tests RUN there. The in-memory backend deliberately returns
+// ErrServiceUnavailable for graph operations (internal/repo/memory/repo.go), so
+// on the memory smoke they self-skip with a clear reason. The Repository-backed
+// flows (password, passwordless OTP + magic-link, TOTP/2FA, QR-login, email
+// verify/reset/change, refresh/revoke) need no graph DB and run on both.
+func requireGraphDB(t *testing.T) {
 	t.Helper()
-	ctx := context.Background()
-
-	admin := client.Admin()
-	if _, err := admin.CreateTenant(ctx, "system:admin", tenantID, tenantID); err != nil && !realEntDBIsAlreadyExists(err) {
-		t.Fatalf("admin.CreateTenant(%q): %v", tenantID, err)
+	if e2eBackend() == backendMemory {
+		t.Skip("graph-DB node queries (service.DB) are unimplemented on the memory smoke backend; this case runs on the postgres gate")
 	}
-}
-
-func realEntDBIsAlreadyExists(err error) bool {
-	if err == nil {
-		return false
-	}
-	if st, ok := status.FromError(err); ok {
-		return st.Code() == codes.AlreadyExists
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "ALREADY_EXISTS") || strings.Contains(msg, "already exists")
 }
 
 // rpcCall posts an RPC request and decodes the JSON response. If the

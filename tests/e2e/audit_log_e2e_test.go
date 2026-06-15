@@ -11,6 +11,7 @@ import (
 // TestE2E_AuditLog_AuthorizationAndQuerying verifies that only admins can query
 // the audit log, and that it successfully records and lists audit events.
 func TestE2E_AuditLog_AuthorizationAndQuerying(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 

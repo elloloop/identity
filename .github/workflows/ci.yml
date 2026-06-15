@@ -335,6 +335,57 @@ jobs:
         run: go test -race -timeout=300s -skip='^TestConformance$' ./internal/repo/postgres/...
 
   # ---------------------------------------------------------------------------
+  # 5d. End-to-end black-box suite — HTTP/JSON over a real server. This is the
+  # authoritative e2e gate: it runs on the POSTGRES backend (a throwaway
+  # postgres:16.13-alpine3.23 testcontainer the harness boots via Docker on the
+  # ubuntu runner), so the graph-DB read path (service.DB QueryNodes/GetNode)
+  # is exercised — admin user CRUD/invite, groups, help, audit querying, and
+  # session listing RUN here, not just the Repository-backed flows (password
+  # signup/login/lockout, passwordless OTP + magic-link, TOTP/2FA, QR login,
+  # refresh/revoke, email verify/reset/change, profile, canonicalization +
+  # hardening, JWKS/CORS/health).
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: E2E (black-box HTTP, postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: go test -tags=e2e (postgres testcontainer)
+        env:
+          GATEWAY_E2E_BACKEND: postgres
+        run: go test -tags=e2e -count=1 -timeout=600s ./tests/e2e/...
+
+  # ---------------------------------------------------------------------------
+  # 5e. E2E smoke — the same black-box suite on the in-memory backend. No Docker,
+  # no external services, so it gives fast signal on every PR. The graph-DB-only
+  # paths self-skip on memory (the postgres e2e gate above covers them); this
+  # job is supplementary signal, the postgres gate is authoritative.
+  # ---------------------------------------------------------------------------
+  e2e-smoke:
+    name: E2E smoke (black-box HTTP, memory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: go test -tags=e2e (memory)
+        env:
+          GATEWAY_E2E_BACKEND: memory
+        run: go test -tags=e2e -count=1 -timeout=600s ./tests/e2e/...
+
+  # ---------------------------------------------------------------------------
   # 6. Fuzz smoke — replay the seed corpus on every PR.
   # ---------------------------------------------------------------------------
   # Per-PR fuzzing replays the committed seed corpus deterministically: every
@@ -433,7 +484,7 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    needs: [lint, tidy, vuln, test, smoke, integration, realentdb, realpostgres, fuzz, docker]
+    needs: [lint, tidy, vuln, test, smoke, integration, realentdb, realpostgres, e2e, e2e-smoke, fuzz, docker]
     if: always()
     steps:
       - name: All required jobs succeeded

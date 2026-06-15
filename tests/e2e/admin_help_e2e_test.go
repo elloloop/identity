@@ -10,6 +10,7 @@ import (
 
 // TestE2E_AdminHelpFlow drives the admin help request creation, listing, and resolution.
 func TestE2E_AdminHelpFlow(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 

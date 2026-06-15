@@ -8,6 +8,7 @@ import (
 )
 
 func TestE2E_Group_CRUDRoundTrip(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 
@@ -94,6 +95,7 @@ func TestE2E_Group_CRUDRoundTrip(t *testing.T) {
 }
 
 func TestE2E_Group_MemberRoundTrip(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 
@@ -165,6 +167,12 @@ func TestE2E_Group_MemberRoundTrip(t *testing.T) {
 
 func TestE2E_Group_NonAdminDenied(t *testing.T) {
 	t.Parallel()
+	// The admin setup (CreateGroup) and the non-admin write attempts both run
+	// through the graph-DB-backed group service. On the memory smoke backend
+	// CreateGroup returns ErrServiceUnavailable, so the denial would be observed
+	// for the wrong reason; require the graph backend to exercise the real
+	// authorization path.
+	requireGraphDB(t)
 	h := StartServer(t)
 
 	// 1. Seed admin and create group

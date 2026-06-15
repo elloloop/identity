@@ -10,6 +10,7 @@ import (
 
 // TestE2E_Admin_InviteAcceptLogin drives user invitation, acceptance, and login.
 func TestE2E_Admin_InviteAcceptLogin(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 
@@ -103,6 +104,7 @@ func TestE2E_Admin_InviteAcceptLogin(t *testing.T) {
 
 // TestE2E_Admin_UserCRUD drives standard admin User CRUD flows.
 func TestE2E_Admin_UserCRUD(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 

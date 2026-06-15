@@ -59,6 +59,11 @@ func TestE2E_AccessToken_ExpiryShape(t *testing.T) {
 // against a fabricated session id returns a non-200 response.
 func TestE2E_RevokeSession_RejectsUnknownID(t *testing.T) {
 	t.Parallel()
+	// RevokeSession looks the session up via the graph-DB read path
+	// (service.DB GetNode). On the memory smoke backend that returns
+	// ErrServiceUnavailable, so the rejection would be observed for the wrong
+	// reason rather than "session not found"; require the graph backend.
+	requireGraphDB(t)
 	h := StartServer(t)
 	at, _, _ := h.Signup(t, "revsess@example.com", goodPassword)
 
@@ -72,6 +77,7 @@ func TestE2E_RevokeSession_RejectsUnknownID(t *testing.T) {
 
 // TestE2E_Session_HappyFlow exercises session listing and individual / bulk revocation.
 func TestE2E_Session_HappyFlow(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 	email := "sess-happy@example.com"
@@ -131,6 +137,7 @@ func TestE2E_Session_HappyFlow(t *testing.T) {
 
 // TestE2E_Session_SignOutEverywhere verifies SignOutEverywhere endpoint.
 func TestE2E_Session_SignOutEverywhere(t *testing.T) {
+	requireGraphDB(t)
 	t.Parallel()
 	h := StartServer(t)
 	email := "sess-signout@example.com"
