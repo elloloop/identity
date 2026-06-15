@@ -1,0 +1,33 @@
+name: Buf Push
+
+# Publish the proto module (and its generated docs) to the Buf Schema
+# Registry at buf.build/elloloop/identity whenever the schema changes on main.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'proto/**'
+      - 'buf.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  buf-push:
+    name: buf-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: '1.66.0'
+
+      - name: buf push
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: buf push --error-format=github-actions
