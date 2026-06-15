@@ -113,9 +113,8 @@ message BeginOAuthLoginResponse {
     storage layer enforces "at most one local user per provider-side
     identity" atomically — two concurrent <code>OAuthLogin</code> calls
     that race to link the same Google account onto two different local
-    accounts will collide on a real unique index on the entdb backend
-    (ADR-031 self-describing writes) and on the unique index on the
-    postgres backend, and exactly one of them succeeds. The repository
+    accounts will collide on a real unique index in the datastore
+    (Postgres or SQLite), and exactly one of them succeeds. The repository
     keeps a pre-query to surface the friendly
     <code>composite unique violated (google, &lt;sub&gt;)</code> error
     message, but the pre-query is not how the invariant is enforced.

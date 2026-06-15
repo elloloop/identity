@@ -99,8 +99,8 @@ const complete = await fetch("/identity.IdentityService/CompletePasskeyLogin", {
 
   <h2>Storage</h2>
   <p>
-    Passkey credentials are EntDB nodes (<code>type_id 6</code>) edge-linked
-    to their owning <code>User</code>. The stored fields are the
+    Passkey credentials are relational rows in the datastore, linked to
+    their owning <code>User</code>. The stored fields are the
     credential ID, the public key, the sign counter, and the user's
     chosen device label — never any private material.
   </p>

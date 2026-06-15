@@ -12,7 +12,7 @@ import { Code } from "astro-expressive-code/components";
   </p>
 
   <h2>Secret</h2>
-  <p>The JWT key ring and TOTP encryption key belong in a Secret:</p>
+  <p>The Postgres DSN, JWT key ring, and TOTP encryption key belong in a Secret:</p>
   <Code code={`apiVersion: v1
 kind: Secret
 metadata:
@@ -20,6 +20,7 @@ metadata:
   namespace: identity
 type: Opaque
 stringData:
+  GATEWAY_POSTGRES_DSN: "postgres://identity:secret@postgres.identity.svc.cluster.local:5432/identity?sslmode=require"
   GATEWAY_JWT_KEYS: |
     [{"kid":"k-2026-05","private_key_pem":"-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n","active":true}]
   GATEWAY_TOTP_ENCRYPTION_KEY: "<base64 32-byte key>"
@@ -33,8 +34,8 @@ metadata:
   name: identity-config
   namespace: identity
 data:
-  GATEWAY_ENTDB_ADDRESS: "entdb.entdb.svc.cluster.local:50051"
-  GATEWAY_DEFAULT_TENANT_ID: "acme"
+  GATEWAY_REPO_DRIVER: "postgres"
+  GATEWAY_DEFAULT_PROJECT_ID: "proj_acme"
   GATEWAY_PASSKEY_RP_ID: "acme.example.com"
   GATEWAY_PASSKEY_ORIGIN: "https://acme.example.com"
   GATEWAY_TOTP_ISSUER: "Acme"
@@ -60,7 +61,7 @@ spec:
     spec:
       containers:
         - name: identity
-          image: ghcr.io/elloloop/identity:0.1.0
+          image: ghcr.io/elloloop/identity:1.2.0
           ports:
             - { containerPort: 80, name: http }
             - { containerPort: 9090, name: metrics }

@@ -12,22 +12,23 @@ import { Code } from "astro-expressive-code/components";
   </p>
 
   <h2>Pull a release</h2>
-  <Code code={`docker pull ghcr.io/elloloop/identity:0.1.0
+  <Code code={`docker pull ghcr.io/elloloop/identity:1.2.0
 # Or always-latest (not recommended for prod):
 docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
   <p>Tag formats produced by the release workflow:</p>
   <ul>
-    <li><code>0.1.0</code> — exact version</li>
-    <li><code>0.1</code>, <code>0</code> — major/minor floats</li>
+    <li><code>1.2.0</code> — exact version</li>
+    <li><code>1.2</code>, <code>1</code> — major/minor floats</li>
     <li><code>latest</code> — non-prerelease tags only</li>
     <li><code>sha-&lt;commit&gt;</code> — commit SHA pin</li>
   </ul>
 
   <h2>Minimal run</h2>
   <Code code={`docker run --rm -p 80:80 -p 9090:9090 \\
-  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \\
-  -e GATEWAY_DEFAULT_TENANT_ID=local \\
-  ghcr.io/elloloop/identity:0.1.0`} lang="bash" title="dev (auto-generated JWT key)" />
+  -e GATEWAY_REPO_DRIVER=sqlite \\
+  -e GATEWAY_SQLITE_PATH=:memory: \\
+  -e GATEWAY_DEFAULT_PROJECT_ID=proj_local \\
+  ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="dev (embedded sqlite, auto-generated JWT key)" />
   <p>
     With no <code>GATEWAY_JWT_KEYS</code> set, the container generates an
     ephemeral RSA key and logs <code>auto_generating_dev_rsa_key</code>.
@@ -39,8 +40,9 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
   <Code code={`docker run -d --restart=always \\
   --name identity \\
   -p 80:80 -p 9090:9090 \\
-  -e GATEWAY_ENTDB_ADDRESS=entdb.svc:50051 \\
-  -e GATEWAY_DEFAULT_TENANT_ID=acme \\
+  -e GATEWAY_REPO_DRIVER=postgres \\
+  -e GATEWAY_POSTGRES_DSN=postgres://identity:secret@postgres.svc:5432/identity \\
+  -e GATEWAY_DEFAULT_PROJECT_ID=proj_acme \\
   -e GATEWAY_PASSKEY_RP_ID=acme.example.com \\
   -e GATEWAY_PASSKEY_ORIGIN=https://acme.example.com \\
   -e GATEWAY_TOTP_ISSUER="Acme" \\
@@ -50,7 +52,7 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
   -e GATEWAY_GOOGLE_CLIENT_ID=... \\
   -e GATEWAY_GOOGLE_CLIENT_SECRET=... \\
   -e GATEWAY_AUTH_ALLOW_LOCAL=true \\
-  ghcr.io/elloloop/identity:0.1.0`} lang="bash" title="production" />
+  ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="production" />
 
   <h2>Building from source</h2>
   <p>The repo's <code>Dockerfile</code> is a two-stage multi-arch build:</p>
@@ -78,19 +80,25 @@ docker run --rm -p 80:80 identity:dev`} lang="bash" />
   <Code code={`version: "3.8"
 
 services:
-  entdb:
-    image: ghcr.io/elloloop/tenant-shard-db:2.5.0
-    ports: ["50051:50051"]
+  postgres:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: identity
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: identity
+    ports: ["5432:5432"]
 
   identity:
-    image: ghcr.io/elloloop/identity:0.1.0
-    depends_on: [entdb]
+    image: ghcr.io/elloloop/identity:1.2.0
+    depends_on: [postgres]
     ports:
       - "80:80"
       - "9090:9090"
     environment:
-      GATEWAY_ENTDB_ADDRESS: entdb:50051
-      GATEWAY_DEFAULT_TENANT_ID: local
+      GATEWAY_REPO_DRIVER: postgres
+      GATEWAY_POSTGRES_DSN: postgres://identity:secret@postgres:5432/identity?sslmode=disable
+      GATEWAY_POSTGRES_AUTO_MIGRATE: "true"
+      GATEWAY_DEFAULT_PROJECT_ID: proj_local
       GATEWAY_AUTH_ALLOW_LOCAL: "true"
       GATEWAY_PASSKEY_RP_ID: localhost
       GATEWAY_PASSKEY_ORIGIN: http://localhost`} lang="yaml" title="docker-compose.yml" />

@@ -99,9 +99,10 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>Groups</h2>
   <p>
-    Groups are a named collection of users. The graph type underneath is
-    still <code>WorkingGroup</code> (type_id 2) for historical reasons;
-    only the proto / RPC names use <code>Group</code>.
+    Groups are a named collection of users, scoped to a Project. They are
+    stored relationally as <code>groups</code> and
+    <code>group_memberships</code> rows (membership is a plain join row, not a
+    graph edge).
   </p>
   <p>
     Identity stores this membership data, but does not treat group
@@ -111,8 +112,7 @@ import { Code } from "astro-expressive-code/components";
   </p>
   <ul>
     <li><code>CreateGroup</code>, <code>UpdateGroup</code>, <code>DeleteGroup</code>, <code>ListGroups</code></li>
-    <li>Membership edges (<code>User -[MEMBER_OF]→ Group</code>):
-      <code>AddGroupMember</code>, <code>RemoveGroupMember</code>,
+    <li>Membership: <code>AddGroupMember</code>, <code>RemoveGroupMember</code>,
       <code>ListGroupMembers</code>.</li>
   </ul>
 

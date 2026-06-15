@@ -7,7 +7,7 @@ import { Code } from "astro-expressive-code/components";
   <h1>Sessions</h1>
   <p>
     A session is a stored refresh token. Identity treats every refresh
-    token as a session row in EntDB, with metadata (device name, IP, user
+    token as a session row in the datastore, with metadata (device name, IP, user
     agent, timestamps) attached for the user-facing session list.
   </p>
 
@@ -16,7 +16,7 @@ import { Code } from "astro-expressive-code/components";
     <li>
       <strong>Issue.</strong> On successful login (password, OAuth, passkey,
       QR-approved, TOTP-completed), Identity creates a
-      <code>RefreshToken</code> node (type_id 5). The raw token is returned
+      <code>RefreshToken</code> row. The raw token is returned
       to the caller; only a hash is stored.
     </li>
     <li>
