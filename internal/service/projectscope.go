@@ -61,3 +61,16 @@ func scopedDB(ctx context.Context, bootDB DB, defaultProjectID string) DB {
 	}
 	return bootDB
 }
+
+// ScopedDB resolves a request's project from ctx and returns bootDB bound to
+// that project together with the resolved project id. It is the exported pair
+// of scopedDB + requestProjectID, wired by internal/app into the audit logger
+// so an audit write lands under the SAME project the request resolved to
+// (ADR-0002): the project id partitions the entdb transport (which keys on the
+// per-call tenant argument every method already takes), and the returned DB is
+// the project-bound postgres writer (which ignores that argument and filters on
+// its bound project). Reads via ProfileService.ListAuditEvents resolve the
+// project identically, so writes and reads round-trip under one project.
+func ScopedDB(ctx context.Context, bootDB DB, defaultProjectID string) (DB, string) {
+	return scopedDB(ctx, bootDB, defaultProjectID), requestProjectID(ctx, defaultProjectID)
+}

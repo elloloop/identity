@@ -288,11 +288,27 @@ func New(deps Deps) (*Built, error) {
 		logger.Error("schema_descriptor_invalid", zap.Error(err))
 	}
 
-	// The audit logger is a boot-scoped singleton; it writes audit_events
-	// under the default project's storage partition (ADR-0002 — the Project
-	// is the data-plane shard), matching the boot-default Repository/DB
-	// binding. Per-request audit project scoping is a follow-up.
-	auditLog := audit.NewLogger(deps.DB, deps.Config.DefaultProjectID, logger)
+	// The audit logger is a boot-scoped singleton, but each write is scoped to
+	// the request's project at Log time via the injected ProjectScoper: it
+	// resolves the project from the request's ProjectScope (falling back to the
+	// boot default) and binds the writer to that project's storage partition
+	// (ADR-0002 — the Project is the data-plane shard). This keeps audit writes
+	// under the SAME project ProfileService.ListAuditEvents reads from, so
+	// events round-trip in a multi-project deployment. deps.DB is captured by
+	// the closure so the scoper rebinds the live boot DB per request.
+	bootDB := deps.DB
+	defaultProjectID := deps.Config.DefaultProjectID
+	auditLog := audit.NewLogger(bootDB, defaultProjectID, logger).
+		WithProjectScoper(func(ctx context.Context) (audit.NodeWriter, string) {
+			scopedDB, projectID := service.ScopedDB(ctx, bootDB, defaultProjectID)
+			if scopedDB == nil {
+				// Preserve audit.Logger's nil-writer contract: hand back a
+				// typed nil so the logger's nil check fires, rather than a
+				// non-nil interface wrapping a nil *DB.
+				return nil, projectID
+			}
+			return scopedDB, projectID
+		})
 
 	// Garbage-collection sweeper for expired ephemeral rows (#94).
 	// Disabled when SweeperIntervalSeconds <= 0 — deployers who

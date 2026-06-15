@@ -6,13 +6,17 @@
 //
 // Usage:
 //
-//	l := audit.NewLogger(writer, "tenant-1", zapLogger)
+//	l := audit.NewLogger(writer, "default-project", zapLogger)
 //	l.Log(ctx, audit.EventLoginSuccess,
 //	    audit.WithActor("user-42"),
 //	    audit.WithIP("10.0.0.1"),
 //	    audit.WithUserAgent("Mozilla/5.0"),
 //	    audit.WithDetails(map[string]any{"method": "password"}),
 //	)
+//
+// In a multi-project deployment, install a ProjectScoper via WithProjectScoper
+// so each write lands under the project the request resolved to (ADR-0002)
+// rather than the boot default.
 package audit
 
 import (
@@ -30,6 +34,12 @@ import (
 
 // auditEventTypeID is the EntDB type_id for AuditEvent nodes (schema.yaml).
 const auditEventTypeID = 26
+
+// auditWriteActor is the system actor recorded for audit-event writes. Audit
+// rows are written by the service itself, not on behalf of the acting user
+// (the acting user is captured in the actor/target fields), so every write
+// uses this fixed system identity.
+const auditWriteActor = "system:admin"
 
 // AuditEvent field IDs from schema.yaml (type_id 26).
 // Data keys on the wire are field IDs as decimal strings.
@@ -54,6 +64,22 @@ type NodeWriter interface {
 		ops []entdb.Operation,
 	) (*entdb.CommitResult, error)
 }
+
+// ProjectScoper resolves the project an audit write must land under, from
+// the request context. It returns the project-bound writer and the project
+// id (ADR-0002: the Project is the data-plane shard). The two outputs cover
+// both backend shapes the identity service ships:
+//
+//   - entdb keys on the per-call tenant argument, so the returned project id
+//     becomes that argument and selects the partition;
+//   - postgres ignores that argument and filters on the project its writer was
+//     bound to, so the returned writer is the project-bound sibling.
+//
+// internal/app wires this to service.ScopedDB so an audit write lands under
+// the SAME project the request resolved to. When no scoper is injected the
+// logger falls back to its boot-default writer and project, preserving the
+// zero-config single-project behaviour.
+type ProjectScoper func(ctx context.Context) (writer NodeWriter, projectID string)
 
 // EventType enumerates all auditable events. Values MUST stay in sync
 // with schema.yaml AuditEvent enum_values.
@@ -170,9 +196,17 @@ func WithDetails(details map[string]any) Option {
 // queue, so the auth hot path is not gated on EntDB latency. Drops
 // when the queue is full are counted and visible via DroppedCount.
 type Logger struct {
-	writer   NodeWriter
-	tenantID string
-	logger   *zap.Logger
+	// writer and defaultProjectID are the boot-default binding: the writer
+	// bound to defaultProjectID's storage partition. They are used verbatim
+	// when no per-request ProjectScoper is injected, and as the fallback the
+	// scoper itself returns for requests that resolved no project.
+	writer           NodeWriter
+	defaultProjectID string
+	logger           *zap.Logger
+	// scoper, when non-nil, resolves the per-request project (writer + id) at
+	// Log time so a write lands under the request's project, not the boot
+	// default. nil in zero-config / tests that don't exercise multi-project.
+	scoper ProjectScoper
 	// nowFunc is overridable for testing.
 	nowFunc func() time.Time
 
@@ -187,28 +221,61 @@ type Logger struct {
 	flushersWG sync.WaitGroup
 }
 
-// asyncOp is the value enqueued by Log when async mode is enabled.
+// asyncOp is the value enqueued by Log when async mode is enabled. The
+// project (writer + id) is resolved at Log time and carried on the op so the
+// background flusher writes under the request's project, not a per-logger
+// field — the resolution must happen on the request goroutine that still
+// holds the project scope, before the context is detached for the queue.
 type asyncOp struct {
-	ctx    context.Context
-	tenant string
-	ops    []entdb.Operation
-	event  EventType
+	ctx       context.Context
+	writer    NodeWriter
+	projectID string
+	ops       []entdb.Operation
+	event     EventType
 }
 
 // NewLogger creates an audit Logger.
 //
 // A nil writer is tolerated — Log calls will be silently dropped with
-// a warning, matching the best-effort contract.
-func NewLogger(writer NodeWriter, tenantID string, logger *zap.Logger) *Logger {
+// a warning, matching the best-effort contract. defaultProjectID is the
+// boot-default storage partition (ADR-0002); per-request scoping is layered
+// on via WithProjectScoper.
+func NewLogger(writer NodeWriter, defaultProjectID string, logger *zap.Logger) *Logger {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &Logger{
-		writer:   writer,
-		tenantID: tenantID,
-		logger:   logger,
-		nowFunc:  time.Now,
+		writer:           writer,
+		defaultProjectID: defaultProjectID,
+		logger:           logger,
+		nowFunc:          time.Now,
 	}
+}
+
+// WithProjectScoper installs the per-request project resolver and returns the
+// receiver for chaining. internal/app calls it once at boot. Passing nil is a
+// no-op, leaving the logger on its boot-default binding.
+func (l *Logger) WithProjectScoper(scoper ProjectScoper) *Logger {
+	l.scoper = scoper
+	return l
+}
+
+// resolveProject returns the writer + project id an event logged under ctx
+// must use: the injected scoper's result when present and non-empty, else the
+// boot-default binding. A scoper that yields an empty project id or nil writer
+// falls back to the boot default field-by-field so a partial resolution never
+// produces an unpartitioned write.
+func (l *Logger) resolveProject(ctx context.Context) (NodeWriter, string) {
+	writer, projectID := l.writer, l.defaultProjectID
+	if l.scoper != nil {
+		if w, p := l.scoper(ctx); p != "" {
+			projectID = p
+			if w != nil {
+				writer = w
+			}
+		}
+	}
+	return writer, projectID
 }
 
 // Log writes an audit event to EntDB. It never returns an error and
@@ -225,7 +292,11 @@ func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 		}
 	}()
 
-	if l.writer == nil {
+	// Resolve the request's project (writer + id) up front, on the calling
+	// goroutine that still holds the project scope — the async queue detaches
+	// the context, so resolution must not be deferred to the flusher.
+	writer, projectID := l.resolveProject(ctx)
+	if writer == nil {
 		l.logger.Warn(
 			"audit_log_skipped_nil_client",
 			zap.String("event_type", string(event)),
@@ -284,11 +355,11 @@ func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 	}
 
 	if l.queueLive.Load() {
-		l.enqueueAsync(ctx, event, ops)
+		l.enqueueAsync(ctx, writer, projectID, event, ops)
 		return
 	}
 
-	_, err := l.writer.ExecuteAtomic(ctx, l.tenantID, "system:admin", ops)
+	_, err := writer.ExecuteAtomic(ctx, projectID, auditWriteActor, ops)
 	if err != nil {
 		l.logger.Error(
 			"audit_log_failed",
@@ -342,12 +413,13 @@ func (l *Logger) closeFn() func() {
 	}
 }
 
-func (l *Logger) enqueueAsync(ctx context.Context, event EventType, ops []entdb.Operation) {
+func (l *Logger) enqueueAsync(ctx context.Context, writer NodeWriter, projectID string, event EventType, ops []entdb.Operation) {
 	op := asyncOp{
-		ctx:    context.WithoutCancel(ctx),
-		tenant: l.tenantID,
-		ops:    ops,
-		event:  event,
+		ctx:       context.WithoutCancel(ctx),
+		writer:    writer,
+		projectID: projectID,
+		ops:       ops,
+		event:     event,
 	}
 	select {
 	case l.queue <- op:
@@ -398,7 +470,7 @@ func (l *Logger) writeOne(op asyncOp) {
 			)
 		}
 	}()
-	_, err := l.writer.ExecuteAtomic(op.ctx, op.tenant, "system:admin", op.ops)
+	_, err := op.writer.ExecuteAtomic(op.ctx, op.projectID, auditWriteActor, op.ops)
 	if err != nil {
 		l.logger.Error(
 			"audit_log_async_failed",
