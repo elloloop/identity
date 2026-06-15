@@ -305,7 +305,8 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr, 
 	// Both passwordless arms — OTP and magic link — prove control of the
 	// email before reaching here, so they are the one governance method
 	// (email_otp). Consult the tenant's LoginPolicy before issuing tokens.
-	if err := s.enforceLoginPolicy(ctx, emailAddr, LoginMethodEmailOTP); err != nil {
+	decision, err := s.enforceLoginPolicy(ctx, emailAddr, LoginMethodEmailOTP)
+	if err != nil {
 		return nil, err
 	}
 
@@ -330,6 +331,12 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr, 
 
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
 		return nil, err
+	}
+
+	// email_otp is a single-factor primary: a Require2FA tenant (or a user who
+	// enrolled TOTP) must complete a second factor before full tokens issue.
+	if user.TotpRequired || decision.RequireSecondFactor {
+		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor)
 	}
 
 	s.updateLastLogin(ctx, user.ID)

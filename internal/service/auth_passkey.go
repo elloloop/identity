@@ -280,9 +280,11 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 
 	// Consult the tenant's LoginPolicy before issuing tokens. A passkey is a
 	// distinct authentication method, so a tenant that disallows it via its
-	// AllowedMethods allow-list must be honoured here too — otherwise the
-	// allow-list could be bypassed by enrolling and using a passkey.
-	if err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodPasskey); err != nil {
+	// AllowedMethods allow-list — or one that requires SSO — must be honoured
+	// here too, otherwise the policy could be bypassed by enrolling and using
+	// a passkey. A passkey is itself a strong factor, so it satisfies a
+	// Require2FA policy on its own and never yields a second-factor decision.
+	if _, err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodPasskey); err != nil {
 		return nil, err
 	}
 
