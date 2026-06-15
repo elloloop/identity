@@ -98,6 +98,7 @@ const (
 	IdentityService_AddProjectAuthDomain_FullMethodName          = "/identity.IdentityService/AddProjectAuthDomain"
 	IdentityService_VerifyProjectAuthDomain_FullMethodName       = "/identity.IdentityService/VerifyProjectAuthDomain"
 	IdentityService_ListProjectAuthDomains_FullMethodName        = "/identity.IdentityService/ListProjectAuthDomains"
+	IdentityService_SetPrimaryAuthDomain_FullMethodName          = "/identity.IdentityService/SetPrimaryAuthDomain"
 	IdentityService_AdminCreateTenant_FullMethodName             = "/identity.IdentityService/AdminCreateTenant"
 	IdentityService_AdminAddTenantAdmin_FullMethodName           = "/identity.IdentityService/AdminAddTenantAdmin"
 	IdentityService_CreateFirstPlatformAdmin_FullMethodName      = "/identity.IdentityService/CreateFirstPlatformAdmin"
@@ -227,6 +228,10 @@ type IdentityServiceClient interface {
 	AddProjectAuthDomain(ctx context.Context, in *AddProjectAuthDomainRequest, opts ...grpc.CallOption) (*AddProjectAuthDomainResponse, error)
 	VerifyProjectAuthDomain(ctx context.Context, in *VerifyProjectAuthDomainRequest, opts ...grpc.CallOption) (*VerifyProjectAuthDomainResponse, error)
 	ListProjectAuthDomains(ctx context.Context, in *ListProjectAuthDomainsRequest, opts ...grpc.CallOption) (*ListProjectAuthDomainsResponse, error)
+	// SetPrimaryAuthDomain promotes a VERIFIED custom auth-domain to the
+	// project's primary serving host, atomically demoting the current primary in
+	// the same transaction. Only a verified domain may be promoted.
+	SetPrimaryAuthDomain(ctx context.Context, in *SetPrimaryAuthDomainRequest, opts ...grpc.CallOption) (*SetPrimaryAuthDomainResponse, error)
 	AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error)
 	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
@@ -1033,6 +1038,16 @@ func (c *identityServiceClient) ListProjectAuthDomains(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *identityServiceClient) SetPrimaryAuthDomain(ctx context.Context, in *SetPrimaryAuthDomainRequest, opts ...grpc.CallOption) (*SetPrimaryAuthDomainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetPrimaryAuthDomainResponse)
+	err := c.cc.Invoke(ctx, IdentityService_SetPrimaryAuthDomain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminCreateTenantResponse)
@@ -1187,6 +1202,10 @@ type IdentityServiceServer interface {
 	AddProjectAuthDomain(context.Context, *AddProjectAuthDomainRequest) (*AddProjectAuthDomainResponse, error)
 	VerifyProjectAuthDomain(context.Context, *VerifyProjectAuthDomainRequest) (*VerifyProjectAuthDomainResponse, error)
 	ListProjectAuthDomains(context.Context, *ListProjectAuthDomainsRequest) (*ListProjectAuthDomainsResponse, error)
+	// SetPrimaryAuthDomain promotes a VERIFIED custom auth-domain to the
+	// project's primary serving host, atomically demoting the current primary in
+	// the same transaction. Only a verified domain may be promoted.
+	SetPrimaryAuthDomain(context.Context, *SetPrimaryAuthDomainRequest) (*SetPrimaryAuthDomainResponse, error)
 	AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error)
 	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
@@ -1439,6 +1458,9 @@ func (UnimplementedIdentityServiceServer) VerifyProjectAuthDomain(context.Contex
 }
 func (UnimplementedIdentityServiceServer) ListProjectAuthDomains(context.Context, *ListProjectAuthDomainsRequest) (*ListProjectAuthDomainsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListProjectAuthDomains not implemented")
+}
+func (UnimplementedIdentityServiceServer) SetPrimaryAuthDomain(context.Context, *SetPrimaryAuthDomainRequest) (*SetPrimaryAuthDomainResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetPrimaryAuthDomain not implemented")
 }
 func (UnimplementedIdentityServiceServer) AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminCreateTenant not implemented")
@@ -2892,6 +2914,24 @@ func _IdentityService_ListProjectAuthDomains_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_SetPrimaryAuthDomain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetPrimaryAuthDomainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).SetPrimaryAuthDomain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_SetPrimaryAuthDomain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).SetPrimaryAuthDomain(ctx, req.(*SetPrimaryAuthDomainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_AdminCreateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminCreateTenantRequest)
 	if err := dec(in); err != nil {
@@ -3268,6 +3308,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListProjectAuthDomains",
 			Handler:    _IdentityService_ListProjectAuthDomains_Handler,
+		},
+		{
+			MethodName: "SetPrimaryAuthDomain",
+			Handler:    _IdentityService_SetPrimaryAuthDomain_Handler,
 		},
 		{
 			MethodName: "AdminCreateTenant",

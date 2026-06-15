@@ -106,6 +106,22 @@ func (s *adminControlStore) SetAuthDomainVerified(_ context.Context, _, hostname
 	return nil
 }
 
+func (s *adminControlStore) SetPrimaryAuthDomain(_ context.Context, _, hostname string) (*service.AdminProjectAuthDomain, error) {
+	target := s.domains[hostname]
+	if target == nil {
+		return nil, service.ErrNotFound
+	}
+	if target.VerifiedAtMs <= 0 {
+		return nil, service.ErrAuthDomainNotVerified
+	}
+	for _, d := range s.domains {
+		d.IsPrimary = false
+	}
+	target.IsPrimary = true
+	cp := *target
+	return &cp, nil
+}
+
 var _ service.ControlPlaneProjectStore = (*adminControlStore)(nil)
 
 // startAdminServer mounts a handler whose only wired service is the
@@ -285,6 +301,33 @@ func TestAdminRPCs_CustomAuthDomain_Handler(t *testing.T) {
 	if len(list.Msg.GetDomains()) != 1 {
 		t.Fatalf("listed %d domains, want 1", len(list.Msg.GetDomains()))
 	}
+
+	// SetPrimary on the verified domain promotes it.
+	sp, err := client.SetPrimaryAuthDomain(ctx,
+		withAdminSecret(&identitypb.SetPrimaryAuthDomainRequest{ProjectId: "proj-1", Hostname: "auth.customer.test"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("SetPrimaryAuthDomain: %v", err)
+	}
+	if !sp.Msg.GetDomain().GetIsPrimary() {
+		t.Fatalf("promoted domain must be primary: %+v", sp.Msg.GetDomain())
+	}
+}
+
+func TestAdminRPCs_SetPrimaryAuthDomain_UnverifiedRejected_Handler(t *testing.T) {
+	t.Parallel()
+	store := &adminControlStore{}
+	dns := &adminDNSResolver{txt: map[string][]string{}}
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &connectPlatformAdminStore{}, dns, zap.NewNop())
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	if _, err := client.AddProjectAuthDomain(ctx,
+		withAdminSecret(&identitypb.AddProjectAuthDomainRequest{ProjectId: "proj-1", Hostname: "pending.customer.test"}, handlerAdminSecret)); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	_, err := client.SetPrimaryAuthDomain(ctx,
+		withAdminSecret(&identitypb.SetPrimaryAuthDomainRequest{ProjectId: "proj-1", Hostname: "pending.customer.test"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeFailedPrecondition)
 }
 
 func TestAdminRPCs_CustomAuthDomain_NilService_Unimplemented(t *testing.T) {
@@ -297,6 +340,8 @@ func TestAdminRPCs_CustomAuthDomain_NilService_Unimplemented(t *testing.T) {
 	_, err = client.VerifyProjectAuthDomain(ctx, withAdminSecret(&identitypb.VerifyProjectAuthDomainRequest{ProjectId: "p", Hostname: "h.example.com"}, handlerAdminSecret))
 	requireCode(t, err, connect.CodeUnimplemented)
 	_, err = client.ListProjectAuthDomains(ctx, withAdminSecret(&identitypb.ListProjectAuthDomainsRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.SetPrimaryAuthDomain(ctx, withAdminSecret(&identitypb.SetPrimaryAuthDomainRequest{ProjectId: "p", Hostname: "h.example.com"}, handlerAdminSecret))
 	requireCode(t, err, connect.CodeUnimplemented)
 }
 

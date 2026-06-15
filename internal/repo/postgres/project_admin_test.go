@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -173,4 +174,95 @@ func runCustomAuthDomainSmoke(t *testing.T, dsn string) {
 	none, err = store.GetAuthDomain(ctx, "no-such-project", "auth.custom.test")
 	require.NoError(t, err)
 	require.Nil(t, none, "GetAuthDomain is scoped to the owning project")
+}
+
+// TestSetPrimaryAuthDomainStore_Smoke exercises the atomic demote+promote
+// SetPrimaryAuthDomain path against a live Postgres. Skips without a backend;
+// the dockerpostgres variant runs the same body in a container.
+func TestSetPrimaryAuthDomainStore_Smoke(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping set-primary auth-domain store smoke test")
+	}
+	runSetPrimaryAuthDomainSmoke(t, dsn)
+}
+
+func runSetPrimaryAuthDomainSmoke(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	store := newProjectStore(ctx, t, dsn)
+
+	proj := &service.AdminProject{StorageScopeID: "scope-primary", Name: "Primary Co"}
+	projID, err := store.CreateProject(ctx, proj)
+	require.NoError(t, err)
+
+	// Seed a verified primary, then add a second domain non-primary and verify.
+	require.NoError(t, store.EnsureAuthDomain(ctx, projID, "old.primary.test", true, 1000))
+	require.NoError(t, store.CreateAuthDomain(ctx, projID, "new.primary.test", false))
+
+	// Promoting an UNVERIFIED domain is rejected (and leaves the primary intact).
+	_, err = store.SetPrimaryProjectAuthDomain(ctx, projID, "new.primary.test")
+	require.ErrorIs(t, err, service.ErrAuthDomainNotVerified)
+	old, err := store.GetAuthDomain(ctx, projID, "old.primary.test")
+	require.NoError(t, err)
+	require.True(t, old.IsPrimary, "a rejected promotion must not demote the existing primary")
+
+	// Promoting a hostname the project does not own is ErrNotFound.
+	_, err = store.SetPrimaryProjectAuthDomain(ctx, projID, "never.added.test")
+	require.ErrorIs(t, err, service.ErrNotFound)
+
+	// Verify the new domain, then promote it: atomic demote+promote.
+	require.NoError(t, store.SetAuthDomainVerified(ctx, projID, "new.primary.test", 2000))
+	promoted, err := store.SetPrimaryProjectAuthDomain(ctx, projID, "new.primary.test")
+	require.NoError(t, err)
+	require.True(t, promoted.IsPrimary)
+	require.Equal(t, "new.primary.test", promoted.Hostname)
+
+	old, err = store.GetAuthDomain(ctx, projID, "old.primary.test")
+	require.NoError(t, err)
+	require.False(t, old.IsPrimary, "the old primary must be demoted")
+
+	// The resolver's primary now reflects the newly-promoted host.
+	resolved, err := store.ResolveByHostname(ctx, "new.primary.test")
+	require.NoError(t, err)
+	require.NotNil(t, resolved)
+	require.Equal(t, "new.primary.test", resolved.PrimaryAuthDomain)
+
+	// Re-promoting the already-primary host is a no-op that succeeds.
+	again, err := store.SetPrimaryProjectAuthDomain(ctx, projID, "new.primary.test")
+	require.NoError(t, err)
+	require.True(t, again.IsPrimary)
+
+	// Concurrent promotions never violate the partial-unique primary index:
+	// they serialize on the project's row locks and converge on one primary.
+	require.NoError(t, store.CreateAuthDomain(ctx, projID, "c1.primary.test", false))
+	require.NoError(t, store.SetAuthDomainVerified(ctx, projID, "c1.primary.test", 3000))
+	require.NoError(t, store.CreateAuthDomain(ctx, projID, "c2.primary.test", false))
+	require.NoError(t, store.SetAuthDomainVerified(ctx, projID, "c2.primary.test", 3001))
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i, host := range []string{"c1.primary.test", "c2.primary.test"} {
+		wg.Add(1)
+		go func(i int, host string) {
+			defer wg.Done()
+			_, errs[i] = store.SetPrimaryProjectAuthDomain(ctx, projID, host)
+		}(i, host)
+	}
+	wg.Wait()
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1])
+
+	list, err := store.ListAuthDomains(ctx, projID)
+	require.NoError(t, err)
+	primaries := 0
+	for _, d := range list {
+		if d.IsPrimary {
+			primaries++
+		}
+	}
+	require.Equal(t, 1, primaries, "exactly one primary survives concurrent promotions")
 }

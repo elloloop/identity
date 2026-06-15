@@ -754,6 +754,11 @@ var (
 	// later call cannot escalate to operator. It is a state precondition (not
 	// an authorization failure), mapped to CodeFailedPrecondition.
 	ErrPlatformAdminExists = errors.New("a platform admin already exists; bootstrap is closed")
+	// ErrAuthDomainNotVerified is returned by SetPrimaryAuthDomain when the
+	// target custom auth-domain has not proven ownership (verified_at_ms == 0).
+	// Only a DNS-verified domain may be promoted to a project's primary serving
+	// host, so this is a state precondition mapped to CodeFailedPrecondition.
+	ErrAuthDomainNotVerified = errors.New("auth domain is not verified")
 )
 
 // ── AuthService ────────────────────────────────────────────────────────

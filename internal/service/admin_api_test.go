@@ -156,6 +156,25 @@ func (f *fakeControlPlaneStore) SetAuthDomainVerified(_ context.Context, project
 	return nil
 }
 
+func (f *fakeControlPlaneStore) SetPrimaryAuthDomain(_ context.Context, projectID, hostname string) (*AdminProjectAuthDomain, error) {
+	if f.domainErr != nil {
+		return nil, f.domainErr
+	}
+	target := f.domainRows[projectID][hostname]
+	if target == nil {
+		return nil, ErrNotFound
+	}
+	if target.VerifiedAtMs <= 0 {
+		return nil, ErrAuthDomainNotVerified
+	}
+	for _, d := range f.domainRows[projectID] {
+		d.IsPrimary = false
+	}
+	target.IsPrimary = true
+	cp := *target
+	return &cp, nil
+}
+
 var _ ControlPlaneProjectStore = (*fakeControlPlaneStore)(nil)
 
 // itoa avoids importing strconv just for the fake's id minting.
@@ -697,6 +716,71 @@ func TestControlPlaneAdmin_ListCustomAuthDomains(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("listed %d domains, want 2", len(got))
+	}
+}
+
+func TestControlPlaneAdmin_SetPrimaryAuthDomain_PromotesVerifiedAndDemotesOld(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	// Seed an existing verified primary, then add+verify a second custom domain.
+	f.projects.putDomain("proj-1", "old.customer.com", true, 1)
+	reg, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "new.customer.com", false)
+	if err != nil {
+		t.Fatalf("add new: %v", err)
+	}
+	f.dns.records["new.customer.com"] = []string{reg.TXTValue}
+	if _, err := f.svc.VerifyProjectAuthDomain(ctx, testAdminSecret, "proj-1", "new.customer.com"); err != nil {
+		t.Fatalf("verify new: %v", err)
+	}
+
+	promoted, err := f.svc.SetPrimaryAuthDomain(ctx, testAdminSecret, "proj-1", "new.customer.com")
+	if err != nil {
+		t.Fatalf("SetPrimaryAuthDomain: %v", err)
+	}
+	if !promoted.IsPrimary || promoted.Hostname != "new.customer.com" {
+		t.Fatalf("promoted = %+v, want new.customer.com primary", promoted)
+	}
+	old, _ := f.projects.GetAuthDomain(ctx, "proj-1", "old.customer.com")
+	if old.IsPrimary {
+		t.Fatal("the old primary must be demoted")
+	}
+}
+
+func TestControlPlaneAdmin_SetPrimaryAuthDomain_UnverifiedRejected(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	if _, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "pending.customer.com", false); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := f.svc.SetPrimaryAuthDomain(ctx, testAdminSecret, "proj-1", "pending.customer.com"); !errors.Is(err, ErrAuthDomainNotVerified) {
+		t.Fatalf("promote unverified: err = %v, want ErrAuthDomainNotVerified", err)
+	}
+}
+
+func TestControlPlaneAdmin_SetPrimaryAuthDomain_UnknownHost_NotFound(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	if _, err := f.svc.SetPrimaryAuthDomain(context.Background(), testAdminSecret, "proj-1", "never.added.com"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("promote unknown: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestControlPlaneAdmin_SetPrimaryAuthDomain_ValidateArgsAndSecret(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+	if _, err := f.svc.SetPrimaryAuthDomain(ctx, "wrong", "proj-1", "h.example.com"); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("wrong secret: err = %v, want ErrPermissionDenied", err)
+	}
+	if _, err := f.svc.SetPrimaryAuthDomain(ctx, testAdminSecret, " ", "h.example.com"); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("blank project id: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.svc.SetPrimaryAuthDomain(ctx, testAdminSecret, "proj-1", "no-dot"); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("invalid hostname: err = %v, want ErrInvalidArgument", err)
 	}
 }
 

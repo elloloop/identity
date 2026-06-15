@@ -181,9 +181,10 @@ func TestRedesign_ControlPlaneAdmin_CustomAuthDomainFlow(t *testing.T) {
 
 	host := fmt.Sprintf("custom-%d.customer.test", unique)
 
-	// 0. The customer RPC rejects is_primary=true: promoting a custom
-	// auth-domain to primary is not yet supported, so it is the documented
-	// InvalidArgument contract rather than a silent half-built path.
+	// 0. The customer RPC rejects is_primary=true: a custom auth-domain is
+	// always added non-primary (it is unverified, so it must not resolve, let
+	// alone drive branded links). Promotion is the dedicated SetPrimaryAuthDomain
+	// RPC, exercised below once the domain is verified.
 	if _, err := admin.AddProjectAuthDomain(ctx, connect.NewRequest(&identitypb.AddProjectAuthDomainRequest{
 		ProjectId: projectID,
 		Hostname:  host,
@@ -255,6 +256,41 @@ func TestRedesign_ControlPlaneAdmin_CustomAuthDomainFlow(t *testing.T) {
 	}
 	if len(listResp.Msg.GetDomains()) != 1 || listResp.Msg.GetDomains()[0].GetHostname() != host {
 		t.Fatalf("list = %+v, want one domain %q", listResp.Msg.GetDomains(), host)
+	}
+
+	// 7. Promoting the UNVERIFIED-only second host is rejected; promoting the
+	// verified host succeeds and makes it the project's primary, which the
+	// resolver then surfaces as PrimaryAuthDomain.
+	host2 := fmt.Sprintf("custom2-%d.customer.test", unique)
+	if _, err := admin.AddProjectAuthDomain(ctx, connect.NewRequest(&identitypb.AddProjectAuthDomainRequest{
+		ProjectId: projectID,
+		Hostname:  host2,
+	})); err != nil {
+		t.Fatalf("AddProjectAuthDomain(host2): %v", err)
+	}
+	if _, err := admin.SetPrimaryAuthDomain(ctx, connect.NewRequest(&identitypb.SetPrimaryAuthDomainRequest{
+		ProjectId: projectID,
+		Hostname:  host2,
+	})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("SetPrimaryAuthDomain(unverified): code = %v, want FailedPrecondition", connect.CodeOf(err))
+	}
+
+	spResp, err := admin.SetPrimaryAuthDomain(ctx, connect.NewRequest(&identitypb.SetPrimaryAuthDomainRequest{
+		ProjectId: projectID,
+		Hostname:  host,
+	}))
+	if err != nil {
+		t.Fatalf("SetPrimaryAuthDomain(verified): %v", err)
+	}
+	if !spResp.Msg.GetDomain().GetIsPrimary() {
+		t.Fatalf("promoted domain must be primary: %+v", spResp.Msg.GetDomain())
+	}
+	resolved, err = h.Stores.projects.ResolveByHostname(ctx, host)
+	if err != nil {
+		t.Fatalf("ResolveByHostname (after promote): %v", err)
+	}
+	if resolved == nil || resolved.PrimaryAuthDomain != host {
+		t.Fatalf("PrimaryAuthDomain = %+v, want %q", resolved, host)
 	}
 }
 

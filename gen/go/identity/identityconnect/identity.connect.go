@@ -268,6 +268,9 @@ const (
 	// IdentityServiceListProjectAuthDomainsProcedure is the fully-qualified name of the
 	// IdentityService's ListProjectAuthDomains RPC.
 	IdentityServiceListProjectAuthDomainsProcedure = "/identity.IdentityService/ListProjectAuthDomains"
+	// IdentityServiceSetPrimaryAuthDomainProcedure is the fully-qualified name of the IdentityService's
+	// SetPrimaryAuthDomain RPC.
+	IdentityServiceSetPrimaryAuthDomainProcedure = "/identity.IdentityService/SetPrimaryAuthDomain"
 	// IdentityServiceAdminCreateTenantProcedure is the fully-qualified name of the IdentityService's
 	// AdminCreateTenant RPC.
 	IdentityServiceAdminCreateTenantProcedure = "/identity.IdentityService/AdminCreateTenant"
@@ -401,6 +404,10 @@ type IdentityServiceClient interface {
 	AddProjectAuthDomain(context.Context, *connect.Request[identity.AddProjectAuthDomainRequest]) (*connect.Response[identity.AddProjectAuthDomainResponse], error)
 	VerifyProjectAuthDomain(context.Context, *connect.Request[identity.VerifyProjectAuthDomainRequest]) (*connect.Response[identity.VerifyProjectAuthDomainResponse], error)
 	ListProjectAuthDomains(context.Context, *connect.Request[identity.ListProjectAuthDomainsRequest]) (*connect.Response[identity.ListProjectAuthDomainsResponse], error)
+	// SetPrimaryAuthDomain promotes a VERIFIED custom auth-domain to the
+	// project's primary serving host, atomically demoting the current primary in
+	// the same transaction. Only a verified domain may be promoted.
+	SetPrimaryAuthDomain(context.Context, *connect.Request[identity.SetPrimaryAuthDomainRequest]) (*connect.Response[identity.SetPrimaryAuthDomainResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error)
 	AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error)
 	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
@@ -894,6 +901,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("ListProjectAuthDomains")),
 			connect.WithClientOptions(opts...),
 		),
+		setPrimaryAuthDomain: connect.NewClient[identity.SetPrimaryAuthDomainRequest, identity.SetPrimaryAuthDomainResponse](
+			httpClient,
+			baseURL+IdentityServiceSetPrimaryAuthDomainProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SetPrimaryAuthDomain")),
+			connect.WithClientOptions(opts...),
+		),
 		adminCreateTenant: connect.NewClient[identity.AdminCreateTenantRequest, identity.AdminCreateTenantResponse](
 			httpClient,
 			baseURL+IdentityServiceAdminCreateTenantProcedure,
@@ -996,6 +1009,7 @@ type identityServiceClient struct {
 	addProjectAuthDomain          *connect.Client[identity.AddProjectAuthDomainRequest, identity.AddProjectAuthDomainResponse]
 	verifyProjectAuthDomain       *connect.Client[identity.VerifyProjectAuthDomainRequest, identity.VerifyProjectAuthDomainResponse]
 	listProjectAuthDomains        *connect.Client[identity.ListProjectAuthDomainsRequest, identity.ListProjectAuthDomainsResponse]
+	setPrimaryAuthDomain          *connect.Client[identity.SetPrimaryAuthDomainRequest, identity.SetPrimaryAuthDomainResponse]
 	adminCreateTenant             *connect.Client[identity.AdminCreateTenantRequest, identity.AdminCreateTenantResponse]
 	adminAddTenantAdmin           *connect.Client[identity.AdminAddTenantAdminRequest, identity.AdminAddTenantAdminResponse]
 	createFirstPlatformAdmin      *connect.Client[identity.CreateFirstPlatformAdminRequest, identity.CreateFirstPlatformAdminResponse]
@@ -1396,6 +1410,11 @@ func (c *identityServiceClient) ListProjectAuthDomains(ctx context.Context, req 
 	return c.listProjectAuthDomains.CallUnary(ctx, req)
 }
 
+// SetPrimaryAuthDomain calls identity.IdentityService.SetPrimaryAuthDomain.
+func (c *identityServiceClient) SetPrimaryAuthDomain(ctx context.Context, req *connect.Request[identity.SetPrimaryAuthDomainRequest]) (*connect.Response[identity.SetPrimaryAuthDomainResponse], error) {
+	return c.setPrimaryAuthDomain.CallUnary(ctx, req)
+}
+
 // AdminCreateTenant calls identity.IdentityService.AdminCreateTenant.
 func (c *identityServiceClient) AdminCreateTenant(ctx context.Context, req *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error) {
 	return c.adminCreateTenant.CallUnary(ctx, req)
@@ -1533,6 +1552,10 @@ type IdentityServiceHandler interface {
 	AddProjectAuthDomain(context.Context, *connect.Request[identity.AddProjectAuthDomainRequest]) (*connect.Response[identity.AddProjectAuthDomainResponse], error)
 	VerifyProjectAuthDomain(context.Context, *connect.Request[identity.VerifyProjectAuthDomainRequest]) (*connect.Response[identity.VerifyProjectAuthDomainResponse], error)
 	ListProjectAuthDomains(context.Context, *connect.Request[identity.ListProjectAuthDomainsRequest]) (*connect.Response[identity.ListProjectAuthDomainsResponse], error)
+	// SetPrimaryAuthDomain promotes a VERIFIED custom auth-domain to the
+	// project's primary serving host, atomically demoting the current primary in
+	// the same transaction. Only a verified domain may be promoted.
+	SetPrimaryAuthDomain(context.Context, *connect.Request[identity.SetPrimaryAuthDomainRequest]) (*connect.Response[identity.SetPrimaryAuthDomainResponse], error)
 	AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error)
 	AdminAddTenantAdmin(context.Context, *connect.Request[identity.AdminAddTenantAdminRequest]) (*connect.Response[identity.AdminAddTenantAdminResponse], error)
 	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
@@ -2022,6 +2045,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("ListProjectAuthDomains")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceSetPrimaryAuthDomainHandler := connect.NewUnaryHandler(
+		IdentityServiceSetPrimaryAuthDomainProcedure,
+		svc.SetPrimaryAuthDomain,
+		connect.WithSchema(identityServiceMethods.ByName("SetPrimaryAuthDomain")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceAdminCreateTenantHandler := connect.NewUnaryHandler(
 		IdentityServiceAdminCreateTenantProcedure,
 		svc.AdminCreateTenant,
@@ -2200,6 +2229,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceVerifyProjectAuthDomainHandler.ServeHTTP(w, r)
 		case IdentityServiceListProjectAuthDomainsProcedure:
 			identityServiceListProjectAuthDomainsHandler.ServeHTTP(w, r)
+		case IdentityServiceSetPrimaryAuthDomainProcedure:
+			identityServiceSetPrimaryAuthDomainHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminCreateTenantProcedure:
 			identityServiceAdminCreateTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminAddTenantAdminProcedure:
@@ -2529,6 +2560,10 @@ func (UnimplementedIdentityServiceHandler) VerifyProjectAuthDomain(context.Conte
 
 func (UnimplementedIdentityServiceHandler) ListProjectAuthDomains(context.Context, *connect.Request[identity.ListProjectAuthDomainsRequest]) (*connect.Response[identity.ListProjectAuthDomainsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.ListProjectAuthDomains is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) SetPrimaryAuthDomain(context.Context, *connect.Request[identity.SetPrimaryAuthDomainRequest]) (*connect.Response[identity.SetPrimaryAuthDomainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.IdentityService.SetPrimaryAuthDomain is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) AdminCreateTenant(context.Context, *connect.Request[identity.AdminCreateTenantRequest]) (*connect.Response[identity.AdminCreateTenantResponse], error) {
