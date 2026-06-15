@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+
+	"github.com/elloloop/identity/pkg/passwords"
 )
 
 // fakeControlPlaneStore is an in-memory ControlPlaneProjectStore. It reuses
@@ -102,22 +106,67 @@ func itoa(n int) string {
 
 const testAdminSecret = "s3cr3t-operator-key"
 
+// fakePlatformAdminStore is an in-memory PlatformAdminStore. It enforces the
+// "first admin only" contract the postgres store provides via an advisory
+// lock: the first successful CreateFirstPlatformAdmin inserts and reports
+// created=true; every later one reports created=false. A mutex makes the
+// check-then-insert atomic so the concurrency test exercises real serialization.
+type fakePlatformAdminStore struct {
+	mu        sync.Mutex
+	admins    []*PlatformAdmin
+	createErr error
+	nextID    int
+}
+
+func newFakePlatformAdminStore() *fakePlatformAdminStore {
+	return &fakePlatformAdminStore{}
+}
+
+func (f *fakePlatformAdminStore) CreateFirstPlatformAdmin(_ context.Context, a *PlatformAdmin) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	if len(f.admins) > 0 {
+		return false, nil
+	}
+	f.nextID++
+	if a.ID == "" {
+		a.ID = "admin-" + itoa(f.nextID)
+	}
+	cp := *a
+	f.admins = append(f.admins, &cp)
+	return true, nil
+}
+
+func (f *fakePlatformAdminStore) CountPlatformAdmins(_ context.Context) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.admins), nil
+}
+
+var _ PlatformAdminStore = (*fakePlatformAdminStore)(nil)
+
 type adminFixture struct {
 	svc      *ControlPlaneAdminService
 	projects *fakeControlPlaneStore
 	tenants  *fakeTenantStore
 	members  *fakeMembershipStore
+	admins   *fakePlatformAdminStore
 }
 
 func newAdminFixture(secret string) *adminFixture {
 	p := newFakeControlPlaneStore()
 	t := newFakeTenantStore()
 	m := newFakeMembershipStore()
+	a := newFakePlatformAdminStore()
 	return &adminFixture{
-		svc:      NewControlPlaneAdminService(secret, p, t, m, nil),
+		svc:      NewControlPlaneAdminService(secret, p, t, m, a, nil),
 		projects: p,
 		tenants:  t,
 		members:  m,
+		admins:   a,
 	}
 }
 
@@ -447,4 +496,149 @@ func TestControlPlaneAdmin_StoreErrorsPropagate(t *testing.T) {
 			t.Fatalf("err = %v, want %v", err, wantErr)
 		}
 	})
+	t.Run("create first platform admin", func(t *testing.T) {
+		f := newAdminFixture(testAdminSecret)
+		f.admins.createErr = wantErr
+		if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "ops@acme.com", "Str0ng!Bootstrap"); !errors.Is(err, wantErr) {
+			t.Fatalf("err = %v, want %v", err, wantErr)
+		}
+	})
+}
+
+// ── zero-config first-admin bootstrap ────────────────────────────────────
+
+// The bootstrap is the ONE admin RPC that is NOT secret-gated: a fresh
+// deployer has configured no secret yet. These tests use a service built with
+// an EMPTY secret to prove the surface still works.
+
+func TestCreateFirstPlatformAdmin_EmptyTableCreatesAdmin(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture("") // empty secret: the rest of the surface is disabled
+	ctx := context.Background()
+
+	got, err := f.svc.CreateFirstPlatformAdmin(ctx, "  Ops@Acme.com ", "")
+	if err != nil {
+		t.Fatalf("CreateFirstPlatformAdmin: %v", err)
+	}
+	if got.ID == "" {
+		t.Fatal("expected an admin id")
+	}
+	if got.Email != "ops@acme.com" {
+		t.Fatalf("email = %q, want canonicalized ops@acme.com", got.Email)
+	}
+	if got.GeneratedPassword == "" {
+		t.Fatal("blank password should yield a generated one")
+	}
+	if issues := passwords.ValidateStrength(got.GeneratedPassword); len(issues) != 0 {
+		t.Fatalf("generated password is weak: %v", issues)
+	}
+	if n, _ := f.admins.CountPlatformAdmins(ctx); n != 1 {
+		t.Fatalf("admin count = %d, want 1", n)
+	}
+	stored := f.admins.admins[0]
+	if stored.PasswordHash == "" || stored.PasswordHash == got.GeneratedPassword {
+		t.Fatal("must store a hash, never the raw password")
+	}
+	if stored.Status != PlatformAdminStatusActive {
+		t.Fatalf("status = %q, want active", stored.Status)
+	}
+}
+
+func TestCreateFirstPlatformAdmin_SuppliedPasswordNotReturned(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture("")
+	ctx := context.Background()
+
+	got, err := f.svc.CreateFirstPlatformAdmin(ctx, "ops@acme.com", "Str0ng!Bootstrap")
+	if err != nil {
+		t.Fatalf("CreateFirstPlatformAdmin: %v", err)
+	}
+	if got.GeneratedPassword != "" {
+		t.Fatalf("supplied password must not be echoed back, got %q", got.GeneratedPassword)
+	}
+	if !passwords.Verify("Str0ng!Bootstrap", f.admins.admins[0].PasswordHash) {
+		t.Fatal("stored hash must verify against the supplied password")
+	}
+}
+
+func TestCreateFirstPlatformAdmin_WeakSuppliedPasswordRejected(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture("")
+	if _, err := f.svc.CreateFirstPlatformAdmin(context.Background(), "ops@acme.com", "weak"); !errors.Is(err, ErrWeakPassword) {
+		t.Fatalf("weak password: err = %v, want ErrWeakPassword", err)
+	}
+	if n, _ := f.admins.CountPlatformAdmins(context.Background()); n != 0 {
+		t.Fatal("a rejected bootstrap must not write anything")
+	}
+}
+
+func TestCreateFirstPlatformAdmin_InvalidEmailRejected(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture("")
+	if _, err := f.svc.CreateFirstPlatformAdmin(context.Background(), "not-an-email", ""); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("invalid email: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestCreateFirstPlatformAdmin_SecondCallRejected(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture("")
+	ctx := context.Background()
+
+	if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "first@acme.com", ""); err != nil {
+		t.Fatalf("first bootstrap: %v", err)
+	}
+	// Once an admin exists the path is permanently closed — even a different
+	// email cannot create a second admin via the bootstrap.
+	_, err := f.svc.CreateFirstPlatformAdmin(ctx, "second@acme.com", "")
+	if !errors.Is(err, ErrPlatformAdminExists) {
+		t.Fatalf("second bootstrap: err = %v, want ErrPlatformAdminExists", err)
+	}
+	if n, _ := f.admins.CountPlatformAdmins(ctx); n != 1 {
+		t.Fatalf("admin count = %d, want exactly 1 after a rejected second bootstrap", n)
+	}
+}
+
+func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture("")
+	ctx := context.Background()
+
+	const n = 16
+	var wg sync.WaitGroup
+	var successes int32
+	errs := make([]error, n)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			_, err := f.svc.CreateFirstPlatformAdmin(ctx, "ops@acme.com", "")
+			if err == nil {
+				atomic.AddInt32(&successes, 1)
+			}
+			errs[i] = err
+		}(i)
+	}
+	wg.Wait()
+
+	if successes != 1 {
+		t.Fatalf("concurrent bootstraps succeeded %d times, want exactly 1", successes)
+	}
+	for _, err := range errs {
+		if err != nil && !errors.Is(err, ErrPlatformAdminExists) {
+			t.Fatalf("loser error = %v, want nil or ErrPlatformAdminExists", err)
+		}
+	}
+	if got, _ := f.admins.CountPlatformAdmins(ctx); got != 1 {
+		t.Fatalf("admin count = %d, want exactly 1", got)
+	}
+}
+
+func TestCreateFirstPlatformAdmin_UnimplementedWithoutStore(t *testing.T) {
+	t.Parallel()
+	// Built without a PlatformAdminStore (the entdb/memory shape).
+	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil)
+	if _, err := svc.CreateFirstPlatformAdmin(context.Background(), "ops@acme.com", ""); !errors.Is(err, ErrUnimplemented) {
+		t.Fatalf("no store: err = %v, want ErrUnimplemented", err)
+	}
 }

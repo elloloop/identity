@@ -742,6 +742,12 @@ var (
 	// to remove members (so PermissionDenied is wrong); this is a state
 	// precondition, mapped to CodeFailedPrecondition.
 	ErrLastOwner = errors.New("cannot remove the last owner of a tenant")
+	// ErrPlatformAdminExists is returned by CreateFirstPlatformAdmin once any
+	// platform admin already exists: the zero-config bootstrap is a one-time
+	// path that permanently closes after the first admin is created, so a
+	// later call cannot escalate to operator. It is a state precondition (not
+	// an authorization failure), mapped to CodeFailedPrecondition.
+	ErrPlatformAdminExists = errors.New("a platform admin already exists; bootstrap is closed")
 )
 
 // ── AuthService ────────────────────────────────────────────────────────

@@ -84,6 +84,14 @@ type Deps struct {
 	// Config.AdminAPISecret is set.
 	ControlPlaneStore service.ControlPlaneProjectStore
 
+	// PlatformAdminStore backs the zero-config first-admin bootstrap
+	// (CreateFirstPlatformAdmin). Non-nil ONLY for the postgres driver; when
+	// nil the bootstrap RPC returns Unimplemented. Unlike the other admin
+	// RPCs the bootstrap is NOT gated on Config.AdminAPISecret — it is the
+	// one path a fresh deployer uses before any secret is configured, and it
+	// self-secures by closing once any admin exists.
+	PlatformAdminStore service.PlatformAdminStore
+
 	// LoginGovernance is the read-side bundle the login path consults to
 	// enforce a claimed tenant's LoginPolicy. Non-nil only for the postgres
 	// driver (the only one with a governance plane); when nil, login imposes
@@ -559,6 +567,7 @@ func buildControlPlaneAdminService(deps Deps, logger *zap.Logger) *service.Contr
 		deps.ControlPlaneStore,
 		deps.TenantStore,
 		deps.MembershipStore,
+		deps.PlatformAdminStore,
 		logger,
 	)
 }

@@ -97,6 +97,7 @@ const (
 	IdentityService_AdminAddProjectAuthDomain_FullMethodName     = "/identity.IdentityService/AdminAddProjectAuthDomain"
 	IdentityService_AdminCreateTenant_FullMethodName             = "/identity.IdentityService/AdminCreateTenant"
 	IdentityService_AdminAddTenantAdmin_FullMethodName           = "/identity.IdentityService/AdminAddTenantAdmin"
+	IdentityService_CreateFirstPlatformAdmin_FullMethodName      = "/identity.IdentityService/CreateFirstPlatformAdmin"
 )
 
 // IdentityServiceClient is the client API for IdentityService service.
@@ -219,6 +220,10 @@ type IdentityServiceClient interface {
 	AdminAddProjectAuthDomain(ctx context.Context, in *AdminAddProjectAuthDomainRequest, opts ...grpc.CallOption) (*AdminAddProjectAuthDomainResponse, error)
 	AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error)
+	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
+	// succeeds only while platform_admins is empty, then permanently closes
+	// (FAILED_PRECONDITION). Postgres-only; entdb/memory return UNIMPLEMENTED.
+	CreateFirstPlatformAdmin(ctx context.Context, in *CreateFirstPlatformAdminRequest, opts ...grpc.CallOption) (*CreateFirstPlatformAdminResponse, error)
 }
 
 type identityServiceClient struct {
@@ -1009,6 +1014,16 @@ func (c *identityServiceClient) AdminAddTenantAdmin(ctx context.Context, in *Adm
 	return out, nil
 }
 
+func (c *identityServiceClient) CreateFirstPlatformAdmin(ctx context.Context, in *CreateFirstPlatformAdminRequest, opts ...grpc.CallOption) (*CreateFirstPlatformAdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateFirstPlatformAdminResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CreateFirstPlatformAdmin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IdentityServiceServer is the server API for IdentityService service.
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
@@ -1129,6 +1144,10 @@ type IdentityServiceServer interface {
 	AdminAddProjectAuthDomain(context.Context, *AdminAddProjectAuthDomainRequest) (*AdminAddProjectAuthDomainResponse, error)
 	AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error)
+	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
+	// succeeds only while platform_admins is empty, then permanently closes
+	// (FAILED_PRECONDITION). Postgres-only; entdb/memory return UNIMPLEMENTED.
+	CreateFirstPlatformAdmin(context.Context, *CreateFirstPlatformAdminRequest) (*CreateFirstPlatformAdminResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
 }
 
@@ -1372,6 +1391,9 @@ func (UnimplementedIdentityServiceServer) AdminCreateTenant(context.Context, *Ad
 }
 func (UnimplementedIdentityServiceServer) AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminAddTenantAdmin not implemented")
+}
+func (UnimplementedIdentityServiceServer) CreateFirstPlatformAdmin(context.Context, *CreateFirstPlatformAdminRequest) (*CreateFirstPlatformAdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateFirstPlatformAdmin not implemented")
 }
 func (UnimplementedIdentityServiceServer) mustEmbedUnimplementedIdentityServiceServer() {}
 func (UnimplementedIdentityServiceServer) testEmbeddedByValue()                         {}
@@ -2798,6 +2820,24 @@ func _IdentityService_AdminAddTenantAdmin_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_CreateFirstPlatformAdmin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateFirstPlatformAdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CreateFirstPlatformAdmin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CreateFirstPlatformAdmin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CreateFirstPlatformAdmin(ctx, req.(*CreateFirstPlatformAdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IdentityService_ServiceDesc is the grpc.ServiceDesc for IdentityService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3116,6 +3156,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminAddTenantAdmin",
 			Handler:    _IdentityService_AdminAddTenantAdmin_Handler,
+		},
+		{
+			MethodName: "CreateFirstPlatformAdmin",
+			Handler:    _IdentityService_CreateFirstPlatformAdmin_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

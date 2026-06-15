@@ -105,3 +105,26 @@ func (h *IdentityHandler) AdminAddTenantAdmin(
 		Membership: membershipToProto(m),
 	}), nil
 }
+
+// CreateFirstPlatformAdmin is the zero-config bootstrap of the first platform
+// admin. Unlike the other Admin RPCs it reads NO admin secret: it succeeds
+// only while platform_admins is empty and is rejected (FailedPrecondition)
+// once any admin exists. nil controlAdmin (entdb/memory, no control plane)
+// yields Unimplemented.
+func (h *IdentityHandler) CreateFirstPlatformAdmin(
+	ctx context.Context,
+	req *connect.Request[identitypb.CreateFirstPlatformAdminRequest],
+) (*connect.Response[identitypb.CreateFirstPlatformAdminResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	admin, err := h.controlAdmin.CreateFirstPlatformAdmin(ctx, req.Msg.Email, req.Msg.Password)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.CreateFirstPlatformAdminResponse{
+		AdminId:           admin.ID,
+		Email:             admin.Email,
+		GeneratedPassword: admin.GeneratedPassword,
+	}), nil
+}

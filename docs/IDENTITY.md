@@ -188,6 +188,34 @@ which authenticate via the `GATEWAY_ADMIN_API_SECRET` shared secret rather
 than a user token. With the secret empty (the default) those RPCs return
 `CodeUnimplemented`, so a deployer who never sets it cannot reach them.
 
+#### Zero-config first-admin bootstrap
+
+The platform's operator accounts live in the `platform_admins` table. To
+let a brand-new deployer establish the **first** operator without
+pre-seeding anything, `CreateFirstPlatformAdmin` is a one-time, **un-gated**
+bootstrap RPC — the only Admin RPC that does NOT require
+`GATEWAY_ADMIN_API_SECRET` (a fresh deploy has configured no secret yet).
+It is self-securing instead of secret-gated:
+
+- It succeeds **only while `platform_admins` is empty**, returning the new
+  admin's id and email. If the request omits a password, the server
+  generates a strong one and returns it **once** in `generated_password`;
+  a supplied password must meet the strength policy. Only the bcrypt hash
+  is stored.
+- Once any admin exists, the path is **permanently closed**: every later
+  call returns `FAILED_PRECONDITION`, so it can never be replayed to
+  escalate privilege on a provisioned deployment.
+- The emptiness check and insert run inside one transaction holding a
+  Postgres advisory lock, so two concurrent bootstraps create **exactly
+  one** admin and the loser is rejected — there is no check-then-write
+  race window.
+
+Like the other control-plane RPCs it is postgres-only; entdb/memory
+deployments (which have no `platform_admins` table) return
+`CodeUnimplemented`. After bootstrapping the first admin, the operator
+configures `GATEWAY_ADMIN_API_SECRET` and uses the secret-gated Admin RPCs
+for everything else.
+
 ### Why one code path, not a mode flag
 
 Same code, same tests, same release. A single-project B2C deployment and a
