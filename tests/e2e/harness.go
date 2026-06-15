@@ -57,6 +57,7 @@ const (
 	backendEnv      = "GATEWAY_E2E_BACKEND"
 	backendPostgres = "postgres"
 	backendMemory   = "memory"
+	backendSQLite   = "sqlite"
 )
 
 // e2eBackend resolves the configured backend, defaulting to postgres.
@@ -149,6 +150,24 @@ func buildBackend(t *testing.T, cfg *config.Config) *repo.Built {
 		}
 		return built
 
+	case backendSQLite:
+		// Pure-Go SQLite (no Docker). A per-test on-disk file in t.TempDir keeps
+		// each test isolated; the driver migrates and seeds the projects(id) FK
+		// row on Build. Like memory, the entdb-graph read paths self-skip — the
+		// postgres gate is authoritative for those.
+		built, err := repo.Build(context.Background(), repo.Config{
+			Driver:     repo.DriverSQLite,
+			SQLitePath: t.TempDir() + "/identity.db",
+			ProjectID:  cfg.DefaultProjectID,
+		}, zap.NewNop())
+		if err != nil {
+			t.Fatalf("repo.Build sqlite: %v", err)
+		}
+		if closer, ok := built.Repository.(interface{ Close() }); ok {
+			t.Cleanup(closer.Close)
+		}
+		return built
+
 	case backendPostgres:
 		if sharedPostgresDSN == "" {
 			t.Fatalf("shared postgres DSN unset — TestMain did not boot a container")
@@ -181,7 +200,7 @@ func buildBackend(t *testing.T, cfg *config.Config) *repo.Built {
 		return built
 
 	default:
-		t.Fatalf("unknown %s=%q (want %q or %q)", backendEnv, backend, backendPostgres, backendMemory)
+		t.Fatalf("unknown %s=%q (want %q, %q, or %q)", backendEnv, backend, backendPostgres, backendMemory, backendSQLite)
 		return nil
 	}
 }
@@ -306,8 +325,12 @@ func StartServer(t *testing.T) *Harness {
 // verify/reset/change, refresh/revoke) need no graph DB and run on both.
 func requireGraphDB(t *testing.T) {
 	t.Helper()
-	if e2eBackend() == backendMemory {
-		t.Skip("graph-DB node queries (service.DB) are unimplemented on the memory smoke backend; this case runs on the postgres gate")
+	// Only the postgres driver implements the service.DB node/edge graph read
+	// path; the memory and sqlite drivers stub it (they are the single-project
+	// embedded/smoke tiers). Cases that exercise the graph run on the postgres
+	// gate and self-skip on the other backends.
+	if e2eBackend() != backendPostgres {
+		t.Skip("graph-DB node queries (service.DB) are unimplemented on this backend; this case runs on the postgres gate")
 	}
 }
 

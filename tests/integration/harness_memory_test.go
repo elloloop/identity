@@ -1,4 +1,4 @@
-//go:build integration && !realentdb && !realpostgres
+//go:build integration && !realentdb && !realpostgres && !sqlite
 
 package integration
 

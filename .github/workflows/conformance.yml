@@ -46,6 +46,11 @@ jobs:
             build_tag: ""
             need_postgres: false
             need_entdb: false
+          - driver: sqlite
+            package: ./internal/repo/sqlite/...
+            build_tag: ""
+            need_postgres: false
+            need_entdb: false
           - driver: postgres
             package: ./internal/repo/postgres/...
             build_tag: ""

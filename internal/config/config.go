@@ -438,6 +438,17 @@ type Config struct {
 	PostgresMaxConns    int
 	PostgresAutoMigrate bool
 
+	// SQLite (lightweight embedded / single-node persistence driver).
+	// Selected with GATEWAY_REPO_DRIVER=sqlite; the data plane lives in a
+	// single file (or an in-process database) via the pure-Go
+	// modernc.org/sqlite engine — no cgo, no external service.
+	//
+	//   GATEWAY_SQLITE_PATH        database file path, or ":memory:" for an
+	//                              ephemeral in-process database
+	//   GATEWAY_SQLITE_MAX_CONNS   pool size for a file database, default 4
+	SQLitePath     string
+	SQLiteMaxConns int
+
 	// OTel exports OpenTelemetry traces to a deployer-supplied OTLP
 	// collector. Default off so a deployer who has no collector pays
 	// zero cost — when disabled the no-op tracer is installed and the
@@ -626,6 +637,9 @@ func Load() *Config {
 		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
 		PostgresAutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", false),
+
+		SQLitePath:     envStr("GATEWAY_SQLITE_PATH", ""),
+		SQLiteMaxConns: envInt("GATEWAY_SQLITE_MAX_CONNS", 4),
 
 		OTelEnabled:          envBool("GATEWAY_OTEL_ENABLED", false),
 		OTelExporterEndpoint: envStr("GATEWAY_OTEL_EXPORTER_ENDPOINT", ""),
