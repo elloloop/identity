@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	entclient "github.com/elloloop/identity/internal/repo/entdb/entclient"
+	pgrepo "github.com/elloloop/identity/internal/repo/postgres"
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"go.uber.org/zap"
 )
@@ -121,4 +122,77 @@ func TestBuild_EntDBHappyPath(t *testing.T) {
 		t.Errorf("Build entdb: ProjectStore = %v, want nil", built.ProjectStore)
 	}
 	assertNoGovernancePlane(t, built, "entdb")
+}
+
+// TestBuilt_GovernanceAccessors_TypedNilAvoidance pins the contract every
+// driver-agnostic accessor exists for: a nil concrete store must surface as a
+// TRUE nil interface (not a typed nil wrapping a nil pointer), and a present
+// store must surface unchanged. The empty Built models the entdb/memory shape
+// (no control plane); the populated Built models the postgres shape.
+func TestBuilt_GovernanceAccessors_TypedNilAvoidance(t *testing.T) {
+	t.Parallel()
+
+	// Empty build: every accessor is a true nil interface.
+	empty := &Built{}
+	if empty.ProjectResolver() != nil {
+		t.Error("empty ProjectResolver: want nil interface")
+	}
+	if empty.ControlPlaneStore() != nil {
+		t.Error("empty ControlPlaneStore: want nil interface")
+	}
+	if empty.TenantAutoFormer() != nil {
+		t.Error("empty TenantAutoFormer: want nil interface")
+	}
+	if empty.DomainStoreIface() != nil {
+		t.Error("empty DomainStoreIface: want nil interface")
+	}
+	if empty.TenantStoreIface() != nil {
+		t.Error("empty TenantStoreIface: want nil interface")
+	}
+	if empty.MembershipStoreIface() != nil {
+		t.Error("empty MembershipStoreIface: want nil interface")
+	}
+	if empty.InvitationStoreIface() != nil {
+		t.Error("empty InvitationStoreIface: want nil interface")
+	}
+	if empty.LoginGovernance() != nil {
+		t.Error("empty LoginGovernance: want nil")
+	}
+
+	// Populated build (postgres shape): each accessor returns its store. The
+	// zero-value store pointers are non-nil; the accessors only thread them
+	// through, so no pool/connection is touched.
+	full := &Built{
+		ProjectStore:     &pgrepo.ProjectStore{},
+		AutoFormStore:    &pgrepo.AutoFormStore{},
+		DomainStore:      &pgrepo.DomainStore{},
+		TenantStore:      &pgrepo.TenantStore{},
+		MembershipStore:  &pgrepo.MembershipStore{},
+		LoginPolicyStore: &pgrepo.LoginPolicyStore{},
+		InvitationStore:  &pgrepo.InvitationStore{},
+	}
+	if full.ProjectResolver() == nil {
+		t.Error("full ProjectResolver: want non-nil")
+	}
+	if full.ControlPlaneStore() == nil {
+		t.Error("full ControlPlaneStore: want non-nil")
+	}
+	if full.TenantAutoFormer() == nil {
+		t.Error("full TenantAutoFormer: want non-nil")
+	}
+	if full.DomainStoreIface() == nil {
+		t.Error("full DomainStoreIface: want non-nil")
+	}
+	if full.TenantStoreIface() == nil {
+		t.Error("full TenantStoreIface: want non-nil")
+	}
+	if full.MembershipStoreIface() == nil {
+		t.Error("full MembershipStoreIface: want non-nil")
+	}
+	if full.InvitationStoreIface() == nil {
+		t.Error("full InvitationStoreIface: want non-nil")
+	}
+	if full.LoginGovernance() == nil {
+		t.Error("full LoginGovernance: want non-nil")
+	}
 }
