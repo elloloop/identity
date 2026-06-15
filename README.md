@@ -95,7 +95,8 @@ All config is via environment variables. See `internal/config/config.go` for the
 | `GATEWAY_REPO_DRIVER` | Persistence backend: `postgres`, `sqlite`, `entdb`, or `memory` (default `entdb`) |
 | `GATEWAY_ENTDB_ADDRESS` | EntDB endpoint (e.g. `entdb:50051`) |
 | `GATEWAY_POSTGRES_DSN` | Postgres DSN (when `GATEWAY_REPO_DRIVER=postgres`) |
-| `GATEWAY_SQLITE_PATH` | SQLite database file path, or `:memory:` (when `GATEWAY_REPO_DRIVER=sqlite`) |
+| `GATEWAY_SQLITE_PATH` | SQLite database file path (when `GATEWAY_REPO_DRIVER=sqlite`). Required — set it to `:memory:` explicitly for an ephemeral in-process database; there is no implicit default. File-backed databases open in WAL mode (`synchronous=NORMAL`) so concurrent reads don't serialize behind writes |
+| `GATEWAY_SQLITE_MAX_CONNS` | Connection-pool size for a file-backed SQLite database (default `4`). Ignored for `:memory:`, which is pinned to a single connection |
 | `GATEWAY_DEFAULT_TENANT_ID` | Storage scope ID (the physical shard) the default project maps onto |
 | `GATEWAY_DEFAULT_PROJECT_ID` | ID of the control-plane Project seeded on boot and used to pin zero-config requests (default `default`) |
 | `GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS` | Comma-separated serving hostnames seeded (verified) onto the default project; the first is primary. Lets the `Host` header resolve to the default project |

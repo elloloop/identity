@@ -74,7 +74,11 @@ func (c *Config) dsn() (dsn string, inMemory bool) {
 		// (and any health-check ping) all address the same database.
 		base = "file::memory:?cache=shared"
 	}
-	return withPragmas(base), inMemory
+	dsn = withPragmas(base)
+	if !inMemory {
+		dsn = withWAL(dsn)
+	}
+	return dsn, inMemory
 }
 
 // withPragmas appends the connection pragmas every SQLite connection needs:
@@ -91,6 +95,18 @@ func withPragmas(dsn string) string {
 		sep = "&"
 	}
 	return dsn + sep + pragmas
+}
+
+// withWAL appends the write-ahead-log pragmas for file-backed databases.
+// WAL lets a writer (login/refresh-token writes) proceed without blocking
+// concurrent readers, so reads do not serialize behind the single writer and
+// bounce off busy_timeout. synchronous(NORMAL) is the safe, recommended
+// pairing with WAL (durable across application crashes; only a power loss can
+// lose the last committed transaction). Applied only to the on-disk path:
+// WAL requires a real file and is meaningless for an in-memory database.
+func withWAL(dsn string) string {
+	const walPragmas = "&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+	return dsn + walPragmas
 }
 
 // memoryDSNForName builds a uniquely-named shared in-memory DSN with the
