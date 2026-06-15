@@ -50,9 +50,8 @@ body:
     attributes:
       label: Storage backend
       options:
-        - memory
-        - entdb
         - postgres
+        - memory
         - other (describe in summary)
     validations:
       required: true

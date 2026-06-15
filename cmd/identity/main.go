@@ -65,7 +65,7 @@ func main() {
 		"identity_service_starting",
 		zap.Int("connect_port", cfg.ConnectPort),
 		zap.Int("metrics_port", cfg.MetricsPort),
-		zap.String("entdb_address", cfg.EntDBAddress),
+		zap.String("repo_driver", cfg.RepoDriver),
 		zap.String("tenant", cfg.DefaultTenantID),
 	)
 
@@ -137,7 +137,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// Stop accepting first, drain in-flight; the deferred srv.Shutdown
-	// then drains background workers and releases the EntDB client,
+	// then drains background workers and releases the persistence layer,
 	// signer watcher, and OTel exporter.
 	if shutdownErr := server.Shutdown(ctx); shutdownErr != nil {
 		logger.Error("server_shutdown_error", zap.Error(shutdownErr))

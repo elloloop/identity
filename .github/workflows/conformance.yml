@@ -27,11 +27,11 @@ jobs:
   # the matrix is the single source of truth for which drivers gate
   # the merge.
   #
-  # Service containers (postgres + entdb) are declared at the job level
-  # so they boot for every entry. The conformance test for the memory
-  # driver ignores them; postgres and entdb tests skip cleanly if their
-  # env-var is unset (which is the local-developer escape hatch). On CI
-  # we always wire the env vars so a real run never silently skips.
+  # The postgres service container is declared at the job level so it
+  # boots for every entry. The conformance test for the memory driver
+  # ignores it; the postgres test skips cleanly if its env-var is unset
+  # (which is the local-developer escape hatch). On CI we always wire the
+  # env var so a real run never silently skips.
   # ---------------------------------------------------------------------------
   conformance:
     name: Conformance / ${{ matrix.driver }}
@@ -45,17 +45,10 @@ jobs:
             package: ./internal/repo/memory/...
             build_tag: ""
             need_postgres: false
-            need_entdb: false
           - driver: postgres
             package: ./internal/repo/postgres/...
             build_tag: ""
             need_postgres: true
-            need_entdb: false
-          - driver: entdb
-            package: ./internal/repo/entdb/...
-            build_tag: realentdb
-            need_postgres: false
-            need_entdb: true
 
     services:
       postgres:
@@ -71,15 +64,6 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 12
-      entdb:
-        # tenant-shard-db v1.12+ is a distroless image (no shell/python),
-        # so an in-container --health-cmd cannot spawn. The Go server
-        # ignores env vars (CLI flags only, with defaults baked into
-        # the entrypoint). TCP readiness is polled by the "Wait for
-        # entdb" step below.
-        image: ghcr.io/elloloop/tenant-shard-db:2.5.0
-        ports:
-          - 50051:50051
 
     steps:
       - uses: actions/checkout@v6
@@ -102,23 +86,9 @@ jobs:
           echo "postgres did not come up" >&2
           exit 1
 
-      - name: Wait for entdb
-        if: matrix.need_entdb
-        run: |
-          for i in $(seq 1 30); do
-            if nc -z localhost 50051; then
-              echo "entdb up"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "entdb did not come up" >&2
-          exit 1
-
       - name: Run conformance suite
         env:
           GATEWAY_TEST_POSTGRES_DSN: ${{ matrix.need_postgres && 'postgres://identity:identity@localhost:5432/identity?sslmode=disable' || '' }}
-          GATEWAY_ENTDB_ADDRESS: ${{ matrix.need_entdb && 'localhost:50051' || '' }}
         run: |
           set -euo pipefail
           tag_flag=""

@@ -5,13 +5,13 @@
 # vuln, build, unit tests, smoke, integration with stubs, fuzz smoke).
 #
 # `make ci-full` adds the real-backend integration tests using the local
-# docker-compose stack (entdb + postgres). `make ci-docker` covers the
+# docker-compose stack (postgres). `make ci-docker` covers the
 # container build smoke.
 #
 # `make conformance-all` runs the driver-agnostic Repository conformance
-# suite against memory + postgres + entdb (the same matrix CI's
-# Conformance / <driver> jobs run; postgres and entdb skip if their
-# env-vars are unset).
+# suite against memory + postgres (the same matrix CI's
+# Conformance / <driver> jobs run; postgres skips if its
+# env-var is unset).
 #
 # Tool versions are pinned to match CI; see GOLANGCI_LINT_VERSION /
 # GOVULNCHECK_VERSION below. Bump them in lockstep with the workflow.
@@ -44,7 +44,7 @@ ci-full: ci ci-real-services ## ci + integration tests against the real docker-c
 	@echo "==> make ci-full: passed (incl. real services)"
 
 .PHONY: ci-real-services
-ci-real-services: services-up realentdb realpostgres services-down ## Run realentdb + realpostgres tests against compose
+ci-real-services: services-up realpostgres services-down ## Run realpostgres tests against compose
 	@echo "==> real-services tests passed"
 
 .PHONY: ci-docker
@@ -126,18 +126,6 @@ integration: ## Integration tests with stub backends
 		echo "no integration tests under tests/integration — skipping"; \
 	fi
 
-.PHONY: realentdb
-realentdb: ## Integration tests against a real entdb (expects GATEWAY_ENTDB_ADDRESS)
-	@if [ -z "$$GATEWAY_ENTDB_ADDRESS" ]; then \
-		echo "GATEWAY_ENTDB_ADDRESS is unset — start the stack with 'make services-up'"; \
-		exit 1; \
-	fi
-	@if compgen -G "tests/integration/*_realentdb_test.go" > /dev/null; then \
-		$(GO) test -tags=realentdb -race -timeout=300s ./tests/integration/...; \
-	else \
-		echo "no realentdb tests yet — skipping"; \
-	fi
-
 .PHONY: realpostgres
 realpostgres: ## Integration tests against a real postgres (expects GATEWAY_POSTGRES_DSN)
 	@if [ -z "$$GATEWAY_POSTGRES_DSN" ]; then \
@@ -159,7 +147,7 @@ realpostgres: ## Integration tests against a real postgres (expects GATEWAY_POST
 # ---------------------------------------------------------------------------
 
 .PHONY: conformance-all
-conformance-all: conformance-memory conformance-postgres conformance-entdb ## Run the conformance suite for every driver
+conformance-all: conformance-memory conformance-postgres ## Run the conformance suite for every driver
 	@echo "==> conformance-all: passed (skipped drivers whose env-vars were unset)"
 
 .PHONY: conformance-memory
@@ -173,10 +161,6 @@ conformance-postgres: ## Conformance suite against a real postgres (skips if GAT
 	else \
 		$(GO) test -race -count=1 -timeout=300s -run='^TestConformance$$' ./internal/repo/postgres/...; \
 	fi
-
-.PHONY: conformance-entdb
-conformance-entdb: ## Conformance suite against a real entdb (skips if GATEWAY_ENTDB_ADDRESS unset)
-	$(GO) test -tags=realentdb -race -count=1 -timeout=300s -run='^TestConformance$$' ./internal/repo/entdb/...
 
 .PHONY: fuzz
 fuzz: ## Fuzz smoke — runs each fuzz target with seed corpus + 15s fuzzing
@@ -201,10 +185,8 @@ fuzz: ## Fuzz smoke — runs each fuzz target with seed corpus + 15s fuzzing
 # ---------------------------------------------------------------------------
 
 .PHONY: services-up
-services-up: ## Start the local docker-compose stack (entdb + postgres) and wait for ready
-	docker compose up -d entdb postgres
-	@echo "waiting for entdb:50051..."
-	@for i in $$(seq 1 30); do nc -z localhost 50051 && break || sleep 1; done
+services-up: ## Start the local docker-compose stack (postgres) and wait for ready
+	docker compose up -d postgres
 	@echo "waiting for postgres:5432..."
 	@for i in $$(seq 1 30); do (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1 && break || sleep 1; done
 

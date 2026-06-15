@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/pkg/audit"
 )
@@ -35,11 +35,11 @@ func (s *AdminService) SetUserQuota(ctx context.Context, actorID, targetUserID s
 		return errors.New("user not found")
 	}
 
-	op := entdb.Operation{
-		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
+	op := graph.Operation{
+		Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 		Patch: map[string]any{ufQuotaBytes: quotaBytes, ufUpdatedAt: nowMs()},
 	}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 		return fmt.Errorf("set quota: %w", err)
 	}
 	return nil
@@ -73,7 +73,7 @@ func (s *AdminService) ListUsers(
 	}
 
 	searchLower := strings.TrimSpace(strings.ToLower(search))
-	var filtered []*entdb.Node
+	var filtered []*graph.Node
 	for _, n := range nodes {
 		u := userFromNode(n)
 		if statusFilter != "" && !strings.EqualFold(u.Status, statusFilter) {
@@ -93,7 +93,7 @@ func (s *AdminService) ListUsers(
 	if end > totalCount {
 		end = totalCount
 	}
-	var page []*entdb.Node
+	var page []*graph.Node
 	if offset < totalCount {
 		page = filtered[offset:end]
 	}
@@ -179,7 +179,7 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 // user belongs to no groups.
 func (s *AdminService) deleteGroupMembershipsForUser(ctx context.Context, actorID, userID string) error {
 	// The read is a cross-user query (the target's outgoing edges), so it
-	// MUST use tenantAdminActor — under entdb's actor-scoped visibility a
+	// MUST use tenantAdminActor — under the graph backend's actor-scoped visibility a
 	// per-user actor silently returns zero rows for another user's edges,
 	// which would make this cleanup a no-op. This matches ListGroupMembers.
 	// The write below uses the admin's actor, since the admin is the acting
@@ -191,10 +191,10 @@ func (s *AdminService) deleteGroupMembershipsForUser(ctx context.Context, actorI
 	if len(edges) == 0 {
 		return nil
 	}
-	ops := make([]entdb.Operation, 0, len(edges))
+	ops := make([]graph.Operation, 0, len(edges))
 	for _, e := range edges {
-		ops = append(ops, entdb.Operation{
-			Type: entdb.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
+		ops = append(ops, graph.Operation{
+			Type: graph.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
 			FromNodeID: userID, ToNodeID: e.ToNodeID,
 		})
 	}
@@ -224,8 +224,8 @@ func (s *AdminService) UpdateUser(ctx context.Context, actorID, userID, name, ro
 		patch[ufAvatarURL] = avatarURL
 	}
 
-	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: userID, Patch: patch}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	op := graph.Operation{Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: userID, Patch: patch}
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
 

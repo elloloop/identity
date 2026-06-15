@@ -7,14 +7,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
 )
 
 // GroupService implements working-group CRUD and membership operations.
-// The underlying EntDB node type is WorkingGroup (type_id 2).
+// The underlying graph node type is WorkingGroup (type_id 2).
 type GroupService struct {
 	bootDB           DB
 	defaultProjectID string
@@ -32,7 +32,7 @@ func NewGroupService(db DB, projectID string, auditLog *audit.Logger, logger *za
 
 // projectID returns the storage shard (project) the request operates under:
 // the per-request ProjectScope when present, else the boot default. It is
-// the partition argument the entdb DB transport keys on (the postgres DB
+// the partition argument the graph DB transport keys on (the postgres DB
 // ignores it and filters on its WithProject-bound project instead).
 func (s *GroupService) projectID(ctx context.Context) string {
 	return requestProjectID(ctx, s.defaultProjectID)
@@ -61,8 +61,8 @@ func (s *GroupService) CreateGroup(ctx context.Context, actorID, name, descripti
 		gfCreatedAt:   now,
 		gfUpdatedAt:   now,
 	}
-	op := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeWorkingGroup, Data: data}
-	result, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op})
+	op := graph.Operation{Type: graph.OpCreateNode, TypeID: typeWorkingGroup, Data: data}
+	result, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op})
 	if err != nil {
 		return nil, fmt.Errorf("create group: %w", err)
 	}
@@ -97,8 +97,8 @@ func (s *GroupService) UpdateGroup(ctx context.Context, actorID, groupID, name, 
 		patch[gfDescription] = strings.TrimSpace(description)
 	}
 
-	op := entdb.Operation{Type: entdb.OpUpdateNode, TypeID: typeWorkingGroup, NodeID: groupID, Patch: patch}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	op := graph.Operation{Type: graph.OpUpdateNode, TypeID: typeWorkingGroup, NodeID: groupID, Patch: patch}
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 		return nil, fmt.Errorf("update group: %w", err)
 	}
 
@@ -126,7 +126,7 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string)
 	// node delete, so deleting a group never leaves dangling memberships on
 	// the graph backend (the symmetric counterpart of the DeleteUser drain).
 	// The read is a cross-user query — every member's edge — so it MUST use
-	// tenantAdminActor: under entdb's actor-scoped visibility a per-user
+	// tenantAdminActor: under the graph backend's actor-scoped visibility a per-user
 	// actor returns zero rows for another user's edges, which would silently
 	// skip the cleanup. This matches ListGroupMembers. The write uses the
 	// admin's actor, since the admin is the acting principal.
@@ -134,14 +134,14 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actorID, groupID string)
 	if err != nil {
 		return fmt.Errorf("delete group: list members: %w", err)
 	}
-	ops := make([]entdb.Operation, 0, len(edges)+1)
+	ops := make([]graph.Operation, 0, len(edges)+1)
 	for _, e := range edges {
-		ops = append(ops, entdb.Operation{
-			Type: entdb.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
+		ops = append(ops, graph.Operation{
+			Type: graph.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
 			FromNodeID: e.FromNodeID, ToNodeID: groupID,
 		})
 	}
-	ops = append(ops, entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeWorkingGroup, NodeID: groupID})
+	ops = append(ops, graph.Operation{Type: graph.OpDeleteNode, TypeID: typeWorkingGroup, NodeID: groupID})
 	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), ops); err != nil {
 		return fmt.Errorf("delete group: %w", err)
 	}
@@ -175,7 +175,7 @@ func (s *GroupService) ListGroups(ctx context.Context, actorID, cursor string, l
 	if end > totalCount {
 		end = totalCount
 	}
-	var page []*entdb.Node
+	var page []*graph.Node
 	if offset < totalCount {
 		page = nodes[offset:end]
 	}
@@ -200,11 +200,11 @@ func (s *GroupService) AddGroupMember(ctx context.Context, actorID, groupID, use
 		return errors.New("group_id and user_id are required")
 	}
 
-	op := entdb.Operation{
-		Type: entdb.OpCreateEdge, EdgeTypeID: edgeMemberOf,
+	op := graph.Operation{
+		Type: graph.OpCreateEdge, EdgeTypeID: edgeMemberOf,
 		FromNodeID: userID, ToNodeID: groupID,
 	}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 		return fmt.Errorf("add group member: %w", err)
 	}
 
@@ -224,11 +224,11 @@ func (s *GroupService) RemoveGroupMember(ctx context.Context, actorID, groupID, 
 		return errors.New("group_id and user_id are required")
 	}
 
-	op := entdb.Operation{
-		Type: entdb.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
+	op := graph.Operation{
+		Type: graph.OpDeleteEdge, EdgeTypeID: edgeMemberOf,
 		FromNodeID: userID, ToNodeID: groupID,
 	}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 		return fmt.Errorf("remove group member: %w", err)
 	}
 

@@ -11,7 +11,7 @@ import (
 
 // CreateTenantInvitation invites an email to join a tenant. Owner/admin only.
 // Available only on the postgres control-plane driver; nil service
-// (entdb/memory) returns Unimplemented.
+// (memory) returns Unimplemented.
 func (h *IdentityHandler) CreateTenantInvitation(
 	ctx context.Context,
 	req *connect.Request[identitypb.CreateTenantInvitationRequest],

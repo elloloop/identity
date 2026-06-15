@@ -18,7 +18,7 @@ import (
 // Return value is only error: tenant-shard-db v1.14.0's
 // OpDeleteWhere primitive (#540) does not return a deleted-row count,
 // so the Repository contract drops the count to keep all three
-// backends (memory, postgres, entdb) on a single signature. The
+// backends (memory, postgres) on a single signature. The
 // postgres-specific `tag.RowsAffected()` is therefore not surfaced.
 
 func (r *pgRepository) deleteExpiredBatch(ctx context.Context, op, table string, beforeMs int64, limit int) error {

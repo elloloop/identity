@@ -5,23 +5,27 @@ import { Code } from "astro-expressive-code/components";
 
 <DocsLayout title="Quick Start">
   <h1>Quick Start</h1>
-  <p>Run Identity locally against an EntDB container, then sign up a user and verify the access token.</p>
+  <p>Run Identity locally against a Postgres container, then sign up a user and verify the access token.</p>
 
-  <h2>1. Start EntDB</h2>
+  <h2>1. Start Postgres</h2>
   <p>
-    Identity needs an EntDB instance. Identity targets the v2 line so
-    it can ride the SDK self-describing-schema mechanism (ADR-031),
-    which is what makes constraints like
+    Identity persists to Postgres — the primary datastore, which carries
+    the Project/Tenant/Domain control plane and enforces constraints like
     <code>OAuthIdentity</code>'s <code>(provider, provider_user_id)</code>
-    composite uniqueness atomic across concurrent writes.
+    composite uniqueness atomically across concurrent writes.
   </p>
-  <Code code={`docker run -d --name entdb -p 50051:50051 ghcr.io/elloloop/tenant-shard-db:2.5.0`} lang="bash" />
+  <Code code={`docker run -d --name identity-db -p 5432:5432 \\
+  -e POSTGRES_USER=identity -e POSTGRES_PASSWORD=identity \\
+  -e POSTGRES_DB=identity \\
+  postgres:16.13-alpine3.23`} lang="bash" />
 
   <h2>2. Start Identity</h2>
   <Code code={`docker run -d --name identity \\
   -p 80:80 -p 9090:9090 \\
-  --link entdb \\
-  -e GATEWAY_ENTDB_ADDRESS=entdb:50051 \\
+  --link identity-db \\
+  -e GATEWAY_REPO_DRIVER=postgres \\
+  -e GATEWAY_POSTGRES_DSN=postgres://identity:identity@identity-db:5432/identity?sslmode=disable \\
+  -e GATEWAY_POSTGRES_AUTO_MIGRATE=true \\
   -e GATEWAY_DEFAULT_TENANT_ID=local \\
   -e GATEWAY_PASSKEY_RP_ID=localhost \\
   -e GATEWAY_PASSKEY_ORIGIN=http://localhost \\

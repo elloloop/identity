@@ -1,7 +1,7 @@
-// Package audit provides best-effort audit event logging to EntDB.
+// Package audit provides best-effort audit event logging to the datastore.
 //
 // Audit writes MUST NOT block the user flow or propagate errors — an
-// EntDB outage must not break login. All failures are caught and logged
+// A datastore outage must not break login. All failures are caught and logged
 // via zap, never returned to callers.
 //
 // Usage:
@@ -28,11 +28,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 	"go.uber.org/zap"
 )
 
-// auditEventTypeID is the EntDB type_id for AuditEvent nodes (schema.yaml).
+// auditEventTypeID is the graph type_id for AuditEvent nodes.
 const auditEventTypeID = 26
 
 // auditWriteActor is the system actor recorded for audit-event writes. Audit
@@ -54,15 +54,15 @@ const (
 	fieldCreatedAt    = "8" // timestamp (ms)
 )
 
-// NodeWriter is the subset of EntDB operations needed by the audit
-// logger. Accepting an interface rather than *entdb.DbClient makes
+// NodeWriter is the subset of datastore operations needed by the audit
+// logger. Accepting an interface rather than *graph.DbClient makes
 // the logger testable without a live gRPC connection.
 type NodeWriter interface {
 	ExecuteAtomic(
 		ctx context.Context,
 		tenantID, actor string,
-		ops []entdb.Operation,
-	) (*entdb.CommitResult, error)
+		ops []graph.Operation,
+	) (*graph.CommitResult, error)
 }
 
 // ProjectScoper resolves the project an audit write must land under, from
@@ -70,7 +70,7 @@ type NodeWriter interface {
 // id (ADR-0002: the Project is the data-plane shard). The two outputs cover
 // both backend shapes the identity service ships:
 //
-//   - entdb keys on the per-call tenant argument, so the returned project id
+//   - the graph DB keys on the per-call tenant argument, so the returned project id
 //     becomes that argument and selects the partition;
 //   - postgres ignores that argument and filters on the project its writer was
 //     bound to, so the returned writer is the project-bound sibling.
@@ -196,11 +196,11 @@ func WithDetails(details map[string]any) Option {
 	return func(c *eventConfig) { c.details = details }
 }
 
-// Logger writes audit events to EntDB. All methods are best-effort.
+// Logger writes audit events to the datastore. All methods are best-effort.
 //
 // By default, Log writes synchronously on the caller's goroutine. Call
 // StartAsync to move writes to a background goroutine with a bounded
-// queue, so the auth hot path is not gated on EntDB latency. Drops
+// queue, so the auth hot path is not gated on datastore latency. Drops
 // when the queue is full are counted and visible via DroppedCount.
 type Logger struct {
 	// writer and defaultProjectID are the boot-default binding: the writer
@@ -237,7 +237,7 @@ type asyncOp struct {
 	ctx       context.Context
 	writer    NodeWriter
 	projectID string
-	ops       []entdb.Operation
+	ops       []graph.Operation
 	event     EventType
 }
 
@@ -285,7 +285,7 @@ func (l *Logger) resolveProject(ctx context.Context) (NodeWriter, string) {
 	return writer, projectID
 }
 
-// Log writes an audit event to EntDB. It never returns an error and
+// Log writes an audit event to the datastore. It never returns an error and
 // never panics — failures are logged via zap and silently dropped.
 func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 	// Recover from any panic — audit writes must never crash the caller.
@@ -341,7 +341,7 @@ func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 	nowMs := l.nowFunc().UnixMilli()
 
 	// Build the raw operation. Data keys are field IDs (decimal strings)
-	// as required by the EntDB wire format.
+	// as required by the graph wire format.
 	data := map[string]any{
 		fieldEventType:    string(event),
 		fieldActorUserID:  cfg.actorUserID,
@@ -353,9 +353,9 @@ func (l *Logger) Log(ctx context.Context, event EventType, opts ...Option) {
 		fieldCreatedAt:    nowMs,
 	}
 
-	ops := []entdb.Operation{
+	ops := []graph.Operation{
 		{
-			Type:   entdb.OpCreateNode,
+			Type:   graph.OpCreateNode,
 			TypeID: auditEventTypeID,
 			Data:   data,
 		},
@@ -420,7 +420,7 @@ func (l *Logger) closeFn() func() {
 	}
 }
 
-func (l *Logger) enqueueAsync(ctx context.Context, writer NodeWriter, projectID string, event EventType, ops []entdb.Operation) {
+func (l *Logger) enqueueAsync(ctx context.Context, writer NodeWriter, projectID string, event EventType, ops []graph.Operation) {
 	op := asyncOp{
 		ctx:       context.WithoutCancel(ctx),
 		writer:    writer,

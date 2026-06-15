@@ -1,6 +1,6 @@
 // Package service implements the business logic for the identity service.
 //
-// The AuthService sits between the Connect-Go handler layer and the EntDB
+// The AuthService sits between the Connect-Go handler layer and the graph
 // persistence layer. It contains all authentication, token management, and
 // 2FA logic. It does NOT import Connect/protobuf types -- it uses plain Go
 // structs and returns errors that the handler translates to gRPC codes.
@@ -111,7 +111,7 @@ type PollQrResult struct {
 }
 
 // ── Repository interface ───────────────────────────────────────────────
-// All EntDB operations are behind this interface so the service layer
+// All graph DB operations are behind this interface so the service layer
 // is testable without a live gRPC connection.
 
 // Repository abstracts all persistence operations for the auth service.
@@ -141,7 +141,7 @@ type Repository interface {
 	//
 	// (Invitations are drained but are the one user_id-keyed type the
 	// cross-driver conformance suite cannot seed/assert — Repository
-	// exposes no invitation create method; they are written via the entdb
+	// exposes no invitation create method; they are written via the graph
 	// graph.)
 	DeleteUser(ctx context.Context, userID string) error
 
@@ -372,7 +372,7 @@ type Repository interface {
 	// background sweeper started by app.New calls these every
 	// GATEWAY_SWEEPER_INTERVAL_SECONDS; each call deletes up to
 	// `limit` rows whose ExpiresAt is strictly less than `beforeMs`.
-	// Every shipping backend (memory, postgres, entdb) implements the
+	// Every shipping backend (memory, postgres) implements the
 	// real sweep; the ErrSweepNotImplemented sentinel remains so a new
 	// backend can land its CRUD methods first and its sweep in a
 	// follow-up PR without erroring the sweeper goroutine.
@@ -650,7 +650,7 @@ type EmailChangeToken struct {
 // local account even if their gmail address changes.
 //
 // Composite uniqueness on (provider, provider_user_id) is enforced at
-// the application layer — EntDB does not currently expose composite
+// the application layer — the graph DB does not expose composite
 // unique constraints. CreateOAuthIdentity callers must lookup first.
 type OAuthIdentity struct {
 	NodeID          string
@@ -740,7 +740,7 @@ var (
 	ErrCaptchaFailed   = errors.New("captcha verification failed")
 	// ErrUnimplemented signals that the requested RPC is intentionally
 	// disabled for the active repository driver (e.g. the redesign
-	// Domain/Tenant RPCs are postgres-only; entdb/memory return this).
+	// Domain/Tenant RPCs are postgres-only; memory returns this).
 	// The Connect handler layer maps it to CodeUnimplemented.
 	ErrUnimplemented = errors.New("operation unimplemented for this repository driver")
 	// ErrLastOwner is returned by RemoveTenantMember when removing the target
@@ -914,7 +914,7 @@ func (s *AuthService) tenantID(context.Context) string {
 // projectID returns the control-plane project the request resolved to (set
 // by the project-resolution middleware), falling back to the configured
 // default project. Empty only when no default project is configured (the
-// entdb/memory deployments with no control plane), in which case the token
+// memory deployments with no control plane), in which case the token
 // simply carries no project claim.
 func (s *AuthService) projectID(ctx context.Context) string {
 	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.ProjectID != "" {

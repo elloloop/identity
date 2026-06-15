@@ -178,7 +178,7 @@ func startServer(t *testing.T, signupEnabled bool) *browserHarness {
 
 	// One unique project id per run keeps concurrent runs isolated and, per
 	// ADR-0002, is the data-plane storage shard. DefaultTenantID and
-	// DefaultProjectID must be the same provisioned value or entdb/postgres
+	// DefaultProjectID must be the same provisioned value or postgres
 	// reject the empty/unprovisioned partition.
 	projectID := "browsere2e"
 	cfg := newUIConfig(signupEnabled, projectID)

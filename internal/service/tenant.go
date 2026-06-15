@@ -7,8 +7,8 @@ import "context"
 // driver-agnostic value types so the service layer (tenant auto-formation,
 // login policy, membership) and its tests depend on a contract, not a
 // concrete store. The only production implementation is postgres
-// (internal/repo/postgres); the entdb graph backend is being retired and
-// has no control/governance plane.
+// (internal/repo/postgres); the in-memory driver has no
+// control/governance plane.
 //
 // Every store method is explicitly project-scoped: projectID is the
 // redesign's isolation boundary, so it is a required leading argument on

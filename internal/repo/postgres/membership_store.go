@@ -207,7 +207,7 @@ func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 // transaction it revokes any existing pending invitation for the same
 // (project, tenant, lower(email)) and inserts the new one. This is the
 // authoritative enforcement (the partial unique index is defense-in-depth,
-// and the memory/entdb drivers — should they ever gain invitations — must
+// and the memory driver — should they ever gain invitations — must
 // match these revoke-then-insert semantics).
 func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.TenantInvitation) (string, error) {
 	if inv == nil {
@@ -246,7 +246,8 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 
 	// Revoke any open invite for the same recipient first, so the new one
 	// is the only pending row — one open invite per (project, tenant, email).
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.Exec(
+		ctx, `
 		UPDATE tenant_invitations SET status = 'revoked'
 		WHERE project_id = $1 AND tenant_id = $2
 		  AND lower(email) = lower($3) AND status = 'pending'`,
@@ -255,7 +256,8 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 		return "", wrapPgErr("CreateInvitation(revoke)", err)
 	}
 
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.Exec(
+		ctx, `
 		INSERT INTO tenant_invitations (
 			id, project_id, tenant_id, token_hash, email, invited_by, role,
 			status, expires_at_ms, accepted_at_ms, created_at_ms

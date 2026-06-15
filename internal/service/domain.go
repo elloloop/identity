@@ -19,7 +19,7 @@ import (
 //
 // It is project-scoped governance: every operation resolves the caller's
 // Project from the request context and rejects when none is present. It is
-// available only on the postgres control-plane driver; entdb/memory
+// available only on the postgres control-plane driver; memory
 // deployments construct no DomainService and the handler returns
 // Unimplemented.
 

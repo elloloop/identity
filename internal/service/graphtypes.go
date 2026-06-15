@@ -3,10 +3,10 @@ package service
 import (
 	"context"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 )
 
-// ── EntDB type IDs (from schema.proto) ─────────────────────────────
+// ── Graph node type IDs ─────────────────────────────
 
 const (
 	typeUser            = 1
@@ -20,7 +20,7 @@ const (
 	typeOAuthIdentity   = 30
 )
 
-// ── EntDB edge IDs (from schema.proto) ─────────────────────────────
+// ── Graph edge type IDs ─────────────────────────────
 
 const edgeMemberOf = 101
 
@@ -196,16 +196,16 @@ type ResetPasswordResult struct {
 
 // ── DB interface ───────────────────────────────────────────────────
 // Services accept this narrow interface rather than the full
-// *entdb.DbClient so they are testable with an in-memory fake.
+// *graph.DbClient so they are testable with an in-memory fake.
 
-// DB is the subset of the EntDB Transport used by identity services.
+// DB is the subset of the graph DB used by identity services.
 type DB interface {
-	GetNode(ctx context.Context, tenantID, actor string, typeID int, nodeID string) (*entdb.Node, error)
-	QueryNodes(ctx context.Context, tenantID, actor string, typeID int, filter map[string]any) ([]*entdb.Node, error)
-	ExecuteAtomic(ctx context.Context, tenantID, actor string, ops []entdb.Operation) (*entdb.CommitResult, error)
-	GetEdgesFrom(ctx context.Context, tenantID, actor, fromNodeID string, edgeTypeID int) ([]*entdb.Edge, error)
-	GetEdgesTo(ctx context.Context, tenantID, actor, toNodeID string, edgeTypeID int) ([]*entdb.Edge, error)
-	SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*entdb.Node, error)
+	GetNode(ctx context.Context, tenantID, actor string, typeID int, nodeID string) (*graph.Node, error)
+	QueryNodes(ctx context.Context, tenantID, actor string, typeID int, filter map[string]any) ([]*graph.Node, error)
+	ExecuteAtomic(ctx context.Context, tenantID, actor string, ops []graph.Operation) (*graph.CommitResult, error)
+	GetEdgesFrom(ctx context.Context, tenantID, actor, fromNodeID string, edgeTypeID int) ([]*graph.Edge, error)
+	GetEdgesTo(ctx context.Context, tenantID, actor, toNodeID string, edgeTypeID int) ([]*graph.Edge, error)
+	SearchNodes(ctx context.Context, tenantID, actor string, typeID int, query string) ([]*graph.Node, error)
 	// RegisterUserInTenant registers userID in the global user
 	// registry and adds them as a member of tenantID with the given
 	// role. Idempotent: tolerates ALREADY_EXISTS on both calls. The

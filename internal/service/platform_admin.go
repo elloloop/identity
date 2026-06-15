@@ -28,7 +28,7 @@ type PlatformAdmin struct {
 }
 
 // PlatformAdminStore persists PlatformAdmins. It exists only on the postgres
-// control-plane driver; entdb/memory have no platform_admins table, so the
+// control-plane driver; the memory driver has no platform_admins table, so the
 // admin service is constructed without it and the bootstrap RPC returns
 // Unimplemented.
 type PlatformAdminStore interface {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
@@ -50,7 +50,7 @@ func (s *ProfileService) repo(ctx context.Context) Repository {
 
 // projectID returns the storage shard (project) the request operates under:
 // the per-request ProjectScope when present, else the boot default. It is
-// the partition argument the entdb DB transport keys on (the postgres DB
+// the partition argument the graph DB transport keys on (the postgres DB
 // ignores it and filters on its WithProject-bound project instead).
 func (s *ProfileService) projectID(ctx context.Context) string {
 	return requestProjectID(ctx, s.defaultProjectID)
@@ -154,8 +154,8 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 		return errors.New("session does not belong to you")
 	}
 
-	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeRefreshToken, NodeID: sessionID}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []entdb.Operation{op}); err != nil {
+	op := graph.Operation{Type: graph.OpDeleteNode, TypeID: typeRefreshToken, NodeID: sessionID}
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []graph.Operation{op}); err != nil {
 		return fmt.Errorf("revoke session: %w", err)
 	}
 
@@ -195,8 +195,8 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 
 	count := 0
 	for _, n := range nodes {
-		op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeRefreshToken, NodeID: n.NodeID}
-		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []entdb.Operation{op}); err != nil {
+		op := graph.Operation{Type: graph.OpDeleteNode, TypeID: typeRefreshToken, NodeID: n.NodeID}
+		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []graph.Operation{op}); err != nil {
 			s.logger.Warn("revoke_session_delete_failed", zap.String("session_id", n.NodeID))
 			continue
 		}
@@ -251,8 +251,8 @@ func (s *ProfileService) DeletePasskey(ctx context.Context, userID, credentialID
 		return errors.New("passkey does not belong to you")
 	}
 
-	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typePasskeyCredCred, NodeID: cred.NodeID}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(userID), []entdb.Operation{op}); err != nil {
+	op := graph.Operation{Type: graph.OpDeleteNode, TypeID: typePasskeyCredCred, NodeID: cred.NodeID}
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(userID), []graph.Operation{op}); err != nil {
 		return fmt.Errorf("delete passkey: %w", err)
 	}
 

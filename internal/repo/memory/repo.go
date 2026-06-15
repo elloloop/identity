@@ -1,9 +1,9 @@
 // Package memory is the in-process Repository driver. It backs both
 // fast unit tests (no gRPC, no docker) and local-development runs
-// where a full EntDB stack is overkill.
+// where a full datastore is overkill.
 //
 // All operations are mutex-protected so tests using t.Parallel() are
-// race-free. The driver keeps the same surface as the EntDB-backed
+// race-free. The driver keeps the same surface as the postgres-backed
 // driver — service.Repository plus a no-op service.DB — so the
 // driver-selection helper in internal/repo/driver.go can hand it
 // back from Build like any other backend.
@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -27,7 +27,7 @@ import (
 // Project isolation (ADR-0002): each Repo instance owns an independent set
 // of data-plane maps, so two projects share no rows and uniqueness (e.g.
 // email) is per-project, mirroring the postgres `WHERE project_id = $1`
-// boundary and the entdb per-project SDK partition. WithProject returns the
+// boundary and the graph per-project partition. WithProject returns the
 // sibling Repo for a given project, lazily created and memoised in a shared
 // registry so repeated lookups of the same project reuse one store.
 type Repo struct {
@@ -116,7 +116,7 @@ func newStore() *Repo {
 }
 
 // WithProject returns the Repo bound to projectID, mirroring the postgres
-// `WHERE project_id = $1` boundary and the entdb per-project SDK partition
+// `WHERE project_id = $1` boundary and the graph per-project partition
 // (ADR-0002). Each project gets a fully independent store, so two projects
 // never see each other's rows and a unique key (email) is scoped per
 // project. The sibling is memoised so repeated calls for one project return
@@ -1550,32 +1550,32 @@ func (r *Repo) RevokeSessionsForUser(_ context.Context, userID string, atMs int6
 
 var errMemoryDBUnsupported = service.ErrServiceUnavailable
 
-func (r *Repo) GetNode(context.Context, string, string, int, string) (*sdk.Node, error) {
+func (r *Repo) GetNode(context.Context, string, string, int, string) (*graph.Node, error) {
 	return nil, errMemoryDBUnsupported
 }
 
-func (r *Repo) QueryNodes(context.Context, string, string, int, map[string]any) ([]*sdk.Node, error) {
+func (r *Repo) QueryNodes(context.Context, string, string, int, map[string]any) ([]*graph.Node, error) {
 	return nil, errMemoryDBUnsupported
 }
 
-func (r *Repo) ExecuteAtomic(context.Context, string, string, []sdk.Operation) (*sdk.CommitResult, error) {
-	return &sdk.CommitResult{Success: true, Applied: true}, nil
+func (r *Repo) ExecuteAtomic(context.Context, string, string, []graph.Operation) (*graph.CommitResult, error) {
+	return &graph.CommitResult{Success: true, Applied: true}, nil
 }
 
-func (r *Repo) GetEdgesFrom(context.Context, string, string, string, int) ([]*sdk.Edge, error) {
+func (r *Repo) GetEdgesFrom(context.Context, string, string, string, int) ([]*graph.Edge, error) {
 	return nil, nil
 }
 
-func (r *Repo) GetEdgesTo(context.Context, string, string, string, int) ([]*sdk.Edge, error) {
+func (r *Repo) GetEdgesTo(context.Context, string, string, string, int) ([]*graph.Edge, error) {
 	return nil, nil
 }
 
-func (r *Repo) SearchNodes(context.Context, string, string, int, string) ([]*sdk.Node, error) {
+func (r *Repo) SearchNodes(context.Context, string, string, int, string) ([]*graph.Node, error) {
 	return nil, errMemoryDBUnsupported
 }
 
 // RegisterUserInTenant is a no-op on the in-memory driver. The
-// in-memory store bypasses the EntDB two-tier model entirely, so
+// in-memory store bypasses the graph two-tier model entirely, so
 // there is no global registry / tenant-membership to enforce.
 func (r *Repo) RegisterUserInTenant(_ context.Context, _, _, _, _, _ string) error {
 	return nil

@@ -1,4 +1,4 @@
-//go:build integration && !realentdb && !realpostgres
+//go:build integration && !realpostgres
 
 // This test builds a memory-backed stack directly (NewMemRepo +
 // newIssue3DB) rather than going through StartServer, because it needs
@@ -6,9 +6,9 @@
 // StartServer's backend harnesses don't expose. The rotation contract
 // lives entirely in the signer + JWKS endpoint and is independent of the
 // repository backend, so there is nothing to gain from running it
-// against entdb/postgres. The memory-only build constraint matches the
+// against postgres. The memory-only build constraint matches the
 // helpers it depends on (issue3_harness.go); without it the test is
-// pulled into the nightly's -tags=integration,realentdb build, where
+// pulled into the nightly's -tags=integration,realpostgres build, where
 // newIssue3DB does not exist and the whole package fails to compile.
 package integration
 

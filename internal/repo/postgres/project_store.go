@@ -15,7 +15,7 @@ import (
 // redesign. It is a self-contained, additive store layered on top of
 // migration 0013's control-plane tables (projects, project_credentials,
 // project_auth_domains). It deliberately does NOT touch the existing
-// service.Repository interface or the memory/entdb drivers — those gain
+// service.Repository interface or the memory driver — those gain
 // project/tenant support in later slices.
 //
 // Unlike the data-plane *pgRepository (which scopes every query by

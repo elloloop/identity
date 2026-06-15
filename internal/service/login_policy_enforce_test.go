@@ -63,8 +63,10 @@ func (f *lpTenantStore) CreateTenant(context.Context, *Tenant) (string, error) {
 func (f *lpTenantStore) GetTenantByPrimaryDomain(context.Context, string, string) (*Tenant, error) {
 	return nil, nil
 }
+
 func (f *lpTenantStore) SetTenantStatus(context.Context, string, string, string) error { return nil }
-func (f *lpTenantStore) ListTenants(context.Context, string) ([]*Tenant, error)        { return nil, nil }
+
+func (f *lpTenantStore) ListTenants(context.Context, string) ([]*Tenant, error) { return nil, nil }
 
 type fakePolicyStore struct {
 	byTenant map[string]*LoginPolicy // key: projectID + "|" + tenantID
@@ -210,7 +212,7 @@ func TestEnforceLoginPolicy_PasswordOnlyDeniesOtherMethods(t *testing.T) {
 	}
 }
 
-// A nil governance bundle (entdb/memory) imposes no restriction.
+// A nil governance bundle (memory) imposes no restriction.
 func TestEnforceLoginPolicy_NilBundle_NoOp(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	// governance left nil.

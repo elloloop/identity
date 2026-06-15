@@ -20,7 +20,7 @@ import (
 // Like DomainService it is project-scoped governance: every operation
 // resolves the caller's Project from the request context and rejects when
 // none is present. It is available only on the postgres control-plane driver;
-// entdb/memory deployments construct no MembershipService and the handler
+// memory deployments construct no MembershipService and the handler
 // returns Unimplemented.
 
 // defaultInvitationTTL is the fallback validity window for an invitation when

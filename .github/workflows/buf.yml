@@ -33,7 +33,7 @@ jobs:
       # current main so a breaking change is caught before it lands.
       - name: buf breaking (vs main)
         if: github.event_name != 'push'
-        run: buf breaking --against '.git#branch=origin/main' --against-config buf.yaml --path proto/identity/identity.proto --path proto/identity/schema/schema.proto
+        run: buf breaking --against '.git#branch=origin/main' --against-config buf.yaml --path proto/identity/identity.proto
 
       # On push to main, comparing against origin/main is a no-op (the commit
       # IS main). Compare against the latest release tag instead, so any
@@ -49,4 +49,4 @@ jobs:
             exit 0
           fi
           echo "Comparing proto against last release tag: $last_tag"
-          buf breaking --against ".git#tag=$last_tag" --against-config buf.yaml --path proto/identity/identity.proto --path proto/identity/schema/schema.proto
+          buf breaking --against ".git#tag=$last_tag" --against-config buf.yaml --path proto/identity/identity.proto

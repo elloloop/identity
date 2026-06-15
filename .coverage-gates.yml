@@ -15,7 +15,6 @@ packages:
   internal/middleware: 98
   internal/repo: 82
   internal/repo/conformance: 67
-  internal/repo/entdb: 78
   internal/repo/memory: 84
   internal/repo/postgres: 75
   internal/service: 92

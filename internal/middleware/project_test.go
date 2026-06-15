@@ -70,7 +70,7 @@ func serve(t *testing.T, resolver service.ProjectResolver, defaultID, defaultSco
 	return rec, cap
 }
 
-// With no resolver (entdb/memory) and no key/host, every request pins to
+// With no resolver (memory) and no key/host, every request pins to
 // the configured default project.
 func TestProjectResolver_NilResolver_PinsDefault(t *testing.T) {
 	rec, cap := serve(t, nil, defProjectID, defScopeID, nil)

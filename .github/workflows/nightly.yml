@@ -43,63 +43,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  realentdb_integration:
-    name: Integration real entdb
-    runs-on: ubuntu-24.04
-    timeout-minutes: 75
-    services:
-      entdb:
-        # tenant-shard-db v1.12+ is a distroless image (no shell/python),
-        # so an in-container --health-cmd cannot spawn. The Go server
-        # ignores env vars (CLI flags only, with defaults baked into
-        # the entrypoint). TCP readiness is polled by the "Wait for"
-        # step below.
-        image: ghcr.io/elloloop/tenant-shard-db:2.5.0
-        ports:
-          - 50051:50051
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Wait for entdb
-        run: |
-          for _ in $(seq 1 30); do
-            if nc -z localhost 50051; then echo "entdb up"; exit 0; fi
-            sleep 1
-          done
-          echo "entdb did not come up"; exit 1
-
-      - name: go test -tags=integration,realentdb
-        env:
-          GATEWAY_ENTDB_ADDRESS: localhost:50051
-        run: |
-          GO_TEST_REPORT_DIR=nightly-reports \
-            bash scripts/go-test-json.sh "Nightly integration real entdb" -- \
-              -tags=integration,realentdb -race -count=5 -shuffle=on \
-              -timeout=1800s ./tests/integration/...
-
-      - name: go test -tags=realentdb internal/repo/entdb
-        env:
-          GATEWAY_ENTDB_ADDRESS: localhost:50051
-        run: |
-          GO_TEST_REPORT_DIR=nightly-reports \
-            bash scripts/go-test-json.sh "Nightly entdb repository" -- \
-              -tags=realentdb -race -count=5 -shuffle=on \
-              -timeout=1200s -skip='^TestConformance$' ./internal/repo/entdb/...
-
-      - name: Upload nightly report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: nightly-reports-realentdb
-          path: nightly-reports
-          if-no-files-found: ignore
-          retention-days: 30
-
   realpostgres_integration:
     name: Integration real postgres
     runs-on: ubuntu-24.04
@@ -189,8 +132,8 @@ jobs:
   report:
     name: Report nightly failure
     runs-on: ubuntu-24.04
-    needs: [race_flake_loop, realentdb_integration, realpostgres_integration, fuzz]
-    if: ${{ always() && (needs.race_flake_loop.result == 'failure' || needs.realentdb_integration.result == 'failure' || needs.realpostgres_integration.result == 'failure' || needs.fuzz.result == 'failure') }}
+    needs: [race_flake_loop, realpostgres_integration, fuzz]
+    if: ${{ always() && (needs.race_flake_loop.result == 'failure' || needs.realpostgres_integration.result == 'failure' || needs.fuzz.result == 'failure') }}
     permissions:
       actions: read
       contents: read
