@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"go.uber.org/zap"
+
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -176,10 +179,11 @@ const testAdminSecret = "s3cr3t-operator-key"
 // created=true; every later one reports created=false. A mutex makes the
 // check-then-insert atomic so the concurrency test exercises real serialization.
 type fakePlatformAdminStore struct {
-	mu        sync.Mutex
-	admins    []*PlatformAdmin
-	createErr error
-	nextID    int
+	mu          sync.Mutex
+	admins      []*PlatformAdmin
+	createErr   error
+	nextID      int
+	createCalls int // how many times the locked CreateFirstPlatformAdmin ran
 }
 
 func newFakePlatformAdminStore() *fakePlatformAdminStore {
@@ -189,6 +193,7 @@ func newFakePlatformAdminStore() *fakePlatformAdminStore {
 func (f *fakePlatformAdminStore) CreateFirstPlatformAdmin(_ context.Context, a *PlatformAdmin) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.createCalls++
 	if f.createErr != nil {
 		return false, f.createErr
 	}
@@ -219,6 +224,7 @@ type adminFixture struct {
 	members  *fakeMembershipStore
 	admins   *fakePlatformAdminStore
 	dns      *fakeDNSResolver
+	audit    *recordingAuditWriter
 }
 
 func newAdminFixture(secret string) *adminFixture {
@@ -227,13 +233,16 @@ func newAdminFixture(secret string) *adminFixture {
 	m := newFakeMembershipStore()
 	a := newFakePlatformAdminStore()
 	dns := &fakeDNSResolver{records: map[string][]string{}}
+	auditWriter := newRecordingAuditWriter()
+	auditLog := audit.NewLogger(auditWriter, "test-project", zap.NewNop())
 	return &adminFixture{
-		svc:      NewControlPlaneAdminService(secret, p, t, m, a, dns, nil),
+		svc:      NewControlPlaneAdminService(secret, p, t, m, a, dns, auditLog, zap.NewNop()),
 		projects: p,
 		tenants:  t,
 		members:  m,
 		admins:   a,
 		dns:      dns,
+		audit:    auditWriter,
 	}
 }
 
@@ -876,6 +885,38 @@ func TestCreateFirstPlatformAdmin_SecondCallRejected(t *testing.T) {
 	}
 }
 
+func TestCreateFirstPlatformAdmin_BlockedAttemptEmitsAudit(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture("")
+	ctx := context.Background()
+
+	if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "first@acme.com", ""); err != nil {
+		t.Fatalf("first bootstrap: %v", err)
+	}
+	// The happy bootstrap must NOT emit a blocked event.
+	if n := f.audit.countByEventType(string(audit.EventPlatformAdminBootstrapBlocked)); n != 0 {
+		t.Fatalf("blocked events after happy bootstrap = %d, want 0", n)
+	}
+
+	// A second (now-closed) attempt must be rejected AND recorded so a
+	// closed-bootstrap probe is visible in the audit trail.
+	if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "probe@evil.com", ""); !errors.Is(err, ErrPlatformAdminExists) {
+		t.Fatalf("second bootstrap: err = %v, want ErrPlatformAdminExists", err)
+	}
+	if n := f.audit.countByEventType(string(audit.EventPlatformAdminBootstrapBlocked)); n != 1 {
+		t.Fatalf("blocked events after closed-bootstrap probe = %d, want 1", n)
+	}
+	// Perf contract: the unlocked CountPlatformAdmins pre-check must have
+	// short-circuited the closed-bootstrap probe BEFORE the advisory-lock
+	// transaction — so the locked create ran exactly once (the real bootstrap).
+	f.admins.mu.Lock()
+	calls := f.admins.createCalls
+	f.admins.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("locked CreateFirstPlatformAdmin calls = %d, want 1 (pre-check should skip the closed probe)", calls)
+	}
+}
+
 func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture("")
@@ -914,7 +955,7 @@ func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
 func TestCreateFirstPlatformAdmin_UnimplementedWithoutStore(t *testing.T) {
 	t.Parallel()
 	// Built without a PlatformAdminStore (the entdb/memory shape).
-	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil)
+	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil)
 	if _, err := svc.CreateFirstPlatformAdmin(context.Background(), "ops@acme.com", ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("no store: err = %v, want ErrUnimplemented", err)
 	}

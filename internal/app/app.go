@@ -240,6 +240,15 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			PathPrefix: "/identity.IdentityService/VerifyTotp", Tag: "totp_verify",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
+		{
+			// First-admin bootstrap: the one unauthenticated, NON-secret-gated
+			// admin RPC. It self-closes once any platform admin exists, but
+			// while open (a fresh deployment) it must not be hammerable — a
+			// tight per-IP quota bounds brute-force / probe traffic against the
+			// ungated endpoint.
+			PathPrefix: "/identity.IdentityService/CreateFirstPlatformAdmin", Tag: "first_admin_bootstrap",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitBootstrapPerIP, 0),
+		},
 	}
 }
 
@@ -418,7 +427,7 @@ func New(deps Deps) (*Built, error) {
 
 	domainSvc := buildDomainService(deps, logger)
 	membershipSvc := buildMembershipService(deps, repo, mailer, logger)
-	controlAdminSvc := buildControlPlaneAdminService(deps, logger)
+	controlAdminSvc := buildControlPlaneAdminService(deps, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, captchaVerifier, deps.Config)
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
@@ -582,7 +591,7 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 // Unimplemented (the secret check short-circuits on an empty secret). This
 // keeps the "off by default" guarantee in one place — the service's
 // constant-time authorize — rather than splitting it across the wiring.
-func buildControlPlaneAdminService(deps Deps, logger *zap.Logger) *service.ControlPlaneAdminService {
+func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *zap.Logger) *service.ControlPlaneAdminService {
 	if deps.ControlPlaneStore == nil || deps.TenantStore == nil || deps.MembershipStore == nil {
 		return nil
 	}
@@ -597,6 +606,7 @@ func buildControlPlaneAdminService(deps Deps, logger *zap.Logger) *service.Contr
 		deps.MembershipStore,
 		deps.PlatformAdminStore,
 		deps.DNSResolver,
+		auditLog,
 		logger,
 	)
 }

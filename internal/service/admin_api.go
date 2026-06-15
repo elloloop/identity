@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -140,16 +141,24 @@ type ControlPlaneAdminService struct {
 	// confirm a custom domain's ownership challenge. Injected so tests drive
 	// the present/absent paths without real DNS.
 	resolver DNSResolver
-	logger   *zap.Logger
-	nowFunc  func() int64
+	// audit records control-plane security events. Currently it captures
+	// BLOCKED first-admin bootstrap attempts (a call after an admin already
+	// exists) so a closed-bootstrap probe is visible in the audit trail. nil
+	// is tolerated (best-effort): NewControlPlaneAdminService installs a
+	// no-op logger so call sites never nil-check.
+	audit   *audit.Logger
+	logger  *zap.Logger
+	nowFunc func() int64
 }
 
 // NewControlPlaneAdminService wires the admin service. An empty secret
 // leaves the service constructed but DISABLED: every method returns
 // ErrUnimplemented (so the handler maps it to CodeUnimplemented). A nil
 // logger defaults to a no-op. A nil resolver defaults to net.DefaultResolver,
-// matching DomainService. nowFunc is injected so the auth-domain verified-at
-// stamp is deterministic in tests; it defaults to wall-clock epoch-millis.
+// matching DomainService. A nil auditLog defaults to a no-op audit.Logger so
+// blocked-bootstrap recording stays best-effort. nowFunc is injected so the
+// auth-domain verified-at stamp is deterministic in tests; it defaults to
+// wall-clock epoch-millis.
 func NewControlPlaneAdminService(
 	secret string,
 	projects ControlPlaneProjectStore,
@@ -157,10 +166,14 @@ func NewControlPlaneAdminService(
 	memberships MembershipStore,
 	admins PlatformAdminStore,
 	resolver DNSResolver,
+	auditLog *audit.Logger,
 	logger *zap.Logger,
 ) *ControlPlaneAdminService {
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+	if auditLog == nil {
+		auditLog = audit.NewLogger(nil, "", zap.NewNop())
 	}
 	if resolver == nil {
 		resolver = net.DefaultResolver
@@ -172,6 +185,7 @@ func NewControlPlaneAdminService(
 		memberships: memberships,
 		admins:      admins,
 		resolver:    resolver,
+		audit:       auditLog,
 		logger:      logger,
 		nowFunc:     func() int64 { return time.Now().UnixMilli() },
 	}
@@ -541,6 +555,19 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 	}
 	canonicalEmail := canonicalizeEmail(email)
 
+	// Unlocked fast-path: on a provisioned deployment the bootstrap is
+	// permanently closed, and that closed state is the overwhelmingly common
+	// case (every probe after the first real bootstrap). An unlocked
+	// CountPlatformAdmins lets that path skip the advisory-lock transaction —
+	// and the bcrypt hash below — entirely. It is a pure OPTIMISATION, never
+	// the correctness gate: the authoritative emptiness check is the atomic,
+	// serialized CreateFirstPlatformAdmin recount below, so a concurrent first
+	// bootstrap that slips past this read is still rejected race-safely.
+	if n, err := s.admins.CountPlatformAdmins(ctx); err == nil && n > 0 {
+		s.recordBootstrapBlocked(ctx, canonicalEmail)
+		return nil, ErrPlatformAdminExists
+	}
+
 	// A blank password means "generate one"; a supplied one must be strong.
 	// The generated password is returned to the caller exactly once.
 	generated := ""
@@ -568,7 +595,11 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 	}
 	if !created {
 		// The table was not empty: an admin already exists, so the bootstrap
-		// is permanently closed. This is the privilege-escalation guard.
+		// is permanently closed. This is the privilege-escalation guard — and
+		// the authoritative one (the locked recount races safe, unlike the
+		// unlocked pre-check above). Record it too: a request that lost the
+		// pre-check race but is still a closed-bootstrap probe must be visible.
+		s.recordBootstrapBlocked(ctx, canonicalEmail)
 		return nil, ErrPlatformAdminExists
 	}
 
@@ -578,6 +609,27 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 		Email:             canonicalEmail,
 		GeneratedPassword: generated,
 	}, nil
+}
+
+// recordBootstrapBlocked emits a best-effort audit event for a first-admin
+// bootstrap attempt that was rejected because the platform is already
+// provisioned (an admin exists). The bootstrap RPC is unauthenticated and
+// ungated, so a probe against the closed endpoint carries no actor identity —
+// the event records the attempted email and lands under the control-plane
+// default project (the audit Logger's boot-default binding), making
+// closed-bootstrap probes visible in the audit trail.
+//
+// TODO(login): once a platform-admin LOGIN path consumes platform_admins,
+// enforce PlatformAdmin.TOTPRequired there — an admin flagged TOTPRequired
+// must complete a second factor before a session is minted. There is no login
+// path yet, so this hardening pass deliberately does not build one; the flag
+// is persisted by the store and waits for that slice.
+func (s *ControlPlaneAdminService) recordBootstrapBlocked(ctx context.Context, attemptedEmail string) {
+	s.audit.Log(
+		ctx, audit.EventPlatformAdminBootstrapBlocked,
+		audit.WithSuccess(false),
+		audit.WithDetails(map[string]any{"attempted_email": attemptedEmail}),
+	)
 }
 
 // normalizeCredentialKind defaults a blank kind to publishable and returns

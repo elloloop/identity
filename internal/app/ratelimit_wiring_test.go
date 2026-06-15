@@ -59,3 +59,44 @@ func TestBuildRateLimits_PasswordlessPathsLimited(t *testing.T) {
 		assert.Equal(t, http.StatusTooManyRequests, codes[2], "%s req 3 over quota", p)
 	}
 }
+
+// TestBuildRateLimits_FirstAdminBootstrapLimited asserts the ungated
+// first-admin bootstrap RPC is wired to the per-IP bootstrap quota and
+// returns 429 once exceeded — so the one non-secret-gated admin endpoint
+// cannot be hammered while it is open on a fresh deployment.
+func TestBuildRateLimits_FirstAdminBootstrapLimited(t *testing.T) {
+	const path = "/identity.IdentityService/CreateFirstPlatformAdmin"
+	cfg := &config.Config{
+		RateLimitWindowSeconds:  60,
+		RateLimitBootstrapPerIP: 2,
+		// Other quotas non-zero so unrelated paths stay enabled.
+		RateLimitSignupPerIP:       10,
+		RateLimitLoginPerIP:        30,
+		RateLimitResetPerIP:        5,
+		RateLimitVerifyPerIP:       20,
+		RateLimitPasswordlessPerIP: 5,
+		RateLimitPhonePerIP:        5,
+	}
+	limits := buildRateLimits(cfg)
+
+	byPath := map[string]middleware.PathLimit{}
+	for _, l := range limits {
+		byPath[l.PathPrefix] = l
+	}
+	require.Contains(t, byPath, path, "bootstrap path must have a rate limit")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	codes := make([]int, 3)
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, "9.9.9.9")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		codes[i] = w.Code
+	}
+	assert.Equal(t, http.StatusOK, codes[0], "bootstrap req 1")
+	assert.Equal(t, http.StatusOK, codes[1], "bootstrap req 2")
+	assert.Equal(t, http.StatusTooManyRequests, codes[2], "bootstrap req 3 over quota")
+}
