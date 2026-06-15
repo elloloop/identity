@@ -8,12 +8,11 @@ migration in this release.
 
 - **Greenfield / no data you must keep:** do a **fresh install** of v1.0
   against an empty database. This is the supported and recommended path.
-- **You ran a pre-v1.0 build with data you must keep:** there is no production
-  data on the legacy model, so no backfill is maintained. A rare developer or
-  early adopter in this situation can try the
-  **unsupported, best-effort** bridge in
-  [`scripts/upgrade/pre-v1-to-v1.sql`](../scripts/upgrade/pre-v1-to-v1.sql) —
-  on a copy, verified by hand.
+- **You ran a pre-v1.0 build with data you must keep:** there is **no
+  first-party automated data migration**. No production deployment ran the
+  legacy model, so no backfill is built or maintained. If you genuinely have
+  pre-v1.0 data with rows, you must migrate it manually against a backup or
+  copy; you are on your own.
 
 Within the v1.x line, upgrades are ordinary additive migrations applied with
 `identity migrate`; this guide is specifically about the pre-v1.0 → v1.0 jump.
@@ -55,7 +54,7 @@ to distinct values — the project **id** (`GATEWAY_DEFAULT_PROJECT_ID`, default
 
 ### Schema migrations involved
 
-The reset lands across three Postgres migrations
+The model change lands across three Postgres migrations
 (`internal/repo/postgres/migrations/`):
 
 - **0013** — additive: creates the control-plane tables (`projects`,
@@ -67,6 +66,11 @@ The reset lands across three Postgres migrations
   `project_id`, re-scopes its indexes, and adds a `FOREIGN KEY` to
   `projects(id)`.
 
+v1.0 then adds one more migration:
+
+- **0016** — enables Postgres row-level security on the data-plane tables as
+  defense-in-depth, scoped to `project_id` (`0016_enable_rls_data_plane`).
+
 ## Recommended path: fresh install
 
 For a greenfield deployment, or any deployment without legacy data you must
@@ -76,7 +80,7 @@ keep:
 2. Apply the schema:
 
    ```sh
-   identity migrate          # applies all pending migrations (0001..0015)
+   identity migrate          # applies all pending migrations (0001..0016)
    ```
 
    (Or run `migrate ... up` against `internal/repo/postgres/migrations` from
@@ -88,48 +92,18 @@ keep:
 EntDB backends are likewise a fresh start — the EntDB schema is the v1.0
 Project-keyed shape; there is no legacy EntDB data to carry forward.
 
-## Unsupported path: bridging legacy Postgres data
+## Legacy Postgres data
 
-> **This is best-effort and unsupported.** It is not wired into the boot path
-> or golang-migrate, is not exercised by CI, and carries no compatibility
-> guarantee. Run it manually, on a copy, and verify before trusting it. If in
-> doubt, do a fresh install instead.
+There is **no first-party automated data migration** from the pre-v1.0 model to
+v1.0. No production deployment ran the legacy model, so no backfill is built,
+shipped, or maintained.
 
-If you genuinely ran a pre-v1.0 build against Postgres and want to keep that
-data, the bridge in
-[`scripts/upgrade/pre-v1-to-v1.sql`](../scripts/upgrade/pre-v1-to-v1.sql)
-materializes one control-plane `projects` row per distinct legacy `tenant_id`
-so that migration 0015's `project_id → projects(id)` foreign key is satisfied.
-Each project's `id` and `storage_scope_id` are set to the legacy shard string,
-because 0015 renames `tenant_id → project_id` **in place** without rewriting
-values.
-
-Sequence (the bridge runs *between* migrations 0014 and 0015):
-
-```sh
-# 1. stage the schema to 0014 (creates `projects`, drops `organizations`)
-migrate -path internal/repo/postgres/migrations -database "$DSN" goto 14
-
-# 2. materialize a Project per legacy tenant_id (this script)
-psql "$DSN" -v ON_ERROR_STOP=1 -f scripts/upgrade/pre-v1-to-v1.sql
-
-# 3. finish: rename tenant_id -> project_id and attach the projects FK
-migrate -path internal/repo/postgres/migrations -database "$DSN" up
-```
-
-For a single-deployment legacy database (one shard string, your old
-`GATEWAY_DEFAULT_TENANT_ID`), set v1.0 config so the default project id matches
-the bridged shard:
-
-```sh
-GATEWAY_DEFAULT_PROJECT_ID=<your legacy GATEWAY_DEFAULT_TENANT_ID>
-GATEWAY_DEFAULT_TENANT_ID=<unchanged>
-```
-
-A legacy `mode=multi` database has several shard strings; the bridge creates
-one Project per shard automatically. Review the resulting `projects` rows and
-choose the one to use as your default project.
-
-The script's own header documents its guards (it refuses to run if `projects`
-is missing or if 0015 has already been applied) and the exact post-conditions.
-Read it before running.
+If you genuinely have a pre-v1.0 Postgres database with rows you must keep,
+migrating it is your responsibility. Work against a backup or a copy, never the
+live database. The migration is not trivial: migration 0015 renames each
+data-plane table's leading `tenant_id` column to `project_id` **in place** and
+attaches a `project_id → projects(id)` foreign key, so before 0015 runs you
+must have created a control-plane `projects` row for **every** distinct legacy
+`tenant_id` present in **any** of the ~30 FK'd data-plane tables — otherwise
+0015's foreign key aborts the migration. There is no supported script for this,
+and you are on your own.
