@@ -405,6 +405,7 @@ type Config struct {
 	RateLimitVerifyPerIP       int // GATEWAY_RATE_LIMIT_VERIFY_PER_IP (default 20/min)
 	RateLimitPasswordlessPerIP int // GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP (default 5/min) — RequestEmailLoginCode + RequestMagicLink
 	RateLimitPhonePerIP        int // GATEWAY_RATE_LIMIT_PHONE_PER_IP (default 5/min) — RequestPhoneVerification
+	RateLimitBootstrapPerIP    int // GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP (default 5/min) — CreateFirstPlatformAdmin
 
 	// Postgres (alternate persistence driver). When PostgresDSN is set
 	// the application bootstrapper may prefer the Postgres-backed
@@ -601,6 +602,7 @@ func Load() *Config {
 		RateLimitVerifyPerIP:       envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
 		RateLimitPasswordlessPerIP: envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
+		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 
 		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),

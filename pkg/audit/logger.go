@@ -113,36 +113,43 @@ const (
 
 	EventPhoneVerificationRequested EventType = "phone_verification_requested"
 	EventPhoneVerified              EventType = "phone_verified"
+
+	// EventPlatformAdminBootstrapBlocked records a first-admin bootstrap
+	// attempt that arrived AFTER the platform_admins table was no longer
+	// empty (the bootstrap is permanently closed → FailedPrecondition). It
+	// makes a closed-bootstrap probe against the ungated endpoint visible.
+	EventPlatformAdminBootstrapBlocked EventType = "platform_admin_bootstrap_blocked"
 )
 
 // validEventTypes is the canonical set of known event type strings.
 var validEventTypes = map[EventType]struct{}{
-	EventLoginSuccess:               {},
-	EventLoginFailure:               {},
-	EventLoginLocked:                {},
-	EventAccountLocked:              {},
-	EventLogout:                     {},
-	EventPasswordChanged:            {},
-	EventPasswordReset:              {},
-	EventTotpEnabled:                {},
-	EventTotpDisabled:               {},
-	EventTotpVerified:               {},
-	EventPasskeyAdded:               {},
-	EventPasskeyRemoved:             {},
-	EventPasskeyUsed:                {},
-	EventSessionRevoked:             {},
-	EventUserInvited:                {},
-	EventUserDeactivated:            {},
-	EventUserReactivated:            {},
-	EventUserDeleted:                {},
-	EventAdminResetPassword:         {},
-	EventOAuthLogin:                 {},
-	EventQrLoginApproved:            {},
-	EventQrLoginRejected:            {},
-	EventAdminHelpRequested:         {},
-	EventAdminHelpResolved:          {},
-	EventPhoneVerificationRequested: {},
-	EventPhoneVerified:              {},
+	EventLoginSuccess:                  {},
+	EventLoginFailure:                  {},
+	EventLoginLocked:                   {},
+	EventAccountLocked:                 {},
+	EventLogout:                        {},
+	EventPasswordChanged:               {},
+	EventPasswordReset:                 {},
+	EventTotpEnabled:                   {},
+	EventTotpDisabled:                  {},
+	EventTotpVerified:                  {},
+	EventPasskeyAdded:                  {},
+	EventPasskeyRemoved:                {},
+	EventPasskeyUsed:                   {},
+	EventSessionRevoked:                {},
+	EventUserInvited:                   {},
+	EventUserDeactivated:               {},
+	EventUserReactivated:               {},
+	EventUserDeleted:                   {},
+	EventAdminResetPassword:            {},
+	EventOAuthLogin:                    {},
+	EventQrLoginApproved:               {},
+	EventQrLoginRejected:               {},
+	EventAdminHelpRequested:            {},
+	EventAdminHelpResolved:             {},
+	EventPhoneVerificationRequested:    {},
+	EventPhoneVerified:                 {},
+	EventPlatformAdminBootstrapBlocked: {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.
