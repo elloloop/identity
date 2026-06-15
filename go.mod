@@ -1,6 +1,6 @@
 module github.com/elloloop/identity
 
-go 1.25.0
+go 1.26
 
 require (
 	connectrpc.com/connect v1.20.0
@@ -8,6 +8,8 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.11
 	github.com/aws/aws-sdk-go-v2/config v1.32.22
 	github.com/aws/aws-sdk-go-v2/service/kms v1.53.2
+	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc
+	github.com/chromedp/chromedp v0.15.1
 	github.com/go-webauthn/webauthn v0.17.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
@@ -31,6 +33,14 @@ require (
 	golang.org/x/net v0.55.0
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
+)
+
+require (
+	github.com/chromedp/sysutil v1.1.0 // indirect
+	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
+	github.com/gobwas/httphead v0.1.0 // indirect
+	github.com/gobwas/pool v0.2.1 // indirect
+	github.com/gobwas/ws v1.4.0 // indirect
 )
 
 require (
