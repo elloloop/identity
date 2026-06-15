@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
 	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 
@@ -31,115 +30,6 @@ func NewDBAdapter(client *sdk.DbClient) (service.DB, error) {
 		return nil, errors.New("entdb: nil db client")
 	}
 	return &dbAdapter{transport: client.Transport()}, nil
-}
-
-// NewTenantAdmin wraps an EntDB SDK client as a service.TenantAdmin
-// — the narrow surface OrganizationSignup needs to provision a new
-// tenant + its first admin user. Idempotent on ALREADY_EXISTS
-// (necessary when the same signup is retried after a partial failure).
-//
-// Uses the raw Transport calls (which the SDK's Admin handle is a
-// thin shim over) so the adapter stays testable with a fake Transport.
-func NewTenantAdmin(client *sdk.DbClient) (service.TenantAdmin, error) {
-	if client == nil {
-		return nil, errors.New("entdb: nil db client")
-	}
-	return &tenantAdmin{transport: client.Transport()}, nil
-}
-
-// PostgresTenantAdmin is a service.TenantAdmin implementation for the
-// postgres driver. Postgres has no cross-tenant global registry — the
-// "tenant" is just a value in the `tenant_id` column — so the operations
-// are intentionally lightweight: CreateTenant tracks the registered
-// tenant ids in memory (the slug uniqueness check is enforced by the
-// per-tenant Repository's CreateOrganization unique index); the
-// promote / remove calls are no-ops because postgres has no storage-
-// layer membership concept.
-type PostgresTenantAdmin struct {
-	mu      sync.Mutex
-	tenants map[string]struct{}
-}
-
-// NewPostgresTenantAdmin returns a TenantAdmin suitable for the
-// postgres driver. Tenant uniqueness is enforced by both the in-memory
-// set here AND the organizations.(tenant_id, slug) unique index.
-func NewPostgresTenantAdmin() *PostgresTenantAdmin {
-	return &PostgresTenantAdmin{tenants: map[string]struct{}{}}
-}
-
-func (a *PostgresTenantAdmin) CreateTenant(_ context.Context, tenantID, _ string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if _, ok := a.tenants[tenantID]; ok {
-		return service.ErrAlreadyExists
-	}
-	a.tenants[tenantID] = struct{}{}
-	return nil
-}
-
-func (a *PostgresTenantAdmin) PromoteTenantMember(_ context.Context, _, _, _ string) error {
-	return nil
-}
-
-func (a *PostgresTenantAdmin) RemoveTenantMember(_ context.Context, _, _ string) error {
-	return nil
-}
-
-type tenantAdmin struct {
-	transport sdk.Transport
-}
-
-const tenantAdminActor = "system:admin"
-
-func (a *tenantAdmin) CreateTenant(ctx context.Context, tenantID, displayName string) error {
-	if _, err := a.transport.CreateTenant(ctx, tenantAdminActor, tenantID, displayName); err != nil {
-		if dbAdapterIsAlreadyExists(err) {
-			return service.ErrAlreadyExists
-		}
-		return err
-	}
-	return nil
-}
-
-func (a *tenantAdmin) PromoteTenantMember(ctx context.Context, tenantID, userID, role string) error {
-	if err := a.transport.ChangeMemberRole(ctx, tenantAdminActor, tenantID, userID, role); err != nil {
-		// Tolerate "already at this role" idempotently. The upstream
-		// signal is *sdk.EntDBError with code ALREADY_EXISTS (handled
-		// by dbAdapterIsAlreadyExists) or a FailedPrecondition that
-		// also stringifies with the role name when the server thinks
-		// the member is already in that role; match the second
-		// variant on the status message text.
-		if dbAdapterIsAlreadyExists(err) {
-			return nil
-		}
-		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "already") && strings.Contains(msg, role) {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-func (a *tenantAdmin) RemoveTenantMember(ctx context.Context, tenantID, userID string) error {
-	if err := a.transport.RemoveTenantMember(ctx, tenantAdminActor, tenantID, userID); err != nil {
-		// Tolerate "member not present" on rollback so re-runs stay
-		// idempotent. tenant-shard-db v1.14.0 surfaces this as the
-		// typed *sdk.NotFoundError (Code == "NOT_FOUND"); some legacy
-		// paths still come through as a FailedPrecondition with a
-		// status message containing "no membership", so match that
-		// too.
-		var nf *sdk.NotFoundError
-		if errors.As(err, &nf) {
-			return nil
-		}
-		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "no membership") {
-			return nil
-		}
-		return err
-	}
-	return nil
 }
 
 type dbAdapter struct {

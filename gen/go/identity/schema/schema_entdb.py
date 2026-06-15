@@ -53,10 +53,6 @@ class IdentityVerificationRecordKeys:
     verification_id = UniqueKey[str](type_id=32, field_id=1, name="verification_id")
 
 
-class OrganizationKeys:
-    slug = UniqueKey[str](type_id=33, field_id=1, name="slug")
-
-
 class SessionKeys:
     sid = UniqueKey[str](type_id=35, field_id=1, name="sid")
 
@@ -71,4 +67,8 @@ class EmailLoginCodeKeys:
 
 class MagicLinkTokenKeys:
     token_hash = UniqueKey[str](type_id=38, field_id=1, name="token_hash")
+
+
+class PhoneVerificationCodeKeys:
+    user_id = UniqueKey[str](type_id=39, field_id=1, name="user_id")
 

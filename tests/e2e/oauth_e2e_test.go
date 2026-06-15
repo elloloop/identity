@@ -52,25 +52,3 @@ func TestE2E_OAuth_DisabledFlows(t *testing.T) {
 		t.Errorf("RedeemOAuthCode code = %q, want 'unavailable'", code)
 	}
 }
-
-// TestE2E_OrganizationSignup_SingleTenantMode verifies that OrganizationSignup
-// returns CodeUnimplemented when the service is configured in mode=single (default).
-func TestE2E_OrganizationSignup_SingleTenantMode(t *testing.T) {
-	t.Parallel()
-	h := StartServer(t)
-
-	resp, status := h.rpcCall(t, "OrganizationSignup", map[string]any{
-		"slug":          "my-cool-org",
-		"displayName":   "My Cool Org",
-		"adminEmail":    "org-admin@example.com",
-		"adminPassword": goodPassword,
-		"adminName":     "Org Admin",
-	}, "")
-	if status == http.StatusOK {
-		t.Fatalf("OrganizationSignup unexpectedly succeeded in single-tenant mode: %v", resp)
-	}
-	code, _ := resp["code"].(string)
-	if code != "unimplemented" {
-		t.Errorf("OrganizationSignup code = %q, want 'unimplemented'", code)
-	}
-}

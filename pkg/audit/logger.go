@@ -84,7 +84,6 @@ const (
 	EventQrLoginRejected    EventType = "qr_login_rejected"
 	EventAdminHelpRequested EventType = "admin_help_requested"
 	EventAdminHelpResolved  EventType = "admin_help_resolved"
-	EventOrganizationSignup EventType = "organization_signup"
 
 	EventPhoneVerificationRequested EventType = "phone_verification_requested"
 	EventPhoneVerified              EventType = "phone_verified"
@@ -116,7 +115,6 @@ var validEventTypes = map[EventType]struct{}{
 	EventQrLoginRejected:            {},
 	EventAdminHelpRequested:         {},
 	EventAdminHelpResolved:          {},
-	EventOrganizationSignup:         {},
 	EventPhoneVerificationRequested: {},
 	EventPhoneVerified:              {},
 }

@@ -159,8 +159,6 @@ func truncateAll(ctx context.Context, dsn string) error {
 			audit_events,
 			group_memberships,
 			groups,
-			organization_members,
-			organizations,
 			oauth_identities,
 			email_change_tokens,
 			email_verification_tokens,

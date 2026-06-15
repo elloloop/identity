@@ -102,8 +102,6 @@ type fakeRepo struct {
 	emailChanges       map[string]*service.EmailChangeToken
 	oauthIdentities    map[string]*service.OAuthIdentity
 	idvRecords         map[string]*service.IdentityVerificationRecord
-	orgs               map[string]*service.Organization
-	orgMembers         map[string]*service.OrganizationMembership
 	sessions           map[string]*service.SessionRecord
 
 	// Optional error injections for specific calls.
@@ -132,8 +130,6 @@ func newFakeRepo() *fakeRepo {
 		emailVerifications: make(map[string]*service.EmailVerificationToken),
 		emailChanges:       make(map[string]*service.EmailChangeToken),
 		oauthIdentities:    make(map[string]*service.OAuthIdentity),
-		orgs:               make(map[string]*service.Organization),
-		orgMembers:         make(map[string]*service.OrganizationMembership),
 		sessions:           make(map[string]*service.SessionRecord),
 	}
 }
@@ -405,11 +401,6 @@ func (r *fakeRepo) DeleteUser(_ context.Context, userID string) error {
 	for id, rec := range r.idvRecords {
 		if rec.UserID == userID {
 			delete(r.idvRecords, id)
-		}
-	}
-	for id, m := range r.orgMembers {
-		if m.UserID == userID {
-			delete(r.orgMembers, id)
 		}
 	}
 	delete(r.users, userID)
@@ -1333,102 +1324,6 @@ func (r *fakeRepo) DeleteExpiredInvitations(_ context.Context, beforeMs int64, l
 	return nil
 }
 
-// ── Organizations ─────────────────────────────────────────────────
-
-func (r *fakeRepo) CreateOrganization(_ context.Context, o *service.Organization) (string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if o == nil || o.Slug == "" {
-		return "", fmt.Errorf("%w: missing slug", service.ErrInvalidArgument)
-	}
-	for _, existing := range r.orgs {
-		if existing.Slug == o.Slug {
-			return "", fmt.Errorf("%w: slug %q", service.ErrAlreadyExists, o.Slug)
-		}
-	}
-	id := nextID()
-	o.ID = id
-	cp := *o
-	r.orgs[id] = &cp
-	return id, nil
-}
-
-func (r *fakeRepo) GetOrganization(_ context.Context, orgID string) (*service.Organization, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	o, ok := r.orgs[orgID]
-	if !ok {
-		return nil, nil
-	}
-	cp := *o
-	return &cp, nil
-}
-
-func (r *fakeRepo) GetOrganizationBySlug(_ context.Context, slug string) (*service.Organization, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, o := range r.orgs {
-		if o.Slug == slug {
-			cp := *o
-			return &cp, nil
-		}
-	}
-	return nil, nil
-}
-
-func (r *fakeRepo) ListOrganizationsForUser(_ context.Context, userID string) ([]*service.Organization, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var out []*service.Organization
-	seen := map[string]struct{}{}
-	for _, m := range r.orgMembers {
-		if m.UserID != userID {
-			continue
-		}
-		if _, dup := seen[m.OrganizationID]; dup {
-			continue
-		}
-		seen[m.OrganizationID] = struct{}{}
-		o, ok := r.orgs[m.OrganizationID]
-		if !ok {
-			continue
-		}
-		cp := *o
-		out = append(out, &cp)
-	}
-	return out, nil
-}
-
-func (r *fakeRepo) CountOrganizationsOwnedBy(_ context.Context, userID string) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	n := 0
-	for _, o := range r.orgs {
-		if o.OwnerUserID == userID {
-			n++
-		}
-	}
-	return n, nil
-}
-
-func (r *fakeRepo) AddOrganizationMember(_ context.Context, m *service.OrganizationMembership) (string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if m == nil || m.OrganizationID == "" || m.UserID == "" {
-		return "", fmt.Errorf("%w: missing organization_id or user_id", service.ErrInvalidArgument)
-	}
-	for _, existing := range r.orgMembers {
-		if existing.OrganizationID == m.OrganizationID && existing.UserID == m.UserID {
-			return "", fmt.Errorf("%w: %s already in %s", service.ErrAlreadyExists, m.UserID, m.OrganizationID)
-		}
-	}
-	id := nextID()
-	m.NodeID = id
-	cp := *m
-	r.orgMembers[id] = &cp
-	return id, nil
-}
-
 // ── Sessions ──────────────────────────────────────────────────────────
 
 func (r *fakeRepo) CreateSession(_ context.Context, s *service.SessionRecord) (string, error) {
@@ -1786,7 +1681,6 @@ func testConfig() *config.Config {
 	// #nosec G101 -- test configuration field names contain password/passkey labels.
 	return &config.Config{
 		DefaultTenantID:                 "test-tenant",
-		IdentityMode:                    config.IdentityModeSingle,
 		AuthAllowLocal:                  true,
 		PasswordSignupEnabled:           true,
 		PasswordResetEnabled:            true,
@@ -1872,7 +1766,7 @@ func newHarnessWith(
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 
-	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, nil, nil, captchaVerifier, cfg)
+	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, nil, captchaVerifier, cfg)
 
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)

@@ -109,31 +109,6 @@ type Config struct {
 	// GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS.
 	DefaultProjectAuthDomains string
 
-	// IdentityMode selects the per-deployment tenancy shape — "single"
-	// (one tenant for the whole deployment, B2C) or "multi" (one tenant
-	// per customer organisation, B2B). Driven by GATEWAY_IDENTITY_MODE.
-	// See docs/IDENTITY.md decision log §1: the mode is per-deployment,
-	// not per-request. In "multi" the OrganizationSignup RPC is wired
-	// up; in "single" it returns Unimplemented (decision log §3).
-	IdentityMode string
-
-	// TenantHostBaseDomain is the suffix stripped from a request's Host
-	// header to derive the tenant slug when the "host" resolution source
-	// is enabled (e.g. base "glassa.work" maps "acmecorp.glassa.work" to
-	// tenant "acmecorp"). Only consulted in mode=multi. Driven by
-	// GATEWAY_TENANT_HOST_BASE_DOMAIN.
-	TenantHostBaseDomain string
-
-	// TenantResolutionSources is the ordered, comma-separated precedence
-	// of per-request tenant-resolution sources in mode=multi. Each entry
-	// is "host" (subdomain of TenantHostBaseDomain) or "jwt" (the access
-	// token's "tenant" claim). The first source that yields a non-empty
-	// tenant wins; remaining sources are then cross-checked for a
-	// conflict and the request is rejected on mismatch. Driven by
-	// GATEWAY_TENANT_RESOLUTION_SOURCES (default "host,jwt"). Ignored in
-	// mode=single, where the tenant is always DefaultTenantID.
-	TenantResolutionSources string
-
 	// Email service (internal gRPC)
 	EmailServiceHost string
 	EmailServicePort int
@@ -479,10 +454,6 @@ func Load() *Config {
 		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", "default"),
 		AdminAPISecret:            envStr("GATEWAY_ADMIN_API_SECRET", ""),
 		DefaultProjectAuthDomains: envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
-		IdentityMode:              envStr("GATEWAY_IDENTITY_MODE", "single"),
-
-		TenantHostBaseDomain:    envStr("GATEWAY_TENANT_HOST_BASE_DOMAIN", ""),
-		TenantResolutionSources: envStr("GATEWAY_TENANT_RESOLUTION_SOURCES", "host,jwt"),
 
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),
@@ -628,22 +599,6 @@ func Load() *Config {
 	}
 }
 
-// Identity-mode constants for GATEWAY_IDENTITY_MODE. See
-// docs/IDENTITY.md decision log §1 — the mode is per-deployment and
-// fixed at boot.
-const (
-	IdentityModeSingle = "single"
-	IdentityModeMulti  = "multi"
-)
-
-// IsMultiMode reports whether the deployment is configured for
-// `mode=multi` (B2B multi-tenant). False indicates `mode=single` or
-// any unrecognised value (which the binary should already have
-// rejected at startup).
-func (c *Config) IsMultiMode() bool {
-	return c.IdentityMode == IdentityModeMulti
-}
-
 // SMS provider names for GATEWAY_SMS_PROVIDER. Firebase/Google are
 // intentionally out of scope — those are client-SDK flows, not server
 // REST APIs.
@@ -652,41 +607,6 @@ const (
 	SMSProviderSNS    = "sns"
 	SMSProviderAzure  = "azure"
 )
-
-// Per-request tenant-resolution source names for
-// GATEWAY_TENANT_RESOLUTION_SOURCES (mode=multi only). See
-// docs/IDENTITY.md "mode=multi" section + the decision-log entry on the
-// resolution mechanism.
-const (
-	// TenantSourceHost derives the tenant slug from the request Host
-	// header as a subdomain of TenantHostBaseDomain.
-	TenantSourceHost = "host"
-	// TenantSourceJWT reads the tenant from the access token's "tenant"
-	// claim (the same claim minted on every token; identity reuses it
-	// rather than adding a parallel "tid" claim).
-	TenantSourceJWT = "jwt"
-)
-
-// TenantResolutionSourceList returns the parsed, ordered, de-duplicated
-// resolution sources. Unrecognised entries are dropped here; Validate
-// rejects a multi-mode config whose effective list is empty so a
-// misconfiguration fails closed at boot rather than silently resolving
-// no tenant.
-func (c *Config) TenantResolutionSourceList() []string {
-	seen := make(map[string]bool, 2)
-	var out []string
-	for _, raw := range strings.Split(c.TenantResolutionSources, ",") {
-		s := strings.ToLower(strings.TrimSpace(raw))
-		switch s {
-		case TenantSourceHost, TenantSourceJWT:
-			if !seen[s] {
-				seen[s] = true
-				out = append(out, s)
-			}
-		}
-	}
-	return out
-}
 
 // DefaultProjectAuthDomainList returns the configured default-project auth
 // domains, lower-cased and de-duplicated, in order — the first entry is the
@@ -822,38 +742,6 @@ func (c *Config) Validate() error {
 
 	if c.SessionCacheTTLSeconds < 0 {
 		return fmt.Errorf("config: GATEWAY_SESSION_CACHE_TTL_SECONDS=%d must be >= 0", c.SessionCacheTTLSeconds)
-	}
-
-	if c.IsMultiMode() {
-		sources := c.TenantResolutionSourceList()
-		if len(sources) == 0 {
-			return fmt.Errorf(
-				"config: GATEWAY_IDENTITY_MODE=multi requires at least one valid GATEWAY_TENANT_RESOLUTION_SOURCES entry (%q or %q); got %q",
-				TenantSourceHost, TenantSourceJWT, c.TenantResolutionSources,
-			)
-		}
-		for _, s := range sources {
-			if s == TenantSourceHost && strings.TrimSpace(c.TenantHostBaseDomain) == "" {
-				return fmt.Errorf(
-					"config: GATEWAY_TENANT_RESOLUTION_SOURCES includes %q but GATEWAY_TENANT_HOST_BASE_DOMAIN is empty",
-					TenantSourceHost,
-				)
-			}
-		}
-
-		// Session-based revocation is not yet tenant-scoped: the session
-		// cache + GetSessionBySid lookup run against the boot-time
-		// (DefaultTenantID) repository, while sessions in mode=multi live
-		// in per-request tenants. Rather than silently look sessions up in
-		// the wrong tenant, fail closed at boot. mode=multi deployments use
-		// the default mode=ttl revocation. (Tenant-scoped session
-		// revocation is a future slice — see docs/IDENTITY.md.)
-		if c.RevocationMode == RevocationModeSession {
-			return fmt.Errorf(
-				"config: GATEWAY_REVOCATION_MODE=session is not supported with GATEWAY_IDENTITY_MODE=multi yet; use the default %q",
-				RevocationModeTTL,
-			)
-		}
 	}
 
 	if err := c.validateSMS(); err != nil {

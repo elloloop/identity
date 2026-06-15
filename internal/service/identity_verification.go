@@ -50,21 +50,13 @@ func NewIdentityVerificationService(
 	}
 }
 
-// tenantID returns the request's resolved tenant, falling back to the
-// boot-time DefaultTenantID in mode=single (decision log §1).
-func (s *IdentityVerificationService) tenantID(ctx context.Context) string {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.TenantID != "" {
-		return scope.TenantID
-	}
+// tenantID returns the internal storage tenant key (DefaultTenantID).
+func (s *IdentityVerificationService) tenantID(context.Context) string {
 	return s.defaultTenantID
 }
 
-// repo returns the Repository scoped to the request's resolved tenant,
-// falling back to the boot-time Repository in mode=single.
-func (s *IdentityVerificationService) repo(ctx context.Context) Repository {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.Repo != nil {
-		return scope.Repo
-	}
+// repo returns the boot-time Repository.
+func (s *IdentityVerificationService) repo(context.Context) Repository {
 	return s.defaultRepo
 }
 

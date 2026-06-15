@@ -31,22 +31,14 @@ func NewHelpService(db DB, tenantID string, auditLog *audit.Logger, logger *zap.
 	return &HelpService{bootDB: db, defaultTenantID: tenantID, audit: auditLog, logger: logger}
 }
 
-// tenantID returns the request's resolved tenant, falling back to the
-// boot-time DefaultTenantID in mode=single (decision log §1).
-func (s *HelpService) tenantID(ctx context.Context) string {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.TenantID != "" {
-		return scope.TenantID
-	}
+// tenantID returns the internal storage tenant key (DefaultTenantID).
+func (s *HelpService) tenantID(context.Context) string {
 	return s.defaultTenantID
 }
 
-// db returns the DB scoped to the request's resolved tenant (see the
-// AdminService.db comment for why the two drivers differ); it falls
-// back to the boot-time DB in mode=single.
-func (s *HelpService) db(ctx context.Context) DB {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.DB != nil {
-		return scope.DB
-	}
+// db returns the boot-time DB; the DB interface takes the storage tenant
+// id per call (passed via s.tenantID).
+func (s *HelpService) db(context.Context) DB {
 	return s.bootDB
 }
 

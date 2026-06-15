@@ -290,15 +290,13 @@ var userDeleteNonFKTables = []string{
 // refresh_tokens, sessions, password_reset_tokens, email_change_tokens,
 // oauth_identities, passkeys, totp_secrets, recovery_codes,
 // login_challenges, oauth_one_time_codes, identity_verifications,
-// phone_verification_codes, organization_members, and group_memberships.
+// phone_verification_codes, and group_memberships.
 // audit_events has no FK to users and is retained for accountability.
 // The email-keyed email_login_codes / magic_link_tokens are out of scope
 // (no user_id).
 //
-// A user who owns an organization (organizations.owner_user_id is
-// ON DELETE RESTRICT) cannot be deleted; the FK violation surfaces to
-// the caller rather than orphaning the org. It is idempotent: deleting
-// a non-existent user touches zero rows and returns nil.
+// It is idempotent: deleting a non-existent user touches zero rows and
+// returns nil.
 func (r *pgRepository) DeleteUser(ctx context.Context, userID string) error {
 	if userID == "" {
 		return nil

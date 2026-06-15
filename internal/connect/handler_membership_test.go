@@ -83,7 +83,7 @@ type membershipServer struct {
 
 func startMembershipServer(t *testing.T, svc *service.MembershipService) *membershipServer {
 	t.Helper()
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, svc, nil, nil, testConfig())
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, svc, nil, nil, testConfig())
 	mux := http.NewServeMux()
 	path, handler := identityconnectgen.NewIdentityServiceHandler(h)
 	mux.Handle(path, handler)

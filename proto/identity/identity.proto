@@ -858,44 +858,6 @@ message SetUserQuotaRequest {
 
 message SetUserQuotaResponse {}
 
-// ─── Organization (mode=multi only) ─────────────────────────────────
-// Identity-layer organisation entity for B2B multi-tenant deployments.
-// Maps 1:1 to a tenant-shard-db tenant; the slug IS the tenant id.
-// See docs/IDENTITY.md decision log §2.
-
-message Organization {
-  string id = 1;
-  string slug = 2;                                  // URL-safe; matches tenant-shard-db tenant id
-  string display_name = 3;
-  string owner_user_id = 4;
-  google.protobuf.Timestamp created_at = 5;
-  google.protobuf.Timestamp updated_at = 6;
-}
-
-// Self-serve organisation signup for B2B multi-tenant deployments.
-//
-// All-or-nothing: creates the tenant in tenant-shard-db, registers
-// the admin user globally, adds them as the tenant's admin, then
-// creates the identity-layer Organization + admin User +
-// OrganizationMembership rows scoped to the new tenant.
-//
-// Disabled in mode=single (returns Unimplemented). See decision log §3.
-message OrganizationSignupRequest {
-  string slug = 1;                                  // URL-safe; becomes the tenant id
-  string display_name = 2;                          // Human-readable org name
-  string admin_email = 3;
-  string admin_password = 4;
-  string admin_name = 5;                            // Optional; defaults to local-part of email
-}
-
-message OrganizationSignupResponse {
-  Organization organization = 1;
-  User admin_user = 2;
-  string access_token = 3;
-  string refresh_token = 4;
-  int32 expires_in = 5;
-}
-
 // ─── Tenant domains (redesign) ───────────────────────────────────────
 
 // Domain is an email domain bound to a Tenant within the caller's
@@ -1186,12 +1148,6 @@ service IdentityService {
   rpc AddGroupMember(AddGroupMemberRequest) returns (AddGroupMemberResponse);
   rpc RemoveGroupMember(RemoveGroupMemberRequest) returns (RemoveGroupMemberResponse);
   rpc ListGroupMembers(ListGroupMembersRequest) returns (ListGroupMembersResponse);
-
-  // Organization signup (mode=multi only — returns Unimplemented in
-  // mode=single). Creates a new tenant in tenant-shard-db, registers
-  // the admin user globally, and creates the identity-layer
-  // Organization + admin User rows scoped to the new tenant.
-  rpc OrganizationSignup(OrganizationSignupRequest) returns (OrganizationSignupResponse);
 
   // Tenant domains (redesign). Authenticated, project-scoped, and gated
   // on the caller being an owner/admin member of the target tenant — with

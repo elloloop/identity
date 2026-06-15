@@ -68,7 +68,8 @@ func TestPostgres_SweeperRespectsLimitAndGrace(t *testing.T) {
 		// same table.
 		count := func(hashPrefix string) int {
 			var n int
-			require.NoError(t, repo.pool.QueryRow(ctx,
+			require.NoError(t, repo.pool.QueryRow(
+				ctx,
 				`SELECT COUNT(*) FROM password_reset_tokens WHERE tenant_id=$1 AND token_hash LIKE $2`,
 				tenant, hashPrefix+"%",
 			).Scan(&n))

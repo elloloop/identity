@@ -5,20 +5,13 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awskms "github.com/aws/aws-sdk-go-v2/service/kms"
 	"go.uber.org/zap"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
-
 	"github.com/elloloop/identity/internal/config"
-	"github.com/elloloop/identity/internal/repo"
-	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
-	pgrepo "github.com/elloloop/identity/internal/repo/postgres"
-	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/idv"
 	jwtpkg "github.com/elloloop/identity/pkg/jwt"
 	jwtfile "github.com/elloloop/identity/pkg/jwt/file"
@@ -184,48 +177,5 @@ func buildIDVProvider(cfg *config.Config, logger *zap.Logger) (idv.Provider, err
 		return p, nil
 	default:
 		return nil, fmt.Errorf("unknown idv provider %q", cfg.IDVProvider)
-	}
-}
-
-// buildMultiModeWiring returns the TenantAdmin + per-tenant repo factory
-// for OrganizationSignup. It dispatches on the persistence driver:
-//
-//   - entdb: full TenantAdmin against tenant-shard-db's Admin handle.
-//   - postgres: degenerate PostgresTenantAdmin (slug uniqueness is
-//     enforced via the per-tenant Repository's CreateOrganization unique
-//     index — postgres has no cross-tenant registry concept).
-//   - memory: not supported.
-func buildMultiModeWiring(ctx context.Context, cfg *config.Config, db *entdb.DbClient, logger *zap.Logger) (service.TenantAdmin, service.RepositoryForTenant, error) {
-	switch repo.Driver(cfg.RepoDriver) {
-	case repo.DriverEntDB:
-		admin, err := repo.NewTenantAdmin(db)
-		if err != nil {
-			return nil, nil, fmt.Errorf("tenant admin: %w", err)
-		}
-		return admin, func(tenantID string) service.Repository {
-			return entdbrepo.NewRepository(db, tenantID)
-		}, nil
-	case repo.DriverPostgres:
-		if cfg.PostgresMaxConns > math.MaxInt32 {
-			return nil, nil, fmt.Errorf("postgres max conns exceeds int32: %d", cfg.PostgresMaxConns)
-		}
-		maxConns := int32(cfg.PostgresMaxConns) // #nosec G115 -- bounds checked above.
-		dsn := cfg.PostgresDSN
-		return repo.NewPostgresTenantAdmin(), func(tenantID string) service.Repository {
-			pg, pgErr := pgrepo.New(ctx, pgrepo.Config{
-				DSN:         dsn,
-				MaxConns:    maxConns,
-				AutoMigrate: false,
-				TenantID:    tenantID,
-			})
-			if pgErr != nil {
-				logger.Error("postgres_per_tenant_repo_failed",
-					zap.String("tenant_id", tenantID), zap.Error(pgErr))
-				return nil
-			}
-			return pg
-		}, nil
-	default:
-		return nil, nil, fmt.Errorf("identity mode=multi unsupported driver %q", cfg.RepoDriver)
 	}
 }

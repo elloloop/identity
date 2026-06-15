@@ -116,7 +116,6 @@ func StartServer(t *testing.T) *Harness {
 
 	cfg := &config.Config{
 		DefaultTenantID:               tenantID,
-		IdentityMode:                  config.IdentityModeSingle,
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

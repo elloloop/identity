@@ -131,7 +131,7 @@ const testProjectID = "proj-1"
 
 func startDomainServer(t *testing.T, svc *service.DomainService) *domainServer {
 	t.Helper()
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, svc, nil, nil, nil, testConfig())
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, svc, nil, nil, nil, testConfig())
 	mux := http.NewServeMux()
 	path, handler := identityconnectgen.NewIdentityServiceHandler(h)
 	mux.Handle(path, handler)

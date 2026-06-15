@@ -41,8 +41,6 @@ func TestSchemaMessages_CoversEveryNodeType(t *testing.T) {
 		30: "EmailChangeToken",
 		31: "OAuthIdentity",
 		32: "IdentityVerificationRecord",
-		33: "Organization",
-		34: "OrganizationMembership",
 		35: "Session",
 		36: "OAuthOneTimeCode",
 		37: "EmailLoginCode",
@@ -124,10 +122,10 @@ func TestSchemaMessages_NoNilEntries(t *testing.T) {
 
 // TestSchemaMessages_StableLength is a tripwire for accidentally
 // removing entries from SchemaMessages without updating the test. The
-// number of messages should equal the count of node types (23) plus
-// edge types (4) = 27 messages registered.
+// number of messages should equal the count of node types (22) plus
+// edge types (4) = 26 messages registered.
 func TestSchemaMessages_StableLength(t *testing.T) {
-	const wantNodes = 24
+	const wantNodes = 22
 	const wantEdges = 4
 	msgs := SchemaMessages()
 	if len(msgs) != wantNodes+wantEdges {

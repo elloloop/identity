@@ -125,10 +125,10 @@ type Repository interface {
 	// record, synchronously, on every driver. This covers the durable
 	// identity/auth material — sessions, refresh tokens, oauth identities,
 	// passkey credentials, totp credentials, recovery codes, identity
-	// verifications, phone verification codes, and organization
-	// memberships — and, as of #168, the short-lived tokens too:
-	// password-reset, email-verification/change, passkey and login
-	// challenges, qr sessions, oauth one-time codes, and invitations.
+	// verifications, and phone verification codes — and, as of #168, the
+	// short-lived tokens too: password-reset, email-verification/change,
+	// passkey and login challenges, qr sessions, oauth one-time codes, and
+	// invitations.
 	// After it, GetUser returns nil and the email is reusable for a new
 	// CreateUser.
 	//
@@ -397,34 +397,6 @@ type Repository interface {
 	DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredQrLoginSessions(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error
-
-	// Organizations — identity-layer entity used by `mode=multi`
-	// deployments. CreateOrganization writes the Organization row and
-	// the owner's OrganizationMembership atomically (from the caller's
-	// point of view; the underlying tenant is created by the
-	// OrganizationSignup RPC before this is reached). Returns the new
-	// organisation id. Slug uniqueness is enforced.
-	//
-	// In `mode=single`, the OrganizationSignup RPC is unimplemented
-	// (per decision log §3), so these methods are exercised only by
-	// `mode=multi` deployments and by the conformance suite.
-	CreateOrganization(ctx context.Context, org *Organization) (string, error)
-	GetOrganization(ctx context.Context, orgID string) (*Organization, error)
-	GetOrganizationBySlug(ctx context.Context, slug string) (*Organization, error)
-	ListOrganizationsForUser(ctx context.Context, userID string) ([]*Organization, error)
-	// CountOrganizationsOwnedBy returns how many organizations the user
-	// owns (Organization.OwnerUserID == userID). DeleteUser uses it to
-	// reject deleting an org owner rather than orphaning the org —
-	// uniformly across drivers, matching the postgres owner_user_id
-	// ON DELETE RESTRICT FK (which remains a backstop).
-	CountOrganizationsOwnedBy(ctx context.Context, userID string) (int, error)
-	// AddOrganizationMember inserts the (org, user, role) membership
-	// row. Returns ErrAlreadyExists if the user is already a member
-	// of the organisation. Used by OrganizationSignup (slice 2) and
-	// the invitation-redemption flow (slice 4) — exposed on the
-	// Repository so both call sites can rely on the same
-	// at-most-one-membership-per-pair invariant.
-	AddOrganizationMember(ctx context.Context, m *OrganizationMembership) (string, error)
 }
 
 // ErrSweepNotImplemented is the soft-skip sentinel a Repository may
@@ -702,61 +674,25 @@ type InvitationRecord struct {
 	CreatedAt  int64
 }
 
-// Organization is the identity-layer organisation entity used by
-// `mode=multi` deployments. Each Organization maps 1:1 to a
-// tenant-shard-db tenant (see docs/IDENTITY.md decision log §2): the
-// Slug is reused as the tenant id when the underlying tenant is
-// created, so collisions surface as an EntDB-level error at
-// `OrganizationSignup` time.
-//
-// Identity-layer admin/role decisions live in `OrganizationMembership`
-// (separately persisted) and on the User.Role axis. `OwnerUserID` is
-// provenance — the User who created the organisation — not authority.
-type Organization struct {
-	ID          string // repository node id; opaque to callers
-	Slug        string // URL-safe; matches the tenant-shard-db tenant id
-	DisplayName string
-	OwnerUserID string
-	CreatedAtMs int64 // epoch ms
-	UpdatedAtMs int64 // epoch ms
-}
-
-// OrganizationMembership records that a User belongs to an
-// Organization. There is exactly one row per (organization, user)
-// pair within a tenant. The role here is identity's product-layer
-// role (`admin` / `member` / `guest`) and is independent of
-// tenant-shard-db's `TenantMember.Role` (see decision log §4).
-type OrganizationMembership struct {
-	NodeID         string
-	OrganizationID string
-	UserID         string
-	Role           string
-	CreatedAtMs    int64
-}
-
 // ── Sentinel errors ────────────────────────────────────────────────────
 
 var (
-	ErrUnauthenticated  = errors.New("unauthenticated")
-	ErrPermissionDenied = errors.New("permission denied")
-	ErrInvalidArgument  = errors.New("invalid argument")
-	ErrNotFound         = errors.New("not found")
-	ErrAlreadyExists    = errors.New("already exists")
-	// ErrUserOwnsOrganization is returned by DeleteUser when the target
-	// still owns one or more organizations. Maps to CodeFailedPrecondition
-	// — transfer or delete the organizations first.
-	ErrUserOwnsOrganization = errors.New("user owns an organization")
-	ErrAccountLocked        = errors.New("account locked")
-	ErrNoPasswordSet        = errors.New("no password set for this account")
-	ErrAccountNotActive     = errors.New("account is not active")
-	ErrInvitationPending    = errors.New("account has not completed invitation")
-	ErrIDVRequired          = errors.New("identity verification required")
-	ErrWeakPassword         = errors.New("password does not meet strength requirements")
-	ErrTotpRequired         = errors.New("totp required")
-	ErrTokenExpired         = errors.New("token expired")
-	ErrInvalidTotpCode      = errors.New("invalid totp code")
-	ErrQrLoginExpired       = errors.New("qr login session expired")
-	ErrQrLoginNotPending    = errors.New("qr login session is not pending")
+	ErrUnauthenticated   = errors.New("unauthenticated")
+	ErrPermissionDenied  = errors.New("permission denied")
+	ErrInvalidArgument   = errors.New("invalid argument")
+	ErrNotFound          = errors.New("not found")
+	ErrAlreadyExists     = errors.New("already exists")
+	ErrAccountLocked     = errors.New("account locked")
+	ErrNoPasswordSet     = errors.New("no password set for this account")
+	ErrAccountNotActive  = errors.New("account is not active")
+	ErrInvitationPending = errors.New("account has not completed invitation")
+	ErrIDVRequired       = errors.New("identity verification required")
+	ErrWeakPassword      = errors.New("password does not meet strength requirements")
+	ErrTotpRequired      = errors.New("totp required")
+	ErrTokenExpired      = errors.New("token expired")
+	ErrInvalidTotpCode   = errors.New("invalid totp code")
+	ErrQrLoginExpired    = errors.New("qr login session expired")
+	ErrQrLoginNotPending = errors.New("qr login session is not pending")
 	// ErrOAuthCodeInvalid is returned when a hosted-flow one-time code is
 	// missing, expired, or already consumed. The Connect handler maps it
 	// to CodeUnauthenticated so replays and expiries look identical to a
@@ -797,10 +733,10 @@ var (
 	ErrCaptchaRequired = errors.New("captcha token required")
 	ErrCaptchaFailed   = errors.New("captcha verification failed")
 	// ErrUnimplemented signals that the requested RPC is intentionally
-	// disabled in the current deployment mode (e.g. OrganizationSignup
-	// in mode=single per docs/IDENTITY.md decision log §3). The Connect
-	// handler layer maps this to CodeUnimplemented.
-	ErrUnimplemented = errors.New("operation unimplemented in this deployment mode")
+	// disabled for the active repository driver (e.g. the redesign
+	// Domain/Tenant RPCs are postgres-only; entdb/memory return this).
+	// The Connect handler layer maps it to CodeUnimplemented.
+	ErrUnimplemented = errors.New("operation unimplemented for this repository driver")
 	// ErrLastOwner is returned by RemoveTenantMember when removing the target
 	// would strand the tenant with no active owner. The caller is permitted
 	// to remove members (so PermissionDenied is wrong); this is a state
@@ -951,16 +887,10 @@ func NewAuthServiceWithOAuth(
 	}
 }
 
-// ── Per-request tenant scoping ──────────────────────────────────────────
+// ── Storage tenant + project scoping ────────────────────────────────────
 
-// tenantID returns the request's resolved tenant. In mode=multi the
-// resolution middleware injects a TenantScope; in mode=single (and any
-// pre-resolution path) it falls back to the boot-time DefaultTenantID,
-// so the single-tenant path stays a clean constant.
-func (s *AuthService) tenantID(ctx context.Context) string {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.TenantID != "" {
-		return scope.TenantID
-	}
+// tenantID returns the internal storage tenant key (DefaultTenantID).
+func (s *AuthService) tenantID(context.Context) string {
 	return s.defaultTenantID
 }
 
@@ -1001,12 +931,8 @@ func (s *AuthService) maybeAutoFormTenant(ctx context.Context, user *User) {
 	}
 }
 
-// repo returns the Repository scoped to the request's resolved tenant,
-// falling back to the boot-time Repository in mode=single.
-func (s *AuthService) repo(ctx context.Context) Repository {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.Repo != nil {
-		return scope.Repo
-	}
+// repo returns the boot-time Repository.
+func (s *AuthService) repo(context.Context) Repository {
 	return s.defaultRepo
 }
 

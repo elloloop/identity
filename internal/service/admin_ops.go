@@ -152,15 +152,6 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 	if u == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
-	// Reject deleting a user who still owns organizations, before any
-	// revocation or cascade — orphaning an org's owner is never correct.
-	// Enforced uniformly across drivers (postgres also has an
-	// owner_user_id ON DELETE RESTRICT FK as a backstop).
-	if owned, err := s.repo(ctx).CountOrganizationsOwnedBy(ctx, targetUserID); err != nil {
-		return fmt.Errorf("delete user: check organization ownership: %w", err)
-	} else if owned > 0 {
-		return fmt.Errorf("%w: user owns %d organization(s)", ErrUserOwnsOrganization, owned)
-	}
 	now := nowMs()
 	if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, targetUserID); err != nil {
 		return fmt.Errorf("delete user: revoke refresh tokens: %w", err)

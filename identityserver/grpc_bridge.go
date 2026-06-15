@@ -326,12 +326,6 @@ func (b *grpcBridge) ListGroupMembers(ctx context.Context, in *identitypb.ListGr
 	return invoke(ctx, in, b.h.ListGroupMembers)
 }
 
-// ─── Organization signup ────────────────────────────────────────────
-
-func (b *grpcBridge) OrganizationSignup(ctx context.Context, in *identitypb.OrganizationSignupRequest) (*identitypb.OrganizationSignupResponse, error) {
-	return invoke(ctx, in, b.h.OrganizationSignup)
-}
-
 // ─── Tenant domains ─────────────────────────────────────────────────
 
 func (b *grpcBridge) CreateDomain(ctx context.Context, in *identitypb.CreateDomainRequest) (*identitypb.CreateDomainResponse, error) {

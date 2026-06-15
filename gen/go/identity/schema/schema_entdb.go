@@ -31,8 +31,6 @@ var (
 
 	IdentityVerificationRecordVerificationID = entdb.UniqueKey[string]{TypeID: 32, FieldID: 1, Name: "verification_id"}
 
-	OrganizationSlug = entdb.UniqueKey[string]{TypeID: 33, FieldID: 1, Name: "slug"}
-
 	SessionSid = entdb.UniqueKey[string]{TypeID: 35, FieldID: 1, Name: "sid"}
 
 	OAuthOneTimeCodeCodeHash = entdb.UniqueKey[string]{TypeID: 36, FieldID: 1, Name: "code_hash"}
@@ -40,4 +38,6 @@ var (
 	EmailLoginCodeEmail = entdb.UniqueKey[string]{TypeID: 37, FieldID: 1, Name: "email"}
 
 	MagicLinkTokenTokenHash = entdb.UniqueKey[string]{TypeID: 38, FieldID: 1, Name: "token_hash"}
+
+	PhoneVerificationCodeUserID = entdb.UniqueKey[string]{TypeID: 39, FieldID: 1, Name: "user_id"}
 )

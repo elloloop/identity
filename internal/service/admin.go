@@ -49,37 +49,20 @@ func NewAdminService(repo Repository, db DB, tenantID string, auditLog *audit.Lo
 	return &AdminService{bootDB: db, defaultRepo: repo, defaultTenantID: tenantID, audit: auditLog, cfg: cfg, mailer: mailer, logger: logger}
 }
 
-// repo returns the Repository scoped to the request's resolved tenant,
-// falling back to the boot-time Repository in mode=single (mirrors
-// ProfileService.repo).
-func (s *AdminService) repo(ctx context.Context) Repository {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.Repo != nil {
-		return scope.Repo
-	}
+// repo returns the boot-time Repository. The ctx parameter is retained
+// for call-site symmetry with the other services.
+func (s *AdminService) repo(context.Context) Repository {
 	return s.defaultRepo
 }
 
-// tenantID returns the request's resolved tenant, falling back to the
-// boot-time DefaultTenantID in mode=single (decision log §1). The DB
-// interface takes the tenant per call, so admin operations need only the
-// resolved id — no per-tenant DB handle.
-func (s *AdminService) tenantID(ctx context.Context) string {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.TenantID != "" {
-		return scope.TenantID
-	}
+// tenantID returns the internal storage tenant key (DefaultTenantID).
+func (s *AdminService) tenantID(context.Context) string {
 	return s.defaultTenantID
 }
 
-// db returns the DB scoped to the request's resolved tenant. The
-// postgres driver binds its DB to a single tenant, so a per-request
-// tenant needs the scope's DB; the entdb driver's DB routes by the
-// per-call tenant id, leaves scope.DB nil, and is reached through the
-// boot-time DB with s.tenantID(ctx) passed per call. In mode=single no
-// scope is present and the boot-time DB is used directly.
-func (s *AdminService) db(ctx context.Context) DB {
-	if scope := TenantScopeFromContext(ctx); scope != nil && scope.DB != nil {
-		return scope.DB
-	}
+// db returns the boot-time DB; the DB interface takes the storage tenant
+// id per call (passed via s.tenantID).
+func (s *AdminService) db(context.Context) DB {
 	return s.bootDB
 }
 

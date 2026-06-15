@@ -45,8 +45,6 @@ type Repo struct {
 	emailChanges       map[string]*service.EmailChangeToken
 	oauthIdentities    map[string]*service.OAuthIdentity
 	idvRecords         map[string]*service.IdentityVerificationRecord
-	orgs               map[string]*service.Organization
-	orgMembers         map[string]*service.OrganizationMembership
 	sessions           map[string]*service.SessionRecord
 }
 
@@ -71,8 +69,6 @@ func New() *Repo {
 		emailChanges:       make(map[string]*service.EmailChangeToken),
 		oauthIdentities:    make(map[string]*service.OAuthIdentity),
 		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
-		orgs:               make(map[string]*service.Organization),
-		orgMembers:         make(map[string]*service.OrganizationMembership),
 		sessions:           make(map[string]*service.SessionRecord),
 	}
 }
@@ -212,7 +208,6 @@ func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 	deleteByUser(r.emailChanges, userID, func(t *service.EmailChangeToken) string { return t.UserID })
 	deleteByUser(r.oauthIdentities, userID, func(o *service.OAuthIdentity) string { return o.UserID })
 	deleteByUser(r.idvRecords, userID, func(rec *service.IdentityVerificationRecord) string { return rec.UserID })
-	deleteByUser(r.orgMembers, userID, func(m *service.OrganizationMembership) string { return m.UserID })
 	deleteByUser(r.phoneVerifyCodes, userID, func(c *service.PhoneVerificationCodeRecord) string { return c.UserID })
 	delete(r.users, userID)
 	return nil
@@ -1403,121 +1398,6 @@ func (r *Repo) DeleteExpiredInvitations(_ context.Context, beforeMs int64, limit
 		}
 	}
 	return nil
-}
-
-// ── Organizations ─────────────────────────────────────────────────
-
-func (r *Repo) CreateOrganization(_ context.Context, o *service.Organization) (string, error) {
-	if o == nil {
-		return "", errors.New("memory: CreateOrganization: nil organization")
-	}
-	if o.Slug == "" {
-		return "", fmt.Errorf("%w: missing slug", service.ErrInvalidArgument)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, existing := range r.orgs {
-		if existing.Slug == o.Slug {
-			return "", fmt.Errorf("%w: slug %q", service.ErrAlreadyExists, o.Slug)
-		}
-	}
-	id := r.nextID()
-	o.ID = id
-	cp := *o
-	r.orgs[id] = &cp
-	return id, nil
-}
-
-func (r *Repo) GetOrganization(_ context.Context, orgID string) (*service.Organization, error) {
-	if orgID == "" {
-		return nil, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	o, ok := r.orgs[orgID]
-	if !ok {
-		return nil, nil
-	}
-	cp := *o
-	return &cp, nil
-}
-
-func (r *Repo) GetOrganizationBySlug(_ context.Context, slug string) (*service.Organization, error) {
-	if slug == "" {
-		return nil, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, o := range r.orgs {
-		if o.Slug == slug {
-			cp := *o
-			return &cp, nil
-		}
-	}
-	return nil, nil
-}
-
-func (r *Repo) ListOrganizationsForUser(_ context.Context, userID string) ([]*service.Organization, error) {
-	if userID == "" {
-		return nil, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var out []*service.Organization
-	seen := make(map[string]struct{})
-	for _, m := range r.orgMembers {
-		if m.UserID != userID {
-			continue
-		}
-		if _, dup := seen[m.OrganizationID]; dup {
-			continue
-		}
-		seen[m.OrganizationID] = struct{}{}
-		o, ok := r.orgs[m.OrganizationID]
-		if !ok {
-			continue
-		}
-		cp := *o
-		out = append(out, &cp)
-	}
-	return out, nil
-}
-
-// CountOrganizationsOwnedBy returns how many organizations the user owns.
-func (r *Repo) CountOrganizationsOwnedBy(_ context.Context, userID string) (int, error) {
-	if userID == "" {
-		return 0, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	n := 0
-	for _, o := range r.orgs {
-		if o.OwnerUserID == userID {
-			n++
-		}
-	}
-	return n, nil
-}
-
-func (r *Repo) AddOrganizationMember(_ context.Context, m *service.OrganizationMembership) (string, error) {
-	if m == nil {
-		return "", errors.New("memory: AddOrganizationMember: nil membership")
-	}
-	if m.OrganizationID == "" || m.UserID == "" {
-		return "", fmt.Errorf("%w: missing organization_id or user_id", service.ErrInvalidArgument)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, existing := range r.orgMembers {
-		if existing.OrganizationID == m.OrganizationID && existing.UserID == m.UserID {
-			return "", fmt.Errorf("%w: %s already in %s", service.ErrAlreadyExists, m.UserID, m.OrganizationID)
-		}
-	}
-	id := r.nextID()
-	m.NodeID = id
-	cp := *m
-	r.orgMembers[id] = &cp
-	return id, nil
 }
 
 // ── Sessions ──────────────────────────────────────────────────────

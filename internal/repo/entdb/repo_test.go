@@ -413,7 +413,6 @@ var uniqueFields = []struct {
 	{&schemapb.UserInvitation{}, "email"},
 	{&schemapb.EmailVerificationToken{}, "token_hash"},
 	{&schemapb.EmailChangeToken{}, "token_hash"},
-	{&schemapb.Organization{}, "slug"},
 	{&schemapb.Session{}, "sid"},
 }
 
@@ -1422,7 +1421,6 @@ func TestDeleteUser_DrainsEveryUserOwnedType(t *testing.T) {
 	mem.store["rc"] = storedNode{msg: &schemapb.RecoveryCode{UserId: "u-1"}}
 	mem.store["idv"] = storedNode{msg: &schemapb.IdentityVerificationRecord{UserId: "u-1"}}
 	mem.store["pvc"] = storedNode{msg: &schemapb.PhoneVerificationCode{UserId: "u-1"}}
-	mem.store["mem"] = storedNode{msg: &schemapb.OrganizationMembership{UserId: "u-1"}}
 	// Short-lived tokens drained eagerly as of #168 — including
 	// user_invitation, which only this test can seed.
 	mem.store["prt"] = storedNode{msg: &schemapb.PasswordResetToken{UserId: "u-1"}}
