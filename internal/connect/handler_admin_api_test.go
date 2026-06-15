@@ -317,7 +317,7 @@ func TestAdminRPCs_SetPrimaryAuthDomain_UnverifiedRejected_Handler(t *testing.T)
 	t.Parallel()
 	store := &adminControlStore{}
 	dns := &adminDNSResolver{txt: map[string][]string{}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &connectPlatformAdminStore{}, dns, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
 	client := startAdminServer(t, svc)
 	ctx := context.Background()
 
