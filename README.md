@@ -8,8 +8,10 @@ Treat this like [tenant-shard-db](https://github.com/elloloop/tenant-shard-db): 
 >
 > v1.0 is the Project/Tenant/Domain redesign. Upgrading from a pre-v1.0
 > deployment is a **breaking schema reset — there is no in-place data
-> migration in this release** (a legacy-data migration script and Postgres
-> row-level-security hardening are tracked v1.1 follow-ups). What changed:
+> migration in this release**; a fresh install is the supported path. See
+> [`docs/UPGRADE.md`](./docs/UPGRADE.md) for the full upgrade guide. Postgres
+> row-level-security defense-in-depth ships in v1.0 (migration
+> `0016_enable_rls_data_plane`). What changed:
 >
 > - **`OrganizationSignup` removed**, along with the `Organization` /
 >   `OrganizationMembership` tables. Multitenancy is now modelled by
