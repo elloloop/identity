@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
@@ -26,7 +26,7 @@ type projectPartitionedDB struct {
 	Repository
 
 	mu      *sync.Mutex
-	byProj  map[string]map[string]*entdb.Node // projectID -> nodeID -> node
+	byProj  map[string]map[string]*graph.Node // projectID -> nodeID -> node
 	seq     *int64
 	boundTo string // project this handle is bound to ("" before WithProject)
 }
@@ -35,7 +35,7 @@ func newProjectPartitionedDB() *projectPartitionedDB {
 	var seq int64
 	return &projectPartitionedDB{
 		mu:     &sync.Mutex{},
-		byProj: map[string]map[string]*entdb.Node{},
+		byProj: map[string]map[string]*graph.Node{},
 		seq:    &seq,
 	}
 }
@@ -44,10 +44,10 @@ func (d *projectPartitionedDB) WithProject(projectID string) Repository {
 	return &projectPartitionedDB{Repository: d.Repository, mu: d.mu, byProj: d.byProj, seq: d.seq, boundTo: projectID}
 }
 
-func (d *projectPartitionedDB) partition() map[string]*entdb.Node {
+func (d *projectPartitionedDB) partition() map[string]*graph.Node {
 	p, ok := d.byProj[d.boundTo]
 	if !ok {
-		p = map[string]*entdb.Node{}
+		p = map[string]*graph.Node{}
 		d.byProj[d.boundTo] = p
 	}
 	return p
@@ -59,13 +59,13 @@ func (d *projectPartitionedDB) seedUser(projectID, id, role string) {
 	defer d.mu.Unlock()
 	p, ok := d.byProj[projectID]
 	if !ok {
-		p = map[string]*entdb.Node{}
+		p = map[string]*graph.Node{}
 		d.byProj[projectID] = p
 	}
-	p[id] = &entdb.Node{NodeID: id, TypeID: typeUser, Payload: map[string]any{ufRole: role}}
+	p[id] = &graph.Node{NodeID: id, TypeID: typeUser, Payload: map[string]any{ufRole: role}}
 }
 
-func (d *projectPartitionedDB) GetNode(_ context.Context, _, _ string, typeID int, nodeID string) (*entdb.Node, error) {
+func (d *projectPartitionedDB) GetNode(_ context.Context, _, _ string, typeID int, nodeID string) (*graph.Node, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	n, ok := d.partition()[nodeID]
@@ -75,10 +75,10 @@ func (d *projectPartitionedDB) GetNode(_ context.Context, _, _ string, typeID in
 	return n, nil
 }
 
-func (d *projectPartitionedDB) QueryNodes(_ context.Context, _, _ string, typeID int, filter map[string]any) ([]*entdb.Node, error) {
+func (d *projectPartitionedDB) QueryNodes(_ context.Context, _, _ string, typeID int, filter map[string]any) ([]*graph.Node, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	var out []*entdb.Node
+	var out []*graph.Node
 	for _, n := range d.partition() {
 		if n.TypeID != typeID {
 			continue
@@ -90,12 +90,12 @@ func (d *projectPartitionedDB) QueryNodes(_ context.Context, _, _ string, typeID
 	return out, nil
 }
 
-func (d *projectPartitionedDB) ExecuteAtomic(_ context.Context, _, _ string, ops []entdb.Operation) (*entdb.CommitResult, error) {
+func (d *projectPartitionedDB) ExecuteAtomic(_ context.Context, _, _ string, ops []graph.Operation) (*graph.CommitResult, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var created []string
 	for _, op := range ops {
-		if op.Type != entdb.OpCreateNode {
+		if op.Type != graph.OpCreateNode {
 			continue
 		}
 		*d.seq++
@@ -103,21 +103,21 @@ func (d *projectPartitionedDB) ExecuteAtomic(_ context.Context, _, _ string, ops
 		if id == "" {
 			id = "ppdb-node-" + strconv.FormatInt(*d.seq, 10)
 		}
-		d.partition()[id] = &entdb.Node{NodeID: id, TypeID: op.TypeID, Payload: fdbCopyMap(op.Data)}
+		d.partition()[id] = &graph.Node{NodeID: id, TypeID: op.TypeID, Payload: fdbCopyMap(op.Data)}
 		created = append(created, id)
 	}
-	return &entdb.CommitResult{Success: true, Applied: true, CreatedNodeIDs: created}, nil
+	return &graph.CommitResult{Success: true, Applied: true, CreatedNodeIDs: created}, nil
 }
 
-func (d *projectPartitionedDB) GetEdgesFrom(context.Context, string, string, string, int) ([]*entdb.Edge, error) {
+func (d *projectPartitionedDB) GetEdgesFrom(context.Context, string, string, string, int) ([]*graph.Edge, error) {
 	return nil, nil
 }
 
-func (d *projectPartitionedDB) GetEdgesTo(context.Context, string, string, string, int) ([]*entdb.Edge, error) {
+func (d *projectPartitionedDB) GetEdgesTo(context.Context, string, string, string, int) ([]*graph.Edge, error) {
 	return nil, nil
 }
 
-func (d *projectPartitionedDB) SearchNodes(context.Context, string, string, int, string) ([]*entdb.Node, error) {
+func (d *projectPartitionedDB) SearchNodes(context.Context, string, string, int, string) ([]*graph.Node, error) {
 	return nil, nil
 }
 

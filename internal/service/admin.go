@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
@@ -57,7 +57,7 @@ func (s *AdminService) repo(ctx context.Context) Repository {
 
 // projectID returns the storage shard (project) the request operates under:
 // the per-request ProjectScope when present, else the boot default. It is
-// the partition argument the entdb DB transport keys on (the postgres DB
+// the partition argument the graph DB transport keys on (the postgres DB
 // ignores it and filters on its WithProject-bound project instead).
 func (s *AdminService) projectID(ctx context.Context) string {
 	return requestProjectID(ctx, s.defaultProjectID)
@@ -152,8 +152,8 @@ func (s *AdminService) InviteUser(
 	}
 
 	// Create user node.
-	userOp := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeUser, Data: userData}
-	result, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []entdb.Operation{userOp})
+	userOp := graph.Operation{Type: graph.OpCreateNode, TypeID: typeUser, Data: userData}
+	result, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []graph.Operation{userOp})
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
@@ -188,8 +188,8 @@ func (s *AdminService) InviteUser(
 		invExpiresAt: now + 7*24*3600*1000,
 		invCreatedAt: now,
 	}
-	invOp := entdb.Operation{Type: entdb.OpCreateNode, TypeID: typeUserInvitation, Data: invData}
-	_, err = s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []entdb.Operation{invOp})
+	invOp := graph.Operation{Type: graph.OpCreateNode, TypeID: typeUserInvitation, Data: invData}
+	_, err = s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []graph.Operation{invOp})
 	if err != nil {
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
@@ -253,11 +253,11 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 	}
 
 	now := nowMs()
-	op := entdb.Operation{
-		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
+	op := graph.Operation{
+		Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 		Patch: map[string]any{ufStatus: "deactivated", ufDeactivatedAt: now, ufUpdatedAt: now},
 	}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 		return fmt.Errorf("deactivate user: %w", err)
 	}
 
@@ -295,11 +295,11 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 	}
 
 	now := nowMs()
-	op := entdb.Operation{
-		Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
+	op := graph.Operation{
+		Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 		Patch: map[string]any{ufStatus: "active", ufDeactivatedAt: int64(0), ufUpdatedAt: now},
 	}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 		return fmt.Errorf("reactivate user: %w", err)
 	}
 
@@ -338,26 +338,26 @@ func (s *AdminService) ResetUserPassword(
 		if err != nil {
 			return nil, fmt.Errorf("hash password: %w", err)
 		}
-		op := entdb.Operation{
-			Type: entdb.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
+		op := graph.Operation{
+			Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
 			Patch: map[string]any{ufPasswordHash: hash, ufUpdatedAt: now},
 		}
-		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []entdb.Operation{op}); err != nil {
+		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 			return nil, fmt.Errorf("set temp password: %w", err)
 		}
 		res.TemporaryPassword = tempPw
 	} else {
 		rawToken := randomToken(32)
 		tokenHash := sha256Hex(rawToken)
-		op := entdb.Operation{
-			Type: entdb.OpCreateNode, TypeID: typePasswordReset,
+		op := graph.Operation{
+			Type: graph.OpCreateNode, TypeID: typePasswordReset,
 			Data: map[string]any{
 				prfTokenHash: tokenHash, prfUserID: targetUserID,
 				prfExpiresAt: now + int64(s.cfg.PasswordResetExpirySeconds)*1000,
 				prfCreatedAt: now,
 			},
 		}
-		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []entdb.Operation{op}); err != nil {
+		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []graph.Operation{op}); err != nil {
 			return nil, fmt.Errorf("create reset token: %w", err)
 		}
 		res.ResetToken = rawToken

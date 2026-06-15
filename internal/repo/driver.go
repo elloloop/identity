@@ -1,14 +1,12 @@
 // Package repo selects between concrete service.Repository / service.DB
-// drivers (entdb, postgres, sqlite, memory) for the production binary's
+// drivers (postgres, sqlite, memory) for the production binary's
 // wiring code.
 //
-// Each driver lives in its own sub-package — internal/repo/entdb for
-// the EntDB-backed driver, internal/repo/postgres for the SQL driver,
-// internal/repo/sqlite for the pure-Go embedded/single-node driver, and
-// internal/repo/memory for the in-process store used by tests. The
-// split keeps each driver's dependencies isolated (entdb pulls in the
-// SDK; postgres pulls in pgx; sqlite pulls in modernc.org/sqlite; memory
-// pulls in nothing).
+// Each driver lives in its own sub-package — internal/repo/postgres for
+// the SQL driver, internal/repo/sqlite for the pure-Go embedded/single-node
+// driver, and internal/repo/memory for the in-process store used by tests.
+// The split keeps each driver's dependencies isolated (postgres pulls in
+// pgx; sqlite pulls in modernc.org/sqlite; memory pulls in nothing).
 package repo
 
 import (
@@ -17,10 +15,8 @@ import (
 	"fmt"
 	"math"
 
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"go.uber.org/zap"
 
-	entdbrepo "github.com/elloloop/identity/internal/repo/entdb"
 	memrepo "github.com/elloloop/identity/internal/repo/memory"
 	pgrepo "github.com/elloloop/identity/internal/repo/postgres"
 	sqliterepo "github.com/elloloop/identity/internal/repo/sqlite"
@@ -31,8 +27,6 @@ import (
 type Driver string
 
 const (
-	// DriverEntDB targets the EntDB gRPC server via the typed SDK.
-	DriverEntDB Driver = "entdb"
 	// DriverPostgres targets a Postgres database via pgx/v5.
 	DriverPostgres Driver = "postgres"
 	// DriverMemory targets a process-local in-memory store, useful
@@ -49,13 +43,10 @@ type Config struct {
 	// Driver is the chosen backend. Required.
 	Driver Driver
 
-	// EntDBClient is the EntDB SDK client (entdb driver only).
-	EntDBClient *sdk.DbClient
-
 	// ProjectID is the storage shard the boot-default Repository/DB binds
 	// to (ADR-0002): the Project is identity's isolation shard, so the
 	// data-plane partition is the project id. Per-request scopes are derived
-	// from it via WithProject. Required for entdb and postgres.
+	// from it via WithProject. Required for postgres.
 	ProjectID string
 
 	// Postgres-specific.
@@ -83,7 +74,7 @@ type Built struct {
 
 	// ProjectStore is the control-plane registry store. It is non-nil
 	// ONLY for the postgres driver — projects are a control-plane concern
-	// and entdb/memory have no control plane. The composition root uses it
+	// and memory has no control plane. The composition root uses it
 	// to seed the default project on boot. It shares Repository's pool, so
 	// closing the repository releases it too; do not close it separately.
 	ProjectStore *pgrepo.ProjectStore
@@ -116,7 +107,7 @@ type Built struct {
 
 // ProjectResolver returns the control-plane project resolver as a
 // driver-agnostic interface, or a true nil when this build has no control
-// plane (entdb/memory). It exists so callers avoid the typed-nil trap:
+// plane (memory). It exists so callers avoid the typed-nil trap:
 // assigning a nil *ProjectStore straight into a service.ProjectResolver
 // variable yields a non-nil interface wrapping a nil pointer.
 func (b *Built) ProjectResolver() service.ProjectResolver {
@@ -128,7 +119,7 @@ func (b *Built) ProjectResolver() service.ProjectResolver {
 
 // ControlPlaneStore returns the control-plane project write-store as the
 // driver-agnostic service.ControlPlaneProjectStore the admin RPCs use, or a
-// true nil when this build has no control plane (entdb/memory) — avoiding the
+// true nil when this build has no control plane (memory) — avoiding the
 // typed-nil trap.
 func (b *Built) ControlPlaneStore() service.ControlPlaneProjectStore {
 	if b.ProjectStore == nil {
@@ -139,7 +130,7 @@ func (b *Built) ControlPlaneStore() service.ControlPlaneProjectStore {
 
 // TenantAutoFormer returns the tenant auto-formation store as a
 // driver-agnostic interface, or a true nil when this build has no control
-// plane (entdb/memory) — avoiding the typed-nil trap.
+// plane (memory) — avoiding the typed-nil trap.
 func (b *Built) TenantAutoFormer() service.TenantAutoFormStore {
 	if b.AutoFormStore == nil {
 		return nil
@@ -149,7 +140,7 @@ func (b *Built) TenantAutoFormer() service.TenantAutoFormStore {
 
 // DomainStoreIface returns the domain governance store as a
 // driver-agnostic interface, or a true nil when this build has no control
-// plane (entdb/memory) — avoiding the typed-nil trap.
+// plane (memory) — avoiding the typed-nil trap.
 func (b *Built) DomainStoreIface() service.DomainStore {
 	if b.DomainStore == nil {
 		return nil
@@ -159,7 +150,7 @@ func (b *Built) DomainStoreIface() service.DomainStore {
 
 // TenantStoreIface returns the tenant governance store as a
 // driver-agnostic interface, or a true nil when this build has no control
-// plane (entdb/memory) — avoiding the typed-nil trap.
+// plane (memory) — avoiding the typed-nil trap.
 func (b *Built) TenantStoreIface() service.TenantStore {
 	if b.TenantStore == nil {
 		return nil
@@ -169,7 +160,7 @@ func (b *Built) TenantStoreIface() service.TenantStore {
 
 // MembershipStoreIface returns the membership governance store as a
 // driver-agnostic interface, or a true nil when this build has no control
-// plane (entdb/memory) — avoiding the typed-nil trap.
+// plane (memory) — avoiding the typed-nil trap.
 func (b *Built) MembershipStoreIface() service.MembershipStore {
 	if b.MembershipStore == nil {
 		return nil
@@ -179,7 +170,7 @@ func (b *Built) MembershipStoreIface() service.MembershipStore {
 
 // InvitationStoreIface returns the invitation governance store as a
 // driver-agnostic interface, or a true nil when this build has no control
-// plane (entdb/memory) — avoiding the typed-nil trap.
+// plane (memory) — avoiding the typed-nil trap.
 func (b *Built) InvitationStoreIface() service.InvitationStore {
 	if b.InvitationStore == nil {
 		return nil
@@ -189,7 +180,7 @@ func (b *Built) InvitationStoreIface() service.InvitationStore {
 
 // PlatformAdminStoreIface returns the platform-admin store as a
 // driver-agnostic interface, or a true nil when this build has no control
-// plane (entdb/memory) — avoiding the typed-nil trap.
+// plane (memory) — avoiding the typed-nil trap.
 func (b *Built) PlatformAdminStoreIface() service.PlatformAdminStore {
 	if b.PlatformAdminStore == nil {
 		return nil
@@ -199,7 +190,7 @@ func (b *Built) PlatformAdminStoreIface() service.PlatformAdminStore {
 
 // LoginGovernance returns the read-side governance bundle the login path
 // consults to enforce a claimed tenant's LoginPolicy, or a true nil when
-// this build has no governance plane (entdb/memory). Returning nil — rather
+// this build has no governance plane (memory). Returning nil — rather
 // than a bundle of typed-nil stores — keeps AuthService's nil check honest.
 func (b *Built) LoginGovernance() *service.LoginGovernance {
 	if b.TenantStore == nil || b.DomainStore == nil || b.LoginPolicyStore == nil {
@@ -218,22 +209,6 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		logger = zap.NewNop()
 	}
 	switch cfg.Driver {
-	case DriverEntDB:
-		if cfg.EntDBClient == nil {
-			return nil, errors.New("repo: Build: entdb driver requires EntDBClient")
-		}
-		if cfg.ProjectID == "" {
-			return nil, errors.New("repo: Build: entdb driver requires ProjectID")
-		}
-		dbAdapter, err := NewDBAdapter(cfg.EntDBClient)
-		if err != nil {
-			return nil, fmt.Errorf("repo: Build: entdb db adapter: %w", err)
-		}
-		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
-		return &Built{
-			Repository: entdbrepo.NewRepository(cfg.EntDBClient, cfg.ProjectID),
-			DB:         dbAdapter,
-		}, nil
 	case DriverMemory:
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
 		mem := memrepo.New()

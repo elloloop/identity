@@ -1,6 +1,6 @@
 <!--
 Thanks for contributing. Fill out the sections below before requesting review.
-The CI pipeline (lint + vuln + test + smoke + integration + realentdb + realpostgres + fuzz + docker) must be green to merge.
+The CI pipeline (lint + vuln + test + smoke + integration + realpostgres + fuzz + docker) must be green to merge.
 -->
 
 ## Summary
@@ -20,12 +20,12 @@ Closes #
 <!--
 How did you verify this works? Be specific.
 For bug fixes: include a regression test in the diff and reference it here.
-For features: list the tests you added (unit / integration / realentdb / realpostgres).
+For features: list the tests you added (unit / integration / realpostgres).
 -->
 
 - [ ] Added or updated unit tests
 - [ ] Added or updated integration tests (`-tags=integration`)
-- [ ] Added or updated real-DB tests (`-tags=realentdb` / `-tags=realpostgres`) if behavior depends on storage
+- [ ] Added or updated real-DB tests (`-tags=realpostgres`) if behavior depends on storage
 - [ ] Documented public-facing changes in `docs-site/`
 
 ## Risk

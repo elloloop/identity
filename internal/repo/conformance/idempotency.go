@@ -40,7 +40,7 @@ func runIdempotencyConformance(t *testing.T, driver Driver) {
 		// NOTE: Update of a non-existent row is deliberately NOT asserted.
 		// The differential suite found the backends genuinely disagree on
 		// this unspecified case — postgres silently no-ops, while memory
-		// ("not found") and entdb ("ACCESS_DENIED" / "not found") error —
+		// ("not found") error —
 		// and the service layer never updates a row it didn't just read,
 		// so there is no contract to pin. Asserting either behavior would
 		// fail a legitimate backend.

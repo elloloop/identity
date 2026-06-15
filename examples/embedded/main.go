@@ -10,7 +10,7 @@
 //	go run ./examples/embedded
 //
 // It uses the in-memory repository so it boots with no external
-// dependencies. A real deployment sets GATEWAY_REPO_DRIVER=entdb (and the
+// dependencies. A real deployment sets GATEWAY_REPO_DRIVER=postgres (and the
 // rest of the GATEWAY_* config) and uses identityserver.OptionsFromEnv.
 package main
 

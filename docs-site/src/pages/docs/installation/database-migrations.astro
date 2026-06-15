@@ -6,11 +6,10 @@ import { Code } from "astro-expressive-code/components";
 <DocsLayout title="Database & Migrations">
   <h1>Database &amp; Migrations</h1>
   <p>
-    Identity's default backend is <strong>EntDB</strong> (tenant-shard-db),
-    where the storage layer owns the schema — those deployments have no SQL
-    migrations and can skip this page. <strong>This page applies when you run
-    Identity on the Postgres driver</strong>
-    (<code>GATEWAY_REPO_DRIVER=postgres</code>). On that driver Identity stores
+    Identity's primary backend is <strong>Postgres</strong>
+    (<code>GATEWAY_REPO_DRIVER=postgres</code>, the default). The in-memory
+    driver keeps no durable state and can skip this page. On the Postgres
+    driver Identity stores
     its durable state in PostgreSQL, and the schema is managed by versioned,
     embedded migrations applied with
     <a href="https://github.com/golang-migrate/migrate">golang-migrate</a>. The

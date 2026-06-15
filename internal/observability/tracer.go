@@ -24,14 +24,15 @@ func Tracer() trace.Tracer {
 // returned end function records the error (if non-nil) on the span and
 // calls span.End() — callers use it as:
 //
-//	ctx, end := observability.StartClient(ctx, "entdb.GetUser",
-//	    attribute.String("entdb.tenant", tenantID))
+//	ctx, end := observability.StartClient(ctx, "db.GetUser",
+//	    attribute.String("db.tenant", tenantID))
 //	defer func() { end(err) }()
 //
 // When OTel is disabled the global no-op tracer is in effect and this
 // allocates only the (very small) no-op Span struct.
 func StartClient(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, func(error)) {
-	ctx, span := Tracer().Start(ctx, name,
+	ctx, span := Tracer().Start(
+		ctx, name,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)

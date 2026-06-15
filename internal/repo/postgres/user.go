@@ -190,7 +190,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 }
 
 // userFieldColumns maps service-layer field names to (column, value-coercer).
-// Unknown keys are dropped to match the EntDB driver's behaviour.
+// Unknown keys are dropped to match the graph driver's behaviour.
 var userFieldColumns = map[string]struct {
 	col  string
 	kind string // "string" | "bool" | "int64"

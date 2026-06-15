@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 	"go.uber.org/zap"
 )
 
@@ -21,7 +21,7 @@ func ctxWithProject(projectID string) context.Context {
 // partitionedWriter is a NodeWriter that records, per project id (the tenant
 // argument), the events written to it. A WithProject sibling shares the parent
 // store so a rebound writer and the boot writer agree on what landed where —
-// mirroring postgres's WithProject (filters on the bound project) and entdb's
+// mirroring postgres's WithProject (filters on the bound project) and the graph driver's
 // per-call partition argument in one fake.
 type partitionedWriter struct {
 	mu      sync.Mutex
@@ -46,10 +46,10 @@ func (w *partitionedWriter) WithProject(projectID string) *partitionedWriter {
 func (w *partitionedWriter) ExecuteAtomic(
 	_ context.Context,
 	tenantID, _ string,
-	ops []entdb.Operation,
-) (*entdb.CommitResult, error) {
+	ops []graph.Operation,
+) (*graph.CommitResult, error) {
 	// A postgres-shaped writer ignores tenantID and lands under boundTo; an
-	// entdb-shaped writer lands under tenantID. The boot writer (boundTo == "")
+	// graph-shaped writer lands under tenantID. The boot writer (boundTo == "")
 	// lands under tenantID. Resolve the effective partition the same way a real
 	// backend would: a bound writer wins, else the per-call tenant argument.
 	proj := tenantID
@@ -62,7 +62,7 @@ func (w *partitionedWriter) ExecuteAtomic(
 		et, _ := op.Data[fieldEventType].(string)
 		w.store.byProj[proj] = append(w.store.byProj[proj], et)
 	}
-	return &entdb.CommitResult{Success: true, Applied: true}, nil
+	return &graph.CommitResult{Success: true, Applied: true}, nil
 }
 
 func (w *partitionedWriter) events(projectID string) []string {
@@ -76,7 +76,7 @@ func (w *partitionedWriter) events(projectID string) []string {
 // scoperFromContext builds a ProjectScoper that rebinds w to the project read
 // from ctx (falling back to the boot default), exactly as internal/app wires
 // service.ScopedDB. It models BOTH backend shapes: it both rebinds the writer
-// (postgres) and passes the project id back (entdb).
+// (postgres) and passes the project id back (graph driver).
 func scoperFromContext(w *partitionedWriter, defaultProjectID string) ProjectScoper {
 	return func(ctx context.Context) (NodeWriter, string) {
 		projectID := defaultProjectID

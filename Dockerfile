@@ -4,7 +4,7 @@
 #   docker build -t identity .
 #
 # Run:
-#   docker run -p 80:80 -p 9090:9090 -e GATEWAY_ENTDB_ADDRESS=entdb:50051 identity
+#   docker run -p 80:80 -p 9090:9090 -e GATEWAY_POSTGRES_DSN=postgres://... identity
 
 FROM --platform=$BUILDPLATFORM golang:1.26.4-alpine3.23 AS builder
 

@@ -277,8 +277,8 @@ func New(deps Deps) (*Built, error) {
 	// struct-literal Configs — every test harness and every embedding caller
 	// that builds Config directly — bypass that. This value becomes the
 	// boot-default project shard id for the audit logger and every service
-	// below (and, via requestProjectID, the entdb partition key / postgres
-	// WHERE project_id), so it must never be "": entdb rejects an empty
+	// below (and, via requestProjectID, the graph partition key / postgres
+	// WHERE project_id), so it must never be "": the graph transport rejects an empty
 	// partition key outright, and a data-plane row written under "" has no
 	// valid project. Default it rather than reject it, mirroring how the
 	// env loader defaults DefaultTenantID, so embedding ergonomics hold.
@@ -297,13 +297,6 @@ func New(deps Deps) (*Built, error) {
 		logger.Error("trusted_proxies_invalid", zap.Error(err))
 	}
 	rateLimits := buildRateLimits(deps.Config)
-
-	// Surface the EntDB schema-apply gap loudly at boot so operators
-	// see exactly which node types identity expects the database to
-	// know about. See internal/app/schema.go for why this only logs.
-	if err := applyOrLogSchemaGap(context.Background(), deps.DB, logger); err != nil {
-		logger.Error("schema_descriptor_invalid", zap.Error(err))
-	}
 
 	// The audit logger is a boot-scoped singleton, but each write is scoped to
 	// the request's project at Log time via the injected ProjectScoper: it
@@ -537,7 +530,7 @@ func buildConnectHandlerOptions(cfg *config.Config) ([]connect.HandlerOption, er
 
 // buildDomainService returns the wired DomainService backing the tenant
 // domain-verification RPCs, or nil when the governance stores are absent
-// (entdb/memory have no control plane). The Connect handler treats nil as
+// (the memory driver has no control plane). The Connect handler treats nil as
 // "disabled" and returns CodeUnimplemented. A nil deps.DNSResolver lets
 // NewDomainService default to net.DefaultResolver.
 func buildDomainService(deps Deps, logger *zap.Logger) *service.DomainService {
@@ -556,7 +549,7 @@ func buildDomainService(deps Deps, logger *zap.Logger) *service.DomainService {
 
 // buildMembershipService returns the wired MembershipService backing the
 // tenant invitation/membership RPCs, or nil when the governance stores are
-// absent (entdb/memory have no control plane). The Connect handler treats nil
+// absent (the memory driver has no control plane). The Connect handler treats nil
 // as "disabled" and returns CodeUnimplemented.
 //
 // mailerConfigured tells the service whether outbound mail actually delivers
@@ -583,7 +576,7 @@ func buildMembershipService(deps Deps, users service.UserDirectory, mailer email
 
 // buildControlPlaneAdminService returns the wired ControlPlaneAdminService
 // backing the platform-operator admin RPCs, or nil when the control-plane
-// stores are absent (entdb/memory have no control plane). The Connect handler
+// stores are absent (the memory driver has no control plane). The Connect handler
 // treats nil as "disabled" and returns CodeUnimplemented.
 //
 // The service is constructed even when no admin secret is configured: in that

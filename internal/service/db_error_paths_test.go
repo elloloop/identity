@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
@@ -307,7 +307,7 @@ func TestGroupListMembers_GetNodeMissingUserSkipped(t *testing.T) {
 
 	// Inject an incoming membership edge to grp-1 from a nonexistent user node.
 	db.mu.Lock()
-	db.edges = append(db.edges, &entdb.Edge{
+	db.edges = append(db.edges, &graph.Edge{
 		FromNodeID: "ghost-user", ToNodeID: "grp-1", EdgeTypeID: edgeMemberOf,
 	})
 	db.mu.Unlock()

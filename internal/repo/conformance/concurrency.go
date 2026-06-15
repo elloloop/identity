@@ -12,7 +12,7 @@ import (
 )
 
 // concurrentWriters is the goroutine fan-out for the concurrency
-// suite. Read-after-write index lag on entdb is load-dependent — the
+// suite. Read-after-write index lag on a remote graph backend is load-dependent — the
 // single-threaded read-your-writes suite passes on an idle backend, but
 // the IDV flake only bit under the nightly's parallel load. A fan-out
 // of writers reproduces that pressure so the lag (and any lost-write or
@@ -82,7 +82,7 @@ func runConcurrencyConformance(t *testing.T, driver Driver) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
 			// Warm the tenant so the filter queries below don't race the
-			// first-write "tenant open" on entdb (a separate concern,
+			// first-write "tenant open" on a remote backend (a separate concern,
 			// covered by the FreshTenant suite).
 			createTestUser(t, r, "conc-warm@example.com")
 
@@ -130,7 +130,7 @@ func runConcurrencyConformance(t *testing.T, driver Driver) {
 			}
 		})
 
-		// Composite uniqueness under contention: entdb has no composite
+		// Composite uniqueness under contention: a graph backend may have no composite
 		// unique constraint, so CreateOAuthIdentity enforces (provider,
 		// provider_user_id) uniqueness with a non-atomic query-then-
 		// create. N goroutines racing the same (provider, sub) must still

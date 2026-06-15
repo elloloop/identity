@@ -6,9 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	entclient "github.com/elloloop/identity/internal/repo/entdb/entclient"
 	pgrepo "github.com/elloloop/identity/internal/repo/postgres"
-	sdk "github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
 	"go.uber.org/zap"
 )
 
@@ -66,8 +64,6 @@ func TestBuildRejectsInvalidConfig(t *testing.T) {
 		cfg  Config
 	}{
 		{"unknown_driver", Config{Driver: Driver("unknown")}},
-		{"entdb_missing_client", Config{Driver: DriverEntDB, ProjectID: "tenant"}},
-		{"entdb_missing_project", Config{Driver: DriverEntDB, EntDBClient: &sdk.DbClient{}}},
 		{"postgres_missing_dsn", Config{Driver: DriverPostgres, ProjectID: "tenant"}},
 		{"postgres_missing_project", Config{Driver: DriverPostgres, PostgresDSN: "postgres://example"}},
 	}
@@ -95,39 +91,10 @@ func TestBuild_PostgresMaxConnsExceedsInt32(t *testing.T) {
 	}
 }
 
-func TestBuild_EntDBHappyPath(t *testing.T) {
-	t.Parallel()
-
-	// sdk.NewClient does not dial — Connect is lazy — so this is safe
-	// to construct without a server. We only assert Build returns a
-	// non-nil Built; the actual reads/writes against the unconnected
-	// client live in the real-entdb integration tests.
-	client, err := entclient.New("localhost:50051")
-	if err != nil {
-		t.Fatalf("sdk.NewClient: %v", err)
-	}
-	built, err := Build(context.Background(), Config{
-		Driver:      DriverEntDB,
-		EntDBClient: client,
-		ProjectID:   "tenant-1",
-	}, nil)
-	if err != nil {
-		t.Fatalf("Build entdb: %v", err)
-	}
-	if built == nil || built.Repository == nil || built.DB == nil {
-		t.Fatalf("Build entdb returned incomplete result: %+v", built)
-	}
-	// The control plane is postgres-only; entdb has none.
-	if built.ProjectStore != nil {
-		t.Errorf("Build entdb: ProjectStore = %v, want nil", built.ProjectStore)
-	}
-	assertNoGovernancePlane(t, built, "entdb")
-}
-
 // TestBuilt_GovernanceAccessors_TypedNilAvoidance pins the contract every
 // driver-agnostic accessor exists for: a nil concrete store must surface as a
 // TRUE nil interface (not a typed nil wrapping a nil pointer), and a present
-// store must surface unchanged. The empty Built models the entdb/memory shape
+// store must surface unchanged. The empty Built models the memory shape
 // (no control plane); the populated Built models the postgres shape.
 func TestBuilt_GovernanceAccessors_TypedNilAvoidance(t *testing.T) {
 	t.Parallel()

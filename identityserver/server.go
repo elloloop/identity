@@ -31,9 +31,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	entclient "github.com/elloloop/identity/internal/repo/entdb/entclient"
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
-
 	identitypb "github.com/elloloop/identity/gen/go/identity"
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/observability"
@@ -51,7 +48,7 @@ type Server struct {
 	logger *zap.Logger
 
 	// shutdownFns run in Shutdown, in reverse construction order, to
-	// release everything New acquired (signer watcher, EntDB client,
+	// release everything New acquired (signer watcher,
 	// OTel exporter). Each is wrapped to bound and log its own failure.
 	shutdownFns []func(context.Context) error
 }
@@ -63,7 +60,7 @@ type Server struct {
 // listener — call Start once you are ready to serve and Shutdown to
 // drain.
 //
-// ctx scopes the construction-time setup (EntDB dial, AWS config load,
+// ctx scopes the construction-time setup (AWS config load,
 // OTel exporter init); it is not retained.
 func New(ctx context.Context, opts Options) (*Server, error) {
 	logger := opts.Logger
@@ -79,23 +76,6 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		return nil, fmt.Errorf("otel setup: %w", err)
 	}
 	s.shutdownFns = append(s.shutdownFns, otelShutdown)
-
-	// EntDB client. Built once and shared by the repository adapter. Only
-	// needed when New itself builds the persistence layer against the entdb
-	// driver; an injected Repo/DB pair or a non-entdb driver leaves it nil.
-	var entdbClient *entdb.DbClient
-	needsEntDBClient := opts.Repo == nil && opts.DB == nil &&
-		repo.Driver(cfg.RepoDriver) == repo.DriverEntDB
-	if needsEntDBClient {
-		entdbClient, err = newEntDBClient(ctx, cfg.EntDBAddress)
-		if err != nil {
-			s.cleanupOnError(ctx)
-			return nil, err
-		}
-		s.shutdownFns = append(s.shutdownFns, func(context.Context) error {
-			return entdbClient.Close()
-		})
-	}
 
 	signer := opts.Signer
 	if signer == nil {
@@ -148,8 +128,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	var loginGovernance *service.LoginGovernance
 	if authRepo == nil || dbAdapter == nil {
 		built, buildErr := repo.Build(ctx, repo.Config{
-			Driver:      repo.Driver(cfg.RepoDriver),
-			EntDBClient: entdbClient,
+			Driver: repo.Driver(cfg.RepoDriver),
 			// The boot-default Repository/DB binds to the default project
 			// (ADR-0002): the Project is the storage shard, so the data-plane
 			// partition is DefaultProjectID, NOT the DefaultTenantID storage
@@ -179,8 +158,8 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		platformAdminStore = built.PlatformAdminStoreIface()
 		loginGovernance = built.LoginGovernance()
 
-		// Seed the control-plane default project (postgres only; entdb/
-		// memory have no control plane, so built.ProjectStore is nil). The
+		// Seed the control-plane default project (postgres only; the
+		// memory driver has no control plane, so built.ProjectStore is nil). The
 		// project is the zero-config isolation entity later slices pin
 		// requests to, and maps onto the DefaultTenantID storage scope. Its
 		// table comes from migration 0013, so a postgres deployment must
@@ -253,7 +232,7 @@ const defaultProjectName = "Default Project"
 
 // ensureDefaultProject idempotently seeds the control-plane default
 // project when identity built a postgres-backed repository. It is a no-op
-// for entdb/memory (built.ProjectStore is nil) and when
+// for memory (built.ProjectStore is nil) and when
 // DefaultProjectID is explicitly blank. The project's id is
 // DefaultProjectID; it maps onto the DefaultTenantID storage scope. Any
 // error fails boot (fail-fast) with a hint to run migrations, since a
@@ -339,7 +318,7 @@ func (s *Server) Start(_ context.Context) error {
 }
 
 // Shutdown drains the background workers and releases every resource New
-// acquired (signer watcher, EntDB client, OTel exporter), in reverse
+// acquired (signer watcher, OTel exporter), in reverse
 // order. It is safe to call without a preceding Start and safe to call
 // more than once. The first non-nil release error is returned after all
 // releases run.
@@ -363,18 +342,4 @@ func (s *Server) runShutdownFns(ctx context.Context) error {
 	}
 	s.shutdownFns = nil
 	return firstErr
-}
-
-// newEntDBClient dials the EntDB server. The dial is lazy in the SDK, so
-// Connect returning nil does not guarantee reachability; it surfaces
-// configuration errors (bad address format) early.
-func newEntDBClient(ctx context.Context, address string) (*entdb.DbClient, error) {
-	db, err := entclient.New(address)
-	if err != nil {
-		return nil, fmt.Errorf("entdb client: %w", err)
-	}
-	if err := db.Connect(ctx); err != nil {
-		return nil, fmt.Errorf("entdb connect: %w", err)
-	}
-	return db, nil
 }

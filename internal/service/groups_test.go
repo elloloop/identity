@@ -116,7 +116,7 @@ func TestGroupService_DeleteGroup_DrainsMemberEdges(t *testing.T) {
 	}
 
 	// The cross-user edge read MUST use the tenant-admin actor; a per-user
-	// actor would silently return zero rows on real entdb and leave the
+	// actor would silently return zero rows on a graph backend and leave the
 	// MEMBER_OF edges dangling. The fake ignores the actor for filtering,
 	// so only this assertion catches that regression.
 	if got := db.lastEdgesToActor; got != tenantAdminActor {

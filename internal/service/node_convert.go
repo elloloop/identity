@@ -3,12 +3,12 @@ package service
 import (
 	"time"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 )
 
 // ── Node-to-domain converters ──────────────────────────────────────
 
-func userFromNode(n *entdb.Node) *User {
+func userFromNode(n *graph.Node) *User {
 	if n == nil {
 		return nil
 	}
@@ -30,7 +30,7 @@ func userFromNode(n *entdb.Node) *User {
 	}
 }
 
-func groupFromNode(n *entdb.Node) *Group {
+func groupFromNode(n *graph.Node) *Group {
 	if n == nil {
 		return nil
 	}
@@ -44,7 +44,7 @@ func groupFromNode(n *entdb.Node) *Group {
 	}
 }
 
-func helpRequestFromNode(n *entdb.Node) *HelpRequest {
+func helpRequestFromNode(n *graph.Node) *HelpRequest {
 	if n == nil {
 		return nil
 	}
@@ -63,7 +63,7 @@ func helpRequestFromNode(n *entdb.Node) *HelpRequest {
 	}
 }
 
-func sessionFromNode(n *entdb.Node) *Session {
+func sessionFromNode(n *graph.Node) *Session {
 	if n == nil {
 		return nil
 	}
@@ -79,7 +79,7 @@ func sessionFromNode(n *entdb.Node) *Session {
 	}
 }
 
-func passkeyInfoFromNode(n *entdb.Node) *PasskeyInfo {
+func passkeyInfoFromNode(n *graph.Node) *PasskeyInfo {
 	if n == nil {
 		return nil
 	}

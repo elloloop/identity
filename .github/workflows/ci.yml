@@ -67,10 +67,6 @@ jobs:
             echo "go.mod / go.sum out of sync — run 'go mod tidy' locally and commit the result." >&2
             exit 1
           fi
-      # Guard against entdb SDK / server-image drift (#180): a bumped SDK
-      # must not run against an older pinned server image in CI.
-      - name: entdb SDK / server-image version guard
-        run: bash scripts/check-entdb-image-version.sh
 
   # ---------------------------------------------------------------------------
   # 2. Vulnerability scan — Go's official CVE checker.
@@ -101,15 +97,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
-      entdb:
-        # tenant-shard-db v1.12+ is a distroless image (no shell/python),
-        # so an in-container --health-cmd cannot spawn. The Go server
-        # ignores env vars (CLI flags only, with defaults baked into
-        # the entrypoint). TCP readiness is polled by the "Wait for"
-        # step below.
-        image: ghcr.io/elloloop/tenant-shard-db:2.5.0
-        ports:
-          - 50051:50051
       postgres:
         image: postgres:16.13-alpine3.23
         env:
@@ -137,11 +124,6 @@ jobs:
       - name: Wait for coverage backends
         run: |
           for i in $(seq 1 30); do
-            if nc -z localhost 50051; then echo "entdb up"; break; fi
-            sleep 1
-            if [[ $i -eq 30 ]]; then echo "entdb did not come up"; exit 1; fi
-          done
-          for i in $(seq 1 30); do
             if (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1; then echo "postgres up"; break; fi
             sleep 1
             if [[ $i -eq 30 ]]; then echo "postgres did not come up"; exit 1; fi
@@ -150,7 +132,6 @@ jobs:
       - name: go test (race + merged coverage)
         env:
           RUN_INTEGRATION_COVERAGE: "1"
-          GATEWAY_ENTDB_ADDRESS: localhost:50051
           GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
           GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
         run: bash scripts/run-coverage.sh
@@ -254,58 +235,7 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # 5b. Integration tests against a real EntDB instance (gated by build tag).
-  # ---------------------------------------------------------------------------
-  realentdb:
-    name: Integration (real entdb)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      entdb:
-        # tenant-shard-db v1.12+ is a distroless image (no shell/python),
-        # so an in-container --health-cmd cannot spawn. The Go server
-        # ignores env vars (CLI flags only, with defaults baked into
-        # the entrypoint). TCP readiness is polled by the "Wait for"
-        # step below.
-        image: ghcr.io/elloloop/tenant-shard-db:2.5.0
-        ports:
-          - 50051:50051
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Wait for entdb
-        run: |
-          for i in $(seq 1 30); do
-            if nc -z localhost 50051; then echo "entdb up"; exit 0; fi
-            sleep 1
-          done
-          echo "entdb did not come up"; exit 1
-
-      - name: go test -tags=realentdb
-        env:
-          GATEWAY_ENTDB_ADDRESS: localhost:50051
-        run: |
-          if compgen -G "tests/integration/*_realentdb_test.go" > /dev/null; then
-            go test -tags=realentdb -race -timeout=300s ./tests/integration/...
-          else
-            echo "no realentdb tests yet — skipping"
-          fi
-
-      - name: go test -tags=realentdb internal/repo/entdb
-        env:
-          GATEWAY_ENTDB_ADDRESS: localhost:50051
-        # The conformance suite runs in the Conformance / entdb matrix
-        # entry (.github/workflows/conformance.yml); skip it here to
-        # avoid double-billing CI compute on every PR.
-        run: go test -tags=realentdb -race -timeout=300s -skip='^TestConformance$' ./internal/repo/entdb/...
-
-  # ---------------------------------------------------------------------------
-  # 5c. Integration tests against a real Postgres instance (gated by build tag).
+  # 5b. Integration tests against a real Postgres instance (gated by build tag).
   # ---------------------------------------------------------------------------
   realpostgres:
     name: Integration (real postgres)
@@ -502,7 +432,7 @@ jobs:
               -e GATEWAY_CONNECT_PORT=8080 \
               -e GATEWAY_METRICS_PORT=9090 \
               -e GATEWAY_GRPC_PORT=50052 \
-              -e GATEWAY_ENTDB_ADDRESS=127.0.0.1:1 \
+              -e GATEWAY_REPO_DRIVER=memory \
               -e GATEWAY_DEFAULT_TENANT_ID=docker-smoke \
               -e GATEWAY_JWT_KEYS= \
               -e GATEWAY_TOTP_ENCRYPTION_KEY= \
@@ -531,7 +461,7 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    needs: [lint, tidy, vuln, test, smoke, integration, integration-sqlite, realentdb, realpostgres, e2e, e2e-smoke, e2e-smoke-sqlite, fuzz, docker]
+    needs: [lint, tidy, vuln, test, smoke, integration, integration-sqlite, realpostgres, e2e, e2e-smoke, e2e-smoke-sqlite, fuzz, docker]
     if: always()
     steps:
       - name: All required jobs succeeded

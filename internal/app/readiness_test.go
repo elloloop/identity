@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/elloloop/tenant-shard-db/sdk/go/entdb/v2"
+	"github.com/elloloop/identity/internal/graph"
 )
 
 // stubDB is a no-op service.DB that records the last QueryNodes call.
@@ -14,28 +14,28 @@ type stubDB struct {
 	failQuery  error
 }
 
-func (s *stubDB) GetNode(_ context.Context, _, _ string, _ int, _ string) (*entdb.Node, error) {
+func (s *stubDB) GetNode(_ context.Context, _, _ string, _ int, _ string) (*graph.Node, error) {
 	return nil, nil
 }
 
-func (s *stubDB) QueryNodes(_ context.Context, _, _ string, typeID int, _ map[string]any) ([]*entdb.Node, error) {
+func (s *stubDB) QueryNodes(_ context.Context, _, _ string, typeID int, _ map[string]any) ([]*graph.Node, error) {
 	s.lastTypeID = typeID
 	return nil, s.failQuery
 }
 
-func (s *stubDB) ExecuteAtomic(_ context.Context, _, _ string, _ []entdb.Operation) (*entdb.CommitResult, error) {
-	return &entdb.CommitResult{Success: true, Applied: true}, nil
+func (s *stubDB) ExecuteAtomic(_ context.Context, _, _ string, _ []graph.Operation) (*graph.CommitResult, error) {
+	return &graph.CommitResult{Success: true, Applied: true}, nil
 }
 
-func (s *stubDB) GetEdgesFrom(_ context.Context, _, _, _ string, _ int) ([]*entdb.Edge, error) {
+func (s *stubDB) GetEdgesFrom(_ context.Context, _, _, _ string, _ int) ([]*graph.Edge, error) {
 	return nil, nil
 }
 
-func (s *stubDB) GetEdgesTo(_ context.Context, _, _, _ string, _ int) ([]*entdb.Edge, error) {
+func (s *stubDB) GetEdgesTo(_ context.Context, _, _, _ string, _ int) ([]*graph.Edge, error) {
 	return nil, nil
 }
 
-func (s *stubDB) SearchNodes(_ context.Context, _, _ string, _ int, _ string) ([]*entdb.Node, error) {
+func (s *stubDB) SearchNodes(_ context.Context, _, _ string, _ int, _ string) ([]*graph.Node, error) {
 	return nil, nil
 }
 

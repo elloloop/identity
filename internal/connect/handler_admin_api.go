@@ -15,7 +15,7 @@ import (
 // handler extracts that header and hands it to the service, which compares it
 // in constant time and — when no secret is configured — returns Unimplemented.
 //
-// h.controlAdmin is nil on entdb/memory (no control plane), which also yields
+// h.controlAdmin is nil on memory (no control plane), which also yields
 // Unimplemented, so the surface is doubly off by default: no control plane OR
 // no configured secret both disable it.
 
@@ -198,7 +198,7 @@ func (h *IdentityHandler) AdminAddTenantAdmin(
 // CreateFirstPlatformAdmin is the zero-config bootstrap of the first platform
 // admin. Unlike the other Admin RPCs it reads NO admin secret: it succeeds
 // only while platform_admins is empty and is rejected (FailedPrecondition)
-// once any admin exists. nil controlAdmin (entdb/memory, no control plane)
+// once any admin exists. nil controlAdmin (memory, no control plane)
 // yields Unimplemented.
 func (h *IdentityHandler) CreateFirstPlatformAdmin(
 	ctx context.Context,

@@ -9,7 +9,7 @@ import (
 )
 
 // paginationRows is deliberately chosen above the suspected per-call
-// QueryNodes cap (~100 observed on entdb v1.16.0) and below the 1000
+// QueryNodes cap (~100 observed on a remote graph backend) and below the 1000
 // the repository's drain loops assume. A List* method that issues a
 // single un-paginated query truncates the result at the cap, so
 // creating this many rows and asserting the full count exposes both a
@@ -18,7 +18,7 @@ const paginationRows = 250
 
 // runPaginationConformance asserts that user/tenant-scoped list and
 // bulk-delete methods cover EVERY matching row, not just the first
-// server page. entdb clamps QueryNodes server-side; methods that fan a
+// server page. A remote graph backend clamps QueryNodes server-side; methods that fan a
 // single query out to the caller (ListPasskeyCredentials,
 // ListOAuthIdentitiesForUser, ...) silently drop rows past the cap,
 // while the DeleteXxxForUser sweeps drain in a loop. This suite makes
@@ -105,7 +105,7 @@ func runPaginationConformance(t *testing.T, driver Driver) {
 }
 
 // runFreshTenantConformance asserts that a read issued before any write
-// returns an empty result, never an error. On entdb a brand-new tenant
+// returns an empty result, never an error. On a remote graph backend a brand-new tenant
 // has no WAL yet, so a filter QueryNodes returns FailedPrecondition
 // "tenant not opened"; the repository is expected to translate that to
 // "no rows". (tenant-shard-db v1.16.0 regressed this by sanitizing the
@@ -113,7 +113,7 @@ func runPaginationConformance(t *testing.T, driver Driver) {
 // isolated cross-backend repro and will go green when that lands.)
 //
 // Every check uses a fresh repo (a fresh, never-written tenant on
-// entdb) and t.Errorf rather than Fatalf so all read paths are
+// graph backend) and t.Errorf rather than Fatalf so all read paths are
 // reported in one run.
 func runFreshTenantConformance(t *testing.T, driver Driver) {
 	t.Helper()

@@ -1120,7 +1120,7 @@ message AdminAddTenantAdminResponse {
 // emptiness check + insert are atomic, so two racing bootstraps create
 // exactly one admin and the loser is rejected.
 //
-// It is available only on the postgres control-plane driver; entdb/memory
+// It is available only on the postgres control-plane driver; the memory driver
 // deployments (which have no platform_admins table) return UNIMPLEMENTED.
 message CreateFirstPlatformAdminRequest {
   string email = 1;
@@ -1242,7 +1242,7 @@ service IdentityService {
   // on the caller being an owner/admin member of the target tenant — with
   // one exception: VerifyDomain on a still-latent tenant that has no
   // members yet is open, so the first verifier becomes its owner.
-  // Available only on the postgres control-plane driver; entdb/memory
+  // Available only on the postgres control-plane driver; the memory driver
   // deployments return Unimplemented.
   rpc CreateDomain(CreateDomainRequest) returns (CreateDomainResponse);
   rpc VerifyDomain(VerifyDomainRequest) returns (VerifyDomainResponse);
@@ -1253,7 +1253,7 @@ service IdentityService {
   // owner/admin member of the target tenant. AcceptTenantInvitation is the
   // redeemer's own action: any authenticated caller may redeem a token, but
   // only for an invitation addressed to their own account email. Available
-  // only on the postgres control-plane driver; entdb/memory deployments
+  // only on the postgres control-plane driver; memory deployments
   // return Unimplemented.
   rpc CreateTenantInvitation(CreateTenantInvitationRequest) returns (CreateTenantInvitationResponse);
   rpc AcceptTenantInvitation(AcceptTenantInvitationRequest) returns (AcceptTenantInvitationResponse);
@@ -1292,6 +1292,6 @@ service IdentityService {
 
   // Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
   // succeeds only while platform_admins is empty, then permanently closes
-  // (FAILED_PRECONDITION). Postgres-only; entdb/memory return UNIMPLEMENTED.
+  // (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
   rpc CreateFirstPlatformAdmin(CreateFirstPlatformAdminRequest) returns (CreateFirstPlatformAdminResponse);
 }

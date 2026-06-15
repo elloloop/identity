@@ -55,15 +55,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
-      entdb:
-        # tenant-shard-db v1.12+ is a distroless image (no shell/python),
-        # so an in-container --health-cmd cannot spawn. The Go server
-        # ignores env vars (CLI flags only, with defaults baked into
-        # the entrypoint). TCP readiness is polled by the "Wait for"
-        # step below.
-        image: ghcr.io/elloloop/tenant-shard-db:2.5.0
-        ports:
-          - 50051:50051
       postgres:
         image: postgres:16.13-alpine3.23
         env:
@@ -88,11 +79,6 @@ jobs:
       - name: Wait for coverage backends
         run: |
           for i in $(seq 1 30); do
-            if nc -z localhost 50051; then echo "entdb up"; break; fi
-            sleep 1
-            if [[ $i -eq 30 ]]; then echo "entdb did not come up"; exit 1; fi
-          done
-          for i in $(seq 1 30); do
             if (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1; then echo "postgres up"; break; fi
             sleep 1
             if [[ $i -eq 30 ]]; then echo "postgres did not come up"; exit 1; fi
@@ -100,7 +86,6 @@ jobs:
       - name: go test (race + merged coverage)
         env:
           RUN_INTEGRATION_COVERAGE: "1"
-          GATEWAY_ENTDB_ADDRESS: localhost:50051
           GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
           GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
         run: bash scripts/run-coverage.sh
@@ -148,50 +133,6 @@ jobs:
           else
             echo "no integration tests under tests/integration — skipping"
           fi
-
-  realentdb:
-    name: Integration (real entdb)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      entdb:
-        # tenant-shard-db v1.12+ is a distroless image (no shell/python),
-        # so an in-container --health-cmd cannot spawn. The Go server
-        # ignores env vars (CLI flags only, with defaults baked into
-        # the entrypoint). TCP readiness is polled by the "Wait for"
-        # step below.
-        image: ghcr.io/elloloop/tenant-shard-db:2.5.0
-        ports:
-          - 50051:50051
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: Wait for entdb
-        run: |
-          for i in $(seq 1 30); do
-            if nc -z localhost 50051; then echo "entdb up"; exit 0; fi
-            sleep 1
-          done
-          echo "entdb did not come up"; exit 1
-      - name: go test -tags=realentdb
-        env:
-          GATEWAY_ENTDB_ADDRESS: localhost:50051
-        run: |
-          if compgen -G "tests/integration/*_realentdb_test.go" > /dev/null; then
-            go test -tags=realentdb -race -timeout=300s ./tests/integration/...
-          else
-            echo "no realentdb tests yet — skipping"
-          fi
-      - name: go test -tags=realentdb internal/repo/entdb
-        env:
-          GATEWAY_ENTDB_ADDRESS: localhost:50051
-        # The conformance suite runs in the Conformance / entdb matrix
-        # entry (.github/workflows/conformance.yml); skip it here to
-        # avoid double-billing CI compute on every release tag.
-        run: go test -tags=realentdb -race -timeout=300s -skip='^TestConformance$' ./internal/repo/entdb/...
 
   realpostgres:
     name: Integration (real postgres)
@@ -301,7 +242,7 @@ jobs:
               -e GATEWAY_CONNECT_PORT=8080 \
               -e GATEWAY_METRICS_PORT=9090 \
               -e GATEWAY_GRPC_PORT=50052 \
-              -e GATEWAY_ENTDB_ADDRESS=127.0.0.1:1 \
+              -e GATEWAY_REPO_DRIVER=memory \
               -e GATEWAY_DEFAULT_TENANT_ID=docker-smoke \
               -e GATEWAY_JWT_KEYS= \
               -e GATEWAY_TOTP_ENCRYPTION_KEY= \
@@ -330,7 +271,7 @@ jobs:
   build-and-push:
     name: Build and Push Image
     runs-on: ubuntu-latest
-    needs: [lint, vuln, test, smoke, integration, realentdb, realpostgres, fuzz, docker]
+    needs: [lint, vuln, test, smoke, integration, realpostgres, fuzz, docker]
     permissions:
       contents: read
       packages: write
