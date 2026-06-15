@@ -65,14 +65,19 @@ exactly as the container does. Set one to inject your own:
 | `Signer`                           | built from `Config.JWTSigner` (file or `kms_aws`)       |
 | `Repo` + `DB`                      | built from `Config.RepoDriver` (must be set together)   |
 | `EmailTransport`                   | built from SMTP settings (falls back to log-only)       |
+| `SMSSender`                        | built from `GATEWAY_SMS_*` (log-only when SMS disabled)  |
 | `OAuthRegistry`                    | built from the OAuth client credentials in `Config`     |
 | `IDVProvider`                      | built from `Config.IDVProvider` (may be disabled)       |
-| `TenantAdmin`/`RepositoryForTenant`| built from `Config.RepoDriver` when `mode=multi`        |
+| `CaptchaVerifier`                  | built from `Config.CaptchaProvider` (no-op when disabled)|
+| `DNSResolver`                      | `net.DefaultResolver` (used by `VerifyDomain` on the postgres control plane) |
 | `Logger`                           | no-op logger                                             |
 | `MetricsRegistry`                  | `prometheus.DefaultRegisterer`                           |
 
 Injecting `Repo`+`DB` is how a host that already owns a database — or a
-test — mounts identity without a real EntDB backend.
+test — mounts identity without a real EntDB backend. The per-request,
+per-project repository is resolved internally from the project scope (see
+[ADR-0002](./adr/0002-project-is-the-isolation-shard.md)); there is no
+per-tenant repository factory to supply.
 
 ## Mount surface 1 — HTTP
 
