@@ -99,13 +99,11 @@ func projectCORSOrigins(p *Project) ([]string, error) {
 // branded links.
 func (s *ProjectStore) primaryAuthHostname(ctx context.Context, projectID string) (string, error) {
 	q := `SELECT hostname FROM project_auth_domains
-		WHERE project_id = $1 AND is_primary
-		LIMIT 1`
+		WHERE project_id = $1 AND is_primary`
 	if s.requireVerifiedAuthDomain {
-		q = `SELECT hostname FROM project_auth_domains
-		WHERE project_id = $1 AND is_primary AND verified_at_ms > 0
-		LIMIT 1`
+		q += ` AND verified_at_ms > 0`
 	}
+	q += ` LIMIT 1`
 	var hostname string
 	err := s.pool.QueryRow(ctx, q, projectID).Scan(&hostname)
 	if noRows(err) {

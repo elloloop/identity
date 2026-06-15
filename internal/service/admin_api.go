@@ -304,9 +304,19 @@ type RegisteredAuthDomain struct {
 // the same deterministic challenge, so a caller can re-fetch the TXT value
 // without a conflict. A hostname owned by a DIFFERENT project surfaces the
 // store's ErrAlreadyExists.
+//
+// isPrimary=true is rejected with ErrInvalidArgument: promoting a custom
+// auth-domain to primary is a planned follow-up, not yet supported. A custom
+// domain is always added NON-primary here. (Honoring it would be a half-built
+// path: the partial-unique primary index would reject a second primary as a
+// misleading AlreadyExists, and verification never promotes primary — so a
+// newly-added primary could never actually become primary.)
 func (s *ControlPlaneAdminService) AddProjectAuthDomain(ctx context.Context, secret, projectID, hostname string, isPrimary bool) (*RegisteredAuthDomain, error) {
 	if err := s.authorize(secret); err != nil {
 		return nil, err
+	}
+	if isPrimary {
+		return nil, fmt.Errorf("%w: promoting a custom auth-domain to primary is not yet supported; add it non-primary, verify it, then set primary once the follow-up lands", ErrInvalidArgument)
 	}
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
@@ -419,28 +429,15 @@ func (s *ControlPlaneAdminService) checkAuthDomainTXT(ctx context.Context, proje
 	return fmt.Errorf("%w: DNS TXT challenge not found for %s", ErrPermissionDenied, hostname)
 }
 
-// authDomainTXTChallenge returns the TXT record name and value a custom
-// hostname must publish to prove ownership. The name is the hostname itself;
-// the value is deterministic per (project, hostname), so no per-domain token
-// is stored (matching dnsTXTChallenge in domain.go).
+// authDomainTXTChallenge returns the TXT record name and value a custom serving
+// hostname must publish to prove ownership, under the auth-domain prefix.
 func authDomainTXTChallenge(projectID, hostname string) (name, value string) {
-	digest := sha256Hex(projectID + ":" + strings.ToLower(hostname))
-	return hostname, authDomainVerifyTXTPrefix + digest
+	return txtOwnershipChallenge(authDomainVerifyTXTPrefix, projectID, hostname)
 }
 
-// normalizeAuthHostname lower-cases, trims, and strips a trailing dot from a
-// serving hostname, rejecting blanks and anything with whitespace, a scheme,
-// an '@', or no dot at all — the same shape normalizeDomain enforces, so a
-// custom auth-domain is a real, fully-qualified hostname.
+// normalizeAuthHostname validates a custom serving hostname.
 func normalizeAuthHostname(hostname string) (string, error) {
-	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(hostname)), ".")
-	if h == "" {
-		return "", fmt.Errorf("%w: missing hostname", ErrInvalidArgument)
-	}
-	if strings.ContainsAny(h, " \t/@:") || !strings.Contains(h, ".") {
-		return "", fmt.Errorf("%w: invalid hostname %q", ErrInvalidArgument, hostname)
-	}
-	return h, nil
+	return normalizeHostname("hostname", hostname)
 }
 
 // AdminCreateTenant provisions a tenant under a project and returns its id.

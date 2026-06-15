@@ -1043,8 +1043,11 @@ message ProjectAuthDomain {
 message AddProjectAuthDomainRequest {
   string project_id = 1;
   string hostname = 2;
-  // is_primary requests this become the project's primary serving host. It
-  // only takes effect once the domain is verified.
+  // is_primary is reserved for a planned follow-up that promotes an already
+  // verified custom auth-domain to the project's primary serving host. It is
+  // NOT yet honored: a request with is_primary=true is rejected with
+  // InvalidArgument. Add a custom domain non-primary, verify it, then (once the
+  // follow-up lands) promote it to primary.
   bool is_primary = 3;
 }
 

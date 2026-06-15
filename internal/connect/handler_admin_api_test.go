@@ -243,13 +243,13 @@ func TestAdminRPCs_CustomAuthDomain_Handler(t *testing.T) {
 	t.Parallel()
 	store := &adminControlStore{}
 	dns := &adminDNSResolver{txt: map[string][]string{}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, dns, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &connectPlatformAdminStore{}, dns, zap.NewNop())
 	client := startAdminServer(t, svc)
 	ctx := context.Background()
 
 	// Add a custom domain → unverified, with a TXT challenge.
 	add, err := client.AddProjectAuthDomain(ctx,
-		withAdminSecret(&identitypb.AddProjectAuthDomainRequest{ProjectId: "proj-1", Hostname: "auth.customer.test", IsPrimary: true}, handlerAdminSecret))
+		withAdminSecret(&identitypb.AddProjectAuthDomainRequest{ProjectId: "proj-1", Hostname: "auth.customer.test", IsPrimary: false}, handlerAdminSecret))
 	if err != nil {
 		t.Fatalf("AddProjectAuthDomain: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestAdminRPCs_HappyPath_Handler(t *testing.T) {
 func startBootstrapServer(t *testing.T) (identityconnectgen.IdentityServiceClient, *connectPlatformAdminStore) {
 	t.Helper()
 	admins := &connectPlatformAdminStore{}
-	svc := service.NewControlPlaneAdminService("", &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, admins, zap.NewNop())
+	svc := service.NewControlPlaneAdminService("", &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, zap.NewNop())
 	return startAdminServer(t, svc), admins
 }
 

@@ -535,7 +535,7 @@ func TestControlPlaneAdmin_AddCustomAuthDomain_Unverified(t *testing.T) {
 	f := newAdminFixture(testAdminSecret)
 	ctx := context.Background()
 
-	reg, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "  Auth.Customer.COM ", true)
+	reg, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "  Auth.Customer.COM ", false)
 	if err != nil {
 		t.Fatalf("AddProjectAuthDomain: %v", err)
 	}
@@ -562,12 +562,52 @@ func TestControlPlaneAdmin_AddCustomAuthDomain_Unverified(t *testing.T) {
 	}
 }
 
+func TestControlPlaneAdmin_AddCustomAuthDomain_Primary_Rejected(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	// Promoting a custom auth-domain to primary is a planned follow-up: a
+	// request with is_primary=true is rejected, and registers nothing.
+	if _, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", true); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("AddProjectAuthDomain(is_primary=true): err = %v, want ErrInvalidArgument", err)
+	}
+	d, err := f.projects.GetAuthDomain(ctx, "proj-1", "auth.customer.com")
+	if err != nil {
+		t.Fatalf("GetAuthDomain: %v", err)
+	}
+	if d != nil {
+		t.Fatalf("a rejected primary add must register nothing, got %+v", d)
+	}
+
+	// The default (is_primary=false) still works end to end: add registers the
+	// domain NON-primary and unverified, verification flips verified_at_ms.
+	reg, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", false)
+	if err != nil {
+		t.Fatalf("AddProjectAuthDomain(is_primary=false): %v", err)
+	}
+	if reg.Domain.IsPrimary {
+		t.Fatal("a custom auth-domain must be added non-primary")
+	}
+	if reg.Domain.VerifiedAtMs != 0 {
+		t.Fatalf("must start unverified, got verified_at_ms=%d", reg.Domain.VerifiedAtMs)
+	}
+	f.dns.records["auth.customer.com"] = []string{reg.TXTValue}
+	verified, err := f.svc.VerifyProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com")
+	if err != nil {
+		t.Fatalf("VerifyProjectAuthDomain: %v", err)
+	}
+	if verified.VerifiedAtMs <= 0 {
+		t.Fatalf("verify must stamp verified_at_ms positive, got %d", verified.VerifiedAtMs)
+	}
+}
+
 func TestControlPlaneAdmin_VerifyCustomAuthDomain_WrongOrMissingTXT_StaysUnverified(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(testAdminSecret)
 	ctx := context.Background()
 
-	_, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", true)
+	_, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", false)
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -597,7 +637,7 @@ func TestControlPlaneAdmin_VerifyCustomAuthDomain_CorrectTXT_FlipsVerified(t *te
 	f := newAdminFixture(testAdminSecret)
 	ctx := context.Background()
 
-	reg, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", true)
+	reg, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "auth.customer.com", false)
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -636,7 +676,7 @@ func TestControlPlaneAdmin_ListCustomAuthDomains(t *testing.T) {
 	f := newAdminFixture(testAdminSecret)
 	ctx := context.Background()
 
-	if _, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "a.customer.com", true); err != nil {
+	if _, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "a.customer.com", false); err != nil {
 		t.Fatalf("add a: %v", err)
 	}
 	if _, err := f.svc.AddProjectAuthDomain(ctx, testAdminSecret, "proj-1", "b.customer.com", false); err != nil {
@@ -874,7 +914,7 @@ func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
 func TestCreateFirstPlatformAdmin_UnimplementedWithoutStore(t *testing.T) {
 	t.Parallel()
 	// Built without a PlatformAdminStore (the entdb/memory shape).
-	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil)
+	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil)
 	if _, err := svc.CreateFirstPlatformAdmin(context.Background(), "ops@acme.com", ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("no store: err = %v, want ErrUnimplemented", err)
 	}
