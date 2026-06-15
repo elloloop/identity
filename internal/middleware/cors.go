@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/elloloop/identity/internal/service"
 )
 
 // ErrAllowedOriginsEmpty is returned by ParseAllowedOrigins when the resolved
@@ -24,9 +26,17 @@ func ParseAllowedOrigins(raw string, allowCredentials bool) ([]string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, ErrAllowedOriginsEmpty
 	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
+	return ValidateAllowedOrigins(strings.Split(raw, ","), allowCredentials)
+}
+
+// ValidateAllowedOrigins validates an already-split list of origins under the
+// same rules as ParseAllowedOrigins. It exists for callers whose origins come
+// from a structured source (a project's config_json array) rather than a
+// comma-separated env var, so they need not round-trip through a join/split.
+// Order and case are preserved; an all-empty input is ErrAllowedOriginsEmpty.
+func ValidateAllowedOrigins(origins []string, allowCredentials bool) ([]string, error) {
+	out := make([]string, 0, len(origins))
+	for _, p := range origins {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			if allowCredentials {
@@ -83,11 +93,21 @@ func validateOrigin(s string) error {
 }
 
 // CORSMiddleware handles CORS preflight requests and injects response headers
-// for allowed origins. allowedOrigins must be the validated output of
-// ParseAllowedOrigins. Match is exact case-sensitive on scheme+host+port.
-func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
-	origins := make([]string, len(allowedOrigins))
-	copy(origins, allowedOrigins)
+// for allowed origins. globalOrigins must be the validated output of
+// ParseAllowedOrigins — the deployment-wide floor from GATEWAY_ALLOWED_ORIGINS.
+// Match is exact case-sensitive on scheme+host+port.
+//
+// On top of that floor, a request is matched against the resolved project's
+// own allow-list (service.ProjectScope.CORSAllowedOrigins, set by the project
+// resolver, already validated): an Origin in EITHER set is allowed. When no
+// project resolves (a deployment with no control plane, or a request that
+// resolves to no project), only the global floor applies. This middleware must
+// run INSIDE the project resolver so the scope is present — including on the
+// OPTIONS preflight, which carries no credentials and so relies on Host →
+// project resolution (the resolver runs ahead of auth).
+func CORSMiddleware(globalOrigins []string) func(http.Handler) http.Handler {
+	origins := make([]string, len(globalOrigins))
+	copy(origins, globalOrigins)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,13 +121,7 @@ func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 				return
 			}
 
-			allowed := false
-			for _, o := range origins {
-				if o == origin {
-					allowed = true
-					break
-				}
-			}
+			allowed := originAllowed(origin, origins) || originAllowed(origin, projectOrigins(r))
 
 			if allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -126,4 +140,27 @@ func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// originAllowed reports whether origin exactly matches an entry in list
+// (case-sensitive on scheme+host+port, matching the CORS spec's serialized
+// origin comparison).
+func originAllowed(origin string, list []string) bool {
+	for _, o := range list {
+		if o == origin {
+			return true
+		}
+	}
+	return false
+}
+
+// projectOrigins returns the resolved project's per-request CORS allow-list,
+// or nil when no project is in scope. The slice is the resolver's
+// already-validated output, so the middleware adds it to the global floor
+// without re-validating.
+func projectOrigins(r *http.Request) []string {
+	if scope := service.ProjectScopeFromContext(r.Context()); scope != nil {
+		return scope.CORSAllowedOrigins
+	}
+	return nil
 }

@@ -124,9 +124,10 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 
 func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 	return &service.ProjectScope{
-		ProjectID:         rp.ID,
-		StorageScopeID:    rp.StorageScopeID,
-		PrimaryAuthDomain: rp.PrimaryAuthDomain,
+		ProjectID:          rp.ID,
+		StorageScopeID:     rp.StorageScopeID,
+		PrimaryAuthDomain:  rp.PrimaryAuthDomain,
+		CORSAllowedOrigins: rp.CORSAllowedOrigins,
 	}
 }
 

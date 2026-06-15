@@ -214,8 +214,12 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	require.NoError(t, truncateAll(ctx, dsn))
 	store := newProjectStore(ctx, t, dsn)
 
-	// Active project with an active credential and a serving hostname.
-	projID, err := store.createProject(ctx, &Project{StorageScopeID: "scope-live", Name: "Live"})
+	// Active project with an active credential, a serving hostname, and a
+	// per-project CORS allow-list in its config_json.
+	projID, err := store.createProject(ctx, &Project{
+		StorageScopeID: "scope-live", Name: "Live",
+		ConfigJSON: `{"cors":{"allowed_origins":["https://app.live.test","http://localhost:5173"]}}`,
+	})
 	require.NoError(t, err)
 	credID, err := store.createProjectCredential(ctx, &ProjectCredential{
 		ProjectID: projID, Kind: "publishable", PublicID: "pk_live",
@@ -233,6 +237,11 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	require.Equal(t, projID, got.ID)
 	require.Equal(t, "scope-live", got.StorageScopeID)
 	require.Equal(t, "auth.live.test", got.PrimaryAuthDomain, "resolver loads the primary auth-domain for branded links")
+	require.Equal(t,
+		[]string{"https://app.live.test", "http://localhost:5173"},
+		got.CORSAllowedOrigins,
+		"resolver parses+validates the per-project CORS allow-list from config_json",
+	)
 
 	// Unknown / blank key → clean miss.
 	miss, err := store.ResolveByCredential(ctx, "pk_unknown")

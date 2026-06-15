@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -43,9 +45,9 @@ func (s *ProjectStore) ResolveByHostname(ctx context.Context, hostname string) (
 }
 
 // resolved maps an active project to a ResolvedProject, loading its primary
-// auth-domain (for branded link building). It returns nil for a nil or
-// suspended project — a resolution miss; a suspended project must never
-// resolve a request.
+// auth-domain (for branded link building) and its per-project CORS allow-list
+// (for the CORS middleware). It returns nil for a nil or suspended project —
+// a resolution miss; a suspended project must never resolve a request.
 func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.ResolvedProject, error) {
 	if p == nil || p.Status != projectStatusActive {
 		return nil, nil
@@ -54,11 +56,38 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 	if err != nil {
 		return nil, err
 	}
+	origins, err := projectCORSOrigins(p)
+	if err != nil {
+		return nil, err
+	}
 	return &service.ResolvedProject{
-		ID:                p.ID,
-		StorageScopeID:    p.StorageScopeID,
-		PrimaryAuthDomain: primary,
+		ID:                 p.ID,
+		StorageScopeID:     p.StorageScopeID,
+		PrimaryAuthDomain:  primary,
+		CORSAllowedOrigins: origins,
 	}, nil
+}
+
+// projectCORSOrigins parses a project's config_json and returns its validated
+// per-project CORS allow-list, or nil when it configures none. Origins are
+// validated with the same rule the global allow-list uses
+// (middleware.ParseAllowedOrigins, credentials-mode): the CORS middleware
+// always sets Access-Control-Allow-Credentials, so a wildcard/"null"/malformed
+// per-project origin is rejected here rather than served to the browser. A bad
+// config is a configuration error surfaced to the caller, not silently dropped.
+func projectCORSOrigins(p *Project) ([]string, error) {
+	cfg, err := service.ParseProjectConfig(p.ConfigJSON)
+	if err != nil {
+		return nil, fmt.Errorf("project %q: %w", p.ID, err)
+	}
+	if len(cfg.CORS.AllowedOrigins) == 0 {
+		return nil, nil
+	}
+	origins, err := middleware.ValidateAllowedOrigins(cfg.CORS.AllowedOrigins, true)
+	if err != nil {
+		return nil, fmt.Errorf("project %q cors: %w", p.ID, err)
+	}
+	return origins, nil
 }
 
 // primaryAuthHostname returns the project's primary serving hostname, or ""

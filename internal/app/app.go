@@ -455,16 +455,22 @@ func New(deps Deps) (*Built, error) {
 	authExpectedTenant := deps.Config.DefaultTenantID
 
 	// Order (outermost runs first on request path):
-	//   logging → recover → CORS → health → client-IP → rate-limit → JWKS → project → auth → project-guard → metrics → Connect
-	// client-IP must precede rate-limit (the limiter keys on the
-	// resolved IP) and health must precede client-IP so liveness probes
-	// from kubelets cannot be rate-limited. The project resolver sits just
-	// outside auth so the resolved project is available to auth and the
-	// service layer (it does not depend on the authenticated user — it
-	// keys on the credential header or Host); it pins the default project
-	// when no control-plane resolver is wired. metrics sits just outside
-	// the Connect mux so it observes every RPC's final status, including
-	// any failure synthesized by the otelconnect interceptor.
+	//   logging → recover → health → project → CORS → client-IP → rate-limit → JWKS → auth → project-guard → metrics → Connect
+	// client-IP must precede rate-limit (the limiter keys on the resolved
+	// IP). health is the outermost functional hop so liveness/readiness
+	// probes short-circuit before any per-request work — including the
+	// project resolver's Host lookup, which must not run on probe traffic.
+	// The project resolver runs just OUTSIDE CORS (and thus outside auth,
+	// rate-limit and the rest) so the resolved project is in context for the
+	// CORS middleware — including the unauthenticated OPTIONS preflight,
+	// which carries no credential key and so resolves by Host. CORS layers
+	// the resolved project's per-project allow-list on top of the global
+	// floor and short-circuits the preflight before rate-limit, so a
+	// preflight is never rate-limited. The resolver still precedes auth and
+	// the service layer, and pins the default project when no control-plane
+	// resolver is wired. metrics sits just outside the Connect mux so it
+	// observes every RPC's final status, including any failure synthesized
+	// by the otelconnect interceptor.
 	var chain http.Handler = mux
 	chain = middleware.MetricsMiddleware(rpcMetrics)(chain)
 	// Project-scope guard runs just after auth (which surfaces the verified
@@ -474,15 +480,15 @@ func New(deps Deps) (*Built, error) {
 		deps.Signer, authExpectedTenant, deps.Config.JWTAudience,
 		deps.Config.JWTRequireAudience, sessionCache,
 	)(chain)
+	chain = middleware.JWKSMiddleware(deps.Signer)(chain)
+	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)
+	chain = middleware.ClientIPMiddleware(trustedProxies)(chain)
+	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
 	chain = middleware.NewProjectResolver(
 		deps.Config.DefaultProjectID, deps.Config.DefaultTenantID,
 		deps.Config.DefaultPrimaryAuthDomain(), deps.ProjectResolver, logger,
 	)(chain)
-	chain = middleware.JWKSMiddleware(deps.Signer)(chain)
-	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)
-	chain = middleware.ClientIPMiddleware(trustedProxies)(chain)
 	chain = middleware.HealthMiddleware(newDBReadinessProbe(deps.DB), chain)
-	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
 	chain = middleware.RecoverMiddleware(logger)(chain)
 	chain = middleware.LoggingMiddleware(logger)(chain)
 
