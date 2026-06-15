@@ -45,6 +45,10 @@ jobs:
             package: ./internal/repo/memory/...
             build_tag: ""
             need_postgres: false
+          - driver: sqlite
+            package: ./internal/repo/sqlite/...
+            build_tag: ""
+            need_postgres: false
           - driver: postgres
             package: ./internal/repo/postgres/...
             build_tag: ""

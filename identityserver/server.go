@@ -139,6 +139,8 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 			PostgresDSN:               cfg.PostgresDSN,
 			PostgresMaxConns:          cfg.PostgresMaxConns,
 			PostgresAutoMigrate:       cfg.PostgresAutoMigrate,
+			SQLitePath:                cfg.SQLitePath,
+			SQLiteMaxConns:            cfg.SQLiteMaxConns,
 			RequireVerifiedAuthDomain: cfg.RequireVerifiedAuthDomain,
 		}, logger)
 		if buildErr != nil {

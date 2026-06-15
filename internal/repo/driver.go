@@ -1,10 +1,12 @@
 // Package repo selects between concrete service.Repository / service.DB
-// drivers (postgres, memory) for the production binary's wiring code.
+// drivers (postgres, sqlite, memory) for the production binary's
+// wiring code.
 //
 // Each driver lives in its own sub-package — internal/repo/postgres for
-// the SQL driver, internal/repo/memory for the in-process store used by
-// tests. The split keeps each driver's dependencies isolated (postgres
-// pulls in pgx; memory pulls in nothing).
+// the SQL driver, internal/repo/sqlite for the pure-Go embedded/single-node
+// driver, and internal/repo/memory for the in-process store used by tests.
+// The split keeps each driver's dependencies isolated (postgres pulls in
+// pgx; sqlite pulls in modernc.org/sqlite; memory pulls in nothing).
 package repo
 
 import (
@@ -17,6 +19,7 @@ import (
 
 	memrepo "github.com/elloloop/identity/internal/repo/memory"
 	pgrepo "github.com/elloloop/identity/internal/repo/postgres"
+	sqliterepo "github.com/elloloop/identity/internal/repo/sqlite"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -29,6 +32,9 @@ const (
 	// DriverMemory targets a process-local in-memory store, useful
 	// for unit tests and local development.
 	DriverMemory Driver = "memory"
+	// DriverSQLite targets a pure-Go SQLite database (file or :memory:)
+	// via modernc.org/sqlite — the lightweight embedded/single-node tier.
+	DriverSQLite Driver = "sqlite"
 )
 
 // Config selects which driver to build and carries the parameters
@@ -47,6 +53,10 @@ type Config struct {
 	PostgresDSN         string
 	PostgresMaxConns    int
 	PostgresAutoMigrate bool
+
+	// SQLite-specific. SQLitePath is the database file path or ":memory:".
+	SQLitePath     string
+	SQLiteMaxConns int
 
 	// RequireVerifiedAuthDomain restricts a project's primary auth-domain
 	// (the host that drives branded link URLs) to DNS-verified hostnames
@@ -205,6 +215,33 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		return &Built{
 			Repository: mem,
 			DB:         mem,
+		}, nil
+	case DriverSQLite:
+		if cfg.SQLitePath == "" {
+			return nil, errors.New("repo: Build: sqlite driver requires SQLitePath (set GATEWAY_SQLITE_PATH, or \":memory:\")")
+		}
+		if cfg.ProjectID == "" {
+			return nil, errors.New("repo: Build: sqlite driver requires ProjectID")
+		}
+		sqliteRepo, err := sqliterepo.New(ctx, sqliterepo.Config{
+			Path:      cfg.SQLitePath,
+			MaxConns:  cfg.SQLiteMaxConns,
+			ProjectID: cfg.ProjectID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("repo: Build: sqlite: %w", err)
+		}
+		// The SQLite backend is the single-project embedded tier: it seeds the
+		// boot-default project (the project_id FK anchor) but has no
+		// control-plane registry/governance stores — those stay Postgres-only.
+		if err := sqliteRepo.EnsureDefaultProject(ctx, cfg.ProjectID, cfg.ProjectID); err != nil {
+			sqliteRepo.Close()
+			return nil, fmt.Errorf("repo: Build: sqlite: seed default project: %w", err)
+		}
+		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
+		return &Built{
+			Repository: sqliteRepo,
+			DB:         sqliteRepo,
 		}, nil
 	case DriverPostgres:
 		if cfg.PostgresDSN == "" {

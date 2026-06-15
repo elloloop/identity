@@ -98,8 +98,10 @@ All config is via environment variables. See `internal/config/config.go` for the
 
 | Var | Purpose |
 |---|---|
-| `GATEWAY_REPO_DRIVER` | Persistence driver: `postgres` (default) or `memory` (local dev / tests) |
+| `GATEWAY_REPO_DRIVER` | Persistence backend: `postgres` (default), `sqlite`, or `memory` (local dev / tests) |
 | `GATEWAY_POSTGRES_DSN` | Postgres connection string (required for the `postgres` driver) |
+| `GATEWAY_SQLITE_PATH` | SQLite database file path (when `GATEWAY_REPO_DRIVER=sqlite`). Required — set it to `:memory:` explicitly for an ephemeral in-process database; there is no implicit default. File-backed databases open in WAL mode (`synchronous=NORMAL`) so concurrent reads don't serialize behind writes |
+| `GATEWAY_SQLITE_MAX_CONNS` | Connection-pool size for a file-backed SQLite database (default `4`). Ignored for `:memory:`, which is pinned to a single connection |
 | `GATEWAY_DEFAULT_TENANT_ID` | Storage scope ID (the physical shard) the default project maps onto |
 | `GATEWAY_DEFAULT_PROJECT_ID` | ID of the control-plane Project seeded on boot and used to pin zero-config requests (default `default`) |
 | `GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS` | Comma-separated serving hostnames seeded (verified) onto the default project; the first is primary. Lets the `Host` header resolve to the default project |
@@ -147,6 +149,42 @@ In production, run migrations out-of-band as a separate step
 on a rolling deploy. Or use `docker-compose.yml` at the repo root — it
 wires identity to Postgres with a persistent volume and a health-gated
 `depends_on`.
+
+### SQLite backend (lightweight / embedded)
+
+For embedded, single-node, and development deployments, identity ships a
+**pure-Go SQLite** driver ([modernc.org/sqlite](https://modernc.org/sqlite),
+no cgo — cross-compiles cleanly). It runs the per-project data plane in a
+single file (or fully in-process) with no external service. Like the entdb
+and memory drivers it is single-project (pinned to the default project — the
+Project/Tenant/Domain control plane is Postgres-only); unlike them it
+persists to durable SQL. Select it with `GATEWAY_REPO_DRIVER=sqlite`:
+
+```bash
+docker run -p 80:80 -p 9090:9090 \
+  -e GATEWAY_REPO_DRIVER=sqlite \
+  -e GATEWAY_SQLITE_PATH=/data/identity.db \
+  -e GATEWAY_DEFAULT_TENANT_ID=my-product \
+  -v identity-data:/data \
+  ghcr.io/elloloop/identity:0.1.0
+```
+
+Set `GATEWAY_SQLITE_PATH=:memory:` for an ephemeral in-process database
+(tests / throwaway dev). The SQLite driver passes the same conformance
+suite as Postgres and memory — identical uniqueness, ordering, and
+`ErrNotFound`/`ErrAlreadyExists`/`ErrInvalidArgument` semantics. There is no
+Row-Level Security on SQLite (that stays Postgres-only defense-in-depth); the
+mandatory `WHERE project_id = $1` repo boundary is the backend-agnostic
+isolation.
+
+Backend tiers at a glance:
+
+| Driver | `GATEWAY_REPO_DRIVER` | Use case | Control plane |
+| --- | --- | --- | --- |
+| Postgres | `postgres` | Production, multi-node | Yes (Project/Tenant/Domain) |
+| SQLite | `sqlite` | Embedded, single-node, dev | No (single-project) |
+| EntDB | `entdb` | tenant-shard-db deployments | No (single-project) |
+| memory | `memory` | Tests, smoke | No (single-project) |
 
 ## Releasing
 
