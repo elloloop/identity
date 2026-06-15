@@ -6,6 +6,11 @@ import { Code } from "astro-expressive-code/components";
 <DocsLayout title="gRPC Reference">
   <h1>gRPC Reference</h1>
   <p>
+    For the full, interactive per-RPC reference generated from the proto,
+    see the <a href="/identity/docs/api-reference/rest">API Reference (OpenAPI)</a>.
+    This page explains how the transport works.
+  </p>
+  <p>
     All RPCs live on the single service
     <code>identity.IdentityService</code>. The wire transports is
     Connect-RPC over HTTP/JSON; the underlying schema is plain protobuf.

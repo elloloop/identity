@@ -91,6 +91,10 @@ vuln: ## govulncheck against the configured CVE database
 	}
 	$(GOVULNCHECK) ./...
 
+.PHONY: generate
+generate: ## Regenerate Go code + OpenAPI spec from proto (buf.gen.yaml)
+	buf generate
+
 .PHONY: build
 build: ## go build ./...
 	$(GO) build ./...

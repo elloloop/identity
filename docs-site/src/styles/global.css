@@ -1,9 +1,12 @@
 @import "@fontsource-variable/inter/index.css";
 @import "@fontsource-variable/jetbrains-mono/index.css";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Tailwind v4 reads the legacy JS config (refraction preset, content globs,
+   darkMode: "class", safelist) via @config so the existing theme tokens and
+   purge rules keep working under the v4 Vite plugin. */
+@config "../../tailwind.config.mjs";
 
 /* Refraction-UI CSS variables (HSL triplets — see tailwind-config) */
 @layer base {
