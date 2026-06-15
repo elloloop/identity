@@ -210,21 +210,21 @@ func TestCachingResolver_LRUEviction(t *testing.T) {
 	c := newTestCache(inner, time.Hour, 2, func() time.Time { return clock })
 
 	ctx := context.Background()
-	c.ResolveByCredential(ctx, "0") // cache: [0]
-	c.ResolveByCredential(ctx, "1") // cache: [1,0]
-	c.ResolveByCredential(ctx, "0") // touch 0 -> cache: [0,1]
-	c.ResolveByCredential(ctx, "2") // inserts 2, evicts LRU=1 -> cache: [2,0]
+	_, _ = c.ResolveByCredential(ctx, "0") // cache: [0]
+	_, _ = c.ResolveByCredential(ctx, "1") // cache: [1,0]
+	_, _ = c.ResolveByCredential(ctx, "0") // touch 0 -> cache: [0,1]
+	_, _ = c.ResolveByCredential(ctx, "2") // inserts 2, evicts LRU=1 -> cache: [2,0]
 
 	// 0,1,2 each hit the store once; the repeat lookup of 0 was a cache hit.
 	if inner.credCalls != 3 {
 		t.Fatalf("want 3 inner calls so far, got %d", inner.credCalls)
 	}
 	// 0 still cached (no new call); 1 was evicted (new call).
-	c.ResolveByCredential(ctx, "0")
+	_, _ = c.ResolveByCredential(ctx, "0")
 	if inner.credCalls != 3 {
 		t.Fatalf("0 should be cached, got %d calls", inner.credCalls)
 	}
-	c.ResolveByCredential(ctx, "1")
+	_, _ = c.ResolveByCredential(ctx, "1")
 	if inner.credCalls != 4 {
 		t.Fatalf("1 should have been evicted, got %d calls", inner.credCalls)
 	}
