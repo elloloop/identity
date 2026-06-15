@@ -34,7 +34,7 @@ import { Code } from "astro-expressive-code/components";
   </p>
 
   <h3>1. Begin</h3>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/BeginPasskeyRegistration \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/BeginPasskeyRegistration \\
   -H "Authorization: Bearer $TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{"deviceName":"Alice's MacBook"}'`} lang="bash" />
@@ -51,7 +51,7 @@ import { Code } from "astro-expressive-code/components";
   <Code code={`const options = JSON.parse(beginResponse.options_json);
 const credential = await navigator.credentials.create(options);
 
-await fetch("/identity.IdentityService/CompletePasskeyRegistration", {
+await fetch("/identity.v1.IdentityService/CompletePasskeyRegistration", {
   method: "POST",
   headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
   body: JSON.stringify({
@@ -70,7 +70,7 @@ await fetch("/identity.IdentityService/CompletePasskeyRegistration", {
     user's keys.
   </p>
   <Code code={`// 1. Ask Identity for options
-const begin = await fetch("/identity.IdentityService/BeginPasskeyLogin", {
+const begin = await fetch("/identity.v1.IdentityService/BeginPasskeyLogin", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ email: "" }),  // discoverable credentials
@@ -80,7 +80,7 @@ const begin = await fetch("/identity.IdentityService/BeginPasskeyLogin", {
 const credential = await navigator.credentials.get(JSON.parse(begin.options_json));
 
 // 3. Hand the assertion back to Identity
-const complete = await fetch("/identity.IdentityService/CompletePasskeyLogin", {
+const complete = await fetch("/identity.v1.IdentityService/CompletePasskeyLogin", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({

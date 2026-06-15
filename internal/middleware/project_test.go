@@ -61,7 +61,7 @@ func serve(t *testing.T, resolver service.ProjectResolver, defaultID, defaultSco
 	t.Helper()
 	cap := &projectScopeCapture{}
 	h := NewProjectResolver(defaultID, defaultScope, "", resolver, nil)(cap.handler())
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	if mutate != nil {
 		mutate(req)
 	}

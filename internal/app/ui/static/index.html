@@ -261,8 +261,8 @@
             resultData.style.display = 'none';
             
             const endpoint = isLogin 
-                ? '/identity.IdentityService/PasswordLogin' 
-                : '/identity.IdentityService/PasswordSignup';
+                ? '/identity.v1.IdentityService/PasswordLogin' 
+                : '/identity.v1.IdentityService/PasswordSignup';
                 
             try {
                 const response = await fetch(endpoint, {

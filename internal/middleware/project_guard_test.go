@@ -21,7 +21,7 @@ func serveGuard(t *testing.T, scope *service.ProjectScope, tokenProject string) 
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	}))
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	if tokenProject != "" {
 		req.Header.Set(AuthenticatedProjectHeader, tokenProject)
 	}

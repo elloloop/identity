@@ -56,19 +56,19 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>Listing sessions</h2>
   <p>Authenticated user lists their own sessions:</p>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/ListMySessions \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/ListMySessions \\
   -H "Authorization: Bearer $TOKEN" \\
   -H 'Content-Type: application/json' -d '{}'`} lang="bash" />
 
   <h2>Revoking sessions</h2>
   <Code code={`# Revoke one session (the user can do this without re-auth)
-curl -sX POST http://localhost/identity.IdentityService/RevokeSession \\
+curl -sX POST http://localhost/identity.v1.IdentityService/RevokeSession \\
   -H "Authorization: Bearer $TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{"sessionId":"sess_01HZ..."}'
 
 # Sign out everywhere — requires password confirmation
-curl -sX POST http://localhost/identity.IdentityService/SignOutEverywhere \\
+curl -sX POST http://localhost/identity.v1.IdentityService/SignOutEverywhere \\
   -H "Authorization: Bearer $TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{"password":"correct horse battery"}'`} lang="bash" />

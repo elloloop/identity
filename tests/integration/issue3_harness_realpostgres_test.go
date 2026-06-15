@@ -12,7 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
-	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
+	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/repo"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"

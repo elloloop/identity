@@ -15,7 +15,7 @@ import { Code } from "astro-expressive-code/components";
   <h2>Self-service</h2>
 
   <h3>Get current user</h3>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/GetCurrentUser \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/GetCurrentUser \\
   -H "Authorization: Bearer $TOKEN" \\
   -H 'Content-Type: application/json' -d '{}'`} lang="bash" />
 
@@ -24,7 +24,7 @@ import { Code } from "astro-expressive-code/components";
     Empty-string fields are unchanged — the message acts as a partial
     update.
   </p>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/UpdateProfile \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/UpdateProfile \\
   -H "Authorization: Bearer $TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{"name":"Alice Anderson","avatarUrl":"https://..."}'`} lang="bash" />
@@ -42,7 +42,7 @@ import { Code } from "astro-expressive-code/components";
     <code>USER_STATUS_INVITED</code> / etc.) and a substring search on
     email + name.
   </p>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/ListUsers \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/ListUsers \\
   -H "Authorization: Bearer $ADMIN_TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{"limit":50,"statusFilter":"USER_STATUS_ACTIVE","search":"@example.com"}'`} lang="bash" />

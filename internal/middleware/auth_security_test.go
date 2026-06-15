@@ -50,7 +50,7 @@ func TestSec_HeaderInjection_CRLF(t *testing.T) {
 			var called bool
 			h := AuthMiddleware(kr, "", "", false)(recordingHandler(&called))
 
-			req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+			req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 			// Direct map write bypasses Go's CRLF validation in Header.Set.
 			req.Header["Authorization"] = []string{tc.val}
 			rec := httptest.NewRecorder()
@@ -88,7 +88,7 @@ func TestSec_BearerSmuggling(t *testing.T) {
 			var called bool
 			h := AuthMiddleware(kr, "", "", false)(recordingHandler(&called))
 
-			req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+			req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 			req.Header.Set("Authorization", tc.header)
 			rec := httptest.NewRecorder()
 
@@ -129,7 +129,7 @@ func TestSec_EmptyOrMalformedAuth_NoPanic(t *testing.T) {
 			var called bool
 			h := AuthMiddleware(kr, "", "", false)(recordingHandler(&called))
 
-			req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+			req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 			if tc.header != "" {
 				req.Header.Set("Authorization", tc.header)
 			}
@@ -154,7 +154,7 @@ func TestSec_BearerCaseSensitive_Required(t *testing.T) {
 
 	var called bool
 	h := AuthMiddleware(kr, "", "", false)(recordingHandler(&called))
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "bearer "+good)
 	rec := httptest.NewRecorder()
 

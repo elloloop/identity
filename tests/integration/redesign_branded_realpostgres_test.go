@@ -10,7 +10,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 )
 
 // TestRedesign_BrandedResolution_ProjectToken asserts that a request whose

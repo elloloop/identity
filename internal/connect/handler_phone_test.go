@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
-	identityconnect "github.com/elloloop/identity/gen/go/identity/identityconnect"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	identityconnect "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passkeys"

@@ -17,7 +17,7 @@ import (
 	"connectrpc.com/connect"
 	"go.uber.org/zap"
 
-	identityconnect "github.com/elloloop/identity/gen/go/identity/identityconnect"
+	identityconnect "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/graph"
 	"github.com/elloloop/identity/internal/service"

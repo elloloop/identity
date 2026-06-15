@@ -37,7 +37,7 @@ func TestIntegration_UnauthenticatedExemptPath_PassesThrough(t *testing.T) {
 
 	handler := chainHandler(t, kr, "http://localhost:9002", echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/PasswordLogin", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/PasswordLogin", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -54,7 +54,7 @@ func TestIntegration_UnauthenticatedProtectedPath_Returns401(t *testing.T) {
 
 	handler := chainHandler(t, kr, "http://localhost:9002", echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -71,7 +71,7 @@ func TestIntegration_ValidJWT_InjectsUserIDHeader(t *testing.T) {
 
 	handler := chainHandler(t, kr, "http://localhost:9002", echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 
@@ -90,7 +90,7 @@ func TestIntegration_ExpiredJWT_Returns401(t *testing.T) {
 
 	handler := chainHandler(t, kr, "http://localhost:9002", echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 
@@ -107,7 +107,7 @@ func TestIntegration_CORSPreflight_Returns204(t *testing.T) {
 
 	handler := chainHandler(t, kr, "http://localhost:9002", echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodOptions, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Origin", "http://localhost:9002")
 	rec := httptest.NewRecorder()
 
@@ -127,7 +127,7 @@ func TestIntegration_CORSDisallowedOrigin_NoAccessControlHeaders(t *testing.T) {
 
 	handler := chainHandler(t, kr, "http://localhost:9002", echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Origin", "http://evil.example.com")
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -192,7 +192,7 @@ func TestIntegration_FullRequestThroughChain(t *testing.T) {
 
 	handler := chainHandler(t, kr, "http://localhost:9002", echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Origin", "http://localhost:9002")
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -249,7 +249,7 @@ func TestIntegration_MultipleOrigins_AllAllowed(t *testing.T) {
 		called = false
 		userID = ""
 
-		req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+		req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 		req.Header.Set("Origin", origin)
 		req.Header.Set("Authorization", "Bearer "+token)
 		rec := httptest.NewRecorder()

@@ -10,7 +10,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passwords"

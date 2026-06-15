@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
-	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/identityserver"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo/memory"

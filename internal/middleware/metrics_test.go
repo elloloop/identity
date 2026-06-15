@@ -30,7 +30,7 @@ func TestMetricsMiddleware_RecordsRedCounters(t *testing.T) {
 
 	for range 3 {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/PasswordLogin", nil)
+		req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/PasswordLogin", nil)
 		handler.ServeHTTP(rec, req)
 	}
 
@@ -101,7 +101,7 @@ func TestMetricsMiddleware_MapsHTTPStatusToConnectCode(t *testing.T) {
 			})
 			handler := MetricsMiddleware(m)(inner)
 			handler.ServeHTTP(httptest.NewRecorder(),
-				httptest.NewRequest(http.MethodPost, "/identity.IdentityService/PasswordLogin", nil))
+				httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/PasswordLogin", nil))
 
 			if got := testutil.ToFloat64(m.requests.WithLabelValues("PasswordLogin", c.wantCode)); got != 1 {
 				t.Errorf("status %d: want code=%q, got 0", c.status, c.wantCode)
@@ -152,7 +152,7 @@ func TestMetricsMiddleware_NilMetricsIsPassthrough(t *testing.T) {
 	handler := MetricsMiddleware(nil)(inner)
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/identity.IdentityService/PasswordLogin", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/identity.v1.IdentityService/PasswordLogin", nil))
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d", rec.Code)
 	}
@@ -197,10 +197,10 @@ func TestRPCMethodFromPath_RejectsNestedAndEmpty(t *testing.T) {
 	t.Parallel()
 
 	bad := []string{
-		"/identity.IdentityService/",
-		"/identity.IdentityService/PasswordLogin?x=1",
-		"/identity.IdentityService/PasswordLogin/foo",
-		"/identity.IdentityService/PasswordLogin#bar",
+		"/identity.v1.IdentityService/",
+		"/identity.v1.IdentityService/PasswordLogin?x=1",
+		"/identity.v1.IdentityService/PasswordLogin/foo",
+		"/identity.v1.IdentityService/PasswordLogin#bar",
 		"/other.Service/Method",
 	}
 	for _, p := range bad {

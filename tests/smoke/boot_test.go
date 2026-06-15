@@ -273,7 +273,7 @@ func TestBootSmoke(t *testing.T) {
 	//     persistence "service unavailable" message instead of 404.
 	signupReq := bytes.NewBufferString(`{"email":"smoke@example.com","password":"unused-by-stub"}`)
 	httpReq, err := http.NewRequest(http.MethodPost,
-		baseURL+"/identity.IdentityService/PasswordSignup", signupReq)
+		baseURL+"/identity.v1.IdentityService/PasswordSignup", signupReq)
 	if err != nil {
 		t.Fatalf("build PasswordSignup request: %v", err)
 	}

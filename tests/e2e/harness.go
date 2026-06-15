@@ -78,7 +78,7 @@ func e2eBackend() string {
 var sharedPostgresDSN string
 
 // Harness is the bag of resources returned by StartServer. Tests do
-// `POST <BaseURL>/identity.IdentityService/<Method>` with a JSON body
+// `POST <BaseURL>/identity.v1.IdentityService/<Method>` with a JSON body
 // and inspect the JSON response — exactly what a downstream client
 // over the wire would do.
 type Harness struct {
@@ -345,7 +345,7 @@ func (h *Harness) rpcCall(t *testing.T, method string, req any, accessToken stri
 		t.Fatalf("marshal %s: %v", method, err)
 	}
 
-	url := h.BaseURL + "/identity.IdentityService/" + method
+	url := h.BaseURL + "/identity.v1.IdentityService/" + method
 	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("new request %s: %v", method, err)

@@ -67,7 +67,7 @@ function signupBatch(user) {
   return http.batch(
     Array.from({ length: batchSize }, () => ({
       method: "POST",
-      url: `${baseURL}/identity.IdentityService/PasswordSignup`,
+      url: `${baseURL}/identity.v1.IdentityService/PasswordSignup`,
       body: payload,
       params,
     })),

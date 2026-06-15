@@ -15,7 +15,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/oauth2-proxy/mockoidc"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/pkg/oauth"
 )
 

@@ -1,12 +1,12 @@
 openapi: 3.1.0
 info: {}
 paths:
-  /identity.IdentityService/AcceptInvitation:
+  /identity.v1.IdentityService/AcceptInvitation:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: AcceptInvitation
-      operationId: identity.IdentityService.AcceptInvitation
+      operationId: identity.v1.IdentityService.AcceptInvitation
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -21,7 +21,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.AcceptInvitationRequest'
+              $ref: '#/components/schemas/identity.v1.AcceptInvitationRequest'
         required: true
       responses:
         default:
@@ -35,13 +35,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.AcceptInvitationResponse'
-  /identity.IdentityService/AcceptTenantInvitation:
+                $ref: '#/components/schemas/identity.v1.AcceptInvitationResponse'
+  /identity.v1.IdentityService/AcceptTenantInvitation:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: AcceptTenantInvitation
-      operationId: identity.IdentityService.AcceptTenantInvitation
+      operationId: identity.v1.IdentityService.AcceptTenantInvitation
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -56,7 +56,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.AcceptTenantInvitationRequest'
+              $ref: '#/components/schemas/identity.v1.AcceptTenantInvitationRequest'
         required: true
       responses:
         default:
@@ -70,14 +70,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.AcceptTenantInvitationResponse'
-  /identity.IdentityService/AddGroupMember:
+                $ref: '#/components/schemas/identity.v1.AcceptTenantInvitationResponse'
+  /identity.v1.IdentityService/AddGroupMember:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: AddGroupMember
       description: Membership (graph edges)
-      operationId: identity.IdentityService.AddGroupMember
+      operationId: identity.v1.IdentityService.AddGroupMember
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -92,7 +92,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.AddGroupMemberRequest'
+              $ref: '#/components/schemas/identity.v1.AddGroupMemberRequest'
         required: true
       responses:
         default:
@@ -106,17 +106,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.AddGroupMemberResponse'
-  /identity.IdentityService/AddProjectAuthDomain:
+                $ref: '#/components/schemas/identity.v1.AddGroupMemberResponse'
+  /identity.v1.IdentityService/AddProjectAuthDomain:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: AddProjectAuthDomain
       description: |-
         Customer-owned custom auth-domains: a project registers a serving
          hostname, proves ownership via a DNS TXT challenge, then it resolves.
          An unverified custom domain does NOT resolve requests.
-      operationId: identity.IdentityService.AddProjectAuthDomain
+      operationId: identity.v1.IdentityService.AddProjectAuthDomain
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -131,7 +131,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.AddProjectAuthDomainRequest'
+              $ref: '#/components/schemas/identity.v1.AddProjectAuthDomainRequest'
         required: true
       responses:
         default:
@@ -145,13 +145,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.AddProjectAuthDomainResponse'
-  /identity.IdentityService/AdminAddProjectAuthDomain:
+                $ref: '#/components/schemas/identity.v1.AddProjectAuthDomainResponse'
+  /identity.v1.IdentityService/AdminAddProjectAuthDomain:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: AdminAddProjectAuthDomain
-      operationId: identity.IdentityService.AdminAddProjectAuthDomain
+      operationId: identity.v1.IdentityService.AdminAddProjectAuthDomain
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -166,7 +166,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.AdminAddProjectAuthDomainRequest'
+              $ref: '#/components/schemas/identity.v1.AdminAddProjectAuthDomainRequest'
         required: true
       responses:
         default:
@@ -180,13 +180,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.AdminAddProjectAuthDomainResponse'
-  /identity.IdentityService/AdminAddTenantAdmin:
+                $ref: '#/components/schemas/identity.v1.AdminAddProjectAuthDomainResponse'
+  /identity.v1.IdentityService/AdminAddTenantAdmin:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: AdminAddTenantAdmin
-      operationId: identity.IdentityService.AdminAddTenantAdmin
+      operationId: identity.v1.IdentityService.AdminAddTenantAdmin
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -201,7 +201,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.AdminAddTenantAdminRequest'
+              $ref: '#/components/schemas/identity.v1.AdminAddTenantAdminRequest'
         required: true
       responses:
         default:
@@ -215,18 +215,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.AdminAddTenantAdminResponse'
-  /identity.IdentityService/AdminCreateProject:
+                $ref: '#/components/schemas/identity.v1.AdminAddTenantAdminResponse'
+  /identity.v1.IdentityService/AdminCreateProject:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: AdminCreateProject
       description: |-
         Control-plane admin (redesign). PLATFORM-operator RPCs that provision
          projects/tenants/credentials out-of-band. Authenticated by the shared
          admin secret in the "X-Admin-Secret" header (NOT a user JWT); disabled
          (UNIMPLEMENTED) unless GATEWAY_ADMIN_API_SECRET is set.
-      operationId: identity.IdentityService.AdminCreateProject
+      operationId: identity.v1.IdentityService.AdminCreateProject
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -241,7 +241,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.AdminCreateProjectRequest'
+              $ref: '#/components/schemas/identity.v1.AdminCreateProjectRequest'
         required: true
       responses:
         default:
@@ -255,13 +255,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.AdminCreateProjectResponse'
-  /identity.IdentityService/AdminCreateProjectCredential:
+                $ref: '#/components/schemas/identity.v1.AdminCreateProjectResponse'
+  /identity.v1.IdentityService/AdminCreateProjectCredential:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: AdminCreateProjectCredential
-      operationId: identity.IdentityService.AdminCreateProjectCredential
+      operationId: identity.v1.IdentityService.AdminCreateProjectCredential
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -276,7 +276,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.AdminCreateProjectCredentialRequest'
+              $ref: '#/components/schemas/identity.v1.AdminCreateProjectCredentialRequest'
         required: true
       responses:
         default:
@@ -290,13 +290,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.AdminCreateProjectCredentialResponse'
-  /identity.IdentityService/AdminCreateTenant:
+                $ref: '#/components/schemas/identity.v1.AdminCreateProjectCredentialResponse'
+  /identity.v1.IdentityService/AdminCreateTenant:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: AdminCreateTenant
-      operationId: identity.IdentityService.AdminCreateTenant
+      operationId: identity.v1.IdentityService.AdminCreateTenant
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -311,7 +311,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.AdminCreateTenantRequest'
+              $ref: '#/components/schemas/identity.v1.AdminCreateTenantRequest'
         required: true
       responses:
         default:
@@ -325,13 +325,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.AdminCreateTenantResponse'
-  /identity.IdentityService/ApproveQrLogin:
+                $ref: '#/components/schemas/identity.v1.AdminCreateTenantResponse'
+  /identity.v1.IdentityService/ApproveQrLogin:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ApproveQrLogin
-      operationId: identity.IdentityService.ApproveQrLogin
+      operationId: identity.v1.IdentityService.ApproveQrLogin
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -346,7 +346,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ApproveQrLoginRequest'
+              $ref: '#/components/schemas/identity.v1.ApproveQrLoginRequest'
         required: true
       responses:
         default:
@@ -360,14 +360,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ApproveQrLoginResponse'
-  /identity.IdentityService/BeginIdentityVerification:
+                $ref: '#/components/schemas/identity.v1.ApproveQrLoginResponse'
+  /identity.v1.IdentityService/BeginIdentityVerification:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: BeginIdentityVerification
       description: Identity Verification (document + selfie via pluggable provider)
-      operationId: identity.IdentityService.BeginIdentityVerification
+      operationId: identity.v1.IdentityService.BeginIdentityVerification
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -382,7 +382,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.BeginIdentityVerificationRequest'
+              $ref: '#/components/schemas/identity.v1.BeginIdentityVerificationRequest'
         required: true
       responses:
         default:
@@ -396,14 +396,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.BeginIdentityVerificationResponse'
-  /identity.IdentityService/BeginOAuthLogin:
+                $ref: '#/components/schemas/identity.v1.BeginIdentityVerificationResponse'
+  /identity.v1.IdentityService/BeginOAuthLogin:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: BeginOAuthLogin
       description: Authentication
-      operationId: identity.IdentityService.BeginOAuthLogin
+      operationId: identity.v1.IdentityService.BeginOAuthLogin
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -418,7 +418,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.BeginOAuthLoginRequest'
+              $ref: '#/components/schemas/identity.v1.BeginOAuthLoginRequest'
         required: true
       responses:
         default:
@@ -432,13 +432,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.BeginOAuthLoginResponse'
-  /identity.IdentityService/BeginPasskeyLogin:
+                $ref: '#/components/schemas/identity.v1.BeginOAuthLoginResponse'
+  /identity.v1.IdentityService/BeginPasskeyLogin:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: BeginPasskeyLogin
-      operationId: identity.IdentityService.BeginPasskeyLogin
+      operationId: identity.v1.IdentityService.BeginPasskeyLogin
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -453,7 +453,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.BeginPasskeyLoginRequest'
+              $ref: '#/components/schemas/identity.v1.BeginPasskeyLoginRequest'
         required: true
       responses:
         default:
@@ -467,14 +467,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.BeginPasskeyLoginResponse'
-  /identity.IdentityService/BeginPasskeyRegistration:
+                $ref: '#/components/schemas/identity.v1.BeginPasskeyLoginResponse'
+  /identity.v1.IdentityService/BeginPasskeyRegistration:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: BeginPasskeyRegistration
       description: Passkey / WebAuthn
-      operationId: identity.IdentityService.BeginPasskeyRegistration
+      operationId: identity.v1.IdentityService.BeginPasskeyRegistration
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -489,7 +489,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.BeginPasskeyRegistrationRequest'
+              $ref: '#/components/schemas/identity.v1.BeginPasskeyRegistrationRequest'
         required: true
       responses:
         default:
@@ -503,14 +503,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.BeginPasskeyRegistrationResponse'
-  /identity.IdentityService/BeginTotpSetup:
+                $ref: '#/components/schemas/identity.v1.BeginPasskeyRegistrationResponse'
+  /identity.v1.IdentityService/BeginTotpSetup:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: BeginTotpSetup
       description: 2FA TOTP
-      operationId: identity.IdentityService.BeginTotpSetup
+      operationId: identity.v1.IdentityService.BeginTotpSetup
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -525,7 +525,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.BeginTotpSetupRequest'
+              $ref: '#/components/schemas/identity.v1.BeginTotpSetupRequest'
         required: true
       responses:
         default:
@@ -539,14 +539,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.BeginTotpSetupResponse'
-  /identity.IdentityService/ChangePassword:
+                $ref: '#/components/schemas/identity.v1.BeginTotpSetupResponse'
+  /identity.v1.IdentityService/ChangePassword:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ChangePassword
       description: Password Management
-      operationId: identity.IdentityService.ChangePassword
+      operationId: identity.v1.IdentityService.ChangePassword
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -561,7 +561,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ChangePasswordRequest'
+              $ref: '#/components/schemas/identity.v1.ChangePasswordRequest'
         required: true
       responses:
         default:
@@ -575,13 +575,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ChangePasswordResponse'
-  /identity.IdentityService/CompletePasskeyLogin:
+                $ref: '#/components/schemas/identity.v1.ChangePasswordResponse'
+  /identity.v1.IdentityService/CompletePasskeyLogin:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: CompletePasskeyLogin
-      operationId: identity.IdentityService.CompletePasskeyLogin
+      operationId: identity.v1.IdentityService.CompletePasskeyLogin
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -596,7 +596,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.CompletePasskeyLoginRequest'
+              $ref: '#/components/schemas/identity.v1.CompletePasskeyLoginRequest'
         required: true
       responses:
         default:
@@ -610,13 +610,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.CompletePasskeyLoginResponse'
-  /identity.IdentityService/CompletePasskeyRegistration:
+                $ref: '#/components/schemas/identity.v1.CompletePasskeyLoginResponse'
+  /identity.v1.IdentityService/CompletePasskeyRegistration:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: CompletePasskeyRegistration
-      operationId: identity.IdentityService.CompletePasskeyRegistration
+      operationId: identity.v1.IdentityService.CompletePasskeyRegistration
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -631,7 +631,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.CompletePasskeyRegistrationRequest'
+              $ref: '#/components/schemas/identity.v1.CompletePasskeyRegistrationRequest'
         required: true
       responses:
         default:
@@ -645,13 +645,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.CompletePasskeyRegistrationResponse'
-  /identity.IdentityService/ConfirmEmailChange:
+                $ref: '#/components/schemas/identity.v1.CompletePasskeyRegistrationResponse'
+  /identity.v1.IdentityService/ConfirmEmailChange:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ConfirmEmailChange
-      operationId: identity.IdentityService.ConfirmEmailChange
+      operationId: identity.v1.IdentityService.ConfirmEmailChange
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -666,7 +666,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ConfirmEmailChangeRequest'
+              $ref: '#/components/schemas/identity.v1.ConfirmEmailChangeRequest'
         required: true
       responses:
         default:
@@ -680,13 +680,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ConfirmEmailChangeResponse'
-  /identity.IdentityService/ConfirmPasswordReset:
+                $ref: '#/components/schemas/identity.v1.ConfirmEmailChangeResponse'
+  /identity.v1.IdentityService/ConfirmPasswordReset:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ConfirmPasswordReset
-      operationId: identity.IdentityService.ConfirmPasswordReset
+      operationId: identity.v1.IdentityService.ConfirmPasswordReset
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -701,7 +701,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ConfirmPasswordResetRequest'
+              $ref: '#/components/schemas/identity.v1.ConfirmPasswordResetRequest'
         required: true
       responses:
         default:
@@ -715,20 +715,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ConfirmPasswordResetResponse'
-  /identity.IdentityService/CreateDomain:
+                $ref: '#/components/schemas/identity.v1.ConfirmPasswordResetResponse'
+  /identity.v1.IdentityService/CreateDomain:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: CreateDomain
       description: |-
         Tenant domains (redesign). Authenticated, project-scoped, and gated
          on the caller being an owner/admin member of the target tenant — with
          one exception: VerifyDomain on a still-latent tenant that has no
          members yet is open, so the first verifier becomes its owner.
-         Available only on the postgres control-plane driver; entdb/memory
+         Available only on the postgres control-plane driver; the memory driver
          deployments return Unimplemented.
-      operationId: identity.IdentityService.CreateDomain
+      operationId: identity.v1.IdentityService.CreateDomain
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -743,7 +743,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.CreateDomainRequest'
+              $ref: '#/components/schemas/identity.v1.CreateDomainRequest'
         required: true
       responses:
         default:
@@ -757,17 +757,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.CreateDomainResponse'
-  /identity.IdentityService/CreateFirstPlatformAdmin:
+                $ref: '#/components/schemas/identity.v1.CreateDomainResponse'
+  /identity.v1.IdentityService/CreateFirstPlatformAdmin:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: CreateFirstPlatformAdmin
       description: |-
         Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
          succeeds only while platform_admins is empty, then permanently closes
-         (FAILED_PRECONDITION). Postgres-only; entdb/memory return UNIMPLEMENTED.
-      operationId: identity.IdentityService.CreateFirstPlatformAdmin
+         (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
+      operationId: identity.v1.IdentityService.CreateFirstPlatformAdmin
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -782,7 +782,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.CreateFirstPlatformAdminRequest'
+              $ref: '#/components/schemas/identity.v1.CreateFirstPlatformAdminRequest'
         required: true
       responses:
         default:
@@ -796,14 +796,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.CreateFirstPlatformAdminResponse'
-  /identity.IdentityService/CreateGroup:
+                $ref: '#/components/schemas/identity.v1.CreateFirstPlatformAdminResponse'
+  /identity.v1.IdentityService/CreateGroup:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: CreateGroup
       description: Groups (formerly WorkingGroup — graph DB type still WorkingGroup)
-      operationId: identity.IdentityService.CreateGroup
+      operationId: identity.v1.IdentityService.CreateGroup
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -818,7 +818,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.CreateGroupRequest'
+              $ref: '#/components/schemas/identity.v1.CreateGroupRequest'
         required: true
       responses:
         default:
@@ -832,11 +832,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.CreateGroupResponse'
-  /identity.IdentityService/CreateTenantInvitation:
+                $ref: '#/components/schemas/identity.v1.CreateGroupResponse'
+  /identity.v1.IdentityService/CreateTenantInvitation:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: CreateTenantInvitation
       description: |-
         Tenant membership (redesign). Authenticated, project-scoped, and —
@@ -844,9 +844,9 @@ paths:
          owner/admin member of the target tenant. AcceptTenantInvitation is the
          redeemer's own action: any authenticated caller may redeem a token, but
          only for an invitation addressed to their own account email. Available
-         only on the postgres control-plane driver; entdb/memory deployments
+         only on the postgres control-plane driver; memory deployments
          return Unimplemented.
-      operationId: identity.IdentityService.CreateTenantInvitation
+      operationId: identity.v1.IdentityService.CreateTenantInvitation
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -861,7 +861,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.CreateTenantInvitationRequest'
+              $ref: '#/components/schemas/identity.v1.CreateTenantInvitationRequest'
         required: true
       responses:
         default:
@@ -875,14 +875,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.CreateTenantInvitationResponse'
-  /identity.IdentityService/CreateUser:
+                $ref: '#/components/schemas/identity.v1.CreateTenantInvitationResponse'
+  /identity.v1.IdentityService/CreateUser:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: CreateUser
       description: Users
-      operationId: identity.IdentityService.CreateUser
+      operationId: identity.v1.IdentityService.CreateUser
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -897,7 +897,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.CreateUserRequest'
+              $ref: '#/components/schemas/identity.v1.CreateUserRequest'
         required: true
       responses:
         default:
@@ -911,13 +911,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.CreateUserResponse'
-  /identity.IdentityService/DeactivateUser:
+                $ref: '#/components/schemas/identity.v1.CreateUserResponse'
+  /identity.v1.IdentityService/DeactivateUser:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: DeactivateUser
-      operationId: identity.IdentityService.DeactivateUser
+      operationId: identity.v1.IdentityService.DeactivateUser
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -932,7 +932,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.DeactivateUserRequest'
+              $ref: '#/components/schemas/identity.v1.DeactivateUserRequest'
         required: true
       responses:
         default:
@@ -946,13 +946,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.DeactivateUserResponse'
-  /identity.IdentityService/DeleteGroup:
+                $ref: '#/components/schemas/identity.v1.DeactivateUserResponse'
+  /identity.v1.IdentityService/DeleteGroup:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: DeleteGroup
-      operationId: identity.IdentityService.DeleteGroup
+      operationId: identity.v1.IdentityService.DeleteGroup
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -967,7 +967,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.DeleteGroupRequest'
+              $ref: '#/components/schemas/identity.v1.DeleteGroupRequest'
         required: true
       responses:
         default:
@@ -981,13 +981,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.DeleteGroupResponse'
-  /identity.IdentityService/DeletePasskey:
+                $ref: '#/components/schemas/identity.v1.DeleteGroupResponse'
+  /identity.v1.IdentityService/DeletePasskey:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: DeletePasskey
-      operationId: identity.IdentityService.DeletePasskey
+      operationId: identity.v1.IdentityService.DeletePasskey
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1002,7 +1002,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.DeletePasskeyRequest'
+              $ref: '#/components/schemas/identity.v1.DeletePasskeyRequest'
         required: true
       responses:
         default:
@@ -1016,13 +1016,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.DeletePasskeyResponse'
-  /identity.IdentityService/DeleteUser:
+                $ref: '#/components/schemas/identity.v1.DeletePasskeyResponse'
+  /identity.v1.IdentityService/DeleteUser:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: DeleteUser
-      operationId: identity.IdentityService.DeleteUser
+      operationId: identity.v1.IdentityService.DeleteUser
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1037,7 +1037,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.DeleteUserRequest'
+              $ref: '#/components/schemas/identity.v1.DeleteUserRequest'
         required: true
       responses:
         default:
@@ -1051,13 +1051,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.DeleteUserResponse'
-  /identity.IdentityService/DisableTotp:
+                $ref: '#/components/schemas/identity.v1.DeleteUserResponse'
+  /identity.v1.IdentityService/DisableTotp:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: DisableTotp
-      operationId: identity.IdentityService.DisableTotp
+      operationId: identity.v1.IdentityService.DisableTotp
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1072,7 +1072,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.DisableTotpRequest'
+              $ref: '#/components/schemas/identity.v1.DisableTotpRequest'
         required: true
       responses:
         default:
@@ -1086,14 +1086,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.DisableTotpResponse'
-  /identity.IdentityService/GetCurrentUser:
+                $ref: '#/components/schemas/identity.v1.DisableTotpResponse'
+  /identity.v1.IdentityService/GetCurrentUser:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: GetCurrentUser
       description: Session / Token Auth
-      operationId: identity.IdentityService.GetCurrentUser
+      operationId: identity.v1.IdentityService.GetCurrentUser
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1108,7 +1108,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.GetCurrentUserRequest'
+              $ref: '#/components/schemas/identity.v1.GetCurrentUserRequest'
         required: true
       responses:
         default:
@@ -1122,13 +1122,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.GetCurrentUserResponse'
-  /identity.IdentityService/GetIdentityVerificationStatus:
+                $ref: '#/components/schemas/identity.v1.GetCurrentUserResponse'
+  /identity.v1.IdentityService/GetIdentityVerificationStatus:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: GetIdentityVerificationStatus
-      operationId: identity.IdentityService.GetIdentityVerificationStatus
+      operationId: identity.v1.IdentityService.GetIdentityVerificationStatus
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1143,7 +1143,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.GetIdentityVerificationStatusRequest'
+              $ref: '#/components/schemas/identity.v1.GetIdentityVerificationStatusRequest'
         required: true
       responses:
         default:
@@ -1157,13 +1157,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.GetIdentityVerificationStatusResponse'
-  /identity.IdentityService/GetQrLoginSession:
+                $ref: '#/components/schemas/identity.v1.GetIdentityVerificationStatusResponse'
+  /identity.v1.IdentityService/GetQrLoginSession:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: GetQrLoginSession
-      operationId: identity.IdentityService.GetQrLoginSession
+      operationId: identity.v1.IdentityService.GetQrLoginSession
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1178,7 +1178,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.GetQrLoginSessionRequest'
+              $ref: '#/components/schemas/identity.v1.GetQrLoginSessionRequest'
         required: true
       responses:
         default:
@@ -1192,13 +1192,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.GetQrLoginSessionResponse'
-  /identity.IdentityService/GetUser:
+                $ref: '#/components/schemas/identity.v1.GetQrLoginSessionResponse'
+  /identity.v1.IdentityService/GetUser:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: GetUser
-      operationId: identity.IdentityService.GetUser
+      operationId: identity.v1.IdentityService.GetUser
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1213,7 +1213,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.GetUserRequest'
+              $ref: '#/components/schemas/identity.v1.GetUserRequest'
         required: true
       responses:
         default:
@@ -1227,14 +1227,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.GetUserResponse'
-  /identity.IdentityService/InitiateQrLogin:
+                $ref: '#/components/schemas/identity.v1.GetUserResponse'
+  /identity.v1.IdentityService/InitiateQrLogin:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: InitiateQrLogin
       description: QR Login (cross-device authorization)
-      operationId: identity.IdentityService.InitiateQrLogin
+      operationId: identity.v1.IdentityService.InitiateQrLogin
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1249,7 +1249,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.InitiateQrLoginRequest'
+              $ref: '#/components/schemas/identity.v1.InitiateQrLoginRequest'
         required: true
       responses:
         default:
@@ -1263,16 +1263,16 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.InitiateQrLoginResponse'
-  /identity.IdentityService/InviteUser:
+                $ref: '#/components/schemas/identity.v1.InitiateQrLoginResponse'
+  /identity.v1.IdentityService/InviteUser:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: InviteUser
       description: |-
         Admin user management (caller must have role=admin). Enforced in the
          servicer via _require_admin(ctx); all admin RPCs audit-log their actions.
-      operationId: identity.IdentityService.InviteUser
+      operationId: identity.v1.IdentityService.InviteUser
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1287,7 +1287,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.InviteUserRequest'
+              $ref: '#/components/schemas/identity.v1.InviteUserRequest'
         required: true
       responses:
         default:
@@ -1301,14 +1301,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.InviteUserResponse'
-  /identity.IdentityService/ListAuditEvents:
+                $ref: '#/components/schemas/identity.v1.InviteUserResponse'
+  /identity.v1.IdentityService/ListAuditEvents:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListAuditEvents
       description: Audit log
-      operationId: identity.IdentityService.ListAuditEvents
+      operationId: identity.v1.IdentityService.ListAuditEvents
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1323,7 +1323,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListAuditEventsRequest'
+              $ref: '#/components/schemas/identity.v1.ListAuditEventsRequest'
         required: true
       responses:
         default:
@@ -1337,13 +1337,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListAuditEventsResponse'
-  /identity.IdentityService/ListGroupMembers:
+                $ref: '#/components/schemas/identity.v1.ListAuditEventsResponse'
+  /identity.v1.IdentityService/ListGroupMembers:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListGroupMembers
-      operationId: identity.IdentityService.ListGroupMembers
+      operationId: identity.v1.IdentityService.ListGroupMembers
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1358,7 +1358,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListGroupMembersRequest'
+              $ref: '#/components/schemas/identity.v1.ListGroupMembersRequest'
         required: true
       responses:
         default:
@@ -1372,13 +1372,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListGroupMembersResponse'
-  /identity.IdentityService/ListGroups:
+                $ref: '#/components/schemas/identity.v1.ListGroupMembersResponse'
+  /identity.v1.IdentityService/ListGroups:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListGroups
-      operationId: identity.IdentityService.ListGroups
+      operationId: identity.v1.IdentityService.ListGroups
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1393,7 +1393,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListGroupsRequest'
+              $ref: '#/components/schemas/identity.v1.ListGroupsRequest'
         required: true
       responses:
         default:
@@ -1407,13 +1407,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListGroupsResponse'
-  /identity.IdentityService/ListHelpRequests:
+                $ref: '#/components/schemas/identity.v1.ListGroupsResponse'
+  /identity.v1.IdentityService/ListHelpRequests:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListHelpRequests
-      operationId: identity.IdentityService.ListHelpRequests
+      operationId: identity.v1.IdentityService.ListHelpRequests
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1428,7 +1428,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListHelpRequestsRequest'
+              $ref: '#/components/schemas/identity.v1.ListHelpRequestsRequest'
         required: true
       responses:
         default:
@@ -1442,14 +1442,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListHelpRequestsResponse'
-  /identity.IdentityService/ListMySessions:
+                $ref: '#/components/schemas/identity.v1.ListHelpRequestsResponse'
+  /identity.v1.IdentityService/ListMySessions:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListMySessions
       description: Session management
-      operationId: identity.IdentityService.ListMySessions
+      operationId: identity.v1.IdentityService.ListMySessions
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1464,7 +1464,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListMySessionsRequest'
+              $ref: '#/components/schemas/identity.v1.ListMySessionsRequest'
         required: true
       responses:
         default:
@@ -1478,13 +1478,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListMySessionsResponse'
-  /identity.IdentityService/ListPasskeys:
+                $ref: '#/components/schemas/identity.v1.ListMySessionsResponse'
+  /identity.v1.IdentityService/ListPasskeys:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListPasskeys
-      operationId: identity.IdentityService.ListPasskeys
+      operationId: identity.v1.IdentityService.ListPasskeys
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1499,7 +1499,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListPasskeysRequest'
+              $ref: '#/components/schemas/identity.v1.ListPasskeysRequest'
         required: true
       responses:
         default:
@@ -1513,13 +1513,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListPasskeysResponse'
-  /identity.IdentityService/ListProjectAuthDomains:
+                $ref: '#/components/schemas/identity.v1.ListPasskeysResponse'
+  /identity.v1.IdentityService/ListProjectAuthDomains:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListProjectAuthDomains
-      operationId: identity.IdentityService.ListProjectAuthDomains
+      operationId: identity.v1.IdentityService.ListProjectAuthDomains
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1534,7 +1534,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListProjectAuthDomainsRequest'
+              $ref: '#/components/schemas/identity.v1.ListProjectAuthDomainsRequest'
         required: true
       responses:
         default:
@@ -1548,13 +1548,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListProjectAuthDomainsResponse'
-  /identity.IdentityService/ListTenantDomains:
+                $ref: '#/components/schemas/identity.v1.ListProjectAuthDomainsResponse'
+  /identity.v1.IdentityService/ListTenantDomains:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListTenantDomains
-      operationId: identity.IdentityService.ListTenantDomains
+      operationId: identity.v1.IdentityService.ListTenantDomains
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1569,7 +1569,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListTenantDomainsRequest'
+              $ref: '#/components/schemas/identity.v1.ListTenantDomainsRequest'
         required: true
       responses:
         default:
@@ -1583,13 +1583,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListTenantDomainsResponse'
-  /identity.IdentityService/ListTenantInvitations:
+                $ref: '#/components/schemas/identity.v1.ListTenantDomainsResponse'
+  /identity.v1.IdentityService/ListTenantInvitations:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListTenantInvitations
-      operationId: identity.IdentityService.ListTenantInvitations
+      operationId: identity.v1.IdentityService.ListTenantInvitations
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1604,7 +1604,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListTenantInvitationsRequest'
+              $ref: '#/components/schemas/identity.v1.ListTenantInvitationsRequest'
         required: true
       responses:
         default:
@@ -1618,13 +1618,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListTenantInvitationsResponse'
-  /identity.IdentityService/ListTenantMembers:
+                $ref: '#/components/schemas/identity.v1.ListTenantInvitationsResponse'
+  /identity.v1.IdentityService/ListTenantMembers:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListTenantMembers
-      operationId: identity.IdentityService.ListTenantMembers
+      operationId: identity.v1.IdentityService.ListTenantMembers
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1639,7 +1639,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListTenantMembersRequest'
+              $ref: '#/components/schemas/identity.v1.ListTenantMembersRequest'
         required: true
       responses:
         default:
@@ -1653,14 +1653,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListTenantMembersResponse'
-  /identity.IdentityService/ListUsers:
+                $ref: '#/components/schemas/identity.v1.ListTenantMembersResponse'
+  /identity.v1.IdentityService/ListUsers:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ListUsers
       description: Admin-only paginated user listing — supports filters and search.
-      operationId: identity.IdentityService.ListUsers
+      operationId: identity.v1.IdentityService.ListUsers
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1675,7 +1675,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ListUsersRequest'
+              $ref: '#/components/schemas/identity.v1.ListUsersRequest'
         required: true
       responses:
         default:
@@ -1689,13 +1689,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ListUsersResponse'
-  /identity.IdentityService/Logout:
+                $ref: '#/components/schemas/identity.v1.ListUsersResponse'
+  /identity.v1.IdentityService/Logout:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: Logout
-      operationId: identity.IdentityService.Logout
+      operationId: identity.v1.IdentityService.Logout
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1710,7 +1710,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.LogoutRequest'
+              $ref: '#/components/schemas/identity.v1.LogoutRequest'
         required: true
       responses:
         default:
@@ -1724,13 +1724,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.LogoutResponse'
-  /identity.IdentityService/OAuthLogin:
+                $ref: '#/components/schemas/identity.v1.LogoutResponse'
+  /identity.v1.IdentityService/OAuthLogin:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: OAuthLogin
-      operationId: identity.IdentityService.OAuthLogin
+      operationId: identity.v1.IdentityService.OAuthLogin
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1745,7 +1745,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.OAuthLoginRequest'
+              $ref: '#/components/schemas/identity.v1.OAuthLoginRequest'
         required: true
       responses:
         default:
@@ -1759,13 +1759,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.OAuthLoginResponse'
-  /identity.IdentityService/PasswordLogin:
+                $ref: '#/components/schemas/identity.v1.OAuthLoginResponse'
+  /identity.v1.IdentityService/PasswordLogin:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: PasswordLogin
-      operationId: identity.IdentityService.PasswordLogin
+      operationId: identity.v1.IdentityService.PasswordLogin
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1780,7 +1780,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.PasswordLoginRequest'
+              $ref: '#/components/schemas/identity.v1.PasswordLoginRequest'
         required: true
       responses:
         default:
@@ -1794,13 +1794,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.PasswordLoginResponse'
-  /identity.IdentityService/PasswordSignup:
+                $ref: '#/components/schemas/identity.v1.PasswordLoginResponse'
+  /identity.v1.IdentityService/PasswordSignup:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: PasswordSignup
-      operationId: identity.IdentityService.PasswordSignup
+      operationId: identity.v1.IdentityService.PasswordSignup
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1815,7 +1815,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.PasswordSignupRequest'
+              $ref: '#/components/schemas/identity.v1.PasswordSignupRequest'
         required: true
       responses:
         default:
@@ -1829,13 +1829,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.PasswordSignupResponse'
-  /identity.IdentityService/PollQrLogin:
+                $ref: '#/components/schemas/identity.v1.PasswordSignupResponse'
+  /identity.v1.IdentityService/PollQrLogin:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: PollQrLogin
-      operationId: identity.IdentityService.PollQrLogin
+      operationId: identity.v1.IdentityService.PollQrLogin
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1850,7 +1850,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.PollQrLoginRequest'
+              $ref: '#/components/schemas/identity.v1.PollQrLoginRequest'
         required: true
       responses:
         default:
@@ -1864,13 +1864,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.PollQrLoginResponse'
-  /identity.IdentityService/ReactivateUser:
+                $ref: '#/components/schemas/identity.v1.PollQrLoginResponse'
+  /identity.v1.IdentityService/ReactivateUser:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ReactivateUser
-      operationId: identity.IdentityService.ReactivateUser
+      operationId: identity.v1.IdentityService.ReactivateUser
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1885,7 +1885,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ReactivateUserRequest'
+              $ref: '#/components/schemas/identity.v1.ReactivateUserRequest'
         required: true
       responses:
         default:
@@ -1899,13 +1899,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ReactivateUserResponse'
-  /identity.IdentityService/RedeemMagicLink:
+                $ref: '#/components/schemas/identity.v1.ReactivateUserResponse'
+  /identity.v1.IdentityService/RedeemMagicLink:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RedeemMagicLink
-      operationId: identity.IdentityService.RedeemMagicLink
+      operationId: identity.v1.IdentityService.RedeemMagicLink
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1920,7 +1920,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RedeemMagicLinkRequest'
+              $ref: '#/components/schemas/identity.v1.RedeemMagicLinkRequest'
         required: true
       responses:
         default:
@@ -1934,13 +1934,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RedeemMagicLinkResponse'
-  /identity.IdentityService/RedeemOAuthCode:
+                $ref: '#/components/schemas/identity.v1.RedeemMagicLinkResponse'
+  /identity.v1.IdentityService/RedeemOAuthCode:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RedeemOAuthCode
-      operationId: identity.IdentityService.RedeemOAuthCode
+      operationId: identity.v1.IdentityService.RedeemOAuthCode
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1955,7 +1955,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RedeemOAuthCodeRequest'
+              $ref: '#/components/schemas/identity.v1.RedeemOAuthCodeRequest'
         required: true
       responses:
         default:
@@ -1969,13 +1969,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RedeemOAuthCodeResponse'
-  /identity.IdentityService/RefreshToken:
+                $ref: '#/components/schemas/identity.v1.RedeemOAuthCodeResponse'
+  /identity.v1.IdentityService/RefreshToken:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RefreshToken
-      operationId: identity.IdentityService.RefreshToken
+      operationId: identity.v1.IdentityService.RefreshToken
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -1990,7 +1990,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RefreshTokenRequest'
+              $ref: '#/components/schemas/identity.v1.RefreshTokenRequest'
         required: true
       responses:
         default:
@@ -2004,13 +2004,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RefreshTokenResponse'
-  /identity.IdentityService/RegenerateRecoveryCodes:
+                $ref: '#/components/schemas/identity.v1.RefreshTokenResponse'
+  /identity.v1.IdentityService/RegenerateRecoveryCodes:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RegenerateRecoveryCodes
-      operationId: identity.IdentityService.RegenerateRecoveryCodes
+      operationId: identity.v1.IdentityService.RegenerateRecoveryCodes
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2025,7 +2025,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RegenerateRecoveryCodesRequest'
+              $ref: '#/components/schemas/identity.v1.RegenerateRecoveryCodesRequest'
         required: true
       responses:
         default:
@@ -2039,13 +2039,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RegenerateRecoveryCodesResponse'
-  /identity.IdentityService/RemoveGroupMember:
+                $ref: '#/components/schemas/identity.v1.RegenerateRecoveryCodesResponse'
+  /identity.v1.IdentityService/RemoveGroupMember:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RemoveGroupMember
-      operationId: identity.IdentityService.RemoveGroupMember
+      operationId: identity.v1.IdentityService.RemoveGroupMember
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2060,7 +2060,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RemoveGroupMemberRequest'
+              $ref: '#/components/schemas/identity.v1.RemoveGroupMemberRequest'
         required: true
       responses:
         default:
@@ -2074,13 +2074,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RemoveGroupMemberResponse'
-  /identity.IdentityService/RemoveTenantMember:
+                $ref: '#/components/schemas/identity.v1.RemoveGroupMemberResponse'
+  /identity.v1.IdentityService/RemoveTenantMember:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RemoveTenantMember
-      operationId: identity.IdentityService.RemoveTenantMember
+      operationId: identity.v1.IdentityService.RemoveTenantMember
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2095,7 +2095,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RemoveTenantMemberRequest'
+              $ref: '#/components/schemas/identity.v1.RemoveTenantMemberRequest'
         required: true
       responses:
         default:
@@ -2109,14 +2109,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RemoveTenantMemberResponse'
-  /identity.IdentityService/RequestAdminHelp:
+                $ref: '#/components/schemas/identity.v1.RemoveTenantMemberResponse'
+  /identity.v1.IdentityService/RequestAdminHelp:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RequestAdminHelp
       description: Admin help (replaces self-serve ForgotPassword)
-      operationId: identity.IdentityService.RequestAdminHelp
+      operationId: identity.v1.IdentityService.RequestAdminHelp
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2131,7 +2131,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RequestAdminHelpRequest'
+              $ref: '#/components/schemas/identity.v1.RequestAdminHelpRequest'
         required: true
       responses:
         default:
@@ -2145,14 +2145,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RequestAdminHelpResponse'
-  /identity.IdentityService/RequestEmailChange:
+                $ref: '#/components/schemas/identity.v1.RequestAdminHelpResponse'
+  /identity.v1.IdentityService/RequestEmailChange:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RequestEmailChange
       description: Email Change (primary-email rotation, double-opt-in)
-      operationId: identity.IdentityService.RequestEmailChange
+      operationId: identity.v1.IdentityService.RequestEmailChange
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2167,7 +2167,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RequestEmailChangeRequest'
+              $ref: '#/components/schemas/identity.v1.RequestEmailChangeRequest'
         required: true
       responses:
         default:
@@ -2181,14 +2181,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RequestEmailChangeResponse'
-  /identity.IdentityService/RequestEmailLoginCode:
+                $ref: '#/components/schemas/identity.v1.RequestEmailChangeResponse'
+  /identity.v1.IdentityService/RequestEmailLoginCode:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RequestEmailLoginCode
       description: Passwordless email login (OTP code + magic link)
-      operationId: identity.IdentityService.RequestEmailLoginCode
+      operationId: identity.v1.IdentityService.RequestEmailLoginCode
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2203,7 +2203,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RequestEmailLoginCodeRequest'
+              $ref: '#/components/schemas/identity.v1.RequestEmailLoginCodeRequest'
         required: true
       responses:
         default:
@@ -2217,13 +2217,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RequestEmailLoginCodeResponse'
-  /identity.IdentityService/RequestMagicLink:
+                $ref: '#/components/schemas/identity.v1.RequestEmailLoginCodeResponse'
+  /identity.v1.IdentityService/RequestMagicLink:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RequestMagicLink
-      operationId: identity.IdentityService.RequestMagicLink
+      operationId: identity.v1.IdentityService.RequestMagicLink
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2238,7 +2238,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RequestMagicLinkRequest'
+              $ref: '#/components/schemas/identity.v1.RequestMagicLinkRequest'
         required: true
       responses:
         default:
@@ -2252,13 +2252,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RequestMagicLinkResponse'
-  /identity.IdentityService/RequestPasswordReset:
+                $ref: '#/components/schemas/identity.v1.RequestMagicLinkResponse'
+  /identity.v1.IdentityService/RequestPasswordReset:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RequestPasswordReset
-      operationId: identity.IdentityService.RequestPasswordReset
+      operationId: identity.v1.IdentityService.RequestPasswordReset
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2273,7 +2273,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RequestPasswordResetRequest'
+              $ref: '#/components/schemas/identity.v1.RequestPasswordResetRequest'
         required: true
       responses:
         default:
@@ -2287,14 +2287,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RequestPasswordResetResponse'
-  /identity.IdentityService/RequestPhoneVerification:
+                $ref: '#/components/schemas/identity.v1.RequestPasswordResetResponse'
+  /identity.v1.IdentityService/RequestPhoneVerification:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RequestPhoneVerification
       description: Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
-      operationId: identity.IdentityService.RequestPhoneVerification
+      operationId: identity.v1.IdentityService.RequestPhoneVerification
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2309,7 +2309,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RequestPhoneVerificationRequest'
+              $ref: '#/components/schemas/identity.v1.RequestPhoneVerificationRequest'
         required: true
       responses:
         default:
@@ -2323,13 +2323,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RequestPhoneVerificationResponse'
-  /identity.IdentityService/ResetUserPassword:
+                $ref: '#/components/schemas/identity.v1.RequestPhoneVerificationResponse'
+  /identity.v1.IdentityService/ResetUserPassword:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ResetUserPassword
-      operationId: identity.IdentityService.ResetUserPassword
+      operationId: identity.v1.IdentityService.ResetUserPassword
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2344,7 +2344,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ResetUserPasswordRequest'
+              $ref: '#/components/schemas/identity.v1.ResetUserPasswordRequest'
         required: true
       responses:
         default:
@@ -2358,13 +2358,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ResetUserPasswordResponse'
-  /identity.IdentityService/ResolveHelpRequest:
+                $ref: '#/components/schemas/identity.v1.ResetUserPasswordResponse'
+  /identity.v1.IdentityService/ResolveHelpRequest:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: ResolveHelpRequest
-      operationId: identity.IdentityService.ResolveHelpRequest
+      operationId: identity.v1.IdentityService.ResolveHelpRequest
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2379,7 +2379,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.ResolveHelpRequestRequest'
+              $ref: '#/components/schemas/identity.v1.ResolveHelpRequestRequest'
         required: true
       responses:
         default:
@@ -2393,13 +2393,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.ResolveHelpRequestResponse'
-  /identity.IdentityService/RevokeAllSessions:
+                $ref: '#/components/schemas/identity.v1.ResolveHelpRequestResponse'
+  /identity.v1.IdentityService/RevokeAllSessions:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RevokeAllSessions
-      operationId: identity.IdentityService.RevokeAllSessions
+      operationId: identity.v1.IdentityService.RevokeAllSessions
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2414,7 +2414,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RevokeAllSessionsRequest'
+              $ref: '#/components/schemas/identity.v1.RevokeAllSessionsRequest'
         required: true
       responses:
         default:
@@ -2428,13 +2428,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RevokeAllSessionsResponse'
-  /identity.IdentityService/RevokeSession:
+                $ref: '#/components/schemas/identity.v1.RevokeAllSessionsResponse'
+  /identity.v1.IdentityService/RevokeSession:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: RevokeSession
-      operationId: identity.IdentityService.RevokeSession
+      operationId: identity.v1.IdentityService.RevokeSession
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2449,7 +2449,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.RevokeSessionRequest'
+              $ref: '#/components/schemas/identity.v1.RevokeSessionRequest'
         required: true
       responses:
         default:
@@ -2463,14 +2463,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.RevokeSessionResponse'
-  /identity.IdentityService/SendEmailVerification:
+                $ref: '#/components/schemas/identity.v1.RevokeSessionResponse'
+  /identity.v1.IdentityService/SendEmailVerification:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: SendEmailVerification
       description: Email Verification
-      operationId: identity.IdentityService.SendEmailVerification
+      operationId: identity.v1.IdentityService.SendEmailVerification
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2485,7 +2485,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.SendEmailVerificationRequest'
+              $ref: '#/components/schemas/identity.v1.SendEmailVerificationRequest'
         required: true
       responses:
         default:
@@ -2499,17 +2499,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.SendEmailVerificationResponse'
-  /identity.IdentityService/SetPrimaryAuthDomain:
+                $ref: '#/components/schemas/identity.v1.SendEmailVerificationResponse'
+  /identity.v1.IdentityService/SetPrimaryAuthDomain:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: SetPrimaryAuthDomain
       description: |-
         SetPrimaryAuthDomain promotes a VERIFIED custom auth-domain to the
          project's primary serving host, atomically demoting the current primary in
          the same transaction. Only a verified domain may be promoted.
-      operationId: identity.IdentityService.SetPrimaryAuthDomain
+      operationId: identity.v1.IdentityService.SetPrimaryAuthDomain
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2524,7 +2524,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.SetPrimaryAuthDomainRequest'
+              $ref: '#/components/schemas/identity.v1.SetPrimaryAuthDomainRequest'
         required: true
       responses:
         default:
@@ -2538,13 +2538,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.SetPrimaryAuthDomainResponse'
-  /identity.IdentityService/SetUserQuota:
+                $ref: '#/components/schemas/identity.v1.SetPrimaryAuthDomainResponse'
+  /identity.v1.IdentityService/SetUserQuota:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: SetUserQuota
-      operationId: identity.IdentityService.SetUserQuota
+      operationId: identity.v1.IdentityService.SetUserQuota
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2559,7 +2559,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.SetUserQuotaRequest'
+              $ref: '#/components/schemas/identity.v1.SetUserQuotaRequest'
         required: true
       responses:
         default:
@@ -2573,13 +2573,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.SetUserQuotaResponse'
-  /identity.IdentityService/SignOutEverywhere:
+                $ref: '#/components/schemas/identity.v1.SetUserQuotaResponse'
+  /identity.v1.IdentityService/SignOutEverywhere:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: SignOutEverywhere
-      operationId: identity.IdentityService.SignOutEverywhere
+      operationId: identity.v1.IdentityService.SignOutEverywhere
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2594,7 +2594,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.SignOutEverywhereRequest'
+              $ref: '#/components/schemas/identity.v1.SignOutEverywhereRequest'
         required: true
       responses:
         default:
@@ -2608,13 +2608,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.SignOutEverywhereResponse'
-  /identity.IdentityService/UpdateGroup:
+                $ref: '#/components/schemas/identity.v1.SignOutEverywhereResponse'
+  /identity.v1.IdentityService/UpdateGroup:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: UpdateGroup
-      operationId: identity.IdentityService.UpdateGroup
+      operationId: identity.v1.IdentityService.UpdateGroup
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2629,7 +2629,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.UpdateGroupRequest'
+              $ref: '#/components/schemas/identity.v1.UpdateGroupRequest'
         required: true
       responses:
         default:
@@ -2643,14 +2643,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.UpdateGroupResponse'
-  /identity.IdentityService/UpdateProfile:
+                $ref: '#/components/schemas/identity.v1.UpdateGroupResponse'
+  /identity.v1.IdentityService/UpdateProfile:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: UpdateProfile
       description: Self-service profile
-      operationId: identity.IdentityService.UpdateProfile
+      operationId: identity.v1.IdentityService.UpdateProfile
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2665,7 +2665,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.UpdateProfileRequest'
+              $ref: '#/components/schemas/identity.v1.UpdateProfileRequest'
         required: true
       responses:
         default:
@@ -2679,13 +2679,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.UpdateProfileResponse'
-  /identity.IdentityService/UpdateUser:
+                $ref: '#/components/schemas/identity.v1.UpdateProfileResponse'
+  /identity.v1.IdentityService/UpdateUser:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: UpdateUser
-      operationId: identity.IdentityService.UpdateUser
+      operationId: identity.v1.IdentityService.UpdateUser
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2700,7 +2700,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.UpdateUserRequest'
+              $ref: '#/components/schemas/identity.v1.UpdateUserRequest'
         required: true
       responses:
         default:
@@ -2714,13 +2714,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.UpdateUserResponse'
-  /identity.IdentityService/VerifyDomain:
+                $ref: '#/components/schemas/identity.v1.UpdateUserResponse'
+  /identity.v1.IdentityService/VerifyDomain:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: VerifyDomain
-      operationId: identity.IdentityService.VerifyDomain
+      operationId: identity.v1.IdentityService.VerifyDomain
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2735,7 +2735,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.VerifyDomainRequest'
+              $ref: '#/components/schemas/identity.v1.VerifyDomainRequest'
         required: true
       responses:
         default:
@@ -2749,13 +2749,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.VerifyDomainResponse'
-  /identity.IdentityService/VerifyEmail:
+                $ref: '#/components/schemas/identity.v1.VerifyDomainResponse'
+  /identity.v1.IdentityService/VerifyEmail:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: VerifyEmail
-      operationId: identity.IdentityService.VerifyEmail
+      operationId: identity.v1.IdentityService.VerifyEmail
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2770,7 +2770,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.VerifyEmailRequest'
+              $ref: '#/components/schemas/identity.v1.VerifyEmailRequest'
         required: true
       responses:
         default:
@@ -2784,13 +2784,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.VerifyEmailResponse'
-  /identity.IdentityService/VerifyEmailLoginCode:
+                $ref: '#/components/schemas/identity.v1.VerifyEmailResponse'
+  /identity.v1.IdentityService/VerifyEmailLoginCode:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: VerifyEmailLoginCode
-      operationId: identity.IdentityService.VerifyEmailLoginCode
+      operationId: identity.v1.IdentityService.VerifyEmailLoginCode
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2805,7 +2805,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.VerifyEmailLoginCodeRequest'
+              $ref: '#/components/schemas/identity.v1.VerifyEmailLoginCodeRequest'
         required: true
       responses:
         default:
@@ -2819,13 +2819,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.VerifyEmailLoginCodeResponse'
-  /identity.IdentityService/VerifyPhoneCode:
+                $ref: '#/components/schemas/identity.v1.VerifyEmailLoginCodeResponse'
+  /identity.v1.IdentityService/VerifyPhoneCode:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: VerifyPhoneCode
-      operationId: identity.IdentityService.VerifyPhoneCode
+      operationId: identity.v1.IdentityService.VerifyPhoneCode
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2840,7 +2840,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.VerifyPhoneCodeRequest'
+              $ref: '#/components/schemas/identity.v1.VerifyPhoneCodeRequest'
         required: true
       responses:
         default:
@@ -2854,13 +2854,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.VerifyPhoneCodeResponse'
-  /identity.IdentityService/VerifyProjectAuthDomain:
+                $ref: '#/components/schemas/identity.v1.VerifyPhoneCodeResponse'
+  /identity.v1.IdentityService/VerifyProjectAuthDomain:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: VerifyProjectAuthDomain
-      operationId: identity.IdentityService.VerifyProjectAuthDomain
+      operationId: identity.v1.IdentityService.VerifyProjectAuthDomain
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2875,7 +2875,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.VerifyProjectAuthDomainRequest'
+              $ref: '#/components/schemas/identity.v1.VerifyProjectAuthDomainRequest'
         required: true
       responses:
         default:
@@ -2889,13 +2889,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.VerifyProjectAuthDomainResponse'
-  /identity.IdentityService/VerifyTotp:
+                $ref: '#/components/schemas/identity.v1.VerifyProjectAuthDomainResponse'
+  /identity.v1.IdentityService/VerifyTotp:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: VerifyTotp
-      operationId: identity.IdentityService.VerifyTotp
+      operationId: identity.v1.IdentityService.VerifyTotp
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2910,7 +2910,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.VerifyTotpRequest'
+              $ref: '#/components/schemas/identity.v1.VerifyTotpRequest'
         required: true
       responses:
         default:
@@ -2924,13 +2924,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.VerifyTotpResponse'
-  /identity.IdentityService/VerifyTotpSetup:
+                $ref: '#/components/schemas/identity.v1.VerifyTotpResponse'
+  /identity.v1.IdentityService/VerifyTotpSetup:
     post:
       tags:
-        - identity.IdentityService
+        - identity.v1.IdentityService
       summary: VerifyTotpSetup
-      operationId: identity.IdentityService.VerifyTotpSetup
+      operationId: identity.v1.IdentityService.VerifyTotpSetup
       parameters:
         - name: Connect-Protocol-Version
           in: header
@@ -2945,7 +2945,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/identity.VerifyTotpSetupRequest'
+              $ref: '#/components/schemas/identity.v1.VerifyTotpSetupRequest'
         required: true
       responses:
         default:
@@ -2959,7 +2959,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/identity.VerifyTotpSetupResponse'
+                $ref: '#/components/schemas/identity.v1.VerifyTotpSetupResponse'
 components:
   schemas:
     connect-protocol-version:
@@ -3031,253 +3031,6 @@ components:
           description: Deserialized error detail payload. The 'type' field indicates the schema. This field is for easier debugging and should not be relied upon for application logic.
       additionalProperties: true
       description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message, with an additional debug field for ConnectRPC error details.
-    entdb.CapabilityImplication:
-      type: object
-      properties:
-        core:
-          title: core
-          $ref: '#/components/schemas/entdb.CoreCapability'
-        ext:
-          type: integer
-          title: ext
-          format: int32
-        impliesCore:
-          type: array
-          items:
-            $ref: '#/components/schemas/entdb.CoreCapability'
-          title: implies_core
-        impliesExt:
-          type: array
-          items:
-            type: integer
-            format: int32
-          title: implies_ext
-      title: CapabilityImplication
-      additionalProperties: false
-    entdb.CapabilityMapping:
-      type: object
-      properties:
-        op:
-          type: string
-          title: op
-        field:
-          type: string
-          title: field
-        fieldValue:
-          type: string
-          title: field_value
-        childType:
-          type: string
-          title: child_type
-        requiredCore:
-          title: required_core
-          $ref: '#/components/schemas/entdb.CoreCapability'
-        requiredExt:
-          type: integer
-          title: required_ext
-          format: int32
-      title: CapabilityMapping
-      additionalProperties: false
-    entdb.CoreCapability:
-      type: string
-      title: CoreCapability
-      enum:
-        - CORE_CAP_UNSPECIFIED
-        - CORE_CAP_READ
-        - CORE_CAP_COMMENT
-        - CORE_CAP_EDIT
-        - CORE_CAP_DELETE
-        - CORE_CAP_ADMIN
-    entdb.DataPolicy:
-      type: string
-      title: DataPolicy
-      enum:
-        - DATA_POLICY_PERSONAL
-        - DATA_POLICY_BUSINESS
-        - DATA_POLICY_FINANCIAL
-        - DATA_POLICY_AUDIT
-        - DATA_POLICY_EPHEMERAL
-        - DATA_POLICY_HEALTHCARE
-    entdb.EdgeOpts:
-      type: object
-      properties:
-        edgeId:
-          type: integer
-          title: edge_id
-          format: int32
-        name:
-          type: string
-          title: name
-        propagateShare:
-          type: boolean
-          title: propagate_share
-        uniquePerFrom:
-          type: boolean
-          title: unique_per_from
-        dataPolicy:
-          title: data_policy
-          $ref: '#/components/schemas/entdb.DataPolicy'
-        onSubjectExit:
-          title: on_subject_exit
-          $ref: '#/components/schemas/entdb.SubjectExitPolicy'
-        retentionDays:
-          type: integer
-          title: retention_days
-          format: int32
-        legalBasis:
-          type: string
-          title: legal_basis
-        description:
-          type: string
-          title: description
-        deprecated:
-          type: boolean
-          title: deprecated
-      title: EdgeOpts
-      additionalProperties: false
-    entdb.FieldOpts:
-      type: object
-      properties:
-        required:
-          type: boolean
-          title: required
-        searchable:
-          type: boolean
-          title: searchable
-        indexed:
-          type: boolean
-          title: indexed
-        pii:
-          type: boolean
-          title: pii
-        phi:
-          type: boolean
-          title: phi
-        enumValues:
-          type: string
-          title: enum_values
-        kind:
-          type: string
-          title: kind
-        refTypeId:
-          type: integer
-          title: ref_type_id
-          format: int32
-        defaultValue:
-          type: string
-          title: default_value
-        description:
-          type: string
-          title: description
-        deprecated:
-          type: boolean
-          title: deprecated
-        piiFalse:
-          type: boolean
-          title: pii_false
-        unique:
-          type: boolean
-          title: unique
-      title: FieldOpts
-      additionalProperties: false
-    entdb.NodeOpts:
-      type: object
-      properties:
-        typeId:
-          type: integer
-          title: type_id
-          format: int32
-        public:
-          type: boolean
-          title: public
-        tenantVisible:
-          type: boolean
-          title: tenant_visible
-        inherit:
-          type: boolean
-          title: inherit
-        private:
-          type: boolean
-          title: private
-        dataPolicy:
-          title: data_policy
-          $ref: '#/components/schemas/entdb.DataPolicy'
-        subjectField:
-          type: string
-          title: subject_field
-        retentionDays:
-          type: integer
-          title: retention_days
-          format: int32
-        legalBasis:
-          type: string
-          title: legal_basis
-        description:
-          type: string
-          title: description
-        deprecated:
-          type: boolean
-          title: deprecated
-        extensionCapabilityEnum:
-          type: string
-          title: extension_capability_enum
-        capabilityMappings:
-          type: array
-          items:
-            $ref: '#/components/schemas/entdb.CapabilityMapping'
-          title: capability_mappings
-        capabilityImplications:
-          type: array
-          items:
-            $ref: '#/components/schemas/entdb.CapabilityImplication'
-          title: capability_implications
-        compositeUnique:
-          type: array
-          items:
-            $ref: '#/components/schemas/entdb.UniqueConstraint'
-          title: composite_unique
-          description: |-
-            Composite (multi-field) unique constraints. Each entry declares a
-             tuple of proto field names that must be unique across all nodes of
-             this type; the server resolves names to numeric field_ids at
-             schema-register time and creates a unique expression index covering
-             the tuple. Single-field uniqueness continues to use
-             (entdb.field).unique = true.
-      title: NodeOpts
-      additionalProperties: false
-    entdb.SubjectExitPolicy:
-      type: string
-      title: SubjectExitPolicy
-      enum:
-        - SUBJECT_EXIT_BOTH
-        - SUBJECT_EXIT_FROM
-        - SUBJECT_EXIT_TO
-    entdb.UniqueConstraint:
-      type: object
-      properties:
-        fields:
-          type: array
-          items:
-            type: string
-          title: fields
-          description: |-
-            Proto field names participating in the constraint. Must reference
-             at least 2 fields (single-field uniqueness is declared via
-             (entdb.field).unique = true).
-        name:
-          type: string
-          title: name
-          description: |-
-            Optional human-readable name. When omitted, the server derives one
-             from the field ids (e.g. "f2_f3"). Surfaces in error messages.
-      title: UniqueConstraint
-      additionalProperties: false
-      description: |-
-        Composite uniqueness constraint on a node type — declares that the
-         listed fields, taken together as a tuple, must be unique across all
-         nodes of the type. Used by ADR-031 self-describing writes: the SDK
-         attaches this to ExecuteAtomic, the server materialises it in the
-         same WAL event before applying the data ops.
     google.protobuf.Timestamp:
       type: string
       examples:
@@ -3374,7 +3127,7 @@ components:
          the Joda Time's [`ISODateTimeFormat.dateTime()`](
          http://joda-time.sourceforge.net/apidocs/org/joda/time/format/ISODateTimeFormat.html#dateTime()
          ) to obtain a formatter capable of generating timestamps in this format.
-    identity.AcceptInvitationRequest:
+    identity.v1.AcceptInvitationRequest:
       type: object
       properties:
         invitationToken:
@@ -3388,12 +3141,12 @@ components:
           title: name
       title: AcceptInvitationRequest
       additionalProperties: false
-    identity.AcceptInvitationResponse:
+    identity.v1.AcceptInvitationResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -3406,7 +3159,7 @@ components:
           format: int32
       title: AcceptInvitationResponse
       additionalProperties: false
-    identity.AcceptTenantInvitationRequest:
+    identity.v1.AcceptTenantInvitationRequest:
       type: object
       properties:
         token:
@@ -3414,15 +3167,15 @@ components:
           title: token
       title: AcceptTenantInvitationRequest
       additionalProperties: false
-    identity.AcceptTenantInvitationResponse:
+    identity.v1.AcceptTenantInvitationResponse:
       type: object
       properties:
         membership:
           title: membership
-          $ref: '#/components/schemas/identity.TenantMembership'
+          $ref: '#/components/schemas/identity.v1.TenantMembership'
       title: AcceptTenantInvitationResponse
       additionalProperties: false
-    identity.AddGroupMemberRequest:
+    identity.v1.AddGroupMemberRequest:
       type: object
       properties:
         groupId:
@@ -3436,11 +3189,11 @@ components:
           title: tenant_id
       title: AddGroupMemberRequest
       additionalProperties: false
-    identity.AddGroupMemberResponse:
+    identity.v1.AddGroupMemberResponse:
       type: object
       title: AddGroupMemberResponse
       additionalProperties: false
-    identity.AddProjectAuthDomainRequest:
+    identity.v1.AddProjectAuthDomainRequest:
       type: object
       properties:
         projectId:
@@ -3460,12 +3213,12 @@ components:
              promotion requires a verified domain and is applied atomically.
       title: AddProjectAuthDomainRequest
       additionalProperties: false
-    identity.AddProjectAuthDomainResponse:
+    identity.v1.AddProjectAuthDomainResponse:
       type: object
       properties:
         domain:
           title: domain
-          $ref: '#/components/schemas/identity.ProjectAuthDomain'
+          $ref: '#/components/schemas/identity.v1.ProjectAuthDomain'
         txtName:
           type: string
           title: txt_name
@@ -3480,7 +3233,7 @@ components:
              per (project, hostname), so re-issuing returns the same challenge.
       title: AddProjectAuthDomainResponse
       additionalProperties: false
-    identity.AdminAddProjectAuthDomainRequest:
+    identity.v1.AdminAddProjectAuthDomainRequest:
       type: object
       properties:
         projectId:
@@ -3497,11 +3250,11 @@ components:
              branded links). At most one primary per project.
       title: AdminAddProjectAuthDomainRequest
       additionalProperties: false
-    identity.AdminAddProjectAuthDomainResponse:
+    identity.v1.AdminAddProjectAuthDomainResponse:
       type: object
       title: AdminAddProjectAuthDomainResponse
       additionalProperties: false
-    identity.AdminAddTenantAdminRequest:
+    identity.v1.AdminAddTenantAdminRequest:
       type: object
       properties:
         projectId:
@@ -3519,15 +3272,15 @@ components:
           description: 'role grants tenant administration: "owner" (default) or "admin".'
       title: AdminAddTenantAdminRequest
       additionalProperties: false
-    identity.AdminAddTenantAdminResponse:
+    identity.v1.AdminAddTenantAdminResponse:
       type: object
       properties:
         membership:
           title: membership
-          $ref: '#/components/schemas/identity.TenantMembership'
+          $ref: '#/components/schemas/identity.v1.TenantMembership'
       title: AdminAddTenantAdminResponse
       additionalProperties: false
-    identity.AdminCreateProjectCredentialRequest:
+    identity.v1.AdminCreateProjectCredentialRequest:
       type: object
       properties:
         projectId:
@@ -3541,7 +3294,7 @@ components:
              no secret) or "secret" (a key whose secret half is shown ONCE).
       title: AdminCreateProjectCredentialRequest
       additionalProperties: false
-    identity.AdminCreateProjectCredentialResponse:
+    identity.v1.AdminCreateProjectCredentialResponse:
       type: object
       properties:
         credentialId:
@@ -3560,7 +3313,7 @@ components:
              has no secret half.
       title: AdminCreateProjectCredentialResponse
       additionalProperties: false
-    identity.AdminCreateProjectRequest:
+    identity.v1.AdminCreateProjectRequest:
       type: object
       properties:
         name:
@@ -3575,7 +3328,7 @@ components:
              Required and globally unique.
       title: AdminCreateProjectRequest
       additionalProperties: false
-    identity.AdminCreateProjectResponse:
+    identity.v1.AdminCreateProjectResponse:
       type: object
       properties:
         projectId:
@@ -3583,7 +3336,7 @@ components:
           title: project_id
       title: AdminCreateProjectResponse
       additionalProperties: false
-    identity.AdminCreateTenantRequest:
+    identity.v1.AdminCreateTenantRequest:
       type: object
       properties:
         projectId:
@@ -3597,7 +3350,7 @@ components:
           title: primary_domain
       title: AdminCreateTenantRequest
       additionalProperties: false
-    identity.AdminCreateTenantResponse:
+    identity.v1.AdminCreateTenantResponse:
       type: object
       properties:
         tenantId:
@@ -3605,7 +3358,7 @@ components:
           title: tenant_id
       title: AdminCreateTenantResponse
       additionalProperties: false
-    identity.AdminHelpRequest:
+    identity.v1.AdminHelpRequest:
       type: object
       properties:
         id:
@@ -3625,7 +3378,7 @@ components:
           title: user_agent
         status:
           title: status
-          $ref: '#/components/schemas/identity.HelpRequestStatus'
+          $ref: '#/components/schemas/identity.v1.HelpRequestStatus'
         resolvedBy:
           type: string
           title: resolved_by
@@ -3640,7 +3393,7 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: AdminHelpRequest
       additionalProperties: false
-    identity.ApproveQrLoginRequest:
+    identity.v1.ApproveQrLoginRequest:
       type: object
       properties:
         sessionId:
@@ -3652,15 +3405,15 @@ components:
       title: ApproveQrLoginRequest
       additionalProperties: false
       description: 'Step 2b: Authenticated device approves (or rejects) the new device.'
-    identity.ApproveQrLoginResponse:
+    identity.v1.ApproveQrLoginResponse:
       type: object
       properties:
         status:
           title: status
-          $ref: '#/components/schemas/identity.QrLoginStatus'
+          $ref: '#/components/schemas/identity.v1.QrLoginStatus'
       title: ApproveQrLoginResponse
       additionalProperties: false
-    identity.AuditEvent:
+    identity.v1.AuditEvent:
       type: object
       properties:
         id:
@@ -3694,11 +3447,11 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: AuditEvent
       additionalProperties: false
-    identity.BeginIdentityVerificationRequest:
+    identity.v1.BeginIdentityVerificationRequest:
       type: object
       title: BeginIdentityVerificationRequest
       additionalProperties: false
-    identity.BeginIdentityVerificationResponse:
+    identity.v1.BeginIdentityVerificationResponse:
       type: object
       properties:
         verificationId:
@@ -3717,7 +3470,7 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: BeginIdentityVerificationResponse
       additionalProperties: false
-    identity.BeginOAuthLoginRequest:
+    identity.v1.BeginOAuthLoginRequest:
       type: object
       properties:
         redirectUri:
@@ -3733,7 +3486,7 @@ components:
           description: Microsoft tenant ID (optional)
       title: BeginOAuthLoginRequest
       additionalProperties: false
-    identity.BeginOAuthLoginResponse:
+    identity.v1.BeginOAuthLoginResponse:
       type: object
       properties:
         authorizationUrl:
@@ -3754,7 +3507,7 @@ components:
           format: int32
       title: BeginOAuthLoginResponse
       additionalProperties: false
-    identity.BeginPasskeyLoginRequest:
+    identity.v1.BeginPasskeyLoginRequest:
       type: object
       properties:
         email:
@@ -3764,7 +3517,7 @@ components:
       title: BeginPasskeyLoginRequest
       additionalProperties: false
       description: Authentication (no session required)
-    identity.BeginPasskeyLoginResponse:
+    identity.v1.BeginPasskeyLoginResponse:
       type: object
       properties:
         optionsJson:
@@ -3775,7 +3528,7 @@ components:
           title: challenge_id
       title: BeginPasskeyLoginResponse
       additionalProperties: false
-    identity.BeginPasskeyRegistrationRequest:
+    identity.v1.BeginPasskeyRegistrationRequest:
       type: object
       properties:
         deviceName:
@@ -3784,7 +3537,7 @@ components:
       title: BeginPasskeyRegistrationRequest
       additionalProperties: false
       description: Registration (requires authenticated session)
-    identity.BeginPasskeyRegistrationResponse:
+    identity.v1.BeginPasskeyRegistrationResponse:
       type: object
       properties:
         optionsJson:
@@ -3796,11 +3549,11 @@ components:
           title: challenge_id
       title: BeginPasskeyRegistrationResponse
       additionalProperties: false
-    identity.BeginTotpSetupRequest:
+    identity.v1.BeginTotpSetupRequest:
       type: object
       title: BeginTotpSetupRequest
       additionalProperties: false
-    identity.BeginTotpSetupResponse:
+    identity.v1.BeginTotpSetupResponse:
       type: object
       properties:
         secret:
@@ -3819,7 +3572,7 @@ components:
           description: 10 one-time recovery codes (shown once)
       title: BeginTotpSetupResponse
       additionalProperties: false
-    identity.ChangePasswordRequest:
+    identity.v1.ChangePasswordRequest:
       type: object
       properties:
         currentPassword:
@@ -3830,11 +3583,11 @@ components:
           title: new_password
       title: ChangePasswordRequest
       additionalProperties: false
-    identity.ChangePasswordResponse:
+    identity.v1.ChangePasswordResponse:
       type: object
       title: ChangePasswordResponse
       additionalProperties: false
-    identity.CompletePasskeyLoginRequest:
+    identity.v1.CompletePasskeyLoginRequest:
       type: object
       properties:
         challengeId:
@@ -3845,12 +3598,12 @@ components:
           title: credential_json
       title: CompletePasskeyLoginRequest
       additionalProperties: false
-    identity.CompletePasskeyLoginResponse:
+    identity.v1.CompletePasskeyLoginResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -3863,7 +3616,7 @@ components:
           format: int32
       title: CompletePasskeyLoginResponse
       additionalProperties: false
-    identity.CompletePasskeyRegistrationRequest:
+    identity.v1.CompletePasskeyRegistrationRequest:
       type: object
       properties:
         challengeId:
@@ -3878,15 +3631,15 @@ components:
           title: device_name
       title: CompletePasskeyRegistrationRequest
       additionalProperties: false
-    identity.CompletePasskeyRegistrationResponse:
+    identity.v1.CompletePasskeyRegistrationResponse:
       type: object
       properties:
         credential:
           title: credential
-          $ref: '#/components/schemas/identity.PasskeyCredentialInfo'
+          $ref: '#/components/schemas/identity.v1.PasskeyCredentialInfo'
       title: CompletePasskeyRegistrationResponse
       additionalProperties: false
-    identity.ConfirmEmailChangeRequest:
+    identity.v1.ConfirmEmailChangeRequest:
       type: object
       properties:
         token:
@@ -3894,15 +3647,15 @@ components:
           title: token
       title: ConfirmEmailChangeRequest
       additionalProperties: false
-    identity.ConfirmEmailChangeResponse:
+    identity.v1.ConfirmEmailChangeResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
       title: ConfirmEmailChangeResponse
       additionalProperties: false
-    identity.ConfirmPasswordResetRequest:
+    identity.v1.ConfirmPasswordResetRequest:
       type: object
       properties:
         token:
@@ -3913,11 +3666,11 @@ components:
           title: new_password
       title: ConfirmPasswordResetRequest
       additionalProperties: false
-    identity.ConfirmPasswordResetResponse:
+    identity.v1.ConfirmPasswordResetResponse:
       type: object
       title: ConfirmPasswordResetResponse
       additionalProperties: false
-    identity.CreateDomainRequest:
+    identity.v1.CreateDomainRequest:
       type: object
       properties:
         tenantId:
@@ -3932,12 +3685,12 @@ components:
           description: '"dns_txt" | "email"'
       title: CreateDomainRequest
       additionalProperties: false
-    identity.CreateDomainResponse:
+    identity.v1.CreateDomainResponse:
       type: object
       properties:
         domain:
           title: domain
-          $ref: '#/components/schemas/identity.Domain'
+          $ref: '#/components/schemas/identity.v1.Domain'
         dnsTxtName:
           type: string
           title: dns_txt_name
@@ -3951,7 +3704,7 @@ components:
           description: exact TXT value to publish
       title: CreateDomainResponse
       additionalProperties: false
-    identity.CreateFirstPlatformAdminRequest:
+    identity.v1.CreateFirstPlatformAdminRequest:
       type: object
       properties:
         email:
@@ -3978,9 +3731,9 @@ components:
          emptiness check + insert are atomic, so two racing bootstraps create
          exactly one admin and the loser is rejected.
 
-         It is available only on the postgres control-plane driver; entdb/memory
+         It is available only on the postgres control-plane driver; the memory driver
          deployments (which have no platform_admins table) return UNIMPLEMENTED.
-    identity.CreateFirstPlatformAdminResponse:
+    identity.v1.CreateFirstPlatformAdminResponse:
       type: object
       properties:
         adminId:
@@ -3998,7 +3751,7 @@ components:
              the caller supplied their own password.
       title: CreateFirstPlatformAdminResponse
       additionalProperties: false
-    identity.CreateGroupRequest:
+    identity.v1.CreateGroupRequest:
       type: object
       properties:
         name:
@@ -4016,15 +3769,15 @@ components:
           description: user_id of creator
       title: CreateGroupRequest
       additionalProperties: false
-    identity.CreateGroupResponse:
+    identity.v1.CreateGroupResponse:
       type: object
       properties:
         group:
           title: group
-          $ref: '#/components/schemas/identity.Group'
+          $ref: '#/components/schemas/identity.v1.Group'
       title: CreateGroupResponse
       additionalProperties: false
-    identity.CreateTenantInvitationRequest:
+    identity.v1.CreateTenantInvitationRequest:
       type: object
       properties:
         tenantId:
@@ -4039,12 +3792,12 @@ components:
           description: '"member" (default) | "admin" | "owner"'
       title: CreateTenantInvitationRequest
       additionalProperties: false
-    identity.CreateTenantInvitationResponse:
+    identity.v1.CreateTenantInvitationResponse:
       type: object
       properties:
         invitation:
           title: invitation
-          $ref: '#/components/schemas/identity.TenantInvitation'
+          $ref: '#/components/schemas/identity.v1.TenantInvitation'
         rawToken:
           type: string
           title: raw_token
@@ -4055,7 +3808,7 @@ components:
              belongs in the recipient's inbox, not the API response.
       title: CreateTenantInvitationResponse
       additionalProperties: false
-    identity.CreateUserRequest:
+    identity.v1.CreateUserRequest:
       type: object
       properties:
         email:
@@ -4075,15 +3828,15 @@ components:
           title: tenant_id
       title: CreateUserRequest
       additionalProperties: false
-    identity.CreateUserResponse:
+    identity.v1.CreateUserResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
       title: CreateUserResponse
       additionalProperties: false
-    identity.DeactivateUserRequest:
+    identity.v1.DeactivateUserRequest:
       type: object
       properties:
         userId:
@@ -4094,11 +3847,11 @@ components:
           title: reason
       title: DeactivateUserRequest
       additionalProperties: false
-    identity.DeactivateUserResponse:
+    identity.v1.DeactivateUserResponse:
       type: object
       title: DeactivateUserResponse
       additionalProperties: false
-    identity.DeleteGroupRequest:
+    identity.v1.DeleteGroupRequest:
       type: object
       properties:
         groupId:
@@ -4109,11 +3862,11 @@ components:
           title: tenant_id
       title: DeleteGroupRequest
       additionalProperties: false
-    identity.DeleteGroupResponse:
+    identity.v1.DeleteGroupResponse:
       type: object
       title: DeleteGroupResponse
       additionalProperties: false
-    identity.DeletePasskeyRequest:
+    identity.v1.DeletePasskeyRequest:
       type: object
       properties:
         credentialId:
@@ -4121,11 +3874,11 @@ components:
           title: credential_id
       title: DeletePasskeyRequest
       additionalProperties: false
-    identity.DeletePasskeyResponse:
+    identity.v1.DeletePasskeyResponse:
       type: object
       title: DeletePasskeyResponse
       additionalProperties: false
-    identity.DeleteUserRequest:
+    identity.v1.DeleteUserRequest:
       type: object
       properties:
         userId:
@@ -4136,11 +3889,11 @@ components:
           title: tenant_id
       title: DeleteUserRequest
       additionalProperties: false
-    identity.DeleteUserResponse:
+    identity.v1.DeleteUserResponse:
       type: object
       title: DeleteUserResponse
       additionalProperties: false
-    identity.DisableTotpRequest:
+    identity.v1.DisableTotpRequest:
       type: object
       properties:
         password:
@@ -4149,11 +3902,11 @@ components:
           description: Require password confirmation to disable
       title: DisableTotpRequest
       additionalProperties: false
-    identity.DisableTotpResponse:
+    identity.v1.DisableTotpResponse:
       type: object
       title: DisableTotpResponse
       additionalProperties: false
-    identity.Domain:
+    identity.v1.Domain:
       type: object
       properties:
         id:
@@ -4188,19 +3941,19 @@ components:
         Domain is an email domain bound to a Tenant within the caller's
          Project. Verifying it (DNS TXT or email) flips its status to verified
          and claims the owning tenant.
-    identity.GetCurrentUserRequest:
+    identity.v1.GetCurrentUserRequest:
       type: object
       title: GetCurrentUserRequest
       additionalProperties: false
-    identity.GetCurrentUserResponse:
+    identity.v1.GetCurrentUserResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
       title: GetCurrentUserResponse
       additionalProperties: false
-    identity.GetIdentityVerificationStatusRequest:
+    identity.v1.GetIdentityVerificationStatusRequest:
       type: object
       properties:
         verificationId:
@@ -4209,15 +3962,15 @@ components:
           description: Optional. When empty, the latest verification for the caller is returned.
       title: GetIdentityVerificationStatusRequest
       additionalProperties: false
-    identity.GetIdentityVerificationStatusResponse:
+    identity.v1.GetIdentityVerificationStatusResponse:
       type: object
       properties:
         verification:
           title: verification
-          $ref: '#/components/schemas/identity.IdentityVerification'
+          $ref: '#/components/schemas/identity.v1.IdentityVerification'
       title: GetIdentityVerificationStatusResponse
       additionalProperties: false
-    identity.GetQrLoginSessionRequest:
+    identity.v1.GetQrLoginSessionRequest:
       type: object
       properties:
         sessionId:
@@ -4226,12 +3979,12 @@ components:
       title: GetQrLoginSessionRequest
       additionalProperties: false
       description: 'Step 2a: Authenticated device looks up session details for display.'
-    identity.GetQrLoginSessionResponse:
+    identity.v1.GetQrLoginSessionResponse:
       type: object
       properties:
         status:
           title: status
-          $ref: '#/components/schemas/identity.QrLoginStatus'
+          $ref: '#/components/schemas/identity.v1.QrLoginStatus'
         newDeviceInfo:
           type: string
           title: new_device_info
@@ -4243,7 +3996,7 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: GetQrLoginSessionResponse
       additionalProperties: false
-    identity.GetUserRequest:
+    identity.v1.GetUserRequest:
       type: object
       properties:
         userId:
@@ -4254,15 +4007,15 @@ components:
           title: tenant_id
       title: GetUserRequest
       additionalProperties: false
-    identity.GetUserResponse:
+    identity.v1.GetUserResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
       title: GetUserResponse
       additionalProperties: false
-    identity.Group:
+    identity.v1.Group:
       type: object
       properties:
         id:
@@ -4282,7 +4035,7 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: Group
       additionalProperties: false
-    identity.HelpRequestStatus:
+    identity.v1.HelpRequestStatus:
       type: string
       title: HelpRequestStatus
       enum:
@@ -4290,7 +4043,7 @@ components:
         - HELP_REQUEST_STATUS_PENDING
         - HELP_REQUEST_STATUS_RESOLVED
         - HELP_REQUEST_STATUS_REJECTED
-    identity.IdentityVerification:
+    identity.v1.IdentityVerification:
       type: object
       properties:
         id:
@@ -4312,7 +4065,7 @@ components:
           description: Provider's check/session ID
         status:
           title: status
-          $ref: '#/components/schemas/identity.IdentityVerificationStatus'
+          $ref: '#/components/schemas/identity.v1.IdentityVerificationStatus'
         createdAt:
           title: created_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
@@ -4328,7 +4081,7 @@ components:
           description: Empty unless status = REJECTED
       title: IdentityVerification
       additionalProperties: false
-    identity.IdentityVerificationStatus:
+    identity.v1.IdentityVerificationStatus:
       type: string
       title: IdentityVerificationStatus
       enum:
@@ -4338,7 +4091,7 @@ components:
         - IDENTITY_VERIFICATION_STATUS_APPROVED
         - IDENTITY_VERIFICATION_STATUS_REJECTED
         - IDENTITY_VERIFICATION_STATUS_EXPIRED
-    identity.InitiateQrLoginRequest:
+    identity.v1.InitiateQrLoginRequest:
       type: object
       properties:
         deviceInfo:
@@ -4351,7 +4104,7 @@ components:
       title: InitiateQrLoginRequest
       additionalProperties: false
       description: 'Step 1: New device (unauthenticated) initiates a QR login.'
-    identity.InitiateQrLoginResponse:
+    identity.v1.InitiateQrLoginResponse:
       type: object
       properties:
         sessionId:
@@ -4376,7 +4129,7 @@ components:
              sees the scanned QR code cannot poll for the issued tokens.
       title: InitiateQrLoginResponse
       additionalProperties: false
-    identity.InviteUserRequest:
+    identity.v1.InviteUserRequest:
       type: object
       properties:
         email:
@@ -4406,12 +4159,12 @@ components:
              If true: create a fully-active user and return a temporary password to the admin.
       title: InviteUserRequest
       additionalProperties: false
-    identity.InviteUserResponse:
+    identity.v1.InviteUserResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         invitationToken:
           type: string
           title: invitation_token
@@ -4426,7 +4179,7 @@ components:
           description: Only set when create_immediately = true
       title: InviteUserResponse
       additionalProperties: false
-    identity.ListAuditEventsRequest:
+    identity.v1.ListAuditEventsRequest:
       type: object
       properties:
         actorUserId:
@@ -4466,20 +4219,20 @@ components:
           description: opaque pagination cursor (offset-based)
       title: ListAuditEventsRequest
       additionalProperties: false
-    identity.ListAuditEventsResponse:
+    identity.v1.ListAuditEventsResponse:
       type: object
       properties:
         events:
           type: array
           items:
-            $ref: '#/components/schemas/identity.AuditEvent'
+            $ref: '#/components/schemas/identity.v1.AuditEvent'
           title: events
         nextCursor:
           type: string
           title: next_cursor
       title: ListAuditEventsResponse
       additionalProperties: false
-    identity.ListGroupMembersRequest:
+    identity.v1.ListGroupMembersRequest:
       type: object
       properties:
         groupId:
@@ -4490,17 +4243,17 @@ components:
           title: tenant_id
       title: ListGroupMembersRequest
       additionalProperties: false
-    identity.ListGroupMembersResponse:
+    identity.v1.ListGroupMembersResponse:
       type: object
       properties:
         members:
           type: array
           items:
-            $ref: '#/components/schemas/identity.User'
+            $ref: '#/components/schemas/identity.v1.User'
           title: members
       title: ListGroupMembersResponse
       additionalProperties: false
-    identity.ListGroupsRequest:
+    identity.v1.ListGroupsRequest:
       type: object
       properties:
         tenantId:
@@ -4519,26 +4272,26 @@ components:
           description: optional substring match on group name
       title: ListGroupsRequest
       additionalProperties: false
-    identity.ListGroupsResponse:
+    identity.v1.ListGroupsResponse:
       type: object
       properties:
         groups:
           type: array
           items:
-            $ref: '#/components/schemas/identity.Group'
+            $ref: '#/components/schemas/identity.v1.Group'
           title: groups
         nextCursor:
           type: string
           title: next_cursor
       title: ListGroupsResponse
       additionalProperties: false
-    identity.ListHelpRequestsRequest:
+    identity.v1.ListHelpRequestsRequest:
       type: object
       properties:
         statusFilter:
           title: status_filter
           description: 0 = all
-          $ref: '#/components/schemas/identity.HelpRequestStatus'
+          $ref: '#/components/schemas/identity.v1.HelpRequestStatus'
         cursor:
           type: string
           title: cursor
@@ -4548,13 +4301,13 @@ components:
           format: int32
       title: ListHelpRequestsRequest
       additionalProperties: false
-    identity.ListHelpRequestsResponse:
+    identity.v1.ListHelpRequestsResponse:
       type: object
       properties:
         requests:
           type: array
           items:
-            $ref: '#/components/schemas/identity.AdminHelpRequest'
+            $ref: '#/components/schemas/identity.v1.AdminHelpRequest'
           title: requests
         nextCursor:
           type: string
@@ -4565,36 +4318,36 @@ components:
           format: int32
       title: ListHelpRequestsResponse
       additionalProperties: false
-    identity.ListMySessionsRequest:
+    identity.v1.ListMySessionsRequest:
       type: object
       title: ListMySessionsRequest
       additionalProperties: false
-    identity.ListMySessionsResponse:
+    identity.v1.ListMySessionsResponse:
       type: object
       properties:
         sessions:
           type: array
           items:
-            $ref: '#/components/schemas/identity.Session'
+            $ref: '#/components/schemas/identity.v1.Session'
           title: sessions
       title: ListMySessionsResponse
       additionalProperties: false
-    identity.ListPasskeysRequest:
+    identity.v1.ListPasskeysRequest:
       type: object
       title: ListPasskeysRequest
       additionalProperties: false
       description: Management
-    identity.ListPasskeysResponse:
+    identity.v1.ListPasskeysResponse:
       type: object
       properties:
         credentials:
           type: array
           items:
-            $ref: '#/components/schemas/identity.PasskeyCredentialInfo'
+            $ref: '#/components/schemas/identity.v1.PasskeyCredentialInfo'
           title: credentials
       title: ListPasskeysResponse
       additionalProperties: false
-    identity.ListProjectAuthDomainsRequest:
+    identity.v1.ListProjectAuthDomainsRequest:
       type: object
       properties:
         projectId:
@@ -4602,17 +4355,17 @@ components:
           title: project_id
       title: ListProjectAuthDomainsRequest
       additionalProperties: false
-    identity.ListProjectAuthDomainsResponse:
+    identity.v1.ListProjectAuthDomainsResponse:
       type: object
       properties:
         domains:
           type: array
           items:
-            $ref: '#/components/schemas/identity.ProjectAuthDomain'
+            $ref: '#/components/schemas/identity.v1.ProjectAuthDomain'
           title: domains
       title: ListProjectAuthDomainsResponse
       additionalProperties: false
-    identity.ListTenantDomainsRequest:
+    identity.v1.ListTenantDomainsRequest:
       type: object
       properties:
         tenantId:
@@ -4620,17 +4373,17 @@ components:
           title: tenant_id
       title: ListTenantDomainsRequest
       additionalProperties: false
-    identity.ListTenantDomainsResponse:
+    identity.v1.ListTenantDomainsResponse:
       type: object
       properties:
         domains:
           type: array
           items:
-            $ref: '#/components/schemas/identity.Domain'
+            $ref: '#/components/schemas/identity.v1.Domain'
           title: domains
       title: ListTenantDomainsResponse
       additionalProperties: false
-    identity.ListTenantInvitationsRequest:
+    identity.v1.ListTenantInvitationsRequest:
       type: object
       properties:
         tenantId:
@@ -4638,17 +4391,17 @@ components:
           title: tenant_id
       title: ListTenantInvitationsRequest
       additionalProperties: false
-    identity.ListTenantInvitationsResponse:
+    identity.v1.ListTenantInvitationsResponse:
       type: object
       properties:
         invitations:
           type: array
           items:
-            $ref: '#/components/schemas/identity.TenantInvitation'
+            $ref: '#/components/schemas/identity.v1.TenantInvitation'
           title: invitations
       title: ListTenantInvitationsResponse
       additionalProperties: false
-    identity.ListTenantMembersRequest:
+    identity.v1.ListTenantMembersRequest:
       type: object
       properties:
         tenantId:
@@ -4656,17 +4409,17 @@ components:
           title: tenant_id
       title: ListTenantMembersRequest
       additionalProperties: false
-    identity.ListTenantMembersResponse:
+    identity.v1.ListTenantMembersResponse:
       type: object
       properties:
         members:
           type: array
           items:
-            $ref: '#/components/schemas/identity.TenantMembership'
+            $ref: '#/components/schemas/identity.v1.TenantMembership'
           title: members
       title: ListTenantMembersResponse
       additionalProperties: false
-    identity.ListUsersRequest:
+    identity.v1.ListUsersRequest:
       type: object
       properties:
         tenantId:
@@ -4682,7 +4435,7 @@ components:
         statusFilter:
           title: status_filter
           description: USER_STATUS_UNSPECIFIED = no filter
-          $ref: '#/components/schemas/identity.UserStatus'
+          $ref: '#/components/schemas/identity.v1.UserStatus'
         search:
           type: string
           title: search
@@ -4693,13 +4446,13 @@ components:
         Admin-only paginated user listing.
            Requires the caller's JWT to carry role=admin.
            Supports filtering by status and substring search on email/name.
-    identity.ListUsersResponse:
+    identity.v1.ListUsersResponse:
       type: object
       properties:
         users:
           type: array
           items:
-            $ref: '#/components/schemas/identity.User'
+            $ref: '#/components/schemas/identity.v1.User'
           title: users
         nextCursor:
           type: string
@@ -4710,7 +4463,7 @@ components:
           format: int32
       title: ListUsersResponse
       additionalProperties: false
-    identity.LogoutRequest:
+    identity.v1.LogoutRequest:
       type: object
       properties:
         refreshToken:
@@ -4718,11 +4471,11 @@ components:
           title: refresh_token
       title: LogoutRequest
       additionalProperties: false
-    identity.LogoutResponse:
+    identity.v1.LogoutResponse:
       type: object
       title: LogoutResponse
       additionalProperties: false
-    identity.OAuthLoginRequest:
+    identity.v1.OAuthLoginRequest:
       type: object
       properties:
         code:
@@ -4753,12 +4506,12 @@ components:
           description: opaque token minted by BeginOAuthLogin
       title: OAuthLoginRequest
       additionalProperties: false
-    identity.OAuthLoginResponse:
+    identity.v1.OAuthLoginResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -4774,7 +4527,7 @@ components:
           description: Access token lifetime in seconds
       title: OAuthLoginResponse
       additionalProperties: false
-    identity.PasskeyCredentialInfo:
+    identity.v1.PasskeyCredentialInfo:
       type: object
       properties:
         credentialId:
@@ -4791,7 +4544,7 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: PasskeyCredentialInfo
       additionalProperties: false
-    identity.PasswordLoginRequest:
+    identity.v1.PasswordLoginRequest:
       type: object
       properties:
         email:
@@ -4806,7 +4559,7 @@ components:
           description: 'Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED'
       title: PasswordLoginRequest
       additionalProperties: false
-    identity.PasswordLoginResponse:
+    identity.v1.PasswordLoginResponse:
       type: object
       properties:
         idToken:
@@ -4815,7 +4568,7 @@ components:
           description: Legacy local format (deprecated)
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -4839,7 +4592,7 @@ components:
           description: id of the pending LoginChallenge; pass to VerifyTotp
       title: PasswordLoginResponse
       additionalProperties: false
-    identity.PasswordSignupRequest:
+    identity.v1.PasswordSignupRequest:
       type: object
       properties:
         email:
@@ -4858,7 +4611,7 @@ components:
           description: 'Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED'
       title: PasswordSignupRequest
       additionalProperties: false
-    identity.PasswordSignupResponse:
+    identity.v1.PasswordSignupResponse:
       type: object
       properties:
         idToken:
@@ -4867,7 +4620,7 @@ components:
           description: deprecated, kept for backward compat
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -4880,7 +4633,7 @@ components:
           format: int32
       title: PasswordSignupResponse
       additionalProperties: false
-    identity.PollQrLoginRequest:
+    identity.v1.PollQrLoginRequest:
       type: object
       properties:
         sessionId:
@@ -4893,16 +4646,16 @@ components:
       title: PollQrLoginRequest
       additionalProperties: false
       description: 'Step 3: New device polls for completion.'
-    identity.PollQrLoginResponse:
+    identity.v1.PollQrLoginResponse:
       type: object
       properties:
         status:
           title: status
-          $ref: '#/components/schemas/identity.QrLoginStatus'
+          $ref: '#/components/schemas/identity.v1.QrLoginStatus'
         user:
           title: user
           description: Populated only when status == QR_LOGIN_STATUS_APPROVED.
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -4915,7 +4668,7 @@ components:
           format: int32
       title: PollQrLoginResponse
       additionalProperties: false
-    identity.ProjectAuthDomain:
+    identity.v1.ProjectAuthDomain:
       type: object
       properties:
         hostname:
@@ -4940,7 +4693,7 @@ components:
          customer-facing custom-domain RPCs. verified_at_ms is 0 until ownership is
          proven (a deployer-seeded or operator-vouched domain is pre-verified); an
          unverified domain does NOT resolve requests.
-    identity.QrLoginStatus:
+    identity.v1.QrLoginStatus:
       type: string
       title: QrLoginStatus
       enum:
@@ -4950,7 +4703,7 @@ components:
         - QR_LOGIN_STATUS_REJECTED
         - QR_LOGIN_STATUS_EXPIRED
         - QR_LOGIN_STATUS_CONSUMED
-    identity.ReactivateUserRequest:
+    identity.v1.ReactivateUserRequest:
       type: object
       properties:
         userId:
@@ -4958,11 +4711,11 @@ components:
           title: user_id
       title: ReactivateUserRequest
       additionalProperties: false
-    identity.ReactivateUserResponse:
+    identity.v1.ReactivateUserResponse:
       type: object
       title: ReactivateUserResponse
       additionalProperties: false
-    identity.RedeemMagicLinkRequest:
+    identity.v1.RedeemMagicLinkRequest:
       type: object
       properties:
         token:
@@ -4975,12 +4728,12 @@ components:
          user keyed by the bound email, and issues a token pair. A replay or an
          expired token surfaces as CodeUnauthenticated. return_to echoes the
          allowlist-validated app URL the SPA should navigate to.
-    identity.RedeemMagicLinkResponse:
+    identity.v1.RedeemMagicLinkResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -4997,7 +4750,7 @@ components:
           description: allowlist-validated app URL bound at request time
       title: RedeemMagicLinkResponse
       additionalProperties: false
-    identity.RedeemOAuthCodeRequest:
+    identity.v1.RedeemOAuthCodeRequest:
       type: object
       properties:
         code:
@@ -5011,12 +4764,12 @@ components:
          SPA by the hosted OAuth callback (GET /oauth/callback/{provider} ->
          302 return_to?code=<otc>) for a backend-issued token pair. The code
          is single-use and short-lived; a replay returns CodeUnauthenticated.
-    identity.RedeemOAuthCodeResponse:
+    identity.v1.RedeemOAuthCodeResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -5032,7 +4785,7 @@ components:
           description: Access token lifetime in seconds
       title: RedeemOAuthCodeResponse
       additionalProperties: false
-    identity.RefreshTokenRequest:
+    identity.v1.RefreshTokenRequest:
       type: object
       properties:
         refreshToken:
@@ -5040,12 +4793,12 @@ components:
           title: refresh_token
       title: RefreshTokenRequest
       additionalProperties: false
-    identity.RefreshTokenResponse:
+    identity.v1.RefreshTokenResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -5054,7 +4807,7 @@ components:
           title: refresh_token
       title: RefreshTokenResponse
       additionalProperties: false
-    identity.RegenerateRecoveryCodesRequest:
+    identity.v1.RegenerateRecoveryCodesRequest:
       type: object
       properties:
         password:
@@ -5062,7 +4815,7 @@ components:
           title: password
       title: RegenerateRecoveryCodesRequest
       additionalProperties: false
-    identity.RegenerateRecoveryCodesResponse:
+    identity.v1.RegenerateRecoveryCodesResponse:
       type: object
       properties:
         recoveryCodes:
@@ -5072,7 +4825,7 @@ components:
           title: recovery_codes
       title: RegenerateRecoveryCodesResponse
       additionalProperties: false
-    identity.RemoveGroupMemberRequest:
+    identity.v1.RemoveGroupMemberRequest:
       type: object
       properties:
         groupId:
@@ -5086,11 +4839,11 @@ components:
           title: tenant_id
       title: RemoveGroupMemberRequest
       additionalProperties: false
-    identity.RemoveGroupMemberResponse:
+    identity.v1.RemoveGroupMemberResponse:
       type: object
       title: RemoveGroupMemberResponse
       additionalProperties: false
-    identity.RemoveTenantMemberRequest:
+    identity.v1.RemoveTenantMemberRequest:
       type: object
       properties:
         tenantId:
@@ -5101,11 +4854,11 @@ components:
           title: user_id
       title: RemoveTenantMemberRequest
       additionalProperties: false
-    identity.RemoveTenantMemberResponse:
+    identity.v1.RemoveTenantMemberResponse:
       type: object
       title: RemoveTenantMemberResponse
       additionalProperties: false
-    identity.RequestAdminHelpRequest:
+    identity.v1.RequestAdminHelpRequest:
       type: object
       properties:
         email:
@@ -5117,12 +4870,12 @@ components:
           description: Optional — what the user is having trouble with
       title: RequestAdminHelpRequest
       additionalProperties: false
-    identity.RequestAdminHelpResponse:
+    identity.v1.RequestAdminHelpResponse:
       type: object
       title: RequestAdminHelpResponse
       additionalProperties: false
       description: Always success — no enumeration
-    identity.RequestEmailChangeRequest:
+    identity.v1.RequestEmailChangeRequest:
       type: object
       properties:
         newEmail:
@@ -5133,11 +4886,11 @@ components:
           title: current_password
       title: RequestEmailChangeRequest
       additionalProperties: false
-    identity.RequestEmailChangeResponse:
+    identity.v1.RequestEmailChangeResponse:
       type: object
       title: RequestEmailChangeResponse
       additionalProperties: false
-    identity.RequestEmailLoginCodeRequest:
+    identity.v1.RequestEmailLoginCodeRequest:
       type: object
       properties:
         email:
@@ -5153,12 +4906,12 @@ components:
         RequestEmailLoginCode emails a 6-digit one-time code to the address.
          Anti-enumeration: the response is identical whether or not the email
          already has an account (and whether or not auto-create is enabled).
-    identity.RequestEmailLoginCodeResponse:
+    identity.v1.RequestEmailLoginCodeResponse:
       type: object
       title: RequestEmailLoginCodeResponse
       additionalProperties: false
       description: Always returns success (no enumeration).
-    identity.RequestMagicLinkRequest:
+    identity.v1.RequestMagicLinkRequest:
       type: object
       properties:
         email:
@@ -5179,12 +4932,12 @@ components:
          validated against the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist
          (shared with the hosted OAuth flow). Anti-enumeration: identical
          response regardless of account existence.
-    identity.RequestMagicLinkResponse:
+    identity.v1.RequestMagicLinkResponse:
       type: object
       title: RequestMagicLinkResponse
       additionalProperties: false
       description: Always returns success (no enumeration).
-    identity.RequestPasswordResetRequest:
+    identity.v1.RequestPasswordResetRequest:
       type: object
       properties:
         email:
@@ -5200,12 +4953,12 @@ components:
         Recovery-email-driven password reset (replaces the deprecated self-serve
          ForgotPassword flow). The reset link is sent to the recovery_email on file —
          or, if none is set, the request silently succeeds (no enumeration).
-    identity.RequestPasswordResetResponse:
+    identity.v1.RequestPasswordResetResponse:
       type: object
       title: RequestPasswordResetResponse
       additionalProperties: false
       description: Always returns success (no enumeration).
-    identity.RequestPhoneVerificationRequest:
+    identity.v1.RequestPhoneVerificationRequest:
       type: object
       properties:
         phoneNumber:
@@ -5214,12 +4967,12 @@ components:
           description: E.164 number to verify (e.g. "+14155550123")
       title: RequestPhoneVerificationRequest
       additionalProperties: false
-    identity.RequestPhoneVerificationResponse:
+    identity.v1.RequestPhoneVerificationResponse:
       type: object
       title: RequestPhoneVerificationResponse
       additionalProperties: false
       description: 'Empty: the code is delivered out of band via SMS.'
-    identity.ResetUserPasswordRequest:
+    identity.v1.ResetUserPasswordRequest:
       type: object
       properties:
         userId:
@@ -5233,7 +4986,7 @@ components:
              If false: create a reset token the admin hands off to the user.
       title: ResetUserPasswordRequest
       additionalProperties: false
-    identity.ResetUserPasswordResponse:
+    identity.v1.ResetUserPasswordResponse:
       type: object
       properties:
         temporaryPassword:
@@ -5246,7 +4999,7 @@ components:
           description: Only set when generate_temp_password = false
       title: ResetUserPasswordResponse
       additionalProperties: false
-    identity.ResolveHelpRequestRequest:
+    identity.v1.ResolveHelpRequestRequest:
       type: object
       properties:
         requestId:
@@ -5261,15 +5014,15 @@ components:
           title: resolution_notes
       title: ResolveHelpRequestRequest
       additionalProperties: false
-    identity.ResolveHelpRequestResponse:
+    identity.v1.ResolveHelpRequestResponse:
       type: object
       properties:
         request:
           title: request
-          $ref: '#/components/schemas/identity.AdminHelpRequest'
+          $ref: '#/components/schemas/identity.v1.AdminHelpRequest'
       title: ResolveHelpRequestResponse
       additionalProperties: false
-    identity.RevokeAllSessionsRequest:
+    identity.v1.RevokeAllSessionsRequest:
       type: object
       properties:
         password:
@@ -5278,7 +5031,7 @@ components:
           description: Require password to revoke all
       title: RevokeAllSessionsRequest
       additionalProperties: false
-    identity.RevokeAllSessionsResponse:
+    identity.v1.RevokeAllSessionsResponse:
       type: object
       properties:
         revokedCount:
@@ -5287,7 +5040,7 @@ components:
           format: int32
       title: RevokeAllSessionsResponse
       additionalProperties: false
-    identity.RevokeSessionRequest:
+    identity.v1.RevokeSessionRequest:
       type: object
       properties:
         sessionId:
@@ -5295,19 +5048,19 @@ components:
           title: session_id
       title: RevokeSessionRequest
       additionalProperties: false
-    identity.RevokeSessionResponse:
+    identity.v1.RevokeSessionResponse:
       type: object
       title: RevokeSessionResponse
       additionalProperties: false
-    identity.SendEmailVerificationRequest:
+    identity.v1.SendEmailVerificationRequest:
       type: object
       title: SendEmailVerificationRequest
       additionalProperties: false
-    identity.SendEmailVerificationResponse:
+    identity.v1.SendEmailVerificationResponse:
       type: object
       title: SendEmailVerificationResponse
       additionalProperties: false
-    identity.Session:
+    identity.v1.Session:
       type: object
       properties:
         sessionId:
@@ -5338,7 +5091,7 @@ components:
           description: is this the session making the request
       title: Session
       additionalProperties: false
-    identity.SetPrimaryAuthDomainRequest:
+    identity.v1.SetPrimaryAuthDomainRequest:
       type: object
       properties:
         projectId:
@@ -5349,15 +5102,15 @@ components:
           title: hostname
       title: SetPrimaryAuthDomainRequest
       additionalProperties: false
-    identity.SetPrimaryAuthDomainResponse:
+    identity.v1.SetPrimaryAuthDomainResponse:
       type: object
       properties:
         domain:
           title: domain
-          $ref: '#/components/schemas/identity.ProjectAuthDomain'
+          $ref: '#/components/schemas/identity.v1.ProjectAuthDomain'
       title: SetPrimaryAuthDomainResponse
       additionalProperties: false
-    identity.SetUserQuotaRequest:
+    identity.v1.SetUserQuotaRequest:
       type: object
       properties:
         userId:
@@ -5371,11 +5124,11 @@ components:
           format: int64
       title: SetUserQuotaRequest
       additionalProperties: false
-    identity.SetUserQuotaResponse:
+    identity.v1.SetUserQuotaResponse:
       type: object
       title: SetUserQuotaResponse
       additionalProperties: false
-    identity.SignOutEverywhereRequest:
+    identity.v1.SignOutEverywhereRequest:
       type: object
       properties:
         password:
@@ -5384,7 +5137,7 @@ components:
           description: Require password confirmation
       title: SignOutEverywhereRequest
       additionalProperties: false
-    identity.SignOutEverywhereResponse:
+    identity.v1.SignOutEverywhereResponse:
       type: object
       properties:
         revokedCount:
@@ -5393,7 +5146,7 @@ components:
           format: int32
       title: SignOutEverywhereResponse
       additionalProperties: false
-    identity.TenantInvitation:
+    identity.v1.TenantInvitation:
       type: object
       properties:
         id:
@@ -5431,7 +5184,7 @@ components:
         TenantInvitation is a pending offer to join a Tenant, addressed to an
          email. The raw redemption token is never exposed here — it travels only
          in the invitation email.
-    identity.TenantMembership:
+    identity.v1.TenantMembership:
       type: object
       properties:
         id:
@@ -5466,7 +5219,7 @@ components:
       description: |-
         TenantMembership is a user's materialized relationship to a Tenant within
          the caller's Project.
-    identity.UpdateGroupRequest:
+    identity.v1.UpdateGroupRequest:
       type: object
       properties:
         groupId:
@@ -5483,15 +5236,15 @@ components:
           title: description
       title: UpdateGroupRequest
       additionalProperties: false
-    identity.UpdateGroupResponse:
+    identity.v1.UpdateGroupResponse:
       type: object
       properties:
         group:
           title: group
-          $ref: '#/components/schemas/identity.Group'
+          $ref: '#/components/schemas/identity.v1.Group'
       title: UpdateGroupResponse
       additionalProperties: false
-    identity.UpdateProfileRequest:
+    identity.v1.UpdateProfileRequest:
       type: object
       properties:
         name:
@@ -5503,15 +5256,15 @@ components:
           title: avatar_url
       title: UpdateProfileRequest
       additionalProperties: false
-    identity.UpdateProfileResponse:
+    identity.v1.UpdateProfileResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
       title: UpdateProfileResponse
       additionalProperties: false
-    identity.UpdateUserRequest:
+    identity.v1.UpdateUserRequest:
       type: object
       properties:
         userId:
@@ -5531,15 +5284,15 @@ components:
           title: role
       title: UpdateUserRequest
       additionalProperties: false
-    identity.UpdateUserResponse:
+    identity.v1.UpdateUserResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
       title: UpdateUserResponse
       additionalProperties: false
-    identity.User:
+    identity.v1.User:
       type: object
       properties:
         id:
@@ -5570,7 +5323,7 @@ components:
           description: true if the user has enrolled a TOTP credential
         status:
           title: status
-          $ref: '#/components/schemas/identity.UserStatus'
+          $ref: '#/components/schemas/identity.v1.UserStatus'
         recoveryEmail:
           type: string
           title: recovery_email
@@ -5635,7 +5388,7 @@ components:
           description: epoch ms; 0 = never verified
       title: User
       additionalProperties: false
-    identity.UserStatus:
+    identity.v1.UserStatus:
       type: string
       title: UserStatus
       enum:
@@ -5644,7 +5397,7 @@ components:
         - USER_STATUS_INVITED
         - USER_STATUS_DEACTIVATED
         - USER_STATUS_SUSPENDED
-    identity.VerifyDomainRequest:
+    identity.v1.VerifyDomainRequest:
       type: object
       properties:
         domainId:
@@ -5652,15 +5405,15 @@ components:
           title: domain_id
       title: VerifyDomainRequest
       additionalProperties: false
-    identity.VerifyDomainResponse:
+    identity.v1.VerifyDomainResponse:
       type: object
       properties:
         domain:
           title: domain
-          $ref: '#/components/schemas/identity.Domain'
+          $ref: '#/components/schemas/identity.v1.Domain'
       title: VerifyDomainResponse
       additionalProperties: false
-    identity.VerifyEmailLoginCodeRequest:
+    identity.v1.VerifyEmailLoginCodeRequest:
       type: object
       properties:
         email:
@@ -5675,12 +5428,12 @@ components:
         VerifyEmailLoginCode validates the OTP, resolves-or-creates the user
          keyed by email, and issues a token pair. A wrong code increments the
          per-code attempt counter; exceeding the cap invalidates the code.
-    identity.VerifyEmailLoginCodeResponse:
+    identity.v1.VerifyEmailLoginCodeResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -5693,7 +5446,7 @@ components:
           format: int32
       title: VerifyEmailLoginCodeResponse
       additionalProperties: false
-    identity.VerifyEmailRequest:
+    identity.v1.VerifyEmailRequest:
       type: object
       properties:
         token:
@@ -5701,15 +5454,15 @@ components:
           title: token
       title: VerifyEmailRequest
       additionalProperties: false
-    identity.VerifyEmailResponse:
+    identity.v1.VerifyEmailResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
       title: VerifyEmailResponse
       additionalProperties: false
-    identity.VerifyPhoneCodeRequest:
+    identity.v1.VerifyPhoneCodeRequest:
       type: object
       properties:
         phoneNumber:
@@ -5722,16 +5475,16 @@ components:
           description: the 6-digit OTP from the SMS
       title: VerifyPhoneCodeRequest
       additionalProperties: false
-    identity.VerifyPhoneCodeResponse:
+    identity.v1.VerifyPhoneCodeResponse:
       type: object
       properties:
         user:
           title: user
           description: the updated user with phone_verified=true
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
       title: VerifyPhoneCodeResponse
       additionalProperties: false
-    identity.VerifyProjectAuthDomainRequest:
+    identity.v1.VerifyProjectAuthDomainRequest:
       type: object
       properties:
         projectId:
@@ -5742,15 +5495,15 @@ components:
           title: hostname
       title: VerifyProjectAuthDomainRequest
       additionalProperties: false
-    identity.VerifyProjectAuthDomainResponse:
+    identity.v1.VerifyProjectAuthDomainResponse:
       type: object
       properties:
         domain:
           title: domain
-          $ref: '#/components/schemas/identity.ProjectAuthDomain'
+          $ref: '#/components/schemas/identity.v1.ProjectAuthDomain'
       title: VerifyProjectAuthDomainResponse
       additionalProperties: false
-    identity.VerifyTotpRequest:
+    identity.v1.VerifyTotpRequest:
       type: object
       properties:
         loginChallengeId:
@@ -5763,12 +5516,12 @@ components:
           description: TOTP code OR recovery code
       title: VerifyTotpRequest
       additionalProperties: false
-    identity.VerifyTotpResponse:
+    identity.v1.VerifyTotpResponse:
       type: object
       properties:
         user:
           title: user
-          $ref: '#/components/schemas/identity.User'
+          $ref: '#/components/schemas/identity.v1.User'
         accessToken:
           type: string
           title: access_token
@@ -5781,7 +5534,7 @@ components:
           format: int32
       title: VerifyTotpResponse
       additionalProperties: false
-    identity.VerifyTotpSetupRequest:
+    identity.v1.VerifyTotpSetupRequest:
       type: object
       properties:
         code:
@@ -5789,7 +5542,7 @@ components:
           title: code
       title: VerifyTotpSetupRequest
       additionalProperties: false
-    identity.VerifyTotpSetupResponse:
+    identity.v1.VerifyTotpSetupResponse:
       type: object
       properties:
         verified:
@@ -5797,938 +5550,6 @@ components:
           title: verified
       title: VerifyTotpSetupResponse
       additionalProperties: false
-    identity.schema.AdminHelpRequest:
-      type: object
-      properties:
-        email:
-          type: string
-          title: email
-        reason:
-          type: string
-          title: reason
-        sourceIp:
-          type: string
-          title: source_ip
-        userAgent:
-          type: string
-          title: user_agent
-        status:
-          type: string
-          title: status
-        resolvedBy:
-          type: string
-          title: resolved_by
-        resolutionNotes:
-          type: string
-          title: resolution_notes
-        resolvedAt:
-          type:
-            - integer
-            - string
-          title: resolved_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-      title: AdminHelpRequest
-      additionalProperties: false
-    identity.schema.AuditEvent:
-      type: object
-      properties:
-        eventType:
-          type: string
-          title: event_type
-        actorUserId:
-          type: string
-          title: actor_user_id
-        targetUserId:
-          type: string
-          title: target_user_id
-        ipAddress:
-          type: string
-          title: ip_address
-        userAgent:
-          type: string
-          title: user_agent
-        success:
-          type: boolean
-          title: success
-        details:
-          type: string
-          title: details
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-      title: AuditEvent
-      additionalProperties: false
-    identity.schema.EmailChangeToken:
-      type: object
-      properties:
-        tokenHash:
-          type: string
-          title: token_hash
-        userId:
-          type: string
-          title: user_id
-        oldEmail:
-          type: string
-          title: old_email
-        newEmail:
-          type: string
-          title: new_email
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        consumedAt:
-          type:
-            - integer
-            - string
-          title: consumed_at
-          format: int64
-          description: 0 = unconsumed
-      title: EmailChangeToken
-      additionalProperties: false
-    identity.schema.EmailLoginCode:
-      type: object
-      properties:
-        email:
-          type: string
-          title: email
-        codeHash:
-          type: string
-          title: code_hash
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        consumedAt:
-          type:
-            - integer
-            - string
-          title: consumed_at
-          format: int64
-          description: 0 = unconsumed
-        attemptCount:
-          type:
-            - integer
-            - string
-          title: attempt_count
-          format: int64
-        maxAttempts:
-          type:
-            - integer
-            - string
-          title: max_attempts
-          format: int64
-      title: EmailLoginCode
-      additionalProperties: false
-      description: |-
-        ─── EmailLoginCode (type_id 37) ───────────────────────────────────────
-
-         The OTP arm of passwordless email login. RequestEmailLoginCode mints a
-         6-digit code, stores its SHA-256 hash here keyed to the email (NOT a
-         user — the user may not exist yet), and emails the plaintext.
-         VerifyEmailLoginCode looks the row up by email, compares the hash,
-         and on a match resolves-or-creates the user and issues tokens.
-
-         Keyed by email (unique) rather than the code hash because the code is
-         only 6 digits: a global unique index on a 6-digit value would collide
-         across users, and brute-force protection needs to find the active code
-         for an email even when the *guess* is wrong (to bump attempt_count).
-         A new request overwrites the previous code for the same email, so at
-         most one code is live per inbox at a time.
-
-         Single-use is enforced by the consumed_at compare-and-set; brute force
-         is bounded by attempt_count — VerifyEmailLoginCode invalidates the
-         code once attempts reach the configured cap.
-    identity.schema.EmailVerificationToken:
-      type: object
-      properties:
-        tokenHash:
-          type: string
-          title: token_hash
-        userId:
-          type: string
-          title: user_id
-        email:
-          type: string
-          title: email
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        consumedAt:
-          type:
-            - integer
-            - string
-          title: consumed_at
-          format: int64
-          description: 0 = unconsumed
-      title: EmailVerificationToken
-      additionalProperties: false
-    identity.schema.IdentityVerificationRecord:
-      type: object
-      properties:
-        verificationId:
-          type: string
-          title: verification_id
-        userId:
-          type: string
-          title: user_id
-        provider:
-          type: string
-          title: provider
-        providerSessionId:
-          type: string
-          title: provider_session_id
-        status:
-          type: string
-          title: status
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        updatedAt:
-          type:
-            - integer
-            - string
-          title: updated_at
-          format: int64
-        completedAt:
-          type:
-            - integer
-            - string
-          title: completed_at
-          format: int64
-        rejectionReason:
-          type: string
-          title: rejection_reason
-      title: IdentityVerificationRecord
-      additionalProperties: false
-      description: |-
-        ─── IdentityVerification (type_id 32) ─────────────────────────────────
-
-         One row per document + selfie verification session run for a User.
-         The Provider field names the backing implementation (e.g. "azure",
-         "stub"); ProviderSessionID is the provider's own identifier for the
-         check, used to correlate webhooks and follow-up status fetches.
-
-         Status moves through:  pending → in_review → (approved | rejected) ;
-         expired is a terminal state for sessions the user never finished.
-
-         Application code MUST enforce uniqueness on (verification_id) per
-         tenant; EntDB does not currently provide composite unique constraints
-         across (tenant, secondary key).
-    identity.schema.LoginChallenge:
-      type: object
-      properties:
-        challengeId:
-          type: string
-          title: challenge_id
-        userId:
-          type: string
-          title: user_id
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-      title: LoginChallenge
-      additionalProperties: false
-    identity.schema.MagicLinkToken:
-      type: object
-      properties:
-        tokenHash:
-          type: string
-          title: token_hash
-        email:
-          type: string
-          title: email
-        returnTo:
-          type: string
-          title: return_to
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        consumedAt:
-          type:
-            - integer
-            - string
-          title: consumed_at
-          format: int64
-          description: 0 = unconsumed
-      title: MagicLinkToken
-      additionalProperties: false
-      description: |-
-        ─── MagicLinkToken (type_id 38) ───────────────────────────────────────
-
-         The magic-link arm of passwordless email login. RequestMagicLink mints
-         a high-entropy opaque token, stores its SHA-256 hash here bound to the
-         requested email and the (allowlist-validated) return_to, and emails the
-         clickable link. RedeemMagicLink consumes the row (consumed_at CAS from
-         0), resolves-or-creates the user by the bound email, and issues tokens.
-
-         Only the email + return_to + a short expiry are persisted — the token
-         plaintext lives solely in the email. Single-use is enforced by the
-         consumed_at compare-and-set so a replay (or two clicks racing) yields
-         exactly one winner; losers see Unauthenticated.
-    identity.schema.MemberOf:
-      type: object
-      title: MemberOf
-      additionalProperties: false
-    identity.schema.OAuthIdentity:
-      type: object
-      properties:
-        userId:
-          type: string
-          title: user_id
-        provider:
-          type: string
-          title: provider
-        providerUserId:
-          type: string
-          title: provider_user_id
-        emailAtLinkTime:
-          type: string
-          title: email_at_link_time
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-      title: OAuthIdentity
-      additionalProperties: false
-      description: |-
-        ─── OAuthIdentity (type_id 31) ────────────────────────────────────────
-
-         Records the linkage between a local User and a stable provider-side
-         identity (provider, provider_user_id). This is what lets OAuth login
-         keep the same human linked to the same local account when the
-         provider's email changes.
-
-         Uniqueness on (provider, provider_user_id) is enforced server-side via
-         the composite_unique declaration below. The SDK attaches the schema to
-         ExecuteAtomic (ADR-031), and the server materialises a unique
-         expression index in the same WAL event as the create, so two
-         concurrent creates with the same tuple cannot both succeed.
-    identity.schema.OAuthOneTimeCode:
-      type: object
-      properties:
-        codeHash:
-          type: string
-          title: code_hash
-        userId:
-          type: string
-          title: user_id
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        consumedAt:
-          type:
-            - integer
-            - string
-          title: consumed_at
-          format: int64
-          description: 0 = unconsumed
-      title: OAuthOneTimeCode
-      additionalProperties: false
-      description: |-
-        ─── OAuthOneTimeCode (type_id 36) ─────────────────────────────────────
-
-         The single-use handover artifact for the hosted OAuth flow. After the
-         hosted callback (GET /oauth/callback/{provider}) completes the code
-         exchange and authenticates the user, it mints an opaque one-time code,
-         stores its SHA-256 hash here keyed to the user, and 302-redirects the
-         browser to return_to?code=<otc>. The SPA exchanges the code via the
-         RedeemOAuthCode RPC, which atomically consumes this row (consumed_at
-         CAS from 0) and mints a fresh token pair.
-
-         Only the user id + a short expiry are persisted — no token material is
-         stored at rest. Single-use is enforced by the consumed_at compare-and-
-         set so a replay (or two replicas racing the same code) yields exactly
-         one winner; losers see Unauthenticated.
-    identity.schema.PasskeyChallenge:
-      type: object
-      properties:
-        challenge:
-          type: string
-          title: challenge
-        userId:
-          type: string
-          title: user_id
-        challengeType:
-          type: string
-          title: challenge_type
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-      title: PasskeyChallenge
-      additionalProperties: false
-    identity.schema.PasskeyCredential:
-      type: object
-      properties:
-        credentialId:
-          type: string
-          title: credential_id
-        userId:
-          type: string
-          title: user_id
-        publicKey:
-          type: string
-          title: public_key
-        signCount:
-          type:
-            - integer
-            - string
-          title: sign_count
-          format: int64
-        deviceName:
-          type: string
-          title: device_name
-        aaguid:
-          type: string
-          title: aaguid
-        transports:
-          type: string
-          title: transports
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        lastUsedAt:
-          type:
-            - integer
-            - string
-          title: last_used_at
-          format: int64
-      title: PasskeyCredential
-      additionalProperties: false
-    identity.schema.PasswordResetToken:
-      type: object
-      properties:
-        tokenHash:
-          type: string
-          title: token_hash
-        userId:
-          type: string
-          title: user_id
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        consumedAt:
-          type:
-            - integer
-            - string
-          title: consumed_at
-          format: int64
-          description: 0 = unconsumed
-      title: PasswordResetToken
-      additionalProperties: false
-    identity.schema.PhoneVerificationCode:
-      type: object
-      properties:
-        userId:
-          type: string
-          title: user_id
-        phoneNumber:
-          type: string
-          title: phone_number
-        codeHash:
-          type: string
-          title: code_hash
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        consumedAt:
-          type:
-            - integer
-            - string
-          title: consumed_at
-          format: int64
-          description: 0 = unconsumed
-        attemptCount:
-          type:
-            - integer
-            - string
-          title: attempt_count
-          format: int64
-        maxAttempts:
-          type:
-            - integer
-            - string
-          title: max_attempts
-          format: int64
-      title: PhoneVerificationCode
-      additionalProperties: false
-    identity.schema.QrLoginSession:
-      type: object
-      properties:
-        sessionId:
-          type: string
-          title: session_id
-        status:
-          type: string
-          title: status
-        userId:
-          type: string
-          title: user_id
-        newDeviceInfo:
-          type: string
-          title: new_device_info
-        newDeviceIp:
-          type: string
-          title: new_device_ip
-        newDeviceUserAgent:
-          type: string
-          title: new_device_user_agent
-        approvedDeviceInfo:
-          type: string
-          title: approved_device_info
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        updatedAt:
-          type:
-            - integer
-            - string
-          title: updated_at
-          format: int64
-        pollSecretHash:
-          type: string
-          title: poll_secret_hash
-          description: |-
-            sha256(poll_secret); the plaintext is returned only to the initiating
-             device. PollQrLogin rejects sessions where the presented secret does
-             not hash to this value.
-      title: QrLoginSession
-      additionalProperties: false
-    identity.schema.RecoveryCode:
-      type: object
-      properties:
-        userId:
-          type: string
-          title: user_id
-        codeHash:
-          type: string
-          title: code_hash
-        used:
-          type: boolean
-          title: used
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        usedAt:
-          type:
-            - integer
-            - string
-          title: used_at
-          format: int64
-      title: RecoveryCode
-      additionalProperties: false
-    identity.schema.RefreshToken:
-      type: object
-      properties:
-        tokenHash:
-          type: string
-          title: token_hash
-        userId:
-          type: string
-          title: user_id
-        deviceInfo:
-          type: string
-          title: device_info
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        deviceName:
-          type: string
-          title: device_name
-        ipAddress:
-          type: string
-          title: ip_address
-        userAgent:
-          type: string
-          title: user_agent
-        lastUsedAt:
-          type:
-            - integer
-            - string
-          title: last_used_at
-          format: int64
-        consumedAt:
-          type:
-            - integer
-            - string
-          title: consumed_at
-          format: int64
-      title: RefreshToken
-      additionalProperties: false
-    identity.schema.Session:
-      type: object
-      properties:
-        sid:
-          type: string
-          title: sid
-        userId:
-          type: string
-          title: user_id
-        createdAtMs:
-          type:
-            - integer
-            - string
-          title: created_at_ms
-          format: int64
-        revokedAtMs:
-          type:
-            - integer
-            - string
-          title: revoked_at_ms
-          format: int64
-      title: Session
-      additionalProperties: false
-      description: |-
-        ─── Session (type_id 35) ──────────────────────────────────────────────
-
-         One row per logged-in session for `GATEWAY_REVOCATION_MODE=session`
-         deployments. Access tokens minted under that mode carry an `sid`
-         claim referencing this row; verification middleware looks the row
-         up (via an in-process cache with configurable TTL) and rejects the
-         request when `revoked_at_ms != 0`.
-
-         The two-mode contract is documented in docs/IDENTITY.md (decision
-         log §6). In `mode=ttl` (the default) Sessions are never created and
-         the lookup is skipped entirely — this node type costs zero on the
-         hot path for deployers who never opt in.
-
-         Why a separate node type from RefreshToken: a refresh token rotates
-         on every use (consumed_at is the serialization point for replay
-         detection), whereas a session stays stable for the lifetime of the
-         login. Conflating them would force cache invalidation on every
-         legitimate rotation, defeating the warm-cache hot path.
-
-         Type_id 35; node type ids on disk are STABLE and must never be
-         renumbered (type_ids 33 and 34 are retired and left unused).
-    identity.schema.TotpCredential:
-      type: object
-      properties:
-        userId:
-          type: string
-          title: user_id
-        secretEncrypted:
-          type: string
-          title: secret_encrypted
-        verified:
-          type: boolean
-          title: verified
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        lastUsedAt:
-          type:
-            - integer
-            - string
-          title: last_used_at
-          format: int64
-      title: TotpCredential
-      additionalProperties: false
-    identity.schema.User:
-      type: object
-      properties:
-        email:
-          type: string
-          title: email
-        name:
-          type: string
-          title: name
-        role:
-          type: string
-          title: role
-        avatarUrl:
-          type: string
-          title: avatar_url
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        updatedAt:
-          type:
-            - integer
-            - string
-          title: updated_at
-          format: int64
-        passwordHash:
-          type: string
-          title: password_hash
-        totpRequired:
-          type: boolean
-          title: totp_required
-        failedLoginCount:
-          type:
-            - integer
-            - string
-          title: failed_login_count
-          format: int64
-        lockedUntil:
-          type:
-            - integer
-            - string
-          title: locked_until
-          format: int64
-        status:
-          type: string
-          title: status
-        recoveryEmail:
-          type: string
-          title: recovery_email
-        invitedBy:
-          type: string
-          title: invited_by
-        invitedAt:
-          type:
-            - integer
-            - string
-          title: invited_at
-          format: int64
-        quotaBytes:
-          type:
-            - integer
-            - string
-          title: quota_bytes
-          format: int64
-        deactivatedAt:
-          type:
-            - integer
-            - string
-          title: deactivated_at
-          format: int64
-        lastLoginAt:
-          type:
-            - integer
-            - string
-          title: last_login_at
-          format: int64
-        emailVerified:
-          type: boolean
-          title: email_verified
-        emailVerifiedAt:
-          type:
-            - integer
-            - string
-          title: email_verified_at
-          format: int64
-        idvVerified:
-          type: boolean
-          title: idv_verified
-        idvVerifiedAt:
-          type:
-            - integer
-            - string
-          title: idv_verified_at
-          format: int64
-        phoneNumber:
-          type: string
-          title: phone_number
-        phoneVerified:
-          type: boolean
-          title: phone_verified
-        phoneVerifiedAt:
-          type:
-            - integer
-            - string
-          title: phone_verified_at
-          format: int64
-      title: User
-      additionalProperties: false
-    identity.schema.UserInvitation:
-      type: object
-      properties:
-        tokenHash:
-          type: string
-          title: token_hash
-        email:
-          type: string
-          title: email
-        userId:
-          type: string
-          title: user_id
-        invitedBy:
-          type: string
-          title: invited_by
-        role:
-          type: string
-          title: role
-        expiresAt:
-          type:
-            - integer
-            - string
-          title: expires_at
-          format: int64
-        acceptedAt:
-          type:
-            - integer
-            - string
-          title: accepted_at
-          format: int64
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-      title: UserInvitation
-      additionalProperties: false
-    identity.schema.UserPasskey:
-      type: object
-      title: UserPasskey
-      additionalProperties: false
-    identity.schema.UserRecoveryCode:
-      type: object
-      title: UserRecoveryCode
-      additionalProperties: false
-    identity.schema.UserTotp:
-      type: object
-      title: UserTotp
-      additionalProperties: false
-    identity.schema.WorkingGroup:
-      type: object
-      properties:
-        name:
-          type: string
-          title: name
-        description:
-          type: string
-          title: description
-        createdBy:
-          type: string
-          title: created_by
-        createdAt:
-          type:
-            - integer
-            - string
-          title: created_at
-          format: int64
-        updatedAt:
-          type:
-            - integer
-            - string
-          title: updated_at
-          format: int64
-      title: WorkingGroup
-      additionalProperties: false
 security: []
 tags:
-  - name: identity.IdentityService
+  - name: identity.v1.IdentityService

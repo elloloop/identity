@@ -51,10 +51,10 @@ import { Code } from "astro-expressive-code/components";
   <h2>3. Sign up a user</h2>
   <p>
     Connect-RPC accepts JSON over HTTP. Each RPC is a POST to
-    <code>/identity.IdentityService/&lt;Method&gt;</code> with the request
+    <code>/identity.v1.IdentityService/&lt;Method&gt;</code> with the request
     message as the body and <code>Content-Type: application/json</code>.
   </p>
-  <Code code={`curl -sX POST http://localhost/identity.IdentityService/PasswordSignup \\
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/PasswordSignup \\
   -H 'Content-Type: application/json' \\
   -d '{"email":"alice@example.com","password":"correct horse battery"}'`} lang="bash" />
   <p>Response (truncated):</p>
@@ -71,12 +71,12 @@ import { Code } from "astro-expressive-code/components";
 }`} lang="json" />
 
   <h2>4. Call an authenticated RPC</h2>
-  <Code code={`TOKEN=$(curl -sX POST http://localhost/identity.IdentityService/PasswordLogin \\
+  <Code code={`TOKEN=$(curl -sX POST http://localhost/identity.v1.IdentityService/PasswordLogin \\
   -H 'Content-Type: application/json' \\
   -d '{"email":"alice@example.com","password":"correct horse battery"}' \\
   | jq -r .accessToken)
 
-curl -sX POST http://localhost/identity.IdentityService/GetCurrentUser \\
+curl -sX POST http://localhost/identity.v1.IdentityService/GetCurrentUser \\
   -H "Authorization: Bearer $TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{}'`} lang="bash" />

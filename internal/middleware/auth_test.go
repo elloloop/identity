@@ -51,7 +51,7 @@ func TestAuthMiddleware_ExemptPath_NoToken_Passes(t *testing.T) {
 
 	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -68,7 +68,7 @@ func TestAuthMiddleware_BeginOAuthLogin_ExemptNoToken_Passes(t *testing.T) {
 
 	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/BeginOAuthLogin", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/BeginOAuthLogin", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -86,7 +86,7 @@ func TestAuthMiddleware_ExemptPath_WithToken_InjectsUserID(t *testing.T) {
 
 	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 
@@ -104,7 +104,7 @@ func TestAuthMiddleware_ExemptPath_InvalidToken_StillPasses(t *testing.T) {
 
 	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/RefreshToken", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/RefreshToken", nil)
 	req.Header.Set("Authorization", "Bearer invalid-token-here")
 	rec := httptest.NewRecorder()
 
@@ -122,7 +122,7 @@ func TestAuthMiddleware_RequiredPath_NoToken_Returns401(t *testing.T) {
 
 	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -139,7 +139,7 @@ func TestAuthMiddleware_RequiredPath_InvalidToken_Returns401(t *testing.T) {
 
 	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer not-a-real-token")
 	rec := httptest.NewRecorder()
 
@@ -158,7 +158,7 @@ func TestAuthMiddleware_RequiredPath_ValidToken_InjectsUserID(t *testing.T) {
 
 	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 
@@ -185,7 +185,7 @@ func TestAuthMiddleware_ValidToken_InjectsProject(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	// An inbound spoofed header must be cleared before the verified one is set.
 	req.Header.Set(AuthenticatedProjectHeader, "spoofed")
@@ -207,7 +207,7 @@ func TestAuthMiddleware_RequiredPath_ExpiredToken_Returns401(t *testing.T) {
 
 	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
 
-	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/UpdateProfile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/UpdateProfile", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 

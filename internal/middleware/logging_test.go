@@ -110,7 +110,7 @@ func TestLoggingMiddleware_EmitsTraceID(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	r := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/PasswordLogin", nil).WithContext(ctx)
+	r := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/PasswordLogin", nil).WithContext(ctx)
 	LoggingMiddleware(logger)(inner).ServeHTTP(httptest.NewRecorder(), r)
 
 	require.Equal(t, 1, logs.Len())

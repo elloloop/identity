@@ -10,8 +10,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
-	identityconnectgen "github.com/elloloop/identity/gen/go/identity/identityconnect"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/internal/observability"
 )
 

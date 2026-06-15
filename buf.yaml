@@ -6,24 +6,25 @@ modules:
 lint:
   use:
     - STANDARD
-  except:
-    - PACKAGE_VERSION_SUFFIX
 
 breaking:
   use:
     - FILE
-  # Intentional, documented breaking change (v1.0 cleanup): the legacy
-  # OrganizationSignup RPC (identity.proto) was removed because the
-  # Project/Tenant/Domain model supersedes it. The retired EntDB schema
-  # (proto/identity/schema/schema.proto, proto/entdb/entdb_options.proto)
-  # was deleted wholesale when the entdb graph backend was removed —
-  # Postgres is the primary datastore and the relational drivers carry
-  # their own type/field-id constants, so the proto schema descriptor is
-  # dead. These ignore_only entries are scoped to the deletion rules on
-  # exactly the affected files, so every other breaking guarantee
-  # (renumbered tags, reused field ids, signature changes on surviving
-  # RPCs) stays enforced. Remove these entries once the removal has
-  # landed on the baseline branch buf breaking runs against.
+  # Intentional, documented breaking change (v1.0 cleanup): the current
+  # API surface was promoted to a real versioned package — the proto moved
+  # from proto/identity/identity.proto (package `identity`) to
+  # proto/identity/v1/identity.proto (package `identity.v1`), making the
+  # wire path /identity.v1.IdentityService/*. This is intentionally
+  # WIRE-BREAKING and accepted because there are no production consumers.
+  # buf breaking sees the old file path as deleted, so it trips
+  # FILE_NO_DELETE / PACKAGE_NO_DELETE on the retired path. These
+  # ignore_only entries are scoped to the deletion rules on exactly the
+  # old path, so every other breaking guarantee (renumbered tags, reused
+  # field ids, signature changes on the surviving RPCs in the v1 file)
+  # stays enforced. Remove these entries once the v1 move has landed on
+  # the baseline branch buf breaking runs against.
   ignore_only:
-    RPC_NO_DELETE:
+    FILE_NO_DELETE:
+      - proto/identity/identity.proto
+    PACKAGE_NO_DELETE:
       - proto/identity/identity.proto

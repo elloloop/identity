@@ -44,7 +44,7 @@ func TestFixedWindowLimiter_ZeroLimitDisables(t *testing.T) {
 func TestRateLimitMiddleware_Returns429_OverLimit(t *testing.T) {
 	l := NewFixedWindowLimiter(time.Minute, 2, 0)
 	limits := []PathLimit{{
-		PathPrefix: "/identity.IdentityService/PasswordSignup",
+		PathPrefix: "/identity.v1.IdentityService/PasswordSignup",
 		Tag:        "signup",
 		Limiter:    l,
 	}}
@@ -56,7 +56,7 @@ func TestRateLimitMiddleware_Returns429_OverLimit(t *testing.T) {
 
 	// Two successful requests then a 429 on the third.
 	for i := 0; i < 3; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/PasswordSignup", nil)
+		req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/PasswordSignup", nil)
 		req.Header.Set(ClientIPHeader, "1.2.3.4")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)

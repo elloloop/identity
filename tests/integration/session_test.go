@@ -9,7 +9,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	identitypb "github.com/elloloop/identity/gen/go/identity"
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 )
 
 // signupViaClient is a small helper that produces a fresh user and

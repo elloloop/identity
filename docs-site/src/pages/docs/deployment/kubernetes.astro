@@ -123,7 +123,7 @@ spec:
   </p>
   <ul>
     <li>Identity speaks HTTP/1.1 + HTTP/2 cleartext on <code>:80</code>.</li>
-    <li>The path namespace is <code>/identity.IdentityService/*</code> and <code>/.well-known/jwks.json</code> + <code>/health*</code>.</li>
+    <li>The path namespace is <code>/identity.v1.IdentityService/*</code> and <code>/.well-known/jwks.json</code> + <code>/health*</code>.</li>
     <li>Make sure the ingress preserves <code>Host</code> + <code>Origin</code> headers — Connect uses them, and CORS / passkey RP-ID checks depend on them.</li>
   </ul>
 </DocsLayout>
