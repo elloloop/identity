@@ -8,7 +8,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elloloop/identity/internal/service"
 )
+
+// withProjectOrigins returns a request whose context carries a ProjectScope
+// with the given per-project CORS allow-list, as the project resolver would.
+func withProjectOrigins(req *http.Request, origins ...string) *http.Request {
+	ctx := service.WithProjectScope(req.Context(), &service.ProjectScope{
+		ProjectID:          "proj-A",
+		CORSAllowedOrigins: origins,
+	})
+	return req.WithContext(ctx)
+}
 
 func nopHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,6 +129,83 @@ func TestCORS_NoOriginHeader_PassesThroughUnchanged(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// ── per-project CORS (layered on the global floor) ─────────────────────
+
+func TestCORS_ProjectOrigin_Allowed_GlobalFloorPreserved(t *testing.T) {
+	// Global floor allows localhost; project A additionally allows its own
+	// app origin. Both must be accepted on a request resolved to project A.
+	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+
+	for _, origin := range []string{"http://localhost:9002", "https://app-a.example.com"} {
+		req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+		req.Header.Set("Origin", origin)
+		req = withProjectOrigins(req, "https://app-a.example.com")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, origin, rec.Header().Get("Access-Control-Allow-Origin"), origin)
+		assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"), origin)
+	}
+}
+
+func TestCORS_ProjectOrigin_OtherProjectOrigin_Rejected(t *testing.T) {
+	// An origin configured for a DIFFERENT project (not in scope) is not
+	// allowed: only the resolved project's list plus the global floor apply.
+	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+
+	req := httptest.NewRequest(http.MethodPost, "/identity.IdentityService/GetCurrentUser", nil)
+	req.Header.Set("Origin", "https://app-b.example.com")
+	req = withProjectOrigins(req, "https://app-a.example.com")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+}
+
+func TestCORS_NoProjectScope_OnlyGlobalFloorApplies(t *testing.T) {
+	// An unresolved request (no ProjectScope in context) falls back to the
+	// global allow-list — the project origin is not magically allowed.
+	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+
+	allowed := httptest.NewRequest(http.MethodPost, "/", nil)
+	allowed.Header.Set("Origin", "http://localhost:9002")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, allowed)
+	assert.Equal(t, "http://localhost:9002", rec.Header().Get("Access-Control-Allow-Origin"))
+
+	denied := httptest.NewRequest(http.MethodPost, "/", nil)
+	denied.Header.Set("Origin", "https://app-a.example.com")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, denied)
+	assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+}
+
+func TestCORS_ProjectOrigin_Preflight_Returns204WithHeaders(t *testing.T) {
+	// The OPTIONS preflight resolves the project by Host (ahead of auth), so
+	// a project origin must be echoed on the preflight too.
+	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+
+	req := httptest.NewRequest(http.MethodOptions, "/identity.IdentityService/GetCurrentUser", nil)
+	req.Header.Set("Origin", "https://app-a.example.com")
+	req = withProjectOrigins(req, "https://app-a.example.com")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, "https://app-a.example.com", rec.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "POST, OPTIONS", rec.Header().Get("Access-Control-Allow-Methods"))
+}
+
+func TestValidateAllowedOrigins_StructuredInput(t *testing.T) {
+	out, err := ValidateAllowedOrigins([]string{"https://A.example.com", " http://localhost:9002 "}, true)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://A.example.com", "http://localhost:9002"}, out)
+
+	_, err = ValidateAllowedOrigins([]string{"*"}, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "wildcard")
+
+	_, err = ValidateAllowedOrigins(nil, true)
+	require.ErrorIs(t, err, ErrAllowedOriginsEmpty)
 }
 
 func TestParseAllowedOrigins_WildcardWithCredentials_Rejected(t *testing.T) {

@@ -26,6 +26,13 @@ type ProjectScope struct {
 	// product's own domain. Empty when the project has no auth-domain, in
 	// which case the service falls back to its configured base URL.
 	PrimaryAuthDomain string
+
+	// CORSAllowedOrigins is the project's own browser CORS allow-list,
+	// parsed and validated from its config_json. It is layered on top of
+	// the global GATEWAY_ALLOWED_ORIGINS floor by the CORS middleware: a
+	// request whose Origin is in either set is allowed. Empty when the
+	// project configures none, in which case only the global floor applies.
+	CORSAllowedOrigins []string
 }
 
 type projectScopeCtxKey struct{}
@@ -53,9 +60,10 @@ func ProjectScopeFromContext(ctx context.Context) *ProjectScope {
 // driver-agnostic value so the resolver contract does not leak a concrete
 // store type into the middleware or app wiring.
 type ResolvedProject struct {
-	ID                string
-	StorageScopeID    string
-	PrimaryAuthDomain string
+	ID                 string
+	StorageScopeID     string
+	PrimaryAuthDomain  string
+	CORSAllowedOrigins []string
 }
 
 // ProjectResolver resolves a request's project from the credentials it

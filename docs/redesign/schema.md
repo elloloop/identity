@@ -127,7 +127,7 @@ The control-plane registry. One row per project. Platform-global (NOT
 | `storage_scope_id` | TEXT | N | **U (global)**. The physical shard this project maps onto. The default project's value = `DefaultTenantID`, but `id != storage_scope_id`. |
 | `name` | TEXT | N | Display name. Not unique. |
 | `status` | TEXT | N | `CHECK IN ('active','suspended')`. Default `active`. Indexed. |
-| `config_json` | JSONB | N | Default `'{}'`. Enabled login methods, OAuth providers, email templates, TTLs. |
+| `config_json` | JSONB | N | Default `'{}'`. Per-project settings, decoded by `service.ParseProjectConfig`. Currently: `cors.allowed_origins` (array of bare scheme+host origins layered on the global `GATEWAY_ALLOWED_ORIGINS` floor). Reserved for enabled login methods, OAuth providers, email templates, TTLs. |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
 
