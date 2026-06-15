@@ -29,11 +29,11 @@ func (r *pgRepository) deleteExpiredBatch(ctx context.Context, op, table string,
 		DELETE FROM %s
 		 WHERE id IN (
 		     SELECT id FROM %s
-		      WHERE tenant_id = $1 AND expires_at_ms < $2
+		      WHERE project_id = $1 AND expires_at_ms < $2
 		      ORDER BY expires_at_ms ASC
 		      LIMIT $3
 		 )`, table, table)
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, beforeMs, limit); err != nil {
+	if _, err := r.pool.Exec(ctx, q, r.projectID, beforeMs, limit); err != nil {
 		return wrapPgErr(op, err)
 	}
 	return nil

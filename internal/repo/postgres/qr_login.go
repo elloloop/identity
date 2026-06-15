@@ -19,10 +19,10 @@ func (r *pgRepository) FindQrLoginSession(ctx context.Context, sessionID string)
 		       approved_device_info, poll_secret_hash,
 		       expires_at_ms, created_at_ms, updated_at_ms
 		  FROM qr_login_sessions
-		 WHERE tenant_id = $1 AND session_id = $2
+		 WHERE project_id = $1 AND session_id = $2
 		 LIMIT 1`
 	var s service.QrLoginSessionRecord
-	err := r.pool.QueryRow(ctx, q, r.tenantID, sessionID).Scan(
+	err := r.pool.QueryRow(ctx, q, r.projectID, sessionID).Scan(
 		&s.NodeID, &s.SessionID, &s.Status, &s.UserID,
 		&s.NewDeviceInfo, &s.NewDeviceIP, &s.NewDeviceUserAgent,
 		&s.ApprovedDeviceInfo, &s.PollSecretHash,
@@ -51,14 +51,14 @@ func (r *pgRepository) CreateQrLoginSession(ctx context.Context, s *service.QrLo
 	}
 	const q = `
 		INSERT INTO qr_login_sessions (
-			id, tenant_id, session_id, status, user_id,
+			id, project_id, session_id, status, user_id,
 			new_device_info, new_device_ip, new_device_user_agent,
 			approved_device_info, poll_secret_hash,
 			expires_at_ms, created_at_ms, updated_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, s.SessionID, status, s.UserID,
+		id, r.projectID, s.SessionID, status, s.UserID,
 		s.NewDeviceInfo, s.NewDeviceIP, s.NewDeviceUserAgent,
 		s.ApprovedDeviceInfo, s.PollSecretHash,
 		s.ExpiresAt, s.CreatedAt, s.UpdatedAt,
@@ -116,8 +116,8 @@ func (r *pgRepository) UpdateQrLoginSession(ctx context.Context, nodeID string, 
 	if len(sets) == 0 {
 		return nil
 	}
-	args = append(args, r.tenantID, nodeID)
-	q := fmt.Sprintf(`UPDATE qr_login_sessions SET %s WHERE tenant_id = $%d AND id = $%d`,
+	args = append(args, r.projectID, nodeID)
+	q := fmt.Sprintf(`UPDATE qr_login_sessions SET %s WHERE project_id = $%d AND id = $%d`,
 		strings.Join(sets, ", "), idx, idx+1)
 	if _, err := r.pool.Exec(ctx, q, args...); err != nil {
 		return wrapPgErr("UpdateQrLoginSession", err)
@@ -137,8 +137,8 @@ func (r *pgRepository) ConsumeQrLoginSession(ctx context.Context, nodeID string,
 	const q = `
 		UPDATE qr_login_sessions
 		   SET status = 'consumed', updated_at_ms = $3
-		 WHERE tenant_id = $1 AND id = $2 AND status = 'approved'`
-	tag, err := r.pool.Exec(ctx, q, r.tenantID, nodeID, atMs)
+		 WHERE project_id = $1 AND id = $2 AND status = 'approved'`
+	tag, err := r.pool.Exec(ctx, q, r.projectID, nodeID, atMs)
 	if err != nil {
 		return wrapPgErr("ConsumeQrLoginSession", err)
 	}

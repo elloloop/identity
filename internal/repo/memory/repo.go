@@ -23,7 +23,23 @@ import (
 )
 
 // Repo is the in-memory implementation of service.Repository.
+//
+// Project isolation (ADR-0002): each Repo instance owns an independent set
+// of data-plane maps, so two projects share no rows and uniqueness (e.g.
+// email) is per-project, mirroring the postgres `WHERE project_id = $1`
+// boundary and the entdb per-project SDK partition. WithProject returns the
+// sibling Repo for a given project, lazily created and memoised in a shared
+// registry so repeated lookups of the same project reuse one store.
 type Repo struct {
+	// projectID is the storage shard this Repo instance is bound to. The
+	// boot-default instance carries the empty string; siblings carry the
+	// resolved project id.
+	projectID string
+	// registry is shared by every sibling produced via WithProject so they
+	// can find one another by project id. The boot Repo creates it; each
+	// sibling points at the same map.
+	registry *projectRegistry
+
 	mu sync.Mutex
 
 	seq                int64
@@ -48,8 +64,34 @@ type Repo struct {
 	sessions           map[string]*service.SessionRecord
 }
 
-// New returns an empty Repo.
+// projectRegistry memoises the per-project Repo siblings produced by
+// WithProject so repeated lookups of one project reuse a single store. It
+// is shared (by pointer) across every sibling of a New()-rooted Repo.
+type projectRegistry struct {
+	mu       sync.Mutex
+	byID     map[string]*Repo
+	makeRepo func(projectID string) *Repo
+}
+
+// New returns an empty Repo bound to the boot-default project (the empty
+// project id). Data written without an explicit project scope lands here;
+// WithProject derives isolated siblings for other projects.
 func New() *Repo {
+	reg := &projectRegistry{byID: make(map[string]*Repo)}
+	reg.makeRepo = func(projectID string) *Repo {
+		r := newStore()
+		r.projectID = projectID
+		r.registry = reg
+		return r
+	}
+	root := reg.makeRepo("")
+	reg.byID[""] = root
+	return root
+}
+
+// newStore allocates a Repo with empty, independent data-plane maps. It
+// carries no project binding or registry; New / WithProject set those.
+func newStore() *Repo {
 	return &Repo{
 		users:              make(map[string]*service.User),
 		refreshTokens:      make(map[string]*service.RefreshTokenRecord),
@@ -71,6 +113,27 @@ func New() *Repo {
 		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
 		sessions:           make(map[string]*service.SessionRecord),
 	}
+}
+
+// WithProject returns the Repo bound to projectID, mirroring the postgres
+// `WHERE project_id = $1` boundary and the entdb per-project SDK partition
+// (ADR-0002). Each project gets a fully independent store, so two projects
+// never see each other's rows and a unique key (email) is scoped per
+// project. The sibling is memoised so repeated calls for one project return
+// the same store; passing this Repo's own project id returns itself.
+func (r *Repo) WithProject(projectID string) service.Repository {
+	if projectID == r.projectID {
+		return r
+	}
+	reg := r.registry
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	if sibling, ok := reg.byID[projectID]; ok {
+		return sibling
+	}
+	sibling := reg.makeRepo(projectID)
+	reg.byID[projectID] = sibling
+	return sibling
 }
 
 func (r *Repo) nextID() string {

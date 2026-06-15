@@ -126,10 +126,12 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 	}
 
 	logger := zaptest.NewLogger(t)
-	// A unique storage scope per test run keeps users/sessions isolated even
-	// though every run shares one control-plane database.
-	tenantID := fmt.Sprintf("it-redesign-%d", time.Now().UnixNano())
-	const projectID = "default"
+	// Post-inversion (ADR-0002) the Project is the data-plane shard, so a
+	// unique project (and its storage scope) per test run keeps users/sessions
+	// isolated even though every run shares one control-plane database.
+	uniq := fmt.Sprintf("it-redesign-%d", time.Now().UnixNano())
+	tenantID := uniq
+	projectID := uniq
 
 	cfg := newRedesignTestConfig(dsn, projectID, tenantID)
 
@@ -162,7 +164,7 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 		PostgresDSN:         dsn,
 		PostgresMaxConns:    5,
 		PostgresAutoMigrate: false,
-		TenantID:            tenantID,
+		ProjectID:           projectID,
 	}, logger)
 	if err != nil {
 		t.Fatalf("repo.Build (governance handle): %v", err)

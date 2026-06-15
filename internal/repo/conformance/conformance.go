@@ -93,6 +93,16 @@ type Driver struct {
 	// them with t.Cleanup inside NewRepo so a subtest never leaks
 	// state into the next.
 	NewRepo func(t *testing.T) service.Repository
+
+	// BindProject returns base rebound to projectID (ADR-0002 — the Project
+	// is the storage shard). It exists so the cross-project isolation suite
+	// can exercise the real per-request WithProject scoping on ONE backing
+	// store rather than two independently-constructed repos. Drivers whose
+	// data-plane FK requires the project row to exist first (postgres) seed
+	// it here before returning base.WithProject(projectID); drivers without a
+	// control plane (memory, entdb) just return base.WithProject(projectID).
+	// When nil, the cross-project isolation subtest skips for this driver.
+	BindProject func(t *testing.T, base service.Repository, projectID string) service.Repository
 }
 
 // runSweepCase exercises one DeleteExpired* method. The caller
@@ -2192,6 +2202,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runFilteringConformance(t, driver)
 	runIdempotencyConformance(t, driver)
 	runIsolationConformance(t, driver)
+	runProjectIsolationConformance(t, driver)
 	runGetLatestConformance(t, driver)
 }
 

@@ -33,9 +33,9 @@ func (r *pgRepository) ListPasskeyCredentials(ctx context.Context, userID string
 	}
 	const q = `SELECT ` + passkeyColumns + `
 		FROM passkeys
-		WHERE tenant_id = $1 AND user_id = $2
+		WHERE project_id = $1 AND user_id = $2
 		ORDER BY created_at_ms ASC`
-	rows, err := r.pool.Query(ctx, q, r.tenantID, userID)
+	rows, err := r.pool.Query(ctx, q, r.projectID, userID)
 	if err != nil {
 		return nil, wrapPgErr("ListPasskeyCredentials", err)
 	}
@@ -60,9 +60,9 @@ func (r *pgRepository) GetPasskeyCredentialByCredID(ctx context.Context, credent
 	}
 	const q = `SELECT ` + passkeyColumns + `
 		FROM passkeys
-		WHERE tenant_id = $1 AND credential_id = $2
+		WHERE project_id = $1 AND credential_id = $2
 		LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, r.tenantID, credentialID)
+	row := r.pool.QueryRow(ctx, q, r.projectID, credentialID)
 	c, err := scanPasskey(row)
 	if noRows(err) {
 		return nil, nil
@@ -83,12 +83,12 @@ func (r *pgRepository) CreatePasskeyCredential(ctx context.Context, c *service.P
 	}
 	const q = `
 		INSERT INTO passkeys (
-			id, tenant_id, credential_id, user_id, public_key, sign_count,
+			id, project_id, credential_id, user_id, public_key, sign_count,
 			device_name, aaguid, transports, created_at_ms, last_used_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, c.CredentialID, c.UserID, c.PublicKey, c.SignCount,
+		id, r.projectID, c.CredentialID, c.UserID, c.PublicKey, c.SignCount,
 		c.DeviceName, c.AAGUID, c.Transports, c.CreatedAt, c.LastUsedAt,
 	)
 	if err != nil {
@@ -143,8 +143,8 @@ func (r *pgRepository) UpdatePasskeyCredential(ctx context.Context, nodeID strin
 	if len(sets) == 0 {
 		return nil
 	}
-	args = append(args, r.tenantID, nodeID)
-	q := fmt.Sprintf(`UPDATE passkeys SET %s WHERE tenant_id = $%d AND id = $%d`,
+	args = append(args, r.projectID, nodeID)
+	q := fmt.Sprintf(`UPDATE passkeys SET %s WHERE project_id = $%d AND id = $%d`,
 		strings.Join(sets, ", "), idx, idx+1)
 	if _, err := r.pool.Exec(ctx, q, args...); err != nil {
 		return wrapPgErr("UpdatePasskeyCredential", err)
@@ -161,9 +161,9 @@ func (r *pgRepository) GetPasskeyChallenge(ctx context.Context, nodeID string) (
 	const q = `
 		SELECT id, challenge, user_id, challenge_type, expires_at_ms, created_at_ms
 		  FROM passkey_challenges
-		 WHERE tenant_id = $1 AND id = $2`
+		 WHERE project_id = $1 AND id = $2`
 	var c service.PasskeyChallengeRecord
-	err := r.pool.QueryRow(ctx, q, r.tenantID, nodeID).Scan(
+	err := r.pool.QueryRow(ctx, q, r.projectID, nodeID).Scan(
 		&c.NodeID, &c.Challenge, &c.UserID, &c.ChallengeType,
 		&c.ExpiresAt, &c.CreatedAt,
 	)
@@ -186,12 +186,12 @@ func (r *pgRepository) CreatePasskeyChallenge(ctx context.Context, c *service.Pa
 	}
 	const q = `
 		INSERT INTO passkey_challenges (
-			id, tenant_id, challenge, user_id, challenge_type,
+			id, project_id, challenge, user_id, challenge_type,
 			expires_at_ms, created_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, c.Challenge, c.UserID, c.ChallengeType,
+		id, r.projectID, c.Challenge, c.UserID, c.ChallengeType,
 		c.ExpiresAt, c.CreatedAt,
 	)
 	if err != nil {
@@ -205,8 +205,8 @@ func (r *pgRepository) DeletePasskeyChallenge(ctx context.Context, nodeID string
 	if nodeID == "" {
 		return nil
 	}
-	const q = `DELETE FROM passkey_challenges WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, nodeID); err != nil {
+	const q = `DELETE FROM passkey_challenges WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, nodeID); err != nil {
 		return wrapPgErr("DeletePasskeyChallenge", err)
 	}
 	return nil

@@ -65,10 +65,10 @@ func TestBuildRejectsInvalidConfig(t *testing.T) {
 		cfg  Config
 	}{
 		{"unknown_driver", Config{Driver: Driver("unknown")}},
-		{"entdb_missing_client", Config{Driver: DriverEntDB, TenantID: "tenant"}},
-		{"entdb_missing_tenant", Config{Driver: DriverEntDB, EntDBClient: &sdk.DbClient{}}},
-		{"postgres_missing_dsn", Config{Driver: DriverPostgres, TenantID: "tenant"}},
-		{"postgres_missing_tenant", Config{Driver: DriverPostgres, PostgresDSN: "postgres://example"}},
+		{"entdb_missing_client", Config{Driver: DriverEntDB, ProjectID: "tenant"}},
+		{"entdb_missing_project", Config{Driver: DriverEntDB, EntDBClient: &sdk.DbClient{}}},
+		{"postgres_missing_dsn", Config{Driver: DriverPostgres, ProjectID: "tenant"}},
+		{"postgres_missing_project", Config{Driver: DriverPostgres, PostgresDSN: "postgres://example"}},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -85,7 +85,7 @@ func TestBuild_PostgresMaxConnsExceedsInt32(t *testing.T) {
 	cfg := Config{
 		Driver:           DriverPostgres,
 		PostgresDSN:      "postgres://example",
-		TenantID:         "tenant",
+		ProjectID:        "tenant",
 		PostgresMaxConns: math.MaxInt32 + 1,
 	}
 	_, err := Build(context.Background(), cfg, nil)
@@ -108,7 +108,7 @@ func TestBuild_EntDBHappyPath(t *testing.T) {
 	built, err := Build(context.Background(), Config{
 		Driver:      DriverEntDB,
 		EntDBClient: client,
-		TenantID:    "tenant-1",
+		ProjectID:   "tenant-1",
 	}, nil)
 	if err != nil {
 		t.Fatalf("Build entdb: %v", err)

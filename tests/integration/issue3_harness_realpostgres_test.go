@@ -30,6 +30,9 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 	tenantID := fmt.Sprintf("issue3-realpostgres-%d", time.Now().UnixNano())
 	cfg := newIssue3TestConfig()
 	cfg.DefaultTenantID = tenantID
+	// The data-plane binds to the project (ADR-0002); use a unique project id
+	// per run so concurrent runs on the shared CI database stay isolated.
+	cfg.DefaultProjectID = tenantID
 	cfg.PasswordResetExpirySeconds = 3600
 
 	signer := jwttest.NewSigner(t, "issue-3-realpostgres-test-kid")
@@ -48,13 +51,19 @@ func StartIssue3Server(t *testing.T) *issue3Harness {
 		PostgresDSN:         dsn,
 		PostgresMaxConns:    5,
 		PostgresAutoMigrate: true,
-		TenantID:            tenantID,
+		ProjectID:           cfg.DefaultProjectID,
 	}, zap.NewNop())
 	if err != nil {
 		t.Fatalf("repo.Build: %v", err)
 	}
 	if closer, ok := built.Repository.(interface{ Close() }); ok {
 		t.Cleanup(closer.Close)
+	}
+	// Seed the projects(id) row the project_id FK (migration 0015) needs.
+	if _, err := built.ProjectStore.EnsureDefaultProject(
+		context.Background(), cfg.DefaultProjectID, cfg.DefaultTenantID, "issue3",
+	); err != nil {
+		t.Fatalf("seed default project: %v", err)
 	}
 
 	appBuilt, err := app.New(app.Deps{

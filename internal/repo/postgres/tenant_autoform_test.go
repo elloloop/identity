@@ -24,10 +24,14 @@ func newAutoFormFixture(ctx context.Context, t *testing.T, dsn string) (
 	t.Helper()
 	repo, err := New(ctx, Config{
 		DSN: dsn, MaxConns: 8, ConnTimeout: 5 * time.Second,
-		AutoMigrate: true, TenantID: "control-plane",
+		AutoMigrate: true, ProjectID: "control-plane",
 	})
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)
+
+	// Users created below carry project_id="control-plane" (the repo binding);
+	// seed that project so the project_id FK (migration 0015) is satisfied.
+	seedProject(ctx, t, repo, "control-plane")
 
 	projectID, err = NewProjectStore(repo).createProject(ctx, &Project{StorageScopeID: "scope-af", Name: "AF"})
 	require.NoError(t, err)

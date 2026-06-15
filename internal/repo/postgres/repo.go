@@ -17,9 +17,9 @@ import (
 // pgRepository is the Postgres-backed implementation of identity's
 // persistence contracts. It is created via New().
 type pgRepository struct {
-	pool     *tracedPool
-	tenantID string
-	cfg      Config
+	pool      *tracedPool
+	projectID string
+	cfg       Config
 }
 
 // New constructs a Postgres-backed repository:
@@ -73,23 +73,23 @@ func New(ctx context.Context, cfg Config) (*pgRepository, error) {
 	}
 
 	return &pgRepository{
-		pool:     pool,
-		tenantID: cfg.TenantID,
-		cfg:      cfg,
+		pool:      pool,
+		projectID: cfg.ProjectID,
+		cfg:       cfg,
 	}, nil
 }
 
-// WithTenant returns a Repository sharing this store's connection pool
-// but scoped to a different tenant. Used by the mode=multi per-request
-// tenant-resolution path, where every request needs a tenant-scoped
-// Repository but opening a fresh pool per request would exhaust
-// connections. The returned value shares the pool, so it must NOT be
-// Closed independently — Close on the original releases the pool for all
-// derived scopes.
-func (r *pgRepository) WithTenant(tenantID string) service.Repository {
+// WithProject returns a Repository sharing this store's connection pool
+// but scoped to a different project (storage shard). Used by the
+// per-request project-resolution path (ADR-0002), where every request
+// needs a project-scoped Repository but opening a fresh pool per request
+// would exhaust connections. The returned value shares the pool, so it
+// must NOT be Closed independently — Close on the original releases the
+// pool for all derived scopes.
+func (r *pgRepository) WithProject(projectID string) service.Repository {
 	cp := *r
-	cp.tenantID = tenantID
-	cp.cfg.TenantID = tenantID
+	cp.projectID = projectID
+	cp.cfg.ProjectID = projectID
 	return &cp
 }
 

@@ -168,7 +168,7 @@ func TestIDVRecordToProto_PopulatesAllFields(t *testing.T) {
 		NodeID:            "node-1",
 		VerificationID:    "v-1",
 		UserID:            "u-1",
-		TenantID:          "t-1",
+		ProjectID:         "t-1",
 		Provider:          "stub",
 		ProviderSessionID: "sess-1",
 		Status:            service.IDVStatusRejected,

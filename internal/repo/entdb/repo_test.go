@@ -469,8 +469,8 @@ func TestCreateUser_DuplicateCreateDeletesLoser(t *testing.T) {
 
 	client := newDuplicateUserEntClient()
 	repo := &entRepository{
-		client:   client,
-		tenantID: "test-tenant",
+		client:    client,
+		projectID: "test-tenant",
 	}
 
 	first := &service.User{Email: "dup@example.com", Status: "active"}
@@ -501,8 +501,8 @@ func TestEntRepositoryInputContracts(t *testing.T) {
 
 	ctx := context.Background()
 	repo := &entRepository{
-		client:   newMemoryEntClient(),
-		tenantID: "test-tenant",
+		client:    newMemoryEntClient(),
+		projectID: "test-tenant",
 	}
 
 	errorCases := []struct {
@@ -868,7 +868,7 @@ func TestEntRepositoryUserOrderingAndCleanup(t *testing.T) {
 	}
 
 	client := newMemoryEntClient()
-	repo := &entRepository{client: client, tenantID: "test-tenant"}
+	repo := &entRepository{client: client, projectID: "test-tenant"}
 	client.store["keep"] = storedNode{msg: &schemapb.User{Email: "dup@example.com"}}
 	client.store["drop"] = storedNode{msg: &schemapb.User{Email: "dup@example.com"}}
 	err := repo.deleteOtherUsers(context.Background(), []queriedNode{
@@ -1158,7 +1158,7 @@ func TestSEC4_DrainCeilingError(t *testing.T) {
 			t.Parallel()
 			mem := newMemoryEntClient()
 			tc.seed(mem)
-			repo := &entRepository{client: &nondeletingClient{memoryEntClient: mem}, tenantID: "t"}
+			repo := &entRepository{client: &nondeletingClient{memoryEntClient: mem}, projectID: "t"}
 			err := tc.call(repo)
 			if err == nil {
 				t.Fatal("expected drain-ceiling error, got nil")
@@ -1184,7 +1184,7 @@ func TestSEC4_DeleteRefreshTokensForUser_DrainsBeyondQueryCap(t *testing.T) {
 	// Use a tiny cap (3) to keep the test fast; the drain logic is
 	// the same shape at 1000.
 	capped := &cappedQueryClient{memoryEntClient: mem, cap: 3}
-	repo := &entRepository{client: capped, tenantID: "t"}
+	repo := &entRepository{client: capped, projectID: "t"}
 
 	// Seed 10 refresh tokens for the same user — more than 3× the cap.
 	for i := 0; i < 10; i++ {
@@ -1217,7 +1217,7 @@ func TestSEC4_DeleteTotpCredentialsForUser_DrainsBeyondQueryCap(t *testing.T) {
 	ctx := context.Background()
 	mem := newMemoryEntClient()
 	capped := &cappedQueryClient{memoryEntClient: mem, cap: 3}
-	repo := &entRepository{client: capped, tenantID: "t"}
+	repo := &entRepository{client: capped, projectID: "t"}
 
 	for i := 0; i < 7; i++ {
 		mem.store[fmt.Sprintf("totp-%02d", i)] = storedNode{msg: &schemapb.TotpCredential{
@@ -1242,7 +1242,7 @@ func TestSEC4_DeleteRecoveryCodesForUser_DrainsBeyondQueryCap(t *testing.T) {
 	ctx := context.Background()
 	mem := newMemoryEntClient()
 	capped := &cappedQueryClient{memoryEntClient: mem, cap: 3}
-	repo := &entRepository{client: capped, tenantID: "t"}
+	repo := &entRepository{client: capped, projectID: "t"}
 
 	for i := 0; i < 8; i++ {
 		mem.store[fmt.Sprintf("rc-%02d", i)] = storedNode{msg: &schemapb.RecoveryCode{
@@ -1278,7 +1278,7 @@ func TestSEC4_RevokeSessionsForUser_RevokesEveryUnrevokedSessionInWindow(t *test
 	t.Parallel()
 	ctx := context.Background()
 	mem := newMemoryEntClient()
-	repo := &entRepository{client: mem, tenantID: "t"}
+	repo := &entRepository{client: mem, projectID: "t"}
 
 	for i := 0; i < 7; i++ {
 		mem.store[fmt.Sprintf("sess-%02d", i)] = storedNode{msg: &schemapb.Session{
@@ -1348,8 +1348,8 @@ func TestDeleteUser_DrainQueryError(t *testing.T) {
 	mem.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u-1"}}
 	mem.store["u-1"] = storedNode{msg: &schemapb.User{Email: "u@e.com"}}
 	repo := &entRepository{
-		client:   &failingQueryClient{memoryEntClient: mem, failType: reflect.TypeOf(&schemapb.RefreshToken{})},
-		tenantID: "t",
+		client:    &failingQueryClient{memoryEntClient: mem, failType: reflect.TypeOf(&schemapb.RefreshToken{})},
+		projectID: "t",
 	}
 
 	err := repo.DeleteUser(ctx, "u-1")
@@ -1378,8 +1378,8 @@ func TestDeleteUser_DrainDeleteError(t *testing.T) {
 	mem.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u-1"}}
 	mem.store["u-1"] = storedNode{msg: &schemapb.User{Email: "u@e.com"}}
 	repo := &entRepository{
-		client:   &failingDeleteClient{memoryEntClient: mem, failType: reflect.TypeOf(&schemapb.RefreshToken{})},
-		tenantID: "t",
+		client:    &failingDeleteClient{memoryEntClient: mem, failType: reflect.TypeOf(&schemapb.RefreshToken{})},
+		projectID: "t",
 	}
 
 	err := repo.DeleteUser(ctx, "u-1")
@@ -1431,7 +1431,7 @@ func TestDeleteUser_DrainsEveryUserOwnedType(t *testing.T) {
 	mem.store["lc"] = storedNode{msg: &schemapb.LoginChallenge{UserId: "u-1"}}
 	mem.store["inv"] = storedNode{msg: &schemapb.UserInvitation{UserId: "u-1"}}
 	mem.store["otc"] = storedNode{msg: &schemapb.OAuthOneTimeCode{UserId: "u-1"}}
-	repo := &entRepository{client: mem, tenantID: "t"}
+	repo := &entRepository{client: mem, projectID: "t"}
 
 	if err := repo.DeleteUser(ctx, "u-1"); err != nil {
 		t.Fatalf("DeleteUser: %v", err)
@@ -1451,7 +1451,7 @@ func TestDeleteUser_EmptyUserIDIsNoOp(t *testing.T) {
 	t.Parallel()
 	mem := newMemoryEntClient()
 	mem.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u-1"}}
-	repo := &entRepository{client: mem, tenantID: "t"}
+	repo := &entRepository{client: mem, projectID: "t"}
 
 	if err := repo.DeleteUser(context.Background(), ""); err != nil {
 		t.Fatalf("DeleteUser(\"\") must be a no-op, got %v", err)
@@ -1471,7 +1471,7 @@ func TestDeleteUser_DrainCeilingError(t *testing.T) {
 	mem := newMemoryEntClient()
 	mem.store["rt"] = storedNode{msg: &schemapb.RefreshToken{UserId: "u-1"}}
 	mem.store["u-1"] = storedNode{msg: &schemapb.User{Email: "u@e.com"}}
-	repo := &entRepository{client: &nondeletingClient{memoryEntClient: mem}, tenantID: "t"}
+	repo := &entRepository{client: &nondeletingClient{memoryEntClient: mem}, projectID: "t"}
 
 	err := repo.DeleteUser(context.Background(), "u-1")
 	if err == nil {

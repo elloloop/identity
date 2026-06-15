@@ -46,7 +46,7 @@ func TestEnsureDefaultProject_SeedsPostgres(t *testing.T) {
 	built, err := repo.Build(ctx, repo.Config{
 		Driver:              repo.DriverPostgres,
 		PostgresDSN:         dsn,
-		TenantID:            "bootstrap-scope",
+		ProjectID:           "bootstrap-test-project",
 		PostgresAutoMigrate: true,
 	}, nil)
 	if err != nil {
@@ -98,7 +98,7 @@ func TestEnsureProjectAuthDomains_SeedsBrandedHosts(t *testing.T) {
 	built, err := repo.Build(ctx, repo.Config{
 		Driver:              repo.DriverPostgres,
 		PostgresDSN:         dsn,
-		TenantID:            "authdom-scope",
+		ProjectID:           "authdom-test-project",
 		PostgresAutoMigrate: true,
 	}, nil)
 	if err != nil {

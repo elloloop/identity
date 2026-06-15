@@ -274,7 +274,11 @@ func New(deps Deps) (*Built, error) {
 		logger.Error("schema_descriptor_invalid", zap.Error(err))
 	}
 
-	auditLog := audit.NewLogger(deps.DB, deps.Config.DefaultTenantID, logger)
+	// The audit logger is a boot-scoped singleton; it writes audit_events
+	// under the default project's storage partition (ADR-0002 — the Project
+	// is the data-plane shard), matching the boot-default Repository/DB
+	// binding. Per-request audit project scoping is a follow-up.
+	auditLog := audit.NewLogger(deps.DB, deps.Config.DefaultProjectID, logger)
 
 	// Garbage-collection sweeper for expired ephemeral rows (#94).
 	// Disabled when SweeperIntervalSeconds <= 0 — deployers who
@@ -354,15 +358,15 @@ func New(deps Deps) (*Built, error) {
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance)
-	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultTenantID, auditLog, deps.Config, mailer, logger)
-	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
-	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
-	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultTenantID, auditLog, logger)
+	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger)
+	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
+	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
+	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 
 	var idvSvc *service.IdentityVerificationService
 	if deps.IDVProvider != nil {
 		idvSvc = service.NewIdentityVerificationService(
-			repo, observability.WrapIDVProvider(deps.IDVProvider), deps.Config.DefaultTenantID, logger,
+			repo, observability.WrapIDVProvider(deps.IDVProvider), deps.Config.DefaultProjectID, logger,
 		)
 	}
 

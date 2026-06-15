@@ -71,10 +71,13 @@ func idvRecordToProto(rec *service.IdentityVerificationRecord) *identitypb.Ident
 	if rec == nil {
 		return nil
 	}
+	// The IdentityVerification.tenant_id API field carries the storage shard,
+	// which is now the project (ADR-0002). The proto field name is part of the
+	// published API and is intentionally not renamed here.
 	return &identitypb.IdentityVerification{
 		Id:                rec.NodeID,
 		UserId:            rec.UserID,
-		TenantId:          rec.TenantID,
+		TenantId:          rec.ProjectID,
 		Provider:          rec.Provider,
 		ProviderSessionId: rec.ProviderSessionID,
 		Status:            idvStatusToProto(rec.Status),

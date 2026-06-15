@@ -26,7 +26,7 @@ func newProjectStore(ctx context.Context, t *testing.T, dsn string) *ProjectStor
 		// The control plane is platform-global; TenantID only satisfies
 		// the data-plane *pgRepository's config validation and is unused
 		// by the ProjectStore.
-		TenantID: "control-plane",
+		ProjectID: "control-plane",
 	})
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)

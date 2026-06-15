@@ -16,11 +16,11 @@ func (r *pgRepository) GetTotpCredential(ctx context.Context, userID string) (*s
 	const q = `
 		SELECT id, user_id, secret_encrypted, verified, created_at_ms, last_used_at_ms
 		  FROM totp_secrets
-		 WHERE tenant_id = $1 AND user_id = $2
+		 WHERE project_id = $1 AND user_id = $2
 		 ORDER BY created_at_ms DESC
 		 LIMIT 1`
 	var c service.TotpCredRecord
-	err := r.pool.QueryRow(ctx, q, r.tenantID, userID).Scan(
+	err := r.pool.QueryRow(ctx, q, r.projectID, userID).Scan(
 		&c.NodeID, &c.UserID, &c.SecretEncrypted, &c.Verified,
 		&c.CreatedAt, &c.LastUsedAt,
 	)
@@ -43,12 +43,12 @@ func (r *pgRepository) CreateTotpCredential(ctx context.Context, c *service.Totp
 	}
 	const q = `
 		INSERT INTO totp_secrets (
-			id, tenant_id, user_id, secret_encrypted, verified,
+			id, project_id, user_id, secret_encrypted, verified,
 			created_at_ms, last_used_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, c.UserID, c.SecretEncrypted, c.Verified,
+		id, r.projectID, c.UserID, c.SecretEncrypted, c.Verified,
 		c.CreatedAt, c.LastUsedAt,
 	)
 	if err != nil {
@@ -109,8 +109,8 @@ func (r *pgRepository) UpdateTotpCredential(ctx context.Context, nodeID string, 
 	if len(sets) == 0 {
 		return nil
 	}
-	args = append(args, r.tenantID, nodeID)
-	q := fmt.Sprintf(`UPDATE totp_secrets SET %s WHERE tenant_id = $%d AND id = $%d`,
+	args = append(args, r.projectID, nodeID)
+	q := fmt.Sprintf(`UPDATE totp_secrets SET %s WHERE project_id = $%d AND id = $%d`,
 		strings.Join(sets, ", "), idx, idx+1)
 	if _, err := r.pool.Exec(ctx, q, args...); err != nil {
 		return wrapPgErr("UpdateTotpCredential", err)
@@ -122,8 +122,8 @@ func (r *pgRepository) DeleteTotpCredential(ctx context.Context, nodeID string) 
 	if nodeID == "" {
 		return nil
 	}
-	const q = `DELETE FROM totp_secrets WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, nodeID); err != nil {
+	const q = `DELETE FROM totp_secrets WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, nodeID); err != nil {
 		return wrapPgErr("DeleteTotpCredential", err)
 	}
 	return nil
@@ -133,8 +133,8 @@ func (r *pgRepository) DeleteTotpCredentialsForUser(ctx context.Context, userID 
 	if userID == "" {
 		return nil
 	}
-	const q = `DELETE FROM totp_secrets WHERE tenant_id = $1 AND user_id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID); err != nil {
+	const q = `DELETE FROM totp_secrets WHERE project_id = $1 AND user_id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, userID); err != nil {
 		return wrapPgErr("DeleteTotpCredentialsForUser", err)
 	}
 	return nil

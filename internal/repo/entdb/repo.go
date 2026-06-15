@@ -37,8 +37,17 @@ const systemActor = "system:admin"
 // entRepository is the EntDB-backed implementation of
 // service.Repository.
 type entRepository struct {
-	client   entClient
-	tenantID string
+	client entClient
+	// projectID is the storage shard this repository is bound to
+	// (ADR-0002). The Project is identity's isolation shard, so the SDK
+	// partition (entClient scope) is keyed by the project id. Per-request
+	// scopes are derived via WithProject.
+	projectID string
+	// newScope rebinds the underlying SDK scope to a different project,
+	// sharing the same connection. It is captured at construction so
+	// WithProject can produce a sibling without the repository needing to
+	// hold the raw *sdk.DbClient.
+	newScope func(projectID string) entClient
 }
 
 type rawUpdateClient interface {
@@ -59,12 +68,31 @@ type rawUpdateClient interface {
 const bulkDrainMaxIterations = 100
 
 // NewRepository constructs an EntDB-backed Repository using the SDK's
-// public typed surface. The returned repository wraps every entClient
+// public typed surface. projectID is the storage shard the repository
+// binds to (ADR-0002 — the Project is identity's isolation shard, so it
+// drives the SDK partition). The returned repository wraps every entClient
 // call in an OpenTelemetry span (no-op when OTel is disabled).
-func NewRepository(client *sdk.DbClient, tenantID string) service.Repository {
+func NewRepository(client *sdk.DbClient, projectID string) service.Repository {
+	newScope := func(pid string) entClient {
+		return newTracedClient(newSDKScope(client, pid))
+	}
 	return &entRepository{
-		client:   newTracedClient(newSDKScope(client, tenantID)),
-		tenantID: tenantID,
+		client:    newScope(projectID),
+		projectID: projectID,
+		newScope:  newScope,
+	}
+}
+
+// WithProject returns a Repository sharing this store's underlying SDK
+// client but partitioned on a different project (ADR-0002). The per-request
+// project-resolution path uses it so every backend honours the resolved
+// project; the returned value shares the connection and must not be closed
+// independently.
+func (r *entRepository) WithProject(projectID string) service.Repository {
+	return &entRepository{
+		client:    r.newScope(projectID),
+		projectID: projectID,
+		newScope:  r.newScope,
 	}
 }
 
@@ -2047,12 +2075,11 @@ func (r *entRepository) ListOAuthIdentitiesForUser(ctx context.Context, userID s
 // ── Identity-verification records ─────────────────────────────────
 
 // identityVerificationFromProto rehydrates a *service.IdentityVerificationRecord
-// from the wire payload. tenantID is the repository's tenant scope —
-// the proto has no tenant_id field because identity-tenant ↔ entdb-tenant
-// is 1:1 (per docs/IDENTITY.md): the storage scope IS the tenant. Reads
-// always know which tenant they're reading from, so the field is
-// synthesised here rather than persisted on every row.
-func identityVerificationFromProto(id, tenantID string, p *schemapb.IdentityVerificationRecord) *service.IdentityVerificationRecord {
+// from the wire payload. projectID is the repository's storage shard
+// (ADR-0002) — the proto has no project_id field because the shard IS the
+// partition the SDK reads under, so it is synthesised here rather than
+// persisted on every row.
+func identityVerificationFromProto(id, projectID string, p *schemapb.IdentityVerificationRecord) *service.IdentityVerificationRecord {
 	if p == nil {
 		return nil
 	}
@@ -2060,7 +2087,7 @@ func identityVerificationFromProto(id, tenantID string, p *schemapb.IdentityVeri
 		NodeID:            id,
 		VerificationID:    p.GetVerificationId(),
 		UserID:            p.GetUserId(),
-		TenantID:          tenantID,
+		ProjectID:         projectID,
 		Provider:          p.GetProvider(),
 		ProviderSessionID: p.GetProviderSessionId(),
 		Status:            p.GetStatus(),
@@ -2160,7 +2187,7 @@ func (r *entRepository) GetIdentityVerification(ctx context.Context, verificatio
 	if err != nil {
 		return nil, fmt.Errorf("repo: GetIdentityVerification: %w", err)
 	}
-	return identityVerificationFromProto(id, r.tenantID, dst), nil
+	return identityVerificationFromProto(id, r.projectID, dst), nil
 }
 
 func (r *entRepository) GetLatestIdentityVerificationForUser(ctx context.Context, userID string) (*service.IdentityVerificationRecord, error) {
@@ -2173,7 +2200,7 @@ func (r *entRepository) GetLatestIdentityVerificationForUser(ctx context.Context
 	}
 	var latest *service.IdentityVerificationRecord
 	for _, row := range rows {
-		rec := identityVerificationFromProto(row.NodeID, r.tenantID, row.Message.(*schemapb.IdentityVerificationRecord))
+		rec := identityVerificationFromProto(row.NodeID, r.projectID, row.Message.(*schemapb.IdentityVerificationRecord))
 		if latest == nil || rec.CreatedAt > latest.CreatedAt {
 			latest = rec
 		}

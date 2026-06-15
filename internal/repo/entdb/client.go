@@ -121,16 +121,19 @@ var errPreconditionFailed = errors.New("entdb: precondition failed")
 // purely a witness picker for sdk.Get[T] / sdk.Delete[T] and not a
 // witness table for the wire payload.
 type sdkScope struct {
-	client    *sdk.DbClient
-	tenantID  string
+	client *sdk.DbClient
+	// projectID is the storage shard the scope partitions on (ADR-0002):
+	// the Project is identity's isolation shard, so the SDK Tenant()
+	// partition key is driven by the project id, not a separate tenant.
+	projectID string
 	transport sdk.Transport
 }
 
-func newSDKScope(client *sdk.DbClient, tenantID string) *sdkScope {
+func newSDKScope(client *sdk.DbClient, projectID string) *sdkScope {
 	// tenant-shard-db v1.14.0 (#528) added a public read-only Transport
 	// accessor on *DbClient, so the repo can reach the raw transport
 	// without reflection. Earlier releases forced an unsafe field read.
-	return &sdkScope{client: client, tenantID: tenantID, transport: client.Transport()}
+	return &sdkScope{client: client, projectID: projectID, transport: client.Transport()}
 }
 
 func (s *sdkScope) scope(actor string) (*sdk.Scope, error) {
@@ -138,7 +141,7 @@ func (s *sdkScope) scope(actor string) (*sdk.Scope, error) {
 	if err != nil {
 		return nil, fmt.Errorf("entdb: parse actor %q: %w", actor, err)
 	}
-	return s.client.Tenant(s.tenantID).Actor(a), nil
+	return s.client.Tenant(s.projectID).Actor(a), nil
 }
 
 func (s *sdkScope) get(ctx context.Context, actor string, dst proto.Message, nodeID string) error {
@@ -400,7 +403,7 @@ func (s *sdkScope) ensureUserTenantMember(ctx context.Context, userID, emailAddr
 	if _, err := admin.CreateUser(ctx, systemActor, userID, emailAddr, name); err != nil && !isAlreadyExists(err) {
 		return fmt.Errorf("entdb: register user %q: %w", userID, err)
 	}
-	if err := admin.AddTenantMember(ctx, systemActor, s.tenantID, userID, role); err != nil && !isAlreadyExists(err) {
+	if err := admin.AddTenantMember(ctx, systemActor, s.projectID, userID, role); err != nil && !isAlreadyExists(err) {
 		return fmt.Errorf("entdb: add tenant member %q: %w", userID, err)
 	}
 	return nil
@@ -450,7 +453,7 @@ func (s *sdkScope) rawUpdate(ctx context.Context, actor string, typeID int, node
 	if s.transport == nil {
 		return errors.New("entdb: raw transport unavailable")
 	}
-	if _, err := s.transport.ExecuteAtomic(ctx, s.tenantID, actor, "", []sdk.Operation{{
+	if _, err := s.transport.ExecuteAtomic(ctx, s.projectID, actor, "", []sdk.Operation{{
 		Type:   sdk.OpUpdateNode,
 		TypeID: typeID,
 		NodeID: nodeID,
@@ -681,7 +684,7 @@ func (s *sdkScope) deleteExpired(ctx context.Context, actor string, witness prot
 		return fmt.Errorf("entdb: deleteExpired: unsupported message type %T", witness)
 	}
 
-	plan := s.client.NewPlan(s.tenantID, actor)
+	plan := s.client.NewPlan(s.projectID, actor)
 	where := []sdk.Filter{{Field: strconv.Itoa(fieldID), Op: sdk.FilterLt, Value: beforeMs}}
 	switch witness.(type) {
 	case *schemapb.PasskeyChallenge:
@@ -816,7 +819,7 @@ func (s *sdkScope) queryViaTransport(ctx context.Context, actor string, witness 
 	// auto-follow the keyset cursor to exhaustion and return the complete
 	// result set — earlier versions silently truncated at the server's
 	// per-page cap (~100), dropping rows for users/tenants past it.
-	nodes, err := s.transport.QueryNodes(ctx, s.tenantID, actor, typeID, rawFilter, 0)
+	nodes, err := s.transport.QueryNodes(ctx, s.projectID, actor, typeID, rawFilter, 0)
 	if err != nil {
 		// tenant-shard-db v1.12.x returns FailedPrecondition
 		// "tenant not opened" on a QueryNodes against a tenant that

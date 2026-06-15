@@ -618,7 +618,7 @@ type IdentityVerificationRecord struct {
 	NodeID            string
 	VerificationID    string // public identifier returned to clients
 	UserID            string
-	TenantID          string
+	ProjectID         string // storage shard (ADR-0002): the per-request project
 	Provider          string
 	ProviderSessionID string
 	Status            string // one of IDVStatus* constants
@@ -931,9 +931,12 @@ func (s *AuthService) maybeAutoFormTenant(ctx context.Context, user *User) {
 	}
 }
 
-// repo returns the boot-time Repository.
-func (s *AuthService) repo(context.Context) Repository {
-	return s.defaultRepo
+// repo returns the Repository bound to the request's project (ADR-0002):
+// the per-request ProjectScope when the project-resolution middleware
+// injected one, else the boot-default project. Every data-plane read/write
+// is filtered by the resolved project's id at the repository boundary.
+func (s *AuthService) repo(ctx context.Context) Repository {
+	return scopedRepository(ctx, s.defaultRepo, s.cfg.DefaultProjectID)
 }
 
 // ── Internal helpers ───────────────────────────────────────────────────

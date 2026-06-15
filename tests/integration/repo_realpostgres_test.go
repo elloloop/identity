@@ -39,9 +39,16 @@ func TestRealPostgres_RepositorySmoke(t *testing.T) {
 		MaxConns:    5,
 		ConnTimeout: 5 * time.Second,
 		AutoMigrate: true,
-		TenantID:    "realpg-tenant",
+		ProjectID:   "realpg-project",
 	}
 	repo, err := postgres.New(ctx, cfg)
+	require.NoError(t, err)
+
+	// Seed the projects(id) row the project_id FK (migration 0015) needs
+	// before any data-plane write under this project binding.
+	_, err = postgres.NewProjectStore(repo).EnsureDefaultProject(
+		ctx, "realpg-project", "realpg-scope", "realpg",
+	)
 	require.NoError(t, err)
 
 	// Round-trip a user to prove the wire and migrations both work

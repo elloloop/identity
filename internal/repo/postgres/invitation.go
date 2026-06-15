@@ -17,10 +17,10 @@ func (r *pgRepository) FindInvitationByHash(ctx context.Context, tokenHash strin
 		SELECT id, token_hash, email, user_id, invited_by, role,
 		       expires_at_ms, accepted_at_ms, created_at_ms
 		  FROM user_invitations
-		 WHERE tenant_id = $1 AND token_hash = $2
+		 WHERE project_id = $1 AND token_hash = $2
 		 LIMIT 1`
 	var inv service.InvitationRecord
-	err := r.pool.QueryRow(ctx, q, r.tenantID, tokenHash).Scan(
+	err := r.pool.QueryRow(ctx, q, r.projectID, tokenHash).Scan(
 		&inv.NodeID, &inv.TokenHash, &inv.Email, &inv.UserID, &inv.InvitedBy, &inv.Role,
 		&inv.ExpiresAt, &inv.AcceptedAt, &inv.CreatedAt,
 	)
@@ -77,8 +77,8 @@ func (r *pgRepository) UpdateInvitation(ctx context.Context, nodeID string, fiel
 	if len(sets) == 0 {
 		return nil
 	}
-	args = append(args, r.tenantID, nodeID)
-	q := fmt.Sprintf(`UPDATE user_invitations SET %s WHERE tenant_id = $%d AND id = $%d`,
+	args = append(args, r.projectID, nodeID)
+	q := fmt.Sprintf(`UPDATE user_invitations SET %s WHERE project_id = $%d AND id = $%d`,
 		strings.Join(sets, ", "), idx, idx+1)
 	if _, err := r.pool.Exec(ctx, q, args...); err != nil {
 		return wrapPgErr("UpdateInvitation", err)

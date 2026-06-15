@@ -22,7 +22,7 @@ func newTenantDomainStores(ctx context.Context, t *testing.T, dsn string) (*Proj
 		MaxConns:    5,
 		ConnTimeout: 5 * time.Second,
 		AutoMigrate: true,
-		TenantID:    "control-plane",
+		ProjectID:   "control-plane",
 	})
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)

@@ -147,9 +147,15 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	var loginGovernance *service.LoginGovernance
 	if authRepo == nil || dbAdapter == nil {
 		built, buildErr := repo.Build(ctx, repo.Config{
-			Driver:              repo.Driver(cfg.RepoDriver),
-			EntDBClient:         entdbClient,
-			TenantID:            cfg.DefaultTenantID,
+			Driver:      repo.Driver(cfg.RepoDriver),
+			EntDBClient: entdbClient,
+			// The boot-default Repository/DB binds to the default project
+			// (ADR-0002): the Project is the storage shard, so the data-plane
+			// partition is DefaultProjectID, NOT the DefaultTenantID storage
+			// scope. ensureDefaultProject (below) seeds a Project row whose id
+			// equals DefaultProjectID so rows written under this binding are
+			// readable and the FK to projects(id) is satisfied.
+			ProjectID:           cfg.DefaultProjectID,
 			PostgresDSN:         cfg.PostgresDSN,
 			PostgresMaxConns:    cfg.PostgresMaxConns,
 			PostgresAutoMigrate: cfg.PostgresAutoMigrate,

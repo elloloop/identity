@@ -53,5 +53,14 @@ func TestPostgres_Container(t *testing.T) {
 	dsn, err := pg.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	runRepositorySmoke(t, dsn, "tc-tenant")
+	// Driver-specific smoke (case-insensitive emails, unique-violation mapping).
+	runRepositorySmoke(t, dsn, "tc-project")
+
+	// Drive the full driver-agnostic conformance suite — including the
+	// cross-project isolation proof — against the real, freshly-migrated
+	// schema (migrations 0001→0015, so the project_id rename + FK chain
+	// applied cleanly on an empty database). The env-gated TestConformance
+	// body reads GATEWAY_TEST_POSTGRES_DSN, so point it at this container.
+	t.Setenv("GATEWAY_TEST_POSTGRES_DSN", dsn)
+	TestConformance(t)
 }

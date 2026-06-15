@@ -43,9 +43,14 @@ type Config struct {
 	// Driver is the chosen backend. Required.
 	Driver Driver
 
-	// EntDB-specific.
+	// EntDBClient is the EntDB SDK client (entdb driver only).
 	EntDBClient *sdk.DbClient
-	TenantID    string
+
+	// ProjectID is the storage shard the boot-default Repository/DB binds
+	// to (ADR-0002): the Project is identity's isolation shard, so the
+	// data-plane partition is the project id. Per-request scopes are derived
+	// from it via WithProject. Required for entdb and postgres.
+	ProjectID string
 
 	// Postgres-specific.
 	PostgresDSN         string
@@ -185,8 +190,8 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		if cfg.EntDBClient == nil {
 			return nil, errors.New("repo: Build: entdb driver requires EntDBClient")
 		}
-		if cfg.TenantID == "" {
-			return nil, errors.New("repo: Build: entdb driver requires TenantID")
+		if cfg.ProjectID == "" {
+			return nil, errors.New("repo: Build: entdb driver requires ProjectID")
 		}
 		dbAdapter, err := NewDBAdapter(cfg.EntDBClient)
 		if err != nil {
@@ -194,7 +199,7 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		}
 		logger.Info("repo_driver_selected", zap.String("driver", string(cfg.Driver)))
 		return &Built{
-			Repository: entdbrepo.NewRepository(cfg.EntDBClient, cfg.TenantID),
+			Repository: entdbrepo.NewRepository(cfg.EntDBClient, cfg.ProjectID),
 			DB:         dbAdapter,
 		}, nil
 	case DriverMemory:
@@ -208,8 +213,8 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		if cfg.PostgresDSN == "" {
 			return nil, errors.New("repo: Build: postgres driver requires PostgresDSN (set GATEWAY_POSTGRES_DSN)")
 		}
-		if cfg.TenantID == "" {
-			return nil, errors.New("repo: Build: postgres driver requires TenantID")
+		if cfg.ProjectID == "" {
+			return nil, errors.New("repo: Build: postgres driver requires ProjectID")
 		}
 		if cfg.PostgresMaxConns > math.MaxInt32 {
 			return nil, fmt.Errorf("repo: Build: postgres max connections exceeds int32: %d", cfg.PostgresMaxConns)
@@ -218,7 +223,7 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 			DSN:         cfg.PostgresDSN,
 			MaxConns:    int32(cfg.PostgresMaxConns), // #nosec G115 -- bounds checked above.
 			AutoMigrate: cfg.PostgresAutoMigrate,
-			TenantID:    cfg.TenantID,
+			ProjectID:   cfg.ProjectID,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("repo: Build: postgres: %w", err)

@@ -54,9 +54,22 @@ func TestConformance(t *testing.T) {
 		NewRepo: func(t *testing.T) service.Repository {
 			t.Helper()
 			n := atomic.AddInt64(&seq, 1)
-			tenantID := fmt.Sprintf("%s-%d", base, n)
-			ensureRealEntDBTenant(t, client, tenantID)
-			return NewRepository(client, tenantID)
+			projectID := fmt.Sprintf("%s-%d", base, n)
+			ensureRealEntDBTenant(t, client, projectID)
+			return NewRepository(client, projectID)
+		},
+		// On entdb the Project drives the SDK partition (ADR-0002), so binding
+		// a project registers that partition (a fresh, process-unique id to
+		// avoid cross-run collisions on the shared server) and rebinds the
+		// shared client to it via WithProject.
+		BindProject: func(t *testing.T, baseRepo service.Repository, suffix string) service.Repository {
+			t.Helper()
+			n := atomic.AddInt64(&seq, 1)
+			projectID := fmt.Sprintf("%s-%d-%s", base, n, suffix)
+			ensureRealEntDBTenant(t, client, projectID)
+			return baseRepo.(interface {
+				WithProject(string) service.Repository
+			}).WithProject(projectID)
 		},
 	})
 }

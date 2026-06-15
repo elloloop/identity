@@ -41,13 +41,13 @@ func (r *pgRepository) CreateSession(ctx context.Context, s *service.SessionReco
 	}
 	const q = `
 		INSERT INTO sessions (
-			id, tenant_id, sid, user_id, created_at_ms, revoked_at_ms
+			id, project_id, sid, user_id, created_at_ms, revoked_at_ms
 		) VALUES (
 			$1, $2, $3, $4, $5, $6
 		)`
 	if _, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, s.SID, s.UserID, s.CreatedAtMs, s.RevokedAtMs,
+		id, r.projectID, s.SID, s.UserID, s.CreatedAtMs, s.RevokedAtMs,
 	); err != nil {
 		// Surface a sid-collision as ErrAlreadyExists so the service
 		// layer can convert to the right gRPC code; the canonical
@@ -67,9 +67,9 @@ func (r *pgRepository) GetSessionBySid(ctx context.Context, sid string) (*servic
 	}
 	const q = `SELECT ` + sessionColumns + `
 		FROM sessions
-		WHERE tenant_id = $1 AND sid = $2
+		WHERE project_id = $1 AND sid = $2
 		LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, r.tenantID, sid)
+	row := r.pool.QueryRow(ctx, q, r.projectID, sid)
 	s, err := scanSession(row)
 	if noRows(err) {
 		return nil, nil
@@ -89,8 +89,8 @@ func (r *pgRepository) RevokeSession(ctx context.Context, sid string, atMs int64
 	const q = `
 		UPDATE sessions
 		   SET revoked_at_ms = $3
-		 WHERE tenant_id = $1 AND sid = $2 AND revoked_at_ms = 0`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, sid, atMs); err != nil {
+		 WHERE project_id = $1 AND sid = $2 AND revoked_at_ms = 0`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, sid, atMs); err != nil {
 		return wrapPgErr("RevokeSession", err)
 	}
 	return nil
@@ -106,8 +106,8 @@ func (r *pgRepository) RevokeSessionsForUser(ctx context.Context, userID string,
 	const q = `
 		UPDATE sessions
 		   SET revoked_at_ms = $3
-		 WHERE tenant_id = $1 AND user_id = $2 AND revoked_at_ms = 0`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, userID, atMs); err != nil {
+		 WHERE project_id = $1 AND user_id = $2 AND revoked_at_ms = 0`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, userID, atMs); err != nil {
 		return wrapPgErr("RevokeSessionsForUser", err)
 	}
 	return nil

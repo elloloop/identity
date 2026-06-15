@@ -75,7 +75,7 @@ func TestIDV_Begin_PersistsPendingRecord(t *testing.T) {
 	if rec.Status != IDVStatusPending {
 		t.Fatalf("status = %q; want pending", rec.Status)
 	}
-	if rec.UserID != uid || rec.TenantID != "tenant-1" {
+	if rec.UserID != uid || rec.ProjectID != "tenant-1" {
 		t.Fatalf("record mismatch: %+v", rec)
 	}
 }

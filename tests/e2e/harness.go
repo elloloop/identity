@@ -157,7 +157,7 @@ func StartServer(t *testing.T) *Harness {
 	builtRepo, err := repo.Build(context.Background(), repo.Config{
 		Driver:      repo.DriverEntDB,
 		EntDBClient: client,
-		TenantID:    tenantID,
+		ProjectID:   tenantID,
 	}, zap.NewNop())
 	if err != nil {
 		t.Fatalf("repo.Build: %v", err)

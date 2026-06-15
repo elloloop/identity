@@ -17,12 +17,12 @@ func (r *pgRepository) CreateOAuthOneTimeCode(ctx context.Context, c *service.OA
 	}
 	const q = `
 		INSERT INTO oauth_one_time_codes (
-			id, tenant_id, code_hash, user_id,
+			id, project_id, code_hash, user_id,
 			expires_at_ms, created_at_ms, consumed_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, c.CodeHash, c.UserID,
+		id, r.projectID, c.CodeHash, c.UserID,
 		c.ExpiresAt, c.CreatedAt, c.ConsumedAt,
 	)
 	if err != nil {
@@ -46,11 +46,11 @@ func (r *pgRepository) ConsumeOAuthOneTimeCode(ctx context.Context, codeHash str
 	const q = `
 		UPDATE oauth_one_time_codes
 		   SET consumed_at_ms = $3
-		 WHERE tenant_id = $1 AND code_hash = $2
+		 WHERE project_id = $1 AND code_hash = $2
 		   AND consumed_at_ms = 0 AND expires_at_ms > $3
 		RETURNING id, code_hash, user_id, expires_at_ms, created_at_ms, consumed_at_ms`
 	var c service.OAuthOneTimeCodeRecord
-	err := r.pool.QueryRow(ctx, q, r.tenantID, codeHash, atMs).Scan(
+	err := r.pool.QueryRow(ctx, q, r.projectID, codeHash, atMs).Scan(
 		&c.NodeID, &c.CodeHash, &c.UserID,
 		&c.ExpiresAt, &c.CreatedAt, &c.ConsumedAt,
 	)

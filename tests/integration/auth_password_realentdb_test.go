@@ -117,7 +117,7 @@ func TestPassword_SignupLoginGetCurrentUser_RealEntDB(t *testing.T) {
 	built, err := repo.Build(context.Background(), repo.Config{
 		Driver:      repo.DriverEntDB,
 		EntDBClient: client,
-		TenantID:    tenantID,
+		ProjectID:   tenantID,
 	}, nil)
 	if err != nil {
 		t.Fatalf("repo.Build: %v", err)

@@ -30,12 +30,12 @@ func (r *pgRepository) CreatePasswordResetToken(ctx context.Context, t *service.
 	}
 	const q = `
 		INSERT INTO password_reset_tokens (
-			id, tenant_id, token_hash, user_id, email,
+			id, project_id, token_hash, user_id, email,
 			expires_at_ms, created_at_ms, consumed_at_ms
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 	_, err := r.pool.Exec(
 		ctx, q,
-		id, r.tenantID, t.TokenHash, t.UserID, "",
+		id, r.projectID, t.TokenHash, t.UserID, "",
 		t.ExpiresAt, t.CreatedAt, t.ConsumedAt,
 	)
 	if err != nil {
@@ -52,9 +52,9 @@ func (r *pgRepository) FindPasswordResetTokenByHash(ctx context.Context, tokenHa
 	const q = `
 		SELECT id, token_hash, user_id, expires_at_ms, created_at_ms, consumed_at_ms
 		  FROM password_reset_tokens
-		 WHERE tenant_id = $1 AND token_hash = $2
+		 WHERE project_id = $1 AND token_hash = $2
 		 LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, r.tenantID, tokenHash)
+	row := r.pool.QueryRow(ctx, q, r.projectID, tokenHash)
 	t, err := scanPasswordReset(row)
 	if noRows(err) {
 		return nil, nil
@@ -72,8 +72,8 @@ func (r *pgRepository) MarkPasswordResetTokenConsumed(ctx context.Context, token
 	const q = `
 		UPDATE password_reset_tokens
 		   SET consumed_at_ms = $3
-		 WHERE tenant_id = $1 AND id = $2`
-	if _, err := r.pool.Exec(ctx, q, r.tenantID, tokenID, atMs); err != nil {
+		 WHERE project_id = $1 AND id = $2`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, tokenID, atMs); err != nil {
 		return wrapPgErr("MarkPasswordResetTokenConsumed", err)
 	}
 	return nil

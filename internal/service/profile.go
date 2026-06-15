@@ -16,11 +16,11 @@ import (
 // ProfileService implements self-service profile, session, passkey,
 // password, and audit log operations.
 type ProfileService struct {
-	bootDB          DB
-	defaultRepo     Repository
-	defaultTenantID string
-	audit           *audit.Logger
-	logger          *zap.Logger
+	bootDB           DB
+	defaultRepo      Repository
+	defaultProjectID string
+	audit            *audit.Logger
+	logger           *zap.Logger
 }
 
 // NewProfileService creates a ProfileService.
@@ -29,33 +29,36 @@ type ProfileService struct {
 // work (Sessions, AuditEvents). Profile/password operations need repo
 // to be set; nil triggers ErrServiceUnavailable at call time, the same
 // shape the no-persistence stub takes.
-func NewProfileService(repo Repository, db DB, tenantID string, auditLog *audit.Logger, logger *zap.Logger) *ProfileService {
+func NewProfileService(repo Repository, db DB, projectID string, auditLog *audit.Logger, logger *zap.Logger) *ProfileService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &ProfileService{
-		bootDB:          db,
-		defaultRepo:     repo,
-		defaultTenantID: tenantID,
-		audit:           auditLog,
-		logger:          logger,
+		bootDB:           db,
+		defaultRepo:      repo,
+		defaultProjectID: projectID,
+		audit:            auditLog,
+		logger:           logger,
 	}
 }
 
-// repo returns the boot-time Repository.
-func (s *ProfileService) repo(context.Context) Repository {
-	return s.defaultRepo
+// repo returns the Repository bound to the request's project (ADR-0002),
+// falling back to the boot-default project when no scope is present.
+func (s *ProfileService) repo(ctx context.Context) Repository {
+	return scopedRepository(ctx, s.defaultRepo, s.defaultProjectID)
 }
 
-// tenantID returns the internal storage tenant key (DefaultTenantID).
-func (s *ProfileService) tenantID(context.Context) string {
-	return s.defaultTenantID
+// projectID returns the storage shard (project) the request operates under:
+// the per-request ProjectScope when present, else the boot default. It is
+// the partition argument the entdb DB transport keys on (the postgres DB
+// ignores it and filters on its WithProject-bound project instead).
+func (s *ProfileService) projectID(ctx context.Context) string {
+	return requestProjectID(ctx, s.defaultProjectID)
 }
 
-// db returns the boot-time DB; the DB interface takes the storage tenant
-// id per call (passed via s.tenantID).
-func (s *ProfileService) db(context.Context) DB {
-	return s.bootDB
+// db returns the DB bound to the request's project.
+func (s *ProfileService) db(ctx context.Context) DB {
+	return scopedDB(ctx, s.bootDB, s.defaultProjectID)
 }
 
 // UpdateProfile updates the authenticated user's name and/or avatar.
@@ -116,7 +119,7 @@ func (s *ProfileService) ListMySessions(ctx context.Context, userID string) ([]*
 		return nil, errors.New("user_id is required")
 	}
 
-	nodes, err := s.db(ctx).QueryNodes(ctx, s.tenantID(ctx), tenantAdminActor, typeRefreshToken,
+	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), tenantAdminActor, typeRefreshToken,
 		map[string]any{rfUserID: userID})
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -140,7 +143,7 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 		return errors.New("session_id is required")
 	}
 
-	node, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), tenantAdminActor, typeRefreshToken, sessionID)
+	node, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), tenantAdminActor, typeRefreshToken, sessionID)
 	if err != nil {
 		return fmt.Errorf("fetch session: %w", err)
 	}
@@ -152,7 +155,7 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 	}
 
 	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeRefreshToken, NodeID: sessionID}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), tenantAdminActor, []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("revoke session: %w", err)
 	}
 
@@ -172,7 +175,7 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 		return 0, errors.New("password confirmation required")
 	}
 
-	userNode, err := s.db(ctx).GetNode(ctx, s.tenantID(ctx), actorStr(userID), typeUser, userID)
+	userNode, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(userID), typeUser, userID)
 	if err != nil {
 		return 0, fmt.Errorf("fetch user: %w", err)
 	}
@@ -184,7 +187,7 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 		return 0, errors.New("invalid password")
 	}
 
-	nodes, err := s.db(ctx).QueryNodes(ctx, s.tenantID(ctx), tenantAdminActor, typeRefreshToken,
+	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), tenantAdminActor, typeRefreshToken,
 		map[string]any{rfUserID: userID})
 	if err != nil {
 		return 0, fmt.Errorf("list sessions: %w", err)
@@ -193,7 +196,7 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 	count := 0
 	for _, n := range nodes {
 		op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typeRefreshToken, NodeID: n.NodeID}
-		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), tenantAdminActor, []entdb.Operation{op}); err != nil {
+		if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []entdb.Operation{op}); err != nil {
 			s.logger.Warn("revoke_session_delete_failed", zap.String("session_id", n.NodeID))
 			continue
 		}
@@ -215,7 +218,7 @@ func (s *ProfileService) ListMyPasskeys(ctx context.Context, userID string) ([]*
 		return nil, errors.New("user_id is required")
 	}
 
-	nodes, err := s.db(ctx).QueryNodes(ctx, s.tenantID(ctx), actorStr(userID), typePasskeyCredCred,
+	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), actorStr(userID), typePasskeyCredCred,
 		map[string]any{pkfUserID: userID})
 	if err != nil {
 		return nil, fmt.Errorf("list passkeys: %w", err)
@@ -235,7 +238,7 @@ func (s *ProfileService) DeletePasskey(ctx context.Context, userID, credentialID
 	}
 
 	// Find the passkey by credential_id.
-	nodes, err := s.db(ctx).QueryNodes(ctx, s.tenantID(ctx), actorStr(userID), typePasskeyCredCred,
+	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), actorStr(userID), typePasskeyCredCred,
 		map[string]any{pkfCredentialID: credentialID})
 	if err != nil {
 		return fmt.Errorf("find passkey: %w", err)
@@ -249,7 +252,7 @@ func (s *ProfileService) DeletePasskey(ctx context.Context, userID, credentialID
 	}
 
 	op := entdb.Operation{Type: entdb.OpDeleteNode, TypeID: typePasskeyCredCred, NodeID: cred.NodeID}
-	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.tenantID(ctx), actorStr(userID), []entdb.Operation{op}); err != nil {
+	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(userID), []entdb.Operation{op}); err != nil {
 		return fmt.Errorf("delete passkey: %w", err)
 	}
 
