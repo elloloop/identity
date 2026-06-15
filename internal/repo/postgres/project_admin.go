@@ -48,3 +48,60 @@ func (s *ProjectStore) CreateProjectCredential(ctx context.Context, c *service.A
 	c.ID = id
 	return id, nil
 }
+
+// CreateAuthDomain registers an UNVERIFIED custom serving hostname (the
+// customer-domain flow). VerifiedAtMs is left 0 so the resolver does not
+// resolve it until VerifyProjectAuthDomain proves ownership. A hostname
+// already bound to any project surfaces service.ErrAlreadyExists.
+func (s *ProjectStore) CreateAuthDomain(ctx context.Context, projectID, hostname string, isPrimary bool) error {
+	_, err := s.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
+		ProjectID: projectID,
+		Hostname:  hostname,
+		IsPrimary: isPrimary,
+		// VerifiedAtMs: 0 — unverified until the DNS-TXT challenge passes.
+	})
+	return err
+}
+
+// GetAuthDomain returns a project's own auth-domain (any state) as the admin
+// service's value type, or (nil, nil) when the project has no such hostname.
+func (s *ProjectStore) GetAuthDomain(ctx context.Context, projectID, hostname string) (*service.AdminProjectAuthDomain, error) {
+	d, err := s.GetProjectAuthDomain(ctx, projectID, hostname)
+	if err != nil {
+		return nil, err
+	}
+	if d == nil {
+		return nil, nil
+	}
+	return authDomainToService(d), nil
+}
+
+// ListAuthDomains returns every auth-domain of a project (primary-first) as
+// the admin service's value type.
+func (s *ProjectStore) ListAuthDomains(ctx context.Context, projectID string) ([]*service.AdminProjectAuthDomain, error) {
+	rows, err := s.ListProjectAuthDomains(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*service.AdminProjectAuthDomain, 0, len(rows))
+	for _, d := range rows {
+		out = append(out, authDomainToService(d))
+	}
+	return out, nil
+}
+
+// SetAuthDomainVerified stamps verifiedAtMs on a project's own auth-domain,
+// flipping it to resolving. A hostname the project does not own surfaces
+// service.ErrNotFound.
+func (s *ProjectStore) SetAuthDomainVerified(ctx context.Context, projectID, hostname string, verifiedAtMs int64) error {
+	return s.SetProjectAuthDomainVerified(ctx, projectID, hostname, verifiedAtMs)
+}
+
+// authDomainToService maps the store row to the driver-agnostic admin value.
+func authDomainToService(d *ProjectAuthDomain) *service.AdminProjectAuthDomain {
+	return &service.AdminProjectAuthDomain{
+		Hostname:     d.Hostname,
+		IsPrimary:    d.IsPrimary,
+		VerifiedAtMs: d.VerifiedAtMs,
+	}
+}

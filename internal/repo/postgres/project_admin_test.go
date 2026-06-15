@@ -94,3 +94,83 @@ func runControlPlaneAdminSmoke(t *testing.T, dsn string) {
 	})
 	require.ErrorIs(t, err, service.ErrAlreadyExists, "duplicate public_id must conflict")
 }
+
+// TestCustomAuthDomainStore_Smoke exercises the customer custom-domain store
+// methods (the service.ControlPlaneProjectStore CreateAuthDomain / GetAuthDomain
+// / ListAuthDomains / SetAuthDomainVerified the AddProjectAuthDomain /
+// VerifyProjectAuthDomain RPCs use) against a live Postgres. Skips without a
+// backend; the dockerpostgres variant runs the same body in a container.
+func TestCustomAuthDomainStore_Smoke(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping custom auth-domain store smoke test")
+	}
+	runCustomAuthDomainSmoke(t, dsn)
+}
+
+func runCustomAuthDomainSmoke(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	store := newProjectStore(ctx, t, dsn)
+
+	proj := &service.AdminProject{StorageScopeID: "scope-custom", Name: "Custom Co"}
+	projID, err := store.CreateProject(ctx, proj)
+	require.NoError(t, err)
+
+	// Register an UNVERIFIED custom domain.
+	require.NoError(t, store.CreateAuthDomain(ctx, projID, "auth.custom.test", true))
+
+	got, err := store.GetAuthDomain(ctx, projID, "AUTH.CUSTOM.TEST")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "auth.custom.test", got.Hostname)
+	require.True(t, got.IsPrimary)
+	require.Zero(t, got.VerifiedAtMs, "a customer domain starts unverified")
+
+	// An unverified domain does NOT resolve.
+	miss, err := store.ResolveByHostname(ctx, "auth.custom.test")
+	require.NoError(t, err)
+	require.Nil(t, miss, "an unverified custom domain must not resolve")
+
+	// Re-creating the same hostname conflicts (global hostname uniqueness).
+	require.ErrorIs(t, store.CreateAuthDomain(ctx, projID, "AUTH.custom.TEST", false), service.ErrAlreadyExists)
+
+	// A hostname owned by a different project conflicts too.
+	other, err := store.CreateProject(ctx, &service.AdminProject{StorageScopeID: "scope-custom-2", Name: "Other"})
+	require.NoError(t, err)
+	require.ErrorIs(t, store.CreateAuthDomain(ctx, other, "auth.custom.test", false), service.ErrAlreadyExists)
+
+	// Verifying a hostname the project does not own is ErrNotFound.
+	require.ErrorIs(t, store.SetAuthDomainVerified(ctx, projID, "never.added.test", 5), service.ErrNotFound)
+	// verified_at_ms must be positive.
+	require.ErrorIs(t, store.SetAuthDomainVerified(ctx, projID, "auth.custom.test", 0), service.ErrInvalidArgument)
+
+	// Verify the domain → it now resolves.
+	require.NoError(t, store.SetAuthDomainVerified(ctx, projID, "auth.custom.test", 9999))
+	got, err = store.GetAuthDomain(ctx, projID, "auth.custom.test")
+	require.NoError(t, err)
+	require.Equal(t, int64(9999), got.VerifiedAtMs)
+
+	resolved, err := store.ResolveByHostname(ctx, "AUTH.CUSTOM.TEST")
+	require.NoError(t, err)
+	require.NotNil(t, resolved, "a verified custom domain resolves")
+	require.Equal(t, projID, resolved.ID)
+
+	// Listing returns the domain; primary-first ordering.
+	require.NoError(t, store.CreateAuthDomain(ctx, projID, "second.custom.test", false))
+	list, err := store.ListAuthDomains(ctx, projID)
+	require.NoError(t, err)
+	require.Len(t, list, 2)
+	require.True(t, list[0].IsPrimary, "primary domain lists first")
+
+	// GetAuthDomain misses on an unknown project/host.
+	none, err := store.GetAuthDomain(ctx, projID, "nope.test")
+	require.NoError(t, err)
+	require.Nil(t, none)
+	none, err = store.GetAuthDomain(ctx, "no-such-project", "auth.custom.test")
+	require.NoError(t, err)
+	require.Nil(t, none, "GetAuthDomain is scoped to the owning project")
+}

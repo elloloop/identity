@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -56,6 +57,14 @@ const (
 	secretKeyPrefix      = "sk_"
 )
 
+// authDomainVerifyTXTPrefix prefixes the DNS TXT value a customer publishes to
+// prove control of a custom serving hostname. The full value is the prefix +
+// hex(sha256(projectID + ":" + lower(hostname))) — deterministic per
+// (project, hostname), so the server can both issue the challenge and re-issue
+// the identical one on a retry without persisting a per-domain token (matching
+// the tenant email-domain pattern in domain.go).
+const authDomainVerifyTXTPrefix = "identity-auth-domain-verify="
+
 // AdminProject is the control-plane project row an operator creates. It is a
 // driver-agnostic value type so the admin service and its tests depend on a
 // contract, not the concrete postgres store type.
@@ -76,18 +85,43 @@ type AdminProjectCredential struct {
 	SecretHash string
 }
 
+// AdminProjectAuthDomain is a project's serving hostname as the admin service
+// reads it back. VerifiedAtMs is 0 until ownership is proven; a domain with 0
+// does NOT resolve requests.
+type AdminProjectAuthDomain struct {
+	Hostname     string
+	IsPrimary    bool
+	VerifiedAtMs int64
+}
+
 // ControlPlaneProjectStore is the narrow write side of the control-plane
 // project registry the admin service needs. *pgrepo.ProjectStore satisfies
-// it; injecting only these three methods keeps the service decoupled from
-// the full store surface and trivially fakeable.
+// it; injecting only this method set keeps the service decoupled from the
+// full store surface and trivially fakeable.
 //
 // EnsureAuthDomain is idempotent and seeds the domain VERIFIED at
 // verifiedAtMs (operator-asserted — the operator vouches for the hostname,
-// so it needs no DNS challenge).
+// so it needs no DNS challenge). The customer-facing custom-domain methods
+// (CreateAuthDomain / GetAuthDomain / ListAuthDomains / SetAuthDomainVerified)
+// instead register a domain UNVERIFIED and flip it only after a DNS-TXT
+// ownership proof.
 type ControlPlaneProjectStore interface {
 	CreateProject(ctx context.Context, p *AdminProject) (string, error)
 	CreateProjectCredential(ctx context.Context, c *AdminProjectCredential) (string, error)
 	EnsureAuthDomain(ctx context.Context, projectID, hostname string, isPrimary bool, verifiedAtMs int64) error
+
+	// CreateAuthDomain registers an UNVERIFIED serving hostname (verifiedAtMs
+	// is 0). A hostname already bound to any project surfaces ErrAlreadyExists.
+	CreateAuthDomain(ctx context.Context, projectID, hostname string, isPrimary bool) error
+	// GetAuthDomain returns a project's own auth-domain, or (nil, nil) when the
+	// project has no such hostname.
+	GetAuthDomain(ctx context.Context, projectID, hostname string) (*AdminProjectAuthDomain, error)
+	// ListAuthDomains returns every auth-domain of a project, primary-first.
+	ListAuthDomains(ctx context.Context, projectID string) ([]*AdminProjectAuthDomain, error)
+	// SetAuthDomainVerified stamps verifiedAtMs (> 0) on a project's own
+	// auth-domain, making it resolve. A hostname the project does not own
+	// surfaces ErrNotFound.
+	SetAuthDomainVerified(ctx context.Context, projectID, hostname string, verifiedAtMs int64) error
 }
 
 // ControlPlaneAdminService provisions control-plane resources on behalf of a
@@ -101,27 +135,35 @@ type ControlPlaneAdminService struct {
 	// admins backs the zero-config first-admin bootstrap. nil when this build
 	// has no control plane (entdb/memory), which makes CreateFirstPlatformAdmin
 	// return ErrUnimplemented.
-	admins  PlatformAdminStore
-	logger  *zap.Logger
-	nowFunc func() int64
+	admins PlatformAdminStore
+	// resolver is the DNS TXT-lookup boundary VerifyProjectAuthDomain uses to
+	// confirm a custom domain's ownership challenge. Injected so tests drive
+	// the present/absent paths without real DNS.
+	resolver DNSResolver
+	logger   *zap.Logger
+	nowFunc  func() int64
 }
 
 // NewControlPlaneAdminService wires the admin service. An empty secret
 // leaves the service constructed but DISABLED: every method returns
 // ErrUnimplemented (so the handler maps it to CodeUnimplemented). A nil
-// logger defaults to a no-op. nowFunc is injected so the auth-domain
-// verified-at stamp is deterministic in tests; it defaults to wall-clock
-// epoch-millis.
+// logger defaults to a no-op. A nil resolver defaults to net.DefaultResolver,
+// matching DomainService. nowFunc is injected so the auth-domain verified-at
+// stamp is deterministic in tests; it defaults to wall-clock epoch-millis.
 func NewControlPlaneAdminService(
 	secret string,
 	projects ControlPlaneProjectStore,
 	tenants TenantStore,
 	memberships MembershipStore,
 	admins PlatformAdminStore,
+	resolver DNSResolver,
 	logger *zap.Logger,
 ) *ControlPlaneAdminService {
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+	if resolver == nil {
+		resolver = net.DefaultResolver
 	}
 	return &ControlPlaneAdminService{
 		secret:      secret,
@@ -129,6 +171,7 @@ func NewControlPlaneAdminService(
 		tenants:     tenants,
 		memberships: memberships,
 		admins:      admins,
+		resolver:    resolver,
 		logger:      logger,
 		nowFunc:     func() int64 { return time.Now().UnixMilli() },
 	}
@@ -242,6 +285,162 @@ func (s *ControlPlaneAdminService) AdminAddProjectAuthDomain(ctx context.Context
 		return fmt.Errorf("%w: missing hostname", ErrInvalidArgument)
 	}
 	return s.projects.EnsureAuthDomain(ctx, projectID, hostname, isPrimary, s.nowFunc())
+}
+
+// RegisteredAuthDomain is the result of AddProjectAuthDomain: the registered
+// (still-UNVERIFIED) domain plus the deterministic DNS TXT challenge the
+// caller must publish before VerifyProjectAuthDomain succeeds.
+type RegisteredAuthDomain struct {
+	Domain   *AdminProjectAuthDomain
+	TXTName  string
+	TXTValue string
+}
+
+// AddProjectAuthDomain registers a CUSTOMER-owned serving hostname on a
+// project, UNVERIFIED, and returns the DNS TXT challenge to publish. Unlike
+// AdminAddProjectAuthDomain (operator-vouched, seeded verified), the domain
+// does NOT resolve requests until VerifyProjectAuthDomain proves ownership.
+// Re-adding an already-registered hostname returns its existing record and
+// the same deterministic challenge, so a caller can re-fetch the TXT value
+// without a conflict. A hostname owned by a DIFFERENT project surfaces the
+// store's ErrAlreadyExists.
+func (s *ControlPlaneAdminService) AddProjectAuthDomain(ctx context.Context, secret, projectID, hostname string, isPrimary bool) (*RegisteredAuthDomain, error) {
+	if err := s.authorize(secret); err != nil {
+		return nil, err
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
+	}
+	hostname, err := normalizeAuthHostname(hostname)
+	if err != nil {
+		return nil, err
+	}
+
+	existing, err := s.projects.GetAuthDomain(ctx, projectID, hostname)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		if err := s.projects.CreateAuthDomain(ctx, projectID, hostname, isPrimary); err != nil {
+			return nil, err
+		}
+		existing, err = s.projects.GetAuthDomain(ctx, projectID, hostname)
+		if err != nil {
+			return nil, err
+		}
+		if existing == nil {
+			return nil, fmt.Errorf("%w: auth domain not found after create", ErrNotFound)
+		}
+	}
+
+	name, value := authDomainTXTChallenge(projectID, hostname)
+	return &RegisteredAuthDomain{Domain: existing, TXTName: name, TXTValue: value}, nil
+}
+
+// VerifyProjectAuthDomain checks the DNS TXT ownership challenge for a
+// project's custom auth-domain and, on success, stamps verified_at_ms so the
+// hostname resolves. A missing/mismatched TXT record leaves the domain
+// unverified and surfaces ErrPermissionDenied (a verification failure the
+// caller can retry); a hostname the project does not own is ErrNotFound. An
+// already-verified domain is idempotent — re-verifying re-checks DNS and
+// returns the current record.
+func (s *ControlPlaneAdminService) VerifyProjectAuthDomain(ctx context.Context, secret, projectID, hostname string) (*AdminProjectAuthDomain, error) {
+	if err := s.authorize(secret); err != nil {
+		return nil, err
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
+	}
+	hostname, err := normalizeAuthHostname(hostname)
+	if err != nil {
+		return nil, err
+	}
+
+	d, err := s.projects.GetAuthDomain(ctx, projectID, hostname)
+	if err != nil {
+		return nil, err
+	}
+	if d == nil {
+		return nil, fmt.Errorf("%w: auth domain", ErrNotFound)
+	}
+
+	if err := s.checkAuthDomainTXT(ctx, projectID, hostname); err != nil {
+		return nil, err
+	}
+
+	// Stamp only when not already verified, so a re-verify does not move the
+	// timestamp; either way return the current record.
+	if d.VerifiedAtMs <= 0 {
+		if err := s.projects.SetAuthDomainVerified(ctx, projectID, hostname, s.nowFunc()); err != nil {
+			return nil, err
+		}
+		d, err = s.projects.GetAuthDomain(ctx, projectID, hostname)
+		if err != nil {
+			return nil, err
+		}
+		if d == nil {
+			return nil, fmt.Errorf("%w: auth domain", ErrNotFound)
+		}
+	}
+	return d, nil
+}
+
+// ListProjectAuthDomains returns every auth-domain of a project, primary-first
+// (the store's ordering), so a caller sees both verified and pending domains.
+func (s *ControlPlaneAdminService) ListProjectAuthDomains(ctx context.Context, secret, projectID string) ([]*AdminProjectAuthDomain, error) {
+	if err := s.authorize(secret); err != nil {
+		return nil, err
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
+	}
+	return s.projects.ListAuthDomains(ctx, projectID)
+}
+
+// checkAuthDomainTXT resolves the hostname's TXT records and confirms the
+// deterministic challenge is present. An absent/mismatched challenge (or a
+// lookup failure — NXDOMAIN, SERVFAIL, timeout) is ErrPermissionDenied: a
+// verification failure the caller can retry, not an internal fault.
+func (s *ControlPlaneAdminService) checkAuthDomainTXT(ctx context.Context, projectID, hostname string) error {
+	_, want := authDomainTXTChallenge(projectID, hostname)
+	records, err := s.resolver.LookupTXT(ctx, hostname)
+	if err != nil {
+		s.logger.Info("auth_domain_verify_lookup_failed", zap.String("hostname", hostname), zap.Error(err))
+		return fmt.Errorf("%w: DNS TXT challenge not found for %s", ErrPermissionDenied, hostname)
+	}
+	for _, rec := range records {
+		if strings.TrimSpace(rec) == want {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: DNS TXT challenge not found for %s", ErrPermissionDenied, hostname)
+}
+
+// authDomainTXTChallenge returns the TXT record name and value a custom
+// hostname must publish to prove ownership. The name is the hostname itself;
+// the value is deterministic per (project, hostname), so no per-domain token
+// is stored (matching dnsTXTChallenge in domain.go).
+func authDomainTXTChallenge(projectID, hostname string) (name, value string) {
+	digest := sha256Hex(projectID + ":" + strings.ToLower(hostname))
+	return hostname, authDomainVerifyTXTPrefix + digest
+}
+
+// normalizeAuthHostname lower-cases, trims, and strips a trailing dot from a
+// serving hostname, rejecting blanks and anything with whitespace, a scheme,
+// an '@', or no dot at all — the same shape normalizeDomain enforces, so a
+// custom auth-domain is a real, fully-qualified hostname.
+func normalizeAuthHostname(hostname string) (string, error) {
+	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(hostname)), ".")
+	if h == "" {
+		return "", fmt.Errorf("%w: missing hostname", ErrInvalidArgument)
+	}
+	if strings.ContainsAny(h, " \t/@:") || !strings.Contains(h, ".") {
+		return "", fmt.Errorf("%w: invalid hostname %q", ErrInvalidArgument, hostname)
+	}
+	return h, nil
 }
 
 // AdminCreateTenant provisions a tenant under a project and returns its id.

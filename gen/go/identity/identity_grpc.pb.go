@@ -95,6 +95,9 @@ const (
 	IdentityService_AdminCreateProject_FullMethodName            = "/identity.IdentityService/AdminCreateProject"
 	IdentityService_AdminCreateProjectCredential_FullMethodName  = "/identity.IdentityService/AdminCreateProjectCredential"
 	IdentityService_AdminAddProjectAuthDomain_FullMethodName     = "/identity.IdentityService/AdminAddProjectAuthDomain"
+	IdentityService_AddProjectAuthDomain_FullMethodName          = "/identity.IdentityService/AddProjectAuthDomain"
+	IdentityService_VerifyProjectAuthDomain_FullMethodName       = "/identity.IdentityService/VerifyProjectAuthDomain"
+	IdentityService_ListProjectAuthDomains_FullMethodName        = "/identity.IdentityService/ListProjectAuthDomains"
 	IdentityService_AdminCreateTenant_FullMethodName             = "/identity.IdentityService/AdminCreateTenant"
 	IdentityService_AdminAddTenantAdmin_FullMethodName           = "/identity.IdentityService/AdminAddTenantAdmin"
 	IdentityService_CreateFirstPlatformAdmin_FullMethodName      = "/identity.IdentityService/CreateFirstPlatformAdmin"
@@ -218,6 +221,12 @@ type IdentityServiceClient interface {
 	AdminCreateProject(ctx context.Context, in *AdminCreateProjectRequest, opts ...grpc.CallOption) (*AdminCreateProjectResponse, error)
 	AdminCreateProjectCredential(ctx context.Context, in *AdminCreateProjectCredentialRequest, opts ...grpc.CallOption) (*AdminCreateProjectCredentialResponse, error)
 	AdminAddProjectAuthDomain(ctx context.Context, in *AdminAddProjectAuthDomainRequest, opts ...grpc.CallOption) (*AdminAddProjectAuthDomainResponse, error)
+	// Customer-owned custom auth-domains: a project registers a serving
+	// hostname, proves ownership via a DNS TXT challenge, then it resolves.
+	// An unverified custom domain does NOT resolve requests.
+	AddProjectAuthDomain(ctx context.Context, in *AddProjectAuthDomainRequest, opts ...grpc.CallOption) (*AddProjectAuthDomainResponse, error)
+	VerifyProjectAuthDomain(ctx context.Context, in *VerifyProjectAuthDomainRequest, opts ...grpc.CallOption) (*VerifyProjectAuthDomainResponse, error)
+	ListProjectAuthDomains(ctx context.Context, in *ListProjectAuthDomainsRequest, opts ...grpc.CallOption) (*ListProjectAuthDomainsResponse, error)
 	AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error)
 	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
@@ -994,6 +1003,36 @@ func (c *identityServiceClient) AdminAddProjectAuthDomain(ctx context.Context, i
 	return out, nil
 }
 
+func (c *identityServiceClient) AddProjectAuthDomain(ctx context.Context, in *AddProjectAuthDomainRequest, opts ...grpc.CallOption) (*AddProjectAuthDomainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddProjectAuthDomainResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AddProjectAuthDomain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) VerifyProjectAuthDomain(ctx context.Context, in *VerifyProjectAuthDomainRequest, opts ...grpc.CallOption) (*VerifyProjectAuthDomainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyProjectAuthDomainResponse)
+	err := c.cc.Invoke(ctx, IdentityService_VerifyProjectAuthDomain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListProjectAuthDomains(ctx context.Context, in *ListProjectAuthDomainsRequest, opts ...grpc.CallOption) (*ListProjectAuthDomainsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProjectAuthDomainsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListProjectAuthDomains_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminCreateTenantResponse)
@@ -1142,6 +1181,12 @@ type IdentityServiceServer interface {
 	AdminCreateProject(context.Context, *AdminCreateProjectRequest) (*AdminCreateProjectResponse, error)
 	AdminCreateProjectCredential(context.Context, *AdminCreateProjectCredentialRequest) (*AdminCreateProjectCredentialResponse, error)
 	AdminAddProjectAuthDomain(context.Context, *AdminAddProjectAuthDomainRequest) (*AdminAddProjectAuthDomainResponse, error)
+	// Customer-owned custom auth-domains: a project registers a serving
+	// hostname, proves ownership via a DNS TXT challenge, then it resolves.
+	// An unverified custom domain does NOT resolve requests.
+	AddProjectAuthDomain(context.Context, *AddProjectAuthDomainRequest) (*AddProjectAuthDomainResponse, error)
+	VerifyProjectAuthDomain(context.Context, *VerifyProjectAuthDomainRequest) (*VerifyProjectAuthDomainResponse, error)
+	ListProjectAuthDomains(context.Context, *ListProjectAuthDomainsRequest) (*ListProjectAuthDomainsResponse, error)
 	AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error)
 	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
@@ -1385,6 +1430,15 @@ func (UnimplementedIdentityServiceServer) AdminCreateProjectCredential(context.C
 }
 func (UnimplementedIdentityServiceServer) AdminAddProjectAuthDomain(context.Context, *AdminAddProjectAuthDomainRequest) (*AdminAddProjectAuthDomainResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminAddProjectAuthDomain not implemented")
+}
+func (UnimplementedIdentityServiceServer) AddProjectAuthDomain(context.Context, *AddProjectAuthDomainRequest) (*AddProjectAuthDomainResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddProjectAuthDomain not implemented")
+}
+func (UnimplementedIdentityServiceServer) VerifyProjectAuthDomain(context.Context, *VerifyProjectAuthDomainRequest) (*VerifyProjectAuthDomainResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyProjectAuthDomain not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListProjectAuthDomains(context.Context, *ListProjectAuthDomainsRequest) (*ListProjectAuthDomainsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListProjectAuthDomains not implemented")
 }
 func (UnimplementedIdentityServiceServer) AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminCreateTenant not implemented")
@@ -2784,6 +2838,60 @@ func _IdentityService_AdminAddProjectAuthDomain_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_AddProjectAuthDomain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddProjectAuthDomainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AddProjectAuthDomain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AddProjectAuthDomain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AddProjectAuthDomain(ctx, req.(*AddProjectAuthDomainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_VerifyProjectAuthDomain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyProjectAuthDomainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).VerifyProjectAuthDomain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_VerifyProjectAuthDomain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).VerifyProjectAuthDomain(ctx, req.(*VerifyProjectAuthDomainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListProjectAuthDomains_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProjectAuthDomainsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListProjectAuthDomains(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListProjectAuthDomains_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListProjectAuthDomains(ctx, req.(*ListProjectAuthDomainsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_AdminCreateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminCreateTenantRequest)
 	if err := dec(in); err != nil {
@@ -3148,6 +3256,18 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminAddProjectAuthDomain",
 			Handler:    _IdentityService_AdminAddProjectAuthDomain_Handler,
+		},
+		{
+			MethodName: "AddProjectAuthDomain",
+			Handler:    _IdentityService_AddProjectAuthDomain_Handler,
+		},
+		{
+			MethodName: "VerifyProjectAuthDomain",
+			Handler:    _IdentityService_VerifyProjectAuthDomain_Handler,
+		},
+		{
+			MethodName: "ListProjectAuthDomains",
+			Handler:    _IdentityService_ListProjectAuthDomains_Handler,
 		},
 		{
 			MethodName: "AdminCreateTenant",

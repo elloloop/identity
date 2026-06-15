@@ -226,7 +226,7 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	})
 	require.NoError(t, err)
 	_, err = store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
-		ProjectID: projID, Hostname: "auth.live.test", IsPrimary: true,
+		ProjectID: projID, Hostname: "auth.live.test", IsPrimary: true, VerifiedAtMs: 1,
 	})
 	require.NoError(t, err)
 
@@ -263,6 +263,26 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	require.NotNil(t, got)
 	require.Equal(t, projID, got.ID)
 
+	// An UNVERIFIED custom domain (verified_at_ms = 0) must NOT resolve, even
+	// though the row exists and is owned by the active project.
+	_, err = store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
+		ProjectID: projID, Hostname: "pending.live.test",
+	})
+	require.NoError(t, err)
+	miss, err = store.ResolveByHostname(ctx, "pending.live.test")
+	require.NoError(t, err)
+	require.Nil(t, miss, "an unverified custom domain must not resolve")
+	noProj, err := store.GetProjectByAuthHostname(ctx, "pending.live.test")
+	require.NoError(t, err)
+	require.Nil(t, noProj, "GetProjectByAuthHostname must filter on verified")
+
+	// Verifying the pending domain flips it to resolving.
+	require.NoError(t, store.SetProjectAuthDomainVerified(ctx, projID, "PENDING.LIVE.TEST", 4242))
+	got, err = store.ResolveByHostname(ctx, "pending.live.test")
+	require.NoError(t, err)
+	require.NotNil(t, got, "a verified custom domain resolves")
+	require.Equal(t, projID, got.ID)
+
 	// Unknown / blank host → clean miss.
 	miss, err = store.ResolveByHostname(ctx, "nope.test")
 	require.NoError(t, err)
@@ -281,7 +301,7 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	})
 	require.NoError(t, err)
 	_, err = store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
-		ProjectID: suspID, Hostname: "auth.susp.test", IsPrimary: true,
+		ProjectID: suspID, Hostname: "auth.susp.test", IsPrimary: true, VerifiedAtMs: 1,
 	})
 	require.NoError(t, err)
 
@@ -383,22 +403,26 @@ func runProjectStoreSmoke(t *testing.T, dsn string) {
 	require.NoError(t, store.RevokeProjectCredential(ctx, "no-such-cred", 0))
 
 	// ── auth-domain round-trip ──────────────────────────────────────
+	// Seeded verified (verified_at_ms > 0) so it resolves; the verified
+	// filter is exercised separately in runProjectResolverSmoke.
 	primaryID, err := store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
-		ProjectID: projID,
-		Hostname:  "auth.acme.test",
-		IsPrimary: true,
+		ProjectID:    projID,
+		Hostname:     "auth.acme.test",
+		IsPrimary:    true,
+		VerifiedAtMs: 1,
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, primaryID)
 
 	secondaryID, err := store.CreateProjectAuthDomain(ctx, &ProjectAuthDomain{
-		ProjectID: projID,
-		Hostname:  "login.acme.test",
+		ProjectID:    projID,
+		Hostname:     "login.acme.test",
+		VerifiedAtMs: 1,
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, secondaryID)
 
-	// Case-insensitive Host → project resolution.
+	// Case-insensitive Host → project resolution (verified domains only).
 	resolved, err := store.GetProjectByAuthHostname(ctx, "AUTH.ACME.TEST")
 	require.NoError(t, err)
 	require.NotNil(t, resolved)

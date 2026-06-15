@@ -144,6 +144,17 @@ func TestPlatformAdminStore_Container(t *testing.T) {
 	runPlatformAdminSmoke(t, dsn)
 }
 
+// TestCustomAuthDomainStore_Container runs the customer custom-domain store
+// body (add unverified → resolver rejects → verify → resolves) against a
+// throwaway Postgres container.
+func TestCustomAuthDomainStore_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runCustomAuthDomainSmoke(t, dsn)
+}
+
 // TestAutoFormStore_Container runs the tenant auto-formation body (incl.
 // the concurrent-race convergence) against a throwaway Postgres container.
 func TestAutoFormStore_Container(t *testing.T) {

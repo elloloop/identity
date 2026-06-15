@@ -74,6 +74,77 @@ func (h *IdentityHandler) AdminAddProjectAuthDomain(
 	return connect.NewResponse(&identitypb.AdminAddProjectAuthDomainResponse{}), nil
 }
 
+// AddProjectAuthDomain registers a customer-owned serving hostname UNVERIFIED
+// and returns its DNS TXT ownership challenge. Operator-only.
+func (h *IdentityHandler) AddProjectAuthDomain(
+	ctx context.Context,
+	req *connect.Request[identitypb.AddProjectAuthDomainRequest],
+) (*connect.Response[identitypb.AddProjectAuthDomainResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	reg, err := h.controlAdmin.AddProjectAuthDomain(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Hostname, req.Msg.IsPrimary)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AddProjectAuthDomainResponse{
+		Domain:   authDomainToProto(reg.Domain),
+		TxtName:  reg.TXTName,
+		TxtValue: reg.TXTValue,
+	}), nil
+}
+
+// VerifyProjectAuthDomain checks the DNS TXT challenge and flips a custom
+// auth-domain to verified (resolving). Operator-only.
+func (h *IdentityHandler) VerifyProjectAuthDomain(
+	ctx context.Context,
+	req *connect.Request[identitypb.VerifyProjectAuthDomainRequest],
+) (*connect.Response[identitypb.VerifyProjectAuthDomainResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	d, err := h.controlAdmin.VerifyProjectAuthDomain(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Hostname)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.VerifyProjectAuthDomainResponse{
+		Domain: authDomainToProto(d),
+	}), nil
+}
+
+// ListProjectAuthDomains lists a project's auth-domains (verified and
+// pending). Operator-only.
+func (h *IdentityHandler) ListProjectAuthDomains(
+	ctx context.Context,
+	req *connect.Request[identitypb.ListProjectAuthDomainsRequest],
+) (*connect.Response[identitypb.ListProjectAuthDomainsResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	domains, err := h.controlAdmin.ListProjectAuthDomains(ctx, adminSecret(req.Header()), req.Msg.ProjectId)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	out := make([]*identitypb.ProjectAuthDomain, 0, len(domains))
+	for _, d := range domains {
+		out = append(out, authDomainToProto(d))
+	}
+	return connect.NewResponse(&identitypb.ListProjectAuthDomainsResponse{Domains: out}), nil
+}
+
+// authDomainToProto maps a service auth-domain value to its proto message. A
+// nil input yields nil (the field is simply omitted).
+func authDomainToProto(d *service.AdminProjectAuthDomain) *identitypb.ProjectAuthDomain {
+	if d == nil {
+		return nil
+	}
+	return &identitypb.ProjectAuthDomain{
+		Hostname:     d.Hostname,
+		IsPrimary:    d.IsPrimary,
+		VerifiedAtMs: d.VerifiedAtMs,
+	}
+}
+
 // AdminCreateTenant provisions a tenant under a project. Operator-only.
 func (h *IdentityHandler) AdminCreateTenant(
 	ctx context.Context,

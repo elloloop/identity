@@ -182,6 +182,39 @@ alone resolves a project. This is the HOSTNAME identity is served on
 - **Indexes:** `project_auth_domains_project_idx (project_id)`.
 - **FKs:** `project_id` → `projects(id)` ON DELETE CASCADE.
 
+##### Customer custom auth-domains (ownership verification)
+
+A project can register a **customer-owned** serving hostname and must prove
+control of it before it resolves. The flow is gated by the admin secret (the
+same `X-Admin-Secret` the other control-plane admin RPCs use):
+
+1. **`AddProjectAuthDomain(project_id, hostname)`** inserts the row with
+   `verified_at_ms = 0` and returns a DNS **TXT challenge**. The challenge is
+   deterministic — `identity-auth-domain-verify=` + `hex(sha256(project_id + ":"
+   + lower(hostname)))` — so no per-domain token is stored and re-issuing returns
+   the same value (mirrors the tenant email-domain pattern in `domain.go`).
+2. The customer publishes that TXT value on the hostname.
+3. **`VerifyProjectAuthDomain(project_id, hostname)`** looks up the TXT record
+   via the injected `service.DNSResolver`; on a match it stamps
+   `verified_at_ms`. A missing/mismatched record is a retryable
+   `PermissionDenied`; the domain stays unverified.
+4. **`ListProjectAuthDomains(project_id)`** returns all of a project's domains
+   (verified and pending).
+
+**Resolution invariant:** the Host→project resolver
+(`GetProjectByAuthHostname` / `ResolveByHostname`) matches **only verified**
+domains (`verified_at_ms > 0`). An unverified custom hostname does NOT resolve
+to its project, so an attacker cannot point an unproven hostname at someone
+else's project. Deployer-seeded domains
+(`GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS`) and operator-vouched
+`AdminAddProjectAuthDomain` domains are seeded pre-verified.
+
+**Per-domain TLS is operational, out of scope for the server.** Once a custom
+hostname is verified, the operator is responsible for serving a valid TLS
+certificate for it (e.g. an ACME/Let's-Encrypt-fronting load balancer or a
+wildcard cert). identity stores the hostname and gates resolution on ownership;
+it does not provision or terminate TLS.
+
 #### `platform_admins` (PlatformAdmin)
 
 Platform operators. Their auth sessions reuse `refresh_tokens`/`sessions` in a
