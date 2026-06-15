@@ -78,14 +78,20 @@ const (
 // connection pool.
 type ProjectStore struct {
 	pool *tracedPool
+	// requireVerifiedAuthDomain restricts the primary auth-domain (the host
+	// that drives branded link URLs) to DNS-verified hostnames. See
+	// primaryAuthHostname.
+	requireVerifiedAuthDomain bool
 }
 
 // NewProjectStore builds a control-plane store that shares the given
 // repository's connection pool. The store must NOT be closed
 // independently — closing the owning *pgRepository releases the pool for
-// every derived store.
-func NewProjectStore(r *pgRepository) *ProjectStore {
-	return &ProjectStore{pool: r.pool}
+// every derived store. requireVerifiedAuthDomain, when true, restricts the
+// resolved primary auth-domain to DNS-verified hostnames (see
+// primaryAuthHostname).
+func NewProjectStore(r *pgRepository, requireVerifiedAuthDomain bool) *ProjectStore {
+	return &ProjectStore{pool: r.pool, requireVerifiedAuthDomain: requireVerifiedAuthDomain}
 }
 
 // columnsPrefixed qualifies every comma-separated column in cols with the

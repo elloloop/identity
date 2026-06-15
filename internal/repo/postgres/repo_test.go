@@ -87,7 +87,7 @@ func TestConformance(t *testing.T) {
 // collide on the projects.storage_scope_id unique index.
 func seedProject(ctx context.Context, t *testing.T, repo *pgRepository, projectID string) {
 	t.Helper()
-	_, err := NewProjectStore(repo).createProject(ctx, &Project{
+	_, err := NewProjectStore(repo, true).createProject(ctx, &Project{
 		ID:             projectID,
 		StorageScopeID: "scope-" + projectID,
 		Name:           projectID,

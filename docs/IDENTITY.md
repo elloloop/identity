@@ -174,6 +174,7 @@ GATEWAY_REPO_DRIVER                 = postgres | entdb | memory  # postgres has 
 GATEWAY_DEFAULT_PROJECT_ID          = <string>   # default "default"; the seeded control-plane Project id
 GATEWAY_DEFAULT_TENANT_ID           = <string>   # the storage scope the default project maps onto
 GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS= <csv>      # serving hostnames seeded (verified) on the default project; first is primary
+GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN= <bool>     # default true; primary auth-domain (branded links) must be DNS-verified. false lets an unverified is_primary host drive links
 GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane admin RPCs; empty disables them
 GATEWAY_PUBLIC_EMAIL_DOMAINS        = <csv>      # extra public domains that never auto-form a tenant
 ```

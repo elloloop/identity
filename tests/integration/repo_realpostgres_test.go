@@ -46,7 +46,7 @@ func TestRealPostgres_RepositorySmoke(t *testing.T) {
 
 	// Seed the projects(id) row the project_id FK (migration 0015) needs
 	// before any data-plane write under this project binding.
-	_, err = postgres.NewProjectStore(repo).EnsureDefaultProject(
+	_, err = postgres.NewProjectStore(repo, true).EnsureDefaultProject(
 		ctx, "realpg-project", "realpg-scope", "realpg",
 	)
 	require.NoError(t, err)

@@ -56,6 +56,13 @@ type Config struct {
 	PostgresDSN         string
 	PostgresMaxConns    int
 	PostgresAutoMigrate bool
+
+	// RequireVerifiedAuthDomain restricts a project's primary auth-domain
+	// (the host that drives branded link URLs) to DNS-verified hostnames
+	// when true (the safe default). When false, a deployer opts into letting
+	// an unverified is_primary host drive branded links. Threaded into the
+	// postgres ProjectStore resolver.
+	RequireVerifiedAuthDomain bool
 }
 
 // Built bundles the constructed Repository + DB pair so callers can
@@ -247,7 +254,7 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		return &Built{
 			Repository:         pgRepo,
 			DB:                 pgRepo,
-			ProjectStore:       pgrepo.NewProjectStore(pgRepo),
+			ProjectStore:       pgrepo.NewProjectStore(pgRepo, cfg.RequireVerifiedAuthDomain),
 			AutoFormStore:      pgrepo.NewAutoFormStore(pgRepo),
 			DomainStore:        pgrepo.NewDomainStore(pgRepo),
 			TenantStore:        pgrepo.NewTenantStore(pgRepo),

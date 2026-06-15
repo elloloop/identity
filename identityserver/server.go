@@ -156,10 +156,11 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 			// scope. ensureDefaultProject (below) seeds a Project row whose id
 			// equals DefaultProjectID so rows written under this binding are
 			// readable and the FK to projects(id) is satisfied.
-			ProjectID:           cfg.DefaultProjectID,
-			PostgresDSN:         cfg.PostgresDSN,
-			PostgresMaxConns:    cfg.PostgresMaxConns,
-			PostgresAutoMigrate: cfg.PostgresAutoMigrate,
+			ProjectID:                 cfg.DefaultProjectID,
+			PostgresDSN:               cfg.PostgresDSN,
+			PostgresMaxConns:          cfg.PostgresMaxConns,
+			PostgresAutoMigrate:       cfg.PostgresAutoMigrate,
+			RequireVerifiedAuthDomain: cfg.RequireVerifiedAuthDomain,
 		}, logger)
 		if buildErr != nil {
 			s.cleanupOnError(ctx)

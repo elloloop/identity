@@ -26,7 +26,7 @@ func newTenantDomainStores(ctx context.Context, t *testing.T, dsn string) (*Proj
 	})
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)
-	return NewProjectStore(repo), NewTenantStore(repo), NewDomainStore(repo)
+	return NewProjectStore(repo, true), NewTenantStore(repo), NewDomainStore(repo)
 }
 
 // TestTenantDomainStore_Smoke runs the tenant + domain store round-trip
