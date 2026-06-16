@@ -95,16 +95,17 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 
 	link := fmt.Sprintf("%s/auth/confirm-email-change?token=%s", s.appBaseURL(ctx), rawToken)
 	expiresStr := formatExpiresIn(expiry)
+	brand := resolveBranding(ctx, s.cfg)
 
 	// Verification email to the NEW address — only here is the token
 	// disclosed.
-	if html, text, rerr := email.Render(email.TemplateEmailChangeVerify, map[string]any{
+	if html, text, rerr := email.Render(email.TemplateEmailChangeVerify, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
 		"NewEmail":  newEmail,
 		"OldEmail":  user.Email,
 		"Link":      link,
 		"ExpiresIn": expiresStr,
-	}); rerr != nil {
+	})); rerr != nil {
 		s.logger.Warn("email_change_verify_render_failed", zap.Error(rerr))
 	} else {
 		msg := email.Message{
@@ -114,6 +115,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 			HTML:    html,
 			Text:    text,
 		}
+		brand.applyTo(&msg)
 		if err := s.mailer.Send(ctx, msg); err != nil {
 			s.logger.Warn("email_change_verify_send_failed",
 				zap.String("user_id", user.ID), zap.Error(err))
@@ -122,12 +124,12 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 
 	// Security notice to the OLD address — never contains the token.
 	if user.Email != "" {
-		if html, text, rerr := email.Render(email.TemplateEmailChangeNotice, map[string]any{
+		if html, text, rerr := email.Render(email.TemplateEmailChangeNotice, brand.templateData(map[string]any{
 			"UserName":  displayNameOrEmail(user),
 			"OldEmail":  user.Email,
 			"NewEmail":  newEmail,
 			"ExpiresIn": expiresStr,
-		}); rerr != nil {
+		})); rerr != nil {
 			s.logger.Warn("email_change_notice_render_failed", zap.Error(rerr))
 		} else {
 			msg := email.Message{
@@ -137,6 +139,7 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 				HTML:    html,
 				Text:    text,
 			}
+			brand.applyTo(&msg)
 			if err := s.mailer.Send(ctx, msg); err != nil {
 				s.logger.Warn("email_change_notice_send_failed",
 					zap.String("user_id", user.ID), zap.Error(err))

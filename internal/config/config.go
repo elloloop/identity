@@ -388,6 +388,24 @@ type Config struct {
 	// used as a chain in order. Overrides the single-provider env vars.
 	SMTPProviders string // GATEWAY_SMTP_PROVIDERS
 
+	// Email branding defaults. These are the global fallback for the
+	// per-project branding block (config_json branding.*): when a project
+	// leaves a branding field unset, the global default here is used; when
+	// the global default is also empty, mail falls back to today's
+	// byte-compatible output (no product name, From = SMTPFrom, no logo,
+	// no Reply-To/List-Unsubscribe). One server serving two products sets
+	// per-project branding to distinguish them.
+	EmailBrandProductName  string // GATEWAY_EMAIL_BRAND_PRODUCT_NAME
+	EmailBrandFrom         string // GATEWAY_EMAIL_BRAND_FROM (falls back to SMTPFrom)
+	EmailBrandFromName     string // GATEWAY_EMAIL_BRAND_FROM_NAME
+	EmailBrandLogoURL      string // GATEWAY_EMAIL_BRAND_LOGO_URL
+	EmailBrandPrimaryColor string // GATEWAY_EMAIL_BRAND_PRIMARY_COLOR
+	EmailBrandSupportEmail string // GATEWAY_EMAIL_BRAND_SUPPORT_EMAIL
+	// EmailListUnsubscribe is the List-Unsubscribe header value applied to
+	// configured mail (e.g. "<mailto:unsubscribe@example.com>"). Empty omits
+	// the header. Auth/transactional mail stays deliverable either way.
+	EmailListUnsubscribe string // GATEWAY_EMAIL_LIST_UNSUBSCRIBE
+
 	// Public app URLs used in email links.
 	AppBaseURL string // GATEWAY_APP_BASE_URL — e.g. "https://app.example.com"
 
@@ -627,6 +645,14 @@ func Load() *Config {
 		SMTPFrom:      envStr("GATEWAY_SMTP_FROM", ""),
 		SMTPTLS:       envBool("GATEWAY_SMTP_TLS", true),
 		SMTPProviders: envStr("GATEWAY_SMTP_PROVIDERS", ""),
+
+		EmailBrandProductName:  envStr("GATEWAY_EMAIL_BRAND_PRODUCT_NAME", ""),
+		EmailBrandFrom:         envStr("GATEWAY_EMAIL_BRAND_FROM", ""),
+		EmailBrandFromName:     envStr("GATEWAY_EMAIL_BRAND_FROM_NAME", ""),
+		EmailBrandLogoURL:      envStr("GATEWAY_EMAIL_BRAND_LOGO_URL", ""),
+		EmailBrandPrimaryColor: envStr("GATEWAY_EMAIL_BRAND_PRIMARY_COLOR", ""),
+		EmailBrandSupportEmail: envStr("GATEWAY_EMAIL_BRAND_SUPPORT_EMAIL", ""),
+		EmailListUnsubscribe:   envStr("GATEWAY_EMAIL_LIST_UNSUBSCRIBE", ""),
 
 		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
 		EmailTokenExpirySeconds: envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),

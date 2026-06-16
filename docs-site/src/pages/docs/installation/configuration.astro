@@ -100,6 +100,71 @@ import { Code } from "astro-expressive-code/components";
     <a href="/identity/docs/auth/passwordless">Passwordless</a>.
   </p>
 
+  <h2>Email branding &amp; deliverability</h2>
+  <p>
+    Transactional emails (magic link, login code, verification, password
+    reset, invitations) carry optional branding. Every field is optional:
+    when unset, mail is byte-compatible with the default unbranded look and
+    the From address falls back to <code>GATEWAY_SMTP_FROM</code>. These are
+    the <strong>global defaults</strong> — a single server serving two
+    products overrides them per project (see below).
+  </p>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+    <tr><td><code>GATEWAY_EMAIL_BRAND_PRODUCT_NAME</code></td><td><em>(empty)</em></td><td>Product name shown in email bodies</td></tr>
+    <tr><td><code>GATEWAY_EMAIL_BRAND_FROM</code></td><td><em>(empty → <code>GATEWAY_SMTP_FROM</code>)</em></td><td>From address for transactional mail</td></tr>
+    <tr><td><code>GATEWAY_EMAIL_BRAND_FROM_NAME</code></td><td><em>(empty)</em></td><td>From display name (<code>"Name" &lt;addr&gt;</code>)</td></tr>
+    <tr><td><code>GATEWAY_EMAIL_BRAND_LOGO_URL</code></td><td><em>(empty)</em></td><td>Absolute <code>https</code> logo URL shown in HTML email</td></tr>
+    <tr><td><code>GATEWAY_EMAIL_BRAND_PRIMARY_COLOR</code></td><td><em>(empty)</em></td><td>CSS colour used to tint branded HTML email</td></tr>
+    <tr><td><code>GATEWAY_EMAIL_BRAND_SUPPORT_EMAIL</code></td><td><em>(empty)</em></td><td>Support address; shown in footers and set as the <code>Reply-To</code> header</td></tr>
+    <tr><td><code>GATEWAY_EMAIL_LIST_UNSUBSCRIBE</code></td><td><em>(empty)</em></td><td><code>List-Unsubscribe</code> header value, e.g. <code>&lt;mailto:unsubscribe@example.com&gt;</code></td></tr>
+  </table>
+  <h3>Per-project branding (one server, two products)</h3>
+  <p>
+    A project's <code>config_json</code> may carry a <code>branding</code> and a
+    <code>passkey</code> block that override the global defaults for requests
+    resolved to that project (by credential key or Host header). Per-field
+    precedence is <em>per-project value → global default → unbranded/legacy</em>.
+    This lets one deployment brand, say, a kids product and a B2B product
+    distinctly, and bind passkeys to each product's own relying-party ID so a
+    passkey registered on <code>kids.example.com</code> validates under that
+    product's RP-ID rather than the other's.
+  </p>
+  <pre><code>{`{
+  "branding": {
+    "product_name": "Glassa Kids",
+    "email_from": "no-reply@kids.example.com",
+    "email_from_name": "Glassa Kids",
+    "logo_url": "https://kids.example.com/logo.png",
+    "primary_color": "#1a73e8",
+    "support_email": "help@kids.example.com"
+  },
+  "passkey": {
+    "rp_id": "kids.example.com",
+    "rp_name": "Glassa Kids",
+    "origin": "https://kids.example.com"
+  }
+}`}</code></pre>
+  <h3>Deliverability (DKIM / SPF / DMARC)</h3>
+  <p>
+    Branding the From address only helps if the receiving mail server trusts
+    it. Configure your sending domain's DNS so auth mail is not flagged as
+    phishing:
+  </p>
+  <ul>
+    <li><strong>SPF</strong>: publish a TXT record authorising your SMTP relay
+    to send for the From domain (e.g. <code>v=spf1 include:your-relay -all</code>).</li>
+    <li><strong>DKIM</strong>: enable DKIM signing at your relay and publish the
+    public key as a TXT record so receivers can verify the signature.</li>
+    <li><strong>DMARC</strong>: publish a <code>_dmarc</code> policy aligning SPF
+    and DKIM with the From domain (start with <code>p=none</code> for
+    monitoring, then tighten to <code>quarantine</code>/<code>reject</code>).</li>
+  </ul>
+  <p>
+    When you set a per-project <code>email_from</code> on a custom domain, that
+    domain needs its own SPF/DKIM/DMARC records.
+  </p>
+
   <h2>TOTP / 2FA</h2>
   <table>
     <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>

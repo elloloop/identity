@@ -115,11 +115,12 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 	}
 
 	link := fmt.Sprintf("%s/auth/reset-password?token=%s", s.appBaseURL(ctx), rawToken)
-	html, text, err := email.Render(email.TemplatePasswordReset, map[string]any{
+	brand := resolveBranding(ctx, s.cfg)
+	html, text, err := email.Render(email.TemplatePasswordReset, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
 		"Link":      link,
 		"ExpiresIn": formatExpiresIn(expiry),
-	})
+	}))
 	if err != nil {
 		s.logger.Warn("password_reset_render_failed", zap.Error(err))
 		return nil
@@ -131,6 +132,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		HTML:    html,
 		Text:    text,
 	}
+	brand.applyTo(&msg)
 	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("password_reset_email_send_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
@@ -264,11 +266,12 @@ func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) 
 	}
 
 	link := fmt.Sprintf("%s/auth/verify-email?token=%s", s.appBaseURL(ctx), rawToken)
-	html, text, err := email.Render(email.TemplateEmailVerification, map[string]any{
+	brand := resolveBranding(ctx, s.cfg)
+	html, text, err := email.Render(email.TemplateEmailVerification, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
 		"Link":      link,
 		"ExpiresIn": formatExpiresIn(expiry),
-	})
+	}))
 	if err != nil {
 		s.logger.Warn("email_verification_render_failed", zap.Error(err))
 		return nil // token is created; rendering failure shouldn't fail RPC
@@ -280,6 +283,7 @@ func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) 
 		HTML:    html,
 		Text:    text,
 	}
+	brand.applyTo(&msg)
 	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("email_verification_send_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
