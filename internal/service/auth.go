@@ -381,6 +381,11 @@ type Repository interface {
 	FindUserByProviderID(ctx context.Context, provider, providerUserID string) (*User, error)
 	CreateOAuthIdentity(ctx context.Context, oi *OAuthIdentity) error
 	ListOAuthIdentitiesForUser(ctx context.Context, userID string) ([]*OAuthIdentity, error)
+	// DeleteOAuthIdentity removes the (provider, provider_user_id) link
+	// owned by userID. It is scoped to the owning user so one user can
+	// never unlink another user's identity. Implementations return
+	// ErrNotFound when no matching link exists for that user.
+	DeleteOAuthIdentity(ctx context.Context, userID, provider, providerUserID string) error
 
 	// Garbage-collection sweepers for ephemeral state. The
 	// background sweeper started by app.New calls these every
@@ -779,6 +784,13 @@ var (
 	// Only a DNS-verified domain may be promoted to a project's primary serving
 	// host, so this is a state precondition mapped to CodeFailedPrecondition.
 	ErrAuthDomainNotVerified = errors.New("auth domain is not verified")
+	// ErrLastCredential is returned by UnlinkIdentity when removing the
+	// requested provider link would leave the user with no remaining way to
+	// sign in (no password, no passkey, and no other linked provider). The
+	// caller is allowed to unlink their own identities, so this is a state
+	// precondition (not an authorization failure), mapped to
+	// CodeFailedPrecondition.
+	ErrLastCredential = errors.New("cannot remove the last sign-in credential")
 )
 
 // ── AuthService ────────────────────────────────────────────────────────

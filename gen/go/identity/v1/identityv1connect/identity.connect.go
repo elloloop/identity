@@ -280,6 +280,15 @@ const (
 	// IdentityServiceCreateFirstPlatformAdminProcedure is the fully-qualified name of the
 	// IdentityService's CreateFirstPlatformAdmin RPC.
 	IdentityServiceCreateFirstPlatformAdminProcedure = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
+	// IdentityServiceListLinkedIdentitiesProcedure is the fully-qualified name of the IdentityService's
+	// ListLinkedIdentities RPC.
+	IdentityServiceListLinkedIdentitiesProcedure = "/identity.v1.IdentityService/ListLinkedIdentities"
+	// IdentityServiceLinkIdentityProcedure is the fully-qualified name of the IdentityService's
+	// LinkIdentity RPC.
+	IdentityServiceLinkIdentityProcedure = "/identity.v1.IdentityService/LinkIdentity"
+	// IdentityServiceUnlinkIdentityProcedure is the fully-qualified name of the IdentityService's
+	// UnlinkIdentity RPC.
+	IdentityServiceUnlinkIdentityProcedure = "/identity.v1.IdentityService/UnlinkIdentity"
 	// IdentityServiceUpsertLoginPolicyProcedure is the fully-qualified name of the IdentityService's
 	// UpsertLoginPolicy RPC.
 	IdentityServiceUpsertLoginPolicyProcedure = "/identity.v1.IdentityService/UpsertLoginPolicy"
@@ -429,6 +438,11 @@ type IdentityServiceClient interface {
 	// succeeds only while platform_admins is empty, then permanently closes
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error)
+	// Self-service linked identities (connected accounts). Authenticated by the
+	// caller's user JWT; each operates only on the caller's own links.
+	ListLinkedIdentities(context.Context, *connect.Request[v1.ListLinkedIdentitiesRequest]) (*connect.Response[v1.ListLinkedIdentitiesResponse], error)
+	LinkIdentity(context.Context, *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error)
+	UnlinkIdentity(context.Context, *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error)
 	// Per-tenant LoginPolicy authoring. These write the policy the login path
 	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
 	// tenant within a project — at most one policy per (project, tenant).
@@ -954,6 +968,24 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("CreateFirstPlatformAdmin")),
 			connect.WithClientOptions(opts...),
 		),
+		listLinkedIdentities: connect.NewClient[v1.ListLinkedIdentitiesRequest, v1.ListLinkedIdentitiesResponse](
+			httpClient,
+			baseURL+IdentityServiceListLinkedIdentitiesProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListLinkedIdentities")),
+			connect.WithClientOptions(opts...),
+		),
+		linkIdentity: connect.NewClient[v1.LinkIdentityRequest, v1.LinkIdentityResponse](
+			httpClient,
+			baseURL+IdentityServiceLinkIdentityProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("LinkIdentity")),
+			connect.WithClientOptions(opts...),
+		),
+		unlinkIdentity: connect.NewClient[v1.UnlinkIdentityRequest, v1.UnlinkIdentityResponse](
+			httpClient,
+			baseURL+IdentityServiceUnlinkIdentityProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UnlinkIdentity")),
+			connect.WithClientOptions(opts...),
+		),
 		upsertLoginPolicy: connect.NewClient[v1.UpsertLoginPolicyRequest, v1.UpsertLoginPolicyResponse](
 			httpClient,
 			baseURL+IdentityServiceUpsertLoginPolicyProcedure,
@@ -1072,6 +1104,9 @@ type identityServiceClient struct {
 	adminCreateTenant             *connect.Client[v1.AdminCreateTenantRequest, v1.AdminCreateTenantResponse]
 	adminAddTenantAdmin           *connect.Client[v1.AdminAddTenantAdminRequest, v1.AdminAddTenantAdminResponse]
 	createFirstPlatformAdmin      *connect.Client[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse]
+	listLinkedIdentities          *connect.Client[v1.ListLinkedIdentitiesRequest, v1.ListLinkedIdentitiesResponse]
+	linkIdentity                  *connect.Client[v1.LinkIdentityRequest, v1.LinkIdentityResponse]
+	unlinkIdentity                *connect.Client[v1.UnlinkIdentityRequest, v1.UnlinkIdentityResponse]
 	upsertLoginPolicy             *connect.Client[v1.UpsertLoginPolicyRequest, v1.UpsertLoginPolicyResponse]
 	getLoginPolicy                *connect.Client[v1.GetLoginPolicyRequest, v1.GetLoginPolicyResponse]
 	deleteLoginPolicy             *connect.Client[v1.DeleteLoginPolicyRequest, v1.DeleteLoginPolicyResponse]
@@ -1494,6 +1529,21 @@ func (c *identityServiceClient) CreateFirstPlatformAdmin(ctx context.Context, re
 	return c.createFirstPlatformAdmin.CallUnary(ctx, req)
 }
 
+// ListLinkedIdentities calls identity.v1.IdentityService.ListLinkedIdentities.
+func (c *identityServiceClient) ListLinkedIdentities(ctx context.Context, req *connect.Request[v1.ListLinkedIdentitiesRequest]) (*connect.Response[v1.ListLinkedIdentitiesResponse], error) {
+	return c.listLinkedIdentities.CallUnary(ctx, req)
+}
+
+// LinkIdentity calls identity.v1.IdentityService.LinkIdentity.
+func (c *identityServiceClient) LinkIdentity(ctx context.Context, req *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error) {
+	return c.linkIdentity.CallUnary(ctx, req)
+}
+
+// UnlinkIdentity calls identity.v1.IdentityService.UnlinkIdentity.
+func (c *identityServiceClient) UnlinkIdentity(ctx context.Context, req *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error) {
+	return c.unlinkIdentity.CallUnary(ctx, req)
+}
+
 // UpsertLoginPolicy calls identity.v1.IdentityService.UpsertLoginPolicy.
 func (c *identityServiceClient) UpsertLoginPolicy(ctx context.Context, req *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error) {
 	return c.upsertLoginPolicy.CallUnary(ctx, req)
@@ -1651,6 +1701,11 @@ type IdentityServiceHandler interface {
 	// succeeds only while platform_admins is empty, then permanently closes
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error)
+	// Self-service linked identities (connected accounts). Authenticated by the
+	// caller's user JWT; each operates only on the caller's own links.
+	ListLinkedIdentities(context.Context, *connect.Request[v1.ListLinkedIdentitiesRequest]) (*connect.Response[v1.ListLinkedIdentitiesResponse], error)
+	LinkIdentity(context.Context, *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error)
+	UnlinkIdentity(context.Context, *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error)
 	// Per-tenant LoginPolicy authoring. These write the policy the login path
 	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
 	// tenant within a project — at most one policy per (project, tenant).
@@ -2172,6 +2227,24 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("CreateFirstPlatformAdmin")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceListLinkedIdentitiesHandler := connect.NewUnaryHandler(
+		IdentityServiceListLinkedIdentitiesProcedure,
+		svc.ListLinkedIdentities,
+		connect.WithSchema(identityServiceMethods.ByName("ListLinkedIdentities")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceLinkIdentityHandler := connect.NewUnaryHandler(
+		IdentityServiceLinkIdentityProcedure,
+		svc.LinkIdentity,
+		connect.WithSchema(identityServiceMethods.ByName("LinkIdentity")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceUnlinkIdentityHandler := connect.NewUnaryHandler(
+		IdentityServiceUnlinkIdentityProcedure,
+		svc.UnlinkIdentity,
+		connect.WithSchema(identityServiceMethods.ByName("UnlinkIdentity")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceUpsertLoginPolicyHandler := connect.NewUnaryHandler(
 		IdentityServiceUpsertLoginPolicyProcedure,
 		svc.UpsertLoginPolicy,
@@ -2370,6 +2443,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminAddTenantAdminHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateFirstPlatformAdminProcedure:
 			identityServiceCreateFirstPlatformAdminHandler.ServeHTTP(w, r)
+		case IdentityServiceListLinkedIdentitiesProcedure:
+			identityServiceListLinkedIdentitiesHandler.ServeHTTP(w, r)
+		case IdentityServiceLinkIdentityProcedure:
+			identityServiceLinkIdentityHandler.ServeHTTP(w, r)
+		case IdentityServiceUnlinkIdentityProcedure:
+			identityServiceUnlinkIdentityHandler.ServeHTTP(w, r)
 		case IdentityServiceUpsertLoginPolicyProcedure:
 			identityServiceUpsertLoginPolicyHandler.ServeHTTP(w, r)
 		case IdentityServiceGetLoginPolicyProcedure:
@@ -2719,6 +2798,18 @@ func (UnimplementedIdentityServiceHandler) AdminAddTenantAdmin(context.Context, 
 
 func (UnimplementedIdentityServiceHandler) CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateFirstPlatformAdmin is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListLinkedIdentities(context.Context, *connect.Request[v1.ListLinkedIdentitiesRequest]) (*connect.Response[v1.ListLinkedIdentitiesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListLinkedIdentities is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) LinkIdentity(context.Context, *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.LinkIdentity is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UnlinkIdentity(context.Context, *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UnlinkIdentity is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error) {

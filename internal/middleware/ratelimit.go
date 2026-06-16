@@ -127,7 +127,8 @@ func RateLimitMiddleware(limits []PathLimit, logger *zap.Logger) func(http.Handl
 				if !pl.Limiter.Allow(key, time.Now()) {
 					w.Header().Set("Retry-After", "60")
 					http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-					logger.Info("rate_limit_exceeded",
+					logger.Info(
+						"rate_limit_exceeded",
 						zap.String("path", r.URL.Path),
 						zap.String("tag", pl.Tag),
 						zap.String("client_ip", clientIP),
