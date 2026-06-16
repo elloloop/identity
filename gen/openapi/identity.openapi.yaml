@@ -3838,13 +3838,6 @@ components:
         tenantId:
           type: string
           title: tenant_id
-        dateOfBirthMs:
-          type:
-            - integer
-            - string
-          title: date_of_birth_ms
-          format: int64
-          description: optional; epoch ms of date of birth (0 = unknown)
       title: CreateUserRequest
       additionalProperties: false
     identity.v1.CreateUserResponse:

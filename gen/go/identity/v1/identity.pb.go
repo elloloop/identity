@@ -542,7 +542,6 @@ type CreateUserRequest struct {
 	AvatarUrl     string                 `protobuf:"bytes,3,opt,name=avatar_url,json=avatarUrl,proto3" json:"avatar_url,omitempty"`
 	Role          string                 `protobuf:"bytes,4,opt,name=role,proto3" json:"role,omitempty"`
 	TenantId      string                 `protobuf:"bytes,5,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	DateOfBirthMs int64                  `protobuf:"varint,6,opt,name=date_of_birth_ms,json=dateOfBirthMs,proto3" json:"date_of_birth_ms,omitempty"` // optional; epoch ms of date of birth (0 = unknown)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -610,13 +609,6 @@ func (x *CreateUserRequest) GetTenantId() string {
 		return x.TenantId
 	}
 	return ""
-}
-
-func (x *CreateUserRequest) GetDateOfBirthMs() int64 {
-	if x != nil {
-		return x.DateOfBirthMs
-	}
-	return 0
 }
 
 type CreateUserResponse struct {
@@ -10107,15 +10099,14 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x11phone_verified_at\x18\x15 \x01(\x03R\x0fphoneVerifiedAt\x12'\n" +
 	"\x10date_of_birth_ms\x18\x16 \x01(\x03R\rdateOfBirthMs\x12\x19\n" +
 	"\bis_minor\x18\x17 \x01(\bR\aisMinor\x12/\n" +
-	"\bage_band\x18\x18 \x01(\x0e2\x14.identity.v1.AgeBandR\aageBand\"\xb6\x01\n" +
+	"\bage_band\x18\x18 \x01(\x0e2\x14.identity.v1.AgeBandR\aageBand\"\x8d\x01\n" +
 	"\x11CreateUserRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
 	"avatar_url\x18\x03 \x01(\tR\tavatarUrl\x12\x12\n" +
 	"\x04role\x18\x04 \x01(\tR\x04role\x12\x1b\n" +
-	"\ttenant_id\x18\x05 \x01(\tR\btenantId\x12'\n" +
-	"\x10date_of_birth_ms\x18\x06 \x01(\x03R\rdateOfBirthMs\";\n" +
+	"\ttenant_id\x18\x05 \x01(\tR\btenantId\";\n" +
 	"\x12CreateUserResponse\x12%\n" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\"F\n" +
 	"\x0eGetUserRequest\x12\x17\n" +

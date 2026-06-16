@@ -700,8 +700,14 @@ var (
 	ErrAccountNotActive  = errors.New("account is not active")
 	ErrInvitationPending = errors.New("account has not completed invitation")
 	ErrIDVRequired       = errors.New("identity verification required")
-	ErrWeakPassword      = errors.New("password does not meet strength requirements")
-	ErrTotpRequired      = errors.New("totp required")
+	// ErrParentalConsentRequired is returned when an admin status mutator
+	// (e.g. ReactivateUser) attempts to move an account out of
+	// pending_parental_consent. The only valid transition out of that state
+	// is the dedicated parental-consent flow; ordinary status patches must
+	// not silently bypass the COPPA consent gate.
+	ErrParentalConsentRequired = errors.New("account is pending parental consent and cannot be activated by this operation")
+	ErrWeakPassword            = errors.New("password does not meet strength requirements")
+	ErrTotpRequired            = errors.New("totp required")
 	// ErrSSORequired is returned when a claimed tenant's LoginPolicy mandates
 	// single sign-on and the caller attempted a non-SSO method. Like
 	// ErrTotpRequired it is a "do something else first" signal rather than a
