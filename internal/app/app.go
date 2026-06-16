@@ -7,6 +7,9 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -27,6 +30,7 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/captcha"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/idv"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
@@ -339,6 +343,9 @@ func New(deps Deps) (*Built, error) {
 	// synchronously on the calling goroutine (audit.Logger falls back to
 	// sync mode), so a never-started Built is still correct, just slower.
 	var stopAudit, stopSweeper func()
+	// Event-worker lifecycle hooks; populated below only when outbound
+	// eventing is enabled (else they stay nil and the worker never runs).
+	var startEvents, stopEvents func()
 	startWork := func() {
 		// Move audit writes off the auth hot path. Drops are counted and
 		// surfaced via auditLog.DroppedCount().
@@ -346,8 +353,14 @@ func New(deps Deps) (*Built, error) {
 		if sweep != nil {
 			stopSweeper = sweep.start()
 		}
+		if startEvents != nil {
+			startEvents()
+		}
 	}
 	stopWork := func() {
+		if stopEvents != nil {
+			stopEvents()
+		}
 		if stopSweeper != nil {
 			stopSweeper()
 		}
@@ -392,13 +405,63 @@ func New(deps Deps) (*Built, error) {
 	}
 	oauthRegistry = wrapOAuthRegistry(oauthRegistry)
 
+	// User-lifecycle eventing (#261). When GATEWAY_WEBHOOKS_ENABLED is
+	// false (the default), eventPublisher stays nil — the service treats a
+	// nil publisher as the no-op events.Discard, so no events are emitted
+	// and no worker runs. When enabled, an outbox-backed publisher fans
+	// events out to subscriptions and a background worker delivers signed
+	// webhooks with retry/backoff. The in-memory outbox backs the
+	// single-node tier; a durable SQL outbox is a follow-up.
+	var eventPublisher events.Publisher
+	if deps.Config.WebhooksEnabled {
+		outbox := events.NewMemoryOutbox()
+		pub := events.NewOutboxPublisher(outbox, randomEventID, time.Now, logger)
+		eventPublisher = pub
+		worker := events.NewWorker(events.WorkerConfig{
+			Store:  outbox,
+			Sender: events.NewHTTPSender(nil),
+			Policy: events.RetryPolicy{
+				MaxAttempts: deps.Config.WebhooksMaxAttempts,
+				BaseDelay:   time.Duration(deps.Config.WebhooksBackoffBaseSeconds) * time.Second,
+				MaxDelay:    time.Duration(deps.Config.WebhooksBackoffMaxSeconds) * time.Second,
+			},
+			Interval: time.Duration(deps.Config.WebhooksWorkerIntervalSeconds) * time.Second,
+			Batch:    deps.Config.WebhooksBatchSize,
+			Logger:   logger,
+			FailureHook: func(d *events.Delivery) {
+				// Surface abandonment via the structured logger rather than
+				// swallowing it (acceptance criterion: failures surfaced, not
+				// hidden). Audit-event surfacing is a follow-up once the
+				// outbox is durable and per-tenant.
+				logger.Error(
+					"webhook_delivery_abandoned",
+					zap.String("event_id", d.EventID),
+					zap.String("subscription_id", d.SubscriptionID),
+					zap.Int("attempts", d.Attempts),
+					zap.String("last_error", d.LastError),
+				)
+			},
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		startEvents = func() {
+			go func() {
+				if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+					logger.Warn("events_worker_stopped", zap.Error(err))
+				}
+			}()
+		}
+		stopEvents = cancel
+	}
+
 	authSvc := service.NewAuthServiceWithOAuth(
 		repo, deps.Config, deps.Signer, deps.Passkeys,
 		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, smsSender, logger,
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
-		WithLoginGovernance(deps.LoginGovernance)
-	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger)
+		WithLoginGovernance(deps.LoginGovernance).
+		WithEventPublisher(eventPublisher)
+	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
+		WithEventPublisher(eventPublisher)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
@@ -643,4 +706,15 @@ func wrapOAuthRegistry(in *oauth.Registry) *oauth.Registry {
 		out.Register(name, observability.WrapOAuthExchanger(name, e))
 	}
 	return out
+}
+
+// randomEventID generates a unique outbox/event id for at-least-once
+// delivery idempotency. crypto/rand failure is unrecoverable, so it panics
+// rather than returning a guessable or empty id.
+func randomEventID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("app: crypto/rand failed generating event id: " + err.Error())
+	}
+	return "evt_" + hex.EncodeToString(b[:])
 }

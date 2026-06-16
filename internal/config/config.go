@@ -480,6 +480,32 @@ type Config struct {
 	SweeperIntervalSeconds int
 	SweeperBatchSize       int
 	SweeperGraceSeconds    int
+
+	// Outbound webhooks / user-lifecycle eventing (#261). When disabled
+	// (the default), the service emits events to a no-op publisher: there
+	// is no observable behaviour change and no background worker runs.
+	// When enabled, user create/update/deactivate events are fanned out to
+	// per-tenant subscriptions and delivered as signed webhooks
+	// at-least-once, with retry/backoff recorded in a transactional outbox.
+	//
+	//   GATEWAY_WEBHOOKS_ENABLED            master switch (default false).
+	//   GATEWAY_WEBHOOKS_MAX_ATTEMPTS       per-delivery retry budget before
+	//                                       the delivery is abandoned and
+	//                                       surfaced via audit (default 6).
+	//   GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS  first-retry delay; doubles
+	//                                       per attempt up to the cap
+	//                                       (default 2).
+	//   GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS   backoff ceiling (default 300).
+	//   GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS  outbox drain tick
+	//                                       (default 1).
+	//   GATEWAY_WEBHOOKS_BATCH_SIZE         deliveries claimed per tick
+	//                                       (default 50).
+	WebhooksEnabled               bool
+	WebhooksMaxAttempts           int
+	WebhooksBackoffBaseSeconds    int
+	WebhooksBackoffMaxSeconds     int
+	WebhooksWorkerIntervalSeconds int
+	WebhooksBatchSize             int
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -646,6 +672,13 @@ func Load() *Config {
 		SweeperIntervalSeconds: envInt("GATEWAY_SWEEPER_INTERVAL_SECONDS", 300),
 		SweeperBatchSize:       envInt("GATEWAY_SWEEPER_BATCH_SIZE", 500),
 		SweeperGraceSeconds:    envInt("GATEWAY_SWEEPER_GRACE_SECONDS", 60),
+
+		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
+		WebhooksMaxAttempts:           envInt("GATEWAY_WEBHOOKS_MAX_ATTEMPTS", 6),
+		WebhooksBackoffBaseSeconds:    envInt("GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS", 2),
+		WebhooksBackoffMaxSeconds:     envInt("GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS", 300),
+		WebhooksWorkerIntervalSeconds: envInt("GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS", 1),
+		WebhooksBatchSize:             envInt("GATEWAY_WEBHOOKS_BATCH_SIZE", 50),
 	}
 }
 
@@ -802,6 +835,40 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateWebhooks(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateWebhooks enforces the outbound-eventing invariants: the retry
+// and backoff knobs must be positive and the cap must not be smaller than
+// the base. The checks only run when eventing is enabled — a disabled
+// deployment uses a no-op publisher and runs no worker, so its (unused)
+// knobs are irrelevant.
+func (c *Config) validateWebhooks() error {
+	if !c.WebhooksEnabled {
+		return nil
+	}
+	if c.WebhooksMaxAttempts < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_MAX_ATTEMPTS=%d must be >= 1", c.WebhooksMaxAttempts)
+	}
+	if c.WebhooksBackoffBaseSeconds < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS=%d must be >= 1", c.WebhooksBackoffBaseSeconds)
+	}
+	if c.WebhooksBackoffMaxSeconds < c.WebhooksBackoffBaseSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS=%d must be >= GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS=%d",
+			c.WebhooksBackoffMaxSeconds, c.WebhooksBackoffBaseSeconds,
+		)
+	}
+	if c.WebhooksWorkerIntervalSeconds < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS=%d must be >= 1", c.WebhooksWorkerIntervalSeconds)
+	}
+	if c.WebhooksBatchSize < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_BATCH_SIZE=%d must be >= 1", c.WebhooksBatchSize)
+	}
 	return nil
 }
 
