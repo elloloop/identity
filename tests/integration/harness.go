@@ -1762,6 +1762,18 @@ func (r *MemRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) (
 	return out, nil
 }
 
+func (r *MemRepo) DeleteOAuthIdentity(_ context.Context, userID, provider, providerUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, oi := range r.oauthIdentities {
+		if oi.UserID == userID && oi.Provider == provider && oi.ProviderUserID == providerUserID {
+			delete(r.oauthIdentities, id)
+			return nil
+		}
+	}
+	return service.ErrNotFound
+}
+
 // ── Identity Verification ──────────────────────────────────────────────
 
 func (r *MemRepo) CreateIdentityVerification(_ context.Context, rec *service.IdentityVerificationRecord) error {
