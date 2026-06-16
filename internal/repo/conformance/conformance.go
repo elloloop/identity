@@ -1228,6 +1228,105 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("RBAC_Roles_CRUD_Uniqueness_Ordering", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+
+			// Create two roles; ListRoles must return them name-ascending.
+			if _, err := r.CreateRole(ctx, &service.RoleRecord{
+				Name: "billing-admin", Description: "billing", Permissions: []string{"billing:read", "billing:write"}, CreatedAt: 100, UpdatedAt: 100,
+			}); err != nil {
+				t.Fatalf("CreateRole billing-admin: %v", err)
+			}
+			if _, err := r.CreateRole(ctx, &service.RoleRecord{
+				Name: "auditor", Permissions: []string{"audit:read"}, CreatedAt: 100, UpdatedAt: 100,
+			}); err != nil {
+				t.Fatalf("CreateRole auditor: %v", err)
+			}
+
+			// Duplicate name must be ErrAlreadyExists.
+			if _, err := r.CreateRole(ctx, &service.RoleRecord{
+				Name: "auditor", Permissions: []string{"x"}, CreatedAt: 100, UpdatedAt: 100,
+			}); !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("duplicate role: want ErrAlreadyExists, got %v", err)
+			}
+
+			roles, err := r.ListRoles(ctx)
+			if err != nil {
+				t.Fatalf("ListRoles: %v", err)
+			}
+			if len(roles) != 2 || roles[0].Name != "auditor" || roles[1].Name != "billing-admin" {
+				t.Fatalf("ListRoles ordering: %#v", roles)
+			}
+
+			// GetRoleByName round-trips the permission set.
+			got, err := r.GetRoleByName(ctx, "billing-admin")
+			if err != nil || got == nil {
+				t.Fatalf("GetRoleByName: %v / %#v", err, got)
+			}
+			if len(got.Permissions) != 2 || got.Permissions[0] != "billing:read" || got.Permissions[1] != "billing:write" {
+				t.Fatalf("permissions round-trip: %#v", got.Permissions)
+			}
+
+			// Missing role: nil, no error.
+			if missing, err := r.GetRoleByName(ctx, "nope"); err != nil || missing != nil {
+				t.Fatalf("GetRoleByName missing: %v / %#v", err, missing)
+			}
+		})
+
+		t.Run("RBAC_Assignment_Upsert_And_Cascades", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "rbac@example.com")
+
+			if _, err := r.CreateRole(ctx, &service.RoleRecord{
+				Name: "reader", Permissions: []string{"doc:read"}, CreatedAt: 1, UpdatedAt: 1,
+			}); err != nil {
+				t.Fatalf("CreateRole reader: %v", err)
+			}
+			if _, err := r.CreateRole(ctx, &service.RoleRecord{
+				Name: "writer", Permissions: []string{"doc:write"}, CreatedAt: 1, UpdatedAt: 1,
+			}); err != nil {
+				t.Fatalf("CreateRole writer: %v", err)
+			}
+
+			// No assignment yet: nil, no error.
+			if a, err := r.GetUserRoleAssignment(ctx, userID); err != nil || a != nil {
+				t.Fatalf("GetUserRoleAssignment empty: %v / %#v", err, a)
+			}
+
+			if err := r.SetUserRoleAssignment(ctx, userID, "reader", 10); err != nil {
+				t.Fatalf("SetUserRoleAssignment reader: %v", err)
+			}
+			// Upsert: re-assigning replaces (a user holds at most one role).
+			if err := r.SetUserRoleAssignment(ctx, userID, "writer", 20); err != nil {
+				t.Fatalf("SetUserRoleAssignment writer: %v", err)
+			}
+			a, err := r.GetUserRoleAssignment(ctx, userID)
+			if err != nil || a == nil || a.RoleName != "writer" {
+				t.Fatalf("assignment after upsert: %v / %#v", err, a)
+			}
+
+			// Deleting the assigned role cascades the assignment away.
+			if err := r.DeleteRole(ctx, "writer"); err != nil {
+				t.Fatalf("DeleteRole writer: %v", err)
+			}
+			if a, err := r.GetUserRoleAssignment(ctx, userID); err != nil || a != nil {
+				t.Fatalf("assignment after role delete: want nil, got %v / %#v", err, a)
+			}
+
+			// Re-assign, then DeleteUser must cascade the assignment.
+			if err := r.SetUserRoleAssignment(ctx, userID, "reader", 30); err != nil {
+				t.Fatalf("SetUserRoleAssignment reader 2: %v", err)
+			}
+			if err := r.DeleteUser(ctx, userID); err != nil {
+				t.Fatalf("DeleteUser: %v", err)
+			}
+			if a, err := r.GetUserRoleAssignment(ctx, userID); err != nil || a != nil {
+				t.Fatalf("assignment after user delete: want nil, got %v / %#v", err, a)
+			}
+		})
+
 		t.Run("LoginChallenge_CRUD", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)

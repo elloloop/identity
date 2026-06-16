@@ -280,6 +280,21 @@ const (
 	// IdentityServiceCreateFirstPlatformAdminProcedure is the fully-qualified name of the
 	// IdentityService's CreateFirstPlatformAdmin RPC.
 	IdentityServiceCreateFirstPlatformAdminProcedure = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
+	// IdentityServiceCreateRoleProcedure is the fully-qualified name of the IdentityService's
+	// CreateRole RPC.
+	IdentityServiceCreateRoleProcedure = "/identity.v1.IdentityService/CreateRole"
+	// IdentityServiceListRolesProcedure is the fully-qualified name of the IdentityService's ListRoles
+	// RPC.
+	IdentityServiceListRolesProcedure = "/identity.v1.IdentityService/ListRoles"
+	// IdentityServiceDeleteRoleProcedure is the fully-qualified name of the IdentityService's
+	// DeleteRole RPC.
+	IdentityServiceDeleteRoleProcedure = "/identity.v1.IdentityService/DeleteRole"
+	// IdentityServiceAssignRoleProcedure is the fully-qualified name of the IdentityService's
+	// AssignRole RPC.
+	IdentityServiceAssignRoleProcedure = "/identity.v1.IdentityService/AssignRole"
+	// IdentityServiceGetUserPermissionsProcedure is the fully-qualified name of the IdentityService's
+	// GetUserPermissions RPC.
+	IdentityServiceGetUserPermissionsProcedure = "/identity.v1.IdentityService/GetUserPermissions"
 )
 
 // IdentityServiceClient is a client for the identity.v1.IdentityService service.
@@ -414,6 +429,17 @@ type IdentityServiceClient interface {
 	// succeeds only while platform_admins is empty, then permanently closes
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error)
+	// RBAC: custom scoped roles + assignments. ADDITIVE least-privilege layer
+	// on top of the legacy free-text user.role field. An admin defines a role
+	// naming an explicit permission subset, assigns it to a user, and the
+	// permission-check helper enforces it ALONGSIDE the existing role==admin
+	// checks (admin/owner remain a full-access superset). Admin-only; the JWT
+	// must carry role=admin.
+	CreateRole(context.Context, *connect.Request[v1.CreateRoleRequest]) (*connect.Response[v1.CreateRoleResponse], error)
+	ListRoles(context.Context, *connect.Request[v1.ListRolesRequest]) (*connect.Response[v1.ListRolesResponse], error)
+	DeleteRole(context.Context, *connect.Request[v1.DeleteRoleRequest]) (*connect.Response[v1.DeleteRoleResponse], error)
+	AssignRole(context.Context, *connect.Request[v1.AssignRoleRequest]) (*connect.Response[v1.AssignRoleResponse], error)
+	GetUserPermissions(context.Context, *connect.Request[v1.GetUserPermissionsRequest]) (*connect.Response[v1.GetUserPermissionsResponse], error)
 }
 
 // NewIdentityServiceClient constructs a client for the identity.v1.IdentityService service. By
@@ -925,6 +951,36 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("CreateFirstPlatformAdmin")),
 			connect.WithClientOptions(opts...),
 		),
+		createRole: connect.NewClient[v1.CreateRoleRequest, v1.CreateRoleResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateRoleProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateRole")),
+			connect.WithClientOptions(opts...),
+		),
+		listRoles: connect.NewClient[v1.ListRolesRequest, v1.ListRolesResponse](
+			httpClient,
+			baseURL+IdentityServiceListRolesProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListRoles")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteRole: connect.NewClient[v1.DeleteRoleRequest, v1.DeleteRoleResponse](
+			httpClient,
+			baseURL+IdentityServiceDeleteRoleProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("DeleteRole")),
+			connect.WithClientOptions(opts...),
+		),
+		assignRole: connect.NewClient[v1.AssignRoleRequest, v1.AssignRoleResponse](
+			httpClient,
+			baseURL+IdentityServiceAssignRoleProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AssignRole")),
+			connect.WithClientOptions(opts...),
+		),
+		getUserPermissions: connect.NewClient[v1.GetUserPermissionsRequest, v1.GetUserPermissionsResponse](
+			httpClient,
+			baseURL+IdentityServiceGetUserPermissionsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetUserPermissions")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -1013,6 +1069,11 @@ type identityServiceClient struct {
 	adminCreateTenant             *connect.Client[v1.AdminCreateTenantRequest, v1.AdminCreateTenantResponse]
 	adminAddTenantAdmin           *connect.Client[v1.AdminAddTenantAdminRequest, v1.AdminAddTenantAdminResponse]
 	createFirstPlatformAdmin      *connect.Client[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse]
+	createRole                    *connect.Client[v1.CreateRoleRequest, v1.CreateRoleResponse]
+	listRoles                     *connect.Client[v1.ListRolesRequest, v1.ListRolesResponse]
+	deleteRole                    *connect.Client[v1.DeleteRoleRequest, v1.DeleteRoleResponse]
+	assignRole                    *connect.Client[v1.AssignRoleRequest, v1.AssignRoleResponse]
+	getUserPermissions            *connect.Client[v1.GetUserPermissionsRequest, v1.GetUserPermissionsResponse]
 }
 
 // BeginOAuthLogin calls identity.v1.IdentityService.BeginOAuthLogin.
@@ -1430,6 +1491,31 @@ func (c *identityServiceClient) CreateFirstPlatformAdmin(ctx context.Context, re
 	return c.createFirstPlatformAdmin.CallUnary(ctx, req)
 }
 
+// CreateRole calls identity.v1.IdentityService.CreateRole.
+func (c *identityServiceClient) CreateRole(ctx context.Context, req *connect.Request[v1.CreateRoleRequest]) (*connect.Response[v1.CreateRoleResponse], error) {
+	return c.createRole.CallUnary(ctx, req)
+}
+
+// ListRoles calls identity.v1.IdentityService.ListRoles.
+func (c *identityServiceClient) ListRoles(ctx context.Context, req *connect.Request[v1.ListRolesRequest]) (*connect.Response[v1.ListRolesResponse], error) {
+	return c.listRoles.CallUnary(ctx, req)
+}
+
+// DeleteRole calls identity.v1.IdentityService.DeleteRole.
+func (c *identityServiceClient) DeleteRole(ctx context.Context, req *connect.Request[v1.DeleteRoleRequest]) (*connect.Response[v1.DeleteRoleResponse], error) {
+	return c.deleteRole.CallUnary(ctx, req)
+}
+
+// AssignRole calls identity.v1.IdentityService.AssignRole.
+func (c *identityServiceClient) AssignRole(ctx context.Context, req *connect.Request[v1.AssignRoleRequest]) (*connect.Response[v1.AssignRoleResponse], error) {
+	return c.assignRole.CallUnary(ctx, req)
+}
+
+// GetUserPermissions calls identity.v1.IdentityService.GetUserPermissions.
+func (c *identityServiceClient) GetUserPermissions(ctx context.Context, req *connect.Request[v1.GetUserPermissionsRequest]) (*connect.Response[v1.GetUserPermissionsResponse], error) {
+	return c.getUserPermissions.CallUnary(ctx, req)
+}
+
 // IdentityServiceHandler is an implementation of the identity.v1.IdentityService service.
 type IdentityServiceHandler interface {
 	// Authentication
@@ -1562,6 +1648,17 @@ type IdentityServiceHandler interface {
 	// succeeds only while platform_admins is empty, then permanently closes
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error)
+	// RBAC: custom scoped roles + assignments. ADDITIVE least-privilege layer
+	// on top of the legacy free-text user.role field. An admin defines a role
+	// naming an explicit permission subset, assigns it to a user, and the
+	// permission-check helper enforces it ALONGSIDE the existing role==admin
+	// checks (admin/owner remain a full-access superset). Admin-only; the JWT
+	// must carry role=admin.
+	CreateRole(context.Context, *connect.Request[v1.CreateRoleRequest]) (*connect.Response[v1.CreateRoleResponse], error)
+	ListRoles(context.Context, *connect.Request[v1.ListRolesRequest]) (*connect.Response[v1.ListRolesResponse], error)
+	DeleteRole(context.Context, *connect.Request[v1.DeleteRoleRequest]) (*connect.Response[v1.DeleteRoleResponse], error)
+	AssignRole(context.Context, *connect.Request[v1.AssignRoleRequest]) (*connect.Response[v1.AssignRoleResponse], error)
+	GetUserPermissions(context.Context, *connect.Request[v1.GetUserPermissionsRequest]) (*connect.Response[v1.GetUserPermissionsResponse], error)
 }
 
 // NewIdentityServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -2069,6 +2166,36 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("CreateFirstPlatformAdmin")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceCreateRoleHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateRoleProcedure,
+		svc.CreateRole,
+		connect.WithSchema(identityServiceMethods.ByName("CreateRole")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListRolesHandler := connect.NewUnaryHandler(
+		IdentityServiceListRolesProcedure,
+		svc.ListRoles,
+		connect.WithSchema(identityServiceMethods.ByName("ListRoles")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceDeleteRoleHandler := connect.NewUnaryHandler(
+		IdentityServiceDeleteRoleProcedure,
+		svc.DeleteRole,
+		connect.WithSchema(identityServiceMethods.ByName("DeleteRole")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAssignRoleHandler := connect.NewUnaryHandler(
+		IdentityServiceAssignRoleProcedure,
+		svc.AssignRole,
+		connect.WithSchema(identityServiceMethods.ByName("AssignRole")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGetUserPermissionsHandler := connect.NewUnaryHandler(
+		IdentityServiceGetUserPermissionsProcedure,
+		svc.GetUserPermissions,
+		connect.WithSchema(identityServiceMethods.ByName("GetUserPermissions")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/identity.v1.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case IdentityServiceBeginOAuthLoginProcedure:
@@ -2237,6 +2364,16 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminAddTenantAdminHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateFirstPlatformAdminProcedure:
 			identityServiceCreateFirstPlatformAdminHandler.ServeHTTP(w, r)
+		case IdentityServiceCreateRoleProcedure:
+			identityServiceCreateRoleHandler.ServeHTTP(w, r)
+		case IdentityServiceListRolesProcedure:
+			identityServiceListRolesHandler.ServeHTTP(w, r)
+		case IdentityServiceDeleteRoleProcedure:
+			identityServiceDeleteRoleHandler.ServeHTTP(w, r)
+		case IdentityServiceAssignRoleProcedure:
+			identityServiceAssignRoleHandler.ServeHTTP(w, r)
+		case IdentityServiceGetUserPermissionsProcedure:
+			identityServiceGetUserPermissionsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2576,4 +2713,24 @@ func (UnimplementedIdentityServiceHandler) AdminAddTenantAdmin(context.Context, 
 
 func (UnimplementedIdentityServiceHandler) CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateFirstPlatformAdmin is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CreateRole(context.Context, *connect.Request[v1.CreateRoleRequest]) (*connect.Response[v1.CreateRoleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateRole is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListRoles(context.Context, *connect.Request[v1.ListRolesRequest]) (*connect.Response[v1.ListRolesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListRoles is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) DeleteRole(context.Context, *connect.Request[v1.DeleteRoleRequest]) (*connect.Response[v1.DeleteRoleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DeleteRole is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AssignRole(context.Context, *connect.Request[v1.AssignRoleRequest]) (*connect.Response[v1.AssignRoleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AssignRole is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetUserPermissions(context.Context, *connect.Request[v1.GetUserPermissionsRequest]) (*connect.Response[v1.GetUserPermissionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetUserPermissions is not implemented"))
 }

@@ -397,6 +397,34 @@ type Repository interface {
 	DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredQrLoginSessions(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error
+
+	// ── RBAC: custom roles + per-user role assignments ─────────────────
+	//
+	// A custom role is a project-scoped named permission set. A role
+	// assignment binds a single user to at most one custom role; it is
+	// additive to (and never replaces) the legacy free-text user.role
+	// string, so existing role=admin/owner behaviour is unchanged.
+	//
+	// CreateRole persists a new role; the (project_id, name) pair is
+	// unique, so a duplicate name returns ErrAlreadyExists. GetRoleByName
+	// returns nil (no error) when the role does not exist. ListRoles
+	// returns every role in the project ordered by name ascending.
+	// DeleteRole removes the role AND every assignment referencing it so
+	// no user is left pointing at a deleted role; deleting a non-existent
+	// role is idempotent (returns nil).
+	CreateRole(ctx context.Context, r *RoleRecord) (string, error)
+	GetRoleByName(ctx context.Context, name string) (*RoleRecord, error)
+	ListRoles(ctx context.Context) ([]*RoleRecord, error)
+	DeleteRole(ctx context.Context, name string) error
+
+	// SetUserRoleAssignment binds userID to roleName, replacing any
+	// existing assignment for that user (upsert keyed on user_id, so a
+	// user has at most one custom role). GetUserRoleAssignment returns nil
+	// (no error) when the user has no assignment. DeleteUserRoleAssignment
+	// removes it and is idempotent.
+	SetUserRoleAssignment(ctx context.Context, userID, roleName string, atMs int64) error
+	GetUserRoleAssignment(ctx context.Context, userID string) (*RoleAssignmentRecord, error)
+	DeleteUserRoleAssignment(ctx context.Context, userID string) error
 }
 
 // ErrSweepNotImplemented is the soft-skip sentinel a Repository may
@@ -568,6 +596,33 @@ type RecoveryCodeRecord struct {
 	Used      bool
 	CreatedAt int64
 	UsedAt    int64
+}
+
+// RoleRecord is a project-scoped custom RBAC role: a named set of
+// permission strings. It is additive to the legacy free-text user.role
+// field — a custom role grants exactly its Permissions, while the legacy
+// admin/owner roles remain a full-access superset checked separately.
+type RoleRecord struct {
+	NodeID string
+	// Name is the role's project-unique identifier (e.g. "billing-admin").
+	Name string
+	// Description is an optional human-readable summary.
+	Description string
+	// Permissions is the exact set of permission strings the role grants.
+	Permissions []string
+	CreatedAt   int64
+	UpdatedAt   int64
+}
+
+// RoleAssignmentRecord binds a user to at most one custom RoleRecord by
+// name within a project. It is additive: a user with an assignment still
+// carries their legacy user.role string, and admin/owner users keep full
+// access regardless of any assignment.
+type RoleAssignmentRecord struct {
+	NodeID    string
+	UserID    string
+	RoleName  string
+	CreatedAt int64
 }
 
 // LoginChallengeRecord represents a pending 2FA login challenge.

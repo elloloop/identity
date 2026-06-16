@@ -62,6 +62,8 @@ type Repo struct {
 	oauthIdentities    map[string]*service.OAuthIdentity
 	idvRecords         map[string]*service.IdentityVerificationRecord
 	sessions           map[string]*service.SessionRecord
+	roles              map[string]*service.RoleRecord
+	roleAssignments    map[string]*service.RoleAssignmentRecord
 }
 
 // projectRegistry memoises the per-project Repo siblings produced by
@@ -112,6 +114,8 @@ func newStore() *Repo {
 		oauthIdentities:    make(map[string]*service.OAuthIdentity),
 		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
 		sessions:           make(map[string]*service.SessionRecord),
+		roles:              make(map[string]*service.RoleRecord),
+		roleAssignments:    make(map[string]*service.RoleAssignmentRecord),
 	}
 }
 
@@ -272,6 +276,7 @@ func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 	deleteByUser(r.oauthIdentities, userID, func(o *service.OAuthIdentity) string { return o.UserID })
 	deleteByUser(r.idvRecords, userID, func(rec *service.IdentityVerificationRecord) string { return rec.UserID })
 	deleteByUser(r.phoneVerifyCodes, userID, func(c *service.PhoneVerificationCodeRecord) string { return c.UserID })
+	deleteByUser(r.roleAssignments, userID, func(a *service.RoleAssignmentRecord) string { return a.UserID })
 	delete(r.users, userID)
 	return nil
 }

@@ -119,6 +119,12 @@ const (
 	// empty (the bootstrap is permanently closed → FailedPrecondition). It
 	// makes a closed-bootstrap probe against the ungated endpoint visible.
 	EventPlatformAdminBootstrapBlocked EventType = "platform_admin_bootstrap_blocked"
+
+	// RBAC role-management events (custom scoped roles + assignments).
+	EventRoleCreated  EventType = "role_created"
+	EventRoleDeleted  EventType = "role_deleted"
+	EventRoleAssigned EventType = "role_assigned"
+	EventRoleRevoked  EventType = "role_revoked"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -150,6 +156,10 @@ var validEventTypes = map[EventType]struct{}{
 	EventPhoneVerificationRequested:    {},
 	EventPhoneVerified:                 {},
 	EventPlatformAdminBootstrapBlocked: {},
+	EventRoleCreated:                   {},
+	EventRoleDeleted:                   {},
+	EventRoleAssigned:                  {},
+	EventRoleRevoked:                   {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

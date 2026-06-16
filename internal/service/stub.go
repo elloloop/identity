@@ -370,6 +370,34 @@ func (StubRepository) RevokeSessionsForUser(context.Context, string, int64) erro
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) CreateRole(context.Context, *RoleRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) GetRoleByName(context.Context, string) (*RoleRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) ListRoles(context.Context) ([]*RoleRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteRole(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) SetUserRoleAssignment(context.Context, string, string, int64) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) GetUserRoleAssignment(context.Context, string) (*RoleAssignmentRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteUserRoleAssignment(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+
 // ── StubDB ────────────────────────────────────────────────────────────
 
 // StubDB implements DB (and audit.NodeWriter) but returns

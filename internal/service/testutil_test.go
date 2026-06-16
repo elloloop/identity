@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -117,6 +118,8 @@ type fakeRepo struct {
 	oauthIdentities    map[string]*OAuthIdentity
 	idvRecords         map[string]*IdentityVerificationRecord
 	sessions           map[string]*SessionRecord
+	roles              map[string]*RoleRecord
+	roleAssignments    map[string]*RoleAssignmentRecord
 }
 
 func newFakeRepo() *fakeRepo {
@@ -140,7 +143,108 @@ func newFakeRepo() *fakeRepo {
 		oauthIdentities:    make(map[string]*OAuthIdentity),
 		idvRecords:         make(map[string]*IdentityVerificationRecord),
 		sessions:           make(map[string]*SessionRecord),
+		roles:              make(map[string]*RoleRecord),
+		roleAssignments:    make(map[string]*RoleAssignmentRecord),
 	}
+}
+
+// ── RBAC (fake) ─────────────────────────────────────────────────────────
+
+func (r *fakeRepo) CreateRole(_ context.Context, rec *RoleRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.roles {
+		if e.Name == rec.Name {
+			return "", fmt.Errorf("%w: role %q", ErrAlreadyExists, rec.Name)
+		}
+	}
+	id := nextNodeID()
+	cp := *rec
+	cp.NodeID = id
+	cp.Permissions = append([]string(nil), rec.Permissions...)
+	r.roles[id] = &cp
+	rec.NodeID = id
+	return id, nil
+}
+
+func (r *fakeRepo) GetRoleByName(_ context.Context, name string) (*RoleRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, role := range r.roles {
+		if role.Name == name {
+			cp := *role
+			cp.Permissions = append([]string(nil), role.Permissions...)
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) ListRoles(_ context.Context) ([]*RoleRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*RoleRecord, 0, len(r.roles))
+	for _, role := range r.roles {
+		cp := *role
+		cp.Permissions = append([]string(nil), role.Permissions...)
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (r *fakeRepo) DeleteRole(_ context.Context, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, role := range r.roles {
+		if role.Name == name {
+			delete(r.roles, id)
+		}
+	}
+	for id, a := range r.roleAssignments {
+		if a.RoleName == name {
+			delete(r.roleAssignments, id)
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) SetUserRoleAssignment(_ context.Context, userID, roleName string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, a := range r.roleAssignments {
+		if a.UserID == userID {
+			a.RoleName = roleName
+			a.CreatedAt = atMs
+			return nil
+		}
+	}
+	id := nextNodeID()
+	r.roleAssignments[id] = &RoleAssignmentRecord{NodeID: id, UserID: userID, RoleName: roleName, CreatedAt: atMs}
+	return nil
+}
+
+func (r *fakeRepo) GetUserRoleAssignment(_ context.Context, userID string) (*RoleAssignmentRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, a := range r.roleAssignments {
+		if a.UserID == userID {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) DeleteUserRoleAssignment(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, a := range r.roleAssignments {
+		if a.UserID == userID {
+			delete(r.roleAssignments, id)
+		}
+	}
+	return nil
 }
 
 // ── Users ──────────────────────────────────────────────────────────────

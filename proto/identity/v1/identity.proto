@@ -1294,4 +1294,76 @@ service IdentityService {
   // succeeds only while platform_admins is empty, then permanently closes
   // (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
   rpc CreateFirstPlatformAdmin(CreateFirstPlatformAdminRequest) returns (CreateFirstPlatformAdminResponse);
+
+  // RBAC: custom scoped roles + assignments. ADDITIVE least-privilege layer
+  // on top of the legacy free-text user.role field. An admin defines a role
+  // naming an explicit permission subset, assigns it to a user, and the
+  // permission-check helper enforces it ALONGSIDE the existing role==admin
+  // checks (admin/owner remain a full-access superset). Admin-only; the JWT
+  // must carry role=admin.
+  rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse);
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+  rpc DeleteRole(DeleteRoleRequest) returns (DeleteRoleResponse);
+  rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
+  rpc GetUserPermissions(GetUserPermissionsRequest) returns (GetUserPermissionsResponse);
+}
+
+// ─── RBAC messages ───────────────────────────────────────────────────
+// Custom scoped roles and per-user assignments. Appended at the end of the
+// file (additive) per the backward-compatibility rules.
+
+// Role is a project-scoped custom RBAC role: a named permission set.
+message Role {
+  string name = 1;
+  string description = 2;
+  repeated string permissions = 3;
+  int64 created_at_ms = 4;
+  int64 updated_at_ms = 5;
+}
+
+message CreateRoleRequest {
+  string name = 1;
+  string description = 2;
+  repeated string permissions = 3;
+}
+
+message CreateRoleResponse {
+  Role role = 1;
+}
+
+message ListRolesRequest {}
+
+message ListRolesResponse {
+  repeated Role roles = 1;
+}
+
+message DeleteRoleRequest {
+  string name = 1;
+}
+
+message DeleteRoleResponse {}
+
+message AssignRoleRequest {
+  string user_id = 1;
+  // role_name binds the user to this custom role. An empty role_name clears
+  // any existing assignment.
+  string role_name = 2;
+}
+
+message AssignRoleResponse {}
+
+message GetUserPermissionsRequest {
+  string user_id = 1;
+}
+
+message GetUserPermissionsResponse {
+  // superset is true when the user holds the legacy admin/owner role, which
+  // grants full access regardless of any custom role; permissions is then
+  // empty and irrelevant.
+  bool superset = 1;
+  // role_name is the user's effective role: the custom role name, or the
+  // legacy admin/owner role when superset is true; empty when the user has
+  // no custom role and is not an admin/owner.
+  string role_name = 2;
+  repeated string permissions = 3;
 }

@@ -361,6 +361,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ApproveQrLoginResponse'
+  /identity.v1.IdentityService/AssignRole:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AssignRole
+      operationId: identity.v1.IdentityService.AssignRole
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AssignRoleRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AssignRoleResponse'
   /identity.v1.IdentityService/BeginIdentityVerification:
     post:
       tags:
@@ -833,6 +868,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.CreateGroupResponse'
+  /identity.v1.IdentityService/CreateRole:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CreateRole
+      description: |-
+        RBAC: custom scoped roles + assignments. ADDITIVE least-privilege layer
+         on top of the legacy free-text user.role field. An admin defines a role
+         naming an explicit permission subset, assigns it to a user, and the
+         permission-check helper enforces it ALONGSIDE the existing role==admin
+         checks (admin/owner remain a full-access superset). Admin-only; the JWT
+         must carry role=admin.
+      operationId: identity.v1.IdentityService.CreateRole
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CreateRoleRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CreateRoleResponse'
   /identity.v1.IdentityService/CreateTenantInvitation:
     post:
       tags:
@@ -1017,6 +1094,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.DeletePasskeyResponse'
+  /identity.v1.IdentityService/DeleteRole:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: DeleteRole
+      operationId: identity.v1.IdentityService.DeleteRole
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.DeleteRoleRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.DeleteRoleResponse'
   /identity.v1.IdentityService/DeleteUser:
     post:
       tags:
@@ -1228,6 +1340,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.GetUserResponse'
+  /identity.v1.IdentityService/GetUserPermissions:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetUserPermissions
+      operationId: identity.v1.IdentityService.GetUserPermissions
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetUserPermissionsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetUserPermissionsResponse'
   /identity.v1.IdentityService/InitiateQrLogin:
     post:
       tags:
@@ -1549,6 +1696,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ListProjectAuthDomainsResponse'
+  /identity.v1.IdentityService/ListRoles:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListRoles
+      operationId: identity.v1.IdentityService.ListRoles
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListRolesRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListRolesResponse'
   /identity.v1.IdentityService/ListTenantDomains:
     post:
       tags:
@@ -3413,6 +3595,24 @@ components:
           $ref: '#/components/schemas/identity.v1.QrLoginStatus'
       title: ApproveQrLoginResponse
       additionalProperties: false
+    identity.v1.AssignRoleRequest:
+      type: object
+      properties:
+        userId:
+          type: string
+          title: user_id
+        roleName:
+          type: string
+          title: role_name
+          description: |-
+            role_name binds the user to this custom role. An empty role_name clears
+             any existing assignment.
+      title: AssignRoleRequest
+      additionalProperties: false
+    identity.v1.AssignRoleResponse:
+      type: object
+      title: AssignRoleResponse
+      additionalProperties: false
     identity.v1.AuditEvent:
       type: object
       properties:
@@ -3777,6 +3977,30 @@ components:
           $ref: '#/components/schemas/identity.v1.Group'
       title: CreateGroupResponse
       additionalProperties: false
+    identity.v1.CreateRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          title: name
+        description:
+          type: string
+          title: description
+        permissions:
+          type: array
+          items:
+            type: string
+          title: permissions
+      title: CreateRoleRequest
+      additionalProperties: false
+    identity.v1.CreateRoleResponse:
+      type: object
+      properties:
+        role:
+          title: role
+          $ref: '#/components/schemas/identity.v1.Role'
+      title: CreateRoleResponse
+      additionalProperties: false
     identity.v1.CreateTenantInvitationRequest:
       type: object
       properties:
@@ -3877,6 +4101,18 @@ components:
     identity.v1.DeletePasskeyResponse:
       type: object
       title: DeletePasskeyResponse
+      additionalProperties: false
+    identity.v1.DeleteRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          title: name
+      title: DeleteRoleRequest
+      additionalProperties: false
+    identity.v1.DeleteRoleResponse:
+      type: object
+      title: DeleteRoleResponse
       additionalProperties: false
     identity.v1.DeleteUserRequest:
       type: object
@@ -3995,6 +4231,38 @@ components:
           title: expires_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: GetQrLoginSessionResponse
+      additionalProperties: false
+    identity.v1.GetUserPermissionsRequest:
+      type: object
+      properties:
+        userId:
+          type: string
+          title: user_id
+      title: GetUserPermissionsRequest
+      additionalProperties: false
+    identity.v1.GetUserPermissionsResponse:
+      type: object
+      properties:
+        superset:
+          type: boolean
+          title: superset
+          description: |-
+            superset is true when the user holds the legacy admin/owner role, which
+             grants full access regardless of any custom role; permissions is then
+             empty and irrelevant.
+        roleName:
+          type: string
+          title: role_name
+          description: |-
+            role_name is the user's effective role: the custom role name, or the
+             legacy admin/owner role when superset is true; empty when the user has
+             no custom role and is not an admin/owner.
+        permissions:
+          type: array
+          items:
+            type: string
+          title: permissions
+      title: GetUserPermissionsResponse
       additionalProperties: false
     identity.v1.GetUserRequest:
       type: object
@@ -4364,6 +4632,20 @@ components:
             $ref: '#/components/schemas/identity.v1.ProjectAuthDomain'
           title: domains
       title: ListProjectAuthDomainsResponse
+      additionalProperties: false
+    identity.v1.ListRolesRequest:
+      type: object
+      title: ListRolesRequest
+      additionalProperties: false
+    identity.v1.ListRolesResponse:
+      type: object
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.Role'
+          title: roles
+      title: ListRolesResponse
       additionalProperties: false
     identity.v1.ListTenantDomainsRequest:
       type: object
@@ -5052,6 +5334,35 @@ components:
       type: object
       title: RevokeSessionResponse
       additionalProperties: false
+    identity.v1.Role:
+      type: object
+      properties:
+        name:
+          type: string
+          title: name
+        description:
+          type: string
+          title: description
+        permissions:
+          type: array
+          items:
+            type: string
+          title: permissions
+        createdAtMs:
+          type:
+            - integer
+            - string
+          title: created_at_ms
+          format: int64
+        updatedAtMs:
+          type:
+            - integer
+            - string
+          title: updated_at_ms
+          format: int64
+      title: Role
+      additionalProperties: false
+      description: 'Role is a project-scoped custom RBAC role: a named permission set.'
     identity.v1.SendEmailVerificationRequest:
       type: object
       title: SendEmailVerificationRequest

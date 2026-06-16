@@ -102,6 +102,11 @@ const (
 	IdentityService_AdminCreateTenant_FullMethodName             = "/identity.v1.IdentityService/AdminCreateTenant"
 	IdentityService_AdminAddTenantAdmin_FullMethodName           = "/identity.v1.IdentityService/AdminAddTenantAdmin"
 	IdentityService_CreateFirstPlatformAdmin_FullMethodName      = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
+	IdentityService_CreateRole_FullMethodName                    = "/identity.v1.IdentityService/CreateRole"
+	IdentityService_ListRoles_FullMethodName                     = "/identity.v1.IdentityService/ListRoles"
+	IdentityService_DeleteRole_FullMethodName                    = "/identity.v1.IdentityService/DeleteRole"
+	IdentityService_AssignRole_FullMethodName                    = "/identity.v1.IdentityService/AssignRole"
+	IdentityService_GetUserPermissions_FullMethodName            = "/identity.v1.IdentityService/GetUserPermissions"
 )
 
 // IdentityServiceClient is the client API for IdentityService service.
@@ -238,6 +243,17 @@ type IdentityServiceClient interface {
 	// succeeds only while platform_admins is empty, then permanently closes
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(ctx context.Context, in *CreateFirstPlatformAdminRequest, opts ...grpc.CallOption) (*CreateFirstPlatformAdminResponse, error)
+	// RBAC: custom scoped roles + assignments. ADDITIVE least-privilege layer
+	// on top of the legacy free-text user.role field. An admin defines a role
+	// naming an explicit permission subset, assigns it to a user, and the
+	// permission-check helper enforces it ALONGSIDE the existing role==admin
+	// checks (admin/owner remain a full-access superset). Admin-only; the JWT
+	// must carry role=admin.
+	CreateRole(ctx context.Context, in *CreateRoleRequest, opts ...grpc.CallOption) (*CreateRoleResponse, error)
+	ListRoles(ctx context.Context, in *ListRolesRequest, opts ...grpc.CallOption) (*ListRolesResponse, error)
+	DeleteRole(ctx context.Context, in *DeleteRoleRequest, opts ...grpc.CallOption) (*DeleteRoleResponse, error)
+	AssignRole(ctx context.Context, in *AssignRoleRequest, opts ...grpc.CallOption) (*AssignRoleResponse, error)
+	GetUserPermissions(ctx context.Context, in *GetUserPermissionsRequest, opts ...grpc.CallOption) (*GetUserPermissionsResponse, error)
 }
 
 type identityServiceClient struct {
@@ -1078,6 +1094,56 @@ func (c *identityServiceClient) CreateFirstPlatformAdmin(ctx context.Context, in
 	return out, nil
 }
 
+func (c *identityServiceClient) CreateRole(ctx context.Context, in *CreateRoleRequest, opts ...grpc.CallOption) (*CreateRoleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateRoleResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CreateRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListRoles(ctx context.Context, in *ListRolesRequest, opts ...grpc.CallOption) (*ListRolesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRolesResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListRoles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) DeleteRole(ctx context.Context, in *DeleteRoleRequest, opts ...grpc.CallOption) (*DeleteRoleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteRoleResponse)
+	err := c.cc.Invoke(ctx, IdentityService_DeleteRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AssignRole(ctx context.Context, in *AssignRoleRequest, opts ...grpc.CallOption) (*AssignRoleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AssignRoleResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AssignRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) GetUserPermissions(ctx context.Context, in *GetUserPermissionsRequest, opts ...grpc.CallOption) (*GetUserPermissionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserPermissionsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GetUserPermissions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IdentityServiceServer is the server API for IdentityService service.
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
@@ -1212,6 +1278,17 @@ type IdentityServiceServer interface {
 	// succeeds only while platform_admins is empty, then permanently closes
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *CreateFirstPlatformAdminRequest) (*CreateFirstPlatformAdminResponse, error)
+	// RBAC: custom scoped roles + assignments. ADDITIVE least-privilege layer
+	// on top of the legacy free-text user.role field. An admin defines a role
+	// naming an explicit permission subset, assigns it to a user, and the
+	// permission-check helper enforces it ALONGSIDE the existing role==admin
+	// checks (admin/owner remain a full-access superset). Admin-only; the JWT
+	// must carry role=admin.
+	CreateRole(context.Context, *CreateRoleRequest) (*CreateRoleResponse, error)
+	ListRoles(context.Context, *ListRolesRequest) (*ListRolesResponse, error)
+	DeleteRole(context.Context, *DeleteRoleRequest) (*DeleteRoleResponse, error)
+	AssignRole(context.Context, *AssignRoleRequest) (*AssignRoleResponse, error)
+	GetUserPermissions(context.Context, *GetUserPermissionsRequest) (*GetUserPermissionsResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
 }
 
@@ -1470,6 +1547,21 @@ func (UnimplementedIdentityServiceServer) AdminAddTenantAdmin(context.Context, *
 }
 func (UnimplementedIdentityServiceServer) CreateFirstPlatformAdmin(context.Context, *CreateFirstPlatformAdminRequest) (*CreateFirstPlatformAdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateFirstPlatformAdmin not implemented")
+}
+func (UnimplementedIdentityServiceServer) CreateRole(context.Context, *CreateRoleRequest) (*CreateRoleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateRole not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListRoles(context.Context, *ListRolesRequest) (*ListRolesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRoles not implemented")
+}
+func (UnimplementedIdentityServiceServer) DeleteRole(context.Context, *DeleteRoleRequest) (*DeleteRoleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteRole not implemented")
+}
+func (UnimplementedIdentityServiceServer) AssignRole(context.Context, *AssignRoleRequest) (*AssignRoleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AssignRole not implemented")
+}
+func (UnimplementedIdentityServiceServer) GetUserPermissions(context.Context, *GetUserPermissionsRequest) (*GetUserPermissionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetUserPermissions not implemented")
 }
 func (UnimplementedIdentityServiceServer) mustEmbedUnimplementedIdentityServiceServer() {}
 func (UnimplementedIdentityServiceServer) testEmbeddedByValue()                         {}
@@ -2986,6 +3078,96 @@ func _IdentityService_CreateFirstPlatformAdmin_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_CreateRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CreateRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CreateRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CreateRole(ctx, req.(*CreateRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListRoles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRolesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListRoles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListRoles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListRoles(ctx, req.(*ListRolesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_DeleteRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).DeleteRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_DeleteRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).DeleteRole(ctx, req.(*DeleteRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AssignRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AssignRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AssignRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AssignRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AssignRole(ctx, req.(*AssignRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_GetUserPermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserPermissionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GetUserPermissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GetUserPermissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GetUserPermissions(ctx, req.(*GetUserPermissionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IdentityService_ServiceDesc is the grpc.ServiceDesc for IdentityService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3324,6 +3506,26 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateFirstPlatformAdmin",
 			Handler:    _IdentityService_CreateFirstPlatformAdmin_Handler,
+		},
+		{
+			MethodName: "CreateRole",
+			Handler:    _IdentityService_CreateRole_Handler,
+		},
+		{
+			MethodName: "ListRoles",
+			Handler:    _IdentityService_ListRoles_Handler,
+		},
+		{
+			MethodName: "DeleteRole",
+			Handler:    _IdentityService_DeleteRole_Handler,
+		},
+		{
+			MethodName: "AssignRole",
+			Handler:    _IdentityService_AssignRole_Handler,
+		},
+		{
+			MethodName: "GetUserPermissions",
+			Handler:    _IdentityService_GetUserPermissions_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
