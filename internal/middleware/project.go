@@ -128,6 +128,8 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		StorageScopeID:     rp.StorageScopeID,
 		PrimaryAuthDomain:  rp.PrimaryAuthDomain,
 		CORSAllowedOrigins: rp.CORSAllowedOrigins,
+		Branding:           rp.Branding,
+		Passkey:            rp.Passkey,
 	}
 }
 

@@ -33,6 +33,17 @@ type ProjectScope struct {
 	// request whose Origin is in either set is allowed. Empty when the
 	// project configures none, in which case only the global floor applies.
 	CORSAllowedOrigins []string
+
+	// Branding is the project's transactional-email branding, parsed from
+	// its config_json. Empty fields fall back to the global
+	// GATEWAY_EMAIL_BRAND_* defaults so a zero-config project's mail is
+	// byte-compatible with today's.
+	Branding ProjectBrandingConfig
+
+	// Passkey is the project's WebAuthn relying-party identity, parsed from
+	// its config_json. Empty fields fall back to the global GATEWAY_PASSKEY_*
+	// values.
+	Passkey ProjectPasskeyConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -64,6 +75,8 @@ type ResolvedProject struct {
 	StorageScopeID     string
 	PrimaryAuthDomain  string
 	CORSAllowedOrigins []string
+	Branding           ProjectBrandingConfig
+	Passkey            ProjectPasskeyConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

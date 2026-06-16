@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -803,6 +804,15 @@ type AuthService struct {
 	// dependency kept off the already-wide constructor. Enforcement fails
 	// safe: any nil store, miss, or lookup error imposes no restriction.
 	governance *LoginGovernance
+
+	// passkeyRPCache memoises per-project WebAuthn relying-party instances
+	// keyed by their (rp_id, rp_name, origin) tuple. A project whose
+	// config_json sets a passkey block needs a WebAuthn instance bound to
+	// that RP-ID so a passkey registered under one product's domain validates
+	// under that product's RP-ID; building one per request is wasteful, so we
+	// cache them. Projects with no override share the global s.passkeys.
+	passkeyRPCache   map[string]*passkeys.WebAuthnService
+	passkeyRPCacheMu sync.RWMutex
 }
 
 // WithTenantAutoFormer wires the optional tenant auto-formation store and

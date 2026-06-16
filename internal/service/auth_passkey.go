@@ -37,7 +37,7 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID, devi
 		}
 	}
 
-	optionsJSON, challengeB64, err := s.passkeys.BeginRegistration(
+	optionsJSON, challengeB64, err := s.passkeysFor(ctx).BeginRegistration(
 		userID, user.Email, coalesce(user.Name, user.Email), existingIDs,
 	)
 	if err != nil {
@@ -92,7 +92,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		return nil, fmt.Errorf("%w: challenge expired", ErrTokenExpired)
 	}
 
-	result, err := s.passkeys.CompleteRegistration(credentialJSON, challenge.Challenge)
+	result, err := s.passkeysFor(ctx).CompleteRegistration(credentialJSON, challenge.Challenge)
 	if err != nil {
 		s.logger.Warn(
 			"passkey_registration_verify_failed",
@@ -170,7 +170,7 @@ func (s *AuthService) BeginPasskeyLogin(ctx context.Context, email string) (stri
 		// allow list to prevent email enumeration.
 	}
 
-	optionsJSON, challengeB64, err := s.passkeys.BeginAuthentication(allowedIDs)
+	optionsJSON, challengeB64, err := s.passkeysFor(ctx).BeginAuthentication(allowedIDs)
 	if err != nil {
 		return "", "", fmt.Errorf("building authentication options: %w", err)
 	}
@@ -236,7 +236,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, errors.New("credential sign_count overflows WebAuthn counter")
 	}
 
-	newSignCount, err := s.passkeys.CompleteAuthentication(
+	newSignCount, err := s.passkeysFor(ctx).CompleteAuthentication(
 		credentialJSON,
 		challenge.Challenge,
 		cred.PublicKey,
@@ -333,4 +333,60 @@ func coalesce(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// passkeysFor returns the WebAuthn relying-party instance to use for the
+// request in ctx. When the resolved project's config_json sets a passkey
+// block, a per-project instance bound to that RP-ID/RPName/Origin is used (and
+// memoised) so a passkey registered under one product's domain validates under
+// that product's RP-ID. A project that sets only some fields inherits the rest
+// from the global GATEWAY_PASSKEY_* values. When nothing is overridden — the
+// zero-config case — the global s.passkeys is returned unchanged, keeping
+// today's behaviour byte-for-byte.
+//
+// Building a per-project instance can fail only on an invalid override (e.g. a
+// malformed origin), which the project-config write path already rejects; if it
+// somehow fails here we fall back to the global instance rather than break the
+// ceremony.
+func (s *AuthService) passkeysFor(ctx context.Context) *passkeys.WebAuthnService {
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil {
+		return s.passkeys
+	}
+	p := scope.Passkey
+	if p.RPID == "" && p.RPName == "" && p.Origin == "" {
+		return s.passkeys
+	}
+	cfg := passkeys.Config{
+		RPID:   coalesce(p.RPID, s.cfg.PasskeyRPID),
+		RPName: coalesce(p.RPName, s.cfg.PasskeyRPName),
+		Origin: coalesce(p.Origin, s.cfg.PasskeyOrigin),
+	}
+	key := cfg.RPID + "\x00" + cfg.RPName + "\x00" + cfg.Origin
+
+	s.passkeyRPCacheMu.RLock()
+	wa := s.passkeyRPCache[key]
+	s.passkeyRPCacheMu.RUnlock()
+	if wa != nil {
+		return wa
+	}
+
+	built, err := passkeys.NewWebAuthnService(cfg)
+	if err != nil {
+		s.logger.Warn("passkey_rp_override_invalid",
+			zap.String("project_id", scope.ProjectID), zap.Error(err))
+		return s.passkeys
+	}
+
+	s.passkeyRPCacheMu.Lock()
+	if s.passkeyRPCache == nil {
+		s.passkeyRPCache = map[string]*passkeys.WebAuthnService{}
+	}
+	if existing := s.passkeyRPCache[key]; existing != nil {
+		built = existing
+	} else {
+		s.passkeyRPCache[key] = built
+	}
+	s.passkeyRPCacheMu.Unlock()
+	return built
 }

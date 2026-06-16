@@ -1,7 +1,12 @@
-Hi {{.UserName}},
+{{if .ProductName}}{{.ProductName}}
+
+{{end}}Hi {{.UserName}},
 
 Please confirm this is your email address by visiting the link below. The link expires in {{.ExpiresIn}}.
 
 {{.Link}}
 
 If you didn't create an account, you can safely ignore this email.
+{{if .SupportEmail}}
+Need help? Contact {{.SupportEmail}}.
+{{end}}
