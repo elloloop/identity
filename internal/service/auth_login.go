@@ -493,67 +493,26 @@ func (s *AuthService) OAuthLogin(
 	ctx context.Context,
 	code, provider, redirectURI, codeVerifier, state, stateToken, ipAddr, userAgent string,
 ) (*LoginResult, error) {
-	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
-		return nil, ErrOAuthDisabled
-	}
 	provider = strings.ToLower(strings.TrimSpace(provider))
-	redirectURI = strings.TrimSpace(redirectURI)
-	if provider == "" {
-		return nil, fmt.Errorf("%w: provider is required", ErrInvalidArgument)
-	}
-	if strings.TrimSpace(code) == "" {
-		return nil, fmt.Errorf("%w: code is required", ErrInvalidArgument)
-	}
-	if redirectURI == "" {
-		return nil, fmt.Errorf("%w: redirect uri is required", ErrInvalidArgument)
-	}
-
-	exchanger, ok := s.oauthRegistry.Get(provider)
-	if !ok {
-		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
-	}
-
-	if strings.TrimSpace(stateToken) != "" {
-		claims, err := oauth.VerifyStateToken(
-			stateToken,
-			s.signer,
-			provider,
-			redirectURI,
-			state,
-			codeVerifier,
-			s.nowFunc().UTC(),
-		)
-		if err != nil {
-			s.logger.Info(
-				"oauth_state_validation_failed",
-				zap.String("provider", provider),
-				zap.Error(err),
-			)
-			return nil, fmt.Errorf("%w: invalid oauth state", ErrUnauthenticated)
-		}
-		codeVerifier = claims.CodeVerifier
-	}
-
-	if strings.TrimSpace(codeVerifier) != "" {
-		ctx = oauth.WithCodeVerifier(ctx, codeVerifier)
-	}
-
-	identity, err := exchanger.Exchange(ctx, code, redirectURI)
+	identity, err := s.verifyOAuthExchange(ctx, code, provider, redirectURI, codeVerifier, state, stateToken)
 	if err != nil {
-		s.logger.Info(
-			"oauth_login_failed",
-			zap.String("provider", provider), zap.Error(err),
-		)
-		s.audit.Log(
-			ctx, audit.EventOAuthLogin,
-			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{
-				"provider": provider,
-				"reason":   "code_exchange_failed",
-			}),
-		)
-		return s.mapOAuthError(err)
+		if errors.Is(err, errOAuthExchangeFailed) {
+			s.logger.Info(
+				"oauth_login_failed",
+				zap.String("provider", provider), zap.Error(err),
+			)
+			s.audit.Log(
+				ctx, audit.EventOAuthLogin,
+				audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+				audit.WithSuccess(false),
+				audit.WithDetails(map[string]any{
+					"provider": provider,
+					"reason":   "code_exchange_failed",
+				}),
+			)
+			return s.mapOAuthError(errors.Unwrap(err))
+		}
+		return nil, err
 	}
 
 	email := strings.TrimSpace(strings.ToLower(identity.Email))
@@ -618,16 +577,88 @@ func (s *AuthService) OAuthLogin(
 // mapOAuthError translates pkg/oauth sentinel errors into AuthService
 // sentinels so the connect handler emits the right RPC code.
 func (s *AuthService) mapOAuthError(err error) (*LoginResult, error) {
+	return nil, s.mapOAuthErr(err)
+}
+
+// mapOAuthErr is the error-only form of mapOAuthError, shared by the OAuth
+// login path and the self-service LinkIdentity path. Both run the same code
+// exchange and want the same RPC-code mapping for a verification failure.
+func (s *AuthService) mapOAuthErr(err error) error {
 	switch {
 	case errors.Is(err, oauth.ErrEmailNotVerified):
-		return nil, fmt.Errorf("%w: provider email is not verified", ErrUnauthenticated)
-	case errors.Is(err, oauth.ErrIdentityVerification):
-		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
-	case errors.Is(err, oauth.ErrCodeExchangeFailed):
-		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
+		return fmt.Errorf("%w: provider email is not verified", ErrUnauthenticated)
 	default:
-		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
+		return fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 	}
+}
+
+// errOAuthExchangeFailed wraps a provider code-exchange failure returned by
+// verifyOAuthExchange so callers can distinguish "the provider rejected the
+// code" (which they audit and map via mapOAuthErr) from an input-validation
+// or state-verification failure (already a typed sentinel).
+var errOAuthExchangeFailed = errors.New("oauth code exchange failed")
+
+// verifyOAuthExchange runs the trusted server-side OAuth code exchange:
+// it validates inputs, verifies the signed state token (binding provider,
+// redirect URI, state, and PKCE verifier), then swaps the authorization
+// code for a provider-verified Identity. The frontend is never trusted to
+// assert the identity — identity performs the exchange itself.
+//
+// provider must already be lower-cased/trimmed by the caller. On a provider
+// exchange failure it returns an error wrapping errOAuthExchangeFailed.
+func (s *AuthService) verifyOAuthExchange(
+	ctx context.Context,
+	code, provider, redirectURI, codeVerifier, state, stateToken string,
+) (*oauth.Identity, error) {
+	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
+		return nil, ErrOAuthDisabled
+	}
+	redirectURI = strings.TrimSpace(redirectURI)
+	if provider == "" {
+		return nil, fmt.Errorf("%w: provider is required", ErrInvalidArgument)
+	}
+	if strings.TrimSpace(code) == "" {
+		return nil, fmt.Errorf("%w: code is required", ErrInvalidArgument)
+	}
+	if redirectURI == "" {
+		return nil, fmt.Errorf("%w: redirect uri is required", ErrInvalidArgument)
+	}
+
+	exchanger, ok := s.oauthRegistry.Get(provider)
+	if !ok {
+		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
+	}
+
+	if strings.TrimSpace(stateToken) != "" {
+		claims, err := oauth.VerifyStateToken(
+			stateToken,
+			s.signer,
+			provider,
+			redirectURI,
+			state,
+			codeVerifier,
+			s.nowFunc().UTC(),
+		)
+		if err != nil {
+			s.logger.Info(
+				"oauth_state_validation_failed",
+				zap.String("provider", provider),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("%w: invalid oauth state", ErrUnauthenticated)
+		}
+		codeVerifier = claims.CodeVerifier
+	}
+
+	if strings.TrimSpace(codeVerifier) != "" {
+		ctx = oauth.WithCodeVerifier(ctx, codeVerifier)
+	}
+
+	identity, err := exchanger.Exchange(ctx, code, redirectURI)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errOAuthExchangeFailed, err)
+	}
+	return identity, nil
 }
 
 // upsertOAuthUser resolves the local User using a (provider,
@@ -820,13 +851,14 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 		return
 	}
 	s.audit.Log(
-		ctx, audit.EventType("oauth_identity_linked"),
+		ctx, audit.EventIdentityLinked,
 		audit.WithActor(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
 			"provider":           identity.Provider,
 			"provider_user_id":   identity.ProviderUserID,
 			"email_at_link_time": email,
+			"source":             "login_auto_link",
 		}),
 	)
 }

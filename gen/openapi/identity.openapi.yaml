@@ -1302,6 +1302,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.InviteUserResponse'
+  /identity.v1.IdentityService/LinkIdentity:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: LinkIdentity
+      operationId: identity.v1.IdentityService.LinkIdentity
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.LinkIdentityRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.LinkIdentityResponse'
   /identity.v1.IdentityService/ListAuditEvents:
     post:
       tags:
@@ -1443,6 +1478,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ListHelpRequestsResponse'
+  /identity.v1.IdentityService/ListLinkedIdentities:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListLinkedIdentities
+      description: |-
+        Self-service linked identities (connected accounts). Authenticated by the
+         caller's user JWT; each operates only on the caller's own links.
+      operationId: identity.v1.IdentityService.ListLinkedIdentities
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListLinkedIdentitiesRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListLinkedIdentitiesResponse'
   /identity.v1.IdentityService/ListMySessions:
     post:
       tags:
@@ -2609,6 +2682,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.SignOutEverywhereResponse'
+  /identity.v1.IdentityService/UnlinkIdentity:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: UnlinkIdentity
+      operationId: identity.v1.IdentityService.UnlinkIdentity
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.UnlinkIdentityRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.UnlinkIdentityResponse'
   /identity.v1.IdentityService/UpdateGroup:
     post:
       tags:
@@ -4179,6 +4287,74 @@ components:
           description: Only set when create_immediately = true
       title: InviteUserResponse
       additionalProperties: false
+    identity.v1.LinkIdentityRequest:
+      type: object
+      properties:
+        code:
+          type: string
+          title: code
+          description: authorization code from the provider callback
+        redirectUri:
+          type: string
+          title: redirect_uri
+        provider:
+          type: string
+          title: provider
+          description: '"google", "microsoft", "github", ...'
+        codeVerifier:
+          type: string
+          title: code_verifier
+          description: PKCE (optional)
+        state:
+          type: string
+          title: state
+          description: authorization callback state
+        stateToken:
+          type: string
+          title: state_token
+          description: opaque token minted by BeginOAuthLogin
+      title: LinkIdentityRequest
+      additionalProperties: false
+      description: |-
+        LinkIdentity attaches a freshly-verified OAuth identity to the
+         authenticated caller. The server performs the provider code exchange
+         itself (the client is never trusted to assert the identity), exactly like
+         OAuthLogin, then persists the (provider, provider_user_id) link against the
+         caller's user id. If that provider identity is already linked to a
+         different user the call fails (CodeAlreadyExists).
+    identity.v1.LinkIdentityResponse:
+      type: object
+      properties:
+        identity:
+          title: identity
+          $ref: '#/components/schemas/identity.v1.LinkedIdentity'
+      title: LinkIdentityResponse
+      additionalProperties: false
+    identity.v1.LinkedIdentity:
+      type: object
+      properties:
+        provider:
+          type: string
+          title: provider
+          description: '"google", "microsoft", "github", ...'
+        providerUserId:
+          type: string
+          title: provider_user_id
+          description: stable provider subject
+        emailAtLinkTime:
+          type: string
+          title: email_at_link_time
+          description: email the provider asserted when linked
+        linkedAt:
+          type:
+            - integer
+            - string
+          title: linked_at
+          format: int64
+          description: epoch ms the link was created
+      title: LinkedIdentity
+      additionalProperties: false
+      description: LinkedIdentity is one connected provider identity for the authenticated user.
     identity.v1.ListAuditEventsRequest:
       type: object
       properties:
@@ -4317,6 +4493,20 @@ components:
           title: pending_count
           format: int32
       title: ListHelpRequestsResponse
+      additionalProperties: false
+    identity.v1.ListLinkedIdentitiesRequest:
+      type: object
+      title: ListLinkedIdentitiesRequest
+      additionalProperties: false
+    identity.v1.ListLinkedIdentitiesResponse:
+      type: object
+      properties:
+        identities:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.LinkedIdentity'
+          title: identities
+      title: ListLinkedIdentitiesResponse
       additionalProperties: false
     identity.v1.ListMySessionsRequest:
       type: object
@@ -5219,6 +5409,27 @@ components:
       description: |-
         TenantMembership is a user's materialized relationship to a Tenant within
          the caller's Project.
+    identity.v1.UnlinkIdentityRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+          title: provider
+        providerUserId:
+          type: string
+          title: provider_user_id
+      title: UnlinkIdentityRequest
+      additionalProperties: false
+      description: |-
+        UnlinkIdentity disconnects a provider identity from the authenticated
+         caller. It refuses (CodeFailedPrecondition) to remove the user's LAST
+         remaining sign-in credential: if the user has no password and no passkey,
+         the final linked provider cannot be removed, so the account can never be
+         locked out of its own sign-in.
+    identity.v1.UnlinkIdentityResponse:
+      type: object
+      title: UnlinkIdentityResponse
+      additionalProperties: false
     identity.v1.UpdateGroupRequest:
       type: object
       properties:

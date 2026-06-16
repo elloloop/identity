@@ -1141,6 +1141,60 @@ message CreateFirstPlatformAdminResponse {
 
 // ─── Service ─────────────────────────────────────────────────────────
 
+// ── Linked identities (self-service connected accounts) ────────────────────
+//
+// User-managed OAuth/OIDC identity links. These let an authenticated user
+// see which providers are connected to their account, attach a new verified
+// provider identity, and disconnect one — without losing the ability to sign
+// in. They operate over the same (provider, provider_user_id) link store that
+// implicit login-time auto-linking writes to; the auto-link behaviour is
+// unchanged.
+
+// LinkedIdentity is one connected provider identity for the authenticated user.
+message LinkedIdentity {
+  string provider            = 1;  // "google", "microsoft", "github", ...
+  string provider_user_id    = 2;  // stable provider subject
+  string email_at_link_time  = 3;  // email the provider asserted when linked
+  int64  linked_at           = 4;  // epoch ms the link was created
+}
+
+message ListLinkedIdentitiesRequest {}
+
+message ListLinkedIdentitiesResponse {
+  repeated LinkedIdentity identities = 1;
+}
+
+// LinkIdentity attaches a freshly-verified OAuth identity to the
+// authenticated caller. The server performs the provider code exchange
+// itself (the client is never trusted to assert the identity), exactly like
+// OAuthLogin, then persists the (provider, provider_user_id) link against the
+// caller's user id. If that provider identity is already linked to a
+// different user the call fails (CodeAlreadyExists).
+message LinkIdentityRequest {
+  string code          = 1;  // authorization code from the provider callback
+  string redirect_uri  = 2;
+  string provider      = 3;  // "google", "microsoft", "github", ...
+  string code_verifier = 4;  // PKCE (optional)
+  string state         = 5;  // authorization callback state
+  string state_token   = 6;  // opaque token minted by BeginOAuthLogin
+}
+
+message LinkIdentityResponse {
+  LinkedIdentity identity = 1;
+}
+
+// UnlinkIdentity disconnects a provider identity from the authenticated
+// caller. It refuses (CodeFailedPrecondition) to remove the user's LAST
+// remaining sign-in credential: if the user has no password and no passkey,
+// the final linked provider cannot be removed, so the account can never be
+// locked out of its own sign-in.
+message UnlinkIdentityRequest {
+  string provider         = 1;
+  string provider_user_id = 2;
+}
+
+message UnlinkIdentityResponse {}
+
 service IdentityService {
   // Authentication
   rpc BeginOAuthLogin(BeginOAuthLoginRequest) returns (BeginOAuthLoginResponse);
@@ -1294,4 +1348,10 @@ service IdentityService {
   // succeeds only while platform_admins is empty, then permanently closes
   // (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
   rpc CreateFirstPlatformAdmin(CreateFirstPlatformAdminRequest) returns (CreateFirstPlatformAdminResponse);
+
+  // Self-service linked identities (connected accounts). Authenticated by the
+  // caller's user JWT; each operates only on the caller's own links.
+  rpc ListLinkedIdentities(ListLinkedIdentitiesRequest) returns (ListLinkedIdentitiesResponse);
+  rpc LinkIdentity(LinkIdentityRequest) returns (LinkIdentityResponse);
+  rpc UnlinkIdentity(UnlinkIdentityRequest) returns (UnlinkIdentityResponse);
 }
