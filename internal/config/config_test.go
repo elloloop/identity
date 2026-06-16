@@ -157,6 +157,46 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoad_AppleAndGenericOIDCProviders(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_APPLE_CLIENT_ID", "com.example.svc")
+	t.Setenv("GATEWAY_APPLE_TEAM_ID", "TEAM1")
+	t.Setenv("GATEWAY_APPLE_KEY_ID", "KEY1")
+	t.Setenv("GATEWAY_APPLE_PRIVATE_KEY", "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----")
+
+	t.Setenv("GATEWAY_OIDC_PROVIDERS", "okta, slack ,okta,disabled")
+	t.Setenv("GATEWAY_OIDC_OKTA_ISSUER", "https://acme.okta.com")
+	t.Setenv("GATEWAY_OIDC_OKTA_CLIENT_ID", "okta-client")
+	t.Setenv("GATEWAY_OIDC_OKTA_CLIENT_SECRET", "okta-secret")
+	t.Setenv("GATEWAY_OIDC_OKTA_SCOPES", "openid email groups")
+	t.Setenv("GATEWAY_OIDC_SLACK_ISSUER", "https://slack.com")
+	t.Setenv("GATEWAY_OIDC_SLACK_CLIENT_ID", "slack-client")
+	t.Setenv("GATEWAY_OIDC_SLACK_CLIENT_SECRET", "slack-secret")
+	// "disabled" has no creds and must be dropped.
+
+	cfg := Load()
+
+	if cfg.AppleClientID != "com.example.svc" || cfg.AppleTeamID != "TEAM1" ||
+		cfg.AppleKeyID != "KEY1" || cfg.ApplePrivateKey == "" {
+		t.Errorf("apple config not loaded: %+v", cfg.AppleClientID)
+	}
+
+	if len(cfg.OIDCProviders) != 2 {
+		t.Fatalf("want 2 oidc providers, got %d: %+v", len(cfg.OIDCProviders), cfg.OIDCProviders)
+	}
+	okta := cfg.OIDCProviders[0]
+	if okta.Key != "okta" || okta.Issuer != "https://acme.okta.com" ||
+		okta.ClientID != "okta-client" || okta.ClientSecret != "okta-secret" {
+		t.Errorf("okta provider wrong: %+v", okta)
+	}
+	if len(okta.Scopes) != 3 || okta.Scopes[2] != "groups" {
+		t.Errorf("okta scopes wrong: %+v", okta.Scopes)
+	}
+	if cfg.OIDCProviders[1].Key != "slack" {
+		t.Errorf("slack provider wrong: %+v", cfg.OIDCProviders[1])
+	}
+}
+
 // TestEnvStr_Default verifies envStr returns the default for unset vars.
 func TestEnvStr_Default(t *testing.T) {
 	clearGatewayEnv(t)

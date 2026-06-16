@@ -40,13 +40,32 @@ func buildOAuthRegistry(cfg *config.Config, logger *zap.Logger) *oauth.Registry 
 			ClientSecret: cfg.GitHubClientSecret,
 		}))
 	}
+	if cfg.AppleClientID != "" && cfg.AppleTeamID != "" &&
+		cfg.AppleKeyID != "" && cfg.ApplePrivateKey != "" {
+		r.Register("apple", oauth.NewApple(oauth.AppleConfig{
+			ClientID:      cfg.AppleClientID,
+			TeamID:        cfg.AppleTeamID,
+			KeyID:         cfg.AppleKeyID,
+			PrivateKeyPEM: cfg.ApplePrivateKey,
+		}))
+	}
+	for _, p := range cfg.OIDCProviders {
+		r.Register(p.Key, oauth.NewOIDC(oauth.GenericOIDCConfig{
+			ProviderKey:  p.Key,
+			IssuerURL:    p.Issuer,
+			ClientID:     p.ClientID,
+			ClientSecret: p.ClientSecret,
+			Scopes:       p.Scopes,
+		}))
+	}
 
 	if r.Len() == 0 {
 		logger.Warn(
 			"oauth_disabled_no_providers_configured",
 			zap.String("hint",
 				"set GATEWAY_GOOGLE_CLIENT_ID/SECRET, GATEWAY_MICROSOFT_CLIENT_ID/SECRET, "+
-					"or GATEWAY_GITHUB_CLIENT_ID/SECRET to enable OAuth login"),
+					"GATEWAY_GITHUB_CLIENT_ID/SECRET, GATEWAY_APPLE_* (CLIENT_ID/TEAM_ID/KEY_ID/PRIVATE_KEY), "+
+					"or GATEWAY_OIDC_PROVIDERS + GATEWAY_OIDC_<KEY>_* to enable OAuth login"),
 		)
 	} else {
 		logger.Info(

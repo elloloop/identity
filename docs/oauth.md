@@ -1,7 +1,8 @@
 # OAuth login
 
-identity supports OAuth/OIDC sign-in with Google, Microsoft, and GitHub.
-It does the authorization-code exchange itself — the frontend is never
+identity supports OAuth/OIDC sign-in with Google, Microsoft, GitHub,
+Sign in with Apple, and any standards-compliant OIDC provider added
+purely via config. It does the authorization-code exchange itself — the frontend is never
 trusted to assert the user's identity. There are two flows; a deployer
 can use either or both.
 
@@ -28,6 +29,47 @@ set. Leave a provider's credentials unset to disable it.
 Microsoft also accepts `GATEWAY_MICROSOFT_TENANT_ID` (optional). At
 startup identity logs the enabled providers (`oauth_providers_enabled`)
 or warns when none are configured.
+
+### Sign in with Apple
+
+Apple does not issue a static client secret; identity mints a
+short-lived ES256-signed `client_secret` JWT per exchange. Provide all
+four values (the provider is enabled only when all are set):
+
+| Env                          | Meaning                                          |
+|------------------------------|--------------------------------------------------|
+| `GATEWAY_APPLE_CLIENT_ID`    | Services ID (the OAuth `client_id` / token `aud`)|
+| `GATEWAY_APPLE_TEAM_ID`      | Apple Developer team identifier                  |
+| `GATEWAY_APPLE_KEY_ID`       | Identifier of the registered private key         |
+| `GATEWAY_APPLE_PRIVATE_KEY`  | PEM-encoded PKCS#8 EC private key (the `.p8`)     |
+
+App Store Guideline 4.8 requires Sign in with Apple whenever another
+third-party social login is offered in an iOS app. Apple returns the
+user's display name only **once**, in the first authorization callback
+(`response_mode=form_post`); the hosted callback captures it and threads
+it into the exchange so first-login name capture works. The `apple`
+provider key flows through the same hosted and headless OAuth paths as
+every other provider.
+
+### Generic OIDC providers (config-only)
+
+Any standards-compliant OIDC provider (Okta, Auth0, Slack, an enterprise
+IdP) can be added without a code release. List the provider keys in
+`GATEWAY_OIDC_PROVIDERS` (comma-separated) and, for each key `KEY`, set:
+
+```
+GATEWAY_OIDC_PROVIDERS=okta,acme
+GATEWAY_OIDC_OKTA_ISSUER=https://acme.okta.com
+GATEWAY_OIDC_OKTA_CLIENT_ID=...
+GATEWAY_OIDC_OKTA_CLIENT_SECRET=...
+GATEWAY_OIDC_OKTA_SCOPES=openid email profile   # optional, space/comma-separated
+```
+
+The exchanger resolves the authorization / token / JWKS / userinfo
+endpoints from `<ISSUER>/.well-known/openid-configuration`, verifies the
+id_token signature (RS256 or ES256) against the discovered JWKS, and
+falls back to the userinfo endpoint for email/name. A provider is enabled
+only when its issuer, client id, and client secret are all present.
 
 ## Hosted flow
 

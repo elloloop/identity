@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -8,7 +9,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/pkg/oauth"
 )
+
+// maxCallbackFormBytes bounds the form_post body the hosted callback will
+// parse (Apple's body is a few hundred bytes; this rejects abuse).
+const maxCallbackFormBytes = 64 << 10
 
 // hostedOAuthHandler serves the browser-facing hosted OAuth endpoints:
 //
@@ -80,7 +86,13 @@ func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	// Most providers redirect the browser back with a GET. Sign in with
+	// Apple instead POSTs an application/x-www-form-urlencoded body
+	// (response_mode=form_post) because it only returns the email/name
+	// scopes that way, so we accept both methods here.
+	switch r.Method {
+	case http.MethodGet, http.MethodPost:
+	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -90,21 +102,35 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	q := r.URL.Query()
-	state := q.Get("state")
+	params, err := callbackParams(r)
+	if err != nil {
+		h.logger.Info("hosted_oauth_callback_parse_failed",
+			zap.String("provider", provider), zap.Error(err))
+		http.Error(w, "oauth failed", http.StatusBadRequest)
+		return
+	}
+	state := params.Get("state")
 
 	// Provider-side error (user denied consent, etc). We cannot recover
 	// return_to without a valid state token, so there is nowhere safe to
 	// redirect — surface a generic 400 and log server-side.
-	if provErr := q.Get("error"); provErr != "" {
+	if provErr := params.Get("error"); provErr != "" {
 		h.logger.Info("hosted_oauth_provider_error",
 			zap.String("provider", provider), zap.String("error", provErr))
 		http.Error(w, "oauth failed", http.StatusBadRequest)
 		return
 	}
 
+	// Apple delivers the display name only once, in the first callback's
+	// `user` form field — never in the id_token. Thread it through the
+	// context so the Apple exchanger can capture it on first login.
+	ctx := r.Context()
+	if name := appleNameFromForm(params.Get("user")); name != "" {
+		ctx = oauth.WithAppleName(ctx, name)
+	}
+
 	result, err := h.auth.CompleteHostedOAuth(
-		r.Context(), provider, q.Get("code"), state,
+		ctx, provider, params.Get("code"), state,
 		clientIPFromRequest(r), r.UserAgent(),
 	)
 	if err != nil {
@@ -169,6 +195,43 @@ func appendQueryParam(base, key, value string) string {
 	q.Set(key, value)
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// callbackParams returns the OAuth callback parameters, reading them from
+// the POST form (Apple's response_mode=form_post) when the request is a
+// POST, and from the query string otherwise. The POST body is size-bound
+// before parsing.
+func callbackParams(r *http.Request) (url.Values, error) {
+	if r.Method == http.MethodPost {
+		r.Body = http.MaxBytesReader(nil, r.Body, maxCallbackFormBytes)
+		if err := r.ParseForm(); err != nil {
+			return nil, err
+		}
+		return r.PostForm, nil
+	}
+	return r.URL.Query(), nil
+}
+
+// appleNameFromForm extracts a display name from Apple's `user` form
+// field, a JSON blob of the shape {"name":{"firstName":..,"lastName":..},
+// "email":..} sent only on the first authorization. Returns "" when the
+// field is absent or unparseable.
+func appleNameFromForm(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var payload struct {
+		Name struct {
+			FirstName string `json:"firstName"`
+			LastName  string `json:"lastName"`
+		} `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return ""
+	}
+	full := strings.TrimSpace(payload.Name.FirstName + " " + payload.Name.LastName)
+	return strings.TrimSpace(full)
 }
 
 func isOAuthDisabled(err error) bool {

@@ -212,6 +212,26 @@ type Config struct {
 	GitHubClientID        string
 	GitHubClientSecret    string
 
+	// Sign in with Apple. Apple does not issue a static client secret;
+	// instead the operator registers a Services ID (AppleClientID), the
+	// developer team (AppleTeamID), and a private signing key
+	// (AppleKeyID + ApplePrivateKey, PEM-encoded PKCS#8). Apple is
+	// enabled only when all four are non-empty. App Store Guideline 4.8
+	// requires SiwA whenever another social login is offered.
+	AppleClientID   string
+	AppleTeamID     string
+	AppleKeyID      string
+	ApplePrivateKey string
+
+	// OIDCProviders is the comma-separated list of generic OIDC provider
+	// keys to register (e.g. "okta,slack"). For each key KEY the loader
+	// reads GATEWAY_OIDC_<KEY>_ISSUER, _CLIENT_ID, _CLIENT_SECRET, and
+	// the optional _SCOPES (space- or comma-separated). A provider is
+	// enabled only when its issuer, client id, and client secret are all
+	// present. This is the code-release-free path for adding an arbitrary
+	// enterprise OIDC IdP purely via env config.
+	OIDCProviders []GenericOIDCProvider
+
 	// OAuthAllowedReturnURLs is the comma-separated allowlist of app URLs
 	// the hosted OAuth flow may redirect back to (the `return_to` param of
 	// GET /oauth/start/{provider}). Each entry is an exact origin or a URL
@@ -525,6 +545,13 @@ func Load() *Config {
 		GitHubClientID:        envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
 		GitHubClientSecret:    envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
 
+		AppleClientID:   envStr("GATEWAY_APPLE_CLIENT_ID", ""),
+		AppleTeamID:     envStr("GATEWAY_APPLE_TEAM_ID", ""),
+		AppleKeyID:      envStr("GATEWAY_APPLE_KEY_ID", ""),
+		ApplePrivateKey: envStr("GATEWAY_APPLE_PRIVATE_KEY", ""),
+
+		OIDCProviders: loadGenericOIDCProviders(),
+
 		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
 
 		IDVProvider:           envStr("GATEWAY_IDV_PROVIDER", ""),
@@ -657,6 +684,76 @@ const (
 	SMSProviderSNS    = "sns"
 	SMSProviderAzure  = "azure"
 )
+
+// GenericOIDCProvider is a single config-driven OIDC provider parsed
+// from GATEWAY_OIDC_PROVIDERS + per-key GATEWAY_OIDC_<KEY>_* env vars.
+// Only providers with a non-empty Issuer, ClientID, and ClientSecret are
+// included by loadGenericOIDCProviders, so app wiring can register every
+// entry unconditionally.
+type GenericOIDCProvider struct {
+	// Key is the registry/provider key, lower-cased (e.g. "okta").
+	Key string
+	// Issuer is the OIDC issuer URL; discovery is derived from it.
+	Issuer       string
+	ClientID     string
+	ClientSecret string
+	// Scopes are the requested OAuth scopes; empty means provider default.
+	Scopes []string
+}
+
+// loadGenericOIDCProviders parses GATEWAY_OIDC_PROVIDERS (comma-separated
+// keys) and, for each key, GATEWAY_OIDC_<UPPER_KEY>_ISSUER / _CLIENT_ID /
+// _CLIENT_SECRET / _SCOPES. Keys whose issuer, client id, or client
+// secret is missing are skipped (disabled). Duplicate keys keep the
+// first occurrence.
+func loadGenericOIDCProviders() []GenericOIDCProvider {
+	raw := os.Getenv("GATEWAY_OIDC_PROVIDERS")
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var out []GenericOIDCProvider
+	for _, part := range strings.Split(raw, ",") {
+		key := strings.ToLower(strings.TrimSpace(part))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		prefix := "GATEWAY_OIDC_" + strings.ToUpper(strings.ReplaceAll(key, "-", "_")) + "_"
+		issuer := strings.TrimSpace(os.Getenv(prefix + "ISSUER"))
+		clientID := strings.TrimSpace(os.Getenv(prefix + "CLIENT_ID"))
+		clientSecret := os.Getenv(prefix + "CLIENT_SECRET")
+		if issuer == "" || clientID == "" || clientSecret == "" {
+			continue
+		}
+		out = append(out, GenericOIDCProvider{
+			Key:          key,
+			Issuer:       issuer,
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			Scopes:       parseOIDCScopes(os.Getenv(prefix + "SCOPES")),
+		})
+	}
+	return out
+}
+
+// parseOIDCScopes splits a scope string on whitespace or commas,
+// dropping blanks. An empty input yields nil (provider default scopes).
+func parseOIDCScopes(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	})
+	var out []string
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
 
 // DefaultProjectAuthDomainList returns the configured default-project auth
 // domains, lower-cased and de-duplicated, in order — the first entry is the

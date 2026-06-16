@@ -184,6 +184,65 @@ func TestHostedHTTP_FullStartCallback(t *testing.T) {
 	}
 }
 
+// appleNameStubProvider records the display name threaded through the
+// context by the form_post callback and returns it on the Identity, so
+// the test can assert Apple first-login name capture end to end.
+type appleNameStubProvider struct {
+	gotName string
+}
+
+func (p *appleNameStubProvider) AuthorizationURL(_ context.Context, redirectURI, state, _ string) (string, error) {
+	u, _ := url.Parse("https://appleid.test/authorize")
+	q := u.Query()
+	q.Set("redirect_uri", redirectURI)
+	q.Set("state", state)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+func (p *appleNameStubProvider) Exchange(ctx context.Context, _, _ string) (*oauth.Identity, error) {
+	p.gotName = oauth.AppleNameFromContext(ctx)
+	return &oauth.Identity{
+		Provider:       "apple",
+		ProviderUserID: "apple-user",
+		Email:          "apple-hosted@example.com",
+		EmailVerified:  true,
+		Name:           p.gotName,
+	}, nil
+}
+
+func TestHostedHTTP_AppleFormPostCapturesName(t *testing.T) {
+	stub := &appleNameStubProvider{}
+	reg := oauth.NewRegistry()
+	reg.Register("apple", stub)
+	h := newHostedTestHandler(t, "https://app.test/", reg)
+
+	// Start to obtain a valid state token for the apple provider.
+	startRR := httptest.NewRecorder()
+	h.ServeHTTP(startRR, httptest.NewRequest(http.MethodGet,
+		"/oauth/start/apple?return_to="+url.QueryEscape("https://app.test/finish"), nil))
+	loc, _ := url.Parse(startRR.Header().Get("Location"))
+	stateToken := loc.Query().Get("state")
+
+	// Apple POSTs the callback (response_mode=form_post) with code, state,
+	// and the one-time `user` JSON blob carrying the display name.
+	body := url.Values{}
+	body.Set("state", stateToken)
+	body.Set("code", "apple-auth-code")
+	body.Set("user", `{"name":{"firstName":"Grace","lastName":"Hopper"},"email":"apple-hosted@example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/oauth/callback/apple", strings.NewReader(body.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	cbRR := httptest.NewRecorder()
+	h.ServeHTTP(cbRR, req)
+
+	if cbRR.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, want 302; body=%q", cbRR.Code, cbRR.Body.String())
+	}
+	if stub.gotName != "Grace Hopper" {
+		t.Fatalf("apple name not captured from form_post: got %q", stub.gotName)
+	}
+}
+
 func TestHostedHTTP_CallbackProviderError(t *testing.T) {
 	h := newHostedTestHandler(t, "https://app.test/", hostedTestRegistry(&appTestStubProvider{}))
 	rr := httptest.NewRecorder()
@@ -207,7 +266,8 @@ func TestHostedHTTP_CallbackBadState(t *testing.T) {
 func TestHostedHTTP_CallbackMethodNotAllowed(t *testing.T) {
 	h := newHostedTestHandler(t, "https://app.test/", hostedTestRegistry(&appTestStubProvider{}))
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/oauth/callback/google", nil))
+	// PUT is unsupported; GET and POST (Apple form_post) are both allowed.
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPut, "/oauth/callback/google", nil))
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rr.Code)
 	}
@@ -318,5 +378,51 @@ func TestClientIPFromRequest(t *testing.T) {
 	r.Header.Set("X-Forwarded-For", "198.51.100.7, 10.0.0.1")
 	if got := clientIPFromRequest(r); got != "198.51.100.7" {
 		t.Errorf("XFF IP = %q", got)
+	}
+}
+
+func TestAppleNameFromForm(t *testing.T) {
+	cases := map[string]string{
+		`{"name":{"firstName":"Ada","lastName":"Lovelace"},"email":"a@b.com"}`: "Ada Lovelace",
+		`{"name":{"firstName":"Ada"}}`:                                         "Ada",
+		``:                                                                     "",
+		`not-json`:                                                             "",
+		`{"name":{}}`:                                                          "",
+	}
+	for in, want := range cases {
+		if got := appleNameFromForm(in); got != want {
+			t.Errorf("appleNameFromForm(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCallbackParams_FormPost(t *testing.T) {
+	body := url.Values{}
+	body.Set("code", "the-code")
+	body.Set("state", "the-state")
+	body.Set("user", `{"name":{"firstName":"A","lastName":"B"}}`)
+	r := httptest.NewRequest(http.MethodPost, "/oauth/callback/apple", strings.NewReader(body.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	params, err := callbackParams(r)
+	if err != nil {
+		t.Fatalf("callbackParams: %v", err)
+	}
+	if params.Get("code") != "the-code" || params.Get("state") != "the-state" {
+		t.Errorf("params = %v", params)
+	}
+	if name := appleNameFromForm(params.Get("user")); name != "A B" {
+		t.Errorf("name = %q", name)
+	}
+}
+
+func TestCallbackParams_GetUsesQuery(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/oauth/callback/google?code=c&state=s", nil)
+	params, err := callbackParams(r)
+	if err != nil {
+		t.Fatalf("callbackParams: %v", err)
+	}
+	if params.Get("code") != "c" || params.Get("state") != "s" {
+		t.Errorf("params = %v", params)
 	}
 }
