@@ -982,6 +982,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.DeleteGroupResponse'
+  /identity.v1.IdentityService/DeleteLoginPolicy:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: DeleteLoginPolicy
+      operationId: identity.v1.IdentityService.DeleteLoginPolicy
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.DeleteLoginPolicyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.DeleteLoginPolicyResponse'
   /identity.v1.IdentityService/DeletePasskey:
     post:
       tags:
@@ -1158,6 +1193,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.GetIdentityVerificationStatusResponse'
+  /identity.v1.IdentityService/GetLoginPolicy:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetLoginPolicy
+      operationId: identity.v1.IdentityService.GetLoginPolicy
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetLoginPolicyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetLoginPolicyResponse'
+  /identity.v1.IdentityService/GetProjectConfig:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetProjectConfig
+      operationId: identity.v1.IdentityService.GetProjectConfig
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetProjectConfigRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetProjectConfigResponse'
   /identity.v1.IdentityService/GetQrLoginSession:
     post:
       tags:
@@ -2715,6 +2820,87 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.UpdateUserResponse'
+  /identity.v1.IdentityService/UpsertLoginPolicy:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: UpsertLoginPolicy
+      description: |-
+        Per-tenant LoginPolicy authoring. These write the policy the login path
+         enforces (allowed methods, SSO-required, require-2FA) for a claimed
+         tenant within a project — at most one policy per (project, tenant).
+         Operator-only: authenticated by the shared admin secret, like the other
+         Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+      operationId: identity.v1.IdentityService.UpsertLoginPolicy
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.UpsertLoginPolicyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.UpsertLoginPolicyResponse'
+  /identity.v1.IdentityService/UpsertProjectConfig:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: UpsertProjectConfig
+      description: |-
+        Per-project config authoring. UpsertProjectConfig replaces a project's
+         config_json blob (the typed knobs an operator sets — e.g. CORS allowed
+         origins); GetProjectConfig reads it back. Operator-only, like the other
+         Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+      operationId: identity.v1.IdentityService.UpsertProjectConfig
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.UpsertProjectConfigRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.UpsertProjectConfigResponse'
   /identity.v1.IdentityService/VerifyDomain:
     post:
       tags:
@@ -3866,6 +4052,21 @@ components:
       type: object
       title: DeleteGroupResponse
       additionalProperties: false
+    identity.v1.DeleteLoginPolicyRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+      title: DeleteLoginPolicyRequest
+      additionalProperties: false
+    identity.v1.DeleteLoginPolicyResponse:
+      type: object
+      title: DeleteLoginPolicyResponse
+      additionalProperties: false
     identity.v1.DeletePasskeyRequest:
       type: object
       properties:
@@ -3969,6 +4170,45 @@ components:
           title: verification
           $ref: '#/components/schemas/identity.v1.IdentityVerification'
       title: GetIdentityVerificationStatusResponse
+      additionalProperties: false
+    identity.v1.GetLoginPolicyRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+      title: GetLoginPolicyRequest
+      additionalProperties: false
+    identity.v1.GetLoginPolicyResponse:
+      type: object
+      properties:
+        policy:
+          title: policy
+          description: |-
+            policy is unset when no LoginPolicy exists for (project, tenant) — the
+             login path then imposes no restriction.
+          $ref: '#/components/schemas/identity.v1.LoginPolicy'
+      title: GetLoginPolicyResponse
+      additionalProperties: false
+    identity.v1.GetProjectConfigRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+      title: GetProjectConfigRequest
+      additionalProperties: false
+    identity.v1.GetProjectConfigResponse:
+      type: object
+      properties:
+        configJson:
+          type: string
+          title: config_json
+          description: config_json is the project's stored config blob ("{}" when unset).
+      title: GetProjectConfigResponse
       additionalProperties: false
     identity.v1.GetQrLoginSessionRequest:
       type: object
@@ -4463,6 +4703,52 @@ components:
           format: int32
       title: ListUsersResponse
       additionalProperties: false
+    identity.v1.LoginPolicy:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+        allowedMethods:
+          type: string
+          title: allowed_methods
+          description: |-
+            allowed_methods is a comma-separated allow-list of login-method tokens
+             ("email_otp", "password", "oauth", "passkey", "sso"). Empty means no
+             restriction (the login path falls back to its safe default).
+        ssoRequired:
+          type: boolean
+          title: sso_required
+          description: |-
+            sso_required forces SSO; sso_connection_json carries the IdP connection
+             config as a JSON object ("{}" when unset).
+        ssoConnectionJson:
+          type: string
+          title: sso_connection_json
+        require2fa:
+          type: boolean
+          title: require_2fa
+          description: require_2fa forces a second factor after the primary method.
+        createdAtMs:
+          type:
+            - integer
+            - string
+          title: created_at_ms
+          format: int64
+        updatedAtMs:
+          type:
+            - integer
+            - string
+          title: updated_at_ms
+          format: int64
+      title: LoginPolicy
+      additionalProperties: false
+      description: |-
+        LoginPolicy is a claimed tenant's authentication policy, as authored and
+         read back by the operator RPCs. It mirrors service.LoginPolicy.
     identity.v1.LogoutRequest:
       type: object
       properties:
@@ -5291,6 +5577,61 @@ components:
           title: user
           $ref: '#/components/schemas/identity.v1.User'
       title: UpdateUserResponse
+      additionalProperties: false
+    identity.v1.UpsertLoginPolicyRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+        allowedMethods:
+          type: string
+          title: allowed_methods
+        ssoRequired:
+          type: boolean
+          title: sso_required
+        ssoConnectionJson:
+          type: string
+          title: sso_connection_json
+        require2fa:
+          type: boolean
+          title: require_2fa
+      title: UpsertLoginPolicyRequest
+      additionalProperties: false
+    identity.v1.UpsertLoginPolicyResponse:
+      type: object
+      properties:
+        policy:
+          title: policy
+          $ref: '#/components/schemas/identity.v1.LoginPolicy'
+      title: UpsertLoginPolicyResponse
+      additionalProperties: false
+    identity.v1.UpsertProjectConfigRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        configJson:
+          type: string
+          title: config_json
+          description: |-
+            config_json is the project's full config blob (a JSON object). It
+             REPLACES the project's existing config; an empty value normalises to
+             "{}" (no per-project overrides). A malformed blob is rejected
+             (INVALID_ARGUMENT).
+      title: UpsertProjectConfigRequest
+      additionalProperties: false
+    identity.v1.UpsertProjectConfigResponse:
+      type: object
+      properties:
+        configJson:
+          type: string
+          title: config_json
+      title: UpsertProjectConfigResponse
       additionalProperties: false
     identity.v1.User:
       type: object
