@@ -33,6 +33,13 @@ type ProjectScope struct {
 	// request whose Origin is in either set is allowed. Empty when the
 	// project configures none, in which case only the global floor applies.
 	CORSAllowedOrigins []string
+
+	// LoginDefaults is the project-wide login-method policy applied to users
+	// with NO claimed tenant, parsed from config_json. It is layered UNDER
+	// any tenant LoginPolicy (tenant overrides project overrides global) by
+	// the login-path enforcement. The zero value imposes no restriction, so
+	// a project that configures none behaves exactly as before.
+	LoginDefaults ProjectLoginConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -64,6 +71,7 @@ type ResolvedProject struct {
 	StorageScopeID     string
 	PrimaryAuthDomain  string
 	CORSAllowedOrigins []string
+	LoginDefaults      ProjectLoginConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

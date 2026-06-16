@@ -25,6 +25,25 @@ func TestParseProjectConfig_CORSOrigins(t *testing.T) {
 	assert.Equal(t, []string{"https://a.example.com", "http://localhost:3000"}, cfg.CORS.AllowedOrigins)
 }
 
+func TestParseProjectConfig_LoginDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"login":{"allowed_methods":"email_otp,password","require_2fa":true}}`)
+	require.NoError(t, err)
+	assert.Equal(t, "email_otp,password", cfg.Login.AllowedMethods)
+	assert.True(t, cfg.Login.Require2FA)
+}
+
+func TestParseProjectConfig_LoginDefaults_OmittedIsZero(t *testing.T) {
+	t.Parallel()
+
+	// An older config (CORS only) leaves the login default zero = no restriction.
+	cfg, err := ParseProjectConfig(`{"cors":{"allowed_origins":["https://a.example.com"]}}`)
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Login.AllowedMethods)
+	assert.False(t, cfg.Login.Require2FA)
+}
+
 func TestParseProjectConfig_UnknownKeysTolerated(t *testing.T) {
 	t.Parallel()
 
