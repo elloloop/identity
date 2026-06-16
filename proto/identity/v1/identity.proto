@@ -14,6 +14,21 @@ enum UserStatus {
   USER_STATUS_INVITED = 2;
   USER_STATUS_DEACTIVATED = 3;
   USER_STATUS_SUSPENDED = 4;
+  // PENDING_PARENTAL_CONSENT marks a child-band account created under
+  // age-gating that has not yet obtained verifiable parental consent. Such
+  // an account exists but cannot mint full access tokens until consent is
+  // granted. Additive; all existing statuses keep their numbers.
+  USER_STATUS_PENDING_PARENTAL_CONSENT = 5;
+}
+
+// AgeBand is the coarse age classification derived from a user's date of
+// birth and the deployment's configured age thresholds. Zero-value
+// (UNSPECIFIED) means age is unknown or age-gating is off.
+enum AgeBand {
+  AGE_BAND_UNSPECIFIED = 0;
+  AGE_BAND_CHILD = 1;   // at/below the configured child-max age (COPPA-protected)
+  AGE_BAND_TEEN = 2;    // minor, above child-max but below adult age
+  AGE_BAND_ADULT = 3;   // at/above the adult age
 }
 
 message User {
@@ -38,6 +53,9 @@ message User {
   string phone_number = 19;               // E.164 phone number the user has verified ownership of
   bool phone_verified = 20;               // true once an SMS OTP for phone_number was confirmed
   int64 phone_verified_at = 21;           // epoch ms; 0 = never verified
+  int64 date_of_birth_ms = 22;            // epoch ms of date of birth; 0 = unknown
+  bool is_minor = 23;                     // derived: true when age < adult age (age-gating on)
+  AgeBand age_band = 24;                  // derived age band; UNSPECIFIED when unknown / gate off
 }
 
 message CreateUserRequest {
@@ -231,6 +249,7 @@ message PasswordSignupRequest {
   string password = 2;
   string recovery_email = 3;  // Optional: used for password reset flow
   string captcha_token = 4;   // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
+  int64 date_of_birth_ms = 5; // Optional; epoch ms of date of birth. Required at signup when GATEWAY_AGEGATE_REQUIRE_DOB.
 }
 
 message PasswordSignupResponse {
@@ -1139,6 +1158,78 @@ message CreateFirstPlatformAdminResponse {
   string generated_password = 3;
 }
 
+// LoginPolicy is a claimed tenant's authentication policy, as authored and
+// read back by the operator RPCs. It mirrors service.LoginPolicy.
+message LoginPolicy {
+  string project_id = 1;
+  string tenant_id = 2;
+  // allowed_methods is a comma-separated allow-list of login-method tokens
+  // ("email_otp", "password", "oauth", "passkey", "sso"). Empty means no
+  // restriction (the login path falls back to its safe default).
+  string allowed_methods = 3;
+  // sso_required forces SSO; sso_connection_json carries the IdP connection
+  // config as a JSON object ("{}" when unset).
+  bool sso_required = 4;
+  string sso_connection_json = 5;
+  // require_2fa forces a second factor after the primary method.
+  bool require_2fa = 6;
+  int64 created_at_ms = 7;
+  int64 updated_at_ms = 8;
+}
+
+message UpsertLoginPolicyRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+  string allowed_methods = 3;
+  bool sso_required = 4;
+  string sso_connection_json = 5;
+  bool require_2fa = 6;
+}
+
+message UpsertLoginPolicyResponse {
+  LoginPolicy policy = 1;
+}
+
+message GetLoginPolicyRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+}
+
+message GetLoginPolicyResponse {
+  // policy is unset when no LoginPolicy exists for (project, tenant) — the
+  // login path then imposes no restriction.
+  LoginPolicy policy = 1;
+}
+
+message DeleteLoginPolicyRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+}
+
+message DeleteLoginPolicyResponse {}
+
+message UpsertProjectConfigRequest {
+  string project_id = 1;
+  // config_json is the project's full config blob (a JSON object). It
+  // REPLACES the project's existing config; an empty value normalises to
+  // "{}" (no per-project overrides). A malformed blob is rejected
+  // (INVALID_ARGUMENT).
+  string config_json = 2;
+}
+
+message UpsertProjectConfigResponse {
+  string config_json = 1;
+}
+
+message GetProjectConfigRequest {
+  string project_id = 1;
+}
+
+message GetProjectConfigResponse {
+  // config_json is the project's stored config blob ("{}" when unset).
+  string config_json = 1;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────
 
 // ── Linked identities (self-service connected accounts) ────────────────────
@@ -1354,4 +1445,20 @@ service IdentityService {
   rpc ListLinkedIdentities(ListLinkedIdentitiesRequest) returns (ListLinkedIdentitiesResponse);
   rpc LinkIdentity(LinkIdentityRequest) returns (LinkIdentityResponse);
   rpc UnlinkIdentity(UnlinkIdentityRequest) returns (UnlinkIdentityResponse);
+
+  // Per-tenant LoginPolicy authoring. These write the policy the login path
+  // enforces (allowed methods, SSO-required, require-2FA) for a claimed
+  // tenant within a project — at most one policy per (project, tenant).
+  // Operator-only: authenticated by the shared admin secret, like the other
+  // Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+  rpc UpsertLoginPolicy(UpsertLoginPolicyRequest) returns (UpsertLoginPolicyResponse);
+  rpc GetLoginPolicy(GetLoginPolicyRequest) returns (GetLoginPolicyResponse);
+  rpc DeleteLoginPolicy(DeleteLoginPolicyRequest) returns (DeleteLoginPolicyResponse);
+
+  // Per-project config authoring. UpsertProjectConfig replaces a project's
+  // config_json blob (the typed knobs an operator sets — e.g. CORS allowed
+  // origins); GetProjectConfig reads it back. Operator-only, like the other
+  // Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+  rpc UpsertProjectConfig(UpsertProjectConfigRequest) returns (UpsertProjectConfigResponse);
+  rpc GetProjectConfig(GetProjectConfigRequest) returns (GetProjectConfigResponse);
 }

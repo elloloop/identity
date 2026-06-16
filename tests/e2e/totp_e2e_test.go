@@ -137,7 +137,7 @@ func TestE2E_Totp_RegenRecoveryCodesConsumeAndReplayRejected(t *testing.T) {
 	for _, c := range originalCodesList {
 		originalCodes = append(originalCodes, c.(string))
 	}
-	
+
 	verifyCode := generateTotpCodeAt(t, secret, time.Now())
 	_, _ = h.rpcCall(t, "VerifyTotpSetup", map[string]any{"code": verifyCode}, at)
 
@@ -163,7 +163,7 @@ func TestE2E_Totp_RegenRecoveryCodesConsumeAndReplayRejected(t *testing.T) {
 		"password": goodPassword,
 	}, "")
 	oldChallengeID, _ := resp["loginChallengeId"].(string)
-	
+
 	resp, status = h.rpcCall(t, "VerifyTotp", map[string]any{
 		"loginChallengeId": oldChallengeID,
 		"code":             originalCodes[0],
@@ -178,7 +178,7 @@ func TestE2E_Totp_RegenRecoveryCodesConsumeAndReplayRejected(t *testing.T) {
 		"password": goodPassword,
 	}, "")
 	validChallengeID, _ := resp["loginChallengeId"].(string)
-	
+
 	resp, status = h.rpcCall(t, "VerifyTotp", map[string]any{
 		"loginChallengeId": validChallengeID,
 		"code":             regenCodes[0],
@@ -197,7 +197,7 @@ func TestE2E_Totp_RegenRecoveryCodesConsumeAndReplayRejected(t *testing.T) {
 		"password": goodPassword,
 	}, "")
 	replayChallengeID, _ := resp["loginChallengeId"].(string)
-	
+
 	resp, status = h.rpcCall(t, "VerifyTotp", map[string]any{
 		"loginChallengeId": replayChallengeID,
 		"code":             regenCodes[0],

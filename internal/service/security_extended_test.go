@@ -28,7 +28,7 @@ func TestSecExt_RefreshTokenReplay_RevokesAllSessions(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	// Sign up — first session.
-	r1, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
+	r1, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 	stolenRefresh := r1.RefreshToken
 
@@ -66,7 +66,7 @@ func TestRefresh_ConsumedTokensSurviveRestart(t *testing.T) {
 	svc1 := newTestAuthService(t, repo)
 
 	// Sign up + first rotation on instance 1.
-	r1, err := svc1.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
+	r1, err := svc1.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 	stolen := r1.RefreshToken
 
@@ -105,7 +105,7 @@ func TestRefresh_ConcurrentRotationRace(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	r, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
+	r, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 	target := r.RefreshToken
 
@@ -212,7 +212,7 @@ func TestSecExt_CrossTenant_TokenRejection(t *testing.T) {
 	svcA.cfg.DefaultTenantID = "tenant-a"
 
 	// Sign up Alice in tenant A.
-	rA, err := svcA.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "")
+	rA, err := svcA.PasswordSignup(context.Background(), "alice@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 	tokenA := rA.AccessToken
 

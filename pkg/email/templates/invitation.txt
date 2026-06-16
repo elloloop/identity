@@ -1,7 +1,12 @@
-Hi {{.UserName}},
+{{if .ProductName}}{{.ProductName}}
+
+{{end}}Hi {{.UserName}},
 
 {{.InviterName}} has invited you to join {{.OrgName}}. Use the link below to accept the invitation and set up your account.
 
 {{.Link}}
 
 If you weren't expecting this invitation, you can safely ignore this email.
+{{if .SupportEmail}}
+Need help? Contact {{.SupportEmail}}.
+{{end}}

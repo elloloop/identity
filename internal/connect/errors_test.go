@@ -1,0 +1,22 @@
+package connect
+
+import (
+	"testing"
+
+	"connectrpc.com/connect"
+
+	"github.com/elloloop/identity/internal/service"
+)
+
+// TestToConnectErrorParentalConsent proves the COPPA parental-consent gate
+// maps to FailedPrecondition: the account exists but the client must complete
+// the parental-consent flow before it can proceed (not an auth failure).
+func TestToConnectErrorParentalConsent(t *testing.T) {
+	err := toConnectError(service.ErrParentalConsentRequired)
+	if err == nil {
+		t.Fatal("toConnectError(ErrParentalConsentRequired) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", got)
+	}
+}

@@ -30,7 +30,8 @@ func WrapIDVProvider(p idv.Provider) idv.Provider {
 func (t *TracedIDVProvider) Name() string { return t.inner.Name() }
 
 func (t *TracedIDVProvider) BeginVerification(ctx context.Context, req idv.Request) (*idv.Session, error) {
-	ctx, end := StartClient(ctx, "idv.BeginVerification",
+	ctx, end := StartClient(
+		ctx, "idv.BeginVerification",
 		attribute.String("idv.provider", t.inner.Name()),
 	)
 	s, err := t.inner.BeginVerification(ctx, req)
@@ -39,7 +40,8 @@ func (t *TracedIDVProvider) BeginVerification(ctx context.Context, req idv.Reque
 }
 
 func (t *TracedIDVProvider) GetVerification(ctx context.Context, providerSessionID string) (*idv.StatusResult, error) {
-	ctx, end := StartClient(ctx, "idv.GetVerification",
+	ctx, end := StartClient(
+		ctx, "idv.GetVerification",
 		attribute.String("idv.provider", t.inner.Name()),
 	)
 	r, err := t.inner.GetVerification(ctx, providerSessionID)
@@ -82,7 +84,8 @@ func WrapOAuthExchanger(provider string, e oauth.Exchanger) oauth.Exchanger {
 }
 
 func (t *TracedExchanger) Exchange(ctx context.Context, code, redirectURI string) (*oauth.Identity, error) {
-	ctx, end := StartClient(ctx, "oauth.Exchange",
+	ctx, end := StartClient(
+		ctx, "oauth.Exchange",
 		attribute.String("oauth.provider", t.provider),
 	)
 	id, err := t.inner.Exchange(ctx, code, redirectURI)
@@ -91,7 +94,8 @@ func (t *TracedExchanger) Exchange(ctx context.Context, code, redirectURI string
 }
 
 func (t *tracedExchangerWithAuthorizer) AuthorizationURL(ctx context.Context, redirectURI, state, codeChallenge string) (string, error) {
-	ctx, end := StartClient(ctx, "oauth.AuthorizationURL",
+	ctx, end := StartClient(
+		ctx, "oauth.AuthorizationURL",
 		attribute.String("oauth.provider", t.provider),
 	)
 	url, err := t.authorizer.AuthorizationURL(ctx, redirectURI, state, codeChallenge)
@@ -115,7 +119,8 @@ func WrapMailer(t email.Transport) email.Transport {
 }
 
 func (m *TracedMailer) Send(ctx context.Context, msg email.Message) error {
-	ctx, end := StartClient(ctx, "email.Send",
+	ctx, end := StartClient(
+		ctx, "email.Send",
 		attribute.String("email.subject", msg.Subject),
 	)
 	err := m.inner.Send(ctx, msg)

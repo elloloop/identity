@@ -47,4 +47,9 @@ type LoginPolicyStore interface {
 	// GetLoginPolicy returns the policy for (projectID, tenantID), or
 	// (nil, nil) when none is set.
 	GetLoginPolicy(ctx context.Context, projectID, tenantID string) (*LoginPolicy, error)
+	// DeleteLoginPolicy removes the policy for (projectID, tenantID). It is
+	// idempotent: deleting an absent policy is a no-op that returns nil, so a
+	// caller can clear a tenant's policy without first checking for one. Both
+	// ids are required.
+	DeleteLoginPolicy(ctx context.Context, projectID, tenantID string) error
 }
