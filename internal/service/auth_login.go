@@ -95,7 +95,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
-	if err := validatePasswordStrength(password); err != nil {
+	if err := s.validatePasswordStrengthForEmail(ctx, email, password); err != nil {
 		return nil, err
 	}
 	start := time.Now()
@@ -879,6 +879,8 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
+	// Global baseline check up front (before any token lookup); the
+	// tenant-specific tightening runs once the owning user is resolved.
 	if err := validatePasswordStrength(password); err != nil {
 		return nil, err
 	}
@@ -914,6 +916,12 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	}
 	if user == nil {
 		return nil, fmt.Errorf("%w: user for invitation not found", ErrNotFound)
+	}
+
+	// Enforce the invited member's tenant password policy now that the
+	// owning user (and thus its email domain) is known.
+	if err := s.validatePasswordStrengthForEmail(ctx, user.Email, password); err != nil {
+		return nil, err
 	}
 
 	pwHash, err := passwords.Hash(password)

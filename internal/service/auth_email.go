@@ -160,6 +160,8 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	if newPassword == "" {
 		return fmt.Errorf("%w: new password is required", ErrInvalidArgument)
 	}
+	// Global baseline check up front (before any token lookup); the
+	// tenant-specific tightening runs once the owning user is resolved.
 	if err := validatePasswordStrength(newPassword); err != nil {
 		return err
 	}
@@ -185,6 +187,12 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	}
 	if user == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+
+	// Enforce the user's tenant password policy now that the owning user
+	// (and thus its email domain) is known.
+	if err := s.validatePasswordStrengthForEmail(ctx, user.Email, newPassword); err != nil {
+		return err
 	}
 
 	pwHash, err := passwords.Hash(newPassword)

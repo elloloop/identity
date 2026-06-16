@@ -340,6 +340,10 @@ punycode domain (H3) — enforced in application code on `lower(domain)`.
 | `sso_required` | BOOLEAN | N | Default `FALSE`. |
 | `sso_connection_json` | JSONB | N | Default `'{}'`. |
 | `require_2fa` | BOOLEAN | N | Default `FALSE`. |
+| `password_min_length` | INTEGER | N | Default `0`. Min password length for this tenant; `0` = global default. Tenants tighten, never loosen. (migration 0263) |
+| `password_require_classes` | BOOLEAN | N | Default `FALSE`. Demands all four char classes; global classes always enforced. (migration 0263) |
+| `session_idle_timeout_seconds` | BIGINT | N | Default `0`. Invalidate a session unused for this long; `0` = no idle timeout. (migration 0263) |
+| `session_absolute_timeout_seconds` | BIGINT | N | Default `0`. Invalidate a session older than this; `0` = no absolute timeout. (migration 0263) |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
 

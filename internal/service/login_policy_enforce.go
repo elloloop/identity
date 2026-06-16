@@ -6,7 +6,64 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/elloloop/identity/pkg/passwords"
 )
+
+// passwordStrengthPolicyFor returns the per-tenant password StrengthPolicy
+// for the org that owns email's domain. When no governed policy applies it
+// returns the zero StrengthPolicy, which is the global default — so callers
+// can always validate without a nil check and a tenant only ever tightens
+// the global baseline.
+func (s *AuthService) passwordStrengthPolicyFor(ctx context.Context, email string) passwords.StrengthPolicy {
+	_, policy := s.resolveLoginPolicy(ctx, email)
+	if policy == nil {
+		return passwords.StrengthPolicy{}
+	}
+	return passwords.StrengthPolicy{
+		MinLength:      policy.PasswordMinLength,
+		RequireClasses: policy.PasswordRequireClasses,
+	}
+}
+
+// enforceSessionTimeout invalidates a session whose refresh token has gone
+// idle or exceeded its absolute lifetime under the owning tenant's
+// LoginPolicy. nowMs is the current epoch ms; createdAtMs/lastUsedAtMs come
+// from the refresh-token row. It returns ErrSessionExpired when a configured
+// timeout is breached and nil otherwise (including when no policy or no
+// timeout is set — fail-safe to the global behavior).
+func (s *AuthService) enforceSessionTimeout(ctx context.Context, email string, nowMs, createdAtMs, lastUsedAtMs int64) error {
+	_, policy := s.resolveLoginPolicy(ctx, email)
+	if policy == nil {
+		return nil
+	}
+	if policy.SessionAbsoluteTimeoutSeconds > 0 && createdAtMs > 0 {
+		if nowMs-createdAtMs > policy.SessionAbsoluteTimeoutSeconds*msPerSecond {
+			s.logger.Info("session_absolute_timeout_exceeded",
+				zap.String("email_domain", emailDomain(email)))
+			return fmt.Errorf("%w: session exceeded its maximum lifetime", ErrSessionExpired)
+		}
+	}
+	if policy.SessionIdleTimeoutSeconds > 0 && lastUsedAtMs > 0 {
+		if nowMs-lastUsedAtMs > policy.SessionIdleTimeoutSeconds*msPerSecond {
+			s.logger.Info("session_idle_timeout_exceeded",
+				zap.String("email_domain", emailDomain(email)))
+			return fmt.Errorf("%w: session timed out due to inactivity", ErrSessionExpired)
+		}
+	}
+	return nil
+}
+
+// emailDomain returns the domain part of an email for low-cardinality
+// logging, or "" when the address has no domain.
+func emailDomain(email string) string {
+	_, domain, _ := strings.Cut(email, "@")
+	return domain
+}
+
+// msPerSecond converts the policy's second-granularity timeouts to the
+// epoch-ms granularity the refresh-token timestamps use.
+const msPerSecond = 1000
 
 // LoginGovernance is the read-side bundle the login path consults to enforce
 // a claimed tenant's LoginPolicy. It is postgres-only governance state, set
@@ -79,47 +136,74 @@ func isSecondFactorSatisfyingMethod(method string) bool {
 // LoginMethodEmailOTP).
 func (s *AuthService) enforceLoginPolicy(ctx context.Context, email, method string) (loginPolicyDecision, error) {
 	var noop loginPolicyDecision
-	if s.governance == nil {
+	tenant, policy := s.resolveLoginPolicy(ctx, email)
+	if policy == nil {
 		return noop, nil
 	}
 	projectID := s.projectID(ctx)
+	return s.applyLoginPolicy(tenant, policy, projectID, method)
+}
+
+// resolveLoginPolicy walks the governance plane (domain → tenant → policy)
+// for the claimed tenant that owns email's domain and returns its
+// LoginPolicy, or (nil, nil) when there is no governed policy to apply.
+//
+// It fails SAFE at every step — no governance bundle, no resolved project,
+// an unverified or unknown domain, an unclaimed tenant, an absent policy, or
+// any lookup error all return (nil, nil) so a caller imposes NO restriction.
+// The tenant is returned alongside the policy so callers that audit or log
+// can name the org without a second lookup.
+func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Tenant, *LoginPolicy) {
+	if s.governance == nil {
+		return nil, nil
+	}
+	projectID := s.projectID(ctx)
 	if projectID == "" {
-		return noop, nil
+		return nil, nil
 	}
 	_, domainName, ok := strings.Cut(email, "@")
 	if !ok || domainName == "" {
-		return noop, nil
+		return nil, nil
 	}
 
 	domain, err := s.governance.Domains.GetDomainByName(ctx, projectID, domainName)
 	if err != nil {
 		s.logger.Warn("login_policy_domain_lookup_failed",
 			zap.String("project_id", projectID), zap.Error(err))
-		return noop, nil
+		return nil, nil
 	}
 	if domain == nil || domain.Status != DomainStatusVerified {
-		return noop, nil
+		return nil, nil
 	}
 
 	tenant, err := s.governance.Tenants.GetTenant(ctx, projectID, domain.TenantID)
 	if err != nil {
 		s.logger.Warn("login_policy_tenant_lookup_failed",
 			zap.String("project_id", projectID), zap.String("tenant_id", domain.TenantID), zap.Error(err))
-		return noop, nil
+		return nil, nil
 	}
 	if tenant == nil || tenant.Status != TenantStatusClaimed {
-		return noop, nil
+		return nil, nil
 	}
 
 	policy, err := s.governance.Policies.GetLoginPolicy(ctx, projectID, tenant.ID)
 	if err != nil {
 		s.logger.Warn("login_policy_lookup_failed",
 			zap.String("project_id", projectID), zap.String("tenant_id", tenant.ID), zap.Error(err))
-		return noop, nil
+		return nil, nil
 	}
 	if policy == nil {
-		return noop, nil
+		return nil, nil
 	}
+	return tenant, policy
+}
+
+// applyLoginPolicy enforces the three orthogonal controls of an already
+// resolved LoginPolicy (SSO-required → allow-list → 2FA) for a verified
+// method, returning at most ErrSSORequired / ErrPermissionDenied or a
+// RequireSecondFactor decision. projectID/tenant are passed in for logging.
+func (s *AuthService) applyLoginPolicy(tenant *Tenant, policy *LoginPolicy, projectID, method string) (loginPolicyDecision, error) {
+	var noop loginPolicyDecision
 
 	// 1. SSO required: the tenant authenticates exclusively through its IdP.
 	// Every non-SSO method is blocked and the caller is steered to the SSO
