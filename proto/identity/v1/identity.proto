@@ -14,6 +14,21 @@ enum UserStatus {
   USER_STATUS_INVITED = 2;
   USER_STATUS_DEACTIVATED = 3;
   USER_STATUS_SUSPENDED = 4;
+  // PENDING_PARENTAL_CONSENT marks a child-band account created under
+  // age-gating that has not yet obtained verifiable parental consent. Such
+  // an account exists but cannot mint full access tokens until consent is
+  // granted. Additive; all existing statuses keep their numbers.
+  USER_STATUS_PENDING_PARENTAL_CONSENT = 5;
+}
+
+// AgeBand is the coarse age classification derived from a user's date of
+// birth and the deployment's configured age thresholds. Zero-value
+// (UNSPECIFIED) means age is unknown or age-gating is off.
+enum AgeBand {
+  AGE_BAND_UNSPECIFIED = 0;
+  AGE_BAND_CHILD = 1;   // at/below the configured child-max age (COPPA-protected)
+  AGE_BAND_TEEN = 2;    // minor, above child-max but below adult age
+  AGE_BAND_ADULT = 3;   // at/above the adult age
 }
 
 message User {
@@ -38,6 +53,9 @@ message User {
   string phone_number = 19;               // E.164 phone number the user has verified ownership of
   bool phone_verified = 20;               // true once an SMS OTP for phone_number was confirmed
   int64 phone_verified_at = 21;           // epoch ms; 0 = never verified
+  int64 date_of_birth_ms = 22;            // epoch ms of date of birth; 0 = unknown
+  bool is_minor = 23;                     // derived: true when age < adult age (age-gating on)
+  AgeBand age_band = 24;                  // derived age band; UNSPECIFIED when unknown / gate off
 }
 
 message CreateUserRequest {
@@ -231,6 +249,7 @@ message PasswordSignupRequest {
   string password = 2;
   string recovery_email = 3;  // Optional: used for password reset flow
   string captcha_token = 4;   // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
+  int64 date_of_birth_ms = 5; // Optional; epoch ms of date of birth. Required at signup when GATEWAY_AGEGATE_REQUIRE_DOB.
 }
 
 message PasswordSignupResponse {

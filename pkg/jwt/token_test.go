@@ -43,6 +43,28 @@ func TestCreateAndVerify(t *testing.T) {
 	assert.True(t, got.ExpiresAt > got.IssuedAt)
 }
 
+// A minor's token carries is_minor=true and round-trips. A token without
+// the claim verifies with IsMinor=false (the claim is omitted, not forced).
+func TestCreateAndVerify_IsMinorClaim(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+
+	minorTok, err := s.SignAccessToken(context.Background(), Claims{
+		Sub: "kid", Email: "kid@b.com", Role: "member", Tenant: "t", IsMinor: true,
+	}, 15*time.Minute)
+	require.NoError(t, err)
+	gotMinor, err := VerifyAccessToken(minorTok, s, "", "", false)
+	require.NoError(t, err)
+	assert.True(t, gotMinor.IsMinor, "minor token must carry is_minor=true")
+
+	adultTok, err := s.SignAccessToken(context.Background(), Claims{
+		Sub: "adult", Email: "a@b.com", Role: "member", Tenant: "t",
+	}, 15*time.Minute)
+	require.NoError(t, err)
+	gotAdult, err := VerifyAccessToken(adultTok, s, "", "", false)
+	require.NoError(t, err)
+	assert.False(t, gotAdult.IsMinor, "non-minor token verifies with IsMinor=false")
+}
+
 // A token minted before the project model (no Project claim) round-trips
 // with an empty Project — the claim is omitted, not a forced "".
 func TestCreateAndVerify_NoProjectClaim(t *testing.T) {

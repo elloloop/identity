@@ -28,7 +28,7 @@ func TestPasswordSignup_EmptyPasswordFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", "", "", "")
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", "", "", "", 0)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -37,7 +37,7 @@ func TestPasswordSignup_DefaultDisplayNameFromEmail(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "rosa@example.com", strongPW, "", "rec@example.com")
+	result, err := svc.PasswordSignup(context.Background(), "rosa@example.com", strongPW, "", "rec@example.com", 0)
 	require.NoError(t, err)
 	assert.Equal(t, "rosa", result.User.Name)
 }
@@ -243,7 +243,7 @@ func TestRefreshToken_UserDeletedFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "deleted@example.com", strongPW, "", "")
+	result, err := svc.PasswordSignup(context.Background(), "deleted@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 
 	// Delete the user node directly while the refresh token still exists.

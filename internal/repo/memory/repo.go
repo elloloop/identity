@@ -387,6 +387,13 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			case int:
 				u.PhoneVerifiedAt = int64(x)
 			}
+		case "date_of_birth_ms":
+			switch x := v.(type) {
+			case int64:
+				u.DateOfBirthMs = x
+			case int:
+				u.DateOfBirthMs = int64(x)
+			}
 		}
 	}
 }
