@@ -188,6 +188,17 @@ func (b *Built) PlatformAdminStoreIface() service.PlatformAdminStore {
 	return b.PlatformAdminStore
 }
 
+// LoginPolicyStoreIface returns the login-policy governance store as a
+// driver-agnostic interface, or a true nil when this build has no governance
+// plane (memory) — avoiding the typed-nil trap. It backs the operator
+// LoginPolicy-authoring admin RPCs.
+func (b *Built) LoginPolicyStoreIface() service.LoginPolicyStore {
+	if b.LoginPolicyStore == nil {
+		return nil
+	}
+	return b.LoginPolicyStore
+}
+
 // LoginGovernance returns the read-side governance bundle the login path
 // consults to enforce a claimed tenant's LoginPolicy, or a true nil when
 // this build has no governance plane (memory). Returning nil — rather

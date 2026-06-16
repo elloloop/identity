@@ -195,6 +195,112 @@ func (h *IdentityHandler) AdminAddTenantAdmin(
 	}), nil
 }
 
+// UpsertLoginPolicy authors a claimed tenant's LoginPolicy (the policy the
+// login path enforces). Operator-only.
+func (h *IdentityHandler) UpsertLoginPolicy(
+	ctx context.Context,
+	req *connect.Request[identitypb.UpsertLoginPolicyRequest],
+) (*connect.Response[identitypb.UpsertLoginPolicyResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	policy, err := h.controlAdmin.UpsertLoginPolicy(ctx, adminSecret(req.Header()), &service.LoginPolicy{
+		ProjectID:         req.Msg.ProjectId,
+		TenantID:          req.Msg.TenantId,
+		AllowedMethods:    req.Msg.AllowedMethods,
+		SSORequired:       req.Msg.SsoRequired,
+		SSOConnectionJSON: req.Msg.SsoConnectionJson,
+		Require2FA:        req.Msg.Require_2Fa,
+	})
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.UpsertLoginPolicyResponse{
+		Policy: loginPolicyToProto(policy),
+	}), nil
+}
+
+// GetLoginPolicy reads a claimed tenant's LoginPolicy. The policy field is
+// unset when none exists. Operator-only.
+func (h *IdentityHandler) GetLoginPolicy(
+	ctx context.Context,
+	req *connect.Request[identitypb.GetLoginPolicyRequest],
+) (*connect.Response[identitypb.GetLoginPolicyResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	policy, err := h.controlAdmin.GetLoginPolicy(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.GetLoginPolicyResponse{
+		Policy: loginPolicyToProto(policy),
+	}), nil
+}
+
+// DeleteLoginPolicy clears a claimed tenant's LoginPolicy (idempotent).
+// Operator-only.
+func (h *IdentityHandler) DeleteLoginPolicy(
+	ctx context.Context,
+	req *connect.Request[identitypb.DeleteLoginPolicyRequest],
+) (*connect.Response[identitypb.DeleteLoginPolicyResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	if err := h.controlAdmin.DeleteLoginPolicy(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.TenantId); err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.DeleteLoginPolicyResponse{}), nil
+}
+
+// UpsertProjectConfig replaces a project's config_json blob. Operator-only.
+func (h *IdentityHandler) UpsertProjectConfig(
+	ctx context.Context,
+	req *connect.Request[identitypb.UpsertProjectConfigRequest],
+) (*connect.Response[identitypb.UpsertProjectConfigResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	stored, err := h.controlAdmin.UpsertProjectConfig(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.ConfigJson)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.UpsertProjectConfigResponse{ConfigJson: stored}), nil
+}
+
+// GetProjectConfig reads a project's config_json blob. Operator-only.
+func (h *IdentityHandler) GetProjectConfig(
+	ctx context.Context,
+	req *connect.Request[identitypb.GetProjectConfigRequest],
+) (*connect.Response[identitypb.GetProjectConfigResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	stored, err := h.controlAdmin.GetProjectConfig(ctx, adminSecret(req.Header()), req.Msg.ProjectId)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.GetProjectConfigResponse{ConfigJson: stored}), nil
+}
+
+// loginPolicyToProto maps a service LoginPolicy to its proto message. A nil
+// input yields nil (the field is omitted — meaning "no policy set").
+func loginPolicyToProto(p *service.LoginPolicy) *identitypb.LoginPolicy {
+	if p == nil {
+		return nil
+	}
+	return &identitypb.LoginPolicy{
+		ProjectId:         p.ProjectID,
+		TenantId:          p.TenantID,
+		AllowedMethods:    p.AllowedMethods,
+		SsoRequired:       p.SSORequired,
+		SsoConnectionJson: p.SSOConnectionJSON,
+		Require_2Fa:       p.Require2FA,
+		CreatedAtMs:       p.CreatedAtMs,
+		UpdatedAtMs:       p.UpdatedAtMs,
+	}
+}
+
 // CreateFirstPlatformAdmin is the zero-config bootstrap of the first platform
 // admin. Unlike the other Admin RPCs it reads NO admin secret: it succeeds
 // only while platform_admins is empty and is rejected (FailedPrecondition)

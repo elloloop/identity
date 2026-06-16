@@ -84,6 +84,8 @@ func (f *fakePolicyStore) UpsertLoginPolicy(context.Context, *LoginPolicy) (stri
 	return "", nil
 }
 
+func (f *fakePolicyStore) DeleteLoginPolicy(context.Context, string, string) error { return nil }
+
 var (
 	_ DomainStore      = (*lpDomainStore)(nil)
 	_ TenantStore      = (*lpTenantStore)(nil)
