@@ -447,6 +447,22 @@ func New(deps Deps) (*Built, error) {
 	}
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 
+	// Inbound SCIM 2.0 provisioning (#260). Registered only when
+	// GATEWAY_SCIM_ENABLED is true (and Validate has confirmed a bearer
+	// token); otherwise /scim/v2/* 404s and the headless RPCs are unaffected.
+	if deps.Config.SCIMEnabled {
+		logger.Info("scim_server_enabled", zap.String("mount", "/scim/v2/"))
+		(&scimHandler{
+			repo:        repo,
+			defaultProj: deps.Config.DefaultProjectID,
+			bearerToken: deps.Config.SCIMBearerToken,
+			logger:      logger,
+		}).register(mux, true)
+	} else {
+		logger.Info("scim_server_disabled",
+			zap.String("hint", "set GATEWAY_SCIM_ENABLED=true and GATEWAY_SCIM_BEARER_TOKEN to enable /scim/v2"))
+	}
+
 	rpcMetrics, err := middleware.NewRPCMetrics(deps.MetricsRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("rpc metrics: %w", err)

@@ -268,6 +268,7 @@ type User struct {
 	PhoneNumber      string                 `protobuf:"bytes,19,opt,name=phone_number,json=phoneNumber,proto3" json:"phone_number,omitempty"`                   // E.164 phone number the user has verified ownership of
 	PhoneVerified    bool                   `protobuf:"varint,20,opt,name=phone_verified,json=phoneVerified,proto3" json:"phone_verified,omitempty"`            // true once an SMS OTP for phone_number was confirmed
 	PhoneVerifiedAt  int64                  `protobuf:"varint,21,opt,name=phone_verified_at,json=phoneVerifiedAt,proto3" json:"phone_verified_at,omitempty"`    // epoch ms; 0 = never verified
+	ExternalId       string                 `protobuf:"bytes,22,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`                      // IdP-owned stable identifier (SCIM externalId); unique per tenant when set
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -447,6 +448,13 @@ func (x *User) GetPhoneVerifiedAt() int64 {
 		return x.PhoneVerifiedAt
 	}
 	return 0
+}
+
+func (x *User) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
 }
 
 type CreateUserRequest struct {
@@ -9975,7 +9983,7 @@ var File_identity_v1_identity_proto protoreflect.FileDescriptor
 
 const file_identity_v1_identity_proto_rawDesc = "" +
 	"\n" +
-	"\x1aidentity/v1/identity.proto\x12\videntity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x95\x06\n" +
+	"\x1aidentity/v1/identity.proto\x12\videntity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb6\x06\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
@@ -10002,7 +10010,9 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x0fidv_verified_at\x18\x12 \x01(\x03R\ridvVerifiedAt\x12!\n" +
 	"\fphone_number\x18\x13 \x01(\tR\vphoneNumber\x12%\n" +
 	"\x0ephone_verified\x18\x14 \x01(\bR\rphoneVerified\x12*\n" +
-	"\x11phone_verified_at\x18\x15 \x01(\x03R\x0fphoneVerifiedAt\"\x8d\x01\n" +
+	"\x11phone_verified_at\x18\x15 \x01(\x03R\x0fphoneVerifiedAt\x12\x1f\n" +
+	"\vexternal_id\x18\x16 \x01(\tR\n" +
+	"externalId\"\x8d\x01\n" +
 	"\x11CreateUserRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +

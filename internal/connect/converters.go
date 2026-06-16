@@ -55,6 +55,7 @@ func userToProto(u *service.User) *identitypb.User {
 		PhoneVerifiedAt:  u.PhoneVerifiedAt,
 		FailedLoginCount: intToProtoInt32(u.FailedLoginCount),
 		LockedUntil:      u.LockedUntil,
+		ExternalId:       u.ExternalID,
 	}
 	if !u.CreatedAt.IsZero() {
 		pb.CreatedAt = timestamppb.New(u.CreatedAt)

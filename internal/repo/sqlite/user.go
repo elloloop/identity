@@ -23,6 +23,7 @@ const userColumns = `
 	idv_verified, idv_verified_at_ms,
 	phone_number, phone_verified, phone_verified_at_ms,
 	last_login_at_ms,
+	external_id,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed qualifies every column with the given table alias so
@@ -47,6 +48,7 @@ func scanUser(s scanner) (*service.User, error) {
 		phoneVerified                                          int64
 		id, email, name, role, avatar, status, recovery, phash string
 		phoneNumber                                            string
+		externalID                                             string
 	)
 	if err := s.Scan(
 		&id, &email, &name, &role, &avatar, &status, &recovery,
@@ -56,6 +58,7 @@ func scanUser(s scanner) (*service.User, error) {
 		&idvVerified, &idvVerifiedAtMs,
 		&phoneNumber, &phoneVerified, &phoneVerifiedAtMs,
 		&lastLoginAtMs,
+		&externalID,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -80,6 +83,7 @@ func scanUser(s scanner) (*service.User, error) {
 	u.PhoneVerified = phoneVerified != 0
 	u.PhoneVerifiedAt = phoneVerifiedAtMs
 	u.LastLoginAtMs = lastLoginAtMs
+	u.ExternalID = externalID
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -120,6 +124,75 @@ func (r *sqliteRepository) GetUser(ctx context.Context, userID string) (*service
 	return u, nil
 }
 
+func (r *sqliteRepository) FindUserByExternalID(ctx context.Context, externalID string) (*service.User, error) {
+	if externalID == "" {
+		return nil, nil
+	}
+	const q = `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND external_id = $2
+		LIMIT 1`
+	u, err := scanUser(r.db.QueryRow(ctx, q, r.projectID, externalID))
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapErr("FindUserByExternalID", err)
+	}
+	return u, nil
+}
+
+func (r *sqliteRepository) ListUsers(ctx context.Context, filter service.UserListFilter) ([]*service.User, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = service.DefaultUserListLimit
+	}
+	if limit > service.MaxUserListLimit {
+		limit = service.MaxUserListLimit
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	where := []string{"project_id = $1"}
+	args := []any{r.projectID}
+	if filter.Email != "" {
+		args = append(args, filter.Email)
+		where = append(where, fmt.Sprintf("lower(email) = lower($%d)", len(args)))
+	}
+	if filter.ExternalID != "" {
+		args = append(args, filter.ExternalID)
+		where = append(where, fmt.Sprintf("external_id = $%d", len(args)))
+	}
+	args = append(args, limit, offset)
+	q := fmt.Sprintf(`SELECT %s
+		FROM users
+		WHERE %s
+		ORDER BY created_at_ms ASC, id ASC
+		LIMIT $%d OFFSET $%d`,
+		userColumns, strings.Join(where, " AND "), len(args)-1, len(args))
+
+	rows, err := r.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, wrapErr("ListUsers", err)
+	}
+	defer rows.Close()
+
+	var out []*service.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, wrapErr("ListUsers", err)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapErr("ListUsers", err)
+	}
+	return out, nil
+}
+
 func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (string, error) {
 	if u == nil {
 		return "", errors.New("sqlite: CreateUser: nil user")
@@ -152,6 +225,7 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 			idv_verified, idv_verified_at_ms,
 			phone_number, phone_verified, phone_verified_at_ms,
 			last_login_at_ms,
+			external_id,
 			created_at_ms, updated_at_ms
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
@@ -161,7 +235,8 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 			$16, $17,
 			$18, $19, $20,
 			$21,
-			$22, $23
+			$22,
+			$23, $24
 		)`
 	_, err := r.db.Exec(
 		ctx, q,
@@ -172,6 +247,7 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 		u.IDVVerified, u.IDVVerifiedAt,
 		u.PhoneNumber, u.PhoneVerified, u.PhoneVerifiedAt,
 		u.LastLoginAtMs,
+		u.ExternalID,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	)
 	if err != nil {
@@ -207,6 +283,7 @@ var userFieldColumns = map[string]struct {
 	"phone_number":       {"phone_number", "string"},
 	"phone_verified":     {"phone_verified", "bool"},
 	"phone_verified_at":  {"phone_verified_at_ms", "int64"},
+	"external_id":        {"external_id", "string"},
 }
 
 func (r *sqliteRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {

@@ -5386,6 +5386,10 @@ components:
           title: phone_verified_at
           format: int64
           description: epoch ms; 0 = never verified
+        externalId:
+          type: string
+          title: external_id
+          description: IdP-owned stable identifier (SCIM externalId); unique per tenant when set
       title: User
       additionalProperties: false
     identity.v1.UserStatus:

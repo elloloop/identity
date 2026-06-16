@@ -41,6 +41,16 @@ func scopedRepository(ctx context.Context, defaultRepo Repository, defaultProjec
 	return scoper.WithProject(requestProjectID(ctx, defaultProjectID))
 }
 
+// ScopedRepository resolves a request's project from ctx and returns
+// defaultRepo bound to that project (ADR-0002). It is the exported pair of
+// scopedRepository, wired by internal/app for HTTP surfaces (e.g. the SCIM
+// server) that run inside the project-resolution middleware but outside the
+// Connect service layer, so their reads/writes are filtered by the same
+// `WHERE project_id = $1` boundary every RPC honours.
+func ScopedRepository(ctx context.Context, defaultRepo Repository, defaultProjectID string) Repository {
+	return scopedRepository(ctx, defaultRepo, defaultProjectID)
+}
+
 // scopedDB returns bootDB bound to the request's project. The postgres DB
 // is the same concrete type as its Repository (it ignores the per-call
 // tenant argument and filters on its bound project), so it is rebound via

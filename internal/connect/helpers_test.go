@@ -163,6 +163,38 @@ func (r *fakeRepo) GetUser(_ context.Context, userID string) (*service.User, err
 	return &cp, nil
 }
 
+func (r *fakeRepo) FindUserByExternalID(_ context.Context, externalID string) (*service.User, error) {
+	if externalID == "" {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, u := range r.users {
+		if u.ExternalID == externalID {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.User
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		cp := *u
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
 func (r *fakeRepo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

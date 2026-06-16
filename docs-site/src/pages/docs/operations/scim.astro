@@ -1,0 +1,95 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="SCIM Provisioning">
+  <h1>SCIM 2.0 Provisioning</h1>
+  <p>
+    Identity exposes an inbound <strong>SCIM 2.0</strong> server (RFC 7643 /
+    RFC 7644) under <code>/scim/v2</code> so an external identity provider —
+    Okta, Microsoft Entra ID, Google Workspace — can lifecycle-manage users
+    in a project: create accounts on hire, deactivate on offboard, and keep
+    profile attributes in sync, all without anyone logging into an admin
+    console.
+  </p>
+
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+    <strong>Disabled by default.</strong> When
+    <code>GATEWAY_SCIM_ENABLED</code> is unset the <code>/scim/v2/*</code>
+    routes are never registered and return <code>404</code>. The headless
+    RPCs are unaffected. Turning SCIM on requires a bearer token; the server
+    refuses to boot otherwise.
+  </div>
+
+  <h2>Enable it</h2>
+  <Code
+    lang="bash"
+    code={`# Turn on the SCIM server and set the shared bearer token the IdP presents.
+GATEWAY_SCIM_ENABLED=true
+GATEWAY_SCIM_BEARER_TOKEN=<a-long-random-secret>`}
+  />
+  <p>
+    Configure your IdP's SCIM connector with the base URL
+    <code>https://&lt;your-host&gt;/scim/v2</code> and the same bearer token.
+    Each request resolves to a project via the normal project resolver
+    (credential key or <code>Host</code> auth-domain), so a multi-project
+    deployment serves each project's own user pool.
+  </p>
+
+  <h2>external_id correlation</h2>
+  <p>
+    The user model carries a stable, IdP-owned
+    <code>external_id</code> (SCIM <code>externalId</code>). It is unique per
+    project when set and lets the IdP target an account independently of email
+    changes. It round-trips through every store (Postgres, SQLite, in-memory)
+    and is exposed on the <code>User</code> message
+    (field&nbsp;22).
+  </p>
+
+  <h2>Supported surface</h2>
+  <ul>
+    <li><code>POST /scim/v2/Users</code> — create a user.</li>
+    <li><code>GET /scim/v2/Users/&#123;id&#125;</code> — fetch one user.</li>
+    <li>
+      <code>GET /scim/v2/Users?filter=userName eq "a@b.com"</code> — list with
+      <code>userName</code>, <code>email</code>, or <code>externalId</code> eq
+      filters, plus <code>startIndex</code> / <code>count</code> pagination.
+    </li>
+    <li><code>PUT /scim/v2/Users/&#123;id&#125;</code> — replace a user.</li>
+    <li>
+      <code>PATCH /scim/v2/Users/&#123;id&#125;</code> — toggle
+      <code>active</code>. <code>active:false</code> deactivates the account
+      and immediately revokes its sessions and refresh tokens;
+      <code>active:true</code> reactivates it.
+    </li>
+    <li><code>DELETE /scim/v2/Users/&#123;id&#125;</code> — remove a user.</li>
+    <li>
+      <code>GET /scim/v2/ServiceProviderConfig</code>,
+      <code>/Schemas</code>, <code>/ResourceTypes</code> — discovery.
+    </li>
+  </ul>
+
+  <h2>Example: provision a user</h2>
+  <Code
+    lang="bash"
+    code={`curl -X POST https://auth.example.com/scim/v2/Users \\
+  -H "Authorization: Bearer $GATEWAY_SCIM_BEARER_TOKEN" \\
+  -H "Content-Type: application/scim+json" \\
+  -d '{
+    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+    "userName": "alice@example.com",
+    "externalId": "okta-00u123",
+    "name": { "givenName": "Alice", "familyName": "Smith" },
+    "emails": [{ "value": "alice@example.com", "primary": true }],
+    "active": true
+  }'`}
+  />
+
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+    <strong>Deferred.</strong> SCIM <code>/Groups</code> and per-tenant
+    (rather than per-deployment) bearer tokens are not yet implemented. The
+    <code>/Users</code> surface above is complete and tested across all
+    storage backends.
+  </div>
+</DocsLayout>

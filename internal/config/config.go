@@ -255,6 +255,17 @@ type Config struct {
 	CaptchaEnforceEmailLoginCode   bool    // GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE (default true)
 	CaptchaEnforceMagicLink        bool    // GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK (default true)
 
+	// SCIM 2.0 inbound provisioning (#260). When SCIMEnabled is false the
+	// /scim/v2/* routes are not registered and return 404, leaving the
+	// headless RPCs untouched. When true, SCIMBearerToken MUST be set
+	// (enforced by Validate): it is the shared secret an external IdP
+	// (Okta/Entra/Google) presents in the Authorization: Bearer header on
+	// every SCIM request. Requests resolve to the request's project via the
+	// existing project resolver, so a multi-project deployment serves each
+	// project's user pool from its own auth-domain.
+	SCIMEnabled     bool   // GATEWAY_SCIM_ENABLED (default false)
+	SCIMBearerToken string // GATEWAY_SCIM_BEARER_TOKEN (required when SCIMEnabled)
+
 	// Password
 	PasswordSignupEnabled      bool
 	PasswordResetEnabled       bool
@@ -544,6 +555,9 @@ func Load() *Config {
 		CaptchaEnforceEmailLoginCode:   envBool("GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE", true),
 		CaptchaEnforceMagicLink:        envBool("GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK", true),
 
+		SCIMEnabled:     envBool("GATEWAY_SCIM_ENABLED", false),
+		SCIMBearerToken: envStr("GATEWAY_SCIM_BEARER_TOKEN", ""),
+
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
 		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
@@ -802,6 +816,26 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateSCIM(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateSCIM enforces the SCIM invariant: a deployment that turns the
+// inbound SCIM server on must supply a bearer token, since the token is the
+// only credential gating account lifecycle operations. Failing closed at
+// boot beats serving an unauthenticated provisioning endpoint.
+func (c *Config) validateSCIM() error {
+	if !c.SCIMEnabled {
+		return nil
+	}
+	if c.SCIMBearerToken == "" {
+		return errors.New(
+			"config: GATEWAY_SCIM_ENABLED=true requires GATEWAY_SCIM_BEARER_TOKEN to be set",
+		)
+	}
 	return nil
 }
 

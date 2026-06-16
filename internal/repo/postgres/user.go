@@ -24,6 +24,7 @@ const userColumns = `
 	idv_verified, idv_verified_at_ms,
 	phone_number, phone_verified, phone_verified_at_ms,
 	last_login_at_ms,
+	external_id,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed returns userColumns with every column qualified by
@@ -51,6 +52,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		phoneVerified                                          bool
 		id, email, name, role, avatar, status, recovery, phash string
 		phoneNumber                                            string
+		externalID                                             string
 	)
 	if err := row.Scan(
 		&id, &email, &name, &role, &avatar, &status, &recovery,
@@ -60,6 +62,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		&idvVerified, &idvVerifiedAtMs,
 		&phoneNumber, &phoneVerified, &phoneVerifiedAtMs,
 		&lastLoginAtMs,
+		&externalID,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -84,6 +87,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 	u.PhoneVerified = phoneVerified
 	u.PhoneVerifiedAt = phoneVerifiedAtMs
 	u.LastLoginAtMs = lastLoginAtMs
+	u.ExternalID = externalID
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -126,6 +130,76 @@ func (r *pgRepository) GetUser(ctx context.Context, userID string) (*service.Use
 	return u, nil
 }
 
+func (r *pgRepository) FindUserByExternalID(ctx context.Context, externalID string) (*service.User, error) {
+	if externalID == "" {
+		return nil, nil
+	}
+	const q = `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND external_id = $2
+		LIMIT 1`
+	row := r.pool.QueryRow(ctx, q, r.projectID, externalID)
+	u, err := scanUser(row)
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapPgErr("FindUserByExternalID", err)
+	}
+	return u, nil
+}
+
+func (r *pgRepository) ListUsers(ctx context.Context, filter service.UserListFilter) ([]*service.User, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = service.DefaultUserListLimit
+	}
+	if limit > service.MaxUserListLimit {
+		limit = service.MaxUserListLimit
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	where := []string{"project_id = $1"}
+	args := []any{r.projectID}
+	if filter.Email != "" {
+		args = append(args, filter.Email)
+		where = append(where, fmt.Sprintf("lower(email) = lower($%d)", len(args)))
+	}
+	if filter.ExternalID != "" {
+		args = append(args, filter.ExternalID)
+		where = append(where, fmt.Sprintf("external_id = $%d", len(args)))
+	}
+	args = append(args, limit, offset)
+	q := fmt.Sprintf(`SELECT %s
+		FROM users
+		WHERE %s
+		ORDER BY created_at_ms ASC, id ASC
+		LIMIT $%d OFFSET $%d`,
+		userColumns, strings.Join(where, " AND "), len(args)-1, len(args))
+
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, wrapPgErr("ListUsers", err)
+	}
+	defer rows.Close()
+
+	var out []*service.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, wrapPgErr("ListUsers", err)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapPgErr("ListUsers", err)
+	}
+	return out, nil
+}
+
 func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string, error) {
 	if u == nil {
 		return "", errors.New("postgres: CreateUser: nil user")
@@ -160,6 +234,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			idv_verified, idv_verified_at_ms,
 			phone_number, phone_verified, phone_verified_at_ms,
 			last_login_at_ms,
+			external_id,
 			created_at_ms, updated_at_ms
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
@@ -169,7 +244,8 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			$16, $17,
 			$18, $19, $20,
 			$21,
-			$22, $23
+			$22,
+			$23, $24
 		)`
 	_, err := r.pool.Exec(
 		ctx, q,
@@ -180,6 +256,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 		u.IDVVerified, u.IDVVerifiedAt,
 		u.PhoneNumber, u.PhoneVerified, u.PhoneVerifiedAt,
 		u.LastLoginAtMs,
+		u.ExternalID,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	)
 	if err != nil {
@@ -215,6 +292,7 @@ var userFieldColumns = map[string]struct {
 	"phone_number":       {"phone_number", "string"},
 	"phone_verified":     {"phone_verified", "bool"},
 	"phone_verified_at":  {"phone_verified_at_ms", "int64"},
+	"external_id":        {"external_id", "string"},
 }
 
 func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {

@@ -38,6 +38,7 @@ message User {
   string phone_number = 19;               // E.164 phone number the user has verified ownership of
   bool phone_verified = 20;               // true once an SMS OTP for phone_number was confirmed
   int64 phone_verified_at = 21;           // epoch ms; 0 = never verified
+  string external_id = 22;                 // IdP-owned stable identifier (SCIM externalId); unique per tenant when set
 }
 
 message CreateUserRequest {
