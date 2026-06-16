@@ -303,6 +303,17 @@ type Config struct {
 	PhoneCodeMaxAttempts     int // GATEWAY_PHONE_CODE_MAX_ATTEMPTS (default 5)
 	PhoneCodeCooldownSeconds int // GATEWAY_PHONE_CODE_COOLDOWN_SECONDS (default 60)
 
+	// SAML 2.0 Identity Provider. Disabled by default; the server mounts
+	// no SAML surface and holds a no-op issuer. When SAMLIDPEnabled is
+	// true the entityID, SSO URL, and a signing key + certificate are
+	// required (enforced by Validate). SLO URL is optional.
+	SAMLIDPEnabled  bool   // GATEWAY_SAML_IDP_ENABLED (default false)
+	SAMLEntityID    string // GATEWAY_SAML_ENTITY_ID (IdP entityID / metadata URL)
+	SAMLSSOURL      string // GATEWAY_SAML_SSO_URL (HTTP-POST/Redirect SSO endpoint)
+	SAMLSLOURL      string // GATEWAY_SAML_SLO_URL (optional single-logout endpoint)
+	SAMLSigningKey  string // GATEWAY_SAML_SIGNING_KEY (PEM RSA private key)
+	SAMLSigningCert string // GATEWAY_SAML_SIGNING_CERT (PEM X.509 certificate)
+
 	// TOTP (2FA)
 	// 32-byte key, base64-encoded. Required in prod; dev falls back to
 	// a deterministic throwaway key.
@@ -568,6 +579,13 @@ func Load() *Config {
 		PhoneCodeMaxAttempts:     envInt("GATEWAY_PHONE_CODE_MAX_ATTEMPTS", 5),
 		PhoneCodeCooldownSeconds: envInt("GATEWAY_PHONE_CODE_COOLDOWN_SECONDS", 60),
 
+		SAMLIDPEnabled:  envBool("GATEWAY_SAML_IDP_ENABLED", false),
+		SAMLEntityID:    envStr("GATEWAY_SAML_ENTITY_ID", ""),
+		SAMLSSOURL:      envStr("GATEWAY_SAML_SSO_URL", ""),
+		SAMLSLOURL:      envStr("GATEWAY_SAML_SLO_URL", ""),
+		SAMLSigningKey:  envStr("GATEWAY_SAML_SIGNING_KEY", ""),
+		SAMLSigningCert: envStr("GATEWAY_SAML_SIGNING_CERT", ""),
+
 		TOTPEncryptionKey:  envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),
 		TOTPIssuer:         envStr("GATEWAY_TOTP_ISSUER", "Glassa Work"),
 		TOTPRecoveryPepper: envStr("GATEWAY_TOTP_RECOVERY_PEPPER", ""),
@@ -802,6 +820,34 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateSAML(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateSAML enforces the SAML-IdP invariant: enabling the IdP requires
+// an entityID, an SSO URL, and a signing key + certificate. A disabled
+// deployment is unconstrained — the no-op issuer is wired and the fields
+// are ignored. The cryptographic validity of the key/cert pair is checked
+// when the issuer is constructed (samlidp.NewRSAIssuer); here we only fail
+// closed on missing required values so the server never boots an "enabled
+// but unusable" SAML surface.
+func (c *Config) validateSAML() error {
+	if !c.SAMLIDPEnabled {
+		return nil
+	}
+	if c.SAMLEntityID == "" || c.SAMLSSOURL == "" {
+		return errors.New(
+			"config: GATEWAY_SAML_IDP_ENABLED=true requires GATEWAY_SAML_ENTITY_ID and GATEWAY_SAML_SSO_URL",
+		)
+	}
+	if c.SAMLSigningKey == "" || c.SAMLSigningCert == "" {
+		return errors.New(
+			"config: GATEWAY_SAML_IDP_ENABLED=true requires GATEWAY_SAML_SIGNING_KEY and GATEWAY_SAML_SIGNING_CERT (PEM)",
+		)
+	}
 	return nil
 }
 
