@@ -295,6 +295,30 @@ const (
 	// IdentityServiceGetUserPermissionsProcedure is the fully-qualified name of the IdentityService's
 	// GetUserPermissions RPC.
 	IdentityServiceGetUserPermissionsProcedure = "/identity.v1.IdentityService/GetUserPermissions"
+	// IdentityServiceListLinkedIdentitiesProcedure is the fully-qualified name of the IdentityService's
+	// ListLinkedIdentities RPC.
+	IdentityServiceListLinkedIdentitiesProcedure = "/identity.v1.IdentityService/ListLinkedIdentities"
+	// IdentityServiceLinkIdentityProcedure is the fully-qualified name of the IdentityService's
+	// LinkIdentity RPC.
+	IdentityServiceLinkIdentityProcedure = "/identity.v1.IdentityService/LinkIdentity"
+	// IdentityServiceUnlinkIdentityProcedure is the fully-qualified name of the IdentityService's
+	// UnlinkIdentity RPC.
+	IdentityServiceUnlinkIdentityProcedure = "/identity.v1.IdentityService/UnlinkIdentity"
+	// IdentityServiceUpsertLoginPolicyProcedure is the fully-qualified name of the IdentityService's
+	// UpsertLoginPolicy RPC.
+	IdentityServiceUpsertLoginPolicyProcedure = "/identity.v1.IdentityService/UpsertLoginPolicy"
+	// IdentityServiceGetLoginPolicyProcedure is the fully-qualified name of the IdentityService's
+	// GetLoginPolicy RPC.
+	IdentityServiceGetLoginPolicyProcedure = "/identity.v1.IdentityService/GetLoginPolicy"
+	// IdentityServiceDeleteLoginPolicyProcedure is the fully-qualified name of the IdentityService's
+	// DeleteLoginPolicy RPC.
+	IdentityServiceDeleteLoginPolicyProcedure = "/identity.v1.IdentityService/DeleteLoginPolicy"
+	// IdentityServiceUpsertProjectConfigProcedure is the fully-qualified name of the IdentityService's
+	// UpsertProjectConfig RPC.
+	IdentityServiceUpsertProjectConfigProcedure = "/identity.v1.IdentityService/UpsertProjectConfig"
+	// IdentityServiceGetProjectConfigProcedure is the fully-qualified name of the IdentityService's
+	// GetProjectConfig RPC.
+	IdentityServiceGetProjectConfigProcedure = "/identity.v1.IdentityService/GetProjectConfig"
 )
 
 // IdentityServiceClient is a client for the identity.v1.IdentityService service.
@@ -440,6 +464,25 @@ type IdentityServiceClient interface {
 	DeleteRole(context.Context, *connect.Request[v1.DeleteRoleRequest]) (*connect.Response[v1.DeleteRoleResponse], error)
 	AssignRole(context.Context, *connect.Request[v1.AssignRoleRequest]) (*connect.Response[v1.AssignRoleResponse], error)
 	GetUserPermissions(context.Context, *connect.Request[v1.GetUserPermissionsRequest]) (*connect.Response[v1.GetUserPermissionsResponse], error)
+	// Self-service linked identities (connected accounts). Authenticated by the
+	// caller's user JWT; each operates only on the caller's own links.
+	ListLinkedIdentities(context.Context, *connect.Request[v1.ListLinkedIdentitiesRequest]) (*connect.Response[v1.ListLinkedIdentitiesResponse], error)
+	LinkIdentity(context.Context, *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error)
+	UnlinkIdentity(context.Context, *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error)
+	// Per-tenant LoginPolicy authoring. These write the policy the login path
+	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
+	// tenant within a project — at most one policy per (project, tenant).
+	// Operator-only: authenticated by the shared admin secret, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error)
+	GetLoginPolicy(context.Context, *connect.Request[v1.GetLoginPolicyRequest]) (*connect.Response[v1.GetLoginPolicyResponse], error)
+	DeleteLoginPolicy(context.Context, *connect.Request[v1.DeleteLoginPolicyRequest]) (*connect.Response[v1.DeleteLoginPolicyResponse], error)
+	// Per-project config authoring. UpsertProjectConfig replaces a project's
+	// config_json blob (the typed knobs an operator sets — e.g. CORS allowed
+	// origins); GetProjectConfig reads it back. Operator-only, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertProjectConfig(context.Context, *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error)
+	GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error)
 }
 
 // NewIdentityServiceClient constructs a client for the identity.v1.IdentityService service. By
@@ -981,6 +1024,54 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("GetUserPermissions")),
 			connect.WithClientOptions(opts...),
 		),
+		listLinkedIdentities: connect.NewClient[v1.ListLinkedIdentitiesRequest, v1.ListLinkedIdentitiesResponse](
+			httpClient,
+			baseURL+IdentityServiceListLinkedIdentitiesProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListLinkedIdentities")),
+			connect.WithClientOptions(opts...),
+		),
+		linkIdentity: connect.NewClient[v1.LinkIdentityRequest, v1.LinkIdentityResponse](
+			httpClient,
+			baseURL+IdentityServiceLinkIdentityProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("LinkIdentity")),
+			connect.WithClientOptions(opts...),
+		),
+		unlinkIdentity: connect.NewClient[v1.UnlinkIdentityRequest, v1.UnlinkIdentityResponse](
+			httpClient,
+			baseURL+IdentityServiceUnlinkIdentityProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UnlinkIdentity")),
+			connect.WithClientOptions(opts...),
+		),
+		upsertLoginPolicy: connect.NewClient[v1.UpsertLoginPolicyRequest, v1.UpsertLoginPolicyResponse](
+			httpClient,
+			baseURL+IdentityServiceUpsertLoginPolicyProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UpsertLoginPolicy")),
+			connect.WithClientOptions(opts...),
+		),
+		getLoginPolicy: connect.NewClient[v1.GetLoginPolicyRequest, v1.GetLoginPolicyResponse](
+			httpClient,
+			baseURL+IdentityServiceGetLoginPolicyProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetLoginPolicy")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteLoginPolicy: connect.NewClient[v1.DeleteLoginPolicyRequest, v1.DeleteLoginPolicyResponse](
+			httpClient,
+			baseURL+IdentityServiceDeleteLoginPolicyProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("DeleteLoginPolicy")),
+			connect.WithClientOptions(opts...),
+		),
+		upsertProjectConfig: connect.NewClient[v1.UpsertProjectConfigRequest, v1.UpsertProjectConfigResponse](
+			httpClient,
+			baseURL+IdentityServiceUpsertProjectConfigProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UpsertProjectConfig")),
+			connect.WithClientOptions(opts...),
+		),
+		getProjectConfig: connect.NewClient[v1.GetProjectConfigRequest, v1.GetProjectConfigResponse](
+			httpClient,
+			baseURL+IdentityServiceGetProjectConfigProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetProjectConfig")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -1074,6 +1165,14 @@ type identityServiceClient struct {
 	deleteRole                    *connect.Client[v1.DeleteRoleRequest, v1.DeleteRoleResponse]
 	assignRole                    *connect.Client[v1.AssignRoleRequest, v1.AssignRoleResponse]
 	getUserPermissions            *connect.Client[v1.GetUserPermissionsRequest, v1.GetUserPermissionsResponse]
+	listLinkedIdentities          *connect.Client[v1.ListLinkedIdentitiesRequest, v1.ListLinkedIdentitiesResponse]
+	linkIdentity                  *connect.Client[v1.LinkIdentityRequest, v1.LinkIdentityResponse]
+	unlinkIdentity                *connect.Client[v1.UnlinkIdentityRequest, v1.UnlinkIdentityResponse]
+	upsertLoginPolicy             *connect.Client[v1.UpsertLoginPolicyRequest, v1.UpsertLoginPolicyResponse]
+	getLoginPolicy                *connect.Client[v1.GetLoginPolicyRequest, v1.GetLoginPolicyResponse]
+	deleteLoginPolicy             *connect.Client[v1.DeleteLoginPolicyRequest, v1.DeleteLoginPolicyResponse]
+	upsertProjectConfig           *connect.Client[v1.UpsertProjectConfigRequest, v1.UpsertProjectConfigResponse]
+	getProjectConfig              *connect.Client[v1.GetProjectConfigRequest, v1.GetProjectConfigResponse]
 }
 
 // BeginOAuthLogin calls identity.v1.IdentityService.BeginOAuthLogin.
@@ -1516,6 +1615,46 @@ func (c *identityServiceClient) GetUserPermissions(ctx context.Context, req *con
 	return c.getUserPermissions.CallUnary(ctx, req)
 }
 
+// ListLinkedIdentities calls identity.v1.IdentityService.ListLinkedIdentities.
+func (c *identityServiceClient) ListLinkedIdentities(ctx context.Context, req *connect.Request[v1.ListLinkedIdentitiesRequest]) (*connect.Response[v1.ListLinkedIdentitiesResponse], error) {
+	return c.listLinkedIdentities.CallUnary(ctx, req)
+}
+
+// LinkIdentity calls identity.v1.IdentityService.LinkIdentity.
+func (c *identityServiceClient) LinkIdentity(ctx context.Context, req *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error) {
+	return c.linkIdentity.CallUnary(ctx, req)
+}
+
+// UnlinkIdentity calls identity.v1.IdentityService.UnlinkIdentity.
+func (c *identityServiceClient) UnlinkIdentity(ctx context.Context, req *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error) {
+	return c.unlinkIdentity.CallUnary(ctx, req)
+}
+
+// UpsertLoginPolicy calls identity.v1.IdentityService.UpsertLoginPolicy.
+func (c *identityServiceClient) UpsertLoginPolicy(ctx context.Context, req *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error) {
+	return c.upsertLoginPolicy.CallUnary(ctx, req)
+}
+
+// GetLoginPolicy calls identity.v1.IdentityService.GetLoginPolicy.
+func (c *identityServiceClient) GetLoginPolicy(ctx context.Context, req *connect.Request[v1.GetLoginPolicyRequest]) (*connect.Response[v1.GetLoginPolicyResponse], error) {
+	return c.getLoginPolicy.CallUnary(ctx, req)
+}
+
+// DeleteLoginPolicy calls identity.v1.IdentityService.DeleteLoginPolicy.
+func (c *identityServiceClient) DeleteLoginPolicy(ctx context.Context, req *connect.Request[v1.DeleteLoginPolicyRequest]) (*connect.Response[v1.DeleteLoginPolicyResponse], error) {
+	return c.deleteLoginPolicy.CallUnary(ctx, req)
+}
+
+// UpsertProjectConfig calls identity.v1.IdentityService.UpsertProjectConfig.
+func (c *identityServiceClient) UpsertProjectConfig(ctx context.Context, req *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error) {
+	return c.upsertProjectConfig.CallUnary(ctx, req)
+}
+
+// GetProjectConfig calls identity.v1.IdentityService.GetProjectConfig.
+func (c *identityServiceClient) GetProjectConfig(ctx context.Context, req *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error) {
+	return c.getProjectConfig.CallUnary(ctx, req)
+}
+
 // IdentityServiceHandler is an implementation of the identity.v1.IdentityService service.
 type IdentityServiceHandler interface {
 	// Authentication
@@ -1659,6 +1798,25 @@ type IdentityServiceHandler interface {
 	DeleteRole(context.Context, *connect.Request[v1.DeleteRoleRequest]) (*connect.Response[v1.DeleteRoleResponse], error)
 	AssignRole(context.Context, *connect.Request[v1.AssignRoleRequest]) (*connect.Response[v1.AssignRoleResponse], error)
 	GetUserPermissions(context.Context, *connect.Request[v1.GetUserPermissionsRequest]) (*connect.Response[v1.GetUserPermissionsResponse], error)
+	// Self-service linked identities (connected accounts). Authenticated by the
+	// caller's user JWT; each operates only on the caller's own links.
+	ListLinkedIdentities(context.Context, *connect.Request[v1.ListLinkedIdentitiesRequest]) (*connect.Response[v1.ListLinkedIdentitiesResponse], error)
+	LinkIdentity(context.Context, *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error)
+	UnlinkIdentity(context.Context, *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error)
+	// Per-tenant LoginPolicy authoring. These write the policy the login path
+	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
+	// tenant within a project — at most one policy per (project, tenant).
+	// Operator-only: authenticated by the shared admin secret, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error)
+	GetLoginPolicy(context.Context, *connect.Request[v1.GetLoginPolicyRequest]) (*connect.Response[v1.GetLoginPolicyResponse], error)
+	DeleteLoginPolicy(context.Context, *connect.Request[v1.DeleteLoginPolicyRequest]) (*connect.Response[v1.DeleteLoginPolicyResponse], error)
+	// Per-project config authoring. UpsertProjectConfig replaces a project's
+	// config_json blob (the typed knobs an operator sets — e.g. CORS allowed
+	// origins); GetProjectConfig reads it back. Operator-only, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertProjectConfig(context.Context, *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error)
+	GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error)
 }
 
 // NewIdentityServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -2196,6 +2354,54 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("GetUserPermissions")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceListLinkedIdentitiesHandler := connect.NewUnaryHandler(
+		IdentityServiceListLinkedIdentitiesProcedure,
+		svc.ListLinkedIdentities,
+		connect.WithSchema(identityServiceMethods.ByName("ListLinkedIdentities")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceLinkIdentityHandler := connect.NewUnaryHandler(
+		IdentityServiceLinkIdentityProcedure,
+		svc.LinkIdentity,
+		connect.WithSchema(identityServiceMethods.ByName("LinkIdentity")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceUnlinkIdentityHandler := connect.NewUnaryHandler(
+		IdentityServiceUnlinkIdentityProcedure,
+		svc.UnlinkIdentity,
+		connect.WithSchema(identityServiceMethods.ByName("UnlinkIdentity")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceUpsertLoginPolicyHandler := connect.NewUnaryHandler(
+		IdentityServiceUpsertLoginPolicyProcedure,
+		svc.UpsertLoginPolicy,
+		connect.WithSchema(identityServiceMethods.ByName("UpsertLoginPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGetLoginPolicyHandler := connect.NewUnaryHandler(
+		IdentityServiceGetLoginPolicyProcedure,
+		svc.GetLoginPolicy,
+		connect.WithSchema(identityServiceMethods.ByName("GetLoginPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceDeleteLoginPolicyHandler := connect.NewUnaryHandler(
+		IdentityServiceDeleteLoginPolicyProcedure,
+		svc.DeleteLoginPolicy,
+		connect.WithSchema(identityServiceMethods.ByName("DeleteLoginPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceUpsertProjectConfigHandler := connect.NewUnaryHandler(
+		IdentityServiceUpsertProjectConfigProcedure,
+		svc.UpsertProjectConfig,
+		connect.WithSchema(identityServiceMethods.ByName("UpsertProjectConfig")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGetProjectConfigHandler := connect.NewUnaryHandler(
+		IdentityServiceGetProjectConfigProcedure,
+		svc.GetProjectConfig,
+		connect.WithSchema(identityServiceMethods.ByName("GetProjectConfig")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/identity.v1.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case IdentityServiceBeginOAuthLoginProcedure:
@@ -2374,6 +2580,22 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAssignRoleHandler.ServeHTTP(w, r)
 		case IdentityServiceGetUserPermissionsProcedure:
 			identityServiceGetUserPermissionsHandler.ServeHTTP(w, r)
+		case IdentityServiceListLinkedIdentitiesProcedure:
+			identityServiceListLinkedIdentitiesHandler.ServeHTTP(w, r)
+		case IdentityServiceLinkIdentityProcedure:
+			identityServiceLinkIdentityHandler.ServeHTTP(w, r)
+		case IdentityServiceUnlinkIdentityProcedure:
+			identityServiceUnlinkIdentityHandler.ServeHTTP(w, r)
+		case IdentityServiceUpsertLoginPolicyProcedure:
+			identityServiceUpsertLoginPolicyHandler.ServeHTTP(w, r)
+		case IdentityServiceGetLoginPolicyProcedure:
+			identityServiceGetLoginPolicyHandler.ServeHTTP(w, r)
+		case IdentityServiceDeleteLoginPolicyProcedure:
+			identityServiceDeleteLoginPolicyHandler.ServeHTTP(w, r)
+		case IdentityServiceUpsertProjectConfigProcedure:
+			identityServiceUpsertProjectConfigHandler.ServeHTTP(w, r)
+		case IdentityServiceGetProjectConfigProcedure:
+			identityServiceGetProjectConfigHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2733,4 +2955,36 @@ func (UnimplementedIdentityServiceHandler) AssignRole(context.Context, *connect.
 
 func (UnimplementedIdentityServiceHandler) GetUserPermissions(context.Context, *connect.Request[v1.GetUserPermissionsRequest]) (*connect.Response[v1.GetUserPermissionsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetUserPermissions is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListLinkedIdentities(context.Context, *connect.Request[v1.ListLinkedIdentitiesRequest]) (*connect.Response[v1.ListLinkedIdentitiesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListLinkedIdentities is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) LinkIdentity(context.Context, *connect.Request[v1.LinkIdentityRequest]) (*connect.Response[v1.LinkIdentityResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.LinkIdentity is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UnlinkIdentity(context.Context, *connect.Request[v1.UnlinkIdentityRequest]) (*connect.Response[v1.UnlinkIdentityResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UnlinkIdentity is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UpsertLoginPolicy is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetLoginPolicy(context.Context, *connect.Request[v1.GetLoginPolicyRequest]) (*connect.Response[v1.GetLoginPolicyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetLoginPolicy is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) DeleteLoginPolicy(context.Context, *connect.Request[v1.DeleteLoginPolicyRequest]) (*connect.Response[v1.DeleteLoginPolicyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DeleteLoginPolicy is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UpsertProjectConfig(context.Context, *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UpsertProjectConfig is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetProjectConfig is not implemented"))
 }

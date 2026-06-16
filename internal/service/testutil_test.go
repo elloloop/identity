@@ -1432,6 +1432,18 @@ func (r *fakeRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) 
 	return out, nil
 }
 
+func (r *fakeRepo) DeleteOAuthIdentity(_ context.Context, userID, provider, providerUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, oi := range r.oauthIdentities {
+		if oi.UserID == userID && oi.Provider == provider && oi.ProviderUserID == providerUserID {
+			delete(r.oauthIdentities, id)
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
 // ── Identity Verification ──────────────────────────────────────────────
 
 func (r *fakeRepo) CreateIdentityVerification(_ context.Context, rec *IdentityVerificationRecord) error {

@@ -115,6 +115,7 @@ func (h *IdentityHandler) PasswordSignup(
 		req.Msg.Password,
 		"", // name — not in proto; service derives from email
 		req.Msg.RecoveryEmail,
+		req.Msg.DateOfBirthMs,
 	)
 	if err != nil {
 		return nil, toConnectError(err)

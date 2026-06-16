@@ -1,7 +1,12 @@
-Hi {{.UserName}},
+{{if .ProductName}}{{.ProductName}}
+
+{{end}}Hi {{.UserName}},
 
 Someone — hopefully you — requested that the primary email on your account be changed from {{.OldEmail}} to {{.NewEmail}}. The change won't take effect until the new address confirms it (within {{.ExpiresIn}}).
 
 If you didn't request this change, please contact support immediately and reset your password — your account may be compromised.
 
 For your security, this notice was sent to your current email address. The confirmation link was sent only to the new address.
+{{if .SupportEmail}}
+Need help? Contact {{.SupportEmail}}.
+{{end}}

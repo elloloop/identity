@@ -22,6 +22,7 @@ const userColumns = `
 	email_verified, email_verified_at_ms,
 	idv_verified, idv_verified_at_ms,
 	phone_number, phone_verified, phone_verified_at_ms,
+	date_of_birth_ms,
 	last_login_at_ms,
 	created_at_ms, updated_at_ms`
 
@@ -42,7 +43,7 @@ func scanUser(s scanner) (*service.User, error) {
 		quotaBytes, lockedUntilMs                              int64
 		failedLoginCount                                       int64
 		emailVerifiedAtMs, idvVerifiedAtMs, lastLoginAtMs      int64
-		phoneVerifiedAtMs                                      int64
+		phoneVerifiedAtMs, dateOfBirthMs                       int64
 		emailVerified, idvVerified, totpRequired               int64
 		phoneVerified                                          int64
 		id, email, name, role, avatar, status, recovery, phash string
@@ -55,6 +56,7 @@ func scanUser(s scanner) (*service.User, error) {
 		&emailVerified, &emailVerifiedAtMs,
 		&idvVerified, &idvVerifiedAtMs,
 		&phoneNumber, &phoneVerified, &phoneVerifiedAtMs,
+		&dateOfBirthMs,
 		&lastLoginAtMs,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
@@ -79,6 +81,7 @@ func scanUser(s scanner) (*service.User, error) {
 	u.PhoneNumber = phoneNumber
 	u.PhoneVerified = phoneVerified != 0
 	u.PhoneVerifiedAt = phoneVerifiedAtMs
+	u.DateOfBirthMs = dateOfBirthMs
 	u.LastLoginAtMs = lastLoginAtMs
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
@@ -151,6 +154,7 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 			email_verified, email_verified_at_ms,
 			idv_verified, idv_verified_at_ms,
 			phone_number, phone_verified, phone_verified_at_ms,
+			date_of_birth_ms,
 			last_login_at_ms,
 			created_at_ms, updated_at_ms
 		) VALUES (
@@ -161,7 +165,8 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 			$16, $17,
 			$18, $19, $20,
 			$21,
-			$22, $23
+			$22,
+			$23, $24
 		)`
 	_, err := r.db.Exec(
 		ctx, q,
@@ -171,6 +176,7 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 		u.EmailVerified, u.EmailVerifiedAt,
 		u.IDVVerified, u.IDVVerifiedAt,
 		u.PhoneNumber, u.PhoneVerified, u.PhoneVerifiedAt,
+		u.DateOfBirthMs,
 		u.LastLoginAtMs,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	)
@@ -207,6 +213,7 @@ var userFieldColumns = map[string]struct {
 	"phone_number":       {"phone_number", "string"},
 	"phone_verified":     {"phone_verified", "bool"},
 	"phone_verified_at":  {"phone_verified_at_ms", "int64"},
+	"date_of_birth_ms":   {"date_of_birth_ms", "int64"},
 }
 
 func (r *sqliteRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {

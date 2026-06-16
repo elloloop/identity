@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -731,6 +732,8 @@ type MemRepo struct {
 	oauthIdentities    map[string]*service.OAuthIdentity
 	idvRecords         map[string]*service.IdentityVerificationRecord
 	sessions           map[string]*service.SessionRecord
+	roles              map[string]*service.RoleRecord
+	roleAssignments    map[string]*service.RoleAssignmentRecord
 }
 
 // NewMemRepo returns an empty MemRepo.
@@ -755,6 +758,8 @@ func NewMemRepo() *MemRepo {
 		oauthIdentities:    make(map[string]*service.OAuthIdentity),
 		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
 		sessions:           make(map[string]*service.SessionRecord),
+		roles:              make(map[string]*service.RoleRecord),
+		roleAssignments:    make(map[string]*service.RoleAssignmentRecord),
 	}
 }
 
@@ -1762,6 +1767,18 @@ func (r *MemRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) (
 	return out, nil
 }
 
+func (r *MemRepo) DeleteOAuthIdentity(_ context.Context, userID, provider, providerUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, oi := range r.oauthIdentities {
+		if oi.UserID == userID && oi.Provider == provider && oi.ProviderUserID == providerUserID {
+			delete(r.oauthIdentities, id)
+			return nil
+		}
+	}
+	return service.ErrNotFound
+}
+
 // ── Identity Verification ──────────────────────────────────────────────
 
 func (r *MemRepo) CreateIdentityVerification(_ context.Context, rec *service.IdentityVerificationRecord) error {
@@ -2084,3 +2101,113 @@ var _ service.Repository = (*MemRepo)(nil)
 // silence unused import when graph is only referenced via the
 // service.DB stub; keep the import line stable for future replacement.
 var _ = (*graph.Node)(nil)
+
+// ── RBAC: custom roles + per-user role assignments ─────────────────────
+
+func (r *MemRepo) CreateRole(_ context.Context, rec *service.RoleRecord) (string, error) {
+	if rec == nil {
+		return "", fmt.Errorf("memory: CreateRole: nil record")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.roles {
+		if existing.Name == rec.Name {
+			return "", fmt.Errorf("%w: role %q", service.ErrAlreadyExists, rec.Name)
+		}
+	}
+	id := r.nextID()
+	cp := *rec
+	cp.NodeID = id
+	cp.Permissions = append([]string(nil), rec.Permissions...)
+	r.roles[id] = &cp
+	rec.NodeID = id
+	return id, nil
+}
+
+func (r *MemRepo) GetRoleByName(_ context.Context, name string) (*service.RoleRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, role := range r.roles {
+		if role.Name == name {
+			cp := *role
+			cp.Permissions = append([]string(nil), role.Permissions...)
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) ListRoles(_ context.Context) ([]*service.RoleRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*service.RoleRecord, 0, len(r.roles))
+	for _, role := range r.roles {
+		cp := *role
+		cp.Permissions = append([]string(nil), role.Permissions...)
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (r *MemRepo) DeleteRole(_ context.Context, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, role := range r.roles {
+		if role.Name == name {
+			delete(r.roles, id)
+		}
+	}
+	for id, a := range r.roleAssignments {
+		if a.RoleName == name {
+			delete(r.roleAssignments, id)
+		}
+	}
+	return nil
+}
+
+func (r *MemRepo) SetUserRoleAssignment(_ context.Context, userID, roleName string, atMs int64) error {
+	if userID == "" {
+		return fmt.Errorf("%w: user_id is required", service.ErrInvalidArgument)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, a := range r.roleAssignments {
+		if a.UserID == userID {
+			a.RoleName = roleName
+			a.CreatedAt = atMs
+			return nil
+		}
+	}
+	id := r.nextID()
+	r.roleAssignments[id] = &service.RoleAssignmentRecord{
+		NodeID:    id,
+		UserID:    userID,
+		RoleName:  roleName,
+		CreatedAt: atMs,
+	}
+	return nil
+}
+
+func (r *MemRepo) GetUserRoleAssignment(_ context.Context, userID string) (*service.RoleAssignmentRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, a := range r.roleAssignments {
+		if a.UserID == userID {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) DeleteUserRoleAssignment(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, a := range r.roleAssignments {
+		if a.UserID == userID {
+			delete(r.roleAssignments, id)
+		}
+	}
+	return nil
+}

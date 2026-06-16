@@ -310,6 +310,10 @@ func (StubRepository) ListOAuthIdentitiesForUser(context.Context, string) ([]*OA
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) DeleteOAuthIdentity(context.Context, string, string, string) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) DeleteExpiredWebAuthnChallenges(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }

@@ -1402,6 +1402,43 @@ func RunConformance(t *testing.T, driver Driver) {
 			if err != nil || len(list) != 2 {
 				t.Fatalf("List: len=%d err=%v", len(list), err)
 			}
+
+			// DeleteOAuthIdentity is scoped to the owning user: another
+			// user attempting to unlink uid's link must not succeed and the
+			// row must survive.
+			if err := r.DeleteOAuthIdentity(ctx, otherUID, "google", "g-123"); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("Delete by non-owner: want ErrNotFound, got %v", err)
+			}
+			if got, err := r.FindUserByProviderID(ctx, "google", "g-123"); err != nil || got == nil {
+				t.Fatalf("link removed by non-owner delete: %v %#v", err, got)
+			}
+
+			// Deleting a non-existent (provider, sub) for the owner is
+			// ErrNotFound, not a silent success.
+			if err := r.DeleteOAuthIdentity(ctx, uid, "google", "does-not-exist"); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("Delete missing sub: want ErrNotFound, got %v", err)
+			}
+
+			// Owner removes one link; only that (provider, sub) goes away.
+			if err := r.DeleteOAuthIdentity(ctx, uid, "google", "g-123"); err != nil {
+				t.Fatalf("Delete owned link: %v", err)
+			}
+			if got, err := r.FindUserByProviderID(ctx, "google", "g-123"); err != nil || got != nil {
+				t.Fatalf("google link not removed: %v %#v", err, got)
+			}
+			if got, err := r.FindUserByProviderID(ctx, "microsoft", "g-123"); err != nil || got == nil {
+				t.Fatalf("microsoft link wrongly removed: %v %#v", err, got)
+			}
+			list, err = r.ListOAuthIdentitiesForUser(ctx, uid)
+			if err != nil || len(list) != 1 {
+				t.Fatalf("List after delete: len=%d err=%v", len(list), err)
+			}
+
+			// A repeat delete of the now-removed link is ErrNotFound
+			// (idempotency is the caller's concern; the store reports truth).
+			if err := r.DeleteOAuthIdentity(ctx, uid, "google", "g-123"); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("Delete already-removed: want ErrNotFound, got %v", err)
+			}
 		})
 
 		t.Run("Invitation_FindUpdate", func(t *testing.T) {

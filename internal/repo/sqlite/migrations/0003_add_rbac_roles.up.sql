@@ -1,4 +1,4 @@
--- 0262_add_rbac_roles.up.sql
+-- 0003_add_rbac_roles.up.sql
 --
 -- RBAC: project-scoped custom roles and per-user role assignments.
 -- SQLite has no array type, so permissions are stored as a JSON text column.

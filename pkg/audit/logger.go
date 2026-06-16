@@ -114,6 +114,13 @@ const (
 	EventPhoneVerificationRequested EventType = "phone_verification_requested"
 	EventPhoneVerified              EventType = "phone_verified"
 
+	// EventIdentityLinked records a provider identity being attached to a
+	// user — both implicit login-time auto-linking and the self-service
+	// LinkIdentity RPC. EventIdentityUnlinked records a self-service
+	// disconnect via UnlinkIdentity.
+	EventIdentityLinked   EventType = "identity_linked"
+	EventIdentityUnlinked EventType = "identity_unlinked"
+
 	// EventPlatformAdminBootstrapBlocked records a first-admin bootstrap
 	// attempt that arrived AFTER the platform_admins table was no longer
 	// empty (the bootstrap is permanently closed → FailedPrecondition). It
@@ -125,6 +132,16 @@ const (
 	EventRoleDeleted  EventType = "role_deleted"
 	EventRoleAssigned EventType = "role_assigned"
 	EventRoleRevoked  EventType = "role_revoked"
+
+	// EventLoginPolicyUpserted / EventLoginPolicyDeleted record an operator
+	// authoring or clearing a claimed tenant's LoginPolicy (the policy the
+	// login path enforces). EventProjectConfigUpdated records an operator
+	// replacing a project's config_json blob. They make control-plane policy
+	// changes — which alter how every member of a tenant/project authenticates
+	// — visible in the audit trail.
+	EventLoginPolicyUpserted  EventType = "login_policy_upserted"
+	EventLoginPolicyDeleted   EventType = "login_policy_deleted"
+	EventProjectConfigUpdated EventType = "project_config_updated"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -156,10 +173,15 @@ var validEventTypes = map[EventType]struct{}{
 	EventPhoneVerificationRequested:    {},
 	EventPhoneVerified:                 {},
 	EventPlatformAdminBootstrapBlocked: {},
+	EventIdentityLinked:                {},
+	EventIdentityUnlinked:              {},
 	EventRoleCreated:                   {},
 	EventRoleDeleted:                   {},
 	EventRoleAssigned:                  {},
 	EventRoleRevoked:                   {},
+	EventLoginPolicyUpserted:           {},
+	EventLoginPolicyDeleted:            {},
+	EventProjectConfigUpdated:          {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

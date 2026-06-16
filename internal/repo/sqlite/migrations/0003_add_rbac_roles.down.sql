@@ -1,3 +1,3 @@
--- 0262_add_rbac_roles.down.sql
+-- 0003_add_rbac_roles.down.sql
 DROP TABLE IF EXISTS rbac_role_assignments;
 DROP TABLE IF EXISTS rbac_roles;

@@ -69,6 +69,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAccountNotActive),
 		errors.Is(err, service.ErrInvitationPending),
 		errors.Is(err, service.ErrSignupDisabled),
+		errors.Is(err, service.ErrParentalConsentRequired),
 		errors.Is(err, service.ErrIDVRequired):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
@@ -78,7 +79,8 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrLastOwner),
 		errors.Is(err, service.ErrPlatformAdminExists),
-		errors.Is(err, service.ErrAuthDomainNotVerified):
+		errors.Is(err, service.ErrAuthDomainNotVerified),
+		errors.Is(err, service.ErrLastCredential):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrQrLoginNotPending):

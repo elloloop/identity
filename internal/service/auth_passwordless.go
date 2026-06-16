@@ -107,21 +107,24 @@ func (s *AuthService) RequestEmailLoginCode(ctx context.Context, emailAddr strin
 		return nil
 	}
 
-	html, text, err := email.Render(email.TemplateEmailLoginCode, map[string]any{
+	brand := resolveBranding(ctx, s.cfg)
+	html, text, err := email.Render(email.TemplateEmailLoginCode, brand.templateData(map[string]any{
 		"Code":      code,
 		"ExpiresIn": formatExpiresIn(ttl),
-	})
+	}))
 	if err != nil {
 		s.logger.Warn("email_login_code_render_failed", zap.Error(err))
 		return nil
 	}
-	if err := s.mailer.Send(ctx, email.Message{
+	msg := email.Message{
 		To:      emailAddr,
 		From:    s.cfg.SMTPFrom,
 		Subject: "Your login code",
 		HTML:    html,
 		Text:    text,
-	}); err != nil {
+	}
+	brand.applyTo(&msg)
+	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("email_login_code_send_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
 	}
@@ -231,21 +234,24 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 	}
 
 	link := fmt.Sprintf("%s/auth/magic-link?token=%s", s.appBaseURL(ctx), rawToken)
-	html, text, err := email.Render(email.TemplateMagicLink, map[string]any{
+	brand := resolveBranding(ctx, s.cfg)
+	html, text, err := email.Render(email.TemplateMagicLink, brand.templateData(map[string]any{
 		"Link":      link,
 		"ExpiresIn": formatExpiresIn(ttl),
-	})
+	}))
 	if err != nil {
 		s.logger.Warn("magic_link_render_failed", zap.Error(err))
 		return nil
 	}
-	if err := s.mailer.Send(ctx, email.Message{
+	msg := email.Message{
 		To:      emailAddr,
 		From:    s.cfg.SMTPFrom,
 		Subject: "Your sign-in link",
 		HTML:    html,
 		Text:    text,
-	}); err != nil {
+	}
+	brand.applyTo(&msg)
+	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("magic_link_send_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
 	}

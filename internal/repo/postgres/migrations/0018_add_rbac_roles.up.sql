@@ -1,4 +1,4 @@
--- 0262_add_rbac_roles.up.sql
+-- 0018_add_rbac_roles.up.sql
 --
 -- RBAC: project-scoped custom roles and per-user role assignments.
 --

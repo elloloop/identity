@@ -122,10 +122,10 @@ func TestE2E_EmailHardening_RejectsConsecutiveDots(t *testing.T) {
 		"a..b@example.com",
 		"first..last@example.com",
 		"x...y@example.com",
-		".alice@example.com",  // leading dot already covered, included for completeness
-		"alice.@example.com",  // trailing dot
-		"alice@x..y.com",      // consecutive dots in domain
-		"alice@x.y..com",      // consecutive dots in domain (different position)
+		".alice@example.com", // leading dot already covered, included for completeness
+		"alice.@example.com", // trailing dot
+		"alice@x..y.com",     // consecutive dots in domain
+		"alice@x.y..com",     // consecutive dots in domain (different position)
 	}
 	for _, email := range cases {
 		t.Run(email, func(t *testing.T) {
