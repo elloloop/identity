@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
@@ -39,6 +40,11 @@ import (
 )
 
 // ── Domain types ───────────────────────────────────────────────────────
+
+// StatusPendingParentalConsent is the user status for a child-band account
+// created under age-gating that has not yet obtained verifiable parental
+// consent. Such an account exists but cannot be issued access tokens.
+const StatusPendingParentalConsent = "pending_parental_consent"
 
 // User represents a user in the identity system.
 type User struct {
@@ -64,6 +70,13 @@ type User struct {
 	PhoneNumber      string
 	PhoneVerified    bool
 	PhoneVerifiedAt  int64 // epoch ms; 0 = never verified
+	DateOfBirthMs    int64 // epoch ms of date of birth; 0 = unknown (persisted)
+	// IsMinor and AgeBand are DERIVED from DateOfBirthMs + the age-gate
+	// configuration; they are NOT persisted. The service stamps them on a
+	// user before returning it so the handler/JWT layers can read a single
+	// authoritative value.
+	IsMinor bool
+	AgeBand string // "CHILD" | "TEEN" | "ADULT" | "" (unknown)
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -688,8 +701,14 @@ var (
 	ErrAccountNotActive  = errors.New("account is not active")
 	ErrInvitationPending = errors.New("account has not completed invitation")
 	ErrIDVRequired       = errors.New("identity verification required")
-	ErrWeakPassword      = errors.New("password does not meet strength requirements")
-	ErrTotpRequired      = errors.New("totp required")
+	// ErrParentalConsentRequired is returned when an admin status mutator
+	// (e.g. ReactivateUser) attempts to move an account out of
+	// pending_parental_consent. The only valid transition out of that state
+	// is the dedicated parental-consent flow; ordinary status patches must
+	// not silently bypass the COPPA consent gate.
+	ErrParentalConsentRequired = errors.New("account is pending parental consent and cannot be activated by this operation")
+	ErrWeakPassword            = errors.New("password does not meet strength requirements")
+	ErrTotpRequired            = errors.New("totp required")
 	// ErrSSORequired is returned when a claimed tenant's LoginPolicy mandates
 	// single sign-on and the caller attempted a non-SSO method. Like
 	// ErrTotpRequired it is a "do something else first" signal rather than a
@@ -805,6 +824,12 @@ type AuthService struct {
 	// safe: any nil store, miss, or lookup error imposes no restriction.
 	governance *LoginGovernance
 
+	// ageGate determines a user's age band from their date of birth. It is
+	// always non-nil: the constructor wires the no-op determiner when
+	// age-gating is disabled (everyone classifies as adult) and the
+	// threshold determiner when GATEWAY_AGEGATE_ENABLED is set.
+	ageGate agegate.Determiner
+
 	// passkeyRPCache memoises per-project WebAuthn relying-party instances
 	// keyed by their (rp_id, rp_name, origin) tuple. A project whose
 	// config_json sets a passkey block needs a WebAuthn instance bound to
@@ -896,6 +921,7 @@ func NewAuthServiceWithOAuth(
 	return &AuthService{
 		defaultRepo:        repo,
 		defaultTenantID:    cfg.DefaultTenantID,
+		ageGate:            buildAgeGate(cfg, logger),
 		signer:             signer,
 		passkeys:           passkeysSvc,
 		audit:              auditLogger,
@@ -912,6 +938,40 @@ func NewAuthServiceWithOAuth(
 		returnAllow:        ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
 		nowFunc:            time.Now,
 	}
+}
+
+// buildAgeGate selects the age-determination provider from config. When
+// age-gating is off the no-op determiner is returned (everyone is an adult).
+// When on, the threshold determiner is built from the configured boundaries;
+// config.Validate already guarantees they are well-formed, but if a caller
+// bypassed validation we fail safe to the no-op rather than panic.
+func buildAgeGate(cfg *config.Config, logger *zap.Logger) agegate.Determiner {
+	if !cfg.AgeGateEnabled {
+		return agegate.NewNoop()
+	}
+	d, err := agegate.NewThreshold(cfg.AgeGateChildMaxAge, cfg.AgeGateAdultAge)
+	if err != nil {
+		logger.Error("agegate_config_invalid_falling_back_to_noop", zap.Error(err))
+		return agegate.NewNoop()
+	}
+	return d
+}
+
+// stampAgeBand derives IsMinor / AgeBand for a user from their stored date of
+// birth and the active age-gate, mutating the user in place. It is a no-op
+// (leaves the zero-values) when age-gating is disabled or no DOB is on file.
+func (s *AuthService) stampAgeBand(u *User) {
+	if u == nil {
+		return
+	}
+	u.IsMinor = false
+	u.AgeBand = ""
+	if !s.ageGate.Enabled() {
+		return
+	}
+	dec := s.ageGate.Determine(u.DateOfBirthMs, s.nowFunc())
+	u.IsMinor = dec.IsMinor
+	u.AgeBand = string(dec.Band)
 }
 
 // ── Storage tenant + project scoping ────────────────────────────────────
@@ -1014,6 +1074,11 @@ func generateChallengeID() string {
 func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
 	now := s.nowMs()
 
+	// Stamp the derived minor flag from the stored DOB so the token carries
+	// an authoritative is_minor claim when age-gating is on. No-op (false)
+	// when the gate is off or no DOB is on file.
+	s.stampAgeBand(user)
+
 	claims := jwt.Claims{
 		Sub:       user.ID,
 		Email:     user.Email,
@@ -1022,6 +1087,7 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 		Tenant:    s.tenantID(ctx),
 		Project:   s.projectID(ctx),
 		AvatarURL: user.AvatarURL,
+		IsMinor:   user.IsMinor,
 	}
 	if s.cfg.JWTAudience != "" {
 		claims.Audience = []string{s.cfg.JWTAudience}

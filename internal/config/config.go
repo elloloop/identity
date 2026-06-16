@@ -52,6 +52,13 @@ const (
 	// DefaultCaptchaRecaptchaScoreThreshold is the reCAPTCHA v3 score below
 	// which a response is rejected when no threshold is configured.
 	DefaultCaptchaRecaptchaScoreThreshold = 0.5
+
+	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
+	// users 12 and under (i.e. under 13) are in the protected CHILD band.
+	DefaultAgeGateChildMaxAge = 12
+	// DefaultAgeGateAdultAge is the age at or above which a user is an adult;
+	// below it (and above child-max) they are a TEEN minor.
+	DefaultAgeGateAdultAge = 18
 )
 
 // DefaultProjectIDFallback is the project id used when none is configured.
@@ -254,6 +261,18 @@ type Config struct {
 	CaptchaEnforcePasswordReset    bool    // GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET (default true)
 	CaptchaEnforceEmailLoginCode   bool    // GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE (default true)
 	CaptchaEnforceMagicLink        bool    // GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK (default true)
+
+	// Age-gating (COPPA). AgeGateEnabled is the global on/off; when off the
+	// no-op determiner is wired (everyone classifies as adult, no consent
+	// gating) and signup behaves exactly as before. When on, a user whose
+	// derived age <= AgeGateChildMaxAge is a CHILD and one below
+	// AgeGateAdultAge is a minor. AgeGateRequireDOB rejects a signup that
+	// omits a date of birth (INVALID_ARGUMENT) instead of treating it as
+	// adult.
+	AgeGateEnabled     bool // GATEWAY_AGEGATE_ENABLED (default false)
+	AgeGateChildMaxAge int  // GATEWAY_AGEGATE_CHILD_MAX_AGE (default 12 → under-13)
+	AgeGateAdultAge    int  // GATEWAY_AGEGATE_ADULT_AGE (default 18)
+	AgeGateRequireDOB  bool // GATEWAY_AGEGATE_REQUIRE_DOB (default false)
 
 	// Password
 	PasswordSignupEnabled      bool
@@ -562,6 +581,11 @@ func Load() *Config {
 		CaptchaEnforceEmailLoginCode:   envBool("GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE", true),
 		CaptchaEnforceMagicLink:        envBool("GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK", true),
 
+		AgeGateEnabled:     envBool("GATEWAY_AGEGATE_ENABLED", false),
+		AgeGateChildMaxAge: envInt("GATEWAY_AGEGATE_CHILD_MAX_AGE", DefaultAgeGateChildMaxAge),
+		AgeGateAdultAge:    envInt("GATEWAY_AGEGATE_ADULT_AGE", DefaultAgeGateAdultAge),
+		AgeGateRequireDOB:  envBool("GATEWAY_AGEGATE_REQUIRE_DOB", false),
+
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
 		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
@@ -828,6 +852,30 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateAgeGate(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateAgeGate enforces the age-gate invariant: when age-gating is on the
+// two boundaries must satisfy 0 <= child-max < adult. A disabled deployment
+// is unconstrained — the no-op determiner is wired and the thresholds are
+// ignored.
+func (c *Config) validateAgeGate() error {
+	if !c.AgeGateEnabled {
+		return nil
+	}
+	if c.AgeGateChildMaxAge < 0 {
+		return fmt.Errorf("config: GATEWAY_AGEGATE_CHILD_MAX_AGE=%d must be >= 0", c.AgeGateChildMaxAge)
+	}
+	if c.AgeGateAdultAge <= c.AgeGateChildMaxAge {
+		return fmt.Errorf(
+			"config: GATEWAY_AGEGATE_ADULT_AGE=%d must be greater than GATEWAY_AGEGATE_CHILD_MAX_AGE=%d",
+			c.AgeGateAdultAge, c.AgeGateChildMaxAge,
+		)
+	}
 	return nil
 }
 

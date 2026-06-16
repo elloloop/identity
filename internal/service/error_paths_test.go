@@ -22,7 +22,7 @@ func TestPasswordSignup_FindUserByEmailErrors(t *testing.T) {
 	r.failFindUserByEmail = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.PasswordSignup(context.Background(), "x@example.com", strongPW, "", "")
+	_, err := svc.PasswordSignup(context.Background(), "x@example.com", strongPW, "", "", 0)
 	require.Error(t, err)
 }
 
@@ -31,7 +31,7 @@ func TestPasswordSignup_CreateUserErrors(t *testing.T) {
 	r.failCreateUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.PasswordSignup(context.Background(), "x@example.com", strongPW, "", "")
+	_, err := svc.PasswordSignup(context.Background(), "x@example.com", strongPW, "", "", 0)
 	require.Error(t, err)
 }
 
@@ -40,7 +40,7 @@ func TestPasswordSignup_IssueTokensFails(t *testing.T) {
 	r.failCreateRefreshToken = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, err := svc.PasswordSignup(context.Background(), "x@example.com", strongPW, "", "")
+	_, err := svc.PasswordSignup(context.Background(), "x@example.com", strongPW, "", "", 0)
 	require.Error(t, err)
 }
 
@@ -191,7 +191,7 @@ func TestRefreshToken_GetUserErrors(t *testing.T) {
 	r := newErrorRepo()
 	svc := newTestAuthServiceErr(t, r)
 
-	res, err := svc.PasswordSignup(context.Background(), "rt@example.com", strongPW, "", "")
+	res, err := svc.PasswordSignup(context.Background(), "rt@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 
 	r.failGetUser = true

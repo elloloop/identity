@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
@@ -77,12 +78,15 @@ func fallbackDisplayName(email, preferred string) string {
 // ── PasswordSignup ─────────────────────────────────────────────────────
 
 // PasswordSignup creates a new user with email + password and issues tokens.
-func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name, recoveryEmail string) (*LoginResult, error) {
+func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name, recoveryEmail string, dateOfBirthMs int64) (*LoginResult, error) {
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
 	}
 	if !s.cfg.PasswordSignupEnabled {
 		return nil, ErrSignupDisabled
+	}
+	if s.ageGate.Enabled() && s.cfg.AgeGateRequireDOB && dateOfBirthMs <= 0 {
+		return nil, fmt.Errorf("%w: date of birth is required", ErrInvalidArgument)
 	}
 	email = strings.TrimSpace(strings.ToLower(email))
 	if err := validateEmailFormat(email); err != nil {
@@ -128,13 +132,24 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	now := s.nowMs()
 	recEmail := strings.TrimSpace(strings.ToLower(recoveryEmail))
 
+	// Derive the age band from the supplied DOB. A child-band account under
+	// age-gating is created in PENDING_PARENTAL_CONSENT and is not issued
+	// tokens until verifiable parental consent is granted; every other band
+	// (and a disabled gate) creates an active account exactly as before.
+	ageDec := s.ageGate.Determine(dateOfBirthMs, s.nowFunc())
+	status := "active"
+	if s.ageGate.Enabled() && ageDec.Band == agegate.BandChild {
+		status = StatusPendingParentalConsent
+	}
+
 	userID, err := s.repo(ctx).CreateUser(ctx, &User{
 		Email:         email,
 		Name:          displayName,
 		Role:          "member",
-		Status:        "active",
+		Status:        status,
 		PasswordHash:  pwHash,
 		RecoveryEmail: recEmail,
+		DateOfBirthMs: dateOfBirthMs,
 		CreatedAt:     msToTime(now),
 		UpdatedAt:     msToTime(now),
 	})
@@ -147,15 +162,31 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	}
 
 	user := &User{
-		ID:        userID,
-		Email:     email,
-		Name:      displayName,
-		Role:      "member",
-		Status:    "active",
-		CreatedAt: msToTime(now),
-		UpdatedAt: msToTime(now),
+		ID:            userID,
+		Email:         email,
+		Name:          displayName,
+		Role:          "member",
+		Status:        status,
+		DateOfBirthMs: dateOfBirthMs,
+		CreatedAt:     msToTime(now),
+		UpdatedAt:     msToTime(now),
 	}
+	s.stampAgeBand(user)
 	s.logger.Info("local_signup_success", zap.String("email", redactEmail(email)), zap.String("user_id", userID))
+
+	// A child-band account pending parental consent exists but cannot be
+	// logged in: return the user (so the client can drive the consent flow)
+	// with no tokens. The verification email is intentionally skipped — a
+	// child account is not an email-owner we can solicit.
+	if status == StatusPendingParentalConsent {
+		s.audit.Log(
+			ctx, audit.EventLoginSuccess,
+			audit.WithActor(userID),
+			audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{"method": "signup", "pending_parental_consent": true, "age_band": user.AgeBand}),
+		)
+		return &LoginResult{User: user}, nil
+	}
 
 	// Best-effort: auto-form a company tenant from the email domain.
 	s.maybeAutoFormTenant(ctx, user)

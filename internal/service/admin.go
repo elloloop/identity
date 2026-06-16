@@ -294,6 +294,14 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 		return errors.New("user not found")
 	}
 
+	// Refuse to move an account out of pending_parental_consent via the
+	// ordinary reactivation path. The only valid exit from that state is the
+	// dedicated parental-consent flow; activating here would bypass the COPPA
+	// consent gate (issue #256).
+	if pstrOr(node.Payload, ufStatus, "active") == StatusPendingParentalConsent {
+		return ErrParentalConsentRequired
+	}
+
 	now := nowMs()
 	op := graph.Operation{
 		Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
