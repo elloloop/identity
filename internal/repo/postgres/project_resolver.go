@@ -56,7 +56,11 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 	if err != nil {
 		return nil, err
 	}
-	origins, err := projectCORSOrigins(p)
+	cfg, err := service.ParseProjectConfig(p.ConfigJSON)
+	if err != nil {
+		return nil, fmt.Errorf("project %q: %w", p.ID, err)
+	}
+	origins, err := projectCORSOrigins(p.ID, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +69,7 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 		StorageScopeID:     p.StorageScopeID,
 		PrimaryAuthDomain:  primary,
 		CORSAllowedOrigins: origins,
+		LoginDefaults:      cfg.Login,
 	}, nil
 }
 
@@ -75,17 +80,13 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 // always sets Access-Control-Allow-Credentials, so a wildcard/"null"/malformed
 // per-project origin is rejected here rather than served to the browser. A bad
 // config is a configuration error surfaced to the caller, not silently dropped.
-func projectCORSOrigins(p *Project) ([]string, error) {
-	cfg, err := service.ParseProjectConfig(p.ConfigJSON)
-	if err != nil {
-		return nil, fmt.Errorf("project %q: %w", p.ID, err)
-	}
+func projectCORSOrigins(projectID string, cfg service.ProjectConfig) ([]string, error) {
 	if len(cfg.CORS.AllowedOrigins) == 0 {
 		return nil, nil
 	}
 	origins, err := middleware.ValidateAllowedOrigins(cfg.CORS.AllowedOrigins, true)
 	if err != nil {
-		return nil, fmt.Errorf("project %q cors: %w", p.ID, err)
+		return nil, fmt.Errorf("project %q cors: %w", projectID, err)
 	}
 	return origins, nil
 }
