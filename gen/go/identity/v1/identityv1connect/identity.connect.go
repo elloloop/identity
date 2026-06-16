@@ -280,6 +280,21 @@ const (
 	// IdentityServiceCreateFirstPlatformAdminProcedure is the fully-qualified name of the
 	// IdentityService's CreateFirstPlatformAdmin RPC.
 	IdentityServiceCreateFirstPlatformAdminProcedure = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
+	// IdentityServiceUpsertLoginPolicyProcedure is the fully-qualified name of the IdentityService's
+	// UpsertLoginPolicy RPC.
+	IdentityServiceUpsertLoginPolicyProcedure = "/identity.v1.IdentityService/UpsertLoginPolicy"
+	// IdentityServiceGetLoginPolicyProcedure is the fully-qualified name of the IdentityService's
+	// GetLoginPolicy RPC.
+	IdentityServiceGetLoginPolicyProcedure = "/identity.v1.IdentityService/GetLoginPolicy"
+	// IdentityServiceDeleteLoginPolicyProcedure is the fully-qualified name of the IdentityService's
+	// DeleteLoginPolicy RPC.
+	IdentityServiceDeleteLoginPolicyProcedure = "/identity.v1.IdentityService/DeleteLoginPolicy"
+	// IdentityServiceUpsertProjectConfigProcedure is the fully-qualified name of the IdentityService's
+	// UpsertProjectConfig RPC.
+	IdentityServiceUpsertProjectConfigProcedure = "/identity.v1.IdentityService/UpsertProjectConfig"
+	// IdentityServiceGetProjectConfigProcedure is the fully-qualified name of the IdentityService's
+	// GetProjectConfig RPC.
+	IdentityServiceGetProjectConfigProcedure = "/identity.v1.IdentityService/GetProjectConfig"
 )
 
 // IdentityServiceClient is a client for the identity.v1.IdentityService service.
@@ -414,6 +429,20 @@ type IdentityServiceClient interface {
 	// succeeds only while platform_admins is empty, then permanently closes
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error)
+	// Per-tenant LoginPolicy authoring. These write the policy the login path
+	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
+	// tenant within a project — at most one policy per (project, tenant).
+	// Operator-only: authenticated by the shared admin secret, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error)
+	GetLoginPolicy(context.Context, *connect.Request[v1.GetLoginPolicyRequest]) (*connect.Response[v1.GetLoginPolicyResponse], error)
+	DeleteLoginPolicy(context.Context, *connect.Request[v1.DeleteLoginPolicyRequest]) (*connect.Response[v1.DeleteLoginPolicyResponse], error)
+	// Per-project config authoring. UpsertProjectConfig replaces a project's
+	// config_json blob (the typed knobs an operator sets — e.g. CORS allowed
+	// origins); GetProjectConfig reads it back. Operator-only, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertProjectConfig(context.Context, *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error)
+	GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error)
 }
 
 // NewIdentityServiceClient constructs a client for the identity.v1.IdentityService service. By
@@ -925,6 +954,36 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("CreateFirstPlatformAdmin")),
 			connect.WithClientOptions(opts...),
 		),
+		upsertLoginPolicy: connect.NewClient[v1.UpsertLoginPolicyRequest, v1.UpsertLoginPolicyResponse](
+			httpClient,
+			baseURL+IdentityServiceUpsertLoginPolicyProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UpsertLoginPolicy")),
+			connect.WithClientOptions(opts...),
+		),
+		getLoginPolicy: connect.NewClient[v1.GetLoginPolicyRequest, v1.GetLoginPolicyResponse](
+			httpClient,
+			baseURL+IdentityServiceGetLoginPolicyProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetLoginPolicy")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteLoginPolicy: connect.NewClient[v1.DeleteLoginPolicyRequest, v1.DeleteLoginPolicyResponse](
+			httpClient,
+			baseURL+IdentityServiceDeleteLoginPolicyProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("DeleteLoginPolicy")),
+			connect.WithClientOptions(opts...),
+		),
+		upsertProjectConfig: connect.NewClient[v1.UpsertProjectConfigRequest, v1.UpsertProjectConfigResponse](
+			httpClient,
+			baseURL+IdentityServiceUpsertProjectConfigProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UpsertProjectConfig")),
+			connect.WithClientOptions(opts...),
+		),
+		getProjectConfig: connect.NewClient[v1.GetProjectConfigRequest, v1.GetProjectConfigResponse](
+			httpClient,
+			baseURL+IdentityServiceGetProjectConfigProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetProjectConfig")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -1013,6 +1072,11 @@ type identityServiceClient struct {
 	adminCreateTenant             *connect.Client[v1.AdminCreateTenantRequest, v1.AdminCreateTenantResponse]
 	adminAddTenantAdmin           *connect.Client[v1.AdminAddTenantAdminRequest, v1.AdminAddTenantAdminResponse]
 	createFirstPlatformAdmin      *connect.Client[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse]
+	upsertLoginPolicy             *connect.Client[v1.UpsertLoginPolicyRequest, v1.UpsertLoginPolicyResponse]
+	getLoginPolicy                *connect.Client[v1.GetLoginPolicyRequest, v1.GetLoginPolicyResponse]
+	deleteLoginPolicy             *connect.Client[v1.DeleteLoginPolicyRequest, v1.DeleteLoginPolicyResponse]
+	upsertProjectConfig           *connect.Client[v1.UpsertProjectConfigRequest, v1.UpsertProjectConfigResponse]
+	getProjectConfig              *connect.Client[v1.GetProjectConfigRequest, v1.GetProjectConfigResponse]
 }
 
 // BeginOAuthLogin calls identity.v1.IdentityService.BeginOAuthLogin.
@@ -1430,6 +1494,31 @@ func (c *identityServiceClient) CreateFirstPlatformAdmin(ctx context.Context, re
 	return c.createFirstPlatformAdmin.CallUnary(ctx, req)
 }
 
+// UpsertLoginPolicy calls identity.v1.IdentityService.UpsertLoginPolicy.
+func (c *identityServiceClient) UpsertLoginPolicy(ctx context.Context, req *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error) {
+	return c.upsertLoginPolicy.CallUnary(ctx, req)
+}
+
+// GetLoginPolicy calls identity.v1.IdentityService.GetLoginPolicy.
+func (c *identityServiceClient) GetLoginPolicy(ctx context.Context, req *connect.Request[v1.GetLoginPolicyRequest]) (*connect.Response[v1.GetLoginPolicyResponse], error) {
+	return c.getLoginPolicy.CallUnary(ctx, req)
+}
+
+// DeleteLoginPolicy calls identity.v1.IdentityService.DeleteLoginPolicy.
+func (c *identityServiceClient) DeleteLoginPolicy(ctx context.Context, req *connect.Request[v1.DeleteLoginPolicyRequest]) (*connect.Response[v1.DeleteLoginPolicyResponse], error) {
+	return c.deleteLoginPolicy.CallUnary(ctx, req)
+}
+
+// UpsertProjectConfig calls identity.v1.IdentityService.UpsertProjectConfig.
+func (c *identityServiceClient) UpsertProjectConfig(ctx context.Context, req *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error) {
+	return c.upsertProjectConfig.CallUnary(ctx, req)
+}
+
+// GetProjectConfig calls identity.v1.IdentityService.GetProjectConfig.
+func (c *identityServiceClient) GetProjectConfig(ctx context.Context, req *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error) {
+	return c.getProjectConfig.CallUnary(ctx, req)
+}
+
 // IdentityServiceHandler is an implementation of the identity.v1.IdentityService service.
 type IdentityServiceHandler interface {
 	// Authentication
@@ -1562,6 +1651,20 @@ type IdentityServiceHandler interface {
 	// succeeds only while platform_admins is empty, then permanently closes
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error)
+	// Per-tenant LoginPolicy authoring. These write the policy the login path
+	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
+	// tenant within a project — at most one policy per (project, tenant).
+	// Operator-only: authenticated by the shared admin secret, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error)
+	GetLoginPolicy(context.Context, *connect.Request[v1.GetLoginPolicyRequest]) (*connect.Response[v1.GetLoginPolicyResponse], error)
+	DeleteLoginPolicy(context.Context, *connect.Request[v1.DeleteLoginPolicyRequest]) (*connect.Response[v1.DeleteLoginPolicyResponse], error)
+	// Per-project config authoring. UpsertProjectConfig replaces a project's
+	// config_json blob (the typed knobs an operator sets — e.g. CORS allowed
+	// origins); GetProjectConfig reads it back. Operator-only, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertProjectConfig(context.Context, *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error)
+	GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error)
 }
 
 // NewIdentityServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -2069,6 +2172,36 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("CreateFirstPlatformAdmin")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceUpsertLoginPolicyHandler := connect.NewUnaryHandler(
+		IdentityServiceUpsertLoginPolicyProcedure,
+		svc.UpsertLoginPolicy,
+		connect.WithSchema(identityServiceMethods.ByName("UpsertLoginPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGetLoginPolicyHandler := connect.NewUnaryHandler(
+		IdentityServiceGetLoginPolicyProcedure,
+		svc.GetLoginPolicy,
+		connect.WithSchema(identityServiceMethods.ByName("GetLoginPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceDeleteLoginPolicyHandler := connect.NewUnaryHandler(
+		IdentityServiceDeleteLoginPolicyProcedure,
+		svc.DeleteLoginPolicy,
+		connect.WithSchema(identityServiceMethods.ByName("DeleteLoginPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceUpsertProjectConfigHandler := connect.NewUnaryHandler(
+		IdentityServiceUpsertProjectConfigProcedure,
+		svc.UpsertProjectConfig,
+		connect.WithSchema(identityServiceMethods.ByName("UpsertProjectConfig")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGetProjectConfigHandler := connect.NewUnaryHandler(
+		IdentityServiceGetProjectConfigProcedure,
+		svc.GetProjectConfig,
+		connect.WithSchema(identityServiceMethods.ByName("GetProjectConfig")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/identity.v1.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case IdentityServiceBeginOAuthLoginProcedure:
@@ -2237,6 +2370,16 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminAddTenantAdminHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateFirstPlatformAdminProcedure:
 			identityServiceCreateFirstPlatformAdminHandler.ServeHTTP(w, r)
+		case IdentityServiceUpsertLoginPolicyProcedure:
+			identityServiceUpsertLoginPolicyHandler.ServeHTTP(w, r)
+		case IdentityServiceGetLoginPolicyProcedure:
+			identityServiceGetLoginPolicyHandler.ServeHTTP(w, r)
+		case IdentityServiceDeleteLoginPolicyProcedure:
+			identityServiceDeleteLoginPolicyHandler.ServeHTTP(w, r)
+		case IdentityServiceUpsertProjectConfigProcedure:
+			identityServiceUpsertProjectConfigHandler.ServeHTTP(w, r)
+		case IdentityServiceGetProjectConfigProcedure:
+			identityServiceGetProjectConfigHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2576,4 +2719,24 @@ func (UnimplementedIdentityServiceHandler) AdminAddTenantAdmin(context.Context, 
 
 func (UnimplementedIdentityServiceHandler) CreateFirstPlatformAdmin(context.Context, *connect.Request[v1.CreateFirstPlatformAdminRequest]) (*connect.Response[v1.CreateFirstPlatformAdminResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateFirstPlatformAdmin is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UpsertLoginPolicy(context.Context, *connect.Request[v1.UpsertLoginPolicyRequest]) (*connect.Response[v1.UpsertLoginPolicyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UpsertLoginPolicy is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetLoginPolicy(context.Context, *connect.Request[v1.GetLoginPolicyRequest]) (*connect.Response[v1.GetLoginPolicyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetLoginPolicy is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) DeleteLoginPolicy(context.Context, *connect.Request[v1.DeleteLoginPolicyRequest]) (*connect.Response[v1.DeleteLoginPolicyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DeleteLoginPolicy is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UpsertProjectConfig(context.Context, *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UpsertProjectConfig is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetProjectConfig is not implemented"))
 }

@@ -130,6 +130,7 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		CORSAllowedOrigins: rp.CORSAllowedOrigins,
 		Branding:           rp.Branding,
 		Passkey:            rp.Passkey,
+		LoginDefaults:      rp.LoginDefaults,
 	}
 }
 

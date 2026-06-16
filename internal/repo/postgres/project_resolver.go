@@ -71,6 +71,7 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 		CORSAllowedOrigins: origins,
 		Branding:           cfg.Branding,
 		Passkey:            cfg.Passkey,
+		LoginDefaults:      cfg.Login,
 	}, nil
 }
 

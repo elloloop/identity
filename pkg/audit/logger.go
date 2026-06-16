@@ -119,6 +119,16 @@ const (
 	// empty (the bootstrap is permanently closed → FailedPrecondition). It
 	// makes a closed-bootstrap probe against the ungated endpoint visible.
 	EventPlatformAdminBootstrapBlocked EventType = "platform_admin_bootstrap_blocked"
+
+	// EventLoginPolicyUpserted / EventLoginPolicyDeleted record an operator
+	// authoring or clearing a claimed tenant's LoginPolicy (the policy the
+	// login path enforces). EventProjectConfigUpdated records an operator
+	// replacing a project's config_json blob. They make control-plane policy
+	// changes — which alter how every member of a tenant/project authenticates
+	// — visible in the audit trail.
+	EventLoginPolicyUpserted  EventType = "login_policy_upserted"
+	EventLoginPolicyDeleted   EventType = "login_policy_deleted"
+	EventProjectConfigUpdated EventType = "project_config_updated"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -150,6 +160,9 @@ var validEventTypes = map[EventType]struct{}{
 	EventPhoneVerificationRequested:    {},
 	EventPhoneVerified:                 {},
 	EventPlatformAdminBootstrapBlocked: {},
+	EventLoginPolicyUpserted:           {},
+	EventLoginPolicyDeleted:            {},
+	EventProjectConfigUpdated:          {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

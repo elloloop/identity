@@ -92,6 +92,12 @@ type Deps struct {
 	// self-secures by closing once any admin exists.
 	PlatformAdminStore service.PlatformAdminStore
 
+	// LoginPolicyStore backs the operator LoginPolicy-authoring admin RPCs
+	// (UpsertLoginPolicy / GetLoginPolicy / DeleteLoginPolicy) — the write
+	// side of the policy the login path enforces. Non-nil ONLY for the
+	// postgres driver; when nil those RPCs return Unimplemented.
+	LoginPolicyStore service.LoginPolicyStore
+
 	// LoginGovernance is the read-side bundle the login path consults to
 	// enforce a claimed tenant's LoginPolicy. Non-nil only for the postgres
 	// driver (the only one with a governance plane); when nil, login imposes
@@ -597,6 +603,7 @@ func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *za
 		deps.ControlPlaneStore,
 		deps.TenantStore,
 		deps.MembershipStore,
+		deps.LoginPolicyStore,
 		deps.PlatformAdminStore,
 		deps.DNSResolver,
 		auditLog,

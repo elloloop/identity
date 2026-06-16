@@ -84,6 +84,8 @@ func (f *fakePolicyStore) UpsertLoginPolicy(context.Context, *LoginPolicy) (stri
 	return "", nil
 }
 
+func (f *fakePolicyStore) DeleteLoginPolicy(context.Context, string, string) error { return nil }
+
 var (
 	_ DomainStore      = (*lpDomainStore)(nil)
 	_ TenantStore      = (*lpTenantStore)(nil)
@@ -164,6 +166,112 @@ func seedVerifiedTotp(t *testing.T, repo *fakeRepo, userID string) {
 		Verified:        true,
 	}
 	repo.mu.Unlock()
+}
+
+// withProjectLoginDefaults returns a context carrying a resolved project scope
+// whose project-wide login default constrains tenant-less users. It mirrors the
+// scope the project-resolution middleware injects from a project's config_json.
+func withProjectLoginDefaults(projectID, allowedMethods string, require2FA bool) context.Context {
+	return WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: projectID,
+		LoginDefaults: ProjectLoginConfig{
+			AllowedMethods: allowedMethods,
+			Require2FA:     require2FA,
+		},
+	})
+}
+
+// ── Project-wide login default (tenant-less users) ───────────────────────
+
+// A project-wide allow-list blocks a disallowed method for a user with NO
+// claimed tenant — the consumer-pool case the tenant-scoped policy never
+// reached. This is the core kids-platform requirement (issue #252).
+func TestEnforceLoginPolicy_ProjectDefault_BlocksTenantlessUser(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
+	// bob@gmail.com maps to no claimed tenant; only the project default applies.
+	ctx := withProjectLoginDefaults("proj-1", LoginMethodEmailOTP, false)
+
+	require.NoError(t, enforceErr(ctx, t, svc, "bob@gmail.com", LoginMethodEmailOTP),
+		"email_otp is on the project allow-list and must pass")
+	require.ErrorIs(t, enforceErr(ctx, t, svc, "bob@gmail.com", LoginMethodPasskey), ErrPermissionDenied,
+		"passkey is not on the project allow-list and must be denied for a tenant-less user")
+}
+
+// A project-wide Require2FA forces a second factor for a tenant-less user on a
+// single-factor primary, and is satisfied on its own by a strong method.
+func TestEnforceLoginPolicy_ProjectDefault_Require2FA_TenantlessUser(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
+	ctx := withProjectLoginDefaults("proj-1", "", true)
+
+	dec, err := svc.enforceLoginPolicy(ctx, "bob@gmail.com", LoginMethodPassword)
+	require.NoError(t, err)
+	require.True(t, dec.RequireSecondFactor, "project Require2FA must owe a second factor on a single-factor primary")
+
+	dec, err = svc.enforceLoginPolicy(ctx, "bob@gmail.com", LoginMethodPasskey)
+	require.NoError(t, err)
+	require.False(t, dec.RequireSecondFactor, "a passkey satisfies project Require2FA on its own")
+}
+
+// A tenant LoginPolicy fully overrides the project-wide default: a governed
+// user's login is decided by their tenant's allow-list, not the project one,
+// even when the two disagree.
+func TestEnforceLoginPolicy_TenantPolicy_OverridesProjectDefault(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	// Tenant acme.com permits password only; project default permits oauth only.
+	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
+	ctx := withProjectLoginDefaults("proj-1", LoginMethodOAuth, false)
+
+	// Governed acme.com user follows the tenant policy (password ok, oauth no).
+	require.NoError(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodPassword),
+		"tenant allow-list governs the governed user")
+	require.ErrorIs(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodOAuth), ErrPermissionDenied,
+		"the project default must not leak into a governed tenant")
+
+	// Tenant-less user follows the project default (oauth ok, password no).
+	require.NoError(t, enforceErr(ctx, t, svc, "bob@gmail.com", LoginMethodOAuth))
+	require.ErrorIs(t, enforceErr(ctx, t, svc, "bob@gmail.com", LoginMethodPassword), ErrPermissionDenied)
+}
+
+// A tenant that deliberately runs an open login (empty allow-list) does NOT
+// inherit the project-wide restriction — a found tenant policy replaces the
+// default wholesale rather than merging field by field.
+func TestEnforceLoginPolicy_TenantOpenPolicy_DoesNotInheritProjectDefault(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	g := claimedPasswordOnlyGovernance()
+	g.Policies.(*fakePolicyStore).byTenant["proj-1|tenant-acme"].AllowedMethods = "" // open
+	svc.WithLoginGovernance(g)
+	ctx := withProjectLoginDefaults("proj-1", LoginMethodOAuth, false)
+
+	require.NoError(t, enforceErr(ctx, t, svc, "alice@acme.com", LoginMethodPassword),
+		"an open tenant policy must not inherit the project allow-list")
+}
+
+// With no project default and no tenant policy, a tenant-less user is
+// unrestricted — the global fallback, exactly as before this feature.
+func TestEnforceLoginPolicy_GlobalFallback_NoDefaultNoTenant(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
+	// withProject carries a scope with an empty LoginDefaults.
+	require.NoError(t, enforceErr(withProject("proj-1"), t, svc, "bob@gmail.com", LoginMethodPasskey),
+		"with no project default a tenant-less user is unrestricted")
+}
+
+// End-to-end: a project-wide password-disallowing default blocks a tenant-less
+// user's email-OTP login before any token is issued.
+func TestVerifyEmailLoginCode_DeniedByProjectDefault(t *testing.T) {
+	svc, repo, rec := passwordlessSvc(t)
+	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
+	ctx := withProjectLoginDefaults("proj-1", LoginMethodPassword, false) // email_otp not allowed
+	seedUser(repo, "bob@gmail.com", "", "active")
+
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, "bob@gmail.com"))
+	code := extractCodeFromEmail(t, rec.Sent()[0].Text)
+
+	_, err := svc.VerifyEmailLoginCode(ctx, "bob@gmail.com", code, "", "")
+	require.ErrorIs(t, err, ErrPermissionDenied,
+		"email_otp must be denied for a tenant-less user under a password-only project default")
 }
 
 // ── enforceLoginPolicy ──────────────────────────────────────────────────
