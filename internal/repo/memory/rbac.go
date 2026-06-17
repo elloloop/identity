@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -12,7 +13,7 @@ import (
 
 func (r *Repo) CreateRole(_ context.Context, rec *service.RoleRecord) (string, error) {
 	if rec == nil {
-		return "", fmt.Errorf("memory: CreateRole: nil record")
+		return "", errors.New("memory: CreateRole: nil record")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

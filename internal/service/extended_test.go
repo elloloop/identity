@@ -1749,6 +1749,27 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	if err := r.DeleteExpiredInvitations(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredInvitations: %v", err)
 	}
+	if _, err := r.CreateRole(ctx, &RoleRecord{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreateRole: %v", err)
+	}
+	if _, err := r.GetRoleByName(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("GetRoleByName: %v", err)
+	}
+	if _, err := r.ListRoles(ctx); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ListRoles: %v", err)
+	}
+	if err := r.DeleteRole(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteRole: %v", err)
+	}
+	if err := r.SetUserRoleAssignment(ctx, "", "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("SetUserRoleAssignment: %v", err)
+	}
+	if _, err := r.GetUserRoleAssignment(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("GetUserRoleAssignment: %v", err)
+	}
+	if err := r.DeleteUserRoleAssignment(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteUserRoleAssignment: %v", err)
+	}
 }
 
 func TestStubDB_AllMethodsReturnUnavailable(t *testing.T) {

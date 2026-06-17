@@ -99,6 +99,10 @@ type fakeRepo struct {
 	// (after the counter decrements to 0) succeed normally.
 	incrementErrCount int
 
+	// rbacErr, when non-nil, is returned by every RBAC repository method
+	// so tests can exercise the service layer's error-propagation branches.
+	rbacErr error
+
 	users              map[string]*User
 	refreshTokens      map[string]*RefreshTokenRecord
 	passkeyCreds       map[string]*PasskeyCredRecord
@@ -153,6 +157,9 @@ func newFakeRepo() *fakeRepo {
 func (r *fakeRepo) CreateRole(_ context.Context, rec *RoleRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.rbacErr != nil {
+		return "", r.rbacErr
+	}
 	for _, e := range r.roles {
 		if e.Name == rec.Name {
 			return "", fmt.Errorf("%w: role %q", ErrAlreadyExists, rec.Name)
@@ -170,6 +177,9 @@ func (r *fakeRepo) CreateRole(_ context.Context, rec *RoleRecord) (string, error
 func (r *fakeRepo) GetRoleByName(_ context.Context, name string) (*RoleRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.rbacErr != nil {
+		return nil, r.rbacErr
+	}
 	for _, role := range r.roles {
 		if role.Name == name {
 			cp := *role
@@ -183,6 +193,9 @@ func (r *fakeRepo) GetRoleByName(_ context.Context, name string) (*RoleRecord, e
 func (r *fakeRepo) ListRoles(_ context.Context) ([]*RoleRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.rbacErr != nil {
+		return nil, r.rbacErr
+	}
 	out := make([]*RoleRecord, 0, len(r.roles))
 	for _, role := range r.roles {
 		cp := *role
@@ -196,6 +209,9 @@ func (r *fakeRepo) ListRoles(_ context.Context) ([]*RoleRecord, error) {
 func (r *fakeRepo) DeleteRole(_ context.Context, name string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.rbacErr != nil {
+		return r.rbacErr
+	}
 	for id, role := range r.roles {
 		if role.Name == name {
 			delete(r.roles, id)
@@ -212,6 +228,9 @@ func (r *fakeRepo) DeleteRole(_ context.Context, name string) error {
 func (r *fakeRepo) SetUserRoleAssignment(_ context.Context, userID, roleName string, atMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.rbacErr != nil {
+		return r.rbacErr
+	}
 	for _, a := range r.roleAssignments {
 		if a.UserID == userID {
 			a.RoleName = roleName
@@ -227,6 +246,9 @@ func (r *fakeRepo) SetUserRoleAssignment(_ context.Context, userID, roleName str
 func (r *fakeRepo) GetUserRoleAssignment(_ context.Context, userID string) (*RoleAssignmentRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.rbacErr != nil {
+		return nil, r.rbacErr
+	}
 	for _, a := range r.roleAssignments {
 		if a.UserID == userID {
 			cp := *a
@@ -239,6 +261,9 @@ func (r *fakeRepo) GetUserRoleAssignment(_ context.Context, userID string) (*Rol
 func (r *fakeRepo) DeleteUserRoleAssignment(_ context.Context, userID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.rbacErr != nil {
+		return r.rbacErr
+	}
 	for id, a := range r.roleAssignments {
 		if a.UserID == userID {
 			delete(r.roleAssignments, id)
