@@ -20,3 +20,16 @@ func TestToConnectErrorParentalConsent(t *testing.T) {
 		t.Fatalf("code = %v, want FailedPrecondition", got)
 	}
 }
+
+// TestToConnectErrorMinorDataMinimized proves COPPA data-minimization rejection
+// maps to FailedPrecondition: the account may not collect this PII, a "do
+// something else" precondition rather than an auth or argument failure.
+func TestToConnectErrorMinorDataMinimized(t *testing.T) {
+	err := toConnectError(service.ErrMinorDataMinimized)
+	if err == nil {
+		t.Fatal("toConnectError(ErrMinorDataMinimized) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", got)
+	}
+}
