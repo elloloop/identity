@@ -274,6 +274,16 @@ type Config struct {
 	AgeGateAdultAge    int  // GATEWAY_AGEGATE_ADULT_AGE (default 18)
 	AgeGateRequireDOB  bool // GATEWAY_AGEGATE_REQUIRE_DOB (default false)
 
+	// MinorDataMinimization gates COPPA-style data-minimization for accounts
+	// the age gate classifies as AGE_BAND_CHILD. When true (and the age gate
+	// is enabled), the server refuses to collect or persist non-essential PII
+	// from a child: RequestPhoneVerification and BeginIdentityVerification are
+	// rejected with ErrMinorDataMinimized, and a recovery_email / avatar_url
+	// supplied for a child at signup or profile-update is dropped rather than
+	// stored. Default false preserves today's behavior — adults, teens, and
+	// accounts with an unknown age band are never affected.
+	MinorDataMinimization bool // GATEWAY_MINOR_DATA_MINIMIZATION (default false)
+
 	// Password
 	PasswordSignupEnabled      bool
 	PasswordResetEnabled       bool
@@ -585,6 +595,8 @@ func Load() *Config {
 		AgeGateChildMaxAge: envInt("GATEWAY_AGEGATE_CHILD_MAX_AGE", DefaultAgeGateChildMaxAge),
 		AgeGateAdultAge:    envInt("GATEWAY_AGEGATE_ADULT_AGE", DefaultAgeGateAdultAge),
 		AgeGateRequireDOB:  envBool("GATEWAY_AGEGATE_REQUIRE_DOB", false),
+
+		MinorDataMinimization: envBool("GATEWAY_MINOR_DATA_MINIMIZATION", false),
 
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),

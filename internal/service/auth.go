@@ -706,6 +706,13 @@ var (
 	ErrAccountNotActive  = errors.New("account is not active")
 	ErrInvitationPending = errors.New("account has not completed invitation")
 	ErrIDVRequired       = errors.New("identity verification required")
+	// ErrMinorDataMinimized is returned when GATEWAY_MINOR_DATA_MINIMIZATION is
+	// enabled and a CHILD-band account attempts an RPC that would collect
+	// non-essential PII the server refuses to gather from a minor — phone
+	// verification or identity verification. Like ErrIDVRequired it is a
+	// "this is not permitted for this account" precondition, mapped to
+	// CodeFailedPrecondition by the Connect layer.
+	ErrMinorDataMinimized = errors.New("data collection not permitted for a minor account")
 	// ErrParentalConsentRequired is returned when an admin status mutator
 	// (e.g. ReactivateUser) attempts to move an account out of
 	// pending_parental_consent. The only valid transition out of that state
@@ -842,6 +849,11 @@ type AuthService struct {
 	// threshold determiner when GATEWAY_AGEGATE_ENABLED is set.
 	ageGate agegate.Determiner
 
+	// minorData decides whether a child account's optional PII must be
+	// suppressed (COPPA data-minimization). Built from the age gate and
+	// GATEWAY_MINOR_DATA_MINIMIZATION; a no-op when either is off.
+	minorData MinorDataMinimizer
+
 	// passkeyRPCache memoises per-project WebAuthn relying-party instances
 	// keyed by their (rp_id, rp_name, origin) tuple. A project whose
 	// config_json sets a passkey block needs a WebAuthn instance bound to
@@ -930,10 +942,12 @@ func NewAuthServiceWithOAuth(
 			len(totpRecoveryPepper), totp.MinRecoveryPepperBytes,
 		))
 	}
+	ageGate := BuildAgeGate(cfg, logger)
 	return &AuthService{
 		defaultRepo:        repo,
 		defaultTenantID:    cfg.DefaultTenantID,
-		ageGate:            buildAgeGate(cfg, logger),
+		ageGate:            ageGate,
+		minorData:          NewMinorDataMinimizer(cfg.MinorDataMinimization, ageGate, time.Now),
 		signer:             signer,
 		passkeys:           passkeysSvc,
 		audit:              auditLogger,
@@ -952,12 +966,12 @@ func NewAuthServiceWithOAuth(
 	}
 }
 
-// buildAgeGate selects the age-determination provider from config. When
+// BuildAgeGate selects the age-determination provider from config. When
 // age-gating is off the no-op determiner is returned (everyone is an adult).
 // When on, the threshold determiner is built from the configured boundaries;
 // config.Validate already guarantees they are well-formed, but if a caller
 // bypassed validation we fail safe to the no-op rather than panic.
-func buildAgeGate(cfg *config.Config, logger *zap.Logger) agegate.Determiner {
+func BuildAgeGate(cfg *config.Config, logger *zap.Logger) agegate.Determiner {
 	if !cfg.AgeGateEnabled {
 		return agegate.NewNoop()
 	}

@@ -142,6 +142,15 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		status = StatusPendingParentalConsent
 	}
 
+	// COPPA data-minimization: never persist a recovery_email for a child
+	// account. The recovery-email flow is a non-essential PII collection the
+	// server declines to perform for a minor; the account row is still created
+	// (in pending_parental_consent) so the parental-consent flow can proceed.
+	if s.minorData.BlocksChild(dateOfBirthMs) && recEmail != "" {
+		s.logger.Info("signup_recovery_email_dropped_minor", zap.String("user_id_email", redactEmail(email)))
+		recEmail = ""
+	}
+
 	userID, err := s.repo(ctx).CreateUser(ctx, &User{
 		Email:         email,
 		Name:          displayName,

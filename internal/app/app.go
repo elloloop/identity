@@ -407,13 +407,24 @@ func New(deps Deps) (*Built, error) {
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
-	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
+	// COPPA data-minimization: one minimizer derived from the age gate +
+	// GATEWAY_MINOR_DATA_MINIMIZATION, shared by the profile and IDV services
+	// so the "is this a minimized child?" rule lives in one place. A no-op
+	// when either toggle is off.
+	minorData := service.NewMinorDataMinimizer(
+		deps.Config.MinorDataMinimization,
+		service.BuildAgeGate(deps.Config, logger),
+		nil,
+	)
+
+	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, logger).
+		WithMinorDataMinimizer(minorData)
 
 	var idvSvc *service.IdentityVerificationService
 	if deps.IDVProvider != nil {
 		idvSvc = service.NewIdentityVerificationService(
 			repo, observability.WrapIDVProvider(deps.IDVProvider), deps.Config.DefaultProjectID, logger,
-		)
+		).WithMinorDataMinimizer(minorData)
 	}
 
 	captchaVerifier := deps.CaptchaVerifier
