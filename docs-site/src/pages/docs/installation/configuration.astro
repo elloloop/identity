@@ -58,11 +58,17 @@ import { Code } from "astro-expressive-code/components";
   <h2>OAuth</h2>
   <table>
     <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_GOOGLE_CLIENT_ID</code></td><td><em>(empty)</em></td><td>Google OAuth client ID</td></tr>
-    <tr><td><code>GATEWAY_GOOGLE_CLIENT_SECRET</code></td><td><em>(empty)</em></td><td>Google OAuth client secret</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_ID</code></td><td><em>(empty)</em></td><td>Microsoft / Entra ID client ID</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_SECRET</code></td><td><em>(empty)</em></td><td>Microsoft client secret</td></tr>
+    <tr><td><code>GATEWAY_OAUTH_GOOGLE_CLIENT_ID</code></td><td><em>(empty)</em></td><td>Google OAuth client ID</td></tr>
+    <tr><td><code>GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET</code></td><td><em>(empty)</em></td><td>Google OAuth client secret</td></tr>
+    <tr><td><code>GATEWAY_OAUTH_MICROSOFT_CLIENT_ID</code></td><td><em>(empty)</em></td><td>Microsoft / Entra ID client ID</td></tr>
+    <tr><td><code>GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET</code></td><td><em>(empty)</em></td><td>Microsoft client secret</td></tr>
     <tr><td><code>GATEWAY_MICROSOFT_TENANT_ID</code></td><td><em>(empty)</em></td><td>Microsoft tenant ID (or <code>common</code>)</td></tr>
+    <tr><td><code>GATEWAY_OAUTH_GITHUB_CLIENT_ID</code></td><td><em>(empty)</em></td><td>GitHub OAuth client ID</td></tr>
+    <tr><td><code>GATEWAY_OAUTH_GITHUB_CLIENT_SECRET</code></td><td><em>(empty)</em></td><td>GitHub OAuth client secret</td></tr>
+    <tr><td><code>GATEWAY_OAUTH_APPLE_CLIENT_ID</code></td><td><em>(empty)</em></td><td>Apple Service ID (Client ID)</td></tr>
+    <tr><td><code>GATEWAY_OAUTH_APPLE_TEAM_ID</code></td><td><em>(empty)</em></td><td>Apple Developer Team ID</td></tr>
+    <tr><td><code>GATEWAY_OAUTH_APPLE_KEY_ID</code></td><td><em>(empty)</em></td><td>Apple Private Key ID</td></tr>
+    <tr><td><code>GATEWAY_OAUTH_APPLE_PRIVATE_KEY</code></td><td><em>(empty)</em></td><td>Apple Private Key (PEM format or base64)</td></tr>
   </table>
 
   <h2>Password / lockout</h2>

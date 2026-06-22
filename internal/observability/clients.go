@@ -83,12 +83,12 @@ func WrapOAuthExchanger(provider string, e oauth.Exchanger) oauth.Exchanger {
 	return &base
 }
 
-func (t *TracedExchanger) Exchange(ctx context.Context, code, redirectURI string) (*oauth.Identity, error) {
+func (t *TracedExchanger) Exchange(ctx context.Context, params oauth.ExchangeParams) (*oauth.Identity, error) {
 	ctx, end := StartClient(
 		ctx, "oauth.Exchange",
 		attribute.String("oauth.provider", t.provider),
 	)
-	id, err := t.inner.Exchange(ctx, code, redirectURI)
+	id, err := t.inner.Exchange(ctx, params)
 	end(err)
 	return id, err
 }

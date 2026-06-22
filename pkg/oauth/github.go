@@ -98,8 +98,8 @@ type githubEmail struct {
 	Verified bool   `json:"verified"`
 }
 
-func (g *githubExchanger) Exchange(ctx context.Context, code, redirectURI string) (*Identity, error) {
-	if code == "" {
+func (g *githubExchanger) Exchange(ctx context.Context, params ExchangeParams) (*Identity, error) {
+	if params.Code == "" {
 		return nil, fmt.Errorf("%w: missing authorization code", ErrCodeExchangeFailed)
 	}
 	if g.cfg.ClientID == "" || g.cfg.ClientSecret == "" {
@@ -109,12 +109,12 @@ func (g *githubExchanger) Exchange(ctx context.Context, code, redirectURI string
 	form := url.Values{}
 	form.Set("client_id", g.cfg.ClientID)
 	form.Set("client_secret", g.cfg.ClientSecret)
-	form.Set("code", code)
-	if redirectURI != "" {
-		form.Set("redirect_uri", redirectURI)
+	form.Set("code", params.Code)
+	if params.RedirectURI != "" {
+		form.Set("redirect_uri", params.RedirectURI)
 	}
-	if codeVerifier := codeVerifierFromContext(ctx); codeVerifier != "" {
-		form.Set("code_verifier", codeVerifier)
+	if params.CodeVerifier != "" {
+		form.Set("code_verifier", params.CodeVerifier)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.TokenURL,

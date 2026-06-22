@@ -44,7 +44,7 @@ func TestMicrosoft_ExchangeSuccess(t *testing.T) {
 		IssuerFormat: "https://login.test/%s/v2.0",
 		Now:          nowFunc(now),
 	})
-	id, err := exch.Exchange(context.Background(), "code", "https://app/cb")
+	id, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"})
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestMicrosoft_EmailFromUPNFallback(t *testing.T) {
 		IssuerFormat: "https://login.test/%s/v2.0",
 		Now:          nowFunc(now),
 	})
-	id, err := exch.Exchange(context.Background(), "code", "https://x")
+	id, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestMicrosoft_BadIssuer(t *testing.T) {
 		IssuerFormat: "https://login.test/%s/v2.0",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}
@@ -154,7 +154,7 @@ func TestMicrosoft_BadAudience(t *testing.T) {
 		IssuerFormat: "https://login.test/%s/v2.0",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}
@@ -186,7 +186,7 @@ func TestMicrosoft_ExpiredToken(t *testing.T) {
 		IssuerFormat: "https://login.test/%s/v2.0",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}
@@ -219,7 +219,7 @@ func TestMicrosoft_VerifiedEmailFalse(t *testing.T) {
 		IssuerFormat: "https://login.test/%s/v2.0",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrEmailNotVerified) {
 		t.Fatalf("want ErrEmailNotVerified, got %v", err)
 	}
@@ -238,7 +238,7 @@ func TestMicrosoft_TokenEndpoint400(t *testing.T) {
 		JWKSURL:      fp.URL("/jwks"),
 		IssuerFormat: "https://login.test/%s/v2.0",
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}

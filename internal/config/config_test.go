@@ -89,6 +89,18 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.SweeperGraceSeconds != 60 {
 		t.Errorf("SweeperGraceSeconds: want 60, got %d", cfg.SweeperGraceSeconds)
 	}
+	if cfg.AppleClientID != "" {
+		t.Errorf("AppleClientID: want empty default, got %q", cfg.AppleClientID)
+	}
+	if cfg.AppleTeamID != "" {
+		t.Errorf("AppleTeamID: want empty default, got %q", cfg.AppleTeamID)
+	}
+	if cfg.AppleKeyID != "" {
+		t.Errorf("AppleKeyID: want empty default, got %q", cfg.AppleKeyID)
+	}
+	if cfg.ApplePrivateKey != "" {
+		t.Errorf("ApplePrivateKey: want empty default, got %q", cfg.ApplePrivateKey)
+	}
 }
 
 // TestLoad_SweeperDisabledWhenIntervalZero asserts the documented
@@ -119,6 +131,10 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_PASSWORD_RESET_ENABLED", "false")
 	t.Setenv("GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS", "10")
 	t.Setenv("GATEWAY_TOTP_ISSUER", "My Corp")
+	t.Setenv("GATEWAY_OAUTH_APPLE_CLIENT_ID", "apple-client")
+	t.Setenv("GATEWAY_OAUTH_APPLE_TEAM_ID", "apple-team")
+	t.Setenv("GATEWAY_OAUTH_APPLE_KEY_ID", "apple-key")
+	t.Setenv("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", "apple-private")
 
 	cfg := Load()
 
@@ -154,6 +170,18 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	}
 	if cfg.TOTPIssuer != "My Corp" {
 		t.Errorf("TOTPIssuer: want 'My Corp', got %q", cfg.TOTPIssuer)
+	}
+	if cfg.AppleClientID != "apple-client" {
+		t.Errorf("AppleClientID: want apple-client, got %q", cfg.AppleClientID)
+	}
+	if cfg.AppleTeamID != "apple-team" {
+		t.Errorf("AppleTeamID: want apple-team, got %q", cfg.AppleTeamID)
+	}
+	if cfg.AppleKeyID != "apple-key" {
+		t.Errorf("AppleKeyID: want apple-key, got %q", cfg.AppleKeyID)
+	}
+	if cfg.ApplePrivateKey != "apple-private" {
+		t.Errorf("ApplePrivateKey: want apple-private, got %q", cfg.ApplePrivateKey)
 	}
 }
 

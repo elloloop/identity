@@ -36,7 +36,7 @@ Treat this like [tenant-shard-db](https://github.com/elloloop/tenant-shard-db): 
 - **Passkeys (WebAuthn)** registration and login
 - **TOTP (2FA)** setup, verify, recovery codes
 - **QR cross-device login**
-- **OAuth login** (Google, Microsoft — server consumes pre-verified ID tokens from frontend SDKs)
+- **OAuth login** (Google, Microsoft, GitHub, Apple — server-owned authorization-code exchange)
 - **Sessions** with revoke and sign-out-everywhere
 - **JWT issuance** with key rotation, plus `/.well-known/jwks.json` for downstream services
 - **User and Group CRUD**, group membership data

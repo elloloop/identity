@@ -34,7 +34,7 @@ func (p *appTestStubProvider) AuthorizationURL(_ context.Context, redirectURI, s
 	return u.String(), nil
 }
 
-func (p *appTestStubProvider) Exchange(_ context.Context, _, _ string) (*oauth.Identity, error) {
+func (p *appTestStubProvider) Exchange(_ context.Context, _ oauth.ExchangeParams) (*oauth.Identity, error) {
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -90,8 +90,12 @@ func newHostedTestHandler(t *testing.T, allowlist string, reg *oauth.Registry) h
 }
 
 func hostedTestRegistry(p oauth.Exchanger) *oauth.Registry {
+	return hostedTestRegistryFor("google", p)
+}
+
+func hostedTestRegistryFor(provider string, p oauth.Exchanger) *oauth.Registry {
 	reg := oauth.NewRegistry()
-	reg.Register("google", p)
+	reg.Register(provider, p)
 	return reg
 }
 
@@ -113,6 +117,36 @@ func TestHostedHTTP_StartHappyPath(t *testing.T) {
 	}
 	if got := loc.Query().Get("redirect_uri"); !strings.HasSuffix(got, "/oauth/callback/google") {
 		t.Fatalf("redirect_uri = %q", got)
+	}
+}
+
+func TestHostedHTTP_StartSetsCSRFCookie(t *testing.T) {
+	for _, tt := range []struct {
+		provider string
+		sameSite http.SameSite
+	}{
+		{provider: "google", sameSite: http.SameSiteLaxMode},
+		{provider: "apple", sameSite: http.SameSiteNoneMode},
+	} {
+		t.Run(tt.provider, func(t *testing.T) {
+			h := newHostedTestHandler(t, "https://app.test/", hostedTestRegistryFor(tt.provider, &appTestStubProvider{}))
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet,
+				"/oauth/start/"+tt.provider+"?return_to="+url.QueryEscape("https://app.test/finish"), nil))
+
+			if rr.Code != http.StatusFound {
+				t.Fatalf("status = %d, want 302", rr.Code)
+			}
+			cookies := rr.Result().Cookies()
+			if len(cookies) != 1 {
+				t.Fatalf("cookie count = %d, want 1", len(cookies))
+			}
+			cookie := cookies[0]
+			if cookie.Name != hostedOAuthCSRFCookieName(tt.provider) || cookie.Path != "/" || cookie.Domain != "" ||
+				!cookie.HttpOnly || !cookie.Secure || cookie.SameSite != tt.sameSite {
+				t.Fatalf("csrf cookie = %#v", cookie)
+			}
+		})
 	}
 }
 
@@ -169,8 +203,11 @@ func TestHostedHTTP_FullStartCallback(t *testing.T) {
 
 	// Callback with the state token + a code.
 	cbRR := httptest.NewRecorder()
-	h.ServeHTTP(cbRR, httptest.NewRequest(http.MethodGet,
-		"/oauth/callback/google?state="+url.QueryEscape(stateToken)+"&code=auth-xyz", nil))
+	cbReq := httptest.NewRequest(http.MethodGet, "/oauth/callback/google?state="+url.QueryEscape(stateToken)+"&code=auth-xyz", nil)
+	for _, c := range startRR.Result().Cookies() {
+		cbReq.AddCookie(c)
+	}
+	h.ServeHTTP(cbRR, cbReq)
 	if cbRR.Code != http.StatusFound {
 		t.Fatalf("callback status = %d, want 302; body=%q", cbRR.Code, cbRR.Body.String())
 	}
@@ -181,6 +218,140 @@ func TestHostedHTTP_FullStartCallback(t *testing.T) {
 	cb, _ := url.Parse(redir)
 	if cb.Query().Get("code") == "" {
 		t.Fatal("callback redirect carried no one-time code")
+	}
+}
+
+func TestHostedHTTP_ConcurrentStartsCompleteIndependently(t *testing.T) {
+	h := newHostedTestHandler(t, "https://app.test/", hostedTestRegistry(&appTestStubProvider{}))
+
+	firstStartRR := httptest.NewRecorder()
+	h.ServeHTTP(firstStartRR, httptest.NewRequest(http.MethodGet,
+		"/oauth/start/google?return_to="+url.QueryEscape("https://app.test/finish"), nil))
+	firstLocation, _ := url.Parse(firstStartRR.Header().Get("Location"))
+	firstState := firstLocation.Query().Get("state")
+	firstCookie := firstStartRR.Result().Cookies()[0]
+
+	secondStartRR := httptest.NewRecorder()
+	secondStartReq := httptest.NewRequest(http.MethodGet,
+		"/oauth/start/google?return_to="+url.QueryEscape("https://app.test/finish"), nil)
+	secondStartReq.AddCookie(firstCookie)
+	h.ServeHTTP(secondStartRR, secondStartReq)
+	secondLocation, _ := url.Parse(secondStartRR.Header().Get("Location"))
+	secondState := secondLocation.Query().Get("state")
+	secondCookie := secondStartRR.Result().Cookies()[0]
+	if got := len(strings.Split(secondCookie.Value, ".")); got != 2 {
+		t.Fatalf("csrf token count = %d, want 2", got)
+	}
+
+	firstCallbackRR := httptest.NewRecorder()
+	firstCallbackReq := httptest.NewRequest(http.MethodGet,
+		"/oauth/callback/google?state="+url.QueryEscape(firstState)+"&code=auth-first", nil)
+	firstCallbackReq.AddCookie(secondCookie)
+	h.ServeHTTP(firstCallbackRR, firstCallbackReq)
+	if firstCallbackRR.Code != http.StatusFound {
+		t.Fatalf("first callback status = %d, want 302; body=%q", firstCallbackRR.Code, firstCallbackRR.Body.String())
+	}
+	remainingCookie := firstCallbackRR.Result().Cookies()[0]
+	if got := len(strings.Split(remainingCookie.Value, ".")); got != 1 {
+		t.Fatalf("remaining csrf token count = %d, want 1", got)
+	}
+
+	secondCallbackRR := httptest.NewRecorder()
+	secondCallbackReq := httptest.NewRequest(http.MethodGet,
+		"/oauth/callback/google?state="+url.QueryEscape(secondState)+"&code=auth-second", nil)
+	secondCallbackReq.AddCookie(remainingCookie)
+	h.ServeHTTP(secondCallbackRR, secondCallbackReq)
+	if secondCallbackRR.Code != http.StatusFound {
+		t.Fatalf("second callback status = %d, want 302; body=%q", secondCallbackRR.Code, secondCallbackRR.Body.String())
+	}
+}
+
+func TestHostedHTTP_FullStartCallback_FormPost(t *testing.T) {
+	h := newHostedTestHandler(t, "https://app.test/", hostedTestRegistry(&appTestStubProvider{}))
+
+	// Start to obtain a valid state token.
+	startRR := httptest.NewRecorder()
+	h.ServeHTTP(startRR, httptest.NewRequest(http.MethodGet,
+		"/oauth/start/google?return_to="+url.QueryEscape("https://app.test/finish"), nil))
+	loc, _ := url.Parse(startRR.Header().Get("Location"))
+	stateToken := loc.Query().Get("state")
+
+	// Callback with the state token + a code via POST form body.
+	cbRR := httptest.NewRecorder()
+	form := url.Values{}
+	form.Set("state", stateToken)
+	form.Set("code", "auth-xyz-form")
+	req := httptest.NewRequest(http.MethodPost, "/oauth/callback/google", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, c := range startRR.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	h.ServeHTTP(cbRR, req)
+
+	if cbRR.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, want 302; body=%q", cbRR.Code, cbRR.Body.String())
+	}
+	redir := cbRR.Header().Get("Location")
+	if !strings.HasPrefix(redir, "https://app.test/finish") {
+		t.Fatalf("callback redirect = %q", redir)
+	}
+	cb, _ := url.Parse(redir)
+	if cb.Query().Get("code") == "" {
+		t.Fatal("callback redirect carried no one-time code")
+	}
+}
+
+func TestHostedHTTP_CallbackRejectsInvalidCSRFCookie(t *testing.T) {
+	h := newHostedTestHandler(t, "https://app.test/", hostedTestRegistry(&appTestStubProvider{}))
+	startRR := httptest.NewRecorder()
+	h.ServeHTTP(startRR, httptest.NewRequest(http.MethodGet,
+		"/oauth/start/google?return_to="+url.QueryEscape("https://app.test/finish"), nil))
+	loc, _ := url.Parse(startRR.Header().Get("Location"))
+	stateToken := loc.Query().Get("state")
+
+	for _, tt := range []struct {
+		name       string
+		addCookies func(*http.Request)
+	}{
+		{name: "missing"},
+		{name: "mismatched", addCookies: func(req *http.Request) {
+			req.AddCookie(&http.Cookie{
+				Name:     hostedOAuthCSRFCookieName("google"),
+				Value:    "wrong",
+				Secure:   true,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
+		}},
+		{name: "duplicate", addCookies: func(req *http.Request) {
+			req.AddCookie(&http.Cookie{
+				Name:     hostedOAuthCSRFCookieName("google"),
+				Value:    "first",
+				Secure:   true,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
+			req.AddCookie(&http.Cookie{
+				Name:     hostedOAuthCSRFCookieName("google"),
+				Value:    "second",
+				Secure:   true,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet,
+				"/oauth/callback/google?state="+url.QueryEscape(stateToken)+"&code=auth-xyz", nil)
+			if tt.addCookies != nil {
+				tt.addCookies(req)
+			}
+			h.ServeHTTP(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", rr.Code)
+			}
+		})
 	}
 }
 
@@ -207,7 +378,7 @@ func TestHostedHTTP_CallbackBadState(t *testing.T) {
 func TestHostedHTTP_CallbackMethodNotAllowed(t *testing.T) {
 	h := newHostedTestHandler(t, "https://app.test/", hostedTestRegistry(&appTestStubProvider{}))
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/oauth/callback/google", nil))
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPut, "/oauth/callback/google", nil))
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rr.Code)
 	}

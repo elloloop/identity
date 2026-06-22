@@ -1,6 +1,8 @@
 package app
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,7 +15,7 @@ import (
 // hostedOAuthHandler serves the browser-facing hosted OAuth endpoints:
 //
 //	GET /oauth/start/{provider}?return_to=<app-url>
-//	GET /oauth/callback/{provider}
+//	GET/POST /oauth/callback/{provider}
 //
 // These are plain HTTP routes (not Connect RPCs) because the browser is
 // 302-redirected through them. They are thin wrappers over the existing
@@ -29,6 +31,11 @@ type hostedOAuthHandler struct {
 	allowlist service.ReturnAllowlist
 	logger    *zap.Logger
 }
+
+const (
+	hostedOAuthCSRFCookiePrefix = "__Host-oauth_csrf_"
+	hostedOAuthCSRFMaxTokens    = 16
+)
 
 // register wires the hosted routes onto mux. It is a no-op when the
 // allowlist is empty (hosted flow disabled), leaving the routes
@@ -62,8 +69,19 @@ func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	csrfToken := base64.RawURLEncoding.EncodeToString(b[:])
+	csrfTokens, ok := hostedOAuthCSRFTokens(r, provider)
+	if !ok {
+		csrfTokens = nil
+	}
+
 	redirectURI := h.callbackURL(r, provider)
-	result, err := h.auth.BeginHostedOAuth(r.Context(), provider, redirectURI, returnTo)
+	result, err := h.auth.BeginHostedOAuth(r.Context(), provider, redirectURI, returnTo, csrfToken)
 	if err != nil {
 		h.logger.Info("hosted_oauth_start_failed", zap.String("provider", provider), zap.Error(err))
 		status := http.StatusBadRequest
@@ -76,36 +94,51 @@ func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request)
 	// #nosec G710 -- the redirect target is the provider authorization
 	// URL built server-side by BeginHostedOAuth from the registered
 	// provider config, not from request input.
+	http.SetCookie(w, hostedOAuthCSRFCookie(provider, appendHostedOAuthCSRFToken(csrfTokens, csrfToken), 900))
 	http.Redirect(w, r, result.AuthorizationURL, http.StatusFound)
 }
 
 func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if r.Method == http.MethodPost {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MiB limit
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
 	provider := pathProvider(r.URL.Path, "/oauth/callback/")
 	if provider == "" {
 		http.Error(w, "provider is required", http.StatusBadRequest)
 		return
 	}
 
-	q := r.URL.Query()
-	state := q.Get("state")
+	state := r.FormValue("state")
 
 	// Provider-side error (user denied consent, etc). We cannot recover
 	// return_to without a valid state token, so there is nowhere safe to
 	// redirect — surface a generic 400 and log server-side.
-	if provErr := q.Get("error"); provErr != "" {
+	if provErr := r.FormValue("error"); provErr != "" {
 		h.logger.Info("hosted_oauth_provider_error",
 			zap.String("provider", provider), zap.String("error", provErr))
 		http.Error(w, "oauth failed", http.StatusBadRequest)
 		return
 	}
 
+	csrfTokens, ok := hostedOAuthCSRFTokens(r, provider)
+	if !ok {
+		h.logger.Info("hosted_oauth_csrf_cookie_invalid", zap.String("provider", provider))
+		http.Error(w, "oauth failed", http.StatusBadRequest)
+		return
+	}
+
 	result, err := h.auth.CompleteHostedOAuth(
-		r.Context(), provider, q.Get("code"), state,
-		clientIPFromRequest(r), r.UserAgent(),
+		r.Context(), provider, r.FormValue("code"), state, r.FormValue("user"),
+		clientIPFromRequest(r), r.UserAgent(), csrfTokens,
 	)
 	if err != nil {
 		// We do not have a verified return_to here (the state token failed
@@ -121,7 +154,78 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 	// tamper-proof hosted state token whose return_to was validated
 	// against the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist at /start
 	// time. It is not raw request input.
+	remainingCSRFTokens := removeHostedOAuthCSRFToken(csrfTokens, result.CSRFToken)
+	maxAge := 900
+	if len(remainingCSRFTokens) == 0 {
+		maxAge = -1
+	}
+	http.SetCookie(w, hostedOAuthCSRFCookie(provider, remainingCSRFTokens, maxAge))
 	http.Redirect(w, r, appendQueryParam(result.ReturnTo, "code", result.Code), http.StatusFound)
+}
+
+func hostedOAuthCSRFCookie(provider string, tokens []string, maxAge int) *http.Cookie {
+	sameSite := http.SameSiteLaxMode
+	if provider == "apple" {
+		sameSite = http.SameSiteNoneMode
+	}
+	return &http.Cookie{ // #nosec G124 -- Secure and HttpOnly are fixed; SameSite is Lax or None for Apple's cross-site form POST.
+		Name:     hostedOAuthCSRFCookieName(provider),
+		Value:    strings.Join(tokens, "."),
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: sameSite,
+	}
+}
+
+func hostedOAuthCSRFCookieName(provider string) string {
+	return hostedOAuthCSRFCookiePrefix + provider
+}
+
+func hostedOAuthCSRFTokens(r *http.Request, provider string) ([]string, bool) {
+	var value string
+	found := false
+	for _, cookie := range r.Cookies() {
+		if cookie.Name != hostedOAuthCSRFCookieName(provider) {
+			continue
+		}
+		if found {
+			return nil, false
+		}
+		found = true
+		value = cookie.Value
+	}
+	if !found {
+		return nil, false
+	}
+	tokens := strings.Split(value, ".")
+	if len(tokens) > hostedOAuthCSRFMaxTokens {
+		return nil, false
+	}
+	for _, token := range tokens {
+		if token == "" {
+			return nil, false
+		}
+	}
+	return tokens, true
+}
+
+func appendHostedOAuthCSRFToken(tokens []string, token string) []string {
+	if len(tokens) == hostedOAuthCSRFMaxTokens {
+		tokens = tokens[1:]
+	}
+	return append(tokens, token)
+}
+
+func removeHostedOAuthCSRFToken(tokens []string, token string) []string {
+	remaining := make([]string, 0, len(tokens))
+	for _, candidate := range tokens {
+		if candidate != token {
+			remaining = append(remaining, candidate)
+		}
+	}
+	return remaining
 }
 
 // callbackURL reconstructs this server's single redirect URI for the

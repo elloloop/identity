@@ -478,7 +478,7 @@ func TestOAuthLogin_DeniedByPolicy(t *testing.T) {
 	svc.WithLoginGovernance(claimedPasswordOnlyGovernance())
 
 	code := fakeOAuthCode("alice@acme.com", "Alice", "", "google")
-	_, err := svc.OAuthLogin(withProject("proj-1"), code, "google", "https://app/cb", "", "", "", "", "")
+	_, err := svc.OAuthLogin(withProject("proj-1"), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.ErrorIs(t, err, ErrPermissionDenied,
 		"oauth must be denied for a password-only tenant")
 }
@@ -490,7 +490,7 @@ func TestOAuthLogin_AllowedByPolicy(t *testing.T) {
 	svc.WithLoginGovernance(withAllowedMethods(LoginMethodOAuth))
 
 	code := fakeOAuthCode("alice@acme.com", "Alice", "", "google")
-	res, err := svc.OAuthLogin(withProject("proj-1"), code, "google", "https://app/cb", "", "", "", "", "")
+	res, err := svc.OAuthLogin(withProject("proj-1"), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.NoError(t, err)
 	require.NotEmpty(t, res.AccessToken)
 }
@@ -503,11 +503,11 @@ func TestRedeemOAuthCode_DeniedByPolicy(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123")
 	require.NoError(t, err)
 	cb, err := svc.CompleteHostedOAuth(ctx, "google",
 		fakeOAuthCode("alice@acme.com", "Alice", "", "google"),
-		stateTokenFromAuthURL(t, begin.AuthorizationURL), "1.2.3.4", "test-agent")
+		stateTokenFromAuthURL(t, begin.AuthorizationURL), "", "1.2.3.4", "test-agent", []string{"csrf-123"})
 	require.NoError(t, err)
 
 	// Policy is consulted at redeem, the point tokens would be issued.

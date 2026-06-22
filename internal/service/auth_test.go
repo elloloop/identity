@@ -432,7 +432,7 @@ func TestOAuthLogin_CreatesNewUser(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	code := fakeOAuthCode("oauth@example.com", "OAuth User", "https://img.example.com/pic.jpg", "google")
-	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
+	result, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.NoError(t, err)
 	assert.Equal(t, "oauth@example.com", result.User.Email)
 	assert.Equal(t, "OAuth User", result.User.Name)
@@ -445,7 +445,7 @@ func TestOAuthLogin_ExistingUserUpdatesProfile(t *testing.T) {
 	seedUser(repo, "existing@example.com", "", "active")
 
 	code := fakeOAuthCode("existing@example.com", "New Name", "https://pic.url", "google")
-	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
+	result, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.NoError(t, err)
 	assert.Equal(t, "existing@example.com", result.User.Email)
 }
