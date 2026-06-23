@@ -24,8 +24,8 @@ stringData:
   GATEWAY_JWT_KEYS: |
     [{"kid":"k-2026-05","private_key_pem":"-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n","active":true}]
   GATEWAY_TOTP_ENCRYPTION_KEY: "<base64 32-byte key>"
-  GATEWAY_GOOGLE_CLIENT_SECRET: "..."
-  GATEWAY_MICROSOFT_CLIENT_SECRET: "..."`} lang="yaml" title="secret.yaml" />
+  GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET: "..."
+  GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET: "..."`} lang="yaml" title="secret.yaml" />
 
   <h2>ConfigMap</h2>
   <Code code={`apiVersion: v1
@@ -42,8 +42,8 @@ data:
   GATEWAY_ALLOWED_ORIGINS: "https://acme.example.com"
   GATEWAY_AUTH_ALLOW_LOCAL: "true"
   GATEWAY_COOKIE_SECURE: "true"
-  GATEWAY_GOOGLE_CLIENT_ID: "..."
-  GATEWAY_MICROSOFT_CLIENT_ID: "..."`} lang="yaml" title="configmap.yaml" />
+  GATEWAY_OAUTH_GOOGLE_CLIENT_ID: "..."
+  GATEWAY_OAUTH_MICROSOFT_CLIENT_ID: "..."`} lang="yaml" title="configmap.yaml" />
 
   <h2>Deployment</h2>
   <Code code={`apiVersion: apps/v1

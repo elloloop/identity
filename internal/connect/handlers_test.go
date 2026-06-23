@@ -491,7 +491,7 @@ func TestRedeemOAuthCode_DisabledUnavailable(t *testing.T) {
 
 type connectOAuthExchanger struct{}
 
-func (connectOAuthExchanger) Exchange(context.Context, string, string) (*oauth.Identity, error) {
+func (connectOAuthExchanger) Exchange(_ context.Context, _ oauth.ExchangeParams) (*oauth.Identity, error) {
 	return &oauth.Identity{
 		Provider:       "google",
 		ProviderUserID: "connect-user",

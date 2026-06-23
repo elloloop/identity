@@ -1898,7 +1898,7 @@ func (x *ListGroupMembersResponse) GetMembers() []*User {
 type BeginOAuthLoginRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RedirectUri   string                 `protobuf:"bytes,1,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
-	Provider      string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"` // "google", "microsoft", or "github"
+	Provider      string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"` // "google", "microsoft", "github", or "apple"
 	Tenant        string                 `protobuf:"bytes,3,opt,name=tenant,proto3" json:"tenant,omitempty"`     // Microsoft tenant ID (optional)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2032,16 +2032,17 @@ func (x *BeginOAuthLoginResponse) GetExpiresIn() int32 {
 }
 
 type OAuthLoginRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
-	RedirectUri   string                 `protobuf:"bytes,2,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
-	Provider      string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`                             // "google", "microsoft", or "github"
-	CodeVerifier  string                 `protobuf:"bytes,4,opt,name=code_verifier,json=codeVerifier,proto3" json:"code_verifier,omitempty"` // PKCE (optional)
-	Tenant        string                 `protobuf:"bytes,5,opt,name=tenant,proto3" json:"tenant,omitempty"`                                 // Microsoft tenant ID (optional)
-	State         string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"`                                   // authorization callback state (required for server-owned flow)
-	StateToken    string                 `protobuf:"bytes,7,opt,name=state_token,json=stateToken,proto3" json:"state_token,omitempty"`       // opaque token minted by BeginOAuthLogin
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Code             string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	RedirectUri      string                 `protobuf:"bytes,2,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
+	Provider         string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`                                           // "google", "microsoft", "github", or "apple"
+	CodeVerifier     string                 `protobuf:"bytes,4,opt,name=code_verifier,json=codeVerifier,proto3" json:"code_verifier,omitempty"`               // PKCE (optional)
+	Tenant           string                 `protobuf:"bytes,5,opt,name=tenant,proto3" json:"tenant,omitempty"`                                               // Microsoft tenant ID (optional)
+	State            string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"`                                                 // authorization callback state (required for server-owned flow)
+	StateToken       string                 `protobuf:"bytes,7,opt,name=state_token,json=stateToken,proto3" json:"state_token,omitempty"`                     // opaque token minted by BeginOAuthLogin
+	AppleUserPayload string                 `protobuf:"bytes,8,opt,name=apple_user_payload,json=appleUserPayload,proto3" json:"apple_user_payload,omitempty"` // one-time user payload from Apple's form_post callback
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *OAuthLoginRequest) Reset() {
@@ -2123,6 +2124,13 @@ func (x *OAuthLoginRequest) GetStateToken() string {
 	return ""
 }
 
+func (x *OAuthLoginRequest) GetAppleUserPayload() string {
+	if x != nil {
+		return x.AppleUserPayload
+	}
+	return ""
+}
+
 type OAuthLoginResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
@@ -2192,7 +2200,7 @@ func (x *OAuthLoginResponse) GetExpiresIn() int32 {
 }
 
 // RedeemOAuthCode exchanges the single-use one-time code handed to the
-// SPA by the hosted OAuth callback (GET /oauth/callback/{provider} ->
+// SPA by the hosted OAuth callback (GET/POST /oauth/callback/{provider} ->
 // 302 return_to?code=<otc>) for a backend-issued token pair. The code
 // is single-use and short-lived; a replay returns CodeUnauthenticated.
 type RedeemOAuthCodeRequest struct {
@@ -10679,7 +10687,7 @@ func (x *GetProjectConfigResponse) GetConfigJson() string {
 // LinkedIdentity is one connected provider identity for the authenticated user.
 type LinkedIdentity struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	Provider        string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`                                          // "google", "microsoft", "github", ...
+	Provider        string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`                                          // "google", "microsoft", "github", "apple", ...
 	ProviderUserId  string                 `protobuf:"bytes,2,opt,name=provider_user_id,json=providerUserId,proto3" json:"provider_user_id,omitempty"`      // stable provider subject
 	EmailAtLinkTime string                 `protobuf:"bytes,3,opt,name=email_at_link_time,json=emailAtLinkTime,proto3" json:"email_at_link_time,omitempty"` // email the provider asserted when linked
 	LinkedAt        int64                  `protobuf:"varint,4,opt,name=linked_at,json=linkedAt,proto3" json:"linked_at,omitempty"`                         // epoch ms the link was created
@@ -10835,7 +10843,7 @@ type LinkIdentityRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"` // authorization code from the provider callback
 	RedirectUri   string                 `protobuf:"bytes,2,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
-	Provider      string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`                             // "google", "microsoft", "github", ...
+	Provider      string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`                             // "google", "microsoft", "github", "apple", ...
 	CodeVerifier  string                 `protobuf:"bytes,4,opt,name=code_verifier,json=codeVerifier,proto3" json:"code_verifier,omitempty"` // PKCE (optional)
 	State         string                 `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`                                   // authorization callback state
 	StateToken    string                 `protobuf:"bytes,6,opt,name=state_token,json=stateToken,proto3" json:"state_token,omitempty"`       // opaque token minted by BeginOAuthLogin
@@ -11189,7 +11197,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"stateToken\x12#\n" +
 	"\rcode_verifier\x18\x04 \x01(\tR\fcodeVerifier\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x05 \x01(\x05R\texpiresIn\"\xda\x01\n" +
+	"expires_in\x18\x05 \x01(\x05R\texpiresIn\"\x88\x02\n" +
 	"\x11OAuthLoginRequest\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12!\n" +
 	"\fredirect_uri\x18\x02 \x01(\tR\vredirectUri\x12\x1a\n" +
@@ -11198,7 +11206,8 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x06tenant\x18\x05 \x01(\tR\x06tenant\x12\x14\n" +
 	"\x05state\x18\x06 \x01(\tR\x05state\x12\x1f\n" +
 	"\vstate_token\x18\a \x01(\tR\n" +
-	"stateToken\"\xa8\x01\n" +
+	"stateToken\x12,\n" +
+	"\x12apple_user_payload\x18\b \x01(\tR\x10appleUserPayload\"\xa8\x01\n" +
 	"\x12OAuthLoginResponse\x12%\n" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\x12!\n" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +

@@ -31,8 +31,16 @@ type Identity struct {
 	// AvatarURL is a URL to the user's profile picture. May be empty.
 	AvatarURL string
 
-	// Provider is the provider key — "google", "microsoft", "github".
+	// Provider is the provider key — "google", "microsoft", "github", "apple".
 	Provider string
+}
+
+// ExchangeParams contains the arguments for the OAuth token exchange.
+type ExchangeParams struct {
+	Code             string
+	RedirectURI      string
+	CodeVerifier     string // Optional PKCE code_verifier
+	AppleUserPayload string // Optional form-post payload for Apple first-time login
 }
 
 // Exchanger swaps an OAuth authorization code for a verified user
@@ -49,7 +57,7 @@ type Identity struct {
 // leak provider response bodies. Callers that need provider-specific
 // debugging should inspect logs.
 type Exchanger interface {
-	Exchange(ctx context.Context, code, redirectURI string) (*Identity, error)
+	Exchange(ctx context.Context, params ExchangeParams) (*Identity, error)
 }
 
 // Authorizer builds the provider authorization URL for the first half

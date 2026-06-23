@@ -199,7 +199,7 @@ message ListGroupMembersResponse {
 
 message BeginOAuthLoginRequest {
   string redirect_uri = 1;
-  string provider     = 2;  // "google", "microsoft", or "github"
+  string provider     = 2;  // "google", "microsoft", "github", or "apple"
   string tenant       = 3;  // Microsoft tenant ID (optional)
 }
 
@@ -214,11 +214,12 @@ message BeginOAuthLoginResponse {
 message OAuthLoginRequest {
   string code          = 1;
   string redirect_uri  = 2;
-  string provider      = 3;  // "google", "microsoft", or "github"
+  string provider      = 3;  // "google", "microsoft", "github", or "apple"
   string code_verifier = 4;  // PKCE (optional)
   string tenant        = 5;  // Microsoft tenant ID (optional)
   string state         = 6;  // authorization callback state (required for server-owned flow)
   string state_token   = 7;  // opaque token minted by BeginOAuthLogin
+  string apple_user_payload = 8; // one-time user payload from Apple's form_post callback
 }
 
 message OAuthLoginResponse {
@@ -230,7 +231,7 @@ message OAuthLoginResponse {
 }
 
 // RedeemOAuthCode exchanges the single-use one-time code handed to the
-// SPA by the hosted OAuth callback (GET /oauth/callback/{provider} ->
+// SPA by the hosted OAuth callback (GET/POST /oauth/callback/{provider} ->
 // 302 return_to?code=<otc>) for a backend-issued token pair. The code
 // is single-use and short-lived; a replay returns CodeUnauthenticated.
 message RedeemOAuthCodeRequest {
@@ -1243,7 +1244,7 @@ message GetProjectConfigResponse {
 
 // LinkedIdentity is one connected provider identity for the authenticated user.
 message LinkedIdentity {
-  string provider            = 1;  // "google", "microsoft", "github", ...
+  string provider            = 1;  // "google", "microsoft", "github", "apple", ...
   string provider_user_id    = 2;  // stable provider subject
   string email_at_link_time  = 3;  // email the provider asserted when linked
   int64  linked_at           = 4;  // epoch ms the link was created
@@ -1264,7 +1265,7 @@ message ListLinkedIdentitiesResponse {
 message LinkIdentityRequest {
   string code          = 1;  // authorization code from the provider callback
   string redirect_uri  = 2;
-  string provider      = 3;  // "google", "microsoft", "github", ...
+  string provider      = 3;  // "google", "microsoft", "github", "apple", ...
   string code_verifier = 4;  // PKCE (optional)
   string state         = 5;  // authorization callback state
   string state_token   = 6;  // opaque token minted by BeginOAuthLogin

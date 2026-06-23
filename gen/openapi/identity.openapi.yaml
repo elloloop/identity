@@ -3785,7 +3785,7 @@ components:
         provider:
           type: string
           title: provider
-          description: '"google", "microsoft", or "github"'
+          description: '"google", "microsoft", "github", or "apple"'
         tenant:
           type: string
           title: tenant
@@ -4552,7 +4552,7 @@ components:
         provider:
           type: string
           title: provider
-          description: '"google", "microsoft", "github", ...'
+          description: '"google", "microsoft", "github", "apple", ...'
         codeVerifier:
           type: string
           title: code_verifier
@@ -4588,7 +4588,7 @@ components:
         provider:
           type: string
           title: provider
-          description: '"google", "microsoft", "github", ...'
+          description: '"google", "microsoft", "github", "apple", ...'
         providerUserId:
           type: string
           title: provider_user_id
@@ -4975,7 +4975,7 @@ components:
         provider:
           type: string
           title: provider
-          description: '"google", "microsoft", or "github"'
+          description: '"google", "microsoft", "github", or "apple"'
         codeVerifier:
           type: string
           title: code_verifier
@@ -4992,6 +4992,10 @@ components:
           type: string
           title: state_token
           description: opaque token minted by BeginOAuthLogin
+        appleUserPayload:
+          type: string
+          title: apple_user_payload
+          description: one-time user payload from Apple's form_post callback
       title: OAuthLoginRequest
       additionalProperties: false
     identity.v1.OAuthLoginResponse:
@@ -5256,7 +5260,7 @@ components:
       additionalProperties: false
       description: |-
         RedeemOAuthCode exchanges the single-use one-time code handed to the
-         SPA by the hosted OAuth callback (GET /oauth/callback/{provider} ->
+         SPA by the hosted OAuth callback (GET/POST /oauth/callback/{provider} ->
          302 return_to?code=<otc>) for a backend-issued token pair. The code
          is single-use and short-lived; a replay returns CodeUnauthenticated.
     identity.v1.RedeemOAuthCodeResponse:

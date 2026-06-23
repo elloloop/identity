@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"strings"
@@ -38,7 +39,7 @@ type HostedOAuthBeginResult struct {
 // BeginOAuthLogin uses — there is no forked authorization path.
 func (s *AuthService) BeginHostedOAuth(
 	ctx context.Context,
-	provider, redirectURI, returnTo string,
+	provider, redirectURI, returnTo, csrfToken string,
 ) (*HostedOAuthBeginResult, error) {
 	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
 		return nil, ErrOAuthDisabled
@@ -52,6 +53,9 @@ func (s *AuthService) BeginHostedOAuth(
 	}
 	if strings.TrimSpace(returnTo) == "" {
 		return nil, fmt.Errorf("%w: return_to is required", ErrInvalidArgument)
+	}
+	if strings.TrimSpace(csrfToken) == "" {
+		return nil, fmt.Errorf("%w: csrf_token is required", ErrInvalidArgument)
 	}
 
 	exchanger, ok := s.oauthRegistry.Get(provider)
@@ -79,6 +83,7 @@ func (s *AuthService) BeginHostedOAuth(
 		returnTo,
 		state,
 		codeVerifier,
+		csrfToken,
 		oauthStateTokenExpiry,
 		s.nowFunc().UTC(),
 	)
@@ -107,8 +112,9 @@ func (s *AuthService) BeginHostedOAuth(
 // validated return_to plus the freshly-minted one-time code the callback
 // appends as ?code=<otc>.
 type HostedOAuthCallbackResult struct {
-	ReturnTo string
-	Code     string
+	ReturnTo  string
+	Code      string
+	CSRFToken string
 }
 
 // CompleteHostedOAuth runs the hosted callback: it verifies the signed
@@ -122,12 +128,21 @@ type HostedOAuthCallbackResult struct {
 // only to cross-check the token's provider claim.
 func (s *AuthService) CompleteHostedOAuth(
 	ctx context.Context,
-	providerFromPath, code, stateToken, ipAddr, userAgent string,
+	providerFromPath, code, stateToken, appleUserPayload, ipAddr, userAgent string,
+	csrfTokens []string,
 ) (*HostedOAuthCallbackResult, error) {
 	claims, err := oauth.VerifyHostedStateToken(stateToken, s.signer, s.nowFunc().UTC())
 	if err != nil {
 		s.logger.Info("hosted_oauth_state_validation_failed", zap.Error(err))
 		return nil, fmt.Errorf("%w: invalid oauth state", ErrUnauthenticated)
+	}
+	matchedCSRFToken := 0
+	for _, token := range csrfTokens {
+		matchedCSRFToken |= subtle.ConstantTimeCompare([]byte(claims.CSRFToken), []byte(token))
+	}
+	if matchedCSRFToken != 1 {
+		s.logger.Info("hosted_oauth_csrf_mismatch")
+		return nil, fmt.Errorf("%w: csrf mismatch", ErrUnauthenticated)
 	}
 	if want := strings.ToLower(strings.TrimSpace(providerFromPath)); want != "" && claims.Provider != want {
 		s.logger.Info("hosted_oauth_provider_mismatch",
@@ -140,17 +155,17 @@ func (s *AuthService) CompleteHostedOAuth(
 	// verifier so PKCE completes. OAuthLogin upserts the user and mints
 	// the identity token pair internally; we discard those tokens and
 	// hand back a one-time code instead — the SPA re-mints via redeem.
-	result, err := s.OAuthLogin(
-		ctx,
-		code,
-		claims.Provider,
-		claims.RedirectURI,
-		claims.CodeVerifier,
-		"", // state already verified against the hosted token
-		"", // no headless state token in the hosted flow
-		ipAddr,
-		userAgent,
-	)
+	result, err := s.OAuthLogin(ctx, OAuthLoginParams{
+		Code:             code,
+		Provider:         claims.Provider,
+		RedirectURI:      claims.RedirectURI,
+		CodeVerifier:     claims.CodeVerifier,
+		State:            "", // state already verified against the hosted token
+		StateToken:       "", // no headless state token in the hosted flow
+		AppleUserPayload: appleUserPayload,
+		IPAddr:           ipAddr,
+		UserAgent:        userAgent,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +175,7 @@ func (s *AuthService) CompleteHostedOAuth(
 		return nil, err
 	}
 
-	return &HostedOAuthCallbackResult{ReturnTo: claims.ReturnTo, Code: otc}, nil
+	return &HostedOAuthCallbackResult{ReturnTo: claims.ReturnTo, Code: otc, CSRFToken: claims.CSRFToken}, nil
 }
 
 // mintOAuthOneTimeCode generates an opaque code, stores its hash bound

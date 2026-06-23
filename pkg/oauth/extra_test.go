@@ -35,29 +35,29 @@ func TestNewExchangers_DefaultsApplied(t *testing.T) {
 func TestExchanger_MissingCodeOrCreds(t *testing.T) {
 	t.Parallel()
 	g := NewGoogle(GoogleConfig{ClientID: "x", ClientSecret: "y"})
-	if _, err := g.Exchange(context.Background(), "", "https://x"); !errors.Is(err, ErrCodeExchangeFailed) {
+	if _, err := g.Exchange(context.Background(), ExchangeParams{Code: "", RedirectURI: "https://x"}); !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Errorf("google empty code: %v", err)
 	}
 	g2 := NewGoogle(GoogleConfig{})
-	if _, err := g2.Exchange(context.Background(), "code", "https://x"); !errors.Is(err, ErrCodeExchangeFailed) {
+	if _, err := g2.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Errorf("google empty creds: %v", err)
 	}
 
 	m := NewMicrosoft(MicrosoftConfig{})
-	if _, err := m.Exchange(context.Background(), "code", "https://x"); !errors.Is(err, ErrCodeExchangeFailed) {
+	if _, err := m.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Errorf("ms empty creds: %v", err)
 	}
 	m2 := NewMicrosoft(MicrosoftConfig{ClientID: "x", ClientSecret: "y"})
-	if _, err := m2.Exchange(context.Background(), "", "https://x"); !errors.Is(err, ErrCodeExchangeFailed) {
+	if _, err := m2.Exchange(context.Background(), ExchangeParams{Code: "", RedirectURI: "https://x"}); !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Errorf("ms empty code: %v", err)
 	}
 
 	gh := NewGitHub(GitHubConfig{})
-	if _, err := gh.Exchange(context.Background(), "code", "https://x"); !errors.Is(err, ErrCodeExchangeFailed) {
+	if _, err := gh.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Errorf("gh empty creds: %v", err)
 	}
 	gh2 := NewGitHub(GitHubConfig{ClientID: "x", ClientSecret: "y"})
-	if _, err := gh2.Exchange(context.Background(), "", "https://x"); !errors.Is(err, ErrCodeExchangeFailed) {
+	if _, err := gh2.Exchange(context.Background(), ExchangeParams{Code: "", RedirectURI: "https://x"}); !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Errorf("gh empty code: %v", err)
 	}
 }
@@ -200,7 +200,7 @@ func TestGoogle_JWKSRotationRetrySucceeds(t *testing.T) {
 		Now:          nowFunc(now),
 		HTTPClient:   srv.Client(),
 	})
-	if _, err := exch.Exchange(context.Background(), "code", "https://x"); err != nil {
+	if _, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); err != nil {
 		t.Fatalf("Exchange after rotation: %v", err)
 	}
 	if got := jwksHits.Load(); got != 2 {
@@ -233,7 +233,7 @@ func TestMicrosoft_MissingTID(t *testing.T) {
 		IssuerFormat: "https://login.test/%s/v2.0",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}
@@ -265,7 +265,7 @@ func TestMicrosoft_NoEmailFails(t *testing.T) {
 		IssuerFormat: "https://login.test/%s/v2.0",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}
@@ -282,7 +282,7 @@ func TestGoogle_NoIDToken(t *testing.T) {
 		TokenURL:     fp.URL("/token"),
 		JWKSURL:      fp.URL("/jwks"),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}
@@ -304,7 +304,7 @@ func TestGitHub_EmailEndpointBadJSON(t *testing.T) {
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	if _, err := exch.Exchange(context.Background(), "code", "https://x"); err == nil {
+	if _, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); err == nil {
 		t.Fatal("expected parse error")
 	}
 }
@@ -344,7 +344,7 @@ func TestGoogle_Exchange_BadResponseJSON(t *testing.T) {
 		TokenURL:     fp.URL("/token"),
 		JWKSURL:      fp.URL("/jwks"),
 	})
-	if _, err := exch.Exchange(context.Background(), "code", "https://x"); !errors.Is(err, ErrCodeExchangeFailed) {
+	if _, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}
 }
@@ -361,7 +361,7 @@ func TestMicrosoft_Exchange_NoIDToken(t *testing.T) {
 		JWKSURL:      fp.URL("/jwks"),
 		IssuerFormat: "https://x/%s/v2.0",
 	})
-	if _, err := exch.Exchange(context.Background(), "code", "https://x"); !errors.Is(err, ErrCodeExchangeFailed) {
+	if _, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}
 }
@@ -378,7 +378,7 @@ func TestGitHub_NoAccessToken(t *testing.T) {
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	if _, err := exch.Exchange(context.Background(), "code", "https://x"); !errors.Is(err, ErrCodeExchangeFailed) {
+	if _, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}
 }
@@ -396,7 +396,7 @@ func TestGitHub_UserMissingID(t *testing.T) {
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	if _, err := exch.Exchange(context.Background(), "code", "https://x"); !errors.Is(err, ErrIdentityVerification) {
+	if _, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}
 }
@@ -416,7 +416,7 @@ func TestGitHub_UserBadJSON(t *testing.T) {
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	if _, err := exch.Exchange(context.Background(), "code", "https://x"); err == nil {
+	if _, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); err == nil {
 		t.Fatal("expected parse error")
 	}
 }

@@ -522,6 +522,18 @@ func (s *AuthService) BeginOAuthLogin(
 	}, nil
 }
 
+type OAuthLoginParams struct {
+	Code             string
+	Provider         string
+	RedirectURI      string
+	CodeVerifier     string
+	State            string
+	StateToken       string
+	AppleUserPayload string
+	IPAddr           string
+	UserAgent        string
+}
+
 // OAuthLogin performs the full OAuth code-exchange flow: it looks up
 // the registered Exchanger for the provider, swaps the code for a
 // verified Identity, then upserts the local user and issues tokens.
@@ -531,10 +543,10 @@ func (s *AuthService) BeginOAuthLogin(
 // refresh tokens are discarded — they are not persisted.
 func (s *AuthService) OAuthLogin(
 	ctx context.Context,
-	code, provider, redirectURI, codeVerifier, state, stateToken, ipAddr, userAgent string,
+	params OAuthLoginParams,
 ) (*LoginResult, error) {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	identity, err := s.verifyOAuthExchange(ctx, code, provider, redirectURI, codeVerifier, state, stateToken)
+	provider := strings.ToLower(strings.TrimSpace(params.Provider))
+	identity, err := s.verifyOAuthExchange(ctx, params)
 	if err != nil {
 		if errors.Is(err, errOAuthExchangeFailed) {
 			s.logger.Info(
@@ -543,7 +555,7 @@ func (s *AuthService) OAuthLogin(
 			)
 			s.audit.Log(
 				ctx, audit.EventOAuthLogin,
-				audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+				audit.WithIP(params.IPAddr), audit.WithUserAgent(params.UserAgent),
 				audit.WithSuccess(false),
 				audit.WithDetails(map[string]any{
 					"provider": provider,
@@ -565,7 +577,7 @@ func (s *AuthService) OAuthLogin(
 		return nil, err
 	}
 
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent); err != nil {
 		return nil, err
 	}
 
@@ -590,14 +602,14 @@ func (s *AuthService) OAuthLogin(
 		zap.String("user_id", user.ID),
 	)
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)
 	if err != nil {
 		return nil, err
 	}
 
 	s.audit.Log(
 		ctx, audit.EventOAuthLogin,
-		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+		audit.WithActor(user.ID), audit.WithIP(params.IPAddr), audit.WithUserAgent(params.UserAgent),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
 			"provider": provider,
@@ -648,16 +660,17 @@ var errOAuthExchangeFailed = errors.New("oauth code exchange failed")
 // exchange failure it returns an error wrapping errOAuthExchangeFailed.
 func (s *AuthService) verifyOAuthExchange(
 	ctx context.Context,
-	code, provider, redirectURI, codeVerifier, state, stateToken string,
+	params OAuthLoginParams,
 ) (*oauth.Identity, error) {
 	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
 		return nil, ErrOAuthDisabled
 	}
-	redirectURI = strings.TrimSpace(redirectURI)
+	redirectURI := strings.TrimSpace(params.RedirectURI)
+	provider := strings.ToLower(strings.TrimSpace(params.Provider))
 	if provider == "" {
 		return nil, fmt.Errorf("%w: provider is required", ErrInvalidArgument)
 	}
-	if strings.TrimSpace(code) == "" {
+	if strings.TrimSpace(params.Code) == "" {
 		return nil, fmt.Errorf("%w: code is required", ErrInvalidArgument)
 	}
 	if redirectURI == "" {
@@ -669,14 +682,15 @@ func (s *AuthService) verifyOAuthExchange(
 		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
 	}
 
-	if strings.TrimSpace(stateToken) != "" {
+	codeVerifier := params.CodeVerifier
+	if strings.TrimSpace(params.StateToken) != "" {
 		claims, err := oauth.VerifyStateToken(
-			stateToken,
+			params.StateToken,
 			s.signer,
 			provider,
 			redirectURI,
-			state,
-			codeVerifier,
+			params.State,
+			params.CodeVerifier,
 			s.nowFunc().UTC(),
 		)
 		if err != nil {
@@ -690,11 +704,12 @@ func (s *AuthService) verifyOAuthExchange(
 		codeVerifier = claims.CodeVerifier
 	}
 
-	if strings.TrimSpace(codeVerifier) != "" {
-		ctx = oauth.WithCodeVerifier(ctx, codeVerifier)
-	}
-
-	identity, err := exchanger.Exchange(ctx, code, redirectURI)
+	identity, err := exchanger.Exchange(ctx, oauth.ExchangeParams{
+		Code:             params.Code,
+		RedirectURI:      redirectURI,
+		CodeVerifier:     codeVerifier,
+		AppleUserPayload: params.AppleUserPayload,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errOAuthExchangeFailed, err)
 	}

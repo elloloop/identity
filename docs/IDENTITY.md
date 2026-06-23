@@ -553,7 +553,7 @@ before you ship.
       added to the headless state token.
 
     - **Hosted (new).** `GET /oauth/start/{provider}?return_to=` and
-      `GET /oauth/callback/{provider}` are plain `http.Handler` routes
+      `GET/POST /oauth/callback/{provider}` are plain `http.Handler` routes
       (not Connect RPCs — the browser is 302-redirected through them).
       They are thin wrappers over the same `BeginOAuthLogin` /
       `OAuthLogin` service internals; there is no forked exchange path.
@@ -588,9 +588,10 @@ before you ship.
 
     - **`return_to` allowlist, fail-closed, disabled by default.**
       `GATEWAY_OAUTH_ALLOWED_RETURN_URLS` is a comma-separated list of
-      exact origins / URL prefixes. A `return_to` is allowed only if it
-      equals or is prefixed by an entry; anything else is rejected with
-      400 at `/oauth/start` before any provider round-trip. **Empty
+      exact origins / origin-bound path prefixes. A `return_to` must match
+      the configured origin and, for a path entry, that path or one of its
+      descendants; anything else is rejected with 400 at `/oauth/start`
+      before any provider round-trip. **Empty
       disables the hosted flow entirely** — the `/oauth/*` routes are
       not registered (404) and only the headless RPCs work. This is the
       provider-facing-redirect allowlist that did not exist before:

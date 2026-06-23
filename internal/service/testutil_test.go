@@ -1028,9 +1028,9 @@ type fakeOAuthExchanger struct {
 	calls    atomic.Int32
 }
 
-func (f *fakeOAuthExchanger) Exchange(_ context.Context, code, _ string) (*oauth.Identity, error) {
+func (f *fakeOAuthExchanger) Exchange(_ context.Context, params oauth.ExchangeParams) (*oauth.Identity, error) {
 	f.calls.Add(1)
-	parts := splitCode(code)
+	parts := splitCode(params.Code)
 	switch parts[0] {
 	case "ok":
 		return &oauth.Identity{
@@ -1078,10 +1078,7 @@ func splitCode(code string) []string {
 	return out
 }
 
-// defaultTestOAuthRegistry returns a registry pre-populated with a
-// fakeOAuthExchanger for "google", "microsoft", and "github" so the
-// existing test suite continues to work after the OAuthLogin signature
-// change.
+// defaultTestOAuthRegistry returns the providers exercised by service tests.
 func defaultTestOAuthRegistry() *oauth.Registry {
 	r := oauth.NewRegistry()
 	for _, p := range []string{"google", "microsoft", "github"} {

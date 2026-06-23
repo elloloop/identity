@@ -32,7 +32,14 @@ func (s *AuthService) LinkIdentity(
 	}
 	provider = strings.ToLower(strings.TrimSpace(provider))
 
-	identity, err := s.verifyOAuthExchange(ctx, code, provider, redirectURI, codeVerifier, state, stateToken)
+	identity, err := s.verifyOAuthExchange(ctx, OAuthLoginParams{
+		Code:         code,
+		Provider:     provider,
+		RedirectURI:  redirectURI,
+		CodeVerifier: codeVerifier,
+		State:        state,
+		StateToken:   stateToken,
+	})
 	if err != nil {
 		if errors.Is(err, errOAuthExchangeFailed) {
 			s.audit.Log(

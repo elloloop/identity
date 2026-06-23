@@ -49,8 +49,8 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
   -e GATEWAY_TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)" \\
   -e GATEWAY_JWT_KEYS="$(cat keyring.json)" \\
   -e GATEWAY_ALLOWED_ORIGINS="https://acme.example.com" \\
-  -e GATEWAY_GOOGLE_CLIENT_ID=... \\
-  -e GATEWAY_GOOGLE_CLIENT_SECRET=... \\
+  -e GATEWAY_OAUTH_GOOGLE_CLIENT_ID=... \\
+  -e GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET=... \\
   -e GATEWAY_AUTH_ALLOW_LOCAL=true \\
   ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="production" />
 

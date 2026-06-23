@@ -82,7 +82,7 @@ func TestOAuthLogin_FindUserErrors(t *testing.T) {
 	svc := newTestAuthServiceErr(t, r)
 
 	code := fakeOAuthCode("x@example.com", "X", "", "google")
-	_, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
+	_, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.Error(t, err)
 }
 
@@ -92,7 +92,7 @@ func TestOAuthLogin_CreateUserErrors(t *testing.T) {
 	svc := newTestAuthServiceErr(t, r)
 
 	code := fakeOAuthCode("x@example.com", "X", "", "google")
-	_, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
+	_, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.Error(t, err)
 }
 
@@ -102,7 +102,7 @@ func TestOAuthLogin_IssueTokensFails(t *testing.T) {
 	svc := newTestAuthServiceErr(t, r)
 
 	code := fakeOAuthCode("x@example.com", "X", "", "google")
-	_, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
+	_, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.Error(t, err)
 }
 
@@ -574,7 +574,7 @@ func TestOAuthLogin_ExistingUserUpdateWarns(t *testing.T) {
 
 	// Should still succeed because the update failure is logged but not propagated.
 	code := fakeOAuthCode("ouw@example.com", "Different Name", "https://avatar.png", "google")
-	res, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
+	res, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.NoError(t, err)
 	assert.NotNil(t, res)
 }
