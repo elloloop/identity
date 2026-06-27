@@ -1,5 +1,10 @@
 # Identity redesign — implementation plan (PR-by-PR)
 
+> **Original design document — kept as a design record, not find/replaced.**
+> Where this references `EntDB` or `proto/identity/schema/schema.proto`, the
+> implementation shipped as the SQLite driver (`internal/repo/sqlite/`) and
+> the single proto is `proto/identity/v1/identity.proto`.
+
 Sequenced, shippable slices to take the Project/Tenant/Domain redesign
 (`docs/redesign/schema.md`) to done. Each slice is **one PR**, tests-first, and
 goes through the AGENTS.md review-gate before merge. The order keeps every PR

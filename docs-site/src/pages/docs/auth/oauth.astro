@@ -91,16 +91,16 @@ message BeginOAuthLoginResponse {
     </li>
     <li>
       <strong>Existing user, invited.</strong> The login is rejected with
-      <code>invitation_pending</code> until they accept the invitation.
+      <code>FailedPrecondition</code> ("accept your invitation first")
+      until they accept the invitation.
     </li>
     <li>
       <strong>Existing user, deactivated/suspended.</strong> Rejected with
-      <code>account_not_active</code>.
+      <code>FailedPrecondition</code> ("account is &lt;status&gt;").
     </li>
     <li>
       <strong>New user.</strong> Created with status
-      <code>USER_STATUS_ACTIVE</code> and role <code>member</code> (or
-      <code>admin</code> if they are the first user in the deployment).
+      <code>USER_STATUS_ACTIVE</code> and role <code>member</code>.
       No password hash is stored — subsequent <code>PasswordLogin</code>
       attempts return <code>no password set for this account</code> until
       they set one.
@@ -116,20 +116,20 @@ message BeginOAuthLoginResponse {
     provider.
   </p>
 
-  <h2>Duplicate-link safety: composite uniqueness</h2>
+  <h2>Duplicate-link safety: project-scoped unique index</h2>
   <p>
     The link between a local user and a provider-side identity is stored
-    as an <code>OAuthIdentity</code> row keyed on
-    <code>(provider, provider_user_id)</code>. That tuple is declared
-    <code>composite_unique</code> in <code>schema.proto</code>, so the
-    storage layer enforces "at most one local user per provider-side
-    identity" atomically — two concurrent <code>OAuthLogin</code> calls
+    as an <code>OAuthIdentity</code> row. Uniqueness is enforced by a
+    project-scoped three-column SQL unique index on
+    <code>(project_id, provider, provider_user_id)</code>
+    (<code>oi_project_provider_subject_uidx</code>), so the storage layer
+    guarantees "at most one local user per provider-side identity within a
+    project" atomically — two concurrent <code>OAuthLogin</code> calls
     that race to link the same Google account onto two different local
-    accounts will collide on a real unique index in the datastore
-    (Postgres or SQLite), and exactly one of them succeeds. The repository
-    keeps a pre-query to surface the friendly
-    <code>composite unique violated (google, &lt;sub&gt;)</code> error
-    message, but the pre-query is not how the invariant is enforced.
+    accounts collide on that real unique index in Postgres, and exactly
+    one of them succeeds. The memory driver mirrors the same constraint,
+    returning <code>oauth identity already linked: &lt;provider&gt;/&lt;sub&gt;</code>
+    on a conflict.
   </p>
 
   <h2>Hosted OAuth flow (Firebase-style)</h2>

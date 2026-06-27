@@ -18,8 +18,9 @@ v1.0 is the Project/Tenant/Domain redesign (ADR-0001..0009). It removed
 several pre-v1.0 features that older copies of this document still
 described as live. Upgrading from a pre-v1.0 deployment is a **breaking
 schema reset — there is no in-place data migration in this release** (a
-legacy-data migration script and Postgres row-level-security hardening
-are tracked v1.1 follow-ups). What changed:
+legacy-data migration script is the remaining tracked v1.1 follow-up;
+Postgres row-level-security hardening already shipped in v1.0 via migration
+`0016_enable_rls_data_plane`). What changed:
 
 - **`OrganizationSignup` removed**, along with the `Organization` /
   `OrganizationMembership` storage. Multitenancy is now modelled by
@@ -147,7 +148,7 @@ precedence:
    storage scope).
 
 Only the **postgres** driver has a control plane (the `projects` /
-`project_credentials` / `project_auth_domains` registry); the entdb and
+`project_credentials` / `project_auth_domains` registry); the sqlite and
 memory drivers run with a nil resolver, so every request pins to the
 default project (steps 1–2 are skipped). The resolved project scope rides
 the request context; services read it to pick the per-project repository.
@@ -159,18 +160,17 @@ address forms no tenant — public providers are blocklisted at signup,
 domain-verify, and derived-membership (`GATEWAY_PUBLIC_EMAIL_DOMAINS`
 extends the built-in set).
 
-**The storage layer** (Postgres or tenant-shard-db/EntDB) stores the data.
-For EntDB the proto schema in `proto/identity/schema/schema.proto` is
-auto-attached by the SDK (ADR-031) on the first `ExecuteAtomic` per shard,
-and the server enforces field types, unique constraints, and required
-fields atomically. See decision log §15 for that migration.
+**The storage layer** (Postgres or SQLite) stores the data. SQLite is the
+single-file, single-project embedded tier (`internal/repo/sqlite/`): it
+seeds the boot-default project but has no control-plane registry or
+governance stores — those stay Postgres-only.
 
 ## Configuration: Project resolution, not a mode flag
 
 There is no boot-time tenancy mode. The relevant knobs:
 
 ```
-GATEWAY_REPO_DRIVER                 = postgres | entdb | memory  # postgres has the control plane
+GATEWAY_REPO_DRIVER                 = postgres | sqlite | memory  # postgres has the control plane
 GATEWAY_DEFAULT_PROJECT_ID          = <string>   # default "default"; the seeded control-plane Project id
 GATEWAY_DEFAULT_TENANT_ID           = <string>   # the storage scope the default project maps onto
 GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS= <csv>      # serving hostnames seeded (verified) on the default project; first is primary
@@ -222,7 +222,7 @@ It is self-securing instead of secret-gated:
   one** admin and the loser is rejected — there is no check-then-write
   race window.
 
-Like the other control-plane RPCs it is postgres-only; entdb/memory
+Like the other control-plane RPCs it is postgres-only; sqlite/memory
 deployments (which have no `platform_admins` table) return
 `CodeUnimplemented`. After bootstrapping the first admin, the operator
 configures `GATEWAY_ADMIN_API_SECRET` and uses the secret-gated Admin RPCs
@@ -273,45 +273,34 @@ manages "can write to this scope or not."
 
 ## What the schema lives in
 
-- **Proto schema** — `proto/identity/schema/schema.proto`. Declares
-  every EntDB node type (`User`, `RefreshToken`, `PasswordResetToken`,
-  `PasskeyCredential`, `OAuthIdentity`, `Session`, …) with field
-  types, indexes, single-field uniqueness, composite uniqueness, and
-  PII tagging. Generated Go code lives in `gen/go/identity/schema/`.
-- **SDK construction** — `internal/repo/entdb/entclient.New(...)` is
-  the only entry point identity uses to dial the tenant-shard-db Go
-  SDK. It wraps `sdk.NewClient` with `sdk.WithSchema(...)` pre-filled
-  by `SchemaMessages()` — one zero-valued instance of every
-  `(entdb.node)`/`(entdb.edge)` message in `schema.proto`. The SDK
-  reads the proto descriptors at runtime, derives a name-free
-  `SchemaDescriptor` + fingerprint, and rides them on the first
-  `ExecuteAtomic` per tenant; the server materialises the registry
-  in the same WAL event before the data ops (ADR-031). Embedders
-  wiring their own `*sdk.DbClient` can pull the same list via
-  `entclient.SchemaMessages()`.
-- **Repo wiring** — `internal/repo/entdb/` translates between
-  identity's domain types (`service.User`, `service.RefreshTokenRecord`,
-  …) and the proto messages, then issues operations against the
-  tenant-shard-db SDK.
-- **tenant-shard-db** — stores opaque `(type_id, field_id, value)`
-  tuples on the WAL; it learns identity's schema from the SDK
-  auto-attach (above) and enforces field types, single- and composite-
-  unique constraints, and required-field validation against it.
+- **Proto / API schema** — `proto/identity/v1/identity.proto` (package
+  `identity.v1`). Declares the RPC surface and request/response message
+  types; generated Go code lives in `gen/go/identity/v1/`.
+- **Storage schema** — the data-plane tables (`User`, `RefreshToken`,
+  `PasswordResetToken`, `PasskeyCredential`, `OAuthIdentity`, `Session`,
+  …) are defined by the SQL migrations each driver applies at boot:
+  `internal/repo/postgres/migrations/` for Postgres and
+  `internal/repo/sqlite/migrations/` for the embedded SQLite tier. Field
+  types, single-field uniqueness, and composite uniqueness are enforced by
+  SQL constraints and indexes.
+- **Repo wiring** — `internal/repo/postgres/` and `internal/repo/sqlite/`
+  translate between identity's domain types (`service.User`,
+  `service.RefreshTokenRecord`, …) and the backing SQL, behind the shared
+  `service.Repository` / `service.DB` interfaces; `internal/repo/memory/`
+  is the in-process store used by tests.
 
-The `Organization` / `OrganizationMembership` node types were **removed in
-v1.0** (type_ids 33 and 34 are retired and unallocated). The company
-entity is now the **Tenant**, and membership is the `tenant_memberships`
-table in the per-project data plane — not an EntDB node type. Project,
-Tenant, Domain, login-policy, membership, and invitation state live in the
-Postgres control plane / data plane described in
+The `Organization` / `OrganizationMembership` types were **removed in
+v1.0**. The company entity is now the **Tenant**, and membership is the
+`tenant_memberships` table in the per-project data plane. Project, Tenant,
+Domain, login-policy, membership, and invitation state live in the Postgres
+control plane / data plane described in
 [`docs/redesign/schema.md`](./redesign/schema.md).
 
-`OAuthIdentity` (type_id 31) carries a `(entdb.node).composite_unique`
-declaration on `(provider, provider_user_id)`. Two concurrent
-`CreateOAuthIdentity` calls for the same provider tuple collide on the
-server-materialised unique index (ADR-031) — the repository's
-pre-query is kept as a fast path for friendly errors and for the
-in-memory fake, not as the only enforcement.
+`OAuthIdentity` carries a unique index on `(provider, provider_user_id)`.
+Two concurrent `CreateOAuthIdentity` calls for the same provider tuple
+collide on that SQL unique constraint — the repository's pre-query is kept
+as a fast path for friendly errors and for the in-memory fake, not as the
+only enforcement.
 
 ## Runtime
 
@@ -333,7 +322,7 @@ control when they run — `New` starts nothing):
   for deployers running their own GC). Deletions and errors are
   counted as `identity_sweeper_deleted_total{node_type}` and
   `identity_sweeper_errors_total{node_type}` on `/metrics`. All three
-  shipping backends (memory, Postgres, EntDB) run the real sweep;
+  shipping backends (memory, Postgres, SQLite) run the real sweep;
   the `ErrSweepNotImplemented` soft-skip remains for any future
   backend whose CRUD methods land ahead of its sweep.
 
@@ -345,7 +334,8 @@ control when they run — `New` starts nothing):
   both products" mode — one deployment can host many **Projects**, but a
   deployment is still per-product, not cross-product.
 - Each deployment has its own datastore — **Postgres** (which carries the
-  Project/Tenant/Domain control plane) or tenant-shard-db/EntDB.
+  Project/Tenant/Domain control plane) or **SQLite** (the single-file,
+  single-project embedded tier with no control plane).
 - A deployment serves every Project on the same code path; projects are
   resolved per request, not chosen at boot.
 
@@ -358,8 +348,9 @@ that don't belong:
 - **In-place upgrade from pre-v1.0 data.** v1.0 is a breaking schema reset
   with no automatic data migration. A legacy-data migration script (to
   materialise one `Project` per old org-shard and backfill `project_id`)
-  and Postgres row-level-security hardening are tracked **v1.1**
-  follow-ups (ADR-0002, ADR-0007).
+  is the remaining tracked **v1.1** follow-up (ADR-0002, ADR-0007).
+  Postgres row-level-security hardening already shipped in v1.0 (migration
+  `0016_enable_rls_data_plane`, `internal/repo/postgres/rls.go`).
 - **Cross-product SSO.** Two products running their own identity
   deployments do not share sessions. If we ever need this, it'll be a
   separate service (an IdP that the per-product identities consume).
@@ -396,17 +387,15 @@ before you ship.
    tenant-shard-db's `TenantMember.Role`.** They evolve
    independently. An identity admin demoted to member shouldn't lose
    their write rights at the storage layer (or vice-versa).
-5. **tenant-shard-db enforces identity's schema as of v2 (ADR-031).**
-   Through v1.x the storage layer was schemaless and identity's proto
-   was a contract with itself; the database accepted any bytes. The
-   v2 release inverted that: the SDK auto-attaches identity's
-   `SchemaDescriptor` to `ExecuteAtomic` so the server materialises
-   the schema and enforces field types, unique constraints, and
-   required-fields per tenant. The proto file at
-   `proto/identity/schema/schema.proto` is still identity-owned and
-   the only place schema changes are made; what changed is that
-   adding an invariant there (`required`, `unique`, `composite_unique`)
-   now actually binds at the storage layer. See §15 for the migration.
+5. ~~**tenant-shard-db enforces identity's schema as of v2 (ADR-031).**~~
+   **Superseded — the tenant-shard-db/EntDB backend was removed.** The
+   third shipping backend is now **SQLite** (`internal/repo/sqlite/`): a
+   single-file, single-project embedded tier whose storage schema is
+   enforced by ordinary SQL DDL in the driver's migrations
+   (`internal/repo/sqlite/migrations/`), not by a self-attached proto
+   descriptor. The only proto is `proto/identity/v1/identity.proto`
+   (package `identity.v1`, the API surface, generated to
+   `gen/go/identity/v1`).
 6. **JWT signing is a pluggable `jwt.Signer` interface, default
    file-backed.** Issue #90. The OSS image must work with no external
    KMS dependency, so the default backend reads a JSON keys file on
@@ -632,7 +621,7 @@ before you ship.
       middleware twice.
 
     - **Background workers are consumer-controlled.** `New` does no I/O
-      beyond construction-time setup (EntDB dial, AWS config, OTel init)
+      beyond construction-time setup (datastore dial, AWS config, OTel init)
       and starts no goroutines. `Start(ctx)` launches the audit flusher,
       sweeper, and signer SIGHUP reload; `Shutdown(ctx)` drains them and
       releases everything `New` acquired, in reverse order. `cmd/identity`
@@ -706,7 +695,7 @@ before you ship.
       `token_hash` (unique), bound to the email and the
       allowlist-validated `return_to` — the same single-use `consumed_at`
       compare-and-set `OAuthOneTimeCode` uses. Both land across all three
-      backends (memory, postgres, entdb) with the conformance suite
+      backends (memory, postgres, sqlite) with the conformance suite
       extended, and both are swept by the existing GC sweeper.
 
     - **Spam controls are layered.** Per-IP rate limits on the two Request
@@ -738,58 +727,35 @@ before you ship.
       This keeps passwordless login a frictionless front door without
       turning it into an unauthenticated path to tenant membership.
 
-15. **tenant-shard-db v2.0.5 alignment — self-describing schema,
-    server-atomic composite uniqueness.** The v2.0.5 bump (SDK +
-    server image) reworked two seams that had stayed unchanged across
-    every v1.x release:
+15. ~~**tenant-shard-db v2.0.5 alignment — self-describing schema,
+    server-atomic composite uniqueness.**~~ **Superseded — the
+    tenant-shard-db/EntDB backend (and its self-attaching proto schema)
+    was removed.** The third shipping backend is now **SQLite**
+    (`internal/repo/sqlite/`), a single-file, single-project embedded
+    tier. There is no `internal/repo/entdb/entclient.New` /
+    `SchemaMessages` and no `proto/identity/schema/schema.proto`; the only
+    proto is `proto/identity/v1/identity.proto` (package `identity.v1`,
+    generated to `gen/go/identity/v1`), and storage schema is plain SQL DDL
+    in each driver's migrations.
 
-    - **Schema attach moves into the SDK (ADR-031).** identity no
-      longer treats the storage layer as a "schemaless tuple store" —
-      `internal/repo/entdb/entclient.New` wraps `sdk.NewClient` with
-      `sdk.WithSchema(SchemaMessages()...)`, registering one
-      zero-valued instance of every `(entdb.node)`/`(entdb.edge)`
-      message in `schema.proto` (26 messages, 22 nodes + 4 edges).
-      The SDK derives a name-free `SchemaDescriptor` + fingerprint
-      from the proto descriptors; on the first `ExecuteAtomic` per
-      tenant it rides them on the call, the server prepends a
-      `register_schema` WAL op (establish-or-reject) before the data
-      ops, and the registry — type ids, field options, composite-
-      unique indexes — is rebuilt deterministically on replay. After
-      the server confirms the matching fingerprint the descriptor is
-      omitted (lean steady state) and re-attached on `SCHEMA_MISMATCH`.
-      Every production entry point (`identityserver.New`) and every
-      realentdb test/integration harness goes through `entclient.New`
-      so the schema attaches consistently; embedders wiring their own
-      `*sdk.DbClient` can pull the same list via
-      `entclient.SchemaMessages()`.
-
-    - **Composite uniqueness on `OAuthIdentity` is server-atomic.**
-      `OAuthIdentity` declares
-      `(entdb.node).composite_unique = { name: "provider_user_id",
-      fields: ["provider", "provider_user_id"] }`. Two concurrent
-      `CreateOAuthIdentity` calls for the same tuple now collide on
-      the server-materialised unique index instead of racing past a
-      query-then-create guard (identity#141). The repository keeps a
-      pre-query inside `CreateOAuthIdentity` so the *common* "already
-      linked" case returns the friendly composite-violation error
-      instead of the generic `UniqueConstraintError` from the create
-      itself, and so the in-memory fake (which has no schema path)
+    - **Composite uniqueness on `OAuthIdentity`.** `OAuthIdentity` carries
+      a SQL unique index on `(provider, provider_user_id)`. Two concurrent
+      `CreateOAuthIdentity` calls for the same tuple collide on that unique
+      constraint instead of racing past a query-then-create guard
+      (identity#141). The repository keeps a pre-query inside
+      `CreateOAuthIdentity` so the *common* "already linked" case returns
+      the friendly composite-violation error, and so the in-memory fake
       keeps the same observable behavior. The conformance suite's
       `ConcurrentDuplicate_OAuthIdentity_SingleRow` subtest asserts
-      "exactly one winner among 64 concurrent identical creates" on
-      memory, postgres, **and** entdb.
+      "exactly one winner among 64 concurrent identical creates" on memory,
+      postgres, **and** sqlite.
 
       A `tenant_memberships` row could be promoted the same way (its
-      "exactly one (project, tenant, user) row" invariant is
-      structurally identical), but real membership writes are
-      administrator-/invitation-initiated and naturally serialised, so
-      the service-layer pre-check stays sufficient. The path is open if a
-      future flow ever needs concurrent-safe membership creates.
-
-    Module path migrated for major-version 2:
-    `github.com/elloloop/tenant-shard-db/sdk/go/entdb` →
-    `.../sdk/go/entdb/v2` (Go's semantic-import-versioning rule). The
-    `entclient` wrapper keeps every call site free of that detail.
+      "exactly one (project, tenant, user) row" invariant is structurally
+      identical), but real membership writes are administrator-/invitation-
+      initiated and naturally serialised, so the service-layer pre-check
+      stays sufficient. The path is open if a future flow ever needs
+      concurrent-safe membership creates.
 
 If any of those needs to change, update this document in the same
 commit as the code change so the next reader sees them in sync.

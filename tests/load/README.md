@@ -19,7 +19,7 @@ Run them through `tests/load/run.sh`.
 `hotpath_test.go` is a deterministic Go load test for CI and nightly
 automation. It starts the real HTTP/Connect handler with the in-process
 memory repository, seeds password users, and drives the login plus
-refresh hot path without Docker, EntDB, Postgres, or staging.
+refresh hot path without Docker, Postgres, or staging.
 
 ## Default launch baselines
 
@@ -52,17 +52,18 @@ than one authenticated user ID appears for a collision set.
 
 ## Local example
 
-Start EntDB:
+Start Postgres:
 
 ```bash
-docker compose up -d entdb
+docker compose up -d postgres
 ```
 
 Start Identity in another shell:
 
 ```bash
-GATEWAY_ENTDB_ADDRESS=localhost:50051 \
-GATEWAY_DEFAULT_TENANT_ID=loadtest \
+GATEWAY_REPO_DRIVER=postgres \
+GATEWAY_POSTGRES_DSN=postgres://identity:secret@localhost:5432/identity \
+GATEWAY_DEFAULT_PROJECT_ID=loadtest \
 GATEWAY_CONNECT_PORT=18080 \
 GATEWAY_METRICS_PORT=19090 \
 GATEWAY_APP_BASE_URL=http://localhost:18080 \
@@ -73,14 +74,14 @@ Run a short local smoke pass for each scenario:
 
 ```bash
 BASE_URL=http://host.docker.internal:18080 \
-RESULT_PREFIX=local-entdb \
+RESULT_PREFIX=local-postgres \
 TARGET_QPS=6 \
 DURATION=30s \
 USERS=48 \
 ./tests/load/run.sh login_steady
 
 BASE_URL=http://host.docker.internal:18080 \
-RESULT_PREFIX=local-entdb \
+RESULT_PREFIX=local-postgres \
 TARGET_QPS=18 \
 DURATION=30s \
 USERS=48 \
@@ -88,14 +89,14 @@ VUS=12 \
 ./tests/load/run.sh refresh_steady
 
 BASE_URL=http://host.docker.internal:18080 \
-RESULT_PREFIX=local-entdb \
+RESULT_PREFIX=local-postgres \
 TARGET_QPS=12 \
 DURATION=30s \
 BATCH_SIZE=4 \
 ./tests/load/run.sh signup_burst
 
 BASE_URL=http://host.docker.internal:18080 \
-RESULT_PREFIX=local-entdb \
+RESULT_PREFIX=local-postgres \
 TARGET_QPS=20 \
 DURATION=30s \
 USERS=64 \
