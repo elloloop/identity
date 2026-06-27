@@ -5096,7 +5096,7 @@ components:
         recoveryEmail:
           type: string
           title: recovery_email
-          description: 'Optional: used for password reset flow'
+          description: 'Optional: secondary contact address. Note: password reset links are sent to the account''s PRIMARY verified email, not this address.'
         captchaToken:
           type: string
           title: captcha_token
@@ -5449,9 +5449,10 @@ components:
       title: RequestPasswordResetRequest
       additionalProperties: false
       description: |-
-        Recovery-email-driven password reset (replaces the deprecated self-serve
-         ForgotPassword flow). The reset link is sent to the recovery_email on file —
-         or, if none is set, the request silently succeeds (no enumeration).
+        Password reset (replaces the deprecated self-serve ForgotPassword flow).
+         The reset link is sent to the account's PRIMARY verified email — the
+         address matching the supplied `email`. If no account matches, the
+         request silently succeeds (no enumeration).
     identity.v1.RequestPasswordResetResponse:
       type: object
       title: RequestPasswordResetResponse

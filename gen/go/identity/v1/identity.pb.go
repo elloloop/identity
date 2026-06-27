@@ -2319,7 +2319,7 @@ type PasswordSignupRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
 	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
-	RecoveryEmail string                 `protobuf:"bytes,3,opt,name=recovery_email,json=recoveryEmail,proto3" json:"recovery_email,omitempty"`      // Optional: used for password reset flow
+	RecoveryEmail string                 `protobuf:"bytes,3,opt,name=recovery_email,json=recoveryEmail,proto3" json:"recovery_email,omitempty"`      // Optional: secondary contact address. Note: password reset links are sent to the account's PRIMARY verified email, not this address.
 	CaptchaToken  string                 `protobuf:"bytes,4,opt,name=captcha_token,json=captchaToken,proto3" json:"captcha_token,omitempty"`         // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 	DateOfBirthMs int64                  `protobuf:"varint,5,opt,name=date_of_birth_ms,json=dateOfBirthMs,proto3" json:"date_of_birth_ms,omitempty"` // Optional; epoch ms of date of birth. Required at signup when GATEWAY_AGEGATE_REQUIRE_DOB.
 	unknownFields protoimpl.UnknownFields
@@ -3682,9 +3682,10 @@ func (*ChangePasswordResponse) Descriptor() ([]byte, []int) {
 	return file_identity_v1_identity_proto_rawDescGZIP(), []int{57}
 }
 
-// Recovery-email-driven password reset (replaces the deprecated self-serve
-// ForgotPassword flow). The reset link is sent to the recovery_email on file —
-// or, if none is set, the request silently succeeds (no enumeration).
+// Password reset (replaces the deprecated self-serve ForgotPassword flow).
+// The reset link is sent to the account's PRIMARY verified email — the
+// address matching the supplied `email`. If no account matches, the
+// request silently succeeds (no enumeration).
 type RequestPasswordResetRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
