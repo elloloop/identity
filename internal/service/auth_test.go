@@ -182,9 +182,44 @@ func TestPasswordLogin_CorrectPasswordSucceeds(t *testing.T) {
 	assert.False(t, result.TotpRequired)
 }
 
-func TestPasswordLogin_UnverifiedEmailAllowed(t *testing.T) {
+func TestPasswordLogin_UnverifiedEmailBlocked(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
+	svc.cfg.AuthRequireVerifiedEmail = true
+	pwHash := hashPW(t, strongPW)
+	user := seedUser(repo, "bob@example.com", pwHash, "active")
+	user.EmailVerified = false
+	user.EmailVerifiedAt = 0
+
+	// Correct password, but the email is not verified — the gate fires only
+	// after the password is proven, so no enumeration oracle is created.
+	_, err := svc.PasswordLogin(context.Background(), "bob@example.com", strongPW, "1.2.3.4", "TestAgent")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrEmailVerificationRequired))
+}
+
+func TestPasswordLogin_VerifiedEmailAllowed(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.AuthRequireVerifiedEmail = true
+	pwHash := hashPW(t, strongPW)
+	user := seedUser(repo, "bob@example.com", pwHash, "active")
+	user.EmailVerified = true
+	user.EmailVerifiedAt = time.Now().UnixMilli()
+
+	result, err := svc.PasswordLogin(context.Background(), "bob@example.com", strongPW, "1.2.3.4", "TestAgent")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "bob@example.com", result.User.Email)
+	assert.True(t, result.User.EmailVerified)
+	assert.NotEmpty(t, result.AccessToken)
+	assert.NotEmpty(t, result.RefreshToken)
+}
+
+func TestPasswordLogin_RequireVerifiedEmailDisabled_AllowsUnverified(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.AuthRequireVerifiedEmail = false // gate off: old behavior preserved
 	pwHash := hashPW(t, strongPW)
 	user := seedUser(repo, "bob@example.com", pwHash, "active")
 	user.EmailVerified = false

@@ -706,6 +706,11 @@ var (
 	ErrAccountNotActive  = errors.New("account is not active")
 	ErrInvitationPending = errors.New("account has not completed invitation")
 	ErrIDVRequired       = errors.New("identity verification required")
+	// ErrEmailVerificationRequired is returned when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
+	// is enabled and the account's email is not yet verified. Like ErrIDVRequired
+	// it is a "do something else first" precondition (verify your email, then
+	// retry), mapped to CodeFailedPrecondition by the Connect layer.
+	ErrEmailVerificationRequired = errors.New("email verification required")
 	// ErrMinorDataMinimized is returned when GATEWAY_MINOR_DATA_MINIMIZATION is
 	// enabled and a CHILD-band account attempts an RPC that would collect
 	// non-essential PII the server refuses to gather from a minor — phone

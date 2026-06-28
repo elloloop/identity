@@ -104,6 +104,40 @@ func TestVerifyEmailLoginCode_AutoCreatesAndIssuesTokens(t *testing.T) {
 	assert.True(t, got.EmailVerified)
 }
 
+// TestPasswordlessLogin_ClearsPlantedPassword is the passwordless arm of the
+// anti-pre-hijacking regression: redeeming an emailed OTP proves control of the
+// inbox, so a pre-existing (unverified) password planted by an attacker must be
+// cleared, exactly as on the OAuth external-proof path.
+func TestPasswordlessLogin_ClearsPlantedPassword(t *testing.T) {
+	svc, repo, rec := passwordlessSvc(t)
+	ctx := context.Background()
+
+	const plantedPW = "Att@ckerPW1!"
+	planted := seedUser(repo, "victim@test.com", hashPW(t, plantedPW), "active")
+	planted.EmailVerified = false
+	planted.EmailVerifiedAt = 0
+
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, "victim@test.com"))
+	code := extractCodeFromEmail(t, rec.Sent()[0].Text)
+
+	res, err := svc.VerifyEmailLoginCode(ctx, "victim@test.com", code, "9.9.9.9", "agent")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	// Same pre-existing account, now verified.
+	assert.Equal(t, planted.ID, res.User.ID)
+
+	got, err := repo.FindUserByEmail(ctx, "victim@test.com")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.True(t, got.EmailVerified)
+	assert.Empty(t, got.PasswordHash, "planted password must be cleared on OTP-proven email control")
+
+	// The attacker's password no longer works.
+	_, err = svc.PasswordLogin(ctx, "victim@test.com", plantedPW, "1.1.1.1", "agent")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNoPasswordSet))
+}
+
 func TestVerifyEmailLoginCode_WrongCodeFails(t *testing.T) {
 	svc, _, rec := passwordlessSvc(t)
 	ctx := context.Background()
