@@ -139,6 +139,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 			ProjectID:                 cfg.DefaultProjectID,
 			PostgresDSN:               cfg.PostgresDSN,
 			PostgresMaxConns:          cfg.PostgresMaxConns,
+			PostgresConnTimeoutMs:     cfg.PostgresConnTimeoutMs,
 			PostgresAutoMigrate:       cfg.PostgresAutoMigrate,
 			SQLitePath:                cfg.SQLitePath,
 			SQLiteMaxConns:            cfg.SQLiteMaxConns,
