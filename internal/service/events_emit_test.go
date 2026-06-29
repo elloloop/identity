@@ -39,7 +39,7 @@ func TestPasswordSignup_EmitsUserCreatedEvent(t *testing.T) {
 	pub := &capturePublisher{}
 	svc := newTestAuthService(t, repo).WithEventPublisher(pub)
 
-	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "")
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", strongPW, "Alice", "", 0)
 	require.NoError(t, err)
 
 	got := pub.all()
@@ -54,7 +54,7 @@ func TestPasswordSignup_NilPublisher_NoPanic(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo) // no publisher wired
 
-	_, err := svc.PasswordSignup(context.Background(), "bob@example.com", strongPW, "Bob", "")
+	_, err := svc.PasswordSignup(context.Background(), "bob@example.com", strongPW, "Bob", "", 0)
 	require.NoError(t, err)
 }
 
@@ -64,7 +64,7 @@ func TestPasswordSignup_PublisherError_DoesNotFailRPC(t *testing.T) {
 	svc := newTestAuthService(t, repo).WithEventPublisher(pub)
 
 	// A publisher failure is best-effort: the signup still succeeds.
-	res, err := svc.PasswordSignup(context.Background(), "carol@example.com", strongPW, "Carol", "")
+	res, err := svc.PasswordSignup(context.Background(), "carol@example.com", strongPW, "Carol", "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, res)
 }

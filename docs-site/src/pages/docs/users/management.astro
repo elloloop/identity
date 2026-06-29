@@ -99,10 +99,10 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>Groups</h2>
   <p>
-    Groups are a named collection of users, scoped to a Project. They are
-    stored relationally as <code>groups</code> and
-    <code>group_memberships</code> rows (membership is a plain join row, not a
-    graph edge).
+    Groups are a named collection of users, scoped to a Project. A group is
+    stored as a graph node (node type <code>working_group</code>), and
+    membership is a graph edge: each member is a <code>MEMBER_OF</code> edge
+    pointing from the user node to the group node (not a relational join row).
   </p>
   <p>
     Identity stores this membership data, but does not treat group
@@ -123,5 +123,6 @@ import { Code } from "astro-expressive-code/components";
     <tr><td><code>USER_STATUS_INVITED</code></td><td>Invitation pending; cannot log in until <code>AcceptInvitation</code></td></tr>
     <tr><td><code>USER_STATUS_DEACTIVATED</code></td><td>Disabled by an admin; reversible via <code>ReactivateUser</code></td></tr>
     <tr><td><code>USER_STATUS_SUSPENDED</code></td><td>Locked out; cannot log in</td></tr>
+    <tr><td><code>USER_STATUS_PENDING_PARENTAL_CONSENT</code></td><td>Child-band account created under age-gating that has not yet obtained verifiable parental consent; exists but cannot mint full access tokens until consent is granted (COPPA)</td></tr>
   </table>
 </DocsLayout>

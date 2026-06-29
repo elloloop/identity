@@ -7,7 +7,7 @@ import { Code } from "astro-expressive-code/components";
   <h1>Running with Docker</h1>
   <p>
     The official image is <code>ghcr.io/elloloop/identity</code>. It is a
-    multi-arch (linux/amd64, linux/arm64) distroless static image with the
+    multi-arch (linux/amd64, linux/arm64) scratch-based static image with the
     statically-linked <code>/bin/identity</code> binary as ENTRYPOINT.
   </p>
 
@@ -30,8 +30,8 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
   -e GATEWAY_DEFAULT_PROJECT_ID=proj_local \\
   ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="dev (embedded sqlite, auto-generated JWT key)" />
   <p>
-    With no <code>GATEWAY_JWT_KEYS</code> set, the container generates an
-    ephemeral RSA key and logs <code>auto_generating_dev_rsa_key</code>.
+    With no <code>GATEWAY_JWT_KEYS_FILE</code> set, the container generates an
+    ephemeral RSA key and logs <code>jwt_signer_dev_key_generated</code>.
     Restarting the container produces a new key — every existing access
     token becomes unverifiable. Use this for local dev only.
   </p>
@@ -47,31 +47,44 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
   -e GATEWAY_PASSKEY_ORIGIN=https://acme.example.com \\
   -e GATEWAY_TOTP_ISSUER="Acme" \\
   -e GATEWAY_TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)" \\
-  -e GATEWAY_JWT_KEYS="$(cat keyring.json)" \\
+  -v /etc/identity/keys.json:/etc/identity/keys.json:ro \\
+  -e GATEWAY_JWT_SIGNER=file \\
+  -e GATEWAY_JWT_KEYS_FILE=/etc/identity/keys.json \\
   -e GATEWAY_ALLOWED_ORIGINS="https://acme.example.com" \\
-  -e GATEWAY_GOOGLE_CLIENT_ID=... \\
-  -e GATEWAY_GOOGLE_CLIENT_SECRET=... \\
+  -e GATEWAY_OAUTH_GOOGLE_CLIENT_ID=... \\
+  -e GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET=... \\
   -e GATEWAY_AUTH_ALLOW_LOCAL=true \\
   ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="production" />
 
   <h2>Building from source</h2>
   <p>The repo's <code>Dockerfile</code> is a two-stage multi-arch build:</p>
-  <Code code={`FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
-ENV GOTOOLCHAIN=auto
+  <Code code={`FROM --platform=$BUILDPLATFORM golang:1.26.4-alpine3.23 AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=unknown
+
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/    ./cmd/
+COPY identityserver/ ./identityserver/
 COPY internal/ ./internal/
 COPY pkg/    ./pkg/
 COPY gen/    ./gen/
 
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \\
-    go build -ldflags="-s -w" -o /bin/identity ./cmd/identity
+    go build \\
+      -ldflags="-s -w -X main.version=$VERSION -X main.commit=$COMMIT" \\
+      -o /bin/identity \\
+      ./cmd/identity
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM scratch AS server
 COPY --from=builder /bin/identity /bin/identity
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 EXPOSE 80 9090
+USER 65532:65532
 ENTRYPOINT ["/bin/identity"]`} lang="dockerfile" title="Dockerfile" />
   <Code code={`docker build -t identity:dev .
 docker run --rm -p 80:80 identity:dev`} lang="bash" />

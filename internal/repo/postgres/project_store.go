@@ -274,6 +274,53 @@ func (s *ProjectStore) EnsureDefaultProject(ctx context.Context, projectID, stor
 	return p, nil
 }
 
+// updateProjectConfig REPLACES a project's config_json blob and stamps
+// updated_at_ms, returning the stored value. An empty/whitespace blob is
+// normalised to "{}" (no per-project overrides). A project that does not
+// exist affects no row and surfaces service.ErrNotFound. The blob is cast to
+// jsonb so a non-object/malformed value is rejected by Postgres at write time.
+func (s *ProjectStore) updateProjectConfig(ctx context.Context, projectID, configJSON string) (string, error) {
+	if projectID == "" {
+		return "", fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
+	}
+	if strings.TrimSpace(configJSON) == "" {
+		configJSON = "{}"
+	}
+	const q = `
+		UPDATE projects
+		   SET config_json = $2::jsonb,
+		       updated_at_ms = $3
+		 WHERE id = $1
+		 RETURNING config_json`
+	var stored string
+	err := s.pool.QueryRow(ctx, q, projectID, configJSON, nowMs()).Scan(&stored)
+	if noRows(err) {
+		return "", fmt.Errorf("%w: project", service.ErrNotFound)
+	}
+	if err != nil {
+		return "", wrapPgErr("UpdateProjectConfig", err)
+	}
+	return stored, nil
+}
+
+// getProjectConfig returns a project's stored config_json ("{}" when unset).
+// A project that does not exist surfaces service.ErrNotFound.
+func (s *ProjectStore) getProjectConfig(ctx context.Context, projectID string) (string, error) {
+	if projectID == "" {
+		return "", fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
+	}
+	const q = `SELECT config_json FROM projects WHERE id = $1`
+	var stored string
+	err := s.pool.QueryRow(ctx, q, projectID).Scan(&stored)
+	if noRows(err) {
+		return "", fmt.Errorf("%w: project", service.ErrNotFound)
+	}
+	if err != nil {
+		return "", wrapPgErr("GetProjectConfig", err)
+	}
+	return stored, nil
+}
+
 // ── project_credentials ───────────────────────────────────────────────
 
 // #nosec G101 -- this is a SQL column list (secret_hash is a column name),

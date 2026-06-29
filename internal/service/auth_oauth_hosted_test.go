@@ -28,14 +28,14 @@ func TestHostedOAuth_BeginCompleteRedeem(t *testing.T) {
 	ctx := context.Background()
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123")
 	require.NoError(t, err)
 	require.NotEmpty(t, begin.AuthorizationURL)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 
 	cb, err := svc.CompleteHostedOAuth(ctx, "google",
 		fakeOAuthCode("hosted@example.com", "Hosted", "", "google"),
-		stateToken, "1.2.3.4", "test-agent")
+		stateToken, "", "1.2.3.4", "test-agent", []string{"csrf-123"})
 	require.NoError(t, err)
 	assert.Equal(t, "https://app.test/finish", cb.ReturnTo)
 	require.NotEmpty(t, cb.Code)
@@ -58,23 +58,23 @@ func TestHostedOAuth_Begin_InputErrors(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	ctx := context.Background()
 
-	_, err := svc.BeginHostedOAuth(ctx, "", "https://identity.test/cb", "https://app.test/")
+	_, err := svc.BeginHostedOAuth(ctx, "", "https://identity.test/cb", "https://app.test/", "csrf-123")
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 
-	_, err = svc.BeginHostedOAuth(ctx, "google", "", "https://app.test/")
+	_, err = svc.BeginHostedOAuth(ctx, "google", "", "https://app.test/", "csrf-123")
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 
-	_, err = svc.BeginHostedOAuth(ctx, "google", "https://identity.test/cb", "")
+	_, err = svc.BeginHostedOAuth(ctx, "google", "https://identity.test/cb", "", "csrf-123")
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 
-	_, err = svc.BeginHostedOAuth(ctx, "unknown", "https://identity.test/cb", "https://app.test/")
+	_, err = svc.BeginHostedOAuth(ctx, "unknown", "https://identity.test/cb", "https://app.test/", "csrf-123")
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
 
 func TestHostedOAuth_Begin_DisabledNoRegistry(t *testing.T) {
 	svc := newTestAuthServiceNoOAuth(t, newFakeRepo())
 	_, err := svc.BeginHostedOAuth(context.Background(), "google",
-		"https://identity.test/cb", "https://app.test/")
+		"https://identity.test/cb", "https://app.test/", "csrf-123")
 	assert.True(t, errors.Is(err, ErrOAuthDisabled))
 }
 
@@ -84,7 +84,7 @@ func TestHostedOAuth_Complete_TamperedStateRejected(t *testing.T) {
 	ctx := context.Background()
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123")
 	require.NoError(t, err)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 
@@ -92,7 +92,24 @@ func TestHostedOAuth_Complete_TamperedStateRejected(t *testing.T) {
 	tampered := stateToken[:len(stateToken)-2] + "AA"
 	_, err = svc.CompleteHostedOAuth(ctx, "google",
 		fakeOAuthCode("hosted@example.com", "Hosted", "", "google"),
-		tampered, "", "")
+		tampered, "", "", "", []string{"csrf-123"})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated))
+}
+
+func TestHostedOAuth_Complete_CSRFMismatchRejected(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := context.Background()
+
+	begin, err := svc.BeginHostedOAuth(ctx, "google",
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123")
+	require.NoError(t, err)
+	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
+
+	_, err = svc.CompleteHostedOAuth(ctx, "google",
+		fakeOAuthCode("hosted@example.com", "Hosted", "", "google"),
+		stateToken, "", "", "", []string{"wrong-csrf-token"})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }
@@ -103,14 +120,14 @@ func TestHostedOAuth_Complete_ProviderMismatchRejected(t *testing.T) {
 	ctx := context.Background()
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123")
 	require.NoError(t, err)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 
 	// The token was minted for google but the callback path says github.
 	_, err = svc.CompleteHostedOAuth(ctx, "github",
 		fakeOAuthCode("hosted@example.com", "Hosted", "", "google"),
-		stateToken, "", "")
+		stateToken, "", "", "", []string{"csrf-123"})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
 }

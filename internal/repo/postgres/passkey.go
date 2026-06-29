@@ -14,13 +14,15 @@ import (
 // #nosec G101 -- SQL column list contains key field names, not credentials.
 const passkeyColumns = `
 	id, credential_id, user_id, public_key, sign_count,
-	device_name, aaguid, transports, created_at_ms, last_used_at_ms`
+	device_name, aaguid, transports, backup_eligible, backup_state,
+	created_at_ms, last_used_at_ms`
 
 func scanPasskey(row pgx.Row) (*service.PasskeyCredRecord, error) {
 	var c service.PasskeyCredRecord
 	if err := row.Scan(
 		&c.NodeID, &c.CredentialID, &c.UserID, &c.PublicKey, &c.SignCount,
-		&c.DeviceName, &c.AAGUID, &c.Transports, &c.CreatedAt, &c.LastUsedAt,
+		&c.DeviceName, &c.AAGUID, &c.Transports, &c.BackupEligible, &c.BackupState,
+		&c.CreatedAt, &c.LastUsedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -84,12 +86,14 @@ func (r *pgRepository) CreatePasskeyCredential(ctx context.Context, c *service.P
 	const q = `
 		INSERT INTO passkeys (
 			id, project_id, credential_id, user_id, public_key, sign_count,
-			device_name, aaguid, transports, created_at_ms, last_used_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+			device_name, aaguid, transports, backup_eligible, backup_state,
+			created_at_ms, last_used_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	_, err := r.pool.Exec(
 		ctx, q,
 		id, r.projectID, c.CredentialID, c.UserID, c.PublicKey, c.SignCount,
-		c.DeviceName, c.AAGUID, c.Transports, c.CreatedAt, c.LastUsedAt,
+		c.DeviceName, c.AAGUID, c.Transports, c.BackupEligible, c.BackupState,
+		c.CreatedAt, c.LastUsedAt,
 	)
 	if err != nil {
 		return "", wrapPgErr("CreatePasskeyCredential", err)

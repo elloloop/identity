@@ -12,7 +12,7 @@ import { Code } from "astro-expressive-code/components";
   </p>
 
   <h2>Secret</h2>
-  <p>The Postgres DSN, JWT key ring, and TOTP encryption key belong in a Secret:</p>
+  <p>The Postgres DSN, TOTP encryption key, and OAuth client secrets belong in a Secret:</p>
   <Code code={`apiVersion: v1
 kind: Secret
 metadata:
@@ -21,11 +21,25 @@ metadata:
 type: Opaque
 stringData:
   GATEWAY_POSTGRES_DSN: "postgres://identity:secret@postgres.identity.svc.cluster.local:5432/identity?sslmode=require"
-  GATEWAY_JWT_KEYS: |
-    [{"kid":"k-2026-05","private_key_pem":"-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n","active":true}]
   GATEWAY_TOTP_ENCRYPTION_KEY: "<base64 32-byte key>"
-  GATEWAY_GOOGLE_CLIENT_SECRET: "..."
-  GATEWAY_MICROSOFT_CLIENT_SECRET: "..."`} lang="yaml" title="secret.yaml" />
+  GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET: "..."
+  GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET: "..."`} lang="yaml" title="secret.yaml" />
+
+  <p>
+    The JWT signer defaults to <code>file</code> (<code>GATEWAY_JWT_SIGNER</code>),
+    which reads the key ring JSON from the path in
+    <code>GATEWAY_JWT_KEYS_FILE</code>. Put the key ring in its own Secret and
+    mount it as a volume (see the Deployment below):
+  </p>
+  <Code code={`apiVersion: v1
+kind: Secret
+metadata:
+  name: identity-jwt-keys
+  namespace: identity
+type: Opaque
+stringData:
+  jwt-keys.json: |
+    [{"kid":"k-2026-05","private_key_pem":"-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n","active":true}]`} lang="yaml" title="jwt-keys-secret.yaml" />
 
   <h2>ConfigMap</h2>
   <Code code={`apiVersion: v1
@@ -35,6 +49,7 @@ metadata:
   namespace: identity
 data:
   GATEWAY_REPO_DRIVER: "postgres"
+  GATEWAY_JWT_KEYS_FILE: "/etc/identity/jwt/jwt-keys.json"
   GATEWAY_DEFAULT_PROJECT_ID: "proj_acme"
   GATEWAY_PASSKEY_RP_ID: "acme.example.com"
   GATEWAY_PASSKEY_ORIGIN: "https://acme.example.com"
@@ -42,8 +57,8 @@ data:
   GATEWAY_ALLOWED_ORIGINS: "https://acme.example.com"
   GATEWAY_AUTH_ALLOW_LOCAL: "true"
   GATEWAY_COOKIE_SECURE: "true"
-  GATEWAY_GOOGLE_CLIENT_ID: "..."
-  GATEWAY_MICROSOFT_CLIENT_ID: "..."`} lang="yaml" title="configmap.yaml" />
+  GATEWAY_OAUTH_GOOGLE_CLIENT_ID: "..."
+  GATEWAY_OAUTH_MICROSOFT_CLIENT_ID: "..."`} lang="yaml" title="configmap.yaml" />
 
   <h2>Deployment</h2>
   <Code code={`apiVersion: apps/v1
@@ -68,6 +83,10 @@ spec:
           envFrom:
             - configMapRef: { name: identity-config }
             - secretRef:    { name: identity-secrets }
+          volumeMounts:
+            - name: jwt-keys
+              mountPath: /etc/identity/jwt
+              readOnly: true
           readinessProbe:
             httpGet: { path: /healthz, port: 80 }
             periodSeconds: 5
@@ -82,7 +101,11 @@ spec:
             readOnlyRootFilesystem: true
             runAsNonRoot: true
             capabilities:
-              drop: ["ALL"]`} lang="yaml" title="deployment.yaml" />
+              drop: ["ALL"]
+      volumes:
+        - name: jwt-keys
+          secret:
+            secretName: identity-jwt-keys`} lang="yaml" title="deployment.yaml" />
 
   <h2>Service</h2>
   <Code code={`apiVersion: v1

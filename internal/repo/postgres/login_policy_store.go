@@ -111,3 +111,17 @@ func (s *LoginPolicyStore) GetLoginPolicy(ctx context.Context, projectID, tenant
 	}
 	return p, nil
 }
+
+// DeleteLoginPolicy removes the policy for (projectID, tenantID). It is
+// idempotent: deleting an absent policy affects no row and returns nil. Both
+// ids are required.
+func (s *LoginPolicyStore) DeleteLoginPolicy(ctx context.Context, projectID, tenantID string) error {
+	if projectID == "" || tenantID == "" {
+		return fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
+	}
+	const q = `DELETE FROM login_policies WHERE project_id = $1 AND tenant_id = $2`
+	if _, err := s.pool.Exec(ctx, q, projectID, tenantID); err != nil {
+		return wrapPgErr("DeleteLoginPolicy", err)
+	}
+	return nil
+}

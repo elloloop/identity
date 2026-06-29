@@ -27,6 +27,18 @@ type Message struct {
 
 	// Text is the plain-text body. Optional if HTML is set.
 	Text string
+
+	// ReplyTo, when non-empty, is written as the Reply-To header (RFC 5322).
+	// Used to route replies to a product support address while keeping the
+	// transactional From address. Must parse as an address when set.
+	ReplyTo string
+
+	// ListUnsubscribe, when non-empty, is written verbatim as the
+	// List-Unsubscribe header (RFC 2369), e.g.
+	// "<mailto:unsubscribe@example.com>" or an https URL in angle brackets.
+	// Improves deliverability/compliance; auth mail stays deliverable when
+	// unset.
+	ListUnsubscribe string
 }
 
 // NewMessage constructs a Message and runs Validate. Returns a wrapped
@@ -62,6 +74,11 @@ func (m Message) Validate() error {
 	if strings.TrimSpace(m.From) != "" {
 		if _, err := mail.ParseAddress(m.From); err != nil {
 			return fmt.Errorf("%w: invalid from address %q: %w", ErrInvalidMessage, m.From, err)
+		}
+	}
+	if strings.TrimSpace(m.ReplyTo) != "" {
+		if _, err := mail.ParseAddress(m.ReplyTo); err != nil {
+			return fmt.Errorf("%w: invalid reply-to address %q: %w", ErrInvalidMessage, m.ReplyTo, err)
 		}
 	}
 	if strings.TrimSpace(m.Subject) == "" {

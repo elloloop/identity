@@ -110,6 +110,18 @@ func (s *ProjectStore) SetPrimaryAuthDomain(ctx context.Context, projectID, host
 	return authDomainToService(d), nil
 }
 
+// UpdateProjectConfig REPLACES a project's config_json blob and returns the
+// stored (normalised) value. An unknown project surfaces service.ErrNotFound.
+func (s *ProjectStore) UpdateProjectConfig(ctx context.Context, projectID, configJSON string) (string, error) {
+	return s.updateProjectConfig(ctx, projectID, configJSON)
+}
+
+// GetProjectConfig returns a project's stored config_json ("{}" when unset).
+// An unknown project surfaces service.ErrNotFound.
+func (s *ProjectStore) GetProjectConfig(ctx context.Context, projectID string) (string, error) {
+	return s.getProjectConfig(ctx, projectID)
+}
+
 // authDomainToService maps the store row to the driver-agnostic admin value.
 func authDomainToService(d *ProjectAuthDomain) *service.AdminProjectAuthDomain {
 	return &service.AdminProjectAuthDomain{

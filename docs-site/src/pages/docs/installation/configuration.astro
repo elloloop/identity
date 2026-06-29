@@ -1,6 +1,71 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
-import { Code } from "astro-expressive-code/components";
+import configVars from "../../../data/generated/config.json";
+
+interface ConfigVar {
+  name: string;
+  type: string;
+  default: string;
+  required: boolean;
+  description: string;
+  category: string;
+  anchor: string;
+}
+
+const vars = configVars as ConfigVar[];
+
+// Logical display order for the category sections. Any category the generator
+// emits that is not listed here falls to the end, alphabetically — so adding a
+// new var (and a new category) in config.go can never silently drop it.
+const categoryOrder = [
+  "Server & ports",
+  "Datastore",
+  "Projects & tenancy",
+  "JWT & tokens",
+  "Authentication",
+  "Password & lockout",
+  "Passwordless email login",
+  "Passkeys / WebAuthn",
+  "TOTP / 2FA",
+  "OAuth",
+  "QR cross-device login",
+  "Phone / SMS verification",
+  "CAPTCHA",
+  "Age gating (COPPA)",
+  "Identity verification",
+  "Email & branding",
+  "HTTP, CORS & cookies",
+  "Rate limiting",
+  "OpenTelemetry",
+  "Sweeper (GC)",
+  "Audit",
+];
+
+const byCategory = new Map<string, ConfigVar[]>();
+// anchorByCategory carries the slug emitted by the generator (cmd/docsgen) for
+// each category, so this page never re-derives the slug — it consumes the one
+// authoritative `anchor` field. All vars in a category share the same anchor.
+const anchorByCategory = new Map<string, string>();
+for (const v of vars) {
+  const list = byCategory.get(v.category) ?? [];
+  list.push(v);
+  byCategory.set(v.category, list);
+  if (!anchorByCategory.has(v.category)) anchorByCategory.set(v.category, v.anchor);
+}
+
+const orderIndex = (c: string) => {
+  const i = categoryOrder.indexOf(c);
+  return i === -1 ? categoryOrder.length : i;
+};
+
+const categories = [...byCategory.keys()].sort(
+  (a, b) => orderIndex(a) - orderIndex(b) || a.localeCompare(b),
+);
+
+const renderDefault = (v: ConfigVar): string => {
+  if (v.default !== "") return v.default;
+  return v.required ? "(required)" : "(empty)";
+};
 ---
 
 <DocsLayout title="Configuration">
@@ -14,15 +79,18 @@ import { Code } from "astro-expressive-code/components";
     ID/origin, and the TOTP encryption key.
   </p>
 
-  <h2>Server ports</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_CONNECT_PORT</code></td><td><code>80</code></td><td>Connect-RPC HTTP listener</td></tr>
-    <tr><td><code>GATEWAY_GRPC_PORT</code></td><td><code>50051</code></td><td>Reserved for native gRPC (currently unused)</td></tr>
-    <tr><td><code>GATEWAY_METRICS_PORT</code></td><td><code>9090</code></td><td>Prometheus <code>/metrics</code></td></tr>
-  </table>
+  <aside class="not-prose my-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">
+    <strong>This reference is generated from source.</strong> Every
+    <code>GATEWAY_*</code> row below — name, type, default, and whether it is
+    required — is extracted from <code>internal/config/config.go</code> by
+    <code>cmd/docsgen</code> and a CI drift guard fails the build if these docs
+    fall out of sync. To change a variable, its default, or its description,
+    edit the Go source and its doc comment (not this page), then regenerate with
+    <code>make docs-gen</code>. The conceptual guidance between the tables is
+    hand-written.
+  </aside>
 
-  <h2>Datastore</h2>
+  <h2>Choosing a datastore driver</h2>
   <p>
     The backing store is selected with <code>GATEWAY_REPO_DRIVER</code>. All
     drivers pass the same conformance suite (identical uniqueness, ordering, and
@@ -35,110 +103,118 @@ import { Code } from "astro-expressive-code/components";
     <tr><td><code>sqlite</code></td><td>Embedded, single-node, dev</td><td>Pure-Go (<code>modernc.org/sqlite</code>, no cgo) — cross-compiles cleanly and runs in-process from a single file or <code>:memory:</code>. Ideal for the embeddable library and small self-host deployments.</td></tr>
     <tr><td><code>memory</code></td><td>Tests / smoke</td><td>Non-durable; state is lost on restart.</td></tr>
   </table>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_REPO_DRIVER</code></td><td><code>postgres</code></td><td>One of <code>postgres</code>, <code>sqlite</code>, <code>memory</code>.</td></tr>
-    <tr><td><code>GATEWAY_POSTGRES_DSN</code></td><td><em>(empty)</em></td><td>Postgres connection string, e.g. <code>postgres://user:pass@host:5432/identity?sslmode=disable</code>. Required when <code>GATEWAY_REPO_DRIVER=postgres</code>.</td></tr>
-    <tr><td><code>GATEWAY_POSTGRES_MAX_CONNS</code></td><td><code>25</code></td><td>Connection-pool size.</td></tr>
-    <tr><td><code>GATEWAY_POSTGRES_AUTO_MIGRATE</code></td><td><code>false</code></td><td>Run pending migrations on connect. See <a href="/identity/docs/installation/database-migrations">Database migrations</a>.</td></tr>
-    <tr><td><code>GATEWAY_SQLITE_PATH</code></td><td><code>:memory:</code></td><td>SQLite file path (or <code>:memory:</code>). Used when <code>GATEWAY_REPO_DRIVER=sqlite</code>.</td></tr>
-    <tr><td><code>GATEWAY_DEFAULT_PROJECT_ID</code></td><td><code>default</code></td><td>ID of the control-plane <a href="/identity/docs/concepts/multi-tenancy">Project</a> seeded on first boot.</td></tr>
-    <tr><td><code>GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS</code></td><td><em>(empty)</em></td><td>Comma-separated branded login hostnames seeded onto the default project at boot, so the service resolves these hosts to it. The first is the primary (drives branded links). Seeded verified (deployer-owned); customer-supplied domains use DNS verification instead.</td></tr>
-    <tr><td><code>GATEWAY_PUBLIC_EMAIL_DOMAINS</code></td><td><em>(empty)</em></td><td>Comma-separated extra consumer/public email domains (beyond the built-in gmail/outlook/yahoo/… set). A verified address under a public domain never auto-forms a company tenant.</td></tr>
-  </table>
+  <p>
+    See <a href="/identity/docs/installation/database-migrations">Database
+    migrations</a> for <code>GATEWAY_POSTGRES_AUTO_MIGRATE</code> and the
+    migration workflow.
+  </p>
 
-  <h2>JWT</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_JWT_KEYS</code></td><td><em>(empty)</em></td><td>RSA key ring as JSON array. Empty = auto-generate dev key. See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a>.</td></tr>
-    <tr><td><code>GATEWAY_JWT_EXPIRY_SECONDS</code></td><td><code>900</code></td><td>Access-token lifetime (15 min)</td></tr>
-    <tr><td><code>GATEWAY_REFRESH_EXPIRY_SECONDS</code></td><td><code>604800</code></td><td>Refresh-token lifetime (7 days)</td></tr>
-  </table>
+  <h2>Environment variable reference</h2>
+  <p>
+    Every <code>GATEWAY_*</code> variable, grouped by area. A
+    <code>Default</code> of <code>(empty)</code> means unset; <code>(required)</code>
+    means the variable has no default and the server fails to boot without it
+    (often conditionally — e.g. only when a feature or driver is enabled).
+  </p>
+  {
+    categories.map((category) => (
+      <section id={anchorByCategory.get(category)}>
+        <h3>{category}</h3>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Variable</th>
+                <th scope="col">Type</th>
+                <th scope="col">Default</th>
+                <th scope="col">Required</th>
+                <th scope="col">Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byCategory.get(category)!.map((v) => (
+                <tr>
+                  <td><code>{v.name}</code></td>
+                  <td>{v.type}</td>
+                  <td><code>{renderDefault(v)}</code></td>
+                  <td>{v.required ? "yes" : "no"}</td>
+                  <td>{v.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    ))
+  }
 
-  <h2>OAuth</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_GOOGLE_CLIENT_ID</code></td><td><em>(empty)</em></td><td>Google OAuth client ID</td></tr>
-    <tr><td><code>GATEWAY_GOOGLE_CLIENT_SECRET</code></td><td><em>(empty)</em></td><td>Google OAuth client secret</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_ID</code></td><td><em>(empty)</em></td><td>Microsoft / Entra ID client ID</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_CLIENT_SECRET</code></td><td><em>(empty)</em></td><td>Microsoft client secret</td></tr>
-    <tr><td><code>GATEWAY_MICROSOFT_TENANT_ID</code></td><td><em>(empty)</em></td><td>Microsoft tenant ID (or <code>common</code>)</td></tr>
-  </table>
-
-  <h2>Password / lockout</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_AUTH_ALLOW_LOCAL</code></td><td><code>true</code></td><td>Set <code>false</code> to disable username/password and require OAuth</td></tr>
-    <tr><td><code>GATEWAY_PASSWORD_SIGNUP_ENABLED</code></td><td><code>true</code></td><td>Set <code>false</code> to disable self-serve <code>PasswordSignup</code>; admin-driven invitations still work</td></tr>
-    <tr><td><code>GATEWAY_PASSWORD_RESET_ENABLED</code></td><td><code>true</code></td><td>Set <code>false</code> to keep <code>RequestPasswordReset</code> enumeration-safe but make it a no-op; admin resets still work</td></tr>
-    <tr><td><code>GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS</code></td><td><code>3600</code></td><td>Recovery-email reset link lifetime</td></tr>
-    <tr><td><code>GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS</code></td><td><code>5</code></td><td>Lockout threshold</td></tr>
-    <tr><td><code>GATEWAY_LOGIN_LOCKOUT_SECONDS</code></td><td><code>900</code></td><td>Lockout duration (15 min)</td></tr>
-    <tr><td><code>GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS</code></td><td><code>300</code></td><td>Window after password success to complete TOTP</td></tr>
-  </table>
+  <h2>Password reset &amp; signup toggles</h2>
   <p>
     When <code>GATEWAY_PASSWORD_RESET_ENABLED=false</code>,
     <code>RequestPasswordReset</code> still returns success so callers cannot
     use it to enumerate accounts, but Identity does not create a reset token
-    or send recovery email.
+    or send recovery email. Likewise <code>GATEWAY_PASSWORD_SIGNUP_ENABLED=false</code>
+    rejects self-serve <code>PasswordSignup</code> while leaving admin- and
+    invitation-driven account creation intact. See the
+    <a href="/identity/docs/operations/password-toggle-rollout">password-toggle
+    rollout runbook</a>.
   </p>
 
-  <h2>Passwordless email login</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_PASSWORDLESS_SIGNUP_ENABLED</code></td><td><code>true</code></td><td>Auto-create an account on a passwordless verify for an unknown email. Set <code>false</code> to require a pre-existing account (unknown emails get the same <code>unauthenticated</code> shape — no enumeration)</td></tr>
-    <tr><td><code>GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS</code></td><td><code>300</code></td><td>One-time code lifetime</td></tr>
-    <tr><td><code>GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS</code></td><td><code>5</code></td><td>Wrong-code guesses before the code is invalidated (brute-force cap)</td></tr>
-    <tr><td><code>GATEWAY_PASSWORDLESS_MAGIC_LINK_TTL_SECONDS</code></td><td><code>900</code></td><td>Magic-link token lifetime</td></tr>
-    <tr><td><code>GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP</code></td><td><code>5</code></td><td>Per-IP/minute cap on <code>RequestEmailLoginCode</code> + <code>RequestMagicLink</code></td></tr>
-  </table>
+  <h2>Email branding &amp; deliverability</h2>
   <p>
-    The per-email send cooldown
-    (<code>GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS</code>) and the magic link's
-    <code>return_to</code> allowlist
-    (<code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>) also apply — see
-    <a href="/identity/docs/auth/passwordless">Passwordless</a>.
+    Transactional emails (magic link, login code, verification, password
+    reset, invitations) carry optional branding. Every field is optional:
+    when unset, mail is byte-compatible with the default unbranded look and
+    the From address falls back to <code>GATEWAY_SMTP_FROM</code>. The
+    <code>GATEWAY_EMAIL_BRAND_*</code> variables above are the
+    <strong>global defaults</strong> — a single server serving two products
+    overrides them per project (see below).
   </p>
-
-  <h2>TOTP / 2FA</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_TOTP_ENCRYPTION_KEY</code></td><td><em>(throwaway in dev)</em></td><td>Base64-encoded 32-byte AES-256 key for at-rest TOTP secret encryption. <strong>Required in prod.</strong></td></tr>
-    <tr><td><code>GATEWAY_TOTP_ISSUER</code></td><td><code>Glassa Work</code></td><td>Name shown in user authenticator apps</td></tr>
-  </table>
-
-  <h2>Passkeys / WebAuthn</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td><code>localhost</code></td><td>WebAuthn relying-party ID — must match the registrable domain (e.g. <code>example.com</code>)</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td><code>Glassa Work</code></td><td>Human-readable RP name</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td><code>http://localhost:9002</code></td><td>Allowed origin for passkey ceremonies</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS</code></td><td><code>300</code></td><td>Lifetime of registration / login challenges</td></tr>
-  </table>
-
-  <h2>QR cross-device login</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_QR_LOGIN_BASE_URL</code></td><td><code>http://localhost:9002</code></td><td>Base URL embedded in the QR code</td></tr>
-    <tr><td><code>GATEWAY_QR_LOGIN_EXPIRY_SECONDS</code></td><td><code>300</code></td><td>QR session lifetime</td></tr>
-  </table>
-
-  <h2>CORS &amp; cookies</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_ALLOWED_ORIGINS</code></td><td><code>http://localhost:9002,http://localhost:3000</code></td><td>Comma-separated CORS origins</td></tr>
-    <tr><td><code>GATEWAY_COOKIE_DOMAIN</code></td><td><em>(empty)</em></td><td>Cookie domain attribute (when cookies are used)</td></tr>
-    <tr><td><code>GATEWAY_COOKIE_SECURE</code></td><td><code>false</code></td><td>Set <code>true</code> in prod (HTTPS-only cookies)</td></tr>
-    <tr><td><code>GATEWAY_COOKIE_SAMESITE</code></td><td><code>Lax</code></td><td><code>Lax</code> / <code>Strict</code> / <code>None</code></td></tr>
-  </table>
-
-  <h2>Misc</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_DEFAULT_EMAIL_DOMAIN</code></td><td><code>glassa.work</code></td><td>Default email domain for new accounts</td></tr>
-    <tr><td><code>GATEWAY_EMAIL_SERVICE_HOST</code></td><td><code>email-service</code></td><td>Internal email service host</td></tr>
-    <tr><td><code>GATEWAY_EMAIL_SERVICE_PORT</code></td><td><code>50053</code></td><td>Internal email service port</td></tr>
-  </table>
+  <h3>Per-project branding (one server, two products)</h3>
+  <p>
+    A project's <code>config_json</code> may carry a <code>branding</code> and a
+    <code>passkey</code> block that override the global defaults for requests
+    resolved to that project (by credential key or Host header). Per-field
+    precedence is <em>per-project value → global default → unbranded/legacy</em>.
+    This lets one deployment brand, say, a kids product and a B2B product
+    distinctly, and bind passkeys to each product's own relying-party ID so a
+    passkey registered on <code>kids.example.com</code> validates under that
+    product's RP-ID rather than the other's.
+  </p>
+  <pre><code>{`{
+  "branding": {
+    "product_name": "Glassa Kids",
+    "email_from": "no-reply@kids.example.com",
+    "email_from_name": "Glassa Kids",
+    "logo_url": "https://kids.example.com/logo.png",
+    "primary_color": "#1a73e8",
+    "support_email": "help@kids.example.com"
+  },
+  "passkey": {
+    "rp_id": "kids.example.com",
+    "rp_name": "Glassa Kids",
+    "origin": "https://kids.example.com"
+  }
+}`}</code></pre>
+  <h3>Deliverability (DKIM / SPF / DMARC)</h3>
+  <p>
+    Branding the From address only helps if the receiving mail server trusts
+    it. Configure your sending domain's DNS so auth mail is not flagged as
+    phishing:
+  </p>
+  <ul>
+    <li><strong>SPF</strong>: publish a TXT record authorising your SMTP relay
+    to send for the From domain (e.g. <code>v=spf1 include:your-relay -all</code>).</li>
+    <li><strong>DKIM</strong>: enable DKIM signing at your relay and publish the
+    public key as a TXT record so receivers can verify the signature.</li>
+    <li><strong>DMARC</strong>: publish a <code>_dmarc</code> policy aligning SPF
+    and DKIM with the From domain (start with <code>p=none</code> for
+    monitoring, then tighten to <code>quarantine</code>/<code>reject</code>).</li>
+  </ul>
+  <p>
+    When you set a per-project <code>email_from</code> on a custom domain, that
+    domain needs its own SPF/DKIM/DMARC records.
+  </p>
 
   <h2>Boolean parsing</h2>
   <p>

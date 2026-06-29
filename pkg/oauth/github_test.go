@@ -35,7 +35,7 @@ func TestGitHub_ExchangeSuccess(t *testing.T) {
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	id, err := exch.Exchange(context.Background(), "code", "https://x")
+	id, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestGitHub_FallsBackToProfileEmail(t *testing.T) {
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	id, err := exch.Exchange(context.Background(), "code", "https://x")
+	id, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestGitHub_NoVerifiedEmailRejected(t *testing.T) {
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrEmailNotVerified) {
 		t.Fatalf("want ErrEmailNotVerified, got %v", err)
 	}
@@ -123,7 +123,7 @@ func TestGitHub_TokenError(t *testing.T) {
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}
@@ -142,7 +142,7 @@ func TestGitHub_TokenEndpoint500(t *testing.T) {
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}
@@ -162,7 +162,7 @@ func TestGitHub_UserEndpointFailure(t *testing.T) {
 		UserURL:      fp.URL("/user"),
 		UserMailURL:  fp.URL("/user/emails"),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}

@@ -316,6 +316,14 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 		return errors.New("user not found")
 	}
 
+	// Refuse to move an account out of pending_parental_consent via the
+	// ordinary reactivation path. The only valid exit from that state is the
+	// dedicated parental-consent flow; activating here would bypass the COPPA
+	// consent gate (issue #256).
+	if pstrOr(node.Payload, ufStatus, "active") == StatusPendingParentalConsent {
+		return ErrParentalConsentRequired
+	}
+
 	now := nowMs()
 	op := graph.Operation{
 		Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
@@ -400,13 +408,14 @@ func (s *AdminService) ResetUserPassword(
 // invitation token back in the RPC response, so an email outage cannot
 // strand a user.
 func (s *AdminService) sendInvitationEmail(ctx context.Context, to, name, role, link string) {
-	html, text, err := email.Render(email.TemplateInvitation, map[string]any{
+	brand := resolveBranding(ctx, s.cfg)
+	html, text, err := email.Render(email.TemplateInvitation, brand.templateData(map[string]any{
 		"UserName":    name,
 		"InviterName": "An administrator",
 		"OrgName":     s.cfg.TOTPIssuer,
 		"Role":        role,
 		"Link":        link,
-	})
+	}))
 	if err != nil {
 		s.logger.Warn("invitation_email_render_failed", zap.String("to", redactEmail(to)), zap.Error(err))
 		return
@@ -418,6 +427,7 @@ func (s *AdminService) sendInvitationEmail(ctx context.Context, to, name, role, 
 		HTML:    html,
 		Text:    text,
 	}
+	brand.applyTo(&msg)
 	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("invitation_email_send_failed", zap.String("to", redactEmail(to)), zap.Error(err))
 	}

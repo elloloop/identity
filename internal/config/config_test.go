@@ -80,6 +80,12 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.CookieSameSite != "Lax" {
 		t.Errorf("CookieSameSite: want Lax, got %q", cfg.CookieSameSite)
 	}
+	if cfg.PostgresMaxConns != 25 {
+		t.Errorf("PostgresMaxConns: want 25, got %d", cfg.PostgresMaxConns)
+	}
+	if cfg.PostgresConnTimeoutMs != DefaultPostgresConnTimeoutMs {
+		t.Errorf("PostgresConnTimeoutMs: want %d, got %d", DefaultPostgresConnTimeoutMs, cfg.PostgresConnTimeoutMs)
+	}
 	if cfg.SweeperIntervalSeconds != 300 {
 		t.Errorf("SweeperIntervalSeconds: want 300, got %d", cfg.SweeperIntervalSeconds)
 	}
@@ -88,6 +94,18 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.SweeperGraceSeconds != 60 {
 		t.Errorf("SweeperGraceSeconds: want 60, got %d", cfg.SweeperGraceSeconds)
+	}
+	if cfg.AppleClientID != "" {
+		t.Errorf("AppleClientID: want empty default, got %q", cfg.AppleClientID)
+	}
+	if cfg.AppleTeamID != "" {
+		t.Errorf("AppleTeamID: want empty default, got %q", cfg.AppleTeamID)
+	}
+	if cfg.AppleKeyID != "" {
+		t.Errorf("AppleKeyID: want empty default, got %q", cfg.AppleKeyID)
+	}
+	if cfg.ApplePrivateKey != "" {
+		t.Errorf("ApplePrivateKey: want empty default, got %q", cfg.ApplePrivateKey)
 	}
 }
 
@@ -118,7 +136,12 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_PASSWORD_SIGNUP_ENABLED", "false")
 	t.Setenv("GATEWAY_PASSWORD_RESET_ENABLED", "false")
 	t.Setenv("GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS", "10")
+	t.Setenv("GATEWAY_POSTGRES_CONN_TIMEOUT_MS", "2500")
 	t.Setenv("GATEWAY_TOTP_ISSUER", "My Corp")
+	t.Setenv("GATEWAY_OAUTH_APPLE_CLIENT_ID", "apple-client")
+	t.Setenv("GATEWAY_OAUTH_APPLE_TEAM_ID", "apple-team")
+	t.Setenv("GATEWAY_OAUTH_APPLE_KEY_ID", "apple-key")
+	t.Setenv("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", "apple-private")
 
 	cfg := Load()
 
@@ -152,8 +175,23 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	if cfg.LoginMaxFailedAttempts != 10 {
 		t.Errorf("LoginMaxFailedAttempts: want 10, got %d", cfg.LoginMaxFailedAttempts)
 	}
+	if cfg.PostgresConnTimeoutMs != 2500 {
+		t.Errorf("PostgresConnTimeoutMs: want 2500, got %d", cfg.PostgresConnTimeoutMs)
+	}
 	if cfg.TOTPIssuer != "My Corp" {
 		t.Errorf("TOTPIssuer: want 'My Corp', got %q", cfg.TOTPIssuer)
+	}
+	if cfg.AppleClientID != "apple-client" {
+		t.Errorf("AppleClientID: want apple-client, got %q", cfg.AppleClientID)
+	}
+	if cfg.AppleTeamID != "apple-team" {
+		t.Errorf("AppleTeamID: want apple-team, got %q", cfg.AppleTeamID)
+	}
+	if cfg.AppleKeyID != "apple-key" {
+		t.Errorf("AppleKeyID: want apple-key, got %q", cfg.AppleKeyID)
+	}
+	if cfg.ApplePrivateKey != "apple-private" {
+		t.Errorf("ApplePrivateKey: want apple-private, got %q", cfg.ApplePrivateKey)
 	}
 }
 
@@ -323,4 +361,34 @@ func findByte(s string, b byte) int {
 		}
 	}
 	return len(s)
+}
+
+// TestLoad_GoogleOIDCEndpointOverrides verifies the Google OIDC endpoint
+// overrides flow from env into config — they let a self-hosted gateway (or an
+// end-to-end test against a mock OIDC provider) point the Google provider at
+// non-default endpoints. Empty defaults (the real Google) are covered by the
+// all-defaults test.
+func TestLoad_GoogleOIDCEndpointOverrides(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_DISCOVERY_URL", "http://mock/.well-known/openid-configuration")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_AUTHORIZATION_URL", "http://mock/authorize")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_TOKEN_URL", "http://mock/token")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_JWKS_URL", "http://mock/jwks")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_USERINFO_URL", "http://mock/userinfo")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_ISSUER", "http://mock")
+
+	cfg := Load()
+
+	for _, c := range []struct{ field, got, want string }{
+		{"GoogleDiscoveryURL", cfg.GoogleDiscoveryURL, "http://mock/.well-known/openid-configuration"},
+		{"GoogleAuthorizationURL", cfg.GoogleAuthorizationURL, "http://mock/authorize"},
+		{"GoogleTokenURL", cfg.GoogleTokenURL, "http://mock/token"},
+		{"GoogleJWKSURL", cfg.GoogleJWKSURL, "http://mock/jwks"},
+		{"GoogleUserinfoURL", cfg.GoogleUserinfoURL, "http://mock/userinfo"},
+		{"GoogleIssuer", cfg.GoogleIssuer, "http://mock"},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: want %q, got %q", c.field, c.want, c.got)
+		}
+	}
 }

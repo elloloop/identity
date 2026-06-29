@@ -6,50 +6,70 @@ import { Code } from "astro-expressive-code/components";
 <DocsLayout title="JWT Keys">
   <h1>JWT Keys</h1>
   <p>
-    Identity signs access tokens with RS256. Production deployments must
-    supply a key ring through <code>GATEWAY_JWT_KEYS</code>. Without it the
-    container generates a throwaway key on every start and logs
-    <code>auto_generating_dev_rsa_key</code> as a warning.
+    Identity signs access tokens with RS256. The signing backend is
+    selected by <code>GATEWAY_JWT_SIGNER</code> — either <code>file</code>
+    (the default) or <code>kms_aws</code>. The file signer loads its keys
+    from a JSON document at the path given in
+    <code>GATEWAY_JWT_KEYS_FILE</code>. If that path is empty the container
+    generates a throwaway in-memory key (with <code>kid</code>
+    <code>dev</code>) on every start and logs
+    <code>jwt_signer_dev_key_generated</code> as a warning — never use this
+    in production.
+  </p>
+  <p>
+    The AWS KMS backend (<code>GATEWAY_JWT_SIGNER=kms_aws</code>) instead
+    reads <code>GATEWAY_JWT_KMS_KEYS</code> and
+    <code>GATEWAY_JWT_KMS_AWS_REGION</code>; see the KMS docs for that path.
+    The rest of this page covers the file backend.
   </p>
 
   <h2>Format</h2>
   <p>
-    <code>GATEWAY_JWT_KEYS</code> is a JSON array. Each entry has a
-    <code>kid</code>, a PEM-encoded RSA private key, and an
-    <code>active</code> flag. Exactly one key may be active at a time —
-    that is the signing key. All keys (active or not) are published to
-    JWKS so previously-issued tokens continue to verify.
+    <code>GATEWAY_JWT_KEYS_FILE</code> points at a JSON file whose top-level
+    value is an object with a <code>keys</code> array. Each entry has a
+    <code>kid</code>, a PEM-encoded RSA private key
+    (<code>private_key_pem</code>), and optional <code>not_before</code> /
+    <code>expires_at</code> RFC 3339 timestamps (<code>""</code> or omitted
+    means no bound). There is no <code>active</code> flag — the active
+    signing key is the entry with the latest <code>not_before</code> that
+    is currently in force (<code>not_before &lt;= now &lt; expires_at</code>);
+    ties break by file order. All keys are published to JWKS so
+    previously-issued tokens continue to verify.
   </p>
-  <Code code={`[
-  {
-    "kid": "k-2026-05",
-    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\nMIIE...\\n-----END RSA PRIVATE KEY-----\\n",
-    "active": true
-  },
-  {
-    "kid": "k-2026-04",
-    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\nMIIE...\\n-----END RSA PRIVATE KEY-----\\n",
-    "active": false
-  }
-]`} lang="json" title="GATEWAY_JWT_KEYS" />
+  <Code code={`{
+  "keys": [
+    {
+      "kid": "k-2026-05",
+      "not_before": "2026-05-01T00:00:00Z",
+      "expires_at": "2026-08-01T00:00:00Z",
+      "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\nMIIE...\\n-----END RSA PRIVATE KEY-----\\n"
+    },
+    {
+      "kid": "k-2026-04",
+      "not_before": "2026-04-01T00:00:00Z",
+      "expires_at": "2026-07-01T00:00:00Z",
+      "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\nMIIE...\\n-----END RSA PRIVATE KEY-----\\n"
+    }
+  ]
+}`} lang="json" title="keys.json" />
   <p>
     The parser accepts both PKCS#1 (<code>-----BEGIN RSA PRIVATE KEY-----</code>)
     and PKCS#8 (<code>-----BEGIN PRIVATE KEY-----</code>) — but only RSA keys.
-    See <code>parseKeyRingFromEnv</code> in <code>cmd/identity/main.go</code>.
+    The signer is constructed by <code>buildFileSigner</code> in
+    <code>identityserver/adapters.go</code>.
   </p>
 
   <h2>Generating a key</h2>
   <Code code={`# 2048-bit RSA key, PKCS#1 PEM
 openssl genrsa -out k-2026-05.pem 2048
 
-# Build the JSON value to set on the container
+# Build the keys file and point GATEWAY_JWT_KEYS_FILE at it
 PEM=$(awk '{printf "%s\\\\n", $0}' k-2026-05.pem)
-cat > keyring.json <<EOF
-[{"kid":"k-2026-05","private_key_pem":"$PEM","active":true}]
+cat > keys.json <<EOF
+{"keys":[{"kid":"k-2026-05","not_before":"2026-05-01T00:00:00Z","private_key_pem":"$PEM"}]}
 EOF
 
-# Pass it through env (one line, no shell expansion of \\n)
-export GATEWAY_JWT_KEYS=$(cat keyring.json | jq -c .)`} lang="bash" />
+export GATEWAY_JWT_KEYS_FILE=/path/to/keys.json`} lang="bash" />
 
   <h2>JWKS endpoint</h2>
   <p>
@@ -72,10 +92,13 @@ export GATEWAY_JWT_KEYS=$(cat keyring.json | jq -c .)`} lang="bash" />
   </p>
   <ol>
     <li>Generate a new key with a fresh <code>kid</code>.</li>
-    <li>Add it to the ring with <code>"active": false</code>; redeploy.</li>
+    <li>Add it to the file with a future <code>not_before</code> so it
+      publishes to JWKS but does not yet sign; reload.</li>
     <li>Wait long enough for downstream services to refresh JWKS.</li>
-    <li>Flip the new key to <code>active: true</code> and the old one to <code>active: false</code>; redeploy.</li>
-    <li>After every old token has expired (≥ <code>GATEWAY_JWT_EXPIRY_SECONDS</code>), drop the retired key from the ring.</li>
+    <li>Once the new key's <code>not_before</code> has passed it becomes the
+      active signer automatically (latest in-force <code>not_before</code>
+      wins); set an <code>expires_at</code> on the old key.</li>
+    <li>After every old token has expired (≥ <code>GATEWAY_JWT_EXPIRY_SECONDS</code>), drop the retired key from the file.</li>
   </ol>
 
   <h2>Verification</h2>

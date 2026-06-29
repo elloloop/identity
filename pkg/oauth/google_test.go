@@ -47,7 +47,7 @@ func TestGoogle_ExchangeSuccess(t *testing.T) {
 		Now:          nowFunc(now),
 	})
 
-	id, err := exch.Exchange(context.Background(), "the-code", "https://app/cb")
+	id, err := exch.Exchange(context.Background(), ExchangeParams{Code: "the-code", RedirectURI: "https://app/cb"})
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestGoogle_TokenEndpointError(t *testing.T) {
 		TokenURL:     fp.URL("/token"),
 		JWKSURL:      fp.URL("/jwks"),
 	})
-	_, err := exch.Exchange(context.Background(), "bad", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "bad", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}
@@ -94,7 +94,7 @@ func TestGoogle_NetworkError(t *testing.T) {
 		JWKSURL:      "http://127.0.0.1:1/",
 		HTTPClient:   &http.Client{Timeout: 50 * time.Millisecond},
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrCodeExchangeFailed) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}
@@ -129,7 +129,7 @@ func TestGoogle_BadSignature(t *testing.T) {
 		Issuer:       "https://accounts.test",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}
@@ -160,7 +160,7 @@ func TestGoogle_BadIssuer(t *testing.T) {
 		Issuer:       "https://accounts.test",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}
@@ -191,7 +191,7 @@ func TestGoogle_BadAudience(t *testing.T) {
 		Issuer:       "https://accounts.test",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}
@@ -222,7 +222,7 @@ func TestGoogle_ExpiredToken(t *testing.T) {
 		Issuer:       "https://accounts.test",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrIdentityVerification) {
 		t.Fatalf("want ErrIdentityVerification, got %v", err)
 	}
@@ -256,7 +256,7 @@ func TestGoogle_EmailNotVerified(t *testing.T) {
 		Issuer:       "https://accounts.test",
 		Now:          nowFunc(now),
 	})
-	_, err := exch.Exchange(context.Background(), "code", "https://x")
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrEmailNotVerified) {
 		t.Fatalf("want ErrEmailNotVerified, got %v", err)
 	}
@@ -297,7 +297,7 @@ func TestGoogle_JWKSCaching(t *testing.T) {
 
 	// Two successful exchanges should hit JWKS only once.
 	for i := 0; i < 2; i++ {
-		if _, err := exch.Exchange(context.Background(), "code", "https://x"); err != nil {
+		if _, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); err != nil {
 			t.Fatalf("exchange %d: %v", i, err)
 		}
 	}
