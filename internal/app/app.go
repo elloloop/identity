@@ -431,22 +431,10 @@ func New(deps Deps) (*Built, error) {
 				BaseDelay:   time.Duration(deps.Config.WebhooksBackoffBaseSeconds) * time.Second,
 				MaxDelay:    time.Duration(deps.Config.WebhooksBackoffMaxSeconds) * time.Second,
 			},
-			Interval: time.Duration(deps.Config.WebhooksWorkerIntervalSeconds) * time.Second,
-			Batch:    deps.Config.WebhooksBatchSize,
-			Logger:   logger,
-			FailureHook: func(d *events.Delivery) {
-				// Surface abandonment via the structured logger rather than
-				// swallowing it (acceptance criterion: failures surfaced, not
-				// hidden). Audit-event surfacing is a follow-up once the
-				// outbox is durable and per-tenant.
-				logger.Error(
-					"webhook_delivery_abandoned",
-					zap.String("event_id", d.EventID),
-					zap.String("subscription_id", d.SubscriptionID),
-					zap.Int("attempts", d.Attempts),
-					zap.String("last_error", d.LastError),
-				)
-			},
+			Interval:    time.Duration(deps.Config.WebhooksWorkerIntervalSeconds) * time.Second,
+			Batch:       deps.Config.WebhooksBatchSize,
+			Logger:      logger,
+			FailureHook: newWebhookFailureHook(logger),
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		startEvents = func() {
@@ -724,6 +712,23 @@ func wrapOAuthRegistry(in *oauth.Registry) *oauth.Registry {
 		out.Register(name, observability.WrapOAuthExchanger(name, e))
 	}
 	return out
+}
+
+// newWebhookFailureHook returns the hook the events worker invokes when a
+// delivery is abandoned after exhausting its retry budget. It surfaces the
+// abandonment via the structured logger rather than swallowing it
+// (acceptance criterion: failures surfaced, not hidden). Audit-event
+// surfacing is a follow-up once the outbox is durable and per-tenant.
+func newWebhookFailureHook(logger *zap.Logger) events.FailureHook {
+	return func(d *events.Delivery) {
+		logger.Error(
+			"webhook_delivery_abandoned",
+			zap.String("event_id", d.EventID),
+			zap.String("subscription_id", d.SubscriptionID),
+			zap.Int("attempts", d.Attempts),
+			zap.String("last_error", d.LastError),
+		)
+	}
 }
 
 // randomEventID generates a unique outbox/event id for at-least-once
