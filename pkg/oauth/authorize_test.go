@@ -25,21 +25,6 @@ func newOAuthStateSignerWithKID(t *testing.T, kid string) *jwttest.Signer {
 	return jwttest.NewSigner(t, kid)
 }
 
-func TestCodeVerifierContext(t *testing.T) {
-	t.Parallel()
-
-	var nilContext context.Context
-	if got := codeVerifierFromContext(nilContext); got != "" {
-		t.Fatalf("nil context verifier = %q", got)
-	}
-	if got := codeVerifierFromContext(WithCodeVerifier(context.Background(), "   ")); got != "" {
-		t.Fatalf("blank verifier = %q", got)
-	}
-	if got := codeVerifierFromContext(WithCodeVerifier(context.Background(), " verifier-123 ")); got != "verifier-123" {
-		t.Fatalf("verifier = %q", got)
-	}
-}
-
 func TestStateToken_RoundTripAndMismatch(t *testing.T) {
 	t.Parallel()
 

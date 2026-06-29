@@ -65,7 +65,7 @@ var AuthExemptPaths = map[string]bool{
 }
 
 // hostedOAuthPrefix is the path prefix for the browser-facing hosted
-// OAuth routes (GET /oauth/start/{provider}, GET /oauth/callback/
+// OAuth routes (GET /oauth/start/{provider}, GET/POST /oauth/callback/
 // {provider}). These are unauthenticated by design — the user is mid
 // sign-in and has no JWT yet — so they are exempt as a prefix rather
 // than per-exact-path (the {provider} segment varies).

@@ -3,8 +3,6 @@ package sqlite
 import (
 	"errors"
 	"net/url"
-	"os"
-	"strconv"
 	"strings"
 )
 
@@ -29,17 +27,6 @@ const DefaultMaxConns = 4
 
 // MemoryPath is the sentinel Path value selecting an in-memory database.
 const MemoryPath = ":memory:"
-
-// ConfigFromEnv reads Config from GATEWAY_SQLITE_* env vars. projectID is
-// passed in (rather than read from env) because identity already plumbs
-// cfg.DefaultProjectID through its own config.
-func ConfigFromEnv(projectID string) Config {
-	return Config{
-		Path:      os.Getenv("GATEWAY_SQLITE_PATH"),
-		MaxConns:  envInt("GATEWAY_SQLITE_MAX_CONNS", DefaultMaxConns),
-		ProjectID: projectID,
-	}
-}
 
 func (c *Config) applyDefaults() {
 	if c.MaxConns <= 0 {
@@ -115,16 +102,4 @@ func withWAL(dsn string) string {
 // otherwise be process-global).
 func memoryDSNForName(name string) string {
 	return withPragmas("file:" + url.PathEscape(name) + "?mode=memory&cache=shared")
-}
-
-func envInt(key string, def int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return def
-	}
-	return n
 }

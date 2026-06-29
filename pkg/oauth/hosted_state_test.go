@@ -20,6 +20,7 @@ func TestHostedStateToken_RoundTrip(t *testing.T) {
 		"https://app.example.com/finish",
 		"state-abc",
 		"verifier-abc",
+		"csrf-123",
 		5*time.Minute,
 		now,
 	)
@@ -43,6 +44,9 @@ func TestHostedStateToken_RoundTrip(t *testing.T) {
 	if claims.RedirectURI != "https://identity.example.com/oauth/callback/google" {
 		t.Errorf("redirect_uri = %q", claims.RedirectURI)
 	}
+	if claims.CSRFToken != "csrf-123" {
+		t.Errorf("csrf_token = %q", claims.CSRFToken)
+	}
 }
 
 func TestHostedStateToken_RejectsExpired(t *testing.T) {
@@ -53,7 +57,7 @@ func TestHostedStateToken_RejectsExpired(t *testing.T) {
 
 	token, err := IssueHostedStateToken(
 		context.Background(), ring,
-		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v",
+		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c",
 		5*time.Minute, now,
 	)
 	if err != nil {
@@ -72,7 +76,7 @@ func TestHostedStateToken_RejectsTampered(t *testing.T) {
 
 	token, err := IssueHostedStateToken(
 		context.Background(), ring,
-		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v",
+		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c",
 		5*time.Minute, now,
 	)
 	if err != nil {
@@ -111,7 +115,7 @@ func TestHostedStateToken_MissingClaims(t *testing.T) {
 	ring := newOAuthStateSigner(t)
 	now := time.Now().UTC()
 	if _, err := IssueHostedStateToken(
-		context.Background(), ring, "google", "https://cb", "", "s", "v", time.Minute, now,
+		context.Background(), ring, "google", "https://cb", "", "s", "v", "c", time.Minute, now,
 	); err == nil {
 		t.Fatal("IssueHostedStateToken should reject an empty return_to")
 	}

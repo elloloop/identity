@@ -29,22 +29,26 @@ func TestBuildOAuthRegistry(t *testing.T) {
 	cfg := &config.Config{
 		GoogleClientID:    "google-client",
 		MicrosoftClientID: "microsoft-client",
-		MicrosoftTenantID: "tenant",
+		MicrosoftTenantID: "common",
 		GitHubClientID:    "github-client",
+		AppleClientID:     "apple-client",
 	}
 	cfg.GoogleClientSecret = testCredential("google")
 	cfg.MicrosoftClientSecret = testCredential("microsoft")
 	cfg.GitHubClientSecret = testCredential("github")
+	cfg.ApplePrivateKey = testCredential("apple")
+	cfg.AppleTeamID = "team"
+	cfg.AppleKeyID = "key"
 
 	registry := buildOAuthRegistry(cfg, zap.NewNop())
-	if registry.Len() != 3 {
+	if registry.Len() != 4 {
 		t.Fatalf("registry Len = %d", registry.Len())
 	}
 	got := make(map[string]bool)
 	for _, provider := range registry.Providers() {
 		got[provider] = true
 	}
-	for _, provider := range []string{"google", "microsoft", "github"} {
+	for _, provider := range []string{"google", "microsoft", "github", "apple"} {
 		if !got[provider] {
 			t.Fatalf("provider %q not registered; got %v", provider, registry.Providers())
 		}

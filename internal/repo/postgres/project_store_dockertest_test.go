@@ -113,6 +113,16 @@ func TestLoginPolicyStore_Container(t *testing.T) {
 	runLoginPolicySmoke(t, dsn)
 }
 
+// TestProjectConfig_Container runs the project config_json round-trip body
+// against a throwaway Postgres container.
+func TestProjectConfig_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runProjectConfigSmoke(t, dsn)
+}
+
 // TestMembershipStore_Container runs the membership + invitation store body
 // against a throwaway Postgres container.
 func TestMembershipStore_Container(t *testing.T) {

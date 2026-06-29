@@ -21,6 +21,10 @@ type ProfileService struct {
 	defaultProjectID string
 	audit            *audit.Logger
 	logger           *zap.Logger
+	// minorData drops non-essential PII (avatar URL) from a CHILD-band
+	// account's profile updates (COPPA data-minimization). Zero-value is a
+	// safe no-op, so a caller that omits WithMinorDataMinimizer is unchanged.
+	minorData MinorDataMinimizer
 }
 
 // NewProfileService creates a ProfileService.
@@ -40,6 +44,14 @@ func NewProfileService(repo Repository, db DB, projectID string, auditLog *audit
 		audit:            auditLog,
 		logger:           logger,
 	}
+}
+
+// WithMinorDataMinimizer wires COPPA data-minimization: when active, a
+// CHILD-band account's profile updates drop non-essential PII (avatar URL).
+// Returns the service for chaining. Off by default (zero-value is a no-op).
+func (s *ProfileService) WithMinorDataMinimizer(m MinorDataMinimizer) *ProfileService {
+	s.minorData = m
+	return s
 }
 
 // repo returns the Repository bound to the request's project (ADR-0002),
@@ -86,12 +98,22 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userID, name, avatar
 	// Repository.UpdateUser takes field-name keys (matching the canonical
 	// Repository.UpdateUser pattern used by AuthService for OAuth upserts
 	// and invitation redemption — every backend implements those keys).
+	// COPPA data-minimization: an avatar URL is non-essential PII the server
+	// refuses to collect/persist for a CHILD-band account. Silently drop it
+	// (the rest of the update still applies) when minimization is active.
+	// Adults/teens and minimization-off deployments are unaffected.
+	minimizeChild := s.minorData.BlocksChild(user.DateOfBirthMs)
+
 	patch := map[string]any{"updated_at": nowMs()}
 	if n := strings.TrimSpace(name); n != "" {
 		patch["name"] = n
 	}
 	if a := strings.TrimSpace(avatarURL); a != "" {
-		patch["avatar_url"] = a
+		if minimizeChild {
+			s.logger.Info("profile_avatar_dropped_minor", zap.String("user_id", userID))
+		} else {
+			patch["avatar_url"] = a
+		}
 	}
 
 	if err := repo.UpdateUser(ctx, userID, patch); err != nil {
@@ -105,7 +127,7 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userID, name, avatar
 		if n := strings.TrimSpace(name); n != "" {
 			user.Name = n
 		}
-		if a := strings.TrimSpace(avatarURL); a != "" {
+		if a := strings.TrimSpace(avatarURL); a != "" && !minimizeChild {
 			user.AvatarURL = a
 		}
 		return user, nil
@@ -187,6 +209,29 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 		return 0, errors.New("invalid password")
 	}
 
+	count, err := s.revokeAllUserSessions(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	s.audit.Log(
+		ctx, audit.EventSessionRevoked,
+		audit.WithActor(userID), audit.WithTarget(userID),
+		audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"scope": "all", "revoked_count": count}),
+	)
+	return count, nil
+}
+
+// revokeAllUserSessions deletes every refresh-token (session) node owned
+// by userID via the graph DB — the same store ListMySessions/RevokeSession
+// read and write — and returns the number revoked. Best-effort per
+// session: a failed delete is logged and skipped so one bad row does not
+// strand the rest. Shared by RevokeAllSessions (explicit sign-out) and
+// ChangePassword (credential change forces re-auth everywhere). The
+// caller is responsible for any access-control/audit concerns; this
+// helper only performs the revocation.
+func (s *ProfileService) revokeAllUserSessions(ctx context.Context, userID string) (int, error) {
 	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), tenantAdminActor, typeRefreshToken,
 		map[string]any{rfUserID: userID})
 	if err != nil {
@@ -202,13 +247,6 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 		}
 		count++
 	}
-
-	s.audit.Log(
-		ctx, audit.EventSessionRevoked,
-		audit.WithActor(userID), audit.WithTarget(userID),
-		audit.WithSuccess(true),
-		audit.WithDetails(map[string]any{"scope": "all", "revoked_count": count}),
-	)
 	return count, nil
 }
 

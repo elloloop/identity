@@ -28,7 +28,7 @@ func TestPasswordSignup_EmptyPasswordFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", "", "", "")
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", "", "", "", 0)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -37,7 +37,7 @@ func TestPasswordSignup_DefaultDisplayNameFromEmail(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "rosa@example.com", strongPW, "", "rec@example.com")
+	result, err := svc.PasswordSignup(context.Background(), "rosa@example.com", strongPW, "", "rec@example.com", 0)
 	require.NoError(t, err)
 	assert.Equal(t, "rosa", result.User.Name)
 }
@@ -115,7 +115,7 @@ func TestOAuthLogin_EmptyCodeFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.OAuthLogin(context.Background(), "", "google", "https://app/cb", "", "", "", "", "")
+	_, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: "", Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -125,7 +125,7 @@ func TestOAuthLogin_DefaultsDisplayNameFromEmail(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 
 	code := fakeOAuthCode("carol@example.com", "", "", "google")
-	result, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
+	result, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.NoError(t, err)
 	assert.Equal(t, "carol", result.User.Name)
 }
@@ -136,7 +136,7 @@ func TestOAuthLogin_DeactivatedAccountFails(t *testing.T) {
 	seedUser(repo, "deac-oauth@example.com", "", "deactivated")
 
 	code := fakeOAuthCode("deac-oauth@example.com", "X", "", "google")
-	_, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
+	_, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrAccountNotActive))
 }
@@ -148,7 +148,7 @@ func TestOAuthLogin_ExistingUserNoNameChangeNoUpdate(t *testing.T) {
 
 	// Same display name and no avatar -- no patch should happen, but call must succeed.
 	code := fakeOAuthCode("noupd@example.com", "noupd", "", "google")
-	_, err := svc.OAuthLogin(context.Background(), code, "google", "https://app/cb", "", "", "", "", "")
+	_, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "", UserAgent: ""})
 	require.NoError(t, err)
 }
 
@@ -243,7 +243,7 @@ func TestRefreshToken_UserDeletedFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "deleted@example.com", strongPW, "", "")
+	result, err := svc.PasswordSignup(context.Background(), "deleted@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 
 	// Delete the user node directly while the refresh token still exists.

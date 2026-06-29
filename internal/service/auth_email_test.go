@@ -463,7 +463,7 @@ func TestVerifyEmail_AlreadyVerifiedIsIdempotent(t *testing.T) {
 
 func TestPasswordSignup_FiresVerificationEmail(t *testing.T) {
 	svc, _, rec := newAuthSvcWithMailer(t)
-	res, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "")
+	res, err := svc.PasswordSignup(context.Background(), "carol@test.com", "Str0ng!Pass1", "Carol", "", 0)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}

@@ -287,7 +287,7 @@ func TestCompleteAuthentication_BadStoredCredentialID(t *testing.T) {
 	svc := newSpecVectorService(t)
 
 	// stored credential ID is not valid base64url.
-	_, err := svc.CompleteAuthentication("{}", "chal", "cHVi", 0, "not!base64!!!")
+	_, err := svc.CompleteAuthentication("{}", "chal", "cHVi", 0, "not!base64!!!", "spec-user", false, false)
 	if err == nil {
 		t.Fatal("expected error for invalid stored credential ID")
 	}
@@ -302,7 +302,7 @@ func TestCompleteAuthentication_BadStoredPublicKey(t *testing.T) {
 	svc := newSpecVectorService(t)
 
 	credID := base64.RawURLEncoding.EncodeToString([]byte("cred"))
-	_, err := svc.CompleteAuthentication("{}", "chal", "!!!not-base64!!!", 0, credID)
+	_, err := svc.CompleteAuthentication("{}", "chal", "!!!not-base64!!!", 0, credID, "spec-user", false, false)
 	if err == nil {
 		t.Fatal("expected error for invalid stored public key")
 	}
@@ -318,7 +318,7 @@ func TestCompleteAuthentication_InvalidJSON(t *testing.T) {
 	credID := base64.RawURLEncoding.EncodeToString([]byte("cred"))
 	pubKey := base64.StdEncoding.EncodeToString([]byte("pubkey"))
 
-	_, err := svc.CompleteAuthentication("not valid json", "chal", pubKey, 0, credID)
+	_, err := svc.CompleteAuthentication("not valid json", "chal", pubKey, 0, credID, "spec-user", false, false)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -344,7 +344,7 @@ func TestCompleteAuthentication_WrongChallenge(t *testing.T) {
 	storedCredID := base64.RawURLEncoding.EncodeToString(credID)
 	storedPubKey := base64.StdEncoding.EncodeToString(pubKey)
 
-	_, err := svc.CompleteAuthentication(credJSON, wrongChallenge, storedPubKey, 0, storedCredID)
+	_, err := svc.CompleteAuthentication(credJSON, wrongChallenge, storedPubKey, 0, storedCredID, "spec-user", false, false)
 	if err == nil {
 		t.Fatal("expected error for wrong challenge")
 	}
@@ -370,7 +370,7 @@ func TestCompleteAuthentication_WrongPublicKey(t *testing.T) {
 	storedCredID := base64.RawURLEncoding.EncodeToString(credID)
 	bogusPubKey := base64.StdEncoding.EncodeToString([]byte("not-a-real-cose-public-key-blob!"))
 
-	_, err := svc.CompleteAuthentication(credJSON, challenge, bogusPubKey, 0, storedCredID)
+	_, err := svc.CompleteAuthentication(credJSON, challenge, bogusPubKey, 0, storedCredID, "spec-user", false, false)
 	if err == nil {
 		t.Fatal("expected error for wrong public key")
 	}
@@ -398,7 +398,7 @@ func TestCompleteAuthentication_TamperedAuthenticatorData(t *testing.T) {
 	storedCredID := base64.RawURLEncoding.EncodeToString(credID)
 	storedPubKey := base64.StdEncoding.EncodeToString(pubKey)
 
-	_, err := svc.CompleteAuthentication(credJSON, challenge, storedPubKey, 0, storedCredID)
+	_, err := svc.CompleteAuthentication(credJSON, challenge, storedPubKey, 0, storedCredID, "spec-user", false, false)
 	if err == nil {
 		t.Fatal("expected error for tampered authenticatorData")
 	}
@@ -430,7 +430,7 @@ func TestCompleteAuthentication_CounterRegression(t *testing.T) {
 	// flag on the credential rather than aborting — but the key detection
 	// data is still surfaced. Either an error OR a non-incrementing count
 	// is acceptable for our wrapper's purposes.
-	newCount, err := svc.CompleteAuthentication(credJSON, challenge, storedPubKey, 100, storedCredID)
+	newCount, err := svc.CompleteAuthentication(credJSON, challenge, storedPubKey, 100, storedCredID, "spec-user", false, false)
 	if err == nil {
 		// If no error, the returned count should be the authenticator-reported
 		// 25 (which is < stored 100). Caller must detect regression.
@@ -458,9 +458,60 @@ func TestCompleteAuthentication_WrongCredentialID(t *testing.T) {
 	differentCredID := base64.RawURLEncoding.EncodeToString([]byte("a-different-credential-id-bytes!"))
 	storedPubKey := base64.StdEncoding.EncodeToString(pubKey)
 
-	_, err := svc.CompleteAuthentication(credJSON, challenge, storedPubKey, 0, differentCredID)
+	_, err := svc.CompleteAuthentication(credJSON, challenge, storedPubKey, 0, differentCredID, "spec-user", false, false)
 	if err == nil {
 		t.Fatal("expected error when stored credential ID mismatches")
+	}
+}
+
+// A real authenticator returns the user handle it stored at registration (the
+// real user ID) in every assertion. The library rejects the login unless that
+// handle equals the WebAuthnID we build for verification — so CompleteAuthentication
+// MUST verify against the credential's real user ID, not a placeholder. These two
+// tests pin that: they fail if the verification user ID drifts from registration.
+func TestCompleteAuthentication_UserHandleMatches(t *testing.T) {
+	t.Parallel()
+
+	svc := newSpecVectorService(t)
+	authData := mustHex(t, specLoginAuthenticatorDataHex)
+	cdj := mustHex(t, specLoginClientDataJSONHex)
+	sig := mustHex(t, specLoginSignatureHex)
+	credID := mustHex(t, specLoginCredentialIDHex)
+	pubKey := mustHex(t, specLoginCredentialPubKeyHex)
+	challenge := base64.RawURLEncoding.EncodeToString(mustHex(t, specLoginChallengeHex))
+
+	const userID = "80e020e50fdeb064a0c6e736ae69b426"
+	// Assertion carries the user handle stored at registration (== userID).
+	credJSON := buildAssertionCredentialJSON(t, authData, cdj, sig, credID, []byte(userID))
+
+	storedCredID := base64.RawURLEncoding.EncodeToString(credID)
+	storedPubKey := base64.StdEncoding.EncodeToString(pubKey)
+
+	if _, err := svc.CompleteAuthentication(credJSON, challenge, storedPubKey, 0, storedCredID, userID, true, true); err != nil {
+		t.Fatalf("login with a matching user handle must succeed, got: %v", err)
+	}
+}
+
+func TestCompleteAuthentication_UserHandleMismatch(t *testing.T) {
+	t.Parallel()
+
+	svc := newSpecVectorService(t)
+	authData := mustHex(t, specLoginAuthenticatorDataHex)
+	cdj := mustHex(t, specLoginClientDataJSONHex)
+	sig := mustHex(t, specLoginSignatureHex)
+	credID := mustHex(t, specLoginCredentialIDHex)
+	pubKey := mustHex(t, specLoginCredentialPubKeyHex)
+	challenge := base64.RawURLEncoding.EncodeToString(mustHex(t, specLoginChallengeHex))
+
+	// Assertion's user handle belongs to a different user than the one we verify
+	// against — the library must reject it.
+	credJSON := buildAssertionCredentialJSON(t, authData, cdj, sig, credID, []byte("someone-else"))
+
+	storedCredID := base64.RawURLEncoding.EncodeToString(credID)
+	storedPubKey := base64.StdEncoding.EncodeToString(pubKey)
+
+	if _, err := svc.CompleteAuthentication(credJSON, challenge, storedPubKey, 0, storedCredID, "80e020e50fdeb064a0c6e736ae69b426", true, true); err == nil {
+		t.Fatal("expected error when the assertion user handle does not match the user")
 	}
 }
 

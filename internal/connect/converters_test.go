@@ -3,6 +3,8 @@ package connect
 import (
 	"math"
 	"testing"
+
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 )
 
 // TestIntToProtoInt32 covers the bounds clamp used when converting an
@@ -29,6 +31,65 @@ func TestIntToProtoInt32(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := intToProtoInt32(tc.in); got != tc.want {
 				t.Fatalf("intToProtoInt32(%d) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestUserStatusRoundTrip covers the service-string <-> proto-enum mapping
+// for every known UserStatus, including the COPPA pending_parental_consent
+// state, plus the unknown -> unspecified / "" fallbacks on both sides.
+func TestUserStatusRoundTrip(t *testing.T) {
+	cases := []struct {
+		str string
+		pb  identitypb.UserStatus
+	}{
+		{"active", identitypb.UserStatus_USER_STATUS_ACTIVE},
+		{"invited", identitypb.UserStatus_USER_STATUS_INVITED},
+		{"deactivated", identitypb.UserStatus_USER_STATUS_DEACTIVATED},
+		{"suspended", identitypb.UserStatus_USER_STATUS_SUSPENDED},
+		{"pending_parental_consent", identitypb.UserStatus_USER_STATUS_PENDING_PARENTAL_CONSENT},
+	}
+	for _, tc := range cases {
+		t.Run(tc.str, func(t *testing.T) {
+			if got := userStatusToProto(tc.str); got != tc.pb {
+				t.Fatalf("userStatusToProto(%q) = %v, want %v", tc.str, got, tc.pb)
+			}
+			if got := protoToUserStatusString(tc.pb); got != tc.str {
+				t.Fatalf("protoToUserStatusString(%v) = %q, want %q", tc.pb, got, tc.str)
+			}
+		})
+	}
+
+	t.Run("unknown string -> unspecified", func(t *testing.T) {
+		if got := userStatusToProto("nonsense"); got != identitypb.UserStatus_USER_STATUS_UNSPECIFIED {
+			t.Fatalf("userStatusToProto(unknown) = %v, want UNSPECIFIED", got)
+		}
+	})
+	t.Run("unspecified enum -> empty string", func(t *testing.T) {
+		if got := protoToUserStatusString(identitypb.UserStatus_USER_STATUS_UNSPECIFIED); got != "" {
+			t.Fatalf("protoToUserStatusString(UNSPECIFIED) = %q, want \"\"", got)
+		}
+	})
+}
+
+// TestAgeBandToProto covers the COPPA age-band string -> proto-enum mapping
+// for every band plus the unknown/empty -> unspecified fallback.
+func TestAgeBandToProto(t *testing.T) {
+	cases := []struct {
+		in   string
+		want identitypb.AgeBand
+	}{
+		{"CHILD", identitypb.AgeBand_AGE_BAND_CHILD},
+		{"TEEN", identitypb.AgeBand_AGE_BAND_TEEN},
+		{"ADULT", identitypb.AgeBand_AGE_BAND_ADULT},
+		{"", identitypb.AgeBand_AGE_BAND_UNSPECIFIED},
+		{"unknown", identitypb.AgeBand_AGE_BAND_UNSPECIFIED},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := ageBandToProto(tc.in); got != tc.want {
+				t.Fatalf("ageBandToProto(%q) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}

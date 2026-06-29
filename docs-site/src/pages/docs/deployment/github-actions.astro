@@ -91,11 +91,10 @@ git push origin v0.1.0
     <li><strong>Provenance</strong> (<code>provenance: mode=max</code>) — attestation for the SLSA build.</li>
   </ul>
   <p>
-    The runtime base image is
-    <code>gcr.io/distroless/static-debian12:nonroot</code>, pinned by
-    digest. Bump the digest with
-    <code>crane digest gcr.io/distroless/static-debian12:nonroot</code> and
-    cut a new release.
+    The runtime stage builds <code>FROM scratch</code> — the final image
+    carries only the statically linked <code>identity</code> binary and the
+    CA certificate bundle copied from the builder, with no base OS or
+    package manager to track or patch.
   </p>
 
   <h2>Deploying the image</h2>

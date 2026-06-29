@@ -102,6 +102,14 @@ const (
 	IdentityService_AdminCreateTenant_FullMethodName             = "/identity.v1.IdentityService/AdminCreateTenant"
 	IdentityService_AdminAddTenantAdmin_FullMethodName           = "/identity.v1.IdentityService/AdminAddTenantAdmin"
 	IdentityService_CreateFirstPlatformAdmin_FullMethodName      = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
+	IdentityService_ListLinkedIdentities_FullMethodName          = "/identity.v1.IdentityService/ListLinkedIdentities"
+	IdentityService_LinkIdentity_FullMethodName                  = "/identity.v1.IdentityService/LinkIdentity"
+	IdentityService_UnlinkIdentity_FullMethodName                = "/identity.v1.IdentityService/UnlinkIdentity"
+	IdentityService_UpsertLoginPolicy_FullMethodName             = "/identity.v1.IdentityService/UpsertLoginPolicy"
+	IdentityService_GetLoginPolicy_FullMethodName                = "/identity.v1.IdentityService/GetLoginPolicy"
+	IdentityService_DeleteLoginPolicy_FullMethodName             = "/identity.v1.IdentityService/DeleteLoginPolicy"
+	IdentityService_UpsertProjectConfig_FullMethodName           = "/identity.v1.IdentityService/UpsertProjectConfig"
+	IdentityService_GetProjectConfig_FullMethodName              = "/identity.v1.IdentityService/GetProjectConfig"
 )
 
 // IdentityServiceClient is the client API for IdentityService service.
@@ -238,6 +246,25 @@ type IdentityServiceClient interface {
 	// succeeds only while platform_admins is empty, then permanently closes
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(ctx context.Context, in *CreateFirstPlatformAdminRequest, opts ...grpc.CallOption) (*CreateFirstPlatformAdminResponse, error)
+	// Self-service linked identities (connected accounts). Authenticated by the
+	// caller's user JWT; each operates only on the caller's own links.
+	ListLinkedIdentities(ctx context.Context, in *ListLinkedIdentitiesRequest, opts ...grpc.CallOption) (*ListLinkedIdentitiesResponse, error)
+	LinkIdentity(ctx context.Context, in *LinkIdentityRequest, opts ...grpc.CallOption) (*LinkIdentityResponse, error)
+	UnlinkIdentity(ctx context.Context, in *UnlinkIdentityRequest, opts ...grpc.CallOption) (*UnlinkIdentityResponse, error)
+	// Per-tenant LoginPolicy authoring. These write the policy the login path
+	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
+	// tenant within a project — at most one policy per (project, tenant).
+	// Operator-only: authenticated by the shared admin secret, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertLoginPolicy(ctx context.Context, in *UpsertLoginPolicyRequest, opts ...grpc.CallOption) (*UpsertLoginPolicyResponse, error)
+	GetLoginPolicy(ctx context.Context, in *GetLoginPolicyRequest, opts ...grpc.CallOption) (*GetLoginPolicyResponse, error)
+	DeleteLoginPolicy(ctx context.Context, in *DeleteLoginPolicyRequest, opts ...grpc.CallOption) (*DeleteLoginPolicyResponse, error)
+	// Per-project config authoring. UpsertProjectConfig replaces a project's
+	// config_json blob (the typed knobs an operator sets — e.g. CORS allowed
+	// origins); GetProjectConfig reads it back. Operator-only, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertProjectConfig(ctx context.Context, in *UpsertProjectConfigRequest, opts ...grpc.CallOption) (*UpsertProjectConfigResponse, error)
+	GetProjectConfig(ctx context.Context, in *GetProjectConfigRequest, opts ...grpc.CallOption) (*GetProjectConfigResponse, error)
 }
 
 type identityServiceClient struct {
@@ -1078,6 +1105,86 @@ func (c *identityServiceClient) CreateFirstPlatformAdmin(ctx context.Context, in
 	return out, nil
 }
 
+func (c *identityServiceClient) ListLinkedIdentities(ctx context.Context, in *ListLinkedIdentitiesRequest, opts ...grpc.CallOption) (*ListLinkedIdentitiesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListLinkedIdentitiesResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListLinkedIdentities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) LinkIdentity(ctx context.Context, in *LinkIdentityRequest, opts ...grpc.CallOption) (*LinkIdentityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LinkIdentityResponse)
+	err := c.cc.Invoke(ctx, IdentityService_LinkIdentity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) UnlinkIdentity(ctx context.Context, in *UnlinkIdentityRequest, opts ...grpc.CallOption) (*UnlinkIdentityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UnlinkIdentityResponse)
+	err := c.cc.Invoke(ctx, IdentityService_UnlinkIdentity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) UpsertLoginPolicy(ctx context.Context, in *UpsertLoginPolicyRequest, opts ...grpc.CallOption) (*UpsertLoginPolicyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpsertLoginPolicyResponse)
+	err := c.cc.Invoke(ctx, IdentityService_UpsertLoginPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) GetLoginPolicy(ctx context.Context, in *GetLoginPolicyRequest, opts ...grpc.CallOption) (*GetLoginPolicyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLoginPolicyResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GetLoginPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) DeleteLoginPolicy(ctx context.Context, in *DeleteLoginPolicyRequest, opts ...grpc.CallOption) (*DeleteLoginPolicyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteLoginPolicyResponse)
+	err := c.cc.Invoke(ctx, IdentityService_DeleteLoginPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) UpsertProjectConfig(ctx context.Context, in *UpsertProjectConfigRequest, opts ...grpc.CallOption) (*UpsertProjectConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpsertProjectConfigResponse)
+	err := c.cc.Invoke(ctx, IdentityService_UpsertProjectConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) GetProjectConfig(ctx context.Context, in *GetProjectConfigRequest, opts ...grpc.CallOption) (*GetProjectConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProjectConfigResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GetProjectConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IdentityServiceServer is the server API for IdentityService service.
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
@@ -1212,6 +1319,25 @@ type IdentityServiceServer interface {
 	// succeeds only while platform_admins is empty, then permanently closes
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *CreateFirstPlatformAdminRequest) (*CreateFirstPlatformAdminResponse, error)
+	// Self-service linked identities (connected accounts). Authenticated by the
+	// caller's user JWT; each operates only on the caller's own links.
+	ListLinkedIdentities(context.Context, *ListLinkedIdentitiesRequest) (*ListLinkedIdentitiesResponse, error)
+	LinkIdentity(context.Context, *LinkIdentityRequest) (*LinkIdentityResponse, error)
+	UnlinkIdentity(context.Context, *UnlinkIdentityRequest) (*UnlinkIdentityResponse, error)
+	// Per-tenant LoginPolicy authoring. These write the policy the login path
+	// enforces (allowed methods, SSO-required, require-2FA) for a claimed
+	// tenant within a project — at most one policy per (project, tenant).
+	// Operator-only: authenticated by the shared admin secret, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertLoginPolicy(context.Context, *UpsertLoginPolicyRequest) (*UpsertLoginPolicyResponse, error)
+	GetLoginPolicy(context.Context, *GetLoginPolicyRequest) (*GetLoginPolicyResponse, error)
+	DeleteLoginPolicy(context.Context, *DeleteLoginPolicyRequest) (*DeleteLoginPolicyResponse, error)
+	// Per-project config authoring. UpsertProjectConfig replaces a project's
+	// config_json blob (the typed knobs an operator sets — e.g. CORS allowed
+	// origins); GetProjectConfig reads it back. Operator-only, like the other
+	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+	UpsertProjectConfig(context.Context, *UpsertProjectConfigRequest) (*UpsertProjectConfigResponse, error)
+	GetProjectConfig(context.Context, *GetProjectConfigRequest) (*GetProjectConfigResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
 }
 
@@ -1470,6 +1596,30 @@ func (UnimplementedIdentityServiceServer) AdminAddTenantAdmin(context.Context, *
 }
 func (UnimplementedIdentityServiceServer) CreateFirstPlatformAdmin(context.Context, *CreateFirstPlatformAdminRequest) (*CreateFirstPlatformAdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateFirstPlatformAdmin not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListLinkedIdentities(context.Context, *ListLinkedIdentitiesRequest) (*ListLinkedIdentitiesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListLinkedIdentities not implemented")
+}
+func (UnimplementedIdentityServiceServer) LinkIdentity(context.Context, *LinkIdentityRequest) (*LinkIdentityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LinkIdentity not implemented")
+}
+func (UnimplementedIdentityServiceServer) UnlinkIdentity(context.Context, *UnlinkIdentityRequest) (*UnlinkIdentityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnlinkIdentity not implemented")
+}
+func (UnimplementedIdentityServiceServer) UpsertLoginPolicy(context.Context, *UpsertLoginPolicyRequest) (*UpsertLoginPolicyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpsertLoginPolicy not implemented")
+}
+func (UnimplementedIdentityServiceServer) GetLoginPolicy(context.Context, *GetLoginPolicyRequest) (*GetLoginPolicyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetLoginPolicy not implemented")
+}
+func (UnimplementedIdentityServiceServer) DeleteLoginPolicy(context.Context, *DeleteLoginPolicyRequest) (*DeleteLoginPolicyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteLoginPolicy not implemented")
+}
+func (UnimplementedIdentityServiceServer) UpsertProjectConfig(context.Context, *UpsertProjectConfigRequest) (*UpsertProjectConfigResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpsertProjectConfig not implemented")
+}
+func (UnimplementedIdentityServiceServer) GetProjectConfig(context.Context, *GetProjectConfigRequest) (*GetProjectConfigResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetProjectConfig not implemented")
 }
 func (UnimplementedIdentityServiceServer) mustEmbedUnimplementedIdentityServiceServer() {}
 func (UnimplementedIdentityServiceServer) testEmbeddedByValue()                         {}
@@ -2986,6 +3136,150 @@ func _IdentityService_CreateFirstPlatformAdmin_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_ListLinkedIdentities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLinkedIdentitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListLinkedIdentities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListLinkedIdentities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListLinkedIdentities(ctx, req.(*ListLinkedIdentitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_LinkIdentity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LinkIdentityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).LinkIdentity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_LinkIdentity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).LinkIdentity(ctx, req.(*LinkIdentityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_UnlinkIdentity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnlinkIdentityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).UnlinkIdentity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_UnlinkIdentity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).UnlinkIdentity(ctx, req.(*UnlinkIdentityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_UpsertLoginPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpsertLoginPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).UpsertLoginPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_UpsertLoginPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).UpsertLoginPolicy(ctx, req.(*UpsertLoginPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_GetLoginPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLoginPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GetLoginPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GetLoginPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GetLoginPolicy(ctx, req.(*GetLoginPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_DeleteLoginPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteLoginPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).DeleteLoginPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_DeleteLoginPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).DeleteLoginPolicy(ctx, req.(*DeleteLoginPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_UpsertProjectConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpsertProjectConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).UpsertProjectConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_UpsertProjectConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).UpsertProjectConfig(ctx, req.(*UpsertProjectConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_GetProjectConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProjectConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GetProjectConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GetProjectConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GetProjectConfig(ctx, req.(*GetProjectConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IdentityService_ServiceDesc is the grpc.ServiceDesc for IdentityService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3324,6 +3618,38 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateFirstPlatformAdmin",
 			Handler:    _IdentityService_CreateFirstPlatformAdmin_Handler,
+		},
+		{
+			MethodName: "ListLinkedIdentities",
+			Handler:    _IdentityService_ListLinkedIdentities_Handler,
+		},
+		{
+			MethodName: "LinkIdentity",
+			Handler:    _IdentityService_LinkIdentity_Handler,
+		},
+		{
+			MethodName: "UnlinkIdentity",
+			Handler:    _IdentityService_UnlinkIdentity_Handler,
+		},
+		{
+			MethodName: "UpsertLoginPolicy",
+			Handler:    _IdentityService_UpsertLoginPolicy_Handler,
+		},
+		{
+			MethodName: "GetLoginPolicy",
+			Handler:    _IdentityService_GetLoginPolicy_Handler,
+		},
+		{
+			MethodName: "DeleteLoginPolicy",
+			Handler:    _IdentityService_DeleteLoginPolicy_Handler,
+		},
+		{
+			MethodName: "UpsertProjectConfig",
+			Handler:    _IdentityService_UpsertProjectConfig_Handler,
+		},
+		{
+			MethodName: "GetProjectConfig",
+			Handler:    _IdentityService_GetProjectConfig_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

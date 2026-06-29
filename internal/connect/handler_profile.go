@@ -35,7 +35,10 @@ func (h *IdentityHandler) UpdateProfile(
 // ─── Password Management RPCs ───────────────────────────────────────────────
 
 // ChangePassword changes the authenticated user's password after verifying
-// the current password. The service layer also invalidates all refresh tokens.
+// the current password. The service layer also revokes all of the user's
+// sessions (deletes their refresh tokens), forcing re-authentication
+// everywhere — including the caller, who must sign in again with the new
+// password.
 func (h *IdentityHandler) ChangePassword(
 	ctx context.Context,
 	req *connect.Request[identitypb.ChangePasswordRequest],
@@ -53,7 +56,8 @@ func (h *IdentityHandler) ChangePassword(
 	return connect.NewResponse(&identitypb.ChangePasswordResponse{}), nil
 }
 
-// RequestPasswordReset sends a password reset link to the user's recovery email.
+// RequestPasswordReset sends a password reset link to the user's primary
+// verified email (the address on file for the account).
 // Always returns success to prevent email enumeration.
 func (h *IdentityHandler) RequestPasswordReset(
 	ctx context.Context,
@@ -211,6 +215,92 @@ func (h *IdentityHandler) RevokeSession(
 	}
 
 	return connect.NewResponse(&identitypb.RevokeSessionResponse{}), nil
+}
+
+// ─── Linked-Identity RPCs (self-service connected accounts) ──────────────────
+
+// linkedIdentityToProto converts a persisted OAuth identity link to its
+// wire representation. The provider subject and email are non-secret
+// account-management metadata the user is entitled to see.
+func linkedIdentityToProto(oi *service.OAuthIdentity) *identitypb.LinkedIdentity {
+	return &identitypb.LinkedIdentity{
+		Provider:        oi.Provider,
+		ProviderUserId:  oi.ProviderUserID,
+		EmailAtLinkTime: oi.EmailAtLinkTime,
+		LinkedAt:        oi.CreatedAt,
+	}
+}
+
+// ListLinkedIdentities returns the authenticated user's connected providers.
+func (h *IdentityHandler) ListLinkedIdentities(
+	ctx context.Context,
+	req *connect.Request[identitypb.ListLinkedIdentitiesRequest],
+) (*connect.Response[identitypb.ListLinkedIdentitiesResponse], error) {
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	links, err := h.profile.ListLinkedIdentities(ctx, userID)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	out := make([]*identitypb.LinkedIdentity, 0, len(links))
+	for _, l := range links {
+		out = append(out, linkedIdentityToProto(l))
+	}
+	return connect.NewResponse(&identitypb.ListLinkedIdentitiesResponse{Identities: out}), nil
+}
+
+// LinkIdentity attaches a freshly-verified OAuth identity to the caller. The
+// server performs the provider code exchange itself; the client is never
+// trusted to assert the identity.
+func (h *IdentityHandler) LinkIdentity(
+	ctx context.Context,
+	req *connect.Request[identitypb.LinkIdentityRequest],
+) (*connect.Response[identitypb.LinkIdentityResponse], error) {
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	oi, err := h.auth.LinkIdentity(
+		ctx,
+		userID,
+		req.Msg.Code,
+		req.Msg.Provider,
+		req.Msg.RedirectUri,
+		req.Msg.CodeVerifier,
+		req.Msg.State,
+		req.Msg.StateToken,
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	return connect.NewResponse(&identitypb.LinkIdentityResponse{
+		Identity: linkedIdentityToProto(oi),
+	}), nil
+}
+
+// UnlinkIdentity disconnects a provider identity from the caller, refusing to
+// remove the user's last remaining sign-in credential.
+func (h *IdentityHandler) UnlinkIdentity(
+	ctx context.Context,
+	req *connect.Request[identitypb.UnlinkIdentityRequest],
+) (*connect.Response[identitypb.UnlinkIdentityResponse], error) {
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	err := h.profile.UnlinkIdentity(ctx, userID, req.Msg.Provider, req.Msg.ProviderUserId)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	return connect.NewResponse(&identitypb.UnlinkIdentityResponse{}), nil
 }
 
 // RevokeAllSessions revokes all sessions for the authenticated user.

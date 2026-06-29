@@ -292,6 +292,16 @@ func buildBody(m Message) []byte {
 	b.WriteString("Subject: ")
 	b.WriteString(m.Subject)
 	b.WriteString("\r\n")
+	if rt := strings.TrimSpace(m.ReplyTo); rt != "" {
+		b.WriteString("Reply-To: ")
+		b.WriteString(rt)
+		b.WriteString("\r\n")
+	}
+	if lu := strings.TrimSpace(m.ListUnsubscribe); lu != "" {
+		b.WriteString("List-Unsubscribe: ")
+		b.WriteString(lu)
+		b.WriteString("\r\n")
+	}
 	b.WriteString("MIME-Version: 1.0\r\n")
 
 	hasHTML := strings.TrimSpace(m.HTML) != ""

@@ -982,6 +982,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.DeleteGroupResponse'
+  /identity.v1.IdentityService/DeleteLoginPolicy:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: DeleteLoginPolicy
+      operationId: identity.v1.IdentityService.DeleteLoginPolicy
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.DeleteLoginPolicyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.DeleteLoginPolicyResponse'
   /identity.v1.IdentityService/DeletePasskey:
     post:
       tags:
@@ -1158,6 +1193,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.GetIdentityVerificationStatusResponse'
+  /identity.v1.IdentityService/GetLoginPolicy:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetLoginPolicy
+      operationId: identity.v1.IdentityService.GetLoginPolicy
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetLoginPolicyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetLoginPolicyResponse'
+  /identity.v1.IdentityService/GetProjectConfig:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetProjectConfig
+      operationId: identity.v1.IdentityService.GetProjectConfig
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetProjectConfigRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetProjectConfigResponse'
   /identity.v1.IdentityService/GetQrLoginSession:
     post:
       tags:
@@ -1302,6 +1407,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.InviteUserResponse'
+  /identity.v1.IdentityService/LinkIdentity:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: LinkIdentity
+      operationId: identity.v1.IdentityService.LinkIdentity
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.LinkIdentityRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.LinkIdentityResponse'
   /identity.v1.IdentityService/ListAuditEvents:
     post:
       tags:
@@ -1443,6 +1583,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ListHelpRequestsResponse'
+  /identity.v1.IdentityService/ListLinkedIdentities:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ListLinkedIdentities
+      description: |-
+        Self-service linked identities (connected accounts). Authenticated by the
+         caller's user JWT; each operates only on the caller's own links.
+      operationId: identity.v1.IdentityService.ListLinkedIdentities
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ListLinkedIdentitiesRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ListLinkedIdentitiesResponse'
   /identity.v1.IdentityService/ListMySessions:
     post:
       tags:
@@ -2609,6 +2787,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.SignOutEverywhereResponse'
+  /identity.v1.IdentityService/UnlinkIdentity:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: UnlinkIdentity
+      operationId: identity.v1.IdentityService.UnlinkIdentity
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.UnlinkIdentityRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.UnlinkIdentityResponse'
   /identity.v1.IdentityService/UpdateGroup:
     post:
       tags:
@@ -2715,6 +2928,87 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.UpdateUserResponse'
+  /identity.v1.IdentityService/UpsertLoginPolicy:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: UpsertLoginPolicy
+      description: |-
+        Per-tenant LoginPolicy authoring. These write the policy the login path
+         enforces (allowed methods, SSO-required, require-2FA) for a claimed
+         tenant within a project — at most one policy per (project, tenant).
+         Operator-only: authenticated by the shared admin secret, like the other
+         Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+      operationId: identity.v1.IdentityService.UpsertLoginPolicy
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.UpsertLoginPolicyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.UpsertLoginPolicyResponse'
+  /identity.v1.IdentityService/UpsertProjectConfig:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: UpsertProjectConfig
+      description: |-
+        Per-project config authoring. UpsertProjectConfig replaces a project's
+         config_json blob (the typed knobs an operator sets — e.g. CORS allowed
+         origins); GetProjectConfig reads it back. Operator-only, like the other
+         Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+      operationId: identity.v1.IdentityService.UpsertProjectConfig
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.UpsertProjectConfigRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.UpsertProjectConfigResponse'
   /identity.v1.IdentityService/VerifyDomain:
     post:
       tags:
@@ -3393,6 +3687,18 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: AdminHelpRequest
       additionalProperties: false
+    identity.v1.AgeBand:
+      type: string
+      title: AgeBand
+      enum:
+        - AGE_BAND_UNSPECIFIED
+        - AGE_BAND_CHILD
+        - AGE_BAND_TEEN
+        - AGE_BAND_ADULT
+      description: |-
+        AgeBand is the coarse age classification derived from a user's date of
+         birth and the deployment's configured age thresholds. Zero-value
+         (UNSPECIFIED) means age is unknown or age-gating is off.
     identity.v1.ApproveQrLoginRequest:
       type: object
       properties:
@@ -3479,7 +3785,7 @@ components:
         provider:
           type: string
           title: provider
-          description: '"google", "microsoft", or "github"'
+          description: '"google", "microsoft", "github", or "apple"'
         tenant:
           type: string
           title: tenant
@@ -3866,6 +4172,21 @@ components:
       type: object
       title: DeleteGroupResponse
       additionalProperties: false
+    identity.v1.DeleteLoginPolicyRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+      title: DeleteLoginPolicyRequest
+      additionalProperties: false
+    identity.v1.DeleteLoginPolicyResponse:
+      type: object
+      title: DeleteLoginPolicyResponse
+      additionalProperties: false
     identity.v1.DeletePasskeyRequest:
       type: object
       properties:
@@ -3969,6 +4290,45 @@ components:
           title: verification
           $ref: '#/components/schemas/identity.v1.IdentityVerification'
       title: GetIdentityVerificationStatusResponse
+      additionalProperties: false
+    identity.v1.GetLoginPolicyRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+      title: GetLoginPolicyRequest
+      additionalProperties: false
+    identity.v1.GetLoginPolicyResponse:
+      type: object
+      properties:
+        policy:
+          title: policy
+          description: |-
+            policy is unset when no LoginPolicy exists for (project, tenant) — the
+             login path then imposes no restriction.
+          $ref: '#/components/schemas/identity.v1.LoginPolicy'
+      title: GetLoginPolicyResponse
+      additionalProperties: false
+    identity.v1.GetProjectConfigRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+      title: GetProjectConfigRequest
+      additionalProperties: false
+    identity.v1.GetProjectConfigResponse:
+      type: object
+      properties:
+        configJson:
+          type: string
+          title: config_json
+          description: config_json is the project's stored config blob ("{}" when unset).
+      title: GetProjectConfigResponse
       additionalProperties: false
     identity.v1.GetQrLoginSessionRequest:
       type: object
@@ -4179,6 +4539,74 @@ components:
           description: Only set when create_immediately = true
       title: InviteUserResponse
       additionalProperties: false
+    identity.v1.LinkIdentityRequest:
+      type: object
+      properties:
+        code:
+          type: string
+          title: code
+          description: authorization code from the provider callback
+        redirectUri:
+          type: string
+          title: redirect_uri
+        provider:
+          type: string
+          title: provider
+          description: '"google", "microsoft", "github", "apple", ...'
+        codeVerifier:
+          type: string
+          title: code_verifier
+          description: PKCE (optional)
+        state:
+          type: string
+          title: state
+          description: authorization callback state
+        stateToken:
+          type: string
+          title: state_token
+          description: opaque token minted by BeginOAuthLogin
+      title: LinkIdentityRequest
+      additionalProperties: false
+      description: |-
+        LinkIdentity attaches a freshly-verified OAuth identity to the
+         authenticated caller. The server performs the provider code exchange
+         itself (the client is never trusted to assert the identity), exactly like
+         OAuthLogin, then persists the (provider, provider_user_id) link against the
+         caller's user id. If that provider identity is already linked to a
+         different user the call fails (CodeAlreadyExists).
+    identity.v1.LinkIdentityResponse:
+      type: object
+      properties:
+        identity:
+          title: identity
+          $ref: '#/components/schemas/identity.v1.LinkedIdentity'
+      title: LinkIdentityResponse
+      additionalProperties: false
+    identity.v1.LinkedIdentity:
+      type: object
+      properties:
+        provider:
+          type: string
+          title: provider
+          description: '"google", "microsoft", "github", "apple", ...'
+        providerUserId:
+          type: string
+          title: provider_user_id
+          description: stable provider subject
+        emailAtLinkTime:
+          type: string
+          title: email_at_link_time
+          description: email the provider asserted when linked
+        linkedAt:
+          type:
+            - integer
+            - string
+          title: linked_at
+          format: int64
+          description: epoch ms the link was created
+      title: LinkedIdentity
+      additionalProperties: false
+      description: LinkedIdentity is one connected provider identity for the authenticated user.
     identity.v1.ListAuditEventsRequest:
       type: object
       properties:
@@ -4317,6 +4745,20 @@ components:
           title: pending_count
           format: int32
       title: ListHelpRequestsResponse
+      additionalProperties: false
+    identity.v1.ListLinkedIdentitiesRequest:
+      type: object
+      title: ListLinkedIdentitiesRequest
+      additionalProperties: false
+    identity.v1.ListLinkedIdentitiesResponse:
+      type: object
+      properties:
+        identities:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.LinkedIdentity'
+          title: identities
+      title: ListLinkedIdentitiesResponse
       additionalProperties: false
     identity.v1.ListMySessionsRequest:
       type: object
@@ -4463,6 +4905,52 @@ components:
           format: int32
       title: ListUsersResponse
       additionalProperties: false
+    identity.v1.LoginPolicy:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+        allowedMethods:
+          type: string
+          title: allowed_methods
+          description: |-
+            allowed_methods is a comma-separated allow-list of login-method tokens
+             ("email_otp", "password", "oauth", "passkey", "sso"). Empty means no
+             restriction (the login path falls back to its safe default).
+        ssoRequired:
+          type: boolean
+          title: sso_required
+          description: |-
+            sso_required forces SSO; sso_connection_json carries the IdP connection
+             config as a JSON object ("{}" when unset).
+        ssoConnectionJson:
+          type: string
+          title: sso_connection_json
+        require2fa:
+          type: boolean
+          title: require_2fa
+          description: require_2fa forces a second factor after the primary method.
+        createdAtMs:
+          type:
+            - integer
+            - string
+          title: created_at_ms
+          format: int64
+        updatedAtMs:
+          type:
+            - integer
+            - string
+          title: updated_at_ms
+          format: int64
+      title: LoginPolicy
+      additionalProperties: false
+      description: |-
+        LoginPolicy is a claimed tenant's authentication policy, as authored and
+         read back by the operator RPCs. It mirrors service.LoginPolicy.
     identity.v1.LogoutRequest:
       type: object
       properties:
@@ -4487,7 +4975,7 @@ components:
         provider:
           type: string
           title: provider
-          description: '"google", "microsoft", or "github"'
+          description: '"google", "microsoft", "github", or "apple"'
         codeVerifier:
           type: string
           title: code_verifier
@@ -4504,6 +4992,10 @@ components:
           type: string
           title: state_token
           description: opaque token minted by BeginOAuthLogin
+        appleUserPayload:
+          type: string
+          title: apple_user_payload
+          description: one-time user payload from Apple's form_post callback
       title: OAuthLoginRequest
       additionalProperties: false
     identity.v1.OAuthLoginResponse:
@@ -4604,11 +5096,18 @@ components:
         recoveryEmail:
           type: string
           title: recovery_email
-          description: 'Optional: used for password reset flow'
+          description: 'Optional: secondary contact address. Note: password reset links are sent to the account''s PRIMARY verified email, not this address.'
         captchaToken:
           type: string
           title: captcha_token
           description: 'Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED'
+        dateOfBirthMs:
+          type:
+            - integer
+            - string
+          title: date_of_birth_ms
+          format: int64
+          description: Optional; epoch ms of date of birth. Required at signup when GATEWAY_AGEGATE_REQUIRE_DOB.
       title: PasswordSignupRequest
       additionalProperties: false
     identity.v1.PasswordSignupResponse:
@@ -4761,7 +5260,7 @@ components:
       additionalProperties: false
       description: |-
         RedeemOAuthCode exchanges the single-use one-time code handed to the
-         SPA by the hosted OAuth callback (GET /oauth/callback/{provider} ->
+         SPA by the hosted OAuth callback (GET/POST /oauth/callback/{provider} ->
          302 return_to?code=<otc>) for a backend-issued token pair. The code
          is single-use and short-lived; a replay returns CodeUnauthenticated.
     identity.v1.RedeemOAuthCodeResponse:
@@ -4950,9 +5449,10 @@ components:
       title: RequestPasswordResetRequest
       additionalProperties: false
       description: |-
-        Recovery-email-driven password reset (replaces the deprecated self-serve
-         ForgotPassword flow). The reset link is sent to the recovery_email on file —
-         or, if none is set, the request silently succeeds (no enumeration).
+        Password reset (replaces the deprecated self-serve ForgotPassword flow).
+         The reset link is sent to the account's PRIMARY verified email — the
+         address matching the supplied `email`. If no account matches, the
+         request silently succeeds (no enumeration).
     identity.v1.RequestPasswordResetResponse:
       type: object
       title: RequestPasswordResetResponse
@@ -5219,6 +5719,27 @@ components:
       description: |-
         TenantMembership is a user's materialized relationship to a Tenant within
          the caller's Project.
+    identity.v1.UnlinkIdentityRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+          title: provider
+        providerUserId:
+          type: string
+          title: provider_user_id
+      title: UnlinkIdentityRequest
+      additionalProperties: false
+      description: |-
+        UnlinkIdentity disconnects a provider identity from the authenticated
+         caller. It refuses (CodeFailedPrecondition) to remove the user's LAST
+         remaining sign-in credential: if the user has no password and no passkey,
+         the final linked provider cannot be removed, so the account can never be
+         locked out of its own sign-in.
+    identity.v1.UnlinkIdentityResponse:
+      type: object
+      title: UnlinkIdentityResponse
+      additionalProperties: false
     identity.v1.UpdateGroupRequest:
       type: object
       properties:
@@ -5291,6 +5812,61 @@ components:
           title: user
           $ref: '#/components/schemas/identity.v1.User'
       title: UpdateUserResponse
+      additionalProperties: false
+    identity.v1.UpsertLoginPolicyRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        tenantId:
+          type: string
+          title: tenant_id
+        allowedMethods:
+          type: string
+          title: allowed_methods
+        ssoRequired:
+          type: boolean
+          title: sso_required
+        ssoConnectionJson:
+          type: string
+          title: sso_connection_json
+        require2fa:
+          type: boolean
+          title: require_2fa
+      title: UpsertLoginPolicyRequest
+      additionalProperties: false
+    identity.v1.UpsertLoginPolicyResponse:
+      type: object
+      properties:
+        policy:
+          title: policy
+          $ref: '#/components/schemas/identity.v1.LoginPolicy'
+      title: UpsertLoginPolicyResponse
+      additionalProperties: false
+    identity.v1.UpsertProjectConfigRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        configJson:
+          type: string
+          title: config_json
+          description: |-
+            config_json is the project's full config blob (a JSON object). It
+             REPLACES the project's existing config; an empty value normalises to
+             "{}" (no per-project overrides). A malformed blob is rejected
+             (INVALID_ARGUMENT).
+      title: UpsertProjectConfigRequest
+      additionalProperties: false
+    identity.v1.UpsertProjectConfigResponse:
+      type: object
+      properties:
+        configJson:
+          type: string
+          title: config_json
+      title: UpsertProjectConfigResponse
       additionalProperties: false
     identity.v1.User:
       type: object
@@ -5386,6 +5962,21 @@ components:
           title: phone_verified_at
           format: int64
           description: epoch ms; 0 = never verified
+        dateOfBirthMs:
+          type:
+            - integer
+            - string
+          title: date_of_birth_ms
+          format: int64
+          description: epoch ms of date of birth; 0 = unknown
+        isMinor:
+          type: boolean
+          title: is_minor
+          description: 'derived: true when age < adult age (age-gating on)'
+        ageBand:
+          title: age_band
+          description: derived age band; UNSPECIFIED when unknown / gate off
+          $ref: '#/components/schemas/identity.v1.AgeBand'
         externalId:
           type: string
           title: external_id
@@ -5401,6 +5992,7 @@ components:
         - USER_STATUS_INVITED
         - USER_STATUS_DEACTIVATED
         - USER_STATUS_SUSPENDED
+        - USER_STATUS_PENDING_PARENTAL_CONSENT
     identity.v1.VerifyDomainRequest:
       type: object
       properties:
