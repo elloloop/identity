@@ -63,10 +63,7 @@ var gettingStartedDocs = []string{
 // 2). The body is delimited by backticks; \x60 is a backtick.
 var docCodeRe = regexp.MustCompile("(?s)<Code\\s+code=\\{\x60(.*?)\x60\\}\\s*([^>]*?)/>")
 
-var (
-	docTitleRe = regexp.MustCompile(`title="([^"]*)"`)
-	docLangRe  = regexp.MustCompile(`lang="([^"]*)"`)
-)
+var docTitleRe = regexp.MustCompile(`title="([^"]*)"`)
 
 // dockerEnvRe matches a `docker run` env flag, e.g. `-e GATEWAY_REPO_DRIVER=sqlite`.
 var dockerEnvRe = regexp.MustCompile(`-e\s+(GATEWAY_[A-Z0-9_]+)=(\S+)`)
@@ -91,7 +88,6 @@ var cfgKeyRe = regexp.MustCompile(`GATEWAY_[A-Z0-9_]+`)
 type docExample struct {
 	file     string            // repo-relative source path
 	title    string            // title="" attribute, "" if none
-	lang     string            // lang="" attribute
 	body     string            // code between the backticks
 	envPairs map[string]string // GATEWAY_* → documented value, cleaned
 }
@@ -172,9 +168,6 @@ func collectGettingStartedExamples(t *testing.T, root string) []docExample {
 			ex := docExample{file: rel, body: body, envPairs: extractEnvPairs(body)}
 			if tm := docTitleRe.FindStringSubmatch(attrs); tm != nil {
 				ex.title = tm[1]
-			}
-			if lm := docLangRe.FindStringSubmatch(attrs); lm != nil {
-				ex.lang = lm[1]
 			}
 			out = append(out, ex)
 		}

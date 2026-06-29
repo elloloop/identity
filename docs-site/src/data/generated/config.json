@@ -404,7 +404,7 @@
     "type": "string",
     "default": "",
     "required": true,
-    "description": "is a CSV of \"kid=keyARN\" entries for the \"kms_aws\" signer; required when =kms_aws.",
+    "description": "is a CSV of \"kid=keyARN\" entries for the \"kms_aws\" signer; required when",
     "category": "JWT \u0026 tokens"
   },
   {
@@ -1091,7 +1091,7 @@
     "name": "GATEWAY_TOTP_ENCRYPTION_KEY",
     "type": "string",
     "default": "",
-    "required": true,
+    "required": false,
     "description": "is the base64-encoded 32-byte AES-256 key that encrypts TOTP secrets at rest.",
     "category": "TOTP / 2FA"
   },

@@ -3,8 +3,68 @@ package main
 import (
 	"go/ast"
 	"go/parser"
+	"strings"
 	"testing"
 )
+
+// TestIsConditionalAntecedent covers both antecedent shapes of a conditional
+// requirement (the value-equality "=" form and the "when X is set" state form),
+// and crucially the regression that a consequent var phrased as "X is empty"
+// WITHOUT a preceding "when" (the OTLP endpoint check) is NOT mistaken for an
+// antecedent — and that the antecedent "...when GATEWAY_TOTP_ENCRYPTION_KEY is
+// set" is skipped so only GATEWAY_TOTP_RECOVERY_PEPPER stays required.
+func TestIsConditionalAntecedent(t *testing.T) {
+	tests := []struct {
+		name  string
+		val   string
+		token string
+		want  bool
+	}{
+		{
+			"value-equality antecedent",
+			"GATEWAY_JWT_KMS_KEYS is required when GATEWAY_JWT_SIGNER=kms_aws",
+			"GATEWAY_JWT_SIGNER", true,
+		},
+		{
+			"value-equality consequent stays required",
+			"GATEWAY_JWT_KMS_KEYS is required when GATEWAY_JWT_SIGNER=kms_aws",
+			"GATEWAY_JWT_KMS_KEYS", false,
+		},
+		{
+			"when-is-set antecedent is skipped",
+			"GATEWAY_TOTP_RECOVERY_PEPPER is required when GATEWAY_TOTP_ENCRYPTION_KEY is set",
+			"GATEWAY_TOTP_ENCRYPTION_KEY", true,
+		},
+		{
+			"when-is-set consequent stays required",
+			"GATEWAY_TOTP_RECOVERY_PEPPER is required when GATEWAY_TOTP_ENCRYPTION_KEY is set",
+			"GATEWAY_TOTP_RECOVERY_PEPPER", false,
+		},
+		{
+			"is-empty without when is a genuine requirement, not an antecedent",
+			"observability: GATEWAY_OTEL_ENABLED=true but GATEWAY_OTEL_EXPORTER_ENDPOINT is empty",
+			"GATEWAY_OTEL_EXPORTER_ENDPOINT", false,
+		},
+		{
+			"when-is-empty antecedent is skipped",
+			"GATEWAY_X is required when GATEWAY_Y is empty",
+			"GATEWAY_Y", true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			idx := strings.Index(tc.val, tc.token)
+			if idx < 0 {
+				t.Fatalf("token %q not found in %q", tc.token, tc.val)
+			}
+			loc := []int{idx, idx + len(tc.token)}
+			if got := isConditionalAntecedent(tc.val, loc); got != tc.want {
+				t.Errorf("isConditionalAntecedent(%q, token=%q) = %v, want %v",
+					tc.val, tc.token, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestSummarize(t *testing.T) {
 	tests := []struct {
@@ -32,6 +92,14 @@ func TestSummarize(t *testing.T) {
 		},
 		{"comma after field name", "Foo, when true, rejects the request.", "Foo", "when true, rejects the request."},
 		{"field name not a prefix is untouched", "When set, gates the flow.", "Foo", "When set, gates the flow."},
+		{
+			// A gateway token written as "GATEWAY_X=value" must be stripped
+			// together with its "=value", leaving no dangling "=kms_aws".
+			name:      "strips gateway token with trailing =value",
+			raw:       `JWTKMSKeys is a CSV of "kid=keyARN" entries for the "kms_aws" signer; required when GATEWAY_JWT_SIGNER=kms_aws.`,
+			fieldName: "JWTKMSKeys",
+			want:      `is a CSV of "kid=keyARN" entries for the "kms_aws" signer; required when`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

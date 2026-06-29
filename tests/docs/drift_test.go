@@ -55,12 +55,10 @@ var allowedGatewayTokens = map[string]string{
 	"GATEWAY_TEST_POSTGRES_DSN": "test-harness env var (read by *_test.go and CI), not a runtime config key",
 }
 
-// gatewayTokenRe matches an env-var-shaped GATEWAY_ token. A trailing
-// underscore is captured (it signals a glob/wrapped fragment, handled below).
+// gatewayTokenRe matches an env-var-shaped GATEWAY_ token (in docs prose or in
+// the generated reference). A trailing underscore is captured (it signals a
+// glob/wrapped fragment, handled below).
 var gatewayTokenRe = regexp.MustCompile(`GATEWAY_[A-Z0-9_]+`)
-
-// configConstRe extracts the literal env-var keys declared in config.go.
-var configConstRe = regexp.MustCompile(`GATEWAY_[A-Z0-9_]+`)
 
 // eventConstRe extracts the canonical audit event-type strings from the
 // `Event... EventType = "..."` constant block in pkg/audit/logger.go.
@@ -158,6 +156,36 @@ func readRegistry(t *testing.T, root, rel string) string {
 	return string(b)
 }
 
+// generatedConfigVar is one row of the generated config reference
+// (docs-site/src/data/generated/config.json), the authoritative list of live
+// GATEWAY_* keys (and their display categories) emitted by cmd/docsgen.
+type generatedConfigVar struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+}
+
+// readGeneratedConfig parses the generated config reference. Using this rather
+// than regex-scanning all of config.go keeps the registry precise: only keys
+// the generator actually emits count as valid, so a GATEWAY_* token that only
+// appears in a config.go comment or error string is not silently accepted.
+func readGeneratedConfig(t *testing.T, root string) []generatedConfigVar {
+	t.Helper()
+	path := filepath.Join(root, "docs-site", "src", "data", "generated", "config.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading generated config reference: %v", err)
+	}
+	var vars []generatedConfigVar
+	if err := json.Unmarshal(b, &vars); err != nil {
+		t.Fatalf("parsing %s: %v", path, err)
+	}
+	if len(vars) == 0 {
+		t.Fatal("generated config reference is empty; regenerate with `go run ./cmd/docsgen`")
+	}
+	return vars
+}
+
 // isPrefixToken reports whether a GATEWAY_ token is a glob/wrapped fragment
 // (it ends with "_"). Such a token is accepted when some real config key has
 // it as a prefix — this covers documented families like `GATEWAY_SMS_*` and
@@ -166,14 +194,10 @@ func isPrefixToken(tok string) bool { return strings.HasSuffix(tok, "_") }
 
 func TestDocsGatewayEnvVarsExist(t *testing.T) {
 	root := repoRoot(t)
-	cfg := readRegistry(t, root, filepath.Join("internal", "config", "config.go"))
 
 	known := map[string]bool{}
-	for _, m := range configConstRe.FindAllString(cfg, -1) {
-		known[m] = true
-	}
-	if len(known) == 0 {
-		t.Fatal("found zero GATEWAY_ keys in config.go; registry extraction is broken")
+	for _, v := range readGeneratedConfig(t, root) {
+		known[v.Name] = true
 	}
 
 	hasPrefix := func(prefix string) bool {
@@ -279,31 +303,82 @@ func TestDocsRPCMethodsExist(t *testing.T) {
 // against this at generation time, and this test guards the committed artifact.
 func TestGeneratedConfigDescriptionsNonEmpty(t *testing.T) {
 	root := repoRoot(t)
-	path := filepath.Join(root, "docs-site", "src", "data", "generated", "config.json")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading generated config reference: %v", err)
-	}
-
-	var vars []struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
-	if err := json.Unmarshal(b, &vars); err != nil {
-		t.Fatalf("parsing %s: %v", path, err)
-	}
-	if len(vars) == 0 {
-		t.Fatal("generated config reference is empty; regenerate with `go run ./cmd/docsgen`")
-	}
 
 	var violations []string
-	for _, v := range vars {
+	for _, v := range readGeneratedConfig(t, root) {
 		if strings.TrimSpace(v.Description) == "" {
 			violations = append(violations,
 				v.Name+": empty description — add a Go doc comment to the matching Config field, then `go run ./cmd/docsgen`")
 		}
 	}
 	reportViolations(t, "config reference empty-description", violations)
+}
+
+// configAnchorRefRe matches a deep link into the configuration reference,
+// e.g. `configuration#passkeys-webauthn`, capturing the fragment.
+var configAnchorRefRe = regexp.MustCompile(`configuration#([a-z0-9-]+)`)
+
+// slugifyCategory mirrors the slugify() in
+// docs-site/src/pages/docs/installation/configuration.astro EXACTLY: it lowers
+// the category, maps "&" to "and", collapses every run of non-alphanumerics to
+// a single hyphen, and trims leading/trailing hyphens. The configuration page
+// emits this slug as the id of each category <section>, so a cross-link of the
+// form configuration#<slug> resolves to a real on-page anchor.
+func slugifyCategory(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, "&", " and ")
+	var b strings.Builder
+	prevDash := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// TestDocsConfigurationAnchorsResolve is an anti-drift guard for deep links into
+// the configuration reference: every `configuration#<fragment>` referenced
+// anywhere in the docs must match an id the configuration page actually emits
+// (one per category section, via slugify(category)). This catches both a renamed
+// category and a hand-edited href that no longer points at a live anchor.
+func TestDocsConfigurationAnchorsResolve(t *testing.T) {
+	root := repoRoot(t)
+
+	emitted := map[string]bool{}
+	for _, v := range readGeneratedConfig(t, root) {
+		emitted[slugifyCategory(v.Category)] = true
+	}
+	if len(emitted) == 0 {
+		t.Fatal("derived zero category anchors from the generated config; extraction is broken")
+	}
+
+	var violations []string
+	totalRefs := 0
+	for _, df := range collectDocs(t, root) {
+		seen := map[string]bool{}
+		for _, m := range configAnchorRefRe.FindAllStringSubmatch(df.text, -1) {
+			frag := m[1]
+			if seen[frag] {
+				continue
+			}
+			seen[frag] = true
+			totalRefs++
+			if !emitted[frag] {
+				violations = append(violations,
+					df.relPath+": link to configuration#"+frag+
+						" does not resolve to any category anchor emitted by configuration.astro")
+			}
+		}
+	}
+	if totalRefs == 0 {
+		t.Fatal("found zero configuration#<fragment> references; the extractor is misconfigured")
+	}
+	reportViolations(t, "configuration anchor", violations)
 }
 
 // reportViolations fails the test with every accumulated violation listed,

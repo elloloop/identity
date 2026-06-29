@@ -262,15 +262,20 @@ func collectFieldDocs(file *ast.File) map[string]string {
 var (
 	defaultParen = regexp.MustCompile(`\s*\((?:default|optional)[^)]*\)`)
 	gatewayToken = regexp.MustCompile(`GATEWAY_[A-Z0-9_]+`)
-	wsRun        = regexp.MustCompile(`\s+`)
+	// gatewayAssignToken matches a GATEWAY_* token together with a trailing
+	// "=value" (as written in prose like "GATEWAY_JWT_SIGNER=kms_aws"). Used by
+	// summarize so stripping the token also consumes its value rather than
+	// leaving a dangling "=kms_aws" in the rendered description.
+	gatewayAssignToken = regexp.MustCompile(`GATEWAY_[A-Z0-9_]+(=\S+)?`)
+	wsRun              = regexp.MustCompile(`\s+`)
 )
 
 // summarize reduces a Go doc comment to a single-sentence description: it
 // drops the leading "FieldName" the Go doc convention prepends (matched
 // literally against the known field name, so a comment opening with any verb —
 // not only an allowlisted one — never leaks the identifier), strips inline
-// GATEWAY_* tokens and "(default ...)" parentheticals, collapses whitespace,
-// and keeps the first sentence.
+// GATEWAY_* tokens together with any trailing "=value" and "(default ...)"
+// parentheticals, collapses whitespace, and keeps the first sentence.
 func summarize(raw, fieldName string) string {
 	s := wsRun.ReplaceAllString(strings.TrimSpace(raw), " ")
 	if s == "" {
@@ -281,7 +286,7 @@ func summarize(raw, fieldName string) string {
 		s = s[:idx]
 	}
 	s = defaultParen.ReplaceAllString(s, "")
-	s = gatewayToken.ReplaceAllString(s, "")
+	s = gatewayAssignToken.ReplaceAllString(s, "")
 	s = wsRun.ReplaceAllString(strings.TrimSpace(s), " ")
 	// Drop a leading field name (Go's "Name is ..." doc convention), matched
 	// literally so the Go identifier never leaks into operator-facing docs.
@@ -495,6 +500,46 @@ func mentionsRequirement(residual string) bool {
 	return false
 }
 
+// conditionalStates are the trailing state words of a "when GATEWAY_X is <state>"
+// conditional-requirement antecedent.
+var conditionalStates = []string{"set", "unset", "empty", "configured"}
+
+// isConditionalAntecedent reports whether the GATEWAY_* token at loc within val
+// is the ANTECEDENT (trigger) of a conditional requirement rather than the
+// variable being required. Two antecedent shapes are recognised:
+//
+//	"GATEWAY_X=..."                      value-equality trigger
+//	"... when GATEWAY_X is set"          state trigger (set/unset/empty/configured)
+//
+// The state form requires the literal "when" immediately before the token so a
+// genuine requirement phrased as "GATEWAY_X is empty" (no preceding "when",
+// e.g. the OTLP endpoint check) is still correctly marked required.
+func isConditionalAntecedent(val string, loc []int) bool {
+	start, end := loc[0], loc[1]
+	// Value-equality trigger: "GATEWAY_X=...".
+	if end < len(val) && val[end] == '=' {
+		return true
+	}
+	// State trigger: "when GATEWAY_X is set/unset/empty/configured".
+	before := strings.TrimRight(strings.ToLower(val[:start]), " ")
+	if before != "when" && !strings.HasSuffix(before, " when") {
+		return false
+	}
+	after := strings.ToLower(strings.TrimLeft(val[end:], " "))
+	rest, ok := strings.CutPrefix(after, "is ")
+	if !ok {
+		return false
+	}
+	rest = strings.TrimLeft(rest, " ")
+	for _, state := range conditionalStates {
+		if rest == state || strings.HasPrefix(rest, state+" ") ||
+			strings.HasPrefix(rest, state+".") || strings.HasPrefix(rest, state+",") {
+			return true
+		}
+	}
+	return false
+}
+
 // scanRequired walks the repository for string literals that mark a GATEWAY_*
 // variable as required (a boot-time validation message). This is how
 // conditional requirements — e.g. the SQLite path, the Postgres DSN, the
@@ -507,9 +552,12 @@ func mentionsRequirement(residual string) bool {
 //     tokens stripped, so a variable whose NAME merely contains "REQUIRE"
 //     (e.g. GATEWAY_JWT_REQUIRE_AUD, GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL) is
 //     never marked required just by appearing in a literal.
-//   - A token immediately followed by '=' is the antecedent of a conditional
-//     ("GATEWAY_X=true requires GATEWAY_Y"), not the thing being required, so
-//     only the consequent (GATEWAY_Y) is marked.
+//   - The antecedent (trigger) of a conditional requirement is never marked;
+//     only the consequent is. Two antecedent shapes are recognised: the
+//     value-equality form "GATEWAY_X=true requires GATEWAY_Y" and the state
+//     form "GATEWAY_Y is required when GATEWAY_X is set" (also unset/empty/
+//     configured) — in both, GATEWAY_X is the trigger and GATEWAY_Y the
+//     consequent, so only GATEWAY_Y is marked required.
 func scanRequired(root string) (map[string]bool, error) {
 	required := map[string]bool{}
 	skipDirs := map[string]bool{
@@ -549,8 +597,9 @@ func scanRequired(root string) (map[string]bool, error) {
 				return true
 			}
 			for _, loc := range locs {
-				// Skip the antecedent of a conditional ("GATEWAY_X=...").
-				if loc[1] < len(val) && val[loc[1]] == '=' {
+				// Skip the antecedent (trigger) of a conditional requirement;
+				// only the consequent is the thing actually required.
+				if isConditionalAntecedent(val, loc) {
 					continue
 				}
 				required[val[loc[0]:loc[1]]] = true
