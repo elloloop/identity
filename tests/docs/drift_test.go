@@ -17,6 +17,7 @@
 package docs_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -269,6 +270,40 @@ func TestDocsRPCMethodsExist(t *testing.T) {
 	}
 
 	reportViolations(t, "RPC method", violations)
+}
+
+// TestGeneratedConfigDescriptionsNonEmpty asserts that the generated config
+// reference (docs-site/src/data/generated/config.json) documents every
+// GATEWAY_* env var. An empty description means a Config field in
+// internal/config/config.go lost its doc comment; cmd/docsgen also guards
+// against this at generation time, and this test guards the committed artifact.
+func TestGeneratedConfigDescriptionsNonEmpty(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, "docs-site", "src", "data", "generated", "config.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading generated config reference: %v", err)
+	}
+
+	var vars []struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(b, &vars); err != nil {
+		t.Fatalf("parsing %s: %v", path, err)
+	}
+	if len(vars) == 0 {
+		t.Fatal("generated config reference is empty; regenerate with `go run ./cmd/docsgen`")
+	}
+
+	var violations []string
+	for _, v := range vars {
+		if strings.TrimSpace(v.Description) == "" {
+			violations = append(violations,
+				v.Name+": empty description — add a Go doc comment to the matching Config field, then `go run ./cmd/docsgen`")
+		}
+	}
+	reportViolations(t, "config reference empty-description", violations)
 }
 
 // reportViolations fails the test with every accumulated violation listed,

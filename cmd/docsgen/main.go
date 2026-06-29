@@ -50,6 +50,17 @@ func main() {
 		}
 	}
 
+	// Guard: every env var must carry a description. An empty one means the
+	// corresponding Config field lost (or never had) a doc comment, which
+	// silently degrades the operator-facing reference. Fail loudly here rather
+	// than emit a blank row.
+	if missing := missingDescriptions(configVars); len(missing) > 0 {
+		fail(fmt.Errorf(
+			"%d env var(s) have an empty description; add a one-line Go doc comment to the "+
+				"matching Config field in internal/config/config.go:\n  - %s",
+			len(missing), strings.Join(missing, "\n  - ")))
+	}
+
 	events, err := parseAuditEvents(filepath.Join(root, "pkg", "audit", "logger.go"))
 	if err != nil {
 		fail(fmt.Errorf("parse audit events: %w", err))
@@ -81,6 +92,18 @@ type ConfigVar struct {
 	Required    bool   `json:"required"`
 	Description string `json:"description"`
 	Category    string `json:"category"`
+}
+
+// missingDescriptions returns the names of env vars whose description is empty
+// (after trimming), in input order. Used as a generation-time guard.
+func missingDescriptions(vars []ConfigVar) []string {
+	var missing []string
+	for _, v := range vars {
+		if strings.TrimSpace(v.Description) == "" {
+			missing = append(missing, v.Name)
+		}
+	}
+	return missing
 }
 
 // envHelperType maps each config env-reading helper to the type it yields.
@@ -225,9 +248,8 @@ func collectFieldDocs(file *ast.File) map[string]string {
 				} else if fld.Comment != nil {
 					raw = fld.Comment.Text()
 				}
-				desc := summarize(raw)
 				for _, nm := range fld.Names {
-					if desc != "" {
+					if desc := summarize(raw, nm.Name); desc != "" {
 						docs[nm.Name] = desc
 					}
 				}
@@ -244,10 +266,12 @@ var (
 )
 
 // summarize reduces a Go doc comment to a single-sentence description: it
-// drops the leading "FieldName " convention, strips inline GATEWAY_* tokens
-// and "(default ...)" parentheticals, collapses whitespace, and keeps the
-// first sentence.
-func summarize(raw string) string {
+// drops the leading "FieldName" the Go doc convention prepends (matched
+// literally against the known field name, so a comment opening with any verb —
+// not only an allowlisted one — never leaks the identifier), strips inline
+// GATEWAY_* tokens and "(default ...)" parentheticals, collapses whitespace,
+// and keeps the first sentence.
+func summarize(raw, fieldName string) string {
 	s := wsRun.ReplaceAllString(strings.TrimSpace(raw), " ")
 	if s == "" {
 		return ""
@@ -258,41 +282,42 @@ func summarize(raw string) string {
 	}
 	s = defaultParen.ReplaceAllString(s, "")
 	s = gatewayToken.ReplaceAllString(s, "")
-	// Drop a leading exported identifier (Go's "Name is ..." convention).
-	if fields := strings.Fields(s); len(fields) > 1 {
-		first := fields[0]
-		if isExportedIdent(first) && (fields[1] == "is" || fields[1] == "names" ||
-			fields[1] == "holds" || fields[1] == "governs" || fields[1] == "gates" ||
-			fields[1] == "bounds" || fields[1] == "extends" || fields[1] == "selects" ||
-			fields[1] == "enumerates" || fields[1] == "returns") {
-			s = strings.Join(fields[1:], " ")
+	s = wsRun.ReplaceAllString(strings.TrimSpace(s), " ")
+	// Drop a leading field name (Go's "Name is ..." doc convention), matched
+	// literally so the Go identifier never leaks into operator-facing docs.
+	if fieldName != "" {
+		if rest, ok := strings.CutPrefix(s, fieldName); ok && (rest == "" || rest[0] == ' ' || rest[0] == ',') {
+			s = strings.TrimSpace(rest)
 		}
 	}
-	s = wsRun.ReplaceAllString(strings.TrimSpace(s), " ")
-	s = strings.TrimLeft(s, "—-: ")
+	s = strings.TrimLeft(s, "—-:, ")
 	return strings.TrimSpace(s)
 }
 
 func firstSentenceEnd(s string) int {
 	for i := 0; i < len(s)-1; i++ {
 		if (s[i] == '.' || s[i] == '!' || s[i] == '?') && s[i+1] == ' ' {
-			// Skip common abbreviations that aren't sentence ends.
+			// Skip inline abbreviations ("e.g.", "i.e.") whose dot is not a
+			// real sentence terminator.
+			if s[i] == '.' && isAbbreviationDot(s, i) {
+				continue
+			}
 			return i + 1
 		}
 	}
 	return -1
 }
 
-func isExportedIdent(s string) bool {
-	if s == "" || s[0] < 'A' || s[0] > 'Z' {
-		return false
-	}
-	for _, r := range s {
-		if !(r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
-			return false
+// isAbbreviationDot reports whether the period at index i is the trailing dot
+// of an inline abbreviation like "e.g." or "i.e.".
+func isAbbreviationDot(s string, i int) bool {
+	lower := strings.ToLower(s[:i+1])
+	for _, abbr := range []string{"e.g.", "i.e."} {
+		if strings.HasSuffix(lower, abbr) {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // renderDefault evaluates the default-value expression (a constant or a
@@ -312,9 +337,11 @@ func renderDefault(expr ast.Expr, typ string, consts map[string]ast.Expr) string
 			return fmt.Sprintf("%d", i)
 		}
 	case "number":
-		if f, ok := constant.Float64Val(constant.ToFloat(v)); ok {
-			return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%f", f), "0"), ".")
-		}
+		// Float64Val reports ok=false for values not exactly representable as
+		// float64 (e.g. 0.1); the returned nearest value is still correct for
+		// display, so render it regardless of exactness.
+		f, _ := constant.Float64Val(constant.ToFloat(v))
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%f", f), "0"), ".")
 	case "string":
 		return constant.StringVal(v)
 	}
@@ -448,11 +475,41 @@ func categoryFor(name string) string {
 	return "Other"
 }
 
+// requirementPhrases are the substrings (matched case-insensitively, after the
+// GATEWAY_* tokens themselves are removed) that mark a boot-time validation
+// message as declaring a variable required. Covers both the "requires"/"is
+// required" wording and the "is empty"/"must be set" family so a conditionally
+// required var like GATEWAY_OTEL_EXPORTER_ENDPOINT (boot fails when empty) is
+// not a false negative.
+var requirementPhrases = []string{
+	"requir", "is empty", "must be set", "must not be empty",
+	"cannot be empty", "is missing", "is not set",
+}
+
+func mentionsRequirement(residual string) bool {
+	for _, p := range requirementPhrases {
+		if strings.Contains(residual, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // scanRequired walks the repository for string literals that mark a GATEWAY_*
-// variable as required (an error message containing both the word "require"
-// and the variable name). This is how conditional requirements — e.g. the
-// SQLite path, the Postgres DSN, the SMS/CAPTCHA provider credentials — are
-// discovered from code rather than hand-listed.
+// variable as required (a boot-time validation message). This is how
+// conditional requirements — e.g. the SQLite path, the Postgres DSN, the
+// OTLP endpoint, the SMS/CAPTCHA provider credentials — are discovered from
+// code rather than hand-listed.
+//
+// Two precision rules keep the Required column honest:
+//
+//   - The requirement phrase is matched on the message with its GATEWAY_*
+//     tokens stripped, so a variable whose NAME merely contains "REQUIRE"
+//     (e.g. GATEWAY_JWT_REQUIRE_AUD, GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL) is
+//     never marked required just by appearing in a literal.
+//   - A token immediately followed by '=' is the antecedent of a conditional
+//     ("GATEWAY_X=true requires GATEWAY_Y"), not the thing being required, so
+//     only the consequent (GATEWAY_Y) is marked.
 func scanRequired(root string) (map[string]bool, error) {
 	required := map[string]bool{}
 	skipDirs := map[string]bool{
@@ -483,11 +540,20 @@ func scanRequired(root string) (map[string]bool, error) {
 				return true
 			}
 			val := constant.StringVal(constant.MakeFromLiteral(bl.Value, bl.Kind, 0))
-			if !strings.Contains(strings.ToLower(val), "requir") {
+			locs := gatewayToken.FindAllStringIndex(val, -1)
+			if len(locs) == 0 {
 				return true
 			}
-			for _, m := range gatewayToken.FindAllString(val, -1) {
-				required[m] = true
+			residual := strings.ToLower(gatewayToken.ReplaceAllString(val, " "))
+			if !mentionsRequirement(residual) {
+				return true
+			}
+			for _, loc := range locs {
+				// Skip the antecedent of a conditional ("GATEWAY_X=...").
+				if loc[1] < len(val) && val[loc[1]] == '=' {
+					continue
+				}
+				required[val[loc[0]:loc[1]]] = true
 			}
 			return true
 		})
