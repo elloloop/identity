@@ -91,10 +91,10 @@ func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "could not start oauth", status)
 		return
 	}
+	http.SetCookie(w, hostedOAuthCSRFCookie(provider, appendHostedOAuthCSRFToken(csrfTokens, csrfToken), 900))
 	// #nosec G710 -- the redirect target is the provider authorization
 	// URL built server-side by BeginHostedOAuth from the registered
 	// provider config, not from request input.
-	http.SetCookie(w, hostedOAuthCSRFCookie(provider, appendHostedOAuthCSRFToken(csrfTokens, csrfToken), 900))
 	http.Redirect(w, r, result.AuthorizationURL, http.StatusFound)
 }
 
@@ -150,16 +150,16 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// #nosec G710 -- result.ReturnTo is recovered from the signed,
-	// tamper-proof hosted state token whose return_to was validated
-	// against the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist at /start
-	// time. It is not raw request input.
 	remainingCSRFTokens := removeHostedOAuthCSRFToken(csrfTokens, result.CSRFToken)
 	maxAge := 900
 	if len(remainingCSRFTokens) == 0 {
 		maxAge = -1
 	}
 	http.SetCookie(w, hostedOAuthCSRFCookie(provider, remainingCSRFTokens, maxAge))
+	// #nosec G710 -- result.ReturnTo is recovered from the signed,
+	// tamper-proof hosted state token whose return_to was validated
+	// against the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist at /start
+	// time. It is not raw request input.
 	http.Redirect(w, r, appendQueryParam(result.ReturnTo, "code", result.Code), http.StatusFound)
 }
 

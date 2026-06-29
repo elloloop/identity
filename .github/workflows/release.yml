@@ -32,7 +32,12 @@ jobs:
         uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-          only-new-issues: true
+          # Full lint on the tagged commit. only-new-issues needs a PR/diff
+          # base to compare against; on a tag push there is none, so the
+          # action's compare-commits call 404s and fails the release. Main is
+          # already gated on new-issue lint at PR time, so a full lint here is
+          # the correct release gate and works without a base ref.
+          only-new-issues: false
           args: --config=.golangci.yml
 
   vuln:
