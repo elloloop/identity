@@ -176,7 +176,10 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
 			return "", fmt.Errorf("user with email %s already exists", u.Email)
 		}
 	}
-	id := nextNodeID()
+	id := u.ID
+	if id == "" {
+		id = nextNodeID()
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -501,6 +504,17 @@ func (r *fakeRepo) UpdatePasskeyCredential(_ context.Context, nodeID string, fie
 	}
 	if v, ok := fields["last_used_at"]; ok {
 		c.LastUsedAt = v.(int64)
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
 	}
 	return nil
 }
@@ -962,6 +976,7 @@ func testConfig() *config.Config {
 		PasskeyRPName:                   "Test",
 		PasskeyOrigin:                   "http://localhost:9002",
 		PasskeyChallengeExpirySeconds:   300,
+		PasskeySignupEnabled:            true,
 		QRLoginBaseURL:                  "http://localhost:9002",
 		QRLoginExpirySeconds:            300,
 		TOTPIssuer:                      "Glassa Test",

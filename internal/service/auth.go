@@ -218,6 +218,14 @@ type Repository interface {
 	GetPasskeyCredentialByCredID(ctx context.Context, credentialID string) (*PasskeyCredRecord, error)
 	CreatePasskeyCredential(ctx context.Context, r *PasskeyCredRecord) (string, error)
 	UpdatePasskeyCredential(ctx context.Context, nodeID string, fields map[string]any) error
+	// DeletePasskeyCredentialsForUser removes every passkey credential
+	// owned by userID, synchronously, on every driver. It backs the
+	// anti-pre-hijacking clearing in markEmailVerifiedViaExternalProof: a
+	// passkey enrolled while the email was unverified is untrusted (it may
+	// have been planted by an attacker), exactly like a planted password, so
+	// external proof of email control voids it. Idempotent: a user with no
+	// passkeys is a no-op returning nil.
+	DeletePasskeyCredentialsForUser(ctx context.Context, userID string) error
 
 	// Passkey challenges
 	GetPasskeyChallenge(ctx context.Context, nodeID string) (*PasskeyChallengeRecord, error)
@@ -488,8 +496,12 @@ type PasskeyChallengeRecord struct {
 	Challenge     string // base64url
 	UserID        string
 	ChallengeType string // "registration" or "authentication"
-	ExpiresAt     int64
-	CreatedAt     int64
+	// Email binds the account a passkey-first signup challenge will create the
+	// user under (see BeginPasskeySignup); empty for add-a-passkey
+	// registration and for authentication challenges.
+	Email     string
+	ExpiresAt int64
+	CreatedAt int64
 }
 
 // QrLoginSessionRecord represents a stored QR login session.
@@ -775,6 +787,11 @@ var (
 	ErrLocalAuthDisabled    = errors.New("local auth disabled")
 	ErrOAuthDisabled        = errors.New("oauth login is not configured")
 	ErrSignupDisabled       = errors.New("signup is disabled for this deployment")
+	// ErrPasskeySignupDisabled is returned by BeginPasskeySignup /
+	// CompletePasskeySignup when GATEWAY_PASSKEY_SIGNUP_ENABLED is false. It
+	// is distinct from ErrSignupDisabled (password signup) so the two flows
+	// can be toggled independently; both map to FailedPrecondition.
+	ErrPasskeySignupDisabled = errors.New("passkey signup is disabled for this deployment")
 	// ErrCaptchaRequired is returned when CAPTCHA is enforced on an
 	// endpoint but the request carried no captcha token. ErrCaptchaFailed
 	// is returned when the supplied token was rejected by the provider.

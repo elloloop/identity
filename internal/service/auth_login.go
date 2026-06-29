@@ -885,14 +885,20 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email stri
 
 // markEmailVerifiedViaExternalProof flips the account to verified because an
 // external method (OAuth provider assertion, or an emailed OTP/magic-link the
-// user redeemed) proved control of the address. Any password on the account was
-// set BEFORE this proof — possibly by a different party (account pre-hijacking)
-// — so it is cleared; the legitimate owner re-establishes it via password reset.
+// user redeemed) proved control of the address. Any credential on the account
+// was established BEFORE this proof — possibly by a different party (account
+// pre-hijacking) — so the untrusted ones are voided:
+//
+//   - a planted password is cleared (the owner re-establishes it via reset);
+//   - any planted passkeys are deleted. A passkey enrolled while the email was
+//     unverified is exactly as untrustworthy as a planted password: passkey
+//     login does not pass through the email-verification gate, so without this
+//     an attacker who passkey-first-signed-up an unverified address would keep
+//     a working credential after the real owner takes the account over.
 //
 // It is a no-op when the email is already verified (the proof adds nothing).
-// email_verified + email_verified_at and the cleared password_hash are persisted
-// in a single patch. Best-effort: a persistence failure is logged, not fatal —
-// the user has already authenticated via the external proof.
+// Best-effort: a persistence failure is logged, not fatal — the user has
+// already authenticated via the external proof.
 func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, nowMs int64, method string) {
 	if user == nil || user.EmailVerified {
 		return
@@ -923,27 +929,47 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		return
 	}
 
-	if passwordCleared {
-		// The cleared credential is void, so revoke any sessions too — mirroring
-		// ConfirmPasswordReset — so a session established with the old password
-		// cannot outlive it. With the verification gate on this is a no-op (an
-		// unverified account cannot have a session); it matters when the gate is
-		// disabled and an attacker's planted-password session is still live.
+	// Void any passkeys planted while the address was unverified. Detect first
+	// (so the audit/session-revocation only fires when there was something to
+	// clear) then delete them all.
+	passkeysCleared := false
+	if existing, err := s.repo(ctx).ListPasskeyCredentials(ctx, user.ID); err != nil {
+		s.logger.Warn("email_verified_external_passkey_list_failed",
+			zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+	} else if len(existing) > 0 {
+		if err := s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
+			s.logger.Warn("email_verified_external_passkey_clear_failed",
+				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+		} else {
+			passkeysCleared = true
+		}
+	}
+
+	if passwordCleared || passkeysCleared {
+		// The cleared credentials are void, so revoke any sessions too —
+		// mirroring ConfirmPasswordReset — so a session established with a now-
+		// voided credential cannot outlive it. With the verification gate on,
+		// a planted-password session is impossible; a planted-passkey session
+		// is NOT (passkey login skips the gate), so this matters either way.
 		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
 			s.logger.Warn("email_verified_external_revoke_failed",
 				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
 		}
 		s.revokeUserSessionsIfModeSession(ctx, user.ID, "external_email_verification")
-		s.logger.Info("email_verified_external_password_cleared",
+		s.logger.Info("email_verified_external_credentials_cleared",
 			zap.String("user_id", user.ID),
-			zap.String("method", method))
+			zap.String("method", method),
+			zap.Bool("password_cleared", passwordCleared),
+			zap.Bool("passkeys_cleared", passkeysCleared))
 		s.audit.Log(
 			ctx, audit.EventPasswordChanged,
 			audit.WithActor(user.ID),
 			audit.WithSuccess(true),
 			audit.WithDetails(map[string]any{
-				"reason": "planted_password_cleared_on_external_email_verification",
-				"method": method,
+				"reason":           "planted_credentials_cleared_on_external_email_verification",
+				"method":           method,
+				"password_cleared": passwordCleared,
+				"passkeys_cleared": passkeysCleared,
 			}),
 		)
 	}

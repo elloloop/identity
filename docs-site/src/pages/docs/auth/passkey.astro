@@ -25,6 +25,7 @@ import { Code } from "astro-expressive-code/components";
     <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td><code>example.com</code> — registrable domain, no scheme, no port</td></tr>
     <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td><code>Example</code> — shown in the OS dialog</td></tr>
     <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td><code>https://app.example.com</code> — full origin including scheme</td></tr>
+    <tr><td><code>GATEWAY_PASSKEY_SIGNUP_ENABLED</code></td><td><code>true</code> (default) — gates passkey-first signup; set <code>false</code> to disable unauthenticated account creation via a passkey while keeping authenticated add-a-passkey registration</td></tr>
   </table>
   <p>
     Defaults (and the challenge-expiry knob) are in the
@@ -32,7 +33,25 @@ import { Code } from "astro-expressive-code/components";
     / WebAuthn section of the configuration reference</a>.
   </p>
 
-  <h2>Registration</h2>
+  <h2>Two distinct flows</h2>
+  <p>
+    There are two passkey enrolment paths, and they are not the same RPC:
+  </p>
+  <ul>
+    <li>
+      <strong>Add a passkey</strong> (<code>BeginPasskeyRegistration</code> /
+      <code>CompletePasskeyRegistration</code>) — adds a passkey to an account
+      the caller is <em>already signed in to</em>. Requires a bearer token.
+    </li>
+    <li>
+      <strong>Passkey-first signup</strong> (<code>BeginPasskeySignup</code> /
+      <code>CompletePasskeySignup</code>) — creates a <em>brand-new</em> account
+      whose first credential is a passkey. Unauthenticated; no password, no
+      prior session.
+    </li>
+  </ul>
+
+  <h2>Add a passkey (authenticated)</h2>
   <p>
     The user must already be authenticated (e.g. they signed in with
     password). The flow is two RPCs.
@@ -65,6 +84,64 @@ await fetch("/identity.v1.IdentityService/CompletePasskeyRegistration", {
     deviceName: "Alice's MacBook",
   }),
 });`} lang="javascript" />
+
+  <h2>Passkey-first signup (unauthenticated)</h2>
+  <p>
+    Creates a new account directly from a passkey — no password is ever set.
+    The flow mirrors registration but is unauthenticated and takes the email
+    the account will be created under.
+  </p>
+  <Code code={`// 1. Begin — no Authorization header
+const begin = await fetch("/identity.v1.IdentityService/BeginPasskeySignup", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ email: "alice@example.com", deviceName: "Alice's MacBook" }),
+}).then(r => r.json());
+
+// 2. Browser creates the credential
+const credential = await navigator.credentials.create(JSON.parse(begin.options_json));
+
+// 3. Complete — creates the account and returns a session
+const done = await fetch("/identity.v1.IdentityService/CompletePasskeySignup", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    challengeId: begin.challenge_id,
+    credentialJson: JSON.stringify(credential),
+    email: "alice@example.com",
+    deviceName: "Alice's MacBook",
+  }),
+}).then(r => r.json());  // { user, access_token, refresh_token, expires_in }`} lang="javascript" />
+  <p>
+    The server mints the new user id during <code>BeginPasskeySignup</code> and
+    binds it as the WebAuthn user handle, so the credential created here can log
+    in afterwards. Security properties baked into the flow:
+  </p>
+  <ul>
+    <li>
+      <strong>Anti-takeover.</strong> If the email already has an account, the
+      passkey is <em>not</em> attached to it — an unauthenticated caller can
+      never bind a credential to someone else's account.
+    </li>
+    <li>
+      <strong>Enumeration-safe.</strong> An already-registered email returns the
+      same success-shaped response as a new one (and the owner gets a "someone
+      tried to sign up" notice), so the endpoint never reveals which addresses
+      exist.
+    </li>
+    <li>
+      <strong>Anti-pre-hijacking.</strong> The email is still unverified after
+      signup. If the real owner later proves control of the inbox via an
+      external method (OAuth, or an emailed OTP / magic link), any passkey
+      enrolled while the address was unverified is cleared — exactly like a
+      planted password — and sessions are revoked.
+    </li>
+  </ul>
+  <p>
+    Disable the whole flow with <code>GATEWAY_PASSKEY_SIGNUP_ENABLED=false</code>
+    (returns <code>FailedPrecondition</code>); authenticated add-a-passkey
+    registration is unaffected.
+  </p>
 
   <h2>Login</h2>
   <p>

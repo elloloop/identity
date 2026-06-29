@@ -440,6 +440,11 @@ type Config struct {
 	PasskeyOrigin string
 	// PasskeyChallengeExpirySeconds is the lifetime in seconds of registration / login challenges.
 	PasskeyChallengeExpirySeconds int
+	// PasskeySignupEnabled gates passkey-first signup (the unauthenticated
+	// BeginPasskeySignup / CompletePasskeySignup pair that creates a brand-new
+	// account from a passkey); set false to disable it while leaving
+	// authenticated add-a-passkey registration untouched.
+	PasskeySignupEnabled bool
 
 	// QR login (cross-device authorization).
 
@@ -762,6 +767,7 @@ func Load() *Config {
 		PasskeyRPName:                 envStr("GATEWAY_PASSKEY_RP_NAME", "Glassa Work"),
 		PasskeyOrigin:                 envStr("GATEWAY_PASSKEY_ORIGIN", "http://localhost:9002"),
 		PasskeyChallengeExpirySeconds: envInt("GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS", 300),
+		PasskeySignupEnabled:          envBool("GATEWAY_PASSKEY_SIGNUP_ENABLED", true),
 
 		QRLoginBaseURL:       envStr("GATEWAY_QR_LOGIN_BASE_URL", "http://localhost:9002"),
 		QRLoginExpirySeconds: envInt("GATEWAY_QR_LOGIN_EXPIRY_SECONDS", 300),

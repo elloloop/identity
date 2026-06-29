@@ -620,6 +620,39 @@ message CompletePasskeyLoginResponse {
   int32 expires_in = 4;
 }
 
+// Passkey-first signup (UNAUTHENTICATED account creation via a passkey).
+//
+// Unlike BeginPasskeyRegistration (which adds a passkey to an already
+// authenticated account), this pair creates a brand-new account whose first
+// and only credential is a passkey — no password, no session required up
+// front. The server mints the new user id during Begin and binds it as the
+// WebAuthn user handle so the credential registered here can log in later.
+message BeginPasskeySignupRequest {
+  string email = 1;
+  string device_name = 2;
+}
+
+message BeginPasskeySignupResponse {
+  // JSON string of PublicKeyCredentialCreationOptions (frontend passes to navigator.credentials.create)
+  string options_json = 1;
+  string challenge_id = 2;
+}
+
+message CompletePasskeySignupRequest {
+  string challenge_id = 1;
+  // JSON string of the PublicKeyCredential returned by navigator.credentials.create
+  string credential_json = 2;
+  string email = 3;
+  string device_name = 4;
+}
+
+message CompletePasskeySignupResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  int32 expires_in = 4;
+}
+
 // Management
 message ListPasskeysRequest {}
 
@@ -1339,6 +1372,9 @@ service IdentityService {
   // Passkey / WebAuthn
   rpc BeginPasskeyRegistration(BeginPasskeyRegistrationRequest) returns (BeginPasskeyRegistrationResponse);
   rpc CompletePasskeyRegistration(CompletePasskeyRegistrationRequest) returns (CompletePasskeyRegistrationResponse);
+  // Passkey-first signup — unauthenticated account creation via a passkey.
+  rpc BeginPasskeySignup(BeginPasskeySignupRequest) returns (BeginPasskeySignupResponse);
+  rpc CompletePasskeySignup(CompletePasskeySignupRequest) returns (CompletePasskeySignupResponse);
   rpc BeginPasskeyLogin(BeginPasskeyLoginRequest) returns (BeginPasskeyLoginResponse);
   rpc CompletePasskeyLogin(CompletePasskeyLoginRequest) returns (CompletePasskeyLoginResponse);
   rpc ListPasskeys(ListPasskeysRequest) returns (ListPasskeysResponse);

@@ -29,6 +29,10 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/GetCurrentUser":        true,
 	"/identity.v1.IdentityService/BeginPasskeyLogin":     true,
 	"/identity.v1.IdentityService/CompletePasskeyLogin":  true,
+	// Passkey-first signup: the caller is anonymous — they are creating a
+	// brand-new account from a passkey and have no JWT yet.
+	"/identity.v1.IdentityService/BeginPasskeySignup":    true,
+	"/identity.v1.IdentityService/CompletePasskeySignup": true,
 	"/identity.v1.IdentityService/InitiateQrLogin":       true,
 	"/identity.v1.IdentityService/PollQrLogin":           true,
 	"/identity.v1.IdentityService/AcceptInvitation":      true,

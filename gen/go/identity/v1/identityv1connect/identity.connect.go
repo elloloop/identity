@@ -119,6 +119,12 @@ const (
 	// IdentityServiceCompletePasskeyRegistrationProcedure is the fully-qualified name of the
 	// IdentityService's CompletePasskeyRegistration RPC.
 	IdentityServiceCompletePasskeyRegistrationProcedure = "/identity.v1.IdentityService/CompletePasskeyRegistration"
+	// IdentityServiceBeginPasskeySignupProcedure is the fully-qualified name of the IdentityService's
+	// BeginPasskeySignup RPC.
+	IdentityServiceBeginPasskeySignupProcedure = "/identity.v1.IdentityService/BeginPasskeySignup"
+	// IdentityServiceCompletePasskeySignupProcedure is the fully-qualified name of the
+	// IdentityService's CompletePasskeySignup RPC.
+	IdentityServiceCompletePasskeySignupProcedure = "/identity.v1.IdentityService/CompletePasskeySignup"
 	// IdentityServiceBeginPasskeyLoginProcedure is the fully-qualified name of the IdentityService's
 	// BeginPasskeyLogin RPC.
 	IdentityServiceBeginPasskeyLoginProcedure = "/identity.v1.IdentityService/BeginPasskeyLogin"
@@ -348,6 +354,9 @@ type IdentityServiceClient interface {
 	// Passkey / WebAuthn
 	BeginPasskeyRegistration(context.Context, *connect.Request[v1.BeginPasskeyRegistrationRequest]) (*connect.Response[v1.BeginPasskeyRegistrationResponse], error)
 	CompletePasskeyRegistration(context.Context, *connect.Request[v1.CompletePasskeyRegistrationRequest]) (*connect.Response[v1.CompletePasskeyRegistrationResponse], error)
+	// Passkey-first signup — unauthenticated account creation via a passkey.
+	BeginPasskeySignup(context.Context, *connect.Request[v1.BeginPasskeySignupRequest]) (*connect.Response[v1.BeginPasskeySignupResponse], error)
+	CompletePasskeySignup(context.Context, *connect.Request[v1.CompletePasskeySignupRequest]) (*connect.Response[v1.CompletePasskeySignupResponse], error)
 	BeginPasskeyLogin(context.Context, *connect.Request[v1.BeginPasskeyLoginRequest]) (*connect.Response[v1.BeginPasskeyLoginResponse], error)
 	CompletePasskeyLogin(context.Context, *connect.Request[v1.CompletePasskeyLoginRequest]) (*connect.Response[v1.CompletePasskeyLoginResponse], error)
 	ListPasskeys(context.Context, *connect.Request[v1.ListPasskeysRequest]) (*connect.Response[v1.ListPasskeysResponse], error)
@@ -642,6 +651,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceCompletePasskeyRegistrationProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("CompletePasskeyRegistration")),
+			connect.WithClientOptions(opts...),
+		),
+		beginPasskeySignup: connect.NewClient[v1.BeginPasskeySignupRequest, v1.BeginPasskeySignupResponse](
+			httpClient,
+			baseURL+IdentityServiceBeginPasskeySignupProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("BeginPasskeySignup")),
+			connect.WithClientOptions(opts...),
+		),
+		completePasskeySignup: connect.NewClient[v1.CompletePasskeySignupRequest, v1.CompletePasskeySignupResponse](
+			httpClient,
+			baseURL+IdentityServiceCompletePasskeySignupProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CompletePasskeySignup")),
 			connect.WithClientOptions(opts...),
 		),
 		beginPasskeyLogin: connect.NewClient[v1.BeginPasskeyLoginRequest, v1.BeginPasskeyLoginResponse](
@@ -1050,6 +1071,8 @@ type identityServiceClient struct {
 	resolveHelpRequest            *connect.Client[v1.ResolveHelpRequestRequest, v1.ResolveHelpRequestResponse]
 	beginPasskeyRegistration      *connect.Client[v1.BeginPasskeyRegistrationRequest, v1.BeginPasskeyRegistrationResponse]
 	completePasskeyRegistration   *connect.Client[v1.CompletePasskeyRegistrationRequest, v1.CompletePasskeyRegistrationResponse]
+	beginPasskeySignup            *connect.Client[v1.BeginPasskeySignupRequest, v1.BeginPasskeySignupResponse]
+	completePasskeySignup         *connect.Client[v1.CompletePasskeySignupRequest, v1.CompletePasskeySignupResponse]
 	beginPasskeyLogin             *connect.Client[v1.BeginPasskeyLoginRequest, v1.BeginPasskeyLoginResponse]
 	completePasskeyLogin          *connect.Client[v1.CompletePasskeyLoginRequest, v1.CompletePasskeyLoginResponse]
 	listPasskeys                  *connect.Client[v1.ListPasskeysRequest, v1.ListPasskeysResponse]
@@ -1257,6 +1280,16 @@ func (c *identityServiceClient) BeginPasskeyRegistration(ctx context.Context, re
 // CompletePasskeyRegistration calls identity.v1.IdentityService.CompletePasskeyRegistration.
 func (c *identityServiceClient) CompletePasskeyRegistration(ctx context.Context, req *connect.Request[v1.CompletePasskeyRegistrationRequest]) (*connect.Response[v1.CompletePasskeyRegistrationResponse], error) {
 	return c.completePasskeyRegistration.CallUnary(ctx, req)
+}
+
+// BeginPasskeySignup calls identity.v1.IdentityService.BeginPasskeySignup.
+func (c *identityServiceClient) BeginPasskeySignup(ctx context.Context, req *connect.Request[v1.BeginPasskeySignupRequest]) (*connect.Response[v1.BeginPasskeySignupResponse], error) {
+	return c.beginPasskeySignup.CallUnary(ctx, req)
+}
+
+// CompletePasskeySignup calls identity.v1.IdentityService.CompletePasskeySignup.
+func (c *identityServiceClient) CompletePasskeySignup(ctx context.Context, req *connect.Request[v1.CompletePasskeySignupRequest]) (*connect.Response[v1.CompletePasskeySignupResponse], error) {
+	return c.completePasskeySignup.CallUnary(ctx, req)
 }
 
 // BeginPasskeyLogin calls identity.v1.IdentityService.BeginPasskeyLogin.
@@ -1611,6 +1644,9 @@ type IdentityServiceHandler interface {
 	// Passkey / WebAuthn
 	BeginPasskeyRegistration(context.Context, *connect.Request[v1.BeginPasskeyRegistrationRequest]) (*connect.Response[v1.BeginPasskeyRegistrationResponse], error)
 	CompletePasskeyRegistration(context.Context, *connect.Request[v1.CompletePasskeyRegistrationRequest]) (*connect.Response[v1.CompletePasskeyRegistrationResponse], error)
+	// Passkey-first signup — unauthenticated account creation via a passkey.
+	BeginPasskeySignup(context.Context, *connect.Request[v1.BeginPasskeySignupRequest]) (*connect.Response[v1.BeginPasskeySignupResponse], error)
+	CompletePasskeySignup(context.Context, *connect.Request[v1.CompletePasskeySignupRequest]) (*connect.Response[v1.CompletePasskeySignupResponse], error)
 	BeginPasskeyLogin(context.Context, *connect.Request[v1.BeginPasskeyLoginRequest]) (*connect.Response[v1.BeginPasskeyLoginResponse], error)
 	CompletePasskeyLogin(context.Context, *connect.Request[v1.CompletePasskeyLoginRequest]) (*connect.Response[v1.CompletePasskeyLoginResponse], error)
 	ListPasskeys(context.Context, *connect.Request[v1.ListPasskeysRequest]) (*connect.Response[v1.ListPasskeysResponse], error)
@@ -1901,6 +1937,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceCompletePasskeyRegistrationProcedure,
 		svc.CompletePasskeyRegistration,
 		connect.WithSchema(identityServiceMethods.ByName("CompletePasskeyRegistration")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceBeginPasskeySignupHandler := connect.NewUnaryHandler(
+		IdentityServiceBeginPasskeySignupProcedure,
+		svc.BeginPasskeySignup,
+		connect.WithSchema(identityServiceMethods.ByName("BeginPasskeySignup")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceCompletePasskeySignupHandler := connect.NewUnaryHandler(
+		IdentityServiceCompletePasskeySignupProcedure,
+		svc.CompletePasskeySignup,
+		connect.WithSchema(identityServiceMethods.ByName("CompletePasskeySignup")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceBeginPasskeyLoginHandler := connect.NewUnaryHandler(
@@ -2335,6 +2383,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceBeginPasskeyRegistrationHandler.ServeHTTP(w, r)
 		case IdentityServiceCompletePasskeyRegistrationProcedure:
 			identityServiceCompletePasskeyRegistrationHandler.ServeHTTP(w, r)
+		case IdentityServiceBeginPasskeySignupProcedure:
+			identityServiceBeginPasskeySignupHandler.ServeHTTP(w, r)
+		case IdentityServiceCompletePasskeySignupProcedure:
+			identityServiceCompletePasskeySignupHandler.ServeHTTP(w, r)
 		case IdentityServiceBeginPasskeyLoginProcedure:
 			identityServiceBeginPasskeyLoginHandler.ServeHTTP(w, r)
 		case IdentityServiceCompletePasskeyLoginProcedure:
@@ -2582,6 +2634,14 @@ func (UnimplementedIdentityServiceHandler) BeginPasskeyRegistration(context.Cont
 
 func (UnimplementedIdentityServiceHandler) CompletePasskeyRegistration(context.Context, *connect.Request[v1.CompletePasskeyRegistrationRequest]) (*connect.Response[v1.CompletePasskeyRegistrationResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CompletePasskeyRegistration is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) BeginPasskeySignup(context.Context, *connect.Request[v1.BeginPasskeySignupRequest]) (*connect.Response[v1.BeginPasskeySignupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.BeginPasskeySignup is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CompletePasskeySignup(context.Context, *connect.Request[v1.CompletePasskeySignupRequest]) (*connect.Response[v1.CompletePasskeySignupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CompletePasskeySignup is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) BeginPasskeyLogin(context.Context, *connect.Request[v1.BeginPasskeyLoginRequest]) (*connect.Response[v1.BeginPasskeyLoginResponse], error) {

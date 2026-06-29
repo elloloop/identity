@@ -211,6 +211,70 @@ func TestPasskey_LoginSuccess(t *testing.T) {
 	}
 }
 
+// TestPasskeySignup_ThenLoginSuccess drives the full Connect stack: create a
+// brand-new account from a passkey (unauthenticated), then log in with that
+// same passkey. The login succeeding end-to-end proves the user id minted at
+// BeginPasskeySignup was persisted as both the account id and the credential's
+// owner — i.e. the WebAuthn handle binding is correct across the real server.
+func TestPasskeySignup_ThenLoginSuccess(t *testing.T) {
+	t.Parallel()
+
+	h := startPasskeyVectorServer(t)
+	ctx := context.Background()
+	const email = "passkey-firstsignup@example.com"
+
+	begin, err := h.Client.BeginPasskeySignup(ctx, connect.NewRequest(&identitypb.BeginPasskeySignupRequest{
+		Email:      email,
+		DeviceName: "Signup Key",
+	}))
+	if err != nil {
+		t.Fatalf("BeginPasskeySignup: %v", err)
+	}
+	h.SetPasskeyChallengeValue(t, begin.Msg.ChallengeId, specPasskeyLoginRegistrationChallenge(t))
+
+	complete, err := h.Client.CompletePasskeySignup(ctx, connect.NewRequest(&identitypb.CompletePasskeySignupRequest{
+		ChallengeId:    begin.Msg.ChallengeId,
+		CredentialJson: buildPasskeyLoginRegistrationCredentialJSON(t),
+		Email:          email,
+		DeviceName:     "Signup Key",
+	}))
+	if err != nil {
+		t.Fatalf("CompletePasskeySignup: %v", err)
+	}
+	userID := complete.Msg.GetUser().GetId()
+	if userID == "" {
+		t.Fatalf("CompletePasskeySignup returned no user id")
+	}
+	h.WaitForUser(t, email, func(user *service.User) bool { return user.ID == userID })
+
+	if recs := h.ListPasskeyCredentials(t, userID); len(recs) != 1 {
+		t.Fatalf("passkey credential count after signup = %d, want 1", len(recs))
+	}
+
+	// Log in with the passkey created during signup.
+	loginBegin, err := h.Client.BeginPasskeyLogin(ctx, connect.NewRequest(&identitypb.BeginPasskeyLoginRequest{
+		Email: email,
+	}))
+	if err != nil {
+		t.Fatalf("BeginPasskeyLogin: %v", err)
+	}
+	h.SetPasskeyChallengeValue(t, loginBegin.Msg.ChallengeId, specPasskeyLoginChallenge(t))
+
+	login, err := h.Client.CompletePasskeyLogin(ctx, connect.NewRequest(&identitypb.CompletePasskeyLoginRequest{
+		ChallengeId:    loginBegin.Msg.ChallengeId,
+		CredentialJson: buildPasskeyAssertionCredentialJSON(t),
+	}))
+	if err != nil {
+		t.Fatalf("CompletePasskeyLogin after signup: %v", err)
+	}
+	if got := login.Msg.GetUser().GetId(); got != userID {
+		t.Fatalf("login user id = %q, want %q", got, userID)
+	}
+	if login.Msg.AccessToken == "" || login.Msg.RefreshToken == "" {
+		t.Fatalf("expected passkey login to mint access and refresh tokens")
+	}
+}
+
 func TestPasskey_LoginCounterRegressionRejected(t *testing.T) {
 	t.Parallel()
 
