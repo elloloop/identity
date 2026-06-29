@@ -53,11 +53,9 @@ func TestRequireVerifiedEmail_BlocksThenAllows(t *testing.T) {
 		"unverified login must map to FailedPrecondition, got: %v", err)
 
 	// Verify the email, then the same login succeeds and returns a session.
-	mem, ok := h.Repo.(*MemRepo)
-	if !ok {
-		t.Skip("verify-release leg uses the memory backend's direct verify helper")
-	}
-	require.NoError(t, mem.SetUserEmailVerified(ctx, userID, 1))
+	// SetUserEmailVerified is on the service.Repository interface and
+	// implemented by every driver, so this release leg runs on all backends.
+	require.NoError(t, h.Repo.SetUserEmailVerified(ctx, userID, 1))
 
 	login, err := h.Client.PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
 		Email:    email,

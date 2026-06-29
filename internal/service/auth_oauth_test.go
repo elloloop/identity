@@ -136,6 +136,16 @@ func TestOAuthLogin_ClearsPlantedPasswordOnPreviouslyUnverifiedAccount(t *testin
 	planted.EmailVerified = false // attacker never proved control
 	planted.EmailVerifiedAt = 0
 
+	// Seed a live session for the account (only reachable when the verify gate
+	// is off; this asserts the password clear also revokes sessions).
+	const plantedSessionHash = "planted-session-hash"
+	_, err := repo.CreateRefreshToken(context.Background(), &RefreshTokenRecord{
+		TokenHash: plantedSessionHash,
+		UserID:    planted.ID,
+		ExpiresAt: 1 << 62,
+	})
+	require.NoError(t, err)
+
 	// Victim signs in with Google (a verified provider identity).
 	code := fakeOAuthCode("victim@example.com", "Victim", "", "google")
 	res, err := svc.OAuthLogin(context.Background(), OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: "", StateToken: "", AppleUserPayload: "", IPAddr: "9.9.9.9", UserAgent: "TestAgent"})
@@ -157,6 +167,12 @@ func TestOAuthLogin_ClearsPlantedPasswordOnPreviouslyUnverifiedAccount(t *testin
 	_, err = svc.PasswordLogin(context.Background(), "victim@example.com", plantedPW, "1.1.1.1", "agent")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNoPasswordSet))
+
+	// (d) The pre-existing session is revoked alongside the cleared password,
+	// so an attacker's planted-password session cannot survive the verification.
+	tok, err := repo.FindRefreshTokenByHash(context.Background(), plantedSessionHash)
+	require.NoError(t, err)
+	assert.Nil(t, tok, "planted session must be revoked when the planted password is cleared")
 }
 
 func TestOAuthLogin_ExchangerErrorPropagatesAsUnauthenticated(t *testing.T) {

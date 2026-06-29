@@ -924,6 +924,16 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 	}
 
 	if passwordCleared {
+		// The cleared credential is void, so revoke any sessions too — mirroring
+		// ConfirmPasswordReset — so a session established with the old password
+		// cannot outlive it. With the verification gate on this is a no-op (an
+		// unverified account cannot have a session); it matters when the gate is
+		// disabled and an attacker's planted-password session is still live.
+		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
+			s.logger.Warn("email_verified_external_revoke_failed",
+				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+		}
+		s.revokeUserSessionsIfModeSession(ctx, user.ID, "external_email_verification")
 		s.logger.Info("email_verified_external_password_cleared",
 			zap.String("user_id", user.ID),
 			zap.String("method", method))
