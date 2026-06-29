@@ -389,6 +389,12 @@ type Config struct {
 	// Dev-only
 	AuthAllowLocal bool
 
+	// AuthRequireVerifiedEmail blocks authentication until the account's email
+	// is verified. Default ON. Closes an account pre-hijacking vector: an
+	// attacker who plants a password account for an unverified address cannot
+	// use it, and a session is never issued for an unverified account.
+	AuthRequireVerifiedEmail bool
+
 	// SMTP single-provider config (simple form). If SMTPProviders is set,
 	// that takes precedence.
 	SMTPHost string // GATEWAY_SMTP_HOST
@@ -656,7 +662,8 @@ func Load() *Config {
 		CookieSecure:   envBool("GATEWAY_COOKIE_SECURE", false),
 		CookieSameSite: envStr("GATEWAY_COOKIE_SAMESITE", "Lax"),
 
-		AuthAllowLocal: envBool("GATEWAY_AUTH_ALLOW_LOCAL", true),
+		AuthAllowLocal:           envBool("GATEWAY_AUTH_ALLOW_LOCAL", true),
+		AuthRequireVerifiedEmail: envBool("GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL", true),
 
 		SMTPHost:      envStr("GATEWAY_SMTP_HOST", ""),
 		SMTPPort:      envInt("GATEWAY_SMTP_PORT", 587),

@@ -61,6 +61,7 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"CookieSecure", cfg.CookieSecure, false},
 		{"CookieSameSite", cfg.CookieSameSite, "Lax"},
 		{"AuthAllowLocal", cfg.AuthAllowLocal, true},
+		{"AuthRequireVerifiedEmail", cfg.AuthRequireVerifiedEmail, true},
 		{"SMTPHost", cfg.SMTPHost, ""},
 		{"SMTPPort", cfg.SMTPPort, 587},
 		{"SMTPUser", cfg.SMTPUser, ""},
@@ -136,6 +137,15 @@ func TestEnvTest_OverridePasswordResetEnabled(t *testing.T) {
 	cfg := Load()
 	if cfg.PasswordResetEnabled {
 		t.Errorf("PasswordResetEnabled: got true, want false")
+	}
+}
+
+func TestEnvTest_OverrideAuthRequireVerifiedEmail(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL", "false")
+	cfg := Load()
+	if cfg.AuthRequireVerifiedEmail {
+		t.Errorf("AuthRequireVerifiedEmail: got true, want false")
 	}
 }
 

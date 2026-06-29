@@ -207,6 +207,21 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 			zap.String("user_id", userID), zap.Error(err))
 	}
 
+	// When email verification is required, a freshly-created account is
+	// unverified and must NOT receive a live session — otherwise signup would
+	// auto-login past the very gate PasswordLogin enforces. Return the user
+	// (so the client can drive "check your email") with no tokens; the proto
+	// response shape is preserved, the tokens are simply empty.
+	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && !user.EmailVerified {
+		s.audit.Log(
+			ctx, audit.EventLoginSuccess,
+			audit.WithActor(userID),
+			audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{"method": "signup", "email_verification_required": true}),
+		)
+		return &LoginResult{User: user}, nil
+	}
+
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, "", "")
 	if err != nil {
 		return nil, err
@@ -270,6 +285,14 @@ func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displ
 		Status:    "active",
 		CreatedAt: msToTime(now),
 		UpdatedAt: msToTime(now),
+	}
+	// When email verification is required, a genuine new signup returns no
+	// live session (empty tokens — see PasswordSignup). The duplicate-signup
+	// decoy MUST mirror that exactly: otherwise empty-vs-non-empty tokens
+	// would disclose whether the address is already registered — the precise
+	// account-enumeration oracle this decoy exists to prevent.
+	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail {
+		return &LoginResult{User: user}, nil
 	}
 	// Duplicate signup must not authenticate the caller, but it also
 	// must not disclose whether the address already exists. We return a
@@ -407,10 +430,33 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return nil, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
-	// Local password accounts may sign in before verifying email; only
-	// account status is a hard gate here.
+	// Account status (lockout / suspended / invited / IDV) is a hard gate.
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
 		return nil, err
+	}
+
+	// Email-verification gate. The password is correct at this point, so this
+	// is the one place the gate can fire without creating an enumeration oracle
+	// (an unknown email or a wrong password already returned above with the
+	// generic ErrUnauthenticated). When required, an unverified account cannot
+	// authenticate — this closes the pre-hijacking vector where an attacker
+	// plants a password on an unverified address and waits for the real owner
+	// to verify it via OAuth/passwordless.
+	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && !user.EmailVerified {
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
+			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{"reason": "email_not_verified"}),
+		)
+		// Best-effort: resend the verification email so the user can complete
+		// verification and retry. Failures (throttle, transport) must not change
+		// the response — the gate result is the same either way.
+		if sendErr := s.SendEmailVerification(ctx, user.ID); sendErr != nil {
+			s.logger.Warn("login_verification_resend_failed",
+				zap.String("user_id", user.ID), zap.Error(sendErr))
+		}
+		return nil, ErrEmailVerificationRequired
 	}
 
 	// Credentials are proven; consult the tenant's LoginPolicy. This runs
@@ -837,6 +883,72 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email stri
 	return newUser, true, nil
 }
 
+// markEmailVerifiedViaExternalProof flips the account to verified because an
+// external method (OAuth provider assertion, or an emailed OTP/magic-link the
+// user redeemed) proved control of the address. Any password on the account was
+// set BEFORE this proof — possibly by a different party (account pre-hijacking)
+// — so it is cleared; the legitimate owner re-establishes it via password reset.
+//
+// It is a no-op when the email is already verified (the proof adds nothing).
+// email_verified + email_verified_at and the cleared password_hash are persisted
+// in a single patch. Best-effort: a persistence failure is logged, not fatal —
+// the user has already authenticated via the external proof.
+func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, nowMs int64, method string) {
+	if user == nil || user.EmailVerified {
+		return
+	}
+	patch := map[string]any{
+		"email_verified":    true,
+		"email_verified_at": nowMs,
+		"updated_at":        nowMs,
+	}
+	passwordCleared := user.PasswordHash != ""
+	if passwordCleared {
+		// The password predates the proof of email control, so it cannot be
+		// trusted to belong to the verified owner. Clear it.
+		patch["password_hash"] = ""
+	}
+
+	user.EmailVerified = true
+	user.EmailVerifiedAt = nowMs
+	if passwordCleared {
+		user.PasswordHash = ""
+	}
+
+	if err := s.repo(ctx).UpdateUser(ctx, user.ID, patch); err != nil {
+		s.logger.Warn("email_verified_external_persist_failed",
+			zap.String("user_id", user.ID),
+			zap.String("method", method),
+			zap.Error(err))
+		return
+	}
+
+	if passwordCleared {
+		// The cleared credential is void, so revoke any sessions too — mirroring
+		// ConfirmPasswordReset — so a session established with the old password
+		// cannot outlive it. With the verification gate on this is a no-op (an
+		// unverified account cannot have a session); it matters when the gate is
+		// disabled and an attacker's planted-password session is still live.
+		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
+			s.logger.Warn("email_verified_external_revoke_failed",
+				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+		}
+		s.revokeUserSessionsIfModeSession(ctx, user.ID, "external_email_verification")
+		s.logger.Info("email_verified_external_password_cleared",
+			zap.String("user_id", user.ID),
+			zap.String("method", method))
+		s.audit.Log(
+			ctx, audit.EventPasswordChanged,
+			audit.WithActor(user.ID),
+			audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{
+				"reason": "planted_password_cleared_on_external_email_verification",
+				"method": method,
+			}),
+		)
+	}
+}
+
 // applyOAuthProfileUpdates patches the local user record with any new
 // fields from the provider (name, avatar, email-verified flag, and the
 // email itself when the provider's email has changed since the link was
@@ -852,12 +964,11 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 		patch["avatar_url"] = identity.AvatarURL
 		u.AvatarURL = identity.AvatarURL
 	}
-	if !u.EmailVerified {
-		patch["email_verified"] = true
-		patch["email_verified_at"] = nowMs
-		u.EmailVerified = true
-		u.EmailVerifiedAt = nowMs
-	}
+	// A verified provider identity proves control of the address. Flip the
+	// account to verified and clear any password planted while it was still
+	// unverified (anti-pre-hijacking). This runs its own persistence, so it is
+	// intentionally NOT folded into the name/avatar patch below.
+	s.markEmailVerifiedViaExternalProof(ctx, u, nowMs, "oauth")
 	// Provider-asserted email changes are NOT auto-applied to the local
 	// account. A compromised provider account (or a provider that lets
 	// admins change member emails) would otherwise let an attacker

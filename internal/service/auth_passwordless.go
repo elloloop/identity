@@ -335,6 +335,16 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr, 
 		return nil, err
 	}
 
+	// A pre-existing account resolved here was NOT created verified by the
+	// resolver. Redeeming an emailed OTP / magic link proves control of the
+	// address, so verify the account AND clear any password planted while it
+	// was unverified (anti-pre-hijacking) — identical treatment to the OAuth
+	// external proof. New accounts are already created verified, so the helper
+	// is a no-op for them.
+	if !isNew {
+		s.markEmailVerifiedViaExternalProof(ctx, user, s.nowMs(), "passwordless")
+	}
+
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
 		return nil, err
 	}
