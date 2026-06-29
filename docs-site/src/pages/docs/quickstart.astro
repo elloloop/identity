@@ -26,8 +26,9 @@ import { Code } from "astro-expressive-code/components";
   -e GATEWAY_AUTH_ALLOW_LOCAL=true \\
   ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="docker run (sqlite)" />
   <p>
-    With no <code>GATEWAY_JWT_KEYS</code> set, Identity auto-generates a
-    throwaway RSA key on startup and logs <code>auto_generating_dev_rsa_key</code>.
+    With no JWT key file configured, Identity auto-generates a
+    throwaway RSA key (kid <code>dev</code>) on startup and logs
+    <code>jwt_signer_dev_key_generated</code>.
     See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a> for production setup.
   </p>
 

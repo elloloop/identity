@@ -127,3 +127,47 @@ func TestRenderInvalidData(t *testing.T) {
 		t.Logf("got err with empty struct (acceptable): %v", err)
 	}
 }
+
+func TestRender_Unbranded_OmitsBrandingMarkup(t *testing.T) {
+	html, text, err := Render(TemplateMagicLink, map[string]any{
+		"Link":      "https://app.example.com/x",
+		"ExpiresIn": "1 hour",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{html, text} {
+		if strings.Contains(body, "img src") || strings.Contains(body, "Need help?") {
+			t.Fatalf("unbranded render leaked branding markup:\n%s", body)
+		}
+		if strings.Contains(body, "<no value>") {
+			t.Fatalf("unbranded render leaked <no value>:\n%s", body)
+		}
+	}
+}
+
+func TestRender_Branded_IncludesProductLogoAndSupport(t *testing.T) {
+	html, text, err := Render(TemplateMagicLink, map[string]any{
+		"Link":         "https://app.example.com/x",
+		"ExpiresIn":    "1 hour",
+		"ProductName":  "Glassa Kids",
+		"LogoURL":      "https://kids.example.com/logo.png",
+		"PrimaryColor": "#1a73e8",
+		"SupportEmail": "help@kids.example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(html, "https://kids.example.com/logo.png") {
+		t.Fatalf("branded html missing logo:\n%s", html)
+	}
+	if !strings.Contains(html, "Glassa Kids") || !strings.Contains(html, "#1a73e8") {
+		t.Fatalf("branded html missing product name/colour:\n%s", html)
+	}
+	if !strings.Contains(html, "help@kids.example.com") {
+		t.Fatalf("branded html missing support footer:\n%s", html)
+	}
+	if !strings.Contains(text, "Glassa Kids") || !strings.Contains(text, "help@kids.example.com") {
+		t.Fatalf("branded text missing product name/support:\n%s", text)
+	}
+}

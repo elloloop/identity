@@ -243,6 +243,44 @@ func TestProfileService_ChangePassword_HappyPath(t *testing.T) {
 	}
 }
 
+func TestProfileService_ChangePassword_RevokesSessions(t *testing.T) {
+	db := newFakeDB()
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	db.addUserWithPassword("user-1", "alice@test.com", "Alice", "member", "active", pwHash)
+
+	// Two active sessions for the changing user and one for a bystander
+	// who must be untouched.
+	future := nowMs() + 3600*1000
+	db.addRefreshToken("sess-1", "user-1", future)
+	db.addRefreshToken("sess-2", "user-1", future)
+	db.addRefreshToken("other-sess", "user-2", future)
+
+	svc := newTestProfileService(db)
+	if err := svc.ChangePassword(context.Background(), "user-1", "OldStr0ng!Pass", "NewStr0ng!Pass"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The caller's session id is not available in ChangePassword, so ALL
+	// of the user's sessions are revoked (documented credential-change
+	// behavior) — the caller re-authenticates with the new password.
+	mine, err := svc.ListMySessions(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(mine) != 0 {
+		t.Errorf("expected all of user-1's sessions revoked, got %d", len(mine))
+	}
+
+	// A different user's session must survive.
+	others, err := svc.ListMySessions(context.Background(), "user-2")
+	if err != nil {
+		t.Fatalf("list other sessions: %v", err)
+	}
+	if len(others) != 1 {
+		t.Errorf("expected user-2's session untouched, got %d", len(others))
+	}
+}
+
 func TestProfileService_ChangePassword_WrongCurrent(t *testing.T) {
 	db := newFakeDB()
 	pwHash, _ := passwords.Hash("Str0ng!Pass")

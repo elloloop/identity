@@ -55,6 +55,9 @@ func userToProto(u *service.User) *identitypb.User {
 		PhoneVerifiedAt:  u.PhoneVerifiedAt,
 		FailedLoginCount: intToProtoInt32(u.FailedLoginCount),
 		LockedUntil:      u.LockedUntil,
+		DateOfBirthMs:    u.DateOfBirthMs,
+		IsMinor:          u.IsMinor,
+		AgeBand:          ageBandToProto(u.AgeBand),
 	}
 	if !u.CreatedAt.IsZero() {
 		pb.CreatedAt = timestamppb.New(u.CreatedAt)
@@ -75,6 +78,8 @@ func userStatusToProto(s string) identitypb.UserStatus {
 		return identitypb.UserStatus_USER_STATUS_DEACTIVATED
 	case "suspended":
 		return identitypb.UserStatus_USER_STATUS_SUSPENDED
+	case "pending_parental_consent":
+		return identitypb.UserStatus_USER_STATUS_PENDING_PARENTAL_CONSENT
 	default:
 		return identitypb.UserStatus_USER_STATUS_UNSPECIFIED
 	}
@@ -90,8 +95,23 @@ func protoToUserStatusString(s identitypb.UserStatus) string {
 		return "deactivated"
 	case identitypb.UserStatus_USER_STATUS_SUSPENDED:
 		return "suspended"
+	case identitypb.UserStatus_USER_STATUS_PENDING_PARENTAL_CONSENT:
+		return "pending_parental_consent"
 	default:
 		return ""
+	}
+}
+
+func ageBandToProto(b string) identitypb.AgeBand {
+	switch b {
+	case "CHILD":
+		return identitypb.AgeBand_AGE_BAND_CHILD
+	case "TEEN":
+		return identitypb.AgeBand_AGE_BAND_TEEN
+	case "ADULT":
+		return identitypb.AgeBand_AGE_BAND_ADULT
+	default:
+		return identitypb.AgeBand_AGE_BAND_UNSPECIFIED
 	}
 }
 

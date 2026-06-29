@@ -27,6 +27,11 @@ type IdentityVerificationService struct {
 	clock            func() time.Time
 	newID            func() string
 	logger           *zap.Logger
+	// minorData refuses to begin identity verification for a CHILD-band
+	// account (COPPA data-minimization). A zero-value minimizer is a safe
+	// no-op, so a caller that omits WithMinorDataMinimizer behaves exactly
+	// as before.
+	minorData MinorDataMinimizer
 }
 
 // NewIdentityVerificationService constructs the service. clock and
@@ -48,6 +53,14 @@ func NewIdentityVerificationService(
 		newID:            newVerificationID,
 		logger:           logger,
 	}
+}
+
+// WithMinorDataMinimizer wires COPPA data-minimization: when the minimizer is
+// active, a CHILD-band account cannot begin identity verification. Returns the
+// service for chaining. Off by default (zero-value minimizer is a no-op).
+func (s *IdentityVerificationService) WithMinorDataMinimizer(m MinorDataMinimizer) *IdentityVerificationService {
+	s.minorData = m
+	return s
 }
 
 // projectID returns the storage shard (project) the request operates under:
@@ -81,6 +94,14 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 	}
 	if user == nil {
 		return nil, ErrNotFound
+	}
+	// COPPA data-minimization: never collect identity documents from a
+	// CHILD-band account when minimization is enabled. No provider session
+	// is created. Adults/teens and minimization-off deployments are
+	// unaffected.
+	if s.minorData.BlocksChild(user.DateOfBirthMs) {
+		s.logger.Info("idv_begin_blocked_minor", zap.String("user_id", userID))
+		return nil, ErrMinorDataMinimized
 	}
 
 	sess, err := s.provider.BeginVerification(ctx, idv.Request{

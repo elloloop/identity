@@ -52,7 +52,20 @@ const (
 	// DefaultCaptchaRecaptchaScoreThreshold is the reCAPTCHA v3 score below
 	// which a response is rejected when no threshold is configured.
 	DefaultCaptchaRecaptchaScoreThreshold = 0.5
+
+	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
+	// users 12 and under (i.e. under 13) are in the protected CHILD band.
+	DefaultAgeGateChildMaxAge = 12
+	// DefaultAgeGateAdultAge is the age at or above which a user is an adult;
+	// below it (and above child-max) they are a TEEN minor.
+	DefaultAgeGateAdultAge = 18
 )
+
+// DefaultPostgresConnTimeoutMs is the default per-acquire Postgres connection
+// timeout (milliseconds) when GATEWAY_POSTGRES_CONN_TIMEOUT_MS is unset. It
+// mirrors pgrepo.DefaultConnTimeout (5s) so the boundary default matches the
+// driver's own zero-value fallback.
+const DefaultPostgresConnTimeoutMs = 5000
 
 // DefaultProjectIDFallback is the project id used when none is configured.
 // It is the env-loader default for GATEWAY_DEFAULT_PROJECT_ID and the value
@@ -63,18 +76,24 @@ const DefaultProjectIDFallback = "default"
 
 // Config holds all identity service configuration.
 type Config struct {
-	// Server
-	GRPCPort    int
+	// Server & ports.
+
+	// GRPCPort is the native gRPC listener port (reserved; currently unused).
+	GRPCPort int
+	// ConnectPort is the Connect-RPC HTTP listener port — the main public RPC surface.
 	ConnectPort int
+	// MetricsPort is the port serving the Prometheus /metrics endpoint.
 	MetricsPort int
 
-	// Persistence driver. Selects which Repository / DB
-	// implementation the binary wires up — "postgres" (default, the
-	// primary datastore) or "memory" for an in-process store useful for
-	// local dev and tests. Driven by GATEWAY_REPO_DRIVER.
+	// RepoDriver selects the persistence driver — which Repository / DB
+	// implementation the binary wires up: "postgres" (default, the primary
+	// datastore), "sqlite" (embedded single-node), or "memory" (in-process,
+	// for local dev and tests). Driven by GATEWAY_REPO_DRIVER.
 	RepoDriver string
 
-	// Tenant
+	// DefaultTenantID is the storage-scope (shard) id the default project maps
+	// onto — the data-plane tenant zero-config requests are pinned to; distinct
+	// from DefaultProjectID. Driven by GATEWAY_DEFAULT_TENANT_ID.
 	DefaultTenantID string
 
 	// DefaultProjectID is the id of the control-plane Project the service
@@ -125,43 +144,46 @@ type Config struct {
 	// GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN, default true.
 	RequireVerifiedAuthDomain bool
 
-	// Email service (internal gRPC)
+	// Email service (internal gRPC).
+
+	// EmailServiceHost is the host of the internal email-sending gRPC service.
 	EmailServiceHost string
+	// EmailServicePort is the port of the internal email-sending gRPC service.
 	EmailServicePort int
 
-	// JWT (RS256). Two backends ship in-tree:
-	//
-	//   file     (default) reads the keys file at GATEWAY_JWT_KEYS_FILE,
-	//            reloads on SIGHUP. The default for any non-KMS
-	//            deployment; works without external dependencies. If
-	//            JWTKeysFile is empty, the binary auto-generates a
-	//            throwaway dev key in a temp file at startup (suitable
-	//            for local dev / CI only — emits a warning log).
-	//   kms_aws  delegates Sign to AWS KMS. JWTKMSKeys is a CSV of
-	//            "kid=keyARN" entries.
-	//
-	// Adding a new backend (GCP KMS, HashiCorp Vault, hardware HSM, …)
-	// is a matter of implementing pkg/jwt.Signer in a sibling package.
-	JWTSigner        string
-	JWTKeysFile      string
-	JWTKMSKeys       string
-	JWTKMSAWSRegion  string
+	// JWT (RS256). Two signer backends ship in-tree (file, kms_aws); adding a
+	// new one (GCP KMS, HashiCorp Vault, hardware HSM, …) is a matter of
+	// implementing pkg/jwt.Signer in a sibling package.
+
+	// JWTSigner selects the JWT signing backend: "file" (default, RS256 keys
+	// read from JWTKeysFile, reloaded on SIGHUP) or "kms_aws" (AWS KMS).
+	JWTSigner string
+	// JWTKeysFile is the path to the RS256 key document read by the "file"
+	// signer; empty auto-generates a throwaway dev key at startup (local dev /
+	// CI only — emits a warning log).
+	JWTKeysFile string
+	// JWTKMSKeys is a CSV of "kid=keyARN" entries for the "kms_aws" signer;
+	// required when GATEWAY_JWT_SIGNER=kms_aws.
+	JWTKMSKeys string
+	// JWTKMSAWSRegion is the AWS region for the "kms_aws" signer.
+	JWTKMSAWSRegion string
+	// JWTExpirySeconds is the access-token (JWT) lifetime in seconds; capped at
+	// 900 (RevocationModeTTLAccessTokenCap) under revocation mode "ttl".
 	JWTExpirySeconds int
 
-	// JWT audience. When non-empty, minted access tokens carry this as
-	// the "aud" claim and the verifier enforces a match. When
-	// JWTRequireAudience is true, tokens with no "aud" claim are also
-	// rejected; the false default exists so a deploy can roll out the
-	// mint-side change first, wait for in-flight tokens to expire, then
-	// flip to required.
-	JWTAudience        string
+	// JWTAudience, when non-empty, is stamped on minted access tokens as the
+	// "aud" claim and enforced by the verifier on every request.
+	JWTAudience string
+	// JWTRequireAudience, when true, also rejects tokens that carry no "aud"
+	// claim; the false default lets a deploy roll out the mint-side change
+	// first, wait for in-flight tokens to expire, then flip to required.
 	JWTRequireAudience bool
 
-	// Refresh tokens
+	// RefreshExpirySeconds is the refresh-token lifetime in seconds (default 7 days).
 	RefreshExpirySeconds int
 
-	// Revocation mode. Selects how the service propagates a
-	// DeleteRefreshTokensForUser to in-flight access tokens.
+	// RevocationMode selects how a DeleteRefreshTokensForUser propagates to
+	// in-flight access tokens — "ttl" (default) or "session".
 	//
 	//   "ttl"     (default) — refresh tokens are deleted; already-minted
 	//             access tokens stay valid until natural JWT expiry. Zero
@@ -201,124 +223,218 @@ type Config struct {
 	// cannot grow unbounded under hostile or high-cardinality traffic.
 	ProjectResolutionCacheMaxEntries int
 
-	// OAuth providers. Identity does the code exchange for these
-	// providers itself — see pkg/oauth. A provider is enabled only
-	// when BOTH the ID and secret are non-empty.
-	GoogleClientID        string
-	GoogleClientSecret    string
-	MicrosoftClientID     string
+	// OAuth providers. Identity does the code exchange itself (see pkg/oauth);
+	// a provider is enabled only when BOTH its ID and secret are non-empty.
+
+	// GoogleClientID is the Google OAuth client ID.
+	GoogleClientID string
+	// GoogleClientSecret is the Google OAuth client secret.
+	GoogleClientSecret string
+	// GoogleAuthorizationURL overrides the Google OAuth authorization endpoint; empty = the real Google endpoint. For self-hosted proxies and end-to-end tests against a mock OIDC provider.
+	GoogleAuthorizationURL string
+	// GoogleTokenURL overrides the Google OAuth token endpoint; empty = the real Google endpoint.
+	GoogleTokenURL string
+	// GoogleJWKSURL overrides the Google OIDC JWKS (public keys) endpoint; empty = the real Google endpoint.
+	GoogleJWKSURL string
+	// GoogleDiscoveryURL overrides the Google OIDC discovery document URL; empty = the real Google endpoint. When set, the authorization / token / JWKS / userinfo endpoints are resolved from this document.
+	GoogleDiscoveryURL string
+	// GoogleUserinfoURL overrides the Google OIDC userinfo endpoint; empty = the real Google endpoint.
+	GoogleUserinfoURL string
+	// GoogleIssuer overrides the expected Google OIDC token issuer; empty = the real Google issuer.
+	GoogleIssuer string
+	// MicrosoftClientID is the Microsoft / Entra ID OAuth client ID.
+	MicrosoftClientID string
+	// MicrosoftClientSecret is the Microsoft / Entra ID OAuth client secret.
 	MicrosoftClientSecret string
-	MicrosoftTenantID     string
-	GitHubClientID        string
-	GitHubClientSecret    string
+	// MicrosoftTenantID is the Microsoft directory (tenant) id, or "common" for multi-tenant.
+	MicrosoftTenantID string
+	// GitHubClientID is the GitHub OAuth client ID.
+	GitHubClientID string
+	// GitHubClientSecret is the GitHub OAuth client secret.
+	GitHubClientSecret string
+	// AppleClientID is the Apple Service ID used as the OAuth client ID.
+	AppleClientID string
+	// AppleTeamID is the Apple Developer Team ID.
+	AppleTeamID string
+	// AppleKeyID is the Apple private-key (Key) ID.
+	AppleKeyID string
+	// ApplePrivateKey is the Apple Sign in private key (PEM or base64).
+	ApplePrivateKey string
 
 	// OAuthAllowedReturnURLs is the comma-separated allowlist of app URLs
 	// the hosted OAuth flow may redirect back to (the `return_to` param of
-	// GET /oauth/start/{provider}). Each entry is an exact origin or a URL
-	// prefix; a return_to matches when it equals an entry or begins with
-	// an entry. Validation is fail-closed: a return_to that matches no
-	// entry is rejected with 400.
+	// GET /oauth/start/{provider}). Each entry is an exact origin or a path
+	// prefix. A return_to must match the configured origin and, for path
+	// entries, the configured path or one of its descendants. Validation is
+	// fail-closed: a return_to that matches no entry is rejected with 400.
 	//
-	// Empty disables the hosted flow entirely — GET /oauth/start and GET
-	// /oauth/callback return 404. The headless BeginOAuthLogin / OAuthLogin
+	// Empty disables the hosted flow entirely — GET /oauth/start and
+	// GET/POST /oauth/callback return 404. The headless BeginOAuthLogin / OAuthLogin
 	// RPCs are unaffected. Driven by GATEWAY_OAUTH_ALLOWED_RETURN_URLS.
 	OAuthAllowedReturnURLs string
 
-	// Identity Verification (document + selfie). The provider name
-	// selects the implementation in pkg/idv. Empty disables IDV; the
-	// RPCs return CodeUnimplemented to clients in that case.
-	IDVProvider           string // "azure", "stub", or "" (disabled)
-	IDVAzureEndpoint      string // e.g. https://my-face.cognitiveservices.azure.com
-	IDVAzureKey           string // Cognitive Services key
-	IDVAzureSessionTTLSec int    // session token lifetime; default 600
+	// Identity verification (document + selfie); the provider selects the
+	// implementation in pkg/idv.
+
+	// IDVProvider selects the IDV backend — "azure", "stub", or "" (disabled;
+	// the IDV RPCs return CodeUnimplemented).
+	IDVProvider string
+	// IDVAzureEndpoint is the Azure Cognitive Services Face endpoint URL for
+	// the azure provider (e.g. https://NAME.cognitiveservices.azure.com).
+	IDVAzureEndpoint string
+	// IDVAzureKey is the Azure Cognitive Services API key (azure provider).
+	IDVAzureKey string
+	// IDVAzureSessionTTLSec is the IDV session-token lifetime in seconds.
+	IDVAzureSessionTTLSec int
 	// When true, PasswordLogin / OAuthLogin reject users without an
 	// approved identity verification. The default is false (verification
 	// is offered but not required) to match the existing email-verified
 	// pattern. Tenants that need stricter onboarding flip this on.
 	IDVRequired bool
 
-	// CAPTCHA verification on unauthenticated endpoints. CaptchaEnabled is
-	// the global on/off; when off the no-op verifier is wired and the
-	// per-endpoint toggles are ignored. CaptchaProvider selects the
-	// implementation in pkg/captcha ("turnstile" or "recaptcha_v3"); the
-	// matching secret must be set. The per-endpoint toggles let a deployer
-	// enforce CAPTCHA on a subset of the gated endpoints (all default true,
-	// so enabling CAPTCHA gates every endpoint unless one is flipped off).
-	CaptchaEnabled                 bool    // GATEWAY_CAPTCHA_ENABLED (default false)
-	CaptchaProvider                string  // GATEWAY_CAPTCHA_PROVIDER ("turnstile" | "recaptcha_v3" | "")
-	CaptchaTurnstileSecret         string  // GATEWAY_CAPTCHA_TURNSTILE_SECRET
-	CaptchaRecaptchaSecret         string  // GATEWAY_CAPTCHA_RECAPTCHA_SECRET
-	CaptchaRecaptchaScoreThreshold float64 // GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD (default 0.5)
-	CaptchaEnforcePasswordSignup   bool    // GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP (default true)
-	CaptchaEnforcePasswordLogin    bool    // GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN (default true)
-	CaptchaEnforcePasswordReset    bool    // GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET (default true)
-	CaptchaEnforceEmailLoginCode   bool    // GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE (default true)
-	CaptchaEnforceMagicLink        bool    // GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK (default true)
+	// CAPTCHA verification on unauthenticated endpoints. When disabled the
+	// no-op verifier is wired and the per-endpoint toggles are ignored; the
+	// toggles default true, so enabling CAPTCHA gates every endpoint unless one
+	// is flipped off.
 
-	// Password
-	PasswordSignupEnabled      bool
-	PasswordResetEnabled       bool
+	// CaptchaEnabled is the global on/off for CAPTCHA on unauthenticated endpoints.
+	CaptchaEnabled bool
+	// CaptchaProvider selects the pkg/captcha implementation — "turnstile" or
+	// "recaptcha_v3"; the matching secret must be set.
+	CaptchaProvider string
+	// CaptchaTurnstileSecret is the Cloudflare Turnstile secret key (provider "turnstile").
+	CaptchaTurnstileSecret string
+	// CaptchaRecaptchaSecret is the reCAPTCHA v3 secret key (provider "recaptcha_v3").
+	CaptchaRecaptchaSecret string
+	// CaptchaRecaptchaScoreThreshold is the reCAPTCHA v3 score below which a
+	// response is rejected; must be in [0,1].
+	CaptchaRecaptchaScoreThreshold float64
+	// CaptchaEnforcePasswordSignup gates CAPTCHA on the PasswordSignup endpoint.
+	CaptchaEnforcePasswordSignup bool
+	// CaptchaEnforcePasswordLogin gates CAPTCHA on the PasswordLogin endpoint.
+	CaptchaEnforcePasswordLogin bool
+	// CaptchaEnforcePasswordReset gates CAPTCHA on the RequestPasswordReset endpoint.
+	CaptchaEnforcePasswordReset bool
+	// CaptchaEnforceEmailLoginCode gates CAPTCHA on the RequestEmailLoginCode endpoint.
+	CaptchaEnforceEmailLoginCode bool
+	// CaptchaEnforceMagicLink gates CAPTCHA on the RequestMagicLink endpoint.
+	CaptchaEnforceMagicLink bool
+
+	// Age-gating (COPPA). When disabled the no-op determiner is wired (everyone
+	// classifies as adult, no consent gating) and signup behaves as before.
+
+	// AgeGateEnabled is the global on/off for age-gating.
+	AgeGateEnabled bool
+	// AgeGateChildMaxAge is the inclusive upper age of the protected CHILD band
+	// (default 12 → under-13).
+	AgeGateChildMaxAge int
+	// AgeGateAdultAge is the age at or above which a user is an adult; between it
+	// and AgeGateChildMaxAge a user is a TEEN minor (default 18).
+	AgeGateAdultAge int
+	// AgeGateRequireDOB rejects a signup that omits a date of birth
+	// (INVALID_ARGUMENT) instead of treating it as adult.
+	AgeGateRequireDOB bool
+
+	// MinorDataMinimization gates COPPA-style data-minimization for accounts
+	// the age gate classifies as AGE_BAND_CHILD. When true (and the age gate
+	// is enabled), the server refuses to collect or persist non-essential PII
+	// from a child: RequestPhoneVerification and BeginIdentityVerification are
+	// rejected with ErrMinorDataMinimized, and a recovery_email / avatar_url
+	// supplied for a child at signup or profile-update is dropped rather than
+	// stored. Default false preserves today's behavior — adults, teens, and
+	// accounts with an unknown age band are never affected.
+	MinorDataMinimization bool // GATEWAY_MINOR_DATA_MINIMIZATION (default false)
+
+	// Password.
+
+	// PasswordSignupEnabled gates self-serve PasswordSignup; set false to
+	// disable it (admin-driven invitations still work).
+	PasswordSignupEnabled bool
+	// PasswordResetEnabled gates RequestPasswordReset; when false the RPC stays
+	// enumeration-safe but is a no-op (admin resets still work).
+	PasswordResetEnabled bool
+	// PasswordResetExpirySeconds is the recovery-email reset-link lifetime in seconds.
 	PasswordResetExpirySeconds int
 
 	// Passwordless email login (OTP code + magic link).
-	//
-	// PasswordlessSignupEnabled (default true) gates auto-create: when a
-	// passwordless login verifies an email with no existing account and
-	// this is true, the account is created on the spot; when false the
-	// unknown email gets the same anti-enumeration decoy a request for a
-	// known email would produce, so the endpoint never reveals which
-	// addresses exist. Mirrors GATEWAY_PASSWORD_SIGNUP_ENABLED.
-	PasswordlessSignupEnabled bool // GATEWAY_PASSWORDLESS_SIGNUP_ENABLED (default true)
-	// OTP code lifetime, length is fixed at 6 digits.
-	PasswordlessCodeTTLSeconds int // GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS (default 300)
-	// Max verify attempts per OTP before it is invalidated (brute-force cap).
-	PasswordlessCodeMaxAttempts int // GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS (default 5)
-	// Magic-link token lifetime.
-	PasswordlessMagicLinkTTLSeconds int // GATEWAY_PASSWORDLESS_MAGIC_LINK_TTL_SECONDS (default 900)
 
-	// Phone verification (SMS OTP). Standalone phone-ownership
-	// verification for an already-authenticated user — not yet a login
-	// factor. Disabled by default; when SMSEnabled is true a provider and
-	// its credentials must be set (enforced by Validate).
-	SMSEnabled  bool   // GATEWAY_SMS_ENABLED (default false)
-	SMSProvider string // GATEWAY_SMS_PROVIDER: twilio | sns | azure
+	// PasswordlessSignupEnabled gates auto-create on a passwordless verify for
+	// an unknown email: when false the unknown email gets the same
+	// anti-enumeration decoy as a known one, so the endpoint never reveals which
+	// addresses exist. Mirrors PasswordSignupEnabled.
+	PasswordlessSignupEnabled bool
+	// PasswordlessCodeTTLSeconds is the one-time-code lifetime in seconds (code length is fixed at 6 digits).
+	PasswordlessCodeTTLSeconds int
+	// PasswordlessCodeMaxAttempts is the max verify attempts per OTP before it
+	// is invalidated (brute-force cap).
+	PasswordlessCodeMaxAttempts int
+	// PasswordlessMagicLinkTTLSeconds is the magic-link token lifetime in seconds.
+	PasswordlessMagicLinkTTLSeconds int
 
-	// Twilio credentials (SMSProvider == twilio).
-	SMSTwilioAccountSID string // GATEWAY_SMS_TWILIO_ACCOUNT_SID
-	SMSTwilioAuthToken  string // GATEWAY_SMS_TWILIO_AUTH_TOKEN
-	SMSTwilioFrom       string // GATEWAY_SMS_TWILIO_FROM
+	// Phone verification (SMS OTP) — standalone phone-ownership verification for
+	// an already-authenticated user, not yet a login factor. When SMSEnabled, a
+	// provider and its credentials must be set (enforced by Validate).
 
-	// AWS SNS credentials (SMSProvider == sns).
-	SMSAWSRegion          string // GATEWAY_SMS_AWS_REGION
-	SMSAWSAccessKeyID     string // GATEWAY_SMS_AWS_ACCESS_KEY_ID
-	SMSAWSSecretAccessKey string // GATEWAY_SMS_AWS_SECRET_ACCESS_KEY
-	SMSAWSSenderID        string // GATEWAY_SMS_AWS_SENDER_ID (optional)
+	// SMSEnabled turns on phone (SMS OTP) verification.
+	SMSEnabled bool
+	// SMSProvider selects the SMS backend: "twilio", "sns", or "azure".
+	SMSProvider string
 
-	// Azure Communication Services credentials (SMSProvider == azure).
-	SMSAzureConnectionString string // GATEWAY_SMS_AZURE_CONNECTION_STRING
-	SMSAzureFrom             string // GATEWAY_SMS_AZURE_FROM
+	// SMSTwilioAccountSID is the Twilio Account SID (provider "twilio").
+	SMSTwilioAccountSID string
+	// SMSTwilioAuthToken is the Twilio auth token (provider "twilio").
+	SMSTwilioAuthToken string
+	// SMSTwilioFrom is the Twilio sender phone number (provider "twilio").
+	SMSTwilioFrom string
 
-	// Phone-verification OTP policy (mirrors the Passwordless* knobs).
-	PhoneCodeTTLSeconds      int // GATEWAY_PHONE_CODE_TTL_SECONDS (default 300)
-	PhoneCodeMaxAttempts     int // GATEWAY_PHONE_CODE_MAX_ATTEMPTS (default 5)
-	PhoneCodeCooldownSeconds int // GATEWAY_PHONE_CODE_COOLDOWN_SECONDS (default 60)
+	// SMSAWSRegion is the AWS region for the SNS sender (provider "sns").
+	SMSAWSRegion string
+	// SMSAWSAccessKeyID is the AWS access key id for SNS (provider "sns").
+	SMSAWSAccessKeyID string
+	// SMSAWSSecretAccessKey is the AWS secret access key for SNS (provider "sns").
+	SMSAWSSecretAccessKey string
+	// SMSAWSSenderID is the optional AWS SNS sender id (provider "sns").
+	SMSAWSSenderID string
 
-	// SAML 2.0 Identity Provider. Disabled by default; the server mounts
-	// no SAML surface and holds a no-op issuer. When SAMLIDPEnabled is
-	// true the entityID, SSO URL, and a signing key + certificate are
-	// required (enforced by Validate). SLO URL is optional.
-	SAMLIDPEnabled  bool   // GATEWAY_SAML_IDP_ENABLED (default false)
-	SAMLEntityID    string // GATEWAY_SAML_ENTITY_ID (IdP entityID / metadata URL)
-	SAMLSSOURL      string // GATEWAY_SAML_SSO_URL (HTTP-POST/Redirect SSO endpoint)
-	SAMLSLOURL      string // GATEWAY_SAML_SLO_URL (optional single-logout endpoint)
-	SAMLSigningKey  string // GATEWAY_SAML_SIGNING_KEY (PEM RSA private key)
-	SAMLSigningCert string // GATEWAY_SAML_SIGNING_CERT (PEM X.509 certificate)
+	// SMSAzureConnectionString is the Azure Communication Services connection
+	// string (provider "azure").
+	SMSAzureConnectionString string
+	// SMSAzureFrom is the Azure Communication Services sender number (provider "azure").
+	SMSAzureFrom string
 
-	// TOTP (2FA)
-	// 32-byte key, base64-encoded. Required in prod; dev falls back to
-	// a deterministic throwaway key.
+	// PhoneCodeTTLSeconds is the phone-verification OTP lifetime in seconds.
+	PhoneCodeTTLSeconds int
+	// PhoneCodeMaxAttempts is the max wrong-code guesses before the OTP is invalidated.
+	PhoneCodeMaxAttempts int
+	// PhoneCodeCooldownSeconds is the per-request cooldown (seconds) between phone-verification sends.
+	PhoneCodeCooldownSeconds int
+
+	// SAML 2.0 Identity Provider. Disabled by default; the server mounts no
+	// SAML surface and holds a no-op issuer. When SAMLIDPEnabled is true the
+	// entityID, SSO URL, and a signing key + certificate are required
+	// (enforced by Validate). SLO URL is optional.
+
+	// SAMLIDPEnabled turns on the SAML 2.0 IdP surface (default false).
+	SAMLIDPEnabled bool
+	// SAMLEntityID is the IdP entityID published in metadata (metadata URL).
+	SAMLEntityID string
+	// SAMLSSOURL is the HTTP-POST/Redirect single sign-on endpoint.
+	SAMLSSOURL string
+	// SAMLSLOURL is the optional single-logout endpoint.
+	SAMLSLOURL string
+	// SAMLSigningKey is the PEM-encoded RSA private key used to sign assertions.
+	SAMLSigningKey string
+	// SAMLSigningCert is the PEM-encoded X.509 certificate published in metadata.
+	SAMLSigningCert string
+
+	// TOTP (2FA).
+
+	// TOTPEncryptionKey is the base64-encoded 32-byte AES-256 key that encrypts
+	// TOTP secrets at rest. Throwaway dev key if unset; required in prod (a
+	// deterministic dev fallback must never be used in production).
 	TOTPEncryptionKey string
-	TOTPIssuer        string
+	// TOTPIssuer is the issuer name shown in users' authenticator apps.
+	TOTPIssuer string
 
 	// Pepper used as the HMAC-SHA-256 key for recovery-code hashing.
 	// Base64-encoded; must decode to >= 32 bytes. Required whenever
@@ -327,24 +443,37 @@ type Config struct {
 	// without it, an attacker cannot precompute or enumerate hashes.
 	TOTPRecoveryPepper string
 
-	// Login challenge (how long after password success user has to complete 2FA)
+	// LoginChallengeExpirySeconds is the window (seconds) after a password
+	// success in which the user must complete the 2FA challenge.
 	LoginChallengeExpirySeconds int
 
-	// WebAuthn / Passkeys
-	PasskeyRPID                   string
-	PasskeyRPName                 string
-	PasskeyOrigin                 string
+	// WebAuthn / Passkeys.
+
+	// PasskeyRPID is the WebAuthn relying-party ID — must match the registrable
+	// domain (e.g. example.com).
+	PasskeyRPID string
+	// PasskeyRPName is the human-readable WebAuthn relying-party name.
+	PasskeyRPName string
+	// PasskeyOrigin is the allowed origin for passkey ceremonies (scheme + host + port).
+	PasskeyOrigin string
+	// PasskeyChallengeExpirySeconds is the lifetime in seconds of registration / login challenges.
 	PasskeyChallengeExpirySeconds int
 
-	// QR Login (cross-device authorization)
-	QRLoginBaseURL       string
+	// QR login (cross-device authorization).
+
+	// QRLoginBaseURL is the base URL embedded in the cross-device login QR code.
+	QRLoginBaseURL string
+	// QRLoginExpirySeconds is the QR login-session lifetime in seconds.
 	QRLoginExpirySeconds int
 
-	// Login security (failed-login lockout)
-	LoginMaxFailedAttempts int
-	LoginLockoutSeconds    int
+	// Login security (failed-login lockout).
 
-	// Default email domain
+	// LoginMaxFailedAttempts is the consecutive failed-login count that triggers a lockout.
+	LoginMaxFailedAttempts int
+	// LoginLockoutSeconds is how long (seconds) an account stays locked after the threshold is hit.
+	LoginLockoutSeconds int
+
+	// DefaultEmailDomain is the default email domain applied to new accounts.
 	DefaultEmailDomain string
 
 	// PublicEmailDomains extends the built-in set of consumer/public email
@@ -356,29 +485,68 @@ type Config struct {
 	// already covers the major global providers).
 	PublicEmailDomains string
 
-	// CORS
+	// AllowedOrigins is the comma-separated list of CORS allowed origins.
 	AllowedOrigins string
 
-	// Cookie settings
-	CookieDomain   string
-	CookieSecure   bool
+	// Cookie settings.
+
+	// CookieDomain is the Domain attribute set on auth cookies (empty = host-only).
+	CookieDomain string
+	// CookieSecure sets the Secure attribute on auth cookies; enable in prod (HTTPS-only).
+	CookieSecure bool
+	// CookieSameSite is the SameSite attribute on auth cookies — "Lax", "Strict", or "None".
 	CookieSameSite string
 
-	// Dev-only
+	// AuthAllowLocal enables local username/password auth; set false to require
+	// OAuth (intended for development).
 	AuthAllowLocal bool
 
-	// SMTP single-provider config (simple form). If SMTPProviders is set,
-	// that takes precedence.
-	SMTPHost string // GATEWAY_SMTP_HOST
-	SMTPPort int    // GATEWAY_SMTP_PORT (default 587)
-	SMTPUser string // GATEWAY_SMTP_USER
-	SMTPPass string // GATEWAY_SMTP_PASS
-	SMTPFrom string // GATEWAY_SMTP_FROM
-	SMTPTLS  bool   // GATEWAY_SMTP_TLS (default true)
+	// AuthRequireVerifiedEmail blocks authentication until the account's email
+	// is verified. Default ON. Closes an account pre-hijacking vector: an
+	// attacker who plants a password account for an unverified address cannot
+	// use it, and a session is never issued for an unverified account.
+	AuthRequireVerifiedEmail bool
 
-	// SMTP multi-provider JSON. If set, parsed as []email.SMTPConfig and
-	// used as a chain in order. Overrides the single-provider env vars.
-	SMTPProviders string // GATEWAY_SMTP_PROVIDERS
+	// SMTP single-provider config (simple form); SMTPProviders, if set, takes precedence.
+
+	// SMTPHost is the SMTP server hostname.
+	SMTPHost string
+	// SMTPPort is the SMTP server port.
+	SMTPPort int
+	// SMTPUser is the SMTP auth username.
+	SMTPUser string
+	// SMTPPass is the SMTP auth password.
+	SMTPPass string
+	// SMTPFrom is the envelope/From address for outbound mail.
+	SMTPFrom string
+	// SMTPTLS enables STARTTLS / TLS for the SMTP connection.
+	SMTPTLS bool
+
+	// SMTPProviders is a JSON array of SMTP configs ([]email.SMTPConfig) used as
+	// a failover chain in order; overrides the single-provider SMTP_* vars.
+	SMTPProviders string
+
+	// Email branding defaults — the global fallback for the per-project branding
+	// block (config_json branding.*); when both are empty, mail falls back to
+	// the byte-compatible unbranded output. One server serving two products
+	// overrides these per project.
+
+	// EmailBrandProductName is the product name shown in email bodies.
+	EmailBrandProductName string
+	// EmailBrandFrom is the From address for transactional mail (falls back to SMTPFrom).
+	EmailBrandFrom string
+	// EmailBrandFromName is the From display name (rendered as "Name" <addr>).
+	EmailBrandFromName string
+	// EmailBrandLogoURL is the absolute https logo URL shown in HTML email.
+	EmailBrandLogoURL string
+	// EmailBrandPrimaryColor is the CSS colour used to tint branded HTML email.
+	EmailBrandPrimaryColor string
+	// EmailBrandSupportEmail is the support address shown in footers and set as the Reply-To header.
+	EmailBrandSupportEmail string
+	// EmailListUnsubscribe is the List-Unsubscribe header value applied to
+	// configured mail (e.g. "<mailto:unsubscribe@example.com>"). Empty omits the
+	// header; auth/transactional mail stays deliverable either way.
+	EmailListUnsubscribe string
 
 	// Public app URLs used in email links.
 	AppBaseURL string // GATEWAY_APP_BASE_URL — e.g. "https://app.example.com"
@@ -419,78 +587,84 @@ type Config struct {
 	// headers are ignored — TCP peer IP is used instead.
 	TrustedProxies string // GATEWAY_TRUSTED_PROXIES (default "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32,::1/128")
 
-	// Rate-limit configuration. The in-memory token bucket is keyed by
-	// client IP. quotas are requests-per-window per IP. Set to 0 to
-	// disable the per-endpoint limiter.
-	RateLimitWindowSeconds     int // GATEWAY_RATE_LIMIT_WINDOW_SECONDS (default 60)
-	RateLimitSignupPerIP       int // GATEWAY_RATE_LIMIT_SIGNUP_PER_IP (default 10/min)
-	RateLimitLoginPerIP        int // GATEWAY_RATE_LIMIT_LOGIN_PER_IP (default 30/min)
-	RateLimitResetPerIP        int // GATEWAY_RATE_LIMIT_RESET_PER_IP (default 5/min)
-	RateLimitVerifyPerIP       int // GATEWAY_RATE_LIMIT_VERIFY_PER_IP (default 20/min)
-	RateLimitPasswordlessPerIP int // GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP (default 5/min) — RequestEmailLoginCode + RequestMagicLink
-	RateLimitPhonePerIP        int // GATEWAY_RATE_LIMIT_PHONE_PER_IP (default 5/min) — RequestPhoneVerification
-	RateLimitBootstrapPerIP    int // GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP (default 5/min) — CreateFirstPlatformAdmin
+	// Rate-limit configuration. The in-memory token bucket is keyed by client
+	// IP; quotas are requests per window per IP. Set a quota to 0 to disable
+	// that per-endpoint limiter.
 
-	// Postgres (the primary persistence driver). PostgresDSN is required
-	// when RepoDriver is "postgres" (the default); the actual driver
-	// selection lives in the internal/repo package.
-	//
-	//   GATEWAY_POSTGRES_DSN          e.g. "postgres://user:pass@host:5432/identity?sslmode=disable"
-	//   GATEWAY_POSTGRES_MAX_CONNS    pool size, default 25
-	//   GATEWAY_POSTGRES_AUTO_MIGRATE run pending migrations on connect, default false
-	//                                 (production: run migrations out-of-band as a
-	//                                  separate Job; setting this true on a rolling
-	//                                  deploy can race multiple replicas).
-	PostgresDSN         string
-	PostgresMaxConns    int
+	// RateLimitWindowSeconds is the sliding window length (seconds) for the per-IP limiter.
+	RateLimitWindowSeconds int
+	// RateLimitSignupPerIP is the per-IP request cap per window on PasswordSignup.
+	RateLimitSignupPerIP int
+	// RateLimitLoginPerIP is the per-IP request cap per window on the login endpoints.
+	RateLimitLoginPerIP int
+	// RateLimitResetPerIP is the per-IP request cap per window on RequestPasswordReset.
+	RateLimitResetPerIP int
+	// RateLimitVerifyPerIP is the per-IP request cap per window on the verification endpoints.
+	RateLimitVerifyPerIP int
+	// RateLimitPasswordlessPerIP is the per-IP cap per window on
+	// RequestEmailLoginCode + RequestMagicLink.
+	RateLimitPasswordlessPerIP int
+	// RateLimitPhonePerIP is the per-IP cap per window on RequestPhoneVerification.
+	RateLimitPhonePerIP int
+	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
+	RateLimitBootstrapPerIP int
+
+	// Postgres (the primary persistence driver).
+
+	// PostgresDSN is the Postgres connection string (e.g.
+	// "postgres://user:pass@host:5432/identity?sslmode=disable"); required when
+	// RepoDriver is "postgres" (the default).
+	PostgresDSN string
+	// PostgresMaxConns is the connection-pool size.
+	PostgresMaxConns int
+	// PostgresConnTimeoutMs is the per-acquire connection timeout in
+	// milliseconds, applied when checking a connection out of the pgx pool
+	// (pgxpool ConnectTimeout). It bounds how long a connect/acquire may block,
+	// not total query time — callers still pass a context deadline. Default 5000.
+	PostgresConnTimeoutMs int
+	// PostgresAutoMigrate runs pending migrations on connect; leave false in
+	// production and run migrations out-of-band (a rolling deploy can race replicas).
 	PostgresAutoMigrate bool
 
-	// SQLite (lightweight embedded / single-node persistence driver).
-	// Selected with GATEWAY_REPO_DRIVER=sqlite; the data plane lives in a
-	// single file (or an in-process database) via the pure-Go
-	// modernc.org/sqlite engine — no cgo, no external service.
-	//
-	//   GATEWAY_SQLITE_PATH        database file path, or ":memory:" for an
-	//                              ephemeral in-process database
-	//   GATEWAY_SQLITE_MAX_CONNS   pool size for a file database, default 4
-	SQLitePath     string
+	// SQLite (lightweight embedded / single-node persistence driver), selected
+	// with GATEWAY_REPO_DRIVER=sqlite — pure-Go modernc.org/sqlite, no cgo.
+
+	// SQLitePath is the SQLite database file path, or ":memory:" for an
+	// ephemeral in-process database; required when RepoDriver is "sqlite".
+	SQLitePath string
+	// SQLiteMaxConns is the connection-pool size for a file database.
 	SQLiteMaxConns int
 
-	// OTel exports OpenTelemetry traces to a deployer-supplied OTLP
-	// collector. Default off so a deployer who has no collector pays
-	// zero cost — when disabled the no-op tracer is installed and the
-	// otelconnect interceptor is omitted from the handler chain.
-	//
-	//   GATEWAY_OTEL_ENABLED            true|false (default false)
-	//   GATEWAY_OTEL_EXPORTER_ENDPOINT  host:port — required when enabled
-	//   GATEWAY_OTEL_EXPORTER_PROTOCOL  grpc|http (default grpc)
-	//   GATEWAY_OTEL_SAMPLE_RATIO       0.0–1.0 (default 0.1)
-	//   GATEWAY_OTEL_DEPLOYMENT_ENV     deployment.environment.name (default "")
-	//   GATEWAY_OTEL_SERVICE_VERSION    overrides build version baked into the binary
-	OTelEnabled          bool
-	OTelExporterEndpoint string
-	OTelExporterProtocol string
-	OTelSampleRatio      float64
-	OTelDeploymentEnv    string
-	OTelServiceVersion   string
+	// OpenTelemetry tracing to a deployer-supplied OTLP collector. Default off
+	// (no-op tracer, interceptor omitted) so a deployer with no collector pays
+	// zero cost.
 
-	// Sweeper (#94). A background goroutine periodically deletes
-	// expired-but-uncollected rows from five ephemeral tables
-	// (WebAuthn challenges, email-verification / password-reset /
-	// email-change tokens, login challenges). Without GC these
-	// tables grow unboundedly with the abandoned-flow rate.
-	//
-	//   GATEWAY_SWEEPER_INTERVAL_SECONDS  tick interval; 0 disables sweeping
-	//                                     entirely (useful for tests and for
-	//                                     deployers who run their own GC).
-	//   GATEWAY_SWEEPER_BATCH_SIZE        per-table per-tick deletion cap.
-	//   GATEWAY_SWEEPER_GRACE_SECONDS     additional grace past expires_at
-	//                                     before a row is eligible to delete;
-	//                                     covers in-flight flows that just
-	//                                     consumed the token.
+	// OTelEnabled turns on OTLP trace export.
+	OTelEnabled bool
+	// OTelExporterEndpoint is the OTLP collector host:port; required when OTelEnabled.
+	OTelExporterEndpoint string
+	// OTelExporterProtocol is the OTLP transport — "grpc" or "http".
+	OTelExporterProtocol string
+	// OTelSampleRatio is the trace head-sampling ratio in [0.0, 1.0].
+	OTelSampleRatio float64
+	// OTelDeploymentEnv sets the deployment.environment.name resource attribute.
+	OTelDeploymentEnv string
+	// OTelServiceVersion overrides the build version baked into the binary on emitted traces.
+	OTelServiceVersion string
+
+	// Sweeper (#94) — a background goroutine that periodically deletes
+	// expired-but-uncollected rows from the ephemeral tables (WebAuthn
+	// challenges, email-verification / password-reset / email-change tokens,
+	// login challenges) that would otherwise grow unboundedly.
+
+	// SweeperIntervalSeconds is the sweep tick interval in seconds; 0 disables
+	// sweeping entirely (for tests or deployers who run their own GC).
 	SweeperIntervalSeconds int
-	SweeperBatchSize       int
-	SweeperGraceSeconds    int
+	// SweeperBatchSize is the per-table, per-tick deletion cap.
+	SweeperBatchSize int
+	// SweeperGraceSeconds is extra grace past expires_at before a row is
+	// eligible for deletion (covers flows that just consumed the token).
+	SweeperGraceSeconds int
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -528,13 +702,23 @@ func Load() *Config {
 		ProjectResolutionCacheTTLSeconds: envInt("GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS", 30),
 		ProjectResolutionCacheMaxEntries: envInt("GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES", 10000),
 
-		GoogleClientID:        envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", envStr("GATEWAY_GOOGLE_CLIENT_ID", "")),
-		GoogleClientSecret:    envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", envStr("GATEWAY_GOOGLE_CLIENT_SECRET", "")),
-		MicrosoftClientID:     envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_ID", envStr("GATEWAY_MICROSOFT_CLIENT_ID", "")),
-		MicrosoftClientSecret: envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET", envStr("GATEWAY_MICROSOFT_CLIENT_SECRET", "")),
-		MicrosoftTenantID:     envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
-		GitHubClientID:        envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
-		GitHubClientSecret:    envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
+		GoogleClientID:         envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:     envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", ""),
+		GoogleAuthorizationURL: envStr("GATEWAY_OAUTH_GOOGLE_AUTHORIZATION_URL", ""),
+		GoogleTokenURL:         envStr("GATEWAY_OAUTH_GOOGLE_TOKEN_URL", ""),
+		GoogleJWKSURL:          envStr("GATEWAY_OAUTH_GOOGLE_JWKS_URL", ""),
+		GoogleDiscoveryURL:     envStr("GATEWAY_OAUTH_GOOGLE_DISCOVERY_URL", ""),
+		GoogleUserinfoURL:      envStr("GATEWAY_OAUTH_GOOGLE_USERINFO_URL", ""),
+		GoogleIssuer:           envStr("GATEWAY_OAUTH_GOOGLE_ISSUER", ""),
+		MicrosoftClientID:      envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_ID", ""),
+		MicrosoftClientSecret:  envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET", ""),
+		MicrosoftTenantID:      envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
+		GitHubClientID:         envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:     envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
+		AppleClientID:          envStr("GATEWAY_OAUTH_APPLE_CLIENT_ID", ""),
+		AppleTeamID:            envStr("GATEWAY_OAUTH_APPLE_TEAM_ID", ""),
+		AppleKeyID:             envStr("GATEWAY_OAUTH_APPLE_KEY_ID", ""),
+		ApplePrivateKey:        envStr("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", ""),
 
 		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
 
@@ -554,6 +738,13 @@ func Load() *Config {
 		CaptchaEnforcePasswordReset:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET", true),
 		CaptchaEnforceEmailLoginCode:   envBool("GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE", true),
 		CaptchaEnforceMagicLink:        envBool("GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK", true),
+
+		AgeGateEnabled:     envBool("GATEWAY_AGEGATE_ENABLED", false),
+		AgeGateChildMaxAge: envInt("GATEWAY_AGEGATE_CHILD_MAX_AGE", DefaultAgeGateChildMaxAge),
+		AgeGateAdultAge:    envInt("GATEWAY_AGEGATE_ADULT_AGE", DefaultAgeGateAdultAge),
+		AgeGateRequireDOB:  envBool("GATEWAY_AGEGATE_REQUIRE_DOB", false),
+
+		MinorDataMinimization: envBool("GATEWAY_MINOR_DATA_MINIMIZATION", false),
 
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
@@ -612,7 +803,8 @@ func Load() *Config {
 		CookieSecure:   envBool("GATEWAY_COOKIE_SECURE", false),
 		CookieSameSite: envStr("GATEWAY_COOKIE_SAMESITE", "Lax"),
 
-		AuthAllowLocal: envBool("GATEWAY_AUTH_ALLOW_LOCAL", true),
+		AuthAllowLocal:           envBool("GATEWAY_AUTH_ALLOW_LOCAL", true),
+		AuthRequireVerifiedEmail: envBool("GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL", true),
 
 		SMTPHost:      envStr("GATEWAY_SMTP_HOST", ""),
 		SMTPPort:      envInt("GATEWAY_SMTP_PORT", 587),
@@ -621,6 +813,14 @@ func Load() *Config {
 		SMTPFrom:      envStr("GATEWAY_SMTP_FROM", ""),
 		SMTPTLS:       envBool("GATEWAY_SMTP_TLS", true),
 		SMTPProviders: envStr("GATEWAY_SMTP_PROVIDERS", ""),
+
+		EmailBrandProductName:  envStr("GATEWAY_EMAIL_BRAND_PRODUCT_NAME", ""),
+		EmailBrandFrom:         envStr("GATEWAY_EMAIL_BRAND_FROM", ""),
+		EmailBrandFromName:     envStr("GATEWAY_EMAIL_BRAND_FROM_NAME", ""),
+		EmailBrandLogoURL:      envStr("GATEWAY_EMAIL_BRAND_LOGO_URL", ""),
+		EmailBrandPrimaryColor: envStr("GATEWAY_EMAIL_BRAND_PRIMARY_COLOR", ""),
+		EmailBrandSupportEmail: envStr("GATEWAY_EMAIL_BRAND_SUPPORT_EMAIL", ""),
+		EmailListUnsubscribe:   envStr("GATEWAY_EMAIL_LIST_UNSUBSCRIBE", ""),
 
 		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
 		EmailTokenExpirySeconds: envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
@@ -647,9 +847,10 @@ func Load() *Config {
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
 		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 
-		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
-		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
-		PostgresAutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", false),
+		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
+		PostgresMaxConns:      envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
+		PostgresConnTimeoutMs: envInt("GATEWAY_POSTGRES_CONN_TIMEOUT_MS", DefaultPostgresConnTimeoutMs),
+		PostgresAutoMigrate:   envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", false),
 
 		SQLitePath:     envStr("GATEWAY_SQLITE_PATH", ""),
 		SQLiteMaxConns: envInt("GATEWAY_SQLITE_MAX_CONNS", 4),
@@ -820,10 +1021,34 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateAgeGate(); err != nil {
+		return err
+	}
+
 	if err := c.validateSAML(); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+// validateAgeGate enforces the age-gate invariant: when age-gating is on the
+// two boundaries must satisfy 0 <= child-max < adult. A disabled deployment
+// is unconstrained — the no-op determiner is wired and the thresholds are
+// ignored.
+func (c *Config) validateAgeGate() error {
+	if !c.AgeGateEnabled {
+		return nil
+	}
+	if c.AgeGateChildMaxAge < 0 {
+		return fmt.Errorf("config: GATEWAY_AGEGATE_CHILD_MAX_AGE=%d must be >= 0", c.AgeGateChildMaxAge)
+	}
+	if c.AgeGateAdultAge <= c.AgeGateChildMaxAge {
+		return fmt.Errorf(
+			"config: GATEWAY_AGEGATE_ADULT_AGE=%d must be greater than GATEWAY_AGEGATE_CHILD_MAX_AGE=%d",
+			c.AgeGateAdultAge, c.AgeGateChildMaxAge,
+		)
+	}
 	return nil
 }
 

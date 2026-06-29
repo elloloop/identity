@@ -129,6 +129,14 @@ type ControlPlaneProjectStore interface {
 	// unverified target surfaces ErrAuthDomainNotVerified; a hostname the
 	// project does not own surfaces ErrNotFound.
 	SetPrimaryAuthDomain(ctx context.Context, projectID, hostname string) (*AdminProjectAuthDomain, error)
+
+	// UpdateProjectConfig REPLACES a project's config_json blob and returns the
+	// stored value (normalised — an empty blob becomes "{}"). A project that
+	// does not exist surfaces ErrNotFound.
+	UpdateProjectConfig(ctx context.Context, projectID, configJSON string) (string, error)
+	// GetProjectConfig returns a project's stored config_json ("{}" when
+	// unset). A project that does not exist surfaces ErrNotFound.
+	GetProjectConfig(ctx context.Context, projectID string) (string, error)
 }
 
 // ControlPlaneAdminService provisions control-plane resources on behalf of a
@@ -139,6 +147,10 @@ type ControlPlaneAdminService struct {
 	projects    ControlPlaneProjectStore
 	tenants     TenantStore
 	memberships MembershipStore
+	// policies authors per-tenant LoginPolicy (Upsert/Get/Delete). nil when
+	// this build has no governance plane (memory), which makes the
+	// LoginPolicy admin RPCs return ErrUnimplemented.
+	policies LoginPolicyStore
 	// admins backs the zero-config first-admin bootstrap. nil when this build
 	// has no control plane (memory), which makes CreateFirstPlatformAdmin
 	// return ErrUnimplemented.
@@ -162,7 +174,9 @@ type ControlPlaneAdminService struct {
 // ErrUnimplemented (so the handler maps it to CodeUnimplemented). A nil
 // logger defaults to a no-op. A nil resolver defaults to net.DefaultResolver,
 // matching DomainService. A nil auditLog defaults to a no-op audit.Logger so
-// blocked-bootstrap recording stays best-effort. nowFunc is injected so the
+// blocked-bootstrap recording stays best-effort. A nil policies store leaves
+// the LoginPolicy-authoring RPCs disabled (ErrUnimplemented), matching the
+// memory shape with no governance plane. nowFunc is injected so the
 // auth-domain verified-at stamp is deterministic in tests; it defaults to
 // wall-clock epoch-millis.
 func NewControlPlaneAdminService(
@@ -170,6 +184,7 @@ func NewControlPlaneAdminService(
 	projects ControlPlaneProjectStore,
 	tenants TenantStore,
 	memberships MembershipStore,
+	policies LoginPolicyStore,
 	admins PlatformAdminStore,
 	resolver DNSResolver,
 	auditLog *audit.Logger,
@@ -189,6 +204,7 @@ func NewControlPlaneAdminService(
 		projects:    projects,
 		tenants:     tenants,
 		memberships: memberships,
+		policies:    policies,
 		admins:      admins,
 		resolver:    resolver,
 		audit:       auditLog,

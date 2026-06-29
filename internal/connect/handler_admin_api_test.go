@@ -23,12 +23,69 @@ const handlerAdminSecret = "handler-operator-secret"
 type adminControlStore struct {
 	nextID     int
 	domains    map[string]*service.AdminProjectAuthDomain // hostname → row
+	configs    map[string]string                          // projectID → config_json
 	lastDomain struct {
 		projectID string
 		hostname  string
 		isPrimary bool
 	}
 }
+
+func (s *adminControlStore) UpdateProjectConfig(_ context.Context, projectID, configJSON string) (string, error) {
+	if s.configs == nil {
+		s.configs = map[string]string{}
+	}
+	if configJSON == "" {
+		configJSON = "{}"
+	}
+	s.configs[projectID] = configJSON
+	return configJSON, nil
+}
+
+func (s *adminControlStore) GetProjectConfig(_ context.Context, projectID string) (string, error) {
+	if cfg, ok := s.configs[projectID]; ok {
+		return cfg, nil
+	}
+	return "{}", nil
+}
+
+// adminLoginPolicyStore is an in-memory LoginPolicyStore for the handler
+// tests.
+type adminLoginPolicyStore struct {
+	policies map[string]*service.LoginPolicy // projectID|tenantID → policy
+}
+
+func (s *adminLoginPolicyStore) key(p, t string) string { return p + "|" + t }
+
+func (s *adminLoginPolicyStore) UpsertLoginPolicy(_ context.Context, p *service.LoginPolicy) (string, error) {
+	if s.policies == nil {
+		s.policies = map[string]*service.LoginPolicy{}
+	}
+	if p.ID == "" {
+		p.ID = "lp-1"
+	}
+	if p.SSOConnectionJSON == "" {
+		p.SSOConnectionJSON = "{}"
+	}
+	cp := *p
+	s.policies[s.key(p.ProjectID, p.TenantID)] = &cp
+	return p.ID, nil
+}
+
+func (s *adminLoginPolicyStore) GetLoginPolicy(_ context.Context, projectID, tenantID string) (*service.LoginPolicy, error) {
+	if p, ok := s.policies[s.key(projectID, tenantID)]; ok {
+		cp := *p
+		return &cp, nil
+	}
+	return nil, nil
+}
+
+func (s *adminLoginPolicyStore) DeleteLoginPolicy(_ context.Context, projectID, tenantID string) error {
+	delete(s.policies, s.key(projectID, tenantID))
+	return nil
+}
+
+var _ service.LoginPolicyStore = (*adminLoginPolicyStore)(nil)
 
 // adminDNSResolver is a fixed-record TXT resolver for the handler tests.
 type adminDNSResolver struct {
@@ -165,7 +222,7 @@ var _ service.PlatformAdminStore = (*connectPlatformAdminStore)(nil)
 func newAdminControlSvc(secret string) (*service.ControlPlaneAdminService, *adminControlStore, *connectMembershipStore) {
 	store := &adminControlStore{}
 	members := &connectMembershipStore{}
-	svc := service.NewControlPlaneAdminService(secret, store, &connectTenantStore{}, members, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(secret, store, &connectTenantStore{}, members, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return svc, store, members
 }
 
@@ -259,7 +316,7 @@ func TestAdminRPCs_CustomAuthDomain_Handler(t *testing.T) {
 	t.Parallel()
 	store := &adminControlStore{}
 	dns := &adminDNSResolver{txt: map[string][]string{}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
 	client := startAdminServer(t, svc)
 	ctx := context.Background()
 
@@ -317,7 +374,7 @@ func TestAdminRPCs_SetPrimaryAuthDomain_UnverifiedRejected_Handler(t *testing.T)
 	t.Parallel()
 	store := &adminControlStore{}
 	dns := &adminDNSResolver{txt: map[string][]string{}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
 	client := startAdminServer(t, svc)
 	ctx := context.Background()
 
@@ -414,7 +471,7 @@ func TestAdminRPCs_HappyPath_Handler(t *testing.T) {
 func startBootstrapServer(t *testing.T) (identityconnectgen.IdentityServiceClient, *connectPlatformAdminStore) {
 	t.Helper()
 	admins := &connectPlatformAdminStore{}
-	svc := service.NewControlPlaneAdminService("", &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService("", &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return startAdminServer(t, svc), admins
 }
 
@@ -460,4 +517,121 @@ func TestCreateFirstPlatformAdmin_SecondCall_FailedPrecondition(t *testing.T) {
 	_, err := client.CreateFirstPlatformAdmin(ctx,
 		connect.NewRequest(&identitypb.CreateFirstPlatformAdminRequest{Email: "second@acme.com"}))
 	requireCode(t, err, connect.CodeFailedPrecondition)
+}
+
+// ── LoginPolicy + ProjectConfig admin RPCs through the handler ───────────
+
+func TestAdminRPCs_LoginPolicy_Handler(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newAdminControlSvc(handlerAdminSecret)
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	// Get before any policy is set → empty policy.
+	got, err := client.GetLoginPolicy(ctx,
+		withAdminSecret(&identitypb.GetLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("GetLoginPolicy (none): %v", err)
+	}
+	if got.Msg.GetPolicy() != nil {
+		t.Fatalf("expected nil policy, got %+v", got.Msg.GetPolicy())
+	}
+
+	// Upsert.
+	up, err := client.UpsertLoginPolicy(ctx, withAdminSecret(&identitypb.UpsertLoginPolicyRequest{
+		ProjectId:      "p",
+		TenantId:       "t",
+		AllowedMethods: "password,email_otp",
+		Require_2Fa:    true,
+	}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("UpsertLoginPolicy: %v", err)
+	}
+	if !up.Msg.GetPolicy().GetRequire_2Fa() {
+		t.Fatalf("require_2fa not echoed: %+v", up.Msg.GetPolicy())
+	}
+
+	// Get reads it back.
+	got, err = client.GetLoginPolicy(ctx,
+		withAdminSecret(&identitypb.GetLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("GetLoginPolicy: %v", err)
+	}
+	if got.Msg.GetPolicy().GetAllowedMethods() != "password,email_otp" {
+		t.Fatalf("allowed methods = %q", got.Msg.GetPolicy().GetAllowedMethods())
+	}
+
+	// Delete clears it.
+	if _, err := client.DeleteLoginPolicy(ctx,
+		withAdminSecret(&identitypb.DeleteLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, handlerAdminSecret)); err != nil {
+		t.Fatalf("DeleteLoginPolicy: %v", err)
+	}
+	got, err = client.GetLoginPolicy(ctx,
+		withAdminSecret(&identitypb.GetLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("GetLoginPolicy (after delete): %v", err)
+	}
+	if got.Msg.GetPolicy() != nil {
+		t.Fatalf("policy not cleared: %+v", got.Msg.GetPolicy())
+	}
+}
+
+func TestAdminRPCs_ProjectConfig_Handler(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newAdminControlSvc(handlerAdminSecret)
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	const cfg = `{"cors":{"allowed_origins":["https://pro.example.com"]}}`
+	up, err := client.UpsertProjectConfig(ctx,
+		withAdminSecret(&identitypb.UpsertProjectConfigRequest{ProjectId: "p", ConfigJson: cfg}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("UpsertProjectConfig: %v", err)
+	}
+	if up.Msg.GetConfigJson() != cfg {
+		t.Fatalf("stored = %q", up.Msg.GetConfigJson())
+	}
+
+	got, err := client.GetProjectConfig(ctx,
+		withAdminSecret(&identitypb.GetProjectConfigRequest{ProjectId: "p"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("GetProjectConfig: %v", err)
+	}
+	if got.Msg.GetConfigJson() != cfg {
+		t.Fatalf("read = %q", got.Msg.GetConfigJson())
+	}
+
+	// Malformed config is rejected.
+	_, err = client.UpsertProjectConfig(ctx,
+		withAdminSecret(&identitypb.UpsertProjectConfigRequest{ProjectId: "p", ConfigJson: "{bad"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeInvalidArgument)
+}
+
+func TestAdminRPCs_PolicyConfig_NilService_Unimplemented(t *testing.T) {
+	t.Parallel()
+	client := startAdminServer(t, nil)
+	ctx := context.Background()
+
+	_, err := client.UpsertLoginPolicy(ctx, withAdminSecret(&identitypb.UpsertLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.GetLoginPolicy(ctx, withAdminSecret(&identitypb.GetLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.DeleteLoginPolicy(ctx, withAdminSecret(&identitypb.DeleteLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.UpsertProjectConfig(ctx, withAdminSecret(&identitypb.UpsertProjectConfigRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.GetProjectConfig(ctx, withAdminSecret(&identitypb.GetProjectConfigRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+}
+
+func TestAdminRPCs_PolicyConfig_BadSecret_Denied(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newAdminControlSvc(handlerAdminSecret)
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	_, err := client.UpsertLoginPolicy(ctx, withAdminSecret(&identitypb.UpsertLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.UpsertProjectConfig(ctx, withAdminSecret(&identitypb.UpsertProjectConfigRequest{ProjectId: "p"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
 }

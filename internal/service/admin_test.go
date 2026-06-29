@@ -187,6 +187,30 @@ func TestAdminService_ReactivateUser_HappyPath(t *testing.T) {
 	}
 }
 
+// TestAdminService_ReactivateUser_PendingParentalConsentRejected proves that an
+// admin cannot use the ordinary reactivation path to flip a child-band account
+// out of pending_parental_consent, which would bypass the COPPA consent gate
+// (issue #256). The only valid exit from that state is the dedicated
+// parental-consent flow.
+func TestAdminService_ReactivateUser_PendingParentalConsentRejected(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	db.addUser("child-1", "child@test.com", "Child", "member", StatusPendingParentalConsent)
+	svc := newTestAdminService(db)
+
+	err := svc.ReactivateUser(context.Background(), "admin-1", "child-1")
+	if !errors.Is(err, ErrParentalConsentRequired) {
+		t.Fatalf("expected ErrParentalConsentRequired, got %v", err)
+	}
+
+	// Status must be unchanged — the account stays gated.
+	node, _ := db.GetNode(context.Background(), "", "", typeUser, "child-1")
+	if pstr(node.Payload, ufStatus) != StatusPendingParentalConsent {
+		t.Errorf("expected status to remain %q, got %q",
+			StatusPendingParentalConsent, pstr(node.Payload, ufStatus))
+	}
+}
+
 func TestAdminService_ResetUserPassword_TempPassword(t *testing.T) {
 	db := newFakeDB()
 	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")

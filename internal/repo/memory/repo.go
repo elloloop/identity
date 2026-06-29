@@ -387,6 +387,13 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			case int:
 				u.PhoneVerifiedAt = int64(x)
 			}
+		case "date_of_birth_ms":
+			switch x := v.(type) {
+			case int64:
+				u.DateOfBirthMs = x
+			case int:
+				u.DateOfBirthMs = int64(x)
+			}
 		}
 	}
 }
@@ -1183,6 +1190,18 @@ func (r *Repo) ListOAuthIdentitiesForUser(_ context.Context, userID string) ([]*
 		}
 	}
 	return out, nil
+}
+
+func (r *Repo) DeleteOAuthIdentity(_ context.Context, userID, provider, providerUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, oi := range r.oauthIdentities {
+		if oi.UserID == userID && oi.Provider == provider && oi.ProviderUserID == providerUserID {
+			delete(r.oauthIdentities, id)
+			return nil
+		}
+	}
+	return service.ErrNotFound
 }
 
 // ── Identity Verification Records ─────────────────────────────────

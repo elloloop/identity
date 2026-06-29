@@ -25,6 +25,7 @@ const (
 
 	statusSuccess = "urn:oasis:names:tc:SAML:2.0:status:Success"
 
+	// #nosec G101 -- SAML AuthnContext class URN, not a credential.
 	authnContextPassword = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
 
 	// algRSASHA256 / algSHA256 / algEnvC14N / algExcC14N are the
@@ -88,7 +89,7 @@ func NewRSAIssuer(opts Options) (*RSAIssuer, error) {
 	if !ok {
 		return nil, errors.New("samlidp: certificate public key is not RSA")
 	}
-	if certPub.N.Cmp(key.PublicKey.N) != 0 || certPub.E != key.PublicKey.E {
+	if certPub.N.Cmp(key.N) != 0 || certPub.E != key.E {
 		return nil, errors.New("samlidp: certificate does not match private key")
 	}
 	return &RSAIssuer{
@@ -155,7 +156,7 @@ func (i *RSAIssuer) ParseAuthnRequest(raw []byte, relayState string) (AuthnReque
 		Issuer  string   `xml:"Issuer"`
 	}
 	if err := xml.Unmarshal(raw, &ar); err != nil {
-		return AuthnRequestInfo{}, fmt.Errorf("%w: %v", ErrInvalidAuthnRequest, err)
+		return AuthnRequestInfo{}, fmt.Errorf("%w: %w", ErrInvalidAuthnRequest, err)
 	}
 	if strings.TrimSpace(ar.ID) == "" {
 		return AuthnRequestInfo{}, fmt.Errorf("%w: missing request ID", ErrInvalidAuthnRequest)

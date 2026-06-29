@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"encoding/xml"
+	"errors"
 	"math/big"
 	"strings"
 	"testing"
@@ -63,13 +64,13 @@ func TestNoopIssuer_Disabled(t *testing.T) {
 	if n.Name() != ProviderNoop {
 		t.Fatalf("name = %q", n.Name())
 	}
-	if _, err := n.Metadata(); err != ErrDisabled {
+	if _, err := n.Metadata(); !errors.Is(err, ErrDisabled) {
 		t.Fatalf("Metadata err = %v", err)
 	}
-	if _, err := n.ParseAuthnRequest(nil, ""); err != ErrDisabled {
+	if _, err := n.ParseAuthnRequest(nil, ""); !errors.Is(err, ErrDisabled) {
 		t.Fatalf("ParseAuthnRequest err = %v", err)
 	}
-	if _, err := n.Issue(context.Background(), ServiceProvider{}, Subject{}, AuthnRequestInfo{}); err != ErrDisabled {
+	if _, err := n.Issue(context.Background(), ServiceProvider{}, Subject{}, AuthnRequestInfo{}); !errors.Is(err, ErrDisabled) {
 		t.Fatalf("Issue err = %v", err)
 	}
 }

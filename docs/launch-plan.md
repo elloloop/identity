@@ -1,5 +1,13 @@
 # Identity — server hardening: parallel work plan
 
+> **⚠️ ARCHIVED / HISTORICAL — do not treat as current.** This plan
+> predates and was **superseded by the v1.0 Project/Tenant/Domain
+> redesign**. It describes the pre-redesign backlog (single/multi-tenant
+> "mode", an `Organization` type, the `entdb` embedded backend) — none of
+> which reflect how the server works today. It is kept for historical
+> context only. For the current architecture see the redesign docs under
+> `docs/redesign/` and the ADRs.
+
 This document is a parallel-work plan for finishing the identity-server
 hardening backlog. identity is an OSS server (Docker image + Go binary)
 that deployers run as a backend in their own systems; this backlog is
@@ -20,7 +28,8 @@ Companion docs:
 
 ## Status at a glance
 
-Latest released: **v0.6.10** (2026-05-14).
+Latest released: **v1.5.0**. (This doc once said v0.6.10 / 2026-05-14;
+that was the pre-redesign state and is no longer current.)
 
 Operational hardening from the original review is **shipped**. The
 architectural items — substantial implementations of the server's
@@ -31,8 +40,8 @@ remaining surface — are what remains.
 | **#90** | C4: JWT signing keys — pluggable signer (file/rotation default) | CRITICAL | — | 1–3 days | A |
 | **#91** | H2: refresh-token revocation — both models, config-driven | HIGH | — | 2–4 days | A |
 | **#92** | H7: CI conformance matrix | HIGH | — | 2–3 days | A |
-| **#93** | H9: implement \`mode=multi\` | HIGH | — | 1–2 weeks | B |
-| **#94** | M3: GC sweeper | MEDIUM | #82 for entdb-side | 3–5 days | C |
+| **#93** | H9: implement \`mode=multi\` *(obsolete — the `mode=single\|multi` switch was REMOVED in v1.0)* | HIGH | — | 1–2 weeks | B |
+| **#94** | M3: GC sweeper | MEDIUM | #82 for the embedded backend | 3–5 days | C |
 | **#95** | M8: OpenTelemetry + RED | MEDIUM | — | 3–5 days | A |
 | **#82** | v1.12 migration | (PR draft) | upstream #508 | 1 day post-unblock | D |
 | **#14** | QR session CAS | HIGH | #82 | 1–2 days post-#82 | D |
@@ -67,6 +76,11 @@ them within the lane because they all touch `internal/app/app.go` and
 
 ### Lane B — multi-tenant mode (#93)
 
+> **Obsolete:** the `mode=single|multi` switch was **removed in v1.0**
+> and the `Organization` type was **dropped** (migration
+> `0014_drop_organizations`). The redesign replaced this whole approach
+> with the Project/Tenant/Domain model. This lane no longer applies.
+
 The biggest single item. Touches almost everything: a new RPC,
 middleware for per-request tenant resolution, every handler's tenant
 scoping, schema additions for the `Organization` type, a tenant-aware
@@ -83,7 +97,9 @@ changes; sequence accordingly or plan a coordinated merge.
 
 The Postgres-backend portion can land **today, independently** — it
 only touches `internal/repo/postgres/` and `internal/app/`. The
-EntDB-backend portion waits on Lane D.
+embedded-backend portion (today `internal/repo/sqlite/`; the
+`internal/repo/entdb/` backend referenced here no longer exists) waits
+on Lane D.
 
 This lane is good for an agent that wants a self-contained 3–5-day
 piece of work without coordinating with anyone else.
@@ -142,8 +158,9 @@ prevents unbounded table growth.
 - **Lane C is conflict-free** with A and B (touches a non-overlapping
   set of files).
 - **Lane D is conflict-free** with A, B, and C until the CAS work
-  edits `internal/repo/entdb/repo.go`'s refresh-token and QR-session
-  methods. If Lane B touched those methods first (e.g., to attach a
+  edits the embedded backend's refresh-token and QR-session methods
+  (the `internal/repo/entdb/repo.go` named here no longer exists; the
+  embedded backend is now `internal/repo/sqlite/`). If Lane B touched those methods first (e.g., to attach a
   tenant id to QR sessions), Lane D will need a small rebase.
 
 ---
