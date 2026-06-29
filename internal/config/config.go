@@ -61,6 +61,12 @@ const (
 	DefaultAgeGateAdultAge = 18
 )
 
+// DefaultPostgresConnTimeoutMs is the default per-acquire Postgres connection
+// timeout (milliseconds) when GATEWAY_POSTGRES_CONN_TIMEOUT_MS is unset. It
+// mirrors pgrepo.DefaultConnTimeout (5s) so the boundary default matches the
+// driver's own zero-value fallback.
+const DefaultPostgresConnTimeoutMs = 5000
+
 // DefaultProjectIDFallback is the project id used when none is configured.
 // It is the env-loader default for GATEWAY_DEFAULT_PROJECT_ID and the value
 // app.New normalizes an empty DefaultProjectID to, so a directly-constructed
@@ -581,6 +587,11 @@ type Config struct {
 	PostgresDSN string
 	// PostgresMaxConns is the connection-pool size.
 	PostgresMaxConns int
+	// PostgresConnTimeoutMs is the per-acquire connection timeout in
+	// milliseconds, applied when checking a connection out of the pgx pool
+	// (pgxpool ConnectTimeout). It bounds how long a connect/acquire may block,
+	// not total query time — callers still pass a context deadline. Default 5000.
+	PostgresConnTimeoutMs int
 	// PostgresAutoMigrate runs pending migrations on connect; leave false in
 	// production and run migrations out-of-band (a rolling deploy can race replicas).
 	PostgresAutoMigrate bool
@@ -793,9 +804,10 @@ func Load() *Config {
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
 		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 
-		PostgresDSN:         envStr("GATEWAY_POSTGRES_DSN", ""),
-		PostgresMaxConns:    envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
-		PostgresAutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", false),
+		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
+		PostgresMaxConns:      envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
+		PostgresConnTimeoutMs: envInt("GATEWAY_POSTGRES_CONN_TIMEOUT_MS", DefaultPostgresConnTimeoutMs),
+		PostgresAutoMigrate:   envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", false),
 
 		SQLitePath:     envStr("GATEWAY_SQLITE_PATH", ""),
 		SQLiteMaxConns: envInt("GATEWAY_SQLITE_MAX_CONNS", 4),

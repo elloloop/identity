@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -50,9 +51,13 @@ type Config struct {
 	ProjectID string
 
 	// Postgres-specific.
-	PostgresDSN         string
-	PostgresMaxConns    int
-	PostgresAutoMigrate bool
+	PostgresDSN      string
+	PostgresMaxConns int
+	// PostgresConnTimeoutMs is the per-acquire pgx pool connection timeout in
+	// milliseconds; Build converts it to a time.Duration for pgrepo.Config.
+	// Zero leaves pgrepo's own DefaultConnTimeout in effect.
+	PostgresConnTimeoutMs int
+	PostgresAutoMigrate   bool
 
 	// SQLite-specific. SQLitePath is the database file path or ":memory:".
 	SQLitePath     string
@@ -267,6 +272,7 @@ func Build(ctx context.Context, cfg Config, logger *zap.Logger) (*Built, error) 
 		pgRepo, err := pgrepo.New(ctx, pgrepo.Config{
 			DSN:         cfg.PostgresDSN,
 			MaxConns:    int32(cfg.PostgresMaxConns), // #nosec G115 -- bounds checked above.
+			ConnTimeout: time.Duration(cfg.PostgresConnTimeoutMs) * time.Millisecond,
 			AutoMigrate: cfg.PostgresAutoMigrate,
 			ProjectID:   cfg.ProjectID,
 		})

@@ -819,6 +819,15 @@
     "anchor": "datastore"
   },
   {
+    "name": "GATEWAY_POSTGRES_CONN_TIMEOUT_MS",
+    "type": "integer",
+    "default": "5000",
+    "required": false,
+    "description": "is the per-acquire connection timeout in milliseconds, applied when checking a connection out of the pgx pool (pgxpool ConnectTimeout).",
+    "category": "Datastore",
+    "anchor": "datastore"
+  },
+  {
     "name": "GATEWAY_POSTGRES_DSN",
     "type": "string",
     "default": "",

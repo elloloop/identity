@@ -80,6 +80,12 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.CookieSameSite != "Lax" {
 		t.Errorf("CookieSameSite: want Lax, got %q", cfg.CookieSameSite)
 	}
+	if cfg.PostgresMaxConns != 25 {
+		t.Errorf("PostgresMaxConns: want 25, got %d", cfg.PostgresMaxConns)
+	}
+	if cfg.PostgresConnTimeoutMs != DefaultPostgresConnTimeoutMs {
+		t.Errorf("PostgresConnTimeoutMs: want %d, got %d", DefaultPostgresConnTimeoutMs, cfg.PostgresConnTimeoutMs)
+	}
 	if cfg.SweeperIntervalSeconds != 300 {
 		t.Errorf("SweeperIntervalSeconds: want 300, got %d", cfg.SweeperIntervalSeconds)
 	}
@@ -130,6 +136,7 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_PASSWORD_SIGNUP_ENABLED", "false")
 	t.Setenv("GATEWAY_PASSWORD_RESET_ENABLED", "false")
 	t.Setenv("GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS", "10")
+	t.Setenv("GATEWAY_POSTGRES_CONN_TIMEOUT_MS", "2500")
 	t.Setenv("GATEWAY_TOTP_ISSUER", "My Corp")
 	t.Setenv("GATEWAY_OAUTH_APPLE_CLIENT_ID", "apple-client")
 	t.Setenv("GATEWAY_OAUTH_APPLE_TEAM_ID", "apple-team")
@@ -167,6 +174,9 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	}
 	if cfg.LoginMaxFailedAttempts != 10 {
 		t.Errorf("LoginMaxFailedAttempts: want 10, got %d", cfg.LoginMaxFailedAttempts)
+	}
+	if cfg.PostgresConnTimeoutMs != 2500 {
+		t.Errorf("PostgresConnTimeoutMs: want 2500, got %d", cfg.PostgresConnTimeoutMs)
 	}
 	if cfg.TOTPIssuer != "My Corp" {
 		t.Errorf("TOTPIssuer: want 'My Corp', got %q", cfg.TOTPIssuer)
