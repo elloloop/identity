@@ -163,6 +163,10 @@ type generatedConfigVar struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Category    string `json:"category"`
+	// Anchor is the URL fragment of the category section, emitted by cmd/docsgen
+	// (slugify(Category)). The anchor-resolves guard consumes this directly so
+	// the slug logic lives in exactly one place (the generator).
+	Anchor string `json:"anchor"`
 }
 
 // readGeneratedConfig parses the generated config reference. Using this rather
@@ -318,40 +322,22 @@ func TestGeneratedConfigDescriptionsNonEmpty(t *testing.T) {
 // e.g. `configuration#passkeys-webauthn`, capturing the fragment.
 var configAnchorRefRe = regexp.MustCompile(`configuration#([a-z0-9-]+)`)
 
-// slugifyCategory mirrors the slugify() in
-// docs-site/src/pages/docs/installation/configuration.astro EXACTLY: it lowers
-// the category, maps "&" to "and", collapses every run of non-alphanumerics to
-// a single hyphen, and trims leading/trailing hyphens. The configuration page
-// emits this slug as the id of each category <section>, so a cross-link of the
-// form configuration#<slug> resolves to a real on-page anchor.
-func slugifyCategory(s string) string {
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, "&", " and ")
-	var b strings.Builder
-	prevDash := false
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			prevDash = false
-		} else if !prevDash {
-			b.WriteByte('-')
-			prevDash = true
-		}
-	}
-	return strings.Trim(b.String(), "-")
-}
-
 // TestDocsConfigurationAnchorsResolve is an anti-drift guard for deep links into
 // the configuration reference: every `configuration#<fragment>` referenced
 // anywhere in the docs must match an id the configuration page actually emits
-// (one per category section, via slugify(category)). This catches both a renamed
-// category and a hand-edited href that no longer points at a live anchor.
+// (one per category section, using the generator-emitted `anchor`). This catches
+// both a renamed category and a hand-edited href that no longer points at a live
+// anchor. The anchor is consumed directly from the generated config so the slug
+// rule lives only in cmd/docsgen.
 func TestDocsConfigurationAnchorsResolve(t *testing.T) {
 	root := repoRoot(t)
 
 	emitted := map[string]bool{}
 	for _, v := range readGeneratedConfig(t, root) {
-		emitted[slugifyCategory(v.Category)] = true
+		if strings.TrimSpace(v.Anchor) == "" {
+			t.Fatalf("generated config var %q has an empty anchor; regenerate with `go run ./cmd/docsgen`", v.Name)
+		}
+		emitted[v.Anchor] = true
 	}
 	if len(emitted) == 0 {
 		t.Fatal("derived zero category anchors from the generated config; extraction is broken")

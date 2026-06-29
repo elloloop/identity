@@ -93,12 +93,28 @@ func TestSummarize(t *testing.T) {
 		{"comma after field name", "Foo, when true, rejects the request.", "Foo", "when true, rejects the request."},
 		{"field name not a prefix is untouched", "When set, gates the flow.", "Foo", "When set, gates the flow."},
 		{
-			// A gateway token written as "GATEWAY_X=value" must be stripped
-			// together with its "=value", leaving no dangling "=kms_aws".
-			name:      "strips gateway token with trailing =value",
+			// A gateway token written as "GATEWAY_X=value" expresses a condition
+			// and must be KEPT intact, not stripped — otherwise the description
+			// trails off at "required when".
+			name:      "keeps gateway token assignment as a condition",
 			raw:       `JWTKMSKeys is a CSV of "kid=keyARN" entries for the "kms_aws" signer; required when GATEWAY_JWT_SIGNER=kms_aws.`,
 			fieldName: "JWTKMSKeys",
-			want:      `is a CSV of "kid=keyARN" entries for the "kms_aws" signer; required when`,
+			want:      `is a CSV of "kid=keyARN" entries for the "kms_aws" signer; required when GATEWAY_JWT_SIGNER=kms_aws.`,
+		},
+		{
+			// A "required in prod" caveat in the SECOND sentence is security
+			// relevant and must survive truncation, not be dropped.
+			name:      "preserves required-in-prod second-sentence caveat",
+			raw:       "TOTPEncryptionKey is the base64-encoded 32-byte AES-256 key that encrypts TOTP secrets at rest. Throwaway dev key if unset; required in prod.",
+			fieldName: "TOTPEncryptionKey",
+			want:      "is the base64-encoded 32-byte AES-256 key that encrypts TOTP secrets at rest. Throwaway dev key if unset; required in prod.",
+		},
+		{
+			// An ordinary (non-caveat) second sentence is still dropped.
+			name:      "drops non-caveat second sentence",
+			raw:       "Foo is the issuer name shown in apps. Some extra prose here.",
+			fieldName: "Foo",
+			want:      "is the issuer name shown in apps.",
 		},
 	}
 	for _, tc := range tests {
@@ -128,6 +144,68 @@ func TestFirstSentenceEnd(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := firstSentenceEnd(tc.in); got != tc.want {
 				t.Errorf("firstSentenceEnd(%q) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFirstSentenceWithCaveat(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no terminator returns whole", "just one clause here", "just one clause here"},
+		{"single sentence", "Only one. ", "Only one."},
+		{"drops ordinary second sentence", "First one. Second one.", "First one."},
+		{
+			"keeps required-in-prod caveat",
+			"Key encrypts secrets. Required in prod.",
+			"Key encrypts secrets. Required in prod.",
+		},
+		{
+			"keeps required-in-production caveat",
+			"Dev key if unset. It is required in production.",
+			"Dev key if unset. It is required in production.",
+		},
+		{
+			// "not required" alone (no production requirement) is dropped.
+			"drops not-required default explanation",
+			"Flag gates the flow. The default is false, not required normally.",
+			"Flag gates the flow.",
+		},
+		{
+			// "produces" must not be mistaken for the "prod" caveat word.
+			"drops sentence mentioning produces",
+			"Queue depth for the flusher. Drops happen when it produces fast.",
+			"Queue depth for the flusher.",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := firstSentenceWithCaveat(tc.in); got != tc.want {
+				t.Errorf("firstSentenceWithCaveat(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"JWT & tokens", "jwt-and-tokens"},
+		{"Passkeys / WebAuthn", "passkeys-webauthn"},
+		{"Server & ports", "server-and-ports"},
+		{"TOTP / 2FA", "totp-2fa"},
+		{"Age gating (COPPA)", "age-gating-coppa"},
+		{"Other", "other"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := slugify(tc.in); got != tc.want {
+				t.Errorf("slugify(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}

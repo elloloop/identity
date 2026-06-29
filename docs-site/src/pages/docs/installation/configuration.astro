@@ -9,6 +9,7 @@ interface ConfigVar {
   required: boolean;
   description: string;
   category: string;
+  anchor: string;
 }
 
 const vars = configVars as ConfigVar[];
@@ -41,10 +42,15 @@ const categoryOrder = [
 ];
 
 const byCategory = new Map<string, ConfigVar[]>();
+// anchorByCategory carries the slug emitted by the generator (cmd/docsgen) for
+// each category, so this page never re-derives the slug — it consumes the one
+// authoritative `anchor` field. All vars in a category share the same anchor.
+const anchorByCategory = new Map<string, string>();
 for (const v of vars) {
   const list = byCategory.get(v.category) ?? [];
   list.push(v);
   byCategory.set(v.category, list);
+  if (!anchorByCategory.has(v.category)) anchorByCategory.set(v.category, v.anchor);
 }
 
 const orderIndex = (c: string) => {
@@ -60,19 +66,6 @@ const renderDefault = (v: ConfigVar): string => {
   if (v.default !== "") return v.default;
   return v.required ? "(required)" : "(empty)";
 };
-
-// slugify turns a display category into a stable URL fragment, emitted as the
-// id of each category section so deep links (configuration#<slug>) resolve with
-// JavaScript disabled (not relying on the client-side HeadingAnchors). "&" maps
-// to "and" and every run of non-alphanumerics collapses to a single hyphen, so
-// e.g. "JWT & tokens" → "jwt-and-tokens" and "Passkeys / WebAuthn" →
-// "passkeys-webauthn". The anti-drift test in tests/docs mirrors this exactly.
-const slugify = (s: string): string =>
-  s
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
 ---
 
 <DocsLayout title="Configuration">
@@ -125,30 +118,32 @@ const slugify = (s: string): string =>
   </p>
   {
     categories.map((category) => (
-      <section id={slugify(category)}>
+      <section id={anchorByCategory.get(category)}>
         <h3>{category}</h3>
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Variable</th>
-              <th scope="col">Type</th>
-              <th scope="col">Default</th>
-              <th scope="col">Required</th>
-              <th scope="col">Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            {byCategory.get(category)!.map((v) => (
+        <div class="table-scroll">
+          <table>
+            <thead>
               <tr>
-                <td><code>{v.name}</code></td>
-                <td>{v.type}</td>
-                <td><code>{renderDefault(v)}</code></td>
-                <td>{v.required ? "yes" : ""}</td>
-                <td>{v.description}</td>
+                <th scope="col">Variable</th>
+                <th scope="col">Type</th>
+                <th scope="col">Default</th>
+                <th scope="col">Required</th>
+                <th scope="col">Description</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {byCategory.get(category)!.map((v) => (
+                <tr>
+                  <td><code>{v.name}</code></td>
+                  <td>{v.type}</td>
+                  <td><code>{renderDefault(v)}</code></td>
+                  <td>{v.required ? "yes" : "no"}</td>
+                  <td>{v.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
     ))
   }

@@ -92,6 +92,11 @@ type ConfigVar struct {
 	Required    bool   `json:"required"`
 	Description string `json:"description"`
 	Category    string `json:"category"`
+	// Anchor is the URL fragment of the category section that renders this var
+	// (slugify(Category)). It is emitted here so the configuration page and the
+	// deep-link anti-drift test consume one authoritative slug instead of each
+	// re-deriving it.
+	Anchor string `json:"anchor"`
 }
 
 // missingDescriptions returns the names of env vars whose description is empty
@@ -155,12 +160,14 @@ func parseConfig(path string) ([]ConfigVar, error) {
 		seen[name] = true
 
 		def := renderDefault(call.Args[1], typ, consts)
+		category := categoryFor(name)
 		out = append(out, ConfigVar{
 			Name:        name,
 			Type:        typ,
 			Default:     def,
 			Description: descByField[fieldName.Name],
-			Category:    categoryFor(name),
+			Category:    category,
+			Anchor:      slugify(category),
 		})
 		return true
 	})
@@ -262,31 +269,48 @@ func collectFieldDocs(file *ast.File) map[string]string {
 var (
 	defaultParen = regexp.MustCompile(`\s*\((?:default|optional)[^)]*\)`)
 	gatewayToken = regexp.MustCompile(`GATEWAY_[A-Z0-9_]+`)
-	// gatewayAssignToken matches a GATEWAY_* token together with a trailing
-	// "=value" (as written in prose like "GATEWAY_JWT_SIGNER=kms_aws"). Used by
-	// summarize so stripping the token also consumes its value rather than
-	// leaving a dangling "=kms_aws" in the rendered description.
+	// gatewayAssignToken matches a GATEWAY_* token, optionally followed by a
+	// "=value" (as written in prose like "GATEWAY_JWT_SIGNER=kms_aws"). summarize
+	// uses it to tell the two prose shapes apart: a BARE token is a redundant
+	// reference to a var by its env name and is stripped ("Foo holds GATEWAY_BAR
+	// config." → "holds config."); a token in ASSIGNMENT form expresses a real
+	// condition and is kept intact ("...required when GATEWAY_JWT_SIGNER=kms_aws")
+	// so the description does not trail off at "when".
 	gatewayAssignToken = regexp.MustCompile(`GATEWAY_[A-Z0-9_]+(=\S+)?`)
 	wsRun              = regexp.MustCompile(`\s+`)
 )
 
-// summarize reduces a Go doc comment to a single-sentence description: it
+// prodRequirementCaveat matches a follow-on sentence that states a production
+// requirement (e.g. "required in prod" / "is required in production"). Such a
+// caveat is security relevant and must survive single-sentence truncation — it
+// is why GATEWAY_TOTP_ENCRYPTION_KEY keeps its second sentence. It deliberately
+// requires both "required" and a "prod"/"production" WORD so ordinary prose that
+// merely says "not required" or "produces" is not pulled in.
+var prodRequirementCaveat = regexp.MustCompile(`(?i)\brequired\b.*\bprod(uction)?\b`)
+
+// summarize reduces a Go doc comment to a short operator-facing description: it
 // drops the leading "FieldName" the Go doc convention prepends (matched
 // literally against the known field name, so a comment opening with any verb —
-// not only an allowlisted one — never leaks the identifier), strips inline
-// GATEWAY_* tokens together with any trailing "=value" and "(default ...)"
-// parentheticals, collapses whitespace, and keeps the first sentence.
+// not only an allowlisted one — never leaks the identifier), keeps the first
+// sentence plus any immediately following security/requirement caveat (so a
+// "required in prod" warning is never silently dropped), strips bare inline
+// GATEWAY_* references (but keeps "GATEWAY_X=value" condition clauses intact)
+// and "(default ...)" parentheticals, and collapses whitespace.
 func summarize(raw, fieldName string) string {
 	s := wsRun.ReplaceAllString(strings.TrimSpace(raw), " ")
 	if s == "" {
 		return ""
 	}
-	// First sentence only (terminator followed by space).
-	if idx := firstSentenceEnd(s); idx > 0 {
-		s = s[:idx]
-	}
+	s = firstSentenceWithCaveat(s)
 	s = defaultParen.ReplaceAllString(s, "")
-	s = gatewayAssignToken.ReplaceAllString(s, "")
+	s = gatewayAssignToken.ReplaceAllStringFunc(s, func(m string) string {
+		// Keep "GATEWAY_X=value" intact: it expresses a condition, and dropping
+		// the value would leave the sentence trailing off ("...required when").
+		if strings.Contains(m, "=") {
+			return m
+		}
+		return " "
+	})
 	s = wsRun.ReplaceAllString(strings.TrimSpace(s), " ")
 	// Drop a leading field name (Go's "Name is ..." doc convention), matched
 	// literally so the Go identifier never leaks into operator-facing docs.
@@ -297,6 +321,31 @@ func summarize(raw, fieldName string) string {
 	}
 	s = strings.TrimLeft(s, "—-:, ")
 	return strings.TrimSpace(s)
+}
+
+// firstSentenceWithCaveat keeps the first sentence of s and, when the sentence
+// immediately following it states a production requirement (see
+// prodRequirementCaveat, e.g. "required in prod"), keeps that sentence too. This
+// stops single-sentence truncation from dropping production-required warnings
+// while still trimming ordinary trailing prose.
+func firstSentenceWithCaveat(s string) string {
+	end := firstSentenceEnd(s)
+	if end <= 0 {
+		return s
+	}
+	first := s[:end]
+	rest := strings.TrimLeft(s[end:], " ")
+	if rest == "" {
+		return first
+	}
+	next := rest
+	if nextEnd := firstSentenceEnd(rest); nextEnd > 0 {
+		next = rest[:nextEnd]
+	}
+	if prodRequirementCaveat.MatchString(next) {
+		return strings.TrimRight(first, " ") + " " + next
+	}
+	return first
 }
 
 func firstSentenceEnd(s string) int {
@@ -478,6 +527,30 @@ func categoryFor(name string) string {
 		}
 	}
 	return "Other"
+}
+
+// slugify turns a display category into a stable URL fragment used as the id of
+// its section on the configuration page. It lowercases, maps "&" to "and", and
+// collapses every run of non-alphanumerics to a single hyphen (trimming the
+// ends), so "JWT & tokens" → "jwt-and-tokens" and "Passkeys / WebAuthn" →
+// "passkeys-webauthn". This is the single source of the slug: the generated
+// `anchor` field is consumed by configuration.astro and the deep-link
+// anti-drift test, neither of which re-derives it.
+func slugify(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, "&", " and ")
+	var b strings.Builder
+	prevDash := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // requirementPhrases are the substrings (matched case-insensitively, after the
