@@ -1,5 +1,11 @@
 # Multi-Replica Auth-State Audit
 
+> **Historical record.** This is a point-in-time analysis of the
+> **pre-v1.0 EntDB / tenant-shard-db** design. That backend no longer
+> exists: the current backends are **postgres / sqlite / memory** (the
+> embedded tier is `internal/repo/sqlite/`). The findings below are kept as
+> a historical record and are not maintained against the current code.
+
 Date: 2026-05-06
 
 Scope:

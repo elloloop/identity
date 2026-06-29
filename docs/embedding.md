@@ -28,7 +28,9 @@ defer srv.Shutdown(ctx)                               // drain workers, release 
 - **`New(ctx, Options) (*Server, error)`** assembles the persistence,
   signer, WebAuthn, IDV and OpenTelemetry adapters that are not injected,
   validates the config, and wires the service layer. It performs
-  construction-time I/O (EntDB dial, AWS config load, OTel exporter init)
+  construction-time I/O (builds the configured repo driver from
+  `Config.RepoDriver` — memory, sqlite or postgres — plus AWS config load
+  and OTel exporter init)
   but starts no goroutines and binds no listener. `ctx` scopes that setup;
   it is not retained.
 - **`Handler() http.Handler`** is the full middleware chain (logging,
@@ -43,7 +45,7 @@ defer srv.Shutdown(ctx)                               // drain workers, release 
   flusher, the expired-row sweeper, and (for the file signer) SIGHUP-driven
   key reload. Idempotent.
 - **`Shutdown(ctx) error`** drains the workers and releases everything
-  `New` acquired (signer watcher, EntDB client, OTel exporter), in reverse
+  `New` acquired (signer watcher, repo driver, OTel exporter), in reverse
   order. Safe without a preceding `Start`, and safe to call more than once.
 
 ## Options
@@ -74,7 +76,7 @@ exactly as the container does. Set one to inject your own:
 | `MetricsRegistry`                  | `prometheus.DefaultRegisterer`                           |
 
 Injecting `Repo`+`DB` is how a host that already owns a database — or a
-test — mounts identity without a real EntDB backend. The per-request,
+test — mounts identity without standing up a real repo driver. The per-request,
 per-project repository is resolved internally from the project scope (see
 [ADR-0002](./adr/0002-project-is-the-isolation-shard.md)); there is no
 per-tenant repository factory to supply.

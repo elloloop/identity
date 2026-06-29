@@ -209,6 +209,29 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 		return 0, errors.New("invalid password")
 	}
 
+	count, err := s.revokeAllUserSessions(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	s.audit.Log(
+		ctx, audit.EventSessionRevoked,
+		audit.WithActor(userID), audit.WithTarget(userID),
+		audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"scope": "all", "revoked_count": count}),
+	)
+	return count, nil
+}
+
+// revokeAllUserSessions deletes every refresh-token (session) node owned
+// by userID via the graph DB — the same store ListMySessions/RevokeSession
+// read and write — and returns the number revoked. Best-effort per
+// session: a failed delete is logged and skipped so one bad row does not
+// strand the rest. Shared by RevokeAllSessions (explicit sign-out) and
+// ChangePassword (credential change forces re-auth everywhere). The
+// caller is responsible for any access-control/audit concerns; this
+// helper only performs the revocation.
+func (s *ProfileService) revokeAllUserSessions(ctx context.Context, userID string) (int, error) {
 	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), tenantAdminActor, typeRefreshToken,
 		map[string]any{rfUserID: userID})
 	if err != nil {
@@ -224,13 +247,6 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 		}
 		count++
 	}
-
-	s.audit.Log(
-		ctx, audit.EventSessionRevoked,
-		audit.WithActor(userID), audit.WithTarget(userID),
-		audit.WithSuccess(true),
-		audit.WithDetails(map[string]any{"scope": "all", "revoked_count": count}),
-	)
 	return count, nil
 }
 

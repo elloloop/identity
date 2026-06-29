@@ -14,13 +14,17 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>What gets logged</h2>
   <ul>
-    <li>Login attempts: success, password-failure, lockout, OAuth, passkey, TOTP-success, TOTP-failure.</li>
-    <li>Password lifecycle: signup, change, reset request, reset complete.</li>
-    <li>Session changes: refresh-token issuance, revoke, sign-out-everywhere.</li>
-    <li>Passkey lifecycle: register, delete.</li>
-    <li>TOTP lifecycle: enable, disable, recovery-code regenerate, recovery-code consumed.</li>
-    <li>User-management actions: invite, accept-invitation, deactivate, reactivate, reset-password, set-quota, group CRUD, group membership.</li>
-    <li>Help-request lifecycle: created, resolved, rejected.</li>
+    <li>Login attempts: success, failure, login-while-locked, lockout opened (threshold tripped), OAuth, passkey.</li>
+    <li>Session: logout, session revoke.</li>
+    <li>Password lifecycle: change, reset, admin reset-password.</li>
+    <li>Passkey lifecycle: add, remove.</li>
+    <li>TOTP lifecycle: enable, disable, verify.</li>
+    <li>Phone verification: requested, verified.</li>
+    <li>QR login: approved, rejected.</li>
+    <li>Linked identities: linked, unlinked.</li>
+    <li>User-management actions: invite, deactivate, reactivate, delete.</li>
+    <li>Admin help requests: requested, resolved.</li>
+    <li>Control-plane changes: login-policy upsert/delete, project-config update, platform-admin bootstrap blocked.</li>
   </ul>
 
   <h2>Event shape</h2>
@@ -45,7 +49,7 @@ import { Code } from "astro-expressive-code/components";
   -H "Authorization: Bearer $ADMIN_TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{
-    "eventType": "password_login_failed",
+    "eventType": "login_failure",
     "startTimeMs": 1735689600000,
     "limit": 100
   }'`} lang="bash" />

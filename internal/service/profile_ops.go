@@ -9,13 +9,23 @@ import (
 	"strings"
 
 	"github.com/elloloop/identity/internal/graph"
+	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
-// ChangePassword changes the user's password. Requires current
-// password verification. Invalidates all refresh tokens.
+// ChangePassword changes the user's password after verifying the
+// current password. On success every one of the user's sessions is
+// revoked (their refresh tokens are deleted), forcing re-authentication
+// on all devices — the documented credential-change behavior.
+//
+// The caller's own session is included: this RPC does not carry the
+// current session/token id (the handler only resolves the authenticated
+// user id from the JWT), so we cannot single out and preserve the
+// caller's session. The user re-signs in with their new password. The
+// session revoke is best-effort — the password is already committed when
+// it runs, so a revoke failure is logged rather than failing the RPC.
 func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
 	if currentPassword == "" || newPassword == "" {
 		return errors.New("both current and new password are required")
@@ -55,9 +65,20 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPass
 		return fmt.Errorf("update password: %w", err)
 	}
 
+	// A credential change must force re-authentication on every device.
+	// The password is already committed, so a revoke failure is logged
+	// (stale sessions live until their natural expiry) rather than failing
+	// the RPC after a successful password change.
+	revoked, err := s.revokeAllUserSessions(ctx, userID)
+	if err != nil {
+		s.logger.Warn("change_password_session_revoke_failed",
+			zap.String("user_id", userID), zap.Error(err))
+	}
+
 	s.audit.Log(
 		ctx, audit.EventPasswordChanged,
 		audit.WithActor(userID), audit.WithTarget(userID), audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"sessions_revoked": revoked}),
 	)
 	return nil
 }

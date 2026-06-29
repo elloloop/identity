@@ -7,10 +7,37 @@ import { Code } from "astro-expressive-code/components";
   <h1>Observability</h1>
   <p>
     Identity exposes structured logs on stdout, Prometheus metrics on
-    <code>:9090/metrics</code>, and HTTP health endpoints on
-    <code>/health</code> + <code>/healthz</code>. There is no built-in
-    tracing — wrap the binary with your own OpenTelemetry sidecar if you
-    need spans.
+    <code>:9090/metrics</code>, HTTP health endpoints on
+    <code>/health</code> + <code>/healthz</code>, and built-in
+    OpenTelemetry tracing you can point at any OTLP collector.
+  </p>
+
+  <h2>Tracing</h2>
+  <p>
+    The server ships OpenTelemetry tracing. When enabled, an
+    <code>otelconnect</code> interceptor wraps the Connect handlers so
+    each RPC produces a server span, and outbound work (mailer, IDV, the
+    OAuth token-endpoint POST) is instrumented with client-kind spans.
+    Spans carry the <code>identity</code> service-name resource
+    attribute and are exported over OTLP to a collector you supply — no
+    sidecar required. When disabled, OTel's no-op tracer provider is
+    installed and the hot path pays no per-request cost (the W3C
+    TraceContext propagator is still installed so inbound trace IDs
+    surface in logs).
+  </p>
+  <table>
+    <tr><th>Env var</th><th>Meaning</th></tr>
+    <tr><td><code>GATEWAY_OTEL_ENABLED</code></td><td><code>true</code>/<code>false</code> (default <code>false</code>)</td></tr>
+    <tr><td><code>GATEWAY_OTEL_EXPORTER_ENDPOINT</code></td><td>Collector <code>host:port</code> — required when enabled</td></tr>
+    <tr><td><code>GATEWAY_OTEL_EXPORTER_PROTOCOL</code></td><td><code>grpc</code> or <code>http</code> (default <code>grpc</code>)</td></tr>
+    <tr><td><code>GATEWAY_OTEL_SAMPLE_RATIO</code></td><td><code>0.0</code>–<code>1.0</code> (default <code>0.1</code>)</td></tr>
+    <tr><td><code>GATEWAY_OTEL_DEPLOYMENT_ENV</code></td><td><code>deployment.environment.name</code> resource attribute (default empty)</td></tr>
+    <tr><td><code>GATEWAY_OTEL_SERVICE_VERSION</code></td><td>Overrides the build version baked into the binary</td></tr>
+  </table>
+  <p>
+    When <code>GATEWAY_OTEL_ENABLED</code> is <code>true</code> but
+    <code>GATEWAY_OTEL_EXPORTER_ENDPOINT</code> is empty the server fails
+    fast at boot rather than silently dropping traces.
   </p>
 
   <h2>Logs</h2>
@@ -31,7 +58,7 @@ import { Code } from "astro-expressive-code/components";
     <tr><th>Event</th><th>When</th></tr>
     <tr><td><code>identity_service_starting</code></td><td>Process boot, before the datastore connection</td></tr>
     <tr><td><code>jwt_key_ring_loaded</code></td><td>Production keys loaded successfully</td></tr>
-    <tr><td><code>auto_generating_dev_rsa_key</code></td><td>No <code>GATEWAY_JWT_KEYS</code> set — using a throwaway key (warning)</td></tr>
+    <tr><td><code>jwt_signer_dev_key_generated</code></td><td>No JWT key file configured (<code>GATEWAY_JWT_KEYS_FILE</code>) — using a throwaway dev key, kid <code>dev</code> (warning)</td></tr>
     <tr><td><code>using_dev_totp_encryption_key</code></td><td>No <code>GATEWAY_TOTP_ENCRYPTION_KEY</code> set (warning)</td></tr>
     <tr><td><code>repo_driver_selected</code></td><td>The datastore driver chosen by <code>GATEWAY_REPO_DRIVER</code> (<code>postgres</code> / <code>sqlite</code> / <code>memory</code>) is built and connected. The <code>driver</code> field names the active backend.</td></tr>
     <tr><td><code>identity_service_started</code></td><td>HTTP listener accepting connections</td></tr>
@@ -68,9 +95,9 @@ curl -sf http://localhost/healthz`} lang="bash" />
 
   <h2>Alerts</h2>
   <ul>
-    <li><strong>Auto-generated key in prod.</strong> Alert on any occurrence of <code>auto_generating_dev_rsa_key</code> or <code>using_dev_totp_encryption_key</code> in production logs.</li>
+    <li><strong>Auto-generated key in prod.</strong> Alert on any occurrence of <code>jwt_signer_dev_key_generated</code> or <code>using_dev_totp_encryption_key</code> in production logs.</li>
     <li><strong>Wrong backend in prod.</strong> Alert if <code>repo_driver_selected</code> reports anything other than <code>postgres</code> in production — <code>sqlite</code> is single-node only and <code>memory</code> is non-durable.</li>
-    <li><strong>Spike in lockouts.</strong> A burst of <code>password_login_failed</code> followed by <code>account_locked</code> on multiple users typically means a credential-stuffing attack.</li>
+    <li><strong>Spike in lockouts.</strong> A burst of <code>login_failure</code> followed by <code>account_locked</code> on multiple users typically means a credential-stuffing attack.</li>
     <li><strong>Datastore unreachable.</strong> Repeated <code>identity_server_init_failed</code> at boot is a hard outage; the process exits and the orchestrator restarts.</li>
   </ul>
 </DocsLayout>
