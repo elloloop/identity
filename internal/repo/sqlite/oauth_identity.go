@@ -76,3 +76,20 @@ func (r *sqliteRepository) ListOAuthIdentitiesForUser(ctx context.Context, userI
 	}
 	return out, nil
 }
+
+func (r *sqliteRepository) DeleteOAuthIdentity(ctx context.Context, userID, provider, providerUserID string) error {
+	if userID == "" || provider == "" || providerUserID == "" {
+		return service.ErrNotFound
+	}
+	const q = `
+		DELETE FROM oauth_identities
+		 WHERE project_id = $1 AND user_id = $2 AND provider = $3 AND provider_user_id = $4`
+	tag, err := r.db.Exec(ctx, q, r.projectID, userID, provider, providerUserID)
+	if err != nil {
+		return wrapErr("DeleteOAuthIdentity", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return service.ErrNotFound
+	}
+	return nil
+}

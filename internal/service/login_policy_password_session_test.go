@@ -129,7 +129,7 @@ func TestRefreshToken_TenantIdleTimeout(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	user := seedUser(repo, "alice@acme.com", "", "active")
-	rawToken := "raw-idle-token"
+	rawToken := "raw-idle-token" // #nosec G101 -- a test fixture, not a real credential.
 	_, err := repo.CreateRefreshToken(ctx, &RefreshTokenRecord{
 		TokenHash:  hashRefreshToken(rawToken),
 		UserID:     user.ID,

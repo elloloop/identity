@@ -33,7 +33,7 @@ func (p *hostedStubProvider) AuthorizationURL(_ context.Context, redirectURI, st
 	return u.String(), nil
 }
 
-func (p *hostedStubProvider) Exchange(_ context.Context, _, _ string) (*oauth.Identity, error) {
+func (p *hostedStubProvider) Exchange(_ context.Context, params oauth.ExchangeParams) (*oauth.Identity, error) {
 	return p.identity, nil
 }
 
@@ -105,7 +105,14 @@ func TestHostedOAuth_EndToEnd(t *testing.T) {
 	// 2. Callback: provider redirects back with state + code. Expect a
 	// 302 to return_to?code=<otc>.
 	callbackURL := h.BaseURL + "/oauth/callback/google?state=" + url.QueryEscape(stateToken) + "&code=auth-code-xyz"
-	cbResp, err := client.Get(callbackURL)
+	req, err := http.NewRequest("GET", callbackURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	for _, c := range startResp.Cookies() {
+		req.AddCookie(c)
+	}
+	cbResp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET /oauth/callback: %v", err)
 	}

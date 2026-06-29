@@ -1106,3 +1106,37 @@ func TestSMTPAddressOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildBody_ReplyToAndListUnsubscribe(t *testing.T) {
+	m := Message{
+		To:              "u@example.com",
+		From:            "no-reply@example.com",
+		Subject:         "Hi",
+		Text:            "body",
+		ReplyTo:         "help@example.com",
+		ListUnsubscribe: "<mailto:unsub@example.com>",
+	}
+	got := string(buildBody(m))
+	if !strings.Contains(got, "Reply-To: help@example.com\r\n") {
+		t.Fatalf("expected Reply-To header, got:\n%s", got)
+	}
+	if !strings.Contains(got, "List-Unsubscribe: <mailto:unsub@example.com>\r\n") {
+		t.Fatalf("expected List-Unsubscribe header, got:\n%s", got)
+	}
+}
+
+func TestBuildBody_OmitsHeadersWhenUnset(t *testing.T) {
+	m := Message{
+		To:      "u@example.com",
+		From:    "no-reply@example.com",
+		Subject: "Hi",
+		Text:    "body",
+	}
+	got := string(buildBody(m))
+	if strings.Contains(got, "Reply-To:") {
+		t.Fatalf("did not expect Reply-To header, got:\n%s", got)
+	}
+	if strings.Contains(got, "List-Unsubscribe:") {
+		t.Fatalf("did not expect List-Unsubscribe header, got:\n%s", got)
+	}
+}

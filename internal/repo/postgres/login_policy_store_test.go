@@ -126,4 +126,13 @@ func runLoginPolicySmoke(t *testing.T, dsn string) {
 	missing, err := store.GetLoginPolicy(ctx, projectID, "no-such-tenant")
 	require.NoError(t, err)
 	require.Nil(t, missing)
+
+	// Delete clears the policy; a subsequent Get is (nil, nil), and deleting
+	// again is an idempotent no-op.
+	require.NoError(t, store.DeleteLoginPolicy(ctx, projectID, tenantID))
+	gone, err := store.GetLoginPolicy(ctx, projectID, tenantID)
+	require.NoError(t, err)
+	require.Nil(t, gone)
+	require.NoError(t, store.DeleteLoginPolicy(ctx, projectID, tenantID), "delete is idempotent")
+	require.ErrorIs(t, store.DeleteLoginPolicy(ctx, projectID, ""), service.ErrInvalidArgument)
 }

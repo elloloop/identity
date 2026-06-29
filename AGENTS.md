@@ -112,7 +112,7 @@ better, a content digest):
 - `postgres:16.13-alpine3.23` — never `:16-alpine`, never `:alpine`
 - `GO_VERSION: '1.25.9'` — never `'1.25'`, never `'stable'`
 - `go-version: '1.25.9'` in `actions/setup-go` — never `'1.25.x'`
-- `golangci-lint@v1.62.2` — never `@latest`
+- `github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.1` — never `@latest`
 - `protoc-gen-go v1.36.11` — pinned in `go install …@v1.36.11`
 
 Why: builds must be reproducible. A floating tag means yesterday's

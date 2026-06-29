@@ -29,7 +29,8 @@ docker run -d --name identity \\
   -e GATEWAY_PASSKEY_RP_ID=acme.com \\
   -e GATEWAY_PASSKEY_ORIGIN=https://app.acme.com \\
   -e GATEWAY_ALLOWED_ORIGINS="https://app.acme.com,https://admin.acme.com,https://auth.acme.com" \\
-  -e GATEWAY_JWT_KEYS="$(cat keyring.json)" \\
+  -v $(pwd)/keys.json:/etc/identity/keys.json:ro \\
+  -e GATEWAY_JWT_SIGNER=file -e GATEWAY_JWT_KEYS_FILE=/etc/identity/keys.json \\
   -e GATEWAY_TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)" \\
   ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="identity (auth cluster)" />
   <p>

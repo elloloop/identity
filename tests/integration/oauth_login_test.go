@@ -22,7 +22,7 @@ type staticExchanger struct {
 	err      error
 }
 
-func (s *staticExchanger) Exchange(_ context.Context, code, _ string) (*oauth.Identity, error) {
+func (s *staticExchanger) Exchange(_ context.Context, params oauth.ExchangeParams) (*oauth.Identity, error) {
 	if s.err != nil {
 		return nil, s.err
 	}

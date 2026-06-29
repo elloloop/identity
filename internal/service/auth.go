@@ -22,11 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt"
@@ -38,6 +40,11 @@ import (
 )
 
 // ── Domain types ───────────────────────────────────────────────────────
+
+// StatusPendingParentalConsent is the user status for a child-band account
+// created under age-gating that has not yet obtained verifiable parental
+// consent. Such an account exists but cannot be issued access tokens.
+const StatusPendingParentalConsent = "pending_parental_consent"
 
 // User represents a user in the identity system.
 type User struct {
@@ -63,6 +70,13 @@ type User struct {
 	PhoneNumber      string
 	PhoneVerified    bool
 	PhoneVerifiedAt  int64 // epoch ms; 0 = never verified
+	DateOfBirthMs    int64 // epoch ms of date of birth; 0 = unknown (persisted)
+	// IsMinor and AgeBand are DERIVED from DateOfBirthMs + the age-gate
+	// configuration; they are NOT persisted. The service stamps them on a
+	// user before returning it so the handler/JWT layers can read a single
+	// authoritative value.
+	IsMinor bool
+	AgeBand string // "CHILD" | "TEEN" | "ADULT" | "" (unknown)
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -367,6 +381,11 @@ type Repository interface {
 	FindUserByProviderID(ctx context.Context, provider, providerUserID string) (*User, error)
 	CreateOAuthIdentity(ctx context.Context, oi *OAuthIdentity) error
 	ListOAuthIdentitiesForUser(ctx context.Context, userID string) ([]*OAuthIdentity, error)
+	// DeleteOAuthIdentity removes the (provider, provider_user_id) link
+	// owned by userID. It is scoped to the owning user so one user can
+	// never unlink another user's identity. Implementations return
+	// ErrNotFound when no matching link exists for that user.
+	DeleteOAuthIdentity(ctx context.Context, userID, provider, providerUserID string) error
 
 	// Garbage-collection sweepers for ephemeral state. The
 	// background sweeper started by app.New calls these every
@@ -452,8 +471,15 @@ type PasskeyCredRecord struct {
 	DeviceName   string
 	AAGUID       string
 	Transports   string
-	CreatedAt    int64
-	LastUsedAt   int64
+	// BackupEligible / BackupState are the WebAuthn backup flags captured at
+	// registration. They must be persisted and replayed at login: go-webauthn
+	// rejects an assertion whose backup flags are inconsistent with the stored
+	// credential, and every synced platform passkey (iCloud Keychain, Google
+	// Password Manager) sets BackupEligible, so dropping them breaks login.
+	BackupEligible bool
+	BackupState    bool
+	CreatedAt      int64
+	LastUsedAt     int64
 }
 
 // PasskeyChallengeRecord represents a stored passkey challenge.
@@ -687,8 +713,26 @@ var (
 	ErrAccountNotActive  = errors.New("account is not active")
 	ErrInvitationPending = errors.New("account has not completed invitation")
 	ErrIDVRequired       = errors.New("identity verification required")
-	ErrWeakPassword      = errors.New("password does not meet strength requirements")
-	ErrTotpRequired      = errors.New("totp required")
+	// ErrEmailVerificationRequired is returned when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
+	// is enabled and the account's email is not yet verified. Like ErrIDVRequired
+	// it is a "do something else first" precondition (verify your email, then
+	// retry), mapped to CodeFailedPrecondition by the Connect layer.
+	ErrEmailVerificationRequired = errors.New("email verification required")
+	// ErrMinorDataMinimized is returned when GATEWAY_MINOR_DATA_MINIMIZATION is
+	// enabled and a CHILD-band account attempts an RPC that would collect
+	// non-essential PII the server refuses to gather from a minor — phone
+	// verification or identity verification. Like ErrIDVRequired it is a
+	// "this is not permitted for this account" precondition, mapped to
+	// CodeFailedPrecondition by the Connect layer.
+	ErrMinorDataMinimized = errors.New("data collection not permitted for a minor account")
+	// ErrParentalConsentRequired is returned when an admin status mutator
+	// (e.g. ReactivateUser) attempts to move an account out of
+	// pending_parental_consent. The only valid transition out of that state
+	// is the dedicated parental-consent flow; ordinary status patches must
+	// not silently bypass the COPPA consent gate.
+	ErrParentalConsentRequired = errors.New("account is pending parental consent and cannot be activated by this operation")
+	ErrWeakPassword            = errors.New("password does not meet strength requirements")
+	ErrTotpRequired            = errors.New("totp required")
 	// ErrSSORequired is returned when a claimed tenant's LoginPolicy mandates
 	// single sign-on and the caller attempted a non-SSO method. Like
 	// ErrTotpRequired it is a "do something else first" signal rather than a
@@ -763,6 +807,13 @@ var (
 	// Only a DNS-verified domain may be promoted to a project's primary serving
 	// host, so this is a state precondition mapped to CodeFailedPrecondition.
 	ErrAuthDomainNotVerified = errors.New("auth domain is not verified")
+	// ErrLastCredential is returned by UnlinkIdentity when removing the
+	// requested provider link would leave the user with no remaining way to
+	// sign in (no password, no passkey, and no other linked provider). The
+	// caller is allowed to unlink their own identities, so this is a state
+	// precondition (not an authorization failure), mapped to
+	// CodeFailedPrecondition.
+	ErrLastCredential = errors.New("cannot remove the last sign-in credential")
 )
 
 // ── AuthService ────────────────────────────────────────────────────────
@@ -807,6 +858,26 @@ type AuthService struct {
 	// dependency kept off the already-wide constructor. Enforcement fails
 	// safe: any nil store, miss, or lookup error imposes no restriction.
 	governance *LoginGovernance
+
+	// ageGate determines a user's age band from their date of birth. It is
+	// always non-nil: the constructor wires the no-op determiner when
+	// age-gating is disabled (everyone classifies as adult) and the
+	// threshold determiner when GATEWAY_AGEGATE_ENABLED is set.
+	ageGate agegate.Determiner
+
+	// minorData decides whether a child account's optional PII must be
+	// suppressed (COPPA data-minimization). Built from the age gate and
+	// GATEWAY_MINOR_DATA_MINIMIZATION; a no-op when either is off.
+	minorData MinorDataMinimizer
+
+	// passkeyRPCache memoises per-project WebAuthn relying-party instances
+	// keyed by their (rp_id, rp_name, origin) tuple. A project whose
+	// config_json sets a passkey block needs a WebAuthn instance bound to
+	// that RP-ID so a passkey registered under one product's domain validates
+	// under that product's RP-ID; building one per request is wasteful, so we
+	// cache them. Projects with no override share the global s.passkeys.
+	passkeyRPCache   map[string]*passkeys.WebAuthnService
+	passkeyRPCacheMu sync.RWMutex
 }
 
 // WithTenantAutoFormer wires the optional tenant auto-formation store and
@@ -887,9 +958,12 @@ func NewAuthServiceWithOAuth(
 			len(totpRecoveryPepper), totp.MinRecoveryPepperBytes,
 		))
 	}
+	ageGate := BuildAgeGate(cfg, logger)
 	return &AuthService{
 		defaultRepo:        repo,
 		defaultTenantID:    cfg.DefaultTenantID,
+		ageGate:            ageGate,
+		minorData:          NewMinorDataMinimizer(cfg.MinorDataMinimization, ageGate, time.Now),
 		signer:             signer,
 		passkeys:           passkeysSvc,
 		audit:              auditLogger,
@@ -906,6 +980,40 @@ func NewAuthServiceWithOAuth(
 		returnAllow:        ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
 		nowFunc:            time.Now,
 	}
+}
+
+// BuildAgeGate selects the age-determination provider from config. When
+// age-gating is off the no-op determiner is returned (everyone is an adult).
+// When on, the threshold determiner is built from the configured boundaries;
+// config.Validate already guarantees they are well-formed, but if a caller
+// bypassed validation we fail safe to the no-op rather than panic.
+func BuildAgeGate(cfg *config.Config, logger *zap.Logger) agegate.Determiner {
+	if !cfg.AgeGateEnabled {
+		return agegate.NewNoop()
+	}
+	d, err := agegate.NewThreshold(cfg.AgeGateChildMaxAge, cfg.AgeGateAdultAge)
+	if err != nil {
+		logger.Error("agegate_config_invalid_falling_back_to_noop", zap.Error(err))
+		return agegate.NewNoop()
+	}
+	return d
+}
+
+// stampAgeBand derives IsMinor / AgeBand for a user from their stored date of
+// birth and the active age-gate, mutating the user in place. It is a no-op
+// (leaves the zero-values) when age-gating is disabled or no DOB is on file.
+func (s *AuthService) stampAgeBand(u *User) {
+	if u == nil {
+		return
+	}
+	u.IsMinor = false
+	u.AgeBand = ""
+	if !s.ageGate.Enabled() {
+		return
+	}
+	dec := s.ageGate.Determine(u.DateOfBirthMs, s.nowFunc())
+	u.IsMinor = dec.IsMinor
+	u.AgeBand = string(dec.Band)
 }
 
 // ── Storage tenant + project scoping ────────────────────────────────────
@@ -1008,6 +1116,11 @@ func generateChallengeID() string {
 func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
 	now := s.nowMs()
 
+	// Stamp the derived minor flag from the stored DOB so the token carries
+	// an authoritative is_minor claim when age-gating is on. No-op (false)
+	// when the gate is off or no DOB is on file.
+	s.stampAgeBand(user)
+
 	claims := jwt.Claims{
 		Sub:       user.ID,
 		Email:     user.Email,
@@ -1016,6 +1129,7 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 		Tenant:    s.tenantID(ctx),
 		Project:   s.projectID(ctx),
 		AvatarURL: user.AvatarURL,
+		IsMinor:   user.IsMinor,
 	}
 	if s.cfg.JWTAudience != "" {
 		claims.Audience = []string{s.cfg.JWTAudience}

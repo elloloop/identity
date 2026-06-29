@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -115,23 +116,20 @@ type microsoftIDClaims struct {
 	VerifiedEmail *bool `json:"verified_email"`
 }
 
-func (m *microsoftExchanger) Exchange(ctx context.Context, code, redirectURI string) (*Identity, error) {
-	if code == "" {
-		return nil, fmt.Errorf("%w: missing authorization code", ErrCodeExchangeFailed)
-	}
+func (m *microsoftExchanger) Exchange(ctx context.Context, params ExchangeParams) (*Identity, error) {
 	if m.cfg.ClientID == "" || m.cfg.ClientSecret == "" {
 		return nil, fmt.Errorf("%w: client credentials not configured", ErrCodeExchangeFailed)
 	}
 
 	form := url.Values{}
-	form.Set("code", code)
+	form.Set("code", params.Code)
 	form.Set("client_id", m.cfg.ClientID)
 	form.Set("client_secret", m.cfg.ClientSecret)
-	form.Set("redirect_uri", redirectURI)
+	form.Set("redirect_uri", params.RedirectURI)
 	form.Set("grant_type", "authorization_code")
 	form.Set("scope", "openid email profile")
-	if codeVerifier := codeVerifierFromContext(ctx); codeVerifier != "" {
-		form.Set("code_verifier", codeVerifier)
+	if params.CodeVerifier != "" {
+		form.Set("code_verifier", params.CodeVerifier)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.cfg.TokenURL,
@@ -234,16 +232,16 @@ func (m *microsoftExchanger) verifyIDToken(ctx context.Context, raw string) (*mi
 	}
 
 	payload, err := verifyJWS(raw, set)
-	if err != nil {
+	if err != nil && errors.Is(err, errKeyNotFound) {
 		m.jwks.Invalidate()
 		set2, fErr := m.jwks.Get(ctx)
 		if fErr != nil {
 			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 		}
 		payload, err = verifyJWS(raw, set2)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 	}
 
 	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))

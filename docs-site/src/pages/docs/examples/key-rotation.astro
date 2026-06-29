@@ -9,39 +9,71 @@ import { Code } from "astro-expressive-code/components";
     Rotating the JWT signing key without breaking in-flight access tokens
     is a four-step process. The whole point of the
     <code>kid</code> claim and JWKS is that you can introduce a new key
-    while the old one still verifies.
+    while the old one still verifies. With the file signer there is no
+    "active" flag to flip: you append a new key with a future
+    <code>not_before</code>, and it becomes the signer on its own once that
+    timestamp passes.
   </p>
 
   <h2>Prerequisites</h2>
   <ul>
-    <li>Production deployment uses <code>GATEWAY_JWT_KEYS</code> (not the auto-generated dev key).</li>
+    <li>
+      Production runs the file signer (<code>GATEWAY_JWT_SIGNER=file</code>,
+      the default) with a real keys file at
+      <code>GATEWAY_JWT_KEYS_FILE</code> — not the auto-generated dev key.
+      See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a> for the
+      file format.
+    </li>
+    <li>You can edit that keys file and signal the process to reload it
+      (the file signer re-reads the file on <code>SIGHUP</code>).</li>
     <li>Downstream services cache JWKS with a known refresh interval (e.g. 12 hours).</li>
     <li>You know <code>GATEWAY_JWT_EXPIRY_SECONDS</code> for the deployment.</li>
   </ul>
 
+  <p>
+    Throughout this page, the keys file is the JSON document
+    <code>GATEWAY_JWT_KEYS_FILE</code> points at. Each entry has a
+    <code>kid</code>, a PEM-encoded RSA private key, and optional
+    <code>not_before</code> / <code>expires_at</code> RFC 3339 timestamps.
+    The active signing key is whichever in-force entry has the latest
+    <code>not_before</code> (<code>not_before &lt;= now &lt; expires_at</code>);
+    every key in the file is published to JWKS regardless.
+  </p>
+
   <h2>Step 1 — Generate a new key</h2>
   <Code code={`openssl genrsa -out k-2026-08.pem 2048`} lang="bash" />
 
-  <h2>Step 2 — Add the new key as inactive</h2>
+  <h2>Step 2 — Add the new key with a future not_before</h2>
   <p>
-    Update <code>GATEWAY_JWT_KEYS</code> so the ring contains both the
-    current active key and the new one (inactive). After redeploy, the
-    new key appears in JWKS but is not yet used to sign anything.
+    Add the new key to the keys file alongside the current one, giving it a
+    <code>not_before</code> in the future. After the process reloads the
+    file (send it <code>SIGHUP</code>), the new key appears in JWKS
+    immediately but is <em>not</em> yet used to sign anything — the current
+    key still has the latest in-force <code>not_before</code>.
   </p>
-  <Code code={`[
-  {
-    "kid": "k-2026-05",
-    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\n...current...\\n-----END RSA PRIVATE KEY-----\\n",
-    "active": true
-  },
-  {
-    "kid": "k-2026-08",
-    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\n...new...\\n-----END RSA PRIVATE KEY-----\\n",
-    "active": false
-  }
-]`} lang="json" title="GATEWAY_JWT_KEYS — pre-flip" />
+  <Code code={`{
+  "keys": [
+    {
+      "kid": "k-2026-05",
+      "not_before": "2026-05-01T00:00:00Z",
+      "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\n...current...\\n-----END RSA PRIVATE KEY-----\\n"
+    },
+    {
+      "kid": "k-2026-08",
+      "not_before": "2026-08-01T00:00:00Z",
+      "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\\n...new...\\n-----END RSA PRIVATE KEY-----\\n"
+    }
+  ]
+}`} lang="json" title="keys.json — new key staged" />
   <p>
-    Verify the new key is published:
+    Reload the signer so it picks up the edited file:
+  </p>
+  <Code code={`# The file signer re-reads GATEWAY_JWT_KEYS_FILE on SIGHUP.
+kill -HUP "$(pgrep -f cmd/identity)"`} lang="bash" />
+  <p>
+    Verify the new key is published. Both <code>kid</code>s appear, but the
+    signer is still stamping tokens with <code>k-2026-05</code> until
+    <code>k-2026-08</code>'s <code>not_before</code> passes:
   </p>
   <Code code={`curl -s https://auth.acme.com/.well-known/jwks.json | jq '.keys[].kid'
 # "k-2026-05"
@@ -50,43 +82,65 @@ import { Code } from "astro-expressive-code/components";
   <h2>Step 3 — Wait for downstream caches</h2>
   <p>
     Downstream services need to pick up the new key from JWKS before any
-    token signed by it reaches them. Wait at least one cache TTL — for
-    the recommended 12-hour interval, wait 24 hours to be safe.
+    token signed by it reaches them. Make sure <code>not_before</code> is
+    far enough out that every cache has refreshed by the time it passes —
+    for the recommended 12-hour interval, leave at least 24 hours of margin.
   </p>
 
-  <h2>Step 4 — Flip the active flag</h2>
+  <h2>Step 4 — The new key promotes itself</h2>
   <p>
-    Promote the new key. After redeploy, all newly-issued access tokens
-    are signed with <code>k-2026-08</code>. Tokens already in flight,
-    signed by <code>k-2026-05</code>, continue to verify because that key
-    is still in JWKS.
+    There is no flag to flip. Once <code>k-2026-08</code>'s
+    <code>not_before</code> has passed, it has the latest in-force
+    <code>not_before</code>, so it automatically becomes the active signer
+    the next time the file is loaded. To make the switch take effect at a
+    precise moment, send another <code>SIGHUP</code> just after
+    <code>not_before</code>; otherwise it takes over on the next reload or
+    restart. Tokens already in flight, signed by <code>k-2026-05</code>,
+    continue to verify because that key is still in JWKS.
   </p>
-  <Code code={`[
-  {
-    "kid": "k-2026-05",
-    "private_key_pem": "...",
-    "active": false
-  },
-  {
-    "kid": "k-2026-08",
-    "private_key_pem": "...",
-    "active": true
-  }
-]`} lang="json" title="GATEWAY_JWT_KEYS — post-flip" />
+  <Code code={`curl -s https://auth.acme.com/.well-known/jwks.json | jq '.keys[].kid'
+# "k-2026-05"   <- still published, still verifies in-flight tokens
+# "k-2026-08"   <- now the active signer`} lang="bash" />
 
   <h2>Step 5 — Retire the old key</h2>
   <p>
     Wait <code>GATEWAY_JWT_EXPIRY_SECONDS</code> (default 15 min) plus a
-    safety margin. After that point, no extant access token was signed by
-    <code>k-2026-05</code>, so it can be removed entirely.
+    safety margin after the switch. After that point, no extant access token
+    was signed by <code>k-2026-05</code>, so set an <code>expires_at</code>
+    on it (or remove the entry entirely) and reload. Setting
+    <code>expires_at</code> in the past stops it ever signing again while it
+    is still in the file; removing the entry also drops it from JWKS.
   </p>
-  <Code code={`[
-  {
-    "kid": "k-2026-08",
-    "private_key_pem": "...",
-    "active": true
-  }
-]`} lang="json" title="GATEWAY_JWT_KEYS — final" />
+  <Code code={`{
+  "keys": [
+    {
+      "kid": "k-2026-05",
+      "not_before": "2026-05-01T00:00:00Z",
+      "expires_at": "2026-08-01T00:00:00Z",
+      "private_key_pem": "..."
+    },
+    {
+      "kid": "k-2026-08",
+      "not_before": "2026-08-01T00:00:00Z",
+      "private_key_pem": "..."
+    }
+  ]
+}`} lang="json" title="keys.json — old key retired" />
+  <p>
+    Once you no longer need <code>k-2026-05</code> in JWKS for any in-flight
+    token, drop its entry from the file entirely and reload again so it
+    disappears from <code>/.well-known/jwks.json</code>.
+  </p>
+
+  <h2>JWKS propagation</h2>
+  <p>
+    The keys file is the single source of truth: every entry is published at
+    <code>/.well-known/jwks.json</code> (including keys past their
+    <code>expires_at</code>, until you remove them from the file). Reloads
+    are atomic — in-flight signing keeps using the previous snapshot, and
+    only operations after the reload completes see the new set. There is no
+    inline-JSON env var; all changes go through the file plus a reload.
+  </p>
 
   <h2>Emergency rotation</h2>
   <p>
@@ -94,8 +148,11 @@ import { Code } from "astro-expressive-code/components";
   </p>
   <ol>
     <li>
-      Drop it from the ring entirely (don't bother with the inactive
-      step — every token signed by it should be rejected immediately).
+      Remove its entry from the keys file entirely and reload (don't bother
+      with the staged <code>not_before</code> step — every token signed by
+      it should be rejected immediately, and dropping it from the file also
+      drops it from JWKS). Make sure another in-force key remains, or the
+      reload is rejected for having no active signing key.
     </li>
     <li>
       Bring <code>GATEWAY_JWT_EXPIRY_SECONDS</code> very low (e.g. 60)
@@ -112,3 +169,5 @@ import { Code } from "astro-expressive-code/components";
     </li>
   </ol>
 </DocsLayout>
+</content>
+</invoke>

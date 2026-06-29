@@ -23,6 +23,7 @@ type fakeControlPlaneStore struct {
 	credentials map[string]*AdminProjectCredential
 	authDomains map[string]string                             // hostname → projectID (ownership, any state)
 	domainRows  map[string]map[string]*AdminProjectAuthDomain // projectID → hostname → row
+	configs     map[string]string                             // projectID → config_json
 	createErr   error
 	credErr     error
 	domainErr   error
@@ -41,6 +42,7 @@ func newFakeControlPlaneStore() *fakeControlPlaneStore {
 		credentials: map[string]*AdminProjectCredential{},
 		authDomains: map[string]string{},
 		domainRows:  map[string]map[string]*AdminProjectAuthDomain{},
+		configs:     map[string]string{},
 	}
 }
 
@@ -175,7 +177,97 @@ func (f *fakeControlPlaneStore) SetPrimaryAuthDomain(_ context.Context, projectI
 	return &cp, nil
 }
 
+func (f *fakeControlPlaneStore) UpdateProjectConfig(_ context.Context, projectID, configJSON string) (string, error) {
+	if _, ok := f.projects[projectID]; !ok {
+		return "", ErrNotFound
+	}
+	if strings.TrimSpace(configJSON) == "" {
+		configJSON = "{}"
+	}
+	f.configs[projectID] = configJSON
+	return configJSON, nil
+}
+
+func (f *fakeControlPlaneStore) GetProjectConfig(_ context.Context, projectID string) (string, error) {
+	if _, ok := f.projects[projectID]; !ok {
+		return "", ErrNotFound
+	}
+	if cfg, ok := f.configs[projectID]; ok {
+		return cfg, nil
+	}
+	return "{}", nil
+}
+
 var _ ControlPlaneProjectStore = (*fakeControlPlaneStore)(nil)
+
+// fakeLoginPolicyStore is an in-memory LoginPolicyStore for the admin-policy
+// service tests: one policy per (projectID, tenantID), nil-on-miss.
+type fakeLoginPolicyStore struct {
+	policies map[string]*LoginPolicy // projectID|tenantID → policy
+	nextID   int
+	upErr    error
+	getErr   error
+	delErr   error
+}
+
+func newFakeLoginPolicyStore() *fakeLoginPolicyStore {
+	return &fakeLoginPolicyStore{policies: map[string]*LoginPolicy{}}
+}
+
+func lpKey(projectID, tenantID string) string { return projectID + "|" + tenantID }
+
+func (f *fakeLoginPolicyStore) UpsertLoginPolicy(_ context.Context, p *LoginPolicy) (string, error) {
+	if f.upErr != nil {
+		return "", f.upErr
+	}
+	if p == nil || p.ProjectID == "" || p.TenantID == "" {
+		return "", ErrInvalidArgument
+	}
+	k := lpKey(p.ProjectID, p.TenantID)
+	now := int64(1)
+	if existing, ok := f.policies[k]; ok {
+		p.ID = existing.ID
+		p.CreatedAtMs = existing.CreatedAtMs
+	} else {
+		f.nextID++
+		p.ID = "lp-" + itoa(f.nextID)
+		p.CreatedAtMs = now
+	}
+	p.UpdatedAtMs = now
+	if p.SSOConnectionJSON == "" {
+		p.SSOConnectionJSON = "{}"
+	}
+	cp := *p
+	f.policies[k] = &cp
+	return p.ID, nil
+}
+
+func (f *fakeLoginPolicyStore) GetLoginPolicy(_ context.Context, projectID, tenantID string) (*LoginPolicy, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	if projectID == "" || tenantID == "" {
+		return nil, nil
+	}
+	if p, ok := f.policies[lpKey(projectID, tenantID)]; ok {
+		cp := *p
+		return &cp, nil
+	}
+	return nil, nil
+}
+
+func (f *fakeLoginPolicyStore) DeleteLoginPolicy(_ context.Context, projectID, tenantID string) error {
+	if f.delErr != nil {
+		return f.delErr
+	}
+	if projectID == "" || tenantID == "" {
+		return ErrInvalidArgument
+	}
+	delete(f.policies, lpKey(projectID, tenantID))
+	return nil
+}
+
+var _ LoginPolicyStore = (*fakeLoginPolicyStore)(nil)
 
 // itoa avoids importing strconv just for the fake's id minting.
 func itoa(n int) string {
@@ -241,6 +333,7 @@ type adminFixture struct {
 	projects *fakeControlPlaneStore
 	tenants  *fakeTenantStore
 	members  *fakeMembershipStore
+	policies *fakeLoginPolicyStore
 	admins   *fakePlatformAdminStore
 	dns      *fakeDNSResolver
 	audit    *recordingAuditWriter
@@ -250,15 +343,17 @@ func newAdminFixture(secret string) *adminFixture {
 	p := newFakeControlPlaneStore()
 	t := newFakeTenantStore()
 	m := newFakeMembershipStore()
+	lp := newFakeLoginPolicyStore()
 	a := newFakePlatformAdminStore()
 	dns := &fakeDNSResolver{records: map[string][]string{}}
 	auditWriter := newRecordingAuditWriter()
 	auditLog := audit.NewLogger(auditWriter, "test-project", zap.NewNop())
 	return &adminFixture{
-		svc:      NewControlPlaneAdminService(secret, p, t, m, a, dns, auditLog, zap.NewNop()),
+		svc:      NewControlPlaneAdminService(secret, p, t, m, lp, a, dns, auditLog, zap.NewNop()),
 		projects: p,
 		tenants:  t,
 		members:  m,
+		policies: lp,
 		admins:   a,
 		dns:      dns,
 		audit:    auditWriter,
@@ -1039,7 +1134,7 @@ func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
 func TestCreateFirstPlatformAdmin_UnimplementedWithoutStore(t *testing.T) {
 	t.Parallel()
 	// Built without a PlatformAdminStore (the memory shape).
-	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil)
+	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil)
 	if _, err := svc.CreateFirstPlatformAdmin(context.Background(), "ops@acme.com", ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("no store: err = %v, want ErrUnimplemented", err)
 	}

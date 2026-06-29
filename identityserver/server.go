@@ -125,6 +125,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	var invitationStore service.InvitationStore
 	var controlPlaneStore service.ControlPlaneProjectStore
 	var platformAdminStore service.PlatformAdminStore
+	var loginPolicyStore service.LoginPolicyStore
 	var loginGovernance *service.LoginGovernance
 	if authRepo == nil || dbAdapter == nil {
 		built, buildErr := repo.Build(ctx, repo.Config{
@@ -138,6 +139,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 			ProjectID:                 cfg.DefaultProjectID,
 			PostgresDSN:               cfg.PostgresDSN,
 			PostgresMaxConns:          cfg.PostgresMaxConns,
+			PostgresConnTimeoutMs:     cfg.PostgresConnTimeoutMs,
 			PostgresAutoMigrate:       cfg.PostgresAutoMigrate,
 			SQLitePath:                cfg.SQLitePath,
 			SQLiteMaxConns:            cfg.SQLiteMaxConns,
@@ -156,6 +158,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		invitationStore = built.InvitationStoreIface()
 		controlPlaneStore = built.ControlPlaneStore()
 		platformAdminStore = built.PlatformAdminStoreIface()
+		loginPolicyStore = built.LoginPolicyStoreIface()
 		loginGovernance = built.LoginGovernance()
 
 		// Seed the control-plane default project (postgres only; the
@@ -215,6 +218,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		InvitationStore:    invitationStore,
 		ControlPlaneStore:  controlPlaneStore,
 		PlatformAdminStore: platformAdminStore,
+		LoginPolicyStore:   loginPolicyStore,
 		LoginGovernance:    loginGovernance,
 		DNSResolver:        opts.DNSResolver,
 	})

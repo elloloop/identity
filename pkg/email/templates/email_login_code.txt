@@ -1,7 +1,12 @@
-Your login code is:
+{{if .ProductName}}{{.ProductName}}
+
+{{end}}Your login code is:
 
 {{.Code}}
 
 Enter it to finish signing in. The code expires in {{.ExpiresIn}}.
 
 If you didn't request this, you can safely ignore this email.
+{{if .SupportEmail}}
+Need help? Contact {{.SupportEmail}}.
+{{end}}

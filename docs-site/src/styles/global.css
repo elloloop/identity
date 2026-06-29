@@ -297,6 +297,13 @@
     white-space: nowrap;
   }
 
+  /* Generated category sections carry an id for deep-linking; give the target
+     the same sticky-header offset as headings so the anchor isn't hidden
+     under the fixed header. */
+  .prose section[id] {
+    scroll-margin-top: 5rem;
+  }
+
   /* Blockquotes / callouts fallback */
   .prose blockquote {
     @apply my-6 rounded-r-lg border-l-4 border-primary bg-primary/5 px-5 py-4 text-foreground;

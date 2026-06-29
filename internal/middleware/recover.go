@@ -22,7 +22,8 @@ func RecoverMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					logger.Error("http_handler_panic",
+					logger.Error(
+						"http_handler_panic",
 						zap.Any("panic", rec),
 						zap.String("method", r.Method),
 						zap.String("path", r.URL.Path),

@@ -2,8 +2,6 @@ package postgres
 
 import (
 	"errors"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -49,20 +47,6 @@ const DefaultMaxConns int32 = 25
 // DefaultConnTimeout is used when Config.ConnTimeout is zero.
 const DefaultConnTimeout = 5 * time.Second
 
-// ConfigFromEnv reads Config values from GATEWAY_POSTGRES_* env vars.
-// It is a convenience for callers that don't want to plumb each field
-// through their own config struct. projectID is passed in (rather than
-// read from env) because identity already plumbs cfg.DefaultProjectID.
-func ConfigFromEnv(projectID string) Config {
-	return Config{
-		DSN:         os.Getenv("GATEWAY_POSTGRES_DSN"),
-		MaxConns:    envInt32("GATEWAY_POSTGRES_MAX_CONNS", DefaultMaxConns),
-		ConnTimeout: time.Duration(envInt("GATEWAY_POSTGRES_CONN_TIMEOUT_MS", int(DefaultConnTimeout/time.Millisecond))) * time.Millisecond,
-		AutoMigrate: envBool("GATEWAY_POSTGRES_AUTO_MIGRATE", false),
-		ProjectID:   projectID,
-	}
-}
-
 func (c *Config) applyDefaults() {
 	if c.MaxConns == 0 {
 		c.MaxConns = DefaultMaxConns
@@ -83,42 +67,4 @@ func (c *Config) validate() error {
 		return errors.New("postgres: ProjectID is required")
 	}
 	return nil
-}
-
-func envInt(key string, def int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return def
-	}
-	return n
-}
-
-func envInt32(key string, def int32) int32 {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.ParseInt(v, 10, 32)
-	if err != nil {
-		return def
-	}
-	return int32(n)
-}
-
-func envBool(key string, def bool) bool {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	switch strings.ToLower(v) {
-	case "true", "1", "yes":
-		return true
-	case "false", "0", "no":
-		return false
-	}
-	return def
 }

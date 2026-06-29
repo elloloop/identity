@@ -18,7 +18,7 @@ import { Code } from "astro-expressive-code/components";
     creates a <em>pending</em> user (status <code>USER_STATUS_INVITED</code>)
     and returns an <code>invitation_token</code> that must be delivered to
     the user — typically as an email link of the form
-    <code>https://app.example.com/accept?token=&lt;invitation_token&gt;</code>.
+    <code>https://app.example.com/auth/accept-invitation?token=&lt;invitation_token&gt;</code>.
   </p>
   <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/InviteUser \\
   -H "Authorization: Bearer $ADMIN_TOKEN" \\
@@ -31,8 +31,8 @@ import { Code } from "astro-expressive-code/components";
   }'`} lang="bash" />
   <Code code={`{
   "user":            { "id": "user_...", "status": "USER_STATUS_INVITED", ... },
-  "invitationToken": "inv_...",
-  "setupUrl":        "https://app.example.com/accept?token=inv_..."
+  "invitationToken": "9f3c...e2a1",
+  "setupUrl":        "https://app.example.com/auth/accept-invitation?token=9f3c...e2a1"
 }`} lang="json" />
   <p>
     The user opens the link, picks a password, and calls
@@ -43,7 +43,7 @@ import { Code } from "astro-expressive-code/components";
   <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/AcceptInvitation \\
   -H 'Content-Type: application/json' \\
   -d '{
-    "invitationToken": "inv_...",
+    "invitationToken": "9f3c...e2a1",
     "password": "their chosen pass phrase",
     "name": "Bob Robertson"
   }'`} lang="bash" />

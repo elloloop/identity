@@ -104,7 +104,8 @@ func runRLSProof(t *testing.T, dsn string) {
 	// Guard the whole proof: if the probe role can bypass RLS, the assertions
 	// below are meaningless. Assert it cannot, up front.
 	var isSuper, canBypass bool
-	require.NoError(t, raw.QueryRow(ctx,
+	require.NoError(t, raw.QueryRow(
+		ctx,
 		`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
 	).Scan(&isSuper, &canBypass))
 	require.False(t, isSuper, "RLS proof role must not be a superuser")

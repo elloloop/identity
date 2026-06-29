@@ -94,6 +94,13 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phon
 	if user == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
+	// COPPA data-minimization: a CHILD-band account must not be pushed
+	// through phone collection when minimization is enabled. Adults, teens,
+	// and minimization-off deployments are unaffected. No SMS is sent.
+	if s.minorData.BlocksChild(user.DateOfBirthMs) {
+		s.logger.Info("phone_verification_blocked_minor", zap.String("user_id", userID))
+		return ErrMinorDataMinimized
+	}
 	if user.PhoneVerified && user.PhoneNumber == phone {
 		return ErrPhoneAlreadyVerified
 	}

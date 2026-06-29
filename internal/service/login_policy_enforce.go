@@ -136,23 +136,70 @@ func isSecondFactorSatisfyingMethod(method string) bool {
 // LoginMethodEmailOTP).
 func (s *AuthService) enforceLoginPolicy(ctx context.Context, email, method string) (loginPolicyDecision, error) {
 	var noop loginPolicyDecision
-	tenant, policy := s.resolveLoginPolicy(ctx, email)
-	if policy == nil {
+	if s.governance == nil {
 		return noop, nil
 	}
 	projectID := s.projectID(ctx)
-	return s.applyLoginPolicy(tenant, policy, projectID, method)
+	if projectID == "" {
+		return noop, nil
+	}
+
+	// The tenant LoginPolicy, when one applies, fully governs and overrides
+	// the project-wide default; otherwise the project default (which may be
+	// empty = no restriction) applies. This layering — tenant overrides
+	// project overrides global — is what lets a tenant-less user (the common
+	// case for a consumer pool) still be constrained project-wide.
+	eff, tenantID := s.effectiveLoginPolicy(ctx, email)
+
+	// 1. SSO required: authentication is exclusively through the IdP. Every
+	// non-SSO method is blocked and the caller is steered to the SSO
+	// connection. This outranks the allow-list — an SSO-required org has no
+	// business letting any local method through, even one the allow-list
+	// happens to name.
+	if eff.SSORequired && method != LoginMethodSSO {
+		s.logger.Info("login_method_blocked_sso_required",
+			zap.String("project_id", projectID),
+			zap.String("tenant_id", tenantID),
+			zap.String("method", method))
+		return noop, fmt.Errorf("%w: this organization requires single sign-on", ErrSSORequired)
+	}
+
+	// 2. AllowedMethods allow-list. Empty means "no restriction" — an empty
+	// allow-list must never lock a user out of their own login.
+	if strings.TrimSpace(eff.AllowedMethods) != "" &&
+		!allowedMethodsContains(eff.AllowedMethods, method) {
+		s.logger.Info("login_method_denied_by_policy",
+			zap.String("project_id", projectID),
+			zap.String("tenant_id", tenantID),
+			zap.String("method", method))
+		return noop, fmt.Errorf("%w: login method not allowed for your organization", ErrPermissionDenied)
+	}
+
+	// 3. Require 2FA. A permitted single-factor primary (password/email_otp/
+	// oauth) must be followed by a second factor; a method that is already
+	// strong (passkey/sso) satisfies the requirement on its own.
+	if eff.Require2FA && !isSecondFactorSatisfyingMethod(method) {
+		s.logger.Info("login_requires_second_factor_by_policy",
+			zap.String("project_id", projectID),
+			zap.String("tenant_id", tenantID),
+			zap.String("method", method))
+		return loginPolicyDecision{RequireSecondFactor: true}, nil
+	}
+
+	return noop, nil
 }
 
 // resolveLoginPolicy walks the governance plane (domain → tenant → policy)
 // for the claimed tenant that owns email's domain and returns its
 // LoginPolicy, or (nil, nil) when there is no governed policy to apply.
 //
-// It fails SAFE at every step — no governance bundle, no resolved project,
-// an unverified or unknown domain, an unclaimed tenant, an absent policy, or
-// any lookup error all return (nil, nil) so a caller imposes NO restriction.
-// The tenant is returned alongside the policy so callers that audit or log
-// can name the org without a second lookup.
+// It is the single fail-safe lookup the method, password-strength, and
+// session-timeout enforcement all share. It fails SAFE at every step — no
+// governance bundle, no resolved project, an unverified or unknown domain, an
+// unclaimed tenant, an absent policy, or any lookup error all return
+// (nil, nil) so a caller imposes NO restriction. The tenant is returned
+// alongside the policy so callers that audit or log can name the org without
+// a second lookup.
 func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Tenant, *LoginPolicy) {
 	if s.governance == nil {
 		return nil, nil
@@ -198,49 +245,57 @@ func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Te
 	return tenant, policy
 }
 
-// applyLoginPolicy enforces the three orthogonal controls of an already
-// resolved LoginPolicy (SSO-required → allow-list → 2FA) for a verified
-// method, returning at most ErrSSORequired / ErrPermissionDenied or a
-// RequireSecondFactor decision. projectID/tenant are passed in for logging.
-func (s *AuthService) applyLoginPolicy(tenant *Tenant, policy *LoginPolicy, projectID, method string) (loginPolicyDecision, error) {
-	var noop loginPolicyDecision
+// effectiveLoginPolicy resolves the login-method controls that govern email's
+// login, layering the tenant LoginPolicy OVER the project-wide default. It
+// returns the effective controls and the governing tenant id ("" when only
+// the project default applies).
+//
+// It fails SAFE: when resolveLoginPolicy finds no governed tenant policy
+// (unverified/unknown domain, unclaimed tenant, absent policy, or any lookup
+// error) it falls back to the project default rather than locking a user out
+// — so a misconfiguration or an infrastructure blip can never become a login
+// lockout. A tenant policy, once found, fully replaces the project default (it
+// does not merge field by field): a tenant that deliberately runs an open
+// login must not inherit a project-wide restriction.
+func (s *AuthService) effectiveLoginPolicy(ctx context.Context, email string) (loginControls, string) {
+	project := projectLoginControls(ctx)
 
-	// 1. SSO required: the tenant authenticates exclusively through its IdP.
-	// Every non-SSO method is blocked and the caller is steered to the SSO
-	// connection. This outranks the allow-list — an SSO-required tenant has
-	// no business letting any local method through, even one the allow-list
-	// happens to name.
-	if policy.SSORequired && method != LoginMethodSSO {
-		s.logger.Info("login_method_blocked_sso_required",
-			zap.String("project_id", projectID),
-			zap.String("tenant_id", tenant.ID),
-			zap.String("method", method))
-		return noop, fmt.Errorf("%w: this organization requires single sign-on", ErrSSORequired)
+	tenant, policy := s.resolveLoginPolicy(ctx, email)
+	if policy == nil {
+		return project, ""
 	}
+	return loginControls{
+		AllowedMethods: policy.AllowedMethods,
+		SSORequired:    policy.SSORequired,
+		Require2FA:     policy.Require2FA,
+	}, tenant.ID
+}
 
-	// 2. AllowedMethods allow-list. Empty means "no restriction" — an empty
-	// allow-list must never lock a tenant out of its own login.
-	if strings.TrimSpace(policy.AllowedMethods) != "" &&
-		!allowedMethodsContains(policy.AllowedMethods, method) {
-		s.logger.Info("login_method_denied_by_policy",
-			zap.String("project_id", projectID),
-			zap.String("tenant_id", tenant.ID),
-			zap.String("method", method))
-		return noop, fmt.Errorf("%w: login method not allowed for your organization", ErrPermissionDenied)
+// loginControls is the resolved, source-agnostic set of login restrictions the
+// enforcement applies. It is the common shape both a tenant LoginPolicy and a
+// project-wide default reduce to, so the three checks run once over either.
+type loginControls struct {
+	AllowedMethods string
+	SSORequired    bool
+	Require2FA     bool
+}
+
+// projectLoginControls reads the project-wide login default off the request's
+// resolved project scope. The zero value (no scope, or a project that
+// configures none) imposes no restriction, so a deployment without a control
+// plane or a project with empty config_json behaves exactly as before.
+//
+// A project-wide default has no SSO connection of its own, so it never sets
+// SSORequired — forcing SSO without an IdP would lock the whole project out.
+func projectLoginControls(ctx context.Context) loginControls {
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil {
+		return loginControls{}
 	}
-
-	// 3. Require 2FA. A permitted single-factor primary (password/email_otp/
-	// oauth) must be followed by a second factor; a method that is already
-	// strong (passkey/sso) satisfies the requirement on its own.
-	if policy.Require2FA && !isSecondFactorSatisfyingMethod(method) {
-		s.logger.Info("login_requires_second_factor_by_policy",
-			zap.String("project_id", projectID),
-			zap.String("tenant_id", tenant.ID),
-			zap.String("method", method))
-		return loginPolicyDecision{RequireSecondFactor: true}, nil
+	return loginControls{
+		AllowedMethods: scope.LoginDefaults.AllowedMethods,
+		Require2FA:     scope.LoginDefaults.Require2FA,
 	}
-
-	return noop, nil
 }
 
 // requireSecondFactor is the shared tail every single-factor primary login

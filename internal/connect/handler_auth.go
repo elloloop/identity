@@ -49,17 +49,17 @@ func (h *IdentityHandler) OAuthLogin(
 	ipAddr := clientIP(req.Header())
 	userAgent := clientUserAgent(req.Header())
 
-	result, err := h.auth.OAuthLogin(
-		ctx,
-		req.Msg.Code,
-		req.Msg.Provider,
-		req.Msg.RedirectUri,
-		req.Msg.CodeVerifier,
-		req.Msg.State,
-		req.Msg.StateToken,
-		ipAddr,
-		userAgent,
-	)
+	result, err := h.auth.OAuthLogin(ctx, service.OAuthLoginParams{
+		Code:             req.Msg.Code,
+		Provider:         req.Msg.Provider,
+		RedirectURI:      req.Msg.RedirectUri,
+		CodeVerifier:     req.Msg.CodeVerifier,
+		State:            req.Msg.State,
+		StateToken:       req.Msg.StateToken,
+		AppleUserPayload: req.Msg.AppleUserPayload,
+		IPAddr:           ipAddr,
+		UserAgent:        userAgent,
+	})
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -115,6 +115,7 @@ func (h *IdentityHandler) PasswordSignup(
 		req.Msg.Password,
 		"", // name — not in proto; service derives from email
 		req.Msg.RecoveryEmail,
+		req.Msg.DateOfBirthMs,
 	)
 	if err != nil {
 		return nil, toConnectError(err)

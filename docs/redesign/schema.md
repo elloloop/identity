@@ -1,5 +1,10 @@
 # Identity Redesign — Database Schema (Postgres)
 
+> **Original design document — kept as a design record, not find/replaced.**
+> Where this references `EntDB` or `proto/identity/schema/schema.proto`, the
+> implementation shipped as the SQLite driver (`internal/repo/sqlite/`) and
+> the single proto is `proto/identity/v1/identity.proto`.
+
 > Single source of truth for the redesigned identity datastore. Postgres is
 > the datastore. This document is grounded in the current proto schema
 > (`proto/identity/schema/schema.proto`) and migrations `0001..0012`
