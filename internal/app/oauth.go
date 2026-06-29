@@ -24,8 +24,14 @@ func buildOAuthRegistry(cfg *config.Config, logger *zap.Logger) *oauth.Registry 
 
 	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
 		r.Register("google", oauth.NewGoogle(oauth.GoogleConfig{
-			ClientID:     cfg.GoogleClientID,
-			ClientSecret: cfg.GoogleClientSecret,
+			ClientID:         cfg.GoogleClientID,
+			ClientSecret:     cfg.GoogleClientSecret,
+			AuthorizationURL: cfg.GoogleAuthorizationURL,
+			TokenURL:         cfg.GoogleTokenURL,
+			JWKSURL:          cfg.GoogleJWKSURL,
+			DiscoveryURL:     cfg.GoogleDiscoveryURL,
+			UserinfoURL:      cfg.GoogleUserinfoURL,
+			Issuer:           cfg.GoogleIssuer,
 		}))
 	}
 	if cfg.MicrosoftClientID != "" && cfg.MicrosoftClientSecret != "" {

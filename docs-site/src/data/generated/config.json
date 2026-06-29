@@ -594,6 +594,15 @@
     "anchor": "oauth"
   },
   {
+    "name": "GATEWAY_OAUTH_GOOGLE_AUTHORIZATION_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "overrides the Google OAuth authorization endpoint; empty = the real Google endpoint.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
     "name": "GATEWAY_OAUTH_GOOGLE_CLIENT_ID",
     "type": "string",
     "default": "",
@@ -608,6 +617,51 @@
     "default": "",
     "required": false,
     "description": "is the Google OAuth client secret.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_GOOGLE_DISCOVERY_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "overrides the Google OIDC discovery document URL; empty = the real Google endpoint.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_GOOGLE_ISSUER",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "overrides the expected Google OIDC token issuer; empty = the real Google issuer.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_GOOGLE_JWKS_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "overrides the Google OIDC JWKS (public keys) endpoint; empty = the real Google endpoint.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_GOOGLE_TOKEN_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "overrides the Google OAuth token endpoint; empty = the real Google endpoint.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_GOOGLE_USERINFO_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "overrides the Google OIDC userinfo endpoint; empty = the real Google endpoint.",
     "category": "OAuth",
     "anchor": "oauth"
   },

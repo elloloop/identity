@@ -230,6 +230,18 @@ type Config struct {
 	GoogleClientID string
 	// GoogleClientSecret is the Google OAuth client secret.
 	GoogleClientSecret string
+	// GoogleAuthorizationURL overrides the Google OAuth authorization endpoint; empty = the real Google endpoint. For self-hosted proxies and end-to-end tests against a mock OIDC provider.
+	GoogleAuthorizationURL string
+	// GoogleTokenURL overrides the Google OAuth token endpoint; empty = the real Google endpoint.
+	GoogleTokenURL string
+	// GoogleJWKSURL overrides the Google OIDC JWKS (public keys) endpoint; empty = the real Google endpoint.
+	GoogleJWKSURL string
+	// GoogleDiscoveryURL overrides the Google OIDC discovery document URL; empty = the real Google endpoint. When set, the authorization / token / JWKS / userinfo endpoints are resolved from this document.
+	GoogleDiscoveryURL string
+	// GoogleUserinfoURL overrides the Google OIDC userinfo endpoint; empty = the real Google endpoint.
+	GoogleUserinfoURL string
+	// GoogleIssuer overrides the expected Google OIDC token issuer; empty = the real Google issuer.
+	GoogleIssuer string
 	// MicrosoftClientID is the Microsoft / Entra ID OAuth client ID.
 	MicrosoftClientID string
 	// MicrosoftClientSecret is the Microsoft / Entra ID OAuth client secret.
@@ -672,17 +684,23 @@ func Load() *Config {
 		ProjectResolutionCacheTTLSeconds: envInt("GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS", 30),
 		ProjectResolutionCacheMaxEntries: envInt("GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES", 10000),
 
-		GoogleClientID:        envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", ""),
-		GoogleClientSecret:    envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", ""),
-		MicrosoftClientID:     envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_ID", ""),
-		MicrosoftClientSecret: envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET", ""),
-		MicrosoftTenantID:     envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
-		GitHubClientID:        envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
-		GitHubClientSecret:    envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
-		AppleClientID:         envStr("GATEWAY_OAUTH_APPLE_CLIENT_ID", ""),
-		AppleTeamID:           envStr("GATEWAY_OAUTH_APPLE_TEAM_ID", ""),
-		AppleKeyID:            envStr("GATEWAY_OAUTH_APPLE_KEY_ID", ""),
-		ApplePrivateKey:       envStr("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", ""),
+		GoogleClientID:         envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:     envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", ""),
+		GoogleAuthorizationURL: envStr("GATEWAY_OAUTH_GOOGLE_AUTHORIZATION_URL", ""),
+		GoogleTokenURL:         envStr("GATEWAY_OAUTH_GOOGLE_TOKEN_URL", ""),
+		GoogleJWKSURL:          envStr("GATEWAY_OAUTH_GOOGLE_JWKS_URL", ""),
+		GoogleDiscoveryURL:     envStr("GATEWAY_OAUTH_GOOGLE_DISCOVERY_URL", ""),
+		GoogleUserinfoURL:      envStr("GATEWAY_OAUTH_GOOGLE_USERINFO_URL", ""),
+		GoogleIssuer:           envStr("GATEWAY_OAUTH_GOOGLE_ISSUER", ""),
+		MicrosoftClientID:      envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_ID", ""),
+		MicrosoftClientSecret:  envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET", ""),
+		MicrosoftTenantID:      envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
+		GitHubClientID:         envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:     envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
+		AppleClientID:          envStr("GATEWAY_OAUTH_APPLE_CLIENT_ID", ""),
+		AppleTeamID:            envStr("GATEWAY_OAUTH_APPLE_TEAM_ID", ""),
+		AppleKeyID:             envStr("GATEWAY_OAUTH_APPLE_KEY_ID", ""),
+		ApplePrivateKey:        envStr("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", ""),
 
 		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
 
