@@ -13,6 +13,7 @@ import (
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -199,6 +200,10 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 
 	// Best-effort: auto-form a company tenant from the email domain.
 	s.maybeAutoFormTenant(ctx, user)
+
+	// Best-effort: emit a user.created lifecycle event for downstream
+	// provisioning. No-op when eventing is disabled.
+	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, user)
 
 	// Best-effort: fire a verification email. Failures are logged but
 	// must never fail signup itself.
@@ -879,6 +884,10 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email stri
 	// Best-effort: auto-form a company tenant from the email domain. Only on
 	// a genuinely new account (a raced/existing user returned above).
 	s.maybeAutoFormTenant(ctx, newUser)
+
+	// Best-effort: emit a user.created lifecycle event. No-op when eventing
+	// is disabled.
+	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, newUser)
 
 	return newUser, true, nil
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -855,6 +856,14 @@ type AuthService struct {
 	// safe: any nil store, miss, or lookup error imposes no restriction.
 	governance *LoginGovernance
 
+	// publisher emits user-lifecycle events (create/update/deactivate) to
+	// downstream subscribers. nil disables emission (treated as the no-op
+	// events.Discard) — the constructor leaves it nil; app.New sets it via
+	// WithEventPublisher (the outbox-backed publisher when
+	// GATEWAY_WEBHOOKS_ENABLED, else left nil). Emission is best-effort and
+	// never fails the originating RPC.
+	publisher events.Publisher
+
 	// ageGate determines a user's age band from their date of birth. It is
 	// always non-nil: the constructor wires the no-op determiner when
 	// age-gating is disabled (everyone classifies as adult) and the
@@ -874,6 +883,15 @@ type AuthService struct {
 	// cache them. Projects with no override share the global s.passkeys.
 	passkeyRPCache   map[string]*passkeys.WebAuthnService
 	passkeyRPCacheMu sync.RWMutex
+}
+
+// WithEventPublisher wires the optional user-lifecycle event publisher and
+// returns the service for chaining. app.New calls it once at construction
+// (with the outbox-backed publisher when outbound eventing is enabled, or
+// nil to disable emission).
+func (s *AuthService) WithEventPublisher(p events.Publisher) *AuthService {
+	s.publisher = p
+	return s
 }
 
 // WithTenantAutoFormer wires the optional tenant auto-formation store and

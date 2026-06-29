@@ -13,6 +13,7 @@ import (
 	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/events"
 )
 
 // SetUserQuota updates the storage quota for a user.
@@ -171,6 +172,13 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 	}
 	s.audit.Log(ctx, audit.EventUserDeleted,
 		audit.WithActor(actorID), audit.WithTarget(targetUserID), audit.WithSuccess(true))
+
+	// Best-effort: a hard delete is also a deprovisioning signal — emit
+	// user.deactivated so downstream SaaS removes access. No-op when
+	// eventing is disabled.
+	u.Status = "deactivated"
+	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeactivated, u)
+
 	return nil
 }
 
