@@ -31,11 +31,13 @@ type Config struct {
 // RegistrationResult holds the verified credential data after a successful
 // registration ceremony. All fields are in their storage-friendly encoding.
 type RegistrationResult struct {
-	CredentialID string // base64url (unpadded)
-	PublicKey    string // base64 (standard, with padding)
-	SignCount    uint32
-	AAGUID       string
-	Transports   string // comma-separated
+	CredentialID   string // base64url (unpadded)
+	PublicKey      string // base64 (standard, with padding)
+	SignCount      uint32
+	AAGUID         string
+	Transports     string // comma-separated
+	BackupEligible bool   // WebAuthn BE flag — persist + replay at login
+	BackupState    bool   // WebAuthn BS flag — persist + replay at login
 }
 
 // WebAuthnService wraps go-webauthn for registration and authentication
@@ -207,11 +209,13 @@ func (s *WebAuthnService) CompleteRegistration(
 	}
 
 	return &RegistrationResult{
-		CredentialID: b64urlEncode(credential.ID),
-		PublicKey:    base64.StdEncoding.EncodeToString(credential.PublicKey),
-		SignCount:    credential.Authenticator.SignCount,
-		AAGUID:       aaguid,
-		Transports:   transportsStr,
+		CredentialID:   b64urlEncode(credential.ID),
+		PublicKey:      base64.StdEncoding.EncodeToString(credential.PublicKey),
+		SignCount:      credential.Authenticator.SignCount,
+		AAGUID:         aaguid,
+		Transports:     transportsStr,
+		BackupEligible: credential.Flags.BackupEligible,
+		BackupState:    credential.Flags.BackupState,
 	}, nil
 }
 
@@ -286,6 +290,9 @@ func (s *WebAuthnService) CompleteAuthentication(
 	storedPublicKeyB64 string,
 	storedSignCount uint32,
 	storedCredentialID string,
+	userID string,
+	backupEligible bool,
+	backupState bool,
 ) (newSignCount uint32, err error) {
 	credIDBytes, decErr := b64urlDecode(storedCredentialID)
 	if decErr != nil {
@@ -304,14 +311,24 @@ func (s *WebAuthnService) CompleteAuthentication(
 		return 0, fmt.Errorf("passkeys: parsing credential request response: %w", parseErr)
 	}
 
-	// Build a user with the stored credential so the library can verify.
+	// Build a user with the stored credential so the library can verify. The ID
+	// MUST be the real user ID (the same value used as user.id in
+	// BeginRegistration): the authenticator stored it as the credential's user
+	// handle at registration and returns it in the assertion, and the library
+	// rejects the login unless the assertion's user handle equals WebAuthnID().
 	user := &WebAuthnUser{
-		ID:   []byte("auth-user"),
-		Name: "auth-user",
+		ID:   []byte(userID),
+		Name: userID,
 		Credentials: []webauthn.Credential{
 			{
 				ID:        credIDBytes,
 				PublicKey: pubKeyBytes,
+				// Replay the backup flags captured at registration; the library
+				// rejects assertions whose flags are inconsistent with these.
+				Flags: webauthn.CredentialFlags{
+					BackupEligible: backupEligible,
+					BackupState:    backupState,
+				},
 				Authenticator: webauthn.Authenticator{
 					SignCount: storedSignCount,
 				},

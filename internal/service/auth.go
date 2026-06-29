@@ -471,8 +471,15 @@ type PasskeyCredRecord struct {
 	DeviceName   string
 	AAGUID       string
 	Transports   string
-	CreatedAt    int64
-	LastUsedAt   int64
+	// BackupEligible / BackupState are the WebAuthn backup flags captured at
+	// registration. They must be persisted and replayed at login: go-webauthn
+	// rejects an assertion whose backup flags are inconsistent with the stored
+	// credential, and every synced platform passkey (iCloud Keychain, Google
+	// Password Manager) sets BackupEligible, so dropping them breaks login.
+	BackupEligible bool
+	BackupState    bool
+	CreatedAt      int64
+	LastUsedAt     int64
 }
 
 // PasskeyChallengeRecord represents a stored passkey challenge.
