@@ -352,3 +352,33 @@ func findByte(s string, b byte) int {
 	}
 	return len(s)
 }
+
+// TestLoad_GoogleOIDCEndpointOverrides verifies the Google OIDC endpoint
+// overrides flow from env into config — they let a self-hosted gateway (or an
+// end-to-end test against a mock OIDC provider) point the Google provider at
+// non-default endpoints. Empty defaults (the real Google) are covered by the
+// all-defaults test.
+func TestLoad_GoogleOIDCEndpointOverrides(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_DISCOVERY_URL", "http://mock/.well-known/openid-configuration")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_AUTHORIZATION_URL", "http://mock/authorize")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_TOKEN_URL", "http://mock/token")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_JWKS_URL", "http://mock/jwks")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_USERINFO_URL", "http://mock/userinfo")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_ISSUER", "http://mock")
+
+	cfg := Load()
+
+	for _, c := range []struct{ field, got, want string }{
+		{"GoogleDiscoveryURL", cfg.GoogleDiscoveryURL, "http://mock/.well-known/openid-configuration"},
+		{"GoogleAuthorizationURL", cfg.GoogleAuthorizationURL, "http://mock/authorize"},
+		{"GoogleTokenURL", cfg.GoogleTokenURL, "http://mock/token"},
+		{"GoogleJWKSURL", cfg.GoogleJWKSURL, "http://mock/jwks"},
+		{"GoogleUserinfoURL", cfg.GoogleUserinfoURL, "http://mock/userinfo"},
+		{"GoogleIssuer", cfg.GoogleIssuer, "http://mock"},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: want %q, got %q", c.field, c.want, c.got)
+		}
+	}
+}
