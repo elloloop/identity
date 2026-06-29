@@ -95,6 +95,17 @@ vuln: ## govulncheck against the configured CVE database
 generate: ## Regenerate Go code + OpenAPI spec from proto (buf.gen.yaml)
 	buf generate
 
+.PHONY: docs-gen
+docs-gen: ## Regenerate docs reference data (config + audit events) from Go source
+	$(GO) run ./cmd/docsgen
+
+.PHONY: docs-gen-check
+docs-gen-check: docs-gen ## Verify generated docs reference data is up to date
+	@if ! git diff --exit-code -- docs-site/src/data/generated; then \
+		echo "generated docs reference data is stale — run 'make docs-gen' and commit the result." >&2; \
+		exit 1; \
+	fi
+
 .PHONY: build
 build: ## go build ./...
 	$(GO) build ./...

@@ -1,6 +1,9 @@
 ---
 import DocsLayout from "../../../layouts/DocsLayout.astro";
 import { Code } from "astro-expressive-code/components";
+import auditEvents from "../../../data/generated/audit-events.json";
+
+const eventTypes = auditEvents as string[];
 ---
 
 <DocsLayout title="Audit Logging">
@@ -12,7 +15,17 @@ import { Code } from "astro-expressive-code/components";
     log via <code>ListAuditEvents</code>.
   </p>
 
+  <aside class="not-prose my-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">
+    <strong>The event-type list is generated from source.</strong> The
+    canonical identifiers below are extracted from the <code>EventType</code>
+    constants in <code>pkg/audit/logger.go</code> by <code>cmd/docsgen</code>,
+    and a CI drift guard fails the build if these docs reference an event that
+    no longer exists. To add or rename an event, edit the Go source (not this
+    page), then regenerate with <code>make docs-gen</code>.
+  </aside>
+
   <h2>What gets logged</h2>
+  <p>By area:</p>
   <ul>
     <li>Login attempts: success, failure, login-while-locked, lockout opened (threshold tripped), OAuth, passkey.</li>
     <li>Session: logout, session revoke.</li>
@@ -25,6 +38,15 @@ import { Code } from "astro-expressive-code/components";
     <li>User-management actions: invite, deactivate, reactivate, delete.</li>
     <li>Admin help requests: requested, resolved.</li>
     <li>Control-plane changes: login-policy upsert/delete, project-config update, platform-admin bootstrap blocked.</li>
+  </ul>
+
+  <h2>Event types</h2>
+  <p>
+    The complete set of <code>event_type</code> values you can filter
+    <code>ListAuditEvents</code> by:
+  </p>
+  <ul class="columns-2 sm:columns-3">
+    {eventTypes.map((ev) => (<li><code>{ev}</code></li>))}
   </ul>
 
   <h2>Event shape</h2>

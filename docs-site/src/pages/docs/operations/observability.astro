@@ -25,15 +25,14 @@ import { Code } from "astro-expressive-code/components";
     TraceContext propagator is still installed so inbound trace IDs
     surface in logs).
   </p>
-  <table>
-    <tr><th>Env var</th><th>Meaning</th></tr>
-    <tr><td><code>GATEWAY_OTEL_ENABLED</code></td><td><code>true</code>/<code>false</code> (default <code>false</code>)</td></tr>
-    <tr><td><code>GATEWAY_OTEL_EXPORTER_ENDPOINT</code></td><td>Collector <code>host:port</code> — required when enabled</td></tr>
-    <tr><td><code>GATEWAY_OTEL_EXPORTER_PROTOCOL</code></td><td><code>grpc</code> or <code>http</code> (default <code>grpc</code>)</td></tr>
-    <tr><td><code>GATEWAY_OTEL_SAMPLE_RATIO</code></td><td><code>0.0</code>–<code>1.0</code> (default <code>0.1</code>)</td></tr>
-    <tr><td><code>GATEWAY_OTEL_DEPLOYMENT_ENV</code></td><td><code>deployment.environment.name</code> resource attribute (default empty)</td></tr>
-    <tr><td><code>GATEWAY_OTEL_SERVICE_VERSION</code></td><td>Overrides the build version baked into the binary</td></tr>
-  </table>
+  <p>
+    Tracing is configured with the <code>GATEWAY_OTEL_*</code> variables —
+    enable/disable, OTLP exporter endpoint and protocol, sample ratio, and
+    resource attributes. See the
+    <a href="/identity/docs/installation/configuration#opentelemetry">OpenTelemetry
+    section of the configuration reference</a> for the full list with current
+    defaults.
+  </p>
   <p>
     When <code>GATEWAY_OTEL_ENABLED</code> is <code>true</code> but
     <code>GATEWAY_OTEL_EXPORTER_ENDPOINT</code> is empty the server fails

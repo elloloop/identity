@@ -1,0 +1,1122 @@
+[
+  {
+    "name": "GATEWAY_ADMIN_API_SECRET",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the shared secret that authenticates the control-plane admin RPCs (AdminCreateProject and friends), which a PLATFORM operator uses to provision projects/tenants out-of-band.",
+    "category": "Projects \u0026 tenancy"
+  },
+  {
+    "name": "GATEWAY_AGEGATE_ADULT_AGE",
+    "type": "integer",
+    "default": "18",
+    "required": false,
+    "description": "",
+    "category": "Age gating (COPPA)"
+  },
+  {
+    "name": "GATEWAY_AGEGATE_CHILD_MAX_AGE",
+    "type": "integer",
+    "default": "12",
+    "required": false,
+    "description": "",
+    "category": "Age gating (COPPA)"
+  },
+  {
+    "name": "GATEWAY_AGEGATE_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "Age-gating (COPPA).",
+    "category": "Age gating (COPPA)"
+  },
+  {
+    "name": "GATEWAY_AGEGATE_REQUIRE_DOB",
+    "type": "boolean",
+    "default": "false",
+    "required": true,
+    "description": "",
+    "category": "Age gating (COPPA)"
+  },
+  {
+    "name": "GATEWAY_ALLOWED_ORIGINS",
+    "type": "string",
+    "default": "http://localhost:9002,http://localhost:3000",
+    "required": false,
+    "description": "CORS",
+    "category": "HTTP, CORS \u0026 cookies"
+  },
+  {
+    "name": "GATEWAY_APP_BASE_URL",
+    "type": "string",
+    "default": "http://localhost:9002",
+    "required": false,
+    "description": "Public app URLs used in email links.",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_AUDIT_QUEUE_SIZE",
+    "type": "integer",
+    "default": "4096",
+    "required": false,
+    "description": "Audit log queue depth for the async flusher.",
+    "category": "Audit"
+  },
+  {
+    "name": "GATEWAY_AUTH_ALLOW_LOCAL",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "Dev-only",
+    "category": "Authentication"
+  },
+  {
+    "name": "GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL",
+    "type": "boolean",
+    "default": "true",
+    "required": true,
+    "description": "AuthRequireVerifiedEmail blocks authentication until the account's email is verified.",
+    "category": "Authentication"
+  },
+  {
+    "name": "GATEWAY_CAPTCHA_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": true,
+    "description": "CAPTCHA verification on unauthenticated endpoints.",
+    "category": "CAPTCHA"
+  },
+  {
+    "name": "GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "",
+    "category": "CAPTCHA"
+  },
+  {
+    "name": "GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "",
+    "category": "CAPTCHA"
+  },
+  {
+    "name": "GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "",
+    "category": "CAPTCHA"
+  },
+  {
+    "name": "GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "",
+    "category": "CAPTCHA"
+  },
+  {
+    "name": "GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "",
+    "category": "CAPTCHA"
+  },
+  {
+    "name": "GATEWAY_CAPTCHA_PROVIDER",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "(\"turnstile\" | \"recaptcha_v3\" | \"\")",
+    "category": "CAPTCHA"
+  },
+  {
+    "name": "GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD",
+    "type": "number",
+    "default": "0.5",
+    "required": false,
+    "description": "",
+    "category": "CAPTCHA"
+  },
+  {
+    "name": "GATEWAY_CAPTCHA_RECAPTCHA_SECRET",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "",
+    "category": "CAPTCHA"
+  },
+  {
+    "name": "GATEWAY_CAPTCHA_TURNSTILE_SECRET",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "",
+    "category": "CAPTCHA"
+  },
+  {
+    "name": "GATEWAY_CONNECT_PORT",
+    "type": "integer",
+    "default": "80",
+    "required": false,
+    "description": "",
+    "category": "Server \u0026 ports"
+  },
+  {
+    "name": "GATEWAY_COOKIE_DOMAIN",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "Cookie settings",
+    "category": "HTTP, CORS \u0026 cookies"
+  },
+  {
+    "name": "GATEWAY_COOKIE_SAMESITE",
+    "type": "string",
+    "default": "Lax",
+    "required": false,
+    "description": "",
+    "category": "HTTP, CORS \u0026 cookies"
+  },
+  {
+    "name": "GATEWAY_COOKIE_SECURE",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "",
+    "category": "HTTP, CORS \u0026 cookies"
+  },
+  {
+    "name": "GATEWAY_DEFAULT_EMAIL_DOMAIN",
+    "type": "string",
+    "default": "glassa.work",
+    "required": false,
+    "description": "Default email domain",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is a comma-separated list of serving hostnames seeded onto the default project at boot (postgres driver), so the Host→project resolver maps these branded hostnames to the default project.",
+    "category": "Projects \u0026 tenancy"
+  },
+  {
+    "name": "GATEWAY_DEFAULT_PROJECT_ID",
+    "type": "string",
+    "default": "default",
+    "required": false,
+    "description": "is the id of the control-plane Project the service seeds on boot (postgres driver) and pins zero-config requests to.",
+    "category": "Projects \u0026 tenancy"
+  },
+  {
+    "name": "GATEWAY_DEFAULT_TENANT_ID",
+    "type": "string",
+    "default": "local",
+    "required": false,
+    "description": "Tenant",
+    "category": "Projects \u0026 tenancy"
+  },
+  {
+    "name": "GATEWAY_EMAIL_BRAND_FROM",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "(falls back to SMTPFrom)",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_EMAIL_BRAND_FROM_NAME",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_EMAIL_BRAND_LOGO_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_EMAIL_BRAND_PRIMARY_COLOR",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_EMAIL_BRAND_PRODUCT_NAME",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "Email branding defaults.",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_EMAIL_BRAND_SUPPORT_EMAIL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_EMAIL_LIST_UNSUBSCRIBE",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the List-Unsubscribe header value applied to configured mail (e.g.",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_EMAIL_SEND_COOLDOWN_SECONDS",
+    "type": "integer",
+    "default": "60",
+    "required": false,
+    "description": "Per-recipient cooldown between transactional email sends.",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_EMAIL_SERVICE_HOST",
+    "type": "string",
+    "default": "email-service",
+    "required": false,
+    "description": "Email service (internal gRPC)",
+    "category": "Server \u0026 ports"
+  },
+  {
+    "name": "GATEWAY_EMAIL_SERVICE_PORT",
+    "type": "integer",
+    "default": "50053",
+    "required": false,
+    "description": "",
+    "category": "Server \u0026 ports"
+  },
+  {
+    "name": "GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS",
+    "type": "integer",
+    "default": "86400",
+    "required": false,
+    "description": "How long an email-verification or password-reset token is valid for.",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_GRPC_PORT",
+    "type": "integer",
+    "default": "50051",
+    "required": false,
+    "description": "Server",
+    "category": "Server \u0026 ports"
+  },
+  {
+    "name": "GATEWAY_HTTP_MAX_BODY_BYTES",
+    "type": "integer",
+    "default": "1048576",
+    "required": false,
+    "description": "Maximum HTTP request body size in bytes, enforced via http.MaxBytesHandler so a slow-POST / oversize-payload attacker can't exhaust memory.",
+    "category": "HTTP, CORS \u0026 cookies"
+  },
+  {
+    "name": "GATEWAY_IDV_AZURE_ENDPOINT",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "e.g.",
+    "category": "Identity verification"
+  },
+  {
+    "name": "GATEWAY_IDV_AZURE_KEY",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "Cognitive Services key",
+    "category": "Identity verification"
+  },
+  {
+    "name": "GATEWAY_IDV_AZURE_SESSION_TTL_SECONDS",
+    "type": "integer",
+    "default": "600",
+    "required": false,
+    "description": "session token lifetime; default 600",
+    "category": "Identity verification"
+  },
+  {
+    "name": "GATEWAY_IDV_PROVIDER",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "Identity Verification (document + selfie).",
+    "category": "Identity verification"
+  },
+  {
+    "name": "GATEWAY_IDV_REQUIRED",
+    "type": "boolean",
+    "default": "false",
+    "required": true,
+    "description": "When true, PasswordLogin / OAuthLogin reject users without an approved identity verification.",
+    "category": "Identity verification"
+  },
+  {
+    "name": "GATEWAY_JWT_AUDIENCE",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "JWT audience.",
+    "category": "JWT \u0026 tokens"
+  },
+  {
+    "name": "GATEWAY_JWT_EXPIRY_SECONDS",
+    "type": "integer",
+    "default": "900",
+    "required": false,
+    "description": "",
+    "category": "JWT \u0026 tokens"
+  },
+  {
+    "name": "GATEWAY_JWT_KEYS_FILE",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "JWT \u0026 tokens"
+  },
+  {
+    "name": "GATEWAY_JWT_KMS_AWS_REGION",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "JWT \u0026 tokens"
+  },
+  {
+    "name": "GATEWAY_JWT_KMS_KEYS",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "",
+    "category": "JWT \u0026 tokens"
+  },
+  {
+    "name": "GATEWAY_JWT_REQUIRE_AUD",
+    "type": "boolean",
+    "default": "false",
+    "required": true,
+    "description": "",
+    "category": "JWT \u0026 tokens"
+  },
+  {
+    "name": "GATEWAY_JWT_SIGNER",
+    "type": "string",
+    "default": "file",
+    "required": true,
+    "description": "JWT (RS256).",
+    "category": "JWT \u0026 tokens"
+  },
+  {
+    "name": "GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "Login challenge (how long after password success user has to complete 2FA)",
+    "category": "Password \u0026 lockout"
+  },
+  {
+    "name": "GATEWAY_LOGIN_LOCKOUT_SECONDS",
+    "type": "integer",
+    "default": "900",
+    "required": false,
+    "description": "",
+    "category": "Password \u0026 lockout"
+  },
+  {
+    "name": "GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS",
+    "type": "integer",
+    "default": "5",
+    "required": false,
+    "description": "Login security (failed-login lockout)",
+    "category": "Password \u0026 lockout"
+  },
+  {
+    "name": "GATEWAY_METRICS_PORT",
+    "type": "integer",
+    "default": "9090",
+    "required": false,
+    "description": "",
+    "category": "Server \u0026 ports"
+  },
+  {
+    "name": "GATEWAY_MICROSOFT_TENANT_ID",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_MINOR_DATA_MINIMIZATION",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "gates COPPA-style data-minimization for accounts the age gate classifies as AGE_BAND_CHILD.",
+    "category": "Age gating (COPPA)"
+  },
+  {
+    "name": "GATEWAY_OAUTH_ALLOWED_RETURN_URLS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the comma-separated allowlist of app URLs the hosted OAuth flow may redirect back to (the `return_to` param of GET /oauth/start/{provider}).",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_APPLE_CLIENT_ID",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_APPLE_KEY_ID",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_APPLE_PRIVATE_KEY",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_APPLE_TEAM_ID",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_GITHUB_CLIENT_ID",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_GITHUB_CLIENT_SECRET",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_GOOGLE_CLIENT_ID",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "OAuth providers.",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_MICROSOFT_CLIENT_ID",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OAuth"
+  },
+  {
+    "name": "GATEWAY_OTEL_DEPLOYMENT_ENV",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OpenTelemetry"
+  },
+  {
+    "name": "GATEWAY_OTEL_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "OTel exports OpenTelemetry traces to a deployer-supplied OTLP collector.",
+    "category": "OpenTelemetry"
+  },
+  {
+    "name": "GATEWAY_OTEL_EXPORTER_ENDPOINT",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OpenTelemetry"
+  },
+  {
+    "name": "GATEWAY_OTEL_EXPORTER_PROTOCOL",
+    "type": "string",
+    "default": "grpc",
+    "required": false,
+    "description": "",
+    "category": "OpenTelemetry"
+  },
+  {
+    "name": "GATEWAY_OTEL_SAMPLE_RATIO",
+    "type": "number",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OpenTelemetry"
+  },
+  {
+    "name": "GATEWAY_OTEL_SERVICE_VERSION",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "OpenTelemetry"
+  },
+  {
+    "name": "GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "",
+    "category": "Passkeys / WebAuthn"
+  },
+  {
+    "name": "GATEWAY_PASSKEY_ORIGIN",
+    "type": "string",
+    "default": "http://localhost:9002",
+    "required": false,
+    "description": "",
+    "category": "Passkeys / WebAuthn"
+  },
+  {
+    "name": "GATEWAY_PASSKEY_RP_ID",
+    "type": "string",
+    "default": "localhost",
+    "required": false,
+    "description": "WebAuthn / Passkeys",
+    "category": "Passkeys / WebAuthn"
+  },
+  {
+    "name": "GATEWAY_PASSKEY_RP_NAME",
+    "type": "string",
+    "default": "Glassa Work",
+    "required": false,
+    "description": "",
+    "category": "Passkeys / WebAuthn"
+  },
+  {
+    "name": "GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS",
+    "type": "integer",
+    "default": "5",
+    "required": false,
+    "description": "Max verify attempts per OTP before it is invalidated (brute-force cap).",
+    "category": "Passwordless email login"
+  },
+  {
+    "name": "GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "OTP code lifetime, length is fixed at 6 digits.",
+    "category": "Passwordless email login"
+  },
+  {
+    "name": "GATEWAY_PASSWORDLESS_MAGIC_LINK_TTL_SECONDS",
+    "type": "integer",
+    "default": "900",
+    "required": false,
+    "description": "Magic-link token lifetime.",
+    "category": "Passwordless email login"
+  },
+  {
+    "name": "GATEWAY_PASSWORDLESS_SIGNUP_ENABLED",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "Passwordless email login (OTP code + magic link).",
+    "category": "Passwordless email login"
+  },
+  {
+    "name": "GATEWAY_PASSWORD_RESET_ENABLED",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "",
+    "category": "Password \u0026 lockout"
+  },
+  {
+    "name": "GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS",
+    "type": "integer",
+    "default": "900",
+    "required": false,
+    "description": "",
+    "category": "Password \u0026 lockout"
+  },
+  {
+    "name": "GATEWAY_PASSWORD_SIGNUP_ENABLED",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "Password",
+    "category": "Password \u0026 lockout"
+  },
+  {
+    "name": "GATEWAY_PHONE_CODE_COOLDOWN_SECONDS",
+    "type": "integer",
+    "default": "60",
+    "required": false,
+    "description": "",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_PHONE_CODE_MAX_ATTEMPTS",
+    "type": "integer",
+    "default": "5",
+    "required": false,
+    "description": "",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_PHONE_CODE_TTL_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "Phone-verification OTP policy (mirrors the Passwordless* knobs).",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_POSTGRES_AUTO_MIGRATE",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "",
+    "category": "Datastore"
+  },
+  {
+    "name": "GATEWAY_POSTGRES_DSN",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "Postgres (the primary persistence driver).",
+    "category": "Datastore"
+  },
+  {
+    "name": "GATEWAY_POSTGRES_MAX_CONNS",
+    "type": "integer",
+    "default": "25",
+    "required": false,
+    "description": "",
+    "category": "Datastore"
+  },
+  {
+    "name": "GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES",
+    "type": "integer",
+    "default": "10000",
+    "required": false,
+    "description": "bounds the number of distinct resolution keys (credential ids + hostnames) held in the cache, evicting the least-recently-used entry past the bound so the cache cannot grow unbounded under hostile or high-cardinality traffic.",
+    "category": "Projects \u0026 tenancy"
+  },
+  {
+    "name": "GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS",
+    "type": "integer",
+    "default": "30",
+    "required": false,
+    "description": "bounds how long a per-request project resolution (credential-key→project and Host→project) may be served from the in-process cache before being re-read from the control-plane store.",
+    "category": "Projects \u0026 tenancy"
+  },
+  {
+    "name": "GATEWAY_PUBLIC_EMAIL_DOMAINS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "extends the built-in set of consumer/public email providers (gmail, outlook, yahoo, …) used by IsPublicEmailDomain.",
+    "category": "Projects \u0026 tenancy"
+  },
+  {
+    "name": "GATEWAY_QR_LOGIN_BASE_URL",
+    "type": "string",
+    "default": "http://localhost:9002",
+    "required": false,
+    "description": "QR Login (cross-device authorization)",
+    "category": "QR cross-device login"
+  },
+  {
+    "name": "GATEWAY_QR_LOGIN_EXPIRY_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "",
+    "category": "QR cross-device login"
+  },
+  {
+    "name": "GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP",
+    "type": "integer",
+    "default": "5",
+    "required": false,
+    "description": "CreateFirstPlatformAdmin",
+    "category": "Rate limiting"
+  },
+  {
+    "name": "GATEWAY_RATE_LIMIT_LOGIN_PER_IP",
+    "type": "integer",
+    "default": "30",
+    "required": false,
+    "description": "",
+    "category": "Rate limiting"
+  },
+  {
+    "name": "GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP",
+    "type": "integer",
+    "default": "5",
+    "required": false,
+    "description": "RequestEmailLoginCode + RequestMagicLink",
+    "category": "Rate limiting"
+  },
+  {
+    "name": "GATEWAY_RATE_LIMIT_PHONE_PER_IP",
+    "type": "integer",
+    "default": "5",
+    "required": false,
+    "description": "RequestPhoneVerification",
+    "category": "Rate limiting"
+  },
+  {
+    "name": "GATEWAY_RATE_LIMIT_RESET_PER_IP",
+    "type": "integer",
+    "default": "5",
+    "required": false,
+    "description": "",
+    "category": "Rate limiting"
+  },
+  {
+    "name": "GATEWAY_RATE_LIMIT_SIGNUP_PER_IP",
+    "type": "integer",
+    "default": "10",
+    "required": false,
+    "description": "",
+    "category": "Rate limiting"
+  },
+  {
+    "name": "GATEWAY_RATE_LIMIT_VERIFY_PER_IP",
+    "type": "integer",
+    "default": "20",
+    "required": false,
+    "description": "",
+    "category": "Rate limiting"
+  },
+  {
+    "name": "GATEWAY_RATE_LIMIT_WINDOW_SECONDS",
+    "type": "integer",
+    "default": "60",
+    "required": false,
+    "description": "Rate-limit configuration.",
+    "category": "Rate limiting"
+  },
+  {
+    "name": "GATEWAY_REFRESH_EXPIRY_SECONDS",
+    "type": "integer",
+    "default": "604800",
+    "required": false,
+    "description": "Refresh tokens",
+    "category": "JWT \u0026 tokens"
+  },
+  {
+    "name": "GATEWAY_REPO_DRIVER",
+    "type": "string",
+    "default": "postgres",
+    "required": false,
+    "description": "Persistence driver.",
+    "category": "Datastore"
+  },
+  {
+    "name": "GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN",
+    "type": "boolean",
+    "default": "true",
+    "required": true,
+    "description": "governs whether an UNVERIFIED custom auth-domain marked is_primary may become a project's primary auth-domain — the host that drives branded link URLs (magic links, invitations) and cookie domains.",
+    "category": "Projects \u0026 tenancy"
+  },
+  {
+    "name": "GATEWAY_REVOCATION_MODE",
+    "type": "string",
+    "default": "ttl",
+    "required": false,
+    "description": "Revocation mode.",
+    "category": "JWT \u0026 tokens"
+  },
+  {
+    "name": "GATEWAY_SESSION_CACHE_TTL_SECONDS",
+    "type": "integer",
+    "default": "60",
+    "required": false,
+    "description": "bounds how long a session-state read from the in-process cache may serve \"active\" before being re-read from the repository.",
+    "category": "JWT \u0026 tokens"
+  },
+  {
+    "name": "GATEWAY_SIGNUP_EMAIL_COOLDOWN_SECONDS",
+    "type": "integer",
+    "default": "60",
+    "required": false,
+    "description": "Per-email cooldown on PasswordSignup.",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_SMS_AWS_ACCESS_KEY_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMS_AWS_REGION",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "AWS SNS credentials (SMSProvider == sns).",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMS_AWS_SECRET_ACCESS_KEY",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMS_AWS_SENDER_ID",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMS_AZURE_CONNECTION_STRING",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "Azure Communication Services credentials (SMSProvider == azure).",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMS_AZURE_FROM",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMS_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": true,
+    "description": "Phone verification (SMS OTP).",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMS_PROVIDER",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "twilio | sns | azure",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMS_TWILIO_ACCOUNT_SID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "Twilio credentials (SMSProvider == twilio).",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMS_TWILIO_AUTH_TOKEN",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMS_TWILIO_FROM",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "",
+    "category": "Phone / SMS verification"
+  },
+  {
+    "name": "GATEWAY_SMTP_FROM",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_SMTP_HOST",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "SMTP single-provider config (simple form).",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_SMTP_PASS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_SMTP_PORT",
+    "type": "integer",
+    "default": "587",
+    "required": false,
+    "description": "",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_SMTP_PROVIDERS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "SMTP multi-provider JSON.",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_SMTP_TLS",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_SMTP_USER",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_SQLITE_MAX_CONNS",
+    "type": "integer",
+    "default": "4",
+    "required": false,
+    "description": "",
+    "category": "Datastore"
+  },
+  {
+    "name": "GATEWAY_SQLITE_PATH",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "SQLite (lightweight embedded / single-node persistence driver).",
+    "category": "Datastore"
+  },
+  {
+    "name": "GATEWAY_SWEEPER_BATCH_SIZE",
+    "type": "integer",
+    "default": "500",
+    "required": false,
+    "description": "",
+    "category": "Sweeper (GC)"
+  },
+  {
+    "name": "GATEWAY_SWEEPER_GRACE_SECONDS",
+    "type": "integer",
+    "default": "60",
+    "required": false,
+    "description": "",
+    "category": "Sweeper (GC)"
+  },
+  {
+    "name": "GATEWAY_SWEEPER_INTERVAL_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "Sweeper (#94).",
+    "category": "Sweeper (GC)"
+  },
+  {
+    "name": "GATEWAY_TENANT_INVITATION_EXPIRY_SECONDS",
+    "type": "integer",
+    "default": "604800",
+    "required": false,
+    "description": "How long a tenant-membership invitation is valid for before it must be reissued.",
+    "category": "Email \u0026 branding"
+  },
+  {
+    "name": "GATEWAY_TOTP_ENCRYPTION_KEY",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "TOTP (2FA) 32-byte key, base64-encoded.",
+    "category": "TOTP / 2FA"
+  },
+  {
+    "name": "GATEWAY_TOTP_ISSUER",
+    "type": "string",
+    "default": "Glassa Work",
+    "required": false,
+    "description": "",
+    "category": "TOTP / 2FA"
+  },
+  {
+    "name": "GATEWAY_TOTP_RECOVERY_PEPPER",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "Pepper used as the HMAC-SHA-256 key for recovery-code hashing.",
+    "category": "TOTP / 2FA"
+  },
+  {
+    "name": "GATEWAY_TRUSTED_PROXIES",
+    "type": "string",
+    "default": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32,::1/128",
+    "required": false,
+    "description": "Trusted proxies: comma-separated list of CIDRs whose X-Forwarded-For headers the service will honour.",
+    "category": "HTTP, CORS \u0026 cookies"
+  }
+]

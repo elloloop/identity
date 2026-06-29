@@ -27,6 +27,13 @@ import { Code } from "astro-expressive-code/components";
       <td>Sent only to <code>RefreshToken</code> / <code>Logout</code>. Rotated on every use.</td>
     </tr>
   </table>
+  <p>
+    The lifetimes above are the defaults; both are configurable via
+    <code>GATEWAY_JWT_EXPIRY_SECONDS</code> and
+    <code>GATEWAY_REFRESH_EXPIRY_SECONDS</code> — see the
+    <a href="/identity/docs/installation/configuration#jwt-and-tokens">JWT &amp;
+    tokens section of the configuration reference</a> for current values.
+  </p>
 
   <h2>Access token claims</h2>
   <Code code={`{
