@@ -286,6 +286,14 @@ func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displ
 		CreatedAt: msToTime(now),
 		UpdatedAt: msToTime(now),
 	}
+	// When email verification is required, a genuine new signup returns no
+	// live session (empty tokens — see PasswordSignup). The duplicate-signup
+	// decoy MUST mirror that exactly: otherwise empty-vs-non-empty tokens
+	// would disclose whether the address is already registered — the precise
+	// account-enumeration oracle this decoy exists to prevent.
+	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail {
+		return &LoginResult{User: user}, nil
+	}
 	// Duplicate signup must not authenticate the caller, but it also
 	// must not disclose whether the address already exists. We return a
 	// success-shaped payload with an unstored refresh token and a JWT for

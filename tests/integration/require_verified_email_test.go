@@ -67,3 +67,49 @@ func TestRequireVerifiedEmail_BlocksThenAllows(t *testing.T) {
 	require.NotEmpty(t, login.Msg.GetAccessToken(), "verified login returns a session")
 	require.Equal(t, userID, login.Msg.GetUser().GetId(), "same account, not a duplicate")
 }
+
+// TestRequireVerifiedEmail_SignupResponseIndistinguishable guards the
+// account-enumeration property: with the gate on, signing up a brand-new email
+// and signing up an ALREADY-registered email must produce the same observable
+// response. A new signup returns no session (verification required); the
+// duplicate-signup decoy must therefore also return no session, otherwise
+// empty-vs-non-empty tokens would leak whether the address is registered.
+func TestRequireVerifiedEmail_SignupResponseIndistinguishable(t *testing.T) {
+	t.Parallel()
+	h := StartServer(t, WithConfig(func(c *config.Config) {
+		c.AuthRequireVerifiedEmail = true
+	}))
+	ctx := context.Background()
+
+	const existing = "already-registered@example.com"
+
+	// Seed an existing account.
+	_, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email:    existing,
+		Password: goodPassword,
+	}))
+	require.NoError(t, err)
+
+	// New email signup.
+	newResp, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email:    "brand-new@example.com",
+		Password: goodPassword,
+	}))
+	require.NoError(t, err)
+
+	// Duplicate signup for the already-registered email.
+	dupResp, err := h.Client.PasswordSignup(ctx, connect.NewRequest(&identitypb.PasswordSignupRequest{
+		Email:    existing,
+		Password: goodPassword,
+	}))
+	require.NoError(t, err)
+
+	// Both must be session-less: a registered and an unregistered email are
+	// indistinguishable from the response.
+	require.Empty(t, newResp.Msg.GetAccessToken(), "new signup must not return a session under the gate")
+	require.Empty(t, dupResp.Msg.GetAccessToken(), "duplicate signup must not return a session under the gate")
+	require.Equal(t, newResp.Msg.GetAccessToken() == "", dupResp.Msg.GetAccessToken() == "",
+		"new and duplicate signup must be indistinguishable by token presence")
+	require.Equal(t, newResp.Msg.GetRefreshToken() == "", dupResp.Msg.GetRefreshToken() == "",
+		"new and duplicate signup must be indistinguishable by refresh-token presence")
+}
