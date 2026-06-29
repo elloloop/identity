@@ -141,7 +141,7 @@ docker run -p 80:80 -p 9090:9090 \
   -e GATEWAY_PASSKEY_RP_ID=my-product.com \
   -e GATEWAY_PASSKEY_ORIGIN=https://my-product.com \
   -e GATEWAY_TOTP_ISSUER="My Product" \
-  ghcr.io/elloloop/identity:0.1.0
+  ghcr.io/elloloop/identity:1.5.0
 ```
 
 In production, run migrations out-of-band as a separate step
@@ -155,10 +155,10 @@ wires identity to Postgres with a persistent volume and a health-gated
 For embedded, single-node, and development deployments, identity ships a
 **pure-Go SQLite** driver ([modernc.org/sqlite](https://modernc.org/sqlite),
 no cgo — cross-compiles cleanly). It runs the per-project data plane in a
-single file (or fully in-process) with no external service. Like the entdb
-and memory drivers it is single-project (pinned to the default project — the
-Project/Tenant/Domain control plane is Postgres-only); unlike them it
-persists to durable SQL. Select it with `GATEWAY_REPO_DRIVER=sqlite`:
+single file (or fully in-process) with no external service. Like the
+memory driver it is single-project (pinned to the default project — the
+Project/Tenant/Domain control plane is Postgres-only); unlike it the SQLite
+driver persists to durable SQL. Select it with `GATEWAY_REPO_DRIVER=sqlite`:
 
 ```bash
 docker run -p 80:80 -p 9090:9090 \
@@ -166,7 +166,7 @@ docker run -p 80:80 -p 9090:9090 \
   -e GATEWAY_SQLITE_PATH=/data/identity.db \
   -e GATEWAY_DEFAULT_TENANT_ID=my-product \
   -v identity-data:/data \
-  ghcr.io/elloloop/identity:0.1.0
+  ghcr.io/elloloop/identity:1.5.0
 ```
 
 Set `GATEWAY_SQLITE_PATH=:memory:` for an ephemeral in-process database
@@ -182,8 +182,7 @@ Backend tiers at a glance:
 | Driver | `GATEWAY_REPO_DRIVER` | Use case | Control plane |
 | --- | --- | --- | --- |
 | Postgres | `postgres` | Production, multi-node | Yes (Project/Tenant/Domain) |
-| SQLite | `sqlite` | Embedded, single-node, dev | No (single-project) |
-| EntDB | `entdb` | tenant-shard-db deployments | No (single-project) |
+| SQLite | `sqlite` | Single-file embedded, single-node, dev | No (single-project) |
 | memory | `memory` | Tests, smoke | No (single-project) |
 
 ## Releasing
@@ -191,8 +190,8 @@ Backend tiers at a glance:
 Push a `v*` tag — `.github/workflows/release.yml` builds and pushes a multi-arch image to `ghcr.io/elloloop/identity:<version>`.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.5.0
+git push origin v1.5.0
 ```
 
 ## Local development

@@ -89,8 +89,8 @@ keep:
    storage scope default to `default` / `local`).
 4. Start the service.
 
-EntDB backends are likewise a fresh start — the EntDB schema is the v1.0
-Project-keyed shape; there is no legacy EntDB data to carry forward.
+SQLite backends are likewise a fresh start — the SQLite schema is the v1.0
+Project-keyed shape; there is no legacy data to carry forward.
 
 ## Legacy Postgres data
 

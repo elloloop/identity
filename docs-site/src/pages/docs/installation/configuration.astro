@@ -41,7 +41,7 @@ import { Code } from "astro-expressive-code/components";
     <tr><td><code>GATEWAY_POSTGRES_DSN</code></td><td><em>(empty)</em></td><td>Postgres connection string, e.g. <code>postgres://user:pass@host:5432/identity?sslmode=disable</code>. Required when <code>GATEWAY_REPO_DRIVER=postgres</code>.</td></tr>
     <tr><td><code>GATEWAY_POSTGRES_MAX_CONNS</code></td><td><code>25</code></td><td>Connection-pool size.</td></tr>
     <tr><td><code>GATEWAY_POSTGRES_AUTO_MIGRATE</code></td><td><code>false</code></td><td>Run pending migrations on connect. See <a href="/identity/docs/installation/database-migrations">Database migrations</a>.</td></tr>
-    <tr><td><code>GATEWAY_SQLITE_PATH</code></td><td><code>:memory:</code></td><td>SQLite file path (or <code>:memory:</code>). Used when <code>GATEWAY_REPO_DRIVER=sqlite</code>.</td></tr>
+    <tr><td><code>GATEWAY_SQLITE_PATH</code></td><td><em>(required)</em></td><td>SQLite database location — a file path, or the literal <code>:memory:</code> for an in-memory database. Required (no default) when <code>GATEWAY_REPO_DRIVER=sqlite</code>; <code>:memory:</code> is a valid value, not the default.</td></tr>
     <tr><td><code>GATEWAY_DEFAULT_PROJECT_ID</code></td><td><code>default</code></td><td>ID of the control-plane <a href="/identity/docs/concepts/multi-tenancy">Project</a> seeded on first boot.</td></tr>
     <tr><td><code>GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS</code></td><td><em>(empty)</em></td><td>Comma-separated branded login hostnames seeded onto the default project at boot, so the service resolves these hosts to it. The first is the primary (drives branded links). Seeded verified (deployer-owned); customer-supplied domains use DNS verification instead.</td></tr>
     <tr><td><code>GATEWAY_PUBLIC_EMAIL_DOMAINS</code></td><td><em>(empty)</em></td><td>Comma-separated extra consumer/public email domains (beyond the built-in gmail/outlook/yahoo/… set). A verified address under a public domain never auto-forms a company tenant.</td></tr>
@@ -50,7 +50,10 @@ import { Code } from "astro-expressive-code/components";
   <h2>JWT</h2>
   <table>
     <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-    <tr><td><code>GATEWAY_JWT_KEYS</code></td><td><em>(empty)</em></td><td>RSA key ring as JSON array. Empty = auto-generate dev key. See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a>.</td></tr>
+    <tr><td><code>GATEWAY_JWT_SIGNER</code></td><td><code>file</code></td><td>Signer backend: <code>file</code> (default) or <code>kms_aws</code>.</td></tr>
+    <tr><td><code>GATEWAY_JWT_KEYS_FILE</code></td><td><em>(empty)</em></td><td>Filesystem path to the key JSON document, used by the <code>file</code> signer. Empty = a throwaway dev key is generated in-memory on each boot. See <a href="/identity/docs/installation/jwt-keys">JWT Keys</a>.</td></tr>
+    <tr><td><code>GATEWAY_JWT_KMS_KEYS</code></td><td><em>(empty)</em></td><td>KMS key references; required when <code>GATEWAY_JWT_SIGNER=kms_aws</code>.</td></tr>
+    <tr><td><code>GATEWAY_JWT_KMS_AWS_REGION</code></td><td><em>(empty)</em></td><td>AWS region for the <code>kms_aws</code> signer.</td></tr>
     <tr><td><code>GATEWAY_JWT_EXPIRY_SECONDS</code></td><td><code>900</code></td><td>Access-token lifetime (15 min)</td></tr>
     <tr><td><code>GATEWAY_REFRESH_EXPIRY_SECONDS</code></td><td><code>604800</code></td><td>Refresh-token lifetime (7 days)</td></tr>
   </table>
@@ -77,7 +80,7 @@ import { Code } from "astro-expressive-code/components";
     <tr><td><code>GATEWAY_AUTH_ALLOW_LOCAL</code></td><td><code>true</code></td><td>Set <code>false</code> to disable username/password and require OAuth</td></tr>
     <tr><td><code>GATEWAY_PASSWORD_SIGNUP_ENABLED</code></td><td><code>true</code></td><td>Set <code>false</code> to disable self-serve <code>PasswordSignup</code>; admin-driven invitations still work</td></tr>
     <tr><td><code>GATEWAY_PASSWORD_RESET_ENABLED</code></td><td><code>true</code></td><td>Set <code>false</code> to keep <code>RequestPasswordReset</code> enumeration-safe but make it a no-op; admin resets still work</td></tr>
-    <tr><td><code>GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS</code></td><td><code>3600</code></td><td>Recovery-email reset link lifetime</td></tr>
+    <tr><td><code>GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS</code></td><td><code>900</code></td><td>Recovery-email reset link lifetime</td></tr>
     <tr><td><code>GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS</code></td><td><code>5</code></td><td>Lockout threshold</td></tr>
     <tr><td><code>GATEWAY_LOGIN_LOCKOUT_SECONDS</code></td><td><code>900</code></td><td>Lockout duration (15 min)</td></tr>
     <tr><td><code>GATEWAY_LOGIN_CHALLENGE_EXPIRY_SECONDS</code></td><td><code>300</code></td><td>Window after password success to complete TOTP</td></tr>
@@ -175,6 +178,7 @@ import { Code } from "astro-expressive-code/components";
   <table>
     <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
     <tr><td><code>GATEWAY_TOTP_ENCRYPTION_KEY</code></td><td><em>(throwaway in dev)</em></td><td>Base64-encoded 32-byte AES-256 key for at-rest TOTP secret encryption. <strong>Required in prod.</strong></td></tr>
+    <tr><td><code>GATEWAY_TOTP_RECOVERY_PEPPER</code></td><td><em>(empty)</em></td><td><strong>Required whenever <code>GATEWAY_TOTP_ENCRYPTION_KEY</code> is set.</strong> Base64-encoded value that must decode to at least 32 bytes; used to pepper recovery codes. Without it the server fails to boot.</td></tr>
     <tr><td><code>GATEWAY_TOTP_ISSUER</code></td><td><code>Glassa Work</code></td><td>Name shown in user authenticator apps</td></tr>
   </table>
 

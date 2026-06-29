@@ -248,7 +248,7 @@ message RedeemOAuthCodeResponse {
 message PasswordSignupRequest {
   string email    = 1;
   string password = 2;
-  string recovery_email = 3;  // Optional: used for password reset flow
+  string recovery_email = 3;  // Optional: secondary contact address. Note: password reset links are sent to the account's PRIMARY verified email, not this address.
   string captcha_token = 4;   // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
   int64 date_of_birth_ms = 5; // Optional; epoch ms of date of birth. Required at signup when GATEWAY_AGEGATE_REQUIRE_DOB.
 }
@@ -412,9 +412,10 @@ message ChangePasswordRequest {
 
 message ChangePasswordResponse {}
 
-// Recovery-email-driven password reset (replaces the deprecated self-serve
-// ForgotPassword flow). The reset link is sent to the recovery_email on file —
-// or, if none is set, the request silently succeeds (no enumeration).
+// Password reset (replaces the deprecated self-serve ForgotPassword flow).
+// The reset link is sent to the account's PRIMARY verified email — the
+// address matching the supplied `email`. If no account matches, the
+// request silently succeeds (no enumeration).
 message RequestPasswordResetRequest {
   string email = 1;
   string captcha_token = 2;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED

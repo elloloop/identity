@@ -103,15 +103,17 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 
 	now := s.nowMs()
 	_, err = s.repo(ctx).CreatePasskeyCredential(ctx, &PasskeyCredRecord{
-		CredentialID: result.CredentialID,
-		UserID:       userID,
-		PublicKey:    result.PublicKey,
-		SignCount:    int64(result.SignCount),
-		DeviceName:   deviceName,
-		AAGUID:       result.AAGUID,
-		Transports:   result.Transports,
-		CreatedAt:    now,
-		LastUsedAt:   now,
+		CredentialID:   result.CredentialID,
+		UserID:         userID,
+		PublicKey:      result.PublicKey,
+		SignCount:      int64(result.SignCount),
+		DeviceName:     deviceName,
+		AAGUID:         result.AAGUID,
+		Transports:     result.Transports,
+		BackupEligible: result.BackupEligible,
+		BackupState:    result.BackupState,
+		CreatedAt:      now,
+		LastUsedAt:     now,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("storing credential: %w", err)
@@ -242,6 +244,9 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		cred.PublicKey,
 		uint32(cred.SignCount), // #nosec G115 -- bounds checked above.
 		cred.CredentialID,
+		cred.UserID,
+		cred.BackupEligible,
+		cred.BackupState,
 	)
 	if err != nil {
 		s.logger.Warn(

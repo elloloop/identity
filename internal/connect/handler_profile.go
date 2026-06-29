@@ -35,7 +35,10 @@ func (h *IdentityHandler) UpdateProfile(
 // ─── Password Management RPCs ───────────────────────────────────────────────
 
 // ChangePassword changes the authenticated user's password after verifying
-// the current password. The service layer also invalidates all refresh tokens.
+// the current password. The service layer also revokes all of the user's
+// sessions (deletes their refresh tokens), forcing re-authentication
+// everywhere — including the caller, who must sign in again with the new
+// password.
 func (h *IdentityHandler) ChangePassword(
 	ctx context.Context,
 	req *connect.Request[identitypb.ChangePasswordRequest],
@@ -53,7 +56,8 @@ func (h *IdentityHandler) ChangePassword(
 	return connect.NewResponse(&identitypb.ChangePasswordResponse{}), nil
 }
 
-// RequestPasswordReset sends a password reset link to the user's recovery email.
+// RequestPasswordReset sends a password reset link to the user's primary
+// verified email (the address on file for the account).
 // Always returns success to prevent email enumeration.
 func (h *IdentityHandler) RequestPasswordReset(
 	ctx context.Context,
