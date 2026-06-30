@@ -522,6 +522,27 @@ func New(deps Deps) (*Built, error) {
 	}
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 
+	// Inbound SCIM 2.0 provisioning (#260). Registered only when
+	// GATEWAY_SCIM_ENABLED is true (and Validate has confirmed a bearer token
+	// + project id); otherwise /scim/v2/* 404s and the headless RPCs are
+	// unaffected. Every SCIM operation is scoped to the single configured
+	// project, so the deployment-wide bearer token can only touch that
+	// project's users.
+	if deps.Config.SCIMEnabled {
+		logger.Info("scim_server_enabled",
+			zap.String("mount", "/scim/v2/"),
+			zap.String("project_id", deps.Config.SCIMProjectID))
+		(&scimHandler{
+			repo:        repo,
+			projectID:   deps.Config.SCIMProjectID,
+			bearerToken: deps.Config.SCIMBearerToken,
+			logger:      logger,
+		}).register(mux, true)
+	} else {
+		logger.Info("scim_server_disabled",
+			zap.String("hint", "set GATEWAY_SCIM_ENABLED=true, GATEWAY_SCIM_BEARER_TOKEN and GATEWAY_SCIM_PROJECT_ID to enable /scim/v2"))
+	}
+
 	// SAML 2.0 IdP surface (#255). Mounted only when GATEWAY_SAML_IDP_ENABLED
 	// is set with valid signing material; a disabled deployment registers no
 	// routes, so /saml/* returns 404 (unchanged behavior).

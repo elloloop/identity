@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -791,6 +793,68 @@ func (r *MemRepo) FindUserByEmail(_ context.Context, email string) (*service.Use
 	return nil, nil
 }
 
+func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = service.DefaultUserListLimit
+	}
+	if limit > service.MaxUserListLimit {
+		limit = service.MaxUserListLimit
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	r.mu.Lock()
+	matched := make([]*service.User, 0, len(r.users))
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		cp := *u
+		matched = append(matched, &cp)
+	}
+	r.mu.Unlock()
+
+	// Stable ordering identical to the SQL drivers: created_at asc, then id.
+	sort.Slice(matched, func(i, j int) bool {
+		ti, tj := matched[i].CreatedAt.UnixMilli(), matched[j].CreatedAt.UnixMilli()
+		if ti != tj {
+			return ti < tj
+		}
+		return matched[i].ID < matched[j].ID
+	})
+
+	if offset >= len(matched) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], nil
+}
+
+func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
 func (r *MemRepo) GetUser(_ context.Context, userID string) (*service.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -806,8 +870,13 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
-		if existing.Email == u.Email {
-			return "", fmt.Errorf("user %q already exists", u.Email)
+		// Case-insensitive + ErrAlreadyExists-wrapped, matching the production
+		// memory driver and the cross-driver conformance contract.
+		if strings.EqualFold(existing.Email, u.Email) {
+			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
+		}
+		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
+			return "", fmt.Errorf("external_id %q: %w", u.ExternalID, service.ErrAlreadyExists)
 		}
 	}
 	id := u.ID
@@ -826,6 +895,15 @@ func (r *MemRepo) UpdateUser(_ context.Context, userID string, fields map[string
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if v, ok := fields["external_id"]; ok {
+		if ext, _ := v.(string); ext != "" {
+			for id, other := range r.users {
+				if id != userID && other.ExternalID == ext {
+					return fmt.Errorf("external_id %q: %w", ext, service.ErrAlreadyExists)
+				}
+			}
+		}
 	}
 	applyUserFields(u, fields)
 	return nil
@@ -997,6 +1075,8 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			}
 		case "recovery_email":
 			u.RecoveryEmail, _ = v.(string)
+		case "external_id":
+			u.ExternalID, _ = v.(string)
 		case "email_verified":
 			if b, ok := v.(bool); ok {
 				u.EmailVerified = b

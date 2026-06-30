@@ -46,6 +46,14 @@ func (StubRepository) DeleteUser(context.Context, string) error {
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) ListUsers(context.Context, UserListFilter) ([]*User, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) CountUsers(context.Context, UserListFilter) (int, error) {
+	return 0, ErrServiceUnavailable
+}
+
 func (StubRepository) IncrementFailedLoginCount(context.Context, string) (int32, error) {
 	return 0, ErrServiceUnavailable
 }

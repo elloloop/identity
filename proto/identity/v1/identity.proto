@@ -56,6 +56,7 @@ message User {
   int64 date_of_birth_ms = 22;            // epoch ms of date of birth; 0 = unknown
   bool is_minor = 23;                     // derived: true when age < adult age (age-gating on)
   AgeBand age_band = 24;                  // derived age band; UNSPECIFIED when unknown / gate off
+  string external_id = 25;                 // IdP-owned stable identifier (SCIM externalId); unique per project when set
 }
 
 message CreateUserRequest {

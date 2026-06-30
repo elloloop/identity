@@ -6170,6 +6170,10 @@ components:
           title: age_band
           description: derived age band; UNSPECIFIED when unknown / gate off
           $ref: '#/components/schemas/identity.v1.AgeBand'
+        externalId:
+          type: string
+          title: external_id
+          description: IdP-owned stable identifier (SCIM externalId); unique per project when set
       title: User
       additionalProperties: false
     identity.v1.UserStatus:

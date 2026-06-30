@@ -163,6 +163,39 @@ func (r *fakeRepo) GetUser(_ context.Context, userID string) (*service.User, err
 	return &cp, nil
 }
 
+func (r *fakeRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.User
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		cp := *u
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (r *fakeRepo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
 func (r *fakeRepo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

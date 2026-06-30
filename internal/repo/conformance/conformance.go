@@ -249,8 +249,18 @@ func RunConformance(t *testing.T, driver Driver) {
 				t.Fatalf("first CreateUser: %v", err)
 			}
 			_, err = r.CreateUser(ctx, &service.User{Email: "dup@example.com", Status: "active"})
-			if err == nil {
-				t.Fatal("CreateUser duplicate: want error, got nil")
+			// Every driver must signal a duplicate identically: the
+			// unique-violation sentinel service.ErrAlreadyExists (the SCIM
+			// server relies on it to return HTTP 409 Conflict, not 500).
+			if !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("CreateUser duplicate email: want ErrAlreadyExists, got %v", err)
+			}
+			// The uniqueness is case-insensitive on every driver (the SQL
+			// lower(email) index), so a differently-cased address is the SAME
+			// account and must also conflict.
+			_, err = r.CreateUser(ctx, &service.User{Email: "DUP@Example.COM", Status: "active"})
+			if !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("CreateUser case-insensitive duplicate email: want ErrAlreadyExists, got %v", err)
 			}
 		})
 
@@ -2285,6 +2295,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runIsolationConformance(t, driver)
 	runProjectIsolationConformance(t, driver)
 	runGetLatestConformance(t, driver)
+	runExternalIDConformance(t, driver)
 }
 
 // uniqueHash returns a per-call unique token-hash string. Tests use

@@ -345,6 +345,28 @@ type Config struct {
 	// accounts with an unknown age band are never affected.
 	MinorDataMinimization bool // GATEWAY_MINOR_DATA_MINIMIZATION (default false)
 
+	// SCIM 2.0 inbound provisioning (#260). When SCIMEnabled is false the
+	// /scim/v2/* routes are not registered and return 404, leaving the
+	// headless RPCs untouched. When true, SCIMBearerToken and SCIMProjectID
+	// MUST both be set (enforced by Validate). The bearer token is the shared
+	// secret an external IdP (Okta/Entra/Google) presents in the
+	// Authorization: Bearer header on every SCIM request. The project id binds
+	// that single credential to exactly one project: every SCIM operation
+	// (create/list/get/replace/patch/delete) is constrained to that project's
+	// users, so the deployment-wide token can never read or mutate another
+	// project's user pool. A deployment that needs to provision multiple
+	// projects runs one scoped credential per project.
+
+	// SCIMEnabled gates the inbound SCIM 2.0 routes (default false).
+	SCIMEnabled bool // GATEWAY_SCIM_ENABLED (default false)
+	// SCIMBearerToken is the shared secret an external IdP presents in the
+	// Authorization: Bearer header on every SCIM request (required when SCIMEnabled).
+	SCIMBearerToken string // GATEWAY_SCIM_BEARER_TOKEN (required when SCIMEnabled)
+	// SCIMProjectID is the single project whose users the SCIM endpoint
+	// provisions; every SCIM operation is scoped to this project (required
+	// when SCIMEnabled).
+	SCIMProjectID string // GATEWAY_SCIM_PROJECT_ID (required when SCIMEnabled)
+
 	// Password.
 
 	// PasswordSignupEnabled gates self-serve PasswordSignup; set false to
@@ -780,6 +802,10 @@ func Load() *Config {
 
 		MinorDataMinimization: envBool("GATEWAY_MINOR_DATA_MINIMIZATION", false),
 
+		SCIMEnabled:     envBool("GATEWAY_SCIM_ENABLED", false),
+		SCIMBearerToken: envStr("GATEWAY_SCIM_BEARER_TOKEN", ""),
+		SCIMProjectID:   envStr("GATEWAY_SCIM_PROJECT_ID", ""),
+
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
 		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
@@ -1071,10 +1097,50 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateSCIM(); err != nil {
+		return err
+	}
+
 	if err := c.validateSAML(); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+// MinSCIMBearerTokenLength is the floor for GATEWAY_SCIM_BEARER_TOKEN. The
+// token is the sole credential guarding account lifecycle operations across a
+// whole project, so it must carry enough entropy to resist guessing; 32 chars
+// is the minimum a generated secret should ever be.
+const MinSCIMBearerTokenLength = 32
+
+// validateSCIM enforces the SCIM invariant: a deployment that turns the
+// inbound SCIM server on must supply a sufficiently long bearer token (the
+// only credential gating account lifecycle operations) and a project id, since
+// every SCIM operation is scoped to that single project's users. Failing closed
+// at boot beats serving an unauthenticated, weakly-authenticated, or unscoped
+// provisioning endpoint.
+func (c *Config) validateSCIM() error {
+	if !c.SCIMEnabled {
+		return nil
+	}
+	if c.SCIMBearerToken == "" {
+		return errors.New(
+			"config: GATEWAY_SCIM_ENABLED=true requires GATEWAY_SCIM_BEARER_TOKEN to be set",
+		)
+	}
+	if len(c.SCIMBearerToken) < MinSCIMBearerTokenLength {
+		return fmt.Errorf(
+			"config: GATEWAY_SCIM_BEARER_TOKEN must be at least %d characters (got %d)",
+			MinSCIMBearerTokenLength, len(c.SCIMBearerToken),
+		)
+	}
+	if c.SCIMProjectID == "" {
+		return errors.New(
+			"config: GATEWAY_SCIM_ENABLED=true requires GATEWAY_SCIM_PROJECT_ID to be set " +
+				"(the single project whose users the SCIM endpoint provisions)",
+		)
+	}
 	return nil
 }
 

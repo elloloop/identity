@@ -1116,6 +1116,33 @@
     "anchor": "saml-2-0-idp"
   },
   {
+    "name": "GATEWAY_SCIM_BEARER_TOKEN",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the shared secret an external IdP presents in the Authorization: Bearer header on every SCIM request (required when SCIMEnabled).",
+    "category": "SCIM provisioning",
+    "anchor": "scim-provisioning"
+  },
+  {
+    "name": "GATEWAY_SCIM_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "gates the inbound SCIM 2.0 routes.",
+    "category": "SCIM provisioning",
+    "anchor": "scim-provisioning"
+  },
+  {
+    "name": "GATEWAY_SCIM_PROJECT_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the single project whose users the SCIM endpoint provisions; every SCIM operation is scoped to this project (required when SCIMEnabled).",
+    "category": "SCIM provisioning",
+    "anchor": "scim-provisioning"
+  },
+  {
     "name": "GATEWAY_SESSION_CACHE_TTL_SECONDS",
     "type": "integer",
     "default": "60",

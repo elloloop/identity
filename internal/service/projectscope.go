@@ -41,6 +41,27 @@ func scopedRepository(ctx context.Context, defaultRepo Repository, defaultProjec
 	return scoper.WithProject(requestProjectID(ctx, defaultProjectID))
 }
 
+// ProjectBoundRepository returns defaultRepo bound to a FIXED project,
+// independent of any per-request project scope in context. It backs surfaces
+// whose credential authorizes exactly one project — the inbound SCIM server,
+// whose single deployment-wide bearer token is pinned to GATEWAY_SCIM_PROJECT_ID.
+// Every read/write through the returned repository carries the mandatory
+// `WHERE project_id = $1` predicate for that one project, so the credential can
+// neither read nor mutate another project's users regardless of which
+// auth-domain/Host the request arrived on. A driver without per-project binding
+// is returned unchanged (only the single-project memory driver, which pins all
+// data to one store).
+func ProjectBoundRepository(defaultRepo Repository, projectID string) Repository {
+	if defaultRepo == nil {
+		return nil
+	}
+	scoper, ok := defaultRepo.(projectScopedRepository)
+	if !ok {
+		return defaultRepo
+	}
+	return scoper.WithProject(projectID)
+}
+
 // scopedDB returns bootDB bound to the request's project. The postgres DB
 // is the same concrete type as its Repository (it ignores the per-call
 // tenant argument and filters on its bound project), so it is rebound via

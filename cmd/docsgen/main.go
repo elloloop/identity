@@ -505,6 +505,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_SWEEPER_", "Sweeper (GC)"},
 	{"GATEWAY_AUDIT_", "Audit"},
 	{"GATEWAY_WEBHOOKS_", "Webhooks / eventing"},
+	{"GATEWAY_SCIM_", "SCIM provisioning"},
 	{"GATEWAY_REPO_DRIVER", "Datastore"},
 	{"GATEWAY_POSTGRES_", "Datastore"},
 	{"GATEWAY_SQLITE_", "Datastore"},

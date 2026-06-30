@@ -76,8 +76,29 @@ type User struct {
 	// configuration; they are NOT persisted. The service stamps them on a
 	// user before returning it so the handler/JWT layers can read a single
 	// authoritative value.
-	IsMinor bool
-	AgeBand string // "CHILD" | "TEEN" | "ADULT" | "" (unknown)
+	IsMinor    bool
+	AgeBand    string // "CHILD" | "TEEN" | "ADULT" | "" (unknown)
+	ExternalID string // IdP-owned stable identifier (SCIM externalId); unique per tenant when set
+}
+
+// DefaultUserListLimit and MaxUserListLimit bound a Repository.ListUsers
+// page so a caller (e.g. the SCIM list surface) cannot request an
+// unbounded scan. Every driver clamps to these identically.
+const (
+	DefaultUserListLimit = 50
+	MaxUserListLimit     = 500
+)
+
+// UserListFilter narrows and paginates a Repository.ListUsers query. Zero
+// values mean "no constraint": an empty Email/ExternalID does not filter,
+// and a non-positive Limit means "use the driver default". Equality
+// filters are case-insensitive for Email (RFC 7644 §3.4.2 treats userName
+// — mapped to email — case-insensitively) and exact for ExternalID.
+type UserListFilter struct {
+	Email      string // exact (case-insensitive) email match when non-empty
+	ExternalID string // exact external_id match when non-empty
+	Offset     int    // skip this many matching rows (cursor)
+	Limit      int    // max rows to return; <=0 → driver default
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -159,6 +180,22 @@ type Repository interface {
 	// exposes no invitation create method; they are written via the graph
 	// graph.)
 	DeleteUser(ctx context.Context, userID string) error
+
+	// ListUsers returns users in the request's project that match filter,
+	// ordered by created_at ascending then id, with a stable offset cursor.
+	// It backs the SCIM /Users list/filter surface — including externalId
+	// correlation via UserListFilter.ExternalID, the production path an IdP
+	// uses to find a previously-provisioned account. Drivers must apply the
+	// filter and ordering identically (see conformance).
+	ListUsers(ctx context.Context, filter UserListFilter) ([]*User, error)
+
+	// CountUsers returns the total number of users in the request's project
+	// matching filter's equality predicates (Email/ExternalID), ignoring
+	// Offset/Limit. It backs the SCIM /Users totalResults so a page reports
+	// the true match count instead of the page size — and large projects are
+	// never silently truncated at the page cap. Drivers must count the same
+	// rows ListUsers would return across all pages (see conformance).
+	CountUsers(ctx context.Context, filter UserListFilter) (int, error)
 
 	// Lockout state. These are dedicated methods (rather than UpdateUser
 	// patches) so the persistence layer can implement them as single
