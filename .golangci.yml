@@ -47,12 +47,13 @@ linters:
     rules:
       # Tests use math/rand for fixtures (G404) and read fixture/doc files
       # from test-controlled, source-derived paths — directly (G304) or while
-      # walking a known tree (G122); none is a real security concern in a test
-      # harness.
+      # walking a known tree (G122); they also embed fake "secret"/token
+      # fixtures for OAuth/OIDC providers (G101). None is a real security
+      # concern in a test harness.
       - path: _test\.go
         linters:
           - gosec
-        text: "G(122|304|404):"
+        text: "G(101|122|304|404):"
       - path: _test\.go
         linters:
           - cyclop

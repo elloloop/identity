@@ -332,9 +332,19 @@ func (g *googleExchanger) verifyIDToken(ctx context.Context, raw string) (*googl
 var errKeyNotFound = errors.New("key not found in jwks")
 
 // verifyJWS verifies the signature on a compact JWS using the
-// provided JWK set (matching kid → key). Returns the decoded payload
-// bytes on success.
+// provided JWK set (matching kid → key), restricting the accepted
+// signature algorithm to RS256 (what Google + Microsoft sign with).
+// Returns the decoded payload bytes on success.
 func verifyJWS(raw string, set jwk.Set) ([]byte, error) {
+	return verifyJWSWithAlgs(raw, set, jwa.RS256)
+}
+
+// verifyJWSWithAlgs verifies the signature on a compact JWS using the
+// provided JWK set, restricting the accepted signature algorithm to one
+// of allowedAlgs. Pinning the algorithm prevents alg-substitution
+// attacks (e.g. forging an HS256 token using the public key as the
+// secret). Returns the decoded payload bytes on success.
+func verifyJWSWithAlgs(raw string, set jwk.Set, allowedAlgs ...jwa.SignatureAlgorithm) ([]byte, error) {
 	// Parse the message header to find the kid.
 	msg, err := jws.Parse([]byte(raw))
 	if err != nil {
@@ -350,10 +360,14 @@ func verifyJWS(raw string, set jwk.Set) ([]byte, error) {
 	if alg == "" {
 		return nil, errors.New("jws missing alg")
 	}
-	// Restrict to RSA SHA-256 (RS256) — what Google + Microsoft sign
-	// with. Refusing other algs prevents alg-substitution attacks
-	// (e.g. forging an HS256 token with the public key as the secret).
-	if alg != jwa.RS256 {
+	algAllowed := false
+	for _, a := range allowedAlgs {
+		if alg == a {
+			algAllowed = true
+			break
+		}
+	}
+	if !algAllowed {
 		return nil, fmt.Errorf("unexpected jws alg: %s", alg)
 	}
 	var key jwk.Key

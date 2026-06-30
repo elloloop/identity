@@ -684,6 +684,69 @@
     "anchor": "oauth"
   },
   {
+    "name": "GATEWAY_OAUTH_OIDC_CLIENT_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the generic OIDC provider's OAuth client ID.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_CLIENT_SECRET",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the generic OIDC provider's OAuth client secret.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_DISCOVERY_URL",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "overrides the generic OIDC provider's discovery document URL; empty = derived from OIDCIssuer.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "turns on the generic, config-driven OIDC provider so an operator can register an arbitrary standards-compliant IdP (Okta, Auth0, Keycloak, a self-hosted issuer) without a code release.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_ISSUER",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the generic OIDC provider's issuer URL; the discovery, authorization, token, JWKS, and userinfo endpoints are resolved from \u003cissuer\u003e/.well-known/openid-configuration unless OIDCDiscoveryURL is set.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_PROVIDER_KEY",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the registry key the generic OIDC provider is registered under and reported as Identity.Provider (e.g. \"okta\").",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_SCOPES",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "overrides the space-separated OAuth scopes requested from the generic OIDC provider; empty = \"openid email profile\" (\"openid\" is always ensured).",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
     "name": "GATEWAY_OTEL_DEPLOYMENT_ENV",
     "type": "string",
     "default": "",

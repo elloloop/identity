@@ -261,6 +261,29 @@ type Config struct {
 	// ApplePrivateKey is the Apple Sign in private key (PEM or base64).
 	ApplePrivateKey string
 
+	// OIDCEnabled turns on the generic, config-driven OIDC provider so an
+	// operator can register an arbitrary standards-compliant IdP (Okta,
+	// Auth0, Keycloak, a self-hosted issuer) without a code release.
+	OIDCEnabled bool
+	// OIDCProviderKey is the registry key the generic OIDC provider is
+	// registered under and reported as Identity.Provider (e.g. "okta").
+	OIDCProviderKey string
+	// OIDCIssuer is the generic OIDC provider's issuer URL; the discovery,
+	// authorization, token, JWKS, and userinfo endpoints are resolved from
+	// <issuer>/.well-known/openid-configuration unless OIDCDiscoveryURL is set.
+	OIDCIssuer string
+	// OIDCDiscoveryURL overrides the generic OIDC provider's discovery
+	// document URL; empty = derived from OIDCIssuer.
+	OIDCDiscoveryURL string
+	// OIDCClientID is the generic OIDC provider's OAuth client ID.
+	OIDCClientID string
+	// OIDCClientSecret is the generic OIDC provider's OAuth client secret.
+	OIDCClientSecret string
+	// OIDCScopes overrides the space-separated OAuth scopes requested from
+	// the generic OIDC provider; empty = "openid email profile" ("openid"
+	// is always ensured).
+	OIDCScopes string
+
 	// OAuthAllowedReturnURLs is the comma-separated allowlist of app URLs
 	// the hosted OAuth flow may redirect back to (the `return_to` param of
 	// GET /oauth/start/{provider}). Each entry is an exact origin or a path
@@ -776,6 +799,17 @@ func Load() *Config {
 		AppleKeyID:             envStr("GATEWAY_OAUTH_APPLE_KEY_ID", ""),
 		ApplePrivateKey:        envStr("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", ""),
 
+		OIDCEnabled: envBool("GATEWAY_OAUTH_OIDC_ENABLED", false),
+		// Normalize the provider key at the source so it matches the
+		// lowercased/trimmed provider name the service uses for registry
+		// lookups (see internal/service/auth_login.go).
+		OIDCProviderKey:  strings.ToLower(strings.TrimSpace(envStr("GATEWAY_OAUTH_OIDC_PROVIDER_KEY", ""))),
+		OIDCIssuer:       envStr("GATEWAY_OAUTH_OIDC_ISSUER", ""),
+		OIDCDiscoveryURL: envStr("GATEWAY_OAUTH_OIDC_DISCOVERY_URL", ""),
+		OIDCClientID:     envStr("GATEWAY_OAUTH_OIDC_CLIENT_ID", ""),
+		OIDCClientSecret: envStr("GATEWAY_OAUTH_OIDC_CLIENT_SECRET", ""),
+		OIDCScopes:       envStr("GATEWAY_OAUTH_OIDC_SCOPES", ""),
+
 		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
 
 		IDVProvider:           envStr("GATEWAY_IDV_PROVIDER", ""),
@@ -945,6 +979,17 @@ const (
 	SMSProviderAzure  = "azure"
 )
 
+// OIDCScopeList returns the configured generic-OIDC scopes split on
+// whitespace, dropping blanks. An empty config yields nil, which lets the
+// provider fall back to its default scope set ("openid email profile").
+func (c *Config) OIDCScopeList() []string {
+	fields := strings.Fields(c.OIDCScopes)
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
 // DefaultProjectAuthDomainList returns the configured default-project auth
 // domains, lower-cased and de-duplicated, in order — the first entry is the
 // primary. Blank entries are dropped; an empty config yields nil.
@@ -1105,6 +1150,41 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateOIDC(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// reservedOAuthProviderKeys are the built-in provider keys the generic
+// OIDC provider may not reuse, so its registration cannot silently shadow
+// a first-class provider.
+var reservedOAuthProviderKeys = map[string]bool{
+	"google": true, "microsoft": true, "github": true, "apple": true,
+}
+
+// validateOIDC enforces the generic config-driven OIDC provider invariants:
+// when enabled, a provider key, client credentials, and either an issuer or
+// an explicit discovery URL are all required, and the key must not collide
+// with a built-in provider.
+func (c *Config) validateOIDC() error {
+	if !c.OIDCEnabled {
+		return nil
+	}
+	key := strings.ToLower(strings.TrimSpace(c.OIDCProviderKey))
+	if key == "" {
+		return errors.New("config: GATEWAY_OAUTH_OIDC_ENABLED=true requires GATEWAY_OAUTH_OIDC_PROVIDER_KEY")
+	}
+	if reservedOAuthProviderKeys[key] {
+		return fmt.Errorf("config: GATEWAY_OAUTH_OIDC_PROVIDER_KEY=%q is reserved for a built-in provider", key)
+	}
+	if strings.TrimSpace(c.OIDCIssuer) == "" && strings.TrimSpace(c.OIDCDiscoveryURL) == "" {
+		return errors.New("config: GATEWAY_OAUTH_OIDC_ENABLED=true requires GATEWAY_OAUTH_OIDC_ISSUER or GATEWAY_OAUTH_OIDC_DISCOVERY_URL")
+	}
+	if strings.TrimSpace(c.OIDCClientID) == "" || strings.TrimSpace(c.OIDCClientSecret) == "" {
+		return errors.New("config: GATEWAY_OAUTH_OIDC_ENABLED=true requires GATEWAY_OAUTH_OIDC_CLIENT_ID and GATEWAY_OAUTH_OIDC_CLIENT_SECRET")
+	}
 	return nil
 }
 

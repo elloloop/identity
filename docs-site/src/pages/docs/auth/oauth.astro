@@ -7,7 +7,8 @@ import { Code } from "astro-expressive-code/components";
   <h1>OAuth</h1>
   <p>
     Identity supports Google, Microsoft, GitHub, and Apple as upstream OAuth
-    providers. The flow is server-owned: the client calls
+    providers, plus any standards-compliant OIDC provider added purely
+    through config. The flow is server-owned: the client calls
     <code>BeginOAuthLogin</code>, redirects the browser to the returned
     provider URL, then completes the callback with <code>OAuthLogin</code>.
     Identity does the provider token exchange, verifies the upstream
@@ -41,6 +42,31 @@ import { Code } from "astro-expressive-code/components";
     <strong>Apple Configuration.</strong> Apple requires a Team ID, a Services ID (used as the Client ID), a Key ID, and an ECDSA private key (PEM or Base64).
     Unlike other providers, Apple sends this headless flow's callback via <code>POST</code>. Configure an application-owned HTTPS callback that accepts <code>code</code>, <code>state</code>, and the optional <code>user</code> payload, then forwards them to <code>OAuthLogin</code>. Configure <code>https://your-api.com/oauth/callback/apple</code> only when using the hosted flow below.
   </div>
+
+  <h3>Generic OIDC provider</h3>
+  <p>
+    Register an arbitrary standards-compliant OIDC provider (Okta, Auth0,
+    Keycloak, a self-hosted issuer) without a code release. Identity resolves
+    the endpoints from the issuer's
+    <code>/.well-known/openid-configuration</code> document, verifies the
+    id_token against the discovered JWKS (issuer, audience, expiry, signature),
+    and rejects any user whose email is not verified.
+  </p>
+  <Code code={`-e GATEWAY_OAUTH_OIDC_ENABLED=true
+-e GATEWAY_OAUTH_OIDC_PROVIDER_KEY=okta
+-e GATEWAY_OAUTH_OIDC_ISSUER=https://acme.okta.com
+-e GATEWAY_OAUTH_OIDC_CLIENT_ID=...
+-e GATEWAY_OAUTH_OIDC_CLIENT_SECRET=...
+-e GATEWAY_OAUTH_OIDC_SCOPES="openid email profile"`} lang="bash" />
+  <p>
+    The provider registers under <code>GATEWAY_OAUTH_OIDC_PROVIDER_KEY</code>
+    (which becomes the reported <code>provider</code> and the value passed to
+    <code>BeginOAuthLogin</code> / <code>OAuthLogin</code>) and flows through the
+    same hosted and headless paths as every built-in provider. Override the
+    discovery URL with <code>GATEWAY_OAUTH_OIDC_DISCOVERY_URL</code>. The key
+    may not be <code>google</code>, <code>microsoft</code>, <code>github</code>,
+    or <code>apple</code>.
+  </p>
 
   <h2>Start RPC</h2>
   <Code code={`message BeginOAuthLoginRequest {

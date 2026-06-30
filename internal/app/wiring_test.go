@@ -55,6 +55,27 @@ func TestBuildOAuthRegistry(t *testing.T) {
 	}
 }
 
+// TestBuildOAuthRegistry_GenericOIDCKeyNormalized guards the blocker: a
+// mixed-case / whitespace provider key must be registered under the same
+// lowercased/trimmed key the service uses for lookups, so login resolves.
+func TestBuildOAuthRegistry_GenericOIDCKeyNormalized(t *testing.T) {
+	cfg := &config.Config{
+		OIDCEnabled:      true,
+		OIDCProviderKey:  "  Okta  ",
+		OIDCIssuer:       "https://acme.okta.com",
+		OIDCClientID:     "okta-client",
+		OIDCClientSecret: "okta-secret",
+	}
+	registry := buildOAuthRegistry(cfg, zap.NewNop())
+	if _, ok := registry.Get("okta"); !ok {
+		t.Fatalf("generic OIDC provider not registered under normalized key %q; got %v",
+			"okta", registry.Providers())
+	}
+	if _, ok := registry.Get("  Okta  "); ok {
+		t.Fatal("provider registered under the raw un-normalized key")
+	}
+}
+
 func TestBuildEmailTransport(t *testing.T) {
 	cases := []struct {
 		name string
