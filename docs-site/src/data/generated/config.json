@@ -1067,8 +1067,8 @@
     "default": "",
     "required": true,
     "description": "is the IdP entityID published in metadata (metadata URL).",
-    "category": "Other",
-    "anchor": "other"
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
   },
   {
     "name": "GATEWAY_SAML_IDP_ENABLED",
@@ -1076,8 +1076,8 @@
     "default": "false",
     "required": false,
     "description": "turns on the SAML 2.0 IdP surface.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
   },
   {
     "name": "GATEWAY_SAML_SIGNING_CERT",
@@ -1085,8 +1085,8 @@
     "default": "",
     "required": true,
     "description": "is the PEM-encoded X.509 certificate published in metadata.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
   },
   {
     "name": "GATEWAY_SAML_SIGNING_KEY",
@@ -1094,8 +1094,8 @@
     "default": "",
     "required": true,
     "description": "is the PEM-encoded RSA private key used to sign assertions.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
   },
   {
     "name": "GATEWAY_SAML_SLO_URL",
@@ -1103,8 +1103,8 @@
     "default": "",
     "required": false,
     "description": "is the optional single-logout endpoint.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
   },
   {
     "name": "GATEWAY_SAML_SSO_URL",
@@ -1112,8 +1112,8 @@
     "default": "",
     "required": true,
     "description": "is the HTTP-POST/Redirect single sign-on endpoint.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
   },
   {
     "name": "GATEWAY_SESSION_CACHE_TTL_SECONDS",

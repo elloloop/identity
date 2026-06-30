@@ -28,8 +28,13 @@ func randID() string {
 	return hex.EncodeToString(buf[:])
 }
 
-// escape XML-escapes text content (the five predefined entities). Attribute
-// values are emitted via %q which Go escapes for double-quoted attributes.
+// escape XML-escapes a string for safe inclusion in XML — both element
+// content and double-quoted attribute values — covering all five predefined
+// entities (& < > " '). Every dynamic value emitted into the SAML XML MUST
+// pass through escape; never use fmt %q for XML attributes (Go-literal
+// quoting is not XML escaping: it renders " as \" — the quote still
+// terminates the attribute, enabling attribute/element injection into the
+// signed assertion).
 func escape(s string) string {
 	r := strings.NewReplacer(
 		"&", "&amp;",
@@ -39,6 +44,32 @@ func escape(s string) string {
 		"'", "&apos;",
 	)
 	return r.Replace(s)
+}
+
+// isValidNCName reports whether s is a syntactically valid XML NCName: a
+// non-empty name that starts with a letter or underscore, contains only
+// letters, digits, '.', '-' or '_', and (being "non-colonized") has no ':'.
+// SAML element @ID values must be NCNames; validating an inbound
+// AuthnRequest @ID before it is echoed into the signed Response
+// (InResponseTo) is defense-in-depth on top of attribute escaping.
+func isValidNCName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for idx, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
+			// Always allowed.
+		case (r >= '0' && r <= '9') || r == '.' || r == '-':
+			// Allowed only after the first character.
+			if idx == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // sortedKeys returns the map keys in deterministic order so the serialized

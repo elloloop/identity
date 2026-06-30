@@ -98,7 +98,7 @@ func TestNewRSAIssuer_Validation(t *testing.T) {
 	}
 }
 
-func TestMetadata_ContainsEndpointsAndCert(t *testing.T) {
+func TestMetadata_ContainsIdentityAndCert(t *testing.T) {
 	iss, _ := newTestIssuer(t)
 	md, err := iss.Metadata()
 	if err != nil {
@@ -111,10 +111,7 @@ func TestMetadata_ContainsEndpointsAndCert(t *testing.T) {
 	s := string(md)
 	for _, want := range []string{
 		`entityID="https://idp.example.com/saml/metadata"`,
-		"https://idp.example.com/saml/sso",
-		"https://idp.example.com/saml/slo",
-		"<md:SingleSignOnService",
-		"<md:SingleLogoutService",
+		"<md:KeyDescriptor use=\"signing\"",
 		"<ds:X509Certificate>" + iss.certBase64(),
 	} {
 		if !strings.Contains(s, want) {
@@ -123,15 +120,26 @@ func TestMetadata_ContainsEndpointsAndCert(t *testing.T) {
 	}
 }
 
-func TestMetadata_NoSLOWhenUnset(t *testing.T) {
-	keyPEM, certPEM, _ := genKeyPair(t)
-	iss, err := NewRSAIssuer(Options{EntityID: "e", SSOURL: "s", KeyPEM: keyPEM, CertPEM: certPEM})
+// TestMetadata_OmitsUnservedEndpoints asserts the descope: this slice mounts
+// only /saml/metadata, so the metadata must NOT advertise SSO/SLO endpoints
+// (an SP importing them would be redirected to a 404). It must also not leak
+// the configured SSO/SLO URLs anywhere in the document.
+func TestMetadata_OmitsUnservedEndpoints(t *testing.T) {
+	iss, _ := newTestIssuer(t) // configured with SSOURL + SLOURL
+	md, err := iss.Metadata()
 	if err != nil {
 		t.Fatal(err)
 	}
-	md, _ := iss.Metadata()
-	if strings.Contains(string(md), "SingleLogoutService") {
-		t.Fatal("SLO must be omitted when no SLOURL configured")
+	s := string(md)
+	for _, forbidden := range []string{
+		"SingleSignOnService",
+		"SingleLogoutService",
+		"https://idp.example.com/saml/sso",
+		"https://idp.example.com/saml/slo",
+	} {
+		if strings.Contains(s, forbidden) {
+			t.Errorf("metadata must not advertise %q (no handler serves it this slice)", forbidden)
+		}
 	}
 }
 
@@ -154,12 +162,108 @@ func TestParseAuthnRequest_Invalid(t *testing.T) {
 		`not xml`,
 		`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">sp</saml:Issuer></samlp:AuthnRequest>`, // missing ID
 		`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_x"></samlp:AuthnRequest>`,                                                                         // missing Issuer
+		// @ID is not a valid XML NCName (contains a quote that, unescaped,
+		// would break out of the InResponseTo attribute) — must be rejected
+		// at the parse boundary before it can be echoed into a signed Response.
+		`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="a&quot; x=&quot;y"><saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">sp</saml:Issuer></samlp:AuthnRequest>`,
+		// @ID with a space is not an NCName.
+		`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="has space"><saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">sp</saml:Issuer></samlp:AuthnRequest>`,
+		// @ID starting with a digit is not an NCName.
+		`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="1bad"><saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">sp</saml:Issuer></samlp:AuthnRequest>`,
 	}
 	for _, c := range cases {
 		if _, err := iss.ParseAuthnRequest([]byte(c), ""); err == nil {
 			t.Errorf("expected error for %q", c)
 		}
 	}
+}
+
+// TestIssue_MaliciousIDNoForgery is the core regression for the
+// XML-attribute-injection → signed-assertion-forgery blocker. A hostile
+// AuthnRequest @ID (which flows verbatim into InResponseTo on both the
+// signed Assertion and the Response) is fed directly to Issue (bypassing the
+// NCName parse guard) to prove the escaping layer alone neutralizes it: the
+// crafted markup must appear only as escaped text, never as a real element
+// or attribute, the document must round-trip through xml.Unmarshal, and the
+// signature must still verify.
+func TestIssue_MaliciousIDNoForgery(t *testing.T) {
+	iss, key := newTestIssuer(t)
+	sp := ServiceProvider{EntityID: "https://sp.example.com/saml", ACSURL: "https://sp.example.com/acs"}
+
+	// A classic breakout payload: close the InResponseTo attribute, close
+	// the element, then inject a forged signed-looking Attribute.
+	malicious := `_x" foo="bar"><saml:Attribute Name="injected"><saml:AttributeValue>admin</saml:AttributeValue></saml:Attribute><x y="`
+	req := AuthnRequestInfo{ID: malicious, Issuer: sp.EntityID}
+	subj := Subject{NameID: "alice@acme.com"}
+
+	resp, err := iss.Issue(context.Background(), sp, subj, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := string(resp.XML)
+
+	// 1. The output must remain well-formed XML.
+	if err := xml.Unmarshal(resp.XML, new(struct{ XMLName xml.Name })); err != nil {
+		t.Fatalf("malicious @ID produced non-well-formed XML: %v", err)
+	}
+	// 2. No forged element/attribute may appear unescaped.
+	for _, forbidden := range []string{
+		`Name="injected"`,
+		`foo="bar"`,
+		`<saml:Attribute Name="injected"`,
+		`<x y=`,
+	} {
+		if strings.Contains(x, forbidden) {
+			t.Fatalf("forged markup leaked into signed document: %q\n%s", forbidden, x)
+		}
+	}
+	// 3. The payload must be present only in fully-escaped form.
+	if !strings.Contains(x, "&lt;saml:Attribute") || !strings.Contains(x, "&quot;") {
+		t.Fatalf("expected the payload to appear escaped; got:\n%s", x)
+	}
+	// 4. The signature must still verify over the (escaped) assertion.
+	verifyAssertionSignature(t, x, &key.PublicKey)
+}
+
+// TestIssue_MaliciousAttributesNoForgery proves the same for
+// attacker-controlled SAML attribute keys and values: special characters
+// must be escaped, no injected markup may materialize, the document must
+// round-trip, and the signature must verify.
+func TestIssue_MaliciousAttributesNoForgery(t *testing.T) {
+	iss, key := newTestIssuer(t)
+	sp := ServiceProvider{EntityID: "https://sp.example.com/saml", ACSURL: "https://sp.example.com/acs"}
+	req := AuthnRequestInfo{ID: "_req123", Issuer: sp.EntityID}
+	subj := Subject{
+		NameID: "alice@acme.com",
+		Attributes: map[string]string{
+			`evil"><saml:Attribute Name="role`: `admin"/><x a="`,
+			"amp&lt<gt>":                       "v&v<v>\"v'v",
+		},
+	}
+
+	resp, err := iss.Issue(context.Background(), sp, subj, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := string(resp.XML)
+
+	if err := xml.Unmarshal(resp.XML, new(struct{ XMLName xml.Name })); err != nil {
+		t.Fatalf("malicious attributes produced non-well-formed XML: %v", err)
+	}
+	for _, forbidden := range []string{
+		`Name="role"`,
+		`<x a=`,
+		`<saml:Attribute Name="role`,
+	} {
+		if strings.Contains(x, forbidden) {
+			t.Fatalf("forged markup leaked into signed document: %q\n%s", forbidden, x)
+		}
+	}
+	// Raw special characters must not survive in element content/attributes.
+	if strings.Contains(x, `"v'v`) {
+		t.Fatalf("unescaped attribute value characters leaked:\n%s", x)
+	}
+	verifyAssertionSignature(t, x, &key.PublicKey)
 }
 
 func TestIssue_SignedAssertionVerifies(t *testing.T) {
@@ -296,6 +400,21 @@ func TestIssue_DeterministicTime(t *testing.T) {
 	}
 	if !strings.Contains(string(resp.XML), "2026-06-16T12:05:00Z") {
 		t.Fatal("expected NotOnOrAfter = issue + 5m")
+	}
+}
+
+func TestIsValidNCName(t *testing.T) {
+	valid := []string{"_req123", "a", "Abc.def-ghi", "_", "x9"}
+	for _, s := range valid {
+		if !isValidNCName(s) {
+			t.Errorf("isValidNCName(%q) = false, want true", s)
+		}
+	}
+	invalid := []string{"", "1abc", ".abc", "-abc", "9", "has space", `a"b`, "ns:local", "a&b", "a<b"}
+	for _, s := range invalid {
+		if isValidNCName(s) {
+			t.Errorf("isValidNCName(%q) = true, want false", s)
+		}
 	}
 }
 

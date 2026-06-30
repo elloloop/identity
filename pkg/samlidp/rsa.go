@@ -18,8 +18,10 @@ const (
 	nsMetadata  = "urn:oasis:names:tc:SAML:2.0:metadata"
 	nsDSig      = "http://www.w3.org/2000/09/xmldsig#"
 
-	bindingPOST     = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
-	bindingRedirect = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+	// The HTTP-POST/HTTP-Redirect SSO/SLO binding URN constants live with
+	// the SSO binding slice that mounts those handlers and re-adds the
+	// corresponding <md:SingleSignOnService>/<md:SingleLogoutService>
+	// metadata; this slice serves only /saml/metadata.
 
 	nameIDFormatEmail = "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
 
@@ -158,14 +160,21 @@ func (i *RSAIssuer) ParseAuthnRequest(raw []byte, relayState string) (AuthnReque
 	if err := xml.Unmarshal(raw, &ar); err != nil {
 		return AuthnRequestInfo{}, fmt.Errorf("%w: %w", ErrInvalidAuthnRequest, err)
 	}
-	if strings.TrimSpace(ar.ID) == "" {
+	id := strings.TrimSpace(ar.ID)
+	if id == "" {
 		return AuthnRequestInfo{}, fmt.Errorf("%w: missing request ID", ErrInvalidAuthnRequest)
+	}
+	// The @ID is echoed verbatim into the signed Response/Assertion as
+	// InResponseTo; reject anything that is not a syntactically valid XML
+	// NCName so a hostile @ID can never be carried into the signed document.
+	if !isValidNCName(id) {
+		return AuthnRequestInfo{}, fmt.Errorf("%w: request ID is not a valid XML id", ErrInvalidAuthnRequest)
 	}
 	if strings.TrimSpace(ar.Issuer) == "" {
 		return AuthnRequestInfo{}, fmt.Errorf("%w: missing Issuer", ErrInvalidAuthnRequest)
 	}
 	return AuthnRequestInfo{
-		ID:         strings.TrimSpace(ar.ID),
+		ID:         id,
 		Issuer:     strings.TrimSpace(ar.Issuer),
 		ACSURL:     strings.TrimSpace(ar.ACSURL),
 		RelayState: relayState,
