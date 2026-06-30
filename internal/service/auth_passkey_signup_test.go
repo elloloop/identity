@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
 
@@ -454,4 +456,277 @@ func TestPasskeySignup_PreHijacking_ExternalProofClearsPasskeys(t *testing.T) {
 	gone, err := repo.GetPasskeyCredentialByCredID(ctx, "planted-cred")
 	require.NoError(t, err)
 	assert.Nil(t, gone, "the old credential must no longer resolve, so a passkey login with it fails")
+}
+
+// ── BeginPasskeySignup input validation ────────────────────────────────
+
+// TestPasskeySignup_Begin_RejectsMalformedEmail: a syntactically invalid email
+// is rejected before any challenge is minted or OTP sent.
+func TestPasskeySignup_Begin_RejectsMalformedEmail(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, _, err := svc.BeginPasskeySignup(ctx, "not-an-email", "My Key")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+
+	// Nothing was persisted or sent for a rejected address.
+	repo.mu.Lock()
+	assert.Empty(t, repo.passkeyChallenges, "no challenge for a malformed email")
+	repo.mu.Unlock()
+	assert.Empty(t, rec.Sent(), "no OTP for a malformed email")
+}
+
+// ── CompletePasskeySignup pre-checks (all run BEFORE any account lookup,
+// so none can become an existence oracle) ──────────────────────────────
+
+// TestPasskeySignup_Complete_RejectsMissingArgs: empty challenge id or
+// credential json fails fast with ErrInvalidArgument.
+func TestPasskeySignup_Complete_RejectsMissingArgs(t *testing.T) {
+	svc, _, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, err := svc.CompletePasskeySignup(ctx, "", pkRegCredentialJSON(t), pkVectorEmail, "000000", "Key", "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+
+	_, err = svc.CompletePasskeySignup(ctx, "chal-1", "", pkVectorEmail, "000000", "Key", "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+}
+
+// TestPasskeySignup_Complete_ChallengeNotFound: an unknown challenge id is
+// reported as not-found (e.g. already consumed or never existed).
+func TestPasskeySignup_Complete_ChallengeNotFound(t *testing.T) {
+	svc, _, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, err := svc.CompletePasskeySignup(ctx, "missing", pkRegCredentialJSON(t), pkVectorEmail, "000000", "Key", "", "")
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestPasskeySignup_Complete_GetChallengeError: a repo read failure surfaces
+// rather than being swallowed.
+func TestPasskeySignup_Complete_GetChallengeError(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+	repo.getPasskeyChallengeErr = errors.New("datastore down")
+
+	_, err := svc.CompletePasskeySignup(ctx, "any", pkRegCredentialJSON(t), pkVectorEmail, "000000", "Key", "", "")
+	require.ErrorContains(t, err, "datastore down")
+}
+
+// TestPasskeySignup_Complete_RejectsNonSignupChallenge: an add-a-passkey
+// registration challenge (one with no bound email, belonging to an already
+// authenticated user) can never be redeemed through the signup path.
+func TestPasskeySignup_Complete_RejectsNonSignupChallenge(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	// An add-passkey registration challenge: type "registration", no email.
+	chID, err := repo.CreatePasskeyChallenge(ctx, &PasskeyChallengeRecord{
+		Challenge:     "x",
+		UserID:        "existing-user",
+		ChallengeType: "registration",
+		Email:         "",
+		ExpiresAt:     svc.nowMs() + 60_000,
+		CreatedAt:     svc.nowMs(),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.CompletePasskeySignup(ctx, chID, pkRegCredentialJSON(t), "", "000000", "Key", "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	require.ErrorContains(t, err, "not a signup challenge")
+}
+
+// TestPasskeySignup_Complete_RejectsExpiredChallenge: an expired signup
+// challenge returns ErrTokenExpired and is deleted (single-use, no replay).
+func TestPasskeySignup_Complete_RejectsExpiredChallenge(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, chID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+
+	// Expire the challenge itself (distinct from the OTP).
+	repo.mu.Lock()
+	repo.passkeyChallenges[chID].ExpiresAt = svc.nowMs() - 1
+	repo.mu.Unlock()
+
+	_, err = svc.CompletePasskeySignup(ctx, chID, pkRegCredentialJSON(t), pkVectorEmail, "000000", "My Key", "", "")
+	require.ErrorIs(t, err, ErrTokenExpired)
+
+	ch, err := repo.GetPasskeyChallenge(ctx, chID)
+	require.NoError(t, err)
+	assert.Nil(t, ch, "an expired challenge must be deleted")
+}
+
+// TestPasskeySignup_Complete_RejectsEmailMismatch: if the client passes an
+// email it must match the one bound at Begin, so a client cannot complete under
+// an address the user never consented to.
+func TestPasskeySignup_Complete_RejectsEmailMismatch(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, chID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	setFakeChallengeValue(repo, chID, pkB64URL(t, pkRegChallengeHex))
+
+	_, err = svc.CompletePasskeySignup(ctx, chID, pkRegCredentialJSON(t), "someone-else@example.org", "000000", "My Key", "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	require.ErrorContains(t, err, "email does not match")
+}
+
+// TestPasskeySignup_Complete_AttestationFailure: a failed attestation is a
+// generic ErrInvalidArgument — it runs before any account lookup so it cannot
+// be turned into an existence oracle, and (crucially) it returns before the OTP
+// is even consulted.
+func TestPasskeySignup_Complete_AttestationFailure(t *testing.T) {
+	svc, repo, _ := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, chID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	setFakeChallengeValue(repo, chID, pkB64URL(t, pkRegChallengeHex))
+
+	// A well-formed-but-bogus credential the WebAuthn verifier rejects.
+	_, err = svc.CompletePasskeySignup(ctx, chID, `{"type":"public-key","id":"AA","rawId":"AA","response":{}}`, pkVectorEmail, "000000", "My Key", "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	require.ErrorContains(t, err, "attestation verification failed")
+
+	// No account was created off a bad attestation.
+	got, err := repo.FindUserByEmail(ctx, pkVectorEmail)
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+// ── Post-OTP account resolution branches ───────────────────────────────
+
+// TestPasskeySignup_Complete_FindUserError: a repo failure on the existence
+// lookup (after a valid attestation + OTP) surfaces rather than silently
+// proceeding to a create.
+func TestPasskeySignup_Complete_FindUserError(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, chID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	setFakeChallengeValue(repo, chID, pkB64URL(t, pkRegChallengeHex))
+
+	repo.findUserByEmailErr = errors.New("datastore down")
+	_, err = svc.CompletePasskeySignup(ctx, chID, pkRegCredentialJSON(t), pkVectorEmail, otp, "My Key", "", "")
+	require.ErrorContains(t, err, "datastore down")
+}
+
+// TestPasskeySignup_Complete_LostCreateRace_Decoys: a concurrent caller who
+// registers the email between our existence check and our insert makes CreateUser
+// fail; the flow re-resolves, finds the racing winner and returns the
+// enumeration-safe decoy — never attaching the passkey to the winner's account.
+func TestPasskeySignup_Complete_LostCreateRace_Decoys(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, chID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	setFakeChallengeValue(repo, chID, pkB64URL(t, pkRegChallengeHex))
+
+	// Inject the racing winner just before our insert: the existence lookup
+	// already returned nil, so this exercises the lost-create-race branch.
+	var racer *User
+	seeded := false
+	repo.createUserHook = func() {
+		if !seeded {
+			seeded = true
+			racer = seedUser(repo, pkVectorEmail, "", "active")
+		}
+	}
+
+	res, err := svc.CompletePasskeySignup(ctx, chID, pkRegCredentialJSON(t), pkVectorEmail, otp, "My Key", "", "")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	// Decoy: the racing winner's id is never disclosed.
+	require.NotNil(t, racer)
+	assert.NotEqual(t, racer.ID, res.User.ID)
+	assert.True(t, strings.HasPrefix(res.User.ID, "signup-pending-"))
+
+	// The passkey was NOT attached to the winner's account.
+	creds, err := repo.ListPasskeyCredentials(ctx, racer.ID)
+	require.NoError(t, err)
+	assert.Empty(t, creds, "the lost-race passkey must not land on the winner's account")
+}
+
+// TestPasskeySignup_Complete_StoreCredentialError: a failure persisting the
+// credential after the user is created surfaces (wrapped) rather than reporting
+// a half-built account as success.
+func TestPasskeySignup_Complete_StoreCredentialError(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, chID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	setFakeChallengeValue(repo, chID, pkB64URL(t, pkRegChallengeHex))
+
+	repo.createPasskeyCredErr = errors.New("credential write failed")
+	_, err = svc.CompletePasskeySignup(ctx, chID, pkRegCredentialJSON(t), pkVectorEmail, otp, "My Key", "", "")
+	require.ErrorContains(t, err, "storing credential")
+}
+
+// ── Existing-email decoy helper branches ───────────────────────────────
+
+// TestPasskeySignup_ExistingEmail_NoticeFailureStillDecoys: if the
+// existing-account notice email fails to send, the decoy is still returned
+// unchanged — the failure is logged, never surfaced, so it cannot become an
+// existence oracle.
+func TestPasskeySignup_ExistingEmail_NoticeFailureStillDecoys(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	existing := seedUser(repo, pkVectorEmail, hashPW(t, "Existing0wner!"), "active")
+
+	_, chID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "Attacker Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	setFakeChallengeValue(repo, chID, pkB64URL(t, pkRegChallengeHex))
+
+	// Make the existing-account notice send fail.
+	rec.mu.Lock()
+	rec.fail = errors.New("smtp unavailable")
+	rec.mu.Unlock()
+
+	res, err := svc.CompletePasskeySignup(ctx, chID, pkRegCredentialJSON(t), pkVectorEmail, otp, "Attacker Key", "9.9.9.9", "agent")
+	require.NoError(t, err, "a notice-send failure must not surface")
+	require.NotNil(t, res)
+	assert.NotEqual(t, existing.ID, res.User.ID)
+	assert.True(t, strings.HasPrefix(res.User.ID, "signup-pending-"))
+	assert.NotEmpty(t, res.AccessToken, "the decoy still issues a token (parity with the new-account path)")
+
+	// No passkey attached to the real account.
+	creds, err := repo.ListPasskeyCredentials(ctx, existing.ID)
+	require.NoError(t, err)
+	assert.Empty(t, creds)
+}
+
+// TestPasskeySignup_Decoy_CarriesAudienceClaim: when GATEWAY_JWT_AUDIENCE is
+// configured, the existing-email decoy token carries that audience exactly like
+// a genuine session token, so the two are indistinguishable on the wire.
+func TestPasskeySignup_Decoy_CarriesAudienceClaim(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	svc.cfg.JWTAudience = "https://api.example.org"
+	ctx := context.Background()
+
+	seedUser(repo, pkVectorEmail, hashPW(t, "Existing0wner!"), "active")
+
+	_, chID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "Attacker Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	setFakeChallengeValue(repo, chID, pkB64URL(t, pkRegChallengeHex))
+
+	res, err := svc.CompletePasskeySignup(ctx, chID, pkRegCredentialJSON(t), pkVectorEmail, otp, "Attacker Key", "9.9.9.9", "agent")
+	require.NoError(t, err)
+	require.NotEmpty(t, res.AccessToken)
+
+	claims, err := jwt.VerifyAccessToken(res.AccessToken, svc.signer, svc.defaultTenantID, "https://api.example.org", true)
+	require.NoError(t, err, "the decoy token must validate against the configured audience")
+	assert.Contains(t, claims.Audience, "https://api.example.org")
 }
