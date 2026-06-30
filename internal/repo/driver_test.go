@@ -42,6 +42,9 @@ func assertNoGovernancePlane(t *testing.T, built *Built, driver string) {
 	if cp := built.ControlPlaneStore(); cp != nil {
 		t.Errorf("Build %s: ControlPlaneStore() = %v, want true nil", driver, cp)
 	}
+	if np := built.NativeProjectLookup(); np != nil {
+		t.Errorf("Build %s: NativeProjectLookup() = %v, want true nil", driver, np)
+	}
 	if g := built.LoginGovernance(); g != nil {
 		t.Errorf("Build %s: LoginGovernance() = %v, want true nil", driver, g)
 	}
@@ -107,6 +110,9 @@ func TestBuilt_GovernanceAccessors_TypedNilAvoidance(t *testing.T) {
 	if empty.ControlPlaneStore() != nil {
 		t.Error("empty ControlPlaneStore: want nil interface")
 	}
+	if empty.NativeProjectLookup() != nil {
+		t.Error("empty NativeProjectLookup: want nil interface")
+	}
 	if empty.TenantAutoFormer() != nil {
 		t.Error("empty TenantAutoFormer: want nil interface")
 	}
@@ -143,6 +149,9 @@ func TestBuilt_GovernanceAccessors_TypedNilAvoidance(t *testing.T) {
 	}
 	if full.ControlPlaneStore() == nil {
 		t.Error("full ControlPlaneStore: want non-nil")
+	}
+	if full.NativeProjectLookup() == nil {
+		t.Error("full NativeProjectLookup: want non-nil")
 	}
 	if full.TenantAutoFormer() == nil {
 		t.Error("full TenantAutoFormer: want non-nil")

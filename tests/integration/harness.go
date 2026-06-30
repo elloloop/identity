@@ -112,9 +112,11 @@ const (
 type HarnessOption func(*harnessOptions)
 
 type harnessOptions struct {
-	oauthRegistry *oauth.Registry
-	config        func(*config.Config)
-	idvProvider   idv.Provider
+	oauthRegistry  *oauth.Registry
+	nativeVerifier *oauth.NativeVerifier
+	nativeProjects service.NativeOAuthProjectStore
+	config         func(*config.Config)
+	idvProvider    idv.Provider
 }
 
 func applyHarnessOptions(cfg *config.Config, opts []HarnessOption) harnessOptions {
@@ -139,6 +141,15 @@ func WithConfig(fn func(*config.Config)) HarnessOption {
 	return func(o *harnessOptions) { o.config = fn }
 }
 
+// WithNativeOAuth injects a native ID-token verifier (typically pointed at a
+// mock JWKS) and the optional product-lookup store used by NativeOAuthLogin.
+func WithNativeOAuth(v *oauth.NativeVerifier, projects service.NativeOAuthProjectStore) HarnessOption {
+	return func(o *harnessOptions) {
+		o.nativeVerifier = v
+		o.nativeProjects = projects
+	}
+}
+
 // WithIDVProvider sets the identity-verification provider on the harness.
 // Pass nil to leave IDV disabled (the default — RPCs return Unimplemented).
 func WithIDVProvider(p idv.Provider) HarnessOption {
@@ -152,8 +163,7 @@ func startHarness(
 	db service.DB,
 	auditDB *RecordingDB,
 	mailer *RecordingMailer,
-	oauthRegistry *oauth.Registry,
-	idvProvider idv.Provider,
+	hOpts harnessOptions,
 ) *Harness {
 	t.Helper()
 
@@ -169,17 +179,19 @@ func startHarness(
 	}
 
 	built, err := app.New(app.Deps{
-		Config:             cfg,
-		Logger:             zap.NewNop(),
-		Signer:             signer,
-		Repo:               repo,
-		DB:                 db,
-		Passkeys:           pkSvc,
-		TOTPKey:            []byte("01234567890123456789012345678901"),
-		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
-		EmailTransport:     mailer,
-		OAuthRegistry:      oauthRegistry,
-		IDVProvider:        idvProvider,
+		Config:              cfg,
+		Logger:              zap.NewNop(),
+		Signer:              signer,
+		Repo:                repo,
+		DB:                  db,
+		Passkeys:            pkSvc,
+		TOTPKey:             []byte("01234567890123456789012345678901"),
+		TOTPRecoveryPepper:  []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
+		EmailTransport:      mailer,
+		OAuthRegistry:       hOpts.oauthRegistry,
+		NativeOAuthVerifier: hOpts.nativeVerifier,
+		NativeOAuthProjects: hOpts.nativeProjects,
+		IDVProvider:         hOpts.idvProvider,
 	})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)

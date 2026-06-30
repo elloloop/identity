@@ -88,6 +88,12 @@ type Deps struct {
 	// Config.AdminAPISecret is set.
 	ControlPlaneStore service.ControlPlaneProjectStore
 
+	// NativeOAuthProjects is the control-plane project-by-id lookup
+	// NativeOAuthLogin uses to validate a product→project id. Non-nil ONLY for
+	// the postgres driver; nil on drivers without a control plane, where native
+	// login accepts only the product that resolves to the default project.
+	NativeOAuthProjects service.NativeOAuthProjectStore
+
 	// PlatformAdminStore backs the zero-config first-admin bootstrap
 	// (CreateFirstPlatformAdmin). Non-nil ONLY for the postgres driver; when
 	// nil the bootstrap RPC returns Unimplemented. Unlike the other admin
@@ -137,6 +143,14 @@ type Deps struct {
 	// config's GATEWAY_*_CLIENT_ID/SECRET env vars (only providers
 	// with both credentials set are registered).
 	OAuthRegistry *oauth.Registry
+
+	// NativeOAuthVerifier verifies native mobile-SDK ID tokens for
+	// NativeOAuthLogin. May be nil — in that case New builds one from config
+	// via buildNativeOAuthVerifier (which returns nil, leaving the RPC
+	// disabled, unless GATEWAY_NATIVE_OAUTH_ENABLED and audiences are set).
+	// Tests inject a verifier pointed at a mock JWKS through this override,
+	// mirroring OAuthRegistry.
+	NativeOAuthVerifier *oauth.NativeVerifier
 
 	// IDVProvider drives identity-verification (document + selfie).
 	// May be nil — in that case BeginIdentityVerification returns
@@ -240,6 +254,12 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			// Native mobile sign-in (Google/Apple ID-token verification) is a
+			// login surface, bound by the same per-IP login quota as OAuthLogin.
+			PathPrefix: "/identity.v1.IdentityService/NativeOAuthLogin", Tag: "native_oauth",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
@@ -418,6 +438,11 @@ func New(deps Deps) (*Built, error) {
 	}
 	oauthRegistry = wrapOAuthRegistry(oauthRegistry)
 
+	nativeVerifier := deps.NativeOAuthVerifier
+	if nativeVerifier == nil {
+		nativeVerifier = buildNativeOAuthVerifier(deps.Config, logger)
+	}
+
 	// User-lifecycle eventing (#261). When GATEWAY_WEBHOOKS_ENABLED is
 	// false (the default), eventPublisher stays nil — the service treats a
 	// nil publisher as the no-op events.Discard, so no events are emitted
@@ -460,7 +485,8 @@ func New(deps Deps) (*Built, error) {
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance).
-		WithEventPublisher(eventPublisher)
+		WithEventPublisher(eventPublisher).
+		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects)
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)

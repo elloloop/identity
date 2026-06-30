@@ -51,5 +51,5 @@ func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 	}
 
 	mailer := NewRecordingMailer()
-	return startHarness(t, cfg, built.Repository, built.DB, nil, mailer, hOpts.oauthRegistry, hOpts.idvProvider)
+	return startHarness(t, cfg, built.Repository, built.DB, nil, mailer, hOpts)
 }

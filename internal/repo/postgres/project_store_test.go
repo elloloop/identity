@@ -501,6 +501,27 @@ func runProjectStoreSmoke(t *testing.T, dsn string) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{}`, bare.ConfigJSON)
 
+	// ── ActiveProjectByID (native-OAuth product→project lookup) ──────
+	// An active project resolves to the driver-agnostic service.AdminProject.
+	active, err := store.ActiveProjectByID(ctx, projID)
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	require.Equal(t, projID, active.ID)
+	require.Equal(t, "scope-a", active.StorageScopeID)
+	require.Equal(t, "Acme", active.Name)
+	// A miss is (nil, nil), never an error.
+	activeMiss, err := store.ActiveProjectByID(ctx, "no-such-project")
+	require.NoError(t, err)
+	require.Nil(t, activeMiss)
+	// A suspended project is treated as a clean miss (not serving).
+	suspID, err := store.createProject(ctx, &Project{
+		StorageScopeID: "scope-susp-native", Name: "Suspended", Status: "suspended",
+	})
+	require.NoError(t, err)
+	suspMiss, err := store.ActiveProjectByID(ctx, suspID)
+	require.NoError(t, err)
+	require.Nil(t, suspMiss, "a suspended project must not resolve for native login")
+
 	// ── credential round-trip ───────────────────────────────────────
 	credID, err := store.createProjectCredential(ctx, &ProjectCredential{
 		ProjectID: projID,

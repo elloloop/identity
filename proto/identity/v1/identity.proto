@@ -231,6 +231,55 @@ message OAuthLoginResponse {
   int32 expires_in      = 5;  // Access token lifetime in seconds
 }
 
+// NativeOAuthLoginRequest carries a native mobile-SDK ID token for
+// server-side verification. Unlike OAuthLogin (which exchanges an OAuth
+// authorization code through identity's own web client), this path takes the
+// ID token a native SDK already obtained from the platform account picker
+// (Google `google_sign_in`, Apple `sign_in_with_apple`) — no browser, no
+// PKCE. Identity verifies the token's signature, issuer, expiry, and audience
+// against the configured native audiences, then links/creates the user and
+// issues identity tokens scoped to the product's project.
+message NativeOAuthLoginRequest {
+  // Provider key: "google" or "apple". Any other value is InvalidArgument.
+  string provider = 1;
+
+  // The native-SDK ID token (a JWT). For Google this is
+  // GoogleSignInAuthentication.idToken; for Apple it is
+  // credential.identityToken from sign_in_with_apple. Required.
+  string id_token = 2;
+
+  // Product/project selector (e.g. "easyloops" | "tortoise"), with the same
+  // semantics as the hosted hub's ?product= query. The server maps it to an
+  // identity Project (see GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS) and scopes
+  // token issuance to that project. An unknown/unresolvable product is
+  // InvalidArgument.
+  string product = 3;
+
+  // Apple only: the RAW nonce the client passed to the native Sign in with
+  // Apple request. Omit for Google.
+  //
+  // OPTIONAL but STRONGLY RECOMMENDED: nonce-based replay protection is only
+  // enforced when this field is present. The convention (sign_in_with_apple /
+  // Firebase) is that the client hashes a random raw nonce with SHA-256 and
+  // sends the HEX digest as the native request `nonce`; Apple echoes that
+  // digest verbatim in the id_token `nonce` claim. When this field is set the
+  // server verifies id_token.nonce == hex(SHA-256(raw))
+  // (base64url(SHA-256(raw)) is also accepted) and rejects a missing or
+  // mismatched claim. When omitted, the token is still fully verified
+  // (signature, iss, exp, aud) but NOT bound to a per-login nonce, so clients
+  // SHOULD always generate and send a fresh raw nonce.
+  string nonce = 4;
+}
+
+// NativeOAuthLoginResponse mirrors OAuthLoginResponse: the backend-issued
+// token pair plus the resolved user.
+message NativeOAuthLoginResponse {
+  User user            = 1;
+  string access_token  = 2;  // Backend-issued JWT
+  string refresh_token = 3;  // For token rotation (send in RefreshToken RPC body)
+  int32 expires_in     = 4;  // Access token lifetime in seconds
+}
+
 // RedeemOAuthCode exchanges the single-use one-time code handed to the
 // SPA by the hosted OAuth callback (GET/POST /oauth/callback/{provider} ->
 // 302 return_to?code=<otc>) for a backend-issued token pair. The code
@@ -1347,6 +1396,7 @@ service IdentityService {
   // Authentication
   rpc BeginOAuthLogin(BeginOAuthLoginRequest) returns (BeginOAuthLoginResponse);
   rpc OAuthLogin(OAuthLoginRequest) returns (OAuthLoginResponse);
+  rpc NativeOAuthLogin(NativeOAuthLoginRequest) returns (NativeOAuthLoginResponse);
   rpc RedeemOAuthCode(RedeemOAuthCodeRequest) returns (RedeemOAuthCodeResponse);
   rpc PasswordSignup(PasswordSignupRequest) returns (PasswordSignupResponse);
   rpc PasswordLogin(PasswordLoginRequest) returns (PasswordLoginResponse);

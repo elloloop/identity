@@ -103,7 +103,77 @@ message BeginOAuthLoginResponse {
   int32 expires_in      = 5;
 }`} lang="proto" />
 
-  <h2>Upsert semantics</h2>
+  <h2>Native mobile sign-in</h2>
+  <p>
+    Mobile apps that use the platform account picker (the official
+    <code>google_sign_in</code> / <code>sign_in_with_apple</code> Flutter
+    plugins) obtain an <strong>ID token</strong> directly — no browser, no
+    PKCE. <code>NativeOAuthLogin</code> verifies that ID token server-side and
+    issues backend tokens, scoped to the product's project. It is public
+    (auth-exempt) and rate-limited under the per-IP login quota, exactly like
+    <code>OAuthLogin</code>.
+  </p>
+  <Code code={`message NativeOAuthLoginRequest {
+  string provider = 1;  // "google" | "apple"
+  string id_token = 2;  // GoogleSignInAuthentication.idToken / Apple identityToken
+  string product  = 3;  // product selector → project (see config below)
+  string nonce    = 4;  // Apple only: the RAW nonce (replay protection)
+}
+
+message NativeOAuthLoginResponse {
+  User user            = 1;
+  string access_token  = 2;
+  string refresh_token = 3;
+  int32 expires_in     = 4;
+}`} lang="proto" />
+  <p>
+    <strong>Verification.</strong> Google: the token's signature is checked
+    against Google's certs, <code>iss</code> must be
+    <code>accounts.google.com</code> (with or without the <code>https://</code>
+    prefix), <code>exp</code> must be in the future, <code>email_verified</code>
+    must be true, and <code>aud</code> must be one of
+    <code>GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES</code> (the web client id plus
+    each per-platform iOS/Android client id). Apple: signature against Apple's
+    JWKS, <code>iss = https://appleid.apple.com</code>, <code>exp</code>, and
+    <code>aud</code> ∈ <code>GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES</code> (the
+    Services ID plus each native bundle id). Hide-my-email relay addresses are
+    accepted as-is. Any failure returns <code>Unauthenticated</code> with a
+    safe message.
+  </p>
+  <p>
+    <strong>Apple nonce.</strong> The <code>nonce</code> field is
+    <strong>optional but strongly recommended</strong>: nonce-based replay
+    protection is only enforced when the client sends it. When supplied, the
+    server verifies that the id_token's <code>nonce</code> claim equals
+    <code>hex(SHA-256(raw nonce))</code> — the <code>sign_in_with_apple</code> /
+    Firebase convention where the client sends the hashed nonce to Apple and
+    Apple echoes it back verbatim (<code>base64url(SHA-256(raw))</code> is also
+    accepted) — and a missing or mismatched claim is rejected. When omitted, the
+    token is still fully verified (signature, <code>iss</code>, <code>exp</code>,
+    <code>aud</code>) but is not bound to a per-login nonce, so clients
+    <strong>should</strong> always generate and send a fresh raw nonce.
+  </p>
+  <p>
+    <strong>Product → project.</strong> <code>product</code> is mapped to an
+    identity project via
+    <code>GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS</code> (CSV of
+    <code>product=projectID</code>); a product that isn't listed is treated as a
+    project id directly. With a control plane (Postgres) the project must exist
+    and be active, otherwise the request is <code>InvalidArgument</code>; on a
+    single-project deployment only the product that resolves to the default
+    project is accepted. The resolved project is injected as the request's
+    project scope, so account linking and token issuance happen under it —
+    independent of the request Host. When
+    <code>GATEWAY_NATIVE_OAUTH_ENABLED</code> is off the RPC returns
+    <code>FailedPrecondition</code>.
+  </p>
+  <p>
+    Account linking reuses the same path as hosted OAuth (match on
+    <code>(provider, sub)</code>, then email; create if new), so the
+    <a href="#upsert-semantics">upsert semantics</a> below apply identically.
+  </p>
+
+  <h2 id="upsert-semantics">Upsert semantics</h2>
   <p>
     On a successful OAuth verification, Identity resolves the user by
     <code>(provider, provider_user_id)</code> first, then falls back to the

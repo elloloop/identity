@@ -78,6 +78,23 @@ func TestAuthMiddleware_BeginOAuthLogin_ExemptNoToken_Passes(t *testing.T) {
 	assert.Empty(t, userID)
 }
 
+func TestAuthMiddleware_NativeOAuthLogin_ExemptNoToken_Passes(t *testing.T) {
+	kr := testSigner(t)
+	var called bool
+	var userID string
+
+	handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/NativeOAuthLogin", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.True(t, called, "handler should have been called without a Bearer token")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, userID)
+}
+
 func TestAuthMiddleware_ExemptPath_WithToken_InjectsUserID(t *testing.T) {
 	kr := testSigner(t)
 	token := testToken(t, kr, "user-42", 15*time.Minute)

@@ -9,6 +9,32 @@ import (
 	"github.com/elloloop/identity/pkg/oauth"
 )
 
+// buildNativeOAuthVerifier constructs the verifier for NativeOAuthLogin
+// (Google/Apple ID tokens from mobile SDKs) from config, or returns nil when
+// native login is disabled or no provider audiences are configured. A nil
+// verifier leaves the RPC disabled (FailedPrecondition). cfg.Validate already
+// guarantees that an enabled native login has at least one provider's
+// audiences set.
+func buildNativeOAuthVerifier(cfg *config.Config, logger *zap.Logger) *oauth.NativeVerifier {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	googleAuds := cfg.NativeOAuthGoogleAudienceList()
+	appleAuds := cfg.NativeOAuthAppleAudienceList()
+	if !cfg.NativeOAuthEnabled || (len(googleAuds) == 0 && len(appleAuds) == 0) {
+		return nil
+	}
+	logger.Info(
+		"native_oauth_enabled",
+		zap.Int("google_audiences", len(googleAuds)),
+		zap.Int("apple_audiences", len(appleAuds)),
+	)
+	return oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
+		GoogleAudiences: googleAuds,
+		AppleAudiences:  appleAuds,
+	})
+}
+
 // buildOAuthRegistry constructs an oauth.Registry from the gateway
 // configuration. A provider is registered only if its required credentials
 // are non-empty; this lets operators leave a provider's credentials unset

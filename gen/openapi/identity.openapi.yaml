@@ -1974,6 +1974,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.LogoutResponse'
+  /identity.v1.IdentityService/NativeOAuthLogin:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: NativeOAuthLogin
+      operationId: identity.v1.IdentityService.NativeOAuthLogin
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.NativeOAuthLoginRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.NativeOAuthLoginResponse'
   /identity.v1.IdentityService/OAuthLogin:
     post:
       tags:
@@ -5134,6 +5169,81 @@ components:
       type: object
       title: LogoutResponse
       additionalProperties: false
+    identity.v1.NativeOAuthLoginRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+          title: provider
+          description: 'Provider key: "google" or "apple". Any other value is InvalidArgument.'
+        idToken:
+          type: string
+          title: id_token
+          description: |-
+            The native-SDK ID token (a JWT). For Google this is
+             GoogleSignInAuthentication.idToken; for Apple it is
+             credential.identityToken from sign_in_with_apple. Required.
+        product:
+          type: string
+          title: product
+          description: |-
+            Product/project selector (e.g. "easyloops" | "tortoise"), with the same
+             semantics as the hosted hub's ?product= query. The server maps it to an
+             identity Project (see GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS) and scopes
+             token issuance to that project. An unknown/unresolvable product is
+             InvalidArgument.
+        nonce:
+          type: string
+          title: nonce
+          description: |-
+            Apple only: the RAW nonce the client passed to the native Sign in with
+             Apple request. Omit for Google.
+
+             OPTIONAL but STRONGLY RECOMMENDED: nonce-based replay protection is only
+             enforced when this field is present. The convention (sign_in_with_apple /
+             Firebase) is that the client hashes a random raw nonce with SHA-256 and
+             sends the HEX digest as the native request `nonce`; Apple echoes that
+             digest verbatim in the id_token `nonce` claim. When this field is set the
+             server verifies id_token.nonce == hex(SHA-256(raw))
+             (base64url(SHA-256(raw)) is also accepted) and rejects a missing or
+             mismatched claim. When omitted, the token is still fully verified
+             (signature, iss, exp, aud) but NOT bound to a per-login nonce, so clients
+             SHOULD always generate and send a fresh raw nonce.
+      title: NativeOAuthLoginRequest
+      additionalProperties: false
+      description: |-
+        NativeOAuthLoginRequest carries a native mobile-SDK ID token for
+         server-side verification. Unlike OAuthLogin (which exchanges an OAuth
+         authorization code through identity's own web client), this path takes the
+         ID token a native SDK already obtained from the platform account picker
+         (Google `google_sign_in`, Apple `sign_in_with_apple`) — no browser, no
+         PKCE. Identity verifies the token's signature, issuer, expiry, and audience
+         against the configured native audiences, then links/creates the user and
+         issues identity tokens scoped to the product's project.
+    identity.v1.NativeOAuthLoginResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          $ref: '#/components/schemas/identity.v1.User'
+        accessToken:
+          type: string
+          title: access_token
+          description: Backend-issued JWT
+        refreshToken:
+          type: string
+          title: refresh_token
+          description: For token rotation (send in RefreshToken RPC body)
+        expiresIn:
+          type: integer
+          title: expires_in
+          format: int32
+          description: Access token lifetime in seconds
+      title: NativeOAuthLoginResponse
+      additionalProperties: false
+      description: |-
+        NativeOAuthLoginResponse mirrors OAuthLoginResponse: the backend-issued
+         token pair plus the resolved user.
     identity.v1.OAuthLoginRequest:
       type: object
       properties:
