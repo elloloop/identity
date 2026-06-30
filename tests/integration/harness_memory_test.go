@@ -14,5 +14,5 @@ func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 	auditDB := NewRecordingDB()
 	mailer := NewRecordingMailer()
 
-	return startHarness(t, cfg, repo, auditDB, auditDB, mailer, hOpts.oauthRegistry, hOpts.idvProvider)
+	return startHarness(t, cfg, repo, auditDB, auditDB, mailer, hOpts)
 }

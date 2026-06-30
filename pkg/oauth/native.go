@@ -78,13 +78,15 @@ func NewNativeVerifier(cfg NativeVerifierConfig) *NativeVerifier {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	googleJWKSURL := cfg.GoogleJWKSURL
-	if googleJWKSURL == "" {
-		googleJWKSURL = defaultGoogleJWKSURL
+	// Default to the same JWKS endpoints the hosted google/apple exchangers
+	// use (google.go / apple.go); tests override via cfg.
+	gJWKSURL := cfg.GoogleJWKSURL
+	if gJWKSURL == "" {
+		gJWKSURL = googleJWKSURL
 	}
-	appleJWKSURL := cfg.AppleJWKSURL
-	if appleJWKSURL == "" {
-		appleJWKSURL = defaultAppleJWKSURL
+	aJWKSURL := cfg.AppleJWKSURL
+	if aJWKSURL == "" {
+		aJWKSURL = appleJWKSURL
 	}
 	gIssuers := googleIssuers
 	if cfg.GoogleIssuer != "" {
@@ -99,19 +101,11 @@ func NewNativeVerifier(cfg NativeVerifierConfig) *NativeVerifier {
 		appleAuds:     toSet(cfg.AppleAudiences),
 		googleIssuers: gIssuers,
 		appleIssuer:   aIssuer,
-		googleJWKS:    newJWKSCache(googleJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
-		appleJWKS:     newJWKSCache(appleJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
+		googleJWKS:    newJWKSCache(gJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
+		appleJWKS:     newJWKSCache(aJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
 		now:           cfg.Now,
 	}
 }
-
-// defaultGoogleJWKSURL / defaultAppleJWKSURL mirror the constants the hosted
-// providers use; redeclared here so the native path has explicit defaults
-// without reaching into the exchanger structs.
-const (
-	defaultGoogleJWKSURL = "https://www.googleapis.com/oauth2/v3/certs"
-	defaultAppleJWKSURL  = appleJWKSURL
-)
 
 // Verify validates a native ID token for the given provider and returns a
 // canonical, verified Identity. rawNonce is the un-hashed nonce from the

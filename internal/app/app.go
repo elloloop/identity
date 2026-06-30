@@ -144,6 +144,14 @@ type Deps struct {
 	// with both credentials set are registered).
 	OAuthRegistry *oauth.Registry
 
+	// NativeOAuthVerifier verifies native mobile-SDK ID tokens for
+	// NativeOAuthLogin. May be nil — in that case New builds one from config
+	// via buildNativeOAuthVerifier (which returns nil, leaving the RPC
+	// disabled, unless GATEWAY_NATIVE_OAUTH_ENABLED and audiences are set).
+	// Tests inject a verifier pointed at a mock JWKS through this override,
+	// mirroring OAuthRegistry.
+	NativeOAuthVerifier *oauth.NativeVerifier
+
 	// IDVProvider drives identity-verification (document + selfie).
 	// May be nil — in that case BeginIdentityVerification returns
 	// CodeUnimplemented. Production deployments wire an Azure or
@@ -430,6 +438,11 @@ func New(deps Deps) (*Built, error) {
 	}
 	oauthRegistry = wrapOAuthRegistry(oauthRegistry)
 
+	nativeVerifier := deps.NativeOAuthVerifier
+	if nativeVerifier == nil {
+		nativeVerifier = buildNativeOAuthVerifier(deps.Config, logger)
+	}
+
 	// User-lifecycle eventing (#261). When GATEWAY_WEBHOOKS_ENABLED is
 	// false (the default), eventPublisher stays nil — the service treats a
 	// nil publisher as the no-op events.Discard, so no events are emitted
@@ -473,7 +486,7 @@ func New(deps Deps) (*Built, error) {
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance).
 		WithEventPublisher(eventPublisher).
-		WithNativeOAuth(buildNativeOAuthVerifier(deps.Config, logger), deps.NativeOAuthProjects)
+		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects)
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)

@@ -914,9 +914,15 @@ type AuthService struct {
 	// control plane (memory), where NativeOAuthLogin accepts only the product
 	// that resolves to cfg.DefaultProjectID. Set alongside nativeVerifier.
 	nativeProjects NativeOAuthProjectStore
-	emailThrottle  *emailSendThrottle
-	signupThrottle *emailSendThrottle
-	phoneThrottle  *emailSendThrottle
+	// nativeProductProjects is the parsed GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS
+	// map (lower-cased product → verbatim project id), precomputed once at
+	// wiring so a native login does not re-split the CSV and allocate a map per
+	// request (mirrors the verifier's precomputed audience sets). Set in
+	// WithNativeOAuth.
+	nativeProductProjects map[string]string
+	emailThrottle         *emailSendThrottle
+	signupThrottle        *emailSendThrottle
+	phoneThrottle         *emailSendThrottle
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
 	// OAuth flow uses. Parsed once at construction.
@@ -1003,6 +1009,7 @@ func (s *AuthService) WithLoginGovernance(g *LoginGovernance) *AuthService {
 func (s *AuthService) WithNativeOAuth(v *oauth.NativeVerifier, projects NativeOAuthProjectStore) *AuthService {
 	s.nativeVerifier = v
 	s.nativeProjects = projects
+	s.nativeProductProjects = s.cfg.NativeOAuthProductProjectMap()
 	return s
 }
 

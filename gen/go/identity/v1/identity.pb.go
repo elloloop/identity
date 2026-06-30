@@ -2230,12 +2230,18 @@ type NativeOAuthLoginRequest struct {
 	// InvalidArgument.
 	Product string `protobuf:"bytes,3,opt,name=product,proto3" json:"product,omitempty"`
 	// Apple only: the RAW nonce the client passed to the native Sign in with
-	// Apple request. Omit for Google. The convention (sign_in_with_apple /
-	// Firebase) is that the client hashes the raw nonce with SHA-256 and sends
-	// the HEX digest as the request `nonce`; Apple echoes that digest verbatim
-	// in the id_token `nonce` claim. The server therefore verifies
-	// id_token.nonce == hex(SHA-256(raw)) (base64url(SHA-256(raw)) is also
-	// accepted). When set and the claim does not match, the request is rejected.
+	// Apple request. Omit for Google.
+	//
+	// OPTIONAL but STRONGLY RECOMMENDED: nonce-based replay protection is only
+	// enforced when this field is present. The convention (sign_in_with_apple /
+	// Firebase) is that the client hashes a random raw nonce with SHA-256 and
+	// sends the HEX digest as the native request `nonce`; Apple echoes that
+	// digest verbatim in the id_token `nonce` claim. When this field is set the
+	// server verifies id_token.nonce == hex(SHA-256(raw))
+	// (base64url(SHA-256(raw)) is also accepted) and rejects a missing or
+	// mismatched claim. When omitted, the token is still fully verified
+	// (signature, iss, exp, aud) but NOT bound to a per-login nonce, so clients
+	// SHOULD always generate and send a fresh raw nonce.
 	Nonce         string `protobuf:"bytes,4,opt,name=nonce,proto3" json:"nonce,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -141,12 +141,17 @@ message NativeOAuthLoginResponse {
     safe message.
   </p>
   <p>
-    <strong>Apple nonce.</strong> When <code>nonce</code> is supplied, the
+    <strong>Apple nonce.</strong> The <code>nonce</code> field is
+    <strong>optional but strongly recommended</strong>: nonce-based replay
+    protection is only enforced when the client sends it. When supplied, the
     server verifies that the id_token's <code>nonce</code> claim equals
     <code>hex(SHA-256(raw nonce))</code> — the <code>sign_in_with_apple</code> /
     Firebase convention where the client sends the hashed nonce to Apple and
     Apple echoes it back verbatim (<code>base64url(SHA-256(raw))</code> is also
-    accepted). A missing or mismatched claim is rejected.
+    accepted) — and a missing or mismatched claim is rejected. When omitted, the
+    token is still fully verified (signature, <code>iss</code>, <code>exp</code>,
+    <code>aud</code>) but is not bound to a per-login nonce, so clients
+    <strong>should</strong> always generate and send a fresh raw nonce.
   </p>
   <p>
     <strong>Product → project.</strong> <code>product</code> is mapped to an

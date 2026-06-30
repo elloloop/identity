@@ -372,6 +372,26 @@ func TestNativeOAuthLogin_ProjectStoreError_NotInvalidArgument(t *testing.T) {
 	assert.False(t, errors.Is(err, ErrInvalidArgument), "infra error leaked as InvalidArgument: %v", err)
 }
 
+func TestNativeOAuthLogin_UppercaseProjectIDFallback(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+	// A mixed-case project id reached via the implicit fallback (NOT in the
+	// product map). It must be looked up verbatim, not lower-cased.
+	projects := &fakeNativeProjects{active: map[string]string{
+		"Proj-MixedCase": "scope-mixed",
+	}}
+	svc := newNativeTestAuthService(t, repo, signer, projects, func(c *config.Config) {
+		c.NativeOAuthProductProjects = "" // force the direct project-id fallback
+	})
+
+	tok := signer.googleToken(t, "g-mixed", "mixed@example.com", nativeGoogleAud)
+	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok, Product: "Proj-MixedCase",
+	})
+	require.NoError(t, err, "verbatim mixed-case project id must resolve")
+	assert.Equal(t, "mixed@example.com", res.User.Email)
+}
+
 func TestNativeOAuthLogin_NoControlPlane_OnlyDefaultProject(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)

@@ -49,5 +49,5 @@ func StartServer(t *testing.T, opts ...HarnessOption) *Harness {
 	// the SQLite Repository handles all real persistence, while the entdb
 	// graph surface is only used for audit writes (ExecuteAtomic) and the
 	// test-only node-inspection helpers, both of which RecordingDB satisfies.
-	return startHarness(t, cfg, built.Repository, auditDB, auditDB, mailer, hOpts.oauthRegistry, hOpts.idvProvider)
+	return startHarness(t, cfg, built.Repository, auditDB, auditDB, mailer, hOpts)
 }

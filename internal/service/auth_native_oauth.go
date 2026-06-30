@@ -144,8 +144,11 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 // resolveNativeProject maps a native client's product selector to the
 // ProjectScope token issuance is bound to. Resolution:
 //
-//  1. look the product up in GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS; if mapped,
-//     use the mapped project id, else treat the product string AS a project id;
+//  1. look the product up (case-insensitively) in
+//     GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS; if mapped, use the mapped project
+//     id, else treat the ORIGINAL (trimmed, case-preserved) product string AS
+//     a project id — project ids are case-sensitive, so the fallback must not
+//     lower-case;
 //  2. with a control plane (postgres), require that project to exist and be
 //     active (ProjectStore.GetProjectByID via ActiveProjectByID); an unknown
 //     project is InvalidArgument;
@@ -154,13 +157,16 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 //
 // An empty or unresolvable product is ErrInvalidArgument.
 func (s *AuthService) resolveNativeProject(ctx context.Context, product string) (*ProjectScope, error) {
-	product = strings.ToLower(strings.TrimSpace(product))
+	product = strings.TrimSpace(product)
 	if product == "" {
 		return nil, fmt.Errorf("%w: missing product", ErrInvalidArgument)
 	}
 
+	// The map key is case-insensitive (keys are stored lower-cased), but the
+	// fallback project id is the verbatim product — a project id may be
+	// mixed-case, and lower-casing it would never match an upper-case id.
 	projectID := product
-	if mapped, ok := s.cfg.NativeOAuthProductProjectMap()[product]; ok {
+	if mapped, ok := s.nativeProductProjects[strings.ToLower(product)]; ok {
 		projectID = mapped
 	}
 
