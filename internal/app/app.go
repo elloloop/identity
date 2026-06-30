@@ -438,9 +438,15 @@ func New(deps Deps) (*Built, error) {
 	}
 	oauthRegistry = wrapOAuthRegistry(oauthRegistry)
 
-	nativeVerifier := deps.NativeOAuthVerifier
-	if nativeVerifier == nil {
-		nativeVerifier = buildNativeOAuthVerifier(deps.Config, logger)
+	// Resolve the native-OAuth verifier into the service-layer seam. Assign
+	// only a non-nil concrete verifier so the interface stays a true nil when
+	// native login is disabled — boxing a typed-nil *oauth.NativeVerifier would
+	// make WithNativeOAuth's "nil disables the RPC" guard read non-nil.
+	var nativeVerifier service.NativeIDTokenVerifier
+	if v := deps.NativeOAuthVerifier; v != nil {
+		nativeVerifier = v
+	} else if v := buildNativeOAuthVerifier(deps.Config, logger); v != nil {
+		nativeVerifier = v
 	}
 
 	// User-lifecycle eventing (#261). When GATEWAY_WEBHOOKS_ENABLED is

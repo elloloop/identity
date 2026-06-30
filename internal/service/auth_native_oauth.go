@@ -8,7 +8,19 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/oauth"
 )
+
+// NativeIDTokenVerifier verifies a native mobile-SDK ID token (Google idToken /
+// Apple identityToken) server-side — signature, issuer, expiry, audience, and,
+// for Apple, the nonce — returning the provider-asserted identity. It is the
+// seam NativeOAuthLogin depends on instead of the concrete *oauth.NativeVerifier
+// so the login flow's verification-result branches (an unverified provider
+// email, a provider that returns no email) are testable without minting signed
+// JWTs against a live JWKS endpoint. *oauth.NativeVerifier satisfies it.
+type NativeIDTokenVerifier interface {
+	Verify(ctx context.Context, provider, idToken, rawNonce string) (*oauth.Identity, error)
+}
 
 // NativeOAuthProjectStore is the narrow control-plane lookup NativeOAuthLogin
 // uses to confirm that a product→project id names a real, ACTIVE project

@@ -126,6 +126,22 @@ const (
 
 func newNativeTestAuthService(t *testing.T, repo *fakeRepo, signer *nativeTokenSigner, projects NativeOAuthProjectStore, mutate func(*config.Config)) *AuthService {
 	t.Helper()
+	verifier := oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
+		GoogleAudiences: []string{nativeGoogleAud},
+		AppleAudiences:  []string{nativeAppleAud},
+		GoogleJWKSURL:   signer.url,
+		AppleJWKSURL:    signer.url,
+		Now:             func() time.Time { return signer.now },
+	})
+	return newNativeTestAuthServiceWith(t, repo, verifier, projects, mutate)
+}
+
+// newNativeTestAuthServiceWith builds a native-login AuthService over an
+// arbitrary Repository and verifier seam. The error-branch tests use it to
+// inject a failing repo (errorRepo) or a stub verifier (fakeNativeVerifier)
+// that returns a chosen identity/error without minting signed JWTs.
+func newNativeTestAuthServiceWith(t *testing.T, repo Repository, verifier NativeIDTokenVerifier, projects NativeOAuthProjectStore, mutate func(*config.Config)) *AuthService {
+	t.Helper()
 	cfg := testConfig()
 	cfg.DefaultProjectID = "proj-default"
 	cfg.NativeOAuthEnabled = true
@@ -138,21 +154,24 @@ func newNativeTestAuthService(t *testing.T, repo *fakeRepo, signer *nativeTokenS
 	kr := testKeyRing(t)
 	pkSvc, _ := passkeys.NewWebAuthnService(passkeys.Config{RPID: cfg.PasskeyRPID, RPName: cfg.PasskeyRPName, Origin: cfg.PasskeyOrigin})
 
-	verifier := oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
-		GoogleAudiences: cfg.NativeOAuthGoogleAudienceList(),
-		AppleAudiences:  cfg.NativeOAuthAppleAudienceList(),
-		GoogleJWKSURL:   signer.url,
-		AppleJWKSURL:    signer.url,
-		Now:             func() time.Time { return signer.now },
-	})
-
-	svc := NewAuthServiceWithOAuth(
+	return NewAuthServiceWithOAuth(
 		repo, cfg, kr, pkSvc,
 		audit.NewLogger(nil, "test", nil),
 		testTotpKey(), testTotpRecoveryPepper(), email.NewLogOnly(zap.NewNop()), nil, zap.NewNop(),
 		nil,
 	).WithNativeOAuth(verifier, projects)
-	return svc
+}
+
+// fakeNativeVerifier is a stub NativeIDTokenVerifier: it returns a fixed
+// identity (and/or error) regardless of the token, so NativeOAuthLogin's
+// post-verification branches can be driven directly.
+type fakeNativeVerifier struct {
+	identity *oauth.Identity
+	err      error
+}
+
+func (f *fakeNativeVerifier) Verify(_ context.Context, _, _, _ string) (*oauth.Identity, error) {
+	return f.identity, f.err
 }
 
 func defaultNativeProjects() *fakeNativeProjects {
@@ -415,4 +434,143 @@ func TestNativeOAuthLogin_NoControlPlane_OnlyDefaultProject(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument), "got %v", err)
+}
+
+// ── Post-verification error branches ─────────────────────────────────────
+//
+// These drive the branches NativeOAuthLogin reaches AFTER a successful token
+// verification and project resolution. They use the fakeNativeVerifier seam to
+// return a chosen identity/error and, where the failure is in persistence, an
+// errorRepo to fail a specific Repository call.
+
+// A provider that verifies the token but returns no email is rejected as
+// Unauthenticated — the flow needs an address to bind the account to. This is
+// a defensive arm the concrete verifier never reaches (it rejects an
+// empty-email token itself), so it is exercised through the verifier seam.
+func TestNativeOAuthLogin_VerifierReturnsNoEmail_Unauthenticated(t *testing.T) {
+	repo := newFakeRepo()
+	verifier := &fakeNativeVerifier{identity: &oauth.Identity{
+		Provider: "google", ProviderUserID: "g-noemail", Email: "", EmailVerified: true,
+	}}
+	svc := newNativeTestAuthServiceWith(t, repo, verifier, defaultNativeProjects(), nil)
+
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: "tok", Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "got %v", err)
+}
+
+// When the verifier rejects the token because the provider says the email is
+// unverified, NativeOAuthLogin maps it (via mapOAuthErr) to Unauthenticated.
+func TestNativeOAuthLogin_ProviderEmailNotVerified_Unauthenticated(t *testing.T) {
+	repo := newFakeRepo()
+	verifier := &fakeNativeVerifier{err: oauth.ErrEmailNotVerified}
+	svc := newNativeTestAuthServiceWith(t, repo, verifier, defaultNativeProjects(), nil)
+
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: "tok", Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "got %v", err)
+}
+
+// A repo failure while upserting the OAuth user propagates as an internal
+// error — NOT a client-facing InvalidArgument/Unauthenticated, which would
+// mislabel an infrastructure fault as caller error.
+func TestNativeOAuthLogin_UpsertUserError_Propagates(t *testing.T) {
+	er := newErrorRepo()
+	er.failFindUserByEmail = true
+	verifier := &fakeNativeVerifier{identity: &oauth.Identity{
+		Provider: "google", ProviderUserID: "g-upsert", Email: "upsert@example.com", EmailVerified: true, Name: "Upsert",
+	}}
+	svc := newNativeTestAuthServiceWith(t, er, verifier, defaultNativeProjects(), nil)
+
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: "tok", Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errInjected), "got %v", err)
+	assert.False(t, errors.Is(err, ErrInvalidArgument), "infra error leaked as InvalidArgument: %v", err)
+	assert.False(t, errors.Is(err, ErrUnauthenticated), "infra error leaked as Unauthenticated: %v", err)
+}
+
+// A suspended account is rejected even with a valid provider identity: the
+// social-login path must honour the same account-status gate as every other
+// login method.
+func TestNativeOAuthLogin_SuspendedAccount_NotActive(t *testing.T) {
+	repo := newFakeRepo()
+	_, err := repo.CreateUser(context.Background(), &User{
+		Email: "suspended@example.com", Name: "Suspended", Status: "suspended",
+	})
+	require.NoError(t, err)
+
+	verifier := &fakeNativeVerifier{identity: &oauth.Identity{
+		Provider: "google", ProviderUserID: "g-suspended", Email: "suspended@example.com", EmailVerified: true,
+	}}
+	svc := newNativeTestAuthServiceWith(t, repo, verifier, defaultNativeProjects(), nil)
+
+	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: "tok", Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrAccountNotActive), "got %v", err)
+}
+
+// A login-policy rejection (here: the resolved project's tenant mandates SSO)
+// blocks native social login before any token is issued.
+func TestNativeOAuthLogin_SSORequiredPolicy_Blocked(t *testing.T) {
+	repo := newFakeRepo()
+	verifier := &fakeNativeVerifier{identity: &oauth.Identity{
+		Provider: "google", ProviderUserID: "g-sso", Email: "user@acme.com", EmailVerified: true,
+	}}
+	// The governance fixtures key on project "proj-1"; map the product to it so
+	// the resolved ProjectScope matches the tenant/domain/policy fixtures.
+	projects := &fakeNativeProjects{active: map[string]string{"proj-1": "scope-1"}}
+	svc := newNativeTestAuthServiceWith(t, repo, verifier, projects, func(c *config.Config) {
+		c.NativeOAuthProductProjects = "easyloops=proj-1"
+	}).WithLoginGovernance(withSSORequired())
+
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: "tok", Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSSORequired), "got %v", err)
+}
+
+// A repo failure while minting the refresh token surfaces from the final
+// issueTokens step (after the user is resolved and policy clears).
+func TestNativeOAuthLogin_IssueTokensError_Propagates(t *testing.T) {
+	er := newErrorRepo()
+	er.failCreateRefreshToken = true
+	verifier := &fakeNativeVerifier{identity: &oauth.Identity{
+		Provider: "google", ProviderUserID: "g-issue", Email: "issue@example.com", EmailVerified: true,
+	}}
+	svc := newNativeTestAuthServiceWith(t, er, verifier, defaultNativeProjects(), nil)
+
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: "tok", Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errInjected), "got %v", err)
+}
+
+// A project policy that mandates a second factor blocks native social login
+// when the user has no second factor enrolled, steering them to enroll one —
+// the policy-forced 2FA path is distinct from a user's own TOTP enrolment.
+func TestNativeOAuthLogin_PolicyRequires2FA_NoFactorEnrolled(t *testing.T) {
+	repo := newFakeRepo()
+	verifier := &fakeNativeVerifier{identity: &oauth.Identity{
+		Provider: "google", ProviderUserID: "g-2fa", Email: "needs2fa@acme.com", EmailVerified: true,
+	}}
+	projects := &fakeNativeProjects{active: map[string]string{"proj-1": "scope-1"}}
+	svc := newNativeTestAuthServiceWith(t, repo, verifier, projects, func(c *config.Config) {
+		c.NativeOAuthProductProjects = "easyloops=proj-1"
+	}).WithLoginGovernance(withRequire2FA())
+
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: "tok", Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTotpRequired), "got %v", err)
 }
