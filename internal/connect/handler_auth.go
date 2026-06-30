@@ -73,6 +73,39 @@ func (h *IdentityHandler) OAuthLogin(
 	return connect.NewResponse(resp), nil
 }
 
+// NativeOAuthLogin verifies a native mobile-SDK ID token (Google idToken /
+// Apple identityToken) server-side and issues backend tokens scoped to the
+// product's project — no browser, no PKCE. The service layer performs the
+// token verification, product→project resolution, account linking, and token
+// issuance; the handler forwards the request fields and the caller's IP / UA.
+func (h *IdentityHandler) NativeOAuthLogin(
+	ctx context.Context,
+	req *connect.Request[identitypb.NativeOAuthLoginRequest],
+) (*connect.Response[identitypb.NativeOAuthLoginResponse], error) {
+	ipAddr := clientIP(req.Header())
+	userAgent := clientUserAgent(req.Header())
+
+	result, err := h.auth.NativeOAuthLogin(ctx, service.NativeOAuthLoginParams{
+		Provider:  req.Msg.Provider,
+		IDToken:   req.Msg.IdToken,
+		Product:   req.Msg.Product,
+		Nonce:     req.Msg.Nonce,
+		IPAddr:    ipAddr,
+		UserAgent: userAgent,
+	})
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	resp := &identitypb.NativeOAuthLoginResponse{
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // RedeemOAuthCode exchanges the single-use one-time code from the
 // hosted OAuth callback redirect for a backend-issued token pair. The
 // code is consumed atomically; a replay or expired code surfaces as

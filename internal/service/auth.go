@@ -836,7 +836,12 @@ var (
 	ErrInvitationExpired    = errors.New("invitation has expired")
 	ErrLocalAuthDisabled    = errors.New("local auth disabled")
 	ErrOAuthDisabled        = errors.New("oauth login is not configured")
-	ErrSignupDisabled       = errors.New("signup is disabled for this deployment")
+	// ErrNativeOAuthDisabled is returned by NativeOAuthLogin when
+	// GATEWAY_NATIVE_OAUTH_ENABLED is false or no native verifier is
+	// configured. It maps to FailedPrecondition (the feature is off), distinct
+	// from ErrUnauthenticated (a token that failed verification).
+	ErrNativeOAuthDisabled = errors.New("native oauth login is not enabled")
+	ErrSignupDisabled      = errors.New("signup is disabled for this deployment")
 	// ErrPasskeySignupDisabled is returned by BeginPasskeySignup /
 	// CompletePasskeySignup when GATEWAY_PASSKEY_SIGNUP_ENABLED is false. It
 	// is distinct from ErrSignupDisabled (password signup) so the two flows
@@ -897,7 +902,18 @@ type AuthService struct {
 	// oauthRegistry holds per-provider Exchangers. May be nil; in that
 	// case OAuthLogin returns ErrOAuthDisabled. A non-nil but empty
 	// registry has the same effect when looking up a specific provider.
-	oauthRegistry  *oauth.Registry
+	oauthRegistry *oauth.Registry
+	// nativeVerifier verifies native mobile-SDK ID tokens (Google idToken /
+	// Apple identityToken) for NativeOAuthLogin. nil disables the RPC
+	// (FailedPrecondition) — the constructor leaves it nil; app.New sets it via
+	// WithNativeOAuth when GATEWAY_NATIVE_OAUTH_ENABLED and at least one
+	// provider's audiences are configured.
+	nativeVerifier *oauth.NativeVerifier
+	// nativeProjects validates that a native login's resolved product→project
+	// id names a real, active control-plane project. nil on drivers without a
+	// control plane (memory), where NativeOAuthLogin accepts only the product
+	// that resolves to cfg.DefaultProjectID. Set alongside nativeVerifier.
+	nativeProjects NativeOAuthProjectStore
 	emailThrottle  *emailSendThrottle
 	signupThrottle *emailSendThrottle
 	phoneThrottle  *emailSendThrottle
@@ -975,6 +991,18 @@ func (s *AuthService) WithTenantAutoFormer(af TenantAutoFormStore) *AuthService 
 // for drivers without a governance plane). A nil bundle disables enforcement.
 func (s *AuthService) WithLoginGovernance(g *LoginGovernance) *AuthService {
 	s.governance = g
+	return s
+}
+
+// WithNativeOAuth wires the native mobile sign-in dependencies (the ID-token
+// verifier and the optional control-plane project lookup) and returns the
+// service for chaining. app.New calls it once at construction: with a non-nil
+// verifier when native login is enabled and audiences are configured, and with
+// the postgres project store (nil on drivers without a control plane). A nil
+// verifier leaves NativeOAuthLogin disabled.
+func (s *AuthService) WithNativeOAuth(v *oauth.NativeVerifier, projects NativeOAuthProjectStore) *AuthService {
+	s.nativeVerifier = v
+	s.nativeProjects = projects
 	return s
 }
 

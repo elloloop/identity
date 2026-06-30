@@ -531,6 +531,42 @@
     "anchor": "age-gating-coppa"
   },
   {
+    "name": "GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the comma-separated allow-list of accepted Apple ID-token `aud` values for native login — the Services ID plus every native bundle id.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_NATIVE_OAUTH_ENABLED",
+    "type": "boolean",
+    "default": "",
+    "required": false,
+    "description": "is the kill-switch for NativeOAuthLogin (verifying Google/Apple ID tokens from mobile SDKs).",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the comma-separated allow-list of accepted Google ID-token `aud` values for native login — the web client id plus every per-platform (iOS/Android) OAuth client id.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "maps a native client's product selector to an identity project id, as comma-separated product=projectID pairs (e.g. \"easyloops=proj_abc,tortoise=proj_def\").",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
     "name": "GATEWAY_OAUTH_ALLOWED_RETURN_URLS",
     "type": "string",
     "default": "",

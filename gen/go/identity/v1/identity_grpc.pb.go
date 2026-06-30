@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	IdentityService_BeginOAuthLogin_FullMethodName               = "/identity.v1.IdentityService/BeginOAuthLogin"
 	IdentityService_OAuthLogin_FullMethodName                    = "/identity.v1.IdentityService/OAuthLogin"
+	IdentityService_NativeOAuthLogin_FullMethodName              = "/identity.v1.IdentityService/NativeOAuthLogin"
 	IdentityService_RedeemOAuthCode_FullMethodName               = "/identity.v1.IdentityService/RedeemOAuthCode"
 	IdentityService_PasswordSignup_FullMethodName                = "/identity.v1.IdentityService/PasswordSignup"
 	IdentityService_PasswordLogin_FullMethodName                 = "/identity.v1.IdentityService/PasswordLogin"
@@ -121,6 +122,7 @@ type IdentityServiceClient interface {
 	// Authentication
 	BeginOAuthLogin(ctx context.Context, in *BeginOAuthLoginRequest, opts ...grpc.CallOption) (*BeginOAuthLoginResponse, error)
 	OAuthLogin(ctx context.Context, in *OAuthLoginRequest, opts ...grpc.CallOption) (*OAuthLoginResponse, error)
+	NativeOAuthLogin(ctx context.Context, in *NativeOAuthLoginRequest, opts ...grpc.CallOption) (*NativeOAuthLoginResponse, error)
 	RedeemOAuthCode(ctx context.Context, in *RedeemOAuthCodeRequest, opts ...grpc.CallOption) (*RedeemOAuthCodeResponse, error)
 	PasswordSignup(ctx context.Context, in *PasswordSignupRequest, opts ...grpc.CallOption) (*PasswordSignupResponse, error)
 	PasswordLogin(ctx context.Context, in *PasswordLoginRequest, opts ...grpc.CallOption) (*PasswordLoginResponse, error)
@@ -294,6 +296,16 @@ func (c *identityServiceClient) OAuthLogin(ctx context.Context, in *OAuthLoginRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(OAuthLoginResponse)
 	err := c.cc.Invoke(ctx, IdentityService_OAuthLogin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) NativeOAuthLogin(ctx context.Context, in *NativeOAuthLoginRequest, opts ...grpc.CallOption) (*NativeOAuthLoginResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NativeOAuthLoginResponse)
+	err := c.cc.Invoke(ctx, IdentityService_NativeOAuthLogin_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1217,6 +1229,7 @@ type IdentityServiceServer interface {
 	// Authentication
 	BeginOAuthLogin(context.Context, *BeginOAuthLoginRequest) (*BeginOAuthLoginResponse, error)
 	OAuthLogin(context.Context, *OAuthLoginRequest) (*OAuthLoginResponse, error)
+	NativeOAuthLogin(context.Context, *NativeOAuthLoginRequest) (*NativeOAuthLoginResponse, error)
 	RedeemOAuthCode(context.Context, *RedeemOAuthCodeRequest) (*RedeemOAuthCodeResponse, error)
 	PasswordSignup(context.Context, *PasswordSignupRequest) (*PasswordSignupResponse, error)
 	PasswordLogin(context.Context, *PasswordLoginRequest) (*PasswordLoginResponse, error)
@@ -1381,6 +1394,9 @@ func (UnimplementedIdentityServiceServer) BeginOAuthLogin(context.Context, *Begi
 }
 func (UnimplementedIdentityServiceServer) OAuthLogin(context.Context, *OAuthLoginRequest) (*OAuthLoginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method OAuthLogin not implemented")
+}
+func (UnimplementedIdentityServiceServer) NativeOAuthLogin(context.Context, *NativeOAuthLoginRequest) (*NativeOAuthLoginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NativeOAuthLogin not implemented")
 }
 func (UnimplementedIdentityServiceServer) RedeemOAuthCode(context.Context, *RedeemOAuthCodeRequest) (*RedeemOAuthCodeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RedeemOAuthCode not implemented")
@@ -1708,6 +1724,24 @@ func _IdentityService_OAuthLogin_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).OAuthLogin(ctx, req.(*OAuthLoginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_NativeOAuthLogin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NativeOAuthLoginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).NativeOAuthLogin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_NativeOAuthLogin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).NativeOAuthLogin(ctx, req.(*NativeOAuthLoginRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3364,6 +3398,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OAuthLogin",
 			Handler:    _IdentityService_OAuthLogin_Handler,
+		},
+		{
+			MethodName: "NativeOAuthLogin",
+			Handler:    _IdentityService_NativeOAuthLogin_Handler,
 		},
 		{
 			MethodName: "RedeemOAuthCode",

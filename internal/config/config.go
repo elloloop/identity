@@ -296,6 +296,26 @@ type Config struct {
 	// RPCs are unaffected. Driven by GATEWAY_OAUTH_ALLOWED_RETURN_URLS.
 	OAuthAllowedReturnURLs string
 
+	// NativeOAuthEnabled is the kill-switch for NativeOAuthLogin (verifying
+	// Google/Apple ID tokens from mobile SDKs). It defaults true when at least
+	// one provider's native audiences are configured, false otherwise; set it
+	// explicitly to false to disable the RPC even with audiences present.
+	NativeOAuthEnabled bool
+	// NativeOAuthGoogleAudiences is the comma-separated allow-list of accepted
+	// Google ID-token `aud` values for native login — the web client id plus
+	// every per-platform (iOS/Android) OAuth client id. Empty disables Google.
+	NativeOAuthGoogleAudiences string
+	// NativeOAuthAppleAudiences is the comma-separated allow-list of accepted
+	// Apple ID-token `aud` values for native login — the Services ID plus every
+	// native bundle id. Empty disables Apple.
+	NativeOAuthAppleAudiences string
+	// NativeOAuthProductProjects maps a native client's product selector to an
+	// identity project id, as comma-separated product=projectID pairs (e.g.
+	// "easyloops=proj_abc,tortoise=proj_def"). A product not listed falls back
+	// to being treated as a project id directly. Token issuance is scoped to
+	// the resolved project.
+	NativeOAuthProductProjects string
+
 	// Identity verification (document + selfie); the provider selects the
 	// implementation in pkg/idv.
 
@@ -812,6 +832,14 @@ func Load() *Config {
 
 		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
 
+		NativeOAuthGoogleAudiences: envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),
+		NativeOAuthAppleAudiences:  envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES", ""),
+		NativeOAuthProductProjects: envStr("GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS", ""),
+		NativeOAuthEnabled: envBool("GATEWAY_NATIVE_OAUTH_ENABLED", nativeOAuthDefaultEnabled(
+			envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),
+			envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES", ""),
+		)),
+
 		IDVProvider:           envStr("GATEWAY_IDV_PROVIDER", ""),
 		IDVAzureEndpoint:      envStr("GATEWAY_IDV_AZURE_ENDPOINT", ""),
 		IDVAzureKey:           envStr("GATEWAY_IDV_AZURE_KEY", ""),
@@ -1007,6 +1035,60 @@ func (c *Config) DefaultProjectAuthDomainList() []string {
 	return out
 }
 
+// nativeOAuthDefaultEnabled reports the default for GATEWAY_NATIVE_OAUTH_ENABLED:
+// on when at least one provider's native audiences are configured, off
+// otherwise. Keeping the default audience-gated means a deployment that never
+// configures native audiences is unaffected and never trips the Validate
+// invariant.
+func nativeOAuthDefaultEnabled(googleAuds, appleAuds string) bool {
+	return strings.TrimSpace(googleAuds) != "" || strings.TrimSpace(appleAuds) != ""
+}
+
+// NativeOAuthGoogleAudienceList returns the configured Google native audiences,
+// trimmed, blanks dropped, in order. An empty config yields nil.
+func (c *Config) NativeOAuthGoogleAudienceList() []string {
+	return splitTrimCSV(c.NativeOAuthGoogleAudiences)
+}
+
+// NativeOAuthAppleAudienceList returns the configured Apple native audiences,
+// trimmed, blanks dropped, in order. An empty config yields nil.
+func (c *Config) NativeOAuthAppleAudienceList() []string {
+	return splitTrimCSV(c.NativeOAuthAppleAudiences)
+}
+
+// NativeOAuthProductProjectMap parses the product=projectID pairs into a map
+// keyed by the lower-cased product selector. Malformed or blank entries are
+// dropped; an empty config yields an empty (non-nil) map.
+func (c *Config) NativeOAuthProductProjectMap() map[string]string {
+	out := make(map[string]string)
+	for _, raw := range strings.Split(c.NativeOAuthProductProjects, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(raw, "=")
+		k = strings.ToLower(strings.TrimSpace(k))
+		v = strings.TrimSpace(v)
+		if !ok || k == "" || v == "" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// splitTrimCSV splits a comma-separated string, trimming whitespace and
+// dropping blank entries. An empty input yields nil.
+func splitTrimCSV(s string) []string {
+	var out []string
+	for _, raw := range strings.Split(s, ",") {
+		if v := strings.TrimSpace(raw); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // DefaultPrimaryAuthDomain returns the default project's primary serving
 // hostname — the first entry of DefaultProjectAuthDomainList — or "" when
 // none is configured.
@@ -1154,6 +1236,36 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateNativeOAuth(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateNativeOAuth enforces the native mobile sign-in invariant: when
+// enabled, at least one provider's audiences must be configured, otherwise no
+// native token could ever verify. It also rejects a malformed
+// product=projectID map (an entry with no "=", empty key, or empty value).
+func (c *Config) validateNativeOAuth() error {
+	if !c.NativeOAuthEnabled {
+		return nil
+	}
+	if len(c.NativeOAuthGoogleAudienceList()) == 0 && len(c.NativeOAuthAppleAudienceList()) == 0 {
+		return errors.New("config: GATEWAY_NATIVE_OAUTH_ENABLED=true requires at least one of " +
+			"GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES or GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES")
+	}
+	for _, raw := range strings.Split(c.NativeOAuthProductProjects, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(raw, "=")
+		if !ok || strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			return fmt.Errorf("config: GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS entry %q is malformed "+
+				"(want product=projectID)", raw)
+		}
+	}
 	return nil
 }
 

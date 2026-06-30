@@ -88,6 +88,12 @@ type Deps struct {
 	// Config.AdminAPISecret is set.
 	ControlPlaneStore service.ControlPlaneProjectStore
 
+	// NativeOAuthProjects is the control-plane project-by-id lookup
+	// NativeOAuthLogin uses to validate a product→project id. Non-nil ONLY for
+	// the postgres driver; nil on drivers without a control plane, where native
+	// login accepts only the product that resolves to the default project.
+	NativeOAuthProjects service.NativeOAuthProjectStore
+
 	// PlatformAdminStore backs the zero-config first-admin bootstrap
 	// (CreateFirstPlatformAdmin). Non-nil ONLY for the postgres driver; when
 	// nil the bootstrap RPC returns Unimplemented. Unlike the other admin
@@ -240,6 +246,12 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			// Native mobile sign-in (Google/Apple ID-token verification) is a
+			// login surface, bound by the same per-IP login quota as OAuthLogin.
+			PathPrefix: "/identity.v1.IdentityService/NativeOAuthLogin", Tag: "native_oauth",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
@@ -460,7 +472,8 @@ func New(deps Deps) (*Built, error) {
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance).
-		WithEventPublisher(eventPublisher)
+		WithEventPublisher(eventPublisher).
+		WithNativeOAuth(buildNativeOAuthVerifier(deps.Config, logger), deps.NativeOAuthProjects)
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)

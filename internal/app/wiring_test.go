@@ -55,6 +55,26 @@ func TestBuildOAuthRegistry(t *testing.T) {
 	}
 }
 
+func TestBuildNativeOAuthVerifier(t *testing.T) {
+	// Disabled → nil verifier (RPC stays off).
+	if v := buildNativeOAuthVerifier(&config.Config{}, nil); v != nil {
+		t.Fatal("disabled native oauth should yield a nil verifier")
+	}
+	// Enabled flag but no audiences → still nil (nothing could verify).
+	if v := buildNativeOAuthVerifier(&config.Config{NativeOAuthEnabled: true}, zap.NewNop()); v != nil {
+		t.Fatal("native oauth without audiences should yield a nil verifier")
+	}
+	// Enabled + audiences → a real verifier.
+	cfg := &config.Config{
+		NativeOAuthEnabled:         true,
+		NativeOAuthGoogleAudiences: "web-client",
+		NativeOAuthAppleAudiences:  "dev.easyloops.app",
+	}
+	if v := buildNativeOAuthVerifier(cfg, zap.NewNop()); v == nil {
+		t.Fatal("enabled native oauth with audiences should yield a verifier")
+	}
+}
+
 // TestBuildOAuthRegistry_GenericOIDCKeyNormalized guards the blocker: a
 // mixed-case / whitespace provider key must be registered under the same
 // lowercased/trimmed key the service uses for lookups, so login resolves.

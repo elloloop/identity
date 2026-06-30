@@ -71,6 +71,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrInvitationPending),
 		errors.Is(err, service.ErrSignupDisabled),
 		errors.Is(err, service.ErrPasskeySignupDisabled),
+		errors.Is(err, service.ErrNativeOAuthDisabled),
 		errors.Is(err, service.ErrParentalConsentRequired),
 		errors.Is(err, service.ErrIDVRequired),
 		errors.Is(err, service.ErrEmailVerificationRequired),

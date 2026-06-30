@@ -133,6 +133,17 @@ func (b *Built) ControlPlaneStore() service.ControlPlaneProjectStore {
 	return b.ProjectStore
 }
 
+// NativeProjectLookup returns the control-plane project-by-id lookup as the
+// driver-agnostic service.NativeOAuthProjectStore NativeOAuthLogin uses, or a
+// true nil when this build has no control plane (memory) — avoiding the
+// typed-nil trap.
+func (b *Built) NativeProjectLookup() service.NativeOAuthProjectStore {
+	if b.ProjectStore == nil {
+		return nil
+	}
+	return b.ProjectStore
+}
+
 // TenantAutoFormer returns the tenant auto-formation store as a
 // driver-agnostic interface, or a true nil when this build has no control
 // plane (memory) — avoiding the typed-nil trap.

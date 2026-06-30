@@ -12,6 +12,9 @@ import (
 var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/BeginOAuthLogin": true,
 	"/identity.v1.IdentityService/OAuthLogin":      true,
+	// NativeOAuthLogin verifies a native mobile-SDK ID token; the caller is
+	// anonymous until the token is verified, so no Bearer is required.
+	"/identity.v1.IdentityService/NativeOAuthLogin": true,
 	// RedeemOAuthCode trades the hosted-flow one-time code for tokens;
 	// the caller is anonymous until the code is redeemed, so it cannot
 	// carry a JWT.

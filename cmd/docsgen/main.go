@@ -476,6 +476,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_CONNECT_PORT", "Server & ports"},
 	{"GATEWAY_METRICS_PORT", "Server & ports"},
 	{"GATEWAY_EMAIL_SERVICE_", "Server & ports"},
+	{"GATEWAY_NATIVE_OAUTH_", "OAuth"},
 	{"GATEWAY_OAUTH_", "OAuth"},
 	{"GATEWAY_MICROSOFT_TENANT_ID", "OAuth"},
 	{"GATEWAY_JWT_", "JWT & tokens"},
