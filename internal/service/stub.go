@@ -98,6 +98,10 @@ func (StubRepository) UpdatePasskeyCredential(context.Context, string, map[strin
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) DeletePasskeyCredentialsForUser(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) GetPasskeyChallenge(context.Context, string) (*PasskeyChallengeRecord, error) {
 	return nil, ErrServiceUnavailable
 }

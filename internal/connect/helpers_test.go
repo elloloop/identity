@@ -174,7 +174,10 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *service.User) (string, error
 			return "", fmt.Errorf("user with email %s already exists", u.Email)
 		}
 	}
-	id := nextID()
+	id := u.ID
+	if id == "" {
+		id = nextID()
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -469,6 +472,17 @@ func (r *fakeRepo) UpdatePasskeyCredential(_ context.Context, nodeID string, fie
 	}
 	if v, ok := fields["last_used_at"]; ok {
 		c.LastUsedAt = v.(int64)
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
 	}
 	return nil
 }

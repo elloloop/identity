@@ -21,10 +21,15 @@ import { Code } from "astro-expressive-code/components";
     sign in from, or browsers will refuse the ceremony.
   </p>
   <table>
-    <tr><th>Variable</th><th>Example</th></tr>
-    <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td><code>example.com</code> — registrable domain, no scheme, no port</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td><code>Example</code> — shown in the OS dialog</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td><code>https://app.example.com</code> — full origin including scheme</td></tr>
+    <thead>
+      <tr><th scope="col">Variable</th><th scope="col">Example</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td><code>example.com</code> — registrable domain, no scheme, no port</td></tr>
+      <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td><code>Example</code> — shown in the OS dialog</td></tr>
+      <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td><code>https://app.example.com</code> — full origin including scheme</td></tr>
+      <tr><td><code>GATEWAY_PASSKEY_SIGNUP_ENABLED</code></td><td><code>true</code> (default) — gates passkey-first signup; set <code>false</code> to disable unauthenticated account creation via a passkey while keeping authenticated add-a-passkey registration</td></tr>
+    </tbody>
   </table>
   <p>
     Defaults (and the challenge-expiry knob) are in the
@@ -32,7 +37,25 @@ import { Code } from "astro-expressive-code/components";
     / WebAuthn section of the configuration reference</a>.
   </p>
 
-  <h2>Registration</h2>
+  <h2>Two distinct flows</h2>
+  <p>
+    There are two passkey enrolment paths, and they are not the same RPC:
+  </p>
+  <ul>
+    <li>
+      <strong>Add a passkey</strong> (<code>BeginPasskeyRegistration</code> /
+      <code>CompletePasskeyRegistration</code>) — adds a passkey to an account
+      the caller is <em>already signed in to</em>. Requires a bearer token.
+    </li>
+    <li>
+      <strong>Passkey-first signup</strong> (<code>BeginPasskeySignup</code> /
+      <code>CompletePasskeySignup</code>) — creates a <em>brand-new</em> account
+      whose first credential is a passkey. Unauthenticated; no password, no
+      prior session.
+    </li>
+  </ul>
+
+  <h2>Add a passkey (authenticated)</h2>
   <p>
     The user must already be authenticated (e.g. they signed in with
     password). The flow is two RPCs.
@@ -53,18 +76,91 @@ import { Code } from "astro-expressive-code/components";
   </p>
 
   <h3>2. Complete</h3>
-  <Code code={`const options = JSON.parse(beginResponse.options_json);
+  <Code code={`const options = JSON.parse(beginResponse.optionsJson);
 const credential = await navigator.credentials.create(options);
 
 await fetch("/identity.v1.IdentityService/CompletePasskeyRegistration", {
   method: "POST",
   headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
   body: JSON.stringify({
-    challengeId: beginResponse.challenge_id,
+    challengeId: beginResponse.challengeId,
     credentialJson: JSON.stringify(credential),
     deviceName: "Alice's MacBook",
   }),
 });`} lang="javascript" />
+
+  <h2>Passkey-first signup (unauthenticated)</h2>
+  <p>
+    Creates a new account directly from a passkey — no password is ever set.
+    Control of the email is proven <em>in the same flow</em> with a 6-digit
+    one-time code: <code>BeginPasskeySignup</code> emails the code, and
+    <code>CompletePasskeySignup</code> requires it alongside the attestation.
+    Because the code proves inbox control before anything is created, the
+    account is created <strong>already verified</strong> — there is never an
+    unverified account carrying a passkey for an attacker to hijack.
+  </p>
+  <Code code={`// 1. Begin — no Authorization header. This ALSO emails a 6-digit OTP.
+const begin = await fetch("/identity.v1.IdentityService/BeginPasskeySignup", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ email: "alice@example.com", deviceName: "Alice's MacBook" }),
+}).then(r => r.json());
+
+// 2. Browser creates the credential
+const credential = await navigator.credentials.create(JSON.parse(begin.optionsJson));
+
+// 3. Prompt the user for the 6-digit code from their inbox.
+const otpCode = await promptUserForEmailedCode();
+
+// 4. Complete — verifies the attestation AND the OTP, then creates the
+//    (already-verified) account and returns a session.
+const done = await fetch("/identity.v1.IdentityService/CompletePasskeySignup", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    challengeId: begin.challengeId,
+    credentialJson: JSON.stringify(credential),
+    email: "alice@example.com",
+    otpCode,
+    deviceName: "Alice's MacBook",
+  }),
+}).then(r => r.json());  // { user, accessToken, refreshToken, expiresIn }`} lang="javascript" />
+  <p>
+    The server mints the new user id during <code>BeginPasskeySignup</code> and
+    binds it as the WebAuthn user handle, so the credential created here can log
+    in afterwards. The OTP reuses the same email-code machinery as passwordless
+    login (TTL, attempt cap, and per-email send cooldown). Security properties
+    baked into the flow:
+  </p>
+  <ul>
+    <li>
+      <strong>Email verified in-flow.</strong> The emailed code must be returned
+      to <code>CompletePasskeySignup</code> before any account is created, so the
+      new account is verified from the moment it exists. There is no
+      unverified-account-with-a-passkey window — the account pre-hijacking
+      scenario cannot arise at the source.
+    </li>
+    <li>
+      <strong>Anti-takeover.</strong> If the email already has an account, the
+      passkey is <em>not</em> attached to it — an unauthenticated caller can
+      never bind a credential to someone else's account.
+    </li>
+    <li>
+      <strong>Enumeration-safe.</strong> The OTP is sent (and the response
+      looks identical) whether or not the address already has an account. The
+      attestation and the OTP are checked before any account lookup, so an
+      invalid code returns a single generic error that is the same for new and
+      existing addresses — the endpoint never reveals which addresses exist. An
+      already-registered address resolves to the same success-shaped decoy (and
+      the owner gets a "someone tried to sign up" notice) with no passkey
+      attached.
+    </li>
+  </ul>
+  <p>
+    Disable the whole flow with <code>GATEWAY_PASSKEY_SIGNUP_ENABLED=false</code>
+    (returns <code>FailedPrecondition</code>); authenticated add-a-passkey
+    registration is unaffected.
+  </p>
 
   <h2>Login</h2>
   <p>
@@ -82,19 +178,19 @@ const begin = await fetch("/identity.v1.IdentityService/BeginPasskeyLogin", {
 }).then(r => r.json());
 
 // 2. Browser does the ceremony
-const credential = await navigator.credentials.get(JSON.parse(begin.options_json));
+const credential = await navigator.credentials.get(JSON.parse(begin.optionsJson));
 
 // 3. Hand the assertion back to Identity
 const complete = await fetch("/identity.v1.IdentityService/CompletePasskeyLogin", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
-    challengeId: begin.challenge_id,
+    challengeId: begin.challengeId,
     credentialJson: JSON.stringify(credential),
   }),
 }).then(r => r.json());
 
-// complete.access_token, complete.refresh_token, complete.user`} lang="javascript" />
+// complete.accessToken, complete.refreshToken, complete.user`} lang="javascript" />
 
   <h2>Managing passkeys</h2>
   <ul>

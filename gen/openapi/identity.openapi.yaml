@@ -504,6 +504,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.BeginPasskeyRegistrationResponse'
+  /identity.v1.IdentityService/BeginPasskeySignup:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: BeginPasskeySignup
+      description: Passkey-first signup — unauthenticated account creation via a passkey.
+      operationId: identity.v1.IdentityService.BeginPasskeySignup
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.BeginPasskeySignupRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.BeginPasskeySignupResponse'
   /identity.v1.IdentityService/BeginTotpSetup:
     post:
       tags:
@@ -646,6 +682,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.CompletePasskeyRegistrationResponse'
+  /identity.v1.IdentityService/CompletePasskeySignup:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CompletePasskeySignup
+      operationId: identity.v1.IdentityService.CompletePasskeySignup
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CompletePasskeySignupRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CompletePasskeySignupResponse'
   /identity.v1.IdentityService/ConfirmEmailChange:
     post:
       tags:
@@ -3855,6 +3926,37 @@ components:
           title: challenge_id
       title: BeginPasskeyRegistrationResponse
       additionalProperties: false
+    identity.v1.BeginPasskeySignupRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+        deviceName:
+          type: string
+          title: device_name
+      title: BeginPasskeySignupRequest
+      additionalProperties: false
+      description: |-
+        Passkey-first signup (UNAUTHENTICATED account creation via a passkey).
+
+         Unlike BeginPasskeyRegistration (which adds a passkey to an already
+         authenticated account), this pair creates a brand-new account whose first
+         and only credential is a passkey — no password, no session required up
+         front. The server mints the new user id during Begin and binds it as the
+         WebAuthn user handle so the credential registered here can log in later.
+    identity.v1.BeginPasskeySignupResponse:
+      type: object
+      properties:
+        optionsJson:
+          type: string
+          title: options_json
+          description: JSON string of PublicKeyCredentialCreationOptions (frontend passes to navigator.credentials.create)
+        challengeId:
+          type: string
+          title: challenge_id
+      title: BeginPasskeySignupResponse
+      additionalProperties: false
     identity.v1.BeginTotpSetupRequest:
       type: object
       title: BeginTotpSetupRequest
@@ -3944,6 +4046,49 @@ components:
           title: credential
           $ref: '#/components/schemas/identity.v1.PasskeyCredentialInfo'
       title: CompletePasskeyRegistrationResponse
+      additionalProperties: false
+    identity.v1.CompletePasskeySignupRequest:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          title: challenge_id
+        credentialJson:
+          type: string
+          title: credential_json
+          description: JSON string of the PublicKeyCredential returned by navigator.credentials.create
+        email:
+          type: string
+          title: email
+        deviceName:
+          type: string
+          title: device_name
+        otpCode:
+          type: string
+          title: otp_code
+          description: |-
+            6-digit OTP emailed by BeginPasskeySignup. Proves control of the email
+             in-flow, so the account is created already-verified and an attacker cannot
+             plant a passkey on an unverified address (account pre-hijacking).
+      title: CompletePasskeySignupRequest
+      additionalProperties: false
+    identity.v1.CompletePasskeySignupResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          $ref: '#/components/schemas/identity.v1.User'
+        accessToken:
+          type: string
+          title: access_token
+        refreshToken:
+          type: string
+          title: refresh_token
+        expiresIn:
+          type: integer
+          title: expires_in
+          format: int32
+      title: CompletePasskeySignupResponse
       additionalProperties: false
     identity.v1.ConfirmEmailChangeRequest:
       type: object

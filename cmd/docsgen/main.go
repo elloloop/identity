@@ -503,6 +503,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_OTEL_", "OpenTelemetry"},
 	{"GATEWAY_SWEEPER_", "Sweeper (GC)"},
 	{"GATEWAY_AUDIT_", "Audit"},
+	{"GATEWAY_WEBHOOKS_", "Webhooks / eventing"},
 	{"GATEWAY_REPO_DRIVER", "Datastore"},
 	{"GATEWAY_POSTGRES_", "Datastore"},
 	{"GATEWAY_SQLITE_", "Datastore"},

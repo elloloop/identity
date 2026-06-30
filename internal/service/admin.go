@@ -13,6 +13,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -26,6 +27,20 @@ type AdminService struct {
 	cfg              *config.Config
 	mailer           email.Transport
 	logger           *zap.Logger
+
+	// publisher emits user-lifecycle events for admin-driven mutations
+	// (deactivate, delete). nil disables emission (no-op). Set via
+	// WithEventPublisher by app.New. Best-effort: never fails the RPC.
+	publisher events.Publisher
+}
+
+// WithEventPublisher wires the optional user-lifecycle event publisher and
+// returns the service for chaining. app.New calls it once at construction
+// (with the outbox-backed publisher when outbound eventing is enabled, or
+// nil to disable emission).
+func (s *AdminService) WithEventPublisher(p events.Publisher) *AdminService {
+	s.publisher = p
+	return s
 }
 
 // NewAdminService creates an AdminService.
@@ -274,6 +289,13 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"reason": reason}),
 	)
+
+	// Best-effort: emit a user.deactivated lifecycle event so downstream
+	// SaaS can deprovision. No-op when eventing is disabled.
+	deactivated := userFromNode(node)
+	deactivated.Status = "deactivated"
+	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeactivated, deactivated)
+
 	return nil
 }
 

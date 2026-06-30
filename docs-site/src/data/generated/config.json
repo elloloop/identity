@@ -774,6 +774,15 @@
     "anchor": "passkeys-webauthn"
   },
   {
+    "name": "GATEWAY_PASSKEY_SIGNUP_ENABLED",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "gates passkey-first signup (the unauthenticated BeginPasskeySignup / CompletePasskeySignup pair that creates a brand-new account from a passkey); set false to disable it while leaving authenticated add-a-passkey registration untouched.",
+    "category": "Passkeys / WebAuthn",
+    "anchor": "passkeys-webauthn"
+  },
+  {
     "name": "GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS",
     "type": "integer",
     "default": "5",
@@ -1321,5 +1330,59 @@
     "description": "Trusted proxies: comma-separated list of CIDRs whose X-Forwarded-For headers the service will honour.",
     "category": "HTTP, CORS \u0026 cookies",
     "anchor": "http-cors-and-cookies"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS",
+    "type": "integer",
+    "default": "2",
+    "required": false,
+    "description": "is the first-retry delay; it doubles per attempt up to the ceiling.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "is the exponential-backoff ceiling.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_BATCH_SIZE",
+    "type": "integer",
+    "default": "50",
+    "required": false,
+    "description": "is the number of due deliveries claimed per tick.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "is the master switch for outbound user-lifecycle eventing; when false the service emits to a no-op publisher and runs no delivery worker.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_MAX_ATTEMPTS",
+    "type": "integer",
+    "default": "6",
+    "required": false,
+    "description": "is the per-delivery retry budget before a webhook is abandoned and surfaced via the structured logger.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS",
+    "type": "integer",
+    "default": "1",
+    "required": false,
+    "description": "is the outbox drain tick interval.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
   }
 ]
