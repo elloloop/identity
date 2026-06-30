@@ -255,6 +255,31 @@ func (s *AuthService) handleDuplicatePasswordSignup(ctx context.Context, user *U
 	return s.newDuplicateSignupResult(ctx, email, fallbackDisplayName(email, name))
 }
 
+// handleDuplicatePasskeySignup is the existing-email decoy for passkey-first
+// signup. It mirrors handleDuplicatePasswordSignup (sends the existing-account
+// notice, never attaches a passkey, never discloses existence) but ALWAYS
+// returns a fabricated-token decoy regardless of GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL.
+//
+// Why unconditional tokens: the passkey-signup new-account path always issues a
+// live session (the in-flow OTP proved email control, so the account is created
+// verified). If this decoy went through the verified-email-gated
+// newDuplicateSignupResult it would be session-less when the flag is on, making
+// new-vs-existing distinguishable by token presence — the exact enumeration
+// oracle the decoy exists to prevent. duplicateSignupDecoyResult keeps the two
+// responses token-shape identical with the flag both off and on.
+func (s *AuthService) handleDuplicatePasskeySignup(ctx context.Context, user *User, email string) (*LoginResult, error) {
+	if err := s.sendExistingSignupNotice(ctx, user); err != nil {
+		s.logger.Warn(
+			"duplicate_signup_notice_failed",
+			zap.String("user_id", user.ID),
+			zap.String("email", redactEmail(email)),
+			zap.Error(err),
+		)
+	}
+	s.logger.Info("passkey_signup_existing_email", zap.String("email", redactEmail(email)), zap.String("user_id", user.ID))
+	return s.duplicateSignupDecoyResult(ctx, s.newDuplicateSignupUser(email, fallbackDisplayName(email, "")))
+}
+
 func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) error {
 	loginURL := s.appBaseURL(ctx)
 	text := strings.Join([]string{
@@ -275,9 +300,12 @@ func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) 
 	})
 }
 
-func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displayName string) (*LoginResult, error) {
+// newDuplicateSignupUser builds the synthetic, repository-absent user returned
+// by every duplicate-signup decoy. Its id is deliberately a "signup-pending-"
+// placeholder that never collides with a real account id.
+func (s *AuthService) newDuplicateSignupUser(email, displayName string) *User {
 	now := s.nowMs()
-	user := &User{
+	return &User{
 		ID:        "signup-pending-" + randomToken(8),
 		Email:     email,
 		Name:      displayName,
@@ -286,18 +314,30 @@ func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displ
 		CreatedAt: msToTime(now),
 		UpdatedAt: msToTime(now),
 	}
-	// When email verification is required, a genuine new signup returns no
-	// live session (empty tokens — see PasswordSignup). The duplicate-signup
+}
+
+func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displayName string) (*LoginResult, error) {
+	user := s.newDuplicateSignupUser(email, displayName)
+	// When email verification is required, a genuine new password signup returns
+	// no live session (empty tokens — see PasswordSignup). The duplicate-signup
 	// decoy MUST mirror that exactly: otherwise empty-vs-non-empty tokens
 	// would disclose whether the address is already registered — the precise
 	// account-enumeration oracle this decoy exists to prevent.
 	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail {
 		return &LoginResult{User: user}, nil
 	}
-	// Duplicate signup must not authenticate the caller, but it also
-	// must not disclose whether the address already exists. We return a
-	// success-shaped payload with an unstored refresh token and a JWT for
-	// a synthetic subject that is absent from the repository.
+	return s.duplicateSignupDecoyResult(ctx, user)
+}
+
+// duplicateSignupDecoyResult returns a success-shaped payload with an unstored
+// refresh token and a JWT for a synthetic subject that is absent from the
+// repository. It authenticates nobody (the subject does not exist) yet is
+// token-shape identical to a real new-signup session, so token presence cannot
+// disclose whether the address already exists. Callers whose genuine new-account
+// path ALWAYS issues a session (e.g. passkey signup, where the OTP proves email
+// control and the account is created verified) must use this directly — never
+// the verified-email-gated newDuplicateSignupResult, which can be session-less.
+func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User) (*LoginResult, error) {
 	decoyClaims := jwt.Claims{
 		Sub:    user.ID,
 		Email:  user.Email,

@@ -21,11 +21,15 @@ import { Code } from "astro-expressive-code/components";
     sign in from, or browsers will refuse the ceremony.
   </p>
   <table>
-    <tr><th>Variable</th><th>Example</th></tr>
-    <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td><code>example.com</code> — registrable domain, no scheme, no port</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td><code>Example</code> — shown in the OS dialog</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td><code>https://app.example.com</code> — full origin including scheme</td></tr>
-    <tr><td><code>GATEWAY_PASSKEY_SIGNUP_ENABLED</code></td><td><code>true</code> (default) — gates passkey-first signup; set <code>false</code> to disable unauthenticated account creation via a passkey while keeping authenticated add-a-passkey registration</td></tr>
+    <thead>
+      <tr><th scope="col">Variable</th><th scope="col">Example</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>GATEWAY_PASSKEY_RP_ID</code></td><td><code>example.com</code> — registrable domain, no scheme, no port</td></tr>
+      <tr><td><code>GATEWAY_PASSKEY_RP_NAME</code></td><td><code>Example</code> — shown in the OS dialog</td></tr>
+      <tr><td><code>GATEWAY_PASSKEY_ORIGIN</code></td><td><code>https://app.example.com</code> — full origin including scheme</td></tr>
+      <tr><td><code>GATEWAY_PASSKEY_SIGNUP_ENABLED</code></td><td><code>true</code> (default) — gates passkey-first signup; set <code>false</code> to disable unauthenticated account creation via a passkey while keeping authenticated add-a-passkey registration</td></tr>
+    </tbody>
   </table>
   <p>
     Defaults (and the challenge-expiry knob) are in the

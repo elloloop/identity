@@ -118,10 +118,11 @@ func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName 
 //     passkey state, so the pre-hijacking scenario cannot arise), stores the
 //     passkey credential, and issues a session.
 //     - Existing email: does NOT attach the passkey (anti-takeover) and does
-//     NOT reveal that the address exists — it returns the same success-shaped,
-//     session-less decoy as a duplicate PasswordSignup and sends the
-//     existing-account notice. (Only an inbox-controller has a valid OTP, so
-//     this discloses nothing they don't already know.)
+//     NOT reveal that the address exists — it returns a success-shaped decoy
+//     whose token presence is identical to the new-account path (which always
+//     issues a session here) regardless of GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL,
+//     and sends the existing-account notice. (Only an inbox-controller has a
+//     valid OTP, so this discloses nothing they don't already know.)
 //
 // It is unauthenticated: no session is required to call it.
 func (s *AuthService) CompletePasskeySignup(
@@ -174,19 +175,31 @@ func (s *AuthService) CompletePasskeySignup(
 		return nil, fmt.Errorf("%w: attestation verification failed", ErrInvalidArgument)
 	}
 
-	// Single-use challenge — consume it now that the attestation is proven.
-	_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
-
 	// Prove control of the email IN-FLOW before any account decision. This runs
 	// before the existence lookup, so a wrong/expired OTP returns one generic
 	// error identical for new and existing addresses (no existence oracle), and
 	// — crucially — no account is ever created without proven inbox control, so
 	// there is no unverified-passkey state to pre-hijack. Reuses the passwordless
 	// email-code verify+consume path against the bound (canonical) email.
+	//
+	// CRITICAL ORDERING: the OTP is verified BEFORE the single-use challenge is
+	// consumed. CompleteRegistration above is a stateless re-verification that
+	// does not need the challenge deleted, so a wrong/expired OTP can return the
+	// generic error while LEAVING THE CHALLENGE INTACT — the client re-submits
+	// the SAME credentialJSON with a corrected code and the attempt is retryable
+	// (the OTP's own MaxAttempts cap and expiry still govern). Consuming the
+	// challenge before the OTP would burn it on the first mistyped code, forcing
+	// a fresh BeginPasskeySignup + a second navigator.credentials.create ceremony
+	// (orphaning the first credential) on the most error-prone step.
 	if err := s.verifyAndConsumeEmailLoginCode(ctx, boundEmail, otpCode, "passkey_signup", ipAddr, userAgent); err != nil {
 		s.logger.Warn("passkey_signup_otp_failed", zap.String("email", redactEmail(boundEmail)))
 		return nil, err
 	}
+
+	// Both the attestation and the OTP are now proven. Consume the single-use
+	// challenge before resolving the account so a replay racing this completion
+	// loses.
+	_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
 
 	// Anti-takeover + enumeration-safety: an existing account is never given a
 	// new passkey by an unauthenticated caller, and its existence is never
@@ -196,8 +209,7 @@ func (s *AuthService) CompletePasskeySignup(
 		return nil, err
 	}
 	if existing != nil {
-		s.logger.Info("passkey_signup_existing_email", zap.String("email", redactEmail(boundEmail)))
-		return s.handleDuplicatePasswordSignup(ctx, existing, boundEmail, "")
+		return s.handleDuplicatePasskeySignup(ctx, existing, boundEmail)
 	}
 
 	now := s.nowMs()
@@ -221,7 +233,7 @@ func (s *AuthService) CompletePasskeySignup(
 		// our lookup and insert). Treat as duplicate: enumeration-safe, and the
 		// passkey is NOT attached to the winner's account.
 		if raced, lookupErr := s.repo(ctx).FindUserByEmail(ctx, boundEmail); lookupErr == nil && raced != nil {
-			return s.handleDuplicatePasswordSignup(ctx, raced, boundEmail, "")
+			return s.handleDuplicatePasskeySignup(ctx, raced, boundEmail)
 		}
 		return nil, fmt.Errorf("creating user: %w", err)
 	}

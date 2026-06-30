@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -274,6 +275,115 @@ func TestPasskeySignup_WrongOTP_NoAccountCreated(t *testing.T) {
 	got, err := repo.FindUserByEmail(ctx, pkVectorEmail)
 	require.NoError(t, err)
 	assert.Nil(t, got, "a wrong OTP must not create an account")
+}
+
+// TestPasskeySignup_WrongThenRightOTP_RetryableWithoutNewCeremony proves the
+// OTP-before-challenge-consume ordering: a mistyped code returns the generic
+// error but LEAVES THE SINGLE-USE CHALLENGE INTACT, so the client re-submits the
+// SAME credentialJSON with the corrected code and it succeeds — no fresh
+// BeginPasskeySignup and no second navigator.credentials.create ceremony.
+func TestPasskeySignup_WrongThenRightOTP_RetryableWithoutNewCeremony(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	optionsJSON, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	handle := handleFromOptions(t, optionsJSON)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	wrong := "000000"
+	if otp == wrong {
+		wrong = "111111"
+	}
+	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
+
+	// The exact same credential is submitted on both attempts — the client does
+	// NOT run a second ceremony.
+	credJSON := pkRegCredentialJSON(t)
+
+	// Attempt 1: correct attestation, WRONG code → generic error, no account.
+	res, err := svc.CompletePasskeySignup(ctx, challengeID, credJSON, pkVectorEmail, wrong, "My Key", "1.2.3.4", "agent")
+	require.ErrorIs(t, err, ErrEmailLoginCodeInvalid)
+	assert.Nil(t, res)
+	got, err := repo.FindUserByEmail(ctx, pkVectorEmail)
+	require.NoError(t, err)
+	assert.Nil(t, got, "a wrong OTP must not create an account")
+
+	// The single-use challenge SURVIVED the wrong code — it was not burned.
+	ch, err := repo.GetPasskeyChallenge(ctx, challengeID)
+	require.NoError(t, err)
+	require.NotNil(t, ch, "challenge must survive a wrong OTP so the code is retryable without a new ceremony")
+
+	// Attempt 2: SAME credentialJSON + CORRECT code → SUCCEEDS.
+	res, err = svc.CompletePasskeySignup(ctx, challengeID, credJSON, pkVectorEmail, otp, "My Key", "1.2.3.4", "agent")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, handle, res.User.ID, "the retried completion binds the same WebAuthn handle")
+	assert.NotEmpty(t, res.AccessToken)
+	assert.NotEmpty(t, res.RefreshToken)
+
+	got, err = repo.FindUserByEmail(ctx, pkVectorEmail)
+	require.NoError(t, err)
+	require.NotNil(t, got, "the corrected code must create the (verified) account")
+	assert.True(t, got.EmailVerified)
+
+	// Proof the binding is intact: a subsequent passkey login succeeds with the
+	// credential registered during the retried signup.
+	_, loginChallengeID, err := svc.BeginPasskeyLogin(ctx, pkVectorEmail)
+	require.NoError(t, err)
+	setFakeChallengeValue(repo, loginChallengeID, pkB64URL(t, pkLoginChallengeHex))
+	login, err := svc.CompletePasskeyLogin(ctx, loginChallengeID, pkAssertionCredentialJSON(t), "1.2.3.4", "agent")
+	require.NoError(t, err)
+	require.NotNil(t, login)
+	assert.Equal(t, got.ID, login.User.ID)
+	assert.NotEmpty(t, login.AccessToken)
+}
+
+// TestPasskeySignup_DecoyTokenShapeParity proves new-vs-existing passkey-signup
+// responses are indistinguishable by token presence with
+// GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL both off and on. The new-account path
+// always issues a session (the OTP proved email control), so the existing-email
+// decoy must ALSO always carry a fabricated token — otherwise the gated decoy
+// would be session-less and disclose that the address already exists.
+func TestPasskeySignup_DecoyTokenShapeParity(t *testing.T) {
+	for _, requireVerified := range []bool{false, true} {
+		t.Run(fmt.Sprintf("require_verified_email=%v", requireVerified), func(t *testing.T) {
+			ctx := context.Background()
+
+			// New-account path.
+			newSvc, newRepo, newRec := newPasskeyVectorSvc(t)
+			newSvc.cfg.AuthRequireVerifiedEmail = requireVerified
+			_, newChID, err := newSvc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+			require.NoError(t, err)
+			newOTP := passkeySignupOTP(t, newRec, pkVectorEmail)
+			setFakeChallengeValue(newRepo, newChID, pkB64URL(t, pkRegChallengeHex))
+			newRes, err := newSvc.CompletePasskeySignup(ctx, newChID, pkRegCredentialJSON(t), pkVectorEmail, newOTP, "My Key", "1.2.3.4", "agent")
+			require.NoError(t, err)
+			require.NotNil(t, newRes)
+
+			// Existing-account path (decoy).
+			exSvc, exRepo, exRec := newPasskeyVectorSvc(t)
+			exSvc.cfg.AuthRequireVerifiedEmail = requireVerified
+			seedUser(exRepo, pkVectorEmail, hashPW(t, "Existing0wner!"), "active")
+			_, exChID, err := exSvc.BeginPasskeySignup(ctx, pkVectorEmail, "Attacker Key")
+			require.NoError(t, err)
+			exOTP := passkeySignupOTP(t, exRec, pkVectorEmail)
+			setFakeChallengeValue(exRepo, exChID, pkB64URL(t, pkRegChallengeHex))
+			exRes, err := exSvc.CompletePasskeySignup(ctx, exChID, pkRegCredentialJSON(t), pkVectorEmail, exOTP, "Attacker Key", "9.9.9.9", "agent")
+			require.NoError(t, err)
+			require.NotNil(t, exRes)
+
+			// Token PRESENCE must be identical new-vs-existing, both flags.
+			assert.Equal(t, newRes.AccessToken != "", exRes.AccessToken != "",
+				"access-token presence must match new-vs-existing")
+			assert.Equal(t, newRes.RefreshToken != "", exRes.RefreshToken != "",
+				"refresh-token presence must match new-vs-existing")
+			// Both paths actually issue tokens (the new path always does).
+			assert.NotEmpty(t, newRes.AccessToken)
+			assert.NotEmpty(t, newRes.RefreshToken)
+			assert.NotEmpty(t, exRes.AccessToken)
+			assert.NotEmpty(t, exRes.RefreshToken)
+		})
+	}
 }
 
 // TestPasskeySignup_ExpiredOTP_NoAccountCreated: an expired OTP behaves exactly
