@@ -537,12 +537,17 @@ func TestAdminRPCs_LoginPolicy_Handler(t *testing.T) {
 		t.Fatalf("expected nil policy, got %+v", got.Msg.GetPolicy())
 	}
 
-	// Upsert.
+	// Upsert, including the per-tenant password/session governance fields —
+	// they must travel through the proto, the handler, and the service without
+	// being dropped (the blocker-5 regression).
 	up, err := client.UpsertLoginPolicy(ctx, withAdminSecret(&identitypb.UpsertLoginPolicyRequest{
-		ProjectId:      "p",
-		TenantId:       "t",
-		AllowedMethods: "password,email_otp",
-		Require_2Fa:    true,
+		ProjectId:                     "p",
+		TenantId:                      "t",
+		AllowedMethods:                "password,email_otp",
+		Require_2Fa:                   true,
+		PasswordMinLength:             14,
+		SessionIdleTimeoutSeconds:     1800,
+		SessionAbsoluteTimeoutSeconds: 43200,
 	}, handlerAdminSecret))
 	if err != nil {
 		t.Fatalf("UpsertLoginPolicy: %v", err)
@@ -550,8 +555,12 @@ func TestAdminRPCs_LoginPolicy_Handler(t *testing.T) {
 	if !up.Msg.GetPolicy().GetRequire_2Fa() {
 		t.Fatalf("require_2fa not echoed: %+v", up.Msg.GetPolicy())
 	}
+	if p := up.Msg.GetPolicy(); p.GetPasswordMinLength() != 14 ||
+		p.GetSessionIdleTimeoutSeconds() != 1800 || p.GetSessionAbsoluteTimeoutSeconds() != 43200 {
+		t.Fatalf("governance fields not echoed: %+v", p)
+	}
 
-	// Get reads it back.
+	// Get reads it back, governance fields and all.
 	got, err = client.GetLoginPolicy(ctx,
 		withAdminSecret(&identitypb.GetLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, handlerAdminSecret))
 	if err != nil {
@@ -559,6 +568,10 @@ func TestAdminRPCs_LoginPolicy_Handler(t *testing.T) {
 	}
 	if got.Msg.GetPolicy().GetAllowedMethods() != "password,email_otp" {
 		t.Fatalf("allowed methods = %q", got.Msg.GetPolicy().GetAllowedMethods())
+	}
+	if p := got.Msg.GetPolicy(); p.GetPasswordMinLength() != 14 ||
+		p.GetSessionIdleTimeoutSeconds() != 1800 || p.GetSessionAbsoluteTimeoutSeconds() != 43200 {
+		t.Fatalf("read-back dropped governance fields: %+v", p)
 	}
 
 	// Delete clears it.

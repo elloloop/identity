@@ -42,13 +42,46 @@ var commonPasswords = map[string]struct{}{
 // specialChars is the set of characters considered "special" for strength validation.
 const specialChars = `!@#$%^&*()_+-=[]{};':"\|,.<>/?` + "`~"
 
-// ValidateStrength validates password strength and returns a list of issues.
-// An empty slice means the password meets all requirements.
+// StrengthPolicy tunes ValidateStrengthWithPolicy for a single caller —
+// typically a tenant's per-org password rules. The zero value is the global
+// default: MinLength falls back to MinPasswordLength and the four character
+// classes (upper/lower/digit/special) are required. A tenant may only ever
+// tighten the global baseline, never loosen it: MinLength below
+// MinPasswordLength is clamped up to MinPasswordLength, and the global
+// character-class rules are always enforced.
+type StrengthPolicy struct {
+	// MinLength is the tenant's minimum length. 0 means "use the global
+	// MinPasswordLength"; any value below MinPasswordLength is treated as
+	// MinPasswordLength (tenants tighten, never loosen).
+	MinLength int
+}
+
+// effectiveMinLength returns the larger of the policy's MinLength and the
+// global MinPasswordLength so a tenant can only ever raise the floor.
+func (p StrengthPolicy) effectiveMinLength() int {
+	if p.MinLength > MinPasswordLength {
+		return p.MinLength
+	}
+	return MinPasswordLength
+}
+
+// ValidateStrength validates password strength against the global default
+// policy and returns a list of issues. An empty slice means the password
+// meets all requirements.
 func ValidateStrength(password string) []string {
+	return ValidateStrengthWithPolicy(password, StrengthPolicy{})
+}
+
+// ValidateStrengthWithPolicy validates password strength against a
+// per-tenant StrengthPolicy and returns a list of issues. An empty slice
+// means the password meets all requirements. The policy can only tighten
+// the global rules (see StrengthPolicy).
+func ValidateStrengthWithPolicy(password string, policy StrengthPolicy) []string {
 	var issues []string
 
-	if len(password) < MinPasswordLength {
-		issues = append(issues, fmt.Sprintf("Password must be at least %d characters", MinPasswordLength))
+	minLen := policy.effectiveMinLength()
+	if len(password) < minLen {
+		issues = append(issues, fmt.Sprintf("Password must be at least %d characters", minLen))
 	}
 
 	if len(password) > MaxPasswordLength {

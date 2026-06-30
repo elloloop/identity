@@ -205,12 +205,15 @@ func (h *IdentityHandler) UpsertLoginPolicy(
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
 	policy, err := h.controlAdmin.UpsertLoginPolicy(ctx, adminSecret(req.Header()), &service.LoginPolicy{
-		ProjectID:         req.Msg.ProjectId,
-		TenantID:          req.Msg.TenantId,
-		AllowedMethods:    req.Msg.AllowedMethods,
-		SSORequired:       req.Msg.SsoRequired,
-		SSOConnectionJSON: req.Msg.SsoConnectionJson,
-		Require2FA:        req.Msg.Require_2Fa,
+		ProjectID:                     req.Msg.ProjectId,
+		TenantID:                      req.Msg.TenantId,
+		AllowedMethods:                req.Msg.AllowedMethods,
+		SSORequired:                   req.Msg.SsoRequired,
+		SSOConnectionJSON:             req.Msg.SsoConnectionJson,
+		Require2FA:                    req.Msg.Require_2Fa,
+		PasswordMinLength:             int(req.Msg.PasswordMinLength),
+		SessionIdleTimeoutSeconds:     req.Msg.SessionIdleTimeoutSeconds,
+		SessionAbsoluteTimeoutSeconds: req.Msg.SessionAbsoluteTimeoutSeconds,
 	})
 	if err != nil {
 		return nil, toConnectError(err)
@@ -290,14 +293,17 @@ func loginPolicyToProto(p *service.LoginPolicy) *identitypb.LoginPolicy {
 		return nil
 	}
 	return &identitypb.LoginPolicy{
-		ProjectId:         p.ProjectID,
-		TenantId:          p.TenantID,
-		AllowedMethods:    p.AllowedMethods,
-		SsoRequired:       p.SSORequired,
-		SsoConnectionJson: p.SSOConnectionJSON,
-		Require_2Fa:       p.Require2FA,
-		CreatedAtMs:       p.CreatedAtMs,
-		UpdatedAtMs:       p.UpdatedAtMs,
+		ProjectId:                     p.ProjectID,
+		TenantId:                      p.TenantID,
+		AllowedMethods:                p.AllowedMethods,
+		SsoRequired:                   p.SSORequired,
+		SsoConnectionJson:             p.SSOConnectionJSON,
+		Require_2Fa:                   p.Require2FA,
+		CreatedAtMs:                   p.CreatedAtMs,
+		UpdatedAtMs:                   p.UpdatedAtMs,
+		PasswordMinLength:             intToProtoInt32(p.PasswordMinLength),
+		SessionIdleTimeoutSeconds:     p.SessionIdleTimeoutSeconds,
+		SessionAbsoluteTimeoutSeconds: p.SessionAbsoluteTimeoutSeconds,
 	}
 }
 

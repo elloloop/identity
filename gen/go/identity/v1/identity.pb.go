@@ -10349,11 +10349,21 @@ type LoginPolicy struct {
 	SsoRequired       bool   `protobuf:"varint,4,opt,name=sso_required,json=ssoRequired,proto3" json:"sso_required,omitempty"`
 	SsoConnectionJson string `protobuf:"bytes,5,opt,name=sso_connection_json,json=ssoConnectionJson,proto3" json:"sso_connection_json,omitempty"`
 	// require_2fa forces a second factor after the primary method.
-	Require_2Fa   bool  `protobuf:"varint,6,opt,name=require_2fa,json=require2fa,proto3" json:"require_2fa,omitempty"`
-	CreatedAtMs   int64 `protobuf:"varint,7,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
-	UpdatedAtMs   int64 `protobuf:"varint,8,opt,name=updated_at_ms,json=updatedAtMs,proto3" json:"updated_at_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Require_2Fa bool  `protobuf:"varint,6,opt,name=require_2fa,json=require2fa,proto3" json:"require_2fa,omitempty"`
+	CreatedAtMs int64 `protobuf:"varint,7,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
+	UpdatedAtMs int64 `protobuf:"varint,8,opt,name=updated_at_ms,json=updatedAtMs,proto3" json:"updated_at_ms,omitempty"`
+	// password_min_length is the tenant's minimum password length. 0 means "use
+	// the global minimum"; a tenant can only ever raise the floor, never lower it.
+	PasswordMinLength int32 `protobuf:"varint,9,opt,name=password_min_length,json=passwordMinLength,proto3" json:"password_min_length,omitempty"`
+	// session_idle_timeout_seconds invalidates a session unused for this long. 0
+	// means "no idle timeout" (global behavior).
+	SessionIdleTimeoutSeconds int64 `protobuf:"varint,10,opt,name=session_idle_timeout_seconds,json=sessionIdleTimeoutSeconds,proto3" json:"session_idle_timeout_seconds,omitempty"`
+	// session_absolute_timeout_seconds invalidates a session older than this,
+	// measured from the original login regardless of activity. 0 means "no
+	// absolute timeout".
+	SessionAbsoluteTimeoutSeconds int64 `protobuf:"varint,11,opt,name=session_absolute_timeout_seconds,json=sessionAbsoluteTimeoutSeconds,proto3" json:"session_absolute_timeout_seconds,omitempty"`
+	unknownFields                 protoimpl.UnknownFields
+	sizeCache                     protoimpl.SizeCache
 }
 
 func (x *LoginPolicy) Reset() {
@@ -10442,6 +10452,27 @@ func (x *LoginPolicy) GetUpdatedAtMs() int64 {
 	return 0
 }
 
+func (x *LoginPolicy) GetPasswordMinLength() int32 {
+	if x != nil {
+		return x.PasswordMinLength
+	}
+	return 0
+}
+
+func (x *LoginPolicy) GetSessionIdleTimeoutSeconds() int64 {
+	if x != nil {
+		return x.SessionIdleTimeoutSeconds
+	}
+	return 0
+}
+
+func (x *LoginPolicy) GetSessionAbsoluteTimeoutSeconds() int64 {
+	if x != nil {
+		return x.SessionAbsoluteTimeoutSeconds
+	}
+	return 0
+}
+
 type UpsertLoginPolicyRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId         string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
@@ -10450,8 +10481,15 @@ type UpsertLoginPolicyRequest struct {
 	SsoRequired       bool                   `protobuf:"varint,4,opt,name=sso_required,json=ssoRequired,proto3" json:"sso_required,omitempty"`
 	SsoConnectionJson string                 `protobuf:"bytes,5,opt,name=sso_connection_json,json=ssoConnectionJson,proto3" json:"sso_connection_json,omitempty"`
 	Require_2Fa       bool                   `protobuf:"varint,6,opt,name=require_2fa,json=require2fa,proto3" json:"require_2fa,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// password_min_length tightens the tenant's minimum password length (0 =
+	// global default; tenants tighten, never loosen).
+	PasswordMinLength int32 `protobuf:"varint,7,opt,name=password_min_length,json=passwordMinLength,proto3" json:"password_min_length,omitempty"`
+	// session_idle_timeout_seconds / session_absolute_timeout_seconds set the
+	// tenant's idle and absolute session timeouts (0 = no timeout).
+	SessionIdleTimeoutSeconds     int64 `protobuf:"varint,8,opt,name=session_idle_timeout_seconds,json=sessionIdleTimeoutSeconds,proto3" json:"session_idle_timeout_seconds,omitempty"`
+	SessionAbsoluteTimeoutSeconds int64 `protobuf:"varint,9,opt,name=session_absolute_timeout_seconds,json=sessionAbsoluteTimeoutSeconds,proto3" json:"session_absolute_timeout_seconds,omitempty"`
+	unknownFields                 protoimpl.UnknownFields
+	sizeCache                     protoimpl.SizeCache
 }
 
 func (x *UpsertLoginPolicyRequest) Reset() {
@@ -10524,6 +10562,27 @@ func (x *UpsertLoginPolicyRequest) GetRequire_2Fa() bool {
 		return x.Require_2Fa
 	}
 	return false
+}
+
+func (x *UpsertLoginPolicyRequest) GetPasswordMinLength() int32 {
+	if x != nil {
+		return x.PasswordMinLength
+	}
+	return 0
+}
+
+func (x *UpsertLoginPolicyRequest) GetSessionIdleTimeoutSeconds() int64 {
+	if x != nil {
+		return x.SessionIdleTimeoutSeconds
+	}
+	return 0
+}
+
+func (x *UpsertLoginPolicyRequest) GetSessionAbsoluteTimeoutSeconds() int64 {
+	if x != nil {
+		return x.SessionAbsoluteTimeoutSeconds
+	}
+	return 0
 }
 
 type UpsertLoginPolicyResponse struct {
@@ -12035,7 +12094,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	" CreateFirstPlatformAdminResponse\x12\x19\n" +
 	"\badmin_id\x18\x01 \x01(\tR\aadminId\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12-\n" +
-	"\x12generated_password\x18\x03 \x01(\tR\x11generatedPassword\"\xae\x02\n" +
+	"\x12generated_password\x18\x03 \x01(\tR\x11generatedPassword\"\xe8\x03\n" +
 	"\vLoginPolicy\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1b\n" +
@@ -12046,7 +12105,11 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\vrequire_2fa\x18\x06 \x01(\bR\n" +
 	"require2fa\x12\"\n" +
 	"\rcreated_at_ms\x18\a \x01(\x03R\vcreatedAtMs\x12\"\n" +
-	"\rupdated_at_ms\x18\b \x01(\x03R\vupdatedAtMs\"\xf3\x01\n" +
+	"\rupdated_at_ms\x18\b \x01(\x03R\vupdatedAtMs\x12.\n" +
+	"\x13password_min_length\x18\t \x01(\x05R\x11passwordMinLength\x12?\n" +
+	"\x1csession_idle_timeout_seconds\x18\n" +
+	" \x01(\x03R\x19sessionIdleTimeoutSeconds\x12G\n" +
+	" session_absolute_timeout_seconds\x18\v \x01(\x03R\x1dsessionAbsoluteTimeoutSeconds\"\xad\x03\n" +
 	"\x18UpsertLoginPolicyRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1b\n" +
@@ -12055,7 +12118,10 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\fsso_required\x18\x04 \x01(\bR\vssoRequired\x12.\n" +
 	"\x13sso_connection_json\x18\x05 \x01(\tR\x11ssoConnectionJson\x12\x1f\n" +
 	"\vrequire_2fa\x18\x06 \x01(\bR\n" +
-	"require2fa\"M\n" +
+	"require2fa\x12.\n" +
+	"\x13password_min_length\x18\a \x01(\x05R\x11passwordMinLength\x12?\n" +
+	"\x1csession_idle_timeout_seconds\x18\b \x01(\x03R\x19sessionIdleTimeoutSeconds\x12G\n" +
+	" session_absolute_timeout_seconds\x18\t \x01(\x03R\x1dsessionAbsoluteTimeoutSeconds\"M\n" +
 	"\x19UpsertLoginPolicyResponse\x120\n" +
 	"\x06policy\x18\x01 \x01(\v2\x18.identity.v1.LoginPolicyR\x06policy\"S\n" +
 	"\x15GetLoginPolicyRequest\x12\x1d\n" +
