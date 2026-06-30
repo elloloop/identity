@@ -58,7 +58,8 @@ func (p *tracedPool) Close() {
 
 func (p *tracedPool) Ping(ctx context.Context) error {
 	ctx = p.scopeCtx(ctx)
-	ctx, end := observability.StartClient(ctx, "postgres.Ping",
+	ctx, end := observability.StartClient(
+		ctx, "postgres.Ping",
 		attribute.String("db.system", "postgresql"),
 	)
 	err := p.inner.Ping(ctx)
@@ -95,7 +96,8 @@ func (p *tracedPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.
 
 func (p *tracedPool) Begin(ctx context.Context) (pgx.Tx, error) {
 	ctx = p.scopeCtx(ctx)
-	ctx, end := observability.StartClient(ctx, "postgres.Begin",
+	ctx, end := observability.StartClient(
+		ctx, "postgres.Begin",
 		attribute.String("db.system", "postgresql"),
 	)
 	tx, err := p.inner.Begin(ctx)

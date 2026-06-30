@@ -30,8 +30,13 @@ type Claims struct {
 	// scopes the token to one project so a token minted under project A is
 	// rejected on a request resolved to project B (cross-project reuse).
 	// Omitted from tokens minted before the project model (empty).
-	Project   string   `json:"project,omitempty"`
-	AvatarURL string   `json:"avatar_url"`
+	Project   string `json:"project,omitempty"`
+	AvatarURL string `json:"avatar_url"`
+	// IsMinor marks the subject as a minor under the deployment's age-gate.
+	// It is emitted only when true (omitempty) and only when age-gating is
+	// on, so downstream apps can suppress profiling/behavioral features for
+	// minors. Existing verifiers that don't know the claim ignore it.
+	IsMinor   bool     `json:"is_minor,omitempty"`
 	SID       string   `json:"sid,omitempty"`
 	Audience  []string `json:"aud,omitempty"`
 	IssuedAt  int64    `json:"iat"`
@@ -57,6 +62,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if c.Project != "" {
 		m["project"] = c.Project
+	}
+	if c.IsMinor {
+		m["is_minor"] = true
 	}
 	if c.SID != "" {
 		m["sid"] = c.SID
@@ -165,6 +173,9 @@ func VerifyAccessToken(tokenStr string, kp KeyProvider, expectedTenant, expected
 	}
 	if v, ok := tok.Get("sid"); ok {
 		claims.SID, _ = v.(string)
+	}
+	if v, ok := tok.Get("is_minor"); ok {
+		claims.IsMinor, _ = v.(bool)
 	}
 	claims.Audience = tok.Audience()
 

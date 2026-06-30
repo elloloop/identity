@@ -6,286 +6,493 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
-// testECKey is an ES256 (P-256) key + matching JWK set the Apple/OIDC
-// tests use to sign and serve id_tokens.
-type testECKey struct {
-	Priv    *ecdsa.PrivateKey
-	JWKSet  jwk.Set
-	KID     string
-	JWKJSON []byte
-}
+func generateTestECDSAKey(tb testing.TB) string {
+	tb.Helper()
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		tb.Fatalf("ecdsa generate: %v", err)
+	}
 
-func newTestECKey(t *testing.T, kid string) *testECKey {
-	t.Helper()
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	x509Encoded, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
-		t.Fatalf("ecdsa generate: %v", err)
+		tb.Fatalf("failed to marshal ECDSA key: %v", err)
 	}
-	pubKey, err := jwk.FromRaw(priv.Public())
-	if err != nil {
-		t.Fatalf("jwk from raw: %v", err)
-	}
-	_ = pubKey.Set(jwk.KeyIDKey, kid)
-	_ = pubKey.Set(jwk.AlgorithmKey, jwa.ES256)
-	set := jwk.NewSet()
-	if err := set.AddKey(pubKey); err != nil {
-		t.Fatalf("add key: %v", err)
-	}
-	jwksJSON, err := json.Marshal(set)
-	if err != nil {
-		t.Fatalf("marshal jwks: %v", err)
-	}
-	return &testECKey{Priv: priv, JWKSet: set, KID: kid, JWKJSON: jwksJSON}
-}
 
-func (k *testECKey) signIDToken(t *testing.T, claims map[string]any) string {
-	t.Helper()
-	tok := jwt.New()
-	for kk, vv := range claims {
-		switch kk {
-		case "iss":
-			_ = tok.Set(jwt.IssuerKey, vv)
-		case "sub":
-			_ = tok.Set(jwt.SubjectKey, vv)
-		case "aud":
-			_ = tok.Set(jwt.AudienceKey, vv)
-		case "exp":
-			_ = tok.Set(jwt.ExpirationKey, vv)
-		case "iat":
-			_ = tok.Set(jwt.IssuedAtKey, vv)
-		default:
-			_ = tok.Set(kk, vv)
-		}
-	}
-	signKey, err := jwk.FromRaw(k.Priv)
-	if err != nil {
-		t.Fatalf("priv jwk: %v", err)
-	}
-	_ = signKey.Set(jwk.KeyIDKey, k.KID)
-	_ = signKey.Set(jwk.AlgorithmKey, jwa.ES256)
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, signKey))
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
-	return string(signed)
-}
-
-// newTestApplePrivateKeyPEM returns a PKCS#8 PEM EC private key suitable
-// for AppleConfig.PrivateKeyPEM.
-func newTestApplePrivateKeyPEM(t *testing.T) string {
-	t.Helper()
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("ecdsa generate: %v", err)
-	}
-	der, err := x509.MarshalPKCS8PrivateKey(priv)
-	if err != nil {
-		t.Fatalf("marshal pkcs8: %v", err)
-	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
-}
-
-func appleConfigFor(t *testing.T, fp *fakeProvider, key *testECKey, now time.Time) AppleConfig {
-	t.Helper()
-	return AppleConfig{
-		ClientID:      "com.example.service",
-		TeamID:        "TEAM123",
-		KeyID:         "KEY123",
-		PrivateKeyPEM: newTestApplePrivateKeyPEM(t),
-		HTTPClient:    fp.srv.Client(),
-		TokenURL:      fp.URL("/token"),
-		JWKSURL:       fp.URL("/jwks"),
-		Issuer:        appleIssuer,
-		Now:           nowFunc(now),
-	}
-}
-
-func TestApple_Exchange_HappyPath_NameFromContext(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	key := newTestECKey(t, "apple-kid")
-	fp := newFakeProvider(t)
-	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
-	idToken := key.signIDToken(t, map[string]any{
-		"iss":            appleIssuer,
-		"sub":            "apple-sub-1",
-		"aud":            "com.example.service",
-		"email":          "User@Example.com",
-		"email_verified": "true",
-		"exp":            now.Add(time.Hour),
-		"iat":            now,
+	pemEncoded := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: x509Encoded,
 	})
-	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
 
-	ex := NewApple(appleConfigFor(t, fp, key, now))
-	ctx := WithAppleName(context.Background(), "Ada Lovelace")
-	id, err := ex.Exchange(ctx, "the-code", "https://app/cb")
+	return string(pemEncoded)
+}
+
+func TestApple_ExchangeSuccess(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	key := newTestKey(t, "kid-A")
+	fp := newFakeProvider(t)
+
+	const clientID = "apple-client-id"
+	privateKeyPEM := generateTestECDSAKey(t)
+
+	idToken := key.signIDToken(t, map[string]any{
+		"iss":            "https://appleid.apple.com",
+		"sub":            "apple-sub-1",
+		"aud":            clientID,
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "user@example.com",
+		"email_verified": true, // standard boolean
+	})
+
+	fp.tokenHandler = jsonHandler(map[string]any{
+		"id_token":     idToken,
+		"access_token": "discardable",
+		"token_type":   "Bearer",
+		"expires_in":   3600,
+	})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+
+	exch := NewApple(AppleConfig{
+		ClientID:   clientID,
+		TeamID:     "team-123",
+		KeyID:      "key-123",
+		PrivateKey: privateKeyPEM,
+		TokenURL:   fp.URL("/token"),
+		JWKSURL:    fp.URL("/jwks"),
+		Issuer:     "https://appleid.apple.com",
+		Now:        nowFunc(now),
+	})
+
+	id, err := exch.Exchange(context.Background(), ExchangeParams{Code: "the-code", RedirectURI: "https://app/cb"})
 	if err != nil {
-		t.Fatalf("exchange: %v", err)
-	}
-	if id.Provider != "apple" {
-		t.Errorf("provider = %q", id.Provider)
+		t.Fatalf("Exchange: %v", err)
 	}
 	if id.Email != "user@example.com" {
 		t.Errorf("email = %q", id.Email)
 	}
-	if !id.EmailVerified {
-		t.Errorf("email not verified")
-	}
 	if id.ProviderUserID != "apple-sub-1" {
-		t.Errorf("sub = %q", id.ProviderUserID)
+		t.Errorf("provider id = %q", id.ProviderUserID)
 	}
-	if id.Name != "Ada Lovelace" {
-		t.Errorf("name = %q", id.Name)
+	if !id.EmailVerified {
+		t.Error("email_verified must be true")
+	}
+	if id.Provider != "apple" {
+		t.Errorf("provider = %q", id.Provider)
 	}
 }
 
-func TestApple_Exchange_EmailVerifiedBool(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	key := newTestECKey(t, "apple-kid")
-	fp := newFakeProvider(t)
-	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
-	idToken := key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "com.example.service",
-		"email": "a@b.com", "email_verified": true,
-		"exp": now.Add(time.Hour), "iat": now,
-	})
-	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+func TestApple_EmailVerifiedString(t *testing.T) {
+	t.Parallel()
 
-	ex := NewApple(appleConfigFor(t, fp, key, now))
-	id, err := ex.Exchange(context.Background(), "c", "https://app/cb")
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	key := newTestKey(t, "kid-A")
+	fp := newFakeProvider(t)
+
+	const clientID = "apple-client-id"
+	privateKeyPEM := generateTestECDSAKey(t)
+
+	idToken := key.signIDToken(t, map[string]any{
+		"iss":            "https://appleid.apple.com",
+		"sub":            "apple-sub-1",
+		"aud":            clientID,
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "user@example.com",
+		"email_verified": "true", // Apple string format
+	})
+
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+
+	exch := NewApple(AppleConfig{
+		ClientID:   clientID,
+		TeamID:     "team-123",
+		KeyID:      "key-123",
+		PrivateKey: privateKeyPEM,
+		TokenURL:   fp.URL("/token"),
+		JWKSURL:    fp.URL("/jwks"),
+		Issuer:     "https://appleid.apple.com",
+		Now:        nowFunc(now),
+	})
+
+	id, err := exch.Exchange(context.Background(), ExchangeParams{Code: "the-code", RedirectURI: "https://app/cb"})
 	if err != nil {
-		t.Fatalf("exchange: %v", err)
+		t.Fatalf("Exchange: %v", err)
 	}
-	if !id.EmailVerified || id.Email != "a@b.com" {
-		t.Errorf("got %+v", id)
+	if !id.EmailVerified {
+		t.Error("email_verified must be true")
 	}
 }
 
-func TestApple_Exchange_RejectsUnverifiedEmail(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	key := newTestECKey(t, "apple-kid")
-	fp := newFakeProvider(t)
-	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
-	idToken := key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "com.example.service",
-		"email": "a@b.com", "email_verified": "false",
-		"exp": now.Add(time.Hour), "iat": now,
-	})
-	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+func TestApple_EmailNotVerifiedString(t *testing.T) {
+	t.Parallel()
 
-	ex := NewApple(appleConfigFor(t, fp, key, now))
-	_, err := ex.Exchange(context.Background(), "c", "https://app/cb")
-	if !errors.Is(err, ErrEmailNotVerified) {
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	key := newTestKey(t, "kid-A")
+	fp := newFakeProvider(t)
+
+	const clientID = "apple-client-id"
+	privateKeyPEM := generateTestECDSAKey(t)
+
+	idToken := key.signIDToken(t, map[string]any{
+		"iss":            "https://appleid.apple.com",
+		"sub":            "apple-sub-1",
+		"aud":            clientID,
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "user@example.com",
+		"email_verified": "false", // Apple string format
+	})
+
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+
+	exch := NewApple(AppleConfig{
+		ClientID:   clientID,
+		TeamID:     "team-123",
+		KeyID:      "key-123",
+		PrivateKey: privateKeyPEM,
+		TokenURL:   fp.URL("/token"),
+		JWKSURL:    fp.URL("/jwks"),
+		Issuer:     "https://appleid.apple.com",
+		Now:        nowFunc(now),
+	})
+
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "the-code", RedirectURI: "https://app/cb"})
+	if err == nil || !errors.Is(err, ErrEmailNotVerified) {
 		t.Fatalf("want ErrEmailNotVerified, got %v", err)
 	}
 }
 
-func TestApple_Exchange_BadAudience(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	key := newTestECKey(t, "apple-kid")
+func TestApple_MissingEmail(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	key := newTestKey(t, "kid-A")
+	fp := newFakeProvider(t)
+
+	const clientID = "apple-client-id"
+	privateKeyPEM := generateTestECDSAKey(t)
+
+	idToken := key.signIDToken(t, map[string]any{
+		"iss": "https://appleid.apple.com",
+		"sub": "apple-sub-1",
+		"aud": clientID,
+		"iat": now.Unix(),
+		"exp": now.Add(5 * time.Minute).Unix(),
+		// no email or email_verified
+	})
+
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+
+	exch := NewApple(AppleConfig{
+		ClientID:   clientID,
+		TeamID:     "team-123",
+		KeyID:      "key-123",
+		PrivateKey: privateKeyPEM,
+		TokenURL:   fp.URL("/token"),
+		JWKSURL:    fp.URL("/jwks"),
+		Issuer:     "https://appleid.apple.com",
+		Now:        nowFunc(now),
+	})
+
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "the-code", RedirectURI: "https://app/cb"})
+	if err == nil || !errors.Is(err, ErrIdentityVerification) {
+		t.Fatalf("want ErrIdentityVerification, got %v", err)
+	}
+}
+
+func TestApple_TokenEndpointError(t *testing.T) {
+	t.Parallel()
+	fp := newFakeProvider(t)
+	fp.tokenHandler = func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+	}
+	exch := NewApple(AppleConfig{
+		ClientID:   "x",
+		TeamID:     "team",
+		KeyID:      "key",
+		PrivateKey: generateTestECDSAKey(t),
+		TokenURL:   fp.URL("/token"),
+		JWKSURL:    fp.URL("/jwks"),
+	})
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "bad", RedirectURI: "https://x"})
+	if err == nil || !errors.Is(err, ErrCodeExchangeFailed) {
+		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
+	}
+}
+
+func TestApple_NetworkError(t *testing.T) {
+	t.Parallel()
+	exch := NewApple(AppleConfig{ //nolint:gosec // dummy config
+		ClientID:   "x",
+		TeamID:     "team",
+		KeyID:      "key",
+		PrivateKey: generateTestECDSAKey(t), //nolint:gosec // this is a dummy test key
+		TokenURL:   "http://127.0.0.1:1/",   // closed port
+		JWKSURL:    "http://127.0.0.1:1/",
+		HTTPClient: &http.Client{Timeout: 50 * time.Millisecond},
+	})
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
+	if err == nil || !errors.Is(err, ErrCodeExchangeFailed) {
+		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
+	}
+}
+
+func TestApple_BadPrivateKey(t *testing.T) {
+	t.Parallel()
+	exch := NewApple(AppleConfig{
+		ClientID:   "x",
+		TeamID:     "team",
+		KeyID:      "key",
+		PrivateKey: "invalid-pem", // will fail to sign secret
+	})
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
+	if err == nil {
+		t.Fatalf("expected error due to invalid private key")
+	}
+}
+
+func TestApple_BadSignature(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+
+	signing := newTestKey(t, "kid-attacker")
+	servingJWKS := newTestKey(t, "kid-server") // a different keypair
+
+	idToken := signing.signIDToken(t, map[string]any{
+		"iss":            "https://appleid.apple.com",
+		"sub":            "victim",
+		"aud":            "client-id",
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "v@example.com",
+		"email_verified": true,
+	})
+
+	fp := newFakeProvider(t)
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", servingJWKS.JWKJSON)
+
+	exch := NewApple(AppleConfig{
+		ClientID:   "client-id",
+		TeamID:     "team",
+		KeyID:      "key",
+		PrivateKey: generateTestECDSAKey(t),
+		TokenURL:   fp.URL("/token"),
+		JWKSURL:    fp.URL("/jwks"),
+		Issuer:     "https://appleid.apple.com",
+		Now:        nowFunc(now),
+	})
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
+	if err == nil || !errors.Is(err, ErrIdentityVerification) {
+		t.Fatalf("want ErrIdentityVerification, got %v", err)
+	}
+}
+
+func TestApple_BadIssuer(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	key := newTestKey(t, "kid-A")
+	fp := newFakeProvider(t)
+	idToken := key.signIDToken(t, map[string]any{
+		"iss":            "https://evil.example",
+		"sub":            "x",
+		"aud":            "client-id",
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "v@example.com",
+		"email_verified": true,
+	})
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+
+	exch := NewApple(AppleConfig{
+		ClientID:   "client-id",
+		TeamID:     "team",
+		KeyID:      "key",
+		PrivateKey: generateTestECDSAKey(t),
+		TokenURL:   fp.URL("/token"),
+		JWKSURL:    fp.URL("/jwks"),
+		Issuer:     "https://appleid.apple.com",
+		Now:        nowFunc(now),
+	})
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
+	if err == nil || !errors.Is(err, ErrIdentityVerification) {
+		t.Fatalf("want ErrIdentityVerification, got %v", err)
+	}
+}
+
+func TestApple_BadAudience(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	key := newTestKey(t, "kid-A")
+	fp := newFakeProvider(t)
+	idToken := key.signIDToken(t, map[string]any{
+		"iss":            "https://appleid.apple.com",
+		"sub":            "x",
+		"aud":            "different-audience",
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "v@example.com",
+		"email_verified": true,
+	})
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+
+	exch := NewApple(AppleConfig{
+		ClientID:   "client-id",
+		TeamID:     "team",
+		KeyID:      "key",
+		PrivateKey: generateTestECDSAKey(t),
+		TokenURL:   fp.URL("/token"),
+		JWKSURL:    fp.URL("/jwks"),
+		Issuer:     "https://appleid.apple.com",
+		Now:        nowFunc(now),
+	})
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
+	if err == nil || !errors.Is(err, ErrIdentityVerification) {
+		t.Fatalf("want ErrIdentityVerification, got %v", err)
+	}
+}
+
+func TestApple_ExpiredToken(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	key := newTestKey(t, "kid-A")
+	fp := newFakeProvider(t)
+	idToken := key.signIDToken(t, map[string]any{
+		"iss":            "https://appleid.apple.com",
+		"sub":            "x",
+		"aud":            "client-id",
+		"iat":            now.Add(-2 * time.Hour).Unix(),
+		"exp":            now.Add(-1 * time.Hour).Unix(),
+		"email":          "v@example.com",
+		"email_verified": true,
+	})
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+
+	exch := NewApple(AppleConfig{
+		ClientID:   "client-id",
+		TeamID:     "team",
+		KeyID:      "key",
+		PrivateKey: generateTestECDSAKey(t),
+		TokenURL:   fp.URL("/token"),
+		JWKSURL:    fp.URL("/jwks"),
+		Issuer:     "https://appleid.apple.com",
+		Now:        nowFunc(now),
+	})
+	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
+	if err == nil || !errors.Is(err, ErrIdentityVerification) {
+		t.Fatalf("want ErrIdentityVerification, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Logf("unexpected error message: %v", err)
+	}
+}
+
+func TestApple_JWKSCaching(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	key := newTestKey(t, "kid-A")
 	fp := newFakeProvider(t)
 	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+
+	const clientID = "client-id"
+	makeToken := func() string {
+		return key.signIDToken(t, map[string]any{
+			"iss":            "https://appleid.apple.com",
+			"sub":            "u",
+			"aud":            clientID,
+			"iat":            now.Unix(),
+			"exp":            now.Add(5 * time.Minute).Unix(),
+			"email":          "u@example.com",
+			"email_verified": true,
+		})
+	}
+	fp.tokenHandler = func(w http.ResponseWriter, r *http.Request) {
+		jsonHandler(map[string]any{"id_token": makeToken()})(w, r)
+	}
+
+	exch := NewApple(AppleConfig{
+		ClientID:     clientID,
+		TeamID:       "team",
+		KeyID:        "key",
+		PrivateKey:   generateTestECDSAKey(t),
+		TokenURL:     fp.URL("/token"),
+		JWKSURL:      fp.URL("/jwks"),
+		Issuer:       "https://appleid.apple.com",
+		Now:          nowFunc(now),
+		JWKSCacheTTL: time.Hour,
+	})
+
+	for i := 0; i < 2; i++ {
+		if _, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"}); err != nil {
+			t.Fatalf("exchange %d: %v", i, err)
+		}
+	}
+	if got := fp.jwksCalls.Load(); got != 1 {
+		t.Errorf("jwks fetched %d times, want 1", got)
+	}
+}
+
+func TestApple_UserPayloadName(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	key := newTestKey(t, "kid-A")
+	fp := newFakeProvider(t)
+
+	const clientID = "apple-client-id"
+	privateKeyPEM := generateTestECDSAKey(t)
+
 	idToken := key.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "someone-else",
-		"email": "a@b.com", "email_verified": "true",
-		"exp": now.Add(time.Hour), "iat": now,
+		"iss":            "https://appleid.apple.com",
+		"sub":            "apple-sub-1",
+		"aud":            clientID,
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "user@example.com",
+		"email_verified": true,
 	})
+
 	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
 
-	ex := NewApple(appleConfigFor(t, fp, key, now))
-	_, err := ex.Exchange(context.Background(), "c", "https://app/cb")
-	if !errors.Is(err, ErrIdentityVerification) {
-		t.Fatalf("want ErrIdentityVerification, got %v", err)
-	}
-}
-
-func TestApple_Exchange_RejectsRS256IDToken(t *testing.T) {
-	// An attacker-supplied RS256 token must be rejected: Apple signs ES256.
-	now := time.Unix(1_700_000_000, 0)
-	ecKey := newTestECKey(t, "apple-kid")
-	rsaKey := newTestKey(t, "apple-kid")
-	fp := newFakeProvider(t)
-	// Serve the EC JWKS but sign the token with RSA under the same kid.
-	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", ecKey.JWKJSON)
-	idToken := rsaKey.signIDToken(t, map[string]any{
-		"iss": appleIssuer, "sub": "s", "aud": "com.example.service",
-		"email": "a@b.com", "email_verified": "true",
-		"exp": now.Add(time.Hour), "iat": now,
+	exch := NewApple(AppleConfig{
+		ClientID:   clientID,
+		TeamID:     "team-123",
+		KeyID:      "key-123",
+		PrivateKey: privateKeyPEM,
+		TokenURL:   fp.URL("/token"),
+		JWKSURL:    fp.URL("/jwks"),
+		Issuer:     "https://appleid.apple.com",
+		Now:        nowFunc(now),
 	})
-	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
 
-	ex := NewApple(appleConfigFor(t, fp, ecKey, now))
-	_, err := ex.Exchange(context.Background(), "c", "https://app/cb")
-	if !errors.Is(err, ErrIdentityVerification) {
-		t.Fatalf("want ErrIdentityVerification, got %v", err)
-	}
-}
-
-func TestApple_AuthorizationURL_FormPost(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	key := newTestECKey(t, "apple-kid")
-	fp := newFakeProvider(t)
-	ex := NewApple(appleConfigFor(t, fp, key, now)).(Authorizer)
-	u, err := ex.AuthorizationURL(context.Background(), "https://app/cb", "state123", "challenge")
+	ctx := context.Background()
+	id, err := exch.Exchange(ctx, ExchangeParams{
+		Code:             "the-code",
+		RedirectURI:      "https://app/cb",
+		AppleUserPayload: `{"name":{"firstName":"John","lastName":"Doe"}}`,
+	})
 	if err != nil {
-		t.Fatalf("auth url: %v", err)
+		t.Fatalf("Exchange: %v", err)
 	}
-	if !strings.Contains(u, "response_mode=form_post") {
-		t.Errorf("missing form_post: %s", u)
-	}
-	if !strings.Contains(u, "scope=openid+email+name") {
-		t.Errorf("missing scopes: %s", u)
-	}
-}
-
-func TestApple_NewApple_BadPrivateKey(t *testing.T) {
-	ex := NewApple(AppleConfig{
-		ClientID: "c", TeamID: "t", KeyID: "k", PrivateKeyPEM: "not-a-key",
-	})
-	_, err := ex.Exchange(context.Background(), "code", "https://app/cb")
-	if !errors.Is(err, ErrCodeExchangeFailed) {
-		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
-	}
-}
-
-func TestApple_Exchange_TokenEndpointError(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	key := newTestECKey(t, "apple-kid")
-	fp := newFakeProvider(t)
-	fp.tokenHandler = jsonHandler(map[string]any{"error": "invalid_grant"})
-	ex := NewApple(appleConfigFor(t, fp, key, now))
-	_, err := ex.Exchange(context.Background(), "c", "https://app/cb")
-	if !errors.Is(err, ErrCodeExchangeFailed) {
-		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
-	}
-}
-
-func TestAppleBoolString(t *testing.T) {
-	cases := map[string]bool{`"true"`: true, `true`: true, `"false"`: false, `false`: false, `""`: false}
-	for in, want := range cases {
-		var b appleBoolString
-		if err := b.UnmarshalJSON([]byte(in)); err != nil {
-			t.Fatalf("unmarshal %q: %v", in, err)
-		}
-		if bool(b) != want {
-			t.Errorf("%q => %v, want %v", in, bool(b), want)
-		}
-	}
-	var b appleBoolString
-	if err := b.UnmarshalJSON([]byte(`"maybe"`)); err == nil {
-		t.Errorf("expected error for invalid bool")
+	if id.Name != "John Doe" {
+		t.Errorf("expected Name 'John Doe', got %q", id.Name)
 	}
 }

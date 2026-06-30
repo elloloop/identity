@@ -362,14 +362,18 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 		return
 	}
 	link := fmt.Sprintf("%s/auth/accept-invitation?token=%s", s.appBaseURL(ctx), rawToken)
-	html, text, err := email.Render(email.TemplateTenantInvitation, map[string]any{
+	var brand resolvedBranding
+	if s.cfg != nil {
+		brand = resolveBranding(ctx, s.cfg)
+	}
+	html, text, err := email.Render(email.TemplateTenantInvitation, brand.templateData(map[string]any{
 		"UserName":    invitationGreeting(inv.Email),
 		"InviterName": "A tenant administrator",
 		"TenantName":  s.tenantDisplayName(ctx, inv.ProjectID, inv.TenantID),
 		"Role":        inv.Role,
 		"ExpiresIn":   formatExpiresIn(s.invitationTTL()),
 		"Link":        link,
-	})
+	}))
 	if err != nil {
 		s.logger.Warn("tenant_invitation_render_failed", zap.String("to", redactEmail(inv.Email)), zap.Error(err))
 		return
@@ -378,13 +382,15 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 	if s.cfg != nil {
 		from = s.cfg.SMTPFrom
 	}
-	if err := s.mailer.Send(ctx, email.Message{
+	msg := email.Message{
 		To:      inv.Email,
 		From:    from,
 		Subject: "You're invited to join a team",
 		HTML:    html,
 		Text:    text,
-	}); err != nil {
+	}
+	brand.applyTo(&msg)
+	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("tenant_invitation_send_failed", zap.String("to", redactEmail(inv.Email)), zap.Error(err))
 	}
 }

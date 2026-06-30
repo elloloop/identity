@@ -89,6 +89,56 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		// DateOfBirthMs must default to 0 (unknown) when omitted at create
+		// and round-trip exactly through both create and update, identically
+		// on every driver. This is the persistence half of age-gating; the
+		// derived band/minor flags are computed in the service layer, not
+		// stored.
+		t.Run("User_DateOfBirth", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+
+			// Omitted at create → 0 (unknown).
+			idDefault := createTestUser(t, r, "rt-dob-default@example.com")
+			gotDefault, err := r.GetUser(ctx, idDefault)
+			if err != nil || gotDefault == nil {
+				t.Fatalf("GetUser(default): %v %#v", err, gotDefault)
+			}
+			if gotDefault.DateOfBirthMs != 0 {
+				t.Errorf("default DateOfBirthMs = %d, want 0", gotDefault.DateOfBirthMs)
+			}
+
+			// Set at create → reads back exactly.
+			const dobCreate int64 = 1_041_465_600_000 // 2003-01-02 UTC
+			idCreate, err := r.CreateUser(ctx, &service.User{
+				Email: "rt-dob-create@example.com", Status: "active", Role: "member",
+				Name: "dob", DateOfBirthMs: dobCreate,
+			})
+			if err != nil {
+				t.Fatalf("CreateUser(dob): %v", err)
+			}
+			gotCreate, err := r.GetUser(ctx, idCreate)
+			if err != nil || gotCreate == nil {
+				t.Fatalf("GetUser(create): %v %#v", err, gotCreate)
+			}
+			if gotCreate.DateOfBirthMs != dobCreate {
+				t.Errorf("create DateOfBirthMs = %d, want %d", gotCreate.DateOfBirthMs, dobCreate)
+			}
+
+			// Updated → reads back the new value.
+			const dobUpdate int64 = 1_577_836_800_000 // 2020-01-01 UTC
+			if err := r.UpdateUser(ctx, idCreate, map[string]any{"date_of_birth_ms": dobUpdate}); err != nil {
+				t.Fatalf("UpdateUser(dob): %v", err)
+			}
+			gotUpdate, err := r.GetUser(ctx, idCreate)
+			if err != nil || gotUpdate == nil {
+				t.Fatalf("GetUser(update): %v %#v", err, gotUpdate)
+			}
+			if gotUpdate.DateOfBirthMs != dobUpdate {
+				t.Errorf("update DateOfBirthMs = %d, want %d", gotUpdate.DateOfBirthMs, dobUpdate)
+			}
+		})
+
 		// Int64 fidelity: timestamps and counters must survive the full
 		// signed-64-bit range without truncation or float coercion.
 		t.Run("Int64_Fidelity", func(t *testing.T) {
@@ -106,8 +156,14 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 			}
 			for i, c := range cases {
 				h := fmt.Sprintf("rt-int64-%d", i)
+				// SessionStartedAt is the absolute-timeout anchor; it must
+				// survive the full int64 range like the other timestamps, and
+				// independently of created_at (it is propagated across
+				// rotations rather than re-stamped).
+				sessionStart := c.createdAt - 1
 				if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
 					TokenHash: h, UserID: uid, ExpiresAt: c.expiresAt, CreatedAt: c.createdAt, LastUsedAt: c.createdAt,
+					SessionStartedAt: sessionStart,
 				}); err != nil {
 					t.Fatalf("%s: CreateRefreshToken: %v", c.name, err)
 				}
@@ -120,6 +176,9 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 				}
 				if got.CreatedAt != c.createdAt {
 					t.Errorf("%s: CreatedAt round-trip = %d, want %d", c.name, got.CreatedAt, c.createdAt)
+				}
+				if got.SessionStartedAt != sessionStart {
+					t.Errorf("%s: SessionStartedAt round-trip = %d, want %d", c.name, got.SessionStartedAt, sessionStart)
 				}
 			}
 		})

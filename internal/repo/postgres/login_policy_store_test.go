@@ -68,11 +68,14 @@ func runLoginPolicySmoke(t *testing.T, dsn string) {
 
 	// Insert.
 	id1, err := store.UpsertLoginPolicy(ctx, &service.LoginPolicy{
-		ProjectID:      projectID,
-		TenantID:       tenantID,
-		AllowedMethods: service.LoginMethodSSO,
-		SSORequired:    true,
-		Require2FA:     true,
+		ProjectID:                     projectID,
+		TenantID:                      tenantID,
+		AllowedMethods:                service.LoginMethodSSO,
+		SSORequired:                   true,
+		Require2FA:                    true,
+		PasswordMinLength:             12,
+		SessionIdleTimeoutSeconds:     900,
+		SessionAbsoluteTimeoutSeconds: 86400,
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, id1)
@@ -84,6 +87,9 @@ func runLoginPolicySmoke(t *testing.T, dsn string) {
 	require.Equal(t, service.LoginMethodSSO, got.AllowedMethods)
 	require.True(t, got.SSORequired)
 	require.True(t, got.Require2FA)
+	require.Equal(t, 12, got.PasswordMinLength)
+	require.Equal(t, int64(900), got.SessionIdleTimeoutSeconds)
+	require.Equal(t, int64(86400), got.SessionAbsoluteTimeoutSeconds)
 	require.JSONEq(t, `{}`, got.SSOConnectionJSON, "empty sso connection defaults to {}")
 	require.NotZero(t, got.CreatedAtMs)
 	createdAt := got.CreatedAtMs
@@ -105,6 +111,9 @@ func runLoginPolicySmoke(t *testing.T, dsn string) {
 	require.Equal(t, service.LoginMethodEmailOTP+","+service.LoginMethodPassword, got.AllowedMethods)
 	require.False(t, got.SSORequired)
 	require.JSONEq(t, `{"idp":"okta"}`, got.SSOConnectionJSON)
+	require.Zero(t, got.PasswordMinLength, "upsert overwrites the policy fields")
+	require.Zero(t, got.SessionIdleTimeoutSeconds)
+	require.Zero(t, got.SessionAbsoluteTimeoutSeconds)
 	require.Equal(t, createdAt, got.CreatedAtMs, "created_at_ms is preserved across upsert")
 	require.GreaterOrEqual(t, got.UpdatedAtMs, createdAt)
 
@@ -114,4 +123,13 @@ func runLoginPolicySmoke(t *testing.T, dsn string) {
 	missing, err := store.GetLoginPolicy(ctx, projectID, "no-such-tenant")
 	require.NoError(t, err)
 	require.Nil(t, missing)
+
+	// Delete clears the policy; a subsequent Get is (nil, nil), and deleting
+	// again is an idempotent no-op.
+	require.NoError(t, store.DeleteLoginPolicy(ctx, projectID, tenantID))
+	gone, err := store.GetLoginPolicy(ctx, projectID, tenantID)
+	require.NoError(t, err)
+	require.Nil(t, gone)
+	require.NoError(t, store.DeleteLoginPolicy(ctx, projectID, tenantID), "delete is idempotent")
+	require.ErrorIs(t, store.DeleteLoginPolicy(ctx, projectID, ""), service.ErrInvalidArgument)
 }

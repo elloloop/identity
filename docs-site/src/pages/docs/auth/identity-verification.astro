@@ -120,7 +120,7 @@ enum IdentityVerificationStatus {
 }`} lang="go" />
 
   <p>
-    A non-Azure provider then registers itself in <code>cmd/identity/idv.go</code>'s
+    A non-Azure provider then registers itself in <code>identityserver/adapters.go</code>'s
     <code>buildIDVProvider</code> switch (or in a fork's equivalent
     factory). The service layer, persistence, RPC contract, and login
     gate all keep working unchanged.

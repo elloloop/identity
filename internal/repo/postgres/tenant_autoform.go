@@ -72,7 +72,8 @@ func (s *AutoFormStore) findOrCreateTenant(ctx context.Context, projectID, domai
 
 	now := nowMs()
 	tenantID := newID()
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.Exec(
+		ctx, `
 		INSERT INTO tenants (
 			id, project_id, name, primary_domain, status,
 			created_at_ms, updated_at_ms
@@ -82,7 +83,8 @@ func (s *AutoFormStore) findOrCreateTenant(ctx context.Context, projectID, domai
 		return "", wrapPgErr("EnsureTenantForDomain(tenant)", err)
 	}
 
-	_, err = tx.Exec(ctx, `
+	_, err = tx.Exec(
+		ctx, `
 		INSERT INTO domains (
 			id, project_id, tenant_id, domain, verification_method, status,
 			verified_at_ms, created_at_ms, updated_at_ms
@@ -119,7 +121,8 @@ type querier interface {
 // project (case-insensitive), or "" when none.
 func (s *AutoFormStore) tenantIDForDomain(ctx context.Context, q querier, projectID, domain string) (string, error) {
 	var id string
-	err := q.QueryRow(ctx, `
+	err := q.QueryRow(
+		ctx, `
 		SELECT tenant_id FROM domains
 		WHERE project_id = $1 AND lower(domain) = lower($2)`,
 		projectID, domain,
@@ -138,7 +141,8 @@ func (s *AutoFormStore) tenantIDForDomain(ctx context.Context, q querier, projec
 // (project, tenant, user).
 func (s *AutoFormStore) upsertDerivedMembership(ctx context.Context, projectID, tenantID, userID string) error {
 	now := nowMs()
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.pool.Exec(
+		ctx, `
 		INSERT INTO tenant_memberships (
 			id, project_id, tenant_id, user_id, source, role, status,
 			created_at_ms, updated_at_ms

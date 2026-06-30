@@ -29,13 +29,17 @@ func NewLoginPolicyStore(r *pgRepository) *LoginPolicyStore {
 
 const loginPolicyColumns = `
 	id, project_id, tenant_id, allowed_methods, sso_required,
-	sso_connection_json, require_2fa, created_at_ms, updated_at_ms`
+	sso_connection_json, require_2fa, password_min_length,
+	session_idle_timeout_seconds,
+	session_absolute_timeout_seconds, created_at_ms, updated_at_ms`
 
 func scanLoginPolicy(row pgx.Row) (*service.LoginPolicy, error) {
 	var p service.LoginPolicy
 	if err := row.Scan(
 		&p.ID, &p.ProjectID, &p.TenantID, &p.AllowedMethods, &p.SSORequired,
-		&p.SSOConnectionJSON, &p.Require2FA, &p.CreatedAtMs, &p.UpdatedAtMs,
+		&p.SSOConnectionJSON, &p.Require2FA, &p.PasswordMinLength,
+		&p.SessionIdleTimeoutSeconds,
+		&p.SessionAbsoluteTimeoutSeconds, &p.CreatedAtMs, &p.UpdatedAtMs,
 	); err != nil {
 		return nil, err
 	}
@@ -71,20 +75,26 @@ func (s *LoginPolicyStore) UpsertLoginPolicy(ctx context.Context, p *service.Log
 	const q = `
 		INSERT INTO login_policies (
 			id, project_id, tenant_id, allowed_methods, sso_required,
-			sso_connection_json, require_2fa, created_at_ms, updated_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $8)
+			sso_connection_json, require_2fa, password_min_length,
+			session_idle_timeout_seconds,
+			session_absolute_timeout_seconds, created_at_ms, updated_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $11)
 		ON CONFLICT (project_id, tenant_id) DO UPDATE SET
-			allowed_methods     = EXCLUDED.allowed_methods,
-			sso_required        = EXCLUDED.sso_required,
-			sso_connection_json = EXCLUDED.sso_connection_json,
-			require_2fa         = EXCLUDED.require_2fa,
-			updated_at_ms       = EXCLUDED.updated_at_ms
+			allowed_methods                  = EXCLUDED.allowed_methods,
+			sso_required                     = EXCLUDED.sso_required,
+			sso_connection_json              = EXCLUDED.sso_connection_json,
+			require_2fa                      = EXCLUDED.require_2fa,
+			password_min_length              = EXCLUDED.password_min_length,
+			session_idle_timeout_seconds     = EXCLUDED.session_idle_timeout_seconds,
+			session_absolute_timeout_seconds = EXCLUDED.session_absolute_timeout_seconds,
+			updated_at_ms                    = EXCLUDED.updated_at_ms
 		RETURNING id`
 	var outID string
 	if err := s.pool.QueryRow(
 		ctx, q,
 		id, p.ProjectID, p.TenantID, p.AllowedMethods, p.SSORequired,
-		ssoConn, p.Require2FA, now,
+		ssoConn, p.Require2FA, p.PasswordMinLength,
+		p.SessionIdleTimeoutSeconds, p.SessionAbsoluteTimeoutSeconds, now,
 	).Scan(&outID); err != nil {
 		return "", wrapPgErr("UpsertLoginPolicy", err)
 	}
@@ -110,4 +120,18 @@ func (s *LoginPolicyStore) GetLoginPolicy(ctx context.Context, projectID, tenant
 		return nil, wrapPgErr("GetLoginPolicy", err)
 	}
 	return p, nil
+}
+
+// DeleteLoginPolicy removes the policy for (projectID, tenantID). It is
+// idempotent: deleting an absent policy affects no row and returns nil. Both
+// ids are required.
+func (s *LoginPolicyStore) DeleteLoginPolicy(ctx context.Context, projectID, tenantID string) error {
+	if projectID == "" || tenantID == "" {
+		return fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
+	}
+	const q = `DELETE FROM login_policies WHERE project_id = $1 AND tenant_id = $2`
+	if _, err := s.pool.Exec(ctx, q, projectID, tenantID); err != nil {
+		return wrapPgErr("DeleteLoginPolicy", err)
+	}
+	return nil
 }

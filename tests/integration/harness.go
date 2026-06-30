@@ -810,7 +810,10 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 			return "", fmt.Errorf("user %q already exists", u.Email)
 		}
 	}
-	id := r.nextID()
+	id := u.ID
+	if id == "" {
+		id = r.nextID()
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -1130,6 +1133,17 @@ func (r *MemRepo) UpdatePasskeyCredential(_ context.Context, nodeID string, fiel
 	}
 	if v, ok := fields["last_used_at"]; ok {
 		c.LastUsedAt, _ = v.(int64)
+	}
+	return nil
+}
+
+func (r *MemRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
 	}
 	return nil
 }
@@ -1760,6 +1774,18 @@ func (r *MemRepo) ListOAuthIdentitiesForUser(_ context.Context, userID string) (
 		}
 	}
 	return out, nil
+}
+
+func (r *MemRepo) DeleteOAuthIdentity(_ context.Context, userID, provider, providerUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, oi := range r.oauthIdentities {
+		if oi.UserID == userID && oi.Provider == provider && oi.ProviderUserID == providerUserID {
+			delete(r.oauthIdentities, id)
+			return nil
+		}
+	}
+	return service.ErrNotFound
 }
 
 // ── Identity Verification ──────────────────────────────────────────────

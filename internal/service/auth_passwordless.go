@@ -83,13 +83,24 @@ func (s *AuthService) RequestEmailLoginCode(ctx context.Context, emailAddr strin
 		s.logger.Info("email_login_code_requested_invalid_email")
 		return nil
 	}
+	s.sendEmailLoginCode(ctx, emailAddr)
+	return nil
+}
 
+// sendEmailLoginCode mints, stores, and emails a fresh 6-digit OTP for the
+// (already-normalized/canonical) address, honouring the per-email send
+// cooldown. It is the single mint-and-dispatch primitive shared by the
+// passwordless email-code arm and passkey-first signup, so both produce an
+// identical, enumeration-safe observable: it is silent — throttled, render, and
+// send failures are logged, never surfaced — and behaves the same whether or
+// not the address has an account (the account, if any, is never looked up here).
+func (s *AuthService) sendEmailLoginCode(ctx context.Context, emailAddr string) {
 	// Per-email send cooldown — a single inbox can't be flooded. Reuses
 	// the shared transactional-email throttle. A throttled request is
 	// silent (same response as success) so the cooldown can't be probed.
 	if !s.emailThrottle.allow(emailAddr, s.nowMs()) {
 		s.logger.Info("email_login_code_throttled", zap.String("email", redactEmail(emailAddr)))
-		return nil
+		return
 	}
 
 	code := generateEmailLoginCode()
@@ -104,29 +115,31 @@ func (s *AuthService) RequestEmailLoginCode(ctx context.Context, emailAddr strin
 	}); err != nil {
 		s.logger.Warn("email_login_code_create_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
-		return nil
+		return
 	}
 
-	html, text, err := email.Render(email.TemplateEmailLoginCode, map[string]any{
+	brand := resolveBranding(ctx, s.cfg)
+	html, text, err := email.Render(email.TemplateEmailLoginCode, brand.templateData(map[string]any{
 		"Code":      code,
 		"ExpiresIn": formatExpiresIn(ttl),
-	})
+	}))
 	if err != nil {
 		s.logger.Warn("email_login_code_render_failed", zap.Error(err))
-		return nil
+		return
 	}
-	if err := s.mailer.Send(ctx, email.Message{
+	msg := email.Message{
 		To:      emailAddr,
 		From:    s.cfg.SMTPFrom,
 		Subject: "Your login code",
 		HTML:    html,
 		Text:    text,
-	}); err != nil {
+	}
+	brand.applyTo(&msg)
+	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("email_login_code_send_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
 	}
 	s.logger.Info("email_login_code_requested", zap.String("email", redactEmail(emailAddr)))
-	return nil
 }
 
 // ── VerifyEmailLoginCode ───────────────────────────────────────────────
@@ -146,15 +159,36 @@ func (s *AuthService) VerifyEmailLoginCode(ctx context.Context, emailAddr, code 
 		return nil, ErrEmailLoginCodeInvalid
 	}
 
+	if err := s.verifyAndConsumeEmailLoginCode(ctx, emailAddr, code, "email_code", ipAddr, userAgent); err != nil {
+		return nil, err
+	}
+
+	return s.completePasswordlessLogin(ctx, emailAddr, "email_code", ipAddr, userAgent)
+}
+
+// verifyAndConsumeEmailLoginCode validates the OTP for the (already-normalized/
+// canonical) address and, on success, consumes it single-use. It is the shared
+// proof-of-inbox-control primitive: the passwordless email-code arm chains it
+// into completePasswordlessLogin, and passkey-first signup chains it into
+// verified account creation. It does NOT resolve or create a user, so it never
+// reveals whether the address has an account.
+//
+// Every failure mode — missing/expired/consumed code, wrong code, exhausted
+// attempts — collapses to ErrEmailLoginCodeInvalid, so the caller can surface
+// one generic error with no existence oracle. A wrong guess bumps the per-code
+// attempt counter; once it reaches the cap captured at mint time the code is
+// consumed (invalidated) to stop a brute-force walk of the 6-digit space.
+// method tags the failure audit event ("email_code" or "passkey_signup").
+func (s *AuthService) verifyAndConsumeEmailLoginCode(ctx context.Context, emailAddr, code, method, ipAddr, userAgent string) error {
 	rec, err := s.repo(ctx).FindEmailLoginCodeByEmail(ctx, emailAddr)
 	if err != nil {
-		return nil, fmt.Errorf("looking up email login code: %w", err)
+		return fmt.Errorf("looking up email login code: %w", err)
 	}
 	if rec == nil || rec.ConsumedAt != 0 || rec.ExpiresAt <= s.nowMs() {
-		return nil, ErrEmailLoginCodeInvalid
+		return ErrEmailLoginCodeInvalid
 	}
 	if rec.MaxAttempts > 0 && rec.AttemptCount >= rec.MaxAttempts {
-		return nil, ErrEmailLoginCodeInvalid
+		return ErrEmailLoginCodeInvalid
 	}
 
 	// Constant-time compare so a timing oracle can't shortcut the guess.
@@ -174,17 +208,16 @@ func (s *AuthService) VerifyEmailLoginCode(ctx context.Context, emailAddr, code 
 		}
 		s.audit.Log(ctx, audit.EventLoginFailure,
 			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent), audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"method": "email_code", "reason": "code_mismatch"}))
-		return nil, ErrEmailLoginCodeInvalid
+			audit.WithDetails(map[string]any{"method": method, "reason": "code_mismatch"}))
+		return ErrEmailLoginCodeInvalid
 	}
 
-	// Correct code: consume single-use (CAS) before resolving the user so
+	// Correct code: consume single-use (CAS) before the caller proceeds so
 	// a replay racing this verify loses.
 	if _, err := s.repo(ctx).ConsumeEmailLoginCode(ctx, emailAddr, s.nowMs()); err != nil {
-		return nil, ErrEmailLoginCodeInvalid
+		return ErrEmailLoginCodeInvalid
 	}
-
-	return s.completePasswordlessLogin(ctx, emailAddr, "email_code", ipAddr, userAgent)
+	return nil
 }
 
 // ── RequestMagicLink ───────────────────────────────────────────────────
@@ -231,21 +264,24 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 	}
 
 	link := fmt.Sprintf("%s/auth/magic-link?token=%s", s.appBaseURL(ctx), rawToken)
-	html, text, err := email.Render(email.TemplateMagicLink, map[string]any{
+	brand := resolveBranding(ctx, s.cfg)
+	html, text, err := email.Render(email.TemplateMagicLink, brand.templateData(map[string]any{
 		"Link":      link,
 		"ExpiresIn": formatExpiresIn(ttl),
-	})
+	}))
 	if err != nil {
 		s.logger.Warn("magic_link_render_failed", zap.Error(err))
 		return nil
 	}
-	if err := s.mailer.Send(ctx, email.Message{
+	msg := email.Message{
 		To:      emailAddr,
 		From:    s.cfg.SMTPFrom,
 		Subject: "Your sign-in link",
 		HTML:    html,
 		Text:    text,
-	}); err != nil {
+	}
+	brand.applyTo(&msg)
+	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("magic_link_send_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
 	}
@@ -327,6 +363,16 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr, 
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// A pre-existing account resolved here was NOT created verified by the
+	// resolver. Redeeming an emailed OTP / magic link proves control of the
+	// address, so verify the account AND clear any password planted while it
+	// was unverified (anti-pre-hijacking) — identical treatment to the OAuth
+	// external proof. New accounts are already created verified, so the helper
+	// is a no-op for them.
+	if !isNew {
+		s.markEmailVerifiedViaExternalProof(ctx, user, s.nowMs(), "passwordless")
 	}
 
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {

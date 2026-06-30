@@ -27,10 +27,16 @@ import { Code } from "astro-expressive-code/components";
       <td>Sent only to <code>RefreshToken</code> / <code>Logout</code>. Rotated on every use.</td>
     </tr>
   </table>
+  <p>
+    The lifetimes above are the defaults; both are configurable via
+    <code>GATEWAY_JWT_EXPIRY_SECONDS</code> and
+    <code>GATEWAY_REFRESH_EXPIRY_SECONDS</code> — see the
+    <a href="/identity/docs/installation/configuration#jwt-and-tokens">JWT &amp;
+    tokens section of the configuration reference</a> for current values.
+  </p>
 
   <h2>Access token claims</h2>
   <Code code={`{
-  "iss": "identity",
   "sub": "user_01HZ...",       // user ID
   "email": "alice@acme.com",   // login key — see Projects, Tenants & Domains
   "project": "proj_01HZ...",   // Project (isolation shard) the user belongs to
@@ -46,9 +52,10 @@ import { Code } from "astro-expressive-code/components";
     or app-specific ACL decisions into the JWT.
   </p>
   <p>
-    <code>VerifyAccessToken</code> in <code>pkg/jwt</code> checks the
-    signature, <code>exp</code>, <code>iss</code>, and looks the
-    <code>kid</code> up in the active key ring. Tokens signed with a key
+    <code>VerifyAccessToken</code> in <code>pkg/jwt</code> looks the
+    <code>kid</code> up in the active key ring and checks the
+    signature, <code>exp</code>, and (when the caller supplies them) the
+    <code>tenant</code> and <code>aud</code> claims. Tokens signed with a key
     that has been rotated out (but is still in the ring) continue to verify
     until they expire — see <a href="/identity/docs/installation/jwt-keys">JWT Keys</a>.
   </p>

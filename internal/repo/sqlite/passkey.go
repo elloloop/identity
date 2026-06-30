@@ -12,13 +12,15 @@ import (
 // #nosec G101 -- SQL column list contains key field names, not credentials.
 const passkeyColumns = `
 	id, credential_id, user_id, public_key, sign_count,
-	device_name, aaguid, transports, created_at_ms, last_used_at_ms`
+	device_name, aaguid, transports, backup_eligible, backup_state,
+	created_at_ms, last_used_at_ms`
 
 func scanPasskey(s scanner) (*service.PasskeyCredRecord, error) {
 	var c service.PasskeyCredRecord
 	if err := s.Scan(
 		&c.NodeID, &c.CredentialID, &c.UserID, &c.PublicKey, &c.SignCount,
-		&c.DeviceName, &c.AAGUID, &c.Transports, &c.CreatedAt, &c.LastUsedAt,
+		&c.DeviceName, &c.AAGUID, &c.Transports, &c.BackupEligible, &c.BackupState,
+		&c.CreatedAt, &c.LastUsedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -81,12 +83,14 @@ func (r *sqliteRepository) CreatePasskeyCredential(ctx context.Context, c *servi
 	const q = `
 		INSERT INTO passkeys (
 			id, project_id, credential_id, user_id, public_key, sign_count,
-			device_name, aaguid, transports, created_at_ms, last_used_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+			device_name, aaguid, transports, backup_eligible, backup_state,
+			created_at_ms, last_used_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	_, err := r.db.Exec(
 		ctx, q,
 		id, r.projectID, c.CredentialID, c.UserID, c.PublicKey, c.SignCount,
-		c.DeviceName, c.AAGUID, c.Transports, c.CreatedAt, c.LastUsedAt,
+		c.DeviceName, c.AAGUID, c.Transports, c.BackupEligible, c.BackupState,
+		c.CreatedAt, c.LastUsedAt,
 	)
 	if err != nil {
 		return "", wrapErr("CreatePasskeyCredential", err)
@@ -149,6 +153,17 @@ func (r *sqliteRepository) UpdatePasskeyCredential(ctx context.Context, nodeID s
 	return nil
 }
 
+func (r *sqliteRepository) DeletePasskeyCredentialsForUser(ctx context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	const q = `DELETE FROM passkeys WHERE project_id = $1 AND user_id = $2`
+	if _, err := r.db.Exec(ctx, q, r.projectID, userID); err != nil {
+		return wrapErr("DeletePasskeyCredentialsForUser", err)
+	}
+	return nil
+}
+
 // ── Passkey challenges ────────────────────────────────────────────
 
 func (r *sqliteRepository) GetPasskeyChallenge(ctx context.Context, nodeID string) (*service.PasskeyChallengeRecord, error) {
@@ -156,12 +171,12 @@ func (r *sqliteRepository) GetPasskeyChallenge(ctx context.Context, nodeID strin
 		return nil, nil
 	}
 	const q = `
-		SELECT id, challenge, user_id, challenge_type, expires_at_ms, created_at_ms
+		SELECT id, challenge, user_id, challenge_type, email, expires_at_ms, created_at_ms
 		  FROM passkey_challenges
 		 WHERE project_id = $1 AND id = $2`
 	var c service.PasskeyChallengeRecord
 	err := r.db.QueryRow(ctx, q, r.projectID, nodeID).Scan(
-		&c.NodeID, &c.Challenge, &c.UserID, &c.ChallengeType, &c.ExpiresAt, &c.CreatedAt,
+		&c.NodeID, &c.Challenge, &c.UserID, &c.ChallengeType, &c.Email, &c.ExpiresAt, &c.CreatedAt,
 	)
 	if noRows(err) {
 		return nil, nil
@@ -182,9 +197,9 @@ func (r *sqliteRepository) CreatePasskeyChallenge(ctx context.Context, c *servic
 	}
 	const q = `
 		INSERT INTO passkey_challenges (
-			id, project_id, challenge, user_id, challenge_type, expires_at_ms, created_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := r.db.Exec(ctx, q, id, r.projectID, c.Challenge, c.UserID, c.ChallengeType, c.ExpiresAt, c.CreatedAt)
+			id, project_id, challenge, user_id, challenge_type, email, expires_at_ms, created_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	_, err := r.db.Exec(ctx, q, id, r.projectID, c.Challenge, c.UserID, c.ChallengeType, c.Email, c.ExpiresAt, c.CreatedAt)
 	if err != nil {
 		return "", wrapErr("CreatePasskeyChallenge", err)
 	}

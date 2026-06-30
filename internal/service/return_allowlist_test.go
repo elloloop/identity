@@ -32,24 +32,42 @@ func TestParseReturnAllowlist(t *testing.T) {
 func TestReturnAllowlist_Allows(t *testing.T) {
 	t.Parallel()
 
-	a := ParseReturnAllowlist("https://app.example.com/,https://other.example.org/auth")
+	a := ParseReturnAllowlist("https://app.example.com,https://other.example.org/auth")
 	tests := []struct {
 		returnTo string
 		want     bool
 	}{
 		{"https://app.example.com/", true},
-		{"https://app.example.com/auth/finish?next=/home", true}, // prefix match
+		{"https://app.example.com/auth/finish?next=/home", true},
 		{"https://other.example.org/auth", true},
 		{"https://other.example.org/auth/callback", true},
+		{"https://other.example.org/authentication", false},
+		{"https://other.example.org/auth/../unrelated", false},
 		{"https://evil.example.net/", false},
-		{"https://app.example.com.evil.net/", false}, // not a prefix of an entry
-		{"http://app.example.com/", false},           // scheme differs
+		{"https://app.example.com.evil.net/", false},
+		{"https://app.example.com.attacker.tld/", false},
+		{"https://app.example.com@evil.example.net/", false},
+		{"http://app.example.com/", false},
 		{"", false},
 		{"   ", false},
 	}
 	for _, tt := range tests {
 		if got := a.Allows(tt.returnTo); got != tt.want {
 			t.Errorf("Allows(%q) = %v, want %v", tt.returnTo, got, tt.want)
+		}
+	}
+}
+
+func TestReturnAllowlist_RejectsEntriesWithQueryOrFragment(t *testing.T) {
+	t.Parallel()
+
+	for _, entry := range []string{
+		"https://app.example.com/callback?source=oauth",
+		"https://app.example.com/callback#fragment",
+	} {
+		a := ParseReturnAllowlist(entry)
+		if a.Allows("https://app.example.com/callback") {
+			t.Fatalf("entry %q allowed a return_to", entry)
 		}
 	}
 }

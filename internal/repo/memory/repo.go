@@ -225,7 +225,16 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 			return "", fmt.Errorf("user %q already exists", u.Email)
 		}
 	}
-	id := r.nextID()
+	// Honour a caller-provided id (matching the postgres/sqlite drivers).
+	// Passkey-first signup mints the user id during the Begin step and binds
+	// it as the WebAuthn user handle; CreateUser must persist that exact id so
+	// the credential's handle matches the stored user at login time.
+	id := u.ID
+	if id == "" {
+		id = r.nextID()
+	} else if _, clash := r.users[id]; clash {
+		return "", fmt.Errorf("user id %q already exists", id)
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -387,6 +396,13 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			case int:
 				u.PhoneVerifiedAt = int64(x)
 			}
+		case "date_of_birth_ms":
+			switch x := v.(type) {
+			case int64:
+				u.DateOfBirthMs = x
+			case int:
+				u.DateOfBirthMs = int64(x)
+			}
 		}
 	}
 }
@@ -513,6 +529,16 @@ func (r *Repo) UpdatePasskeyCredential(_ context.Context, nodeID string, fields 
 	if v, ok := fields["last_used_at"]; ok {
 		c.LastUsedAt, _ = v.(int64)
 	}
+	return nil
+}
+
+func (r *Repo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	deleteByUser(r.passkeyCreds, userID, func(c *service.PasskeyCredRecord) string { return c.UserID })
 	return nil
 }
 
@@ -1183,6 +1209,18 @@ func (r *Repo) ListOAuthIdentitiesForUser(_ context.Context, userID string) ([]*
 		}
 	}
 	return out, nil
+}
+
+func (r *Repo) DeleteOAuthIdentity(_ context.Context, userID, provider, providerUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, oi := range r.oauthIdentities {
+		if oi.UserID == userID && oi.Provider == provider && oi.ProviderUserID == providerUserID {
+			delete(r.oauthIdentities, id)
+			return nil
+		}
+	}
+	return service.ErrNotFound
 }
 
 // ── Identity Verification Records ─────────────────────────────────

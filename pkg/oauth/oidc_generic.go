@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
@@ -19,17 +19,17 @@ import (
 var defaultOIDCScopes = []string{"openid", "email", "profile"}
 
 // GenericOIDCConfig configures a config-driven OIDC Exchanger for an
-// arbitrary standards-compliant provider (Okta, Slack, Auth0, any
-// enterprise IdP). It is the additive, code-release-free path: an
-// operator enables a new provider purely via GATEWAY_OIDC_* env vars.
+// arbitrary standards-compliant provider (Okta, Auth0, Keycloak, any
+// self-hosted issuer). It is the additive, code-release-free path: an
+// operator enables a new provider purely via GATEWAY_OAUTH_OIDC_* env vars.
 //
 // IssuerURL is the provider's issuer (e.g. https://example.okta.com).
 // The exchanger resolves the authorization / token / JWKS / userinfo
 // endpoints from <IssuerURL>/.well-known/openid-configuration unless
 // DiscoveryURL overrides it.
 type GenericOIDCConfig struct {
-	// ProviderKey is the registry key (e.g. "okta", "slack") this
-	// exchanger is registered under and reported in Identity.Provider.
+	// ProviderKey is the registry key (e.g. "okta") this exchanger is
+	// registered under and reported in Identity.Provider.
 	ProviderKey string
 
 	IssuerURL    string
@@ -56,8 +56,8 @@ type oidcExchanger struct {
 }
 
 // NewOIDC returns a generic OIDC Exchanger built on the shared OIDC
-// discovery / userinfo helpers. ProviderKey, IssuerURL (or DiscoveryURL),
-// ClientID, and ClientSecret are required.
+// discovery / userinfo / JWKS helpers. ProviderKey, IssuerURL (or
+// DiscoveryURL), ClientID, and ClientSecret are required.
 func NewOIDC(cfg GenericOIDCConfig) Exchanger {
 	if cfg.DiscoveryURL == "" && cfg.IssuerURL != "" {
 		cfg.DiscoveryURL = strings.TrimRight(cfg.IssuerURL, "/") +
@@ -134,8 +134,8 @@ func (o *oidcExchanger) AuthorizationURL(ctx context.Context, redirectURI, state
 	return buildAuthorizationURL(doc.AuthorizationEndpoint, params)
 }
 
-func (o *oidcExchanger) Exchange(ctx context.Context, code, redirectURI string) (*Identity, error) {
-	if code == "" {
+func (o *oidcExchanger) Exchange(ctx context.Context, params ExchangeParams) (*Identity, error) {
+	if params.Code == "" {
 		return nil, fmt.Errorf("%w: missing authorization code", ErrCodeExchangeFailed)
 	}
 	if o.cfg.ClientID == "" || o.cfg.ClientSecret == "" {
@@ -151,13 +151,13 @@ func (o *oidcExchanger) Exchange(ctx context.Context, code, redirectURI string) 
 	}
 
 	form := url.Values{}
-	form.Set("code", code)
+	form.Set("code", params.Code)
 	form.Set("client_id", o.cfg.ClientID)
 	form.Set("client_secret", o.cfg.ClientSecret)
-	form.Set("redirect_uri", redirectURI)
+	form.Set("redirect_uri", params.RedirectURI)
 	form.Set("grant_type", "authorization_code")
-	if codeVerifier := codeVerifierFromContext(ctx); codeVerifier != "" {
-		form.Set("code_verifier", codeVerifier)
+	if params.CodeVerifier != "" {
+		form.Set("code_verifier", params.CodeVerifier)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, doc.TokenEndpoint,
@@ -255,17 +255,17 @@ func (o *oidcExchanger) verifyIDToken(ctx context.Context, raw, issuer string) (
 		return nil, fmt.Errorf("%w: jwks: %w", ErrIdentityVerification, err)
 	}
 
-	payload, err := verifyJWSWithAlgs(raw, set, jwa.RS256, jwa.ES256)
-	if err != nil {
+	payload, err := verifyJWS(raw, set)
+	if err != nil && errors.Is(err, errKeyNotFound) {
 		o.jwks.Invalidate()
 		set2, fErr := o.jwks.Get(ctx)
 		if fErr != nil {
 			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 		}
-		payload, err = verifyJWSWithAlgs(raw, set2, jwa.RS256, jwa.ES256)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-		}
+		payload, err = verifyJWS(raw, set2)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 	}
 
 	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))

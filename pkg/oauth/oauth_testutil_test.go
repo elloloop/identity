@@ -25,29 +25,29 @@ type testKey struct {
 	JWKJSON []byte
 }
 
-func newTestKey(t *testing.T, kid string) *testKey {
-	t.Helper()
+func newTestKey(tb testing.TB, kid string) *testKey {
+	tb.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		t.Fatalf("rsa generate: %v", err)
+		tb.Fatalf("rsa generate: %v", err)
 	}
 	pubKey, err := jwk.FromRaw(priv.Public())
 	if err != nil {
-		t.Fatalf("jwk from raw: %v", err)
+		tb.Fatalf("jwk from raw: %v", err)
 	}
 	if err := pubKey.Set(jwk.KeyIDKey, kid); err != nil {
-		t.Fatalf("set kid: %v", err)
+		tb.Fatalf("set kid: %v", err)
 	}
 	if err := pubKey.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		t.Fatalf("set alg: %v", err)
+		tb.Fatalf("set alg: %v", err)
 	}
 	set := jwk.NewSet()
 	if err := set.AddKey(pubKey); err != nil {
-		t.Fatalf("add key: %v", err)
+		tb.Fatalf("add key: %v", err)
 	}
 	jwksJSON, err := json.Marshal(set)
 	if err != nil {
-		t.Fatalf("marshal jwks: %v", err)
+		tb.Fatalf("marshal jwks: %v", err)
 	}
 	return &testKey{Priv: priv, JWKSet: set, KID: kid, JWKJSON: jwksJSON}
 }

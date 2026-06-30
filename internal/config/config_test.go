@@ -80,6 +80,12 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.CookieSameSite != "Lax" {
 		t.Errorf("CookieSameSite: want Lax, got %q", cfg.CookieSameSite)
 	}
+	if cfg.PostgresMaxConns != 25 {
+		t.Errorf("PostgresMaxConns: want 25, got %d", cfg.PostgresMaxConns)
+	}
+	if cfg.PostgresConnTimeoutMs != DefaultPostgresConnTimeoutMs {
+		t.Errorf("PostgresConnTimeoutMs: want %d, got %d", DefaultPostgresConnTimeoutMs, cfg.PostgresConnTimeoutMs)
+	}
 	if cfg.SweeperIntervalSeconds != 300 {
 		t.Errorf("SweeperIntervalSeconds: want 300, got %d", cfg.SweeperIntervalSeconds)
 	}
@@ -88,6 +94,18 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.SweeperGraceSeconds != 60 {
 		t.Errorf("SweeperGraceSeconds: want 60, got %d", cfg.SweeperGraceSeconds)
+	}
+	if cfg.AppleClientID != "" {
+		t.Errorf("AppleClientID: want empty default, got %q", cfg.AppleClientID)
+	}
+	if cfg.AppleTeamID != "" {
+		t.Errorf("AppleTeamID: want empty default, got %q", cfg.AppleTeamID)
+	}
+	if cfg.AppleKeyID != "" {
+		t.Errorf("AppleKeyID: want empty default, got %q", cfg.AppleKeyID)
+	}
+	if cfg.ApplePrivateKey != "" {
+		t.Errorf("ApplePrivateKey: want empty default, got %q", cfg.ApplePrivateKey)
 	}
 }
 
@@ -118,7 +136,12 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_PASSWORD_SIGNUP_ENABLED", "false")
 	t.Setenv("GATEWAY_PASSWORD_RESET_ENABLED", "false")
 	t.Setenv("GATEWAY_LOGIN_MAX_FAILED_ATTEMPTS", "10")
+	t.Setenv("GATEWAY_POSTGRES_CONN_TIMEOUT_MS", "2500")
 	t.Setenv("GATEWAY_TOTP_ISSUER", "My Corp")
+	t.Setenv("GATEWAY_OAUTH_APPLE_CLIENT_ID", "apple-client")
+	t.Setenv("GATEWAY_OAUTH_APPLE_TEAM_ID", "apple-team")
+	t.Setenv("GATEWAY_OAUTH_APPLE_KEY_ID", "apple-key")
+	t.Setenv("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", "apple-private")
 
 	cfg := Load()
 
@@ -152,49 +175,121 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	if cfg.LoginMaxFailedAttempts != 10 {
 		t.Errorf("LoginMaxFailedAttempts: want 10, got %d", cfg.LoginMaxFailedAttempts)
 	}
+	if cfg.PostgresConnTimeoutMs != 2500 {
+		t.Errorf("PostgresConnTimeoutMs: want 2500, got %d", cfg.PostgresConnTimeoutMs)
+	}
 	if cfg.TOTPIssuer != "My Corp" {
 		t.Errorf("TOTPIssuer: want 'My Corp', got %q", cfg.TOTPIssuer)
 	}
+	if cfg.AppleClientID != "apple-client" {
+		t.Errorf("AppleClientID: want apple-client, got %q", cfg.AppleClientID)
+	}
+	if cfg.AppleTeamID != "apple-team" {
+		t.Errorf("AppleTeamID: want apple-team, got %q", cfg.AppleTeamID)
+	}
+	if cfg.AppleKeyID != "apple-key" {
+		t.Errorf("AppleKeyID: want apple-key, got %q", cfg.AppleKeyID)
+	}
+	if cfg.ApplePrivateKey != "apple-private" {
+		t.Errorf("ApplePrivateKey: want apple-private, got %q", cfg.ApplePrivateKey)
+	}
 }
 
-func TestLoad_AppleAndGenericOIDCProviders(t *testing.T) {
+func TestLoad_GenericOIDC_Defaults(t *testing.T) {
 	clearGatewayEnv(t)
-	t.Setenv("GATEWAY_APPLE_CLIENT_ID", "com.example.svc")
-	t.Setenv("GATEWAY_APPLE_TEAM_ID", "TEAM1")
-	t.Setenv("GATEWAY_APPLE_KEY_ID", "KEY1")
-	t.Setenv("GATEWAY_APPLE_PRIVATE_KEY", "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----")
+	cfg := Load()
+	if cfg.OIDCEnabled {
+		t.Errorf("OIDCEnabled should default to false")
+	}
+	if cfg.OIDCProviderKey != "" || cfg.OIDCIssuer != "" || cfg.OIDCClientID != "" ||
+		cfg.OIDCClientSecret != "" || cfg.OIDCScopes != "" || cfg.OIDCDiscoveryURL != "" {
+		t.Errorf("generic OIDC fields should default empty: %+v", cfg)
+	}
+	if got := cfg.OIDCScopeList(); got != nil {
+		t.Errorf("OIDCScopeList default should be nil, got %v", got)
+	}
+}
 
-	t.Setenv("GATEWAY_OIDC_PROVIDERS", "okta, slack ,okta,disabled")
-	t.Setenv("GATEWAY_OIDC_OKTA_ISSUER", "https://acme.okta.com")
-	t.Setenv("GATEWAY_OIDC_OKTA_CLIENT_ID", "okta-client")
-	t.Setenv("GATEWAY_OIDC_OKTA_CLIENT_SECRET", "okta-secret")
-	t.Setenv("GATEWAY_OIDC_OKTA_SCOPES", "openid email groups")
-	t.Setenv("GATEWAY_OIDC_SLACK_ISSUER", "https://slack.com")
-	t.Setenv("GATEWAY_OIDC_SLACK_CLIENT_ID", "slack-client")
-	t.Setenv("GATEWAY_OIDC_SLACK_CLIENT_SECRET", "slack-secret")
-	// "disabled" has no creds and must be dropped.
+func TestLoad_GenericOIDC_Overrides(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_OAUTH_OIDC_ENABLED", "true")
+	t.Setenv("GATEWAY_OAUTH_OIDC_PROVIDER_KEY", "okta")
+	t.Setenv("GATEWAY_OAUTH_OIDC_ISSUER", "https://acme.okta.com")
+	t.Setenv("GATEWAY_OAUTH_OIDC_DISCOVERY_URL", "https://acme.okta.com/.well-known/openid-configuration")
+	t.Setenv("GATEWAY_OAUTH_OIDC_CLIENT_ID", "okta-client")
+	t.Setenv("GATEWAY_OAUTH_OIDC_CLIENT_SECRET", "okta-secret")
+	t.Setenv("GATEWAY_OAUTH_OIDC_SCOPES", "openid email groups")
 
 	cfg := Load()
 
-	if cfg.AppleClientID != "com.example.svc" || cfg.AppleTeamID != "TEAM1" ||
-		cfg.AppleKeyID != "KEY1" || cfg.ApplePrivateKey == "" {
-		t.Errorf("apple config not loaded: %+v", cfg.AppleClientID)
+	if !cfg.OIDCEnabled || cfg.OIDCProviderKey != "okta" ||
+		cfg.OIDCIssuer != "https://acme.okta.com" ||
+		cfg.OIDCDiscoveryURL != "https://acme.okta.com/.well-known/openid-configuration" ||
+		cfg.OIDCClientID != "okta-client" || cfg.OIDCClientSecret != "okta-secret" {
+		t.Errorf("generic OIDC config not loaded: %+v", cfg)
 	}
+	scopes := cfg.OIDCScopeList()
+	if len(scopes) != 3 || scopes[2] != "groups" {
+		t.Errorf("OIDCScopeList wrong: %v", scopes)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("valid generic OIDC config should pass Validate: %v", err)
+	}
+}
 
-	if len(cfg.OIDCProviders) != 2 {
-		t.Fatalf("want 2 oidc providers, got %d: %+v", len(cfg.OIDCProviders), cfg.OIDCProviders)
+func TestValidate_GenericOIDC_Invariants(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			OIDCEnabled:      true,
+			OIDCProviderKey:  "okta",
+			OIDCIssuer:       "https://acme.okta.com",
+			OIDCClientID:     "okta-client",
+			OIDCClientSecret: "okta-secret",
+		}
 	}
-	okta := cfg.OIDCProviders[0]
-	if okta.Key != "okta" || okta.Issuer != "https://acme.okta.com" ||
-		okta.ClientID != "okta-client" || okta.ClientSecret != "okta-secret" {
-		t.Errorf("okta provider wrong: %+v", okta)
-	}
-	if len(okta.Scopes) != 3 || okta.Scopes[2] != "groups" {
-		t.Errorf("okta scopes wrong: %+v", okta.Scopes)
-	}
-	if cfg.OIDCProviders[1].Key != "slack" {
-		t.Errorf("slack provider wrong: %+v", cfg.OIDCProviders[1])
-	}
+	t.Run("missing key", func(t *testing.T) {
+		c := base()
+		c.OIDCProviderKey = ""
+		if err := c.validateOIDC(); err == nil {
+			t.Error("want error for missing provider key")
+		}
+	})
+	t.Run("reserved key", func(t *testing.T) {
+		c := base()
+		c.OIDCProviderKey = "google"
+		if err := c.validateOIDC(); err == nil {
+			t.Error("want error for reserved provider key")
+		}
+	})
+	t.Run("missing issuer and discovery", func(t *testing.T) {
+		c := base()
+		c.OIDCIssuer = ""
+		c.OIDCDiscoveryURL = ""
+		if err := c.validateOIDC(); err == nil {
+			t.Error("want error when both issuer and discovery url are empty")
+		}
+	})
+	t.Run("discovery url substitutes for issuer", func(t *testing.T) {
+		c := base()
+		c.OIDCIssuer = ""
+		c.OIDCDiscoveryURL = "https://acme.okta.com/.well-known/openid-configuration"
+		if err := c.validateOIDC(); err != nil {
+			t.Errorf("discovery url should satisfy the issuer requirement: %v", err)
+		}
+	})
+	t.Run("missing credentials", func(t *testing.T) {
+		c := base()
+		c.OIDCClientSecret = ""
+		if err := c.validateOIDC(); err == nil {
+			t.Error("want error for missing client secret")
+		}
+	})
+	t.Run("disabled skips all checks", func(t *testing.T) {
+		c := &Config{OIDCEnabled: false}
+		if err := c.validateOIDC(); err != nil {
+			t.Errorf("disabled OIDC should never error: %v", err)
+		}
+	})
 }
 
 // TestEnvStr_Default verifies envStr returns the default for unset vars.
@@ -363,4 +458,34 @@ func findByte(s string, b byte) int {
 		}
 	}
 	return len(s)
+}
+
+// TestLoad_GoogleOIDCEndpointOverrides verifies the Google OIDC endpoint
+// overrides flow from env into config — they let a self-hosted gateway (or an
+// end-to-end test against a mock OIDC provider) point the Google provider at
+// non-default endpoints. Empty defaults (the real Google) are covered by the
+// all-defaults test.
+func TestLoad_GoogleOIDCEndpointOverrides(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_DISCOVERY_URL", "http://mock/.well-known/openid-configuration")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_AUTHORIZATION_URL", "http://mock/authorize")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_TOKEN_URL", "http://mock/token")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_JWKS_URL", "http://mock/jwks")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_USERINFO_URL", "http://mock/userinfo")
+	t.Setenv("GATEWAY_OAUTH_GOOGLE_ISSUER", "http://mock")
+
+	cfg := Load()
+
+	for _, c := range []struct{ field, got, want string }{
+		{"GoogleDiscoveryURL", cfg.GoogleDiscoveryURL, "http://mock/.well-known/openid-configuration"},
+		{"GoogleAuthorizationURL", cfg.GoogleAuthorizationURL, "http://mock/authorize"},
+		{"GoogleTokenURL", cfg.GoogleTokenURL, "http://mock/token"},
+		{"GoogleJWKSURL", cfg.GoogleJWKSURL, "http://mock/jwks"},
+		{"GoogleUserinfoURL", cfg.GoogleUserinfoURL, "http://mock/userinfo"},
+		{"GoogleIssuer", cfg.GoogleIssuer, "http://mock"},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: want %q, got %q", c.field, c.want, c.got)
+		}
+	}
 }

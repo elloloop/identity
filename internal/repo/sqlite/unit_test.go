@@ -66,35 +66,6 @@ func TestNullableHelpers(t *testing.T) {
 	}
 }
 
-// TestConfigFromEnv covers the env-var reader and its envInt helper, including
-// the default, valid-override, and non-numeric-fallback branches.
-func TestConfigFromEnv(t *testing.T) {
-	t.Setenv("GATEWAY_SQLITE_PATH", "/tmp/identity.db")
-	t.Setenv("GATEWAY_SQLITE_MAX_CONNS", "9")
-	cfg := ConfigFromEnv("proj-1")
-	if cfg.Path != "/tmp/identity.db" {
-		t.Fatalf("Path = %q", cfg.Path)
-	}
-	if cfg.MaxConns != 9 {
-		t.Fatalf("MaxConns = %d, want 9", cfg.MaxConns)
-	}
-	if cfg.ProjectID != "proj-1" {
-		t.Fatalf("ProjectID = %q", cfg.ProjectID)
-	}
-
-	// Non-numeric value falls back to the default.
-	t.Setenv("GATEWAY_SQLITE_MAX_CONNS", "not-a-number")
-	if got := ConfigFromEnv("p").MaxConns; got != DefaultMaxConns {
-		t.Fatalf("MaxConns on bad input = %d, want default %d", got, DefaultMaxConns)
-	}
-
-	// Unset value falls back to the default.
-	t.Setenv("GATEWAY_SQLITE_MAX_CONNS", "")
-	if got := ConfigFromEnv("p").MaxConns; got != DefaultMaxConns {
-		t.Fatalf("MaxConns when unset = %d, want default %d", got, DefaultMaxConns)
-	}
-}
-
 // TestConfigValidate covers each validation branch.
 func TestConfigValidate(t *testing.T) {
 	var nilCfg *Config

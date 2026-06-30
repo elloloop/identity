@@ -10,8 +10,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -77,12 +79,15 @@ func fallbackDisplayName(email, preferred string) string {
 // ── PasswordSignup ─────────────────────────────────────────────────────
 
 // PasswordSignup creates a new user with email + password and issues tokens.
-func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name, recoveryEmail string) (*LoginResult, error) {
+func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name, recoveryEmail string, dateOfBirthMs int64) (*LoginResult, error) {
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
 	}
 	if !s.cfg.PasswordSignupEnabled {
 		return nil, ErrSignupDisabled
+	}
+	if s.ageGate.Enabled() && s.cfg.AgeGateRequireDOB && dateOfBirthMs <= 0 {
+		return nil, fmt.Errorf("%w: date of birth is required", ErrInvalidArgument)
 	}
 	email = strings.TrimSpace(strings.ToLower(email))
 	if err := validateEmailFormat(email); err != nil {
@@ -95,7 +100,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
-	if err := validatePasswordStrength(password); err != nil {
+	if err := s.validatePasswordStrengthForEmail(ctx, email, password); err != nil {
 		return nil, err
 	}
 	start := time.Now()
@@ -128,13 +133,33 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	now := s.nowMs()
 	recEmail := strings.TrimSpace(strings.ToLower(recoveryEmail))
 
+	// Derive the age band from the supplied DOB. A child-band account under
+	// age-gating is created in PENDING_PARENTAL_CONSENT and is not issued
+	// tokens until verifiable parental consent is granted; every other band
+	// (and a disabled gate) creates an active account exactly as before.
+	ageDec := s.ageGate.Determine(dateOfBirthMs, s.nowFunc())
+	status := "active"
+	if s.ageGate.Enabled() && ageDec.Band == agegate.BandChild {
+		status = StatusPendingParentalConsent
+	}
+
+	// COPPA data-minimization: never persist a recovery_email for a child
+	// account. The recovery-email flow is a non-essential PII collection the
+	// server declines to perform for a minor; the account row is still created
+	// (in pending_parental_consent) so the parental-consent flow can proceed.
+	if s.minorData.BlocksChild(dateOfBirthMs) && recEmail != "" {
+		s.logger.Info("signup_recovery_email_dropped_minor", zap.String("user_id_email", redactEmail(email)))
+		recEmail = ""
+	}
+
 	userID, err := s.repo(ctx).CreateUser(ctx, &User{
 		Email:         email,
 		Name:          displayName,
 		Role:          "member",
-		Status:        "active",
+		Status:        status,
 		PasswordHash:  pwHash,
 		RecoveryEmail: recEmail,
+		DateOfBirthMs: dateOfBirthMs,
 		CreatedAt:     msToTime(now),
 		UpdatedAt:     msToTime(now),
 	})
@@ -147,24 +172,59 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	}
 
 	user := &User{
-		ID:        userID,
-		Email:     email,
-		Name:      displayName,
-		Role:      "member",
-		Status:    "active",
-		CreatedAt: msToTime(now),
-		UpdatedAt: msToTime(now),
+		ID:            userID,
+		Email:         email,
+		Name:          displayName,
+		Role:          "member",
+		Status:        status,
+		DateOfBirthMs: dateOfBirthMs,
+		CreatedAt:     msToTime(now),
+		UpdatedAt:     msToTime(now),
 	}
+	s.stampAgeBand(user)
 	s.logger.Info("local_signup_success", zap.String("email", redactEmail(email)), zap.String("user_id", userID))
+
+	// A child-band account pending parental consent exists but cannot be
+	// logged in: return the user (so the client can drive the consent flow)
+	// with no tokens. The verification email is intentionally skipped — a
+	// child account is not an email-owner we can solicit.
+	if status == StatusPendingParentalConsent {
+		s.audit.Log(
+			ctx, audit.EventLoginSuccess,
+			audit.WithActor(userID),
+			audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{"method": "signup", "pending_parental_consent": true, "age_band": user.AgeBand}),
+		)
+		return &LoginResult{User: user}, nil
+	}
 
 	// Best-effort: auto-form a company tenant from the email domain.
 	s.maybeAutoFormTenant(ctx, user)
+
+	// Best-effort: emit a user.created lifecycle event for downstream
+	// provisioning. No-op when eventing is disabled.
+	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, user)
 
 	// Best-effort: fire a verification email. Failures are logged but
 	// must never fail signup itself.
 	if err := s.SendEmailVerification(ctx, userID); err != nil {
 		s.logger.Warn("signup_verification_email_failed",
 			zap.String("user_id", userID), zap.Error(err))
+	}
+
+	// When email verification is required, a freshly-created account is
+	// unverified and must NOT receive a live session — otherwise signup would
+	// auto-login past the very gate PasswordLogin enforces. Return the user
+	// (so the client can drive "check your email") with no tokens; the proto
+	// response shape is preserved, the tokens are simply empty.
+	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && !user.EmailVerified {
+		s.audit.Log(
+			ctx, audit.EventLoginSuccess,
+			audit.WithActor(userID),
+			audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{"method": "signup", "email_verification_required": true}),
+		)
+		return &LoginResult{User: user}, nil
 	}
 
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, "", "")
@@ -200,6 +260,31 @@ func (s *AuthService) handleDuplicatePasswordSignup(ctx context.Context, user *U
 	return s.newDuplicateSignupResult(ctx, email, fallbackDisplayName(email, name))
 }
 
+// handleDuplicatePasskeySignup is the existing-email decoy for passkey-first
+// signup. It mirrors handleDuplicatePasswordSignup (sends the existing-account
+// notice, never attaches a passkey, never discloses existence) but ALWAYS
+// returns a fabricated-token decoy regardless of GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL.
+//
+// Why unconditional tokens: the passkey-signup new-account path always issues a
+// live session (the in-flow OTP proved email control, so the account is created
+// verified). If this decoy went through the verified-email-gated
+// newDuplicateSignupResult it would be session-less when the flag is on, making
+// new-vs-existing distinguishable by token presence — the exact enumeration
+// oracle the decoy exists to prevent. duplicateSignupDecoyResult keeps the two
+// responses token-shape identical with the flag both off and on.
+func (s *AuthService) handleDuplicatePasskeySignup(ctx context.Context, user *User, email string) (*LoginResult, error) {
+	if err := s.sendExistingSignupNotice(ctx, user); err != nil {
+		s.logger.Warn(
+			"duplicate_signup_notice_failed",
+			zap.String("user_id", user.ID),
+			zap.String("email", redactEmail(email)),
+			zap.Error(err),
+		)
+	}
+	s.logger.Info("passkey_signup_existing_email", zap.String("email", redactEmail(email)), zap.String("user_id", user.ID))
+	return s.duplicateSignupDecoyResult(ctx, s.newDuplicateSignupUser(email, fallbackDisplayName(email, "")))
+}
+
 func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) error {
 	loginURL := s.appBaseURL(ctx)
 	text := strings.Join([]string{
@@ -220,9 +305,12 @@ func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) 
 	})
 }
 
-func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displayName string) (*LoginResult, error) {
+// newDuplicateSignupUser builds the synthetic, repository-absent user returned
+// by every duplicate-signup decoy. Its id is deliberately a "signup-pending-"
+// placeholder that never collides with a real account id.
+func (s *AuthService) newDuplicateSignupUser(email, displayName string) *User {
 	now := s.nowMs()
-	user := &User{
+	return &User{
 		ID:        "signup-pending-" + randomToken(8),
 		Email:     email,
 		Name:      displayName,
@@ -231,10 +319,30 @@ func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displ
 		CreatedAt: msToTime(now),
 		UpdatedAt: msToTime(now),
 	}
-	// Duplicate signup must not authenticate the caller, but it also
-	// must not disclose whether the address already exists. We return a
-	// success-shaped payload with an unstored refresh token and a JWT for
-	// a synthetic subject that is absent from the repository.
+}
+
+func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displayName string) (*LoginResult, error) {
+	user := s.newDuplicateSignupUser(email, displayName)
+	// When email verification is required, a genuine new password signup returns
+	// no live session (empty tokens — see PasswordSignup). The duplicate-signup
+	// decoy MUST mirror that exactly: otherwise empty-vs-non-empty tokens
+	// would disclose whether the address is already registered — the precise
+	// account-enumeration oracle this decoy exists to prevent.
+	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail {
+		return &LoginResult{User: user}, nil
+	}
+	return s.duplicateSignupDecoyResult(ctx, user)
+}
+
+// duplicateSignupDecoyResult returns a success-shaped payload with an unstored
+// refresh token and a JWT for a synthetic subject that is absent from the
+// repository. It authenticates nobody (the subject does not exist) yet is
+// token-shape identical to a real new-signup session, so token presence cannot
+// disclose whether the address already exists. Callers whose genuine new-account
+// path ALWAYS issues a session (e.g. passkey signup, where the OTP proves email
+// control and the account is created verified) must use this directly — never
+// the verified-email-gated newDuplicateSignupResult, which can be session-less.
+func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User) (*LoginResult, error) {
 	decoyClaims := jwt.Claims{
 		Sub:    user.ID,
 		Email:  user.Email,
@@ -367,10 +475,33 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return nil, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
 
-	// Local password accounts may sign in before verifying email; only
-	// account status is a hard gate here.
+	// Account status (lockout / suspended / invited / IDV) is a hard gate.
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
 		return nil, err
+	}
+
+	// Email-verification gate. The password is correct at this point, so this
+	// is the one place the gate can fire without creating an enumeration oracle
+	// (an unknown email or a wrong password already returned above with the
+	// generic ErrUnauthenticated). When required, an unverified account cannot
+	// authenticate — this closes the pre-hijacking vector where an attacker
+	// plants a password on an unverified address and waits for the real owner
+	// to verify it via OAuth/passwordless.
+	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && !user.EmailVerified {
+		s.audit.Log(
+			ctx, audit.EventLoginFailure,
+			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{"reason": "email_not_verified"}),
+		)
+		// Best-effort: resend the verification email so the user can complete
+		// verification and retry. Failures (throttle, transport) must not change
+		// the response — the gate result is the same either way.
+		if sendErr := s.SendEmailVerification(ctx, user.ID); sendErr != nil {
+			s.logger.Warn("login_verification_resend_failed",
+				zap.String("user_id", user.ID), zap.Error(sendErr))
+		}
+		return nil, ErrEmailVerificationRequired
 	}
 
 	// Credentials are proven; consult the tenant's LoginPolicy. This runs
@@ -482,6 +613,18 @@ func (s *AuthService) BeginOAuthLogin(
 	}, nil
 }
 
+type OAuthLoginParams struct {
+	Code             string
+	Provider         string
+	RedirectURI      string
+	CodeVerifier     string
+	State            string
+	StateToken       string
+	AppleUserPayload string
+	IPAddr           string
+	UserAgent        string
+}
+
 // OAuthLogin performs the full OAuth code-exchange flow: it looks up
 // the registered Exchanger for the provider, swaps the code for a
 // verified Identity, then upserts the local user and issues tokens.
@@ -491,69 +634,28 @@ func (s *AuthService) BeginOAuthLogin(
 // refresh tokens are discarded — they are not persisted.
 func (s *AuthService) OAuthLogin(
 	ctx context.Context,
-	code, provider, redirectURI, codeVerifier, state, stateToken, ipAddr, userAgent string,
+	params OAuthLoginParams,
 ) (*LoginResult, error) {
-	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
-		return nil, ErrOAuthDisabled
-	}
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	redirectURI = strings.TrimSpace(redirectURI)
-	if provider == "" {
-		return nil, fmt.Errorf("%w: provider is required", ErrInvalidArgument)
-	}
-	if strings.TrimSpace(code) == "" {
-		return nil, fmt.Errorf("%w: code is required", ErrInvalidArgument)
-	}
-	if redirectURI == "" {
-		return nil, fmt.Errorf("%w: redirect uri is required", ErrInvalidArgument)
-	}
-
-	exchanger, ok := s.oauthRegistry.Get(provider)
-	if !ok {
-		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
-	}
-
-	if strings.TrimSpace(stateToken) != "" {
-		claims, err := oauth.VerifyStateToken(
-			stateToken,
-			s.signer,
-			provider,
-			redirectURI,
-			state,
-			codeVerifier,
-			s.nowFunc().UTC(),
-		)
-		if err != nil {
-			s.logger.Info(
-				"oauth_state_validation_failed",
-				zap.String("provider", provider),
-				zap.Error(err),
-			)
-			return nil, fmt.Errorf("%w: invalid oauth state", ErrUnauthenticated)
-		}
-		codeVerifier = claims.CodeVerifier
-	}
-
-	if strings.TrimSpace(codeVerifier) != "" {
-		ctx = oauth.WithCodeVerifier(ctx, codeVerifier)
-	}
-
-	identity, err := exchanger.Exchange(ctx, code, redirectURI)
+	provider := strings.ToLower(strings.TrimSpace(params.Provider))
+	identity, err := s.verifyOAuthExchange(ctx, params)
 	if err != nil {
-		s.logger.Info(
-			"oauth_login_failed",
-			zap.String("provider", provider), zap.Error(err),
-		)
-		s.audit.Log(
-			ctx, audit.EventOAuthLogin,
-			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
-			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{
-				"provider": provider,
-				"reason":   "code_exchange_failed",
-			}),
-		)
-		return s.mapOAuthError(err)
+		if errors.Is(err, errOAuthExchangeFailed) {
+			s.logger.Info(
+				"oauth_login_failed",
+				zap.String("provider", provider), zap.Error(err),
+			)
+			s.audit.Log(
+				ctx, audit.EventOAuthLogin,
+				audit.WithIP(params.IPAddr), audit.WithUserAgent(params.UserAgent),
+				audit.WithSuccess(false),
+				audit.WithDetails(map[string]any{
+					"provider": provider,
+					"reason":   "code_exchange_failed",
+				}),
+			)
+			return s.mapOAuthError(errors.Unwrap(err))
+		}
+		return nil, err
 	}
 
 	email := strings.TrimSpace(strings.ToLower(identity.Email))
@@ -566,7 +668,7 @@ func (s *AuthService) OAuthLogin(
 		return nil, err
 	}
 
-	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent); err != nil {
 		return nil, err
 	}
 
@@ -591,14 +693,14 @@ func (s *AuthService) OAuthLogin(
 		zap.String("user_id", user.ID),
 	)
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)
 	if err != nil {
 		return nil, err
 	}
 
 	s.audit.Log(
 		ctx, audit.EventOAuthLogin,
-		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+		audit.WithActor(user.ID), audit.WithIP(params.IPAddr), audit.WithUserAgent(params.UserAgent),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
 			"provider": provider,
@@ -618,16 +720,91 @@ func (s *AuthService) OAuthLogin(
 // mapOAuthError translates pkg/oauth sentinel errors into AuthService
 // sentinels so the connect handler emits the right RPC code.
 func (s *AuthService) mapOAuthError(err error) (*LoginResult, error) {
+	return nil, s.mapOAuthErr(err)
+}
+
+// mapOAuthErr is the error-only form of mapOAuthError, shared by the OAuth
+// login path and the self-service LinkIdentity path. Both run the same code
+// exchange and want the same RPC-code mapping for a verification failure.
+func (s *AuthService) mapOAuthErr(err error) error {
 	switch {
 	case errors.Is(err, oauth.ErrEmailNotVerified):
-		return nil, fmt.Errorf("%w: provider email is not verified", ErrUnauthenticated)
-	case errors.Is(err, oauth.ErrIdentityVerification):
-		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
-	case errors.Is(err, oauth.ErrCodeExchangeFailed):
-		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
+		return fmt.Errorf("%w: provider email is not verified", ErrUnauthenticated)
 	default:
-		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
+		return fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 	}
+}
+
+// errOAuthExchangeFailed wraps a provider code-exchange failure returned by
+// verifyOAuthExchange so callers can distinguish "the provider rejected the
+// code" (which they audit and map via mapOAuthErr) from an input-validation
+// or state-verification failure (already a typed sentinel).
+var errOAuthExchangeFailed = errors.New("oauth code exchange failed")
+
+// verifyOAuthExchange runs the trusted server-side OAuth code exchange:
+// it validates inputs, verifies the signed state token (binding provider,
+// redirect URI, state, and PKCE verifier), then swaps the authorization
+// code for a provider-verified Identity. The frontend is never trusted to
+// assert the identity — identity performs the exchange itself.
+//
+// provider must already be lower-cased/trimmed by the caller. On a provider
+// exchange failure it returns an error wrapping errOAuthExchangeFailed.
+func (s *AuthService) verifyOAuthExchange(
+	ctx context.Context,
+	params OAuthLoginParams,
+) (*oauth.Identity, error) {
+	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
+		return nil, ErrOAuthDisabled
+	}
+	redirectURI := strings.TrimSpace(params.RedirectURI)
+	provider := strings.ToLower(strings.TrimSpace(params.Provider))
+	if provider == "" {
+		return nil, fmt.Errorf("%w: provider is required", ErrInvalidArgument)
+	}
+	if strings.TrimSpace(params.Code) == "" {
+		return nil, fmt.Errorf("%w: code is required", ErrInvalidArgument)
+	}
+	if redirectURI == "" {
+		return nil, fmt.Errorf("%w: redirect uri is required", ErrInvalidArgument)
+	}
+
+	exchanger, ok := s.oauthRegistry.Get(provider)
+	if !ok {
+		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
+	}
+
+	codeVerifier := params.CodeVerifier
+	if strings.TrimSpace(params.StateToken) != "" {
+		claims, err := oauth.VerifyStateToken(
+			params.StateToken,
+			s.signer,
+			provider,
+			redirectURI,
+			params.State,
+			params.CodeVerifier,
+			s.nowFunc().UTC(),
+		)
+		if err != nil {
+			s.logger.Info(
+				"oauth_state_validation_failed",
+				zap.String("provider", provider),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("%w: invalid oauth state", ErrUnauthenticated)
+		}
+		codeVerifier = claims.CodeVerifier
+	}
+
+	identity, err := exchanger.Exchange(ctx, oauth.ExchangeParams{
+		Code:             params.Code,
+		RedirectURI:      redirectURI,
+		CodeVerifier:     codeVerifier,
+		AppleUserPayload: params.AppleUserPayload,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errOAuthExchangeFailed, err)
+	}
+	return identity, nil
 }
 
 // upsertOAuthUser resolves the local User using a (provider,
@@ -748,7 +925,103 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email stri
 	// a genuinely new account (a raced/existing user returned above).
 	s.maybeAutoFormTenant(ctx, newUser)
 
+	// Best-effort: emit a user.created lifecycle event. No-op when eventing
+	// is disabled.
+	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, newUser)
+
 	return newUser, true, nil
+}
+
+// markEmailVerifiedViaExternalProof flips the account to verified because an
+// external method (OAuth provider assertion, or an emailed OTP/magic-link the
+// user redeemed) proved control of the address. Any credential on the account
+// was established BEFORE this proof — possibly by a different party (account
+// pre-hijacking) — so the untrusted ones are voided:
+//
+//   - a planted password is cleared (the owner re-establishes it via reset);
+//   - any planted passkeys are deleted. A passkey enrolled while the email was
+//     unverified is exactly as untrustworthy as a planted password: passkey
+//     login does not pass through the email-verification gate, so without this
+//     an attacker who passkey-first-signed-up an unverified address would keep
+//     a working credential after the real owner takes the account over.
+//
+// It is a no-op when the email is already verified (the proof adds nothing).
+// Best-effort: a persistence failure is logged, not fatal — the user has
+// already authenticated via the external proof.
+func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, nowMs int64, method string) {
+	if user == nil || user.EmailVerified {
+		return
+	}
+	patch := map[string]any{
+		"email_verified":    true,
+		"email_verified_at": nowMs,
+		"updated_at":        nowMs,
+	}
+	passwordCleared := user.PasswordHash != ""
+	if passwordCleared {
+		// The password predates the proof of email control, so it cannot be
+		// trusted to belong to the verified owner. Clear it.
+		patch["password_hash"] = ""
+	}
+
+	user.EmailVerified = true
+	user.EmailVerifiedAt = nowMs
+	if passwordCleared {
+		user.PasswordHash = ""
+	}
+
+	if err := s.repo(ctx).UpdateUser(ctx, user.ID, patch); err != nil {
+		s.logger.Warn("email_verified_external_persist_failed",
+			zap.String("user_id", user.ID),
+			zap.String("method", method),
+			zap.Error(err))
+		return
+	}
+
+	// Void any passkeys planted while the address was unverified. Detect first
+	// (so the audit/session-revocation only fires when there was something to
+	// clear) then delete them all.
+	passkeysCleared := false
+	if existing, err := s.repo(ctx).ListPasskeyCredentials(ctx, user.ID); err != nil {
+		s.logger.Warn("email_verified_external_passkey_list_failed",
+			zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+	} else if len(existing) > 0 {
+		if err := s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
+			s.logger.Warn("email_verified_external_passkey_clear_failed",
+				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+		} else {
+			passkeysCleared = true
+		}
+	}
+
+	if passwordCleared || passkeysCleared {
+		// The cleared credentials are void, so revoke any sessions too —
+		// mirroring ConfirmPasswordReset — so a session established with a now-
+		// voided credential cannot outlive it. With the verification gate on,
+		// a planted-password session is impossible; a planted-passkey session
+		// is NOT (passkey login skips the gate), so this matters either way.
+		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
+			s.logger.Warn("email_verified_external_revoke_failed",
+				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+		}
+		s.revokeUserSessionsIfModeSession(ctx, user.ID, "external_email_verification")
+		s.logger.Info("email_verified_external_credentials_cleared",
+			zap.String("user_id", user.ID),
+			zap.String("method", method),
+			zap.Bool("password_cleared", passwordCleared),
+			zap.Bool("passkeys_cleared", passkeysCleared))
+		s.audit.Log(
+			ctx, audit.EventPasswordChanged,
+			audit.WithActor(user.ID),
+			audit.WithSuccess(true),
+			audit.WithDetails(map[string]any{
+				"reason":           "planted_credentials_cleared_on_external_email_verification",
+				"method":           method,
+				"password_cleared": passwordCleared,
+				"passkeys_cleared": passkeysCleared,
+			}),
+		)
+	}
 }
 
 // applyOAuthProfileUpdates patches the local user record with any new
@@ -766,12 +1039,11 @@ func (s *AuthService) applyOAuthProfileUpdates(ctx context.Context, u *User, ide
 		patch["avatar_url"] = identity.AvatarURL
 		u.AvatarURL = identity.AvatarURL
 	}
-	if !u.EmailVerified {
-		patch["email_verified"] = true
-		patch["email_verified_at"] = nowMs
-		u.EmailVerified = true
-		u.EmailVerifiedAt = nowMs
-	}
+	// A verified provider identity proves control of the address. Flip the
+	// account to verified and clear any password planted while it was still
+	// unverified (anti-pre-hijacking). This runs its own persistence, so it is
+	// intentionally NOT folded into the name/avatar patch below.
+	s.markEmailVerifiedViaExternalProof(ctx, u, nowMs, "oauth")
 	// Provider-asserted email changes are NOT auto-applied to the local
 	// account. A compromised provider account (or a provider that lets
 	// admins change member emails) would otherwise let an attacker
@@ -820,13 +1092,14 @@ func (s *AuthService) linkOAuthIdentity(ctx context.Context, userID string, iden
 		return
 	}
 	s.audit.Log(
-		ctx, audit.EventType("oauth_identity_linked"),
+		ctx, audit.EventIdentityLinked,
 		audit.WithActor(userID),
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{
 			"provider":           identity.Provider,
 			"provider_user_id":   identity.ProviderUserID,
 			"email_at_link_time": email,
+			"source":             "login_auto_link",
 		}),
 	)
 }
@@ -879,6 +1152,8 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
+	// Global baseline check up front (before any token lookup); the
+	// tenant-specific tightening runs once the owning user is resolved.
 	if err := validatePasswordStrength(password); err != nil {
 		return nil, err
 	}
@@ -914,6 +1189,12 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	}
 	if user == nil {
 		return nil, fmt.Errorf("%w: user for invitation not found", ErrNotFound)
+	}
+
+	// Enforce the invited member's tenant password policy now that the
+	// owning user (and thus its email domain) is known.
+	if err := s.validatePasswordStrengthForEmail(ctx, user.Email, password); err != nil {
+		return nil, err
 	}
 
 	pwHash, err := passwords.Hash(password)

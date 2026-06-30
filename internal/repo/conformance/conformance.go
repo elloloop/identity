@@ -577,6 +577,63 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("DeletePasskeyCredentialsForUser", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			victim := createTestUser(t, r, "pk-clear-victim@example.com")
+			keep := createTestUser(t, r, "pk-clear-keep@example.com")
+			for _, cid := range []string{"vc-1", "vc-2"} {
+				if _, err := r.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{
+					CredentialID: cid, UserID: victim, PublicKey: "pk",
+				}); err != nil {
+					t.Fatalf("Create victim cred %s: %v", cid, err)
+				}
+			}
+			if _, err := r.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{
+				CredentialID: "kc-1", UserID: keep, PublicKey: "pk",
+			}); err != nil {
+				t.Fatalf("Create keep cred: %v", err)
+			}
+
+			if err := r.DeletePasskeyCredentialsForUser(ctx, victim); err != nil {
+				t.Fatalf("DeletePasskeyCredentialsForUser: %v", err)
+			}
+			if list, err := r.ListPasskeyCredentials(ctx, victim); err != nil || len(list) != 0 {
+				t.Fatalf("victim creds after delete: len=%d err=%v", len(list), err)
+			}
+			// Other users' credentials are untouched.
+			if list, err := r.ListPasskeyCredentials(ctx, keep); err != nil || len(list) != 1 {
+				t.Fatalf("keep creds after delete: len=%d err=%v", len(list), err)
+			}
+			// Idempotent: deleting again (now zero creds) is a no-op.
+			if err := r.DeletePasskeyCredentialsForUser(ctx, victim); err != nil {
+				t.Fatalf("DeletePasskeyCredentialsForUser idempotent: %v", err)
+			}
+		})
+
+		t.Run("CreateUser_HonoursProvidedID", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			// Passkey-first signup binds a server-minted id as the WebAuthn
+			// user handle during Begin, then persists the user under that
+			// exact id at Complete. Every driver must therefore honour a
+			// caller-provided User.ID rather than minting its own.
+			const wantID = "fixed-handle-id-deadbeef"
+			gotID, err := r.CreateUser(ctx, &service.User{
+				ID: wantID, Email: "provided-id@example.com", Status: "active", Role: "member",
+			})
+			if err != nil {
+				t.Fatalf("CreateUser with provided id: %v", err)
+			}
+			if gotID != wantID {
+				t.Fatalf("returned id = %q, want %q", gotID, wantID)
+			}
+			got, err := r.GetUser(ctx, wantID)
+			if err != nil || got == nil || got.ID != wantID {
+				t.Fatalf("GetUser(%q) = %#v err=%v", wantID, got, err)
+			}
+		})
+
 		t.Run("PasskeyChallenge_CRUD", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
@@ -585,6 +642,7 @@ func RunConformance(t *testing.T, driver Driver) {
 				Challenge:     "c-1",
 				UserID:        userID,
 				ChallengeType: "registration",
+				Email:         "bound@example.com",
 				ExpiresAt:     1_000,
 			})
 			if err != nil {
@@ -593,6 +651,10 @@ func RunConformance(t *testing.T, driver Driver) {
 			got, err := r.GetPasskeyChallenge(ctx, id)
 			if err != nil || got == nil || got.Challenge != "c-1" {
 				t.Fatalf("Get: %v, %#v", err, got)
+			}
+			// The signup-bound email round-trips on every driver.
+			if got.Email != "bound@example.com" {
+				t.Fatalf("Email = %q, want bound@example.com", got.Email)
 			}
 			if err := r.DeletePasskeyChallenge(ctx, id); err != nil {
 				t.Fatalf("Delete: %v", err)
@@ -1302,6 +1364,43 @@ func RunConformance(t *testing.T, driver Driver) {
 			list, err := r.ListOAuthIdentitiesForUser(ctx, uid)
 			if err != nil || len(list) != 2 {
 				t.Fatalf("List: len=%d err=%v", len(list), err)
+			}
+
+			// DeleteOAuthIdentity is scoped to the owning user: another
+			// user attempting to unlink uid's link must not succeed and the
+			// row must survive.
+			if err := r.DeleteOAuthIdentity(ctx, otherUID, "google", "g-123"); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("Delete by non-owner: want ErrNotFound, got %v", err)
+			}
+			if got, err := r.FindUserByProviderID(ctx, "google", "g-123"); err != nil || got == nil {
+				t.Fatalf("link removed by non-owner delete: %v %#v", err, got)
+			}
+
+			// Deleting a non-existent (provider, sub) for the owner is
+			// ErrNotFound, not a silent success.
+			if err := r.DeleteOAuthIdentity(ctx, uid, "google", "does-not-exist"); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("Delete missing sub: want ErrNotFound, got %v", err)
+			}
+
+			// Owner removes one link; only that (provider, sub) goes away.
+			if err := r.DeleteOAuthIdentity(ctx, uid, "google", "g-123"); err != nil {
+				t.Fatalf("Delete owned link: %v", err)
+			}
+			if got, err := r.FindUserByProviderID(ctx, "google", "g-123"); err != nil || got != nil {
+				t.Fatalf("google link not removed: %v %#v", err, got)
+			}
+			if got, err := r.FindUserByProviderID(ctx, "microsoft", "g-123"); err != nil || got == nil {
+				t.Fatalf("microsoft link wrongly removed: %v %#v", err, got)
+			}
+			list, err = r.ListOAuthIdentitiesForUser(ctx, uid)
+			if err != nil || len(list) != 1 {
+				t.Fatalf("List after delete: len=%d err=%v", len(list), err)
+			}
+
+			// A repeat delete of the now-removed link is ErrNotFound
+			// (idempotency is the caller's concern; the store reports truth).
+			if err := r.DeleteOAuthIdentity(ctx, uid, "google", "g-123"); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("Delete already-removed: want ErrNotFound, got %v", err)
 			}
 		})
 

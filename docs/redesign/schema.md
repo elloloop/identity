@@ -1,5 +1,10 @@
 # Identity Redesign — Database Schema (Postgres)
 
+> **Original design document — kept as a design record, not find/replaced.**
+> Where this references `EntDB` or `proto/identity/schema/schema.proto`, the
+> implementation shipped as the SQLite driver (`internal/repo/sqlite/`) and
+> the single proto is `proto/identity/v1/identity.proto`.
+
 > Single source of truth for the redesigned identity datastore. Postgres is
 > the datastore. This document is grounded in the current proto schema
 > (`proto/identity/schema/schema.proto`) and migrations `0001..0012`
@@ -340,6 +345,9 @@ punycode domain (H3) — enforced in application code on `lower(domain)`.
 | `sso_required` | BOOLEAN | N | Default `FALSE`. |
 | `sso_connection_json` | JSONB | N | Default `'{}'`. |
 | `require_2fa` | BOOLEAN | N | Default `FALSE`. |
+| `password_min_length` | INTEGER | N | Default `0`. Min password length for this tenant; `0` = global default. Tenants tighten, never loosen. (migration 0020) |
+| `session_idle_timeout_seconds` | BIGINT | N | Default `0`. Invalidate a session unused for this long; `0` = no idle timeout. (migration 0020) |
+| `session_absolute_timeout_seconds` | BIGINT | N | Default `0`. Invalidate a session older than this; `0` = no absolute timeout. (migration 0020) |
 | `created_at_ms` | BIGINT | N | |
 | `updated_at_ms` | BIGINT | N | |
 

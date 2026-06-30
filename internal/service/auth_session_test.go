@@ -19,7 +19,7 @@ func TestModeTTL_IssueTokens_DoesNotMintSession(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	// Default test config is mode=ttl (empty), so no session mints.
 
-	result, err := svc.PasswordSignup(context.Background(), "ttl@example.com", strongPW, "", "")
+	result, err := svc.PasswordSignup(context.Background(), "ttl@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.AccessToken)
 
@@ -41,7 +41,7 @@ func TestModeTTL_DeleteRefreshTokensForUser_LeavesAccessTokenAlive(t *testing.T)
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "ttl-revoke@example.com", strongPW, "", "")
+	result, err := svc.PasswordSignup(context.Background(), "ttl-revoke@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 
 	user, err := repo.FindUserByEmail(context.Background(), "ttl-revoke@example.com")
@@ -61,7 +61,7 @@ func TestRefreshToken_DeactivatedUser_Rejected(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "deact@example.com", strongPW, "", "")
+	result, err := svc.PasswordSignup(context.Background(), "deact@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 
 	user, err := repo.FindUserByEmail(context.Background(), "deact@example.com")
@@ -79,7 +79,7 @@ func TestRefreshToken_LockedUser_Rejected(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "locked@example.com", strongPW, "", "")
+	result, err := svc.PasswordSignup(context.Background(), "locked@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 
 	user, err := repo.FindUserByEmail(context.Background(), "locked@example.com")
@@ -107,7 +107,7 @@ func TestModeSession_IssueTokens_MintsSessionAndEmbedsSID(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newSessionModeService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "sess@example.com", strongPW, "", "")
+	result, err := svc.PasswordSignup(context.Background(), "sess@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 
 	claims, err := jwt.VerifyAccessToken(result.AccessToken, svc.signer, "", "", false)
@@ -125,7 +125,7 @@ func TestModeSession_RefreshRotatesSID(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newSessionModeService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "sess-rot@example.com", strongPW, "", "")
+	result, err := svc.PasswordSignup(context.Background(), "sess-rot@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 
 	originalClaims, err := jwt.VerifyAccessToken(result.AccessToken, svc.signer, "", "", false)
@@ -153,7 +153,7 @@ func TestModeSession_RefreshReplayRevokesAllSessions(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newSessionModeService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "sess-replay@example.com", strongPW, "", "")
+	result, err := svc.PasswordSignup(context.Background(), "sess-replay@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 
 	// First refresh consumes the original token.
@@ -185,7 +185,7 @@ func TestModeSession_PasswordReset_RevokesSessions(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newSessionModeService(t, repo)
 
-	_, err := svc.PasswordSignup(context.Background(), "sess-reset@example.com", strongPW, "", "")
+	_, err := svc.PasswordSignup(context.Background(), "sess-reset@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 
 	user, err := repo.FindUserByEmail(context.Background(), "sess-reset@example.com")
@@ -266,7 +266,7 @@ func TestModeSession_IssueTokens_CreateSessionError(t *testing.T) {
 	svc.cfg.RevocationMode = config.RevocationModeSession
 	repo.failCreateSession = true
 
-	_, err := svc.PasswordSignup(context.Background(), "create-fail@example.com", strongPW, "", "")
+	_, err := svc.PasswordSignup(context.Background(), "create-fail@example.com", strongPW, "", "", 0)
 	require.Error(t, err)
 }
 
@@ -281,7 +281,7 @@ func TestModeSession_RevokeFailureIsBestEffort(t *testing.T) {
 	svc.cfg.RevocationMode = config.RevocationModeSession
 
 	// Seed a user and a session.
-	_, err := svc.PasswordSignup(context.Background(), "revoke-fail@example.com", strongPW, "", "")
+	_, err := svc.PasswordSignup(context.Background(), "revoke-fail@example.com", strongPW, "", "", 0)
 	require.NoError(t, err)
 	user, err := repo.FindUserByEmail(context.Background(), "revoke-fail@example.com")
 	require.NoError(t, err)

@@ -1,5 +1,10 @@
-Use the link below to sign in. It works once and expires in {{.ExpiresIn}}.
+{{if .ProductName}}{{.ProductName}}
+
+{{end}}Use the link below to sign in. It works once and expires in {{.ExpiresIn}}.
 
 {{.Link}}
 
 If you didn't request this, you can safely ignore this email.
+{{if .SupportEmail}}
+Need help? Contact {{.SupportEmail}}.
+{{end}}

@@ -19,9 +19,12 @@ import { Code } from "astro-expressive-code/components";
 +-------------------------------+        +---------------------+
 | Identity container            | -----> |                     |
 |                               |        |     Datastore       |
-|  Logging  -> CORS -> Health   |        | (Postgres / SQLite) |
-|     -> JWKS  -> Auth          |        |                     |
-|     -> service.IdentityHandler|        |                     |
+|  Logging -> Recover -> Health |        | (Postgres / SQLite) |
+|   -> Project -> CORS          |        |                     |
+|   -> Client-IP -> Rate-limit  |        |                     |
+|   -> JWKS -> Auth             |        |                     |
+|   -> Project-guard -> Metrics |        |                     |
+|   -> service.IdentityHandler  |        |                     |
 +-------------------------------+        +---------------------+
      |
      |  Prometheus  (port 9090)
@@ -34,7 +37,8 @@ import { Code } from "astro-expressive-code/components";
     Each layer has a single responsibility:
   </p>
   <ul>
-    <li><code>cmd/identity/main.go</code> — process bootstrap, key-ring loading, middleware chain, graceful shutdown.</li>
+    <li><code>cmd/identity/main.go</code> — process bootstrap, config and key-ring loading, listener startup, graceful shutdown.</li>
+    <li><code>internal/app/app.go</code> — the <code>Build</code> function assembles the middleware chain (project resolver, project-scope guard, auth, etc.) and the Connect handler.</li>
     <li><code>internal/middleware/</code> — logging, CORS, health, JWKS endpoint, bearer-token auth.</li>
     <li><code>internal/connect/</code> — Connect-RPC adapter that translates between proto types and the service-layer Go types.</li>
     <li><code>internal/service/</code> — business logic. <code>AuthService</code>, <code>AdminService</code>, <code>GroupService</code>, <code>HelpService</code>, <code>ProfileService</code>. None of these import Connect or proto types.</li>
@@ -48,16 +52,22 @@ import { Code } from "astro-expressive-code/components";
 
   <h2>Middleware chain</h2>
   <p>
-    The chain is built in <code>cmd/identity/main.go</code>. Outermost runs
-    first on the request path:
+    The chain is built in <code>internal/app/app.go</code> (the
+    <code>Build</code> function). Outermost runs first on the request path:
   </p>
-  <Code code={`logging -> CORS -> health -> JWKS -> auth -> Connect handler`} lang="plaintext" />
+  <Code code={`logging -> recover -> health -> project -> CORS -> client-IP -> rate-limit -> JWKS -> auth -> project-guard -> metrics -> Connect handler`} lang="plaintext" />
   <ul>
     <li><strong>logging</strong> — structured zap logs with request ID, latency, status.</li>
-    <li><strong>CORS</strong> — comma-separated origins from <code>GATEWAY_ALLOWED_ORIGINS</code>.</li>
-    <li><strong>health</strong> — answers <code>/health</code> and <code>/healthz</code> before reaching the auth layer.</li>
+    <li><strong>recover</strong> — turns a panicking handler into a 500 instead of crashing the process.</li>
+    <li><strong>health</strong> — answers <code>/health</code> and <code>/healthz</code> as the outermost functional hop, so liveness/readiness probes short-circuit before any per-request work (including the project resolver's Host lookup).</li>
+    <li><strong>project</strong> — the project resolver maps the request (by credential or Host) to a project and pins it into context. This is the entry point of the Project/Tenant isolation model; it pins the default project when no control-plane resolver is wired.</li>
+    <li><strong>CORS</strong> — layers the resolved project's per-project allow-list on top of the global floor from <code>GATEWAY_ALLOWED_ORIGINS</code>, and short-circuits the OPTIONS preflight before rate-limit.</li>
+    <li><strong>client-IP</strong> — resolves the caller IP from trusted proxies; must precede rate-limit, which keys on the resolved IP.</li>
+    <li><strong>rate-limit</strong> — per-IP request throttling.</li>
     <li><strong>JWKS</strong> — serves <code>/.well-known/jwks.json</code> straight from the in-memory <code>KeyRing</code>.</li>
     <li><strong>auth</strong> — verifies bearer tokens and writes the user ID to <code>X-Authenticated-User-Id</code>. Skipped for the exempt-path list (signup, login, JWKS, health, etc.).</li>
+    <li><strong>project-guard</strong> — runs just after auth (which surfaces the verified project) and rejects an access token replayed across projects, enforcing project-scope isolation.</li>
+    <li><strong>metrics</strong> — sits just outside the Connect mux so it observes every RPC's final status, including failures synthesized by the otelconnect interceptor.</li>
   </ul>
 
   <h2>Graceful shutdown</h2>

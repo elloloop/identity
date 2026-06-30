@@ -20,6 +20,15 @@ import { Code } from "astro-expressive-code/components";
       uses a fixed dev key and logs <code>using_dev_totp_encryption_key</code>.
     </li>
     <li>
+      <code>GATEWAY_TOTP_RECOVERY_PEPPER</code> — base64-encoded value that
+      must decode to <strong>at least 32 bytes</strong>; used as the
+      HMAC-SHA-256 key for hashing and verifying recovery codes.
+      <strong>Required whenever <code>GATEWAY_TOTP_ENCRYPTION_KEY</code> is
+      set</strong> — the server hard-fails on boot if the encryption key is
+      present but the pepper is missing or too short. Without it, recovery
+      codes cannot be hashed or verified.
+    </li>
+    <li>
       <code>GATEWAY_TOTP_ISSUER</code> — string shown next to the account
       in user authenticator apps.
     </li>
@@ -42,7 +51,7 @@ openssl rand -base64 32`} lang="bash" />
   <Code code={`{
   "secret":         "JBSWY3DPEHPK3PXP",
   "qrCodeUri":      "otpauth://totp/Acme:alice@example.com?secret=...&issuer=Acme",
-  "recoveryCodes":  ["abcd-efgh", "ijkl-mnop", ...]
+  "recoveryCodes":  ["MFRGGZDFMZ", "NBSWY3DPEB", ...]
 }`} lang="json" />
   <p>
     The client encodes <code>qr_code_uri</code> as a QR code for the user

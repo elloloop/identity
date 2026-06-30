@@ -98,6 +98,10 @@ func (StubRepository) UpdatePasskeyCredential(context.Context, string, map[strin
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) DeletePasskeyCredentialsForUser(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) GetPasskeyChallenge(context.Context, string) (*PasskeyChallengeRecord, error) {
 	return nil, ErrServiceUnavailable
 }
@@ -308,6 +312,10 @@ func (StubRepository) CreateOAuthIdentity(context.Context, *OAuthIdentity) error
 
 func (StubRepository) ListOAuthIdentitiesForUser(context.Context, string) ([]*OAuthIdentity, error) {
 	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteOAuthIdentity(context.Context, string, string, string) error {
+	return ErrServiceUnavailable
 }
 
 func (StubRepository) DeleteExpiredWebAuthnChallenges(context.Context, int64, int) error {

@@ -111,6 +111,63 @@ func TestProjectStore_Smoke(t *testing.T) {
 	runProjectStoreSmoke(t, dsn)
 }
 
+// TestProjectStore_Config_Smoke runs the project config_json round-trip
+// against a live Postgres pointed to by GATEWAY_TEST_POSTGRES_DSN, skipping
+// when unset. The dockerpostgres container test runs the same body locally.
+func TestProjectStore_Config_Smoke(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping project config smoke test")
+	}
+	runProjectConfigSmoke(t, dsn)
+}
+
+// runProjectConfigSmoke asserts the operator-authored config_json round-trips
+// identically: a created project starts at "{}", UpdateProjectConfig replaces
+// the blob and returns the stored value, GetProjectConfig reads it back, an
+// empty blob normalises to "{}", and an unknown project surfaces ErrNotFound.
+func runProjectConfigSmoke(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	store := newProjectStore(ctx, t, dsn)
+
+	projectID, err := store.createProject(ctx, &Project{StorageScopeID: "scope-cfg", Name: "Cfg"})
+	require.NoError(t, err)
+
+	// A fresh project's config is the empty object.
+	got, err := store.GetProjectConfig(ctx, projectID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{}`, got)
+
+	// Update replaces the blob and returns the stored value.
+	const cfg = `{"cors": {"allowed_origins": ["https://kids.example.com"]}}`
+	stored, err := store.UpdateProjectConfig(ctx, projectID, cfg)
+	require.NoError(t, err)
+	require.JSONEq(t, cfg, stored)
+
+	got, err = store.GetProjectConfig(ctx, projectID)
+	require.NoError(t, err)
+	require.JSONEq(t, cfg, got)
+	// The stored blob decodes to the typed config the resolver consumes.
+	parsed, err := service.ParseProjectConfig(got)
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://kids.example.com"}, parsed.CORS.AllowedOrigins)
+
+	// An empty blob normalises to "{}".
+	stored, err = store.UpdateProjectConfig(ctx, projectID, "")
+	require.NoError(t, err)
+	require.JSONEq(t, `{}`, stored)
+
+	// Unknown project is ErrNotFound for both read and write.
+	_, err = store.UpdateProjectConfig(ctx, "no-such-project", cfg)
+	require.ErrorIs(t, err, service.ErrNotFound)
+	_, err = store.GetProjectConfig(ctx, "no-such-project")
+	require.ErrorIs(t, err, service.ErrNotFound)
+}
+
 // TestProjectStore_EnsureDefaultProject_Smoke runs the default-project
 // bootstrap against a live Postgres pointed to by GATEWAY_TEST_POSTGRES_DSN
 // (CI's coverage job), skipping when unset. The dockerpostgres container test
@@ -246,7 +303,8 @@ func runProjectResolverSmoke(t *testing.T, dsn string) {
 	require.Equal(t, projID, got.ID)
 	require.Equal(t, "scope-live", got.StorageScopeID)
 	require.Equal(t, "auth.live.test", got.PrimaryAuthDomain, "resolver loads the primary auth-domain for branded links")
-	require.Equal(t,
+	require.Equal(
+		t,
 		[]string{"https://app.live.test", "http://localhost:5173"},
 		got.CORSAllowedOrigins,
 		"resolver parses+validates the per-project CORS allow-list from config_json",

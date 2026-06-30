@@ -2,7 +2,7 @@ package oauth
 
 import "sync"
 
-// Registry maps provider keys ("google", "microsoft", "github") to
+// Registry maps provider keys ("google", "microsoft", "github", "apple") to
 // their Exchanger implementations. The service layer looks up the
 // Exchanger for the provider named in the OAuthLoginRequest.
 //

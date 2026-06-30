@@ -118,8 +118,8 @@ type googleTokenResponse struct {
 	ErrorDesc   string `json:"error_description"`
 }
 
-func (g *googleExchanger) Exchange(ctx context.Context, code, redirectURI string) (*Identity, error) {
-	if code == "" {
+func (g *googleExchanger) Exchange(ctx context.Context, params ExchangeParams) (*Identity, error) {
+	if params.Code == "" {
 		return nil, fmt.Errorf("%w: missing authorization code", ErrCodeExchangeFailed)
 	}
 	if g.cfg.ClientID == "" || g.cfg.ClientSecret == "" {
@@ -151,13 +151,13 @@ func (g *googleExchanger) Exchange(ctx context.Context, code, redirectURI string
 	}
 
 	form := url.Values{}
-	form.Set("code", code)
+	form.Set("code", params.Code)
 	form.Set("client_id", g.cfg.ClientID)
 	form.Set("client_secret", g.cfg.ClientSecret)
-	form.Set("redirect_uri", redirectURI)
+	form.Set("redirect_uri", params.RedirectURI)
 	form.Set("grant_type", "authorization_code")
-	if codeVerifier := codeVerifierFromContext(ctx); codeVerifier != "" {
-		form.Set("code_verifier", codeVerifier)
+	if params.CodeVerifier != "" {
+		form.Set("code_verifier", params.CodeVerifier)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL,
@@ -281,18 +281,18 @@ func (g *googleExchanger) verifyIDToken(ctx context.Context, raw string) (*googl
 	}
 
 	payload, err := verifyJWS(raw, set)
-	if err != nil {
-		// On verification failure we may be looking at a stale cache
-		// after a key rotation. Invalidate and try once more.
+	if err != nil && errors.Is(err, errKeyNotFound) {
+		// On verification failure due to missing key, we may be looking
+		// at a stale cache after a key rotation. Invalidate and try once more.
 		g.jwks.Invalidate()
 		set2, fErr := g.jwks.Get(ctx)
 		if fErr != nil {
 			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 		}
 		payload, err = verifyJWS(raw, set2)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 	}
 
 	// Decode the JWT for issuer/audience/exp checks via jwx's parser
@@ -328,6 +328,8 @@ func (g *googleExchanger) verifyIDToken(ctx context.Context, raw string) (*googl
 	}
 	return &claims, nil
 }
+
+var errKeyNotFound = errors.New("key not found in jwks")
 
 // verifyJWS verifies the signature on a compact JWS using the
 // provided JWK set (matching kid → key), restricting the accepted
@@ -372,17 +374,17 @@ func verifyJWSWithAlgs(raw string, set jwk.Set, allowedAlgs ...jwa.SignatureAlgo
 	if kid != "" {
 		k, ok := set.LookupKeyID(kid)
 		if !ok {
-			return nil, fmt.Errorf("no jwk for kid=%q", kid)
+			return nil, fmt.Errorf("%w: kid=%q", errKeyNotFound, kid)
 		}
 		key = k
 	} else {
 		// No kid — try the first key.
 		if set.Len() == 0 {
-			return nil, errors.New("jwks empty")
+			return nil, fmt.Errorf("%w: empty", errKeyNotFound)
 		}
 		k, ok := set.Key(0)
 		if !ok {
-			return nil, errors.New("jwks first key missing")
+			return nil, fmt.Errorf("%w: first key missing", errKeyNotFound)
 		}
 		key = k
 	}

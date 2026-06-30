@@ -67,7 +67,7 @@ type fakeExchanger struct {
 	id *oauth.Identity
 }
 
-func (f *fakeExchanger) Exchange(context.Context, string, string) (*oauth.Identity, error) {
+func (f *fakeExchanger) Exchange(_ context.Context, _ oauth.ExchangeParams) (*oauth.Identity, error) {
 	return f.id, nil
 }
 
@@ -94,7 +94,7 @@ func TestWrapOAuthExchanger(t *testing.T) {
 	if _, ok := wrapped.(oauth.Authorizer); ok {
 		t.Errorf("plain exchanger wrapper should not satisfy Authorizer")
 	}
-	id, err := wrapped.Exchange(context.Background(), "code", "https://r")
+	id, err := wrapped.Exchange(context.Background(), oauth.ExchangeParams{Code: "code", RedirectURI: "https://r"})
 	if err != nil || id.Email != "x@y" {
 		t.Errorf("Exchange: %v %v", id, err)
 	}

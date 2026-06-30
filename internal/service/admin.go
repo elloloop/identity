@@ -13,6 +13,7 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -26,6 +27,20 @@ type AdminService struct {
 	cfg              *config.Config
 	mailer           email.Transport
 	logger           *zap.Logger
+
+	// publisher emits user-lifecycle events for admin-driven mutations
+	// (deactivate, delete). nil disables emission (no-op). Set via
+	// WithEventPublisher by app.New. Best-effort: never fails the RPC.
+	publisher events.Publisher
+}
+
+// WithEventPublisher wires the optional user-lifecycle event publisher and
+// returns the service for chaining. app.New calls it once at construction
+// (with the outbox-backed publisher when outbound eventing is enabled, or
+// nil to disable emission).
+func (s *AdminService) WithEventPublisher(p events.Publisher) *AdminService {
+	s.publisher = p
+	return s
 }
 
 // NewAdminService creates an AdminService.
@@ -274,6 +289,13 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		audit.WithSuccess(true),
 		audit.WithDetails(map[string]any{"reason": reason}),
 	)
+
+	// Best-effort: emit a user.deactivated lifecycle event so downstream
+	// SaaS can deprovision. No-op when eventing is disabled.
+	deactivated := userFromNode(node)
+	deactivated.Status = "deactivated"
+	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeactivated, deactivated)
+
 	return nil
 }
 
@@ -292,6 +314,14 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID, targetUserID
 	}
 	if node == nil {
 		return errors.New("user not found")
+	}
+
+	// Refuse to move an account out of pending_parental_consent via the
+	// ordinary reactivation path. The only valid exit from that state is the
+	// dedicated parental-consent flow; activating here would bypass the COPPA
+	// consent gate (issue #256).
+	if pstrOr(node.Payload, ufStatus, "active") == StatusPendingParentalConsent {
+		return ErrParentalConsentRequired
 	}
 
 	now := nowMs()
@@ -378,13 +408,14 @@ func (s *AdminService) ResetUserPassword(
 // invitation token back in the RPC response, so an email outage cannot
 // strand a user.
 func (s *AdminService) sendInvitationEmail(ctx context.Context, to, name, role, link string) {
-	html, text, err := email.Render(email.TemplateInvitation, map[string]any{
+	brand := resolveBranding(ctx, s.cfg)
+	html, text, err := email.Render(email.TemplateInvitation, brand.templateData(map[string]any{
 		"UserName":    name,
 		"InviterName": "An administrator",
 		"OrgName":     s.cfg.TOTPIssuer,
 		"Role":        role,
 		"Link":        link,
-	})
+	}))
 	if err != nil {
 		s.logger.Warn("invitation_email_render_failed", zap.String("to", redactEmail(to)), zap.Error(err))
 		return
@@ -396,6 +427,7 @@ func (s *AdminService) sendInvitationEmail(ctx context.Context, to, name, role, 
 		HTML:    html,
 		Text:    text,
 	}
+	brand.applyTo(&msg)
 	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("invitation_email_send_failed", zap.String("to", redactEmail(to)), zap.Error(err))
 	}

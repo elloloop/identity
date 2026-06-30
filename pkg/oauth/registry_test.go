@@ -7,7 +7,7 @@ import (
 
 type stubExchanger struct{ name string }
 
-func (s stubExchanger) Exchange(_ context.Context, _, _ string) (*Identity, error) {
+func (s stubExchanger) Exchange(_ context.Context, _ ExchangeParams) (*Identity, error) {
 	return &Identity{Provider: s.name, Email: "x@x", EmailVerified: true}, nil
 }
 

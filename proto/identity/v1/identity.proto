@@ -14,6 +14,21 @@ enum UserStatus {
   USER_STATUS_INVITED = 2;
   USER_STATUS_DEACTIVATED = 3;
   USER_STATUS_SUSPENDED = 4;
+  // PENDING_PARENTAL_CONSENT marks a child-band account created under
+  // age-gating that has not yet obtained verifiable parental consent. Such
+  // an account exists but cannot mint full access tokens until consent is
+  // granted. Additive; all existing statuses keep their numbers.
+  USER_STATUS_PENDING_PARENTAL_CONSENT = 5;
+}
+
+// AgeBand is the coarse age classification derived from a user's date of
+// birth and the deployment's configured age thresholds. Zero-value
+// (UNSPECIFIED) means age is unknown or age-gating is off.
+enum AgeBand {
+  AGE_BAND_UNSPECIFIED = 0;
+  AGE_BAND_CHILD = 1;   // at/below the configured child-max age (COPPA-protected)
+  AGE_BAND_TEEN = 2;    // minor, above child-max but below adult age
+  AGE_BAND_ADULT = 3;   // at/above the adult age
 }
 
 message User {
@@ -38,6 +53,9 @@ message User {
   string phone_number = 19;               // E.164 phone number the user has verified ownership of
   bool phone_verified = 20;               // true once an SMS OTP for phone_number was confirmed
   int64 phone_verified_at = 21;           // epoch ms; 0 = never verified
+  int64 date_of_birth_ms = 22;            // epoch ms of date of birth; 0 = unknown
+  bool is_minor = 23;                     // derived: true when age < adult age (age-gating on)
+  AgeBand age_band = 24;                  // derived age band; UNSPECIFIED when unknown / gate off
 }
 
 message CreateUserRequest {
@@ -181,7 +199,7 @@ message ListGroupMembersResponse {
 
 message BeginOAuthLoginRequest {
   string redirect_uri = 1;
-  string provider     = 2;  // "google", "microsoft", or "github"
+  string provider     = 2;  // "google", "microsoft", "github", or "apple"
   string tenant       = 3;  // Microsoft tenant ID (optional)
 }
 
@@ -196,11 +214,12 @@ message BeginOAuthLoginResponse {
 message OAuthLoginRequest {
   string code          = 1;
   string redirect_uri  = 2;
-  string provider      = 3;  // "google", "microsoft", or "github"
+  string provider      = 3;  // "google", "microsoft", "github", or "apple"
   string code_verifier = 4;  // PKCE (optional)
   string tenant        = 5;  // Microsoft tenant ID (optional)
   string state         = 6;  // authorization callback state (required for server-owned flow)
   string state_token   = 7;  // opaque token minted by BeginOAuthLogin
+  string apple_user_payload = 8; // one-time user payload from Apple's form_post callback
 }
 
 message OAuthLoginResponse {
@@ -212,7 +231,7 @@ message OAuthLoginResponse {
 }
 
 // RedeemOAuthCode exchanges the single-use one-time code handed to the
-// SPA by the hosted OAuth callback (GET /oauth/callback/{provider} ->
+// SPA by the hosted OAuth callback (GET/POST /oauth/callback/{provider} ->
 // 302 return_to?code=<otc>) for a backend-issued token pair. The code
 // is single-use and short-lived; a replay returns CodeUnauthenticated.
 message RedeemOAuthCodeRequest {
@@ -229,8 +248,9 @@ message RedeemOAuthCodeResponse {
 message PasswordSignupRequest {
   string email    = 1;
   string password = 2;
-  string recovery_email = 3;  // Optional: used for password reset flow
+  string recovery_email = 3;  // Optional: secondary contact address. Note: password reset links are sent to the account's PRIMARY verified email, not this address.
   string captcha_token = 4;   // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
+  int64 date_of_birth_ms = 5; // Optional; epoch ms of date of birth. Required at signup when GATEWAY_AGEGATE_REQUIRE_DOB.
 }
 
 message PasswordSignupResponse {
@@ -392,9 +412,10 @@ message ChangePasswordRequest {
 
 message ChangePasswordResponse {}
 
-// Recovery-email-driven password reset (replaces the deprecated self-serve
-// ForgotPassword flow). The reset link is sent to the recovery_email on file —
-// or, if none is set, the request silently succeeds (no enumeration).
+// Password reset (replaces the deprecated self-serve ForgotPassword flow).
+// The reset link is sent to the account's PRIMARY verified email — the
+// address matching the supplied `email`. If no account matches, the
+// request silently succeeds (no enumeration).
 message RequestPasswordResetRequest {
   string email = 1;
   string captcha_token = 2;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
@@ -593,6 +614,43 @@ message CompletePasskeyLoginRequest {
 }
 
 message CompletePasskeyLoginResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  int32 expires_in = 4;
+}
+
+// Passkey-first signup (UNAUTHENTICATED account creation via a passkey).
+//
+// Unlike BeginPasskeyRegistration (which adds a passkey to an already
+// authenticated account), this pair creates a brand-new account whose first
+// and only credential is a passkey — no password, no session required up
+// front. The server mints the new user id during Begin and binds it as the
+// WebAuthn user handle so the credential registered here can log in later.
+message BeginPasskeySignupRequest {
+  string email = 1;
+  string device_name = 2;
+}
+
+message BeginPasskeySignupResponse {
+  // JSON string of PublicKeyCredentialCreationOptions (frontend passes to navigator.credentials.create)
+  string options_json = 1;
+  string challenge_id = 2;
+}
+
+message CompletePasskeySignupRequest {
+  string challenge_id = 1;
+  // JSON string of the PublicKeyCredential returned by navigator.credentials.create
+  string credential_json = 2;
+  string email = 3;
+  string device_name = 4;
+  // 6-digit OTP emailed by BeginPasskeySignup. Proves control of the email
+  // in-flow, so the account is created already-verified and an attacker cannot
+  // plant a passkey on an unverified address (account pre-hijacking).
+  string otp_code = 5;
+}
+
+message CompletePasskeySignupResponse {
   User user = 1;
   string access_token = 2;
   string refresh_token = 3;
@@ -1139,7 +1197,150 @@ message CreateFirstPlatformAdminResponse {
   string generated_password = 3;
 }
 
+// LoginPolicy is a claimed tenant's authentication policy, as authored and
+// read back by the operator RPCs. It mirrors service.LoginPolicy.
+message LoginPolicy {
+  string project_id = 1;
+  string tenant_id = 2;
+  // allowed_methods is a comma-separated allow-list of login-method tokens
+  // ("email_otp", "password", "oauth", "passkey", "sso"). Empty means no
+  // restriction (the login path falls back to its safe default).
+  string allowed_methods = 3;
+  // sso_required forces SSO; sso_connection_json carries the IdP connection
+  // config as a JSON object ("{}" when unset).
+  bool sso_required = 4;
+  string sso_connection_json = 5;
+  // require_2fa forces a second factor after the primary method.
+  bool require_2fa = 6;
+  int64 created_at_ms = 7;
+  int64 updated_at_ms = 8;
+  // password_min_length is the tenant's minimum password length. 0 means "use
+  // the global minimum"; a tenant can only ever raise the floor, never lower it.
+  int32 password_min_length = 9;
+  // session_idle_timeout_seconds invalidates a session unused for this long. 0
+  // means "no idle timeout" (global behavior).
+  int64 session_idle_timeout_seconds = 10;
+  // session_absolute_timeout_seconds invalidates a session older than this,
+  // measured from the original login regardless of activity. 0 means "no
+  // absolute timeout".
+  int64 session_absolute_timeout_seconds = 11;
+}
+
+message UpsertLoginPolicyRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+  string allowed_methods = 3;
+  bool sso_required = 4;
+  string sso_connection_json = 5;
+  bool require_2fa = 6;
+  // password_min_length tightens the tenant's minimum password length (0 =
+  // global default; tenants tighten, never loosen).
+  int32 password_min_length = 7;
+  // session_idle_timeout_seconds / session_absolute_timeout_seconds set the
+  // tenant's idle and absolute session timeouts (0 = no timeout).
+  int64 session_idle_timeout_seconds = 8;
+  int64 session_absolute_timeout_seconds = 9;
+}
+
+message UpsertLoginPolicyResponse {
+  LoginPolicy policy = 1;
+}
+
+message GetLoginPolicyRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+}
+
+message GetLoginPolicyResponse {
+  // policy is unset when no LoginPolicy exists for (project, tenant) — the
+  // login path then imposes no restriction.
+  LoginPolicy policy = 1;
+}
+
+message DeleteLoginPolicyRequest {
+  string project_id = 1;
+  string tenant_id = 2;
+}
+
+message DeleteLoginPolicyResponse {}
+
+message UpsertProjectConfigRequest {
+  string project_id = 1;
+  // config_json is the project's full config blob (a JSON object). It
+  // REPLACES the project's existing config; an empty value normalises to
+  // "{}" (no per-project overrides). A malformed blob is rejected
+  // (INVALID_ARGUMENT).
+  string config_json = 2;
+}
+
+message UpsertProjectConfigResponse {
+  string config_json = 1;
+}
+
+message GetProjectConfigRequest {
+  string project_id = 1;
+}
+
+message GetProjectConfigResponse {
+  // config_json is the project's stored config blob ("{}" when unset).
+  string config_json = 1;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────
+
+// ── Linked identities (self-service connected accounts) ────────────────────
+//
+// User-managed OAuth/OIDC identity links. These let an authenticated user
+// see which providers are connected to their account, attach a new verified
+// provider identity, and disconnect one — without losing the ability to sign
+// in. They operate over the same (provider, provider_user_id) link store that
+// implicit login-time auto-linking writes to; the auto-link behaviour is
+// unchanged.
+
+// LinkedIdentity is one connected provider identity for the authenticated user.
+message LinkedIdentity {
+  string provider            = 1;  // "google", "microsoft", "github", "apple", ...
+  string provider_user_id    = 2;  // stable provider subject
+  string email_at_link_time  = 3;  // email the provider asserted when linked
+  int64  linked_at           = 4;  // epoch ms the link was created
+}
+
+message ListLinkedIdentitiesRequest {}
+
+message ListLinkedIdentitiesResponse {
+  repeated LinkedIdentity identities = 1;
+}
+
+// LinkIdentity attaches a freshly-verified OAuth identity to the
+// authenticated caller. The server performs the provider code exchange
+// itself (the client is never trusted to assert the identity), exactly like
+// OAuthLogin, then persists the (provider, provider_user_id) link against the
+// caller's user id. If that provider identity is already linked to a
+// different user the call fails (CodeAlreadyExists).
+message LinkIdentityRequest {
+  string code          = 1;  // authorization code from the provider callback
+  string redirect_uri  = 2;
+  string provider      = 3;  // "google", "microsoft", "github", "apple", ...
+  string code_verifier = 4;  // PKCE (optional)
+  string state         = 5;  // authorization callback state
+  string state_token   = 6;  // opaque token minted by BeginOAuthLogin
+}
+
+message LinkIdentityResponse {
+  LinkedIdentity identity = 1;
+}
+
+// UnlinkIdentity disconnects a provider identity from the authenticated
+// caller. It refuses (CodeFailedPrecondition) to remove the user's LAST
+// remaining sign-in credential: if the user has no password and no passkey,
+// the final linked provider cannot be removed, so the account can never be
+// locked out of its own sign-in.
+message UnlinkIdentityRequest {
+  string provider         = 1;
+  string provider_user_id = 2;
+}
+
+message UnlinkIdentityResponse {}
 
 service IdentityService {
   // Authentication
@@ -1192,6 +1393,9 @@ service IdentityService {
   // Passkey / WebAuthn
   rpc BeginPasskeyRegistration(BeginPasskeyRegistrationRequest) returns (BeginPasskeyRegistrationResponse);
   rpc CompletePasskeyRegistration(CompletePasskeyRegistrationRequest) returns (CompletePasskeyRegistrationResponse);
+  // Passkey-first signup — unauthenticated account creation via a passkey.
+  rpc BeginPasskeySignup(BeginPasskeySignupRequest) returns (BeginPasskeySignupResponse);
+  rpc CompletePasskeySignup(CompletePasskeySignupRequest) returns (CompletePasskeySignupResponse);
   rpc BeginPasskeyLogin(BeginPasskeyLoginRequest) returns (BeginPasskeyLoginResponse);
   rpc CompletePasskeyLogin(CompletePasskeyLoginRequest) returns (CompletePasskeyLoginResponse);
   rpc ListPasskeys(ListPasskeysRequest) returns (ListPasskeysResponse);
@@ -1294,4 +1498,26 @@ service IdentityService {
   // succeeds only while platform_admins is empty, then permanently closes
   // (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
   rpc CreateFirstPlatformAdmin(CreateFirstPlatformAdminRequest) returns (CreateFirstPlatformAdminResponse);
+
+  // Self-service linked identities (connected accounts). Authenticated by the
+  // caller's user JWT; each operates only on the caller's own links.
+  rpc ListLinkedIdentities(ListLinkedIdentitiesRequest) returns (ListLinkedIdentitiesResponse);
+  rpc LinkIdentity(LinkIdentityRequest) returns (LinkIdentityResponse);
+  rpc UnlinkIdentity(UnlinkIdentityRequest) returns (UnlinkIdentityResponse);
+
+  // Per-tenant LoginPolicy authoring. These write the policy the login path
+  // enforces (allowed methods, SSO-required, require-2FA) for a claimed
+  // tenant within a project — at most one policy per (project, tenant).
+  // Operator-only: authenticated by the shared admin secret, like the other
+  // Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+  rpc UpsertLoginPolicy(UpsertLoginPolicyRequest) returns (UpsertLoginPolicyResponse);
+  rpc GetLoginPolicy(GetLoginPolicyRequest) returns (GetLoginPolicyResponse);
+  rpc DeleteLoginPolicy(DeleteLoginPolicyRequest) returns (DeleteLoginPolicyResponse);
+
+  // Per-project config authoring. UpsertProjectConfig replaces a project's
+  // config_json blob (the typed knobs an operator sets — e.g. CORS allowed
+  // origins); GetProjectConfig reads it back. Operator-only, like the other
+  // Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+  rpc UpsertProjectConfig(UpsertProjectConfigRequest) returns (UpsertProjectConfigResponse);
+  rpc GetProjectConfig(GetProjectConfigRequest) returns (GetProjectConfigResponse);
 }

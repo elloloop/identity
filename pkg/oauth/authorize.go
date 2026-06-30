@@ -79,5 +79,4 @@ var (
 	_ Authorizer = (*microsoftExchanger)(nil)
 	_ Authorizer = (*githubExchanger)(nil)
 	_ Authorizer = (*appleExchanger)(nil)
-	_ Authorizer = (*oidcExchanger)(nil)
 )
