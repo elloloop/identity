@@ -123,42 +123,63 @@ func TestRepoSCIMStore_ReplaceUser_Errors(t *testing.T) {
 	}
 }
 
-func TestRepoSCIMStore_SetActive_RevokesAndErrors(t *testing.T) {
+func boolPtr(b bool) *bool { return &b }
+
+func TestRepoSCIMStore_PatchUser_RevokesAndErrors(t *testing.T) {
 	ctx := context.Background()
 
-	// Deactivation revokes both refresh tokens and sessions.
+	// Deactivation via PATCH revokes both refresh tokens and sessions.
 	fr := &scimFakeRepo{user: &service.User{ID: "id"}}
 	s := &repoSCIMStore{repo: fr}
-	if _, err := s.SetActive(ctx, "id", false); err != nil {
-		t.Fatalf("SetActive deactivate: %v", err)
+	if _, err := s.PatchUser(ctx, "id", scim.UserPatch{Active: boolPtr(false)}); err != nil {
+		t.Fatalf("PatchUser deactivate: %v", err)
 	}
 	if !fr.delRefreshCalled || !fr.revokeCalled {
-		t.Fatalf("SetActive false must revoke tokens+sessions: refresh=%v sessions=%v", fr.delRefreshCalled, fr.revokeCalled)
+		t.Fatalf("PatchUser active:false must revoke tokens+sessions: refresh=%v sessions=%v", fr.delRefreshCalled, fr.revokeCalled)
 	}
 
 	// Session-revocation failure surfaces.
 	fr = &scimFakeRepo{user: &service.User{ID: "id"}, errRevoke: errors.New("sess fail")}
 	s = &repoSCIMStore{repo: fr}
-	if _, err := s.SetActive(ctx, "id", false); err == nil {
-		t.Fatal("SetActive must surface session-revocation error")
+	if _, err := s.PatchUser(ctx, "id", scim.UserPatch{Active: boolPtr(false)}); err == nil {
+		t.Fatal("PatchUser must surface session-revocation error")
+	}
+
+	// A profile-only PATCH (no active) does not revoke.
+	fr = &scimFakeRepo{user: &service.User{ID: "id", Name: "Old Name"}}
+	s = &repoSCIMStore{repo: fr}
+	if _, err := s.PatchUser(ctx, "id", scim.UserPatch{GivenName: ptr("New")}); err != nil {
+		t.Fatalf("PatchUser profile: %v", err)
+	}
+	if fr.delRefreshCalled || fr.revokeCalled {
+		t.Fatal("PatchUser without active:false must not revoke")
 	}
 
 	// Reactivation does not revoke.
 	fr = &scimFakeRepo{user: &service.User{ID: "id"}}
 	s = &repoSCIMStore{repo: fr}
-	if _, err := s.SetActive(ctx, "id", true); err != nil {
-		t.Fatalf("SetActive activate: %v", err)
+	if _, err := s.PatchUser(ctx, "id", scim.UserPatch{Active: boolPtr(true)}); err != nil {
+		t.Fatalf("PatchUser activate: %v", err)
 	}
 	if fr.delRefreshCalled || fr.revokeCalled {
-		t.Fatal("SetActive true must not revoke")
+		t.Fatal("PatchUser active:true must not revoke")
+	}
+
+	// UpdateUser conflict (e.g. email collision) maps to ErrConflict.
+	fr = &scimFakeRepo{user: &service.User{ID: "id"}, errUpdate: service.ErrAlreadyExists}
+	s = &repoSCIMStore{repo: fr}
+	if _, err := s.PatchUser(ctx, "id", scim.UserPatch{Email: ptr("dup@example.com")}); !errors.Is(err, scim.ErrConflict) {
+		t.Fatalf("PatchUser email conflict → %v, want ErrConflict", err)
 	}
 
 	// Missing user → ErrNotFound.
 	s = &repoSCIMStore{repo: &scimFakeRepo{user: nil}}
-	if _, err := s.SetActive(ctx, "id", false); !errors.Is(err, scim.ErrNotFound) {
-		t.Fatalf("SetActive missing → %v, want ErrNotFound", err)
+	if _, err := s.PatchUser(ctx, "id", scim.UserPatch{Active: boolPtr(false)}); !errors.Is(err, scim.ErrNotFound) {
+		t.Fatalf("PatchUser missing → %v, want ErrNotFound", err)
 	}
 }
+
+func ptr(s string) *string { return &s }
 
 func TestRepoSCIMStore_DeleteUser(t *testing.T) {
 	ctx := context.Background()

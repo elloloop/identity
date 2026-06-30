@@ -6173,7 +6173,7 @@ components:
         externalId:
           type: string
           title: external_id
-          description: IdP-owned stable identifier (SCIM externalId); unique per tenant when set
+          description: IdP-owned stable identifier (SCIM externalId); unique per project when set
       title: User
       additionalProperties: false
     identity.v1.UserStatus:

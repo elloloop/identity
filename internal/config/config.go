@@ -1108,11 +1108,18 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// MinSCIMBearerTokenLength is the floor for GATEWAY_SCIM_BEARER_TOKEN. The
+// token is the sole credential guarding account lifecycle operations across a
+// whole project, so it must carry enough entropy to resist guessing; 32 chars
+// is the minimum a generated secret should ever be.
+const MinSCIMBearerTokenLength = 32
+
 // validateSCIM enforces the SCIM invariant: a deployment that turns the
-// inbound SCIM server on must supply a bearer token (the only credential
-// gating account lifecycle operations) and a project id, since every SCIM
-// operation is scoped to that single project's users. Failing closed at
-// boot beats serving an unauthenticated or unscoped provisioning endpoint.
+// inbound SCIM server on must supply a sufficiently long bearer token (the
+// only credential gating account lifecycle operations) and a project id, since
+// every SCIM operation is scoped to that single project's users. Failing closed
+// at boot beats serving an unauthenticated, weakly-authenticated, or unscoped
+// provisioning endpoint.
 func (c *Config) validateSCIM() error {
 	if !c.SCIMEnabled {
 		return nil
@@ -1120,6 +1127,12 @@ func (c *Config) validateSCIM() error {
 	if c.SCIMBearerToken == "" {
 		return errors.New(
 			"config: GATEWAY_SCIM_ENABLED=true requires GATEWAY_SCIM_BEARER_TOKEN to be set",
+		)
+	}
+	if len(c.SCIMBearerToken) < MinSCIMBearerTokenLength {
+		return fmt.Errorf(
+			"config: GATEWAY_SCIM_BEARER_TOKEN must be at least %d characters (got %d)",
+			MinSCIMBearerTokenLength, len(c.SCIMBearerToken),
 		)
 	}
 	if c.SCIMProjectID == "" {

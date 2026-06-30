@@ -46,10 +46,6 @@ func (StubRepository) DeleteUser(context.Context, string) error {
 	return ErrServiceUnavailable
 }
 
-func (StubRepository) FindUserByExternalID(context.Context, string) (*User, error) {
-	return nil, ErrServiceUnavailable
-}
-
 func (StubRepository) ListUsers(context.Context, UserListFilter) ([]*User, error) {
 	return nil, ErrServiceUnavailable
 }

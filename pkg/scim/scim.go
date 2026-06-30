@@ -60,14 +60,34 @@ type Store interface {
 	CreateUser(ctx context.Context, u User) (User, error)
 	GetUser(ctx context.Context, id string) (User, error)
 	ReplaceUser(ctx context.Context, id string, u User) (User, error)
-	// SetActive flips the account's active state. active=false maps to the
-	// host's deactivation path (which also revokes sessions); active=true
-	// reactivates. It returns the updated user.
-	SetActive(ctx context.Context, id string, active bool) (User, error)
+	// PatchUser applies the non-nil fields of patch to the user (SCIM
+	// PATCH partial update), returning the updated user. Setting Active to
+	// false maps to the host's deactivation path (which also revokes
+	// sessions/refresh tokens); true reactivates. Implementations MUST return
+	// ErrNotFound for a missing user and ErrConflict on a uniqueness violation
+	// (userName/email/externalId).
+	PatchUser(ctx context.Context, id string, patch UserPatch) (User, error)
 	DeleteUser(ctx context.Context, id string) error
 	// ListUsers returns users matching filter (zero value = all), ordered
 	// stably, plus the total number of matches (for SCIM totalResults).
 	ListUsers(ctx context.Context, filter ListFilter) (users []User, total int, err error)
+}
+
+// UserPatch is a partial update to a User: every field is a pointer so the
+// caller can distinguish "leave unchanged" (nil) from "set to this value"
+// (non-nil). The SCIM provider builds it from a PATCH request's operations and
+// the host Store maps the set fields onto its repository, so a PATCH replace of
+// a single attribute never clobbers the others. The mapping mirrors the PUT
+// (ReplaceUser) attribute mapping: userName/email → the host email, given/family
+// → the host display name, externalId → external_id, active → the account
+// status.
+type UserPatch struct {
+	Active     *bool
+	UserName   *string
+	Email      *string
+	ExternalID *string
+	GivenName  *string
+	FamilyName *string
 }
 
 // ListFilter narrows a ListUsers query. The provider parses the subset of

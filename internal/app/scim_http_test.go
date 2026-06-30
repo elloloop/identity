@@ -88,11 +88,13 @@ func TestSCIM_CreatePatchListThroughRepo(t *testing.T) {
 		t.Fatalf("create returned no id: %v", created)
 	}
 
-	// external_id round-trips into the repository.
-	u, err := repo.FindUserByExternalID(context.Background(), "entra-77")
-	if err != nil || u == nil {
-		t.Fatalf("FindUserByExternalID: %v %#v", err, u)
+	// external_id round-trips into the repository — resolved via the
+	// production correlation path (ListUsers with an ExternalID filter).
+	matches, err := repo.ListUsers(context.Background(), service.UserListFilter{ExternalID: "entra-77"})
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("ListUsers(ExternalID): %v %#v", err, matches)
 	}
+	u := matches[0]
 	if u.Email != "bob@example.com" || u.Status != "active" {
 		t.Fatalf("created user: %+v", u)
 	}

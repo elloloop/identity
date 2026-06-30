@@ -64,10 +64,14 @@ GATEWAY_SCIM_PROJECT_ID=<project-id>`}
     </li>
     <li><code>PUT /scim/v2/Users/&#123;id&#125;</code> — replace a user.</li>
     <li>
-      <code>PATCH /scim/v2/Users/&#123;id&#125;</code> — toggle
-      <code>active</code>. <code>active:false</code> deactivates the account
-      and immediately revokes its sessions and refresh tokens;
-      <code>active:true</code> reactivates it.
+      <code>PATCH /scim/v2/Users/&#123;id&#125;</code> — partial update of
+      <code>userName</code>, <code>emails</code>/<code>email</code>,
+      <code>name</code> (given/family/displayName), <code>externalId</code>, and
+      <code>active</code> (the path Microsoft Entra ID drives all profile syncs
+      through). <code>active:false</code> deactivates the account and
+      immediately revokes its sessions and refresh tokens;
+      <code>active:true</code> reactivates it. Unsupported attributes are
+      rejected with <code>400</code>.
     </li>
     <li><code>DELETE /scim/v2/Users/&#123;id&#125;</code> — remove a user.</li>
     <li>
@@ -96,8 +100,10 @@ GATEWAY_SCIM_PROJECT_ID=<project-id>`}
     <strong>Deferred.</strong> SCIM <code>/Groups</code> is not yet
     implemented. Each bearer token is scoped to one project
     (<code>GATEWAY_SCIM_PROJECT_ID</code>); multiplexing several projects
-    through a single credential is intentionally out of scope. The
-    <code>/Users</code> surface above is complete and tested across all
-    storage backends.
+    through a single credential is intentionally out of scope. SCIM mutations
+    write straight through the project-scoped repository, so they do not yet
+    emit the service-layer audit events / user-lifecycle webhooks that the gRPC
+    admin path does — a tracked follow-up. The <code>/Users</code> surface
+    above is complete and tested across all storage backends.
   </div>
 </DocsLayout>

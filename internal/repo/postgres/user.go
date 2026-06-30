@@ -133,25 +133,6 @@ func (r *pgRepository) GetUser(ctx context.Context, userID string) (*service.Use
 	return u, nil
 }
 
-func (r *pgRepository) FindUserByExternalID(ctx context.Context, externalID string) (*service.User, error) {
-	if externalID == "" {
-		return nil, nil
-	}
-	const q = `SELECT ` + userColumns + `
-		FROM users
-		WHERE project_id = $1 AND external_id = $2
-		LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, r.projectID, externalID)
-	u, err := scanUser(row)
-	if noRows(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, wrapPgErr("FindUserByExternalID", err)
-	}
-	return u, nil
-}
-
 func (r *pgRepository) ListUsers(ctx context.Context, filter service.UserListFilter) ([]*service.User, error) {
 	limit := filter.Limit
 	if limit <= 0 {

@@ -127,24 +127,6 @@ func (r *sqliteRepository) GetUser(ctx context.Context, userID string) (*service
 	return u, nil
 }
 
-func (r *sqliteRepository) FindUserByExternalID(ctx context.Context, externalID string) (*service.User, error) {
-	if externalID == "" {
-		return nil, nil
-	}
-	const q = `SELECT ` + userColumns + `
-		FROM users
-		WHERE project_id = $1 AND external_id = $2
-		LIMIT 1`
-	u, err := scanUser(r.db.QueryRow(ctx, q, r.projectID, externalID))
-	if noRows(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, wrapErr("FindUserByExternalID", err)
-	}
-	return u, nil
-}
-
 func (r *sqliteRepository) ListUsers(ctx context.Context, filter service.UserListFilter) ([]*service.User, error) {
 	limit := filter.Limit
 	if limit <= 0 {

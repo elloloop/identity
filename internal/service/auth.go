@@ -181,16 +181,11 @@ type Repository interface {
 	// graph.)
 	DeleteUser(ctx context.Context, userID string) error
 
-	// FindUserByExternalID returns the user whose IdP-owned external_id
-	// matches exactly within the request's project, or nil when none does.
-	// external_id is the stable SCIM externalId an external IdP assigns; it
-	// is unique per project when set (an empty external_id never matches and
-	// carries no uniqueness constraint, so unprovisioned users coexist).
-	FindUserByExternalID(ctx context.Context, externalID string) (*User, error)
-
 	// ListUsers returns users in the request's project that match filter,
 	// ordered by created_at ascending then id, with a stable offset cursor.
-	// It backs the SCIM /Users list/filter surface. Drivers must apply the
+	// It backs the SCIM /Users list/filter surface — including externalId
+	// correlation via UserListFilter.ExternalID, the production path an IdP
+	// uses to find a previously-provisioned account. Drivers must apply the
 	// filter and ordering identically (see conformance).
 	ListUsers(ctx context.Context, filter UserListFilter) ([]*User, error)
 

@@ -10,3 +10,9 @@ ALTER TABLE users
 CREATE UNIQUE INDEX IF NOT EXISTS users_project_external_id_uidx
     ON users (project_id, external_id)
     WHERE external_id <> '';
+
+-- Backing index for the SCIM /Users list ORDER BY (created_at_ms ASC, id ASC)
+-- within a project: the unfiltered list page is the hot path an IdP polls, so a
+-- composite index lets the keyset/offset scan run without a sort.
+CREATE INDEX IF NOT EXISTS users_project_created_id_idx
+    ON users (project_id, created_at_ms, id);

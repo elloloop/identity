@@ -219,21 +219,6 @@ func (r *Repo) GetUser(_ context.Context, userID string) (*service.User, error) 
 	return &cp, nil
 }
 
-func (r *Repo) FindUserByExternalID(_ context.Context, externalID string) (*service.User, error) {
-	if externalID == "" {
-		return nil, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, u := range r.users {
-		if u.ExternalID == externalID {
-			cp := *u
-			return &cp, nil
-		}
-	}
-	return nil, nil
-}
-
 func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
 	limit := filter.Limit
 	if limit <= 0 {
@@ -342,6 +327,18 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 			for id, other := range r.users {
 				if id != userID && other.ExternalID == ext {
 					return fmt.Errorf("external_id %q: %w", ext, service.ErrAlreadyExists)
+				}
+			}
+		}
+	}
+	// Mirror the SQL drivers' per-project unique (lower(email)) index: an
+	// email change that collides with another user is a conflict, so a SCIM
+	// PUT/PATCH that reuses an address fails identically across backends.
+	if v, ok := fields["email"]; ok {
+		if email, _ := v.(string); email != "" {
+			for id, other := range r.users {
+				if id != userID && strings.EqualFold(other.Email, email) {
+					return fmt.Errorf("email %q: %w", email, service.ErrAlreadyExists)
 				}
 			}
 		}

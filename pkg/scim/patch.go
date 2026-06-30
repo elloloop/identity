@@ -7,9 +7,11 @@ import (
 )
 
 // PatchRequest is the SCIM PatchOp message (RFC 7644 §3.5.2). The provider
-// supports the single operation enterprises drive for deprovisioning:
-// replacing the `active` attribute. Other paths are surfaced as errors by the
-// handler rather than silently dropped.
+// supports the attribute set enterprises drive through PATCH — Microsoft Entra
+// ID, for one, performs ALL profile updates (and de/re-provisioning) via PATCH
+// replace, never PUT — so the mapped attributes (userName, emails/email, name,
+// externalId, active) are all patchable. Operations targeting an attribute this
+// server does not model are surfaced as errors rather than silently dropped.
 type PatchRequest struct {
 	Schemas    []string    `json:"schemas"`
 	Operations []Operation `json:"Operations"`
@@ -22,37 +24,196 @@ type Operation struct {
 	Value json.RawMessage `json:"value,omitempty"`
 }
 
-// activeValue extracts the desired `active` state from the patch. It returns
-// ok=false when no operation touches `active`, so the caller can reject an
-// unsupported patch. Both shapes IdPs emit are handled:
-//
-//	{"op":"replace","path":"active","value":false}
-//	{"op":"replace","value":{"active":false}}
-func (p PatchRequest) activeValue() (active, ok bool, err error) {
+// errNoSupportedPatch is returned when a PatchRequest carries no operation that
+// touches an attribute this server models (so the caller can 400 rather than
+// silently no-op).
+var errNoSupportedPatch = errors.New("no supported attribute in patch")
+
+// toUserPatch folds a PatchRequest's operations into a partial UserPatch. It
+// handles the two shapes IdPs emit — a targeted op with a `path`
+// (`{"op":"replace","path":"name.givenName","value":"Ada"}`) and a no-path op
+// whose value is an attribute object (`{"op":"replace","value":{"active":false,
+// "name":{"givenName":"Ada"}}}`) — for replace, add (treated as set), and
+// remove (treated as clear). An operation targeting an unmodelled attribute, or
+// a patch with no modelled attribute at all, is an error so the handler returns
+// 400 instead of pretending success.
+func (p PatchRequest) toUserPatch() (UserPatch, error) {
+	var patch UserPatch
+	touched := false
 	for _, op := range p.Operations {
-		if !strings.EqualFold(op.Op, "replace") && !strings.EqualFold(op.Op, "add") {
+		opName := strings.ToLower(strings.TrimSpace(op.Op))
+		switch opName {
+		case "replace", "add", "remove":
+		default:
+			return UserPatch{}, errors.New("unsupported patch op: " + op.Op)
+		}
+		remove := opName == "remove"
+
+		path := strings.TrimSpace(op.Path)
+		if path == "" {
+			// No path: the value is an object whose keys are attribute paths.
+			var attrs map[string]json.RawMessage
+			if err := json.Unmarshal(op.Value, &attrs); err != nil {
+				return UserPatch{}, errors.New("patch operation without a path must carry an attribute object")
+			}
+			for attr, raw := range attrs {
+				if err := applyPatchAttr(&patch, attr, raw, false); err != nil {
+					return UserPatch{}, err
+				}
+				touched = true
+			}
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(op.Path), "active") {
-			var b bool
-			if err := json.Unmarshal(op.Value, &b); err != nil {
-				return false, false, errors.New("active value must be a boolean")
-			}
-			return b, true, nil
+		if err := applyPatchAttr(&patch, path, op.Value, remove); err != nil {
+			return UserPatch{}, err
 		}
-		if strings.TrimSpace(op.Path) == "" && len(op.Value) > 0 {
-			var m map[string]json.RawMessage
-			if err := json.Unmarshal(op.Value, &m); err != nil {
-				continue
-			}
-			if raw, present := m["active"]; present {
-				var b bool
-				if err := json.Unmarshal(raw, &b); err != nil {
-					return false, false, errors.New("active value must be a boolean")
-				}
-				return b, true, nil
-			}
+		touched = true
+	}
+	if !touched {
+		return UserPatch{}, errNoSupportedPatch
+	}
+	return patch, nil
+}
+
+// applyPatchAttr sets the field of patch named by attr from raw (or clears it
+// when remove is true). attr is a SCIM attribute path (case-insensitive,
+// optional filter brackets and schema-URN prefix stripped). An unmodelled
+// attribute is an error.
+func applyPatchAttr(patch *UserPatch, attr string, raw json.RawMessage, remove bool) error {
+	switch normalizeAttrPath(attr) {
+	case "active":
+		if remove {
+			return errors.New("the 'active' attribute cannot be removed")
+		}
+		b, err := decodeSCIMBool(raw)
+		if err != nil {
+			return err
+		}
+		patch.Active = &b
+	case "username":
+		patch.UserName = stringValue(raw, remove)
+	case "externalid":
+		patch.ExternalID = stringValue(raw, remove)
+	case "email", "emails", "emails.value":
+		v, err := emailValue(raw, remove)
+		if err != nil {
+			return err
+		}
+		patch.Email = v
+	case "name.givenname":
+		patch.GivenName = stringValue(raw, remove)
+	case "name.familyname":
+		patch.FamilyName = stringValue(raw, remove)
+	case "name.formatted", "displayname":
+		given, family := splitName(stringOrEmpty(raw, remove))
+		patch.GivenName = &given
+		patch.FamilyName = &family
+	case "name":
+		// A whole-name object: {givenName, familyName, formatted}.
+		if remove {
+			empty := ""
+			patch.GivenName, patch.FamilyName = &empty, &empty
+			return nil
+		}
+		var n Name
+		if err := json.Unmarshal(raw, &n); err != nil {
+			return errors.New("name value must be an object")
+		}
+		if n.GivenName == "" && n.FamilyName == "" && n.Formatted != "" {
+			g, f := splitName(n.Formatted)
+			patch.GivenName, patch.FamilyName = &g, &f
+		} else {
+			patch.GivenName, patch.FamilyName = &n.GivenName, &n.FamilyName
+		}
+	default:
+		return errors.New("unsupported patch attribute: " + attr)
+	}
+	return nil
+}
+
+// normalizeAttrPath lower-cases an attribute path and strips the SCIM
+// schema-URN prefix and any value-selector filter brackets (e.g.
+// `emails[type eq "work"].value` → `emails.value`) so the switch in
+// applyPatchAttr matches the bare attribute path.
+func normalizeAttrPath(attr string) string {
+	attr = strings.TrimSpace(attr)
+	if i := strings.LastIndex(attr, ":"); i >= 0 {
+		// Strip a leading schema URN like
+		// urn:ietf:params:scim:schemas:core:2.0:User:userName.
+		attr = attr[i+1:]
+	}
+	for {
+		open := strings.IndexByte(attr, '[')
+		if open < 0 {
+			break
+		}
+		rel := strings.IndexByte(attr[open:], ']')
+		if rel < 0 {
+			break
+		}
+		attr = attr[:open] + attr[open+rel+1:]
+	}
+	return strings.ToLower(strings.TrimSpace(attr))
+}
+
+// stringValue decodes a JSON string into a *string, or returns a pointer to ""
+// when remove is true.
+func stringValue(raw json.RawMessage, remove bool) *string {
+	s := stringOrEmpty(raw, remove)
+	return &s
+}
+
+func stringOrEmpty(raw json.RawMessage, remove bool) string {
+	if remove || len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return strings.Trim(string(raw), `"`)
+	}
+	return s
+}
+
+// emailValue extracts an email from the several shapes SCIM clients send for
+// the emails attribute: a bare string, an object {"value":...}, or an array of
+// {value, primary} entries (primary wins, else first).
+func emailValue(raw json.RawMessage, remove bool) (*string, error) {
+	if remove || len(raw) == 0 {
+		empty := ""
+		return &empty, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return &s, nil
+	}
+	var one Email
+	if err := json.Unmarshal(raw, &one); err == nil && one.Value != "" {
+		return &one.Value, nil
+	}
+	var many []Email
+	if err := json.Unmarshal(raw, &many); err == nil {
+		v := primaryEmail(many)
+		return &v, nil
+	}
+	return nil, errors.New("email value must be a string, an object, or an array")
+}
+
+// decodeSCIMBool parses the active value as a JSON boolean or, for
+// interoperability with IdPs (Entra) that send it as a quoted string, the
+// strings "true"/"false" (case-insensitive).
+func decodeSCIMBool(raw json.RawMessage) (bool, error) {
+	var b bool
+	if err := json.Unmarshal(raw, &b); err == nil {
+		return b, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "true":
+			return true, nil
+		case "false":
+			return false, nil
 		}
 	}
-	return false, false, nil
+	return false, errors.New("active value must be a boolean")
 }

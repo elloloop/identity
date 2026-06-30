@@ -9,13 +9,38 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
+// findByExternalID resolves the single user with the given external_id via the
+// PRODUCTION correlation path — ListUsers with an ExternalID equality filter,
+// the exact query the SCIM server runs to find a previously-provisioned account
+// (there is no dedicated FindUserByExternalID). An empty external_id is never a
+// lookup key, so it returns nil without querying. Returns nil when no row
+// matches.
+func findByExternalID(ctx context.Context, t *testing.T, r service.Repository, ext string) *service.User {
+	t.Helper()
+	if ext == "" {
+		return nil
+	}
+	users, err := r.ListUsers(ctx, service.UserListFilter{ExternalID: ext})
+	if err != nil {
+		t.Fatalf("ListUsers(ExternalID=%q): %v", ext, err)
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	if len(users) != 1 {
+		t.Fatalf("ListUsers(ExternalID=%q) returned %d rows, want at most 1", ext, len(users))
+	}
+	return users[0]
+}
+
 // RunExternalIDConformance exercises the SCIM externalId surface every
 // driver must honour identically (#260): external_id round-trips through
-// CreateUser/UpdateUser, FindUserByExternalID resolves exactly within the
-// project, a non-empty external_id is unique per project (collision →
-// service.ErrAlreadyExists on both create and update), an empty external_id
-// is exempt from uniqueness, and ListUsers filters + paginates with the
-// same ordering across backends.
+// CreateUser/UpdateUser, an ExternalID-filtered ListUsers resolves exactly
+// within the project (the production correlation path), a non-empty external_id
+// is unique per project (collision → service.ErrAlreadyExists on both create
+// and update), an empty external_id is exempt from uniqueness, an email change
+// that collides is rejected, and ListUsers filters + paginates with the same
+// ordering across backends.
 func runExternalIDConformance(t *testing.T, driver Driver) {
 	t.Helper()
 	t.Run(driver.Name+"/ExternalID", func(t *testing.T) {
@@ -23,12 +48,12 @@ func runExternalIDConformance(t *testing.T, driver Driver) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
 
-			// Empty external_id never matches.
-			if got, err := r.FindUserByExternalID(ctx, ""); err != nil || got != nil {
-				t.Fatalf("FindUserByExternalID empty: got=%#v err=%v", got, err)
+			// Empty external_id never matches; absent external_id resolves nothing.
+			if got := findByExternalID(ctx, t, r, ""); got != nil {
+				t.Fatalf("findByExternalID empty: got=%#v", got)
 			}
-			if got, err := r.FindUserByExternalID(ctx, "okta-1"); err != nil || got != nil {
-				t.Fatalf("FindUserByExternalID before create: got=%#v err=%v", got, err)
+			if got := findByExternalID(ctx, t, r, "okta-1"); got != nil {
+				t.Fatalf("findByExternalID before create: got=%#v", got)
 			}
 
 			id, err := r.CreateUser(ctx, &service.User{
@@ -38,14 +63,11 @@ func runExternalIDConformance(t *testing.T, driver Driver) {
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
-			got, err := r.FindUserByExternalID(ctx, "okta-1")
-			if err != nil || got == nil {
-				t.Fatalf("FindUserByExternalID: got=%#v err=%v", got, err)
+			got := findByExternalID(ctx, t, r, "okta-1")
+			if got == nil || got.ID != id || got.ExternalID != "okta-1" {
+				t.Fatalf("findByExternalID round-trip: %#v", got)
 			}
-			if got.ID != id || got.ExternalID != "okta-1" {
-				t.Fatalf("FindUserByExternalID round-trip: %+v", got)
-			}
-			// GetUser/FindUserByEmail also carry external_id.
+			// GetUser also carries external_id.
 			byID, _ := r.GetUser(ctx, id)
 			if byID == nil || byID.ExternalID != "okta-1" {
 				t.Fatalf("GetUser external_id = %#v", byID)
@@ -62,7 +84,7 @@ func runExternalIDConformance(t *testing.T, driver Driver) {
 			if err := r.UpdateUser(ctx, id, map[string]any{"external_id": "entra-9"}); err != nil {
 				t.Fatalf("UpdateUser: %v", err)
 			}
-			got, _ := r.FindUserByExternalID(ctx, "entra-9")
+			got := findByExternalID(ctx, t, r, "entra-9")
 			if got == nil || got.ID != id {
 				t.Fatalf("after UpdateUser external_id: %#v", got)
 			}
@@ -93,6 +115,25 @@ func runExternalIDConformance(t *testing.T, driver Driver) {
 			err = r.UpdateUser(ctx, otherID, map[string]any{"external_id": "taken"})
 			if !errors.Is(err, service.ErrAlreadyExists) {
 				t.Fatalf("duplicate external_id on update: want ErrAlreadyExists, got %v", err)
+			}
+		})
+
+		t.Run("UpdateEmailCollision", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.CreateUser(ctx, &service.User{Email: "taken@example.com", Status: "active"}); err != nil {
+				t.Fatalf("CreateUser taken: %v", err)
+			}
+			otherID, err := r.CreateUser(ctx, &service.User{Email: "mover@example.com", Status: "active"})
+			if err != nil {
+				t.Fatalf("CreateUser mover: %v", err)
+			}
+			// A SCIM PUT/PATCH that moves an account onto an address another
+			// user already holds must conflict identically across drivers
+			// (case-insensitive), so the provider returns 409 not 500/silent.
+			err = r.UpdateUser(ctx, otherID, map[string]any{"email": "TAKEN@example.com"})
+			if !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("email-change collision on update: want ErrAlreadyExists, got %v", err)
 			}
 		})
 
@@ -132,13 +173,13 @@ func runExternalIDConformance(t *testing.T, driver Driver) {
 			// DATA (email), not id: some backends restart their id counter per
 			// scope, so A and B can mint the same id string for their first row;
 			// a real leak is B resolving A's row data.
-			gotA, err := a.FindUserByExternalID(ctx, sharedExt)
-			if err != nil || gotA == nil || gotA.Email != emailA {
-				t.Fatalf("FindUserByExternalID in A: got=%#v err=%v want email=%q", gotA, err, emailA)
+			gotA := findByExternalID(ctx, t, a, sharedExt)
+			if gotA == nil || gotA.Email != emailA {
+				t.Fatalf("findByExternalID in A: got=%#v want email=%q", gotA, emailA)
 			}
-			gotB, err := b.FindUserByExternalID(ctx, sharedExt)
-			if err != nil || gotB == nil || gotB.Email != emailB {
-				t.Fatalf("FindUserByExternalID in B: got=%#v err=%v want email=%q", gotB, err, emailB)
+			gotB := findByExternalID(ctx, t, b, sharedExt)
+			if gotB == nil || gotB.Email != emailB {
+				t.Fatalf("findByExternalID in B: got=%#v want email=%q", gotB, emailB)
 			}
 		})
 

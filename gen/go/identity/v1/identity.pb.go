@@ -333,7 +333,7 @@ type User struct {
 	DateOfBirthMs    int64                  `protobuf:"varint,22,opt,name=date_of_birth_ms,json=dateOfBirthMs,proto3" json:"date_of_birth_ms,omitempty"`        // epoch ms of date of birth; 0 = unknown
 	IsMinor          bool                   `protobuf:"varint,23,opt,name=is_minor,json=isMinor,proto3" json:"is_minor,omitempty"`                              // derived: true when age < adult age (age-gating on)
 	AgeBand          AgeBand                `protobuf:"varint,24,opt,name=age_band,json=ageBand,proto3,enum=identity.v1.AgeBand" json:"age_band,omitempty"`     // derived age band; UNSPECIFIED when unknown / gate off
-	ExternalId       string                 `protobuf:"bytes,25,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`                      // IdP-owned stable identifier (SCIM externalId); unique per tenant when set
+	ExternalId       string                 `protobuf:"bytes,25,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`                      // IdP-owned stable identifier (SCIM externalId); unique per project when set
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }

@@ -8,3 +8,8 @@ ALTER TABLE users
 CREATE UNIQUE INDEX users_project_external_id_uidx
     ON users (project_id, external_id)
     WHERE external_id <> '';
+
+-- Backing index for the SCIM /Users list ORDER BY (created_at_ms ASC, id ASC)
+-- within a project, mirroring the postgres driver.
+CREATE INDEX users_project_created_id_idx
+    ON users (project_id, created_at_ms, id);

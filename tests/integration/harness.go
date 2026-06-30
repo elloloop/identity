@@ -793,21 +793,6 @@ func (r *MemRepo) FindUserByEmail(_ context.Context, email string) (*service.Use
 	return nil, nil
 }
 
-func (r *MemRepo) FindUserByExternalID(_ context.Context, externalID string) (*service.User, error) {
-	if externalID == "" {
-		return nil, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, u := range r.users {
-		if u.ExternalID == externalID {
-			cp := *u
-			return &cp, nil
-		}
-	}
-	return nil, nil
-}
-
 func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
 	limit := filter.Limit
 	if limit <= 0 {

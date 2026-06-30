@@ -135,16 +135,41 @@ func TestProvider_ListInvalidParams(t *testing.T) {
 	}
 }
 
-func TestProvider_CountClampedToMax(t *testing.T) {
-	// count=0 and count>max both clamp to maxPageSize without error.
-	for _, q := range []string{"?count=0", "?count=99999"} {
-		f, err := parseListFilterQuery(t, q)
-		if err != nil {
-			t.Fatalf("parse %s: %v", q, err)
+func TestProvider_CountParsing(t *testing.T) {
+	// count above the cap clamps to maxPageSize.
+	if f, err := parseListFilterQuery(t, "?count=99999"); err != nil || f.Count != maxPageSize {
+		t.Fatalf("count=99999 → %d err=%v, want %d", f.Count, err, maxPageSize)
+	}
+	// count=0 is preserved (RFC 7644 §3.4.2.4 "totalResults only"), NOT clamped.
+	if f, err := parseListFilterQuery(t, "?count=0"); err != nil || f.Count != 0 {
+		t.Fatalf("count=0 → %d err=%v, want 0", f.Count, err)
+	}
+	// Absent count uses the default page size.
+	if f, err := parseListFilterQuery(t, ""); err != nil || f.Count != defaultPageSize {
+		t.Fatalf("no count → %d err=%v, want %d", f.Count, err, defaultPageSize)
+	}
+}
+
+func TestProvider_CountZeroReturnsTotalsOnly(t *testing.T) {
+	st := newMemStore()
+	ctx := context.Background()
+	for _, e := range []string{"a@x.com", "b@x.com", "c@x.com"} {
+		if _, err := st.CreateUser(ctx, User{UserName: e, Email: e, Active: true}); err != nil {
+			t.Fatalf("seed %s: %v", e, err)
 		}
-		if f.Count != maxPageSize {
-			t.Fatalf("count for %s = %d, want %d", q, f.Count, maxPageSize)
-		}
+	}
+	h := NewProvider(st).Handler()
+	rec := do(t, h, http.MethodGet, "/scim/v2/Users?count=0", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("count=0 list = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var list ListResponse
+	mustJSON(t, rec, &list)
+	if list.TotalResults != 3 {
+		t.Fatalf("count=0 totalResults = %d, want 3", list.TotalResults)
+	}
+	if list.ItemsPerPage != 0 || len(list.Resources) != 0 {
+		t.Fatalf("count=0 must return zero resources: itemsPerPage=%d len=%d", list.ItemsPerPage, len(list.Resources))
 	}
 }
 
@@ -157,30 +182,47 @@ func parseListFilterQuery(t *testing.T, rawQuery string) (ListFilter, error) {
 	return parseListFilter(req)
 }
 
-func TestPatch_ActiveValueShapes(t *testing.T) {
-	// Path-form replace.
-	if a, ok, err := (PatchRequest{Operations: []Operation{{Op: "replace", Path: "active", Value: []byte("false")}}}).activeValue(); err != nil || !ok || a {
-		t.Fatalf("path-form: a=%v ok=%v err=%v", a, ok, err)
+func TestToUserPatch(t *testing.T) {
+	// Path-form active replace, accepting a JSON bool.
+	if p, err := (PatchRequest{Operations: []Operation{{Op: "replace", Path: "active", Value: []byte("false")}}}).toUserPatch(); err != nil || p.Active == nil || *p.Active {
+		t.Fatalf("active false: %+v err=%v", p, err)
 	}
-	// add op with value object {"active":true}.
-	if a, ok, err := (PatchRequest{Operations: []Operation{{Op: "add", Value: []byte(`{"active":true}`)}}}).activeValue(); err != nil || !ok || !a {
-		t.Fatalf("value-object: a=%v ok=%v err=%v", a, ok, err)
+	// Entra sometimes sends active as a quoted string.
+	if p, err := (PatchRequest{Operations: []Operation{{Op: "Replace", Path: "active", Value: []byte(`"True"`)}}}).toUserPatch(); err != nil || p.Active == nil || !*p.Active {
+		t.Fatalf("active string True: %+v err=%v", p, err)
 	}
-	// Non-active op → ok=false.
-	if _, ok, err := (PatchRequest{Operations: []Operation{{Op: "replace", Path: "displayName", Value: []byte(`"x"`)}}}).activeValue(); ok || err != nil {
-		t.Fatalf("non-active: ok=%v err=%v", ok, err)
+	// No-path value-object touching several attributes.
+	if p, err := (PatchRequest{Operations: []Operation{{Op: "replace", Value: []byte(`{"active":false,"externalId":"e1","name":{"givenName":"A","familyName":"B"}}`)}}}).toUserPatch(); err != nil ||
+		p.Active == nil || *p.Active || p.ExternalID == nil || *p.ExternalID != "e1" || p.GivenName == nil || *p.GivenName != "A" || p.FamilyName == nil || *p.FamilyName != "B" {
+		t.Fatalf("value-object: %+v err=%v", p, err)
 	}
-	// Invalid boolean in path-form → error.
-	if _, _, err := (PatchRequest{Operations: []Operation{{Op: "replace", Path: "active", Value: []byte(`"nope"`)}}}).activeValue(); err == nil {
-		t.Fatal("invalid bool path-form must error")
+	// emails array → primary value.
+	if p, err := (PatchRequest{Operations: []Operation{{Op: "replace", Path: "emails", Value: []byte(`[{"value":"x@y.com","primary":true}]`)}}}).toUserPatch(); err != nil || p.Email == nil || *p.Email != "x@y.com" {
+		t.Fatalf("emails array: %+v err=%v", p, err)
 	}
-	// Invalid boolean in value-object form → error.
-	if _, _, err := (PatchRequest{Operations: []Operation{{Op: "add", Value: []byte(`{"active":"nope"}`)}}}).activeValue(); err == nil {
-		t.Fatal("invalid bool value-object must error")
+	// displayName splits into given/family.
+	if p, err := (PatchRequest{Operations: []Operation{{Op: "replace", Path: "displayName", Value: []byte(`"Ada Lovelace"`)}}}).toUserPatch(); err != nil || p.GivenName == nil || *p.GivenName != "Ada" || p.FamilyName == nil || *p.FamilyName != "Lovelace" {
+		t.Fatalf("displayName: %+v err=%v", p, err)
 	}
-	// Non-replace/add op is skipped.
-	if _, ok, _ := (PatchRequest{Operations: []Operation{{Op: "remove", Path: "active"}}}).activeValue(); ok {
-		t.Fatal("remove op must not yield an active value")
+	// remove externalId clears it.
+	if p, err := (PatchRequest{Operations: []Operation{{Op: "remove", Path: "externalId"}}}).toUserPatch(); err != nil || p.ExternalID == nil || *p.ExternalID != "" {
+		t.Fatalf("remove externalId: %+v err=%v", p, err)
+	}
+	// Invalid active boolean → error.
+	if _, err := (PatchRequest{Operations: []Operation{{Op: "replace", Path: "active", Value: []byte(`"nope"`)}}}).toUserPatch(); err == nil {
+		t.Fatal("invalid active bool must error")
+	}
+	// remove active is rejected.
+	if _, err := (PatchRequest{Operations: []Operation{{Op: "remove", Path: "active"}}}).toUserPatch(); err == nil {
+		t.Fatal("remove active must error")
+	}
+	// Unmodelled attribute → error.
+	if _, err := (PatchRequest{Operations: []Operation{{Op: "replace", Path: "title", Value: []byte(`"Dr"`)}}}).toUserPatch(); err == nil {
+		t.Fatal("unmodelled attribute must error")
+	}
+	// Empty patch → errNoSupportedPatch.
+	if _, err := (PatchRequest{}).toUserPatch(); err == nil {
+		t.Fatal("empty patch must error")
 	}
 }
 

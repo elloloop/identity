@@ -123,20 +123,14 @@ func (p *Provider) patchUser(w http.ResponseWriter, r *http.Request, id string) 
 		writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 		return
 	}
-	active, ok, err := body.activeValue()
+	patch, err := body.toUserPatch()
 	if err != nil {
+		// An unmodelled attribute / op, or a patch that touches nothing this
+		// server stores, is rejected explicitly rather than silently ignored.
 		writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 		return
 	}
-	if !ok {
-		// The only PATCH the provider supports today is toggling active
-		// (the deprovision/reprovision path every IdP drives). Anything
-		// else is rejected explicitly rather than silently ignored.
-		writeError(w, http.StatusBadRequest, "invalidValue",
-			"only the 'active' attribute may be patched")
-		return
-	}
-	updated, err := p.store.SetActive(r.Context(), id, active)
+	updated, err := p.store.PatchUser(r.Context(), id, patch)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -164,8 +158,12 @@ func (p *Provider) listUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resources := make([]Resource, 0, len(users))
-	for _, u := range users {
-		resources = append(resources, toResource(u))
+	// count=0 (RFC 7644 §3.4.2.4) asks for the match count only: return
+	// totalResults with an empty Resources page.
+	if filter.Count != 0 {
+		for _, u := range users {
+			resources = append(resources, toResource(u))
+		}
 	}
 	writeJSON(w, http.StatusOK, ListResponse{
 		Schemas:      []string{SchemaListResponse},
@@ -195,7 +193,10 @@ func parseListFilter(r *http.Request) (ListFilter, error) {
 		if err != nil || n < 0 {
 			return f, errors.New("count must be a non-negative integer")
 		}
-		if n == 0 || n > maxPageSize {
+		// count=0 is the RFC 7644 §3.4.2.4 "totalResults only" request — it is
+		// preserved (not clamped to the page size) and yields zero resources in
+		// listUsers. A positive count above the cap is clamped.
+		if n > maxPageSize {
 			n = maxPageSize
 		}
 		f.Count = n

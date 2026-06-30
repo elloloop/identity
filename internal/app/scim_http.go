@@ -133,6 +133,8 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 		"name":        joinName(u.GivenName, u.FamilyName),
 		"external_id": u.ExternalID,
 		"status":      status,
+		// Stamp updated_at so meta.lastModified reflects this write.
+		"updated_at": time.Now().UnixMilli(),
 	}
 	if err := s.repo.UpdateUser(ctx, id, fields); err != nil {
 		return scim.User{}, mapStoreErr(err)
@@ -162,7 +164,13 @@ func (s *repoSCIMStore) revokeUserAccess(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *repoSCIMStore) SetActive(ctx context.Context, id string, active bool) (scim.User, error) {
+// PatchUser applies a SCIM PATCH partial update: only the non-nil fields of
+// patch are written, mirroring the ReplaceUser attribute mapping (userName /
+// email → email, given/family → display name, externalId → external_id, active
+// → status). The current display name is read first so a patch of only
+// givenName (or familyName) preserves the other half. Setting active false
+// revokes sessions + refresh tokens, exactly like the PUT deactivation path.
+func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.UserPatch) (scim.User, error) {
 	existing, err := s.repo.GetUser(ctx, id)
 	if err != nil {
 		return scim.User{}, mapStoreErr(err)
@@ -170,16 +178,45 @@ func (s *repoSCIMStore) SetActive(ctx context.Context, id string, active bool) (
 	if existing == nil {
 		return scim.User{}, scim.ErrNotFound
 	}
-	status := statusActive
-	if !active {
-		status = statusDeactivated
+
+	fields := map[string]any{}
+	// userName and email both map to the host email column; an explicit email
+	// wins when both are present.
+	if patch.UserName != nil {
+		fields["email"] = *patch.UserName
 	}
-	if err := s.repo.UpdateUser(ctx, id, map[string]any{"status": status}); err != nil {
+	if patch.Email != nil {
+		fields["email"] = *patch.Email
+	}
+	if patch.ExternalID != nil {
+		fields["external_id"] = *patch.ExternalID
+	}
+	if patch.GivenName != nil || patch.FamilyName != nil {
+		given, family := splitDisplayName(existing.Name)
+		if patch.GivenName != nil {
+			given = *patch.GivenName
+		}
+		if patch.FamilyName != nil {
+			family = *patch.FamilyName
+		}
+		fields["name"] = joinName(given, family)
+	}
+	deactivate := false
+	if patch.Active != nil {
+		if *patch.Active {
+			fields["status"] = statusActive
+		} else {
+			fields["status"] = statusDeactivated
+			deactivate = true
+		}
+	}
+	// Stamp updated_at so meta.lastModified reflects the change.
+	fields["updated_at"] = time.Now().UnixMilli()
+
+	if err := s.repo.UpdateUser(ctx, id, fields); err != nil {
 		return scim.User{}, mapStoreErr(err)
 	}
-	if !active {
-		// Kill sessions + refresh tokens so the suspension takes effect
-		// immediately, not at token expiry (see revokeUserAccess).
+	if deactivate {
 		if err := s.revokeUserAccess(ctx, id); err != nil {
 			return scim.User{}, err
 		}

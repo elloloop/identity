@@ -1,6 +1,12 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// a valid (>= MinSCIMBearerTokenLength) bearer token for the enabled cases.
+const validSCIMToken = "0123456789abcdef0123456789abcdef" // 32 chars
 
 func baseSCIMConfig() *Config {
 	c := Load()
@@ -26,16 +32,32 @@ func TestValidateSCIM_EnabledRequiresToken(t *testing.T) {
 	if err := c.Validate(); err == nil {
 		t.Fatal("enabled SCIM with no bearer token must fail")
 	}
-	c.SCIMBearerToken = "a-secret"
+	c.SCIMBearerToken = validSCIMToken
 	if err := c.Validate(); err != nil {
 		t.Fatalf("enabled SCIM with a token and project id must validate: %v", err)
+	}
+}
+
+func TestValidateSCIM_BearerTokenMinLength(t *testing.T) {
+	c := baseSCIMConfig()
+	c.SCIMEnabled = true
+	c.SCIMProjectID = "proj-1"
+	// A short token (below the entropy floor) is rejected.
+	c.SCIMBearerToken = strings.Repeat("a", MinSCIMBearerTokenLength-1)
+	if err := c.Validate(); err == nil {
+		t.Fatalf("bearer token shorter than %d chars must fail", MinSCIMBearerTokenLength)
+	}
+	// Exactly the minimum length passes.
+	c.SCIMBearerToken = strings.Repeat("a", MinSCIMBearerTokenLength)
+	if err := c.Validate(); err != nil {
+		t.Fatalf("bearer token of exactly %d chars must validate: %v", MinSCIMBearerTokenLength, err)
 	}
 }
 
 func TestValidateSCIM_EnabledRequiresProjectID(t *testing.T) {
 	c := baseSCIMConfig()
 	c.SCIMEnabled = true
-	c.SCIMBearerToken = "a-secret"
+	c.SCIMBearerToken = validSCIMToken
 	c.SCIMProjectID = ""
 	if err := c.Validate(); err == nil {
 		t.Fatal("enabled SCIM with no project id must fail (the token must be scoped to one project)")
