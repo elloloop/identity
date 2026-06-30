@@ -907,8 +907,10 @@ type AuthService struct {
 	// Apple identityToken) for NativeOAuthLogin. nil disables the RPC
 	// (FailedPrecondition) — the constructor leaves it nil; app.New sets it via
 	// WithNativeOAuth when GATEWAY_NATIVE_OAUTH_ENABLED and at least one
-	// provider's audiences are configured.
-	nativeVerifier *oauth.NativeVerifier
+	// provider's audiences are configured. Held behind the
+	// NativeIDTokenVerifier seam (satisfied by *oauth.NativeVerifier) so the
+	// login flow's verification-result branches are unit-testable.
+	nativeVerifier NativeIDTokenVerifier
 	// nativeProjects validates that a native login's resolved product→project
 	// id names a real, active control-plane project. nil on drivers without a
 	// control plane (memory), where NativeOAuthLogin accepts only the product
@@ -1006,7 +1008,7 @@ func (s *AuthService) WithLoginGovernance(g *LoginGovernance) *AuthService {
 // verifier when native login is enabled and audiences are configured, and with
 // the postgres project store (nil on drivers without a control plane). A nil
 // verifier leaves NativeOAuthLogin disabled.
-func (s *AuthService) WithNativeOAuth(v *oauth.NativeVerifier, projects NativeOAuthProjectStore) *AuthService {
+func (s *AuthService) WithNativeOAuth(v NativeIDTokenVerifier, projects NativeOAuthProjectStore) *AuthService {
 	s.nativeVerifier = v
 	s.nativeProjects = projects
 	s.nativeProductProjects = s.cfg.NativeOAuthProductProjectMap()
