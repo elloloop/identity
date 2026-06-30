@@ -774,6 +774,15 @@
     "anchor": "passkeys-webauthn"
   },
   {
+    "name": "GATEWAY_PASSKEY_SIGNUP_ENABLED",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "gates passkey-first signup (the unauthenticated BeginPasskeySignup / CompletePasskeySignup pair that creates a brand-new account from a passkey); set false to disable it while leaving authenticated add-a-passkey registration untouched.",
+    "category": "Passkeys / WebAuthn",
+    "anchor": "passkeys-webauthn"
+  },
+  {
     "name": "GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS",
     "type": "integer",
     "default": "5",

@@ -48,6 +48,8 @@ const (
 	IdentityService_ResolveHelpRequest_FullMethodName            = "/identity.v1.IdentityService/ResolveHelpRequest"
 	IdentityService_BeginPasskeyRegistration_FullMethodName      = "/identity.v1.IdentityService/BeginPasskeyRegistration"
 	IdentityService_CompletePasskeyRegistration_FullMethodName   = "/identity.v1.IdentityService/CompletePasskeyRegistration"
+	IdentityService_BeginPasskeySignup_FullMethodName            = "/identity.v1.IdentityService/BeginPasskeySignup"
+	IdentityService_CompletePasskeySignup_FullMethodName         = "/identity.v1.IdentityService/CompletePasskeySignup"
 	IdentityService_BeginPasskeyLogin_FullMethodName             = "/identity.v1.IdentityService/BeginPasskeyLogin"
 	IdentityService_CompletePasskeyLogin_FullMethodName          = "/identity.v1.IdentityService/CompletePasskeyLogin"
 	IdentityService_ListPasskeys_FullMethodName                  = "/identity.v1.IdentityService/ListPasskeys"
@@ -156,6 +158,9 @@ type IdentityServiceClient interface {
 	// Passkey / WebAuthn
 	BeginPasskeyRegistration(ctx context.Context, in *BeginPasskeyRegistrationRequest, opts ...grpc.CallOption) (*BeginPasskeyRegistrationResponse, error)
 	CompletePasskeyRegistration(ctx context.Context, in *CompletePasskeyRegistrationRequest, opts ...grpc.CallOption) (*CompletePasskeyRegistrationResponse, error)
+	// Passkey-first signup — unauthenticated account creation via a passkey.
+	BeginPasskeySignup(ctx context.Context, in *BeginPasskeySignupRequest, opts ...grpc.CallOption) (*BeginPasskeySignupResponse, error)
+	CompletePasskeySignup(ctx context.Context, in *CompletePasskeySignupRequest, opts ...grpc.CallOption) (*CompletePasskeySignupResponse, error)
 	BeginPasskeyLogin(ctx context.Context, in *BeginPasskeyLoginRequest, opts ...grpc.CallOption) (*BeginPasskeyLoginResponse, error)
 	CompletePasskeyLogin(ctx context.Context, in *CompletePasskeyLoginRequest, opts ...grpc.CallOption) (*CompletePasskeyLoginResponse, error)
 	ListPasskeys(ctx context.Context, in *ListPasskeysRequest, opts ...grpc.CallOption) (*ListPasskeysResponse, error)
@@ -559,6 +564,26 @@ func (c *identityServiceClient) CompletePasskeyRegistration(ctx context.Context,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CompletePasskeyRegistrationResponse)
 	err := c.cc.Invoke(ctx, IdentityService_CompletePasskeyRegistration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) BeginPasskeySignup(ctx context.Context, in *BeginPasskeySignupRequest, opts ...grpc.CallOption) (*BeginPasskeySignupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BeginPasskeySignupResponse)
+	err := c.cc.Invoke(ctx, IdentityService_BeginPasskeySignup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) CompletePasskeySignup(ctx context.Context, in *CompletePasskeySignupRequest, opts ...grpc.CallOption) (*CompletePasskeySignupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CompletePasskeySignupResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CompletePasskeySignup_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1229,6 +1254,9 @@ type IdentityServiceServer interface {
 	// Passkey / WebAuthn
 	BeginPasskeyRegistration(context.Context, *BeginPasskeyRegistrationRequest) (*BeginPasskeyRegistrationResponse, error)
 	CompletePasskeyRegistration(context.Context, *CompletePasskeyRegistrationRequest) (*CompletePasskeyRegistrationResponse, error)
+	// Passkey-first signup — unauthenticated account creation via a passkey.
+	BeginPasskeySignup(context.Context, *BeginPasskeySignupRequest) (*BeginPasskeySignupResponse, error)
+	CompletePasskeySignup(context.Context, *CompletePasskeySignupRequest) (*CompletePasskeySignupResponse, error)
 	BeginPasskeyLogin(context.Context, *BeginPasskeyLoginRequest) (*BeginPasskeyLoginResponse, error)
 	CompletePasskeyLogin(context.Context, *CompletePasskeyLoginRequest) (*CompletePasskeyLoginResponse, error)
 	ListPasskeys(context.Context, *ListPasskeysRequest) (*ListPasskeysResponse, error)
@@ -1434,6 +1462,12 @@ func (UnimplementedIdentityServiceServer) BeginPasskeyRegistration(context.Conte
 }
 func (UnimplementedIdentityServiceServer) CompletePasskeyRegistration(context.Context, *CompletePasskeyRegistrationRequest) (*CompletePasskeyRegistrationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CompletePasskeyRegistration not implemented")
+}
+func (UnimplementedIdentityServiceServer) BeginPasskeySignup(context.Context, *BeginPasskeySignupRequest) (*BeginPasskeySignupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BeginPasskeySignup not implemented")
+}
+func (UnimplementedIdentityServiceServer) CompletePasskeySignup(context.Context, *CompletePasskeySignupRequest) (*CompletePasskeySignupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CompletePasskeySignup not implemented")
 }
 func (UnimplementedIdentityServiceServer) BeginPasskeyLogin(context.Context, *BeginPasskeyLoginRequest) (*BeginPasskeyLoginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BeginPasskeyLogin not implemented")
@@ -2160,6 +2194,42 @@ func _IdentityService_CompletePasskeyRegistration_Handler(srv interface{}, ctx c
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).CompletePasskeyRegistration(ctx, req.(*CompletePasskeyRegistrationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_BeginPasskeySignup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BeginPasskeySignupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).BeginPasskeySignup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_BeginPasskeySignup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).BeginPasskeySignup(ctx, req.(*BeginPasskeySignupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_CompletePasskeySignup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompletePasskeySignupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CompletePasskeySignup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CompletePasskeySignup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CompletePasskeySignup(ctx, req.(*CompletePasskeySignupRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3402,6 +3472,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompletePasskeyRegistration",
 			Handler:    _IdentityService_CompletePasskeyRegistration_Handler,
+		},
+		{
+			MethodName: "BeginPasskeySignup",
+			Handler:    _IdentityService_BeginPasskeySignup_Handler,
+		},
+		{
+			MethodName: "CompletePasskeySignup",
+			Handler:    _IdentityService_CompletePasskeySignup_Handler,
 		},
 		{
 			MethodName: "BeginPasskeyLogin",
