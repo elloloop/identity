@@ -477,3 +477,171 @@ func TestGenericOIDC_DiscoveryIssuerMismatch(t *testing.T) {
 		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}
 }
+
+// TestGenericOIDC_Exchange_DivergentEmailNotVerified is the core
+// regression for the email/verified-coupling blocker: an id_token with an
+// UNVERIFIED address must never be marked verified because userinfo reports
+// a DIFFERENT address as verified (same sub only proves same user, not same
+// address). The result must be rejected, not a verified a@x.com.
+func TestGenericOIDC_Exchange_DivergentEmailNotVerified(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+
+	run := func(t *testing.T, idTokenName string) {
+		t.Helper()
+		fp, key := newGenericOIDCProvider(t)
+		claims := map[string]any{
+			"iss": fp.srv.URL, "sub": "user-1", "aud": "client-1",
+			"email": "a@x.com", "email_verified": false,
+			"exp": now.Add(time.Hour), "iat": now,
+		}
+		if idTokenName != "" {
+			claims["name"] = idTokenName
+		}
+		idToken := key.signIDToken(t, claims)
+		fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken, "access_token": "at"})
+		verified := true
+		fp.mux.HandleFunc("/userinfo", jsonHandler(oidcUserInfo{
+			Sub: "user-1", Email: "b@y.com", EmailVerified: &verified, Name: "User One",
+		}))
+
+		ex := NewOIDC(genericOIDCConfig(fp, now))
+		id, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"})
+		if !errors.Is(err, ErrEmailNotVerified) {
+			t.Fatalf("want ErrEmailNotVerified (a@x.com must not be verified via b@y.com), got id=%+v err=%v", id, err)
+		}
+	}
+
+	// Without a name in the id_token, userinfo is fetched (and must not be
+	// allowed to flip the verified flag for the id_token's address).
+	t.Run("userinfo fetched", func(t *testing.T) { run(t, "") })
+	// With a name present, userinfo is skipped entirely — still rejected.
+	t.Run("userinfo skipped", func(t *testing.T) { run(t, "Has Name") })
+}
+
+// TestGenericOIDC_Exchange_MultiAudienceAzp enforces OIDC Core 3.1.3.7:
+// a multi-audience id_token is accepted only when azp == client_id.
+func TestGenericOIDC_Exchange_MultiAudienceAzp(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	base := map[string]any{
+		"sub": "s", "aud": []string{"client-1", "other-app"},
+		"email": "e@corp.com", "email_verified": true, "name": "N",
+		"exp": now.Add(time.Hour), "iat": now,
+	}
+
+	t.Run("correct azp accepted", func(t *testing.T) {
+		fp, key := newGenericOIDCProvider(t)
+		claims := cloneClaims(base)
+		claims["iss"] = fp.srv.URL
+		claims["azp"] = "client-1"
+		fp.tokenHandler = jsonHandler(map[string]any{"id_token": key.signIDToken(t, claims)})
+		ex := NewOIDC(genericOIDCConfig(fp, now))
+		if _, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"}); err != nil {
+			t.Fatalf("multi-aud token with correct azp should succeed: %v", err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		azp  any
+	}{
+		{"missing azp", nil},
+		{"wrong azp", "other-app"},
+	} {
+		t.Run(tc.name+" rejected", func(t *testing.T) {
+			fp, key := newGenericOIDCProvider(t)
+			claims := cloneClaims(base)
+			claims["iss"] = fp.srv.URL
+			if tc.azp != nil {
+				claims["azp"] = tc.azp
+			}
+			fp.tokenHandler = jsonHandler(map[string]any{"id_token": key.signIDToken(t, claims)})
+			ex := NewOIDC(genericOIDCConfig(fp, now))
+			if _, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"}); !errors.Is(err, ErrIdentityVerification) {
+				t.Fatalf("want ErrIdentityVerification, got %v", err)
+			}
+		})
+	}
+}
+
+func cloneClaims(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// TestGenericOIDC_Exchange_MissingExpOrIat rejects id_tokens that omit the
+// REQUIRED exp / iat claims.
+func TestGenericOIDC_Exchange_MissingExpOrIat(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	for _, drop := range []string{"exp", "iat"} {
+		t.Run("missing "+drop, func(t *testing.T) {
+			fp, key := newGenericOIDCProvider(t)
+			claims := map[string]any{
+				"iss": fp.srv.URL, "sub": "s", "aud": "client-1",
+				"email": "e@corp.com", "email_verified": true,
+				"exp": now.Add(time.Hour), "iat": now,
+			}
+			delete(claims, drop)
+			fp.tokenHandler = jsonHandler(map[string]any{"id_token": key.signIDToken(t, claims)})
+			ex := NewOIDC(genericOIDCConfig(fp, now))
+			if _, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"}); !errors.Is(err, ErrIdentityVerification) {
+				t.Fatalf("want ErrIdentityVerification, got %v", err)
+			}
+		})
+	}
+}
+
+// TestGenericOIDC_Exchange_UserinfoFailureNonFatal proves that once the
+// id_token has established a verified email, a failing userinfo fetch (here
+// a 500 while looking up the display name) does not fail the login.
+func TestGenericOIDC_Exchange_UserinfoFailureNonFatal(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	fp, key := newGenericOIDCProvider(t)
+	// Verified email but no name → userinfo is fetched for the name only.
+	idToken := key.signIDToken(t, map[string]any{
+		"iss": fp.srv.URL, "sub": "s", "aud": "client-1",
+		"email": "e@corp.com", "email_verified": true,
+		"exp": now.Add(time.Hour), "iat": now,
+	})
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken, "access_token": "at"})
+	fp.mux.HandleFunc("/userinfo", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	ex := NewOIDC(genericOIDCConfig(fp, now))
+	id, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"})
+	if err != nil {
+		t.Fatalf("userinfo failure should be non-fatal once email is verified: %v", err)
+	}
+	if id.Email != "e@corp.com" || !id.EmailVerified {
+		t.Errorf("got %+v", id)
+	}
+}
+
+// TestGenericOIDC_Exchange_SkipsUserinfoWhenComplete asserts userinfo is
+// not fetched when the id_token already yields a verified email and a name.
+func TestGenericOIDC_Exchange_SkipsUserinfoWhenComplete(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	fp, key := newGenericOIDCProvider(t)
+	idToken := key.signIDToken(t, map[string]any{
+		"iss": fp.srv.URL, "sub": "s", "aud": "client-1",
+		"email": "e@corp.com", "email_verified": true, "name": "Full Name",
+		"exp": now.Add(time.Hour), "iat": now,
+	})
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken, "access_token": "at"})
+	var userinfoCalls atomic.Int32
+	fp.mux.HandleFunc("/userinfo", func(w http.ResponseWriter, _ *http.Request) {
+		userinfoCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	ex := NewOIDC(genericOIDCConfig(fp, now))
+	if _, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"}); err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	if n := userinfoCalls.Load(); n != 0 {
+		t.Errorf("userinfo fetched %d times, want 0 (id_token already complete)", n)
+	}
+}

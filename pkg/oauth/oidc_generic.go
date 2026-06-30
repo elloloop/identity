@@ -263,36 +263,48 @@ func (o *oidcExchanger) Exchange(ctx context.Context, params ExchangeParams) (*I
 		return nil, err
 	}
 
-	userinfo, err := fetchOIDCUserInfo(ctx, o.client, doc.UserinfoEndpoint, tr.AccessToken)
-	if err != nil {
-		return nil, err
-	}
-	// OIDC Core 5.3.2: the userinfo `sub` MUST match the id_token `sub`;
-	// a mismatch means the userinfo response describes a different user
-	// and must not be trusted.
-	if userinfo != nil && userinfo.Sub != "" && userinfo.Sub != claims.Sub {
-		return nil, fmt.Errorf("%w: userinfo sub does not match id_token sub", ErrIdentityVerification)
-	}
-
+	// The email and its verified flag MUST come from the same source. We
+	// trust the id_token's email together with its own email_verified; we
+	// never let a userinfo verified flag vouch for a different address (a
+	// matching sub only proves same user, not same address). userinfo is a
+	// best-effort gap-filler: fetched only when the id_token lacks the
+	// email or a display name, and — once an email is established — its
+	// failure is non-fatal.
 	email := strings.ToLower(strings.TrimSpace(claims.Email))
 	emailVerified := claims.EmailVerified != nil && *claims.EmailVerified
 	name := strings.TrimSpace(claims.Name)
 	avatarURL := strings.TrimSpace(claims.Picture)
-	if userinfo != nil {
-		if email == "" && userinfo.Email != "" {
-			email = strings.ToLower(strings.TrimSpace(userinfo.Email))
-		}
-		if !emailVerified && userinfo.EmailVerified != nil && *userinfo.EmailVerified {
-			emailVerified = true
-		}
-		if name == "" {
-			name = strings.TrimSpace(userinfo.Name)
-		}
-		if name == "" {
-			name = strings.TrimSpace(userinfo.PreferredUsername)
-		}
-		if avatarURL == "" {
-			avatarURL = strings.TrimSpace(userinfo.Picture)
+
+	if email == "" || name == "" {
+		userinfo, uErr := fetchOIDCUserInfo(ctx, o.client, doc.UserinfoEndpoint, tr.AccessToken)
+		switch {
+		case uErr != nil && email == "":
+			// No email in the id_token and userinfo is unavailable — we
+			// cannot establish a verified address, so the login fails.
+			return nil, uErr
+		case uErr != nil:
+			// The id_token already supplied the email; userinfo was only a
+			// best-effort source for the display name. Proceed without it.
+		case userinfo != nil:
+			// OIDC Core 5.3.2: the userinfo sub MUST match the id_token sub
+			// before any of its fields are trusted.
+			if userinfo.Sub != "" && userinfo.Sub != claims.Sub {
+				return nil, fmt.Errorf("%w: userinfo sub does not match id_token sub", ErrIdentityVerification)
+			}
+			if email == "" && userinfo.Email != "" {
+				// Email AND its verified flag both come from userinfo.
+				email = strings.ToLower(strings.TrimSpace(userinfo.Email))
+				emailVerified = userinfo.EmailVerified != nil && *userinfo.EmailVerified
+			}
+			if name == "" {
+				name = strings.TrimSpace(userinfo.Name)
+			}
+			if name == "" {
+				name = strings.TrimSpace(userinfo.PreferredUsername)
+			}
+			if avatarURL == "" {
+				avatarURL = strings.TrimSpace(userinfo.Picture)
+			}
 		}
 	}
 
@@ -316,6 +328,7 @@ func (o *oidcExchanger) Exchange(ctx context.Context, params ExchangeParams) (*I
 // oidcIDClaims is the subset of a generic OIDC id_token we consume.
 type oidcIDClaims struct {
 	Sub           string `json:"sub"`
+	Azp           string `json:"azp"`
 	Email         string `json:"email"`
 	EmailVerified *bool  `json:"email_verified"`
 	Name          string `json:"name"`
@@ -347,24 +360,43 @@ func (o *oidcExchanger) verifyIDToken(ctx context.Context, jwks *jwksCache, raw,
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
 	}
-	if iss := tok.Issuer(); iss != issuer {
-		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, iss)
-	}
-	if !containsString(tok.Audience(), o.cfg.ClientID) {
-		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
-	}
-	now := o.cfg.Now()
-	if exp := tok.Expiration(); !exp.IsZero() && now.After(exp) {
-		return nil, fmt.Errorf("%w: token expired", ErrIdentityVerification)
-	}
-	if iat := tok.IssuedAt(); !iat.IsZero() && iat.After(now.Add(2*time.Minute)) {
-		return nil, fmt.Errorf("%w: iat in the future", ErrIdentityVerification)
-	}
 
 	var claims oidcIDClaims
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return nil, fmt.Errorf("%w: decode claims: %w", ErrIdentityVerification, err)
 	}
+
+	if iss := tok.Issuer(); iss != issuer {
+		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, iss)
+	}
+	auds := tok.Audience()
+	if !containsString(auds, o.cfg.ClientID) {
+		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
+	}
+	// OIDC Core 3.1.3.7: when the token carries multiple audiences, the
+	// authorized party (azp) MUST be present and equal to our client_id.
+	if len(auds) > 1 && claims.Azp != o.cfg.ClientID {
+		return nil, fmt.Errorf("%w: azp does not match client_id for multi-audience token", ErrIdentityVerification)
+	}
+	now := o.cfg.Now()
+	// exp is REQUIRED (OIDC Core 2). A token without it would never expire,
+	// so refuse it rather than treating expiry as optional.
+	exp := tok.Expiration()
+	if exp.IsZero() {
+		return nil, fmt.Errorf("%w: missing exp", ErrIdentityVerification)
+	}
+	if now.After(exp) {
+		return nil, fmt.Errorf("%w: token expired", ErrIdentityVerification)
+	}
+	// iat is also REQUIRED (OIDC Core 2).
+	iat := tok.IssuedAt()
+	if iat.IsZero() {
+		return nil, fmt.Errorf("%w: missing iat", ErrIdentityVerification)
+	}
+	if iat.After(now.Add(2 * time.Minute)) {
+		return nil, fmt.Errorf("%w: iat in the future", ErrIdentityVerification)
+	}
+
 	if claims.Sub == "" {
 		return nil, fmt.Errorf("%w: missing sub", ErrIdentityVerification)
 	}

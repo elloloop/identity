@@ -484,3 +484,118 @@ func TestGenericOIDC_Concurrent_EndToEnd(t *testing.T) {
 		}
 	}
 }
+
+// TestGenericOIDC_DivergentEmail_NotVerified is the end-to-end regression
+// for the email/verified-coupling blocker: an id_token with an unverified
+// address plus a userinfo response advertising a DIFFERENT verified address
+// (same sub) must NOT log the user in and must NOT provision a verified
+// account for the id_token's address.
+func TestGenericOIDC_DivergentEmail_NotVerified(t *testing.T) {
+	t.Parallel()
+
+	key := msNewTestKey(t, "oidc-kid-divergent")
+	now := time.Now()
+	verified := true
+	fp := oidcNewFakeIDP(t, "", key.jwksRaw, map[string]any{
+		"sub": "oidc-sub-div", "email": "verified-b@corp.example",
+		"email_verified": verified, "name": "B",
+	})
+	fp.idToken = key.signIDToken(t, map[string]any{
+		"iss":            fp.srv.URL,
+		"sub":            "oidc-sub-div",
+		"aud":            oidcGenericClientID,
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "unverified-a@corp.example",
+		"email_verified": false,
+	})
+
+	h := StartServer(t, WithOAuthRegistry(oidcGenericRegistry(fp)))
+
+	_, err := oidcGenericBeginAndLogin(t, h, "https://app.example.com/oauth/callback")
+	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("OAuthLogin code = %v, want Unauthenticated (err=%v)", got, err)
+	}
+	if n := h.CountUsersByEmail(t, "unverified-a@corp.example"); n != 0 {
+		t.Fatalf("unverified id_token address provisioned %d users, want 0", n)
+	}
+	if n := h.CountUsersByEmail(t, "verified-b@corp.example"); n != 0 {
+		t.Fatalf("userinfo address must not be substituted: provisioned %d users, want 0", n)
+	}
+}
+
+// TestGenericOIDC_MultiAudienceAzp covers OIDC Core 3.1.3.7 end to end: a
+// multi-audience id_token succeeds only when azp == client_id.
+func TestGenericOIDC_MultiAudienceAzp(t *testing.T) {
+	t.Parallel()
+
+	mk := func(t *testing.T, azp string) *oidcFakeIDP {
+		t.Helper()
+		key := msNewTestKey(t, "oidc-kid-azp")
+		now := time.Now()
+		fp := oidcNewFakeIDP(t, "", key.jwksRaw, nil)
+		claims := map[string]any{
+			"iss":            fp.srv.URL,
+			"sub":            "oidc-sub-azp",
+			"aud":            []string{oidcGenericClientID, "other-app"},
+			"iat":            now.Unix(),
+			"exp":            now.Add(5 * time.Minute).Unix(),
+			"email":          "azp@corp.example",
+			"email_verified": true,
+			"name":           "Azp User",
+		}
+		if azp != "" {
+			claims["azp"] = azp
+		}
+		fp.idToken = key.signIDToken(t, claims)
+		return fp
+	}
+
+	t.Run("correct azp accepted", func(t *testing.T) {
+		t.Parallel()
+		h := StartServer(t, WithOAuthRegistry(oidcGenericRegistry(mk(t, oidcGenericClientID))))
+		resp, err := oidcGenericBeginAndLogin(t, h, "https://app.example.com/oauth/callback")
+		if err != nil {
+			t.Fatalf("OAuthLogin: %v", err)
+		}
+		if got := resp.Msg.GetUser().GetEmail(); got != "azp@corp.example" {
+			t.Fatalf("email = %q, want azp@corp.example", got)
+		}
+	})
+
+	t.Run("missing azp rejected", func(t *testing.T) {
+		t.Parallel()
+		h := StartServer(t, WithOAuthRegistry(oidcGenericRegistry(mk(t, ""))))
+		_, err := oidcGenericBeginAndLogin(t, h, "https://app.example.com/oauth/callback")
+		if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
+			t.Fatalf("code = %v, want Unauthenticated (err=%v)", got, err)
+		}
+	})
+}
+
+// TestGenericOIDC_MissingExp_Rejected proves an id_token without the
+// required exp claim is refused end to end.
+func TestGenericOIDC_MissingExp_Rejected(t *testing.T) {
+	t.Parallel()
+
+	key := msNewTestKey(t, "oidc-kid-noexp")
+	now := time.Now()
+	fp := oidcNewFakeIDP(t, "", key.jwksRaw, nil)
+	// No exp claim.
+	fp.idToken = key.signIDToken(t, map[string]any{
+		"iss":            fp.srv.URL,
+		"sub":            "oidc-sub-noexp",
+		"aud":            oidcGenericClientID,
+		"iat":            now.Unix(),
+		"email":          "noexp@corp.example",
+		"email_verified": true,
+		"name":           "No Exp",
+	})
+
+	h := StartServer(t, WithOAuthRegistry(oidcGenericRegistry(fp)))
+
+	_, err := oidcGenericBeginAndLogin(t, h, "https://app.example.com/oauth/callback")
+	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("code = %v, want Unauthenticated (err=%v)", got, err)
+	}
+}
