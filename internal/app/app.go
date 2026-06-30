@@ -522,6 +522,15 @@ func New(deps Deps) (*Built, error) {
 	}
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 
+	// SAML 2.0 IdP surface (#255). Mounted only when GATEWAY_SAML_IDP_ENABLED
+	// is set with valid signing material; a disabled deployment registers no
+	// routes, so /saml/* returns 404 (unchanged behavior).
+	samlIssuer, err := buildSAMLIssuer(deps.Config, logger)
+	if err != nil {
+		return nil, fmt.Errorf("saml issuer: %w", err)
+	}
+	(&samlHandler{issuer: samlIssuer, logger: logger}).register(mux)
+
 	rpcMetrics, err := middleware.NewRPCMetrics(deps.MetricsRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("rpc metrics: %w", err)

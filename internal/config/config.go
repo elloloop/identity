@@ -409,6 +409,24 @@ type Config struct {
 	// PhoneCodeCooldownSeconds is the per-request cooldown (seconds) between phone-verification sends.
 	PhoneCodeCooldownSeconds int
 
+	// SAML 2.0 Identity Provider. Disabled by default; the server mounts no
+	// SAML surface and holds a no-op issuer. When SAMLIDPEnabled is true the
+	// entityID, SSO URL, and a signing key + certificate are required
+	// (enforced by Validate). SLO URL is optional.
+
+	// SAMLIDPEnabled turns on the SAML 2.0 IdP surface (default false).
+	SAMLIDPEnabled bool
+	// SAMLEntityID is the IdP entityID published in metadata (metadata URL).
+	SAMLEntityID string
+	// SAMLSSOURL is the HTTP-POST/Redirect single sign-on endpoint.
+	SAMLSSOURL string
+	// SAMLSLOURL is the optional single-logout endpoint.
+	SAMLSLOURL string
+	// SAMLSigningKey is the PEM-encoded RSA private key used to sign assertions.
+	SAMLSigningKey string
+	// SAMLSigningCert is the PEM-encoded X.509 certificate published in metadata.
+	SAMLSigningCert string
+
 	// TOTP (2FA).
 
 	// TOTPEncryptionKey is the base64-encoded 32-byte AES-256 key that encrypts
@@ -786,6 +804,13 @@ func Load() *Config {
 		PhoneCodeMaxAttempts:     envInt("GATEWAY_PHONE_CODE_MAX_ATTEMPTS", 5),
 		PhoneCodeCooldownSeconds: envInt("GATEWAY_PHONE_CODE_COOLDOWN_SECONDS", 60),
 
+		SAMLIDPEnabled:  envBool("GATEWAY_SAML_IDP_ENABLED", false),
+		SAMLEntityID:    envStr("GATEWAY_SAML_ENTITY_ID", ""),
+		SAMLSSOURL:      envStr("GATEWAY_SAML_SSO_URL", ""),
+		SAMLSLOURL:      envStr("GATEWAY_SAML_SLO_URL", ""),
+		SAMLSigningKey:  envStr("GATEWAY_SAML_SIGNING_KEY", ""),
+		SAMLSigningCert: envStr("GATEWAY_SAML_SIGNING_CERT", ""),
+
 		TOTPEncryptionKey:  envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),
 		TOTPIssuer:         envStr("GATEWAY_TOTP_ISSUER", "Glassa Work"),
 		TOTPRecoveryPepper: envStr("GATEWAY_TOTP_RECOVERY_PEPPER", ""),
@@ -1046,6 +1071,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateSAML(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1094,6 +1123,30 @@ func (c *Config) validateAgeGate() error {
 		return fmt.Errorf(
 			"config: GATEWAY_AGEGATE_ADULT_AGE=%d must be greater than GATEWAY_AGEGATE_CHILD_MAX_AGE=%d",
 			c.AgeGateAdultAge, c.AgeGateChildMaxAge,
+		)
+	}
+	return nil
+}
+
+// validateSAML enforces the SAML-IdP invariant: enabling the IdP requires
+// an entityID, an SSO URL, and a signing key + certificate. A disabled
+// deployment is unconstrained — the no-op issuer is wired and the fields
+// are ignored. The cryptographic validity of the key/cert pair is checked
+// when the issuer is constructed (samlidp.NewRSAIssuer); here we only fail
+// closed on missing required values so the server never boots an "enabled
+// but unusable" SAML surface.
+func (c *Config) validateSAML() error {
+	if !c.SAMLIDPEnabled {
+		return nil
+	}
+	if c.SAMLEntityID == "" || c.SAMLSSOURL == "" {
+		return errors.New(
+			"config: GATEWAY_SAML_IDP_ENABLED=true requires GATEWAY_SAML_ENTITY_ID and GATEWAY_SAML_SSO_URL",
+		)
+	}
+	if c.SAMLSigningKey == "" || c.SAMLSigningCert == "" {
+		return errors.New(
+			"config: GATEWAY_SAML_IDP_ENABLED=true requires GATEWAY_SAML_SIGNING_KEY and GATEWAY_SAML_SIGNING_CERT (PEM)",
 		)
 	}
 	return nil
