@@ -854,6 +854,22 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 	return matched[offset:end], nil
 }
 
+func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
 func (r *MemRepo) GetUser(_ context.Context, userID string) (*service.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -876,7 +892,10 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 			return "", fmt.Errorf("external_id %q: %w", u.ExternalID, service.ErrAlreadyExists)
 		}
 	}
-	id := r.nextID()
+	id := u.ID
+	if id == "" {
+		id = r.nextID()
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -1207,6 +1226,17 @@ func (r *MemRepo) UpdatePasskeyCredential(_ context.Context, nodeID string, fiel
 	}
 	if v, ok := fields["last_used_at"]; ok {
 		c.LastUsedAt, _ = v.(int64)
+	}
+	return nil
+}
+
+func (r *MemRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
 	}
 	return nil
 }

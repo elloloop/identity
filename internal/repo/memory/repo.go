@@ -280,18 +280,50 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 	return matched[offset:end], nil
 }
 
+// CountUsers returns the total number of users matching filter's equality
+// predicates (Email/ExternalID), ignoring Offset/Limit. It backs the SCIM
+// /Users totalResults so a page reports the true match count rather than the
+// page size. Mirrors the SQL drivers.
+func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
 func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
 		if existing.Email == u.Email {
-			return "", fmt.Errorf("user %q already exists", u.Email)
+			// Mirror the SQL drivers' unique-violation → ErrAlreadyExists
+			// mapping so every backend signals a duplicate identically (the
+			// SCIM server maps this sentinel to HTTP 409 Conflict).
+			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
 		}
 		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
 			return "", fmt.Errorf("external_id %q: %w", u.ExternalID, service.ErrAlreadyExists)
 		}
 	}
-	id := r.nextID()
+	// Honour a caller-provided id (matching the postgres/sqlite drivers).
+	// Passkey-first signup mints the user id during the Begin step and binds
+	// it as the WebAuthn user handle; CreateUser must persist that exact id so
+	// the credential's handle matches the stored user at login time.
+	id := u.ID
+	if id == "" {
+		id = r.nextID()
+	} else if _, clash := r.users[id]; clash {
+		return "", fmt.Errorf("user id %q: %w", id, service.ErrAlreadyExists)
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -597,6 +629,16 @@ func (r *Repo) UpdatePasskeyCredential(_ context.Context, nodeID string, fields 
 	if v, ok := fields["last_used_at"]; ok {
 		c.LastUsedAt, _ = v.(int64)
 	}
+	return nil
+}
+
+func (r *Repo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	deleteByUser(r.passkeyCreds, userID, func(c *service.PasskeyCredRecord) string { return c.UserID })
 	return nil
 }
 

@@ -774,6 +774,15 @@
     "anchor": "passkeys-webauthn"
   },
   {
+    "name": "GATEWAY_PASSKEY_SIGNUP_ENABLED",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "gates passkey-first signup (the unauthenticated BeginPasskeySignup / CompletePasskeySignup pair that creates a brand-new account from a passkey); set false to disable it while leaving authenticated add-a-passkey registration untouched.",
+    "category": "Passkeys / WebAuthn",
+    "anchor": "passkeys-webauthn"
+  },
+  {
     "name": "GATEWAY_PASSWORDLESS_CODE_MAX_ATTEMPTS",
     "type": "integer",
     "default": "5",
@@ -1053,6 +1062,60 @@
     "anchor": "jwt-and-tokens"
   },
   {
+    "name": "GATEWAY_SAML_ENTITY_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the IdP entityID published in metadata (metadata URL).",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SAML_IDP_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "turns on the SAML 2.0 IdP surface.",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SAML_SIGNING_CERT",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the PEM-encoded X.509 certificate published in metadata.",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SAML_SIGNING_KEY",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the PEM-encoded RSA private key used to sign assertions.",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SAML_SLO_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the optional single-logout endpoint.",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SAML_SSO_URL",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the HTTP-POST/Redirect single sign-on endpoint.",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
     "name": "GATEWAY_SCIM_BEARER_TOKEN",
     "type": "string",
     "default": "",
@@ -1067,6 +1130,15 @@
     "default": "false",
     "required": false,
     "description": "gates the inbound SCIM 2.0 routes.",
+    "category": "SCIM provisioning",
+    "anchor": "scim-provisioning"
+  },
+  {
+    "name": "GATEWAY_SCIM_PROJECT_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the single project whose users the SCIM endpoint provisions; every SCIM operation is scoped to this project (required when SCIMEnabled).",
     "category": "SCIM provisioning",
     "anchor": "scim-provisioning"
   },

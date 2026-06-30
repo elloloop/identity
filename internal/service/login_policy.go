@@ -34,9 +34,21 @@ type LoginPolicy struct {
 	SSORequired       bool
 	SSOConnectionJSON string
 	// Require2FA forces a second factor after the primary method.
-	Require2FA  bool
-	CreatedAtMs int64
-	UpdatedAtMs int64
+	Require2FA bool
+	// PasswordMinLength is the tenant's minimum password length. 0 means
+	// "use the global passwords.MinPasswordLength"; a tenant can only ever
+	// raise the floor, never lower it.
+	PasswordMinLength int
+	// SessionIdleTimeoutSeconds invalidates a session not used within this
+	// many seconds (compared against the refresh token's LastUsedAt). 0
+	// means "no idle timeout — global behavior".
+	SessionIdleTimeoutSeconds int64
+	// SessionAbsoluteTimeoutSeconds invalidates a session older than this
+	// many seconds regardless of activity (compared against the refresh
+	// token's CreatedAt). 0 means "no absolute timeout".
+	SessionAbsoluteTimeoutSeconds int64
+	CreatedAtMs                   int64
+	UpdatedAtMs                   int64
 }
 
 // LoginPolicyStore persists at most one LoginPolicy per (project, tenant).

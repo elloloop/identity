@@ -194,6 +194,14 @@ type Repository interface {
 	// filter and ordering identically (see conformance).
 	ListUsers(ctx context.Context, filter UserListFilter) ([]*User, error)
 
+	// CountUsers returns the total number of users in the request's project
+	// matching filter's equality predicates (Email/ExternalID), ignoring
+	// Offset/Limit. It backs the SCIM /Users totalResults so a page reports
+	// the true match count instead of the page size — and large projects are
+	// never silently truncated at the page cap. Drivers must count the same
+	// rows ListUsers would return across all pages (see conformance).
+	CountUsers(ctx context.Context, filter UserListFilter) (int, error)
+
 	// Lockout state. These are dedicated methods (rather than UpdateUser
 	// patches) so the persistence layer can implement them as single
 	// atomic writes — important for racing concurrent failed-login
@@ -253,6 +261,14 @@ type Repository interface {
 	GetPasskeyCredentialByCredID(ctx context.Context, credentialID string) (*PasskeyCredRecord, error)
 	CreatePasskeyCredential(ctx context.Context, r *PasskeyCredRecord) (string, error)
 	UpdatePasskeyCredential(ctx context.Context, nodeID string, fields map[string]any) error
+	// DeletePasskeyCredentialsForUser removes every passkey credential
+	// owned by userID, synchronously, on every driver. It backs the
+	// anti-pre-hijacking clearing in markEmailVerifiedViaExternalProof: a
+	// passkey enrolled while the email was unverified is untrusted (it may
+	// have been planted by an attacker), exactly like a planted password, so
+	// external proof of email control voids it. Idempotent: a user with no
+	// passkeys is a no-op returning nil.
+	DeletePasskeyCredentialsForUser(ctx context.Context, userID string) error
 
 	// Passkey challenges
 	GetPasskeyChallenge(ctx context.Context, nodeID string) (*PasskeyChallengeRecord, error)
@@ -483,17 +499,25 @@ type SessionRecord struct {
 
 // RefreshTokenRecord represents a stored refresh token.
 type RefreshTokenRecord struct {
-	NodeID       string
-	TokenHash    string
-	UserID       string
-	DeviceInfo   string
-	DeviceName   string
-	IPAddress    string
-	UserAgent    string
-	ExpiresAt    int64 // epoch ms
-	CreatedAt    int64
-	LastUsedAt   int64
-	ConsumedAtMs int64 // epoch ms; 0 = unconsumed (still valid for refresh)
+	NodeID     string
+	TokenHash  string
+	UserID     string
+	DeviceInfo string
+	DeviceName string
+	IPAddress  string
+	UserAgent  string
+	ExpiresAt  int64 // epoch ms
+	CreatedAt  int64
+	LastUsedAt int64
+	// SessionStartedAt anchors the session's absolute lifetime. Unlike
+	// CreatedAt — which is re-stamped on every rotation — it is copied
+	// UNCHANGED from the consumed token across refreshes, so the per-tenant
+	// absolute session timeout is measured from the original login rather
+	// than the latest refresh. It is set to now only at initial login. 0
+	// means "no anchor recorded" (legacy rows), in which case the absolute
+	// timeout is skipped until the next rotation re-anchors it.
+	SessionStartedAt int64 // epoch ms
+	ConsumedAtMs     int64 // epoch ms; 0 = unconsumed (still valid for refresh)
 }
 
 // PasskeyCredRecord represents a stored passkey credential.
@@ -523,8 +547,12 @@ type PasskeyChallengeRecord struct {
 	Challenge     string // base64url
 	UserID        string
 	ChallengeType string // "registration" or "authentication"
-	ExpiresAt     int64
-	CreatedAt     int64
+	// Email binds the account a passkey-first signup challenge will create the
+	// user under (see BeginPasskeySignup); empty for add-a-passkey
+	// registration and for authentication challenges.
+	Email     string
+	ExpiresAt int64
+	CreatedAt int64
 }
 
 // QrLoginSessionRecord represents a stored QR login session.
@@ -773,8 +801,12 @@ var (
 	// ErrTotpRequired it is a "do something else first" signal rather than a
 	// hard failure, so the Connect handler maps it to CodeFailedPrecondition,
 	// steering the client to the tenant's SSO connection.
-	ErrSSORequired       = errors.New("sso required for this domain")
-	ErrTokenExpired      = errors.New("token expired")
+	ErrSSORequired  = errors.New("sso required for this domain")
+	ErrTokenExpired = errors.New("token expired")
+	// ErrSessionExpired is returned when a still-valid refresh token is
+	// rejected because the owning tenant's LoginPolicy idle or absolute
+	// session timeout has elapsed.
+	ErrSessionExpired    = errors.New("session expired")
 	ErrInvalidTotpCode   = errors.New("invalid totp code")
 	ErrQrLoginExpired    = errors.New("qr login session expired")
 	ErrQrLoginNotPending = errors.New("qr login session is not pending")
@@ -810,6 +842,11 @@ var (
 	ErrLocalAuthDisabled    = errors.New("local auth disabled")
 	ErrOAuthDisabled        = errors.New("oauth login is not configured")
 	ErrSignupDisabled       = errors.New("signup is disabled for this deployment")
+	// ErrPasskeySignupDisabled is returned by BeginPasskeySignup /
+	// CompletePasskeySignup when GATEWAY_PASSKEY_SIGNUP_ENABLED is false. It
+	// is distinct from ErrSignupDisabled (password signup) so the two flows
+	// can be toggled independently; both map to FailedPrecondition.
+	ErrPasskeySignupDisabled = errors.New("passkey signup is disabled for this deployment")
 	// ErrCaptchaRequired is returned when CAPTCHA is enforced on an
 	// endpoint but the request carried no captcha token. ErrCaptchaFailed
 	// is returned when the supplied token was rejected by the provider.
@@ -1161,8 +1198,25 @@ func generateChallengeID() string {
 // access token also carries a `sid` claim referencing a freshly
 // minted Session row; the verification middleware looks the row up on
 // every authenticated request.
+//
+// This is the initial-login entry point: it anchors the new session's
+// absolute lifetime at now. The refresh path calls issueTokensWithSessionStart
+// directly so the anchor propagates unchanged across rotations.
 func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
+	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, 0)
+}
+
+// issueTokensWithSessionStart mints a token pair, anchoring the session's
+// absolute lifetime at sessionStartedAtMs. A value <= 0 anchors a brand-new
+// session at now (the initial-login case); the refresh path passes the consumed
+// token's SessionStartedAt so the per-tenant absolute timeout is measured from
+// the original login rather than re-set on every rotation.
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs int64) (string, string, error) {
 	now := s.nowMs()
+	sessionStart := sessionStartedAtMs
+	if sessionStart <= 0 {
+		sessionStart = now
+	}
 
 	// Stamp the derived minor flag from the stored DOB so the token carries
 	// an authoritative is_minor claim when age-gating is on. No-op (false)
@@ -1204,15 +1258,16 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	devName := friendlyDeviceName(userAgent)
 
 	_, err = s.repo(ctx).CreateRefreshToken(ctx, &RefreshTokenRecord{
-		TokenHash:  refreshHash,
-		UserID:     user.ID,
-		DeviceInfo: devName,
-		DeviceName: devName,
-		IPAddress:  ipAddr,
-		UserAgent:  truncate(userAgent, 512),
-		ExpiresAt:  now + int64(s.cfg.RefreshExpirySeconds)*1000,
-		CreatedAt:  now,
-		LastUsedAt: now,
+		TokenHash:        refreshHash,
+		UserID:           user.ID,
+		DeviceInfo:       devName,
+		DeviceName:       devName,
+		IPAddress:        ipAddr,
+		UserAgent:        truncate(userAgent, 512),
+		ExpiresAt:        now + int64(s.cfg.RefreshExpirySeconds)*1000,
+		CreatedAt:        now,
+		LastUsedAt:       now,
+		SessionStartedAt: sessionStart,
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("storing refresh token: %w", err)
@@ -1348,9 +1403,23 @@ func (s *AuthService) storeRecoveryCodes(ctx context.Context, userID string, cod
 	return nil
 }
 
-// validatePasswordStrength checks password requirements and returns an error if weak.
+// validatePasswordStrength checks password requirements against the global
+// default policy and returns an error if weak.
 func validatePasswordStrength(pw string) error {
-	issues := passwords.ValidateStrength(pw)
+	return passwordIssuesToErr(passwords.ValidateStrength(pw))
+}
+
+// validatePasswordStrengthForEmail checks password requirements against the
+// per-tenant policy for the org that owns email's domain, falling back to the
+// global rules when no governed policy applies. Use this on any path where
+// the subject's email is known (signup, password reset, password change) so
+// an org's tightened complexity rules are enforced for its members only.
+func (s *AuthService) validatePasswordStrengthForEmail(ctx context.Context, email, pw string) error {
+	policy := s.passwordStrengthPolicyFor(ctx, email)
+	return passwordIssuesToErr(passwords.ValidateStrengthWithPolicy(pw, policy))
+}
+
+func passwordIssuesToErr(issues []string) error {
 	if len(issues) > 0 {
 		return fmt.Errorf("%w: %s", ErrWeakPassword, strings.Join(issues, "; "))
 	}
@@ -1485,6 +1554,24 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", fmt.Errorf("%w: refresh token expired", ErrTokenExpired)
 	}
 
+	// Per-tenant session timeout (idle / absolute). Enforced BEFORE the
+	// token is rotated so an expired session never mints fresh tokens, and
+	// the refresh row is deleted so the dead session can't be retried.
+	// Requires the user's email to resolve the owning tenant's policy; the
+	// lookup fails safe (no policy → no timeout) so a non-governed user is
+	// unaffected.
+	timeoutUser, err := s.repo(ctx).GetUser(ctx, record.UserID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if timeoutUser == nil {
+		return nil, "", "", fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.enforceSessionTimeout(ctx, timeoutUser.Email, s.nowMs(), record.SessionStartedAt, record.LastUsedAt); err != nil {
+		_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
+		return nil, "", "", err
+	}
+
 	// Rotation. ConsumeRefreshTokenByHash is the serialization point: it
 	// only succeeds when the row's consumed_at is currently 0, so two
 	// concurrent rotations of the same token resolve to exactly one
@@ -1497,13 +1584,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", fmt.Errorf("consuming refresh token: %w", err)
 	}
 
-	user, err := s.repo(ctx).GetUser(ctx, record.UserID)
-	if err != nil {
-		return nil, "", "", err
-	}
-	if user == nil {
-		return nil, "", "", fmt.Errorf("%w: user not found", ErrNotFound)
-	}
+	user := timeoutUser
 
 	// Re-enforce account status on every refresh: a user deactivated
 	// (or locked, or IDV-revoked) after the original login must not be
@@ -1514,7 +1595,11 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", err
 	}
 
-	accessToken, newRefresh, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	// Propagate the session-start anchor UNCHANGED across the rotation so the
+	// absolute timeout keeps measuring from the original login. A legacy row
+	// with no anchor (SessionStartedAt == 0) is re-anchored at now by
+	// issueTokensWithSessionStart.
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, record.SessionStartedAt)
 	if err != nil {
 		return nil, "", "", err
 	}

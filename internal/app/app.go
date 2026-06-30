@@ -247,6 +247,13 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
+			// Passkey-first signup: unauthenticated account creation. Bound by
+			// the same per-IP signup quota as PasswordSignup so it cannot be
+			// used to mass-create accounts or pump verification mail.
+			PathPrefix: "/identity.v1.IdentityService/BeginPasskeySignup", Tag: "passkey_signup",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.v1.IdentityService/VerifyTotp", Tag: "totp_verify",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
@@ -431,22 +438,10 @@ func New(deps Deps) (*Built, error) {
 				BaseDelay:   time.Duration(deps.Config.WebhooksBackoffBaseSeconds) * time.Second,
 				MaxDelay:    time.Duration(deps.Config.WebhooksBackoffMaxSeconds) * time.Second,
 			},
-			Interval: time.Duration(deps.Config.WebhooksWorkerIntervalSeconds) * time.Second,
-			Batch:    deps.Config.WebhooksBatchSize,
-			Logger:   logger,
-			FailureHook: func(d *events.Delivery) {
-				// Surface abandonment via the structured logger rather than
-				// swallowing it (acceptance criterion: failures surfaced, not
-				// hidden). Audit-event surfacing is a follow-up once the
-				// outbox is durable and per-tenant.
-				logger.Error(
-					"webhook_delivery_abandoned",
-					zap.String("event_id", d.EventID),
-					zap.String("subscription_id", d.SubscriptionID),
-					zap.Int("attempts", d.Attempts),
-					zap.String("last_error", d.LastError),
-				)
-			},
+			Interval:    time.Duration(deps.Config.WebhooksWorkerIntervalSeconds) * time.Second,
+			Batch:       deps.Config.WebhooksBatchSize,
+			Logger:      logger,
+			FailureHook: newWebhookFailureHook(logger),
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		startEvents = func() {
@@ -528,20 +523,34 @@ func New(deps Deps) (*Built, error) {
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 
 	// Inbound SCIM 2.0 provisioning (#260). Registered only when
-	// GATEWAY_SCIM_ENABLED is true (and Validate has confirmed a bearer
-	// token); otherwise /scim/v2/* 404s and the headless RPCs are unaffected.
+	// GATEWAY_SCIM_ENABLED is true (and Validate has confirmed a bearer token
+	// + project id); otherwise /scim/v2/* 404s and the headless RPCs are
+	// unaffected. Every SCIM operation is scoped to the single configured
+	// project, so the deployment-wide bearer token can only touch that
+	// project's users.
 	if deps.Config.SCIMEnabled {
-		logger.Info("scim_server_enabled", zap.String("mount", "/scim/v2/"))
+		logger.Info("scim_server_enabled",
+			zap.String("mount", "/scim/v2/"),
+			zap.String("project_id", deps.Config.SCIMProjectID))
 		(&scimHandler{
 			repo:        repo,
-			defaultProj: deps.Config.DefaultProjectID,
+			projectID:   deps.Config.SCIMProjectID,
 			bearerToken: deps.Config.SCIMBearerToken,
 			logger:      logger,
 		}).register(mux, true)
 	} else {
 		logger.Info("scim_server_disabled",
-			zap.String("hint", "set GATEWAY_SCIM_ENABLED=true and GATEWAY_SCIM_BEARER_TOKEN to enable /scim/v2"))
+			zap.String("hint", "set GATEWAY_SCIM_ENABLED=true, GATEWAY_SCIM_BEARER_TOKEN and GATEWAY_SCIM_PROJECT_ID to enable /scim/v2"))
 	}
+
+	// SAML 2.0 IdP surface (#255). Mounted only when GATEWAY_SAML_IDP_ENABLED
+	// is set with valid signing material; a disabled deployment registers no
+	// routes, so /saml/* returns 404 (unchanged behavior).
+	samlIssuer, err := buildSAMLIssuer(deps.Config, logger)
+	if err != nil {
+		return nil, fmt.Errorf("saml issuer: %w", err)
+	}
+	(&samlHandler{issuer: samlIssuer, logger: logger}).register(mux)
 
 	rpcMetrics, err := middleware.NewRPCMetrics(deps.MetricsRegistry)
 	if err != nil {
@@ -740,6 +749,23 @@ func wrapOAuthRegistry(in *oauth.Registry) *oauth.Registry {
 		out.Register(name, observability.WrapOAuthExchanger(name, e))
 	}
 	return out
+}
+
+// newWebhookFailureHook returns the hook the events worker invokes when a
+// delivery is abandoned after exhausting its retry budget. It surfaces the
+// abandonment via the structured logger rather than swallowing it
+// (acceptance criterion: failures surfaced, not hidden). Audit-event
+// surfacing is a follow-up once the outbox is durable and per-tenant.
+func newWebhookFailureHook(logger *zap.Logger) events.FailureHook {
+	return func(d *events.Delivery) {
+		logger.Error(
+			"webhook_delivery_abandoned",
+			zap.String("event_id", d.EventID),
+			zap.String("subscription_id", d.SubscriptionID),
+			zap.Int("attempts", d.Attempts),
+			zap.String("last_error", d.LastError),
+		)
+	}
 }
 
 // randomEventID generates a unique outbox/event id for at-least-once

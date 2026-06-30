@@ -17,13 +17,15 @@ import (
 // scimHandler mounts the inbound SCIM 2.0 server (#260) under /scim/v2/. It
 // is registered only when GATEWAY_SCIM_ENABLED is true (see register); when
 // disabled the routes are never added and the mux 404s, leaving the headless
-// RPCs untouched. Every request must carry the configured bearer token; the
-// request's project is resolved by the project-resolution middleware that
-// wraps the mux, and the per-request project-scoped repository backs the
-// SCIM store so a multi-project deployment serves each project's user pool.
+// RPCs untouched. Every request must carry the configured bearer token, and
+// every SCIM operation is scoped to the single configured project (projectID,
+// from GATEWAY_SCIM_PROJECT_ID) — NOT the project the request's Host/auth-domain
+// resolves to. The deployment-wide bearer token therefore authorizes exactly
+// one project's user pool: it can never read or mutate another project's users,
+// no matter which auth-domain it is presented against.
 type scimHandler struct {
 	repo        service.Repository
-	defaultProj string
+	projectID   string
 	bearerToken string
 	logger      *zap.Logger
 }
@@ -38,15 +40,15 @@ func (h *scimHandler) register(mux *http.ServeMux, enabled bool) {
 	mux.Handle("/scim/v2/", h.authenticate(h.scimProvider()))
 }
 
-// scimProvider builds a per-request scim.Provider over the project-scoped
-// repository. The provider is cheap to construct, so it is built per request
-// to bind the resolved project's repository.
+// scimProvider builds the scim.Provider over the repository bound to the single
+// configured project. The binding is fixed (it does NOT read the request's
+// resolved project), so the deployment-wide bearer token is constrained to that
+// one project's users — the cross-project provisioning hole. The bound repo is
+// built once and reused: every SCIM request shares the same project scope.
 func (h *scimHandler) scimProvider() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		repo := service.ScopedRepository(r.Context(), h.repo, h.defaultProj)
-		store := &repoSCIMStore{repo: repo}
-		scim.NewProvider(store).Handler().ServeHTTP(w, r)
-	})
+	repo := service.ProjectBoundRepository(h.repo, h.projectID)
+	store := &repoSCIMStore{repo: repo}
+	return scim.NewProvider(store).Handler()
 }
 
 // authenticate enforces the SCIM bearer token using a constant-time compare.
@@ -135,7 +137,29 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 	if err := s.repo.UpdateUser(ctx, id, fields); err != nil {
 		return scim.User{}, mapStoreErr(err)
 	}
+	// A PUT that flips the user to inactive must take effect immediately, the
+	// same as a PATCH active:false — otherwise a deprovisioned account keeps
+	// its live sessions and refresh tokens until they expire.
+	if !u.Active {
+		if err := s.revokeUserAccess(ctx, id); err != nil {
+			return scim.User{}, err
+		}
+	}
 	return s.GetUser(ctx, id)
+}
+
+// revokeUserAccess kills a user's live sessions and refresh tokens so a
+// deactivation takes effect at once rather than at token expiry. It mirrors
+// AdminService.DeactivateUser and backs both the PATCH active:false and the
+// PUT (ReplaceUser) deactivation paths.
+func (s *repoSCIMStore) revokeUserAccess(ctx context.Context, id string) error {
+	if err := s.repo.DeleteRefreshTokensForUser(ctx, id); err != nil {
+		return mapStoreErr(err)
+	}
+	if err := s.repo.RevokeSessionsForUser(ctx, id, time.Now().UnixMilli()); err != nil {
+		return mapStoreErr(err)
+	}
+	return nil
 }
 
 func (s *repoSCIMStore) SetActive(ctx context.Context, id string, active bool) (scim.User, error) {
@@ -154,13 +178,10 @@ func (s *repoSCIMStore) SetActive(ctx context.Context, id string, active bool) (
 		return scim.User{}, mapStoreErr(err)
 	}
 	if !active {
-		// Mirror AdminService.DeactivateUser: kill sessions + refresh tokens so
-		// the suspension takes effect immediately, not at token expiry.
-		if err := s.repo.DeleteRefreshTokensForUser(ctx, id); err != nil {
-			return scim.User{}, mapStoreErr(err)
-		}
-		if err := s.repo.RevokeSessionsForUser(ctx, id, time.Now().UnixMilli()); err != nil {
-			return scim.User{}, mapStoreErr(err)
+		// Kill sessions + refresh tokens so the suspension takes effect
+		// immediately, not at token expiry (see revokeUserAccess).
+		if err := s.revokeUserAccess(ctx, id); err != nil {
+			return scim.User{}, err
 		}
 	}
 	return s.GetUser(ctx, id)
@@ -190,27 +211,27 @@ func (s *repoSCIMStore) ListUsers(ctx context.Context, f scim.ListFilter) ([]sci
 	if offset < 0 {
 		offset = 0
 	}
-	// To compute totalResults the adapter fetches the full matching set with a
-	// generous cap, then applies the requested window. The repository clamps
-	// to MaxUserListLimit, which bounds the scan.
-	all, err := s.repo.ListUsers(ctx, service.UserListFilter{
+	filter := service.UserListFilter{
 		Email:      email,
 		ExternalID: f.ExternalID,
-		Limit:      service.MaxUserListLimit,
-	})
+		Offset:     offset,
+		Limit:      f.Count, // the provider always supplies a clamped, positive page size
+	}
+	// totalResults is the count of ALL matching rows, computed in the DB
+	// independently of the page window — so it reflects the whole project and
+	// is never truncated to the page size or the MaxUserListLimit cap. The page
+	// itself is fetched with the real offset/limit, so a client can page beyond
+	// the first 500 users.
+	total, err := s.repo.CountUsers(ctx, filter)
 	if err != nil {
 		return nil, 0, mapStoreErr(err)
 	}
-	total := len(all)
-	if offset > len(all) {
-		offset = len(all)
+	page, err := s.repo.ListUsers(ctx, filter)
+	if err != nil {
+		return nil, 0, mapStoreErr(err)
 	}
-	windowed := all[offset:]
-	if f.Count > 0 && len(windowed) > f.Count {
-		windowed = windowed[:f.Count]
-	}
-	out := make([]scim.User, 0, len(windowed))
-	for _, u := range windowed {
+	out := make([]scim.User, 0, len(page))
+	for _, u := range page {
 		out = append(out, toSCIMUser(u))
 	}
 	return out, total, nil

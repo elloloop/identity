@@ -158,16 +158,7 @@ func (r *sqliteRepository) ListUsers(ctx context.Context, filter service.UserLis
 		offset = 0
 	}
 
-	where := []string{"project_id = $1"}
-	args := []any{r.projectID}
-	if filter.Email != "" {
-		args = append(args, filter.Email)
-		where = append(where, fmt.Sprintf("lower(email) = lower($%d)", len(args)))
-	}
-	if filter.ExternalID != "" {
-		args = append(args, filter.ExternalID)
-		where = append(where, fmt.Sprintf("external_id = $%d", len(args)))
-	}
+	where, args := r.userFilterWhere(filter)
 	args = append(args, limit, offset)
 	q := fmt.Sprintf(`SELECT %s
 		FROM users
@@ -194,6 +185,38 @@ func (r *sqliteRepository) ListUsers(ctx context.Context, filter service.UserLis
 		return nil, wrapErr("ListUsers", err)
 	}
 	return out, nil
+}
+
+// CountUsers returns the total number of users matching filter's equality
+// predicates (Email/ExternalID), ignoring Offset/Limit. It backs the SCIM
+// /Users totalResults so a page reports the true match count rather than the
+// page size — and never silently truncates large projects at the page cap.
+// Mirrors the postgres driver.
+func (r *sqliteRepository) CountUsers(ctx context.Context, filter service.UserListFilter) (int, error) {
+	where, args := r.userFilterWhere(filter)
+	q := `SELECT count(*) FROM users WHERE ` + strings.Join(where, " AND ")
+	var n int
+	if err := r.db.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+		return 0, wrapErr("CountUsers", err)
+	}
+	return n, nil
+}
+
+// userFilterWhere builds the project-scoped WHERE predicates and positional
+// args shared by ListUsers and CountUsers, so the two never drift on which
+// rows match. The mandatory project_id = $1 boundary is always first.
+func (r *sqliteRepository) userFilterWhere(filter service.UserListFilter) (where []string, args []any) {
+	where = []string{"project_id = $1"}
+	args = []any{r.projectID}
+	if filter.Email != "" {
+		args = append(args, filter.Email)
+		where = append(where, fmt.Sprintf("lower(email) = lower($%d)", len(args)))
+	}
+	if filter.ExternalID != "" {
+		args = append(args, filter.ExternalID)
+		where = append(where, fmt.Sprintf("external_id = $%d", len(args)))
+	}
+	return where, args
 }
 
 func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (string, error) {

@@ -347,18 +347,25 @@ type Config struct {
 
 	// SCIM 2.0 inbound provisioning (#260). When SCIMEnabled is false the
 	// /scim/v2/* routes are not registered and return 404, leaving the
-	// headless RPCs untouched. When true, SCIMBearerToken MUST be set
-	// (enforced by Validate): it is the shared secret an external IdP
-	// (Okta/Entra/Google) presents in the Authorization: Bearer header on
-	// every SCIM request. Requests resolve to the request's project via the
-	// existing project resolver, so a multi-project deployment serves each
-	// project's user pool from its own auth-domain.
+	// headless RPCs untouched. When true, SCIMBearerToken and SCIMProjectID
+	// MUST both be set (enforced by Validate). The bearer token is the shared
+	// secret an external IdP (Okta/Entra/Google) presents in the
+	// Authorization: Bearer header on every SCIM request. The project id binds
+	// that single credential to exactly one project: every SCIM operation
+	// (create/list/get/replace/patch/delete) is constrained to that project's
+	// users, so the deployment-wide token can never read or mutate another
+	// project's user pool. A deployment that needs to provision multiple
+	// projects runs one scoped credential per project.
 
 	// SCIMEnabled gates the inbound SCIM 2.0 routes (default false).
 	SCIMEnabled bool // GATEWAY_SCIM_ENABLED (default false)
 	// SCIMBearerToken is the shared secret an external IdP presents in the
 	// Authorization: Bearer header on every SCIM request (required when SCIMEnabled).
 	SCIMBearerToken string // GATEWAY_SCIM_BEARER_TOKEN (required when SCIMEnabled)
+	// SCIMProjectID is the single project whose users the SCIM endpoint
+	// provisions; every SCIM operation is scoped to this project (required
+	// when SCIMEnabled).
+	SCIMProjectID string // GATEWAY_SCIM_PROJECT_ID (required when SCIMEnabled)
 
 	// Password.
 
@@ -424,6 +431,24 @@ type Config struct {
 	// PhoneCodeCooldownSeconds is the per-request cooldown (seconds) between phone-verification sends.
 	PhoneCodeCooldownSeconds int
 
+	// SAML 2.0 Identity Provider. Disabled by default; the server mounts no
+	// SAML surface and holds a no-op issuer. When SAMLIDPEnabled is true the
+	// entityID, SSO URL, and a signing key + certificate are required
+	// (enforced by Validate). SLO URL is optional.
+
+	// SAMLIDPEnabled turns on the SAML 2.0 IdP surface (default false).
+	SAMLIDPEnabled bool
+	// SAMLEntityID is the IdP entityID published in metadata (metadata URL).
+	SAMLEntityID string
+	// SAMLSSOURL is the HTTP-POST/Redirect single sign-on endpoint.
+	SAMLSSOURL string
+	// SAMLSLOURL is the optional single-logout endpoint.
+	SAMLSLOURL string
+	// SAMLSigningKey is the PEM-encoded RSA private key used to sign assertions.
+	SAMLSigningKey string
+	// SAMLSigningCert is the PEM-encoded X.509 certificate published in metadata.
+	SAMLSigningCert string
+
 	// TOTP (2FA).
 
 	// TOTPEncryptionKey is the base64-encoded 32-byte AES-256 key that encrypts
@@ -455,6 +480,11 @@ type Config struct {
 	PasskeyOrigin string
 	// PasskeyChallengeExpirySeconds is the lifetime in seconds of registration / login challenges.
 	PasskeyChallengeExpirySeconds int
+	// PasskeySignupEnabled gates passkey-first signup (the unauthenticated
+	// BeginPasskeySignup / CompletePasskeySignup pair that creates a brand-new
+	// account from a passkey); set false to disable it while leaving
+	// authenticated add-a-passkey registration untouched.
+	PasskeySignupEnabled bool
 
 	// QR login (cross-device authorization).
 
@@ -774,6 +804,7 @@ func Load() *Config {
 
 		SCIMEnabled:     envBool("GATEWAY_SCIM_ENABLED", false),
 		SCIMBearerToken: envStr("GATEWAY_SCIM_BEARER_TOKEN", ""),
+		SCIMProjectID:   envStr("GATEWAY_SCIM_PROJECT_ID", ""),
 
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
@@ -799,6 +830,13 @@ func Load() *Config {
 		PhoneCodeMaxAttempts:     envInt("GATEWAY_PHONE_CODE_MAX_ATTEMPTS", 5),
 		PhoneCodeCooldownSeconds: envInt("GATEWAY_PHONE_CODE_COOLDOWN_SECONDS", 60),
 
+		SAMLIDPEnabled:  envBool("GATEWAY_SAML_IDP_ENABLED", false),
+		SAMLEntityID:    envStr("GATEWAY_SAML_ENTITY_ID", ""),
+		SAMLSSOURL:      envStr("GATEWAY_SAML_SSO_URL", ""),
+		SAMLSLOURL:      envStr("GATEWAY_SAML_SLO_URL", ""),
+		SAMLSigningKey:  envStr("GATEWAY_SAML_SIGNING_KEY", ""),
+		SAMLSigningCert: envStr("GATEWAY_SAML_SIGNING_CERT", ""),
+
 		TOTPEncryptionKey:  envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),
 		TOTPIssuer:         envStr("GATEWAY_TOTP_ISSUER", "Glassa Work"),
 		TOTPRecoveryPepper: envStr("GATEWAY_TOTP_RECOVERY_PEPPER", ""),
@@ -809,6 +847,7 @@ func Load() *Config {
 		PasskeyRPName:                 envStr("GATEWAY_PASSKEY_RP_NAME", "Glassa Work"),
 		PasskeyOrigin:                 envStr("GATEWAY_PASSKEY_ORIGIN", "http://localhost:9002"),
 		PasskeyChallengeExpirySeconds: envInt("GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS", 300),
+		PasskeySignupEnabled:          envBool("GATEWAY_PASSKEY_SIGNUP_ENABLED", true),
 
 		QRLoginBaseURL:       envStr("GATEWAY_QR_LOGIN_BASE_URL", "http://localhost:9002"),
 		QRLoginExpirySeconds: envInt("GATEWAY_QR_LOGIN_EXPIRY_SECONDS", 300),
@@ -1062,13 +1101,18 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateSAML(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 // validateSCIM enforces the SCIM invariant: a deployment that turns the
-// inbound SCIM server on must supply a bearer token, since the token is the
-// only credential gating account lifecycle operations. Failing closed at
-// boot beats serving an unauthenticated provisioning endpoint.
+// inbound SCIM server on must supply a bearer token (the only credential
+// gating account lifecycle operations) and a project id, since every SCIM
+// operation is scoped to that single project's users. Failing closed at
+// boot beats serving an unauthenticated or unscoped provisioning endpoint.
 func (c *Config) validateSCIM() error {
 	if !c.SCIMEnabled {
 		return nil
@@ -1076,6 +1120,12 @@ func (c *Config) validateSCIM() error {
 	if c.SCIMBearerToken == "" {
 		return errors.New(
 			"config: GATEWAY_SCIM_ENABLED=true requires GATEWAY_SCIM_BEARER_TOKEN to be set",
+		)
+	}
+	if c.SCIMProjectID == "" {
+		return errors.New(
+			"config: GATEWAY_SCIM_ENABLED=true requires GATEWAY_SCIM_PROJECT_ID to be set " +
+				"(the single project whose users the SCIM endpoint provisions)",
 		)
 	}
 	return nil
@@ -1126,6 +1176,30 @@ func (c *Config) validateAgeGate() error {
 		return fmt.Errorf(
 			"config: GATEWAY_AGEGATE_ADULT_AGE=%d must be greater than GATEWAY_AGEGATE_CHILD_MAX_AGE=%d",
 			c.AgeGateAdultAge, c.AgeGateChildMaxAge,
+		)
+	}
+	return nil
+}
+
+// validateSAML enforces the SAML-IdP invariant: enabling the IdP requires
+// an entityID, an SSO URL, and a signing key + certificate. A disabled
+// deployment is unconstrained — the no-op issuer is wired and the fields
+// are ignored. The cryptographic validity of the key/cert pair is checked
+// when the issuer is constructed (samlidp.NewRSAIssuer); here we only fail
+// closed on missing required values so the server never boots an "enabled
+// but unusable" SAML surface.
+func (c *Config) validateSAML() error {
+	if !c.SAMLIDPEnabled {
+		return nil
+	}
+	if c.SAMLEntityID == "" || c.SAMLSSOURL == "" {
+		return errors.New(
+			"config: GATEWAY_SAML_IDP_ENABLED=true requires GATEWAY_SAML_ENTITY_ID and GATEWAY_SAML_SSO_URL",
+		)
+	}
+	if c.SAMLSigningKey == "" || c.SAMLSigningCert == "" {
+		return errors.New(
+			"config: GATEWAY_SAML_IDP_ENABLED=true requires GATEWAY_SAML_SIGNING_KEY and GATEWAY_SAML_SIGNING_CERT (PEM)",
 		)
 	}
 	return nil

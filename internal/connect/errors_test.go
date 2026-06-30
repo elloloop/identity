@@ -34,6 +34,20 @@ func TestToConnectErrorEmailVerificationRequired(t *testing.T) {
 	}
 }
 
+// TestToConnectErrorSessionExpired proves a session killed by the tenant's
+// idle/absolute timeout maps to Unauthenticated (like ErrTokenExpired): the
+// presented refresh token is no longer valid, so the client must re-authenticate
+// — not a FailedPrecondition or an Internal error.
+func TestToConnectErrorSessionExpired(t *testing.T) {
+	err := toConnectError(service.ErrSessionExpired)
+	if err == nil {
+		t.Fatal("toConnectError(ErrSessionExpired) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("code = %v, want Unauthenticated", got)
+	}
+}
+
 // TestToConnectErrorMinorDataMinimized proves COPPA data-minimization rejection
 // maps to FailedPrecondition: the account may not collect this PII, a "do
 // something else" precondition rather than an auth or argument failure.

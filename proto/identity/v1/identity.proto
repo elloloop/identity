@@ -621,6 +621,43 @@ message CompletePasskeyLoginResponse {
   int32 expires_in = 4;
 }
 
+// Passkey-first signup (UNAUTHENTICATED account creation via a passkey).
+//
+// Unlike BeginPasskeyRegistration (which adds a passkey to an already
+// authenticated account), this pair creates a brand-new account whose first
+// and only credential is a passkey — no password, no session required up
+// front. The server mints the new user id during Begin and binds it as the
+// WebAuthn user handle so the credential registered here can log in later.
+message BeginPasskeySignupRequest {
+  string email = 1;
+  string device_name = 2;
+}
+
+message BeginPasskeySignupResponse {
+  // JSON string of PublicKeyCredentialCreationOptions (frontend passes to navigator.credentials.create)
+  string options_json = 1;
+  string challenge_id = 2;
+}
+
+message CompletePasskeySignupRequest {
+  string challenge_id = 1;
+  // JSON string of the PublicKeyCredential returned by navigator.credentials.create
+  string credential_json = 2;
+  string email = 3;
+  string device_name = 4;
+  // 6-digit OTP emailed by BeginPasskeySignup. Proves control of the email
+  // in-flow, so the account is created already-verified and an attacker cannot
+  // plant a passkey on an unverified address (account pre-hijacking).
+  string otp_code = 5;
+}
+
+message CompletePasskeySignupResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  int32 expires_in = 4;
+}
+
 // Management
 message ListPasskeysRequest {}
 
@@ -1178,6 +1215,16 @@ message LoginPolicy {
   bool require_2fa = 6;
   int64 created_at_ms = 7;
   int64 updated_at_ms = 8;
+  // password_min_length is the tenant's minimum password length. 0 means "use
+  // the global minimum"; a tenant can only ever raise the floor, never lower it.
+  int32 password_min_length = 9;
+  // session_idle_timeout_seconds invalidates a session unused for this long. 0
+  // means "no idle timeout" (global behavior).
+  int64 session_idle_timeout_seconds = 10;
+  // session_absolute_timeout_seconds invalidates a session older than this,
+  // measured from the original login regardless of activity. 0 means "no
+  // absolute timeout".
+  int64 session_absolute_timeout_seconds = 11;
 }
 
 message UpsertLoginPolicyRequest {
@@ -1187,6 +1234,13 @@ message UpsertLoginPolicyRequest {
   bool sso_required = 4;
   string sso_connection_json = 5;
   bool require_2fa = 6;
+  // password_min_length tightens the tenant's minimum password length (0 =
+  // global default; tenants tighten, never loosen).
+  int32 password_min_length = 7;
+  // session_idle_timeout_seconds / session_absolute_timeout_seconds set the
+  // tenant's idle and absolute session timeouts (0 = no timeout).
+  int64 session_idle_timeout_seconds = 8;
+  int64 session_absolute_timeout_seconds = 9;
 }
 
 message UpsertLoginPolicyResponse {
@@ -1340,6 +1394,9 @@ service IdentityService {
   // Passkey / WebAuthn
   rpc BeginPasskeyRegistration(BeginPasskeyRegistrationRequest) returns (BeginPasskeyRegistrationResponse);
   rpc CompletePasskeyRegistration(CompletePasskeyRegistrationRequest) returns (CompletePasskeyRegistrationResponse);
+  // Passkey-first signup — unauthenticated account creation via a passkey.
+  rpc BeginPasskeySignup(BeginPasskeySignupRequest) returns (BeginPasskeySignupResponse);
+  rpc CompletePasskeySignup(CompletePasskeySignupRequest) returns (CompletePasskeySignupResponse);
   rpc BeginPasskeyLogin(BeginPasskeyLoginRequest) returns (BeginPasskeyLoginResponse);
   rpc CompletePasskeyLogin(CompletePasskeyLoginRequest) returns (CompletePasskeyLoginResponse);
   rpc ListPasskeys(ListPasskeysRequest) returns (ListPasskeysResponse);

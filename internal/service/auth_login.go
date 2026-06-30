@@ -100,7 +100,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
-	if err := validatePasswordStrength(password); err != nil {
+	if err := s.validatePasswordStrengthForEmail(ctx, email, password); err != nil {
 		return nil, err
 	}
 	start := time.Now()
@@ -260,6 +260,31 @@ func (s *AuthService) handleDuplicatePasswordSignup(ctx context.Context, user *U
 	return s.newDuplicateSignupResult(ctx, email, fallbackDisplayName(email, name))
 }
 
+// handleDuplicatePasskeySignup is the existing-email decoy for passkey-first
+// signup. It mirrors handleDuplicatePasswordSignup (sends the existing-account
+// notice, never attaches a passkey, never discloses existence) but ALWAYS
+// returns a fabricated-token decoy regardless of GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL.
+//
+// Why unconditional tokens: the passkey-signup new-account path always issues a
+// live session (the in-flow OTP proved email control, so the account is created
+// verified). If this decoy went through the verified-email-gated
+// newDuplicateSignupResult it would be session-less when the flag is on, making
+// new-vs-existing distinguishable by token presence — the exact enumeration
+// oracle the decoy exists to prevent. duplicateSignupDecoyResult keeps the two
+// responses token-shape identical with the flag both off and on.
+func (s *AuthService) handleDuplicatePasskeySignup(ctx context.Context, user *User, email string) (*LoginResult, error) {
+	if err := s.sendExistingSignupNotice(ctx, user); err != nil {
+		s.logger.Warn(
+			"duplicate_signup_notice_failed",
+			zap.String("user_id", user.ID),
+			zap.String("email", redactEmail(email)),
+			zap.Error(err),
+		)
+	}
+	s.logger.Info("passkey_signup_existing_email", zap.String("email", redactEmail(email)), zap.String("user_id", user.ID))
+	return s.duplicateSignupDecoyResult(ctx, s.newDuplicateSignupUser(email, fallbackDisplayName(email, "")))
+}
+
 func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) error {
 	loginURL := s.appBaseURL(ctx)
 	text := strings.Join([]string{
@@ -280,9 +305,12 @@ func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) 
 	})
 }
 
-func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displayName string) (*LoginResult, error) {
+// newDuplicateSignupUser builds the synthetic, repository-absent user returned
+// by every duplicate-signup decoy. Its id is deliberately a "signup-pending-"
+// placeholder that never collides with a real account id.
+func (s *AuthService) newDuplicateSignupUser(email, displayName string) *User {
 	now := s.nowMs()
-	user := &User{
+	return &User{
 		ID:        "signup-pending-" + randomToken(8),
 		Email:     email,
 		Name:      displayName,
@@ -291,18 +319,30 @@ func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displ
 		CreatedAt: msToTime(now),
 		UpdatedAt: msToTime(now),
 	}
-	// When email verification is required, a genuine new signup returns no
-	// live session (empty tokens — see PasswordSignup). The duplicate-signup
+}
+
+func (s *AuthService) newDuplicateSignupResult(ctx context.Context, email, displayName string) (*LoginResult, error) {
+	user := s.newDuplicateSignupUser(email, displayName)
+	// When email verification is required, a genuine new password signup returns
+	// no live session (empty tokens — see PasswordSignup). The duplicate-signup
 	// decoy MUST mirror that exactly: otherwise empty-vs-non-empty tokens
 	// would disclose whether the address is already registered — the precise
 	// account-enumeration oracle this decoy exists to prevent.
 	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail {
 		return &LoginResult{User: user}, nil
 	}
-	// Duplicate signup must not authenticate the caller, but it also
-	// must not disclose whether the address already exists. We return a
-	// success-shaped payload with an unstored refresh token and a JWT for
-	// a synthetic subject that is absent from the repository.
+	return s.duplicateSignupDecoyResult(ctx, user)
+}
+
+// duplicateSignupDecoyResult returns a success-shaped payload with an unstored
+// refresh token and a JWT for a synthetic subject that is absent from the
+// repository. It authenticates nobody (the subject does not exist) yet is
+// token-shape identical to a real new-signup session, so token presence cannot
+// disclose whether the address already exists. Callers whose genuine new-account
+// path ALWAYS issues a session (e.g. passkey signup, where the OTP proves email
+// control and the account is created verified) must use this directly — never
+// the verified-email-gated newDuplicateSignupResult, which can be session-less.
+func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User) (*LoginResult, error) {
 	decoyClaims := jwt.Claims{
 		Sub:    user.ID,
 		Email:  user.Email,
@@ -894,14 +934,20 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email stri
 
 // markEmailVerifiedViaExternalProof flips the account to verified because an
 // external method (OAuth provider assertion, or an emailed OTP/magic-link the
-// user redeemed) proved control of the address. Any password on the account was
-// set BEFORE this proof — possibly by a different party (account pre-hijacking)
-// — so it is cleared; the legitimate owner re-establishes it via password reset.
+// user redeemed) proved control of the address. Any credential on the account
+// was established BEFORE this proof — possibly by a different party (account
+// pre-hijacking) — so the untrusted ones are voided:
+//
+//   - a planted password is cleared (the owner re-establishes it via reset);
+//   - any planted passkeys are deleted. A passkey enrolled while the email was
+//     unverified is exactly as untrustworthy as a planted password: passkey
+//     login does not pass through the email-verification gate, so without this
+//     an attacker who passkey-first-signed-up an unverified address would keep
+//     a working credential after the real owner takes the account over.
 //
 // It is a no-op when the email is already verified (the proof adds nothing).
-// email_verified + email_verified_at and the cleared password_hash are persisted
-// in a single patch. Best-effort: a persistence failure is logged, not fatal —
-// the user has already authenticated via the external proof.
+// Best-effort: a persistence failure is logged, not fatal — the user has
+// already authenticated via the external proof.
 func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, user *User, nowMs int64, method string) {
 	if user == nil || user.EmailVerified {
 		return
@@ -932,27 +978,47 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 		return
 	}
 
-	if passwordCleared {
-		// The cleared credential is void, so revoke any sessions too — mirroring
-		// ConfirmPasswordReset — so a session established with the old password
-		// cannot outlive it. With the verification gate on this is a no-op (an
-		// unverified account cannot have a session); it matters when the gate is
-		// disabled and an attacker's planted-password session is still live.
+	// Void any passkeys planted while the address was unverified. Detect first
+	// (so the audit/session-revocation only fires when there was something to
+	// clear) then delete them all.
+	passkeysCleared := false
+	if existing, err := s.repo(ctx).ListPasskeyCredentials(ctx, user.ID); err != nil {
+		s.logger.Warn("email_verified_external_passkey_list_failed",
+			zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+	} else if len(existing) > 0 {
+		if err := s.repo(ctx).DeletePasskeyCredentialsForUser(ctx, user.ID); err != nil {
+			s.logger.Warn("email_verified_external_passkey_clear_failed",
+				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
+		} else {
+			passkeysCleared = true
+		}
+	}
+
+	if passwordCleared || passkeysCleared {
+		// The cleared credentials are void, so revoke any sessions too —
+		// mirroring ConfirmPasswordReset — so a session established with a now-
+		// voided credential cannot outlive it. With the verification gate on,
+		// a planted-password session is impossible; a planted-passkey session
+		// is NOT (passkey login skips the gate), so this matters either way.
 		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
 			s.logger.Warn("email_verified_external_revoke_failed",
 				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
 		}
 		s.revokeUserSessionsIfModeSession(ctx, user.ID, "external_email_verification")
-		s.logger.Info("email_verified_external_password_cleared",
+		s.logger.Info("email_verified_external_credentials_cleared",
 			zap.String("user_id", user.ID),
-			zap.String("method", method))
+			zap.String("method", method),
+			zap.Bool("password_cleared", passwordCleared),
+			zap.Bool("passkeys_cleared", passkeysCleared))
 		s.audit.Log(
 			ctx, audit.EventPasswordChanged,
 			audit.WithActor(user.ID),
 			audit.WithSuccess(true),
 			audit.WithDetails(map[string]any{
-				"reason": "planted_password_cleared_on_external_email_verification",
-				"method": method,
+				"reason":           "planted_credentials_cleared_on_external_email_verification",
+				"method":           method,
+				"password_cleared": passwordCleared,
+				"passkeys_cleared": passkeysCleared,
 			}),
 		)
 	}
@@ -1086,6 +1152,8 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
+	// Global baseline check up front (before any token lookup); the
+	// tenant-specific tightening runs once the owning user is resolved.
 	if err := validatePasswordStrength(password); err != nil {
 		return nil, err
 	}
@@ -1121,6 +1189,12 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	}
 	if user == nil {
 		return nil, fmt.Errorf("%w: user for invitation not found", ErrNotFound)
+	}
+
+	// Enforce the invited member's tenant password policy now that the
+	// owning user (and thus its email domain) is known.
+	if err := s.validatePasswordStrengthForEmail(ctx, user.Email, password); err != nil {
+		return nil, err
 	}
 
 	pwHash, err := passwords.Hash(password)

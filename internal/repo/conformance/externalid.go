@@ -96,6 +96,52 @@ func runExternalIDConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("UniquePerProject_AcrossProjects", func(t *testing.T) {
+			// The proof that external_id uniqueness is scoped to the project,
+			// NOT global: the SAME external_id is creatable under two projects
+			// derived from ONE backing store (the real per-request WithProject
+			// scoping). A global unique index — the memory-driver bug this
+			// asserts against — would reject the second create. Drivers without
+			// a BindProject hook skip (none in tree).
+			if driver.BindProject == nil {
+				t.Skipf("%s: no BindProject hook — per-project external_id scoping not exercised", driver.Name)
+			}
+			ctx := context.Background()
+			base := driver.NewRepo(t)
+			const projectA, projectB = "ext-project-a", "ext-project-b"
+			a := driver.BindProject(t, base, projectA)
+			b := driver.BindProject(t, base, projectB)
+
+			const (
+				sharedExt = "okta-shared"
+				emailA    = "ext-iso-a@example.com"
+				emailB    = "ext-iso-b@example.com"
+			)
+			if _, err := a.CreateUser(ctx, &service.User{
+				Email: emailA, Status: "active", Role: "member", ExternalID: sharedExt,
+			}); err != nil {
+				t.Fatalf("CreateUser in project A: %v", err)
+			}
+			// Same external_id under project B must be allowed (per-project, not global).
+			if _, err := b.CreateUser(ctx, &service.User{
+				Email: emailB, Status: "active", Role: "member", ExternalID: sharedExt,
+			}); err != nil {
+				t.Fatalf("same external_id in project B must be allowed (per-project uniqueness): %v", err)
+			}
+			// Each project resolves only its OWN row by external_id. Compare on
+			// DATA (email), not id: some backends restart their id counter per
+			// scope, so A and B can mint the same id string for their first row;
+			// a real leak is B resolving A's row data.
+			gotA, err := a.FindUserByExternalID(ctx, sharedExt)
+			if err != nil || gotA == nil || gotA.Email != emailA {
+				t.Fatalf("FindUserByExternalID in A: got=%#v err=%v want email=%q", gotA, err, emailA)
+			}
+			gotB, err := b.FindUserByExternalID(ctx, sharedExt)
+			if err != nil || gotB == nil || gotB.Email != emailB {
+				t.Fatalf("FindUserByExternalID in B: got=%#v err=%v want email=%q", gotB, err, emailB)
+			}
+		})
+
 		t.Run("EmptyExternalID_NotUnique", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
@@ -154,6 +200,25 @@ func runExternalIDConformance(t *testing.T, driver Driver) {
 			}
 			if len(none) != 0 {
 				t.Fatalf("ListUsers past end: want empty, got %+v", none)
+			}
+
+			// CountUsers reports the full match count, INDEPENDENT of the
+			// Offset/Limit window — the contract the SCIM totalResults relies on
+			// so a large project never truncates at the page cap. Every driver
+			// must count identically.
+			total, err := r.CountUsers(ctx, service.UserListFilter{})
+			if err != nil || total != 3 {
+				t.Fatalf("CountUsers all: got=%d err=%v want 3", total, err)
+			}
+			// A page-sized window must not change the count.
+			totalPaged, err := r.CountUsers(ctx, service.UserListFilter{Limit: 1, Offset: 2})
+			if err != nil || totalPaged != 3 {
+				t.Fatalf("CountUsers ignores Offset/Limit: got=%d err=%v want 3", totalPaged, err)
+			}
+			// The equality filter narrows the count the same as ListUsers.
+			byEmailCount, err := r.CountUsers(ctx, service.UserListFilter{Email: "L2@EXAMPLE.COM"})
+			if err != nil || byEmailCount != 1 {
+				t.Fatalf("CountUsers email filter: got=%d err=%v want 1", byEmailCount, err)
 			}
 		})
 	})

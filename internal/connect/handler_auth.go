@@ -294,6 +294,59 @@ func (h *IdentityHandler) CompletePasskeyLogin(
 	return connect.NewResponse(resp), nil
 }
 
+// ─── Passkey-first Signup RPCs (unauthenticated) ─────────────────────────────
+
+// BeginPasskeySignup generates PublicKeyCredentialCreationOptions for creating
+// a brand-new account from a passkey. Unauthenticated: no session required.
+func (h *IdentityHandler) BeginPasskeySignup(
+	ctx context.Context,
+	req *connect.Request[identitypb.BeginPasskeySignupRequest],
+) (*connect.Response[identitypb.BeginPasskeySignupResponse], error) {
+	optionsJSON, challengeID, err := h.auth.BeginPasskeySignup(ctx, req.Msg.Email, req.Msg.DeviceName)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	resp := &identitypb.BeginPasskeySignupResponse{
+		OptionsJson: optionsJSON,
+		ChallengeId: challengeID,
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// CompletePasskeySignup verifies the attestation, creates the account (or
+// returns an enumeration-safe decoy when the email already exists) and issues
+// tokens. Unauthenticated: no session required.
+func (h *IdentityHandler) CompletePasskeySignup(
+	ctx context.Context,
+	req *connect.Request[identitypb.CompletePasskeySignupRequest],
+) (*connect.Response[identitypb.CompletePasskeySignupResponse], error) {
+	ipAddr := clientIP(req.Header())
+	userAgent := clientUserAgent(req.Header())
+
+	result, err := h.auth.CompletePasskeySignup(
+		ctx,
+		req.Msg.ChallengeId,
+		req.Msg.CredentialJson,
+		req.Msg.Email,
+		req.Msg.OtpCode,
+		req.Msg.DeviceName,
+		ipAddr,
+		userAgent,
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	resp := &identitypb.CompletePasskeySignupResponse{
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // ─── QR Login RPCs ──────────────────────────────────────────────────────────
 
 // InitiateQrLogin creates a new QR login session for a new device.

@@ -18,23 +18,29 @@ import { Code } from "astro-expressive-code/components";
     <strong>Disabled by default.</strong> When
     <code>GATEWAY_SCIM_ENABLED</code> is unset the <code>/scim/v2/*</code>
     routes are never registered and return <code>404</code>. The headless
-    RPCs are unaffected. Turning SCIM on requires a bearer token; the server
-    refuses to boot otherwise.
+    RPCs are unaffected. Turning SCIM on requires a bearer token <em>and</em> a
+    project id; the server refuses to boot otherwise.
   </div>
 
   <h2>Enable it</h2>
   <Code
     lang="bash"
-    code={`# Turn on the SCIM server and set the shared bearer token the IdP presents.
+    code={`# Turn on the SCIM server, set the shared bearer token the IdP presents,
+# and bind it to the single project whose users it may provision.
 GATEWAY_SCIM_ENABLED=true
-GATEWAY_SCIM_BEARER_TOKEN=<a-long-random-secret>`}
+GATEWAY_SCIM_BEARER_TOKEN=<a-long-random-secret>
+GATEWAY_SCIM_PROJECT_ID=<project-id>`}
   />
   <p>
     Configure your IdP's SCIM connector with the base URL
     <code>https://&lt;your-host&gt;/scim/v2</code> and the same bearer token.
-    Each request resolves to a project via the normal project resolver
-    (credential key or <code>Host</code> auth-domain), so a multi-project
-    deployment serves each project's own user pool.
+    The bearer token is bound to the single project named by
+    <code>GATEWAY_SCIM_PROJECT_ID</code>: every SCIM operation
+    (create / list / get / replace / patch / delete) is scoped to that
+    project's users, regardless of which <code>Host</code> / auth-domain the
+    request arrives on. The credential can never read or mutate another
+    project's user pool. To provision more than one project, run one scoped
+    credential per project.
   </p>
 
   <h2>external_id correlation</h2>
@@ -44,7 +50,7 @@ GATEWAY_SCIM_BEARER_TOKEN=<a-long-random-secret>`}
     project when set and lets the IdP target an account independently of email
     changes. It round-trips through every store (Postgres, SQLite, in-memory)
     and is exposed on the <code>User</code> message
-    (field&nbsp;22).
+    (field&nbsp;25).
   </p>
 
   <h2>Supported surface</h2>
@@ -87,8 +93,10 @@ GATEWAY_SCIM_BEARER_TOKEN=<a-long-random-secret>`}
   />
 
   <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
-    <strong>Deferred.</strong> SCIM <code>/Groups</code> and per-tenant
-    (rather than per-deployment) bearer tokens are not yet implemented. The
+    <strong>Deferred.</strong> SCIM <code>/Groups</code> is not yet
+    implemented. Each bearer token is scoped to one project
+    (<code>GATEWAY_SCIM_PROJECT_ID</code>); multiplexing several projects
+    through a single credential is intentionally out of scope. The
     <code>/Users</code> surface above is complete and tested across all
     storage backends.
   </div>

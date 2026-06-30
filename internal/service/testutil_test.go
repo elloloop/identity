@@ -99,6 +99,20 @@ type fakeRepo struct {
 	// (after the counter decrements to 0) succeed normally.
 	incrementErrCount int
 
+	// createUserHook, when set, runs at the very start of CreateUser
+	// (before the duplicate-email check). A test uses it to inject a
+	// concurrent insert and exercise the lost-create-race path: seeding a
+	// user with the same email here makes the subsequent insert fail the
+	// uniqueness check exactly as a racing winner would.
+	createUserHook func()
+
+	// The following, when non-nil, make the corresponding read/write return
+	// that error so a test can exercise the caller's repo-error-propagation
+	// path. Default nil (success).
+	getPasskeyChallengeErr error
+	findUserByEmailErr     error
+	createPasskeyCredErr   error
+
 	users              map[string]*User
 	refreshTokens      map[string]*RefreshTokenRecord
 	passkeyCreds       map[string]*PasskeyCredRecord
@@ -149,6 +163,9 @@ func newFakeRepo() *fakeRepo {
 func (r *fakeRepo) FindUserByEmail(_ context.Context, email string) (*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.findUserByEmailErr != nil {
+		return nil, r.findUserByEmailErr
+	}
 	for _, u := range r.users {
 		if u.Email == email {
 			cp := *u
@@ -201,7 +218,26 @@ func (r *fakeRepo) ListUsers(_ context.Context, filter UserListFilter) ([]*User,
 	return out, nil
 }
 
+func (r *fakeRepo) CountUsers(_ context.Context, filter UserListFilter) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
 func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
+	if r.createUserHook != nil {
+		r.createUserHook()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
@@ -209,7 +245,10 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
 			return "", fmt.Errorf("user with email %s already exists", u.Email)
 		}
 	}
-	id := nextNodeID()
+	id := u.ID
+	if id == "" {
+		id = nextNodeID()
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -515,6 +554,9 @@ func (r *fakeRepo) GetPasskeyCredentialByCredID(_ context.Context, credentialID 
 func (r *fakeRepo) CreatePasskeyCredential(_ context.Context, rec *PasskeyCredRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.createPasskeyCredErr != nil {
+		return "", r.createPasskeyCredErr
+	}
 	id := nextNodeID()
 	rec.NodeID = id
 	cp := *rec
@@ -538,11 +580,25 @@ func (r *fakeRepo) UpdatePasskeyCredential(_ context.Context, nodeID string, fie
 	return nil
 }
 
+func (r *fakeRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
+	}
+	return nil
+}
+
 // ── Passkey Challenges ─────────────────────────────────────────────────
 
 func (r *fakeRepo) GetPasskeyChallenge(_ context.Context, nodeID string) (*PasskeyChallengeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getPasskeyChallengeErr != nil {
+		return nil, r.getPasskeyChallengeErr
+	}
 	c, ok := r.passkeyChallenges[nodeID]
 	if !ok {
 		return nil, nil
@@ -995,6 +1051,7 @@ func testConfig() *config.Config {
 		PasskeyRPName:                   "Test",
 		PasskeyOrigin:                   "http://localhost:9002",
 		PasskeyChallengeExpirySeconds:   300,
+		PasskeySignupEnabled:            true,
 		QRLoginBaseURL:                  "http://localhost:9002",
 		QRLoginExpirySeconds:            300,
 		TOTPIssuer:                      "Glassa Test",
