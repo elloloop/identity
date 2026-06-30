@@ -80,23 +80,32 @@ func (s *ControlPlaneAdminService) UpsertLoginPolicy(ctx context.Context, secret
 	if err != nil {
 		return nil, err
 	}
+	if p.PasswordMinLength < 0 || p.SessionIdleTimeoutSeconds < 0 || p.SessionAbsoluteTimeoutSeconds < 0 {
+		return nil, fmt.Errorf("%w: password/session governance values must be non-negative", ErrInvalidArgument)
+	}
 	policy := &LoginPolicy{
-		ProjectID:         projectID,
-		TenantID:          tenantID,
-		AllowedMethods:    allowed,
-		SSORequired:       p.SSORequired,
-		SSOConnectionJSON: strings.TrimSpace(p.SSOConnectionJSON),
-		Require2FA:        p.Require2FA,
+		ProjectID:                     projectID,
+		TenantID:                      tenantID,
+		AllowedMethods:                allowed,
+		SSORequired:                   p.SSORequired,
+		SSOConnectionJSON:             strings.TrimSpace(p.SSOConnectionJSON),
+		Require2FA:                    p.Require2FA,
+		PasswordMinLength:             p.PasswordMinLength,
+		SessionIdleTimeoutSeconds:     p.SessionIdleTimeoutSeconds,
+		SessionAbsoluteTimeoutSeconds: p.SessionAbsoluteTimeoutSeconds,
 	}
 	if _, err := s.policies.UpsertLoginPolicy(ctx, policy); err != nil {
 		return nil, err
 	}
 	s.audit.Log(ctx, audit.EventLoginPolicyUpserted, audit.WithSuccess(true), audit.WithDetails(map[string]any{
-		"project_id":      projectID,
-		"tenant_id":       tenantID,
-		"allowed_methods": allowed,
-		"sso_required":    policy.SSORequired,
-		"require_2fa":     policy.Require2FA,
+		"project_id":                 projectID,
+		"tenant_id":                  tenantID,
+		"allowed_methods":            allowed,
+		"sso_required":               policy.SSORequired,
+		"require_2fa":                policy.Require2FA,
+		"password_min_length":        policy.PasswordMinLength,
+		"session_idle_timeout_s":     policy.SessionIdleTimeoutSeconds,
+		"session_absolute_timeout_s": policy.SessionAbsoluteTimeoutSeconds,
 	}))
 	return policy, nil
 }

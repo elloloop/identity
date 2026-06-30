@@ -11,14 +11,14 @@ import (
 const refreshTokenColumns = `
 	id, token_hash, user_id, device_info, device_name,
 	ip_address, user_agent,
-	expires_at_ms, created_at_ms, last_used_at_ms, consumed_at_ms`
+	expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms`
 
 func scanRefreshToken(s scanner) (*service.RefreshTokenRecord, error) {
 	var t service.RefreshTokenRecord
 	if err := s.Scan(
 		&t.NodeID, &t.TokenHash, &t.UserID, &t.DeviceInfo, &t.DeviceName,
 		&t.IPAddress, &t.UserAgent,
-		&t.ExpiresAt, &t.CreatedAt, &t.LastUsedAt, &t.ConsumedAtMs,
+		&t.ExpiresAt, &t.CreatedAt, &t.LastUsedAt, &t.SessionStartedAt, &t.ConsumedAtMs,
 	); err != nil {
 		return nil, err
 	}
@@ -73,13 +73,13 @@ func (r *sqliteRepository) CreateRefreshToken(ctx context.Context, t *service.Re
 		INSERT INTO refresh_tokens (
 			id, project_id, token_hash, user_id,
 			device_info, device_name, ip_address, user_agent,
-			expires_at_ms, created_at_ms, last_used_at_ms, consumed_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+			expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	_, err := r.db.Exec(
 		ctx, q,
 		id, r.projectID, t.TokenHash, t.UserID,
 		t.DeviceInfo, t.DeviceName, t.IPAddress, t.UserAgent,
-		t.ExpiresAt, t.CreatedAt, t.LastUsedAt, t.ConsumedAtMs,
+		t.ExpiresAt, t.CreatedAt, t.LastUsedAt, t.SessionStartedAt, t.ConsumedAtMs,
 	)
 	if err != nil {
 		return "", wrapErr("CreateRefreshToken", err)

@@ -1214,6 +1214,16 @@ message LoginPolicy {
   bool require_2fa = 6;
   int64 created_at_ms = 7;
   int64 updated_at_ms = 8;
+  // password_min_length is the tenant's minimum password length. 0 means "use
+  // the global minimum"; a tenant can only ever raise the floor, never lower it.
+  int32 password_min_length = 9;
+  // session_idle_timeout_seconds invalidates a session unused for this long. 0
+  // means "no idle timeout" (global behavior).
+  int64 session_idle_timeout_seconds = 10;
+  // session_absolute_timeout_seconds invalidates a session older than this,
+  // measured from the original login regardless of activity. 0 means "no
+  // absolute timeout".
+  int64 session_absolute_timeout_seconds = 11;
 }
 
 message UpsertLoginPolicyRequest {
@@ -1223,6 +1233,13 @@ message UpsertLoginPolicyRequest {
   bool sso_required = 4;
   string sso_connection_json = 5;
   bool require_2fa = 6;
+  // password_min_length tightens the tenant's minimum password length (0 =
+  // global default; tenants tighten, never loosen).
+  int32 password_min_length = 7;
+  // session_idle_timeout_seconds / session_absolute_timeout_seconds set the
+  // tenant's idle and absolute session timeouts (0 = no timeout).
+  int64 session_idle_timeout_seconds = 8;
+  int64 session_absolute_timeout_seconds = 9;
 }
 
 message UpsertLoginPolicyResponse {

@@ -39,10 +39,6 @@ type LoginPolicy struct {
 	// "use the global passwords.MinPasswordLength"; a tenant can only ever
 	// raise the floor, never lower it.
 	PasswordMinLength int
-	// PasswordRequireClasses records that the tenant demands all four
-	// character classes (upper/lower/digit/special). The global class
-	// rules are always enforced; this only tightens.
-	PasswordRequireClasses bool
 	// SessionIdleTimeoutSeconds invalidates a session not used within this
 	// many seconds (compared against the refresh token's LastUsedAt). 0
 	// means "no idle timeout — global behavior".

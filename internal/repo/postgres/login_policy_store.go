@@ -30,7 +30,7 @@ func NewLoginPolicyStore(r *pgRepository) *LoginPolicyStore {
 const loginPolicyColumns = `
 	id, project_id, tenant_id, allowed_methods, sso_required,
 	sso_connection_json, require_2fa, password_min_length,
-	password_require_classes, session_idle_timeout_seconds,
+	session_idle_timeout_seconds,
 	session_absolute_timeout_seconds, created_at_ms, updated_at_ms`
 
 func scanLoginPolicy(row pgx.Row) (*service.LoginPolicy, error) {
@@ -38,7 +38,7 @@ func scanLoginPolicy(row pgx.Row) (*service.LoginPolicy, error) {
 	if err := row.Scan(
 		&p.ID, &p.ProjectID, &p.TenantID, &p.AllowedMethods, &p.SSORequired,
 		&p.SSOConnectionJSON, &p.Require2FA, &p.PasswordMinLength,
-		&p.PasswordRequireClasses, &p.SessionIdleTimeoutSeconds,
+		&p.SessionIdleTimeoutSeconds,
 		&p.SessionAbsoluteTimeoutSeconds, &p.CreatedAtMs, &p.UpdatedAtMs,
 	); err != nil {
 		return nil, err
@@ -76,16 +76,15 @@ func (s *LoginPolicyStore) UpsertLoginPolicy(ctx context.Context, p *service.Log
 		INSERT INTO login_policies (
 			id, project_id, tenant_id, allowed_methods, sso_required,
 			sso_connection_json, require_2fa, password_min_length,
-			password_require_classes, session_idle_timeout_seconds,
+			session_idle_timeout_seconds,
 			session_absolute_timeout_seconds, created_at_ms, updated_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $12)
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $11)
 		ON CONFLICT (project_id, tenant_id) DO UPDATE SET
 			allowed_methods                  = EXCLUDED.allowed_methods,
 			sso_required                     = EXCLUDED.sso_required,
 			sso_connection_json              = EXCLUDED.sso_connection_json,
 			require_2fa                      = EXCLUDED.require_2fa,
 			password_min_length              = EXCLUDED.password_min_length,
-			password_require_classes         = EXCLUDED.password_require_classes,
 			session_idle_timeout_seconds     = EXCLUDED.session_idle_timeout_seconds,
 			session_absolute_timeout_seconds = EXCLUDED.session_absolute_timeout_seconds,
 			updated_at_ms                    = EXCLUDED.updated_at_ms
@@ -94,7 +93,7 @@ func (s *LoginPolicyStore) UpsertLoginPolicy(ctx context.Context, p *service.Log
 	if err := s.pool.QueryRow(
 		ctx, q,
 		id, p.ProjectID, p.TenantID, p.AllowedMethods, p.SSORequired,
-		ssoConn, p.Require2FA, p.PasswordMinLength, p.PasswordRequireClasses,
+		ssoConn, p.Require2FA, p.PasswordMinLength,
 		p.SessionIdleTimeoutSeconds, p.SessionAbsoluteTimeoutSeconds, now,
 	).Scan(&outID); err != nil {
 		return "", wrapPgErr("UpsertLoginPolicy", err)

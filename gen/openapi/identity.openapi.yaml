@@ -5091,6 +5091,32 @@ components:
             - string
           title: updated_at_ms
           format: int64
+        passwordMinLength:
+          type: integer
+          title: password_min_length
+          format: int32
+          description: |-
+            password_min_length is the tenant's minimum password length. 0 means "use
+             the global minimum"; a tenant can only ever raise the floor, never lower it.
+        sessionIdleTimeoutSeconds:
+          type:
+            - integer
+            - string
+          title: session_idle_timeout_seconds
+          format: int64
+          description: |-
+            session_idle_timeout_seconds invalidates a session unused for this long. 0
+             means "no idle timeout" (global behavior).
+        sessionAbsoluteTimeoutSeconds:
+          type:
+            - integer
+            - string
+          title: session_absolute_timeout_seconds
+          format: int64
+          description: |-
+            session_absolute_timeout_seconds invalidates a session older than this,
+             measured from the original login regardless of activity. 0 means "no
+             absolute timeout".
       title: LoginPolicy
       additionalProperties: false
       description: |-
@@ -5979,6 +6005,28 @@ components:
         require2fa:
           type: boolean
           title: require_2fa
+        passwordMinLength:
+          type: integer
+          title: password_min_length
+          format: int32
+          description: |-
+            password_min_length tightens the tenant's minimum password length (0 =
+             global default; tenants tighten, never loosen).
+        sessionIdleTimeoutSeconds:
+          type:
+            - integer
+            - string
+          title: session_idle_timeout_seconds
+          format: int64
+          description: |-
+            session_idle_timeout_seconds / session_absolute_timeout_seconds set the
+             tenant's idle and absolute session timeouts (0 = no timeout).
+        sessionAbsoluteTimeoutSeconds:
+          type:
+            - integer
+            - string
+          title: session_absolute_timeout_seconds
+          format: int64
       title: UpsertLoginPolicyRequest
       additionalProperties: false
     identity.v1.UpsertLoginPolicyResponse:

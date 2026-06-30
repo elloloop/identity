@@ -74,7 +74,6 @@ func runLoginPolicySmoke(t *testing.T, dsn string) {
 		SSORequired:                   true,
 		Require2FA:                    true,
 		PasswordMinLength:             12,
-		PasswordRequireClasses:        true,
 		SessionIdleTimeoutSeconds:     900,
 		SessionAbsoluteTimeoutSeconds: 86400,
 	})
@@ -89,7 +88,6 @@ func runLoginPolicySmoke(t *testing.T, dsn string) {
 	require.True(t, got.SSORequired)
 	require.True(t, got.Require2FA)
 	require.Equal(t, 12, got.PasswordMinLength)
-	require.True(t, got.PasswordRequireClasses)
 	require.Equal(t, int64(900), got.SessionIdleTimeoutSeconds)
 	require.Equal(t, int64(86400), got.SessionAbsoluteTimeoutSeconds)
 	require.JSONEq(t, `{}`, got.SSOConnectionJSON, "empty sso connection defaults to {}")
@@ -114,7 +112,6 @@ func runLoginPolicySmoke(t *testing.T, dsn string) {
 	require.False(t, got.SSORequired)
 	require.JSONEq(t, `{"idp":"okta"}`, got.SSOConnectionJSON)
 	require.Zero(t, got.PasswordMinLength, "upsert overwrites the policy fields")
-	require.False(t, got.PasswordRequireClasses)
 	require.Zero(t, got.SessionIdleTimeoutSeconds)
 	require.Zero(t, got.SessionAbsoluteTimeoutSeconds)
 	require.Equal(t, createdAt, got.CreatedAtMs, "created_at_ms is preserved across upsert")

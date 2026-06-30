@@ -176,6 +176,48 @@ func TestRefreshToken_TenantTimeout_FreshSessionPasses(t *testing.T) {
 	require.NotEmpty(t, refresh)
 }
 
+// The absolute timeout is anchored at the original login and survives
+// repeated refreshes: a session that keeps refreshing within its idle window
+// must still die once the absolute window passes. This is the regression for
+// the bug where issueTokens re-stamped CreatedAt on every rotation, so the
+// absolute cap was measured from the latest refresh and never fired.
+func TestRefreshToken_AbsoluteTimeoutAnchoredAcrossRefreshes(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	// idle 1h, absolute 2h — refreshing every 30m never goes idle, so only
+	// the absolute cap can end the session.
+	svc.WithLoginGovernance(withSessionTimeouts(3600, 7200))
+
+	start := time.Unix(5_000_000, 0)
+	cur := start
+	svc.nowFunc = func() time.Time { return cur }
+	ctx := withProject("proj-1")
+
+	user := seedUser(repo, "alice@acme.com", "", "active")
+
+	// Initial login anchors the session's absolute lifetime at `start`.
+	_, raw, err := svc.issueTokens(ctx, user, "", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, raw)
+
+	// Refresh at +30m, +60m, +90m, +120m. Each stays within the 1h idle
+	// window AND within (or exactly at) the 2h absolute cap, so all succeed
+	// and rotate the token — yet the absolute anchor stays pinned to `start`.
+	for _, mins := range []int{30, 60, 90, 120} {
+		cur = start.Add(time.Duration(mins) * time.Minute)
+		_, _, raw, err = svc.RefreshToken(ctx, raw, "", "")
+		require.NoErrorf(t, err, "refresh at +%dm should be within the absolute window", mins)
+		require.NotEmpty(t, raw)
+	}
+
+	// +150m: still well within the idle window (only 30m since the last
+	// refresh) but past the 2h absolute cap. With the bug, CreatedAt would
+	// have been re-stamped to +120m and this would wrongly succeed.
+	cur = start.Add(150 * time.Minute)
+	_, _, _, err = svc.RefreshToken(ctx, raw, "", "")
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrSessionExpired), "absolute cap must fire once the session is older than 2h")
+}
+
 // passwordStrengthPolicyFor maps the LoginPolicy fields onto the passwords
 // StrengthPolicy and falls back to the zero policy when ungoverned.
 func TestPasswordStrengthPolicyFor(t *testing.T) {
@@ -183,11 +225,10 @@ func TestPasswordStrengthPolicyFor(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	g := withPasswordMinLength(16)
-	g.Policies.(*fakePolicyStore).byTenant["proj-1|tenant-acme"].PasswordRequireClasses = true
 	svc.WithLoginGovernance(g)
 
 	got := svc.passwordStrengthPolicyFor(ctx, "alice@acme.com")
-	require.Equal(t, passwords.StrengthPolicy{MinLength: 16, RequireClasses: true}, got)
+	require.Equal(t, passwords.StrengthPolicy{MinLength: 16}, got)
 
 	// Ungoverned → zero policy (global default).
 	require.Equal(t, passwords.StrengthPolicy{}, svc.passwordStrengthPolicyFor(ctx, "x@nowhere.example"))

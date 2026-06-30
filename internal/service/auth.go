@@ -457,17 +457,25 @@ type SessionRecord struct {
 
 // RefreshTokenRecord represents a stored refresh token.
 type RefreshTokenRecord struct {
-	NodeID       string
-	TokenHash    string
-	UserID       string
-	DeviceInfo   string
-	DeviceName   string
-	IPAddress    string
-	UserAgent    string
-	ExpiresAt    int64 // epoch ms
-	CreatedAt    int64
-	LastUsedAt   int64
-	ConsumedAtMs int64 // epoch ms; 0 = unconsumed (still valid for refresh)
+	NodeID     string
+	TokenHash  string
+	UserID     string
+	DeviceInfo string
+	DeviceName string
+	IPAddress  string
+	UserAgent  string
+	ExpiresAt  int64 // epoch ms
+	CreatedAt  int64
+	LastUsedAt int64
+	// SessionStartedAt anchors the session's absolute lifetime. Unlike
+	// CreatedAt — which is re-stamped on every rotation — it is copied
+	// UNCHANGED from the consumed token across refreshes, so the per-tenant
+	// absolute session timeout is measured from the original login rather
+	// than the latest refresh. It is set to now only at initial login. 0
+	// means "no anchor recorded" (legacy rows), in which case the absolute
+	// timeout is skipped until the next rotation re-anchors it.
+	SessionStartedAt int64 // epoch ms
+	ConsumedAtMs     int64 // epoch ms; 0 = unconsumed (still valid for refresh)
 }
 
 // PasskeyCredRecord represents a stored passkey credential.
@@ -1148,8 +1156,25 @@ func generateChallengeID() string {
 // access token also carries a `sid` claim referencing a freshly
 // minted Session row; the verification middleware looks the row up on
 // every authenticated request.
+//
+// This is the initial-login entry point: it anchors the new session's
+// absolute lifetime at now. The refresh path calls issueTokensWithSessionStart
+// directly so the anchor propagates unchanged across rotations.
 func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
+	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, 0)
+}
+
+// issueTokensWithSessionStart mints a token pair, anchoring the session's
+// absolute lifetime at sessionStartedAtMs. A value <= 0 anchors a brand-new
+// session at now (the initial-login case); the refresh path passes the consumed
+// token's SessionStartedAt so the per-tenant absolute timeout is measured from
+// the original login rather than re-set on every rotation.
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs int64) (string, string, error) {
 	now := s.nowMs()
+	sessionStart := sessionStartedAtMs
+	if sessionStart <= 0 {
+		sessionStart = now
+	}
 
 	// Stamp the derived minor flag from the stored DOB so the token carries
 	// an authoritative is_minor claim when age-gating is on. No-op (false)
@@ -1191,15 +1216,16 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	devName := friendlyDeviceName(userAgent)
 
 	_, err = s.repo(ctx).CreateRefreshToken(ctx, &RefreshTokenRecord{
-		TokenHash:  refreshHash,
-		UserID:     user.ID,
-		DeviceInfo: devName,
-		DeviceName: devName,
-		IPAddress:  ipAddr,
-		UserAgent:  truncate(userAgent, 512),
-		ExpiresAt:  now + int64(s.cfg.RefreshExpirySeconds)*1000,
-		CreatedAt:  now,
-		LastUsedAt: now,
+		TokenHash:        refreshHash,
+		UserID:           user.ID,
+		DeviceInfo:       devName,
+		DeviceName:       devName,
+		IPAddress:        ipAddr,
+		UserAgent:        truncate(userAgent, 512),
+		ExpiresAt:        now + int64(s.cfg.RefreshExpirySeconds)*1000,
+		CreatedAt:        now,
+		LastUsedAt:       now,
+		SessionStartedAt: sessionStart,
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("storing refresh token: %w", err)
@@ -1499,7 +1525,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	if timeoutUser == nil {
 		return nil, "", "", fmt.Errorf("%w: user not found", ErrNotFound)
 	}
-	if err := s.enforceSessionTimeout(ctx, timeoutUser.Email, s.nowMs(), record.CreatedAt, record.LastUsedAt); err != nil {
+	if err := s.enforceSessionTimeout(ctx, timeoutUser.Email, s.nowMs(), record.SessionStartedAt, record.LastUsedAt); err != nil {
 		_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
 		return nil, "", "", err
 	}
@@ -1527,7 +1553,11 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", err
 	}
 
-	accessToken, newRefresh, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	// Propagate the session-start anchor UNCHANGED across the rotation so the
+	// absolute timeout keeps measuring from the original login. A legacy row
+	// with no anchor (SessionStartedAt == 0) is re-anchored at now by
+	// issueTokensWithSessionStart.
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, record.SessionStartedAt)
 	if err != nil {
 		return nil, "", "", err
 	}

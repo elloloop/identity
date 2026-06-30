@@ -21,24 +21,26 @@ func (s *AuthService) passwordStrengthPolicyFor(ctx context.Context, email strin
 		return passwords.StrengthPolicy{}
 	}
 	return passwords.StrengthPolicy{
-		MinLength:      policy.PasswordMinLength,
-		RequireClasses: policy.PasswordRequireClasses,
+		MinLength: policy.PasswordMinLength,
 	}
 }
 
 // enforceSessionTimeout invalidates a session whose refresh token has gone
 // idle or exceeded its absolute lifetime under the owning tenant's
-// LoginPolicy. nowMs is the current epoch ms; createdAtMs/lastUsedAtMs come
-// from the refresh-token row. It returns ErrSessionExpired when a configured
-// timeout is breached and nil otherwise (including when no policy or no
-// timeout is set — fail-safe to the global behavior).
-func (s *AuthService) enforceSessionTimeout(ctx context.Context, email string, nowMs, createdAtMs, lastUsedAtMs int64) error {
+// LoginPolicy. nowMs is the current epoch ms; sessionStartedAtMs is the
+// session-start anchor (propagated unchanged across rotations) the absolute
+// timeout is measured against, and lastUsedAtMs (the latest refresh) is what
+// the idle timeout is measured against — both come from the refresh-token row.
+// It returns ErrSessionExpired when a configured timeout is breached and nil
+// otherwise (including when no policy or no timeout is set — fail-safe to the
+// global behavior). A zero anchor (legacy row) skips the absolute check.
+func (s *AuthService) enforceSessionTimeout(ctx context.Context, email string, nowMs, sessionStartedAtMs, lastUsedAtMs int64) error {
 	_, policy := s.resolveLoginPolicy(ctx, email)
 	if policy == nil {
 		return nil
 	}
-	if policy.SessionAbsoluteTimeoutSeconds > 0 && createdAtMs > 0 {
-		if nowMs-createdAtMs > policy.SessionAbsoluteTimeoutSeconds*msPerSecond {
+	if policy.SessionAbsoluteTimeoutSeconds > 0 && sessionStartedAtMs > 0 {
+		if nowMs-sessionStartedAtMs > policy.SessionAbsoluteTimeoutSeconds*msPerSecond {
 			s.logger.Info("session_absolute_timeout_exceeded",
 				zap.String("email_domain", emailDomain(email)))
 			return fmt.Errorf("%w: session exceeded its maximum lifetime", ErrSessionExpired)

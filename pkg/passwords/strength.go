@@ -54,12 +54,6 @@ type StrengthPolicy struct {
 	// MinPasswordLength"; any value below MinPasswordLength is treated as
 	// MinPasswordLength (tenants tighten, never loosen).
 	MinLength int
-	// RequireClasses, when true, demands all four character classes
-	// (upper, lower, digit, special) on top of the global rules. The
-	// global classes are always enforced regardless; this flag exists so
-	// a tenant policy can record the intent explicitly and so future
-	// per-class relaxation has a home without a breaking signature change.
-	RequireClasses bool
 }
 
 // effectiveMinLength returns the larger of the policy's MinLength and the
