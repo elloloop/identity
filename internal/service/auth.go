@@ -31,6 +31,7 @@ import (
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -218,6 +219,14 @@ type Repository interface {
 	GetPasskeyCredentialByCredID(ctx context.Context, credentialID string) (*PasskeyCredRecord, error)
 	CreatePasskeyCredential(ctx context.Context, r *PasskeyCredRecord) (string, error)
 	UpdatePasskeyCredential(ctx context.Context, nodeID string, fields map[string]any) error
+	// DeletePasskeyCredentialsForUser removes every passkey credential
+	// owned by userID, synchronously, on every driver. It backs the
+	// anti-pre-hijacking clearing in markEmailVerifiedViaExternalProof: a
+	// passkey enrolled while the email was unverified is untrusted (it may
+	// have been planted by an attacker), exactly like a planted password, so
+	// external proof of email control voids it. Idempotent: a user with no
+	// passkeys is a no-op returning nil.
+	DeletePasskeyCredentialsForUser(ctx context.Context, userID string) error
 
 	// Passkey challenges
 	GetPasskeyChallenge(ctx context.Context, nodeID string) (*PasskeyChallengeRecord, error)
@@ -488,8 +497,12 @@ type PasskeyChallengeRecord struct {
 	Challenge     string // base64url
 	UserID        string
 	ChallengeType string // "registration" or "authentication"
-	ExpiresAt     int64
-	CreatedAt     int64
+	// Email binds the account a passkey-first signup challenge will create the
+	// user under (see BeginPasskeySignup); empty for add-a-passkey
+	// registration and for authentication challenges.
+	Email     string
+	ExpiresAt int64
+	CreatedAt int64
 }
 
 // QrLoginSessionRecord represents a stored QR login session.
@@ -775,6 +788,11 @@ var (
 	ErrLocalAuthDisabled    = errors.New("local auth disabled")
 	ErrOAuthDisabled        = errors.New("oauth login is not configured")
 	ErrSignupDisabled       = errors.New("signup is disabled for this deployment")
+	// ErrPasskeySignupDisabled is returned by BeginPasskeySignup /
+	// CompletePasskeySignup when GATEWAY_PASSKEY_SIGNUP_ENABLED is false. It
+	// is distinct from ErrSignupDisabled (password signup) so the two flows
+	// can be toggled independently; both map to FailedPrecondition.
+	ErrPasskeySignupDisabled = errors.New("passkey signup is disabled for this deployment")
 	// ErrCaptchaRequired is returned when CAPTCHA is enforced on an
 	// endpoint but the request carried no captcha token. ErrCaptchaFailed
 	// is returned when the supplied token was rejected by the provider.
@@ -855,6 +873,14 @@ type AuthService struct {
 	// safe: any nil store, miss, or lookup error imposes no restriction.
 	governance *LoginGovernance
 
+	// publisher emits user-lifecycle events (create/update/deactivate) to
+	// downstream subscribers. nil disables emission (treated as the no-op
+	// events.Discard) — the constructor leaves it nil; app.New sets it via
+	// WithEventPublisher (the outbox-backed publisher when
+	// GATEWAY_WEBHOOKS_ENABLED, else left nil). Emission is best-effort and
+	// never fails the originating RPC.
+	publisher events.Publisher
+
 	// ageGate determines a user's age band from their date of birth. It is
 	// always non-nil: the constructor wires the no-op determiner when
 	// age-gating is disabled (everyone classifies as adult) and the
@@ -874,6 +900,15 @@ type AuthService struct {
 	// cache them. Projects with no override share the global s.passkeys.
 	passkeyRPCache   map[string]*passkeys.WebAuthnService
 	passkeyRPCacheMu sync.RWMutex
+}
+
+// WithEventPublisher wires the optional user-lifecycle event publisher and
+// returns the service for chaining. app.New calls it once at construction
+// (with the outbox-backed publisher when outbound eventing is enabled, or
+// nil to disable emission).
+func (s *AuthService) WithEventPublisher(p events.Publisher) *AuthService {
+	s.publisher = p
+	return s
 }
 
 // WithTenantAutoFormer wires the optional tenant auto-formation store and

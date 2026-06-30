@@ -458,6 +458,11 @@ type Config struct {
 	PasskeyOrigin string
 	// PasskeyChallengeExpirySeconds is the lifetime in seconds of registration / login challenges.
 	PasskeyChallengeExpirySeconds int
+	// PasskeySignupEnabled gates passkey-first signup (the unauthenticated
+	// BeginPasskeySignup / CompletePasskeySignup pair that creates a brand-new
+	// account from a passkey); set false to disable it while leaving
+	// authenticated add-a-passkey registration untouched.
+	PasskeySignupEnabled bool
 
 	// QR login (cross-device authorization).
 
@@ -665,6 +670,35 @@ type Config struct {
 	// SweeperGraceSeconds is extra grace past expires_at before a row is
 	// eligible for deletion (covers flows that just consumed the token).
 	SweeperGraceSeconds int
+
+	// Outbound webhooks / user-lifecycle eventing (#261). When disabled
+	// (the default), the service emits events to a no-op publisher: there is
+	// no observable behaviour change and no background worker runs. When
+	// enabled, user create/update/deactivate events are fanned out to
+	// per-tenant subscriptions and delivered as signed webhooks
+	// at-least-once, with retry/backoff recorded in a transactional outbox.
+
+	// WebhooksEnabled is the master switch for outbound user-lifecycle
+	// eventing; when false the service emits to a no-op publisher and runs no
+	// delivery worker. Driven by GATEWAY_WEBHOOKS_ENABLED (default false).
+	WebhooksEnabled bool
+	// WebhooksMaxAttempts is the per-delivery retry budget before a webhook is
+	// abandoned and surfaced via the structured logger. Driven by
+	// GATEWAY_WEBHOOKS_MAX_ATTEMPTS (default 6).
+	WebhooksMaxAttempts int
+	// WebhooksBackoffBaseSeconds is the first-retry delay; it doubles per
+	// attempt up to the ceiling. Driven by GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS
+	// (default 2).
+	WebhooksBackoffBaseSeconds int
+	// WebhooksBackoffMaxSeconds is the exponential-backoff ceiling. Driven by
+	// GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS (default 300).
+	WebhooksBackoffMaxSeconds int
+	// WebhooksWorkerIntervalSeconds is the outbox drain tick interval. Driven
+	// by GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS (default 1).
+	WebhooksWorkerIntervalSeconds int
+	// WebhooksBatchSize is the number of due deliveries claimed per tick.
+	// Driven by GATEWAY_WEBHOOKS_BATCH_SIZE (default 50).
+	WebhooksBatchSize int
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -787,6 +821,7 @@ func Load() *Config {
 		PasskeyRPName:                 envStr("GATEWAY_PASSKEY_RP_NAME", "Glassa Work"),
 		PasskeyOrigin:                 envStr("GATEWAY_PASSKEY_ORIGIN", "http://localhost:9002"),
 		PasskeyChallengeExpirySeconds: envInt("GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS", 300),
+		PasskeySignupEnabled:          envBool("GATEWAY_PASSKEY_SIGNUP_ENABLED", true),
 
 		QRLoginBaseURL:       envStr("GATEWAY_QR_LOGIN_BASE_URL", "http://localhost:9002"),
 		QRLoginExpirySeconds: envInt("GATEWAY_QR_LOGIN_EXPIRY_SECONDS", 300),
@@ -865,6 +900,13 @@ func Load() *Config {
 		SweeperIntervalSeconds: envInt("GATEWAY_SWEEPER_INTERVAL_SECONDS", 300),
 		SweeperBatchSize:       envInt("GATEWAY_SWEEPER_BATCH_SIZE", 500),
 		SweeperGraceSeconds:    envInt("GATEWAY_SWEEPER_GRACE_SECONDS", 60),
+
+		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
+		WebhooksMaxAttempts:           envInt("GATEWAY_WEBHOOKS_MAX_ATTEMPTS", 6),
+		WebhooksBackoffBaseSeconds:    envInt("GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS", 2),
+		WebhooksBackoffMaxSeconds:     envInt("GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS", 300),
+		WebhooksWorkerIntervalSeconds: envInt("GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS", 1),
+		WebhooksBatchSize:             envInt("GATEWAY_WEBHOOKS_BATCH_SIZE", 50),
 	}
 }
 
@@ -1021,6 +1063,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateWebhooks(); err != nil {
+		return err
+	}
+
 	if err := c.validateAgeGate(); err != nil {
 		return err
 	}
@@ -1029,6 +1075,36 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	return nil
+}
+
+// validateWebhooks enforces the outbound-eventing invariants: the retry
+// and backoff knobs must be positive and the cap must not be smaller than
+// the base. The checks only run when eventing is enabled — a disabled
+// deployment uses a no-op publisher and runs no worker, so its (unused)
+// knobs are irrelevant.
+func (c *Config) validateWebhooks() error {
+	if !c.WebhooksEnabled {
+		return nil
+	}
+	if c.WebhooksMaxAttempts < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_MAX_ATTEMPTS=%d must be >= 1", c.WebhooksMaxAttempts)
+	}
+	if c.WebhooksBackoffBaseSeconds < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS=%d must be >= 1", c.WebhooksBackoffBaseSeconds)
+	}
+	if c.WebhooksBackoffMaxSeconds < c.WebhooksBackoffBaseSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS=%d must be >= GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS=%d",
+			c.WebhooksBackoffMaxSeconds, c.WebhooksBackoffBaseSeconds,
+		)
+	}
+	if c.WebhooksWorkerIntervalSeconds < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS=%d must be >= 1", c.WebhooksWorkerIntervalSeconds)
+	}
+	if c.WebhooksBatchSize < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_BATCH_SIZE=%d must be >= 1", c.WebhooksBatchSize)
+	}
 	return nil
 }
 
