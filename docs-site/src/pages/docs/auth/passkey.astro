@@ -76,14 +76,14 @@ import { Code } from "astro-expressive-code/components";
   </p>
 
   <h3>2. Complete</h3>
-  <Code code={`const options = JSON.parse(beginResponse.options_json);
+  <Code code={`const options = JSON.parse(beginResponse.optionsJson);
 const credential = await navigator.credentials.create(options);
 
 await fetch("/identity.v1.IdentityService/CompletePasskeyRegistration", {
   method: "POST",
   headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
   body: JSON.stringify({
-    challengeId: beginResponse.challenge_id,
+    challengeId: beginResponse.challengeId,
     credentialJson: JSON.stringify(credential),
     deviceName: "Alice's MacBook",
   }),
@@ -107,7 +107,7 @@ const begin = await fetch("/identity.v1.IdentityService/BeginPasskeySignup", {
 }).then(r => r.json());
 
 // 2. Browser creates the credential
-const credential = await navigator.credentials.create(JSON.parse(begin.options_json));
+const credential = await navigator.credentials.create(JSON.parse(begin.optionsJson));
 
 // 3. Prompt the user for the 6-digit code from their inbox.
 const otpCode = await promptUserForEmailedCode();
@@ -118,13 +118,13 @@ const done = await fetch("/identity.v1.IdentityService/CompletePasskeySignup", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
-    challengeId: begin.challenge_id,
+    challengeId: begin.challengeId,
     credentialJson: JSON.stringify(credential),
     email: "alice@example.com",
     otpCode,
     deviceName: "Alice's MacBook",
   }),
-}).then(r => r.json());  // { user, access_token, refresh_token, expires_in }`} lang="javascript" />
+}).then(r => r.json());  // { user, accessToken, refreshToken, expiresIn }`} lang="javascript" />
   <p>
     The server mints the new user id during <code>BeginPasskeySignup</code> and
     binds it as the WebAuthn user handle, so the credential created here can log
@@ -178,19 +178,19 @@ const begin = await fetch("/identity.v1.IdentityService/BeginPasskeyLogin", {
 }).then(r => r.json());
 
 // 2. Browser does the ceremony
-const credential = await navigator.credentials.get(JSON.parse(begin.options_json));
+const credential = await navigator.credentials.get(JSON.parse(begin.optionsJson));
 
 // 3. Hand the assertion back to Identity
 const complete = await fetch("/identity.v1.IdentityService/CompletePasskeyLogin", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
-    challengeId: begin.challenge_id,
+    challengeId: begin.challengeId,
     credentialJson: JSON.stringify(credential),
   }),
 }).then(r => r.json());
 
-// complete.access_token, complete.refresh_token, complete.user`} lang="javascript" />
+// complete.accessToken, complete.refreshToken, complete.user`} lang="javascript" />
 
   <h2>Managing passkeys</h2>
   <ul>
