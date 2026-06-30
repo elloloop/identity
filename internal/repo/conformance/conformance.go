@@ -255,6 +255,13 @@ func RunConformance(t *testing.T, driver Driver) {
 			if !errors.Is(err, service.ErrAlreadyExists) {
 				t.Fatalf("CreateUser duplicate email: want ErrAlreadyExists, got %v", err)
 			}
+			// The uniqueness is case-insensitive on every driver (the SQL
+			// lower(email) index), so a differently-cased address is the SAME
+			// account and must also conflict.
+			_, err = r.CreateUser(ctx, &service.User{Email: "DUP@Example.COM", Status: "active"})
+			if !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("CreateUser case-insensitive duplicate email: want ErrAlreadyExists, got %v", err)
+			}
 		})
 
 		t.Run("UserUpdate_FieldRoundTrip", func(t *testing.T) {

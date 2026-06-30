@@ -870,8 +870,10 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
-		if existing.Email == u.Email {
-			return "", fmt.Errorf("user %q already exists", u.Email)
+		// Case-insensitive + ErrAlreadyExists-wrapped, matching the production
+		// memory driver and the cross-driver conformance contract.
+		if strings.EqualFold(existing.Email, u.Email) {
+			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
 		}
 		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
 			return "", fmt.Errorf("external_id %q: %w", u.ExternalID, service.ErrAlreadyExists)

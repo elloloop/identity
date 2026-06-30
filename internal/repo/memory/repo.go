@@ -289,10 +289,10 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
-		if existing.Email == u.Email {
-			// Mirror the SQL drivers' unique-violation → ErrAlreadyExists
-			// mapping so every backend signals a duplicate identically (the
-			// SCIM server maps this sentinel to HTTP 409 Conflict).
+		// Case-insensitive, mirroring the SQL drivers' lower(email) unique
+		// index: every backend signals a duplicate identically (the SCIM
+		// server maps this sentinel to HTTP 409 Conflict).
+		if strings.EqualFold(existing.Email, u.Email) {
 			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
 		}
 		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
