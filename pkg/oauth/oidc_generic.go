@@ -9,14 +9,27 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
 // defaultOIDCScopes is the scope set requested when a generic OIDC
 // provider config does not specify scopes.
 var defaultOIDCScopes = []string{"openid", "email", "profile"}
+
+// oidcAllowedAlgs is the set of id_token signature algorithms a generic
+// OIDC provider may use. It is restricted to the asymmetric algorithms
+// OIDC permits (RFC 7518) — symmetric (HS*) and "none" are refused so a
+// provider's public JWKS can never be abused for an alg-substitution
+// forgery.
+var oidcAllowedAlgs = []jwa.SignatureAlgorithm{
+	jwa.RS256, jwa.RS384, jwa.RS512,
+	jwa.ES256, jwa.ES384, jwa.ES512,
+	jwa.PS256, jwa.PS384, jwa.PS512,
+}
 
 // GenericOIDCConfig configures a config-driven OIDC Exchanger for an
 // arbitrary standards-compliant provider (Okta, Auth0, Keycloak, any
@@ -44,15 +57,25 @@ type GenericOIDCConfig struct {
 	// derived from IssuerURL when empty.
 	DiscoveryURL string
 
-	HTTPClient   *http.Client
-	JWKSCacheTTL time.Duration
-	Now          func() time.Time
+	HTTPClient *http.Client
+	// DiscoveryCacheTTL bounds how long a fetched discovery document is
+	// reused before re-fetching. Optional; defaults to one hour.
+	DiscoveryCacheTTL time.Duration
+	JWKSCacheTTL      time.Duration
+	Now               func() time.Time
 }
 
 type oidcExchanger struct {
 	cfg    GenericOIDCConfig
 	client *http.Client
-	jwks   *jwksCache
+
+	// mu guards the cached discovery document and the JWKS cache it
+	// points at. A single *oidcExchanger serves all logins for its
+	// provider, so the lazy first-resolution must be synchronized.
+	mu    sync.Mutex
+	doc   *oidcDiscoveryDocument
+	docAt time.Time
+	jwks  *jwksCache
 }
 
 // NewOIDC returns a generic OIDC Exchanger built on the shared OIDC
@@ -65,6 +88,9 @@ func NewOIDC(cfg GenericOIDCConfig) Exchanger {
 	}
 	if len(cfg.Scopes) == 0 {
 		cfg.Scopes = defaultOIDCScopes
+	}
+	if cfg.DiscoveryCacheTTL == 0 {
+		cfg.DiscoveryCacheTTL = time.Hour
 	}
 	if cfg.JWKSCacheTTL == 0 {
 		cfg.JWKSCacheTTL = time.Hour
@@ -101,6 +127,50 @@ func (o *oidcExchanger) scopeString() string {
 	return strings.Join(scopes, " ")
 }
 
+// resolve returns the provider's discovery document and a JWKS cache for
+// its signing keys, fetching the discovery document at most once per
+// DiscoveryCacheTTL. It serializes concurrent first-time resolution so a
+// single shared exchanger is safe for many in-flight logins, and serves a
+// stale document if a refresh fails transiently.
+func (o *oidcExchanger) resolve(ctx context.Context) (*oidcDiscoveryDocument, *jwksCache, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if o.doc != nil && o.cfg.Now().Sub(o.docAt) < o.cfg.DiscoveryCacheTTL {
+		return o.doc, o.jwks, nil
+	}
+
+	doc, err := fetchOIDCDiscovery(ctx, o.client, o.cfg.DiscoveryURL)
+	if err != nil {
+		if o.doc != nil {
+			return o.doc, o.jwks, nil
+		}
+		return nil, nil, err
+	}
+
+	// OIDC Discovery 4.3: the issuer advertised by the discovery document
+	// MUST match the issuer we configured (from which the well-known URL
+	// derives). Skipped when only an explicit DiscoveryURL is configured,
+	// since no expected issuer is known.
+	if o.cfg.IssuerURL != "" && !sameIssuer(doc.Issuer, o.cfg.IssuerURL) {
+		return nil, nil, fmt.Errorf("%w: discovery issuer %q does not match configured issuer",
+			ErrCodeExchangeFailed, doc.Issuer)
+	}
+
+	if o.jwks == nil || o.jwks.url != doc.JWKSURI {
+		o.jwks = newJWKSCache(doc.JWKSURI, o.cfg.JWKSCacheTTL, o.client)
+	}
+	o.doc = doc
+	o.docAt = o.cfg.Now()
+	return o.doc, o.jwks, nil
+}
+
+// sameIssuer compares two issuer URLs, tolerating a trailing slash on
+// either side.
+func sameIssuer(a, b string) bool {
+	return strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
+}
+
 type oidcTokenResponse struct {
 	IDToken     string `json:"id_token"`
 	AccessToken string `json:"access_token"`
@@ -115,7 +185,7 @@ func (o *oidcExchanger) AuthorizationURL(ctx context.Context, redirectURI, state
 	if o.cfg.ClientID == "" {
 		return "", fmt.Errorf("%w: client credentials not configured", ErrCodeExchangeFailed)
 	}
-	doc, err := fetchOIDCDiscovery(ctx, o.client, o.cfg.DiscoveryURL)
+	doc, _, err := o.resolve(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -142,12 +212,9 @@ func (o *oidcExchanger) Exchange(ctx context.Context, params ExchangeParams) (*I
 		return nil, fmt.Errorf("%w: client credentials not configured", ErrCodeExchangeFailed)
 	}
 
-	doc, err := fetchOIDCDiscovery(ctx, o.client, o.cfg.DiscoveryURL)
+	doc, jwks, err := o.resolve(ctx)
 	if err != nil {
 		return nil, err
-	}
-	if o.jwks == nil || o.jwks.url != doc.JWKSURI {
-		o.jwks = newJWKSCache(doc.JWKSURI, o.cfg.JWKSCacheTTL, o.client)
 	}
 
 	form := url.Values{}
@@ -191,7 +258,7 @@ func (o *oidcExchanger) Exchange(ctx context.Context, params ExchangeParams) (*I
 		return nil, fmt.Errorf("%w: provider returned no id_token", ErrCodeExchangeFailed)
 	}
 
-	claims, err := o.verifyIDToken(ctx, tr.IDToken, doc.Issuer)
+	claims, err := o.verifyIDToken(ctx, jwks, tr.IDToken, doc.Issuer)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +266,12 @@ func (o *oidcExchanger) Exchange(ctx context.Context, params ExchangeParams) (*I
 	userinfo, err := fetchOIDCUserInfo(ctx, o.client, doc.UserinfoEndpoint, tr.AccessToken)
 	if err != nil {
 		return nil, err
+	}
+	// OIDC Core 5.3.2: the userinfo `sub` MUST match the id_token `sub`;
+	// a mismatch means the userinfo response describes a different user
+	// and must not be trusted.
+	if userinfo != nil && userinfo.Sub != "" && userinfo.Sub != claims.Sub {
+		return nil, fmt.Errorf("%w: userinfo sub does not match id_token sub", ErrIdentityVerification)
 	}
 
 	email := strings.ToLower(strings.TrimSpace(claims.Email))
@@ -249,20 +322,22 @@ type oidcIDClaims struct {
 	Picture       string `json:"picture"`
 }
 
-func (o *oidcExchanger) verifyIDToken(ctx context.Context, raw, issuer string) (*oidcIDClaims, error) {
-	set, err := o.jwks.Get(ctx)
+func (o *oidcExchanger) verifyIDToken(ctx context.Context, jwks *jwksCache, raw, issuer string) (*oidcIDClaims, error) {
+	set, err := jwks.Get(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: jwks: %w", ErrIdentityVerification, err)
 	}
 
-	payload, err := verifyJWS(raw, set)
+	payload, err := verifyJWSWithAlgs(raw, set, oidcAllowedAlgs...)
 	if err != nil && errors.Is(err, errKeyNotFound) {
-		o.jwks.Invalidate()
-		set2, fErr := o.jwks.Get(ctx)
+		// A signing key we don't know about may indicate a rotation;
+		// invalidate the cache and retry once with fresh keys.
+		jwks.Invalidate()
+		set2, fErr := jwks.Get(ctx)
 		if fErr != nil {
 			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
 		}
-		payload, err = verifyJWS(raw, set2)
+		payload, err = verifyJWSWithAlgs(raw, set2, oidcAllowedAlgs...)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)

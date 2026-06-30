@@ -777,8 +777,11 @@ func Load() *Config {
 		AppleKeyID:             envStr("GATEWAY_OAUTH_APPLE_KEY_ID", ""),
 		ApplePrivateKey:        envStr("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", ""),
 
-		OIDCEnabled:      envBool("GATEWAY_OAUTH_OIDC_ENABLED", false),
-		OIDCProviderKey:  envStr("GATEWAY_OAUTH_OIDC_PROVIDER_KEY", ""),
+		OIDCEnabled: envBool("GATEWAY_OAUTH_OIDC_ENABLED", false),
+		// Normalize the provider key at the source so it matches the
+		// lowercased/trimmed provider name the service uses for registry
+		// lookups (see internal/service/auth_login.go).
+		OIDCProviderKey:  strings.ToLower(strings.TrimSpace(envStr("GATEWAY_OAUTH_OIDC_PROVIDER_KEY", ""))),
 		OIDCIssuer:       envStr("GATEWAY_OAUTH_OIDC_ISSUER", ""),
 		OIDCDiscoveryURL: envStr("GATEWAY_OAUTH_OIDC_DISCOVERY_URL", ""),
 		OIDCClientID:     envStr("GATEWAY_OAUTH_OIDC_CLIENT_ID", ""),

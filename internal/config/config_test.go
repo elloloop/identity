@@ -237,6 +237,23 @@ func TestLoad_GenericOIDC_Overrides(t *testing.T) {
 	}
 }
 
+func TestLoad_GenericOIDC_NormalizesProviderKey(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_OAUTH_OIDC_ENABLED", "true")
+	t.Setenv("GATEWAY_OAUTH_OIDC_PROVIDER_KEY", "  Okta  ")
+	t.Setenv("GATEWAY_OAUTH_OIDC_ISSUER", "https://acme.okta.com")
+	t.Setenv("GATEWAY_OAUTH_OIDC_CLIENT_ID", "okta-client")
+	t.Setenv("GATEWAY_OAUTH_OIDC_CLIENT_SECRET", "okta-secret")
+
+	cfg := Load()
+	if cfg.OIDCProviderKey != "okta" {
+		t.Errorf("provider key = %q, want normalized %q", cfg.OIDCProviderKey, "okta")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("normalized config should validate: %v", err)
+	}
+}
+
 func TestValidate_GenericOIDC_Invariants(t *testing.T) {
 	base := func() *Config {
 		return &Config{

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"strings"
+
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
@@ -60,8 +62,13 @@ func buildOAuthRegistry(cfg *config.Config, logger *zap.Logger) *oauth.Registry 
 	// under its configured key. cfg.Validate() guarantees the key and
 	// credentials are present and the key does not shadow a built-in provider.
 	if cfg.OIDCEnabled {
-		r.Register(cfg.OIDCProviderKey, oauth.NewOIDC(oauth.GenericOIDCConfig{
-			ProviderKey:  cfg.OIDCProviderKey,
+		// Register under the same lowercased/trimmed key the service uses
+		// for lookups, so a config like PROVIDER_KEY="Okta" (or with stray
+		// whitespace) still resolves at login. Robust even when a Config is
+		// constructed directly rather than via config.Load.
+		oidcKey := strings.ToLower(strings.TrimSpace(cfg.OIDCProviderKey))
+		r.Register(oidcKey, oauth.NewOIDC(oauth.GenericOIDCConfig{
+			ProviderKey:  oidcKey,
 			IssuerURL:    cfg.OIDCIssuer,
 			DiscoveryURL: cfg.OIDCDiscoveryURL,
 			ClientID:     cfg.OIDCClientID,

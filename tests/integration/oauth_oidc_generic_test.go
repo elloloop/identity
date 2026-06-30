@@ -4,15 +4,23 @@ package integration
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/oauth"
 )
 
@@ -283,5 +291,196 @@ func TestGenericOIDC_UnverifiedEmailRejected(t *testing.T) {
 	}
 	if n := h.CountUsersByEmail(t, "oidc.carol@corp.example"); n != 0 {
 		t.Fatalf("unverified login provisioned %d users, want 0", n)
+	}
+}
+
+// oidcECKey is a P-256 key + JWKS used to sign ES256 id_tokens.
+type oidcECKey struct {
+	priv    *ecdsa.PrivateKey
+	kid     string
+	jwksRaw []byte
+}
+
+func oidcNewECKey(t *testing.T, kid string) *oidcECKey {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa generate: %v", err)
+	}
+	pub, err := jwk.FromRaw(priv.Public())
+	if err != nil {
+		t.Fatalf("jwk from raw: %v", err)
+	}
+	_ = pub.Set(jwk.KeyIDKey, kid)
+	_ = pub.Set(jwk.AlgorithmKey, jwa.ES256)
+	set := jwk.NewSet()
+	if err := set.AddKey(pub); err != nil {
+		t.Fatalf("add key: %v", err)
+	}
+	raw, err := json.Marshal(set)
+	if err != nil {
+		t.Fatalf("marshal jwks: %v", err)
+	}
+	return &oidcECKey{priv: priv, kid: kid, jwksRaw: raw}
+}
+
+func (k *oidcECKey) signIDToken(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	tok := jwt.New()
+	for kk, vv := range claims {
+		switch kk {
+		case "iss":
+			_ = tok.Set(jwt.IssuerKey, vv)
+		case "sub":
+			_ = tok.Set(jwt.SubjectKey, vv)
+		case "aud":
+			_ = tok.Set(jwt.AudienceKey, vv)
+		case "exp":
+			_ = tok.Set(jwt.ExpirationKey, vv)
+		case "iat":
+			_ = tok.Set(jwt.IssuedAtKey, vv)
+		default:
+			_ = tok.Set(kk, vv)
+		}
+	}
+	signKey, err := jwk.FromRaw(k.priv)
+	if err != nil {
+		t.Fatalf("priv jwk: %v", err)
+	}
+	_ = signKey.Set(jwk.KeyIDKey, k.kid)
+	_ = signKey.Set(jwk.AlgorithmKey, jwa.ES256)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, signKey))
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	return string(signed)
+}
+
+// TestGenericOIDC_ES256_EndToEnd drives the full login path with an
+// ES256-signed id_token, proving the provider verifies elliptic-curve
+// signatures, not only RSA.
+func TestGenericOIDC_ES256_EndToEnd(t *testing.T) {
+	t.Parallel()
+
+	key := oidcNewECKey(t, "oidc-ec-kid")
+	now := time.Now()
+	fp := oidcNewFakeIDP(t, "", key.jwksRaw, nil)
+	fp.idToken = key.signIDToken(t, map[string]any{
+		"iss":            fp.srv.URL,
+		"sub":            "oidc-ec-sub",
+		"aud":            oidcGenericClientID,
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "oidc.ec@corp.example",
+		"email_verified": true,
+		"name":           "OIDC EC",
+	})
+
+	h := StartServer(t, WithOAuthRegistry(oidcGenericRegistry(fp)))
+
+	resp, err := oidcGenericBeginAndLogin(t, h, "https://app.example.com/oauth/callback")
+	if err != nil {
+		t.Fatalf("OAuthLogin: %v", err)
+	}
+	if got := resp.Msg.GetUser().GetEmail(); got != "oidc.ec@corp.example" {
+		t.Fatalf("user email = %q, want oidc.ec@corp.example", got)
+	}
+}
+
+// TestGenericOIDC_KeyNormalized_EndToEnd proves the blocker fix through the
+// real config→registry→service path: a mixed-case/whitespace provider key
+// in config registers under the normalized key, so a login naming the
+// normalized provider resolves (rather than "unknown oauth provider").
+func TestGenericOIDC_KeyNormalized_EndToEnd(t *testing.T) {
+	t.Parallel()
+
+	key := msNewTestKey(t, "oidc-kid-norm")
+	now := time.Now()
+	fp := oidcNewFakeIDP(t, "", key.jwksRaw, nil)
+	fp.idToken = key.signIDToken(t, map[string]any{
+		"iss":            fp.srv.URL,
+		"sub":            "oidc-sub-norm",
+		"aud":            oidcGenericClientID,
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "oidc.norm@corp.example",
+		"email_verified": true,
+	})
+
+	// No WithOAuthRegistry: the harness builds the registry from config via
+	// buildOAuthRegistry, exercising the normalization at the registration
+	// site. The provider key is supplied with mixed case + surrounding space.
+	h := StartServer(t, WithConfig(func(cfg *config.Config) {
+		cfg.OIDCEnabled = true
+		cfg.OIDCProviderKey = "  Okta  "
+		cfg.OIDCIssuer = fp.srv.URL
+		cfg.OIDCClientID = oidcGenericClientID
+		cfg.OIDCClientSecret = oidcGenericClientSecret
+	}))
+
+	// Log in naming the normalized provider key.
+	begin, err := h.Client.BeginOAuthLogin(context.Background(), connect.NewRequest(&identitypb.BeginOAuthLoginRequest{
+		Provider:    "okta",
+		RedirectUri: "https://app.example.com/oauth/callback",
+	}))
+	if err != nil {
+		t.Fatalf("BeginOAuthLogin(okta): %v", err)
+	}
+	resp, err := h.Client.OAuthLogin(context.Background(), connect.NewRequest(&identitypb.OAuthLoginRequest{
+		Code:        "oidc-auth-code",
+		Provider:    "okta",
+		RedirectUri: "https://app.example.com/oauth/callback",
+		State:       begin.Msg.State,
+		StateToken:  begin.Msg.StateToken,
+	}))
+	if err != nil {
+		t.Fatalf("OAuthLogin(okta): %v", err)
+	}
+	if got := resp.Msg.GetUser().GetEmail(); got != "oidc.norm@corp.example" {
+		t.Fatalf("user email = %q, want oidc.norm@corp.example", got)
+	}
+}
+
+// TestGenericOIDC_Concurrent_EndToEnd hammers BeginOAuthLogin from many
+// goroutines against one shared exchanger (the production registry path),
+// so `go test -race` covers the lazy discovery/JWKS resolution under load.
+func TestGenericOIDC_Concurrent_EndToEnd(t *testing.T) {
+	t.Parallel()
+
+	key := msNewTestKey(t, "oidc-kid-conc")
+	now := time.Now()
+	fp := oidcNewFakeIDP(t, "", key.jwksRaw, nil)
+	fp.idToken = key.signIDToken(t, map[string]any{
+		"iss":            fp.srv.URL,
+		"sub":            "oidc-sub-conc",
+		"aud":            oidcGenericClientID,
+		"iat":            now.Unix(),
+		"exp":            now.Add(5 * time.Minute).Unix(),
+		"email":          "oidc.conc@corp.example",
+		"email_verified": true,
+	})
+
+	h := StartServer(t, WithOAuthRegistry(oidcGenericRegistry(fp)))
+
+	const goroutines = 16
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := h.Client.BeginOAuthLogin(context.Background(), connect.NewRequest(&identitypb.BeginOAuthLoginRequest{
+				Provider:    oidcGenericProviderKey,
+				RedirectUri: "https://app.example.com/oauth/callback",
+			}))
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent BeginOAuthLogin: %v", err)
+		}
 	}
 }

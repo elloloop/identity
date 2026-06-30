@@ -2,11 +2,21 @@ package oauth
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
 func oidcDiscoveryHandler(fp *fakeProvider) http.HandlerFunc {
@@ -262,5 +272,208 @@ func TestGenericOIDC_ProviderKeyDefaultsToOIDC(t *testing.T) {
 	}
 	if id.Provider != "oidc" {
 		t.Errorf("default provider key = %q, want oidc", id.Provider)
+	}
+}
+
+// ecTestKey is a P-256 key plus its matching JWK Set, used to sign
+// ES256 id_tokens and serve an EC JWKS.
+type ecTestKey struct {
+	priv    *ecdsa.PrivateKey
+	kid     string
+	jwksRaw []byte
+}
+
+func newECTestKey(t *testing.T, kid string) *ecTestKey {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa generate: %v", err)
+	}
+	pub, err := jwk.FromRaw(priv.Public())
+	if err != nil {
+		t.Fatalf("jwk from raw: %v", err)
+	}
+	_ = pub.Set(jwk.KeyIDKey, kid)
+	_ = pub.Set(jwk.AlgorithmKey, jwa.ES256)
+	set := jwk.NewSet()
+	if err := set.AddKey(pub); err != nil {
+		t.Fatalf("add key: %v", err)
+	}
+	raw, err := json.Marshal(set)
+	if err != nil {
+		t.Fatalf("marshal jwks: %v", err)
+	}
+	return &ecTestKey{priv: priv, kid: kid, jwksRaw: raw}
+}
+
+func (k *ecTestKey) signIDToken(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	tok := jwt.New()
+	for kk, vv := range claims {
+		switch kk {
+		case "iss":
+			_ = tok.Set(jwt.IssuerKey, vv)
+		case "sub":
+			_ = tok.Set(jwt.SubjectKey, vv)
+		case "aud":
+			_ = tok.Set(jwt.AudienceKey, vv)
+		case "exp":
+			_ = tok.Set(jwt.ExpirationKey, vv)
+		case "iat":
+			_ = tok.Set(jwt.IssuedAtKey, vv)
+		default:
+			_ = tok.Set(kk, vv)
+		}
+	}
+	signKey, err := jwk.FromRaw(k.priv)
+	if err != nil {
+		t.Fatalf("priv jwk: %v", err)
+	}
+	_ = signKey.Set(jwk.KeyIDKey, k.kid)
+	_ = signKey.Set(jwk.AlgorithmKey, jwa.ES256)
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, signKey))
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	return string(signed)
+}
+
+// TestGenericOIDC_Exchange_ES256 proves the provider accepts an
+// ES256-signed id_token (not only RS256), exercising the broadened
+// asymmetric-algorithm allow-list.
+func TestGenericOIDC_Exchange_ES256(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	fp := newFakeProvider(t)
+	key := newECTestKey(t, "oidc-ec-kid")
+	fp.mux.HandleFunc("/.well-known/openid-configuration", oidcDiscoveryHandler(fp))
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.jwksRaw)
+	idToken := key.signIDToken(t, map[string]any{
+		"iss": fp.srv.URL, "sub": "ec-sub", "aud": "client-1",
+		"email": "ec@corp.com", "email_verified": true, "name": "EC User",
+		"exp": now.Add(time.Hour), "iat": now,
+	})
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+
+	ex := NewOIDC(genericOIDCConfig(fp, now))
+	id, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"})
+	if err != nil {
+		t.Fatalf("ES256 exchange: %v", err)
+	}
+	if id.Email != "ec@corp.com" || id.ProviderUserID != "ec-sub" || !id.EmailVerified {
+		t.Errorf("got %+v", id)
+	}
+}
+
+// TestGenericOIDC_Exchange_Concurrent runs many Exchange calls against a
+// single shared exchanger so `go test -race` covers the lazy
+// discovery/JWKS initialization for data races.
+func TestGenericOIDC_Exchange_Concurrent(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	fp, key := newGenericOIDCProvider(t)
+	idToken := key.signIDToken(t, map[string]any{
+		"iss": fp.srv.URL, "sub": "s", "aud": "client-1",
+		"email": "e@corp.com", "email_verified": true,
+		"exp": now.Add(time.Hour), "iat": now,
+	})
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+
+	ex := NewOIDC(genericOIDCConfig(fp, now))
+	const goroutines = 24
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent exchange: %v", err)
+		}
+	}
+}
+
+// TestGenericOIDC_DiscoveryCached asserts the discovery document is
+// fetched once and reused across AuthorizationURL + repeated Exchange
+// calls (within the cache TTL).
+func TestGenericOIDC_DiscoveryCached(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	fp := newFakeProvider(t)
+	key := newTestKey(t, "oidc-kid")
+	var discoveryCalls atomic.Int32
+	disco := oidcDiscoveryHandler(fp)
+	fp.mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		discoveryCalls.Add(1)
+		disco(w, r)
+	})
+	fp.mux.HandleFunc("/authorize", func(http.ResponseWriter, *http.Request) {})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+	idToken := key.signIDToken(t, map[string]any{
+		"iss": fp.srv.URL, "sub": "s", "aud": "client-1",
+		"email": "e@corp.com", "email_verified": true,
+		"exp": now.Add(time.Hour), "iat": now,
+	})
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
+
+	ex := NewOIDC(genericOIDCConfig(fp, now))
+	if _, err := ex.(Authorizer).AuthorizationURL(context.Background(), "https://app/cb", "state", "challenge"); err != nil {
+		t.Fatalf("auth url: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"}); err != nil {
+			t.Fatalf("exchange %d: %v", i, err)
+		}
+	}
+	if n := discoveryCalls.Load(); n != 1 {
+		t.Errorf("discovery fetched %d times, want 1 (cached)", n)
+	}
+}
+
+// TestGenericOIDC_Exchange_UserinfoSubMismatch enforces OIDC Core 5.3.2:
+// a userinfo response whose sub differs from the id_token sub is rejected.
+func TestGenericOIDC_Exchange_UserinfoSubMismatch(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	fp, key := newGenericOIDCProvider(t)
+	idToken := key.signIDToken(t, map[string]any{
+		"iss": fp.srv.URL, "sub": "real-sub", "aud": "client-1",
+		"exp": now.Add(time.Hour), "iat": now,
+	})
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken, "access_token": "at"})
+	verified := true
+	fp.mux.HandleFunc("/userinfo", jsonHandler(oidcUserInfo{
+		Sub: "other-sub", Email: "e@corp.com", EmailVerified: &verified,
+	}))
+
+	ex := NewOIDC(genericOIDCConfig(fp, now))
+	if _, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"}); !errors.Is(err, ErrIdentityVerification) {
+		t.Fatalf("want ErrIdentityVerification, got %v", err)
+	}
+}
+
+// TestGenericOIDC_DiscoveryIssuerMismatch enforces OIDC Discovery 4.3:
+// a discovery document whose issuer differs from the configured issuer is
+// rejected before any token exchange.
+func TestGenericOIDC_DiscoveryIssuerMismatch(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	fp := newFakeProvider(t)
+	key := newTestKey(t, "oidc-kid")
+	fp.mux.HandleFunc("/.well-known/openid-configuration", jsonHandler(map[string]any{
+		"issuer":                 "https://impostor.example",
+		"authorization_endpoint": fp.URL("/authorize"),
+		"token_endpoint":         fp.URL("/token"),
+		"jwks_uri":               fp.URL("/jwks"),
+		"userinfo_endpoint":      fp.URL("/userinfo"),
+	}))
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": "x"})
+
+	ex := NewOIDC(genericOIDCConfig(fp, now))
+	if _, err := ex.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"}); !errors.Is(err, ErrCodeExchangeFailed) {
+		t.Fatalf("want ErrCodeExchangeFailed, got %v", err)
 	}
 }
