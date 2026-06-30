@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/passwords"
 )
 
 const policyAdminSecret = "policy-operator-secret"
@@ -101,6 +102,51 @@ func TestUpsertLoginPolicy_RejectsNegativeGovernance(t *testing.T) {
 		ProjectID: "p", TenantID: "t", PasswordMinLength: -1,
 	}); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+// A password_min_length above bcrypt's max byte length would make every
+// password simultaneously too short and too long, locking the tenant out of
+// all password signups/resets; the upsert must reject it.
+func TestUpsertLoginPolicy_RejectsPasswordMinLengthAboveBcryptMax(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(policyAdminSecret)
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t", PasswordMinLength: passwords.MaxPasswordLength + 1,
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("err = %v, want ErrInvalidArgument", err)
+	}
+	// The bcrypt max itself stays valid (boundary check).
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t", PasswordMinLength: passwords.MaxPasswordLength,
+	}); err != nil {
+		t.Fatalf("MaxPasswordLength must be accepted: %v", err)
+	}
+}
+
+// An absurd session timeout would overflow the seconds→ms (*1000) conversion
+// in the enforcement path and wrap negative, silently disabling the timeout;
+// the upsert must reject values above maxSessionTimeoutSeconds.
+func TestUpsertLoginPolicy_RejectsOverlargeSessionTimeout(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(policyAdminSecret)
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t", SessionIdleTimeoutSeconds: maxSessionTimeoutSeconds + 1,
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("idle timeout: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t", SessionAbsoluteTimeoutSeconds: maxSessionTimeoutSeconds + 1,
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("absolute timeout: err = %v, want ErrInvalidArgument", err)
+	}
+	// The bound itself stays valid (boundary check).
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t",
+		SessionIdleTimeoutSeconds:     maxSessionTimeoutSeconds,
+		SessionAbsoluteTimeoutSeconds: maxSessionTimeoutSeconds,
+	}); err != nil {
+		t.Fatalf("maxSessionTimeoutSeconds must be accepted: %v", err)
 	}
 }
 

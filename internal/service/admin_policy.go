@@ -6,7 +6,17 @@ import (
 	"strings"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/passwords"
 )
+
+// maxSessionTimeoutSeconds bounds the idle/absolute session timeouts an
+// operator may author. The enforcement path converts these to epoch-ms by
+// multiplying by msPerSecond (1000); a value near math.MaxInt64 would overflow
+// int64 on that multiply and wrap negative, silently disabling the timeout.
+// 100 years is far longer than any real session lifetime yet comfortably below
+// math.MaxInt64/1000 (~2.9e8 years), so the *1000 conversion can never
+// overflow.
+const maxSessionTimeoutSeconds = 100 * 365 * 24 * 60 * 60
 
 // This file adds the operator-authored write/read surface for the two pieces
 // of governance state the login path already ENFORCES but nothing could
@@ -82,6 +92,18 @@ func (s *ControlPlaneAdminService) UpsertLoginPolicy(ctx context.Context, secret
 	}
 	if p.PasswordMinLength < 0 || p.SessionIdleTimeoutSeconds < 0 || p.SessionAbsoluteTimeoutSeconds < 0 {
 		return nil, fmt.Errorf("%w: password/session governance values must be non-negative", ErrInvalidArgument)
+	}
+	// A minimum above bcrypt's max byte length would make every password both
+	// too short (vs the floor) and too long (vs the bcrypt cap) at once,
+	// locking the tenant out of all password signups/resets. Reject it so the
+	// operator learns immediately rather than silently breaking the tenant.
+	if p.PasswordMinLength > passwords.MaxPasswordLength {
+		return nil, fmt.Errorf("%w: password_min_length must not exceed %d (bcrypt's maximum)", ErrInvalidArgument, passwords.MaxPasswordLength)
+	}
+	// Bound the timeouts so the seconds→ms (*1000) conversion in the
+	// enforcement path can never overflow int64 and wrap negative.
+	if p.SessionIdleTimeoutSeconds > maxSessionTimeoutSeconds || p.SessionAbsoluteTimeoutSeconds > maxSessionTimeoutSeconds {
+		return nil, fmt.Errorf("%w: session timeout seconds must not exceed %d", ErrInvalidArgument, maxSessionTimeoutSeconds)
 	}
 	policy := &LoginPolicy{
 		ProjectID:                     projectID,
