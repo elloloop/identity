@@ -35,13 +35,21 @@ func (s *AuthService) newPasskeySignupUserID() string {
 // ── BeginPasskeySignup ─────────────────────────────────────────────────
 
 // BeginPasskeySignup generates WebAuthn registration options for creating a
-// NEW account from a passkey. It mints the new user id now and binds it both as
-// the WebAuthn user handle (so the credential can log in later) and to the
-// email on the stored challenge. Returns (optionsJSON, challengeID, error).
+// NEW account from a passkey AND emails a 6-digit OTP to the address. It mints
+// the new user id now and binds it both as the WebAuthn user handle (so the
+// credential can log in later) and to the email on the stored challenge.
+// Returns (optionsJSON, challengeID, error).
 //
-// Enumeration-safe: options are produced and returned regardless of whether the
-// email already has an account; the duplicate decision is deferred to
-// CompletePasskeySignup, where it is handled without disclosing existence.
+// The OTP is the in-flow proof of email control: CompletePasskeySignup will not
+// create the account until it is presented, so the account is created already
+// verified and an attacker can never leave a planted passkey on an unverified
+// address (account pre-hijacking). The OTP reuses the passwordless email-code
+// infra (same mint/store/TTL/attempt-limit/send path) via sendEmailLoginCode.
+//
+// Enumeration-safe: options are returned and an OTP is sent regardless of
+// whether the email already has an account (the existence check is deferred to
+// CompletePasskeySignup, after the OTP is verified, and never disclosed). The
+// per-email send cooldown is honoured exactly as RequestEmailLoginCode does.
 func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName string) (string, string, error) {
 	if s.cfg != nil && !s.cfg.PasskeySignupEnabled {
 		return "", "", ErrPasskeySignupDisabled
@@ -76,6 +84,12 @@ func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName 
 		return "", "", fmt.Errorf("storing challenge: %w", err)
 	}
 
+	// Email the in-flow proof-of-control OTP. Enumeration-safe and silent
+	// (throttle/send failures are logged, never surfaced), exactly like
+	// RequestEmailLoginCode — keyed by the same canonical email the challenge
+	// is bound to, so CompletePasskeySignup verifies against the matching code.
+	s.sendEmailLoginCode(ctx, email)
+
 	s.logger.Info(
 		"passkey_signup_begin",
 		zap.String("email", redactEmail(email)),
@@ -87,21 +101,32 @@ func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName 
 // ── CompletePasskeySignup ──────────────────────────────────────────────
 
 // CompletePasskeySignup verifies the attestation produced for a
-// BeginPasskeySignup challenge and finalizes account creation.
+// BeginPasskeySignup challenge, verifies the emailed OTP, and finalizes account
+// creation.
 //
-//   - New email: creates the User under the id bound as the WebAuthn handle
-//     (email unverified, role member, status active), stores the passkey
-//     credential, sends the verification email, and issues a session (subject
-//     to the email-verification gate, mirroring PasswordSignup).
-//   - Existing email: does NOT attach the passkey (anti-takeover) and does NOT
-//     reveal that the address exists (enumeration-safe) — it returns the same
-//     success-shaped decoy as a duplicate PasswordSignup and sends the
-//     existing-account notice.
+// Checks run in a fixed, enumeration-safe order — none of them look up the
+// account, so neither a passkey nor an OTP failure can be turned into an
+// existence oracle:
+//
+//  1. Verify the WebAuthn attestation against the challenge.
+//  2. Verify+consume the OTP against the bound email. Any failure
+//     (wrong/expired/exhausted) returns one generic error, identical for new
+//     and existing addresses.
+//  3. Only after a VALID OTP, resolve the email:
+//     - New email: creates the User under the id bound as the WebAuthn handle,
+//     already EmailVerified (the OTP proved control — there is no unverified-
+//     passkey state, so the pre-hijacking scenario cannot arise), stores the
+//     passkey credential, and issues a session.
+//     - Existing email: does NOT attach the passkey (anti-takeover) and does
+//     NOT reveal that the address exists — it returns the same success-shaped,
+//     session-less decoy as a duplicate PasswordSignup and sends the
+//     existing-account notice. (Only an inbox-controller has a valid OTP, so
+//     this discloses nothing they don't already know.)
 //
 // It is unauthenticated: no session is required to call it.
 func (s *AuthService) CompletePasskeySignup(
 	ctx context.Context,
-	challengeID, credentialJSON, email, deviceName, ipAddr, userAgent string,
+	challengeID, credentialJSON, email, otpCode, deviceName, ipAddr, userAgent string,
 ) (*LoginResult, error) {
 	if s.cfg != nil && !s.cfg.PasskeySignupEnabled {
 		return nil, ErrPasskeySignupDisabled
@@ -152,6 +177,17 @@ func (s *AuthService) CompletePasskeySignup(
 	// Single-use challenge — consume it now that the attestation is proven.
 	_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
 
+	// Prove control of the email IN-FLOW before any account decision. This runs
+	// before the existence lookup, so a wrong/expired OTP returns one generic
+	// error identical for new and existing addresses (no existence oracle), and
+	// — crucially — no account is ever created without proven inbox control, so
+	// there is no unverified-passkey state to pre-hijack. Reuses the passwordless
+	// email-code verify+consume path against the bound (canonical) email.
+	if err := s.verifyAndConsumeEmailLoginCode(ctx, boundEmail, otpCode, "passkey_signup", ipAddr, userAgent); err != nil {
+		s.logger.Warn("passkey_signup_otp_failed", zap.String("email", redactEmail(boundEmail)))
+		return nil, err
+	}
+
 	// Anti-takeover + enumeration-safety: an existing account is never given a
 	// new passkey by an unauthenticated caller, and its existence is never
 	// disclosed. Mirror the duplicate-PasswordSignup decoy exactly.
@@ -166,13 +202,18 @@ func (s *AuthService) CompletePasskeySignup(
 
 	now := s.nowMs()
 	user := &User{
-		ID:        challenge.UserID, // == WebAuthn handle minted at Begin
-		Email:     boundEmail,
-		Name:      fallbackDisplayName(boundEmail, ""),
-		Role:      "member",
-		Status:    "active",
-		CreatedAt: msToTime(now),
-		UpdatedAt: msToTime(now),
+		ID:     challenge.UserID, // == WebAuthn handle minted at Begin
+		Email:  boundEmail,
+		Name:   fallbackDisplayName(boundEmail, ""),
+		Role:   "member",
+		Status: "active",
+		// The consumed OTP proved control of this inbox, so the account is
+		// created already verified — there is never an unverified account
+		// carrying a passkey, which is what closes the pre-hijacking surface.
+		EmailVerified:   true,
+		EmailVerifiedAt: now,
+		CreatedAt:       msToTime(now),
+		UpdatedAt:       msToTime(now),
 	}
 	userID, err := s.repo(ctx).CreateUser(ctx, user)
 	if err != nil {
@@ -224,11 +265,8 @@ func (s *AuthService) CompletePasskeySignup(
 	// Best-effort: auto-form a company tenant from the email domain.
 	s.maybeAutoFormTenant(ctx, user)
 
-	// Best-effort: fire a verification email. Failures are logged, never fatal.
-	if err := s.SendEmailVerification(ctx, userID); err != nil {
-		s.logger.Warn("passkey_signup_verification_email_failed",
-			zap.String("user_id", userID), zap.Error(err))
-	}
+	// No verification email is sent: the consumed OTP already proved control of
+	// the address, so the account is created verified.
 
 	s.audit.Log(
 		ctx, audit.EventLoginSuccess,
@@ -237,15 +275,12 @@ func (s *AuthService) CompletePasskeySignup(
 		audit.WithDetails(map[string]any{"method": "passkey_signup"}),
 	)
 
-	// Email-verification gate (mirrors PasswordSignup): when verified email is
-	// required, a freshly-created unverified account receives NO live session.
-	// The duplicate-email decoy above is also session-less under this same
-	// condition, so empty-vs-non-empty tokens never disclose whether the
-	// address already existed.
-	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && !user.EmailVerified {
-		return &LoginResult{User: user}, nil
-	}
-
+	// No email-verification gate applies here: the OTP proved control of the
+	// inbox, so the account is created verified and a live session always
+	// issues. (PasswordSignup gates because it creates an UNVERIFIED account;
+	// this flow has no such state.) A non-inbox-controller can never reach this
+	// point — an invalid OTP fails above with a generic error — so issuing a
+	// session reveals nothing to an attacker who lacks the emailed code.
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
 	if err != nil {
 		return nil, err

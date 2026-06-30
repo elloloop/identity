@@ -4063,6 +4063,13 @@ components:
         deviceName:
           type: string
           title: device_name
+        otpCode:
+          type: string
+          title: otp_code
+          description: |-
+            6-digit OTP emailed by BeginPasskeySignup. Proves control of the email
+             in-flow, so the account is created already-verified and an attacker cannot
+             plant a passkey on an unverified address (account pre-hijacking).
       title: CompletePasskeySignupRequest
       additionalProperties: false
     identity.v1.CompletePasskeySignupResponse:

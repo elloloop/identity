@@ -88,10 +88,14 @@ await fetch("/identity.v1.IdentityService/CompletePasskeyRegistration", {
   <h2>Passkey-first signup (unauthenticated)</h2>
   <p>
     Creates a new account directly from a passkey — no password is ever set.
-    The flow mirrors registration but is unauthenticated and takes the email
-    the account will be created under.
+    Control of the email is proven <em>in the same flow</em> with a 6-digit
+    one-time code: <code>BeginPasskeySignup</code> emails the code, and
+    <code>CompletePasskeySignup</code> requires it alongside the attestation.
+    Because the code proves inbox control before anything is created, the
+    account is created <strong>already verified</strong> — there is never an
+    unverified account carrying a passkey for an attacker to hijack.
   </p>
-  <Code code={`// 1. Begin — no Authorization header
+  <Code code={`// 1. Begin — no Authorization header. This ALSO emails a 6-digit OTP.
 const begin = await fetch("/identity.v1.IdentityService/BeginPasskeySignup", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -101,7 +105,11 @@ const begin = await fetch("/identity.v1.IdentityService/BeginPasskeySignup", {
 // 2. Browser creates the credential
 const credential = await navigator.credentials.create(JSON.parse(begin.options_json));
 
-// 3. Complete — creates the account and returns a session
+// 3. Prompt the user for the 6-digit code from their inbox.
+const otpCode = await promptUserForEmailedCode();
+
+// 4. Complete — verifies the attestation AND the OTP, then creates the
+//    (already-verified) account and returns a session.
 const done = await fetch("/identity.v1.IdentityService/CompletePasskeySignup", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -109,32 +117,39 @@ const done = await fetch("/identity.v1.IdentityService/CompletePasskeySignup", {
     challengeId: begin.challenge_id,
     credentialJson: JSON.stringify(credential),
     email: "alice@example.com",
+    otpCode,
     deviceName: "Alice's MacBook",
   }),
 }).then(r => r.json());  // { user, access_token, refresh_token, expires_in }`} lang="javascript" />
   <p>
     The server mints the new user id during <code>BeginPasskeySignup</code> and
     binds it as the WebAuthn user handle, so the credential created here can log
-    in afterwards. Security properties baked into the flow:
+    in afterwards. The OTP reuses the same email-code machinery as passwordless
+    login (TTL, attempt cap, and per-email send cooldown). Security properties
+    baked into the flow:
   </p>
   <ul>
+    <li>
+      <strong>Email verified in-flow.</strong> The emailed code must be returned
+      to <code>CompletePasskeySignup</code> before any account is created, so the
+      new account is verified from the moment it exists. There is no
+      unverified-account-with-a-passkey window — the account pre-hijacking
+      scenario cannot arise at the source.
+    </li>
     <li>
       <strong>Anti-takeover.</strong> If the email already has an account, the
       passkey is <em>not</em> attached to it — an unauthenticated caller can
       never bind a credential to someone else's account.
     </li>
     <li>
-      <strong>Enumeration-safe.</strong> An already-registered email returns the
-      same success-shaped response as a new one (and the owner gets a "someone
-      tried to sign up" notice), so the endpoint never reveals which addresses
-      exist.
-    </li>
-    <li>
-      <strong>Anti-pre-hijacking.</strong> The email is still unverified after
-      signup. If the real owner later proves control of the inbox via an
-      external method (OAuth, or an emailed OTP / magic link), any passkey
-      enrolled while the address was unverified is cleared — exactly like a
-      planted password — and sessions are revoked.
+      <strong>Enumeration-safe.</strong> The OTP is sent (and the response
+      looks identical) whether or not the address already has an account. The
+      attestation and the OTP are checked before any account lookup, so an
+      invalid code returns a single generic error that is the same for new and
+      existing addresses — the endpoint never reveals which addresses exist. An
+      already-registered address resolves to the same success-shaped decoy (and
+      the owner gets a "someone tried to sign up" notice) with no passkey
+      attached.
     </li>
   </ul>
   <p>

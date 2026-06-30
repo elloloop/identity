@@ -5542,8 +5542,12 @@ type CompletePasskeySignupRequest struct {
 	CredentialJson string `protobuf:"bytes,2,opt,name=credential_json,json=credentialJson,proto3" json:"credential_json,omitempty"`
 	Email          string `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`
 	DeviceName     string `protobuf:"bytes,4,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// 6-digit OTP emailed by BeginPasskeySignup. Proves control of the email
+	// in-flow, so the account is created already-verified and an attacker cannot
+	// plant a passkey on an unverified address (account pre-hijacking).
+	OtpCode       string `protobuf:"bytes,5,opt,name=otp_code,json=otpCode,proto3" json:"otp_code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CompletePasskeySignupRequest) Reset() {
@@ -5600,6 +5604,13 @@ func (x *CompletePasskeySignupRequest) GetEmail() string {
 func (x *CompletePasskeySignupRequest) GetDeviceName() string {
 	if x != nil {
 		return x.DeviceName
+	}
+	return ""
+}
+
+func (x *CompletePasskeySignupRequest) GetOtpCode() string {
+	if x != nil {
+		return x.OtpCode
 	}
 	return ""
 }
@@ -11681,13 +11692,14 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"deviceName\"b\n" +
 	"\x1aBeginPasskeySignupResponse\x12!\n" +
 	"\foptions_json\x18\x01 \x01(\tR\voptionsJson\x12!\n" +
-	"\fchallenge_id\x18\x02 \x01(\tR\vchallengeId\"\xa1\x01\n" +
+	"\fchallenge_id\x18\x02 \x01(\tR\vchallengeId\"\xbc\x01\n" +
 	"\x1cCompletePasskeySignupRequest\x12!\n" +
 	"\fchallenge_id\x18\x01 \x01(\tR\vchallengeId\x12'\n" +
 	"\x0fcredential_json\x18\x02 \x01(\tR\x0ecredentialJson\x12\x14\n" +
 	"\x05email\x18\x03 \x01(\tR\x05email\x12\x1f\n" +
 	"\vdevice_name\x18\x04 \x01(\tR\n" +
-	"deviceName\"\xad\x01\n" +
+	"deviceName\x12\x19\n" +
+	"\botp_code\x18\x05 \x01(\tR\aotpCode\"\xad\x01\n" +
 	"\x1dCompletePasskeySignupResponse\x12%\n" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\x12!\n" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +

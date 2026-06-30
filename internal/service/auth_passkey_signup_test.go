@@ -126,10 +126,24 @@ func pkAssertionCredentialJSON(t *testing.T) string {
 	return string(b)
 }
 
+// passkeySignupOTP pulls the 6-digit OTP that BeginPasskeySignup emails (the
+// in-flow proof of email control) out of the recording transport.
+func passkeySignupOTP(t *testing.T, rec *recordingTransport, addr string) string {
+	t.Helper()
+	for _, msg := range rec.Sent() {
+		if msg.To == addr && msg.Subject == "Your login code" {
+			return extractCodeFromEmail(t, msg.Text)
+		}
+	}
+	t.Fatalf("no passkey-signup OTP email for %q", addr)
+	return ""
+}
+
 // TestPasskeySignup_NewEmail_BindsHandleAndLoginSucceeds is the core proof of
 // the #283-class binding: the created user's id equals the WebAuthn user handle
 // minted at Begin, and a subsequent CompletePasskeyLogin for that account
-// succeeds with the credential registered during signup.
+// succeeds with the credential registered during signup. It also proves the
+// in-flow OTP path: a valid OTP creates an already-verified account.
 func TestPasskeySignup_NewEmail_BindsHandleAndLoginSucceeds(t *testing.T) {
 	svc, repo, rec := newPasskeyVectorSvc(t)
 	ctx := context.Background()
@@ -138,11 +152,12 @@ func TestPasskeySignup_NewEmail_BindsHandleAndLoginSucceeds(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, challengeID)
 	handle := handleFromOptions(t, optionsJSON)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
 
 	// Drive the spec attestation against the minted challenge.
 	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
 
-	res, err := svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, "My Key", "1.2.3.4", "agent")
+	res, err := svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, otp, "My Key", "1.2.3.4", "agent")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	require.NotNil(t, res.User)
@@ -153,7 +168,12 @@ func TestPasskeySignup_NewEmail_BindsHandleAndLoginSucceeds(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, handle, got.ID)
-	assert.False(t, got.EmailVerified, "passkey-first signup leaves the email unverified")
+	// The consumed OTP proved inbox control, so the account is created VERIFIED.
+	// There is no unverified account carrying a passkey — the pre-hijacking
+	// surface is closed at the source.
+	assert.True(t, got.EmailVerified, "passkey-first signup with a valid OTP creates a verified account")
+	assert.NotZero(t, got.EmailVerifiedAt)
+	assert.True(t, res.User.EmailVerified)
 
 	// The credential is stored under that same id.
 	creds, err := repo.ListPasskeyCredentials(ctx, got.ID)
@@ -162,11 +182,9 @@ func TestPasskeySignup_NewEmail_BindsHandleAndLoginSucceeds(t *testing.T) {
 	assert.Equal(t, got.ID, creds[0].UserID)
 	assert.Equal(t, pkB64URL(t, pkCredentialIDHex), creds[0].CredentialID)
 
-	// A session was issued (verification gate off in testConfig).
+	// A session was issued (the account is verified).
 	assert.NotEmpty(t, res.AccessToken)
 	assert.NotEmpty(t, res.RefreshToken)
-	// A verification email was sent.
-	assert.NotEmpty(t, rec.Sent())
 
 	// PROOF: a subsequent passkey login for this account succeeds. This only
 	// works if the stored credential's user id matches the handle the
@@ -195,9 +213,12 @@ func TestPasskeySignup_ExistingEmail_Decoy(t *testing.T) {
 
 	_, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "Attacker Key")
 	require.NoError(t, err)
+	// An OTP is still emailed for an existing address (enumeration-safe). Only an
+	// inbox-controller has it; supplying a VALID one still yields the decoy.
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
 	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
 
-	res, err := svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, "Attacker Key", "9.9.9.9", "agent")
+	res, err := svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, otp, "Attacker Key", "9.9.9.9", "agent")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 
@@ -210,9 +231,8 @@ func TestPasskeySignup_ExistingEmail_Decoy(t *testing.T) {
 	assert.NotEqual(t, existing.ID, res.User.ID)
 	assert.True(t, strings.HasPrefix(res.User.ID, "signup-pending-"), "expected an enumeration-safe decoy id")
 
-	// The existing-account notice was sent.
+	// The existing-account notice was sent (after the OTP email).
 	require.NotEmpty(t, rec.Sent())
-	assert.Equal(t, pkVectorEmail, rec.Sent()[0].To)
 }
 
 // TestPasskeySignup_Disabled: both RPCs fail closed when the feature flag is off.
@@ -224,14 +244,79 @@ func TestPasskeySignup_Disabled(t *testing.T) {
 	_, _, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "Key")
 	require.ErrorIs(t, err, ErrPasskeySignupDisabled)
 
-	_, err = svc.CompletePasskeySignup(ctx, "cid", "{}", pkVectorEmail, "Key", "", "")
+	_, err = svc.CompletePasskeySignup(ctx, "cid", "{}", pkVectorEmail, "000000", "Key", "", "")
 	require.ErrorIs(t, err, ErrPasskeySignupDisabled)
 }
 
-// TestPasskeySignup_PreHijacking_ExternalProofClearsPasskeys: a passkey
-// enrolled on an unverified account is voided when an external proof (here an
-// emailed OTP — the same markEmailVerifiedViaExternalProof path OAuth uses)
-// proves the real owner controls the inbox.
+// TestPasskeySignup_WrongOTP_NoAccountCreated: a passkey whose attestation
+// verifies but whose OTP is wrong creates NO account and returns a generic
+// error — there is never a planted passkey on an unverified account.
+func TestPasskeySignup_WrongOTP_NoAccountCreated(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	// Confirm a real OTP was minted, then deliberately submit a different one.
+	real := passkeySignupOTP(t, rec, pkVectorEmail)
+	wrong := "000000"
+	if real == wrong {
+		wrong = "111111"
+	}
+	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
+
+	res, err := svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, wrong, "My Key", "1.2.3.4", "agent")
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrEmailLoginCodeInvalid)
+	assert.Nil(t, res)
+
+	// No account, no passkey: the wrong OTP left nothing behind.
+	got, err := repo.FindUserByEmail(ctx, pkVectorEmail)
+	require.NoError(t, err)
+	assert.Nil(t, got, "a wrong OTP must not create an account")
+}
+
+// TestPasskeySignup_ExpiredOTP_NoAccountCreated: an expired OTP behaves exactly
+// like a wrong one — generic error, no account.
+func TestPasskeySignup_ExpiredOTP_NoAccountCreated(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	ctx := context.Background()
+
+	_, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "My Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+
+	// Expire the minted OTP in place.
+	repo.mu.Lock()
+	for _, c := range repo.emailLoginCodes {
+		if c.Email == pkVectorEmail {
+			c.ExpiresAt = svc.nowMs() - 1
+		}
+	}
+	repo.mu.Unlock()
+
+	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
+
+	res, err := svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, otp, "My Key", "1.2.3.4", "agent")
+	require.ErrorIs(t, err, ErrEmailLoginCodeInvalid)
+	assert.Nil(t, res)
+
+	got, err := repo.FindUserByEmail(ctx, pkVectorEmail)
+	require.NoError(t, err)
+	assert.Nil(t, got, "an expired OTP must not create an account")
+}
+
+// TestPasskeySignup_PreHijacking_ExternalProofClearsPasskeys exercises the
+// DEFENSE-IN-DEPTH eviction: a passkey sitting on an unverified account is
+// voided when an external proof (here an emailed OTP — the same
+// markEmailVerifiedViaExternalProof path OAuth/passwordless use) proves the real
+// owner controls the inbox.
+//
+// The PRIMARY fix for the pre-hijacking blocker is upstream: passkey-first
+// signup now requires an in-flow OTP and creates the account already verified
+// (see TestPasskeySignup_NewEmail_BindsHandleAndLoginSucceeds), so this
+// unverified-account-with-a-passkey state can no longer arise via signup. This
+// test keeps the external-proof eviction honest as belt-and-suspenders.
 func TestPasskeySignup_PreHijacking_ExternalProofClearsPasskeys(t *testing.T) {
 	svc, repo, rec := passwordlessSvc(t)
 	ctx := context.Background()

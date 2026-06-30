@@ -644,6 +644,10 @@ message CompletePasskeySignupRequest {
   string credential_json = 2;
   string email = 3;
   string device_name = 4;
+  // 6-digit OTP emailed by BeginPasskeySignup. Proves control of the email
+  // in-flow, so the account is created already-verified and an attacker cannot
+  // plant a passkey on an unverified address (account pre-hijacking).
+  string otp_code = 5;
 }
 
 message CompletePasskeySignupResponse {

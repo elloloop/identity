@@ -329,6 +329,7 @@ func (h *IdentityHandler) CompletePasskeySignup(
 		req.Msg.ChallengeId,
 		req.Msg.CredentialJson,
 		req.Msg.Email,
+		req.Msg.OtpCode,
 		req.Msg.DeviceName,
 		ipAddr,
 		userAgent,
