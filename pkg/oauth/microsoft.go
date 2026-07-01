@@ -3,7 +3,6 @@ package oauth
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
@@ -226,22 +226,9 @@ func (m *microsoftExchanger) AuthorizationURL(_ context.Context, redirectURI, st
 }
 
 func (m *microsoftExchanger) verifyIDToken(ctx context.Context, raw string) (*microsoftIDClaims, error) {
-	set, err := m.jwks.Get(ctx)
+	payload, err := verifyJWSWithRotation(ctx, m.jwks, raw, jwa.RS256)
 	if err != nil {
-		return nil, fmt.Errorf("%w: jwks: %w", ErrIdentityVerification, err)
-	}
-
-	payload, err := verifyJWS(raw, set)
-	if err != nil && errors.Is(err, errKeyNotFound) {
-		m.jwks.Invalidate()
-		set2, fErr := m.jwks.Get(ctx)
-		if fErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-		}
-		payload, err = verifyJWS(raw, set2)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
+		return nil, err
 	}
 
 	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
@@ -264,12 +251,8 @@ func (m *microsoftExchanger) verifyIDToken(ctx context.Context, raw string) (*mi
 	if !containsString(auds, m.cfg.ClientID) {
 		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
 	}
-	now := m.cfg.Now()
-	if exp := tok.Expiration(); !exp.IsZero() && now.After(exp) {
-		return nil, fmt.Errorf("%w: token expired", ErrIdentityVerification)
-	}
-	if iat := tok.IssuedAt(); !iat.IsZero() && iat.After(now.Add(2*time.Minute)) {
-		return nil, fmt.Errorf("%w: iat in the future", ErrIdentityVerification)
+	if err := checkTokenTimes(tok, m.cfg.Now()); err != nil {
+		return nil, err
 	}
 	return &claims, nil
 }

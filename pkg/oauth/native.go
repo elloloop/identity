@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
@@ -25,7 +25,7 @@ const (
 	// min(exp, now+max).
 	maxNativeReplayTTL = time.Hour
 	// defaultNativeReplayTTL is the retention used when a token carries no
-	// `exp`. Defensive: checkTimes already tolerates a zero `exp`, so the
+	// `exp`. Defensive: checkTokenTimes already tolerates a zero `exp`, so the
 	// replay row still needs a bounded lifetime.
 	defaultNativeReplayTTL = 5 * time.Minute
 )
@@ -180,7 +180,7 @@ func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken, product stri
 	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: google native login not configured", ErrIdentityVerification)
 	}
-	payload, err := verifyJWSWithRotation(ctx, v.googleJWKS, idToken)
+	payload, err := verifyJWSWithRotation(ctx, v.googleJWKS, idToken, jwa.RS256)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken, product stri
 	if !audInSet(tok.Audience(), auds) {
 		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
 	}
-	if err := v.checkTimes(tok); err != nil {
+	if err := checkTokenTimes(tok, v.now()); err != nil {
 		return nil, err
 	}
 
@@ -234,7 +234,7 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, pro
 	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: apple native login not configured", ErrIdentityVerification)
 	}
-	payload, err := verifyJWSWithRotation(ctx, v.appleJWKS, idToken)
+	payload, err := verifyJWSWithRotation(ctx, v.appleJWKS, idToken, jwa.RS256)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +248,7 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, pro
 	if !audInSet(tok.Audience(), auds) {
 		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
 	}
-	if err := v.checkTimes(tok); err != nil {
+	if err := checkTokenTimes(tok, v.now()); err != nil {
 		return nil, err
 	}
 
@@ -338,56 +338,6 @@ func nativeReplayKey(tok jwt.Token, provider, nonce string) string {
 		nonce,
 	}, "\x00")))
 	return provider + "|d|" + hex.EncodeToString(sum[:])
-}
-
-// checkTimes enforces exp (not in the past) and iat (not in the future,
-// allowing the same 2-minute clock skew the hosted providers allow).
-func (v *NativeVerifier) checkTimes(tok jwt.Token) error {
-	now := v.now()
-	if exp := tok.Expiration(); !exp.IsZero() && now.After(exp) {
-		return fmt.Errorf("%w: token expired", ErrIdentityVerification)
-	}
-	if iat := tok.IssuedAt(); !iat.IsZero() && iat.After(now.Add(2*time.Minute)) {
-		return fmt.Errorf("%w: iat in the future", ErrIdentityVerification)
-	}
-	return nil
-}
-
-// verifyJWSWithRotation verifies a compact JWS against a JWKS cache, retrying
-// once after a cache invalidation if the signing key was not found (handles
-// provider key rotation). It mirrors the hosted exchangers' verifyIDToken
-// preamble.
-func verifyJWSWithRotation(ctx context.Context, cache *jwksCache, raw string) ([]byte, error) {
-	set, err := cache.Get(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("%w: jwks: %w", ErrIdentityVerification, err)
-	}
-	payload, err := verifyJWS(raw, set)
-	if err != nil && errors.Is(err, errKeyNotFound) {
-		cache.Invalidate()
-		set2, fErr := cache.Get(ctx)
-		if fErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-		}
-		payload, err = verifyJWS(raw, set2)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-	}
-	return payload, nil
-}
-
-// appleEmailVerified collapses Apple's polymorphic email_verified (bool or the
-// string "true") to a boolean, matching apple.go's handling.
-func appleEmailVerified(v interface{}) bool {
-	switch ev := v.(type) {
-	case bool:
-		return ev
-	case string:
-		return ev == "true"
-	default:
-		return false
-	}
 }
 
 // nonceMatches reports whether claim equals the hex or base64url (no padding)
