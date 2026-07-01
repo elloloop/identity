@@ -17,18 +17,14 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
-const (
-	// maxNativeReplayTTL bounds how long a redeemed native token's replay key
-	// is retained. Google ID tokens live ~1h; the replay cache never needs to
-	// remember a redeemed key past the token's own `exp`, and a mis-issued
-	// far-future `exp` must not pin a row indefinitely, so retention is
-	// min(exp, now+max).
-	maxNativeReplayTTL = time.Hour
-	// defaultNativeReplayTTL is the retention used when a token carries no
-	// `exp`. Defensive: checkTokenTimes already tolerates a zero `exp`, so the
-	// replay row still needs a bounded lifetime.
-	defaultNativeReplayTTL = 5 * time.Minute
-)
+// maxNativeReplayTTL bounds how long a redeemed native token's replay key is
+// retained. Google ID tokens live ~1h; the replay cache never needs to
+// remember a redeemed key past the token's own `exp`, and a mis-issued
+// far-future `exp` must not pin a row indefinitely, so retention is
+// min(exp, now+max). Every native token is guaranteed to carry an `exp`
+// (requireNativeExp rejects one that does not), so a zero `exp` never reaches
+// the replay-expiry computation.
+const maxNativeReplayTTL = time.Hour
 
 // NativeVerification is the result of verifying a native ID token: the
 // canonical Identity plus the material NativeOAuthLogin needs to enforce
@@ -197,6 +193,9 @@ func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken, product stri
 	if err := checkTokenTimes(tok, v.now()); err != nil {
 		return nil, err
 	}
+	if err := requireNativeExp(tok); err != nil {
+		return nil, err
+	}
 
 	var claims googleIDClaims
 	if err := json.Unmarshal(payload, &claims); err != nil {
@@ -251,6 +250,9 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, pro
 	if err := checkTokenTimes(tok, v.now()); err != nil {
 		return nil, err
 	}
+	if err := requireNativeExp(tok); err != nil {
+		return nil, err
+	}
 
 	var claims nativeAppleClaims
 	if err := json.Unmarshal(payload, &claims); err != nil {
@@ -289,6 +291,19 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, pro
 	}, tok, "apple", claims.Nonce), nil
 }
 
+// requireNativeExp rejects a native ID token that carries no `exp` claim. Real
+// Google/Apple native ID tokens always stamp `exp`; the shared checkTokenTimes
+// is intentionally tolerant of a missing `exp` for the hosted flows, so a
+// native token without one would otherwise pass the time check and be retained
+// for only the default replay TTL. This stricter rule is native-only — it does
+// not change hosted google/apple/microsoft/oidc behavior.
+func requireNativeExp(tok jwt.Token) error {
+	if tok.Expiration().IsZero() {
+		return fmt.Errorf("%w: native id token missing exp", ErrIdentityVerification)
+	}
+	return nil
+}
+
 // buildVerification packages a verified Identity with the replay-cache
 // material derived from the same token. Both provider paths funnel through
 // it so the replay key and expiry are computed identically.
@@ -302,14 +317,11 @@ func (v *NativeVerifier) buildVerification(id *Identity, tok jwt.Token, provider
 
 // replayExpiryMs is the epoch-ms bound after which the redeemed-key row may
 // be swept: the token's own `exp`, capped at now+maxNativeReplayTTL so a
-// mis-issued far-future `exp` cannot pin the row indefinitely. A token with
-// no `exp` gets defaultNativeReplayTTL.
+// mis-issued far-future `exp` cannot pin the row indefinitely. Callers reach
+// this only after requireNativeExp, so `exp` is always present.
 func (v *NativeVerifier) replayExpiryMs(tok jwt.Token) int64 {
 	now := v.now()
 	until := tok.Expiration()
-	if until.IsZero() {
-		until = now.Add(defaultNativeReplayTTL)
-	}
 	if capAt := now.Add(maxNativeReplayTTL); until.After(capAt) {
 		until = capAt
 	}

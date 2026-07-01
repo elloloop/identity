@@ -301,27 +301,27 @@ type Config struct {
 	// one provider's native audiences are configured, false otherwise; set it
 	// explicitly to false to disable the RPC even with audiences present.
 	NativeOAuthEnabled bool
-	// NativeOAuthGoogleAudiences is the GLOBAL comma-separated allow-list of
+	// NativeOAuthGoogleAudiences is the global comma-separated allow-list of
 	// accepted Google ID-token `aud` values for native login — the web client
 	// id plus every per-platform (iOS/Android) OAuth client id. It is the
 	// fallback for products with no entry in
 	// NativeOAuthGoogleAudiencesByProduct. Empty disables Google for those.
 	NativeOAuthGoogleAudiences string
-	// NativeOAuthAppleAudiences is the GLOBAL comma-separated allow-list of
+	// NativeOAuthAppleAudiences is the global comma-separated allow-list of
 	// accepted Apple ID-token `aud` values for native login — the Services ID
 	// plus every native bundle id. It is the fallback for products with no
 	// entry in NativeOAuthAppleAudiencesByProduct. Empty disables Apple for those.
 	NativeOAuthAppleAudiences string
 	// NativeOAuthGoogleAudiencesByProduct scopes accepted Google `aud` values
-	// PER PRODUCT so a token minted for one product's client id cannot be
+	// per product so a token minted for one product's client id cannot be
 	// redeemed as another. Format: comma-separated product=aud entries, each
 	// value a space-separated audience list (e.g.
 	// "easyloops=web.easyloops.app ios.easyloops.app,tortoise=web.tortoise.app").
-	// A product listed here accepts ONLY its own audiences; a product not listed
+	// A product listed here accepts only its own audiences; a product not listed
 	// falls back to NativeOAuthGoogleAudiences.
 	NativeOAuthGoogleAudiencesByProduct string
-	// NativeOAuthAppleAudiencesByProduct scopes accepted Apple `aud` values PER
-	// PRODUCT, same format and semantics as
+	// NativeOAuthAppleAudiencesByProduct scopes accepted Apple `aud` values per
+	// product, same format and semantics as
 	// NativeOAuthGoogleAudiencesByProduct: a listed product accepts only its own
 	// audiences, an unlisted product falls back to NativeOAuthAppleAudiences.
 	NativeOAuthAppleAudiencesByProduct string
@@ -1069,13 +1069,13 @@ func nativeOAuthDefaultEnabled(audienceConfigs ...string) bool {
 	return false
 }
 
-// NativeOAuthGoogleAudienceList returns the configured GLOBAL Google native
+// NativeOAuthGoogleAudienceList returns the configured global Google native
 // audiences, trimmed, blanks dropped, in order. An empty config yields nil.
 func (c *Config) NativeOAuthGoogleAudienceList() []string {
 	return splitTrimCSV(c.NativeOAuthGoogleAudiences)
 }
 
-// NativeOAuthAppleAudienceList returns the configured GLOBAL Apple native
+// NativeOAuthAppleAudienceList returns the configured global Apple native
 // audiences, trimmed, blanks dropped, in order. An empty config yields nil.
 func (c *Config) NativeOAuthAppleAudienceList() []string {
 	return splitTrimCSV(c.NativeOAuthAppleAudiences)

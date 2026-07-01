@@ -117,6 +117,35 @@ func TestNativeVerifier_Google_Rejections(t *testing.T) {
 	}
 }
 
+func TestNativeVerifier_MissingExpRejected(t *testing.T) {
+	// Real Google/Apple native ID tokens always carry `exp`. A native token
+	// with no `exp` claim must be rejected on both provider paths — the shared
+	// time check tolerates a zero `exp` (for the hosted flows), so the native
+	// verifier enforces its presence explicitly.
+	t.Run("google", func(t *testing.T) {
+		f := newNativeFixture(t, []string{"web-client"}, nil)
+		tok := f.key.signIDToken(t, map[string]any{
+			"iss": "https://accounts.google.com", "sub": "s", "aud": "web-client",
+			"iat": f.now, "email": "a@b.com", "email_verified": true,
+			// no exp claim
+		})
+		if _, err := f.veri.Verify(context.Background(), "google", tok, "", ""); !errors.Is(err, ErrIdentityVerification) {
+			t.Fatalf("want ErrIdentityVerification for missing exp, got %v", err)
+		}
+	})
+	t.Run("apple", func(t *testing.T) {
+		f := newNativeFixture(t, nil, []string{"dev.easyloops.app"})
+		tok := f.key.signIDToken(t, map[string]any{
+			"iss": appleIssuer, "sub": "s", "aud": "dev.easyloops.app",
+			"iat": f.now, "email": "a@b.com", "email_verified": true,
+			// no exp claim
+		})
+		if _, err := f.veri.Verify(context.Background(), "apple", tok, "", ""); !errors.Is(err, ErrIdentityVerification) {
+			t.Fatalf("want ErrIdentityVerification for missing exp, got %v", err)
+		}
+	})
+}
+
 func TestNativeVerifier_Google_BadSignature(t *testing.T) {
 	f := newNativeFixture(t, []string{"web-client"}, nil)
 	// Sign with a DIFFERENT key than the one served by the stub JWKS.

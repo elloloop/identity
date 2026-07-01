@@ -535,7 +535,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "is the GLOBAL comma-separated allow-list of accepted Apple ID-token `aud` values for native login — the Services ID plus every native bundle id.",
+    "description": "is the global comma-separated allow-list of accepted Apple ID-token `aud` values for native login — the Services ID plus every native bundle id.",
     "category": "OAuth",
     "anchor": "oauth"
   },
@@ -544,7 +544,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "scopes accepted Apple `aud` values PER PRODUCT, same format and semantics as NativeOAuthGoogleAudiencesByProduct: a listed product accepts only its own audiences, an unlisted product falls back to NativeOAuthAppleAudiences.",
+    "description": "scopes accepted Apple `aud` values per product, same format and semantics as NativeOAuthGoogleAudiencesByProduct: a listed product accepts only its own audiences, an unlisted product falls back to NativeOAuthAppleAudiences.",
     "category": "OAuth",
     "anchor": "oauth"
   },
@@ -562,7 +562,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "is the GLOBAL comma-separated allow-list of accepted Google ID-token `aud` values for native login — the web client id plus every per-platform (iOS/Android) OAuth client id.",
+    "description": "is the global comma-separated allow-list of accepted Google ID-token `aud` values for native login — the web client id plus every per-platform (iOS/Android) OAuth client id.",
     "category": "OAuth",
     "anchor": "oauth"
   },
@@ -571,7 +571,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "scopes accepted Google `aud` values PER PRODUCT so a token minted for one product's client id cannot be redeemed as another.",
+    "description": "scopes accepted Google `aud` values per product so a token minted for one product's client id cannot be redeemed as another.",
     "category": "OAuth",
     "anchor": "oauth"
   },
