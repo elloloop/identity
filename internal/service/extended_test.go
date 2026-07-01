@@ -1734,6 +1734,9 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	if err := r.DeleteExpiredOAuthOneTimeCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredOAuthOneTimeCodes: %v", err)
 	}
+	if err := r.DeleteExpiredNativeTokenRedemptions(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredNativeTokenRedemptions: %v", err)
+	}
 	if err := r.DeleteExpiredEmailLoginCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredEmailLoginCodes: %v", err)
 	}

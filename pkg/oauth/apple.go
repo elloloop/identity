@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -207,20 +206,11 @@ func (a *appleExchanger) Exchange(ctx context.Context, params ExchangeParams) (*
 		return nil, err
 	}
 
+	// verifyIDToken has already established a present, verified email; here
+	// we only normalize it and (optionally) enrich the display name.
 	email := strings.ToLower(strings.TrimSpace(claims.Email))
 	if email == "" {
 		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
-	}
-
-	verified := false
-	switch v := claims.EmailVerified.(type) {
-	case bool:
-		verified = v
-	case string:
-		verified = v == "true"
-	}
-	if !verified {
-		return nil, fmt.Errorf("%w: email not verified", ErrIdentityVerification)
 	}
 
 	name := claims.Name
@@ -258,22 +248,9 @@ type appleIDClaims struct {
 }
 
 func (a *appleExchanger) verifyIDToken(ctx context.Context, raw string) (*appleIDClaims, error) {
-	set, err := a.jwks.Get(ctx)
+	payload, err := verifyJWSWithRotation(ctx, a.jwks, raw, jwa.RS256)
 	if err != nil {
-		return nil, fmt.Errorf("%w: jwks: %w", ErrIdentityVerification, err)
-	}
-
-	payload, err := verifyJWS(raw, set)
-	if err != nil && errors.Is(err, errKeyNotFound) {
-		a.jwks.Invalidate()
-		set2, fErr := a.jwks.Get(ctx)
-		if fErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-		}
-		payload, err = verifyJWS(raw, set2)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
+		return nil, err
 	}
 
 	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
@@ -287,12 +264,8 @@ func (a *appleExchanger) verifyIDToken(ctx context.Context, raw string) (*appleI
 	if !containsString(auds, a.cfg.ClientID) {
 		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
 	}
-	now := a.cfg.Now()
-	if exp := tok.Expiration(); !exp.IsZero() && now.After(exp) {
-		return nil, fmt.Errorf("%w: token expired", ErrIdentityVerification)
-	}
-	if iat := tok.IssuedAt(); !iat.IsZero() && iat.After(now.Add(2*time.Minute)) {
-		return nil, fmt.Errorf("%w: iat in the future", ErrIdentityVerification)
+	if err := checkTokenTimes(tok, a.cfg.Now()); err != nil {
+		return nil, err
 	}
 
 	var claims appleIDClaims
@@ -305,14 +278,7 @@ func (a *appleExchanger) verifyIDToken(ctx context.Context, raw string) (*appleI
 	if claims.Email == "" {
 		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
 	}
-
-	var verified bool
-	if ev, ok := claims.EmailVerified.(string); ok && ev == "true" {
-		verified = true
-	} else if ev, ok := claims.EmailVerified.(bool); ok && ev {
-		verified = true
-	}
-	if !verified {
+	if !appleEmailVerified(claims.EmailVerified) {
 		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, claims.Email)
 	}
 

@@ -3,7 +3,6 @@ package oauth
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,8 +11,6 @@ import (
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jws"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
@@ -275,24 +272,9 @@ type googleIDClaims struct {
 // verifyIDToken verifies the signature, issuer, audience, and
 // expiry of a Google-issued ID token, then returns its claims.
 func (g *googleExchanger) verifyIDToken(ctx context.Context, raw string) (*googleIDClaims, error) {
-	set, err := g.jwks.Get(ctx)
+	payload, err := verifyJWSWithRotation(ctx, g.jwks, raw, jwa.RS256)
 	if err != nil {
-		return nil, fmt.Errorf("%w: jwks: %w", ErrIdentityVerification, err)
-	}
-
-	payload, err := verifyJWS(raw, set)
-	if err != nil && errors.Is(err, errKeyNotFound) {
-		// On verification failure due to missing key, we may be looking
-		// at a stale cache after a key rotation. Invalidate and try once more.
-		g.jwks.Invalidate()
-		set2, fErr := g.jwks.Get(ctx)
-		if fErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-		}
-		payload, err = verifyJWS(raw, set2)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
+		return nil, err
 	}
 
 	// Decode the JWT for issuer/audience/exp checks via jwx's parser
@@ -308,12 +290,8 @@ func (g *googleExchanger) verifyIDToken(ctx context.Context, raw string) (*googl
 	if !containsString(auds, g.cfg.ClientID) {
 		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
 	}
-	now := g.cfg.Now()
-	if exp := tok.Expiration(); !exp.IsZero() && now.After(exp) {
-		return nil, fmt.Errorf("%w: token expired", ErrIdentityVerification)
-	}
-	if iat := tok.IssuedAt(); !iat.IsZero() && iat.After(now.Add(2*time.Minute)) {
-		return nil, fmt.Errorf("%w: iat in the future", ErrIdentityVerification)
+	if err := checkTokenTimes(tok, g.cfg.Now()); err != nil {
+		return nil, err
 	}
 
 	var claims googleIDClaims
@@ -327,72 +305,6 @@ func (g *googleExchanger) verifyIDToken(ctx context.Context, raw string) (*googl
 		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
 	}
 	return &claims, nil
-}
-
-var errKeyNotFound = errors.New("key not found in jwks")
-
-// verifyJWS verifies the signature on a compact JWS using the
-// provided JWK set (matching kid → key), restricting the accepted
-// signature algorithm to RS256 (what Google + Microsoft sign with).
-// Returns the decoded payload bytes on success.
-func verifyJWS(raw string, set jwk.Set) ([]byte, error) {
-	return verifyJWSWithAlgs(raw, set, jwa.RS256)
-}
-
-// verifyJWSWithAlgs verifies the signature on a compact JWS using the
-// provided JWK set, restricting the accepted signature algorithm to one
-// of allowedAlgs. Pinning the algorithm prevents alg-substitution
-// attacks (e.g. forging an HS256 token using the public key as the
-// secret). Returns the decoded payload bytes on success.
-func verifyJWSWithAlgs(raw string, set jwk.Set, allowedAlgs ...jwa.SignatureAlgorithm) ([]byte, error) {
-	// Parse the message header to find the kid.
-	msg, err := jws.Parse([]byte(raw))
-	if err != nil {
-		return nil, fmt.Errorf("parse jws: %w", err)
-	}
-	sigs := msg.Signatures()
-	if len(sigs) == 0 {
-		return nil, errors.New("jws has no signatures")
-	}
-	hdr := sigs[0].ProtectedHeaders()
-	kid := hdr.KeyID()
-	alg := hdr.Algorithm()
-	if alg == "" {
-		return nil, errors.New("jws missing alg")
-	}
-	algAllowed := false
-	for _, a := range allowedAlgs {
-		if alg == a {
-			algAllowed = true
-			break
-		}
-	}
-	if !algAllowed {
-		return nil, fmt.Errorf("unexpected jws alg: %s", alg)
-	}
-	var key jwk.Key
-	if kid != "" {
-		k, ok := set.LookupKeyID(kid)
-		if !ok {
-			return nil, fmt.Errorf("%w: kid=%q", errKeyNotFound, kid)
-		}
-		key = k
-	} else {
-		// No kid — try the first key.
-		if set.Len() == 0 {
-			return nil, fmt.Errorf("%w: empty", errKeyNotFound)
-		}
-		k, ok := set.Key(0)
-		if !ok {
-			return nil, fmt.Errorf("%w: first key missing", errKeyNotFound)
-		}
-		key = k
-	}
-	verified, err := jws.Verify([]byte(raw), jws.WithKey(alg, key))
-	if err != nil {
-		return nil, fmt.Errorf("verify jws: %w", err)
-	}
-	return verified, nil
 }
 
 func containsString(haystack []string, needle string) bool {

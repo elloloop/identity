@@ -146,6 +146,10 @@ func (StubRepository) ConsumeOAuthOneTimeCode(context.Context, string, int64) (*
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) RecordNativeTokenRedemption(context.Context, *NativeTokenRedemptionRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
 func (StubRepository) UpsertEmailLoginCode(context.Context, *EmailLoginCodeRecord) (string, error) {
 	return "", ErrServiceUnavailable
 }
@@ -347,6 +351,10 @@ func (StubRepository) DeleteExpiredLoginChallenges(context.Context, int64, int) 
 }
 
 func (StubRepository) DeleteExpiredOAuthOneTimeCodes(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredNativeTokenRedemptions(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }
 

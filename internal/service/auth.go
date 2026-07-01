@@ -300,6 +300,22 @@ type Repository interface {
 	CreateOAuthOneTimeCode(ctx context.Context, r *OAuthOneTimeCodeRecord) (string, error)
 	ConsumeOAuthOneTimeCode(ctx context.Context, codeHash string, atMs int64) (*OAuthOneTimeCodeRecord, error)
 
+	// Native ID-token replay cache (bearer-token single-use).
+	//
+	// Native mobile-SDK ID tokens (Google idToken / Apple identityToken) are
+	// bearer JWTs replayable until their `exp` (~1h for Google; the Apple
+	// nonce is client-optional), so a captured token could be redeemed more
+	// than once. RecordNativeTokenRedemption makes each token single-use: it
+	// atomically inserts the token's replay key (see NativeVerification.
+	// ReplayKey) and returns nil on the FIRST redemption; a second insert of
+	// the same key — a replay of the same bearer token — hits the unique
+	// index and returns ErrNativeTokenReplayed. This is the multi-replica
+	// serialization point: exactly one of N concurrent redemptions of the
+	// same token wins. Retention is bounded by ExpiresAt (= the token's `exp`,
+	// capped) so a swept row can never resurrect a still-valid token — once
+	// the row's expiry passes, the token itself can no longer be presented.
+	RecordNativeTokenRedemption(ctx context.Context, r *NativeTokenRedemptionRecord) (string, error)
+
 	// Email login codes (OTP arm of passwordless email login).
 	//
 	// UpsertEmailLoginCode stores the latest code for an email, replacing
@@ -457,6 +473,7 @@ type Repository interface {
 	DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredOAuthOneTimeCodes(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredNativeTokenRedemptions(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredEmailLoginCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error
@@ -581,6 +598,20 @@ type OAuthOneTimeCodeRecord struct {
 	ExpiresAt  int64 // epoch ms
 	CreatedAt  int64 // epoch ms
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
+}
+
+// NativeTokenRedemptionRecord is the replay-cache row that makes a native ID
+// token (Google idToken / Apple identityToken) single-use. ReplayKey uniquely
+// identifies one issued token — the token's `jti` when present, else a stable
+// digest of (provider|iss|sub|iat|aud|nonce); see oauth.NativeVerification.
+// ExpiresAt is the token's own `exp` (bounded to a sane max) so the row is
+// retained only as long as the token could still be presented. No token
+// material or user id is stored at rest — the key is opaque.
+type NativeTokenRedemptionRecord struct {
+	NodeID    string
+	ReplayKey string
+	ExpiresAt int64 // epoch ms
+	CreatedAt int64 // epoch ms
 }
 
 // EmailLoginCodeRecord is the OTP arm of passwordless email login. The
@@ -841,6 +872,12 @@ var (
 	// configured. It maps to FailedPrecondition (the feature is off), distinct
 	// from ErrUnauthenticated (a token that failed verification).
 	ErrNativeOAuthDisabled = errors.New("native oauth login is not enabled")
+	// ErrNativeTokenReplayed is returned by RecordNativeTokenRedemption when a
+	// native ID token's replay key has already been recorded — the bearer
+	// token is being presented a second time. NativeOAuthLogin maps it to
+	// CodeUnauthenticated so a replay looks identical to any other rejected
+	// token.
+	ErrNativeTokenReplayed = errors.New("native id token has already been redeemed")
 	ErrSignupDisabled      = errors.New("signup is disabled for this deployment")
 	// ErrPasskeySignupDisabled is returned by BeginPasskeySignup /
 	// CompletePasskeySignup when GATEWAY_PASSKEY_SIGNUP_ENABLED is false. It

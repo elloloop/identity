@@ -6,14 +6,38 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
+
+// maxNativeReplayTTL bounds how long a redeemed native token's replay key is
+// retained. Google ID tokens live ~1h; the replay cache never needs to
+// remember a redeemed key past the token's own `exp`, and a mis-issued
+// far-future `exp` must not pin a row indefinitely, so retention is
+// min(exp, now+max). Every native token is guaranteed to carry an `exp`
+// (requireNativeExp rejects one that does not), so a zero `exp` never reaches
+// the replay-expiry computation.
+const maxNativeReplayTTL = time.Hour
+
+// NativeVerification is the result of verifying a native ID token: the
+// canonical Identity plus the material NativeOAuthLogin needs to enforce
+// single-use (replay protection). ReplayKey uniquely identifies the one
+// issued token — the token's `jti` when the provider stamps one, else a
+// stable digest of (provider|iss|sub|iat|aud|nonce). ExpiresAtMs is the
+// token's `exp` (epoch ms, bounded to a sane max) so the redeemed-key row
+// is retained only as long as the token could still be presented.
+type NativeVerification struct {
+	Identity    *Identity
+	ReplayKey   string
+	ExpiresAtMs int64
+}
 
 // googleIssuers are the two issuer strings Google stamps on an ID token. The
 // non-https form is historical but still emitted, so both are accepted (this
@@ -24,14 +48,29 @@ var googleIssuers = []string{"https://accounts.google.com", "accounts.google.com
 // audiences must be non-empty for the verifier to accept that provider; a
 // provider with no configured audiences is treated as unsupported.
 type NativeVerifierConfig struct {
-	// GoogleAudiences is the set of accepted `aud` values for Google ID
-	// tokens — the web client id PLUS every per-platform (iOS/Android) OAuth
-	// client id the native SDKs present. Empty disables Google native login.
+	// GoogleAudiences is the GLOBAL fallback set of accepted `aud` values for
+	// Google ID tokens — the web client id PLUS every per-platform
+	// (iOS/Android) OAuth client id the native SDKs present. It is consulted
+	// only for a product with no entry in GoogleAudiencesByProduct. Empty
+	// disables Google native login for those products.
 	GoogleAudiences []string
-	// AppleAudiences is the set of accepted `aud` values for Apple ID tokens —
-	// the Services ID PLUS every native bundle id. Empty disables Apple native
-	// login.
+	// AppleAudiences is the GLOBAL fallback set of accepted `aud` values for
+	// Apple ID tokens — the Services ID PLUS every native bundle id. It is
+	// consulted only for a product with no entry in AppleAudiencesByProduct.
+	// Empty disables Apple native login for those products.
 	AppleAudiences []string
+
+	// GoogleAudiencesByProduct scopes the accepted Google `aud` values PER
+	// PRODUCT, keyed by the lower-cased product selector. When a product has an
+	// entry here, ONLY that entry's audiences are accepted for it — a token
+	// whose `aud` is valid for another product (or only globally) is rejected.
+	// A product with no entry falls back to GoogleAudiences.
+	GoogleAudiencesByProduct map[string][]string
+	// AppleAudiencesByProduct scopes the accepted Apple `aud` values PER
+	// PRODUCT, keyed by the lower-cased product selector. Same semantics as
+	// GoogleAudiencesByProduct: an entry is exclusive for its product, an
+	// absent product falls back to AppleAudiences.
+	AppleAudiencesByProduct map[string][]string
 
 	// GoogleJWKSURL / AppleJWKSURL override the default provider JWKS
 	// endpoints (used by tests to point at a stub). Empty uses the live URL.
@@ -52,16 +91,21 @@ type NativeVerifierConfig struct {
 // identityToken) WITHOUT an OAuth code exchange, producing a canonical
 // Identity. It reuses the same JWKS cache + JWS verification + claim parsing
 // the hosted Exchangers use; the only difference is that `aud` is matched
-// against a configured SET of native audiences (not a single web client id)
-// and, for Apple, the request nonce is verified against the id_token claim.
+// against the audience set of the REQUESTED PRODUCT (a per-product set when
+// configured, else the global fallback set — never a single web client id) and,
+// for Apple, the request nonce is verified against the id_token claim. Scoping
+// `aud` per product stops a token minted for product A's client id from being
+// redeemed as product B.
 type NativeVerifier struct {
-	googleAuds    map[string]bool
-	appleAuds     map[string]bool
-	googleIssuers []string
-	appleIssuer   string
-	googleJWKS    *jwksCache
-	appleJWKS     *jwksCache
-	now           func() time.Time
+	googleAuds          map[string]bool
+	appleAuds           map[string]bool
+	googleAudsByProduct map[string]map[string]bool
+	appleAudsByProduct  map[string]map[string]bool
+	googleIssuers       []string
+	appleIssuer         string
+	googleJWKS          *jwksCache
+	appleJWKS           *jwksCache
+	now                 func() time.Time
 }
 
 // NewNativeVerifier builds a NativeVerifier. JWKS caches are created for both
@@ -97,37 +141,42 @@ func NewNativeVerifier(cfg NativeVerifierConfig) *NativeVerifier {
 		aIssuer = cfg.AppleIssuer
 	}
 	return &NativeVerifier{
-		googleAuds:    toSet(cfg.GoogleAudiences),
-		appleAuds:     toSet(cfg.AppleAudiences),
-		googleIssuers: gIssuers,
-		appleIssuer:   aIssuer,
-		googleJWKS:    newJWKSCache(gJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
-		appleJWKS:     newJWKSCache(aJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
-		now:           cfg.Now,
+		googleAuds:          toSet(cfg.GoogleAudiences),
+		appleAuds:           toSet(cfg.AppleAudiences),
+		googleAudsByProduct: toSetByProduct(cfg.GoogleAudiencesByProduct),
+		appleAudsByProduct:  toSetByProduct(cfg.AppleAudiencesByProduct),
+		googleIssuers:       gIssuers,
+		appleIssuer:         aIssuer,
+		googleJWKS:          newJWKSCache(gJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
+		appleJWKS:           newJWKSCache(aJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
+		now:                 cfg.Now,
 	}
 }
 
-// Verify validates a native ID token for the given provider and returns a
-// canonical, verified Identity. rawNonce is the un-hashed nonce from the
-// native request (Apple only); pass "" for Google. Every failure returns an
-// error wrapping ErrIdentityVerification or ErrEmailNotVerified so the caller
-// can map it to a single, safe Unauthenticated response.
-func (v *NativeVerifier) Verify(ctx context.Context, provider, idToken, rawNonce string) (*Identity, error) {
+// Verify validates a native ID token for the given provider and product, and
+// returns a canonical, verified Identity. product selects the audience set the
+// token's `aud` is matched against (see audsFor); rawNonce is the un-hashed
+// nonce from the native request (Apple only); pass "" for Google. Every failure
+// returns an error wrapping ErrIdentityVerification or ErrEmailNotVerified so
+// the caller can map it to a single, safe Unauthenticated response — the reason
+// (bad aud, wrong product, expired, …) is never leaked to the client.
+func (v *NativeVerifier) Verify(ctx context.Context, provider, idToken, rawNonce, product string) (*NativeVerification, error) {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "google":
-		return v.verifyGoogle(ctx, idToken)
+		return v.verifyGoogle(ctx, idToken, product)
 	case "apple":
-		return v.verifyApple(ctx, idToken, rawNonce)
+		return v.verifyApple(ctx, idToken, rawNonce, product)
 	default:
 		return nil, fmt.Errorf("%w: unsupported native provider %q", ErrIdentityVerification, provider)
 	}
 }
 
-func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken string) (*Identity, error) {
-	if len(v.googleAuds) == 0 {
+func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken, product string) (*NativeVerification, error) {
+	auds := audsFor(product, v.googleAudsByProduct, v.googleAuds)
+	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: google native login not configured", ErrIdentityVerification)
 	}
-	payload, err := verifyJWSWithRotation(ctx, v.googleJWKS, idToken)
+	payload, err := verifyJWSWithRotation(ctx, v.googleJWKS, idToken, jwa.RS256)
 	if err != nil {
 		return nil, err
 	}
@@ -138,10 +187,13 @@ func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken string) (*Ide
 	if !containsString(v.googleIssuers, tok.Issuer()) {
 		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, tok.Issuer())
 	}
-	if !audInSet(tok.Audience(), v.googleAuds) {
+	if !audInSet(tok.Audience(), auds) {
 		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
 	}
-	if err := v.checkTimes(tok); err != nil {
+	if err := checkTokenTimes(tok, v.now()); err != nil {
+		return nil, err
+	}
+	if err := requireNativeExp(tok); err != nil {
 		return nil, err
 	}
 
@@ -159,14 +211,14 @@ func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken string) (*Ide
 	if !claims.EmailVerified {
 		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, email)
 	}
-	return &Identity{
+	return v.buildVerification(&Identity{
 		ProviderUserID: claims.Sub,
 		Email:          email,
 		EmailVerified:  true,
 		Name:           claims.Name,
 		AvatarURL:      claims.Picture,
 		Provider:       "google",
-	}, nil
+	}, tok, "google", ""), nil
 }
 
 // nativeAppleClaims extends the hosted appleIDClaims (polymorphic
@@ -176,11 +228,12 @@ type nativeAppleClaims struct {
 	Nonce string `json:"nonce"`
 }
 
-func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce string) (*Identity, error) {
-	if len(v.appleAuds) == 0 {
+func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, product string) (*NativeVerification, error) {
+	auds := audsFor(product, v.appleAudsByProduct, v.appleAuds)
+	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: apple native login not configured", ErrIdentityVerification)
 	}
-	payload, err := verifyJWSWithRotation(ctx, v.appleJWKS, idToken)
+	payload, err := verifyJWSWithRotation(ctx, v.appleJWKS, idToken, jwa.RS256)
 	if err != nil {
 		return nil, err
 	}
@@ -191,10 +244,13 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce stri
 	if tok.Issuer() != v.appleIssuer {
 		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, tok.Issuer())
 	}
-	if !audInSet(tok.Audience(), v.appleAuds) {
+	if !audInSet(tok.Audience(), auds) {
 		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
 	}
-	if err := v.checkTimes(tok); err != nil {
+	if err := checkTokenTimes(tok, v.now()); err != nil {
+		return nil, err
+	}
+	if err := requireNativeExp(tok); err != nil {
 		return nil, err
 	}
 
@@ -226,63 +282,74 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce stri
 	if !appleEmailVerified(claims.EmailVerified) {
 		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, email)
 	}
-	return &Identity{
+	return v.buildVerification(&Identity{
 		ProviderUserID: claims.Sub,
 		Email:          email,
 		EmailVerified:  true,
 		Name:           claims.Name,
 		Provider:       "apple",
-	}, nil
+	}, tok, "apple", claims.Nonce), nil
 }
 
-// checkTimes enforces exp (not in the past) and iat (not in the future,
-// allowing the same 2-minute clock skew the hosted providers allow).
-func (v *NativeVerifier) checkTimes(tok jwt.Token) error {
-	now := v.now()
-	if exp := tok.Expiration(); !exp.IsZero() && now.After(exp) {
-		return fmt.Errorf("%w: token expired", ErrIdentityVerification)
-	}
-	if iat := tok.IssuedAt(); !iat.IsZero() && iat.After(now.Add(2*time.Minute)) {
-		return fmt.Errorf("%w: iat in the future", ErrIdentityVerification)
+// requireNativeExp rejects a native ID token that carries no `exp` claim. Real
+// Google/Apple native ID tokens always stamp `exp`; the shared checkTokenTimes
+// is intentionally tolerant of a missing `exp` for the hosted flows, so a
+// native token without one would otherwise pass the time check and be retained
+// for only the default replay TTL. This stricter rule is native-only — it does
+// not change hosted google/apple/microsoft/oidc behavior.
+func requireNativeExp(tok jwt.Token) error {
+	if tok.Expiration().IsZero() {
+		return fmt.Errorf("%w: native id token missing exp", ErrIdentityVerification)
 	}
 	return nil
 }
 
-// verifyJWSWithRotation verifies a compact JWS against a JWKS cache, retrying
-// once after a cache invalidation if the signing key was not found (handles
-// provider key rotation). It mirrors the hosted exchangers' verifyIDToken
-// preamble.
-func verifyJWSWithRotation(ctx context.Context, cache *jwksCache, raw string) ([]byte, error) {
-	set, err := cache.Get(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("%w: jwks: %w", ErrIdentityVerification, err)
+// buildVerification packages a verified Identity with the replay-cache
+// material derived from the same token. Both provider paths funnel through
+// it so the replay key and expiry are computed identically.
+func (v *NativeVerifier) buildVerification(id *Identity, tok jwt.Token, provider, nonce string) *NativeVerification {
+	return &NativeVerification{
+		Identity:    id,
+		ReplayKey:   nativeReplayKey(tok, provider, nonce),
+		ExpiresAtMs: v.replayExpiryMs(tok),
 	}
-	payload, err := verifyJWS(raw, set)
-	if err != nil && errors.Is(err, errKeyNotFound) {
-		cache.Invalidate()
-		set2, fErr := cache.Get(ctx)
-		if fErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-		}
-		payload, err = verifyJWS(raw, set2)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-	}
-	return payload, nil
 }
 
-// appleEmailVerified collapses Apple's polymorphic email_verified (bool or the
-// string "true") to a boolean, matching apple.go's handling.
-func appleEmailVerified(v interface{}) bool {
-	switch ev := v.(type) {
-	case bool:
-		return ev
-	case string:
-		return ev == "true"
-	default:
-		return false
+// replayExpiryMs is the epoch-ms bound after which the redeemed-key row may
+// be swept: the token's own `exp`, capped at now+maxNativeReplayTTL so a
+// mis-issued far-future `exp` cannot pin the row indefinitely. Callers reach
+// this only after requireNativeExp, so `exp` is always present.
+func (v *NativeVerifier) replayExpiryMs(tok jwt.Token) int64 {
+	now := v.now()
+	until := tok.Expiration()
+	if capAt := now.Add(maxNativeReplayTTL); until.After(capAt) {
+		until = capAt
 	}
+	return until.UnixMilli()
+}
+
+// nativeReplayKey derives a stable identifier for a single issued native ID
+// token. When the provider stamps a `jti` that alone identifies the token
+// (unique per issuer); otherwise a digest over (provider|iss|sub|iat|aud|
+// nonce) uniquely names it — a re-issued token for the same subject differs
+// in `iat` (and `jti`/`nonce`), so a duplicate key can only be the SAME
+// bearer token replayed. Provider prefixes the key so a `jti` collision
+// across issuers cannot alias two distinct tokens.
+func nativeReplayKey(tok jwt.Token, provider, nonce string) string {
+	if jti := strings.TrimSpace(tok.JwtID()); jti != "" {
+		return provider + "|jti|" + jti
+	}
+	auds := append([]string(nil), tok.Audience()...)
+	sort.Strings(auds)
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		provider,
+		tok.Issuer(),
+		tok.Subject(),
+		strconv.FormatInt(tok.IssuedAt().Unix(), 10),
+		strings.Join(auds, ","),
+		nonce,
+	}, "\x00")))
+	return provider + "|d|" + hex.EncodeToString(sum[:])
 }
 
 // nonceMatches reports whether claim equals the hex or base64url (no padding)
@@ -294,6 +361,44 @@ func nonceMatches(rawNonce, claim string) bool {
 	sum := sha256.Sum256([]byte(rawNonce))
 	return claim == hex.EncodeToString(sum[:]) ||
 		claim == base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// audsFor returns the audience set to match a token's `aud` against for the
+// given product: the product's per-product set when one is configured (keyed
+// case-insensitively), otherwise the global fallback set. A per-product entry
+// is EXCLUSIVE — once a product has its own set, the global set is not merged
+// in, so a token minted for a different product's client id is rejected even
+// if that client id is globally allowed.
+func audsFor(product string, byProduct map[string]map[string]bool, global map[string]bool) map[string]bool {
+	if len(byProduct) > 0 {
+		if set, ok := byProduct[strings.ToLower(strings.TrimSpace(product))]; ok {
+			return set
+		}
+	}
+	return global
+}
+
+// toSetByProduct converts a product→audiences map into a product→set map,
+// lower-casing product keys and dropping products whose audience list is empty
+// after trimming. A nil or empty input yields nil.
+func toSetByProduct(in map[string][]string) map[string]map[string]bool {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]bool, len(in))
+	for product, auds := range in {
+		key := strings.ToLower(strings.TrimSpace(product))
+		if key == "" {
+			continue
+		}
+		if set := toSet(auds); len(set) > 0 {
+			out[key] = set
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func toSet(items []string) map[string]bool {

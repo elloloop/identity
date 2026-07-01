@@ -130,15 +130,48 @@ message NativeOAuthLoginResponse {
     <strong>Verification.</strong> Google: the token's signature is checked
     against Google's certs, <code>iss</code> must be
     <code>accounts.google.com</code> (with or without the <code>https://</code>
-    prefix), <code>exp</code> must be in the future, <code>email_verified</code>
-    must be true, and <code>aud</code> must be one of
+    prefix), <code>exp</code> must be present and in the future,
+    <code>email_verified</code> must be true, and <code>aud</code> must be an
+    accepted Google audience for the request's product (see
+    <strong>Audience scoping</strong> below). Apple: signature against Apple's
+    JWKS, <code>iss = https://appleid.apple.com</code>, a present, unexpired
+    <code>exp</code>, and an accepted Apple <code>aud</code> for the product.
+    Hide-my-email relay addresses are accepted as-is. Any failure returns
+    <code>Unauthenticated</code> with a safe message.
+  </p>
+  <p>
+    <strong>Audience scoping.</strong> By default <code>aud</code> is matched
+    against the global allow-lists
     <code>GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES</code> (the web client id plus
-    each per-platform iOS/Android client id). Apple: signature against Apple's
-    JWKS, <code>iss = https://appleid.apple.com</code>, <code>exp</code>, and
-    <code>aud</code> ∈ <code>GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES</code> (the
-    Services ID plus each native bundle id). Hide-my-email relay addresses are
-    accepted as-is. Any failure returns <code>Unauthenticated</code> with a
-    safe message.
+    each per-platform iOS/Android client id) and
+    <code>GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES</code> (the Services ID plus each
+    native bundle id). Audiences can instead be scoped per product via
+    <code>GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT</code> and
+    <code>GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT</code> — a
+    comma-separated list of <code>product=aud1 aud2</code> entries (audiences
+    space-separated, e.g.
+    <code>easyloops=web.easyloops.app ios.easyloops.app,tortoise=web.tortoise.app</code>).
+    A product listed there is <strong>exclusive</strong>: only its own audiences
+    are accepted, so a token minted for one product's client id is rejected when
+    presented as another product. A product not listed falls back to the global
+    vars.
+  </p>
+  <p>
+    <strong>Single-use replay protection.</strong> A successfully verified
+    native ID token is redeemed <strong>once</strong>: the token's identifier
+    (its <code>jti</code>, or a stable digest of its claims when the provider
+    stamps none) is recorded in a repo-backed replay cache, and a second
+    presentation of the same token is rejected until the record expires (bounded
+    by the token's own <code>exp</code>). This is enforced server-side for both
+    Google and Apple, in addition to the optional Apple nonce below.
+  </p>
+  <p>
+    <strong>Caveat.</strong> Single-use is enforced per <em>resolved
+    project</em>. Under the global-audience fallback, a token whose
+    <code>aud</code> is valid for several products can therefore be redeemed once
+    per product (each resolves to its own project). Configuring per-product
+    audiences closes this — a token is then valid for exactly one product — so
+    scope audiences per product on multi-product deployments.
   </p>
   <p>
     <strong>Apple nonce.</strong> The <code>nonce</code> field is
@@ -150,8 +183,9 @@ message NativeOAuthLoginResponse {
     Apple echoes it back verbatim (<code>base64url(SHA-256(raw))</code> is also
     accepted) — and a missing or mismatched claim is rejected. When omitted, the
     token is still fully verified (signature, <code>iss</code>, <code>exp</code>,
-    <code>aud</code>) but is not bound to a per-login nonce, so clients
-    <strong>should</strong> always generate and send a fresh raw nonce.
+    <code>aud</code>) and remains single-use, but is not additionally bound to a
+    per-login nonce, so clients <strong>should</strong> always generate and send
+    a fresh raw nonce.
   </p>
   <p>
     <strong>Product → project.</strong> <code>product</code> is mapped to an

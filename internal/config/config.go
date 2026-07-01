@@ -301,14 +301,30 @@ type Config struct {
 	// one provider's native audiences are configured, false otherwise; set it
 	// explicitly to false to disable the RPC even with audiences present.
 	NativeOAuthEnabled bool
-	// NativeOAuthGoogleAudiences is the comma-separated allow-list of accepted
-	// Google ID-token `aud` values for native login — the web client id plus
-	// every per-platform (iOS/Android) OAuth client id. Empty disables Google.
+	// NativeOAuthGoogleAudiences is the global comma-separated allow-list of
+	// accepted Google ID-token `aud` values for native login — the web client
+	// id plus every per-platform (iOS/Android) OAuth client id. It is the
+	// fallback for products with no entry in
+	// NativeOAuthGoogleAudiencesByProduct. Empty disables Google for those.
 	NativeOAuthGoogleAudiences string
-	// NativeOAuthAppleAudiences is the comma-separated allow-list of accepted
-	// Apple ID-token `aud` values for native login — the Services ID plus every
-	// native bundle id. Empty disables Apple.
+	// NativeOAuthAppleAudiences is the global comma-separated allow-list of
+	// accepted Apple ID-token `aud` values for native login — the Services ID
+	// plus every native bundle id. It is the fallback for products with no
+	// entry in NativeOAuthAppleAudiencesByProduct. Empty disables Apple for those.
 	NativeOAuthAppleAudiences string
+	// NativeOAuthGoogleAudiencesByProduct scopes accepted Google `aud` values
+	// per product so a token minted for one product's client id cannot be
+	// redeemed as another. Format: comma-separated product=aud entries, each
+	// value a space-separated audience list (e.g.
+	// "easyloops=web.easyloops.app ios.easyloops.app,tortoise=web.tortoise.app").
+	// A product listed here accepts only its own audiences; a product not listed
+	// falls back to NativeOAuthGoogleAudiences.
+	NativeOAuthGoogleAudiencesByProduct string
+	// NativeOAuthAppleAudiencesByProduct scopes accepted Apple `aud` values per
+	// product, same format and semantics as
+	// NativeOAuthGoogleAudiencesByProduct: a listed product accepts only its own
+	// audiences, an unlisted product falls back to NativeOAuthAppleAudiences.
+	NativeOAuthAppleAudiencesByProduct string
 	// NativeOAuthProductProjects maps a native client's product selector to an
 	// identity project id, as comma-separated product=projectID pairs (e.g.
 	// "easyloops=proj_abc,tortoise=proj_def"). A product not listed falls back
@@ -832,12 +848,16 @@ func Load() *Config {
 
 		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
 
-		NativeOAuthGoogleAudiences: envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),
-		NativeOAuthAppleAudiences:  envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES", ""),
-		NativeOAuthProductProjects: envStr("GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS", ""),
+		NativeOAuthGoogleAudiences:          envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),
+		NativeOAuthAppleAudiences:           envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES", ""),
+		NativeOAuthGoogleAudiencesByProduct: envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT", ""),
+		NativeOAuthAppleAudiencesByProduct:  envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT", ""),
+		NativeOAuthProductProjects:          envStr("GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS", ""),
 		NativeOAuthEnabled: envBool("GATEWAY_NATIVE_OAUTH_ENABLED", nativeOAuthDefaultEnabled(
 			envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),
 			envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES", ""),
+			envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT", ""),
+			envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT", ""),
 		)),
 
 		IDVProvider:           envStr("GATEWAY_IDV_PROVIDER", ""),
@@ -1036,24 +1056,69 @@ func (c *Config) DefaultProjectAuthDomainList() []string {
 }
 
 // nativeOAuthDefaultEnabled reports the default for GATEWAY_NATIVE_OAUTH_ENABLED:
-// on when at least one provider's native audiences are configured, off
-// otherwise. Keeping the default audience-gated means a deployment that never
-// configures native audiences is unaffected and never trips the Validate
-// invariant.
-func nativeOAuthDefaultEnabled(googleAuds, appleAuds string) bool {
-	return strings.TrimSpace(googleAuds) != "" || strings.TrimSpace(appleAuds) != ""
+// on when at least one provider's native audiences are configured — globally or
+// per-product — off otherwise. Keeping the default audience-gated means a
+// deployment that never configures native audiences is unaffected and never
+// trips the Validate invariant.
+func nativeOAuthDefaultEnabled(audienceConfigs ...string) bool {
+	for _, s := range audienceConfigs {
+		if strings.TrimSpace(s) != "" {
+			return true
+		}
+	}
+	return false
 }
 
-// NativeOAuthGoogleAudienceList returns the configured Google native audiences,
-// trimmed, blanks dropped, in order. An empty config yields nil.
+// NativeOAuthGoogleAudienceList returns the configured global Google native
+// audiences, trimmed, blanks dropped, in order. An empty config yields nil.
 func (c *Config) NativeOAuthGoogleAudienceList() []string {
 	return splitTrimCSV(c.NativeOAuthGoogleAudiences)
 }
 
-// NativeOAuthAppleAudienceList returns the configured Apple native audiences,
-// trimmed, blanks dropped, in order. An empty config yields nil.
+// NativeOAuthAppleAudienceList returns the configured global Apple native
+// audiences, trimmed, blanks dropped, in order. An empty config yields nil.
 func (c *Config) NativeOAuthAppleAudienceList() []string {
 	return splitTrimCSV(c.NativeOAuthAppleAudiences)
+}
+
+// NativeOAuthGoogleAudiencesByProductMap parses the per-product Google audience
+// config into a map keyed by the lower-cased product selector; each value is
+// the product's audience list. Malformed or blank entries are dropped; an empty
+// config yields an empty (non-nil) map.
+func (c *Config) NativeOAuthGoogleAudiencesByProductMap() map[string][]string {
+	return parseAudiencesByProduct(c.NativeOAuthGoogleAudiencesByProduct)
+}
+
+// NativeOAuthAppleAudiencesByProductMap parses the per-product Apple audience
+// config into a map keyed by the lower-cased product selector; each value is
+// the product's audience list. Malformed or blank entries are dropped; an empty
+// config yields an empty (non-nil) map.
+func (c *Config) NativeOAuthAppleAudiencesByProductMap() map[string][]string {
+	return parseAudiencesByProduct(c.NativeOAuthAppleAudiencesByProduct)
+}
+
+// parseAudiencesByProduct parses comma-separated product=audiences entries into
+// a map keyed by the lower-cased product selector, each value a space-separated
+// audience list (client ids never contain spaces). It mirrors
+// NativeOAuthProductProjectMap's product-keyed, lower-cased parsing; entries
+// with no "=", an empty product, or an empty audience list are dropped.
+func parseAudiencesByProduct(s string) map[string][]string {
+	out := make(map[string][]string)
+	for _, raw := range strings.Split(s, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(raw, "=")
+		k = strings.ToLower(strings.TrimSpace(k))
+		if !ok || k == "" {
+			continue
+		}
+		if auds := strings.Fields(v); len(auds) > 0 {
+			out[k] = auds
+		}
+	}
+	return out
 }
 
 // NativeOAuthProductProjectMap parses the product=projectID pairs into a map
@@ -1244,16 +1309,19 @@ func (c *Config) Validate() error {
 }
 
 // validateNativeOAuth enforces the native mobile sign-in invariant: when
-// enabled, at least one provider's audiences must be configured, otherwise no
-// native token could ever verify. It also rejects a malformed
-// product=projectID map (an entry with no "=", empty key, or empty value).
+// enabled, at least one provider's audiences must be configured — globally or
+// per-product — otherwise no native token could ever verify. It also rejects a
+// malformed product=projectID map and malformed per-product audience maps (an
+// entry with no "=", an empty product, or an empty value/audience list).
 func (c *Config) validateNativeOAuth() error {
 	if !c.NativeOAuthEnabled {
 		return nil
 	}
-	if len(c.NativeOAuthGoogleAudienceList()) == 0 && len(c.NativeOAuthAppleAudienceList()) == 0 {
+	if len(c.NativeOAuthGoogleAudienceList()) == 0 && len(c.NativeOAuthAppleAudienceList()) == 0 &&
+		len(c.NativeOAuthGoogleAudiencesByProductMap()) == 0 && len(c.NativeOAuthAppleAudiencesByProductMap()) == 0 {
 		return errors.New("config: GATEWAY_NATIVE_OAUTH_ENABLED=true requires at least one of " +
-			"GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES or GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES")
+			"GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES, GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES, " +
+			"GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT, or GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT")
 	}
 	for _, raw := range strings.Split(c.NativeOAuthProductProjects, ",") {
 		raw = strings.TrimSpace(raw)
@@ -1264,6 +1332,30 @@ func (c *Config) validateNativeOAuth() error {
 		if !ok || strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
 			return fmt.Errorf("config: GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS entry %q is malformed "+
 				"(want product=projectID)", raw)
+		}
+	}
+	if err := validateAudiencesByProduct(
+		"GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT", c.NativeOAuthGoogleAudiencesByProduct,
+	); err != nil {
+		return err
+	}
+	return validateAudiencesByProduct(
+		"GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT", c.NativeOAuthAppleAudiencesByProduct,
+	)
+}
+
+// validateAudiencesByProduct rejects a malformed per-product audience map: an
+// entry with no "=", an empty product, or an empty (whitespace-only) audience
+// list. envName names the offending variable for the operator-facing error.
+func validateAudiencesByProduct(envName, raw string) error {
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(k) == "" || len(strings.Fields(v)) == 0 {
+			return fmt.Errorf("config: %s entry %q is malformed (want product=aud1 aud2)", envName, entry)
 		}
 	}
 	return nil

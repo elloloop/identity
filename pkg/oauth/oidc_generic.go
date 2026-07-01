@@ -3,7 +3,6 @@ package oauth
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -336,24 +335,9 @@ type oidcIDClaims struct {
 }
 
 func (o *oidcExchanger) verifyIDToken(ctx context.Context, jwks *jwksCache, raw, issuer string) (*oidcIDClaims, error) {
-	set, err := jwks.Get(ctx)
+	payload, err := verifyJWSWithRotation(ctx, jwks, raw, oidcAllowedAlgs...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: jwks: %w", ErrIdentityVerification, err)
-	}
-
-	payload, err := verifyJWSWithAlgs(raw, set, oidcAllowedAlgs...)
-	if err != nil && errors.Is(err, errKeyNotFound) {
-		// A signing key we don't know about may indicate a rotation;
-		// invalidate the cache and retry once with fresh keys.
-		jwks.Invalidate()
-		set2, fErr := jwks.Get(ctx)
-		if fErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
-		}
-		payload, err = verifyJWSWithAlgs(raw, set2, oidcAllowedAlgs...)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIdentityVerification, err)
+		return nil, err
 	}
 
 	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))

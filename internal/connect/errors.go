@@ -37,7 +37,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrOAuthCodeInvalid),
 		errors.Is(err, service.ErrEmailLoginCodeInvalid),
 		errors.Is(err, service.ErrMagicLinkInvalid),
-		errors.Is(err, service.ErrPhoneCodeInvalid):
+		errors.Is(err, service.ErrPhoneCodeInvalid),
+		errors.Is(err, service.ErrNativeTokenReplayed):
 		return connect.NewError(connect.CodeUnauthenticated, err)
 
 	case errors.Is(err, service.ErrInvalidArgument),
