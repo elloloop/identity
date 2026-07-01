@@ -9,11 +9,39 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
+
+const (
+	// maxNativeReplayTTL bounds how long a redeemed native token's replay key
+	// is retained. Google ID tokens live ~1h; the replay cache never needs to
+	// remember a redeemed key past the token's own `exp`, and a mis-issued
+	// far-future `exp` must not pin a row indefinitely, so retention is
+	// min(exp, now+max).
+	maxNativeReplayTTL = time.Hour
+	// defaultNativeReplayTTL is the retention used when a token carries no
+	// `exp`. Defensive: checkTimes already tolerates a zero `exp`, so the
+	// replay row still needs a bounded lifetime.
+	defaultNativeReplayTTL = 5 * time.Minute
+)
+
+// NativeVerification is the result of verifying a native ID token: the
+// canonical Identity plus the material NativeOAuthLogin needs to enforce
+// single-use (replay protection). ReplayKey uniquely identifies the one
+// issued token — the token's `jti` when the provider stamps one, else a
+// stable digest of (provider|iss|sub|iat|aud|nonce). ExpiresAtMs is the
+// token's `exp` (epoch ms, bounded to a sane max) so the redeemed-key row
+// is retained only as long as the token could still be presented.
+type NativeVerification struct {
+	Identity    *Identity
+	ReplayKey   string
+	ExpiresAtMs int64
+}
 
 // googleIssuers are the two issuer strings Google stamps on an ID token. The
 // non-https form is historical but still emitted, so both are accepted (this
@@ -136,7 +164,7 @@ func NewNativeVerifier(cfg NativeVerifierConfig) *NativeVerifier {
 // returns an error wrapping ErrIdentityVerification or ErrEmailNotVerified so
 // the caller can map it to a single, safe Unauthenticated response — the reason
 // (bad aud, wrong product, expired, …) is never leaked to the client.
-func (v *NativeVerifier) Verify(ctx context.Context, provider, idToken, rawNonce, product string) (*Identity, error) {
+func (v *NativeVerifier) Verify(ctx context.Context, provider, idToken, rawNonce, product string) (*NativeVerification, error) {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "google":
 		return v.verifyGoogle(ctx, idToken, product)
@@ -147,7 +175,7 @@ func (v *NativeVerifier) Verify(ctx context.Context, provider, idToken, rawNonce
 	}
 }
 
-func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken, product string) (*Identity, error) {
+func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken, product string) (*NativeVerification, error) {
 	auds := audsFor(product, v.googleAudsByProduct, v.googleAuds)
 	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: google native login not configured", ErrIdentityVerification)
@@ -184,14 +212,14 @@ func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken, product stri
 	if !claims.EmailVerified {
 		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, email)
 	}
-	return &Identity{
+	return v.buildVerification(&Identity{
 		ProviderUserID: claims.Sub,
 		Email:          email,
 		EmailVerified:  true,
 		Name:           claims.Name,
 		AvatarURL:      claims.Picture,
 		Provider:       "google",
-	}, nil
+	}, tok, "google", ""), nil
 }
 
 // nativeAppleClaims extends the hosted appleIDClaims (polymorphic
@@ -201,7 +229,7 @@ type nativeAppleClaims struct {
 	Nonce string `json:"nonce"`
 }
 
-func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, product string) (*Identity, error) {
+func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, product string) (*NativeVerification, error) {
 	auds := audsFor(product, v.appleAudsByProduct, v.appleAuds)
 	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: apple native login not configured", ErrIdentityVerification)
@@ -252,13 +280,64 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, pro
 	if !appleEmailVerified(claims.EmailVerified) {
 		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, email)
 	}
-	return &Identity{
+	return v.buildVerification(&Identity{
 		ProviderUserID: claims.Sub,
 		Email:          email,
 		EmailVerified:  true,
 		Name:           claims.Name,
 		Provider:       "apple",
-	}, nil
+	}, tok, "apple", claims.Nonce), nil
+}
+
+// buildVerification packages a verified Identity with the replay-cache
+// material derived from the same token. Both provider paths funnel through
+// it so the replay key and expiry are computed identically.
+func (v *NativeVerifier) buildVerification(id *Identity, tok jwt.Token, provider, nonce string) *NativeVerification {
+	return &NativeVerification{
+		Identity:    id,
+		ReplayKey:   nativeReplayKey(tok, provider, nonce),
+		ExpiresAtMs: v.replayExpiryMs(tok),
+	}
+}
+
+// replayExpiryMs is the epoch-ms bound after which the redeemed-key row may
+// be swept: the token's own `exp`, capped at now+maxNativeReplayTTL so a
+// mis-issued far-future `exp` cannot pin the row indefinitely. A token with
+// no `exp` gets defaultNativeReplayTTL.
+func (v *NativeVerifier) replayExpiryMs(tok jwt.Token) int64 {
+	now := v.now()
+	until := tok.Expiration()
+	if until.IsZero() {
+		until = now.Add(defaultNativeReplayTTL)
+	}
+	if capAt := now.Add(maxNativeReplayTTL); until.After(capAt) {
+		until = capAt
+	}
+	return until.UnixMilli()
+}
+
+// nativeReplayKey derives a stable identifier for a single issued native ID
+// token. When the provider stamps a `jti` that alone identifies the token
+// (unique per issuer); otherwise a digest over (provider|iss|sub|iat|aud|
+// nonce) uniquely names it — a re-issued token for the same subject differs
+// in `iat` (and `jti`/`nonce`), so a duplicate key can only be the SAME
+// bearer token replayed. Provider prefixes the key so a `jti` collision
+// across issuers cannot alias two distinct tokens.
+func nativeReplayKey(tok jwt.Token, provider, nonce string) string {
+	if jti := strings.TrimSpace(tok.JwtID()); jti != "" {
+		return provider + "|jti|" + jti
+	}
+	auds := append([]string(nil), tok.Audience()...)
+	sort.Strings(auds)
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		provider,
+		tok.Issuer(),
+		tok.Subject(),
+		strconv.FormatInt(tok.IssuedAt().Unix(), 10),
+		strings.Join(auds, ","),
+		nonce,
+	}, "\x00")))
+	return provider + "|d|" + hex.EncodeToString(sum[:])
 }
 
 // checkTimes enforces exp (not in the past) and iat (not in the future,

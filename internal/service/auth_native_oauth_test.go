@@ -164,14 +164,29 @@ func newNativeTestAuthServiceWith(t *testing.T, repo Repository, verifier Native
 
 // fakeNativeVerifier is a stub NativeIDTokenVerifier: it returns a fixed
 // identity (and/or error) regardless of the token, so NativeOAuthLogin's
-// post-verification branches can be driven directly.
+// post-verification branches can be driven directly. replayKey overrides the
+// synthesized per-identity replay key when a test needs two calls to collide
+// (a replay) or diverge; empty falls back to a stable key derived from the
+// identity so each distinct identity is single-use by default.
 type fakeNativeVerifier struct {
-	identity *oauth.Identity
-	err      error
+	identity  *oauth.Identity
+	replayKey string
+	err       error
 }
 
-func (f *fakeNativeVerifier) Verify(_ context.Context, _, _, _, _ string) (*oauth.Identity, error) {
-	return f.identity, f.err
+func (f *fakeNativeVerifier) Verify(_ context.Context, _, _, _, _ string) (*oauth.NativeVerification, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	key := f.replayKey
+	if key == "" && f.identity != nil {
+		key = "fake|" + f.identity.Provider + "|" + f.identity.ProviderUserID
+	}
+	return &oauth.NativeVerification{
+		Identity:    f.identity,
+		ReplayKey:   key,
+		ExpiresAtMs: 9_000_000_000_000,
+	}, nil
 }
 
 func defaultNativeProjects() *fakeNativeProjects {
@@ -622,6 +637,79 @@ func TestNativeOAuthLogin_IssueTokensError_Propagates(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errInjected), "got %v", err)
+}
+
+// A native ID token is single-use: the SAME token replayed after a successful
+// login is rejected as Unauthenticated. The replay cache — not the verifier —
+// is the gate, so both presentations pass verification but only the first
+// issues a session. This is the core of issue #299 item 2.
+func TestNativeOAuthLogin_ReplayedToken_Rejected(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+	svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), nil)
+
+	// A single issued token (fixed sub/iat/aud => one stable replay key).
+	tok := signer.googleToken(t, "g-replay", "replay@example.com", nativeGoogleAud)
+
+	// First redemption succeeds and issues a session.
+	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok, Product: "easyloops",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.NotEmpty(t, res.AccessToken)
+
+	// Replaying the identical token is rejected — no second session.
+	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok, Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "replay must be Unauthenticated, got %v", err)
+}
+
+// The replay cache is keyed per issued token, not per account: a DISTINCT
+// token for the same subject (a fresh login, different iat) is accepted after
+// an earlier token was redeemed. This proves single-use does not lock a user
+// out of subsequent logins.
+func TestNativeOAuthLogin_DistinctTokens_SameUser_BothAccepted(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+	svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), nil)
+
+	tok1 := signer.googleToken(t, "g-multi", "multi@example.com", nativeGoogleAud)
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok1, Product: "easyloops",
+	})
+	require.NoError(t, err)
+
+	// A second token for the same subject but a later iat => a different token,
+	// hence a different replay key => accepted.
+	signer.now = signer.now.Add(time.Minute)
+	tok2 := signer.googleToken(t, "g-multi", "multi@example.com", nativeGoogleAud)
+	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok2, Product: "easyloops",
+	})
+	require.NoError(t, err, "a distinct token for the same user must be accepted")
+}
+
+// A repo failure while recording the redemption propagates as an internal
+// error — NOT a client-facing Unauthenticated/InvalidArgument — so an
+// infrastructure fault is never mislabeled as a replay or caller error.
+func TestNativeOAuthLogin_RecordRedemptionError_Propagates(t *testing.T) {
+	er := newErrorRepo()
+	er.failRecordNativeTokenRedeem = true
+	verifier := &fakeNativeVerifier{identity: &oauth.Identity{
+		Provider: "google", ProviderUserID: "g-rec", Email: "rec@example.com", EmailVerified: true,
+	}}
+	svc := newNativeTestAuthServiceWith(t, er, verifier, defaultNativeProjects(), nil)
+
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: "tok", Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errInjected), "got %v", err)
+	assert.False(t, errors.Is(err, ErrUnauthenticated), "infra error leaked as Unauthenticated: %v", err)
+	assert.False(t, errors.Is(err, ErrInvalidArgument), "infra error leaked as InvalidArgument: %v", err)
 }
 
 // A project policy that mandates a second factor blocks native social login

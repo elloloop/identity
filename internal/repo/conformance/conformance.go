@@ -958,6 +958,108 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("NativeTokenRedemption_SingleUse_AndReplay", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			// First redemption of a key wins and returns a node id.
+			id, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-key-1", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("first Record: want nil, got %v", err)
+			}
+			if id == "" {
+				t.Fatal("RecordNativeTokenRedemption did not return a node id")
+			}
+			// Replaying the SAME key is rejected with ErrNativeTokenReplayed.
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-key-1", ExpiresAt: 9_000_000_000_000, CreatedAt: 200,
+			}); !errors.Is(err, service.ErrNativeTokenReplayed) {
+				t.Fatalf("replay Record: want ErrNativeTokenReplayed, got %v", err)
+			}
+			// A DIFFERENT key is a different token and is accepted.
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-key-2", ExpiresAt: 9_000_000_000_000, CreatedAt: 300,
+			}); err != nil {
+				t.Fatalf("distinct key Record: want nil, got %v", err)
+			}
+		})
+
+		t.Run("NativeTokenRedemption_RaceSingleWinner", func(t *testing.T) {
+			// Drives RecordNativeTokenRedemption from N goroutines against the
+			// same key. Exactly one wins; all others see
+			// ErrNativeTokenReplayed. The repository is the serialization point
+			// — the cross-driver equivalent of the multi-replica redeem race.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+
+			const N = 8
+			results := make(chan error, N)
+			start := make(chan struct{})
+			for i := 0; i < N; i++ {
+				go func() {
+					<-start
+					_, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+						ReplayKey: "ntr-race", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+					})
+					results <- err
+				}()
+			}
+			close(start)
+
+			winners := 0
+			losers := 0
+			for i := 0; i < N; i++ {
+				switch err := <-results; {
+				case err == nil:
+					winners++
+				case errors.Is(err, service.ErrNativeTokenReplayed):
+					losers++
+				default:
+					t.Errorf("loser got unexpected error: %v", err)
+				}
+			}
+			if winners != 1 {
+				t.Fatalf("RecordNativeTokenRedemption winners = %d, want 1 (losers=%d)", winners, losers)
+			}
+			if losers != N-1 {
+				t.Fatalf("RecordNativeTokenRedemption losers = %d, want %d", losers, N-1)
+			}
+		})
+
+		t.Run("NativeTokenRedemption_DeleteExpired", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-old", ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Record old: %v", err)
+			}
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-fresh", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Record fresh: %v", err)
+			}
+			if err := r.DeleteExpiredNativeTokenRedemptions(ctx, 5_000, 100); err != nil {
+				t.Fatalf("DeleteExpired: %v", err)
+			}
+			// The expired key was swept, so it can be recorded again (no replay).
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-old", ExpiresAt: 9_000_000_000_000, CreatedAt: 6_000,
+			}); err != nil {
+				t.Fatalf("Record after sweep: want nil, got %v", err)
+			}
+			// The fresh key survived, so re-recording it is still a replay.
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-fresh", ExpiresAt: 9_000_000_000_000, CreatedAt: 6_000,
+			}); !errors.Is(err, service.ErrNativeTokenReplayed) {
+				t.Fatalf("surviving key: want ErrNativeTokenReplayed, got %v", err)
+			}
+			if err := r.DeleteExpiredNativeTokenRedemptions(ctx, 5_000, 0); err == nil {
+				t.Fatal("DeleteExpired with limit 0: want error, got nil")
+			}
+		})
+
 		t.Run("EmailLoginCode_UpsertFindConsume", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)

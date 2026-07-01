@@ -119,6 +119,7 @@ type fakeRepo struct {
 	passkeyChallenges  map[string]*PasskeyChallengeRecord
 	qrSessions         map[string]*QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*OAuthOneTimeCodeRecord
+	nativeRedemptions  map[string]*NativeTokenRedemptionRecord
 	emailLoginCodes    map[string]*EmailLoginCodeRecord
 	magicLinkTokens    map[string]*MagicLinkTokenRecord
 	phoneVerifyCodes   map[string]*PhoneVerificationCodeRecord
@@ -142,6 +143,7 @@ func newFakeRepo() *fakeRepo {
 		passkeyChallenges:  make(map[string]*PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*OAuthOneTimeCodeRecord),
+		nativeRedemptions:  make(map[string]*NativeTokenRedemptionRecord),
 		emailLoginCodes:    make(map[string]*EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*PhoneVerificationCodeRecord),
@@ -695,6 +697,21 @@ func (r *fakeRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, a
 		return &cp, nil
 	}
 	return nil, ErrOAuthCodeInvalid
+}
+
+func (r *fakeRepo) RecordNativeTokenRedemption(_ context.Context, rec *NativeTokenRedemptionRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.nativeRedemptions {
+		if e.ReplayKey == rec.ReplayKey {
+			return "", ErrNativeTokenReplayed
+		}
+	}
+	id := nextNodeID()
+	rec.NodeID = id
+	cp := *rec
+	r.nativeRedemptions[id] = &cp
+	return id, nil
 }
 
 func (r *fakeRepo) UpsertEmailLoginCode(_ context.Context, rec *EmailLoginCodeRecord) (string, error) {
@@ -1565,6 +1582,22 @@ func (r *fakeRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs in
 		}
 		if c.ExpiresAt < beforeMs {
 			delete(r.oauthOneTimeCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteExpiredNativeTokenRedemptions(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, e := range r.nativeRedemptions {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if e.ExpiresAt < beforeMs {
+			delete(r.nativeRedemptions, id)
 			n++
 		}
 	}

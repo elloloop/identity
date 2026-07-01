@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -19,7 +20,7 @@ import (
 // email, a provider that returns no email) are testable without minting signed
 // JWTs against a live JWKS endpoint. *oauth.NativeVerifier satisfies it.
 type NativeIDTokenVerifier interface {
-	Verify(ctx context.Context, provider, idToken, rawNonce, product string) (*oauth.Identity, error)
+	Verify(ctx context.Context, provider, idToken, rawNonce, product string) (*oauth.NativeVerification, error)
 }
 
 // NativeOAuthProjectStore is the narrow control-plane lookup NativeOAuthLogin
@@ -75,7 +76,7 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 	// Scope the `aud` check to the requested product so a token minted for
 	// another product's OAuth client id is rejected here — before any project
 	// resolution or token issuance — even if its `aud` is valid globally.
-	identity, err := s.nativeVerifier.Verify(ctx, provider, params.IDToken, params.Nonce, params.Product)
+	verified, err := s.nativeVerifier.Verify(ctx, provider, params.IDToken, params.Nonce, params.Product)
 	if err != nil {
 		s.logger.Info("native_oauth_login_failed",
 			zap.String("provider", provider), zap.Error(err))
@@ -91,6 +92,7 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		)
 		return nil, s.mapOAuthErr(err)
 	}
+	identity := verified.Identity
 
 	// Resolve the product to a project and scope the rest of the call to it so
 	// linking + token issuance write under the product's project, independent
@@ -100,6 +102,32 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		return nil, err
 	}
 	ctx = WithProjectScope(ctx, scope)
+
+	// Replay protection: a native ID token is a bearer JWT valid until its
+	// `exp`, so a captured token could be redeemed more than once. Record the
+	// token's replay key BEFORE issuing any session; the first redemption
+	// wins, a second presentation of the SAME token hits the unique index and
+	// is rejected as Unauthenticated. Scoped to the resolved project (the
+	// token is bound to the product's OAuth client id), mirroring every other
+	// ephemeral auth artifact.
+	if err := s.recordNativeRedemption(ctx, verified); err != nil {
+		if errors.Is(err, ErrNativeTokenReplayed) {
+			s.logger.Info("native_oauth_login_replay",
+				zap.String("provider", provider))
+			s.audit.Log(
+				ctx, audit.EventOAuthLogin,
+				audit.WithIP(params.IPAddr), audit.WithUserAgent(params.UserAgent),
+				audit.WithSuccess(false),
+				audit.WithDetails(map[string]any{
+					"provider": provider,
+					"native":   true,
+					"reason":   "token_replay",
+				}),
+			)
+			return nil, fmt.Errorf("%w", ErrUnauthenticated)
+		}
+		return nil, err
+	}
 
 	email := strings.ToLower(strings.TrimSpace(identity.Email))
 	if email == "" {
@@ -155,6 +183,23 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		RefreshToken: refreshToken,
 		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
+}
+
+// recordNativeRedemption records the verified token's replay key so the same
+// bearer token cannot be redeemed twice. A verification with no replay key
+// (only the fake verifier used in tests can produce that) skips the write —
+// the concrete verifier always derives one. Returns ErrNativeTokenReplayed
+// when the key was already recorded (a replay), else any infrastructure error.
+func (s *AuthService) recordNativeRedemption(ctx context.Context, verified *oauth.NativeVerification) error {
+	if verified.ReplayKey == "" {
+		return nil
+	}
+	_, err := s.repo(ctx).RecordNativeTokenRedemption(ctx, &NativeTokenRedemptionRecord{
+		ReplayKey: verified.ReplayKey,
+		ExpiresAt: verified.ExpiresAtMs,
+		CreatedAt: s.nowMs(),
+	})
+	return err
 }
 
 // resolveNativeProject maps a native client's product selector to the

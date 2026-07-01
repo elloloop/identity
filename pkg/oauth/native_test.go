@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -58,10 +59,11 @@ func TestNativeVerifier_Google_Valid(t *testing.T) {
 		"name":           "Ada Lovelace",
 		"picture":        "https://pic",
 	})
-	id, err := f.veri.Verify(context.Background(), "google", tok, "", "")
+	res, err := f.veri.Verify(context.Background(), "google", tok, "", "")
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
+	id := res.Identity
 	if id.Provider != "google" || id.ProviderUserID != "google-sub-123" {
 		t.Fatalf("bad identity: %+v", id)
 	}
@@ -70,6 +72,9 @@ func TestNativeVerifier_Google_Valid(t *testing.T) {
 	}
 	if !id.EmailVerified || id.Name != "Ada Lovelace" || id.AvatarURL != "https://pic" {
 		t.Fatalf("bad identity fields: %+v", id)
+	}
+	if res.ReplayKey == "" {
+		t.Fatal("verify: empty replay key")
 	}
 }
 
@@ -142,10 +147,11 @@ func TestNativeVerifier_Apple_ValidWithNonce(t *testing.T) {
 		"email_verified": "true", // Apple sends string
 		"nonce":          appleNonceHashHex(rawNonce),
 	})
-	id, err := f.veri.Verify(context.Background(), "apple", tok, rawNonce, "")
+	res, err := f.veri.Verify(context.Background(), "apple", tok, rawNonce, "")
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
+	id := res.Identity
 	if id.Provider != "apple" || id.ProviderUserID != "apple-sub-1" || id.Email != "user@icloud.com" {
 		t.Fatalf("bad identity: %+v", id)
 	}
@@ -211,12 +217,12 @@ func TestNativeVerifier_Apple_HideMyEmailRelay(t *testing.T) {
 		"email_verified":   true,
 		"is_private_email": "true",
 	})
-	id, err := f.veri.Verify(context.Background(), "apple", tok, "", "")
+	res, err := f.veri.Verify(context.Background(), "apple", tok, "", "")
 	if err != nil {
 		t.Fatalf("relay address should be accepted: %v", err)
 	}
-	if id.Email != "abc123@privaterelay.appleid.com" {
-		t.Fatalf("relay email not preserved: %q", id.Email)
+	if res.Identity.Email != "abc123@privaterelay.appleid.com" {
+		t.Fatalf("relay email not preserved: %q", res.Identity.Email)
 	}
 }
 
@@ -493,4 +499,91 @@ func materializeTimes(in map[string]any, now time.Time) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// ── Replay-key derivation (issue #299 item 2) ────────────────────────────
+
+func TestNativeVerifier_ReplayKey_UsesJTIWhenPresent(t *testing.T) {
+	f := newNativeFixture(t, []string{"aud-1"}, nil)
+	tok := f.key.signIDToken(t, map[string]any{
+		"iss": "https://accounts.google.com", "sub": "s", "aud": "aud-1",
+		"exp": f.now.Add(time.Hour), "iat": f.now,
+		"email": "a@b.com", "email_verified": true,
+		"jti": "unique-token-id-1",
+	})
+	res, err := f.veri.Verify(context.Background(), "google", tok, "", "")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if want := "google|jti|unique-token-id-1"; res.ReplayKey != want {
+		t.Fatalf("ReplayKey = %q, want %q", res.ReplayKey, want)
+	}
+}
+
+func TestNativeVerifier_ReplayKey_DigestWhenNoJTI(t *testing.T) {
+	f := newNativeFixture(t, []string{"aud-1"}, nil)
+	mk := func(sub string, iat time.Time) *NativeVerification {
+		tok := f.key.signIDToken(t, map[string]any{
+			"iss": "https://accounts.google.com", "sub": sub, "aud": "aud-1",
+			"exp": iat.Add(time.Hour), "iat": iat,
+			"email": "a@b.com", "email_verified": true,
+		})
+		res, err := f.veri.Verify(context.Background(), "google", tok, "", "")
+		if err != nil {
+			t.Fatalf("verify: %v", err)
+		}
+		return res
+	}
+	// No jti -> a stable digest key, prefixed by provider.
+	a := mk("sub-1", f.now)
+	if !strings.HasPrefix(a.ReplayKey, "google|d|") {
+		t.Fatalf("digest key should be provider-prefixed, got %q", a.ReplayKey)
+	}
+	// The SAME token (same claims) yields the SAME key — a replay is detectable.
+	aAgain := mk("sub-1", f.now)
+	if a.ReplayKey != aAgain.ReplayKey {
+		t.Fatalf("identical claims produced different keys: %q vs %q", a.ReplayKey, aAgain.ReplayKey)
+	}
+	// A different subject is a DIFFERENT token -> different key.
+	if b := mk("sub-2", f.now); a.ReplayKey == b.ReplayKey {
+		t.Fatal("distinct subjects must yield distinct replay keys")
+	}
+	// A re-issued token for the same subject differs in iat -> different key.
+	if c := mk("sub-1", f.now.Add(time.Second)); a.ReplayKey == c.ReplayKey {
+		t.Fatal("distinct iat must yield distinct replay keys")
+	}
+}
+
+func TestNativeVerifier_ReplayExpiry_CappedAtMax(t *testing.T) {
+	f := newNativeFixture(t, []string{"aud-1"}, nil)
+	// exp far in the future (10h) must be capped at now + maxNativeReplayTTL.
+	tok := f.key.signIDToken(t, map[string]any{
+		"iss": "https://accounts.google.com", "sub": "s", "aud": "aud-1",
+		"exp": f.now.Add(10 * time.Hour), "iat": f.now,
+		"email": "a@b.com", "email_verified": true,
+	})
+	res, err := f.veri.Verify(context.Background(), "google", tok, "", "")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if want := f.now.Add(maxNativeReplayTTL).UnixMilli(); res.ExpiresAtMs != want {
+		t.Fatalf("ExpiresAtMs = %d, want capped %d", res.ExpiresAtMs, want)
+	}
+}
+
+func TestNativeVerifier_ReplayExpiry_UsesTokenExpWhenWithinCap(t *testing.T) {
+	f := newNativeFixture(t, []string{"aud-1"}, nil)
+	exp := f.now.Add(15 * time.Minute)
+	tok := f.key.signIDToken(t, map[string]any{
+		"iss": "https://accounts.google.com", "sub": "s", "aud": "aud-1",
+		"exp": exp, "iat": f.now,
+		"email": "a@b.com", "email_verified": true,
+	})
+	res, err := f.veri.Verify(context.Background(), "google", tok, "", "")
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if res.ExpiresAtMs != exp.UnixMilli() {
+		t.Fatalf("ExpiresAtMs = %d, want token exp %d", res.ExpiresAtMs, exp.UnixMilli())
+	}
 }

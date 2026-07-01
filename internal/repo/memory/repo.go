@@ -51,6 +51,7 @@ type Repo struct {
 	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
 	qrSessions         map[string]*service.QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
+	nativeRedemptions  map[string]*service.NativeTokenRedemptionRecord
 	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
 	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
@@ -101,6 +102,7 @@ func newStore() *Repo {
 		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
+		nativeRedemptions:  make(map[string]*service.NativeTokenRedemptionRecord),
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
@@ -769,6 +771,33 @@ func (r *Repo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, atMs 
 		return &cp, nil
 	}
 	return nil, service.ErrOAuthCodeInvalid
+}
+
+// RecordNativeTokenRedemption records a redeemed native ID token's replay
+// key, enforcing single-use. The mutex held across scan+insert makes the
+// insert-or-reject trivially atomic for the in-process driver: the first
+// call for a key inserts and returns nil; any second call with the same key
+// (a replay of the same bearer token) returns ErrNativeTokenReplayed —
+// matching the postgres/sqlite unique-index semantics.
+func (r *Repo) RecordNativeTokenRedemption(_ context.Context, rec *service.NativeTokenRedemptionRecord) (string, error) {
+	if rec == nil {
+		return "", errors.New("memory: RecordNativeTokenRedemption: nil record")
+	}
+	if rec.ReplayKey == "" {
+		return "", fmt.Errorf("%w: missing replay key", service.ErrInvalidArgument)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.nativeRedemptions {
+		if e.ReplayKey == rec.ReplayKey {
+			return "", service.ErrNativeTokenReplayed
+		}
+	}
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.nativeRedemptions[id] = &cp
+	return id, nil
 }
 
 // ── Email Login Codes (passwordless OTP) ──────────────────────────
@@ -1497,6 +1526,25 @@ func (r *Repo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs int64,
 		}
 		if c.ExpiresAt < beforeMs {
 			delete(r.oauthOneTimeCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *Repo) DeleteExpiredNativeTokenRedemptions(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memory: DeleteExpiredNativeTokenRedemptions: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, e := range r.nativeRedemptions {
+		if n >= limit {
+			break
+		}
+		if e.ExpiresAt < beforeMs {
+			delete(r.nativeRedemptions, id)
 			n++
 		}
 	}
