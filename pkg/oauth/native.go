@@ -24,14 +24,29 @@ var googleIssuers = []string{"https://accounts.google.com", "accounts.google.com
 // audiences must be non-empty for the verifier to accept that provider; a
 // provider with no configured audiences is treated as unsupported.
 type NativeVerifierConfig struct {
-	// GoogleAudiences is the set of accepted `aud` values for Google ID
-	// tokens — the web client id PLUS every per-platform (iOS/Android) OAuth
-	// client id the native SDKs present. Empty disables Google native login.
+	// GoogleAudiences is the GLOBAL fallback set of accepted `aud` values for
+	// Google ID tokens — the web client id PLUS every per-platform
+	// (iOS/Android) OAuth client id the native SDKs present. It is consulted
+	// only for a product with no entry in GoogleAudiencesByProduct. Empty
+	// disables Google native login for those products.
 	GoogleAudiences []string
-	// AppleAudiences is the set of accepted `aud` values for Apple ID tokens —
-	// the Services ID PLUS every native bundle id. Empty disables Apple native
-	// login.
+	// AppleAudiences is the GLOBAL fallback set of accepted `aud` values for
+	// Apple ID tokens — the Services ID PLUS every native bundle id. It is
+	// consulted only for a product with no entry in AppleAudiencesByProduct.
+	// Empty disables Apple native login for those products.
 	AppleAudiences []string
+
+	// GoogleAudiencesByProduct scopes the accepted Google `aud` values PER
+	// PRODUCT, keyed by the lower-cased product selector. When a product has an
+	// entry here, ONLY that entry's audiences are accepted for it — a token
+	// whose `aud` is valid for another product (or only globally) is rejected.
+	// A product with no entry falls back to GoogleAudiences.
+	GoogleAudiencesByProduct map[string][]string
+	// AppleAudiencesByProduct scopes the accepted Apple `aud` values PER
+	// PRODUCT, keyed by the lower-cased product selector. Same semantics as
+	// GoogleAudiencesByProduct: an entry is exclusive for its product, an
+	// absent product falls back to AppleAudiences.
+	AppleAudiencesByProduct map[string][]string
 
 	// GoogleJWKSURL / AppleJWKSURL override the default provider JWKS
 	// endpoints (used by tests to point at a stub). Empty uses the live URL.
@@ -52,16 +67,21 @@ type NativeVerifierConfig struct {
 // identityToken) WITHOUT an OAuth code exchange, producing a canonical
 // Identity. It reuses the same JWKS cache + JWS verification + claim parsing
 // the hosted Exchangers use; the only difference is that `aud` is matched
-// against a configured SET of native audiences (not a single web client id)
-// and, for Apple, the request nonce is verified against the id_token claim.
+// against the audience set of the REQUESTED PRODUCT (a per-product set when
+// configured, else the global fallback set — never a single web client id) and,
+// for Apple, the request nonce is verified against the id_token claim. Scoping
+// `aud` per product stops a token minted for product A's client id from being
+// redeemed as product B.
 type NativeVerifier struct {
-	googleAuds    map[string]bool
-	appleAuds     map[string]bool
-	googleIssuers []string
-	appleIssuer   string
-	googleJWKS    *jwksCache
-	appleJWKS     *jwksCache
-	now           func() time.Time
+	googleAuds          map[string]bool
+	appleAuds           map[string]bool
+	googleAudsByProduct map[string]map[string]bool
+	appleAudsByProduct  map[string]map[string]bool
+	googleIssuers       []string
+	appleIssuer         string
+	googleJWKS          *jwksCache
+	appleJWKS           *jwksCache
+	now                 func() time.Time
 }
 
 // NewNativeVerifier builds a NativeVerifier. JWKS caches are created for both
@@ -97,34 +117,39 @@ func NewNativeVerifier(cfg NativeVerifierConfig) *NativeVerifier {
 		aIssuer = cfg.AppleIssuer
 	}
 	return &NativeVerifier{
-		googleAuds:    toSet(cfg.GoogleAudiences),
-		appleAuds:     toSet(cfg.AppleAudiences),
-		googleIssuers: gIssuers,
-		appleIssuer:   aIssuer,
-		googleJWKS:    newJWKSCache(gJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
-		appleJWKS:     newJWKSCache(aJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
-		now:           cfg.Now,
+		googleAuds:          toSet(cfg.GoogleAudiences),
+		appleAuds:           toSet(cfg.AppleAudiences),
+		googleAudsByProduct: toSetByProduct(cfg.GoogleAudiencesByProduct),
+		appleAudsByProduct:  toSetByProduct(cfg.AppleAudiencesByProduct),
+		googleIssuers:       gIssuers,
+		appleIssuer:         aIssuer,
+		googleJWKS:          newJWKSCache(gJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
+		appleJWKS:           newJWKSCache(aJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
+		now:                 cfg.Now,
 	}
 }
 
-// Verify validates a native ID token for the given provider and returns a
-// canonical, verified Identity. rawNonce is the un-hashed nonce from the
-// native request (Apple only); pass "" for Google. Every failure returns an
-// error wrapping ErrIdentityVerification or ErrEmailNotVerified so the caller
-// can map it to a single, safe Unauthenticated response.
-func (v *NativeVerifier) Verify(ctx context.Context, provider, idToken, rawNonce string) (*Identity, error) {
+// Verify validates a native ID token for the given provider and product, and
+// returns a canonical, verified Identity. product selects the audience set the
+// token's `aud` is matched against (see audsFor); rawNonce is the un-hashed
+// nonce from the native request (Apple only); pass "" for Google. Every failure
+// returns an error wrapping ErrIdentityVerification or ErrEmailNotVerified so
+// the caller can map it to a single, safe Unauthenticated response — the reason
+// (bad aud, wrong product, expired, …) is never leaked to the client.
+func (v *NativeVerifier) Verify(ctx context.Context, provider, idToken, rawNonce, product string) (*Identity, error) {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "google":
-		return v.verifyGoogle(ctx, idToken)
+		return v.verifyGoogle(ctx, idToken, product)
 	case "apple":
-		return v.verifyApple(ctx, idToken, rawNonce)
+		return v.verifyApple(ctx, idToken, rawNonce, product)
 	default:
 		return nil, fmt.Errorf("%w: unsupported native provider %q", ErrIdentityVerification, provider)
 	}
 }
 
-func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken string) (*Identity, error) {
-	if len(v.googleAuds) == 0 {
+func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken, product string) (*Identity, error) {
+	auds := audsFor(product, v.googleAudsByProduct, v.googleAuds)
+	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: google native login not configured", ErrIdentityVerification)
 	}
 	payload, err := verifyJWSWithRotation(ctx, v.googleJWKS, idToken)
@@ -138,7 +163,7 @@ func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken string) (*Ide
 	if !containsString(v.googleIssuers, tok.Issuer()) {
 		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, tok.Issuer())
 	}
-	if !audInSet(tok.Audience(), v.googleAuds) {
+	if !audInSet(tok.Audience(), auds) {
 		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
 	}
 	if err := v.checkTimes(tok); err != nil {
@@ -176,8 +201,9 @@ type nativeAppleClaims struct {
 	Nonce string `json:"nonce"`
 }
 
-func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce string) (*Identity, error) {
-	if len(v.appleAuds) == 0 {
+func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, product string) (*Identity, error) {
+	auds := audsFor(product, v.appleAudsByProduct, v.appleAuds)
+	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: apple native login not configured", ErrIdentityVerification)
 	}
 	payload, err := verifyJWSWithRotation(ctx, v.appleJWKS, idToken)
@@ -191,7 +217,7 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce stri
 	if tok.Issuer() != v.appleIssuer {
 		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, tok.Issuer())
 	}
-	if !audInSet(tok.Audience(), v.appleAuds) {
+	if !audInSet(tok.Audience(), auds) {
 		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
 	}
 	if err := v.checkTimes(tok); err != nil {
@@ -294,6 +320,44 @@ func nonceMatches(rawNonce, claim string) bool {
 	sum := sha256.Sum256([]byte(rawNonce))
 	return claim == hex.EncodeToString(sum[:]) ||
 		claim == base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// audsFor returns the audience set to match a token's `aud` against for the
+// given product: the product's per-product set when one is configured (keyed
+// case-insensitively), otherwise the global fallback set. A per-product entry
+// is EXCLUSIVE — once a product has its own set, the global set is not merged
+// in, so a token minted for a different product's client id is rejected even
+// if that client id is globally allowed.
+func audsFor(product string, byProduct map[string]map[string]bool, global map[string]bool) map[string]bool {
+	if len(byProduct) > 0 {
+		if set, ok := byProduct[strings.ToLower(strings.TrimSpace(product))]; ok {
+			return set
+		}
+	}
+	return global
+}
+
+// toSetByProduct converts a product→audiences map into a product→set map,
+// lower-casing product keys and dropping products whose audience list is empty
+// after trimming. A nil or empty input yields nil.
+func toSetByProduct(in map[string][]string) map[string]map[string]bool {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]bool, len(in))
+	for product, auds := range in {
+		key := strings.ToLower(strings.TrimSpace(product))
+		if key == "" {
+			continue
+		}
+		if set := toSet(auds); len(set) > 0 {
+			out[key] = set
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func toSet(items []string) map[string]bool {

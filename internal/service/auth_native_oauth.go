@@ -19,7 +19,7 @@ import (
 // email, a provider that returns no email) are testable without minting signed
 // JWTs against a live JWKS endpoint. *oauth.NativeVerifier satisfies it.
 type NativeIDTokenVerifier interface {
-	Verify(ctx context.Context, provider, idToken, rawNonce string) (*oauth.Identity, error)
+	Verify(ctx context.Context, provider, idToken, rawNonce, product string) (*oauth.Identity, error)
 }
 
 // NativeOAuthProjectStore is the narrow control-plane lookup NativeOAuthLogin
@@ -50,8 +50,9 @@ type NativeOAuthLoginParams struct {
 // account-linking + token-issuance path as the hosted OAuthLogin.
 //
 // The flow is, in order: gate on the enabled flag → verify the ID token
-// server-side (signature, issuer, expiry, audience, and — for Apple — the
-// nonce) → resolve product→project and inject a ProjectScope → match
+// server-side (signature, issuer, expiry, the requested product's audience set,
+// and — for Apple — the nonce) → resolve product→project and inject a
+// ProjectScope → match
 // (provider, sub) then email, creating the user if new → issue the token pair.
 // It carries the same enumeration-safety and verified-email posture as
 // OAuthLogin: a provider-verified identity proves email control, so the user
@@ -71,7 +72,10 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		return nil, fmt.Errorf("%w: missing id_token", ErrInvalidArgument)
 	}
 
-	identity, err := s.nativeVerifier.Verify(ctx, provider, params.IDToken, params.Nonce)
+	// Scope the `aud` check to the requested product so a token minted for
+	// another product's OAuth client id is rejected here — before any project
+	// resolution or token issuance — even if its `aud` is valid globally.
+	identity, err := s.nativeVerifier.Verify(ctx, provider, params.IDToken, params.Nonce, params.Product)
 	if err != nil {
 		s.logger.Info("native_oauth_login_failed",
 			zap.String("provider", provider), zap.Error(err))

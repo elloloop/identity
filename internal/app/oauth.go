@@ -21,17 +21,25 @@ func buildNativeOAuthVerifier(cfg *config.Config, logger *zap.Logger) *oauth.Nat
 	}
 	googleAuds := cfg.NativeOAuthGoogleAudienceList()
 	appleAuds := cfg.NativeOAuthAppleAudienceList()
-	if !cfg.NativeOAuthEnabled || (len(googleAuds) == 0 && len(appleAuds) == 0) {
+	googleByProduct := cfg.NativeOAuthGoogleAudiencesByProductMap()
+	appleByProduct := cfg.NativeOAuthAppleAudiencesByProductMap()
+	if !cfg.NativeOAuthEnabled ||
+		(len(googleAuds) == 0 && len(appleAuds) == 0 &&
+			len(googleByProduct) == 0 && len(appleByProduct) == 0) {
 		return nil
 	}
 	logger.Info(
 		"native_oauth_enabled",
 		zap.Int("google_audiences", len(googleAuds)),
 		zap.Int("apple_audiences", len(appleAuds)),
+		zap.Int("google_audience_products", len(googleByProduct)),
+		zap.Int("apple_audience_products", len(appleByProduct)),
 	)
 	return oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
-		GoogleAudiences: googleAuds,
-		AppleAudiences:  appleAuds,
+		GoogleAudiences:          googleAuds,
+		AppleAudiences:           appleAuds,
+		GoogleAudiencesByProduct: googleByProduct,
+		AppleAudiencesByProduct:  appleByProduct,
 	})
 }
 

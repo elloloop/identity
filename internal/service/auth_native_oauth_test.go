@@ -170,7 +170,7 @@ type fakeNativeVerifier struct {
 	err      error
 }
 
-func (f *fakeNativeVerifier) Verify(_ context.Context, _, _, _ string) (*oauth.Identity, error) {
+func (f *fakeNativeVerifier) Verify(_ context.Context, _, _, _, _ string) (*oauth.Identity, error) {
 	return f.identity, f.err
 }
 
@@ -272,6 +272,75 @@ func TestNativeOAuthLogin_WrongAud_Unauthenticated(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated), "got %v", err)
+}
+
+func TestNativeOAuthLogin_PerProductAudience_CrossProductRejected(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+	const (
+		audEasyloops = "easyloops-ios.apps.googleusercontent.com"
+		audTortoise  = "tortoise-ios.apps.googleusercontent.com"
+	)
+	// Per-product audiences: each product accepts ONLY its own client id.
+	verifier := oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
+		GoogleAudiencesByProduct: map[string][]string{
+			"easyloops": {audEasyloops},
+			"tortoise":  {audTortoise},
+		},
+		GoogleJWKSURL: signer.url,
+		AppleJWKSURL:  signer.url,
+		Now:           func() time.Time { return signer.now },
+	})
+	svc := newNativeTestAuthServiceWith(t, repo, verifier, defaultNativeProjects(), nil)
+
+	// Token minted for tortoise's OAuth client id.
+	tok := signer.googleToken(t, "g-sub-cross", "cross@example.com", audTortoise)
+
+	// (a) token for product tortoise, presented as easyloops → Unauthenticated.
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok, Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "cross-product token must be rejected, got %v", err)
+
+	// (b) the same token for its real product tortoise → succeeds.
+	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok, Product: "tortoise",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "cross@example.com", res.User.Email)
+}
+
+func TestNativeOAuthLogin_PerProductWithGlobalFallback(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+	const audEasyloops = "easyloops-ios.apps.googleusercontent.com"
+	// easyloops has an exclusive per-product set; tortoise has none and falls
+	// back to the global audiences (the backward-compatible path).
+	verifier := oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
+		GoogleAudiences:          []string{nativeGoogleAud},
+		GoogleAudiencesByProduct: map[string][]string{"easyloops": {audEasyloops}},
+		GoogleJWKSURL:            signer.url,
+		AppleJWKSURL:             signer.url,
+		Now:                      func() time.Time { return signer.now },
+	})
+	svc := newNativeTestAuthServiceWith(t, repo, verifier, defaultNativeProjects(), nil)
+
+	// (c) a token with the GLOBAL aud is accepted for tortoise (no per-product
+	// entry → global fallback).
+	globalTok := signer.googleToken(t, "g-sub-g", "g@example.com", nativeGoogleAud)
+	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: globalTok, Product: "tortoise",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "g@example.com", res.User.Email)
+
+	// ... yet rejected for easyloops, whose exclusive set does not include it.
+	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: globalTok, Product: "easyloops",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "global aud must not be accepted for a scoped product, got %v", err)
 }
 
 func TestNativeOAuthLogin_Disabled_FailedPrecondition(t *testing.T) {
