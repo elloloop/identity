@@ -14,13 +14,18 @@
 -- The row is retained only until expires_at_ms (= the token's `exp`, capped)
 -- so the GC sweeper can reap it once the token can no longer be presented.
 --
+-- project_id carries the FOREIGN KEY to projects(id) ON DELETE CASCADE that
+-- every data-plane / ephemeral-auth table gained in migration 0015 (and that
+-- the sqlite driver's 0007 mirror also has): a redemption row can only exist
+-- under a real control-plane Project, and dropping a project reaps its rows.
+--
 -- Indexes:
 --   * (project_id, replay_key) unique — the insert-or-reject CAS target.
 --   * (project_id, expires_at_ms) — for the GC sweeper batch delete.
 
 CREATE TABLE native_token_redemptions (
     id              TEXT PRIMARY KEY,
-    project_id      TEXT NOT NULL,
+    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     replay_key      TEXT NOT NULL,
     expires_at_ms   BIGINT NOT NULL,
     created_at_ms   BIGINT NOT NULL
