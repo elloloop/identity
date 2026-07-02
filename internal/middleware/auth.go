@@ -57,18 +57,31 @@ var AuthExemptPaths = map[string]bool{
 	// X-Admin-Secret header against GATEWAY_ADMIN_API_SECRET, and the whole
 	// surface is disabled (CodeUnimplemented) when that secret is unset. So
 	// the secret check, not the JWT, is their auth.
-	"/identity.v1.IdentityService/AdminCreateProject":           true,
-	"/identity.v1.IdentityService/AdminCreateProjectCredential": true,
-	"/identity.v1.IdentityService/AdminAddProjectAuthDomain":    true,
-	"/identity.v1.IdentityService/AddProjectAuthDomain":         true,
-	"/identity.v1.IdentityService/VerifyProjectAuthDomain":      true,
-	"/identity.v1.IdentityService/ListProjectAuthDomains":       true,
-	"/identity.v1.IdentityService/SetPrimaryAuthDomain":         true,
-	"/identity.v1.IdentityService/AdminCreateTenant":            true,
-	"/identity.v1.IdentityService/AdminAddTenantAdmin":          true,
-	"/.well-known/jwks.json":                                    true,
-	"/health":                                                   true,
-	"/healthz":                                                  true,
+	"/identity.v1.IdentityService/AdminCreateProject":              true,
+	"/identity.v1.IdentityService/AdminCreateProjectCredential":    true,
+	"/identity.v1.IdentityService/AdminAddProjectAuthDomain":       true,
+	"/identity.v1.IdentityService/AddProjectAuthDomain":            true,
+	"/identity.v1.IdentityService/VerifyProjectAuthDomain":         true,
+	"/identity.v1.IdentityService/ListProjectAuthDomains":          true,
+	"/identity.v1.IdentityService/SetPrimaryAuthDomain":            true,
+	"/identity.v1.IdentityService/AdminCreateTenant":               true,
+	"/identity.v1.IdentityService/AdminAddTenantAdmin":             true,
+	"/identity.v1.IdentityService/UpsertLoginPolicy":               true,
+	"/identity.v1.IdentityService/GetLoginPolicy":                  true,
+	"/identity.v1.IdentityService/DeleteLoginPolicy":               true,
+	"/identity.v1.IdentityService/UpsertProjectConfig":             true,
+	"/identity.v1.IdentityService/GetProjectConfig":                true,
+	"/identity.v1.IdentityService/AdminSetProjectOAuthProvider":    true,
+	"/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider": true,
+	"/identity.v1.IdentityService/AdminListProjectOAuthProviders":  true,
+	// CreateFirstPlatformAdmin is the ungated zero-config bootstrap: it carries
+	// NO admin secret and NO JWT (a fresh deployer has neither), so it must be
+	// JWT-exempt or the first operator could never be created. It self-secures
+	// by closing permanently once any platform admin exists.
+	"/identity.v1.IdentityService/CreateFirstPlatformAdmin": true,
+	"/.well-known/jwks.json":                                true,
+	"/health":                                               true,
+	"/healthz":                                              true,
 }
 
 // hostedOAuthPrefix is the path prefix for the browser-facing hosted

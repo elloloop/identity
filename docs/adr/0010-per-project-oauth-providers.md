@@ -79,13 +79,22 @@ another project's providers.
   (`pkg/secretcrypto`), reused by TOTP secret storage, so the crypto lives in one
   place.
 - **Neutral.** GitHub is not part of the per-project schema; it remains an
-  env-only provider available to the default project. Per-project GitHub and the
-  admin RPC to author `config_json.oauth` are follow-ups.
+  env-only provider available to the default project. Per-project GitHub is a
+  follow-up.
+- **Positive.** Authoring landed: three operator-only admin RPCs
+  (`AdminSetProjectOAuthProvider` / `AdminDeleteProjectOAuthProvider` /
+  `AdminListProjectOAuthProviders`) let an operator author a project's providers
+  by sending secrets in **plaintext over TLS**; the server encrypts them with
+  `GATEWAY_PROJECT_SECRETS_KEY` and merges the provider into `config_json`
+  without disturbing other keys. Reads redact secrets (`has_*` booleans). The
+  merge path is the write-time validation gate for the whole `config_json` OAuth
+  subtree — including the Microsoft `issuer_format` single-`%s` rule.
 - **Negative / operational.** Postgres deployments must set
   `GATEWAY_PROJECT_SECRETS_KEY`; boot fails fast without it. Losing/rotating the
   key invalidates every stored provider secret (they must be re-encrypted).
 - **Scope.** Generic per-project OIDC is discovery-based (issuer or
   discovery_url), mirroring the env OIDC provider; there are no per-endpoint
   overrides, to avoid dead config knobs the exchanger ignores.
-- **Follow-ups.** The native mobile flow and native Microsoft (PR B), and an
-  admin management RPC to author a project's OAuth providers (PR C).
+- **Follow-ups.** The native mobile flow and native Microsoft (PR B) and the
+  provider authoring admin API (PR C) have landed. Remaining: per-project GitHub
+  and Microsoft nOAuth hardening (#311).

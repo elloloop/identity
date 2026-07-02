@@ -792,16 +792,23 @@ type InvitationRecord struct {
 // ── Sentinel errors ────────────────────────────────────────────────────
 
 var (
-	ErrUnauthenticated   = errors.New("unauthenticated")
-	ErrPermissionDenied  = errors.New("permission denied")
-	ErrInvalidArgument   = errors.New("invalid argument")
-	ErrNotFound          = errors.New("not found")
-	ErrAlreadyExists     = errors.New("already exists")
-	ErrAccountLocked     = errors.New("account locked")
-	ErrNoPasswordSet     = errors.New("no password set for this account")
-	ErrAccountNotActive  = errors.New("account is not active")
-	ErrInvitationPending = errors.New("account has not completed invitation")
-	ErrIDVRequired       = errors.New("identity verification required")
+	ErrUnauthenticated  = errors.New("unauthenticated")
+	ErrPermissionDenied = errors.New("permission denied")
+	ErrInvalidArgument  = errors.New("invalid argument")
+	ErrNotFound         = errors.New("not found")
+	// ErrProjectSecretsKeyMissing is returned when an admin write carries a
+	// plaintext provider secret to encrypt but GATEWAY_PROJECT_SECRETS_KEY is
+	// not configured, so the server cannot encrypt it for storage. It is a
+	// server-configuration precondition (mapped to FailedPrecondition), not a
+	// bad client argument. In a postgres control plane the key is required, so
+	// this only fires on a misconfigured or non-control-plane build.
+	ErrProjectSecretsKeyMissing = errors.New("GATEWAY_PROJECT_SECRETS_KEY is not configured; cannot store per-project OAuth secrets")
+	ErrAlreadyExists            = errors.New("already exists")
+	ErrAccountLocked            = errors.New("account locked")
+	ErrNoPasswordSet            = errors.New("no password set for this account")
+	ErrAccountNotActive         = errors.New("account is not active")
+	ErrInvitationPending        = errors.New("account has not completed invitation")
+	ErrIDVRequired              = errors.New("identity verification required")
 	// ErrEmailVerificationRequired is returned when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
 	// is enabled and the account's email is not yet verified. Like ErrIDVRequired
 	// it is a "do something else first" precondition (verify your email, then

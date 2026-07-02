@@ -19,100 +19,103 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	IdentityService_BeginOAuthLogin_FullMethodName               = "/identity.v1.IdentityService/BeginOAuthLogin"
-	IdentityService_OAuthLogin_FullMethodName                    = "/identity.v1.IdentityService/OAuthLogin"
-	IdentityService_NativeOAuthLogin_FullMethodName              = "/identity.v1.IdentityService/NativeOAuthLogin"
-	IdentityService_RedeemOAuthCode_FullMethodName               = "/identity.v1.IdentityService/RedeemOAuthCode"
-	IdentityService_PasswordSignup_FullMethodName                = "/identity.v1.IdentityService/PasswordSignup"
-	IdentityService_PasswordLogin_FullMethodName                 = "/identity.v1.IdentityService/PasswordLogin"
-	IdentityService_RequestEmailLoginCode_FullMethodName         = "/identity.v1.IdentityService/RequestEmailLoginCode"
-	IdentityService_VerifyEmailLoginCode_FullMethodName          = "/identity.v1.IdentityService/VerifyEmailLoginCode"
-	IdentityService_RequestMagicLink_FullMethodName              = "/identity.v1.IdentityService/RequestMagicLink"
-	IdentityService_RedeemMagicLink_FullMethodName               = "/identity.v1.IdentityService/RedeemMagicLink"
-	IdentityService_RequestPhoneVerification_FullMethodName      = "/identity.v1.IdentityService/RequestPhoneVerification"
-	IdentityService_VerifyPhoneCode_FullMethodName               = "/identity.v1.IdentityService/VerifyPhoneCode"
-	IdentityService_GetCurrentUser_FullMethodName                = "/identity.v1.IdentityService/GetCurrentUser"
-	IdentityService_RefreshToken_FullMethodName                  = "/identity.v1.IdentityService/RefreshToken"
-	IdentityService_Logout_FullMethodName                        = "/identity.v1.IdentityService/Logout"
-	IdentityService_UpdateProfile_FullMethodName                 = "/identity.v1.IdentityService/UpdateProfile"
-	IdentityService_ChangePassword_FullMethodName                = "/identity.v1.IdentityService/ChangePassword"
-	IdentityService_RequestPasswordReset_FullMethodName          = "/identity.v1.IdentityService/RequestPasswordReset"
-	IdentityService_ConfirmPasswordReset_FullMethodName          = "/identity.v1.IdentityService/ConfirmPasswordReset"
-	IdentityService_SendEmailVerification_FullMethodName         = "/identity.v1.IdentityService/SendEmailVerification"
-	IdentityService_VerifyEmail_FullMethodName                   = "/identity.v1.IdentityService/VerifyEmail"
-	IdentityService_RequestEmailChange_FullMethodName            = "/identity.v1.IdentityService/RequestEmailChange"
-	IdentityService_ConfirmEmailChange_FullMethodName            = "/identity.v1.IdentityService/ConfirmEmailChange"
-	IdentityService_BeginIdentityVerification_FullMethodName     = "/identity.v1.IdentityService/BeginIdentityVerification"
-	IdentityService_GetIdentityVerificationStatus_FullMethodName = "/identity.v1.IdentityService/GetIdentityVerificationStatus"
-	IdentityService_RequestAdminHelp_FullMethodName              = "/identity.v1.IdentityService/RequestAdminHelp"
-	IdentityService_ListHelpRequests_FullMethodName              = "/identity.v1.IdentityService/ListHelpRequests"
-	IdentityService_ResolveHelpRequest_FullMethodName            = "/identity.v1.IdentityService/ResolveHelpRequest"
-	IdentityService_BeginPasskeyRegistration_FullMethodName      = "/identity.v1.IdentityService/BeginPasskeyRegistration"
-	IdentityService_CompletePasskeyRegistration_FullMethodName   = "/identity.v1.IdentityService/CompletePasskeyRegistration"
-	IdentityService_BeginPasskeySignup_FullMethodName            = "/identity.v1.IdentityService/BeginPasskeySignup"
-	IdentityService_CompletePasskeySignup_FullMethodName         = "/identity.v1.IdentityService/CompletePasskeySignup"
-	IdentityService_BeginPasskeyLogin_FullMethodName             = "/identity.v1.IdentityService/BeginPasskeyLogin"
-	IdentityService_CompletePasskeyLogin_FullMethodName          = "/identity.v1.IdentityService/CompletePasskeyLogin"
-	IdentityService_ListPasskeys_FullMethodName                  = "/identity.v1.IdentityService/ListPasskeys"
-	IdentityService_DeletePasskey_FullMethodName                 = "/identity.v1.IdentityService/DeletePasskey"
-	IdentityService_InitiateQrLogin_FullMethodName               = "/identity.v1.IdentityService/InitiateQrLogin"
-	IdentityService_GetQrLoginSession_FullMethodName             = "/identity.v1.IdentityService/GetQrLoginSession"
-	IdentityService_ApproveQrLogin_FullMethodName                = "/identity.v1.IdentityService/ApproveQrLogin"
-	IdentityService_PollQrLogin_FullMethodName                   = "/identity.v1.IdentityService/PollQrLogin"
-	IdentityService_BeginTotpSetup_FullMethodName                = "/identity.v1.IdentityService/BeginTotpSetup"
-	IdentityService_VerifyTotpSetup_FullMethodName               = "/identity.v1.IdentityService/VerifyTotpSetup"
-	IdentityService_DisableTotp_FullMethodName                   = "/identity.v1.IdentityService/DisableTotp"
-	IdentityService_VerifyTotp_FullMethodName                    = "/identity.v1.IdentityService/VerifyTotp"
-	IdentityService_RegenerateRecoveryCodes_FullMethodName       = "/identity.v1.IdentityService/RegenerateRecoveryCodes"
-	IdentityService_ListMySessions_FullMethodName                = "/identity.v1.IdentityService/ListMySessions"
-	IdentityService_RevokeSession_FullMethodName                 = "/identity.v1.IdentityService/RevokeSession"
-	IdentityService_RevokeAllSessions_FullMethodName             = "/identity.v1.IdentityService/RevokeAllSessions"
-	IdentityService_SignOutEverywhere_FullMethodName             = "/identity.v1.IdentityService/SignOutEverywhere"
-	IdentityService_ListAuditEvents_FullMethodName               = "/identity.v1.IdentityService/ListAuditEvents"
-	IdentityService_CreateUser_FullMethodName                    = "/identity.v1.IdentityService/CreateUser"
-	IdentityService_GetUser_FullMethodName                       = "/identity.v1.IdentityService/GetUser"
-	IdentityService_UpdateUser_FullMethodName                    = "/identity.v1.IdentityService/UpdateUser"
-	IdentityService_DeleteUser_FullMethodName                    = "/identity.v1.IdentityService/DeleteUser"
-	IdentityService_ListUsers_FullMethodName                     = "/identity.v1.IdentityService/ListUsers"
-	IdentityService_CreateGroup_FullMethodName                   = "/identity.v1.IdentityService/CreateGroup"
-	IdentityService_UpdateGroup_FullMethodName                   = "/identity.v1.IdentityService/UpdateGroup"
-	IdentityService_DeleteGroup_FullMethodName                   = "/identity.v1.IdentityService/DeleteGroup"
-	IdentityService_ListGroups_FullMethodName                    = "/identity.v1.IdentityService/ListGroups"
-	IdentityService_AddGroupMember_FullMethodName                = "/identity.v1.IdentityService/AddGroupMember"
-	IdentityService_RemoveGroupMember_FullMethodName             = "/identity.v1.IdentityService/RemoveGroupMember"
-	IdentityService_ListGroupMembers_FullMethodName              = "/identity.v1.IdentityService/ListGroupMembers"
-	IdentityService_CreateDomain_FullMethodName                  = "/identity.v1.IdentityService/CreateDomain"
-	IdentityService_VerifyDomain_FullMethodName                  = "/identity.v1.IdentityService/VerifyDomain"
-	IdentityService_ListTenantDomains_FullMethodName             = "/identity.v1.IdentityService/ListTenantDomains"
-	IdentityService_CreateTenantInvitation_FullMethodName        = "/identity.v1.IdentityService/CreateTenantInvitation"
-	IdentityService_AcceptTenantInvitation_FullMethodName        = "/identity.v1.IdentityService/AcceptTenantInvitation"
-	IdentityService_ListTenantInvitations_FullMethodName         = "/identity.v1.IdentityService/ListTenantInvitations"
-	IdentityService_ListTenantMembers_FullMethodName             = "/identity.v1.IdentityService/ListTenantMembers"
-	IdentityService_RemoveTenantMember_FullMethodName            = "/identity.v1.IdentityService/RemoveTenantMember"
-	IdentityService_InviteUser_FullMethodName                    = "/identity.v1.IdentityService/InviteUser"
-	IdentityService_AcceptInvitation_FullMethodName              = "/identity.v1.IdentityService/AcceptInvitation"
-	IdentityService_DeactivateUser_FullMethodName                = "/identity.v1.IdentityService/DeactivateUser"
-	IdentityService_ReactivateUser_FullMethodName                = "/identity.v1.IdentityService/ReactivateUser"
-	IdentityService_ResetUserPassword_FullMethodName             = "/identity.v1.IdentityService/ResetUserPassword"
-	IdentityService_SetUserQuota_FullMethodName                  = "/identity.v1.IdentityService/SetUserQuota"
-	IdentityService_AdminCreateProject_FullMethodName            = "/identity.v1.IdentityService/AdminCreateProject"
-	IdentityService_AdminCreateProjectCredential_FullMethodName  = "/identity.v1.IdentityService/AdminCreateProjectCredential"
-	IdentityService_AdminAddProjectAuthDomain_FullMethodName     = "/identity.v1.IdentityService/AdminAddProjectAuthDomain"
-	IdentityService_AddProjectAuthDomain_FullMethodName          = "/identity.v1.IdentityService/AddProjectAuthDomain"
-	IdentityService_VerifyProjectAuthDomain_FullMethodName       = "/identity.v1.IdentityService/VerifyProjectAuthDomain"
-	IdentityService_ListProjectAuthDomains_FullMethodName        = "/identity.v1.IdentityService/ListProjectAuthDomains"
-	IdentityService_SetPrimaryAuthDomain_FullMethodName          = "/identity.v1.IdentityService/SetPrimaryAuthDomain"
-	IdentityService_AdminCreateTenant_FullMethodName             = "/identity.v1.IdentityService/AdminCreateTenant"
-	IdentityService_AdminAddTenantAdmin_FullMethodName           = "/identity.v1.IdentityService/AdminAddTenantAdmin"
-	IdentityService_CreateFirstPlatformAdmin_FullMethodName      = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
-	IdentityService_ListLinkedIdentities_FullMethodName          = "/identity.v1.IdentityService/ListLinkedIdentities"
-	IdentityService_LinkIdentity_FullMethodName                  = "/identity.v1.IdentityService/LinkIdentity"
-	IdentityService_UnlinkIdentity_FullMethodName                = "/identity.v1.IdentityService/UnlinkIdentity"
-	IdentityService_UpsertLoginPolicy_FullMethodName             = "/identity.v1.IdentityService/UpsertLoginPolicy"
-	IdentityService_GetLoginPolicy_FullMethodName                = "/identity.v1.IdentityService/GetLoginPolicy"
-	IdentityService_DeleteLoginPolicy_FullMethodName             = "/identity.v1.IdentityService/DeleteLoginPolicy"
-	IdentityService_UpsertProjectConfig_FullMethodName           = "/identity.v1.IdentityService/UpsertProjectConfig"
-	IdentityService_GetProjectConfig_FullMethodName              = "/identity.v1.IdentityService/GetProjectConfig"
+	IdentityService_BeginOAuthLogin_FullMethodName                 = "/identity.v1.IdentityService/BeginOAuthLogin"
+	IdentityService_OAuthLogin_FullMethodName                      = "/identity.v1.IdentityService/OAuthLogin"
+	IdentityService_NativeOAuthLogin_FullMethodName                = "/identity.v1.IdentityService/NativeOAuthLogin"
+	IdentityService_RedeemOAuthCode_FullMethodName                 = "/identity.v1.IdentityService/RedeemOAuthCode"
+	IdentityService_PasswordSignup_FullMethodName                  = "/identity.v1.IdentityService/PasswordSignup"
+	IdentityService_PasswordLogin_FullMethodName                   = "/identity.v1.IdentityService/PasswordLogin"
+	IdentityService_RequestEmailLoginCode_FullMethodName           = "/identity.v1.IdentityService/RequestEmailLoginCode"
+	IdentityService_VerifyEmailLoginCode_FullMethodName            = "/identity.v1.IdentityService/VerifyEmailLoginCode"
+	IdentityService_RequestMagicLink_FullMethodName                = "/identity.v1.IdentityService/RequestMagicLink"
+	IdentityService_RedeemMagicLink_FullMethodName                 = "/identity.v1.IdentityService/RedeemMagicLink"
+	IdentityService_RequestPhoneVerification_FullMethodName        = "/identity.v1.IdentityService/RequestPhoneVerification"
+	IdentityService_VerifyPhoneCode_FullMethodName                 = "/identity.v1.IdentityService/VerifyPhoneCode"
+	IdentityService_GetCurrentUser_FullMethodName                  = "/identity.v1.IdentityService/GetCurrentUser"
+	IdentityService_RefreshToken_FullMethodName                    = "/identity.v1.IdentityService/RefreshToken"
+	IdentityService_Logout_FullMethodName                          = "/identity.v1.IdentityService/Logout"
+	IdentityService_UpdateProfile_FullMethodName                   = "/identity.v1.IdentityService/UpdateProfile"
+	IdentityService_ChangePassword_FullMethodName                  = "/identity.v1.IdentityService/ChangePassword"
+	IdentityService_RequestPasswordReset_FullMethodName            = "/identity.v1.IdentityService/RequestPasswordReset"
+	IdentityService_ConfirmPasswordReset_FullMethodName            = "/identity.v1.IdentityService/ConfirmPasswordReset"
+	IdentityService_SendEmailVerification_FullMethodName           = "/identity.v1.IdentityService/SendEmailVerification"
+	IdentityService_VerifyEmail_FullMethodName                     = "/identity.v1.IdentityService/VerifyEmail"
+	IdentityService_RequestEmailChange_FullMethodName              = "/identity.v1.IdentityService/RequestEmailChange"
+	IdentityService_ConfirmEmailChange_FullMethodName              = "/identity.v1.IdentityService/ConfirmEmailChange"
+	IdentityService_BeginIdentityVerification_FullMethodName       = "/identity.v1.IdentityService/BeginIdentityVerification"
+	IdentityService_GetIdentityVerificationStatus_FullMethodName   = "/identity.v1.IdentityService/GetIdentityVerificationStatus"
+	IdentityService_RequestAdminHelp_FullMethodName                = "/identity.v1.IdentityService/RequestAdminHelp"
+	IdentityService_ListHelpRequests_FullMethodName                = "/identity.v1.IdentityService/ListHelpRequests"
+	IdentityService_ResolveHelpRequest_FullMethodName              = "/identity.v1.IdentityService/ResolveHelpRequest"
+	IdentityService_BeginPasskeyRegistration_FullMethodName        = "/identity.v1.IdentityService/BeginPasskeyRegistration"
+	IdentityService_CompletePasskeyRegistration_FullMethodName     = "/identity.v1.IdentityService/CompletePasskeyRegistration"
+	IdentityService_BeginPasskeySignup_FullMethodName              = "/identity.v1.IdentityService/BeginPasskeySignup"
+	IdentityService_CompletePasskeySignup_FullMethodName           = "/identity.v1.IdentityService/CompletePasskeySignup"
+	IdentityService_BeginPasskeyLogin_FullMethodName               = "/identity.v1.IdentityService/BeginPasskeyLogin"
+	IdentityService_CompletePasskeyLogin_FullMethodName            = "/identity.v1.IdentityService/CompletePasskeyLogin"
+	IdentityService_ListPasskeys_FullMethodName                    = "/identity.v1.IdentityService/ListPasskeys"
+	IdentityService_DeletePasskey_FullMethodName                   = "/identity.v1.IdentityService/DeletePasskey"
+	IdentityService_InitiateQrLogin_FullMethodName                 = "/identity.v1.IdentityService/InitiateQrLogin"
+	IdentityService_GetQrLoginSession_FullMethodName               = "/identity.v1.IdentityService/GetQrLoginSession"
+	IdentityService_ApproveQrLogin_FullMethodName                  = "/identity.v1.IdentityService/ApproveQrLogin"
+	IdentityService_PollQrLogin_FullMethodName                     = "/identity.v1.IdentityService/PollQrLogin"
+	IdentityService_BeginTotpSetup_FullMethodName                  = "/identity.v1.IdentityService/BeginTotpSetup"
+	IdentityService_VerifyTotpSetup_FullMethodName                 = "/identity.v1.IdentityService/VerifyTotpSetup"
+	IdentityService_DisableTotp_FullMethodName                     = "/identity.v1.IdentityService/DisableTotp"
+	IdentityService_VerifyTotp_FullMethodName                      = "/identity.v1.IdentityService/VerifyTotp"
+	IdentityService_RegenerateRecoveryCodes_FullMethodName         = "/identity.v1.IdentityService/RegenerateRecoveryCodes"
+	IdentityService_ListMySessions_FullMethodName                  = "/identity.v1.IdentityService/ListMySessions"
+	IdentityService_RevokeSession_FullMethodName                   = "/identity.v1.IdentityService/RevokeSession"
+	IdentityService_RevokeAllSessions_FullMethodName               = "/identity.v1.IdentityService/RevokeAllSessions"
+	IdentityService_SignOutEverywhere_FullMethodName               = "/identity.v1.IdentityService/SignOutEverywhere"
+	IdentityService_ListAuditEvents_FullMethodName                 = "/identity.v1.IdentityService/ListAuditEvents"
+	IdentityService_CreateUser_FullMethodName                      = "/identity.v1.IdentityService/CreateUser"
+	IdentityService_GetUser_FullMethodName                         = "/identity.v1.IdentityService/GetUser"
+	IdentityService_UpdateUser_FullMethodName                      = "/identity.v1.IdentityService/UpdateUser"
+	IdentityService_DeleteUser_FullMethodName                      = "/identity.v1.IdentityService/DeleteUser"
+	IdentityService_ListUsers_FullMethodName                       = "/identity.v1.IdentityService/ListUsers"
+	IdentityService_CreateGroup_FullMethodName                     = "/identity.v1.IdentityService/CreateGroup"
+	IdentityService_UpdateGroup_FullMethodName                     = "/identity.v1.IdentityService/UpdateGroup"
+	IdentityService_DeleteGroup_FullMethodName                     = "/identity.v1.IdentityService/DeleteGroup"
+	IdentityService_ListGroups_FullMethodName                      = "/identity.v1.IdentityService/ListGroups"
+	IdentityService_AddGroupMember_FullMethodName                  = "/identity.v1.IdentityService/AddGroupMember"
+	IdentityService_RemoveGroupMember_FullMethodName               = "/identity.v1.IdentityService/RemoveGroupMember"
+	IdentityService_ListGroupMembers_FullMethodName                = "/identity.v1.IdentityService/ListGroupMembers"
+	IdentityService_CreateDomain_FullMethodName                    = "/identity.v1.IdentityService/CreateDomain"
+	IdentityService_VerifyDomain_FullMethodName                    = "/identity.v1.IdentityService/VerifyDomain"
+	IdentityService_ListTenantDomains_FullMethodName               = "/identity.v1.IdentityService/ListTenantDomains"
+	IdentityService_CreateTenantInvitation_FullMethodName          = "/identity.v1.IdentityService/CreateTenantInvitation"
+	IdentityService_AcceptTenantInvitation_FullMethodName          = "/identity.v1.IdentityService/AcceptTenantInvitation"
+	IdentityService_ListTenantInvitations_FullMethodName           = "/identity.v1.IdentityService/ListTenantInvitations"
+	IdentityService_ListTenantMembers_FullMethodName               = "/identity.v1.IdentityService/ListTenantMembers"
+	IdentityService_RemoveTenantMember_FullMethodName              = "/identity.v1.IdentityService/RemoveTenantMember"
+	IdentityService_InviteUser_FullMethodName                      = "/identity.v1.IdentityService/InviteUser"
+	IdentityService_AcceptInvitation_FullMethodName                = "/identity.v1.IdentityService/AcceptInvitation"
+	IdentityService_DeactivateUser_FullMethodName                  = "/identity.v1.IdentityService/DeactivateUser"
+	IdentityService_ReactivateUser_FullMethodName                  = "/identity.v1.IdentityService/ReactivateUser"
+	IdentityService_ResetUserPassword_FullMethodName               = "/identity.v1.IdentityService/ResetUserPassword"
+	IdentityService_SetUserQuota_FullMethodName                    = "/identity.v1.IdentityService/SetUserQuota"
+	IdentityService_AdminCreateProject_FullMethodName              = "/identity.v1.IdentityService/AdminCreateProject"
+	IdentityService_AdminCreateProjectCredential_FullMethodName    = "/identity.v1.IdentityService/AdminCreateProjectCredential"
+	IdentityService_AdminAddProjectAuthDomain_FullMethodName       = "/identity.v1.IdentityService/AdminAddProjectAuthDomain"
+	IdentityService_AddProjectAuthDomain_FullMethodName            = "/identity.v1.IdentityService/AddProjectAuthDomain"
+	IdentityService_VerifyProjectAuthDomain_FullMethodName         = "/identity.v1.IdentityService/VerifyProjectAuthDomain"
+	IdentityService_ListProjectAuthDomains_FullMethodName          = "/identity.v1.IdentityService/ListProjectAuthDomains"
+	IdentityService_SetPrimaryAuthDomain_FullMethodName            = "/identity.v1.IdentityService/SetPrimaryAuthDomain"
+	IdentityService_AdminCreateTenant_FullMethodName               = "/identity.v1.IdentityService/AdminCreateTenant"
+	IdentityService_AdminAddTenantAdmin_FullMethodName             = "/identity.v1.IdentityService/AdminAddTenantAdmin"
+	IdentityService_CreateFirstPlatformAdmin_FullMethodName        = "/identity.v1.IdentityService/CreateFirstPlatformAdmin"
+	IdentityService_ListLinkedIdentities_FullMethodName            = "/identity.v1.IdentityService/ListLinkedIdentities"
+	IdentityService_LinkIdentity_FullMethodName                    = "/identity.v1.IdentityService/LinkIdentity"
+	IdentityService_UnlinkIdentity_FullMethodName                  = "/identity.v1.IdentityService/UnlinkIdentity"
+	IdentityService_UpsertLoginPolicy_FullMethodName               = "/identity.v1.IdentityService/UpsertLoginPolicy"
+	IdentityService_GetLoginPolicy_FullMethodName                  = "/identity.v1.IdentityService/GetLoginPolicy"
+	IdentityService_DeleteLoginPolicy_FullMethodName               = "/identity.v1.IdentityService/DeleteLoginPolicy"
+	IdentityService_UpsertProjectConfig_FullMethodName             = "/identity.v1.IdentityService/UpsertProjectConfig"
+	IdentityService_GetProjectConfig_FullMethodName                = "/identity.v1.IdentityService/GetProjectConfig"
+	IdentityService_AdminSetProjectOAuthProvider_FullMethodName    = "/identity.v1.IdentityService/AdminSetProjectOAuthProvider"
+	IdentityService_AdminDeleteProjectOAuthProvider_FullMethodName = "/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider"
+	IdentityService_AdminListProjectOAuthProviders_FullMethodName  = "/identity.v1.IdentityService/AdminListProjectOAuthProviders"
 )
 
 // IdentityServiceClient is the client API for IdentityService service.
@@ -272,6 +275,16 @@ type IdentityServiceClient interface {
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertProjectConfig(ctx context.Context, in *UpsertProjectConfigRequest, opts ...grpc.CallOption) (*UpsertProjectConfigResponse, error)
 	GetProjectConfig(ctx context.Context, in *GetProjectConfigRequest, opts ...grpc.CallOption) (*GetProjectConfigResponse, error)
+	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
+	// sets/rotates one provider (encrypting any plaintext secret server-side and
+	// merging it into config_json without disturbing other keys);
+	// AdminDeleteProjectOAuthProvider removes one provider;
+	// AdminListProjectOAuthProviders lists the configured providers with secrets
+	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
+	// build with no control plane.
+	AdminSetProjectOAuthProvider(ctx context.Context, in *AdminSetProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminSetProjectOAuthProviderResponse, error)
+	AdminDeleteProjectOAuthProvider(ctx context.Context, in *AdminDeleteProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminDeleteProjectOAuthProviderResponse, error)
+	AdminListProjectOAuthProviders(ctx context.Context, in *AdminListProjectOAuthProvidersRequest, opts ...grpc.CallOption) (*AdminListProjectOAuthProvidersResponse, error)
 }
 
 type identityServiceClient struct {
@@ -1222,6 +1235,36 @@ func (c *identityServiceClient) GetProjectConfig(ctx context.Context, in *GetPro
 	return out, nil
 }
 
+func (c *identityServiceClient) AdminSetProjectOAuthProvider(ctx context.Context, in *AdminSetProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminSetProjectOAuthProviderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminSetProjectOAuthProviderResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminSetProjectOAuthProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AdminDeleteProjectOAuthProvider(ctx context.Context, in *AdminDeleteProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminDeleteProjectOAuthProviderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminDeleteProjectOAuthProviderResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminDeleteProjectOAuthProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AdminListProjectOAuthProviders(ctx context.Context, in *AdminListProjectOAuthProvidersRequest, opts ...grpc.CallOption) (*AdminListProjectOAuthProvidersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminListProjectOAuthProvidersResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminListProjectOAuthProviders_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IdentityServiceServer is the server API for IdentityService service.
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility.
@@ -1379,6 +1422,16 @@ type IdentityServiceServer interface {
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertProjectConfig(context.Context, *UpsertProjectConfigRequest) (*UpsertProjectConfigResponse, error)
 	GetProjectConfig(context.Context, *GetProjectConfigRequest) (*GetProjectConfigResponse, error)
+	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
+	// sets/rotates one provider (encrypting any plaintext secret server-side and
+	// merging it into config_json without disturbing other keys);
+	// AdminDeleteProjectOAuthProvider removes one provider;
+	// AdminListProjectOAuthProviders lists the configured providers with secrets
+	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
+	// build with no control plane.
+	AdminSetProjectOAuthProvider(context.Context, *AdminSetProjectOAuthProviderRequest) (*AdminSetProjectOAuthProviderResponse, error)
+	AdminDeleteProjectOAuthProvider(context.Context, *AdminDeleteProjectOAuthProviderRequest) (*AdminDeleteProjectOAuthProviderResponse, error)
+	AdminListProjectOAuthProviders(context.Context, *AdminListProjectOAuthProvidersRequest) (*AdminListProjectOAuthProvidersResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
 }
 
@@ -1670,6 +1723,15 @@ func (UnimplementedIdentityServiceServer) UpsertProjectConfig(context.Context, *
 }
 func (UnimplementedIdentityServiceServer) GetProjectConfig(context.Context, *GetProjectConfigRequest) (*GetProjectConfigResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetProjectConfig not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminSetProjectOAuthProvider(context.Context, *AdminSetProjectOAuthProviderRequest) (*AdminSetProjectOAuthProviderResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminSetProjectOAuthProvider not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminDeleteProjectOAuthProvider(context.Context, *AdminDeleteProjectOAuthProviderRequest) (*AdminDeleteProjectOAuthProviderResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminDeleteProjectOAuthProvider not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminListProjectOAuthProviders(context.Context, *AdminListProjectOAuthProvidersRequest) (*AdminListProjectOAuthProvidersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminListProjectOAuthProviders not implemented")
 }
 func (UnimplementedIdentityServiceServer) mustEmbedUnimplementedIdentityServiceServer() {}
 func (UnimplementedIdentityServiceServer) testEmbeddedByValue()                         {}
@@ -3384,6 +3446,60 @@ func _IdentityService_GetProjectConfig_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_AdminSetProjectOAuthProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminSetProjectOAuthProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminSetProjectOAuthProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminSetProjectOAuthProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminSetProjectOAuthProvider(ctx, req.(*AdminSetProjectOAuthProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AdminDeleteProjectOAuthProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminDeleteProjectOAuthProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminDeleteProjectOAuthProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminDeleteProjectOAuthProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminDeleteProjectOAuthProvider(ctx, req.(*AdminDeleteProjectOAuthProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AdminListProjectOAuthProviders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminListProjectOAuthProvidersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminListProjectOAuthProviders(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminListProjectOAuthProviders_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminListProjectOAuthProviders(ctx, req.(*AdminListProjectOAuthProvidersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IdentityService_ServiceDesc is the grpc.ServiceDesc for IdentityService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3766,6 +3882,18 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetProjectConfig",
 			Handler:    _IdentityService_GetProjectConfig_Handler,
+		},
+		{
+			MethodName: "AdminSetProjectOAuthProvider",
+			Handler:    _IdentityService_AdminSetProjectOAuthProvider_Handler,
+		},
+		{
+			MethodName: "AdminDeleteProjectOAuthProvider",
+			Handler:    _IdentityService_AdminDeleteProjectOAuthProvider_Handler,
+		},
+		{
+			MethodName: "AdminListProjectOAuthProviders",
+			Handler:    _IdentityService_AdminListProjectOAuthProviders_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

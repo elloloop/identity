@@ -286,6 +286,114 @@ func (h *IdentityHandler) GetProjectConfig(
 	return connect.NewResponse(&identitypb.GetProjectConfigResponse{ConfigJson: stored}), nil
 }
 
+// AdminSetProjectOAuthProvider sets/rotates one of a project's OAuth providers,
+// encrypting any plaintext secret server-side. The response redacts secrets.
+// Operator-only.
+func (h *IdentityHandler) AdminSetProjectOAuthProvider(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminSetProjectOAuthProviderRequest],
+) (*connect.Response[identitypb.AdminSetProjectOAuthProviderResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	view, err := h.controlAdmin.AdminSetProjectOAuthProvider(ctx, adminSecret(req.Header()), req.Msg.ProjectId, oauthProviderInputFromProto(req.Msg.Config))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminSetProjectOAuthProviderResponse{
+		Config: oauthProviderViewToProto(view),
+	}), nil
+}
+
+// AdminDeleteProjectOAuthProvider removes one of a project's OAuth providers.
+// Operator-only.
+func (h *IdentityHandler) AdminDeleteProjectOAuthProvider(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminDeleteProjectOAuthProviderRequest],
+) (*connect.Response[identitypb.AdminDeleteProjectOAuthProviderResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	if err := h.controlAdmin.AdminDeleteProjectOAuthProvider(ctx, adminSecret(req.Header()), req.Msg.ProjectId, req.Msg.Provider); err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminDeleteProjectOAuthProviderResponse{}), nil
+}
+
+// AdminListProjectOAuthProviders lists a project's configured OAuth providers
+// with secrets redacted. Operator-only.
+func (h *IdentityHandler) AdminListProjectOAuthProviders(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminListProjectOAuthProvidersRequest],
+) (*connect.Response[identitypb.AdminListProjectOAuthProvidersResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	views, err := h.controlAdmin.AdminListProjectOAuthProviders(ctx, adminSecret(req.Header()), req.Msg.ProjectId)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	out := make([]*identitypb.ProjectOAuthProviderConfig, 0, len(views))
+	for _, v := range views {
+		out = append(out, oauthProviderViewToProto(v))
+	}
+	return connect.NewResponse(&identitypb.AdminListProjectOAuthProvidersResponse{Providers: out}), nil
+}
+
+// oauthProviderInputFromProto maps the write-side proto config (which carries
+// plaintext secrets) to the service authoring input. A nil message yields a
+// zero input, letting the service reject it with a clear "missing config" error.
+func oauthProviderInputFromProto(c *identitypb.ProjectOAuthProviderConfig) *service.ProjectOAuthProviderInput {
+	if c == nil {
+		return nil
+	}
+	return &service.ProjectOAuthProviderInput{
+		Provider:               c.Provider,
+		ClientID:               c.ClientId,
+		ClientSecret:           c.ClientSecret,
+		NativeAudiences:        c.NativeAudiences,
+		GoogleAuthorizationURL: c.GoogleAuthorizationUrl,
+		GoogleTokenURL:         c.GoogleTokenUrl,
+		GoogleJWKSURL:          c.GoogleJwksUrl,
+		GoogleIssuer:           c.GoogleIssuer,
+		MicrosoftTenantID:      c.MicrosoftTenantId,
+		MicrosoftIssuerFormat:  c.MicrosoftIssuerFormat,
+		AppleTeamID:            c.AppleTeamId,
+		AppleKeyID:             c.AppleKeyId,
+		ApplePrivateKey:        c.ApplePrivateKey,
+		OIDCIssuer:             c.OidcIssuer,
+		OIDCDiscoveryURL:       c.OidcDiscoveryUrl,
+		OIDCScopes:             c.OidcScopes,
+	}
+}
+
+// oauthProviderViewToProto maps a REDACTED service provider view to its proto
+// message. Secret fields are never populated — only the has_* flags. A nil input
+// yields nil.
+func oauthProviderViewToProto(v *service.ProjectOAuthProviderView) *identitypb.ProjectOAuthProviderConfig {
+	if v == nil {
+		return nil
+	}
+	return &identitypb.ProjectOAuthProviderConfig{
+		Provider:               v.Provider,
+		ClientId:               v.ClientID,
+		HasClientSecret:        v.HasClientSecret,
+		NativeAudiences:        v.NativeAudiences,
+		GoogleAuthorizationUrl: v.GoogleAuthorizationURL,
+		GoogleTokenUrl:         v.GoogleTokenURL,
+		GoogleJwksUrl:          v.GoogleJWKSURL,
+		GoogleIssuer:           v.GoogleIssuer,
+		MicrosoftTenantId:      v.MicrosoftTenantID,
+		MicrosoftIssuerFormat:  v.MicrosoftIssuerFormat,
+		AppleTeamId:            v.AppleTeamID,
+		AppleKeyId:             v.AppleKeyID,
+		HasPrivateKey:          v.HasPrivateKey,
+		OidcIssuer:             v.OIDCIssuer,
+		OidcDiscoveryUrl:       v.OIDCDiscoveryURL,
+		OidcScopes:             v.OIDCScopes,
+	}
+}
+
 // loginPolicyToProto maps a service LoginPolicy to its proto message. A nil
 // input yields nil (the field is omitted — meaning "no policy set").
 func loginPolicyToProto(p *service.LoginPolicy) *identitypb.LoginPolicy {
