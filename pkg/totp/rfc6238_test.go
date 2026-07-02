@@ -1,9 +1,6 @@
 package totp
 
 import (
-	"crypto/rand"
-	"encoding/base64"
-	"fmt"
 	"regexp"
 	"testing"
 	"time"
@@ -174,95 +171,5 @@ func TestRFC6238_RecoveryCode_NoDuplicates(t *testing.T) {
 			t.Errorf("duplicate recovery code: %s", code)
 		}
 		seen[code] = true
-	}
-}
-
-// ── AES-GCM encryption: ciphertext length ──────────────────────────────
-
-func TestRFC6238_AESGCM_CiphertextLength(t *testing.T) {
-	t.Parallel()
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatalf("rand: %v", err)
-	}
-
-	testCases := []string{
-		"short",
-		"JBSWY3DPEHPK3PXP",
-		"A" + fmt.Sprintf("%0160d", 0), // longer plaintext
-	}
-
-	for _, plaintext := range testCases {
-		encrypted, err := EncryptSecret(plaintext, key)
-		if err != nil {
-			t.Fatalf("EncryptSecret(%q): %v", plaintext, err)
-		}
-
-		// Decrypt raw ciphertext to check its structure.
-		raw, err := base64.StdEncoding.DecodeString(encrypted)
-		if err != nil {
-			t.Fatalf("decoding base64: %v", err)
-		}
-
-		// AES-GCM: ciphertext = nonce(12) + ciphertext(len(plaintext)) + tag(16)
-		expectedLen := 12 + len(plaintext) + 16
-		if len(raw) != expectedLen {
-			t.Errorf("for plaintext len %d: raw ciphertext len = %d, want %d (12+%d+16)",
-				len(plaintext), len(raw), expectedLen, len(plaintext))
-		}
-	}
-}
-
-func TestRFC6238_AESGCM_NonceUniqueness(t *testing.T) {
-	t.Parallel()
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatalf("rand: %v", err)
-	}
-
-	plaintext := "JBSWY3DPEHPK3PXP"
-	nonces := make(map[string]bool)
-
-	for i := 0; i < 50; i++ {
-		encrypted, err := EncryptSecret(plaintext, key)
-		if err != nil {
-			t.Fatalf("EncryptSecret: %v", err)
-		}
-
-		raw, _ := base64.StdEncoding.DecodeString(encrypted)
-		nonce := string(raw[:12])
-		if nonces[nonce] {
-			t.Error("nonce reuse detected (extremely unlikely)")
-		}
-		nonces[nonce] = true
-	}
-}
-
-func TestRFC6238_AESGCM_DecryptionPreservesPlaintext(t *testing.T) {
-	t.Parallel()
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatalf("rand: %v", err)
-	}
-
-	plaintexts := []string{
-		"",
-		"A",
-		"JBSWY3DPEHPK3PXP",
-		"Hello, World! 12345",
-	}
-
-	for _, pt := range plaintexts {
-		encrypted, err := EncryptSecret(pt, key)
-		if err != nil {
-			t.Fatalf("EncryptSecret(%q): %v", pt, err)
-		}
-		decrypted, err := DecryptSecret(encrypted, key)
-		if err != nil {
-			t.Fatalf("DecryptSecret: %v", err)
-		}
-		if decrypted != pt {
-			t.Errorf("round-trip failed: got %q, want %q", decrypted, pt)
-		}
 	}
 }

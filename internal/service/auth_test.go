@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elloloop/identity/pkg/passwords"
+	"github.com/elloloop/identity/pkg/secretcrypto"
 	"github.com/elloloop/identity/pkg/totp"
 )
 
@@ -826,7 +827,7 @@ func TestVerifyTotp_RecoveryCodeWorks(t *testing.T) {
 	u.TotpRequired = true
 
 	// Set up TOTP credential (verified).
-	encrypted, err := totp.EncryptSecret("JBSWY3DPEHPK3PXP", testTotpKey())
+	encrypted, err := secretcrypto.Encrypt("JBSWY3DPEHPK3PXP", testTotpKey())
 	require.NoError(t, err)
 	repo.mu.Lock()
 	credID := nextNodeID()
@@ -887,7 +888,7 @@ func TestVerifyTotp_RecoveryCodePepperMismatch(t *testing.T) {
 	u := seedUser(repo, "pepper-mismatch@example.com", pwHash, "active")
 	u.TotpRequired = true
 
-	encrypted, err := totp.EncryptSecret("JBSWY3DPEHPK3PXP", testTotpKey())
+	encrypted, err := secretcrypto.Encrypt("JBSWY3DPEHPK3PXP", testTotpKey())
 	require.NoError(t, err)
 	repo.mu.Lock()
 	credID := nextNodeID()
