@@ -20,13 +20,15 @@ import (
 // the resolver decrypts with) and stores them in the project's config_json.
 // Reads NEVER return secret material — they report presence via has_* flags.
 //
-// Every write is a JSON-level READ-MODIFY-WRITE that preserves every OTHER
-// config key (branding/passkey/cors/login): UpdateProjectConfig replaces the
-// whole blob, so the merge decodes the top level into a raw map, replaces only
-// the one provider inside the "oauth" subtree, and re-marshals. The merged
-// config is validated (ProjectConfig.Validate) before it is persisted, so a bad
-// provider config is rejected at author time rather than tripping the login
-// path later.
+// Every write is a JSON-level READ-MODIFY-WRITE that byte-preserves every key it
+// does not touch. UpdateProjectConfig replaces the WHOLE blob, so the merge
+// decodes BOTH the top level AND the "oauth" subtree into map[string]RawMessage
+// and replaces (Set) or removes (Delete) exactly one provider key inside the
+// oauth map — every other top-level key (branding/passkey/cors/login) and every
+// other oauth key (a sibling provider, or an unknown key a newer binary wrote)
+// survives verbatim, so a set/delete is never a lossy rewrite. Only the ONE
+// provider being Set is decoded + validated at author time; Delete just removes
+// a key, so a stale invalid neighbour never blocks an unrelated deletion.
 
 // OAuth provider keys, mirroring the login `provider` argument callers pass.
 const (
@@ -115,27 +117,44 @@ func (s *ControlPlaneAdminService) AdminSetProjectOAuthProvider(ctx context.Cont
 		return nil, err
 	}
 
-	top, oauthCfg, err := s.loadOAuthConfig(ctx, projectID)
+	top, oauthSub, err := s.loadOAuthSubtree(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.applyProvider(provider, in, &oauthCfg); err != nil {
+
+	// Build the typed provider (encrypting any new secret, keeping the stored
+	// one when the input secret is empty) and validate ONLY this provider.
+	prov, err := s.buildProvider(provider, in, oauthSub[provider])
+	if err != nil {
 		return nil, err
 	}
-	if err := s.storeOAuthConfig(ctx, projectID, top, oauthCfg); err != nil {
+	single := ProjectOAuthConfig{}
+	assignProvider(&single, provider, prov)
+	if err := single.validate(); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+	}
+
+	raw, err := json.Marshal(prov)
+	if err != nil {
+		return nil, fmt.Errorf("marshal oauth provider: %w", err)
+	}
+	oauthSub[provider] = raw
+	if err := s.storeOAuthSubtree(ctx, projectID, top, oauthSub); err != nil {
 		return nil, err
 	}
 	s.audit.Log(ctx, audit.EventProjectOAuthProviderSet, audit.WithSuccess(true), audit.WithDetails(map[string]any{
 		"project_id": projectID,
 		"provider":   provider,
 	}))
-	return providerView(provider, oauthCfg), nil
+	return providerView(provider, prov), nil
 }
 
 // AdminDeleteProjectOAuthProvider removes one provider block from a project's
-// config, leaving every other provider and every other config key intact. It is
-// idempotent — removing an absent provider is a no-op. An unknown project
-// surfaces ErrNotFound.
+// config, leaving every other provider and every other config key intact
+// (including keys this binary does not understand). It is idempotent — removing
+// an absent provider is a no-op — and does NOT decode or validate the surviving
+// providers, so a stale invalid neighbour never blocks the deletion. An unknown
+// project surfaces ErrNotFound.
 func (s *ControlPlaneAdminService) AdminDeleteProjectOAuthProvider(ctx context.Context, secret, projectID, provider string) error {
 	if err := s.authorize(secret); err != nil {
 		return err
@@ -149,21 +168,12 @@ func (s *ControlPlaneAdminService) AdminDeleteProjectOAuthProvider(ctx context.C
 		return err
 	}
 
-	top, oauthCfg, err := s.loadOAuthConfig(ctx, projectID)
+	top, oauthSub, err := s.loadOAuthSubtree(ctx, projectID)
 	if err != nil {
 		return err
 	}
-	switch provider {
-	case oauthProviderGoogle:
-		oauthCfg.Google = nil
-	case oauthProviderMicrosoft:
-		oauthCfg.Microsoft = nil
-	case oauthProviderApple:
-		oauthCfg.Apple = nil
-	case oauthProviderOIDC:
-		oauthCfg.OIDC = nil
-	}
-	if err := s.storeOAuthConfig(ctx, projectID, top, oauthCfg); err != nil {
+	delete(oauthSub, provider)
+	if err := s.storeOAuthSubtree(ctx, projectID, top, oauthSub); err != nil {
 		return err
 	}
 	s.audit.Log(ctx, audit.EventProjectOAuthProviderRemoved, audit.WithSuccess(true), audit.WithDetails(map[string]any{
@@ -174,7 +184,9 @@ func (s *ControlPlaneAdminService) AdminDeleteProjectOAuthProvider(ctx context.C
 }
 
 // AdminListProjectOAuthProviders lists a project's configured OAuth providers,
-// ordered by provider key, with secrets REDACTED. An unknown project surfaces
+// ordered by provider key, with secrets REDACTED. Only the known provider keys
+// are surfaced; an unknown key stored under "oauth" is preserved on write but
+// not listed (its shape is unknown to this binary). An unknown project surfaces
 // ErrNotFound.
 func (s *ControlPlaneAdminService) AdminListProjectOAuthProviders(ctx context.Context, secret, projectID string) ([]*ProjectOAuthProviderView, error) {
 	if err := s.authorize(secret); err != nil {
@@ -184,53 +196,58 @@ func (s *ControlPlaneAdminService) AdminListProjectOAuthProviders(ctx context.Co
 	if projectID == "" {
 		return nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
 	}
-	_, oauthCfg, err := s.loadOAuthConfig(ctx, projectID)
+	_, oauthSub, err := s.loadOAuthSubtree(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*ProjectOAuthProviderView, 0, len(oauthProviderKeys))
 	for _, key := range oauthProviderKeys {
-		if _, ok := oauthCfg.provider(key); ok {
-			out = append(out, providerView(key, oauthCfg))
+		raw, ok := oauthSub[key]
+		if !ok || len(raw) == 0 {
+			continue
 		}
+		prov, err := decodeProvider(key, raw)
+		if err != nil {
+			return nil, fmt.Errorf("%w: stored oauth.%s is malformed: %s", ErrInvalidArgument, key, err.Error())
+		}
+		out = append(out, providerView(key, prov))
 	}
 	return out, nil
 }
 
-// loadOAuthConfig reads a project's config_json and splits it into the raw
-// top-level map (so every non-oauth key round-trips untouched) and the typed
-// oauth subtree (so a single provider can be replaced). An unknown project
-// surfaces ErrNotFound from the store; a stored blob that is not a JSON object,
-// or whose oauth subtree is malformed, is an ErrInvalidArgument.
-func (s *ControlPlaneAdminService) loadOAuthConfig(ctx context.Context, projectID string) (map[string]json.RawMessage, ProjectOAuthConfig, error) {
+// loadOAuthSubtree reads a project's config_json and decodes both the top-level
+// object and its "oauth" subtree into raw-message maps, so every untouched key
+// round-trips byte-for-byte. An unknown project surfaces ErrNotFound from the
+// store; a stored blob that is not a JSON object, or whose "oauth" value is not
+// an object, is an ErrInvalidArgument.
+func (s *ControlPlaneAdminService) loadOAuthSubtree(ctx context.Context, projectID string) (top, oauthSub map[string]json.RawMessage, err error) {
 	stored, err := s.projects.GetProjectConfig(ctx, projectID)
 	if err != nil {
-		return nil, ProjectOAuthConfig{}, err
+		return nil, nil, err
 	}
-	top := map[string]json.RawMessage{}
+	top = map[string]json.RawMessage{}
 	if strings.TrimSpace(stored) != "" {
 		if err := json.Unmarshal([]byte(stored), &top); err != nil {
-			return nil, ProjectOAuthConfig{}, fmt.Errorf("%w: stored project config is not a JSON object: %s", ErrInvalidArgument, err.Error())
+			return nil, nil, fmt.Errorf("%w: stored project config is not a JSON object: %s", ErrInvalidArgument, err.Error())
 		}
 	}
-	var oauthCfg ProjectOAuthConfig
+	oauthSub = map[string]json.RawMessage{}
 	if raw, ok := top["oauth"]; ok && len(raw) > 0 {
-		if err := json.Unmarshal(raw, &oauthCfg); err != nil {
-			return nil, ProjectOAuthConfig{}, fmt.Errorf("%w: stored oauth config is malformed: %s", ErrInvalidArgument, err.Error())
+		if err := json.Unmarshal(raw, &oauthSub); err != nil {
+			return nil, nil, fmt.Errorf("%w: stored oauth config is not a JSON object: %s", ErrInvalidArgument, err.Error())
 		}
 	}
-	return top, oauthCfg, nil
+	return top, oauthSub, nil
 }
 
-// storeOAuthConfig re-marshals the merged oauth subtree back into the top-level
-// map (dropping the "oauth" key entirely when no provider remains, so a project
-// with no providers is not left with a dangling empty object), validates the
-// whole merged config, and persists it. Validation happens on the FINAL blob so
-// a malformed provider — or a stale invalid neighbouring key — is rejected
-// before it is written.
-func (s *ControlPlaneAdminService) storeOAuthConfig(ctx context.Context, projectID string, top map[string]json.RawMessage, oauthCfg ProjectOAuthConfig) error {
-	if oauthCfg.hasAny() {
-		raw, err := json.Marshal(oauthCfg)
+// storeOAuthSubtree re-marshals the merged oauth subtree back into the top-level
+// map (dropping the "oauth" key entirely when no key remains, so a project with
+// no providers is not left with a dangling empty object) and persists it.
+// RawMessage values are emitted verbatim, so untouched providers and unknown
+// keys are byte-preserved.
+func (s *ControlPlaneAdminService) storeOAuthSubtree(ctx context.Context, projectID string, top, oauthSub map[string]json.RawMessage) error {
+	if len(oauthSub) > 0 {
+		raw, err := json.Marshal(oauthSub)
 		if err != nil {
 			return fmt.Errorf("marshal oauth config: %w", err)
 		}
@@ -242,30 +259,29 @@ func (s *ControlPlaneAdminService) storeOAuthConfig(ctx context.Context, project
 	if err != nil {
 		return fmt.Errorf("marshal project config: %w", err)
 	}
-	finalJSON := string(final)
-	if _, err := ParseProjectConfig(finalJSON); err != nil {
-		return fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
-	}
-	_, err = s.projects.UpdateProjectConfig(ctx, projectID, finalJSON)
+	_, err = s.projects.UpdateProjectConfig(ctx, projectID, string(final))
 	return err
 }
 
-// applyProvider builds the typed provider sub-struct from the input, encrypting
-// any plaintext secret, and installs it on the oauth config, replacing whatever
-// was there for that provider. An empty plaintext secret keeps the currently
-// stored ciphertext for that provider (if any).
-func (s *ControlPlaneAdminService) applyProvider(provider string, in *ProjectOAuthProviderInput, cfg *ProjectOAuthConfig) error {
+// buildProvider builds the typed provider sub-struct from the input, encrypting
+// any plaintext secret. An empty plaintext secret keeps the ciphertext already
+// stored for that provider (decoded from existingRaw); every other field is
+// fully replaced by the input, since a Set replaces the whole provider block.
+func (s *ControlPlaneAdminService) buildProvider(provider string, in *ProjectOAuthProviderInput, existingRaw json.RawMessage) (any, error) {
 	switch provider {
 	case oauthProviderGoogle:
 		keep := ""
-		if cfg.Google != nil {
-			keep = cfg.Google.ClientSecretEnc
+		if len(existingRaw) > 0 {
+			var g ProjectOAuthGoogle
+			if json.Unmarshal(existingRaw, &g) == nil {
+				keep = g.ClientSecretEnc
+			}
 		}
 		enc, err := s.encryptOrKeep(in.ClientSecret, keep)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		cfg.Google = &ProjectOAuthGoogle{
+		return &ProjectOAuthGoogle{
 			ClientID:         strings.TrimSpace(in.ClientID),
 			ClientSecretEnc:  enc,
 			AuthorizationURL: strings.TrimSpace(in.GoogleAuthorizationURL),
@@ -273,57 +289,115 @@ func (s *ControlPlaneAdminService) applyProvider(provider string, in *ProjectOAu
 			JWKSURL:          strings.TrimSpace(in.GoogleJWKSURL),
 			Issuer:           strings.TrimSpace(in.GoogleIssuer),
 			NativeAudiences:  normalizeAudiences(in.NativeAudiences),
-		}
+		}, nil
 	case oauthProviderMicrosoft:
 		keep := ""
-		if cfg.Microsoft != nil {
-			keep = cfg.Microsoft.ClientSecretEnc
+		if len(existingRaw) > 0 {
+			var m ProjectOAuthMicrosoft
+			if json.Unmarshal(existingRaw, &m) == nil {
+				keep = m.ClientSecretEnc
+			}
 		}
 		enc, err := s.encryptOrKeep(in.ClientSecret, keep)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		cfg.Microsoft = &ProjectOAuthMicrosoft{
+		return &ProjectOAuthMicrosoft{
 			ClientID:        strings.TrimSpace(in.ClientID),
 			ClientSecretEnc: enc,
 			TenantID:        strings.TrimSpace(in.MicrosoftTenantID),
 			IssuerFormat:    strings.TrimSpace(in.MicrosoftIssuerFormat),
 			NativeAudiences: normalizeAudiences(in.NativeAudiences),
-		}
+		}, nil
 	case oauthProviderApple:
 		keep := ""
-		if cfg.Apple != nil {
-			keep = cfg.Apple.PrivateKeyEnc
+		if len(existingRaw) > 0 {
+			var a ProjectOAuthApple
+			if json.Unmarshal(existingRaw, &a) == nil {
+				keep = a.PrivateKeyEnc
+			}
 		}
 		enc, err := s.encryptOrKeep(in.ApplePrivateKey, keep)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		cfg.Apple = &ProjectOAuthApple{
+		return &ProjectOAuthApple{
 			ClientID:        strings.TrimSpace(in.ClientID),
 			TeamID:          strings.TrimSpace(in.AppleTeamID),
 			KeyID:           strings.TrimSpace(in.AppleKeyID),
 			PrivateKeyEnc:   enc,
 			NativeAudiences: normalizeAudiences(in.NativeAudiences),
-		}
+		}, nil
 	case oauthProviderOIDC:
 		keep := ""
-		if cfg.OIDC != nil {
-			keep = cfg.OIDC.ClientSecretEnc
+		if len(existingRaw) > 0 {
+			var o ProjectOAuthOIDC
+			if json.Unmarshal(existingRaw, &o) == nil {
+				keep = o.ClientSecretEnc
+			}
 		}
 		enc, err := s.encryptOrKeep(in.ClientSecret, keep)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		cfg.OIDC = &ProjectOAuthOIDC{
+		return &ProjectOAuthOIDC{
 			ClientID:        strings.TrimSpace(in.ClientID),
 			ClientSecretEnc: enc,
 			Issuer:          strings.TrimSpace(in.OIDCIssuer),
 			DiscoveryURL:    strings.TrimSpace(in.OIDCDiscoveryURL),
 			Scopes:          strings.TrimSpace(in.OIDCScopes),
-		}
+		}, nil
 	}
-	return nil
+	// Unreachable: provider is normalized to one of the four keys above.
+	return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
+}
+
+// decodeProvider unmarshals one provider's stored JSON into its typed struct,
+// so a redacted view can be built for a list/read.
+func decodeProvider(provider string, raw json.RawMessage) (any, error) {
+	switch provider {
+	case oauthProviderGoogle:
+		var g ProjectOAuthGoogle
+		if err := json.Unmarshal(raw, &g); err != nil {
+			return nil, err
+		}
+		return &g, nil
+	case oauthProviderMicrosoft:
+		var m ProjectOAuthMicrosoft
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return &m, nil
+	case oauthProviderApple:
+		var a ProjectOAuthApple
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, err
+		}
+		return &a, nil
+	case oauthProviderOIDC:
+		var o ProjectOAuthOIDC
+		if err := json.Unmarshal(raw, &o); err != nil {
+			return nil, err
+		}
+		return &o, nil
+	}
+	return nil, fmt.Errorf("unknown oauth provider %q", provider)
+}
+
+// assignProvider installs a built typed provider onto a ProjectOAuthConfig, so
+// the shared per-provider validation (ProjectOAuthConfig.validate) can run
+// against exactly the one provider being set.
+func assignProvider(cfg *ProjectOAuthConfig, provider string, prov any) {
+	switch p := prov.(type) {
+	case *ProjectOAuthGoogle:
+		cfg.Google = p
+	case *ProjectOAuthMicrosoft:
+		cfg.Microsoft = p
+	case *ProjectOAuthApple:
+		cfg.Apple = p
+	case *ProjectOAuthOIDC:
+		cfg.OIDC = p
+	}
 }
 
 // encryptOrKeep encrypts a plaintext secret for at-rest storage, or returns the
@@ -341,41 +415,36 @@ func (s *ControlPlaneAdminService) encryptOrKeep(plaintext, existingEnc string) 
 	return secretcrypto.Encrypt(plaintext, s.secretsKey)
 }
 
-// providerView renders the redacted read view of a single configured provider.
-// The provider is assumed present in cfg (callers check first).
-func providerView(provider string, cfg ProjectOAuthConfig) *ProjectOAuthProviderView {
+// providerView renders the redacted read view of a single typed provider.
+func providerView(provider string, prov any) *ProjectOAuthProviderView {
 	v := &ProjectOAuthProviderView{Provider: provider}
-	switch provider {
-	case oauthProviderGoogle:
-		g := cfg.Google
-		v.ClientID = g.ClientID
-		v.HasClientSecret = g.ClientSecretEnc != ""
-		v.NativeAudiences = g.NativeAudiences
-		v.GoogleAuthorizationURL = g.AuthorizationURL
-		v.GoogleTokenURL = g.TokenURL
-		v.GoogleJWKSURL = g.JWKSURL
-		v.GoogleIssuer = g.Issuer
-	case oauthProviderMicrosoft:
-		m := cfg.Microsoft
-		v.ClientID = m.ClientID
-		v.HasClientSecret = m.ClientSecretEnc != ""
-		v.NativeAudiences = m.NativeAudiences
-		v.MicrosoftTenantID = m.TenantID
-		v.MicrosoftIssuerFormat = m.IssuerFormat
-	case oauthProviderApple:
-		a := cfg.Apple
-		v.ClientID = a.ClientID
-		v.HasPrivateKey = a.PrivateKeyEnc != ""
-		v.NativeAudiences = a.NativeAudiences
-		v.AppleTeamID = a.TeamID
-		v.AppleKeyID = a.KeyID
-	case oauthProviderOIDC:
-		o := cfg.OIDC
-		v.ClientID = o.ClientID
-		v.HasClientSecret = o.ClientSecretEnc != ""
-		v.OIDCIssuer = o.Issuer
-		v.OIDCDiscoveryURL = o.DiscoveryURL
-		v.OIDCScopes = o.Scopes
+	switch p := prov.(type) {
+	case *ProjectOAuthGoogle:
+		v.ClientID = p.ClientID
+		v.HasClientSecret = p.ClientSecretEnc != ""
+		v.NativeAudiences = p.NativeAudiences
+		v.GoogleAuthorizationURL = p.AuthorizationURL
+		v.GoogleTokenURL = p.TokenURL
+		v.GoogleJWKSURL = p.JWKSURL
+		v.GoogleIssuer = p.Issuer
+	case *ProjectOAuthMicrosoft:
+		v.ClientID = p.ClientID
+		v.HasClientSecret = p.ClientSecretEnc != ""
+		v.NativeAudiences = p.NativeAudiences
+		v.MicrosoftTenantID = p.TenantID
+		v.MicrosoftIssuerFormat = p.IssuerFormat
+	case *ProjectOAuthApple:
+		v.ClientID = p.ClientID
+		v.HasPrivateKey = p.PrivateKeyEnc != ""
+		v.NativeAudiences = p.NativeAudiences
+		v.AppleTeamID = p.TeamID
+		v.AppleKeyID = p.KeyID
+	case *ProjectOAuthOIDC:
+		v.ClientID = p.ClientID
+		v.HasClientSecret = p.ClientSecretEnc != ""
+		v.OIDCIssuer = p.Issuer
+		v.OIDCDiscoveryURL = p.DiscoveryURL
+		v.OIDCScopes = p.Scopes
 	}
 	return v
 }

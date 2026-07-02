@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -382,5 +383,339 @@ func TestAdminOAuthRPCs_DisabledWhenSecretEmpty(t *testing.T) {
 	}
 	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, "anything", "p"); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("list: err = %v, want ErrUnimplemented", err)
+	}
+}
+
+// oauthSubtreeOf extracts the decoded "oauth" object from a project's stored
+// config_json, so tests can assert exactly which keys survive a merge.
+func oauthSubtreeOf(t *testing.T, f *adminFixture, projectID string) map[string]json.RawMessage {
+	t.Helper()
+	stored, err := f.projects.GetProjectConfig(context.Background(), projectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig: %v", err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stored), &top); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	sub := map[string]json.RawMessage{}
+	if raw, ok := top["oauth"]; ok {
+		if err := json.Unmarshal(raw, &sub); err != nil {
+			t.Fatalf("unmarshal oauth: %v", err)
+		}
+	}
+	return sub
+}
+
+// A Set/Delete must byte-preserve every "oauth" key it does not touch —
+// including a sibling provider with an UNKNOWN field and a wholly UNKNOWN
+// provider key a newer binary may have written (forward/rollback compat).
+func TestAdminOAuthProvider_PreservesUnknownOAuthKeys(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	// Seed config with: a top-level non-oauth key, a known provider carrying an
+	// unknown field, a wholly-unknown provider key, and a provider to delete.
+	const seed = `{"branding":{"product_name":"Kids"},"oauth":{` +
+		`"google":{"client_id":"g","client_secret_enc":"ENC","future_field":"keepme"},` +
+		`"future_provider":{"client_id":"fp","weird":123},` +
+		`"apple":{"native_audiences":["com.x"]}}}`
+	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Set a DIFFERENT provider and Delete ANOTHER one.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderMicrosoft, ClientID: "m", ClientSecret: "ms-secret",
+	}); err != nil {
+		t.Fatalf("set microsoft: %v", err)
+	}
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderApple); err != nil {
+		t.Fatalf("delete apple: %v", err)
+	}
+
+	sub := oauthSubtreeOf(t, f, projectID)
+	// The unknown provider key survives byte-for-byte.
+	if got := string(sub["future_provider"]); got != `{"client_id":"fp","weird":123}` {
+		t.Fatalf("future_provider not preserved: %s", got)
+	}
+	// The unknown field inside the untouched known provider survives.
+	if got := string(sub["google"]); !strings.Contains(got, `"future_field":"keepme"`) {
+		t.Fatalf("google unknown field dropped: %s", got)
+	}
+	// The edited/removed providers reflect the operations.
+	if _, ok := sub["microsoft"]; !ok {
+		t.Fatal("microsoft not set")
+	}
+	if _, ok := sub["apple"]; ok {
+		t.Fatal("apple not deleted")
+	}
+	// The non-oauth top-level key survives.
+	stored, _ := f.projects.GetProjectConfig(ctx, projectID)
+	if !strings.Contains(stored, `"product_name":"Kids"`) {
+		t.Fatalf("branding dropped: %s", stored)
+	}
+}
+
+// Delete removes only the target key; it must NOT decode or validate the
+// surviving providers, so a stale INVALID neighbour never blocks the deletion.
+func TestAdminDeleteProjectOAuthProvider_IgnoresInvalidNeighbor(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	// A microsoft block with a malformed issuer_format (no %s) — invalid, but
+	// already at rest — alongside a valid google block.
+	const seed = `{"oauth":{` +
+		`"google":{"client_id":"g","client_secret_enc":"ENC"},` +
+		`"microsoft":{"client_id":"m","client_secret_enc":"ENC","issuer_format":"https://login.test/no-verb"}}}`
+	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle); err != nil {
+		t.Fatalf("delete google must succeed despite invalid neighbor: %v", err)
+	}
+	sub := oauthSubtreeOf(t, f, projectID)
+	if _, ok := sub["google"]; ok {
+		t.Fatal("google not deleted")
+	}
+	if _, ok := sub["microsoft"]; !ok {
+		t.Fatal("invalid microsoft neighbor must survive the deletion")
+	}
+}
+
+func TestAdminDeleteProjectOAuthProvider_MissingIsNoop(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	// Delete a provider that was never configured — no error, no oauth block.
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle); err != nil {
+		t.Fatalf("delete missing: %v", err)
+	}
+	if list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); err != nil || len(list) != 0 {
+		t.Fatalf("list = %+v, err = %v; want empty", list, err)
+	}
+}
+
+func TestAdminListProjectOAuthProviders_EmptyProject(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	projectID := seedOAuthProject(t, f)
+	list, err := f.svc.AdminListProjectOAuthProviders(context.Background(), oauthAdminSecret, projectID)
+	if err != nil || len(list) != 0 {
+		t.Fatalf("list = %+v, err = %v; want empty", list, err)
+	}
+}
+
+// Exercises the Microsoft and OIDC field mappings (buildProvider + providerView
+// + decodeProvider) and a native-only Apple block, plus the sorted list order.
+func TestAdminSetProjectOAuthProvider_AllProviderFields(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	ms, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:              oauthProviderMicrosoft,
+		ClientID:              "ms-client",
+		ClientSecret:          "ms-secret",
+		MicrosoftTenantID:     "tenant-abc",
+		MicrosoftIssuerFormat: "https://login.test/%s/v2.0",
+		NativeAudiences:       []string{"ms-native"},
+	})
+	if err != nil {
+		t.Fatalf("set microsoft: %v", err)
+	}
+	if ms.MicrosoftTenantID != "tenant-abc" || ms.MicrosoftIssuerFormat != "https://login.test/%s/v2.0" ||
+		!ms.HasClientSecret || len(ms.NativeAudiences) != 1 {
+		t.Fatalf("microsoft view = %+v", ms)
+	}
+
+	oidc, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:         oauthProviderOIDC,
+		ClientID:         "oidc-client",
+		ClientSecret:     "oidc-secret",
+		OIDCIssuer:       "https://idp.example.com",
+		OIDCDiscoveryURL: "https://idp.example.com/.well-known/openid-configuration",
+		OIDCScopes:       "openid email profile",
+	})
+	if err != nil {
+		t.Fatalf("set oidc: %v", err)
+	}
+	if oidc.OIDCIssuer != "https://idp.example.com" || oidc.OIDCDiscoveryURL == "" ||
+		oidc.OIDCScopes != "openid email profile" || !oidc.HasClientSecret {
+		t.Fatalf("oidc view = %+v", oidc)
+	}
+
+	// A native-only Apple block: no hosted credentials, so no private key stored.
+	apple, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:        oauthProviderApple,
+		NativeAudiences: []string{"com.example.app"},
+	})
+	if err != nil {
+		t.Fatalf("set apple native-only: %v", err)
+	}
+	if apple.HasPrivateKey || len(apple.NativeAudiences) != 1 {
+		t.Fatalf("apple view = %+v", apple)
+	}
+
+	// List returns all three, ordered by provider key (apple, microsoft, oidc),
+	// with secrets redacted.
+	list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	gotOrder := []string{list[0].Provider, list[1].Provider, list[2].Provider}
+	want := []string{oauthProviderApple, oauthProviderMicrosoft, oauthProviderOIDC}
+	for i := range want {
+		if gotOrder[i] != want[i] {
+			t.Fatalf("list order = %v, want %v", gotOrder, want)
+		}
+	}
+	if !list[1].HasClientSecret || list[1].MicrosoftTenantID != "tenant-abc" {
+		t.Fatalf("listed microsoft not mapped/redacted: %+v", list[1])
+	}
+}
+
+// A stored oauth subtree that is not a JSON object is a caller-visible config
+// error rather than a silent nil.
+func TestAdminOAuthProvider_MalformedStoredSubtree(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, `{"oauth":["not","an","object"]}`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("list malformed oauth: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+// Covers the argument-validation error paths of all three RPCs.
+func TestAdminOAuthRPCs_ArgumentValidation(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+
+	// Missing project_id on each RPC.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, "  ", &ProjectOAuthProviderInput{Provider: oauthProviderGoogle, ClientID: "g", ClientSecret: "s"}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("set missing project_id: %v", err)
+	}
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, "", oauthProviderGoogle); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("delete missing project_id: %v", err)
+	}
+	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, ""); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("list missing project_id: %v", err)
+	}
+
+	// Nil config on Set.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, "p", nil); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("set nil config: %v", err)
+	}
+
+	// Unknown provider on Delete (normalize rejects it before touching config).
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, "p", "facebook"); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("delete unknown provider: %v", err)
+	}
+}
+
+// A stored config that is not a JSON object at all is a caller-visible error.
+func TestAdminOAuthProvider_MalformedStoredTopLevel(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, `[1,2,3]`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("list malformed top-level: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+// A known provider key whose stored VALUE is not a valid provider object makes
+// a list fail cleanly (exercising the decodeProvider error path).
+func TestAdminListProjectOAuthProviders_MalformedProviderValue(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, `{"oauth":{"google":"not-an-object"}}`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("list malformed provider: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+// Empty-secret-keeps must work for every provider, not just Google — this
+// exercises the existing-secret decode branch of buildProvider per provider.
+func TestAdminSetProjectOAuthProvider_EmptySecretKeepsAllProviders(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	// Microsoft: set with a secret, then re-set with empty secret + a new field.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderMicrosoft, ClientID: "m", ClientSecret: "ms-1",
+	}); err != nil {
+		t.Fatalf("ms set: %v", err)
+	}
+	if v, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderMicrosoft, ClientID: "m2", MicrosoftTenantID: "t",
+	}); err != nil || !v.HasClientSecret || v.ClientID != "m2" {
+		t.Fatalf("ms re-set keep: v=%+v err=%v", v, err)
+	}
+
+	// OIDC: same pattern.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderOIDC, ClientID: "o", ClientSecret: "o-1", OIDCIssuer: "https://idp.example.com",
+	}); err != nil {
+		t.Fatalf("oidc set: %v", err)
+	}
+	v, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderOIDC, ClientID: "o2", OIDCIssuer: "https://idp.example.com", OIDCScopes: "openid",
+	})
+	if err != nil || !v.HasClientSecret || v.ClientID != "o2" {
+		t.Fatalf("oidc re-set keep: v=%+v err=%v", v, err)
+	}
+	// Confirm both secrets round-trip after the keep.
+	sub := oauthSubtreeOf(t, f, projectID)
+	for _, key := range []string{oauthProviderMicrosoft, oauthProviderOIDC} {
+		prov, err := decodeProvider(key, sub[key])
+		if err != nil {
+			t.Fatalf("decode %s: %v", key, err)
+		}
+		if !providerView(key, prov).HasClientSecret {
+			t.Fatalf("%s secret not kept", key)
+		}
+	}
+}
+
+// decodeProvider surfaces a malformed stored VALUE for each provider key, not
+// just Google — a list over a corrupted subtree fails cleanly per provider.
+func TestAdminListProjectOAuthProviders_MalformedPerProvider(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{oauthProviderMicrosoft, oauthProviderApple, oauthProviderOIDC} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			f := newAdminFixture(oauthAdminSecret)
+			ctx := context.Background()
+			projectID := seedOAuthProject(t, f)
+			if _, err := f.projects.UpdateProjectConfig(ctx, projectID, `{"oauth":{"`+key+`":42}}`); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
+				t.Fatalf("list malformed %s: err = %v, want ErrInvalidArgument", key, err)
+			}
+		})
 	}
 }
