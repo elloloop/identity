@@ -49,15 +49,27 @@ type NativeOAuthLoginParams struct {
 	UserAgent string
 }
 
-// NativeOAuthLogin verifies a native mobile-SDK ID token, resolves the
-// product to a project, scopes the request to it, then reuses the SAME social
-// account-linking + token-issuance path as the hosted OAuthLogin.
+// NativeOAuthLogin verifies a native mobile-SDK ID token against the resolved
+// project's per-project config, then reuses the SAME social account-linking +
+// token-issuance path as the hosted OAuthLogin.
 //
-// The flow is, in order: gate on the enabled flag → verify the ID token
-// server-side (signature, issuer, expiry, the requested product's audience set,
-// and — for Apple — the nonce) → resolve product→project and inject a
-// ProjectScope → match
-// (provider, sub) then email, creating the user if new → issue the token pair.
+// The flow is, in order:
+//
+//  1. gate on the enabled flag;
+//  2. resolve product→project and inject a ProjectScope — this happens BEFORE
+//     verification because the accepted native audiences (and Microsoft
+//     issuer/tenant pinning) are PER-PROJECT (config_json), so the project must
+//     be known first. This resolve-before-verify order is security-sensitive:
+//     it is what binds the token to exactly one project's audiences — do not
+//     revert it to verify-first;
+//  3. verify the ID token server-side against the RESOLVED PROJECT's config
+//     (signature, issuer, expiry, that project's native audiences; for Microsoft
+//     the issuer is derived from the token's tid, optionally tenant-pinned; the
+//     nonce is checked for Apple as hex(SHA-256(raw)) and for Microsoft
+//     verbatim);
+//  4. record the token's replay key (single-use), then link (provider, sub)
+//     then email, creating the user if new, and issue the token pair.
+//
 // It carries the same enumeration-safety and verified-email posture as
 // OAuthLogin: a provider-verified identity proves email control, so the user
 // is upserted with email_verified=true and any planted credentials are cleared.
@@ -122,7 +134,8 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 	if err := s.recordNativeRedemption(ctx, verified); err != nil {
 		if errors.Is(err, ErrNativeTokenReplayed) {
 			s.logger.Info("native_oauth_login_replay",
-				zap.String("provider", provider))
+				zap.String("provider", provider),
+				zap.String("project", scope.ProjectID))
 			s.audit.Log(
 				ctx, audit.EventOAuthLogin,
 				audit.WithIP(params.IPAddr), audit.WithUserAgent(params.UserAgent),
@@ -130,6 +143,7 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 				audit.WithDetails(map[string]any{
 					"provider": provider,
 					"native":   true,
+					"project":  scope.ProjectID,
 					"reason":   "token_replay",
 				}),
 			)
@@ -294,16 +308,8 @@ func (s *AuthService) nativeAudiences(scope *ProjectScope, provider string) []st
 	if auds := scope.OAuth.nativeAudiences(provider); len(auds) > 0 {
 		return auds
 	}
-	if s.isDefaultNativeProject(scope.ProjectID) {
+	if s.cfg.IsDefaultProject(scope.ProjectID) {
 		return s.cfg.NativeOAuthAudienceList(provider)
 	}
 	return nil
-}
-
-// isDefaultNativeProject reports whether projectID is the default project (or an
-// unscoped / control-plane-less request), i.e. one that falls back to the env
-// native-audience seed. It mirrors OAuthResolver.isNonDefaultProject: with no
-// configured default project the env seed applies to every request.
-func (s *AuthService) isDefaultNativeProject(projectID string) bool {
-	return s.cfg.DefaultProjectID == "" || projectID == "" || projectID == s.cfg.DefaultProjectID
 }

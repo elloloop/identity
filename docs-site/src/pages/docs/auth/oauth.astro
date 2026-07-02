@@ -226,6 +226,23 @@ message NativeOAuthLoginResponse {
     then <code>sub</code>). Any failure returns <code>Unauthenticated</code> with
     a safe message.
   </p>
+  <div class="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm">
+    <strong>🔒 Security — multi-tenant Microsoft &amp; account linking.</strong>
+    Native (and hosted) Microsoft login defaults to <strong>multi-tenant</strong>:
+    the expected issuer is derived from the token's own <code>tid</code>, so
+    <strong>any</strong> Azure AD tenant — including one an attacker controls —
+    can mint a valid token. Because a token carries an <code>email</code>, this is
+    an <a href="https://www.descope.com/blog/post/noauth" rel="nofollow">nOAuth</a>-style
+    account-takeover vector when email is trusted for cross-provider linking: an
+    attacker can present a Microsoft token bearing a <strong>victim's email</strong>
+    and take over the account. For email-based linking,
+    <strong>pin <code>tenant_id</code></strong> (single-tenant) on the project's
+    <code>oauth.microsoft</code> block unless you fully trust every tenant that
+    can obtain a token. Do <strong>not</strong> trust a multi-tenant Microsoft
+    email for cross-provider account linking. (This matches the existing hosted
+    Microsoft provider; a tenant allowlist and the <code>xms_edov</code>
+    email-verified claim are planned hardening for both flows.)
+  </div>
   <p>
     <strong>Audience scoping (per-project).</strong> The accepted <code>aud</code>
     values are resolved <strong>per project</strong> from its <code>config_json</code>

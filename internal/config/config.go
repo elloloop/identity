@@ -1113,6 +1113,24 @@ func (c *Config) NativeOAuthAudienceList(provider string) []string {
 	return nil
 }
 
+// IsDefaultProject reports whether id refers to the default project — the
+// project that falls back to env-configured (default-project) settings (OAuth
+// providers, native audiences). It delegates to the package-level
+// IsDefaultProject rule using this Config's DefaultProjectID.
+func (c *Config) IsDefaultProject(id string) bool {
+	return IsDefaultProject(c.DefaultProjectID, id)
+}
+
+// IsDefaultProject reports whether id refers to the default project identified
+// by defaultProjectID. An empty defaultProjectID (a Config built without a
+// control plane) or an empty id means "default", so env settings apply to every
+// request as they did before per-project config. It is the SINGLE SOURCE of the
+// default/non-default rule, shared by the OAuth exchanger resolver (which holds
+// only the id string) and native-audience resolution (via the Config method).
+func IsDefaultProject(defaultProjectID, id string) bool {
+	return defaultProjectID == "" || id == "" || id == defaultProjectID
+}
+
 // NativeOAuthProductProjectMap parses the product=projectID pairs into a map
 // keyed by the lower-cased product selector. Malformed or blank entries are
 // dropped; an empty config yields an empty (non-nil) map.

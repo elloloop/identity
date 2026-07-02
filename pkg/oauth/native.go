@@ -168,7 +168,9 @@ func NewNativeVerifier(cfg NativeVerifierConfig) *NativeVerifier {
 // (Apple/Microsoft). Every failure returns an error wrapping
 // ErrIdentityVerification or ErrEmailNotVerified so the caller can map it to a
 // single, safe Unauthenticated response — the reason (bad aud, wrong project,
-// expired, …) is never leaked to the client.
+// expired, …) is never leaked to the client. Failure errors deliberately omit
+// the token's email address: the service logs them with zap.Error at the
+// native-login failure site, and the raw email is PII that must not reach logs.
 func (v *NativeVerifier) Verify(ctx context.Context, p NativeVerifyParams) (*NativeVerification, error) {
 	switch strings.ToLower(strings.TrimSpace(p.Provider)) {
 	case "google":
@@ -220,7 +222,7 @@ func (v *NativeVerifier) verifyGoogle(ctx context.Context, p NativeVerifyParams)
 		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
 	}
 	if !claims.EmailVerified {
-		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, email)
+		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
 	}
 	return v.buildVerification(&Identity{
 		ProviderUserID: claims.Sub,
@@ -292,7 +294,7 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, p NativeVerifyParams) 
 	// Apple flow's stance. Relay (Hide My Email) addresses arrive verified and
 	// are accepted as-is, exactly like apple.go's Exchange path.
 	if !appleEmailVerified(claims.EmailVerified) {
-		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, email)
+		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
 	}
 	return v.buildVerification(&Identity{
 		ProviderUserID: claims.Sub,
@@ -370,7 +372,7 @@ func (v *NativeVerifier) verifyMicrosoft(ctx context.Context, p NativeVerifyPara
 		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
 	}
 	if claims.VerifiedEmail != nil && !*claims.VerifiedEmail {
-		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, email)
+		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
 	}
 
 	subject := claims.OID
