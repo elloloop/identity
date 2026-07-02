@@ -5,9 +5,26 @@ import (
 	"strings"
 	"testing"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/secretcrypto"
 )
+
+// rotatedGoogleScope is projectGoogleScope with a different encrypted secret, so
+// its provider config hashes differently (simulating a config edit).
+func rotatedGoogleScope(t *testing.T, projectID, clientID string) context.Context {
+	t.Helper()
+	return WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: projectID,
+		OAuth: ProjectOAuthConfig{Google: &ProjectOAuthGoogle{
+			ClientID:         clientID,
+			ClientSecretEnc:  encForProject(t, "rotated-secret"),
+			AuthorizationURL: "https://accounts.example/authorize",
+		}},
+	})
+}
 
 func resolverSecretsKey() []byte { return make([]byte, 32) }
 
@@ -218,5 +235,52 @@ func TestOAuthResolver_BuildsAllProviders(t *testing.T) {
 		if _, ok := r.exchangerFor(ctx, provider); !ok {
 			t.Errorf("provider %q must build from project config", provider)
 		}
+	}
+}
+
+func TestOAuthResolver_CacheSingleSlotPerProviderEvictsSuperseded(t *testing.T) {
+	r := newOAuthResolver("default", oauth.NewRegistry(), nil).
+		withSecrets(resolverSecretsKey(), nil)
+
+	// Build the initial config, then a rotated one (different hash) for the SAME
+	// project+provider. The superseded entry must be evicted, not accumulated.
+	if _, ok := r.exchangerFor(projectGoogleScope(t, "other", "proj-google"), "google"); !ok {
+		t.Fatal("initial build must succeed")
+	}
+	if _, ok := r.exchangerFor(rotatedGoogleScope(t, "other", "proj-google"), "google"); !ok {
+		t.Fatal("rotated build must succeed")
+	}
+
+	r.mu.RLock()
+	n := len(r.cache)
+	r.mu.RUnlock()
+	if n != 1 {
+		t.Fatalf("cache must hold at most one entry per project+provider, got %d", n)
+	}
+}
+
+func TestOAuthResolver_NegativeResultCachedNoRebuildOrRelog(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	// No withSecrets: every build fails (cannot decrypt) and logs a warning.
+	r := newOAuthResolver("default", oauth.NewRegistry(), zap.New(core))
+	ctx := projectGoogleScope(t, "other", "proj-google")
+
+	// Repeated logins with the SAME broken config must neither rebuild nor
+	// re-log — the negative result is cached under its config hash.
+	for i := 0; i < 3; i++ {
+		if _, ok := r.exchangerFor(ctx, "google"); ok {
+			t.Fatal("a build failure must report the provider unavailable")
+		}
+	}
+	if got := logs.FilterMessage("oauth_project_provider_build_failed").Len(); got != 1 {
+		t.Fatalf("a persistently-bad config must log exactly once, got %d", got)
+	}
+
+	// A genuinely changed config (new hash) misses the negative entry and retries.
+	if _, ok := r.exchangerFor(rotatedGoogleScope(t, "other", "proj-google"), "google"); ok {
+		t.Fatal("changed-but-still-broken config must still be unavailable")
+	}
+	if got := logs.FilterMessage("oauth_project_provider_build_failed").Len(); got != 2 {
+		t.Fatalf("a changed config must retry and log again, got %d", got)
 	}
 }

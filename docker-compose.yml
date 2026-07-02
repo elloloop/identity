@@ -53,6 +53,10 @@ services:
       GATEWAY_POSTGRES_AUTO_MIGRATE: "true"
       GATEWAY_DEFAULT_TENANT_ID: local
       GATEWAY_APP_BASE_URL: http://localhost:8080
+      # Encrypts per-project OAuth provider secrets at rest (base64 32-byte
+      # AES key). Required with the postgres control plane. DEV-ONLY all-zero
+      # key — generate and set a real one in production: openssl rand -base64 32
+      GATEWAY_PROJECT_SECRETS_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       # SMTP_* intentionally unset — falls back to LogOnly transport.
       # OAuth provider configs intentionally unset — those RPCs return
       # CodeUnavailable until you wire them up via env vars.

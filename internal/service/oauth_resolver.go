@@ -44,8 +44,20 @@ type OAuthResolver struct {
 	// this wraps the per-project ones identically. nil leaves them unwrapped.
 	wrap func(provider string, e oauth.Exchanger) oauth.Exchanger
 
-	mu    sync.RWMutex
-	cache map[string]oauth.Exchanger
+	mu sync.RWMutex
+	// cache holds at most ONE entry per (projectID, provider): a config change
+	// (new hash) overwrites the superseded entry rather than accumulating. An
+	// entry with a nil exchanger is a NEGATIVE result (the build failed for that
+	// hash), cached so a persistently-misconfigured project neither rebuilds nor
+	// re-logs on every login; a genuinely fixed config (new hash) retries.
+	cache map[string]oauthCacheEntry
+}
+
+// oauthCacheEntry is one resolver cache slot. hash pins it to a specific
+// provider config; exchanger is nil when the build failed for that hash.
+type oauthCacheEntry struct {
+	hash      string
+	exchanger oauth.Exchanger
 }
 
 // newOAuthResolver builds a resolver over the env-built default-project
@@ -59,7 +71,7 @@ func newOAuthResolver(defaultProjectID string, defaultRegistry *oauth.Registry, 
 		defaultProjectID: defaultProjectID,
 		defaultRegistry:  defaultRegistry,
 		logger:           logger,
-		cache:            make(map[string]oauth.Exchanger),
+		cache:            make(map[string]oauthCacheEntry),
 	}
 }
 
@@ -136,32 +148,38 @@ func (r *OAuthResolver) buildProject(projectID, provider string, cfg ProjectOAut
 	if !ok {
 		return false, nil
 	}
-	key := projectID + "\x00" + provider + "\x00" + providerConfigHash(raw)
+	hash := providerConfigHash(raw)
+	// One slot per (projectID, provider) — a config change overwrites it.
+	key := projectID + "\x00" + provider
 
 	r.mu.RLock()
-	cached, hit := r.cache[key]
+	entry, hit := r.cache[key]
 	r.mu.RUnlock()
-	if hit {
-		return true, cached
+	if hit && entry.hash == hash {
+		// Hit for the current config — positive OR negative (nil exchanger).
+		return true, entry.exchanger
 	}
 
 	built, err := r.build(provider, raw)
 	if err != nil {
+		// Cache the negative result under this hash so the same broken config
+		// neither rebuilds nor re-logs on every login; a fixed config (new
+		// hash) misses this entry and retries. built stays nil.
 		r.logger.Warn("oauth_project_provider_build_failed",
 			zap.String("project_id", projectID),
 			zap.String("provider", provider),
 			zap.Error(err))
-		return true, nil
-	}
-	if r.wrap != nil {
+	} else if r.wrap != nil {
 		built = r.wrap(provider, built)
 	}
 
 	r.mu.Lock()
-	if existing, ok := r.cache[key]; ok {
-		built = existing
+	// A concurrent builder of the SAME hash wins so callers share one instance;
+	// otherwise store (and thereby evict any superseded hash for this key).
+	if existing, ok := r.cache[key]; ok && existing.hash == hash {
+		built = existing.exchanger
 	} else {
-		r.cache[key] = built
+		r.cache[key] = oauthCacheEntry{hash: hash, exchanger: built}
 	}
 	r.mu.Unlock()
 	return true, built

@@ -47,6 +47,7 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
   -e GATEWAY_PASSKEY_ORIGIN=https://acme.example.com \\
   -e GATEWAY_TOTP_ISSUER="Acme" \\
   -e GATEWAY_TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)" \\
+  -e GATEWAY_PROJECT_SECRETS_KEY="$(openssl rand -base64 32)" \\
   -v /etc/identity/keys.json:/etc/identity/keys.json:ro \\
   -e GATEWAY_JWT_SIGNER=file \\
   -e GATEWAY_JWT_KEYS_FILE=/etc/identity/keys.json \\
@@ -112,6 +113,9 @@ services:
       GATEWAY_POSTGRES_DSN: postgres://identity:secret@postgres:5432/identity?sslmode=disable
       GATEWAY_POSTGRES_AUTO_MIGRATE: "true"
       GATEWAY_DEFAULT_PROJECT_ID: proj_local
+      # Required with postgres — encrypts per-project OAuth secrets at rest.
+      # Dev-only all-zero key; generate a real one: openssl rand -base64 32
+      GATEWAY_PROJECT_SECRETS_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       GATEWAY_AUTH_ALLOW_LOCAL: "true"
       GATEWAY_PASSKEY_RP_ID: localhost
       GATEWAY_PASSKEY_ORIGIN: http://localhost`} lang="yaml" title="docker-compose.yml" />

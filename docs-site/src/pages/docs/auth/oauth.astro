@@ -123,6 +123,13 @@ import { Code } from "astro-expressive-code/components";
     invalidates every stored provider secret. GitHub is not part of the
     per-project schema — it remains an env-only provider for the default project.
   </p>
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+    <strong>Upgrade note.</strong> This key is <strong>mandatory</strong> for
+    postgres deployments (<code>GATEWAY_REPO_DRIVER=postgres</code>) — boot fails
+    fast without it, so existing deployments must set it before upgrading.
+    Generate one with:
+    <Code code={`openssl rand -base64 32`} lang="bash" />
+  </div>
   <p>
     Built exchangers (and their JWKS/discovery caches) are cached per
     <code>(project, provider, config)</code>, so a config edit rebuilds while
