@@ -73,6 +73,13 @@ type AdminProject struct {
 	ID             string
 	StorageScopeID string
 	Name           string
+
+	// OAuth is the project's parsed config_json OAuth block. It is populated on
+	// READS that need it (the native-login project lookup, ActiveProjectByID, so
+	// resolveNativeProject can bind the project's per-project native audiences to
+	// the request scope) and ignored on WRITES (CreateProject persists the row,
+	// not the config). Zero value = no per-project OAuth configured.
+	OAuth ProjectOAuthConfig
 }
 
 // AdminProjectCredential is the credential row an operator mints. Only the

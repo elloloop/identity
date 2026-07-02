@@ -10,37 +10,26 @@ import (
 )
 
 // buildNativeOAuthVerifier constructs the verifier for NativeOAuthLogin
-// (Google/Apple ID tokens from mobile SDKs) from config, or returns nil when
-// native login is disabled or no provider audiences are configured. A nil
-// verifier leaves the RPC disabled (FailedPrecondition). cfg.Validate already
-// guarantees that an enabled native login has at least one provider's
-// audiences set.
+// (Google/Apple/Microsoft ID tokens from mobile SDKs), or returns nil when
+// native login is disabled. A nil verifier leaves the RPC disabled
+// (FailedPrecondition). The accepted audiences are resolved per-request from
+// the project scope (env seed for the default project, config_json for others),
+// so the verifier itself holds only the shared JWKS caches — no audiences are
+// baked in at construction.
 func buildNativeOAuthVerifier(cfg *config.Config, logger *zap.Logger) *oauth.NativeVerifier {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	googleAuds := cfg.NativeOAuthGoogleAudienceList()
-	appleAuds := cfg.NativeOAuthAppleAudienceList()
-	googleByProduct := cfg.NativeOAuthGoogleAudiencesByProductMap()
-	appleByProduct := cfg.NativeOAuthAppleAudiencesByProductMap()
-	if !cfg.NativeOAuthEnabled ||
-		(len(googleAuds) == 0 && len(appleAuds) == 0 &&
-			len(googleByProduct) == 0 && len(appleByProduct) == 0) {
+	if !cfg.NativeOAuthEnabled {
 		return nil
 	}
 	logger.Info(
 		"native_oauth_enabled",
-		zap.Int("google_audiences", len(googleAuds)),
-		zap.Int("apple_audiences", len(appleAuds)),
-		zap.Int("google_audience_products", len(googleByProduct)),
-		zap.Int("apple_audience_products", len(appleByProduct)),
+		zap.Int("default_project_google_audiences", len(cfg.NativeOAuthGoogleAudienceList())),
+		zap.Int("default_project_apple_audiences", len(cfg.NativeOAuthAppleAudienceList())),
+		zap.Int("default_project_microsoft_audiences", len(cfg.NativeOAuthMicrosoftAudienceList())),
 	)
-	return oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
-		GoogleAudiences:          googleAuds,
-		AppleAudiences:           appleAuds,
-		GoogleAudiencesByProduct: googleByProduct,
-		AppleAudiencesByProduct:  appleByProduct,
-	})
+	return oauth.NewNativeVerifier(oauth.NativeVerifierConfig{})
 }
 
 // buildOAuthRegistry constructs an oauth.Registry from the gateway

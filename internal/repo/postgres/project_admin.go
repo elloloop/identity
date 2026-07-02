@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -31,7 +32,19 @@ func (s *ProjectStore) ActiveProjectByID(ctx context.Context, projectID string) 
 	if p == nil || p.Status != projectStatusActive {
 		return nil, nil
 	}
-	return &service.AdminProject{ID: p.ID, StorageScopeID: p.StorageScopeID, Name: p.Name}, nil
+	// Parse config_json so native login can bind the project's per-project OAuth
+	// audiences/issuer to the request scope. A malformed blob is a configuration
+	// error surfaced to the caller, never silently dropped.
+	cfg, err := service.ParseProjectConfig(p.ConfigJSON)
+	if err != nil {
+		return nil, fmt.Errorf("project %q: %w", p.ID, err)
+	}
+	return &service.AdminProject{
+		ID:             p.ID,
+		StorageScopeID: p.StorageScopeID,
+		Name:           p.Name,
+		OAuth:          cfg.OAuth,
+	}, nil
 }
 
 // CreateProject inserts a project from the admin service's value type and

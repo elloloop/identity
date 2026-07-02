@@ -100,9 +100,8 @@ func newNativeHarness(t *testing.T, signer *nativeHandlerSigner, enabled bool) *
 	var verifier *oauth.NativeVerifier
 	if enabled {
 		verifier = oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
-			GoogleAudiences: cfg.NativeOAuthGoogleAudienceList(),
-			GoogleJWKSURL:   signer.url,
-			Now:             func() time.Time { return signer.now },
+			GoogleJWKSURL: signer.url,
+			Now:           func() time.Time { return signer.now },
 		})
 	}
 

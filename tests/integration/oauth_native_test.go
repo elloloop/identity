@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,6 +22,7 @@ import (
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/oauth"
 )
 
@@ -120,21 +122,91 @@ func nativeITHarness(t *testing.T, signer *nativeITSigner, enabled bool) *Harnes
 		c.NativeOAuthEnabled = enabled
 		c.NativeOAuthGoogleAudiences = nativeITGoogleAud
 		c.NativeOAuthAppleAudiences = nativeITAppleAud
+		c.NativeOAuthMicrosoftAudiences = nativeITMicrosoftAud
 		c.NativeOAuthProductProjects = "easyloops=" + nativeITProject
 	})
 	if !enabled {
 		return StartServer(t, cfgFn)
 	}
 	verifier := oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
-		GoogleAudiences: []string{nativeITGoogleAud},
-		AppleAudiences:  []string{nativeITAppleAud},
-		GoogleJWKSURL:   signer.url,
-		AppleJWKSURL:    signer.url,
-		Now:             func() time.Time { return signer.now },
+		GoogleJWKSURL:    signer.url,
+		AppleJWKSURL:     signer.url,
+		MicrosoftJWKSURL: signer.url,
+		Now:              func() time.Time { return signer.now },
 	})
 	// Memory driver: no control plane, so nativeProjects is nil and the product
-	// must resolve to the default project.
+	// must resolve to the default project, whose native audiences come from env.
 	return StartServer(t, cfgFn, WithNativeOAuth(verifier, nil))
+}
+
+const (
+	nativeITMicrosoftAud  = "ms-native-client"
+	nativeITMSTenant      = "tenant-it-1"
+	nativeITPerProjAud    = "perproject-ios.apps.googleusercontent.com"
+	nativeITMSIssuerFmt   = "https://login.microsoftonline.com/%s/v2.0"
+	nativeITPerProjProdID = "perproject"
+)
+
+func (s *nativeITSigner) microsoftToken(t *testing.T, sub, email, aud, tid string) string {
+	return s.sign(t, map[string]any{
+		"iss": fmt.Sprintf(nativeITMSIssuerFmt, tid), "tid": tid, "aud": aud,
+		"oid": sub, "exp": s.now.Add(time.Hour), "iat": s.now, "email": email, "name": "IT MS User",
+	})
+}
+
+// fakeITProjects is a control-plane stub for the integration harness: it maps a
+// product→project id to an active project carrying its own per-project OAuth
+// config (native audiences / Microsoft issuer pinning), exercising the
+// non-default-project isolation path end-to-end.
+type fakeITProjects struct {
+	active map[string]*service.AdminProject
+}
+
+func (f *fakeITProjects) ActiveProjectByID(_ context.Context, id string) (*service.AdminProject, error) {
+	p, ok := f.active[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := *p
+	return &cp, nil
+}
+
+// nativeITPerProjectHarness boots the server with a control-plane stub that
+// returns per-project config_json native audiences (and Microsoft issuer
+// pinning), proving config_json drives verification and OVERRIDES the env seed.
+// The stub resolves to the boot-seeded project id (the only projects(id) row the
+// sqlite/memory data plane has), since the data-plane writes FK onto it — the
+// non-default-project isolation itself is unit-covered in internal/service.
+func nativeITPerProjectHarness(t *testing.T, signer *nativeITSigner) *Harness {
+	t.Helper()
+	cfgFn := WithConfig(func(c *config.Config) {
+		c.DefaultProjectID = nativeITProject
+		c.NativeOAuthEnabled = true
+		// The env seed differs from the per-project audiences so the test proves
+		// config_json wins and the env seed does NOT leak in when config is present.
+		c.NativeOAuthGoogleAudiences = nativeITGoogleAud
+		c.NativeOAuthProductProjects = nativeITPerProjProdID + "=" + nativeITProject
+	})
+	verifier := oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
+		GoogleJWKSURL:    signer.url,
+		AppleJWKSURL:     signer.url,
+		MicrosoftJWKSURL: signer.url,
+		Now:              func() time.Time { return signer.now },
+	})
+	projects := &fakeITProjects{active: map[string]*service.AdminProject{
+		nativeITProject: {
+			ID: nativeITProject, StorageScopeID: newTestConfig().DefaultTenantID, Name: nativeITProject,
+			OAuth: service.ProjectOAuthConfig{
+				Google: &service.ProjectOAuthGoogle{NativeAudiences: []string{nativeITPerProjAud}},
+				Microsoft: &service.ProjectOAuthMicrosoft{
+					NativeAudiences: []string{nativeITMicrosoftAud},
+					TenantID:        nativeITMSTenant,
+					IssuerFormat:    nativeITMSIssuerFmt,
+				},
+			},
+		},
+	}}
+	return StartServer(t, cfgFn, WithNativeOAuth(verifier, projects))
 }
 
 func TestNativeOAuth_Google_HappyPath(t *testing.T) {
@@ -233,5 +305,81 @@ func TestNativeOAuth_Disabled_FailedPrecondition(t *testing.T) {
 	}))
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("disabled: code = %v, want FailedPrecondition (err=%v)", connect.CodeOf(err), err)
+	}
+}
+
+// TestNativeOAuth_Microsoft_DefaultProject_HappyPath verifies a Microsoft native
+// login for the DEFAULT project, whose accepted audiences come from the env seed
+// (GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES).
+func TestNativeOAuth_Microsoft_DefaultProject_HappyPath(t *testing.T) {
+	signer := newNativeITSigner(t)
+	h := nativeITHarness(t, signer, true)
+
+	tok := signer.microsoftToken(t, "it-ms-oid", "it-ms@contoso.com", nativeITMicrosoftAud, nativeITMSTenant)
+	resp, err := h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
+		Provider: "microsoft", IdToken: tok, Product: "easyloops",
+	}))
+	if err != nil {
+		t.Fatalf("NativeOAuthLogin microsoft: %v", err)
+	}
+	if resp.Msg.AccessToken == "" || resp.Msg.User == nil || resp.Msg.User.Email != "it-ms@contoso.com" {
+		t.Fatalf("unexpected microsoft result: %+v", resp.Msg)
+	}
+}
+
+// TestNativeOAuth_PerProjectAudiences drives a project whose config_json carries
+// its own Google native audience. A token for that audience is accepted, while a
+// token for the env-seed audience is rejected — config_json wins and the env seed
+// does not merge in when the project configures its own audiences.
+func TestNativeOAuth_PerProjectAudiences(t *testing.T) {
+	signer := newNativeITSigner(t)
+	h := nativeITPerProjectHarness(t, signer)
+
+	// (a) the project's own (config_json) audience is accepted.
+	ok := signer.googleToken(t, "it-pp-1", "it-pp@example.com", nativeITPerProjAud, signer.now.Add(time.Hour))
+	resp, err := h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
+		Provider: "google", IdToken: ok, Product: nativeITPerProjProdID,
+	}))
+	if err != nil {
+		t.Fatalf("per-project google login: %v", err)
+	}
+	if resp.Msg.User == nil || resp.Msg.User.Email != "it-pp@example.com" {
+		t.Fatalf("unexpected per-project result: %+v", resp.Msg)
+	}
+
+	// (b) the env-seed audience must NOT be accepted once config_json sets its own.
+	leak := signer.googleToken(t, "it-pp-2", "it-pp2@example.com", nativeITGoogleAud, signer.now.Add(time.Hour))
+	_, err = h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
+		Provider: "google", IdToken: leak, Product: nativeITPerProjProdID,
+	}))
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("env aud leak: code = %v, want Unauthenticated (err=%v)", connect.CodeOf(err), err)
+	}
+}
+
+// TestNativeOAuth_PerProjectMicrosoft drives a non-default project's Microsoft
+// native audience + tenant pinning end-to-end.
+func TestNativeOAuth_PerProjectMicrosoft(t *testing.T) {
+	signer := newNativeITSigner(t)
+	h := nativeITPerProjectHarness(t, signer)
+
+	tok := signer.microsoftToken(t, "it-pp-ms", "it-pp-ms@contoso.com", nativeITMicrosoftAud, nativeITMSTenant)
+	resp, err := h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
+		Provider: "microsoft", IdToken: tok, Product: nativeITPerProjProdID,
+	}))
+	if err != nil {
+		t.Fatalf("per-project microsoft login: %v", err)
+	}
+	if resp.Msg.User == nil || resp.Msg.User.Email != "it-pp-ms@contoso.com" {
+		t.Fatalf("unexpected per-project microsoft result: %+v", resp.Msg)
+	}
+
+	// A token from a DIFFERENT tenant is rejected by the project's tenant pin.
+	wrong := signer.microsoftToken(t, "it-pp-ms2", "x@contoso.com", nativeITMicrosoftAud, "other-tenant")
+	_, err = h.Client.NativeOAuthLogin(context.Background(), connect.NewRequest(&identitypb.NativeOAuthLoginRequest{
+		Provider: "microsoft", IdToken: wrong, Product: nativeITPerProjProdID,
+	}))
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("wrong tenant: code = %v, want Unauthenticated (err=%v)", connect.CodeOf(err), err)
 	}
 }
