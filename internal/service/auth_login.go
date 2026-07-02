@@ -551,7 +551,7 @@ func (s *AuthService) BeginOAuthLogin(
 	ctx context.Context,
 	provider, redirectURI string,
 ) (*OAuthBeginResult, error) {
-	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
+	if !s.oauthResolver.available(ctx) {
 		return nil, ErrOAuthDisabled
 	}
 	provider = strings.ToLower(strings.TrimSpace(provider))
@@ -563,7 +563,7 @@ func (s *AuthService) BeginOAuthLogin(
 		return nil, fmt.Errorf("%w: redirect uri is required", ErrInvalidArgument)
 	}
 
-	exchanger, ok := s.oauthRegistry.Get(provider)
+	exchanger, ok := s.oauthResolver.exchangerFor(ctx, provider)
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
 	}
@@ -753,7 +753,7 @@ func (s *AuthService) verifyOAuthExchange(
 	ctx context.Context,
 	params OAuthLoginParams,
 ) (*oauth.Identity, error) {
-	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
+	if !s.oauthResolver.available(ctx) {
 		return nil, ErrOAuthDisabled
 	}
 	redirectURI := strings.TrimSpace(params.RedirectURI)
@@ -768,7 +768,7 @@ func (s *AuthService) verifyOAuthExchange(
 		return nil, fmt.Errorf("%w: redirect uri is required", ErrInvalidArgument)
 	}
 
-	exchanger, ok := s.oauthRegistry.Get(provider)
+	exchanger, ok := s.oauthResolver.exchangerFor(ctx, provider)
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
 	}

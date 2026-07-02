@@ -51,6 +51,14 @@ type ProjectScope struct {
 	// the login-path enforcement. The zero value imposes no restriction, so
 	// a project that configures none behaves exactly as before.
 	LoginDefaults ProjectLoginConfig
+
+	// OAuth is the project's own hosted-flow OAuth providers, parsed from
+	// config_json. Each provider present here is built (and its secret
+	// decrypted) on demand for this project only. A provider absent here is
+	// unavailable to the project, except that the default project additionally
+	// falls back to the env-configured GATEWAY_OAUTH_* providers. Empty for a
+	// zero-config project, which then behaves exactly as before.
+	OAuth ProjectOAuthConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -85,6 +93,7 @@ type ResolvedProject struct {
 	Branding           ProjectBrandingConfig
 	Passkey            ProjectPasskeyConfig
 	LoginDefaults      ProjectLoginConfig
+	OAuth              ProjectOAuthConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

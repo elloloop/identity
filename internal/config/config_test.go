@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"testing"
 	"time"
@@ -466,6 +467,11 @@ func clearGatewayEnv(t *testing.T) {
 			_ = os.Unsetenv(key)
 		}
 	}
+	// The postgres default driver requires a project secrets key
+	// (validateProjectSecrets); restore a valid one so "clear then Load then
+	// Validate" tests of unrelated features keep passing. Tests of the
+	// requirement itself call validateProjectSecrets directly.
+	t.Setenv("GATEWAY_PROJECT_SECRETS_KEY", base64.StdEncoding.EncodeToString(make([]byte, projectSecretsKeyBytes)))
 }
 
 func findByte(s string, b byte) int {

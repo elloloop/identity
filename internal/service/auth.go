@@ -936,10 +936,11 @@ type AuthService struct {
 	mailer             email.Transport
 	smsSender          sms.Sender
 	logger             *zap.Logger
-	// oauthRegistry holds per-provider Exchangers. May be nil; in that
-	// case OAuthLogin returns ErrOAuthDisabled. A non-nil but empty
-	// registry has the same effect when looking up a specific provider.
-	oauthRegistry *oauth.Registry
+	// oauthResolver resolves the OAuth Exchanger for a request's project and
+	// provider (per-project providers from config_json, env providers for the
+	// default project). Always non-nil once the constructor runs; OAuthLogin
+	// returns ErrOAuthDisabled when no provider is available for the project.
+	oauthResolver *OAuthResolver
 	// nativeVerifier verifies native mobile-SDK ID tokens (Google idToken /
 	// Apple identityToken) for NativeOAuthLogin. nil disables the RPC
 	// (FailedPrecondition) — the constructor leaves it nil; app.New sets it via
@@ -1039,6 +1040,17 @@ func (s *AuthService) WithLoginGovernance(g *LoginGovernance) *AuthService {
 	return s
 }
 
+// WithProjectOAuthSecrets wires the per-project OAuth secret-decryption key and
+// the Exchanger observability wrapper into the OAuth resolver, and returns the
+// service for chaining. app.New calls it once at construction with the decoded
+// GATEWAY_PROJECT_SECRETS_KEY and observability.WrapOAuthExchanger. Without it,
+// a project that stores encrypted provider secrets cannot be built (only the
+// default project's env providers work).
+func (s *AuthService) WithProjectOAuthSecrets(secretsKey []byte, wrap func(provider string, e oauth.Exchanger) oauth.Exchanger) *AuthService {
+	s.oauthResolver.withSecrets(secretsKey, wrap)
+	return s
+}
+
 // WithNativeOAuth wires the native mobile sign-in dependencies (the ID-token
 // verifier and the optional control-plane project lookup) and returns the
 // service for chaining. app.New calls it once at construction: with a non-nil
@@ -1127,7 +1139,7 @@ func NewAuthServiceWithOAuth(
 		mailer:             mailer,
 		smsSender:          smsSender,
 		logger:             logger,
-		oauthRegistry:      oauthRegistry,
+		oauthResolver:      newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, logger),
 		emailThrottle:      newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
 		signupThrottle:     newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
 		phoneThrottle:      newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),

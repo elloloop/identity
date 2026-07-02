@@ -1044,6 +1044,15 @@
     "anchor": "projects-and-tenancy"
   },
   {
+    "name": "GATEWAY_PROJECT_SECRETS_KEY",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the base64-encoded 32-byte AES-256 key that encrypts per-project secrets at rest — currently the hosted-flow OAuth provider secrets (client secrets, Apple private keys) stored in a project's config_json.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
     "name": "GATEWAY_PUBLIC_EMAIL_DOMAINS",
     "type": "string",
     "default": "",

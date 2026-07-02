@@ -115,6 +115,11 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		s.cleanupOnError(ctx)
 		return nil, err
 	}
+	projectSecretsKey, err := decodeProjectSecretsKey(&cfg)
+	if err != nil {
+		s.cleanupOnError(ctx)
+		return nil, err
+	}
 
 	authRepo, dbAdapter := opts.Repo, opts.DB
 	var projectResolver service.ProjectResolver
@@ -206,6 +211,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		Passkeys:            webauthnSvc,
 		TOTPKey:             totpKey,
 		TOTPRecoveryPepper:  totpRecoveryPepper,
+		ProjectSecretsKey:   projectSecretsKey,
 		EmailTransport:      opts.EmailTransport,
 		SMSSender:           opts.SMSSender,
 		OAuthRegistry:       opts.OAuthRegistry,
