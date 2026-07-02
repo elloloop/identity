@@ -138,11 +138,18 @@ docker run -p 80:80 -p 9090:9090 \
   -e GATEWAY_POSTGRES_DSN='postgres://identity:password@identity-db:5432/identity?sslmode=disable' \
   -e GATEWAY_POSTGRES_AUTO_MIGRATE=true \
   -e GATEWAY_DEFAULT_TENANT_ID=my-product \
+  -e GATEWAY_PROJECT_SECRETS_KEY="$(openssl rand -base64 32)" \
   -e GATEWAY_PASSKEY_RP_ID=my-product.com \
   -e GATEWAY_PASSKEY_ORIGIN=https://my-product.com \
   -e GATEWAY_TOTP_ISSUER="My Product" \
   ghcr.io/elloloop/identity:1.5.0
 ```
+
+> **Upgrade note (breaking):** the postgres backend now **requires**
+> `GATEWAY_PROJECT_SECRETS_KEY` (a base64-encoded 32-byte key, e.g.
+> `openssl rand -base64 32`). It encrypts per-project OAuth provider secrets at
+> rest; boot fails fast without it. Set it before upgrading an existing postgres
+> deployment. Drivers without a control plane (`sqlite`, `memory`) do not need it.
 
 In production, run migrations out-of-band as a separate step
 (`identity migrate`) rather than relying on `GATEWAY_POSTGRES_AUTO_MIGRATE`

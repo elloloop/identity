@@ -122,6 +122,27 @@ func decodeTOTPKey(cfg *config.Config, logger *zap.Logger) ([]byte, error) {
 	return key, nil
 }
 
+// decodeProjectSecretsKey returns the 32-byte AES key that decrypts
+// per-project secrets at rest (hosted-flow OAuth provider secrets), or nil when
+// GATEWAY_PROJECT_SECRETS_KEY is unset. Unlike the TOTP key there is NO dev
+// fallback: config.Validate requires the key whenever the postgres control
+// plane is enabled, and drivers without a control plane legitimately need no
+// key (they pin to the default project's env providers). A set-but-malformed
+// value fails boot.
+func decodeProjectSecretsKey(cfg *config.Config) ([]byte, error) {
+	if cfg.ProjectSecretsKey == "" {
+		return nil, nil
+	}
+	key, err := base64.StdEncoding.DecodeString(cfg.ProjectSecretsKey)
+	if err != nil {
+		return nil, fmt.Errorf("project secrets key decode: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("project secrets key wrong size: got %d, want 32", len(key))
+	}
+	return key, nil
+}
+
 // decodeTOTPRecoveryPepper returns the HMAC pepper for recovery-code
 // hashing. It is required whenever a real TOTP encryption key is set;
 // the dev fallback is only allowed when the encryption key is also dev.

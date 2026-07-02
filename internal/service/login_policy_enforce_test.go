@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elloloop/identity/pkg/passwords"
-	"github.com/elloloop/identity/pkg/totp"
+	"github.com/elloloop/identity/pkg/secretcrypto"
 )
 
 // ── Fake governance stores ─────────────────────────────────────────────
@@ -155,7 +155,7 @@ func withRequire2FA() *LoginGovernance {
 // Require2FA login can complete its second-factor step.
 func seedVerifiedTotp(t *testing.T, repo *fakeRepo, userID string) {
 	t.Helper()
-	encrypted, err := totp.EncryptSecret("JBSWY3DPEHPK3PXP", testTotpKey())
+	encrypted, err := secretcrypto.Encrypt("JBSWY3DPEHPK3PXP", testTotpKey())
 	require.NoError(t, err)
 	repo.mu.Lock()
 	id := nextNodeID()

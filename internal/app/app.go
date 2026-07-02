@@ -51,6 +51,13 @@ type Deps struct {
 	Passkeys *passkeys.WebAuthnService
 	TOTPKey  []byte
 
+	// ProjectSecretsKey is the 32-byte AES-256 key that decrypts per-project
+	// secrets at rest (hosted-flow OAuth provider secrets in a project's
+	// config_json). Empty/nil on drivers without a control plane, where every
+	// request pins to the default project (env OAuth providers). Decoded from
+	// GATEWAY_PROJECT_SECRETS_KEY by the composition root.
+	ProjectSecretsKey []byte
+
 	// ProjectResolver resolves a request's control-plane project from its
 	// credential key or Host header (see middleware.NewProjectResolver).
 	// Non-nil only for the postgres driver; when nil the project-resolution
@@ -492,7 +499,8 @@ func New(deps Deps) (*Built, error) {
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
 		WithLoginGovernance(deps.LoginGovernance).
 		WithEventPublisher(eventPublisher).
-		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects)
+		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
+		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger)
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)

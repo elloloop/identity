@@ -44,6 +44,7 @@ import { Code } from "astro-expressive-code/components";
   -e GATEWAY_POSTGRES_DSN=postgres://identity:secret@postgres:5432/identity \\
   -e GATEWAY_POSTGRES_AUTO_MIGRATE=true \\
   -e GATEWAY_DEFAULT_PROJECT_ID=proj_local \\
+  -e GATEWAY_PROJECT_SECRETS_KEY="$(openssl rand -base64 32)" \\
   -e GATEWAY_PASSKEY_RP_ID=localhost \\
   -e GATEWAY_PASSKEY_ORIGIN=http://localhost \\
   -e GATEWAY_AUTH_ALLOW_LOCAL=true \\

@@ -1,8 +1,6 @@
 package totp
 
 import (
-	"encoding/base64"
-	"strings"
 	"testing"
 	"time"
 
@@ -90,42 +88,4 @@ func TestGenerateRecoveryCodes_NegativeN(t *testing.T) {
 	t.Parallel()
 	assert.Nil(t, GenerateRecoveryCodes(-1))
 	assert.Nil(t, GenerateRecoveryCodes(-100))
-}
-
-// TestDecrypt_TooShortCiphertext exercises the "ciphertext too short" branch.
-func TestDecrypt_TooShortCiphertext(t *testing.T) {
-	t.Parallel()
-	key := makeKey(t)
-	// Valid base64 but shorter than the GCM nonce size (12 bytes).
-	short := base64.StdEncoding.EncodeToString([]byte{1, 2, 3})
-	_, err := DecryptSecret(short, key)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "too short")
-}
-
-// TestDecrypt_WrongKeyAEADFailure verifies the gcm.Open error path is hit when
-// decrypting a well-formed (correct length) ciphertext with the wrong key.
-func TestDecrypt_WrongKeyAEADFailure(t *testing.T) {
-	t.Parallel()
-	k1 := makeKey(t)
-	k2 := makeKey(t)
-
-	ct, err := EncryptSecret("HELLOWORLD", k1)
-	require.NoError(t, err)
-
-	_, err = DecryptSecret(ct, k2)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "decrypting")
-}
-
-// TestEncryptDecrypt_LargeAndUnicode round-trips a non-trivial payload.
-func TestEncryptDecrypt_LargeAndUnicode(t *testing.T) {
-	t.Parallel()
-	key := makeKey(t)
-	plain := strings.Repeat("Σπρτ-✓-", 32)
-	ct, err := EncryptSecret(plain, key)
-	require.NoError(t, err)
-	got, err := DecryptSecret(ct, key)
-	require.NoError(t, err)
-	assert.Equal(t, plain, got)
 }

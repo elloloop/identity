@@ -679,9 +679,15 @@ func newReq[T any](msg *T, headers map[string]string) *connect.Request[T] {
 // override the DB and key ring elsewhere; this only sets non-zero
 // values that the service layer reads (expiries, password limits,
 // CORS origins, etc).
+// testProjectSecretsKey is a valid base64-encoded 32-byte (all-zero) AES key.
+// The postgres control plane requires GATEWAY_PROJECT_SECRETS_KEY; harnesses
+// that boot postgres inherit this so config.Validate passes.
+const testProjectSecretsKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
 func newTestConfig() *config.Config {
 	return &config.Config{
 		DefaultTenantID:                 "test-tenant",
+		ProjectSecretsKey:               testProjectSecretsKey,
 		AuthAllowLocal:                  true,
 		PasswordSignupEnabled:           true,
 		PasswordResetEnabled:            true,
@@ -2226,7 +2232,7 @@ func (r *MemRepo) CountSessionsForUser(userID string) (active, revoked int) {
 			revoked++
 		}
 	}
-	return
+	return active, revoked
 }
 
 // compile-time interface assertion

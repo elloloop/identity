@@ -41,7 +41,7 @@ func (s *AuthService) BeginHostedOAuth(
 	ctx context.Context,
 	provider, redirectURI, returnTo, csrfToken string,
 ) (*HostedOAuthBeginResult, error) {
-	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
+	if !s.oauthResolver.available(ctx) {
 		return nil, ErrOAuthDisabled
 	}
 	provider = strings.ToLower(strings.TrimSpace(provider))
@@ -58,7 +58,7 @@ func (s *AuthService) BeginHostedOAuth(
 		return nil, fmt.Errorf("%w: csrf_token is required", ErrInvalidArgument)
 	}
 
-	exchanger, ok := s.oauthRegistry.Get(provider)
+	exchanger, ok := s.oauthResolver.exchangerFor(ctx, provider)
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
 	}
@@ -204,7 +204,7 @@ func (s *AuthService) mintOAuthOneTimeCode(ctx context.Context, userID string) (
 // replay, an expired code, or an unknown code all return
 // ErrOAuthCodeInvalid.
 func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, ipAddr, userAgent string) (*LoginResult, error) {
-	if s.oauthRegistry == nil || s.oauthRegistry.Len() == 0 {
+	if !s.oauthResolver.available(ctx) {
 		return nil, ErrOAuthDisabled
 	}
 	if strings.TrimSpace(code) == "" {

@@ -122,3 +122,67 @@ func TestParseProjectConfig_EmptyBlocksValid(t *testing.T) {
 	assert.Empty(t, cfg.Branding.ProductName)
 	assert.Empty(t, cfg.Passkey.RPID)
 }
+
+func TestParseProjectConfig_OAuth_Present(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"oauth":{
+		"google":{"client_id":"g","client_secret_enc":"enc-g","issuer":"https://accounts.google.com"},
+		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","tenant_id":"t"},
+		"apple":{"client_id":"a","team_id":"team","key_id":"kid","private_key_enc":"enc-pk"},
+		"oidc":{"client_id":"o","client_secret_enc":"enc-o","issuer":"https://issuer.example","scopes":"openid email"}
+	}}`)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.OAuth.Google)
+	assert.Equal(t, "g", cfg.OAuth.Google.ClientID)
+	assert.Equal(t, "enc-g", cfg.OAuth.Google.ClientSecretEnc)
+	require.NotNil(t, cfg.OAuth.Microsoft)
+	assert.Equal(t, "t", cfg.OAuth.Microsoft.TenantID)
+	require.NotNil(t, cfg.OAuth.Apple)
+	assert.Equal(t, "enc-pk", cfg.OAuth.Apple.PrivateKeyEnc)
+	require.NotNil(t, cfg.OAuth.OIDC)
+	assert.Equal(t, "openid email", cfg.OAuth.OIDC.Scopes)
+	assert.True(t, cfg.OAuth.hasAny())
+}
+
+func TestParseProjectConfig_OAuth_Absent(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"cors":{"allowed_origins":["https://a.example.com"]}}`)
+	require.NoError(t, err)
+	assert.Nil(t, cfg.OAuth.Google)
+	assert.False(t, cfg.OAuth.hasAny())
+}
+
+func TestParseProjectConfig_OAuth_PartialGoogleRejected(t *testing.T) {
+	t.Parallel()
+
+	// A configured google block missing its secret must fail the write.
+	_, err := ParseProjectConfig(`{"oauth":{"google":{"client_id":"g"}}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oauth.google requires")
+}
+
+func TestParseProjectConfig_OAuth_PartialAppleRejected(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseProjectConfig(`{"oauth":{"apple":{"client_id":"a","team_id":"team"}}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oauth.apple requires")
+}
+
+func TestParseProjectConfig_OAuth_OIDCRequiresIssuer(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseProjectConfig(`{"oauth":{"oidc":{"client_id":"o","client_secret_enc":"enc"}}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oauth.oidc requires issuer")
+}
+
+func TestParseProjectConfig_OAuth_GoogleBadURLRejected(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseProjectConfig(`{"oauth":{"google":{"client_id":"g","client_secret_enc":"enc","token_url":"ftp://nope"}}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oauth.google.token_url")
+}

@@ -52,6 +52,27 @@ to distinct values — the project **id** (`GATEWAY_DEFAULT_PROJECT_ID`, default
 - `GATEWAY_DEFAULT_TENANT_ID` — the physical storage scope (shard) the default
   Project maps onto.
 
+### New required config: `GATEWAY_PROJECT_SECRETS_KEY` (postgres)
+
+Per-project OAuth providers (each Project configures its own Google/Microsoft/
+Apple/OIDC providers, Firebase-style) store provider secrets **encrypted at
+rest**. The encryption key is supplied via `GATEWAY_PROJECT_SECRETS_KEY`, a
+**base64-encoded 32-byte** key.
+
+**This is a breaking change for postgres deployments:** when
+`GATEWAY_REPO_DRIVER=postgres` (the default), boot now **fails fast** unless
+`GATEWAY_PROJECT_SECRETS_KEY` is set. Generate one and set it **before**
+upgrading:
+
+```sh
+openssl rand -base64 32
+```
+
+Drivers without a control plane (`sqlite`, `memory`) pin every request to the
+default project and draw OAuth providers from the `GATEWAY_OAUTH_*` env vars, so
+they do **not** require the key. Rotating or losing the key invalidates every
+per-project provider secret already stored (they must be re-encrypted).
+
 ### Schema migrations involved
 
 The model change lands across three Postgres migrations

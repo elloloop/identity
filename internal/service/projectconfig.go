@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/mail"
 	"net/url"
@@ -37,6 +38,72 @@ type ProjectConfig struct {
 	// who have NO claimed tenant (the common case for a consumer pool). A
 	// tenant's LoginPolicy, when one applies, fully overrides these.
 	Login ProjectLoginConfig `json:"login"`
+
+	// OAuth holds the project's own hosted-flow OAuth providers (the
+	// Firebase-project model): each project enables and configures its own
+	// Google/Microsoft/Apple/OIDC providers, isolated from every other
+	// project. A provider absent here is simply unavailable for the project,
+	// EXCEPT the default project, which additionally inherits the env-configured
+	// GATEWAY_OAUTH_* providers. Provider secrets are stored encrypted at rest
+	// (see the *_enc fields).
+	OAuth ProjectOAuthConfig `json:"oauth"`
+}
+
+// ProjectOAuthConfig is a project's per-provider hosted-flow OAuth
+// configuration. Each field is a pointer so "absent" (nil) is distinct from
+// "present but empty" — only a present provider is built for the project. The
+// keys mirror the login `provider` argument callers pass ("google",
+// "microsoft", "apple", "oidc"). GitHub is intentionally not per-project: it
+// remains an env-only provider available to the default project.
+type ProjectOAuthConfig struct {
+	Google    *ProjectOAuthGoogle    `json:"google,omitempty"`
+	Microsoft *ProjectOAuthMicrosoft `json:"microsoft,omitempty"`
+	Apple     *ProjectOAuthApple     `json:"apple,omitempty"`
+	OIDC      *ProjectOAuthOIDC      `json:"oidc,omitempty"`
+}
+
+// ProjectOAuthGoogle configures the project's Google provider. ClientID and
+// ClientSecretEnc are required; the URL fields are optional overrides that
+// default to the live Google endpoints (used by tests / self-hosted proxies).
+type ProjectOAuthGoogle struct {
+	ClientID         string `json:"client_id"`
+	ClientSecretEnc  string `json:"client_secret_enc"`
+	AuthorizationURL string `json:"authorization_url,omitempty"`
+	TokenURL         string `json:"token_url,omitempty"`
+	JWKSURL          string `json:"jwks_url,omitempty"`
+	Issuer           string `json:"issuer,omitempty"`
+}
+
+// ProjectOAuthMicrosoft configures the project's Microsoft (Azure AD) provider.
+type ProjectOAuthMicrosoft struct {
+	ClientID        string `json:"client_id"`
+	ClientSecretEnc string `json:"client_secret_enc"`
+	TenantID        string `json:"tenant_id,omitempty"`
+	IssuerFormat    string `json:"issuer_format,omitempty"`
+}
+
+// ProjectOAuthApple configures the project's Apple provider. Apple has no
+// client secret; it signs a client assertion with a private key, stored
+// encrypted at rest as PrivateKeyEnc.
+type ProjectOAuthApple struct {
+	ClientID      string `json:"client_id"`
+	TeamID        string `json:"team_id"`
+	KeyID         string `json:"key_id"`
+	PrivateKeyEnc string `json:"private_key_enc"`
+}
+
+// ProjectOAuthOIDC configures the project's generic OIDC provider, registered
+// under the fixed key "oidc". Endpoints are discovered from Issuer's
+// well-known document (or DiscoveryURL when set), mirroring the env OIDC
+// provider — there are no per-endpoint overrides to keep dead knobs out.
+type ProjectOAuthOIDC struct {
+	ClientID        string `json:"client_id"`
+	ClientSecretEnc string `json:"client_secret_enc"`
+	Issuer          string `json:"issuer,omitempty"`
+	DiscoveryURL    string `json:"discovery_url,omitempty"`
+	// Scopes is a space-separated scope list; "openid" is always ensured by
+	// the provider. Empty defaults to "openid email profile".
+	Scopes string `json:"scopes,omitempty"`
 }
 
 // ProjectBrandingConfig is the per-project transactional-email branding.
@@ -100,6 +167,64 @@ func (c ProjectConfig) Validate() error {
 	}
 	if err := c.Passkey.validate(); err != nil {
 		return err
+	}
+	if err := c.OAuth.validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validate rejects a present-but-incomplete provider block: a provider a caller
+// bothered to configure must carry the credentials needed to build it, so a
+// half-filled block fails the write rather than silently producing a provider
+// that can never complete a login. Absent providers (nil) are valid — they mean
+// "not enabled for this project". URL fields are validated when set. Secrets are
+// opaque ciphertext here (validated at decrypt time), so only their presence is
+// checked.
+func (c ProjectOAuthConfig) validate() error {
+	if g := c.Google; g != nil {
+		if g.ClientID == "" || g.ClientSecretEnc == "" {
+			return errors.New("oauth.google requires client_id and client_secret_enc")
+		}
+		for field, raw := range map[string]string{
+			"oauth.google.authorization_url": g.AuthorizationURL,
+			"oauth.google.token_url":         g.TokenURL,
+			"oauth.google.jwks_url":          g.JWKSURL,
+		} {
+			if raw != "" {
+				if err := validateHTTPSURL(raw, field); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if m := c.Microsoft; m != nil {
+		if m.ClientID == "" || m.ClientSecretEnc == "" {
+			return errors.New("oauth.microsoft requires client_id and client_secret_enc")
+		}
+	}
+	if a := c.Apple; a != nil {
+		if a.ClientID == "" || a.TeamID == "" || a.KeyID == "" || a.PrivateKeyEnc == "" {
+			return errors.New("oauth.apple requires client_id, team_id, key_id, and private_key_enc")
+		}
+	}
+	if o := c.OIDC; o != nil {
+		if o.ClientID == "" || o.ClientSecretEnc == "" {
+			return errors.New("oauth.oidc requires client_id and client_secret_enc")
+		}
+		if o.Issuer == "" && o.DiscoveryURL == "" {
+			return errors.New("oauth.oidc requires issuer or discovery_url")
+		}
+		if o.Issuer != "" {
+			if err := validateHTTPSURL(o.Issuer, "oauth.oidc.issuer"); err != nil {
+				return err
+			}
+		}
+		if o.DiscoveryURL != "" {
+			if err := validateHTTPSURL(o.DiscoveryURL, "oauth.oidc.discovery_url"); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

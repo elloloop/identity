@@ -68,6 +68,76 @@ import { Code } from "astro-expressive-code/components";
     or <code>apple</code>.
   </p>
 
+  <h2>Per-project providers (the Firebase-project model)</h2>
+  <p>
+    A Project is identity's isolation container — the Firebase-project
+    equivalent. Each project configures its <strong>own</strong> OAuth providers,
+    exactly like enabling providers in a Firebase project's Auth console, and one
+    project never sees another's. The <code>GATEWAY_OAUTH_*</code> environment
+    variables above configure the <strong>default project's</strong> providers
+    only; existing single-project deployments are unchanged.
+  </p>
+  <p>
+    Precedence, per provider, for the request's resolved project:
+  </p>
+  <ul>
+    <li>
+      if the project has that provider in its <code>config_json</code> →
+      it is used (its secret is decrypted at build time);
+    </li>
+    <li>
+      else if the project <strong>is</strong> the default project
+      (<code>GATEWAY_DEFAULT_PROJECT_ID</code>) → the env-configured provider is
+      used;
+    </li>
+    <li>
+      else — a non-default project with no such provider — the provider is
+      <strong>unavailable</strong> for that project (the same
+      "unknown provider" error an unregistered provider returns). A non-default
+      project never inherits the default project's providers, so credentials
+      never leak across projects.
+    </li>
+  </ul>
+  <p>
+    A project's providers live under an <code>"oauth"</code> object in its
+    <code>config_json</code> (the same per-project blob that carries branding,
+    passkey RP-ID, and CORS), keyed by provider. Provider secrets are stored
+    <strong>encrypted at rest</strong> (<code>client_secret_enc</code>, Apple
+    <code>private_key_enc</code>) with AES-256-GCM:
+  </p>
+  <Code code={`{
+  "oauth": {
+    "google":    { "client_id": "...", "client_secret_enc": "<enc>" },
+    "microsoft": { "client_id": "...", "client_secret_enc": "<enc>", "tenant_id": "" },
+    "apple":     { "client_id": "...", "team_id": "...", "key_id": "...", "private_key_enc": "<enc>" },
+    "oidc":      { "client_id": "...", "client_secret_enc": "<enc>", "issuer": "https://acme.okta.com", "scopes": "openid email profile" }
+  }
+}`} lang="json" />
+  <p>
+    The encryption key is a base64-encoded 32-byte key supplied via
+    <code>GATEWAY_PROJECT_SECRETS_KEY</code>. It is <strong>required</strong>
+    whenever the postgres control plane is enabled
+    (<code>GATEWAY_REPO_DRIVER=postgres</code>), because only postgres stores a
+    non-default project's credentials; drivers without a control plane pin every
+    request to the default project and need no key. Rotating or losing the key
+    invalidates every stored provider secret. GitHub is not part of the
+    per-project schema — it remains an env-only provider for the default project.
+  </p>
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+    <strong>Upgrade note.</strong> This key is <strong>mandatory</strong> for
+    postgres deployments (<code>GATEWAY_REPO_DRIVER=postgres</code>) — boot fails
+    fast without it, so existing deployments must set it before upgrading.
+    Generate one with:
+    <Code code={`openssl rand -base64 32`} lang="bash" />
+  </div>
+  <p>
+    Built exchangers (and their JWKS/discovery caches) are cached per
+    <code>(project, provider, config)</code>, so a config edit rebuilds while
+    steady-state logins reuse the cache. Editing a project's
+    <code>config_json</code> today is an operator/control-plane action; a
+    dedicated admin RPC to author a project's providers is a follow-up.
+  </p>
+
   <h2>Start RPC</h2>
   <Code code={`message BeginOAuthLoginRequest {
   string redirect_uri = 1;

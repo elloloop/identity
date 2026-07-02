@@ -8,6 +8,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -120,6 +121,18 @@ type Config struct {
 	// work hardens this with mTLS client-certificate auth and an optional
 	// internal-only listener port bound away from the public RPC surface.
 	AdminAPISecret string
+
+	// ProjectSecretsKey is the base64-encoded 32-byte AES-256 key that
+	// encrypts per-project secrets at rest — currently the hosted-flow OAuth
+	// provider secrets (client secrets, Apple private keys) stored in a
+	// project's config_json. It is REQUIRED whenever the postgres control
+	// plane is enabled (GATEWAY_REPO_DRIVER=postgres), because a non-default
+	// project can only store provider credentials encrypted with this key;
+	// Validate enforces that. Drivers without a control plane (memory, sqlite)
+	// pin every request to the default project, which draws its OAuth
+	// providers from the GATEWAY_OAUTH_* env vars, so the key is not required
+	// there. Driven by GATEWAY_PROJECT_SECRETS_KEY.
+	ProjectSecretsKey string
 
 	// DefaultProjectAuthDomains is a comma-separated list of serving
 	// hostnames seeded onto the default project at boot (postgres driver),
@@ -795,6 +808,7 @@ func Load() *Config {
 		DefaultTenantID:           envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
 		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", DefaultProjectIDFallback),
 		AdminAPISecret:            envStr("GATEWAY_ADMIN_API_SECRET", ""),
+		ProjectSecretsKey:         envStr("GATEWAY_PROJECT_SECRETS_KEY", ""),
 		DefaultProjectAuthDomains: envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
 		RequireVerifiedAuthDomain: envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
 
@@ -1305,6 +1319,38 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateProjectSecrets(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// projectSecretsKeyBytes is the required decoded length of
+// GATEWAY_PROJECT_SECRETS_KEY (AES-256).
+const projectSecretsKeyBytes = 32
+
+// validateProjectSecrets enforces the per-project secrets-encryption invariant:
+// GATEWAY_PROJECT_SECRETS_KEY is REQUIRED when the postgres control plane is
+// enabled, because a non-default project can only store OAuth provider secrets
+// encrypted with it. When set (on any driver) it must be base64 that decodes to
+// exactly 32 bytes, failing fast rather than at first decrypt.
+func (c *Config) validateProjectSecrets() error {
+	if c.ProjectSecretsKey == "" {
+		if c.RepoDriver == "postgres" {
+			return errors.New("config: GATEWAY_PROJECT_SECRETS_KEY is required when GATEWAY_REPO_DRIVER=postgres " +
+				"(it encrypts per-project OAuth provider secrets at rest); set a base64-encoded 32-byte key")
+		}
+		return nil
+	}
+	key, err := base64.StdEncoding.DecodeString(c.ProjectSecretsKey)
+	if err != nil {
+		return fmt.Errorf("config: GATEWAY_PROJECT_SECRETS_KEY is not valid base64: %w", err)
+	}
+	if len(key) != projectSecretsKeyBytes {
+		return fmt.Errorf("config: GATEWAY_PROJECT_SECRETS_KEY must decode to %d bytes, got %d",
+			projectSecretsKeyBytes, len(key))
+	}
 	return nil
 }
 
