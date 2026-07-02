@@ -339,7 +339,22 @@ type adminFixture struct {
 	audit    *recordingAuditWriter
 }
 
+// testAdminSecretsKey is a fixed 32-byte AES-256 key the admin fixture uses to
+// encrypt per-project OAuth secrets, so an encrypted secret round-trips through
+// the resolver's decrypt path in tests.
+func testAdminSecretsKey() []byte {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	return key
+}
+
 func newAdminFixture(secret string) *adminFixture {
+	return newAdminFixtureWithKey(secret, testAdminSecretsKey())
+}
+
+func newAdminFixtureWithKey(secret string, secretsKey []byte) *adminFixture {
 	p := newFakeControlPlaneStore()
 	t := newFakeTenantStore()
 	m := newFakeMembershipStore()
@@ -349,7 +364,7 @@ func newAdminFixture(secret string) *adminFixture {
 	auditWriter := newRecordingAuditWriter()
 	auditLog := audit.NewLogger(auditWriter, "test-project", zap.NewNop())
 	return &adminFixture{
-		svc:      NewControlPlaneAdminService(secret, p, t, m, lp, a, dns, auditLog, zap.NewNop()),
+		svc:      NewControlPlaneAdminService(secret, secretsKey, p, t, m, lp, a, dns, auditLog, zap.NewNop()),
 		projects: p,
 		tenants:  t,
 		members:  m,
@@ -1134,7 +1149,7 @@ func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
 func TestCreateFirstPlatformAdmin_UnimplementedWithoutStore(t *testing.T) {
 	t.Parallel()
 	// Built without a PlatformAdminStore (the memory shape).
-	svc := NewControlPlaneAdminService("", newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil)
+	svc := NewControlPlaneAdminService("", nil, newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil)
 	if _, err := svc.CreateFirstPlatformAdmin(context.Background(), "ops@acme.com", ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("no store: err = %v, want ErrUnimplemented", err)
 	}

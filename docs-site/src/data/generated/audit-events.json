@@ -21,6 +21,8 @@
   "phone_verified",
   "platform_admin_bootstrap_blocked",
   "project_config_updated",
+  "project_oauth_provider_removed",
+  "project_oauth_provider_set",
   "qr_login_approved",
   "qr_login_rejected",
   "session_revoked",

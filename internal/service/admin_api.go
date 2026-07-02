@@ -150,7 +150,12 @@ type ControlPlaneProjectStore interface {
 // platform operator authenticated by a shared secret.
 type ControlPlaneAdminService struct {
 	// secret is the shared admin secret. Empty disables the whole surface.
-	secret      string
+	secret string
+	// secretsKey is the AES-256 key (GATEWAY_PROJECT_SECRETS_KEY, decoded) used
+	// to ENCRYPT plaintext per-project OAuth provider secrets at author time,
+	// the same key the resolver decrypts with. Empty when unconfigured: a write
+	// that carries a secret is then rejected with a clear error.
+	secretsKey  []byte
 	projects    ControlPlaneProjectStore
 	tenants     TenantStore
 	memberships MembershipStore
@@ -188,6 +193,7 @@ type ControlPlaneAdminService struct {
 // wall-clock epoch-millis.
 func NewControlPlaneAdminService(
 	secret string,
+	secretsKey []byte,
 	projects ControlPlaneProjectStore,
 	tenants TenantStore,
 	memberships MembershipStore,
@@ -208,6 +214,7 @@ func NewControlPlaneAdminService(
 	}
 	return &ControlPlaneAdminService{
 		secret:      secret,
+		secretsKey:  secretsKey,
 		projects:    projects,
 		tenants:     tenants,
 		memberships: memberships,

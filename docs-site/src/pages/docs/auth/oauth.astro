@@ -141,10 +141,70 @@ import { Code } from "astro-expressive-code/components";
   <p>
     Built exchangers (and their JWKS/discovery caches) are cached per
     <code>(project, provider, config)</code>, so a config edit rebuilds while
-    steady-state logins reuse the cache. Editing a project's
-    <code>config_json</code> today is an operator/control-plane action; a
-    dedicated admin RPC to author a project's providers is a follow-up.
+    steady-state logins reuse the cache.
   </p>
+
+  <h2>Authoring a project's providers (admin API)</h2>
+  <p>
+    You never hand-craft the encrypted <code>*_enc</code> fields. Three
+    operator-only admin RPCs author a project's providers — the operator sends
+    the secret in <strong>plaintext over TLS</strong>, and the server encrypts it
+    with <code>GATEWAY_PROJECT_SECRETS_KEY</code> before storing it. They are
+    authenticated by the <code>X-Admin-Secret</code> header (like every other
+    <code>Admin*</code> RPC), and are <code>UNIMPLEMENTED</code> on a driver with
+    no control plane.
+  </p>
+  <ul>
+    <li>
+      <code>AdminSetProjectOAuthProvider</code> — set or rotate one provider.
+      The write carries the non-secret fields plus a write-only plaintext
+      <code>client_secret</code> (or Apple <code>apple_private_key</code>). An
+      <strong>empty</strong> secret on a subsequent write keeps the stored one,
+      so you can edit non-secret fields without re-sending it. The provider block
+      is merged into <code>config_json</code> without disturbing any other key
+      (branding, passkey, CORS, login), and the merged config is validated at
+      author time (e.g. a Microsoft <code>issuer_format</code> must contain
+      exactly one <code>%s</code>).
+    </li>
+    <li>
+      <code>AdminDeleteProjectOAuthProvider</code> — remove one provider
+      (idempotent).
+    </li>
+    <li>
+      <code>AdminListProjectOAuthProviders</code> — list configured providers.
+    </li>
+  </ul>
+  <p>
+    <strong>Reads never return secrets.</strong> The set response and the list
+    response redact all secret material, reporting only
+    <code>has_client_secret</code> / <code>has_private_key</code> booleans.
+  </p>
+  <Code code={`message ProjectOAuthProviderConfig {
+  string provider = 1;              // "google" | "microsoft" | "apple" | "oidc"
+  string client_id = 2;
+  string client_secret = 3;         // write-only plaintext; empty = keep stored
+  bool   has_client_secret = 4;     // read-only (redacted presence)
+  repeated string native_audiences = 5;
+  // google endpoint overrides (6-9), microsoft tenant_id/issuer_format (10-11),
+  // apple team_id/key_id/apple_private_key (12-14, key is write-only),
+  // has_private_key (15), oidc issuer/discovery_url/scopes (16-18).
+}
+
+rpc AdminSetProjectOAuthProvider(AdminSetProjectOAuthProviderRequest) returns (AdminSetProjectOAuthProviderResponse);
+rpc AdminDeleteProjectOAuthProvider(AdminDeleteProjectOAuthProviderRequest) returns (AdminDeleteProjectOAuthProviderResponse);
+rpc AdminListProjectOAuthProviders(AdminListProjectOAuthProvidersRequest) returns (AdminListProjectOAuthProvidersResponse);`} lang="protobuf" />
+  <Code code={`# Author a project's Google provider (secret sent in plaintext over TLS).
+curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAuthProvider \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "project_id": "proj_123",
+    "config": {
+      "provider": "google",
+      "client_id": "1234.apps.googleusercontent.com",
+      "client_secret": "GOCSPX-plaintext-secret"
+    }
+  }'`} lang="bash" />
 
   <h2>Start RPC</h2>
   <Code code={`message BeginOAuthLoginRequest {

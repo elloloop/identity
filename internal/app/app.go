@@ -739,6 +739,7 @@ func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *za
 	}
 	return service.NewControlPlaneAdminService(
 		secret,
+		deps.ProjectSecretsKey,
 		deps.ControlPlaneStore,
 		deps.TenantStore,
 		deps.MembershipStore,

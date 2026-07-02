@@ -313,6 +313,15 @@ const (
 	// IdentityServiceGetProjectConfigProcedure is the fully-qualified name of the IdentityService's
 	// GetProjectConfig RPC.
 	IdentityServiceGetProjectConfigProcedure = "/identity.v1.IdentityService/GetProjectConfig"
+	// IdentityServiceAdminSetProjectOAuthProviderProcedure is the fully-qualified name of the
+	// IdentityService's AdminSetProjectOAuthProvider RPC.
+	IdentityServiceAdminSetProjectOAuthProviderProcedure = "/identity.v1.IdentityService/AdminSetProjectOAuthProvider"
+	// IdentityServiceAdminDeleteProjectOAuthProviderProcedure is the fully-qualified name of the
+	// IdentityService's AdminDeleteProjectOAuthProvider RPC.
+	IdentityServiceAdminDeleteProjectOAuthProviderProcedure = "/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider"
+	// IdentityServiceAdminListProjectOAuthProvidersProcedure is the fully-qualified name of the
+	// IdentityService's AdminListProjectOAuthProviders RPC.
+	IdentityServiceAdminListProjectOAuthProvidersProcedure = "/identity.v1.IdentityService/AdminListProjectOAuthProviders"
 )
 
 // IdentityServiceClient is a client for the identity.v1.IdentityService service.
@@ -470,6 +479,16 @@ type IdentityServiceClient interface {
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertProjectConfig(context.Context, *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error)
 	GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error)
+	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
+	// sets/rotates one provider (encrypting any plaintext secret server-side and
+	// merging it into config_json without disturbing other keys);
+	// AdminDeleteProjectOAuthProvider removes one provider;
+	// AdminListProjectOAuthProviders lists the configured providers with secrets
+	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
+	// build with no control plane.
+	AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error)
+	AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error)
+	AdminListProjectOAuthProviders(context.Context, *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error)
 }
 
 // NewIdentityServiceClient constructs a client for the identity.v1.IdentityService service. By
@@ -1047,105 +1066,126 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("GetProjectConfig")),
 			connect.WithClientOptions(opts...),
 		),
+		adminSetProjectOAuthProvider: connect.NewClient[v1.AdminSetProjectOAuthProviderRequest, v1.AdminSetProjectOAuthProviderResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminSetProjectOAuthProviderProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectOAuthProvider")),
+			connect.WithClientOptions(opts...),
+		),
+		adminDeleteProjectOAuthProvider: connect.NewClient[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminDeleteProjectOAuthProviderProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminDeleteProjectOAuthProvider")),
+			connect.WithClientOptions(opts...),
+		),
+		adminListProjectOAuthProviders: connect.NewClient[v1.AdminListProjectOAuthProvidersRequest, v1.AdminListProjectOAuthProvidersResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminListProjectOAuthProvidersProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminListProjectOAuthProviders")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // identityServiceClient implements IdentityServiceClient.
 type identityServiceClient struct {
-	beginOAuthLogin               *connect.Client[v1.BeginOAuthLoginRequest, v1.BeginOAuthLoginResponse]
-	oAuthLogin                    *connect.Client[v1.OAuthLoginRequest, v1.OAuthLoginResponse]
-	nativeOAuthLogin              *connect.Client[v1.NativeOAuthLoginRequest, v1.NativeOAuthLoginResponse]
-	redeemOAuthCode               *connect.Client[v1.RedeemOAuthCodeRequest, v1.RedeemOAuthCodeResponse]
-	passwordSignup                *connect.Client[v1.PasswordSignupRequest, v1.PasswordSignupResponse]
-	passwordLogin                 *connect.Client[v1.PasswordLoginRequest, v1.PasswordLoginResponse]
-	requestEmailLoginCode         *connect.Client[v1.RequestEmailLoginCodeRequest, v1.RequestEmailLoginCodeResponse]
-	verifyEmailLoginCode          *connect.Client[v1.VerifyEmailLoginCodeRequest, v1.VerifyEmailLoginCodeResponse]
-	requestMagicLink              *connect.Client[v1.RequestMagicLinkRequest, v1.RequestMagicLinkResponse]
-	redeemMagicLink               *connect.Client[v1.RedeemMagicLinkRequest, v1.RedeemMagicLinkResponse]
-	requestPhoneVerification      *connect.Client[v1.RequestPhoneVerificationRequest, v1.RequestPhoneVerificationResponse]
-	verifyPhoneCode               *connect.Client[v1.VerifyPhoneCodeRequest, v1.VerifyPhoneCodeResponse]
-	getCurrentUser                *connect.Client[v1.GetCurrentUserRequest, v1.GetCurrentUserResponse]
-	refreshToken                  *connect.Client[v1.RefreshTokenRequest, v1.RefreshTokenResponse]
-	logout                        *connect.Client[v1.LogoutRequest, v1.LogoutResponse]
-	updateProfile                 *connect.Client[v1.UpdateProfileRequest, v1.UpdateProfileResponse]
-	changePassword                *connect.Client[v1.ChangePasswordRequest, v1.ChangePasswordResponse]
-	requestPasswordReset          *connect.Client[v1.RequestPasswordResetRequest, v1.RequestPasswordResetResponse]
-	confirmPasswordReset          *connect.Client[v1.ConfirmPasswordResetRequest, v1.ConfirmPasswordResetResponse]
-	sendEmailVerification         *connect.Client[v1.SendEmailVerificationRequest, v1.SendEmailVerificationResponse]
-	verifyEmail                   *connect.Client[v1.VerifyEmailRequest, v1.VerifyEmailResponse]
-	requestEmailChange            *connect.Client[v1.RequestEmailChangeRequest, v1.RequestEmailChangeResponse]
-	confirmEmailChange            *connect.Client[v1.ConfirmEmailChangeRequest, v1.ConfirmEmailChangeResponse]
-	beginIdentityVerification     *connect.Client[v1.BeginIdentityVerificationRequest, v1.BeginIdentityVerificationResponse]
-	getIdentityVerificationStatus *connect.Client[v1.GetIdentityVerificationStatusRequest, v1.GetIdentityVerificationStatusResponse]
-	requestAdminHelp              *connect.Client[v1.RequestAdminHelpRequest, v1.RequestAdminHelpResponse]
-	listHelpRequests              *connect.Client[v1.ListHelpRequestsRequest, v1.ListHelpRequestsResponse]
-	resolveHelpRequest            *connect.Client[v1.ResolveHelpRequestRequest, v1.ResolveHelpRequestResponse]
-	beginPasskeyRegistration      *connect.Client[v1.BeginPasskeyRegistrationRequest, v1.BeginPasskeyRegistrationResponse]
-	completePasskeyRegistration   *connect.Client[v1.CompletePasskeyRegistrationRequest, v1.CompletePasskeyRegistrationResponse]
-	beginPasskeySignup            *connect.Client[v1.BeginPasskeySignupRequest, v1.BeginPasskeySignupResponse]
-	completePasskeySignup         *connect.Client[v1.CompletePasskeySignupRequest, v1.CompletePasskeySignupResponse]
-	beginPasskeyLogin             *connect.Client[v1.BeginPasskeyLoginRequest, v1.BeginPasskeyLoginResponse]
-	completePasskeyLogin          *connect.Client[v1.CompletePasskeyLoginRequest, v1.CompletePasskeyLoginResponse]
-	listPasskeys                  *connect.Client[v1.ListPasskeysRequest, v1.ListPasskeysResponse]
-	deletePasskey                 *connect.Client[v1.DeletePasskeyRequest, v1.DeletePasskeyResponse]
-	initiateQrLogin               *connect.Client[v1.InitiateQrLoginRequest, v1.InitiateQrLoginResponse]
-	getQrLoginSession             *connect.Client[v1.GetQrLoginSessionRequest, v1.GetQrLoginSessionResponse]
-	approveQrLogin                *connect.Client[v1.ApproveQrLoginRequest, v1.ApproveQrLoginResponse]
-	pollQrLogin                   *connect.Client[v1.PollQrLoginRequest, v1.PollQrLoginResponse]
-	beginTotpSetup                *connect.Client[v1.BeginTotpSetupRequest, v1.BeginTotpSetupResponse]
-	verifyTotpSetup               *connect.Client[v1.VerifyTotpSetupRequest, v1.VerifyTotpSetupResponse]
-	disableTotp                   *connect.Client[v1.DisableTotpRequest, v1.DisableTotpResponse]
-	verifyTotp                    *connect.Client[v1.VerifyTotpRequest, v1.VerifyTotpResponse]
-	regenerateRecoveryCodes       *connect.Client[v1.RegenerateRecoveryCodesRequest, v1.RegenerateRecoveryCodesResponse]
-	listMySessions                *connect.Client[v1.ListMySessionsRequest, v1.ListMySessionsResponse]
-	revokeSession                 *connect.Client[v1.RevokeSessionRequest, v1.RevokeSessionResponse]
-	revokeAllSessions             *connect.Client[v1.RevokeAllSessionsRequest, v1.RevokeAllSessionsResponse]
-	signOutEverywhere             *connect.Client[v1.SignOutEverywhereRequest, v1.SignOutEverywhereResponse]
-	listAuditEvents               *connect.Client[v1.ListAuditEventsRequest, v1.ListAuditEventsResponse]
-	createUser                    *connect.Client[v1.CreateUserRequest, v1.CreateUserResponse]
-	getUser                       *connect.Client[v1.GetUserRequest, v1.GetUserResponse]
-	updateUser                    *connect.Client[v1.UpdateUserRequest, v1.UpdateUserResponse]
-	deleteUser                    *connect.Client[v1.DeleteUserRequest, v1.DeleteUserResponse]
-	listUsers                     *connect.Client[v1.ListUsersRequest, v1.ListUsersResponse]
-	createGroup                   *connect.Client[v1.CreateGroupRequest, v1.CreateGroupResponse]
-	updateGroup                   *connect.Client[v1.UpdateGroupRequest, v1.UpdateGroupResponse]
-	deleteGroup                   *connect.Client[v1.DeleteGroupRequest, v1.DeleteGroupResponse]
-	listGroups                    *connect.Client[v1.ListGroupsRequest, v1.ListGroupsResponse]
-	addGroupMember                *connect.Client[v1.AddGroupMemberRequest, v1.AddGroupMemberResponse]
-	removeGroupMember             *connect.Client[v1.RemoveGroupMemberRequest, v1.RemoveGroupMemberResponse]
-	listGroupMembers              *connect.Client[v1.ListGroupMembersRequest, v1.ListGroupMembersResponse]
-	createDomain                  *connect.Client[v1.CreateDomainRequest, v1.CreateDomainResponse]
-	verifyDomain                  *connect.Client[v1.VerifyDomainRequest, v1.VerifyDomainResponse]
-	listTenantDomains             *connect.Client[v1.ListTenantDomainsRequest, v1.ListTenantDomainsResponse]
-	createTenantInvitation        *connect.Client[v1.CreateTenantInvitationRequest, v1.CreateTenantInvitationResponse]
-	acceptTenantInvitation        *connect.Client[v1.AcceptTenantInvitationRequest, v1.AcceptTenantInvitationResponse]
-	listTenantInvitations         *connect.Client[v1.ListTenantInvitationsRequest, v1.ListTenantInvitationsResponse]
-	listTenantMembers             *connect.Client[v1.ListTenantMembersRequest, v1.ListTenantMembersResponse]
-	removeTenantMember            *connect.Client[v1.RemoveTenantMemberRequest, v1.RemoveTenantMemberResponse]
-	inviteUser                    *connect.Client[v1.InviteUserRequest, v1.InviteUserResponse]
-	acceptInvitation              *connect.Client[v1.AcceptInvitationRequest, v1.AcceptInvitationResponse]
-	deactivateUser                *connect.Client[v1.DeactivateUserRequest, v1.DeactivateUserResponse]
-	reactivateUser                *connect.Client[v1.ReactivateUserRequest, v1.ReactivateUserResponse]
-	resetUserPassword             *connect.Client[v1.ResetUserPasswordRequest, v1.ResetUserPasswordResponse]
-	setUserQuota                  *connect.Client[v1.SetUserQuotaRequest, v1.SetUserQuotaResponse]
-	adminCreateProject            *connect.Client[v1.AdminCreateProjectRequest, v1.AdminCreateProjectResponse]
-	adminCreateProjectCredential  *connect.Client[v1.AdminCreateProjectCredentialRequest, v1.AdminCreateProjectCredentialResponse]
-	adminAddProjectAuthDomain     *connect.Client[v1.AdminAddProjectAuthDomainRequest, v1.AdminAddProjectAuthDomainResponse]
-	addProjectAuthDomain          *connect.Client[v1.AddProjectAuthDomainRequest, v1.AddProjectAuthDomainResponse]
-	verifyProjectAuthDomain       *connect.Client[v1.VerifyProjectAuthDomainRequest, v1.VerifyProjectAuthDomainResponse]
-	listProjectAuthDomains        *connect.Client[v1.ListProjectAuthDomainsRequest, v1.ListProjectAuthDomainsResponse]
-	setPrimaryAuthDomain          *connect.Client[v1.SetPrimaryAuthDomainRequest, v1.SetPrimaryAuthDomainResponse]
-	adminCreateTenant             *connect.Client[v1.AdminCreateTenantRequest, v1.AdminCreateTenantResponse]
-	adminAddTenantAdmin           *connect.Client[v1.AdminAddTenantAdminRequest, v1.AdminAddTenantAdminResponse]
-	createFirstPlatformAdmin      *connect.Client[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse]
-	listLinkedIdentities          *connect.Client[v1.ListLinkedIdentitiesRequest, v1.ListLinkedIdentitiesResponse]
-	linkIdentity                  *connect.Client[v1.LinkIdentityRequest, v1.LinkIdentityResponse]
-	unlinkIdentity                *connect.Client[v1.UnlinkIdentityRequest, v1.UnlinkIdentityResponse]
-	upsertLoginPolicy             *connect.Client[v1.UpsertLoginPolicyRequest, v1.UpsertLoginPolicyResponse]
-	getLoginPolicy                *connect.Client[v1.GetLoginPolicyRequest, v1.GetLoginPolicyResponse]
-	deleteLoginPolicy             *connect.Client[v1.DeleteLoginPolicyRequest, v1.DeleteLoginPolicyResponse]
-	upsertProjectConfig           *connect.Client[v1.UpsertProjectConfigRequest, v1.UpsertProjectConfigResponse]
-	getProjectConfig              *connect.Client[v1.GetProjectConfigRequest, v1.GetProjectConfigResponse]
+	beginOAuthLogin                 *connect.Client[v1.BeginOAuthLoginRequest, v1.BeginOAuthLoginResponse]
+	oAuthLogin                      *connect.Client[v1.OAuthLoginRequest, v1.OAuthLoginResponse]
+	nativeOAuthLogin                *connect.Client[v1.NativeOAuthLoginRequest, v1.NativeOAuthLoginResponse]
+	redeemOAuthCode                 *connect.Client[v1.RedeemOAuthCodeRequest, v1.RedeemOAuthCodeResponse]
+	passwordSignup                  *connect.Client[v1.PasswordSignupRequest, v1.PasswordSignupResponse]
+	passwordLogin                   *connect.Client[v1.PasswordLoginRequest, v1.PasswordLoginResponse]
+	requestEmailLoginCode           *connect.Client[v1.RequestEmailLoginCodeRequest, v1.RequestEmailLoginCodeResponse]
+	verifyEmailLoginCode            *connect.Client[v1.VerifyEmailLoginCodeRequest, v1.VerifyEmailLoginCodeResponse]
+	requestMagicLink                *connect.Client[v1.RequestMagicLinkRequest, v1.RequestMagicLinkResponse]
+	redeemMagicLink                 *connect.Client[v1.RedeemMagicLinkRequest, v1.RedeemMagicLinkResponse]
+	requestPhoneVerification        *connect.Client[v1.RequestPhoneVerificationRequest, v1.RequestPhoneVerificationResponse]
+	verifyPhoneCode                 *connect.Client[v1.VerifyPhoneCodeRequest, v1.VerifyPhoneCodeResponse]
+	getCurrentUser                  *connect.Client[v1.GetCurrentUserRequest, v1.GetCurrentUserResponse]
+	refreshToken                    *connect.Client[v1.RefreshTokenRequest, v1.RefreshTokenResponse]
+	logout                          *connect.Client[v1.LogoutRequest, v1.LogoutResponse]
+	updateProfile                   *connect.Client[v1.UpdateProfileRequest, v1.UpdateProfileResponse]
+	changePassword                  *connect.Client[v1.ChangePasswordRequest, v1.ChangePasswordResponse]
+	requestPasswordReset            *connect.Client[v1.RequestPasswordResetRequest, v1.RequestPasswordResetResponse]
+	confirmPasswordReset            *connect.Client[v1.ConfirmPasswordResetRequest, v1.ConfirmPasswordResetResponse]
+	sendEmailVerification           *connect.Client[v1.SendEmailVerificationRequest, v1.SendEmailVerificationResponse]
+	verifyEmail                     *connect.Client[v1.VerifyEmailRequest, v1.VerifyEmailResponse]
+	requestEmailChange              *connect.Client[v1.RequestEmailChangeRequest, v1.RequestEmailChangeResponse]
+	confirmEmailChange              *connect.Client[v1.ConfirmEmailChangeRequest, v1.ConfirmEmailChangeResponse]
+	beginIdentityVerification       *connect.Client[v1.BeginIdentityVerificationRequest, v1.BeginIdentityVerificationResponse]
+	getIdentityVerificationStatus   *connect.Client[v1.GetIdentityVerificationStatusRequest, v1.GetIdentityVerificationStatusResponse]
+	requestAdminHelp                *connect.Client[v1.RequestAdminHelpRequest, v1.RequestAdminHelpResponse]
+	listHelpRequests                *connect.Client[v1.ListHelpRequestsRequest, v1.ListHelpRequestsResponse]
+	resolveHelpRequest              *connect.Client[v1.ResolveHelpRequestRequest, v1.ResolveHelpRequestResponse]
+	beginPasskeyRegistration        *connect.Client[v1.BeginPasskeyRegistrationRequest, v1.BeginPasskeyRegistrationResponse]
+	completePasskeyRegistration     *connect.Client[v1.CompletePasskeyRegistrationRequest, v1.CompletePasskeyRegistrationResponse]
+	beginPasskeySignup              *connect.Client[v1.BeginPasskeySignupRequest, v1.BeginPasskeySignupResponse]
+	completePasskeySignup           *connect.Client[v1.CompletePasskeySignupRequest, v1.CompletePasskeySignupResponse]
+	beginPasskeyLogin               *connect.Client[v1.BeginPasskeyLoginRequest, v1.BeginPasskeyLoginResponse]
+	completePasskeyLogin            *connect.Client[v1.CompletePasskeyLoginRequest, v1.CompletePasskeyLoginResponse]
+	listPasskeys                    *connect.Client[v1.ListPasskeysRequest, v1.ListPasskeysResponse]
+	deletePasskey                   *connect.Client[v1.DeletePasskeyRequest, v1.DeletePasskeyResponse]
+	initiateQrLogin                 *connect.Client[v1.InitiateQrLoginRequest, v1.InitiateQrLoginResponse]
+	getQrLoginSession               *connect.Client[v1.GetQrLoginSessionRequest, v1.GetQrLoginSessionResponse]
+	approveQrLogin                  *connect.Client[v1.ApproveQrLoginRequest, v1.ApproveQrLoginResponse]
+	pollQrLogin                     *connect.Client[v1.PollQrLoginRequest, v1.PollQrLoginResponse]
+	beginTotpSetup                  *connect.Client[v1.BeginTotpSetupRequest, v1.BeginTotpSetupResponse]
+	verifyTotpSetup                 *connect.Client[v1.VerifyTotpSetupRequest, v1.VerifyTotpSetupResponse]
+	disableTotp                     *connect.Client[v1.DisableTotpRequest, v1.DisableTotpResponse]
+	verifyTotp                      *connect.Client[v1.VerifyTotpRequest, v1.VerifyTotpResponse]
+	regenerateRecoveryCodes         *connect.Client[v1.RegenerateRecoveryCodesRequest, v1.RegenerateRecoveryCodesResponse]
+	listMySessions                  *connect.Client[v1.ListMySessionsRequest, v1.ListMySessionsResponse]
+	revokeSession                   *connect.Client[v1.RevokeSessionRequest, v1.RevokeSessionResponse]
+	revokeAllSessions               *connect.Client[v1.RevokeAllSessionsRequest, v1.RevokeAllSessionsResponse]
+	signOutEverywhere               *connect.Client[v1.SignOutEverywhereRequest, v1.SignOutEverywhereResponse]
+	listAuditEvents                 *connect.Client[v1.ListAuditEventsRequest, v1.ListAuditEventsResponse]
+	createUser                      *connect.Client[v1.CreateUserRequest, v1.CreateUserResponse]
+	getUser                         *connect.Client[v1.GetUserRequest, v1.GetUserResponse]
+	updateUser                      *connect.Client[v1.UpdateUserRequest, v1.UpdateUserResponse]
+	deleteUser                      *connect.Client[v1.DeleteUserRequest, v1.DeleteUserResponse]
+	listUsers                       *connect.Client[v1.ListUsersRequest, v1.ListUsersResponse]
+	createGroup                     *connect.Client[v1.CreateGroupRequest, v1.CreateGroupResponse]
+	updateGroup                     *connect.Client[v1.UpdateGroupRequest, v1.UpdateGroupResponse]
+	deleteGroup                     *connect.Client[v1.DeleteGroupRequest, v1.DeleteGroupResponse]
+	listGroups                      *connect.Client[v1.ListGroupsRequest, v1.ListGroupsResponse]
+	addGroupMember                  *connect.Client[v1.AddGroupMemberRequest, v1.AddGroupMemberResponse]
+	removeGroupMember               *connect.Client[v1.RemoveGroupMemberRequest, v1.RemoveGroupMemberResponse]
+	listGroupMembers                *connect.Client[v1.ListGroupMembersRequest, v1.ListGroupMembersResponse]
+	createDomain                    *connect.Client[v1.CreateDomainRequest, v1.CreateDomainResponse]
+	verifyDomain                    *connect.Client[v1.VerifyDomainRequest, v1.VerifyDomainResponse]
+	listTenantDomains               *connect.Client[v1.ListTenantDomainsRequest, v1.ListTenantDomainsResponse]
+	createTenantInvitation          *connect.Client[v1.CreateTenantInvitationRequest, v1.CreateTenantInvitationResponse]
+	acceptTenantInvitation          *connect.Client[v1.AcceptTenantInvitationRequest, v1.AcceptTenantInvitationResponse]
+	listTenantInvitations           *connect.Client[v1.ListTenantInvitationsRequest, v1.ListTenantInvitationsResponse]
+	listTenantMembers               *connect.Client[v1.ListTenantMembersRequest, v1.ListTenantMembersResponse]
+	removeTenantMember              *connect.Client[v1.RemoveTenantMemberRequest, v1.RemoveTenantMemberResponse]
+	inviteUser                      *connect.Client[v1.InviteUserRequest, v1.InviteUserResponse]
+	acceptInvitation                *connect.Client[v1.AcceptInvitationRequest, v1.AcceptInvitationResponse]
+	deactivateUser                  *connect.Client[v1.DeactivateUserRequest, v1.DeactivateUserResponse]
+	reactivateUser                  *connect.Client[v1.ReactivateUserRequest, v1.ReactivateUserResponse]
+	resetUserPassword               *connect.Client[v1.ResetUserPasswordRequest, v1.ResetUserPasswordResponse]
+	setUserQuota                    *connect.Client[v1.SetUserQuotaRequest, v1.SetUserQuotaResponse]
+	adminCreateProject              *connect.Client[v1.AdminCreateProjectRequest, v1.AdminCreateProjectResponse]
+	adminCreateProjectCredential    *connect.Client[v1.AdminCreateProjectCredentialRequest, v1.AdminCreateProjectCredentialResponse]
+	adminAddProjectAuthDomain       *connect.Client[v1.AdminAddProjectAuthDomainRequest, v1.AdminAddProjectAuthDomainResponse]
+	addProjectAuthDomain            *connect.Client[v1.AddProjectAuthDomainRequest, v1.AddProjectAuthDomainResponse]
+	verifyProjectAuthDomain         *connect.Client[v1.VerifyProjectAuthDomainRequest, v1.VerifyProjectAuthDomainResponse]
+	listProjectAuthDomains          *connect.Client[v1.ListProjectAuthDomainsRequest, v1.ListProjectAuthDomainsResponse]
+	setPrimaryAuthDomain            *connect.Client[v1.SetPrimaryAuthDomainRequest, v1.SetPrimaryAuthDomainResponse]
+	adminCreateTenant               *connect.Client[v1.AdminCreateTenantRequest, v1.AdminCreateTenantResponse]
+	adminAddTenantAdmin             *connect.Client[v1.AdminAddTenantAdminRequest, v1.AdminAddTenantAdminResponse]
+	createFirstPlatformAdmin        *connect.Client[v1.CreateFirstPlatformAdminRequest, v1.CreateFirstPlatformAdminResponse]
+	listLinkedIdentities            *connect.Client[v1.ListLinkedIdentitiesRequest, v1.ListLinkedIdentitiesResponse]
+	linkIdentity                    *connect.Client[v1.LinkIdentityRequest, v1.LinkIdentityResponse]
+	unlinkIdentity                  *connect.Client[v1.UnlinkIdentityRequest, v1.UnlinkIdentityResponse]
+	upsertLoginPolicy               *connect.Client[v1.UpsertLoginPolicyRequest, v1.UpsertLoginPolicyResponse]
+	getLoginPolicy                  *connect.Client[v1.GetLoginPolicyRequest, v1.GetLoginPolicyResponse]
+	deleteLoginPolicy               *connect.Client[v1.DeleteLoginPolicyRequest, v1.DeleteLoginPolicyResponse]
+	upsertProjectConfig             *connect.Client[v1.UpsertProjectConfigRequest, v1.UpsertProjectConfigResponse]
+	getProjectConfig                *connect.Client[v1.GetProjectConfigRequest, v1.GetProjectConfigResponse]
+	adminSetProjectOAuthProvider    *connect.Client[v1.AdminSetProjectOAuthProviderRequest, v1.AdminSetProjectOAuthProviderResponse]
+	adminDeleteProjectOAuthProvider *connect.Client[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse]
+	adminListProjectOAuthProviders  *connect.Client[v1.AdminListProjectOAuthProvidersRequest, v1.AdminListProjectOAuthProvidersResponse]
 }
 
 // BeginOAuthLogin calls identity.v1.IdentityService.BeginOAuthLogin.
@@ -1618,6 +1658,22 @@ func (c *identityServiceClient) GetProjectConfig(ctx context.Context, req *conne
 	return c.getProjectConfig.CallUnary(ctx, req)
 }
 
+// AdminSetProjectOAuthProvider calls identity.v1.IdentityService.AdminSetProjectOAuthProvider.
+func (c *identityServiceClient) AdminSetProjectOAuthProvider(ctx context.Context, req *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error) {
+	return c.adminSetProjectOAuthProvider.CallUnary(ctx, req)
+}
+
+// AdminDeleteProjectOAuthProvider calls
+// identity.v1.IdentityService.AdminDeleteProjectOAuthProvider.
+func (c *identityServiceClient) AdminDeleteProjectOAuthProvider(ctx context.Context, req *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error) {
+	return c.adminDeleteProjectOAuthProvider.CallUnary(ctx, req)
+}
+
+// AdminListProjectOAuthProviders calls identity.v1.IdentityService.AdminListProjectOAuthProviders.
+func (c *identityServiceClient) AdminListProjectOAuthProviders(ctx context.Context, req *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error) {
+	return c.adminListProjectOAuthProviders.CallUnary(ctx, req)
+}
+
 // IdentityServiceHandler is an implementation of the identity.v1.IdentityService service.
 type IdentityServiceHandler interface {
 	// Authentication
@@ -1773,6 +1829,16 @@ type IdentityServiceHandler interface {
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertProjectConfig(context.Context, *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error)
 	GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error)
+	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
+	// sets/rotates one provider (encrypting any plaintext secret server-side and
+	// merging it into config_json without disturbing other keys);
+	// AdminDeleteProjectOAuthProvider removes one provider;
+	// AdminListProjectOAuthProviders lists the configured providers with secrets
+	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
+	// build with no control plane.
+	AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error)
+	AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error)
+	AdminListProjectOAuthProviders(context.Context, *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error)
 }
 
 // NewIdentityServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -2346,6 +2412,24 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("GetProjectConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceAdminSetProjectOAuthProviderHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminSetProjectOAuthProviderProcedure,
+		svc.AdminSetProjectOAuthProvider,
+		connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectOAuthProvider")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAdminDeleteProjectOAuthProviderHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminDeleteProjectOAuthProviderProcedure,
+		svc.AdminDeleteProjectOAuthProvider,
+		connect.WithSchema(identityServiceMethods.ByName("AdminDeleteProjectOAuthProvider")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAdminListProjectOAuthProvidersHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminListProjectOAuthProvidersProcedure,
+		svc.AdminListProjectOAuthProviders,
+		connect.WithSchema(identityServiceMethods.ByName("AdminListProjectOAuthProviders")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/identity.v1.IdentityService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case IdentityServiceBeginOAuthLoginProcedure:
@@ -2536,6 +2620,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceUpsertProjectConfigHandler.ServeHTTP(w, r)
 		case IdentityServiceGetProjectConfigProcedure:
 			identityServiceGetProjectConfigHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminSetProjectOAuthProviderProcedure:
+			identityServiceAdminSetProjectOAuthProviderHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminDeleteProjectOAuthProviderProcedure:
+			identityServiceAdminDeleteProjectOAuthProviderHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminListProjectOAuthProvidersProcedure:
+			identityServiceAdminListProjectOAuthProvidersHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2919,4 +3009,16 @@ func (UnimplementedIdentityServiceHandler) UpsertProjectConfig(context.Context, 
 
 func (UnimplementedIdentityServiceHandler) GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetProjectConfig is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminSetProjectOAuthProvider is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminDeleteProjectOAuthProvider is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminListProjectOAuthProviders(context.Context, *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminListProjectOAuthProviders is not implemented"))
 }

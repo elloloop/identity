@@ -86,6 +86,7 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrLastOwner),
 		errors.Is(err, service.ErrPlatformAdminExists),
 		errors.Is(err, service.ErrAuthDomainNotVerified),
+		errors.Is(err, service.ErrProjectSecretsKeyMissing),
 		errors.Is(err, service.ErrLastCredential):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 

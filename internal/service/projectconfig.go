@@ -263,6 +263,16 @@ func (c ProjectOAuthConfig) validate() error {
 		if !hosted && len(m.NativeAudiences) == 0 {
 			return errors.New("oauth.microsoft requires client_id and client_secret_enc, or native_audiences")
 		}
+		// The issuer is built with fmt.Sprintf(IssuerFormat, tid), so the format
+		// must carry exactly one %s verb. A format with zero or extra verbs would
+		// render a malformed issuer (…%!(EXTRA…) / %!s(MISSING)) that no real
+		// token could ever match, silently failing every login — reject it at
+		// author time. Both the write path and resolution enforce this.
+		if m.IssuerFormat != "" {
+			if err := validateSingleStringVerb(m.IssuerFormat, "oauth.microsoft.issuer_format"); err != nil {
+				return err
+			}
+		}
 	}
 	if a := c.Apple; a != nil {
 		hosted := a.ClientID != "" || a.TeamID != "" || a.KeyID != "" || a.PrivateKeyEnc != ""
@@ -324,6 +334,16 @@ func (p ProjectPasskeyConfig) validate() error {
 		if err := validateHTTPURL(p.Origin, "passkey.origin"); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateSingleStringVerb rejects a fmt format string that does not contain
+// exactly one %s verb (and no other verb). A literal percent (%%) is allowed.
+func validateSingleStringVerb(format, field string) error {
+	stripped := strings.ReplaceAll(format, "%%", "")
+	if strings.Count(stripped, "%s") != 1 || strings.Count(stripped, "%") != 1 {
+		return fmt.Errorf("%s %q must contain exactly one %%s verb", field, format)
 	}
 	return nil
 }
