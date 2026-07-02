@@ -44,6 +44,47 @@ func echoHandler(called *bool, userID *string) http.Handler {
 	})
 }
 
+// TestAuthMiddleware_OperatorRPCs_Exempt asserts every control-plane operator
+// RPC bypasses JWT enforcement. Operator RPCs authenticate by the X-Admin-Secret
+// header (or, for the bootstrap, self-secure), NOT a user JWT — a platform
+// operator has no user token, so an omitted exempt entry would make the RPC
+// unreachable. This guards against adding an operator RPC without exempting it.
+func TestAuthMiddleware_OperatorRPCs_Exempt(t *testing.T) {
+	kr := testSigner(t)
+	operatorRPCs := []string{
+		"AdminCreateProject",
+		"AdminCreateProjectCredential",
+		"AdminAddProjectAuthDomain",
+		"AddProjectAuthDomain",
+		"VerifyProjectAuthDomain",
+		"ListProjectAuthDomains",
+		"SetPrimaryAuthDomain",
+		"AdminCreateTenant",
+		"AdminAddTenantAdmin",
+		"UpsertLoginPolicy",
+		"GetLoginPolicy",
+		"DeleteLoginPolicy",
+		"UpsertProjectConfig",
+		"GetProjectConfig",
+		"AdminSetProjectOAuthProvider",
+		"AdminDeleteProjectOAuthProvider",
+		"AdminListProjectOAuthProviders",
+		"CreateFirstPlatformAdmin",
+	}
+	for _, rpc := range operatorRPCs {
+		t.Run(rpc, func(t *testing.T) {
+			var called bool
+			var userID string
+			handler := AuthMiddleware(kr, "", "", false)(echoHandler(&called, &userID))
+			req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/"+rpc, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			assert.True(t, called, "operator RPC %s must be JWT-exempt", rpc)
+			assert.Equal(t, http.StatusOK, rec.Code)
+		})
+	}
+}
+
 func TestAuthMiddleware_ExemptPath_NoToken_Passes(t *testing.T) {
 	kr := testSigner(t)
 	var called bool
