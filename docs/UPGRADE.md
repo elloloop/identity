@@ -73,6 +73,27 @@ default project and draw OAuth providers from the `GATEWAY_OAUTH_*` env vars, so
 they do **not** require the key. Rotating or losing the key invalidates every
 per-project provider secret already stored (they must be re-encrypted).
 
+### Removed: `GATEWAY_NATIVE_OAUTH_*_AUDIENCES_BY_PRODUCT`
+
+Native mobile sign-in accepted-audience configuration is now **per-project**,
+carried in a project's `config_json` under
+`oauth.<provider>.native_audiences` (an array of accepted `aud` values). This
+replaces the per-product stopgap env vars shipped the prior week:
+
+- `GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT` — **removed**
+- `GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT` — **removed**
+
+**Migrate:** move each `product=aud1 aud2` entry to the corresponding project's
+`config_json` (`oauth.google.native_audiences` / `oauth.apple.native_audiences`
+/ the new `oauth.microsoft.native_audiences`). The plain
+`GATEWAY_NATIVE_OAUTH_{GOOGLE,APPLE,MICROSOFT}_AUDIENCES` env vars are **kept**
+as the **default project's** seed (a non-default project never inherits them),
+and `GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS` (product → project resolution) is
+**kept**. This release also adds **native Microsoft** login (mirrors the hosted
+verifier: issuer derived from the token's `tid`, `email → preferred_username →
+upn` coalescing, and a **verbatim** nonce — unlike Apple's hashed nonce). It is
+breaking, but the `*_BY_PRODUCT` vars shipped only the prior week.
+
 ### Schema migrations involved
 
 The model change lands across three Postgres migrations
