@@ -50,6 +50,12 @@ var allowedGatewayTokens = map[string]string{
 	"GATEWAY_TENANT_HOST_BASE_DOMAIN":   "removed in v1.0; documented in docs/UPGRADE.md as an env var to delete",
 	"GATEWAY_TENANT_RESOLUTION_SOURCES": "removed in v1.0; documented in docs/UPGRADE.md as an env var to delete",
 
+	// Native OAuth per-product audience stopgap, superseded by per-project
+	// config_json oauth.<provider>.native_audiences; documented in
+	// docs/UPGRADE.md as removed env vars to migrate off.
+	"GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT": "removed; migrate to per-project config_json native_audiences (docs/UPGRADE.md)",
+	"GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT":  "removed; migrate to per-project config_json native_audiences (docs/UPGRADE.md)",
+
 	// (2) Test-harness only: read by internal/repo/postgres/*_test.go and the
 	// CI postgres legs, referenced in ops/testing docs (postgres-rls, redesign).
 	"GATEWAY_TEST_POSTGRES_DSN": "test-harness env var (read by *_test.go and CI), not a runtime config key",

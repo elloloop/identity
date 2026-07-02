@@ -44,41 +44,24 @@ type NativeVerification struct {
 // matches the hosted Google provider's iss check in google.go).
 var googleIssuers = []string{"https://accounts.google.com", "accounts.google.com"}
 
-// NativeVerifierConfig configures a NativeVerifier. At least one provider's
-// audiences must be non-empty for the verifier to accept that provider; a
-// provider with no configured audiences is treated as unsupported.
+// NativeVerifierConfig configures a NativeVerifier. It holds only the
+// project-INDEPENDENT state: the JWKS endpoints (shared across projects — a
+// provider's signing keys do not vary per project) and the accepted issuer(s).
+// The accepted audience set and (for Microsoft) the issuer/tenant pinning are
+// supplied PER REQUEST via NativeVerifyParams, resolved by the caller from the
+// request's project scope — so one verifier with shared JWKS caches serves
+// every project.
 type NativeVerifierConfig struct {
-	// GoogleAudiences is the GLOBAL fallback set of accepted `aud` values for
-	// Google ID tokens — the web client id PLUS every per-platform
-	// (iOS/Android) OAuth client id the native SDKs present. It is consulted
-	// only for a product with no entry in GoogleAudiencesByProduct. Empty
-	// disables Google native login for those products.
-	GoogleAudiences []string
-	// AppleAudiences is the GLOBAL fallback set of accepted `aud` values for
-	// Apple ID tokens — the Services ID PLUS every native bundle id. It is
-	// consulted only for a product with no entry in AppleAudiencesByProduct.
-	// Empty disables Apple native login for those products.
-	AppleAudiences []string
-
-	// GoogleAudiencesByProduct scopes the accepted Google `aud` values PER
-	// PRODUCT, keyed by the lower-cased product selector. When a product has an
-	// entry here, ONLY that entry's audiences are accepted for it — a token
-	// whose `aud` is valid for another product (or only globally) is rejected.
-	// A product with no entry falls back to GoogleAudiences.
-	GoogleAudiencesByProduct map[string][]string
-	// AppleAudiencesByProduct scopes the accepted Apple `aud` values PER
-	// PRODUCT, keyed by the lower-cased product selector. Same semantics as
-	// GoogleAudiencesByProduct: an entry is exclusive for its product, an
-	// absent product falls back to AppleAudiences.
-	AppleAudiencesByProduct map[string][]string
-
-	// GoogleJWKSURL / AppleJWKSURL override the default provider JWKS
-	// endpoints (used by tests to point at a stub). Empty uses the live URL.
-	GoogleJWKSURL string
-	AppleJWKSURL  string
+	// GoogleJWKSURL / AppleJWKSURL / MicrosoftJWKSURL override the default
+	// provider JWKS endpoints (used by tests to point at a stub). Empty uses the
+	// live URL.
+	GoogleJWKSURL    string
+	AppleJWKSURL     string
+	MicrosoftJWKSURL string
 
 	// GoogleIssuer / AppleIssuer override the accepted issuer(s) (tests only).
-	// Empty uses the live issuer(s).
+	// Empty uses the live issuer(s). Microsoft's expected issuer is derived
+	// per-request from the token's `tid` and the project's issuer format.
 	GoogleIssuer string
 	AppleIssuer  string
 
@@ -87,31 +70,56 @@ type NativeVerifierConfig struct {
 	Now          func() time.Time
 }
 
-// NativeVerifier verifies native mobile-SDK ID tokens (Google idToken / Apple
-// identityToken) WITHOUT an OAuth code exchange, producing a canonical
-// Identity. It reuses the same JWKS cache + JWS verification + claim parsing
-// the hosted Exchangers use; the only difference is that `aud` is matched
-// against the audience set of the REQUESTED PRODUCT (a per-product set when
-// configured, else the global fallback set — never a single web client id) and,
-// for Apple, the request nonce is verified against the id_token claim. Scoping
-// `aud` per product stops a token minted for product A's client id from being
-// redeemed as product B.
-type NativeVerifier struct {
-	googleAuds          map[string]bool
-	appleAuds           map[string]bool
-	googleAudsByProduct map[string]map[string]bool
-	appleAudsByProduct  map[string]map[string]bool
-	googleIssuers       []string
-	appleIssuer         string
-	googleJWKS          *jwksCache
-	appleJWKS           *jwksCache
-	now                 func() time.Time
+// NativeVerifyParams are the per-request inputs to Verify. The accepted
+// audience set (and, for Microsoft, the issuer/tenant pinning) are resolved by
+// the caller from the request's project scope — the verifier holds no
+// per-project audience state, only the shared JWKS caches.
+type NativeVerifyParams struct {
+	// Provider is the native provider key: "google", "apple", or "microsoft".
+	Provider string
+	// IDToken is the JWT a native SDK returned (Google idToken / Apple
+	// identityToken / Microsoft id_token).
+	IDToken string
+	// RawNonce is the client-supplied nonce. Apple stamps the SHA-256 of it on
+	// the id_token nonce claim; Microsoft stamps it VERBATIM; Google does not
+	// use it. Empty skips the nonce check.
+	RawNonce string
+	// Audiences is the accepted `aud` allow-list for this request's project +
+	// provider. Empty means the provider is not configured for the project, so
+	// the token is rejected.
+	Audiences []string
+	// MicrosoftTenantID, when set, pins the accepted tenant: the token's `tid`
+	// must equal it. Empty keeps the multi-tenant default (issuer derived from
+	// the token's own `tid`). Ignored for Google/Apple.
+	MicrosoftTenantID string
+	// MicrosoftIssuerFormat overrides the issuer format string interpolated with
+	// the tenant id to derive the expected issuer. Empty uses the live Microsoft
+	// format. Ignored for Google/Apple.
+	MicrosoftIssuerFormat string
 }
 
-// NewNativeVerifier builds a NativeVerifier. JWKS caches are created for both
-// providers regardless of whether their audiences are configured; a provider
-// with no audiences is rejected at Verify time, so an unconfigured provider's
-// cache is never consulted.
+// NativeVerifier verifies native mobile-SDK ID tokens (Google idToken / Apple
+// identityToken / Microsoft id_token) WITHOUT an OAuth code exchange, producing
+// a canonical Identity. It reuses the same JWKS cache + JWS verification + claim
+// parsing the hosted Exchangers use; the difference is that `aud` is matched
+// against the audience set supplied PER REQUEST (resolved from the caller's
+// project scope — never a single web client id), and the provider nonce handling
+// differs (Apple: SHA-256; Microsoft: verbatim; Google: none). The JWKS caches
+// are shared across projects because a provider's signing keys are
+// project-independent.
+type NativeVerifier struct {
+	googleIssuers []string
+	appleIssuer   string
+	googleJWKS    *jwksCache
+	appleJWKS     *jwksCache
+	microsoftJWKS *jwksCache
+	now           func() time.Time
+}
+
+// NewNativeVerifier builds a NativeVerifier. JWKS caches are created for every
+// provider regardless of which are configured per project; a provider with no
+// audiences for a request is rejected at Verify time, so an unconfigured
+// provider's cache is never consulted for that request.
 func NewNativeVerifier(cfg NativeVerifierConfig) *NativeVerifier {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = defaultHTTPClient()
@@ -122,8 +130,8 @@ func NewNativeVerifier(cfg NativeVerifierConfig) *NativeVerifier {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	// Default to the same JWKS endpoints the hosted google/apple exchangers
-	// use (google.go / apple.go); tests override via cfg.
+	// Default to the same JWKS endpoints the hosted google/apple/microsoft
+	// exchangers use (google.go / apple.go / microsoft.go); tests override via cfg.
 	gJWKSURL := cfg.GoogleJWKSURL
 	if gJWKSURL == "" {
 		gJWKSURL = googleJWKSURL
@@ -131,6 +139,10 @@ func NewNativeVerifier(cfg NativeVerifierConfig) *NativeVerifier {
 	aJWKSURL := cfg.AppleJWKSURL
 	if aJWKSURL == "" {
 		aJWKSURL = appleJWKSURL
+	}
+	mJWKSURL := cfg.MicrosoftJWKSURL
+	if mJWKSURL == "" {
+		mJWKSURL = microsoftJWKSURL
 	}
 	gIssuers := googleIssuers
 	if cfg.GoogleIssuer != "" {
@@ -141,42 +153,43 @@ func NewNativeVerifier(cfg NativeVerifierConfig) *NativeVerifier {
 		aIssuer = cfg.AppleIssuer
 	}
 	return &NativeVerifier{
-		googleAuds:          toSet(cfg.GoogleAudiences),
-		appleAuds:           toSet(cfg.AppleAudiences),
-		googleAudsByProduct: toSetByProduct(cfg.GoogleAudiencesByProduct),
-		appleAudsByProduct:  toSetByProduct(cfg.AppleAudiencesByProduct),
-		googleIssuers:       gIssuers,
-		appleIssuer:         aIssuer,
-		googleJWKS:          newJWKSCache(gJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
-		appleJWKS:           newJWKSCache(aJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
-		now:                 cfg.Now,
+		googleIssuers: gIssuers,
+		appleIssuer:   aIssuer,
+		googleJWKS:    newJWKSCache(gJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
+		appleJWKS:     newJWKSCache(aJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
+		microsoftJWKS: newJWKSCache(mJWKSURL, cfg.JWKSCacheTTL, cfg.HTTPClient),
+		now:           cfg.Now,
 	}
 }
 
-// Verify validates a native ID token for the given provider and product, and
-// returns a canonical, verified Identity. product selects the audience set the
-// token's `aud` is matched against (see audsFor); rawNonce is the un-hashed
-// nonce from the native request (Apple only); pass "" for Google. Every failure
-// returns an error wrapping ErrIdentityVerification or ErrEmailNotVerified so
-// the caller can map it to a single, safe Unauthenticated response — the reason
-// (bad aud, wrong product, expired, …) is never leaked to the client.
-func (v *NativeVerifier) Verify(ctx context.Context, provider, idToken, rawNonce, product string) (*NativeVerification, error) {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
+// Verify validates a native ID token against the per-request params and returns
+// a canonical, verified Identity. p.Audiences is the accepted `aud` set for the
+// request's project + provider; p.RawNonce is the un-hashed request nonce
+// (Apple/Microsoft). Every failure returns an error wrapping
+// ErrIdentityVerification or ErrEmailNotVerified so the caller can map it to a
+// single, safe Unauthenticated response — the reason (bad aud, wrong project,
+// expired, …) is never leaked to the client. Failure errors deliberately omit
+// the token's email address: the service logs them with zap.Error at the
+// native-login failure site, and the raw email is PII that must not reach logs.
+func (v *NativeVerifier) Verify(ctx context.Context, p NativeVerifyParams) (*NativeVerification, error) {
+	switch strings.ToLower(strings.TrimSpace(p.Provider)) {
 	case "google":
-		return v.verifyGoogle(ctx, idToken, product)
+		return v.verifyGoogle(ctx, p)
 	case "apple":
-		return v.verifyApple(ctx, idToken, rawNonce, product)
+		return v.verifyApple(ctx, p)
+	case "microsoft":
+		return v.verifyMicrosoft(ctx, p)
 	default:
-		return nil, fmt.Errorf("%w: unsupported native provider %q", ErrIdentityVerification, provider)
+		return nil, fmt.Errorf("%w: unsupported native provider %q", ErrIdentityVerification, p.Provider)
 	}
 }
 
-func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken, product string) (*NativeVerification, error) {
-	auds := audsFor(product, v.googleAudsByProduct, v.googleAuds)
+func (v *NativeVerifier) verifyGoogle(ctx context.Context, p NativeVerifyParams) (*NativeVerification, error) {
+	auds := toSet(p.Audiences)
 	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: google native login not configured", ErrIdentityVerification)
 	}
-	payload, err := verifyJWSWithRotation(ctx, v.googleJWKS, idToken, jwa.RS256)
+	payload, err := verifyJWSWithRotation(ctx, v.googleJWKS, p.IDToken, jwa.RS256)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +222,7 @@ func (v *NativeVerifier) verifyGoogle(ctx context.Context, idToken, product stri
 		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
 	}
 	if !claims.EmailVerified {
-		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, email)
+		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
 	}
 	return v.buildVerification(&Identity{
 		ProviderUserID: claims.Sub,
@@ -228,12 +241,12 @@ type nativeAppleClaims struct {
 	Nonce string `json:"nonce"`
 }
 
-func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, product string) (*NativeVerification, error) {
-	auds := audsFor(product, v.appleAudsByProduct, v.appleAuds)
+func (v *NativeVerifier) verifyApple(ctx context.Context, p NativeVerifyParams) (*NativeVerification, error) {
+	auds := toSet(p.Audiences)
 	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: apple native login not configured", ErrIdentityVerification)
 	}
-	payload, err := verifyJWSWithRotation(ctx, v.appleJWKS, idToken, jwa.RS256)
+	payload, err := verifyJWSWithRotation(ctx, v.appleJWKS, p.IDToken, jwa.RS256)
 	if err != nil {
 		return nil, err
 	}
@@ -269,9 +282,10 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, pro
 	// Nonce: when the client supplied a raw nonce, the id_token's nonce claim
 	// must equal the SHA-256 of that raw value (hex per the sign_in_with_apple
 	// / Firebase convention; base64url also accepted). A missing or mismatched
-	// claim is a hard reject — it is the native flow's replay protection.
-	if strings.TrimSpace(rawNonce) != "" {
-		if !nonceMatches(rawNonce, claims.Nonce) {
+	// claim is a hard reject — it is the native flow's replay protection. NOTE:
+	// Apple HASHES the nonce; Microsoft (verifyMicrosoft) compares it VERBATIM.
+	if strings.TrimSpace(p.RawNonce) != "" {
+		if !nonceMatches(p.RawNonce, claims.Nonce) {
 			return nil, fmt.Errorf("%w: nonce mismatch", ErrIdentityVerification)
 		}
 	}
@@ -280,7 +294,7 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, pro
 	// Apple flow's stance. Relay (Hide My Email) addresses arrive verified and
 	// are accepted as-is, exactly like apple.go's Exchange path.
 	if !appleEmailVerified(claims.EmailVerified) {
-		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, email)
+		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
 	}
 	return v.buildVerification(&Identity{
 		ProviderUserID: claims.Sub,
@@ -289,6 +303,103 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, idToken, rawNonce, pro
 		Name:           claims.Name,
 		Provider:       "apple",
 	}, tok, "apple", claims.Nonce), nil
+}
+
+// nativeMicrosoftClaims extends the hosted microsoftIDClaims with the nonce
+// claim the native flow verifies. Microsoft stamps the nonce VERBATIM (unlike
+// Apple, which hashes it).
+type nativeMicrosoftClaims struct {
+	microsoftIDClaims
+	Nonce string `json:"nonce"`
+}
+
+// verifyMicrosoft verifies a native Microsoft (Azure AD) id_token, mirroring the
+// hosted verifier's claim handling (microsoft.go verifyIDToken): the expected
+// issuer is derived from the token's `tid` and the project's issuer format, the
+// email is coalesced from email → preferred_username → upn, and the subject is
+// oid then sub. A single-tenant project pins the tenant via p.MicrosoftTenantID;
+// the default keeps multi-tenant (issuer from the token's own `tid`).
+func (v *NativeVerifier) verifyMicrosoft(ctx context.Context, p NativeVerifyParams) (*NativeVerification, error) {
+	auds := toSet(p.Audiences)
+	if len(auds) == 0 {
+		return nil, fmt.Errorf("%w: microsoft native login not configured", ErrIdentityVerification)
+	}
+	payload, err := verifyJWSWithRotation(ctx, v.microsoftJWKS, p.IDToken, jwa.RS256)
+	if err != nil {
+		return nil, err
+	}
+	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
+	}
+
+	var claims nativeMicrosoftClaims
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return nil, fmt.Errorf("%w: decode claims: %w", ErrIdentityVerification, err)
+	}
+	if claims.TID == "" {
+		return nil, fmt.Errorf("%w: missing tid", ErrIdentityVerification)
+	}
+	if p.MicrosoftTenantID != "" && claims.TID != p.MicrosoftTenantID {
+		return nil, fmt.Errorf("%w: tenant mismatch", ErrIdentityVerification)
+	}
+	issuerFormat := p.MicrosoftIssuerFormat
+	if issuerFormat == "" {
+		issuerFormat = microsoftIssuerFormat
+	}
+	expectedIss := fmt.Sprintf(issuerFormat, claims.TID)
+	if iss := tok.Issuer(); iss != expectedIss {
+		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, iss)
+	}
+	if !audInSet(tok.Audience(), auds) {
+		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
+	}
+	if err := checkTokenTimes(tok, v.now()); err != nil {
+		return nil, err
+	}
+	if err := requireNativeExp(tok); err != nil {
+		return nil, err
+	}
+
+	email := strings.TrimSpace(claims.Email)
+	if email == "" {
+		email = strings.TrimSpace(claims.PreferredUsername)
+	}
+	if email == "" {
+		email = strings.TrimSpace(claims.UPN)
+	}
+	if email == "" || !strings.Contains(email, "@") {
+		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
+	}
+	if claims.VerifiedEmail != nil && !*claims.VerifiedEmail {
+		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
+	}
+
+	subject := claims.OID
+	if subject == "" {
+		subject = claims.Sub
+	}
+	if subject == "" {
+		return nil, fmt.Errorf("%w: missing subject", ErrIdentityVerification)
+	}
+
+	// Nonce: Microsoft echoes the client-supplied nonce VERBATIM (it is not a
+	// digest, unlike Apple). When the client supplied one, require an exact
+	// match; when it did not, skip the check (like Google).
+	if strings.TrimSpace(p.RawNonce) != "" {
+		if claims.Nonce != p.RawNonce {
+			return nil, fmt.Errorf("%w: nonce mismatch", ErrIdentityVerification)
+		}
+	}
+
+	return v.buildVerification(&Identity{
+		ProviderUserID: subject,
+		Email:          strings.ToLower(email),
+		EmailVerified:  true,
+		Name:           claims.Name,
+		AvatarURL:      claims.Picture,
+		Provider:       "microsoft",
+	}, tok, "microsoft", claims.Nonce), nil
 }
 
 // requireNativeExp rejects a native ID token that carries no `exp` claim. Real
@@ -361,44 +472,6 @@ func nonceMatches(rawNonce, claim string) bool {
 	sum := sha256.Sum256([]byte(rawNonce))
 	return claim == hex.EncodeToString(sum[:]) ||
 		claim == base64.RawURLEncoding.EncodeToString(sum[:])
-}
-
-// audsFor returns the audience set to match a token's `aud` against for the
-// given product: the product's per-product set when one is configured (keyed
-// case-insensitively), otherwise the global fallback set. A per-product entry
-// is EXCLUSIVE — once a product has its own set, the global set is not merged
-// in, so a token minted for a different product's client id is rejected even
-// if that client id is globally allowed.
-func audsFor(product string, byProduct map[string]map[string]bool, global map[string]bool) map[string]bool {
-	if len(byProduct) > 0 {
-		if set, ok := byProduct[strings.ToLower(strings.TrimSpace(product))]; ok {
-			return set
-		}
-	}
-	return global
-}
-
-// toSetByProduct converts a product→audiences map into a product→set map,
-// lower-casing product keys and dropping products whose audience list is empty
-// after trimming. A nil or empty input yields nil.
-func toSetByProduct(in map[string][]string) map[string]map[string]bool {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]map[string]bool, len(in))
-	for product, auds := range in {
-		key := strings.ToLower(strings.TrimSpace(product))
-		if key == "" {
-			continue
-		}
-		if set := toSet(auds); len(set) > 0 {
-			out[key] = set
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func toSet(items []string) map[string]bool {

@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/secretcrypto"
 )
@@ -130,13 +131,14 @@ func (r *OAuthResolver) exchangerFor(ctx context.Context, provider string) (oaut
 
 // isNonDefaultProject reports whether projectID names a project OTHER than the
 // default one — the projects that must NOT inherit the env-configured
-// (default-project) providers. It returns false when no default project is
-// configured (defaultProjectID == ""): that only happens for a Config built
-// directly without app.New (unit tests / a non-project embedding), which has no
-// control plane to isolate against, so the env providers apply to every request
-// as they did before this feature.
+// (default-project) providers. It is the exact negation of the shared
+// config.IsDefaultProject rule (single source of truth), so hosted-provider and
+// native-audience resolution stay in lock-step: when no default project is
+// configured (a Config built directly without app.New — unit tests / a
+// non-project embedding), every request is treated as default and the env
+// providers apply as they did before this feature.
 func (r *OAuthResolver) isNonDefaultProject(projectID string) bool {
-	return r.defaultProjectID != "" && projectID != "" && projectID != r.defaultProjectID
+	return !config.IsDefaultProject(r.defaultProjectID, projectID)
 }
 
 // buildProject looks up (and lazily builds + caches) the project-configured

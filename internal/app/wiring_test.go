@@ -60,15 +60,18 @@ func TestBuildNativeOAuthVerifier(t *testing.T) {
 	if v := buildNativeOAuthVerifier(&config.Config{}, nil); v != nil {
 		t.Fatal("disabled native oauth should yield a nil verifier")
 	}
-	// Enabled flag but no audiences → still nil (nothing could verify).
-	if v := buildNativeOAuthVerifier(&config.Config{NativeOAuthEnabled: true}, zap.NewNop()); v != nil {
-		t.Fatal("native oauth without audiences should yield a nil verifier")
+	// Enabled → a real verifier even with no env audiences: audiences are now
+	// resolved per-request from the project scope (config_json), so a deployment
+	// that configures native audiences only per-project still gets a verifier.
+	if v := buildNativeOAuthVerifier(&config.Config{NativeOAuthEnabled: true}, zap.NewNop()); v == nil {
+		t.Fatal("enabled native oauth should yield a verifier")
 	}
-	// Enabled + audiences → a real verifier.
+	// Enabled + env audiences → a real verifier (default-project seed logged).
 	cfg := &config.Config{
-		NativeOAuthEnabled:         true,
-		NativeOAuthGoogleAudiences: "web-client",
-		NativeOAuthAppleAudiences:  "dev.easyloops.app",
+		NativeOAuthEnabled:            true,
+		NativeOAuthGoogleAudiences:    "web-client",
+		NativeOAuthAppleAudiences:     "dev.easyloops.app",
+		NativeOAuthMicrosoftAudiences: "ms-client",
 	}
 	if v := buildNativeOAuthVerifier(cfg, zap.NewNop()); v == nil {
 		t.Fatal("enabled native oauth with audiences should yield a verifier")

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -100,11 +101,15 @@ func nativeNonceHex(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// msSvcIssuerFormat is the Microsoft issuer format the service tests pin on the
+// project config and use to stamp matching `iss` claims.
+const msSvcIssuerFormat = "https://login.microsoftonline.com/%s/v2.0"
+
 // fakeNativeProjects is a stub NativeOAuthProjectStore mapping known ids to
-// active projects. When err is set, ActiveProjectByID returns it (simulating
-// an infrastructure failure).
+// active projects (with their per-project OAuth config). When err is set,
+// ActiveProjectByID returns it (simulating an infrastructure failure).
 type fakeNativeProjects struct {
-	active map[string]string // id -> storage scope
+	active map[string]*AdminProject
 	err    error
 }
 
@@ -112,11 +117,12 @@ func (f *fakeNativeProjects) ActiveProjectByID(_ context.Context, id string) (*A
 	if f.err != nil {
 		return nil, f.err
 	}
-	scope, ok := f.active[id]
+	p, ok := f.active[id]
 	if !ok {
 		return nil, nil
 	}
-	return &AdminProject{ID: id, StorageScopeID: scope, Name: id}, nil
+	cp := *p
+	return &cp, nil
 }
 
 const (
@@ -124,14 +130,37 @@ const (
 	nativeAppleAud  = "dev.easyloops.app"
 )
 
+// nativeProjWithAuds is a non-default project carrying the default Google+Apple
+// native audiences in its config_json — the common per-project setup the happy
+// paths exercise.
+func nativeProjWithAuds(id, scope string) *AdminProject {
+	return &AdminProject{
+		ID: id, StorageScopeID: scope, Name: id,
+		OAuth: ProjectOAuthConfig{
+			Google: &ProjectOAuthGoogle{NativeAudiences: []string{nativeGoogleAud}},
+			Apple:  &ProjectOAuthApple{NativeAudiences: []string{nativeAppleAud}},
+		},
+	}
+}
+
+// defaultNativeProjects wires the projects the product map points at. proj-default
+// is the DEFAULT project and deliberately carries NO OAuth config so it exercises
+// the env-seed fallback; the non-default products carry their own audiences.
+func defaultNativeProjects() *fakeNativeProjects {
+	return &fakeNativeProjects{active: map[string]*AdminProject{
+		"proj-default":   {ID: "proj-default", StorageScopeID: "scope-default", Name: "proj-default"},
+		"proj-easyloops": nativeProjWithAuds("proj-easyloops", "scope-easyloops"),
+		"proj-tortoise":  nativeProjWithAuds("proj-tortoise", "scope-tortoise"),
+	}}
+}
+
 func newNativeTestAuthService(t *testing.T, repo *fakeRepo, signer *nativeTokenSigner, projects NativeOAuthProjectStore, mutate func(*config.Config)) *AuthService {
 	t.Helper()
 	verifier := oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
-		GoogleAudiences: []string{nativeGoogleAud},
-		AppleAudiences:  []string{nativeAppleAud},
-		GoogleJWKSURL:   signer.url,
-		AppleJWKSURL:    signer.url,
-		Now:             func() time.Time { return signer.now },
+		GoogleJWKSURL:    signer.url,
+		AppleJWKSURL:     signer.url,
+		MicrosoftJWKSURL: signer.url,
+		Now:              func() time.Time { return signer.now },
 	})
 	return newNativeTestAuthServiceWith(t, repo, verifier, projects, mutate)
 }
@@ -174,7 +203,7 @@ type fakeNativeVerifier struct {
 	err       error
 }
 
-func (f *fakeNativeVerifier) Verify(_ context.Context, _, _, _, _ string) (*oauth.NativeVerification, error) {
+func (f *fakeNativeVerifier) Verify(_ context.Context, _ oauth.NativeVerifyParams) (*oauth.NativeVerification, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -187,14 +216,6 @@ func (f *fakeNativeVerifier) Verify(_ context.Context, _, _, _, _ string) (*oaut
 		ReplayKey:   key,
 		ExpiresAtMs: 9_000_000_000_000,
 	}, nil
-}
-
-func defaultNativeProjects() *fakeNativeProjects {
-	return &fakeNativeProjects{active: map[string]string{
-		"proj-default":   "scope-default",
-		"proj-easyloops": "scope-easyloops",
-		"proj-tortoise":  "scope-tortoise",
-	}}
 }
 
 func TestNativeOAuthLogin_Google_NewUser(t *testing.T) {
@@ -289,73 +310,138 @@ func TestNativeOAuthLogin_WrongAud_Unauthenticated(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrUnauthenticated), "got %v", err)
 }
 
-func TestNativeOAuthLogin_PerProductAudience_CrossProductRejected(t *testing.T) {
+// ── Per-project native audience resolution + isolation ───────────────────
+
+func TestNativeOAuthLogin_PerProject_AcceptsOnlyProjectAudiences(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)
-	const (
-		audEasyloops = "easyloops-ios.apps.googleusercontent.com"
-		audTortoise  = "tortoise-ios.apps.googleusercontent.com"
-	)
-	// Per-product audiences: each product accepts ONLY its own client id.
-	verifier := oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
-		GoogleAudiencesByProduct: map[string][]string{
-			"easyloops": {audEasyloops},
-			"tortoise":  {audTortoise},
-		},
-		GoogleJWKSURL: signer.url,
-		AppleJWKSURL:  signer.url,
-		Now:           func() time.Time { return signer.now },
-	})
-	svc := newNativeTestAuthServiceWith(t, repo, verifier, defaultNativeProjects(), nil)
+	const audA = "projA-ios.apps.googleusercontent.com"
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+		"proj-a": {ID: "proj-a", StorageScopeID: "scope-a", Name: "proj-a", OAuth: ProjectOAuthConfig{
+			Google: &ProjectOAuthGoogle{NativeAudiences: []string{audA}},
+		}},
+	}}
+	svc := newNativeTestAuthServiceWith(t, repo, oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
+		GoogleJWKSURL: signer.url, AppleJWKSURL: signer.url, MicrosoftJWKSURL: signer.url,
+		Now: func() time.Time { return signer.now },
+	}), projects, func(c *config.Config) { c.NativeOAuthProductProjects = "appa=proj-a" })
 
-	// Token minted for tortoise's OAuth client id.
-	tok := signer.googleToken(t, "g-sub-cross", "cross@example.com", audTortoise)
-
-	// (a) token for product tortoise, presented as easyloops → Unauthenticated.
-	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "easyloops",
-	})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrUnauthenticated), "cross-product token must be rejected, got %v", err)
-
-	// (b) the same token for its real product tortoise → succeeds.
+	// A token for the project's own audience is accepted.
+	ok := signer.googleToken(t, "g-a", "a@example.com", audA)
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: tok, Product: "tortoise",
+		Provider: "google", IDToken: ok, Product: "appa",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "cross@example.com", res.User.Email)
+	assert.Equal(t, "a@example.com", res.User.Email)
+
+	// The DEFAULT project's env audience is NOT accepted for a non-default project.
+	bad := signer.googleToken(t, "g-a2", "a2@example.com", nativeGoogleAud)
+	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: bad, Product: "appa",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "env aud must not leak into a non-default project, got %v", err)
 }
 
-func TestNativeOAuthLogin_PerProductWithGlobalFallback(t *testing.T) {
+func TestNativeOAuthLogin_DefaultProject_UsesEnvAudiences(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)
-	const audEasyloops = "easyloops-ios.apps.googleusercontent.com"
-	// easyloops has an exclusive per-product set; tortoise has none and falls
-	// back to the global audiences (the backward-compatible path).
-	verifier := oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
-		GoogleAudiences:          []string{nativeGoogleAud},
-		GoogleAudiencesByProduct: map[string][]string{"easyloops": {audEasyloops}},
-		GoogleJWKSURL:            signer.url,
-		AppleJWKSURL:             signer.url,
-		Now:                      func() time.Time { return signer.now },
+	// The control plane returns proj-default with NO OAuth config; it must fall
+	// back to the env seed (nativeGoogleAud).
+	svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), func(c *config.Config) {
+		c.NativeOAuthProductProjects = "home=proj-default"
 	})
-	svc := newNativeTestAuthServiceWith(t, repo, verifier, defaultNativeProjects(), nil)
-
-	// (c) a token with the GLOBAL aud is accepted for tortoise (no per-product
-	// entry → global fallback).
-	globalTok := signer.googleToken(t, "g-sub-g", "g@example.com", nativeGoogleAud)
+	tok := signer.googleToken(t, "g-def", "def@example.com", nativeGoogleAud)
 	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: globalTok, Product: "tortoise",
+		Provider: "google", IDToken: tok, Product: "home",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "g@example.com", res.User.Email)
+	assert.Equal(t, "def@example.com", res.User.Email)
+}
 
-	// ... yet rejected for easyloops, whose exclusive set does not include it.
-	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "google", IDToken: globalTok, Product: "easyloops",
+func TestNativeOAuthLogin_NonDefaultProject_NoAudiences_Rejected(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+	// proj-noauth is active but configures no native audiences: it cannot use
+	// native login and never inherits the env seed.
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+		"proj-noauth": {ID: "proj-noauth", StorageScopeID: "scope-noauth", Name: "proj-noauth"},
+	}}
+	svc := newNativeTestAuthService(t, repo, signer, projects, func(c *config.Config) {
+		c.NativeOAuthProductProjects = "bare=proj-noauth"
+	})
+	tok := signer.googleToken(t, "g-bare", "bare@example.com", nativeGoogleAud)
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok, Product: "bare",
 	})
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrUnauthenticated), "global aud must not be accepted for a scoped product, got %v", err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "got %v", err)
+}
+
+func TestNativeOAuthLogin_TokenForProjectX_RejectedUnderProjectY(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+	const audX = "x-ios.apps.googleusercontent.com"
+	const audY = "y-ios.apps.googleusercontent.com"
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+		"proj-x": {ID: "proj-x", StorageScopeID: "scope-x", Name: "proj-x", OAuth: ProjectOAuthConfig{
+			Google: &ProjectOAuthGoogle{NativeAudiences: []string{audX}},
+		}},
+		"proj-y": {ID: "proj-y", StorageScopeID: "scope-y", Name: "proj-y", OAuth: ProjectOAuthConfig{
+			Google: &ProjectOAuthGoogle{NativeAudiences: []string{audY}},
+		}},
+	}}
+	svc := newNativeTestAuthServiceWith(t, repo, oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
+		GoogleJWKSURL: signer.url, AppleJWKSURL: signer.url, MicrosoftJWKSURL: signer.url,
+		Now: func() time.Time { return signer.now },
+	}), projects, func(c *config.Config) { c.NativeOAuthProductProjects = "px=proj-x,py=proj-y" })
+
+	// A token minted for project X's audience.
+	tok := signer.googleToken(t, "g-xy", "xy@example.com", audX)
+
+	// Presented as project Y → rejected.
+	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok, Product: "py",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "cross-project token must be rejected, got %v", err)
+
+	// Presented as its own project X → accepted.
+	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok, Product: "px",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "xy@example.com", res.User.Email)
+}
+
+func TestNativeOAuthLogin_Microsoft_Accepted(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+	const tid = "tenant-1"
+	const msAud = "ms-app-client"
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+		"proj-ms": {ID: "proj-ms", StorageScopeID: "scope-ms", Name: "proj-ms", OAuth: ProjectOAuthConfig{
+			Microsoft: &ProjectOAuthMicrosoft{
+				NativeAudiences: []string{msAud}, TenantID: tid, IssuerFormat: msSvcIssuerFormat,
+			},
+		}},
+	}}
+	svc := newNativeTestAuthService(t, repo, signer, projects, func(c *config.Config) {
+		c.NativeOAuthProductProjects = "msapp=proj-ms"
+	})
+
+	tok := signer.sign(t, map[string]any{
+		"iss": fmt.Sprintf(msSvcIssuerFormat, tid), "tid": tid, "aud": msAud,
+		"oid": "ms-oid-1", "sub": "ms-sub-1",
+		"exp": signer.now.Add(time.Hour), "iat": signer.now,
+		"email": "ms@contoso.com", "name": "Msft User",
+	})
+	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "microsoft", IDToken: tok, Product: "msapp",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res.User)
+	assert.Equal(t, "ms@contoso.com", res.User.Email)
 }
 
 func TestNativeOAuthLogin_Disabled_FailedPrecondition(t *testing.T) {
@@ -379,7 +465,7 @@ func TestNativeOAuthLogin_UnsupportedProvider_InvalidArgument(t *testing.T) {
 	svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), nil)
 
 	_, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
-		Provider: "microsoft", IDToken: "x", Product: "easyloops",
+		Provider: "github", IDToken: "x", Product: "easyloops",
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument), "got %v", err)
@@ -480,8 +566,8 @@ func TestNativeOAuthLogin_UppercaseProjectIDFallback(t *testing.T) {
 	signer := newNativeTokenSigner(t)
 	// A mixed-case project id reached via the implicit fallback (NOT in the
 	// product map). It must be looked up verbatim, not lower-cased.
-	projects := &fakeNativeProjects{active: map[string]string{
-		"Proj-MixedCase": "scope-mixed",
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+		"Proj-MixedCase": nativeProjWithAuds("Proj-MixedCase", "scope-mixed"),
 	}}
 	svc := newNativeTestAuthService(t, repo, signer, projects, func(c *config.Config) {
 		c.NativeOAuthProductProjects = "" // force the direct project-id fallback
@@ -499,7 +585,8 @@ func TestNativeOAuthLogin_NoControlPlane_OnlyDefaultProject(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)
 	// nil project store => no control plane. Map the product to the default
-	// project id so it resolves; any other product is rejected.
+	// project id so it resolves; any other product is rejected. The default
+	// project uses the env audience seed.
 	svc := newNativeTestAuthService(t, repo, signer, nil, func(c *config.Config) {
 		c.NativeOAuthProductProjects = "easyloops=proj-default"
 	})
@@ -610,7 +697,7 @@ func TestNativeOAuthLogin_SSORequiredPolicy_Blocked(t *testing.T) {
 	}}
 	// The governance fixtures key on project "proj-1"; map the product to it so
 	// the resolved ProjectScope matches the tenant/domain/policy fixtures.
-	projects := &fakeNativeProjects{active: map[string]string{"proj-1": "scope-1"}}
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-1": {ID: "proj-1", StorageScopeID: "scope-1", Name: "proj-1"}}}
 	svc := newNativeTestAuthServiceWith(t, repo, verifier, projects, func(c *config.Config) {
 		c.NativeOAuthProductProjects = "easyloops=proj-1"
 	}).WithLoginGovernance(withSSORequired())
@@ -642,7 +729,7 @@ func TestNativeOAuthLogin_IssueTokensError_Propagates(t *testing.T) {
 // A native ID token is single-use: the SAME token replayed after a successful
 // login is rejected as Unauthenticated. The replay cache — not the verifier —
 // is the gate, so both presentations pass verification but only the first
-// issues a session. This is the core of issue #299 item 2.
+// issues a session.
 func TestNativeOAuthLogin_ReplayedToken_Rejected(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)
@@ -720,7 +807,7 @@ func TestNativeOAuthLogin_PolicyRequires2FA_NoFactorEnrolled(t *testing.T) {
 	verifier := &fakeNativeVerifier{identity: &oauth.Identity{
 		Provider: "google", ProviderUserID: "g-2fa", Email: "needs2fa@acme.com", EmailVerified: true,
 	}}
-	projects := &fakeNativeProjects{active: map[string]string{"proj-1": "scope-1"}}
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-1": {ID: "proj-1", StorageScopeID: "scope-1", Name: "proj-1"}}}
 	svc := newNativeTestAuthServiceWith(t, repo, verifier, projects, func(c *config.Config) {
 		c.NativeOAuthProductProjects = "easyloops=proj-1"
 	}).WithLoginGovernance(withRequire2FA())

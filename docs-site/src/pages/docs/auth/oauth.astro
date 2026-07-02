@@ -107,12 +107,20 @@ import { Code } from "astro-expressive-code/components";
   </p>
   <Code code={`{
   "oauth": {
-    "google":    { "client_id": "...", "client_secret_enc": "<enc>" },
-    "microsoft": { "client_id": "...", "client_secret_enc": "<enc>", "tenant_id": "" },
-    "apple":     { "client_id": "...", "team_id": "...", "key_id": "...", "private_key_enc": "<enc>" },
+    "google":    { "client_id": "...", "client_secret_enc": "<enc>", "native_audiences": ["web.g.apps.googleusercontent.com", "ios.g"] },
+    "microsoft": { "client_id": "...", "client_secret_enc": "<enc>", "tenant_id": "", "native_audiences": ["ms-native-client"] },
+    "apple":     { "native_audiences": ["com.example.app"] },
     "oidc":      { "client_id": "...", "client_secret_enc": "<enc>", "issuer": "https://acme.okta.com", "scopes": "openid email profile" }
   }
 }`} lang="json" />
+  <p>
+    Each Google/Apple/Microsoft block drives the <strong>hosted</strong> flow
+    (via the credentials) and the <strong>native</strong> flow (via
+    <code>native_audiences</code>) independently — a block may configure hosted,
+    native, or both. The Apple block above is <em>native-only</em> (no hosted
+    credentials). See <strong>Native mobile sign-in</strong> below for how
+    <code>native_audiences</code> is resolved per project.
+  </p>
   <p>
     The encryption key is a base64-encoded 32-byte key supplied via
     <code>GATEWAY_PROJECT_SECRETS_KEY</code>. It is <strong>required</strong>
@@ -184,10 +192,10 @@ message BeginOAuthLoginResponse {
     <code>OAuthLogin</code>.
   </p>
   <Code code={`message NativeOAuthLoginRequest {
-  string provider = 1;  // "google" | "apple"
-  string id_token = 2;  // GoogleSignInAuthentication.idToken / Apple identityToken
+  string provider = 1;  // "google" | "apple" | "microsoft"
+  string id_token = 2;  // GoogleSignInAuthentication.idToken / Apple identityToken / MSAL id_token
   string product  = 3;  // product selector → project (see config below)
-  string nonce    = 4;  // Apple only: the RAW nonce (replay protection)
+  string nonce    = 4;  // Apple: RAW nonce (hashed); Microsoft: verbatim nonce (both optional)
 }
 
 message NativeOAuthLoginResponse {
@@ -202,29 +210,54 @@ message NativeOAuthLoginResponse {
     <code>accounts.google.com</code> (with or without the <code>https://</code>
     prefix), <code>exp</code> must be present and in the future,
     <code>email_verified</code> must be true, and <code>aud</code> must be an
-    accepted Google audience for the request's product (see
+    accepted Google audience for the request's project (see
     <strong>Audience scoping</strong> below). Apple: signature against Apple's
     JWKS, <code>iss = https://appleid.apple.com</code>, a present, unexpired
-    <code>exp</code>, and an accepted Apple <code>aud</code> for the product.
-    Hide-my-email relay addresses are accepted as-is. Any failure returns
-    <code>Unauthenticated</code> with a safe message.
+    <code>exp</code>, and an accepted Apple <code>aud</code>. Hide-my-email relay
+    addresses are accepted as-is. Microsoft: signature against the
+    common-endpoint JWKS, a present <code>tid</code> (tenant), an
+    <code>iss</code> equal to
+    <code>https://login.microsoftonline.com/&lt;tid&gt;/v2.0</code> (multi-tenant
+    by default — the issuer is derived from the token's own <code>tid</code>; a
+    project may pin <code>tenant_id</code> / <code>issuer_format</code> to accept
+    one tenant only), a present unexpired <code>exp</code>, an accepted
+    <code>aud</code>, and an email coalesced from
+    <code>email → preferred_username → upn</code> (subject is <code>oid</code>
+    then <code>sub</code>). Any failure returns <code>Unauthenticated</code> with
+    a safe message.
   </p>
+  <div class="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm">
+    <strong>🔒 Security — multi-tenant Microsoft &amp; account linking.</strong>
+    Native (and hosted) Microsoft login defaults to <strong>multi-tenant</strong>:
+    the expected issuer is derived from the token's own <code>tid</code>, so
+    <strong>any</strong> Azure AD tenant — including one an attacker controls —
+    can mint a valid token. Because a token carries an <code>email</code>, this is
+    an <a href="https://www.descope.com/blog/post/noauth" rel="nofollow">nOAuth</a>-style
+    account-takeover vector when email is trusted for cross-provider linking: an
+    attacker can present a Microsoft token bearing a <strong>victim's email</strong>
+    and take over the account. For email-based linking,
+    <strong>pin <code>tenant_id</code></strong> (single-tenant) on the project's
+    <code>oauth.microsoft</code> block unless you fully trust every tenant that
+    can obtain a token. Do <strong>not</strong> trust a multi-tenant Microsoft
+    email for cross-provider account linking. (This matches the existing hosted
+    Microsoft provider; a tenant allowlist and the <code>xms_edov</code>
+    email-verified claim are planned hardening for both flows.)
+  </div>
   <p>
-    <strong>Audience scoping.</strong> By default <code>aud</code> is matched
-    against the global allow-lists
-    <code>GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES</code> (the web client id plus
-    each per-platform iOS/Android client id) and
-    <code>GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES</code> (the Services ID plus each
-    native bundle id). Audiences can instead be scoped per product via
-    <code>GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT</code> and
-    <code>GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT</code> — a
-    comma-separated list of <code>product=aud1 aud2</code> entries (audiences
-    space-separated, e.g.
-    <code>easyloops=web.easyloops.app ios.easyloops.app,tortoise=web.tortoise.app</code>).
-    A product listed there is <strong>exclusive</strong>: only its own audiences
-    are accepted, so a token minted for one product's client id is rejected when
-    presented as another product. A product not listed falls back to the global
-    vars.
+    <strong>Audience scoping (per-project).</strong> The accepted <code>aud</code>
+    values are resolved <strong>per project</strong> from its <code>config_json</code>
+    — <code>oauth.google.native_audiences</code>,
+    <code>oauth.apple.native_audiences</code>, and
+    <code>oauth.microsoft.native_audiences</code> (each an array of client ids /
+    bundle ids). A non-default project accepts only its own configured audiences
+    and never inherits the env seed, so a token minted for one project's client
+    id is rejected under another. The <strong>default project</strong> falls back
+    to the env seed <code>GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES</code> /
+    <code>GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES</code> /
+    <code>GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES</code> when it configures none
+    of its own; if it configures its own, config_json wins and the env seed is
+    not merged in. A provider with no audiences for the resolved project cannot
+    be used natively.
   </p>
   <p>
     <strong>Single-use replay protection.</strong> A successfully verified
@@ -232,30 +265,22 @@ message NativeOAuthLoginResponse {
     (its <code>jti</code>, or a stable digest of its claims when the provider
     stamps none) is recorded in a repo-backed replay cache, and a second
     presentation of the same token is rejected until the record expires (bounded
-    by the token's own <code>exp</code>). This is enforced server-side for both
-    Google and Apple, in addition to the optional Apple nonce below.
+    by the token's own <code>exp</code>). This is enforced server-side for every
+    provider, in addition to the optional nonce below. Because audiences are now
+    per-project, a token is valid for exactly one project, so single-use is not
+    weakened by any cross-project audience overlap.
   </p>
   <p>
-    <strong>Caveat.</strong> Single-use is enforced per <em>resolved
-    project</em>. Under the global-audience fallback, a token whose
-    <code>aud</code> is valid for several products can therefore be redeemed once
-    per product (each resolves to its own project). Configuring per-product
-    audiences closes this — a token is then valid for exactly one product — so
-    scope audiences per product on multi-product deployments.
-  </p>
-  <p>
-    <strong>Apple nonce.</strong> The <code>nonce</code> field is
-    <strong>optional but strongly recommended</strong>: nonce-based replay
-    protection is only enforced when the client sends it. When supplied, the
-    server verifies that the id_token's <code>nonce</code> claim equals
+    <strong>Nonce (per-provider difference).</strong> The <code>nonce</code>
+    field is <strong>optional but recommended</strong>; the check runs only when
+    the client sends a raw nonce. <em>Apple</em> HASHES it: the server verifies
+    the id_token's <code>nonce</code> claim equals
     <code>hex(SHA-256(raw nonce))</code> — the <code>sign_in_with_apple</code> /
-    Firebase convention where the client sends the hashed nonce to Apple and
-    Apple echoes it back verbatim (<code>base64url(SHA-256(raw))</code> is also
-    accepted) — and a missing or mismatched claim is rejected. When omitted, the
-    token is still fully verified (signature, <code>iss</code>, <code>exp</code>,
-    <code>aud</code>) and remains single-use, but is not additionally bound to a
-    per-login nonce, so clients <strong>should</strong> always generate and send
-    a fresh raw nonce.
+    Firebase convention (<code>base64url(SHA-256(raw))</code> is also accepted).
+    <em>Microsoft</em> echoes the nonce <strong>verbatim</strong>: the claim must
+    equal the raw nonce exactly (no hashing). <em>Google</em> does not use the
+    nonce. A missing or mismatched claim (when a nonce was supplied) is rejected;
+    when omitted, the token is still fully verified and remains single-use.
   </p>
   <p>
     <strong>Product → project.</strong> <code>product</code> is mapped to an

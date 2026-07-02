@@ -73,6 +73,57 @@ default project and draw OAuth providers from the `GATEWAY_OAUTH_*` env vars, so
 they do **not** require the key. Rotating or losing the key invalidates every
 per-project provider secret already stored (they must be re-encrypted).
 
+### Removed: `GATEWAY_NATIVE_OAUTH_*_AUDIENCES_BY_PRODUCT`
+
+Native mobile sign-in accepted-audience configuration is now **per-project**,
+carried in a project's `config_json` under
+`oauth.<provider>.native_audiences` (an array of accepted `aud` values). This
+replaces the per-product stopgap env vars shipped the prior week:
+
+- `GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT` — **removed**
+- `GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT` — **removed**
+
+**Migrate:** move each `product=aud1 aud2` entry to the corresponding project's
+`config_json` (`oauth.google.native_audiences` / `oauth.apple.native_audiences`
+/ the new `oauth.microsoft.native_audiences`). The plain
+`GATEWAY_NATIVE_OAUTH_{GOOGLE,APPLE,MICROSOFT}_AUDIENCES` env vars are **kept**
+as the **default project's** seed (a non-default project never inherits them),
+and `GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS` (product → project resolution) is
+**kept**. This release also adds **native Microsoft** login (mirrors the hosted
+verifier: issuer derived from the token's `tid`, `email → preferred_username →
+upn` coalescing, and a **verbatim** nonce — unlike Apple's hashed nonce). It is
+breaking, but the `*_BY_PRODUCT` vars shipped only the prior week.
+
+> **⚠️ Do not silently disable native login.** `GATEWAY_NATIVE_OAUTH_ENABLED`
+> auto-defaults to `true` only when at least one of the **plain**
+> `GATEWAY_NATIVE_OAUTH_{GOOGLE,APPLE,MICROSOFT}_AUDIENCES` env vars is set — it
+> no longer considers the removed `*_BY_PRODUCT` vars. If you migrate by moving
+> audiences into `config_json` **and** clearing the plain env vars, the flag
+> auto-defaults to **`false`** and `NativeOAuthLogin` returns
+> `FailedPrecondition`. Such deployments **must set
+> `GATEWAY_NATIVE_OAUTH_ENABLED=true` explicitly.**
+
+> **Microsoft tenant pinning needs `config_json`.** The env seed
+> (`GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES`) enables Microsoft native login for
+> the **default project** but cannot pin a tenant — it is multi-tenant. To pin a
+> single tenant you must configure a `config_json` `oauth.microsoft` block
+> (`tenant_id` / `issuer_format` + `native_audiences`), which **supersedes** the
+> env seed for that project (config_json wins; the env seed is not merged in).
+
+> **🔒 Security — multi-tenant Microsoft + email-based account linking.** Native
+> (and hosted) Microsoft login defaults to **multi-tenant**: the expected issuer
+> is derived from the token's own `tid`, so **any** Azure AD tenant — including
+> an attacker-controlled one — can mint a token. Combined with email-based
+> account federation this is an nOAuth-style account-takeover vector: an attacker
+> can present a Microsoft token carrying a **victim's email** and, if that email
+> is trusted for cross-provider linking, take over the victim's account. For
+> email-based linking, **pin `tenant_id`** (single-tenant) unless you fully trust
+> every tenant that can obtain a token; do **not** trust a multi-tenant Microsoft
+> email for cross-provider account linking. This release ships parity with the
+> existing hosted provider and does not change verification behavior — deeper
+> hardening (a tenant allowlist and the `xms_edov` email-verified claim, for both
+> hosted and native) is tracked as a follow-up.
+
 ### Schema migrations involved
 
 The model change lands across three Postgres migrations

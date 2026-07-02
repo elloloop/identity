@@ -21,9 +21,15 @@ func TestValidateNativeOAuth(t *testing.T) {
 			cfg:  Config{NativeOAuthEnabled: true, NativeOAuthAppleAudiences: "dev.easyloops.app"},
 		},
 		{
-			name:    "enabled but no audiences",
-			cfg:     Config{NativeOAuthEnabled: true},
-			wantErr: true,
+			name: "enabled with microsoft audiences",
+			cfg:  Config{NativeOAuthEnabled: true, NativeOAuthMicrosoftAudiences: "ms-client"},
+		},
+		{
+			// With native audiences now per-project (config_json), an enabled
+			// deployment with NO env audiences is valid — the default project just
+			// has no native seed, non-default projects carry their own.
+			name: "enabled with no env audiences is valid (per-project config)",
+			cfg:  Config{NativeOAuthEnabled: true},
 		},
 		{
 			name: "enabled with well-formed product map",
@@ -59,45 +65,6 @@ func TestValidateNativeOAuth(t *testing.T) {
 				NativeOAuthProductProjects: " , easyloops=proj_a , ",
 			},
 		},
-		{
-			name: "enabled with only per-product google audiences",
-			cfg: Config{
-				NativeOAuthEnabled:                  true,
-				NativeOAuthGoogleAudiencesByProduct: "easyloops=web.easyloops.app ios.easyloops.app",
-			},
-		},
-		{
-			name: "enabled with only per-product apple audiences",
-			cfg: Config{
-				NativeOAuthEnabled:                 true,
-				NativeOAuthAppleAudiencesByProduct: "tortoise=com.tortoise.app",
-			},
-		},
-		{
-			name: "malformed per-product google audiences (no =)",
-			cfg: Config{
-				NativeOAuthEnabled:                  true,
-				NativeOAuthGoogleAudiences:          "web-client",
-				NativeOAuthGoogleAudiencesByProduct: "easyloops",
-			},
-			wantErr: true,
-		},
-		{
-			name: "malformed per-product apple audiences (empty audience list)",
-			cfg: Config{
-				NativeOAuthEnabled:                 true,
-				NativeOAuthGoogleAudiences:         "web-client",
-				NativeOAuthAppleAudiencesByProduct: "tortoise=  ",
-			},
-			wantErr: true,
-		},
-		{
-			name: "blank per-product audience entries are skipped",
-			cfg: Config{
-				NativeOAuthEnabled:                  true,
-				NativeOAuthGoogleAudiencesByProduct: " , easyloops=web.easyloops.app , ",
-			},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -118,37 +85,16 @@ func TestNativeOAuthDefaultEnabled(t *testing.T) {
 		args []string
 		want bool
 	}{
-		{"none", []string{"", "", "", ""}, false},
-		{"global google", []string{"web-client", "", "", ""}, true},
-		{"global apple", []string{"", "bundle-id", "", ""}, true},
-		{"per-product google", []string{"", "", "easyloops=web.easyloops.app", ""}, true},
-		{"per-product apple", []string{"", "", "", "tortoise=com.tortoise.app"}, true},
-		{"all whitespace", []string{"  ", "  ", "  ", "  "}, false},
+		{"none", []string{"", "", ""}, false},
+		{"google", []string{"web-client", "", ""}, true},
+		{"apple", []string{"", "bundle-id", ""}, true},
+		{"microsoft", []string{"", "", "ms-client"}, true},
+		{"all whitespace", []string{"  ", "  ", "  "}, false},
 	}
 	for _, c := range cases {
 		if got := nativeOAuthDefaultEnabled(c.args...); got != c.want {
 			t.Fatalf("%s: nativeOAuthDefaultEnabled(%q)=%v want %v", c.name, c.args, got, c.want)
 		}
-	}
-}
-
-func TestNativeOAuthAudiencesByProductMap(t *testing.T) {
-	c := Config{
-		NativeOAuthGoogleAudiencesByProduct: "EasyLoops=web.easyloops.app ios.easyloops.app, tortoise = com.tortoise.app , junk, =v, k= , ",
-	}
-	m := c.NativeOAuthGoogleAudiencesByProductMap()
-	if len(m) != 2 {
-		t.Fatalf("want 2 valid entries, got %d: %v", len(m), m)
-	}
-	if got := m["easyloops"]; len(got) != 2 || got[0] != "web.easyloops.app" || got[1] != "ios.easyloops.app" {
-		t.Fatalf("easyloops audiences not parsed/lower-cased key: %v", m)
-	}
-	if got := m["tortoise"]; len(got) != 1 || got[0] != "com.tortoise.app" {
-		t.Fatalf("tortoise audiences not trimmed: %v", m)
-	}
-	// Empty config yields a non-nil empty map (mirrors NativeOAuthProductProjectMap).
-	if empty := (&Config{}).NativeOAuthAppleAudiencesByProductMap(); empty == nil || len(empty) != 0 {
-		t.Fatalf("empty per-product apple config should yield empty non-nil map, got %v", empty)
 	}
 }
 
@@ -168,8 +114,9 @@ func TestNativeOAuthProductProjectMap(t *testing.T) {
 
 func TestNativeOAuthAudienceLists(t *testing.T) {
 	c := Config{
-		NativeOAuthGoogleAudiences: " a , ,b ",
-		NativeOAuthAppleAudiences:  "",
+		NativeOAuthGoogleAudiences:    " a , ,b ",
+		NativeOAuthAppleAudiences:     "",
+		NativeOAuthMicrosoftAudiences: " ms1 ,ms2",
 	}
 	g := c.NativeOAuthGoogleAudienceList()
 	if len(g) != 2 || g[0] != "a" || g[1] != "b" {
@@ -177,6 +124,25 @@ func TestNativeOAuthAudienceLists(t *testing.T) {
 	}
 	if a := c.NativeOAuthAppleAudienceList(); a != nil {
 		t.Fatalf("empty apple audiences should yield nil, got %v", a)
+	}
+	if m := c.NativeOAuthMicrosoftAudienceList(); len(m) != 2 || m[0] != "ms1" || m[1] != "ms2" {
+		t.Fatalf("microsoft audience list: %v", m)
+	}
+}
+
+func TestNativeOAuthAudienceList_ByProvider(t *testing.T) {
+	c := Config{
+		NativeOAuthGoogleAudiences:    "g",
+		NativeOAuthAppleAudiences:     "a",
+		NativeOAuthMicrosoftAudiences: "m",
+	}
+	for provider, want := range map[string]string{"google": "g", "apple": "a", "microsoft": "m"} {
+		if got := c.NativeOAuthAudienceList(provider); len(got) != 1 || got[0] != want {
+			t.Fatalf("provider %q: got %v want [%q]", provider, got, want)
+		}
+	}
+	if got := c.NativeOAuthAudienceList("github"); got != nil {
+		t.Fatalf("unknown provider should yield nil, got %v", got)
 	}
 }
 
@@ -195,8 +161,8 @@ func TestValidate_NativeOAuth_ThroughValidate(t *testing.T) {
 		t.Fatalf("valid native config should pass Validate: %v", err)
 	}
 	bad := base()
-	bad.NativeOAuthGoogleAudiences = ""
+	bad.NativeOAuthProductProjects = "malformed-no-equals"
 	if err := bad.Validate(); err == nil {
-		t.Fatal("enabled native oauth with no audiences should fail Validate")
+		t.Fatal("enabled native oauth with a malformed product map should fail Validate")
 	}
 }
