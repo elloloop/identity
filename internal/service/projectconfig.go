@@ -235,70 +235,98 @@ func (c ProjectConfig) Validate() error {
 // URL fields are validated when set. Secrets are opaque ciphertext here
 // (validated at decrypt time), so only their presence is checked.
 func (c ProjectOAuthConfig) validate() error {
-	if g := c.Google; g != nil {
-		hosted := g.ClientID != "" || g.ClientSecretEnc != ""
-		if hosted && (g.ClientID == "" || g.ClientSecretEnc == "") {
-			return errors.New("oauth.google requires client_id and client_secret_enc")
-		}
-		if !hosted && len(g.NativeAudiences) == 0 {
-			return errors.New("oauth.google requires client_id and client_secret_enc, or native_audiences")
-		}
-		for field, raw := range map[string]string{
-			"oauth.google.authorization_url": g.AuthorizationURL,
-			"oauth.google.token_url":         g.TokenURL,
-			"oauth.google.jwks_url":          g.JWKSURL,
-		} {
-			if raw != "" {
-				if err := validateHTTPSURL(raw, field); err != nil {
-					return err
-				}
-			}
+	if c.Google != nil {
+		if err := c.Google.validate(); err != nil {
+			return err
 		}
 	}
-	if m := c.Microsoft; m != nil {
-		hosted := m.ClientID != "" || m.ClientSecretEnc != ""
-		if hosted && (m.ClientID == "" || m.ClientSecretEnc == "") {
-			return errors.New("oauth.microsoft requires client_id and client_secret_enc")
+	if c.Microsoft != nil {
+		if err := c.Microsoft.validate(); err != nil {
+			return err
 		}
-		if !hosted && len(m.NativeAudiences) == 0 {
-			return errors.New("oauth.microsoft requires client_id and client_secret_enc, or native_audiences")
+	}
+	if c.Apple != nil {
+		if err := c.Apple.validate(); err != nil {
+			return err
 		}
-		// The issuer is built with fmt.Sprintf(IssuerFormat, tid), so the format
-		// must carry exactly one %s verb. A format with zero or extra verbs would
-		// render a malformed issuer (…%!(EXTRA…) / %!s(MISSING)) that no real
-		// token could ever match, silently failing every login — reject it at
-		// author time. Both the write path and resolution enforce this.
-		if m.IssuerFormat != "" {
-			if err := validateSingleStringVerb(m.IssuerFormat, "oauth.microsoft.issuer_format"); err != nil {
+	}
+	if c.OIDC != nil {
+		if err := c.OIDC.validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *ProjectOAuthGoogle) validate() error {
+	hosted := g.ClientID != "" || g.ClientSecretEnc != ""
+	if hosted && (g.ClientID == "" || g.ClientSecretEnc == "") {
+		return errors.New("oauth.google requires client_id and client_secret_enc")
+	}
+	if !hosted && len(g.NativeAudiences) == 0 {
+		return errors.New("oauth.google requires client_id and client_secret_enc, or native_audiences")
+	}
+	for field, raw := range map[string]string{
+		"oauth.google.authorization_url": g.AuthorizationURL,
+		"oauth.google.token_url":         g.TokenURL,
+		"oauth.google.jwks_url":          g.JWKSURL,
+	} {
+		if raw != "" {
+			if err := validateHTTPSURL(raw, field); err != nil {
 				return err
 			}
 		}
 	}
-	if a := c.Apple; a != nil {
-		hosted := a.ClientID != "" || a.TeamID != "" || a.KeyID != "" || a.PrivateKeyEnc != ""
-		if hosted && (a.ClientID == "" || a.TeamID == "" || a.KeyID == "" || a.PrivateKeyEnc == "") {
-			return errors.New("oauth.apple requires client_id, team_id, key_id, and private_key_enc")
-		}
-		if !hosted && len(a.NativeAudiences) == 0 {
-			return errors.New("oauth.apple requires client_id, team_id, key_id, and private_key_enc, or native_audiences")
+	return nil
+}
+
+func (m *ProjectOAuthMicrosoft) validate() error {
+	hosted := m.ClientID != "" || m.ClientSecretEnc != ""
+	if hosted && (m.ClientID == "" || m.ClientSecretEnc == "") {
+		return errors.New("oauth.microsoft requires client_id and client_secret_enc")
+	}
+	if !hosted && len(m.NativeAudiences) == 0 {
+		return errors.New("oauth.microsoft requires client_id and client_secret_enc, or native_audiences")
+	}
+	// The issuer is built with fmt.Sprintf(IssuerFormat, tid), so the format
+	// must carry exactly one %s verb. A format with zero or extra verbs would
+	// render a malformed issuer (…%!(EXTRA…) / %!s(MISSING)) that no real
+	// token could ever match, silently failing every login — reject it at
+	// author time. Both the write path and resolution enforce this.
+	if m.IssuerFormat != "" {
+		if err := validateSingleStringVerb(m.IssuerFormat, "oauth.microsoft.issuer_format"); err != nil {
+			return err
 		}
 	}
-	if o := c.OIDC; o != nil {
-		if o.ClientID == "" || o.ClientSecretEnc == "" {
-			return errors.New("oauth.oidc requires client_id and client_secret_enc")
+	return nil
+}
+
+func (a *ProjectOAuthApple) validate() error {
+	hosted := a.ClientID != "" || a.TeamID != "" || a.KeyID != "" || a.PrivateKeyEnc != ""
+	if hosted && (a.ClientID == "" || a.TeamID == "" || a.KeyID == "" || a.PrivateKeyEnc == "") {
+		return errors.New("oauth.apple requires client_id, team_id, key_id, and private_key_enc")
+	}
+	if !hosted && len(a.NativeAudiences) == 0 {
+		return errors.New("oauth.apple requires client_id, team_id, key_id, and private_key_enc, or native_audiences")
+	}
+	return nil
+}
+
+func (o *ProjectOAuthOIDC) validate() error {
+	if o.ClientID == "" || o.ClientSecretEnc == "" {
+		return errors.New("oauth.oidc requires client_id and client_secret_enc")
+	}
+	if o.Issuer == "" && o.DiscoveryURL == "" {
+		return errors.New("oauth.oidc requires issuer or discovery_url")
+	}
+	if o.Issuer != "" {
+		if err := validateHTTPSURL(o.Issuer, "oauth.oidc.issuer"); err != nil {
+			return err
 		}
-		if o.Issuer == "" && o.DiscoveryURL == "" {
-			return errors.New("oauth.oidc requires issuer or discovery_url")
-		}
-		if o.Issuer != "" {
-			if err := validateHTTPSURL(o.Issuer, "oauth.oidc.issuer"); err != nil {
-				return err
-			}
-		}
-		if o.DiscoveryURL != "" {
-			if err := validateHTTPSURL(o.DiscoveryURL, "oauth.oidc.discovery_url"); err != nil {
-				return err
-			}
+	}
+	if o.DiscoveryURL != "" {
+		if err := validateHTTPSURL(o.DiscoveryURL, "oauth.oidc.discovery_url"); err != nil {
+			return err
 		}
 	}
 	return nil
