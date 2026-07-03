@@ -137,8 +137,18 @@ breaking, but the `*_BY_PRODUCT` vars shipped only the prior week.
 >
 > **Tenant identifiers must be directory GUIDs.** Azure always stamps the token's
 > `tid` as a directory (tenant) GUID, and the runtime pin compares against it
-> (case-insensitively), so a value that can never equal a `tid` is **rejected at
-> config load / write time** rather than silently failing every login:
+> (case-insensitively), so a value that can never equal a `tid` is **rejected by
+> config validation** rather than silently failing every login. Where that
+> rejection surfaces depends on where the value lives:
+>
+> - **env** (`GATEWAY_MICROSOFT_TENANT_ID` / `GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS`)
+>   — fails fast at **boot** (`Config.Validate`);
+> - **per-project `config_json`** (`oauth.microsoft.*`) — rejected at **admin
+>   write time** for new values, but a value **already stored** from before this
+>   release is validated on the **per-request project-resolution path**, so it
+>   fails at request time and (until re-pinned) takes down that project's whole
+>   resolution — not just Microsoft. There is no boot scan, so audit stored
+>   configs before upgrading. The fields:
 >
 > - `allowed_tenants` (env `GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS` /
 >   `oauth.microsoft.allowed_tenants`) — every entry must be a **GUID**;
@@ -164,9 +174,12 @@ breaking, but the `*_BY_PRODUCT` vars shipped only the prior week.
 >   or those logins are now rejected.
 > - _Single-tenant deployments pinned by a **verified domain**_ — this is a
 >   **breaking change**: re-pin `tenant_id` (or `GATEWAY_MICROSOFT_TENANT_ID`) to
->   your directory **GUID** before upgrading; a domain-form value now fails config
->   validation at boot / write, and previously it would have silently rejected
->   every Microsoft login at runtime.
+>   your directory **GUID** before upgrading. An env domain-form value fails fast
+>   at boot; a domain-form value **already stored** in a project's `config_json`
+>   fails at request-time project resolution (no boot signal) and disables that
+>   whole project until corrected — so audit and re-pin stored per-project
+>   Microsoft configs first. Previously a domain-form pin silently rejected every
+>   Microsoft login at runtime.
 
 ### Schema migrations involved
 

@@ -122,8 +122,10 @@ type microsoftIDClaims struct {
 	Name              string `json:"name"`
 	Picture           string `json:"picture"`
 
-	// VerifiedEmail is an explicit verification hint. When present and false the
-	// email is rejected outright; when true it independently authorizes trust.
+	// VerifiedEmail is honored only as a NEGATIVE signal: when present and false
+	// the email is rejected outright. A true value does NOT by itself authorize
+	// trust — the nOAuth guard requires a tenant pin OR xms_edov (see
+	// microsoftEmailTrusted).
 	VerifiedEmail *bool `json:"verified_email"`
 
 	// XMSEdov ("email domain owner verified") is Microsoft's polymorphic
