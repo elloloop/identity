@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -286,6 +287,54 @@ func TestAdminSetProjectOAuthProvider_RejectsBadIssuerFormat(t *testing.T) {
 	}
 }
 
+// TestAdminSetProjectOAuthProvider_MicrosoftAllowedTenants_RoundTrip proves the
+// nOAuth allow-list survives the write→read authoring round-trip (input →
+// config_json → redacted view) and lands on the resolved provider config.
+func TestAdminSetProjectOAuthProvider_MicrosoftAllowedTenants_RoundTrip(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	tenants := []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
+	view, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:                oauthProviderMicrosoft,
+		ClientID:                "ms",
+		ClientSecret:            "ms-secret",
+		MicrosoftAllowedTenants: append([]string{"  "}, tenants...), // a blank entry is dropped
+	})
+	if err != nil {
+		t.Fatalf("AdminSetProjectOAuthProvider: %v", err)
+	}
+	if !slices.Equal(view.MicrosoftAllowedTenants, tenants) {
+		t.Fatalf("view allowed_tenants = %v, want %v", view.MicrosoftAllowedTenants, tenants)
+	}
+
+	// The list round-trips through config_json onto the typed provider.
+	stored, _, err := f.projects.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig: %v", err)
+	}
+	cfg, err := ParseProjectConfig(stored)
+	if err != nil {
+		t.Fatalf("ParseProjectConfig: %v", err)
+	}
+	if cfg.OAuth.Microsoft == nil || !slices.Equal(cfg.OAuth.Microsoft.AllowedTenants, tenants) {
+		t.Fatalf("stored allowed_tenants = %+v, want %v", cfg.OAuth.Microsoft, tenants)
+	}
+
+	// A malformed entry (here a verified-domain form, which can never match a
+	// token's GUID `tid`) is rejected at author time.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:                oauthProviderMicrosoft,
+		ClientID:                "ms",
+		ClientSecret:            "ms-secret",
+		MicrosoftAllowedTenants: []string{"contoso.onmicrosoft.com"},
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("domain-form allowed_tenants: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestAdminSetProjectOAuthProvider_RejectsMissingRequiredFields(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(oauthAdminSecret)
@@ -565,14 +614,14 @@ func TestAdminSetProjectOAuthProvider_AllProviderFields(t *testing.T) {
 		Provider:              oauthProviderMicrosoft,
 		ClientID:              "ms-client",
 		ClientSecret:          "ms-secret",
-		MicrosoftTenantID:     "tenant-abc",
+		MicrosoftTenantID:     "aaaaaaaa-1111-2222-3333-444444444444",
 		MicrosoftIssuerFormat: "https://login.test/%s/v2.0",
 		NativeAudiences:       []string{"ms-native"},
 	})
 	if err != nil {
 		t.Fatalf("set microsoft: %v", err)
 	}
-	if ms.MicrosoftTenantID != "tenant-abc" || ms.MicrosoftIssuerFormat != "https://login.test/%s/v2.0" ||
+	if ms.MicrosoftTenantID != "aaaaaaaa-1111-2222-3333-444444444444" || ms.MicrosoftIssuerFormat != "https://login.test/%s/v2.0" ||
 		!ms.HasClientSecret || len(ms.NativeAudiences) != 1 {
 		t.Fatalf("microsoft view = %+v", ms)
 	}
@@ -618,7 +667,7 @@ func TestAdminSetProjectOAuthProvider_AllProviderFields(t *testing.T) {
 			t.Fatalf("list order = %v, want %v", gotOrder, want)
 		}
 	}
-	if !list[1].HasClientSecret || list[1].MicrosoftTenantID != "tenant-abc" {
+	if !list[1].HasClientSecret || list[1].MicrosoftTenantID != "aaaaaaaa-1111-2222-3333-444444444444" {
 		t.Fatalf("listed microsoft not mapped/redacted: %+v", list[1])
 	}
 }
@@ -704,7 +753,7 @@ func TestAdminSetProjectOAuthProvider_EmptySecretKeepsAllProviders(t *testing.T)
 		t.Fatalf("ms set: %v", err)
 	}
 	if v, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
-		Provider: oauthProviderMicrosoft, ClientID: "m2", MicrosoftTenantID: "t",
+		Provider: oauthProviderMicrosoft, ClientID: "m2", MicrosoftTenantID: "22222222-2222-2222-2222-222222222222",
 	}); err != nil || !v.HasClientSecret || v.ClientID != "m2" {
 		t.Fatalf("ms re-set keep: v=%+v err=%v", v, err)
 	}

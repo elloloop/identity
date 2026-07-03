@@ -211,10 +211,11 @@ func (r *OAuthResolver) build(provider string, raw any) (oauth.Exchanger, error)
 			return nil, fmt.Errorf("microsoft client_secret: %w", err)
 		}
 		return oauth.NewMicrosoft(oauth.MicrosoftConfig{
-			ClientID:     c.ClientID,
-			ClientSecret: secret,
-			TenantID:     c.TenantID,
-			IssuerFormat: c.IssuerFormat,
+			ClientID:       c.ClientID,
+			ClientSecret:   secret,
+			TenantID:       c.TenantID,
+			AllowedTenants: c.AllowedTenants,
+			IssuerFormat:   c.IssuerFormat,
 		}), nil
 	case *ProjectOAuthApple:
 		key, err := r.decrypt(c.PrivateKeyEnc)

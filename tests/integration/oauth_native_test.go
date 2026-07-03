@@ -141,6 +141,9 @@ func nativeITHarness(t *testing.T, signer *nativeITSigner, enabled bool) *Harnes
 		c.NativeOAuthGoogleAudiences = nativeITGoogleAud
 		c.NativeOAuthAppleAudiences = nativeITAppleAud
 		c.NativeOAuthMicrosoftAudiences = nativeITMicrosoftAud
+		// Pin the default project's accepted Microsoft tenant via the env
+		// allow-list so a multi-tenant token's email is trusted (nOAuth guard).
+		c.MicrosoftAllowedTenants = nativeITMSTenant
 		c.NativeOAuthProductProjects = "easyloops=" + nativeITProject
 	})
 	if !enabled {
@@ -159,7 +162,7 @@ func nativeITHarness(t *testing.T, signer *nativeITSigner, enabled bool) *Harnes
 
 const (
 	nativeITMicrosoftAud  = "ms-native-client"
-	nativeITMSTenant      = "tenant-it-1"
+	nativeITMSTenant      = "aaaabbbb-cccc-dddd-eeee-ffff00001111"
 	nativeITPerProjAud    = "perproject-ios.apps.googleusercontent.com"
 	nativeITMSIssuerFmt   = "https://login.microsoftonline.com/%s/v2.0"
 	nativeITPerProjProdID = "perproject"

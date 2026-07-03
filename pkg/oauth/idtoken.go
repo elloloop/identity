@@ -127,11 +127,13 @@ func checkTokenTimes(tok jwt.Token, now time.Time) error {
 	return nil
 }
 
-// appleEmailVerified collapses Apple's polymorphic email_verified claim (a
-// JSON bool OR the string "true") to a boolean. Apple emits it either way
-// depending on the flow; both hosted Exchange and native login normalize it
-// identically here.
-func appleEmailVerified(v interface{}) bool {
+// claimIsTrue collapses a polymorphic boolean JSON claim — emitted by some
+// providers as a real bool and by others as the string "true"/"false" — to a
+// Go bool. Microsoft is the worst offender (email_verified and xms_edov both
+// arrive either way depending on the flow); Apple's email_verified is the same
+// shape. Every provider path normalizes such a claim through this one helper so
+// the bool-vs-string handling can never diverge between them.
+func claimIsTrue(v interface{}) bool {
 	switch ev := v.(type) {
 	case bool:
 		return ev

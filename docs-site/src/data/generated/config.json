@@ -720,6 +720,15 @@
     "anchor": "oauth"
   },
   {
+    "name": "GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the DEFAULT PROJECT's comma-separated allow-list of accepted Azure AD directory (tenant) GUIDs for Microsoft sign-in (hosted + native).",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
     "name": "GATEWAY_OAUTH_MICROSOFT_CLIENT_ID",
     "type": "string",
     "default": "",

@@ -7,6 +7,8 @@ import (
 	"net/mail"
 	"net/url"
 	"strings"
+
+	"github.com/elloloop/identity/internal/config"
 )
 
 // ProjectConfig is the typed view of a project's config_json blob. It is the
@@ -93,6 +95,15 @@ type ProjectOAuthMicrosoft struct {
 	ClientSecretEnc string `json:"client_secret_enc"`
 	TenantID        string `json:"tenant_id,omitempty"`
 	IssuerFormat    string `json:"issuer_format,omitempty"`
+	// AllowedTenants is a multi-tenant allow-list of Azure AD directory (tenant)
+	// GUIDs: when non-empty, a Microsoft token whose `tid` is not a member is
+	// rejected (hosted + native). It is the several-trusted-tenants counterpart
+	// to the single-tenant TenantID pin, and closes the nOAuth account-takeover
+	// vector for apps that accept more than one tenant — a token from any tenant
+	// NOT on the list can no longer assert a victim's email. Entries must be
+	// GUIDs (a domain-form string can never match a token's `tid`). Empty imposes
+	// no allow-list.
+	AllowedTenants []string `json:"allowed_tenants,omitempty"`
 	// NativeAudiences is the accepted native ID-token `aud` allow-list for this
 	// project. Empty disables Microsoft native login for the project (unless it
 	// is the default project, which falls back to the
@@ -296,6 +307,20 @@ func (m *ProjectOAuthMicrosoft) validate() error {
 	if m.IssuerFormat != "" {
 		if err := validateSingleStringVerb(m.IssuerFormat, "oauth.microsoft.issuer_format"); err != nil {
 			return err
+		}
+	}
+	// tenant_id pins verification (tid == tenant_id) for a concrete GUID, so a
+	// domain-form pin would reject every login. Accept empty (no pin), a meta
+	// value (multi-tenant), or a GUID; reject anything else at author time.
+	if !config.ValidMicrosoftTenantPin(m.TenantID) {
+		return fmt.Errorf("oauth.microsoft.tenant_id %q must be an Azure AD directory (tenant) GUID, "+
+			"a meta value (common/organizations/consumers), or empty (a verified-domain string can never match a token's tid)",
+			m.TenantID)
+	}
+	for _, t := range m.AllowedTenants {
+		if !config.ValidMicrosoftTenant(t) {
+			return fmt.Errorf("oauth.microsoft.allowed_tenants entry %q must be an Azure AD directory (tenant) GUID "+
+				"(a verified-domain string can never match a token's tid)", t)
 		}
 	}
 	return nil

@@ -108,7 +108,7 @@ import { Code } from "astro-expressive-code/components";
   <Code code={`{
   "oauth": {
     "google":    { "client_id": "...", "client_secret_enc": "<enc>", "native_audiences": ["web.g.apps.googleusercontent.com", "ios.g"] },
-    "microsoft": { "client_id": "...", "client_secret_enc": "<enc>", "tenant_id": "", "native_audiences": ["ms-native-client"] },
+    "microsoft": { "client_id": "...", "client_secret_enc": "<enc>", "tenant_id": "", "allowed_tenants": ["<tenant-guid>"], "native_audiences": ["ms-native-client"] },
     "apple":     { "native_audiences": ["com.example.app"] },
     "oidc":      { "client_id": "...", "client_secret_enc": "<enc>", "issuer": "https://acme.okta.com", "scopes": "openid email profile" }
   }
@@ -187,7 +187,8 @@ import { Code } from "astro-expressive-code/components";
   repeated string native_audiences = 5;
   // google endpoint overrides (6-9), microsoft tenant_id/issuer_format (10-11),
   // apple team_id/key_id/apple_private_key (12-14, key is write-only),
-  // has_private_key (15), oidc issuer/discovery_url/scopes (16-18).
+  // has_private_key (15), oidc issuer/discovery_url/scopes (16-18),
+  // microsoft_allowed_tenants (19, tenant allow-list — nOAuth guard).
 }
 
 rpc AdminSetProjectOAuthProvider(AdminSetProjectOAuthProviderRequest) returns (AdminSetProjectOAuthProviderResponse);
@@ -280,28 +281,62 @@ message NativeOAuthLoginResponse {
     <code>https://login.microsoftonline.com/&lt;tid&gt;/v2.0</code> (multi-tenant
     by default — the issuer is derived from the token's own <code>tid</code>; a
     project may pin <code>tenant_id</code> / <code>issuer_format</code> to accept
-    one tenant only), a present unexpired <code>exp</code>, an accepted
+    one tenant only, or list several trusted tenants in
+    <code>allowed_tenants</code>), a present unexpired <code>exp</code>, an accepted
     <code>aud</code>, and an email coalesced from
     <code>email → preferred_username → upn</code> (subject is <code>oid</code>
-    then <code>sub</code>). Any failure returns <code>Unauthenticated</code> with
-    a safe message.
+    then <code>sub</code>). The Microsoft <strong>email is trusted as verified</strong>
+    (the precondition for account federation) only when the issuing tenant is
+    pinned (<code>tid</code> equals <code>tenant_id</code> or is a member of the
+    <code>allowed_tenants</code> set — the two form a union of accepted tenants),
+    OR the token carries <code>xms_edov == true</code> (Microsoft's
+    email-domain-owner-verified claim, accepted as a bool or the string
+    <code>"true"</code>). A non-standard <code>verified_email == true</code> is
+    <strong>not</strong> trusted on its own (an attacker tenant can set it too),
+    though an explicit <code>verified_email == false</code> is always rejected.
+    Otherwise the email is treated as unverified and the login is rejected with
+    <code>ErrEmailNotVerified</code> — exactly like Google/Apple's
+    unverified-email handling. Any failure returns <code>Unauthenticated</code>
+    with a safe message.
+  </p>
+  <p>
+    <strong>Enabling <code>xms_edov</code>.</strong> Azure does <strong>not</strong>
+    emit <code>xms_edov</code> by default. To rely on it (rather than pinning a
+    tenant), add it as an <strong>optional claim</strong> on the app registration
+    (Azure portal → App registration → Token configuration → add optional claim →
+    ID → <code>xms_edov</code>), and enable the "emit groups/claims as domain owner
+    verified" toggle. Without this, multi-tenant tokens carry no <code>xms_edov</code>
+    and their email is treated as unverified unless the tenant is pinned.
   </p>
   <div class="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm">
-    <strong>🔒 Security — multi-tenant Microsoft &amp; account linking.</strong>
-    Native (and hosted) Microsoft login defaults to <strong>multi-tenant</strong>:
-    the expected issuer is derived from the token's own <code>tid</code>, so
-    <strong>any</strong> Azure AD tenant — including one an attacker controls —
-    can mint a valid token. Because a token carries an <code>email</code>, this is
-    an <a href="https://www.descope.com/blog/post/noauth" rel="nofollow">nOAuth</a>-style
-    account-takeover vector when email is trusted for cross-provider linking: an
-    attacker can present a Microsoft token bearing a <strong>victim's email</strong>
-    and take over the account. For email-based linking,
-    <strong>pin <code>tenant_id</code></strong> (single-tenant) on the project's
-    <code>oauth.microsoft</code> block unless you fully trust every tenant that
-    can obtain a token. Do <strong>not</strong> trust a multi-tenant Microsoft
-    email for cross-provider account linking. (This matches the existing hosted
-    Microsoft provider; a tenant allowlist and the <code>xms_edov</code>
-    email-verified claim are planned hardening for both flows.)
+    <strong>🔒 Security — multi-tenant Microsoft &amp; account linking (nOAuth).</strong>
+    Microsoft sign-in defaults to <strong>multi-tenant</strong>: the expected issuer
+    is derived from the token's own <code>tid</code>, so <strong>any</strong> Azure
+    AD tenant — including one an attacker controls — can mint a valid token bearing
+    an arbitrary <code>email</code>. Left unchecked, this is an
+    <a href="https://www.descope.com/blog/post/noauth" rel="nofollow">nOAuth</a>-style
+    account-takeover vector: an attacker presents a token carrying a
+    <strong>victim's email</strong> and, because email federates accounts, takes
+    over the victim's account. Identity now <strong>closes this by default</strong>:
+    a multi-tenant Microsoft email is trusted for federation only when the tenant is
+    pinned (<code>tenant_id</code> or <code>allowed_tenants</code>) OR the token
+    proves <code>xms_edov == true</code>; otherwise the login is rejected as
+    unverified. This applies identically to the <strong>hosted and native</strong>
+    flows. To accept a known set of tenants, set <code>allowed_tenants</code>
+    (per project) or <code>GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS</code> (default
+    project) — each entry a directory (tenant) <strong>GUID</strong>. For a single
+    tenant, pin <code>tenant_id</code> / <code>GATEWAY_MICROSOFT_TENANT_ID</code>,
+    which accepts a directory <strong>GUID</strong> or a meta value
+    (<code>common</code>/<code>organizations</code>/<code>consumers</code>, meaning
+    "no pin — multi-tenant"). A token's <code>tid</code> is always a GUID, so a
+    <strong>verified-domain</strong> tenant identifier (e.g.
+    <code>contoso.onmicrosoft.com</code>) can never match and is <strong>rejected
+    at config load / write time</strong> rather than silently failing every login.
+    <strong>Behavior change:</strong> multi-tenant Microsoft deployments that
+    previously relied on blindly-trusted email must now pin a tenant or emit
+    <code>xms_edov</code>; single-tenant deployments that pinned by a
+    <strong>verified domain</strong> must re-pin by the tenant <strong>GUID</strong>
+    before upgrading, or every Microsoft login will be rejected.
   </div>
   <p>
     <strong>Audience scoping (per-project).</strong> The accepted <code>aud</code>

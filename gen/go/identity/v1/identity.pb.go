@@ -11226,6 +11226,14 @@ type ProjectOAuthProviderConfig struct {
 	// default.
 	MicrosoftTenantId     string `protobuf:"bytes,10,opt,name=microsoft_tenant_id,json=microsoftTenantId,proto3" json:"microsoft_tenant_id,omitempty"`
 	MicrosoftIssuerFormat string `protobuf:"bytes,11,opt,name=microsoft_issuer_format,json=microsoftIssuerFormat,proto3" json:"microsoft_issuer_format,omitempty"`
+	// microsoft_allowed_tenants is a multi-tenant allow-list of Azure AD directory
+	// (tenant) GUIDs. When non-empty, a Microsoft token whose `tid` is not a member
+	// is rejected (hosted + native) — the several-trusted-tenants counterpart to
+	// the single microsoft_tenant_id pin, closing the nOAuth account-takeover
+	// vector for multi-tenant apps. Entries must be GUIDs (a token's `tid` is
+	// always a directory GUID, so a domain-form entry could never match and is
+	// rejected at config time). Empty imposes no allow-list.
+	MicrosoftAllowedTenants []string `protobuf:"bytes,19,rep,name=microsoft_allowed_tenants,json=microsoftAllowedTenants,proto3" json:"microsoft_allowed_tenants,omitempty"`
 	// apple_team_id / apple_key_id identify the Apple signing key. apple_private_key
 	// is the PLAINTEXT PKCS#8 key (Apple has no client secret); it is write-only,
 	// stored encrypted, and empty-keeps like client_secret.
@@ -11350,6 +11358,13 @@ func (x *ProjectOAuthProviderConfig) GetMicrosoftIssuerFormat() string {
 		return x.MicrosoftIssuerFormat
 	}
 	return ""
+}
+
+func (x *ProjectOAuthProviderConfig) GetMicrosoftAllowedTenants() []string {
+	if x != nil {
+		return x.MicrosoftAllowedTenants
+	}
+	return nil
 }
 
 func (x *ProjectOAuthProviderConfig) GetAppleTeamId() string {
@@ -12839,7 +12854,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\";\n" +
 	"\x18GetProjectConfigResponse\x12\x1f\n" +
 	"\vconfig_json\x18\x01 \x01(\tR\n" +
-	"configJson\"\xf4\x05\n" +
+	"configJson\"\xb0\x06\n" +
 	"\x1aProjectOAuthProviderConfig\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12#\n" +
@@ -12852,7 +12867,8 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\rgoogle_issuer\x18\t \x01(\tR\fgoogleIssuer\x12.\n" +
 	"\x13microsoft_tenant_id\x18\n" +
 	" \x01(\tR\x11microsoftTenantId\x126\n" +
-	"\x17microsoft_issuer_format\x18\v \x01(\tR\x15microsoftIssuerFormat\x12\"\n" +
+	"\x17microsoft_issuer_format\x18\v \x01(\tR\x15microsoftIssuerFormat\x12:\n" +
+	"\x19microsoft_allowed_tenants\x18\x13 \x03(\tR\x17microsoftAllowedTenants\x12\"\n" +
 	"\rapple_team_id\x18\f \x01(\tR\vappleTeamId\x12 \n" +
 	"\fapple_key_id\x18\r \x01(\tR\n" +
 	"appleKeyId\x12*\n" +

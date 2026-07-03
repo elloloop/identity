@@ -128,7 +128,7 @@ func TestParseProjectConfig_OAuth_Present(t *testing.T) {
 
 	cfg, err := ParseProjectConfig(`{"oauth":{
 		"google":{"client_id":"g","client_secret_enc":"enc-g","issuer":"https://accounts.google.com"},
-		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","tenant_id":"t"},
+		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","tenant_id":"11111111-1111-1111-1111-111111111111"},
 		"apple":{"client_id":"a","team_id":"team","key_id":"kid","private_key_enc":"enc-pk"},
 		"oidc":{"client_id":"o","client_secret_enc":"enc-o","issuer":"https://issuer.example","scopes":"openid email"}
 	}}`)
@@ -137,7 +137,7 @@ func TestParseProjectConfig_OAuth_Present(t *testing.T) {
 	assert.Equal(t, "g", cfg.OAuth.Google.ClientID)
 	assert.Equal(t, "enc-g", cfg.OAuth.Google.ClientSecretEnc)
 	require.NotNil(t, cfg.OAuth.Microsoft)
-	assert.Equal(t, "t", cfg.OAuth.Microsoft.TenantID)
+	assert.Equal(t, "11111111-1111-1111-1111-111111111111", cfg.OAuth.Microsoft.TenantID)
 	require.NotNil(t, cfg.OAuth.Apple)
 	assert.Equal(t, "enc-pk", cfg.OAuth.Apple.PrivateKeyEnc)
 	require.NotNil(t, cfg.OAuth.OIDC)
@@ -195,7 +195,7 @@ func TestParseProjectConfig_OAuth_NativeAudiences_Present(t *testing.T) {
 	// Apple is native-only.
 	cfg, err := ParseProjectConfig(`{"oauth":{
 		"google":{"client_id":"g","client_secret_enc":"enc-g","native_audiences":["web.g","ios.g"]},
-		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","tenant_id":"t","issuer_format":"https://login.microsoftonline.com/%s/v2.0","native_audiences":["ms.app"]},
+		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","tenant_id":"11111111-1111-1111-1111-111111111111","issuer_format":"https://login.microsoftonline.com/%s/v2.0","native_audiences":["ms.app"]},
 		"apple":{"native_audiences":["com.a.app","com.a.web"]}
 	}}`)
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestParseProjectConfig_OAuth_NativeAudiences_Present(t *testing.T) {
 	assert.Equal(t, []string{"web.g", "ios.g"}, cfg.OAuth.Google.NativeAudiences)
 	require.NotNil(t, cfg.OAuth.Microsoft)
 	assert.Equal(t, []string{"ms.app"}, cfg.OAuth.Microsoft.NativeAudiences)
-	assert.Equal(t, "t", cfg.OAuth.Microsoft.TenantID)
+	assert.Equal(t, "11111111-1111-1111-1111-111111111111", cfg.OAuth.Microsoft.TenantID)
 	require.NotNil(t, cfg.OAuth.Apple)
 	assert.Equal(t, []string{"com.a.app", "com.a.web"}, cfg.OAuth.Apple.NativeAudiences)
 
@@ -225,6 +225,34 @@ func TestParseProjectConfig_OAuth_NativeAudiences_Absent(t *testing.T) {
 	assert.Nil(t, cfg.OAuth.nativeAudiences("google"))
 	assert.Nil(t, cfg.OAuth.nativeAudiences("apple"))
 	assert.Nil(t, cfg.OAuth.nativeAudiences("microsoft")) // provider absent entirely
+}
+
+func TestParseProjectConfig_OAuth_MicrosoftAllowedTenants_Present(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"oauth":{
+		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","allowed_tenants":["11111111-1111-1111-1111-111111111111","22222222-2222-2222-2222-222222222222"]}
+	}}`)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.OAuth.Microsoft)
+	assert.Equal(t,
+		[]string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"},
+		cfg.OAuth.Microsoft.AllowedTenants)
+}
+
+func TestParseProjectConfig_OAuth_MicrosoftAllowedTenants_Invalid(t *testing.T) {
+	t.Parallel()
+
+	// Only a directory GUID is a valid entry. A verified-domain form
+	// ("contoso.onmicrosoft.com") is a config error — a token's `tid` is always a
+	// GUID, so a domain entry would silently never match. So are non-GUID junk,
+	// embedded whitespace, and empty. Every one must be rejected at parse time.
+	for _, bad := range []string{"contoso.onmicrosoft.com", "example.co", "not a tenant", "common", "-", ""} {
+		blob := `{"oauth":{"microsoft":{"client_id":"m","client_secret_enc":"enc-m","allowed_tenants":["` + bad + `"]}}}`
+		_, err := ParseProjectConfig(blob)
+		require.Error(t, err, "entry %q must be rejected", bad)
+		assert.Contains(t, err.Error(), "allowed_tenants")
+	}
 }
 
 func TestParseProjectConfig_OAuth_NativeOnlyBlocks_Valid(t *testing.T) {

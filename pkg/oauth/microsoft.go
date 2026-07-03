@@ -39,9 +39,21 @@ type MicrosoftConfig struct {
 	JWKSURL string
 
 	// TenantID controls the default tenant segment in the authorization
-	// endpoint when AuthorizationURL is not set. Optional; defaults to
-	// "common".
+	// endpoint when AuthorizationURL is not set, AND pins verification to a
+	// single Azure AD directory: a token whose `tid` is not this value is
+	// rejected. A meta value ("common"/"organizations"/"consumers") is a
+	// multi-tenant marker and does NOT pin. Optional; empty/"common" keeps the
+	// multi-tenant default.
 	TenantID string
+
+	// AllowedTenants is an allow-list of Azure AD directory (tenant) GUIDs:
+	// when non-empty, a token whose `tid` is not a member is rejected. It is the
+	// multi-tenant counterpart to the single TenantID pin — several trusted
+	// tenants instead of exactly one. Azure always stamps `tid` as a directory
+	// GUID, so entries must be GUIDs (matched case-insensitively); a
+	// verified-domain string would never match and is rejected at config time.
+	// Empty imposes no allow-list.
+	AllowedTenants []string
 
 	// IssuerFormat is a fmt.Sprintf format string into which the
 	// token's `tid` (tenant id) claim is interpolated to derive the
@@ -110,10 +122,86 @@ type microsoftIDClaims struct {
 	Name              string `json:"name"`
 	Picture           string `json:"picture"`
 
-	// Optional verification hint. Microsoft does not always emit
-	// this; absence is treated as verified (the OIDC token issuance
-	// itself implies a verified account in this flow).
+	// VerifiedEmail is honored only as a NEGATIVE signal: when present and false
+	// the email is rejected outright. A true value does NOT by itself authorize
+	// trust — the nOAuth guard requires a tenant pin OR xms_edov (see
+	// microsoftEmailTrusted).
 	VerifiedEmail *bool `json:"verified_email"`
+
+	// XMSEdov ("email domain owner verified") is Microsoft's polymorphic
+	// assertion (JSON bool OR string "true"/"false") that the issuing tenant is
+	// verified to own the email's domain. It is the claim that defends against
+	// the nOAuth cross-tenant email-spoofing vector: on a multi-tenant token
+	// (issuer derived from the token's own tid, no tenant pin) the email is
+	// trusted for account federation ONLY when xms_edov is true — absent/false
+	// leaves the email unverified.
+	XMSEdov interface{} `json:"xms_edov"`
+}
+
+// microsoftTenantPin holds the deployment/project tenant-pinning inputs shared
+// by the hosted exchanger and the native verifier. A configured single TenantID
+// or a non-empty AllowedTenants list means the operator vouches for the
+// issuing tenant(s), which is itself sufficient to trust the token's email.
+type microsoftTenantPin struct {
+	TenantID       string
+	AllowedTenants []string
+}
+
+// microsoftMetaTenants are the Azure AD "meta" tenant segments that denote a
+// MULTI-tenant configuration rather than a single directory. A real token's
+// `tid` is always a concrete directory GUID, so treating one of these as a pin
+// would reject every genuine token; they mean "no tenant pin" instead.
+var microsoftMetaTenants = map[string]bool{"common": true, "organizations": true, "consumers": true}
+
+// enforce checks a token's tid against the pin and reports whether the tenant
+// was pinned. TenantID (a single directory) and AllowedTenants (a set) form the
+// UNION of accepted tenants: when a pin is configured, tid is accepted if it
+// equals TenantID OR is a member of AllowedTenants; matching either is enough.
+// A configured pin that tid satisfies none of is a hard reject
+// (ErrIdentityVerification). A meta TenantID ("common"/"organizations"/
+// "consumers") is not a pin. pinned is true only when a real constraint was
+// configured and satisfied — the signal that the deployment vouches for the
+// issuing tenant. Azure stamps `tid` as a directory GUID; GUIDs are
+// case-insensitive, so every comparison folds.
+func (p microsoftTenantPin) enforce(tid string) (pinned bool, err error) {
+	pinTenant := p.TenantID != "" && !microsoftMetaTenants[strings.ToLower(p.TenantID)]
+	if !pinTenant && len(p.AllowedTenants) == 0 {
+		// No real pin configured (empty, or only a meta TenantID) → multi-tenant.
+		return false, nil
+	}
+	if pinTenant && strings.EqualFold(tid, p.TenantID) {
+		return true, nil
+	}
+	if containsFold(p.AllowedTenants, tid) {
+		return true, nil
+	}
+	return false, fmt.Errorf("%w: tenant not allowed", ErrIdentityVerification)
+}
+
+// containsFold reports whether needle case-insensitively equals any element of
+// haystack (used for GUID membership, which is case-insensitive).
+func containsFold(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if strings.EqualFold(h, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// microsoftEmailTrusted decides whether a Microsoft token's email may be
+// treated as VERIFIED for account federation, the nOAuth guard applied
+// identically by the hosted exchanger and the native verifier. The only
+// legitimate proofs are: the issuing tenant is pinned (the deployment/project
+// vouches for it), OR the token carries xms_edov==true (Microsoft asserts the
+// tenant is verified to own the email's domain). A non-standard
+// verified_email==true is deliberately NOT trusted on its own — an attacker
+// tenant can set it just like the email itself; verified_email is honoured only
+// as a NEGATIVE signal (an explicit false is rejected by the caller before this).
+// When this returns false the email is unproven and the caller rejects it with
+// ErrEmailNotVerified.
+func microsoftEmailTrusted(pinned bool, claims *microsoftIDClaims) bool {
+	return pinned || claimIsTrue(claims.XMSEdov)
 }
 
 func (m *microsoftExchanger) Exchange(ctx context.Context, params ExchangeParams) (*Identity, error) {
@@ -163,7 +251,7 @@ func (m *microsoftExchanger) Exchange(ctx context.Context, params ExchangeParams
 		return nil, fmt.Errorf("%w: provider returned no id_token", ErrCodeExchangeFailed)
 	}
 
-	claims, err := m.verifyIDToken(ctx, tr.IDToken)
+	claims, pinned, err := m.verifyIDToken(ctx, tr.IDToken)
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +268,12 @@ func (m *microsoftExchanger) Exchange(ctx context.Context, params ExchangeParams
 	}
 
 	if claims.VerifiedEmail != nil && !*claims.VerifiedEmail {
+		return nil, fmt.Errorf("%w: %s", ErrEmailNotVerified, email)
+	}
+	// nOAuth guard: a multi-tenant Microsoft token (issuer derived from its own
+	// tid, no tenant pin) may carry any tenant-set email. Trust it as verified
+	// only when the tenant is pinned, or xms_edov proves domain ownership.
+	if !microsoftEmailTrusted(pinned, claims) {
 		return nil, fmt.Errorf("%w: %s", ErrEmailNotVerified, email)
 	}
 
@@ -225,34 +319,43 @@ func (m *microsoftExchanger) AuthorizationURL(_ context.Context, redirectURI, st
 	return buildAuthorizationURL(authURL, params)
 }
 
-func (m *microsoftExchanger) verifyIDToken(ctx context.Context, raw string) (*microsoftIDClaims, error) {
+// verifyIDToken validates the ID token and returns the parsed claims plus
+// whether the issuing tenant was pinned (a configured tenant_id or allow-list
+// that the token's tid satisfied) — the caller folds pinned into the email-trust
+// decision.
+func (m *microsoftExchanger) verifyIDToken(ctx context.Context, raw string) (*microsoftIDClaims, bool, error) {
 	payload, err := verifyJWSWithRotation(ctx, m.jwks, raw, jwa.RS256)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
-		return nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
+		return nil, false, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
 	}
 
 	var claims microsoftIDClaims
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		return nil, fmt.Errorf("%w: decode claims: %w", ErrIdentityVerification, err)
+		return nil, false, fmt.Errorf("%w: decode claims: %w", ErrIdentityVerification, err)
 	}
 	if claims.TID == "" {
-		return nil, fmt.Errorf("%w: missing tid", ErrIdentityVerification)
+		return nil, false, fmt.Errorf("%w: missing tid", ErrIdentityVerification)
+	}
+	pin := microsoftTenantPin{TenantID: m.cfg.TenantID, AllowedTenants: m.cfg.AllowedTenants}
+	pinned, err := pin.enforce(claims.TID)
+	if err != nil {
+		return nil, false, err
 	}
 	expectedIss := fmt.Sprintf(m.cfg.IssuerFormat, claims.TID)
 	if iss := tok.Issuer(); iss != expectedIss {
-		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, iss)
+		return nil, false, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, iss)
 	}
 	auds := tok.Audience()
 	if !containsString(auds, m.cfg.ClientID) {
-		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
+		return nil, false, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
 	}
 	if err := checkTokenTimes(tok, m.cfg.Now()); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return &claims, nil
+	return &claims, pinned, nil
 }
