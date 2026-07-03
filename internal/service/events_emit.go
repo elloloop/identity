@@ -46,10 +46,14 @@ func toEventUser(u *User) events.User {
 	}
 }
 
-// emitUserEvent publishes a single user-lifecycle event through pub. A nil
+// EmitUserEvent publishes a single user-lifecycle event through pub. A nil
 // pub is treated as the no-op publisher. Failures are logged, never
 // returned: the caller's mutation is already durable.
-func emitUserEvent(
+//
+// It is exported so the inbound SCIM server (internal/app) emits the SAME
+// lifecycle events as the admin/gRPC paths through the one construction site,
+// rather than reimplementing the event shape.
+func EmitUserEvent(
 	ctx context.Context,
 	pub events.Publisher,
 	logger *zap.Logger,

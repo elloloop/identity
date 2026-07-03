@@ -199,7 +199,7 @@ func TestLoginPolicy_DisabledWhenNoSecret(t *testing.T) {
 func TestLoginPolicy_UnimplementedWithoutStore(t *testing.T) {
 	t.Parallel()
 	// Wired with a nil policies store (the memory shape).
-	svc := NewControlPlaneAdminService(policyAdminSecret, nil, newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil)
+	svc := NewControlPlaneAdminService(policyAdminSecret, false, nil, newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil)
 	if _, err := svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{ProjectID: "p", TenantID: "t"}); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("upsert err = %v, want ErrUnimplemented", err)
 	}

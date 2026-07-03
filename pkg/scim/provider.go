@@ -109,7 +109,20 @@ func (p *Provider) replaceUser(w http.ResponseWriter, r *http.Request, id string
 		writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 		return
 	}
-	updated, err := p.store.ReplaceUser(r.Context(), id, fromResource(body))
+	// PUT is a full replace that writes the login identifier unconditionally, so
+	// an empty/omitted userName (or a body whose emails blank the effective
+	// email) would strand the account with no way to sign in. Reject it up front
+	// — the same guard createUser applies — rather than blanking the identifier.
+	user := fromResource(body)
+	if strings.TrimSpace(user.UserName) == "" {
+		writeError(w, http.StatusBadRequest, "invalidValue", "userName is required")
+		return
+	}
+	if strings.TrimSpace(user.Email) == "" {
+		writeError(w, http.StatusBadRequest, "invalidValue", "a non-empty email is required")
+		return
+	}
+	updated, err := p.store.ReplaceUser(r.Context(), id, user)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -127,6 +140,12 @@ func (p *Provider) patchUser(w http.ResponseWriter, r *http.Request, id string) 
 	if err != nil {
 		// An unmodelled attribute / op, or a patch that touches nothing this
 		// server stores, is rejected explicitly rather than silently ignored.
+		// A remove of the required login identifier is a mutability violation.
+		var me *mutabilityError
+		if errors.As(err, &me) {
+			writeError(w, http.StatusBadRequest, "mutability", me.Error())
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 		return
 	}

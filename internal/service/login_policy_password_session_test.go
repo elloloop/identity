@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -149,6 +151,90 @@ func TestRefreshToken_TenantIdleTimeout(t *testing.T) {
 	require.Nil(t, stored)
 }
 
+// Under mode=session, a session-timeout breach must revoke the matching access
+// session — not just delete the refresh row — so the still-valid access token
+// stops working immediately. Regression for #304, where the sid Session row
+// outlived the refresh token under GATEWAY_REVOCATION_MODE=session.
+func TestRefreshToken_SessionMode_IdleTimeoutRevokesAccessSession(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	svc.cfg.RevocationMode = config.RevocationModeSession
+	svc.WithLoginGovernance(withSessionTimeouts(60, 0)) // 60s idle
+
+	start := time.Unix(4_000_000, 0)
+	cur := start
+	svc.nowFunc = func() time.Time { return cur }
+	ctx := withProject("proj-1")
+
+	user := seedUser(repo, "alice@acme.com", "", "active")
+
+	// Initial login mints an access session (sid) + refresh token.
+	access, raw, err := svc.issueTokens(ctx, user, "", "")
+	require.NoError(t, err)
+	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
+	require.NoError(t, err)
+	require.NotEmpty(t, claims.SID)
+
+	// The access session is active before the breach.
+	sess, err := repo.GetSessionBySid(ctx, claims.SID)
+	require.NoError(t, err)
+	require.NotNil(t, sess)
+	require.Zero(t, sess.RevokedAtMs)
+
+	// Advance past the idle window and refresh: the timeout fires.
+	cur = start.Add(61 * time.Second)
+	_, _, _, err = svc.RefreshToken(ctx, raw, "", "")
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrSessionExpired))
+
+	// The refresh row is gone AND the access session is revoked, so a
+	// session-store check on the still-live access token now rejects it.
+	stored, findErr := repo.FindRefreshTokenByHashIncludingConsumed(ctx, hashRefreshToken(raw))
+	require.NoError(t, findErr)
+	require.Nil(t, stored)
+
+	revoked, err := repo.GetSessionBySid(ctx, claims.SID)
+	require.NoError(t, err)
+	require.NotNil(t, revoked)
+	require.NotZero(t, revoked.RevokedAtMs, "access session must be revoked on a mode=session timeout breach")
+}
+
+// In the default mode=ttl, a timeout breach deletes the refresh row and never
+// touches the session store (there is no session), so behavior is unchanged.
+func TestRefreshToken_TTLMode_IdleTimeoutLeavesSessionStoreUntouched(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	// Default config is mode=ttl.
+	svc.WithLoginGovernance(withSessionTimeouts(60, 0))
+
+	start := time.Unix(4_500_000, 0)
+	cur := start
+	svc.nowFunc = func() time.Time { return cur }
+	ctx := withProject("proj-1")
+
+	user := seedUser(repo, "alice@acme.com", "", "active")
+	access, raw, err := svc.issueTokens(ctx, user, "", "")
+	require.NoError(t, err)
+
+	// mode=ttl mints no session and no sid claim.
+	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
+	require.NoError(t, err)
+	require.Empty(t, claims.SID)
+
+	cur = start.Add(61 * time.Second)
+	_, _, _, err = svc.RefreshToken(ctx, raw, "", "")
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrSessionExpired))
+
+	// The refresh row is gone; no session rows were ever created.
+	stored, findErr := repo.FindRefreshTokenByHashIncludingConsumed(ctx, hashRefreshToken(raw))
+	require.NoError(t, findErr)
+	require.Nil(t, stored)
+
+	repo.mu.Lock()
+	n := len(repo.sessions)
+	repo.mu.Unlock()
+	require.Zero(t, n, "mode=ttl must not create or touch session rows")
+}
+
 // RefreshToken succeeds for a fresh session under the tenant's timeouts.
 func TestRefreshToken_TenantTimeout_FreshSessionPasses(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
@@ -218,18 +304,18 @@ func TestRefreshToken_AbsoluteTimeoutAnchoredAcrossRefreshes(t *testing.T) {
 	require.True(t, errors.Is(err, ErrSessionExpired), "absolute cap must fire once the session is older than 2h")
 }
 
-// passwordStrengthPolicyFor maps the LoginPolicy fields onto the passwords
+// passwordStrengthPolicy maps the LoginPolicy fields onto the passwords
 // StrengthPolicy and falls back to the zero policy when ungoverned.
-func TestPasswordStrengthPolicyFor(t *testing.T) {
+func TestPasswordStrengthPolicy(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	ctx := withProject("proj-1")
 
 	g := withPasswordMinLength(16)
 	svc.WithLoginGovernance(g)
 
-	got := svc.passwordStrengthPolicyFor(ctx, "alice@acme.com")
+	got := g.passwordStrengthPolicy(ctx, "proj-1", svc.logger, "alice@acme.com")
 	require.Equal(t, passwords.StrengthPolicy{MinLength: 16}, got)
 
 	// Ungoverned → zero policy (global default).
-	require.Equal(t, passwords.StrengthPolicy{}, svc.passwordStrengthPolicyFor(ctx, "x@nowhere.example"))
+	require.Equal(t, passwords.StrengthPolicy{}, g.passwordStrengthPolicy(ctx, "proj-1", svc.logger, "x@nowhere.example"))
 }

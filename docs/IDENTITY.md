@@ -204,10 +204,9 @@ than a user token. With the secret empty (the default) those RPCs return
 
 The platform's operator accounts live in the `platform_admins` table. To
 let a brand-new deployer establish the **first** operator without
-pre-seeding anything, `CreateFirstPlatformAdmin` is a one-time, **un-gated**
-bootstrap RPC — the only Admin RPC that does NOT require
-`GATEWAY_ADMIN_API_SECRET` (a fresh deploy has configured no secret yet).
-It is self-securing instead of secret-gated:
+pre-seeding anything, `CreateFirstPlatformAdmin` is a one-time,
+trust-on-first-use (TOFU) bootstrap RPC that stays zero-config when nothing
+is set yet. It is self-securing:
 
 - It succeeds **only while `platform_admins` is empty**, returning the new
   admin's id and email. If the request omits a password, the server
@@ -221,6 +220,23 @@ It is self-securing instead of secret-gated:
   Postgres advisory lock, so two concurrent bootstraps create **exactly
   one** admin and the loser is rejected — there is no check-then-write
   race window.
+
+A **fresh** deployment exposed to the internet *before* it is bootstrapped
+still has a window in which an anonymous caller could win the first-admin
+race. Two operator-controlled hardenings narrow it; the guidance is to
+**bootstrap the first admin before exposing the server publicly**, and to
+prefer one of:
+
+- **Gate the bootstrap on the admin secret.** When `GATEWAY_ADMIN_API_SECRET`
+  is configured, this RPC requires the same `X-Admin-Secret` header as every
+  other Admin RPC (a wrong or missing secret is `PERMISSION_DENIED`). TOFU
+  stays zero-config **only** when no secret is set, so anyone already running
+  with an admin secret gets the hardening opt-in-by-default.
+- **Close the surface entirely.** Set `GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true`;
+  the RPC then returns `FAILED_PRECONDITION` regardless of whether any admin
+  exists. With it closed, the first admin must be created another way — a direct
+  insert into `platform_admins`, or by toggling the flag off just long enough to
+  bootstrap and back on. No first-party seed CLI or migration ships for this.
 
 Like the other control-plane RPCs it is postgres-only; sqlite/memory
 deployments (which have no `platform_admins` table) return
@@ -429,9 +445,12 @@ before you ship.
      (`GATEWAY_SESSION_CACHE_TTL_SECONDS`, default 60s; 0 = strict).
      `DeleteRefreshTokensForUser` additionally triggers
      `RevokeSessionsForUser`, so the existing replay-detection path
-     also kills the access tokens. Same-process revocation is
-     synchronous; cross-replica revocation is bounded by the cache
-     TTL. Required for deployers handling sensitive data.
+     also kills the access tokens. Logout, a per-tenant session-timeout
+     breach, and expired-refresh-token cleanup likewise revoke the
+     matching session (scoped to its `sid`), so an invalidated refresh
+     token never leaves its access token usable. Same-process
+     revocation is synchronous; cross-replica revocation is bounded by
+     the cache TTL. Required for deployers handling sensitive data.
 
    The two paths share no fallback or translation layer — `mode=ttl`
    is the existing zero-cost path with the startup assertion added,

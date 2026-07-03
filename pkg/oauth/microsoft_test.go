@@ -32,6 +32,7 @@ func TestMicrosoft_ExchangeSuccess(t *testing.T) {
 		"exp":                now.Add(5 * time.Minute).Unix(),
 		"preferred_username": "alice@contoso.com",
 		"name":               "Alice",
+		"xms_edov":           true,
 	})
 	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
 	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
@@ -67,14 +68,15 @@ func TestMicrosoft_EmailFromUPNFallback(t *testing.T) {
 
 	const clientID = "ms-client-id"
 	idToken := key.signIDToken(t, map[string]any{
-		"iss": msIssuer(),
-		"sub": "s",
-		"oid": "o",
-		"tid": msTenantID,
-		"aud": clientID,
-		"iat": now.Unix(),
-		"exp": now.Add(5 * time.Minute).Unix(),
-		"upn": "bob@contoso.com",
+		"iss":      msIssuer(),
+		"sub":      "s",
+		"oid":      "o",
+		"tid":      msTenantID,
+		"aud":      clientID,
+		"iat":      now.Unix(),
+		"exp":      now.Add(5 * time.Minute).Unix(),
+		"upn":      "bob@contoso.com",
+		"xms_edov": true,
 	})
 	fp.tokenHandler = jsonHandler(map[string]any{"id_token": idToken})
 	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
@@ -222,6 +224,156 @@ func TestMicrosoft_VerifiedEmailFalse(t *testing.T) {
 	_, err := exch.Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://x"})
 	if err == nil || !errors.Is(err, ErrEmailNotVerified) {
 		t.Fatalf("want ErrEmailNotVerified, got %v", err)
+	}
+}
+
+// msExchangeWith mints a Microsoft id_token from claims and runs Exchange
+// against an exchanger built from cfgMut (applied over the shared test defaults).
+// It returns the resulting Identity and error so a caller asserts the nOAuth
+// email-trust outcome.
+func msExchangeWith(t *testing.T, claims map[string]any, cfgMut func(*MicrosoftConfig)) (*Identity, error) {
+	t.Helper()
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	key := newTestKey(t, "kid-MS")
+	fp := newFakeProvider(t)
+	const clientID = "ms-client-id"
+	base := map[string]any{
+		"iss": msIssuer(), "sub": "s", "oid": "o", "tid": msTenantID,
+		"aud": clientID, "iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(),
+		"preferred_username": "victim@contoso.com",
+	}
+	for k, v := range claims {
+		base[k] = v
+	}
+	fp.tokenHandler = jsonHandler(map[string]any{"id_token": key.signIDToken(t, base)})
+	fp.jwksHandler = rawHandler(http.StatusOK, "application/json", key.JWKJSON)
+
+	cfg := MicrosoftConfig{
+		ClientID:     clientID,
+		ClientSecret: "secret",
+		TokenURL:     fp.URL("/token"),
+		JWKSURL:      fp.URL("/jwks"),
+		IssuerFormat: "https://login.test/%s/v2.0",
+		Now:          nowFunc(now),
+	}
+	if cfgMut != nil {
+		cfgMut(&cfg)
+	}
+	return NewMicrosoft(cfg).Exchange(context.Background(), ExchangeParams{Code: "code", RedirectURI: "https://app/cb"})
+}
+
+// TestMicrosoft_NOAuth_EmailTrust is the hardening matrix: a multi-tenant token
+// (no tenant pin) is trusted only when it proves email-domain-owner verification
+// (xms_edov==true); pinning the tenant (single id or allow-list) trusts it
+// regardless. A non-standard verified_email==true is NOT trusted on its own,
+// though an explicit verified_email==false still hard-rejects.
+func TestMicrosoft_NOAuth_EmailTrust(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		claims  map[string]any
+		cfgMut  func(*MicrosoftConfig)
+		wantErr error // nil = success
+	}{
+		{"xms_edov bool true", map[string]any{"xms_edov": true}, nil, nil},
+		{"xms_edov string true", map[string]any{"xms_edov": "true"}, nil, nil},
+		{"xms_edov string false", map[string]any{"xms_edov": "false"}, nil, ErrEmailNotVerified},
+		{"xms_edov bool false", map[string]any{"xms_edov": false}, nil, ErrEmailNotVerified},
+		{"xms_edov absent, no pin", map[string]any{}, nil, ErrEmailNotVerified},
+		{"verified_email true is NOT trusted alone", map[string]any{"verified_email": true}, nil, ErrEmailNotVerified},
+		{"verified_email false hard-rejects despite xms_edov", map[string]any{"verified_email": false, "xms_edov": true}, nil, ErrEmailNotVerified},
+		{
+			"tenant pinned trusts without xms_edov",
+			map[string]any{},
+			func(c *MicrosoftConfig) { c.TenantID = msTenantID },
+			nil,
+		},
+		{
+			// The token tid is msTenantID; a differently-cased pin still matches
+			// (Azure tids are GUIDs, compared case-insensitively).
+			"tenant pin case-insensitive",
+			map[string]any{},
+			func(c *MicrosoftConfig) { c.TenantID = "TENANT-UUID" },
+			nil,
+		},
+		{
+			"allow-list case-insensitive match",
+			map[string]any{},
+			func(c *MicrosoftConfig) { c.AllowedTenants = []string{"TENANT-UUID"} },
+			nil,
+		},
+		{
+			"tenant pin mismatch rejected",
+			map[string]any{},
+			func(c *MicrosoftConfig) { c.TenantID = "other-tenant" },
+			ErrIdentityVerification,
+		},
+		{
+			"allow-list match trusts without xms_edov",
+			map[string]any{},
+			func(c *MicrosoftConfig) { c.AllowedTenants = []string{"someone-else", msTenantID} },
+			nil,
+		},
+		{
+			"allow-list miss rejected",
+			map[string]any{},
+			func(c *MicrosoftConfig) { c.AllowedTenants = []string{"someone-else"} },
+			ErrIdentityVerification,
+		},
+		{
+			// Union semantics: both configured, tid equals tenant_id → accepted.
+			"both set, tid matches tenant_id",
+			map[string]any{},
+			func(c *MicrosoftConfig) {
+				c.TenantID = msTenantID
+				c.AllowedTenants = []string{"someone-else"}
+			},
+			nil,
+		},
+		{
+			// Union semantics: both configured, tid is in allow-list (not tenant_id) → accepted.
+			"both set, tid matches allow-list",
+			map[string]any{},
+			func(c *MicrosoftConfig) {
+				c.TenantID = "other-tenant"
+				c.AllowedTenants = []string{msTenantID}
+			},
+			nil,
+		},
+		{
+			// Union semantics: both configured, tid matches neither → rejected.
+			"both set, tid matches neither",
+			map[string]any{},
+			func(c *MicrosoftConfig) {
+				c.TenantID = "other-tenant"
+				c.AllowedTenants = []string{"someone-else"}
+			},
+			ErrIdentityVerification,
+		},
+		{
+			"meta tenant_id common is not a pin",
+			map[string]any{},
+			func(c *MicrosoftConfig) { c.TenantID = "common" },
+			ErrEmailNotVerified,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			id, err := msExchangeWith(t, tc.claims, tc.cfgMut)
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("want success, got %v", err)
+				}
+				if id.Email != "victim@contoso.com" || !id.EmailVerified {
+					t.Fatalf("bad identity: %+v", id)
+				}
+				return
+			}
+			if err == nil || !errors.Is(err, tc.wantErr) {
+				t.Fatalf("want %v, got %v", tc.wantErr, err)
+			}
+		})
 	}
 }
 

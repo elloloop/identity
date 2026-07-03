@@ -74,10 +74,13 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/AdminSetProjectOAuthProvider":    true,
 	"/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider": true,
 	"/identity.v1.IdentityService/AdminListProjectOAuthProviders":  true,
-	// CreateFirstPlatformAdmin is the ungated zero-config bootstrap: it carries
-	// NO admin secret and NO JWT (a fresh deployer has neither), so it must be
-	// JWT-exempt or the first operator could never be created. It self-secures
-	// by closing permanently once any platform admin exists.
+	// CreateFirstPlatformAdmin is the trust-on-first-use bootstrap: a fresh
+	// deployer carries NO JWT (no operator user exists yet), so it must be
+	// JWT-exempt or the first operator could never be created. It is not
+	// unconditionally unauthenticated, though: when GATEWAY_ADMIN_API_SECRET is
+	// set the handler requires the X-Admin-Secret header (like the other admin
+	// RPCs), and GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP closes it entirely. It
+	// also self-secures by closing permanently once any platform admin exists.
 	"/identity.v1.IdentityService/CreateFirstPlatformAdmin": true,
 	"/.well-known/jwks.json":                                true,
 	"/health":                                               true,

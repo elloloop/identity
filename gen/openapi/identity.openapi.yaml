@@ -948,8 +948,11 @@ paths:
         - identity.v1.IdentityService
       summary: CreateFirstPlatformAdmin
       description: |-
-        Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
-         succeeds only while platform_admins is empty, then permanently closes
+        Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
+         while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
+         Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
+         call requires the X-Admin-Secret header (PERMISSION_DENIED otherwise), and
+         GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true closes it entirely
          (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
       operationId: identity.v1.IdentityService.CreateFirstPlatformAdmin
       parameters:
@@ -3881,8 +3884,8 @@ components:
           type: string
           title: provider
           description: |-
-            provider is the provider key to remove: "google", "microsoft", "apple", or
-             "oidc". Removing an absent provider is a no-op (idempotent).
+            provider is the provider key to remove: "google", "microsoft", "apple",
+             "github", or "oidc". Removing an absent provider is a no-op (idempotent).
       title: AdminDeleteProjectOAuthProviderRequest
       additionalProperties: false
     identity.v1.AdminDeleteProjectOAuthProviderResponse:
@@ -4384,16 +4387,26 @@ components:
       title: CreateFirstPlatformAdminRequest
       additionalProperties: false
       description: |-
-        CreateFirstPlatformAdmin is the zero-config bootstrap that establishes the
-         FIRST platform admin on a fresh deployment. Unlike every other Admin* RPC
-         it is NOT authenticated by the shared admin secret — its whole purpose is
-         to let a brand-new deployer who has not yet configured anything stand up
-         the initial operator account. It is self-securing instead: it succeeds
-         ONLY while the platform_admins table is empty, and once any admin exists
-         the path is permanently closed (FAILED_PRECONDITION), so it can never be
-         used to escalate privilege on an already-provisioned deployment. The
-         emptiness check + insert are atomic, so two racing bootstraps create
-         exactly one admin and the loser is rejected.
+        CreateFirstPlatformAdmin is the trust-on-first-use (TOFU) bootstrap that
+         establishes the FIRST platform admin on a fresh deployment. It is
+         self-securing: it succeeds ONLY while the platform_admins table is empty,
+         and once any admin exists the path is permanently closed (FAILED_PRECONDITION),
+         so it can never be used to escalate privilege on an already-provisioned
+         deployment. The emptiness check + insert are atomic, so two racing bootstraps
+         create exactly one admin and the loser is rejected.
+
+         Its authentication depends on how the deployment is configured, so a fresh
+         internet-exposed deployment can be hardened against an anonymous caller
+         winning the first-admin race:
+           - When GATEWAY_ADMIN_API_SECRET is UNSET it is zero-config and reachable
+             without any credential — the one Admin* RPC that does not need the shared
+             admin secret — so a brand-new deployer can stand up the initial operator.
+           - When GATEWAY_ADMIN_API_SECRET is SET it is gated on that secret exactly
+             like every other Admin* RPC: the caller must present the matching
+             X-Admin-Secret header or the call is rejected (PERMISSION_DENIED).
+           - When GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true it is closed entirely and
+             always rejected (FAILED_PRECONDITION), regardless of whether any admin
+             exists — for operators who create the first admin out of band.
 
          It is available only on the postgres control-plane driver; the memory driver
          deployments (which have no platform_admins table) return UNIMPLEMENTED.
@@ -5659,7 +5672,7 @@ components:
           title: provider
           description: |-
             provider is the provider key this block configures: "google", "microsoft",
-             "apple", or "oidc". Required.
+             "apple", "github", or "oidc". Required.
         clientId:
           type: string
           title: client_id
@@ -5670,8 +5683,8 @@ components:
           type: string
           title: client_secret
           description: |-
-            client_secret is the PLAINTEXT client secret (Google/Microsoft/OIDC), sent
-             only on a write over TLS and stored encrypted at rest. It is NEVER returned
+            client_secret is the PLAINTEXT client secret (Google/Microsoft/GitHub/OIDC),
+             sent only on a write over TLS and stored encrypted at rest. It is NEVER returned
              on a read (see has_client_secret). On a write an EMPTY value keeps the
              currently-stored secret, so non-secret fields can be edited without
              re-sending it; send a non-empty value to set or rotate the secret.
@@ -5716,6 +5729,19 @@ components:
         microsoftIssuerFormat:
           type: string
           title: microsoft_issuer_format
+        microsoftAllowedTenants:
+          type: array
+          items:
+            type: string
+          title: microsoft_allowed_tenants
+          description: |-
+            microsoft_allowed_tenants is a multi-tenant allow-list of Azure AD directory
+             (tenant) GUIDs. When non-empty, a Microsoft token whose `tid` is not a member
+             is rejected (hosted + native) — the several-trusted-tenants counterpart to
+             the single microsoft_tenant_id pin, closing the nOAuth account-takeover
+             vector for multi-tenant apps. Entries must be GUIDs (a token's `tid` is
+             always a directory GUID, so a domain-form entry could never match and is
+             rejected at config time). Empty imposes no allow-list.
         appleTeamId:
           type: string
           title: apple_team_id
@@ -5748,6 +5774,22 @@ components:
         oidcScopes:
           type: string
           title: oidc_scopes
+        githubAuthorizationUrl:
+          type: string
+          title: github_authorization_url
+          description: |-
+            GitHub endpoint overrides — optional, default to the live GitHub endpoints
+             (used by tests / self-hosted GitHub Enterprise proxies). GitHub is
+             hosted-only (GitHub OAuth issues no ID token), so it has no native_audiences.
+        githubTokenUrl:
+          type: string
+          title: github_token_url
+        githubUserUrl:
+          type: string
+          title: github_user_url
+        githubUserMailUrl:
+          type: string
+          title: github_user_mail_url
       title: ProjectOAuthProviderConfig
       additionalProperties: false
       description: |-

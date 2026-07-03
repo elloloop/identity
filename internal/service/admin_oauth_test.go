@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"go.uber.org/zap"
@@ -25,6 +27,20 @@ func seedOAuthProject(t *testing.T, f *adminFixture) string {
 		t.Fatalf("seed project: %v", err)
 	}
 	return id
+}
+
+// seedProjectConfig writes cfg into the fake control-plane store using the
+// project's CURRENT config version, so a test lays down starting state without
+// having to thread the optimistic-concurrency token by hand.
+func seedProjectConfig(t *testing.T, f *adminFixture, projectID, cfg string) {
+	t.Helper()
+	_, ver, err := f.projects.GetProjectConfig(context.Background(), projectID)
+	if err != nil {
+		t.Fatalf("seed read version: %v", err)
+	}
+	if _, _, err := f.projects.UpdateProjectConfig(context.Background(), projectID, ver, cfg); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
 }
 
 func TestAdminSetProjectOAuthProvider_EncryptsAndResolves(t *testing.T) {
@@ -48,7 +64,7 @@ func TestAdminSetProjectOAuthProvider_EncryptsAndResolves(t *testing.T) {
 		t.Fatalf("view = %+v", view)
 	}
 
-	stored, err := f.projects.GetProjectConfig(ctx, projectID)
+	stored, _, err := f.projects.GetProjectConfig(ctx, projectID)
 	if err != nil {
 		t.Fatalf("GetProjectConfig: %v", err)
 	}
@@ -83,6 +99,130 @@ func TestAdminSetProjectOAuthProvider_EncryptsAndResolves(t *testing.T) {
 	}
 }
 
+// TestAdminSetProjectOAuthProvider_GitHub_RoundTrip proves GitHub authoring
+// mirrors the other providers: the plaintext secret is encrypted at rest and
+// redacted on read, the endpoint overrides round-trip through config_json, and
+// the resolver decrypts and builds the authored provider end-to-end.
+func TestAdminSetProjectOAuthProvider_GitHub_RoundTrip(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	const plaintext = "github-top-secret"
+	view, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:               oauthProviderGitHub,
+		ClientID:               "gh-client",
+		ClientSecret:           plaintext,
+		GitHubAuthorizationURL: "https://ghe.example/login/oauth/authorize",
+		GitHubTokenURL:         "https://ghe.example/login/oauth/access_token",
+		GitHubUserURL:          "https://ghe.example/api/v3/user",
+		GitHubUserMailURL:      "https://ghe.example/api/v3/user/emails",
+	})
+	if err != nil {
+		t.Fatalf("AdminSetProjectOAuthProvider: %v", err)
+	}
+	// The response redacts the secret but reports its presence + the overrides.
+	if !view.HasClientSecret || view.ClientID != "gh-client" {
+		t.Fatalf("view = %+v", view)
+	}
+	if view.GitHubTokenURL != "https://ghe.example/login/oauth/access_token" || view.GitHubUserURL != "https://ghe.example/api/v3/user" {
+		t.Fatalf("github overrides not mapped in view: %+v", view)
+	}
+
+	stored, _, err := f.projects.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig: %v", err)
+	}
+	if strings.Contains(stored, plaintext) {
+		t.Fatalf("plaintext secret leaked into config_json: %s", stored)
+	}
+
+	cfg, err := ParseProjectConfig(stored)
+	if err != nil {
+		t.Fatalf("ParseProjectConfig: %v", err)
+	}
+	if cfg.OAuth.GitHub == nil || cfg.OAuth.GitHub.ClientSecretEnc == "" {
+		t.Fatalf("github secret not stored: %+v", cfg.OAuth.GitHub)
+	}
+	dec, err := secretcrypto.Decrypt(cfg.OAuth.GitHub.ClientSecretEnc, testAdminSecretsKey())
+	if err != nil || dec != plaintext {
+		t.Fatalf("decrypt = %q, %v; want %q", dec, err, plaintext)
+	}
+
+	// The resolver builds the exchanger for this project end-to-end.
+	r := newOAuthResolver("default-proj", nil, zap.NewNop()).withSecrets(testAdminSecretsKey(), nil)
+	rctx := WithProjectScope(ctx, &ProjectScope{ProjectID: projectID, OAuth: cfg.OAuth})
+	if ex, ok := r.exchangerFor(rctx, oauthProviderGitHub); !ok || ex == nil {
+		t.Fatal("resolver could not build the authored github provider")
+	}
+
+	// List surfaces github (redacted) with the endpoint overrides intact.
+	list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
+	if err != nil || len(list) != 1 || list[0].Provider != oauthProviderGitHub || list[0].GitHubUserURL == "" {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+
+	// An empty-secret re-set keeps the stored secret, fully replacing the rest of
+	// the block (so the previously-set overrides are cleared).
+	if v, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderGitHub, ClientID: "gh-client-2",
+	}); err != nil || !v.HasClientSecret || v.ClientID != "gh-client-2" || v.GitHubUserURL != "" {
+		t.Fatalf("empty-secret keep: v=%+v err=%v", v, err)
+	}
+
+	// Delete removes only it.
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGitHub); err != nil {
+		t.Fatalf("delete github: %v", err)
+	}
+	if list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); err != nil || len(list) != 0 {
+		t.Fatalf("after delete list = %+v, err = %v; want empty", list, err)
+	}
+}
+
+// GitHub is hosted-only (GitHub OAuth issues no ID token), so native_audiences
+// on a github write must be rejected — never silently dropped.
+func TestAdminSetProjectOAuthProvider_GitHubRejectsNativeAudiences(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	_, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:        oauthProviderGitHub,
+		ClientID:        "gh",
+		ClientSecret:    "gh-secret",
+		NativeAudiences: []string{"native.aud"},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("github with native_audiences: err = %v, want ErrInvalidArgument", err)
+	}
+
+	// The same write without native_audiences succeeds.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderGitHub, ClientID: "gh", ClientSecret: "gh-secret",
+	}); err != nil {
+		t.Fatalf("github without native_audiences: %v", err)
+	}
+}
+
+// A github block missing its required credentials is rejected at author time
+// (hosted-only: there is no native-audience alternative).
+func TestAdminSetProjectOAuthProvider_GitHubRejectsIncomplete(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	_, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderGitHub,
+		ClientID: "gh",
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("incomplete github: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestAdminSetProjectOAuthProvider_PreservesOtherConfigKeys(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(oauthAdminSecret)
@@ -91,9 +231,7 @@ func TestAdminSetProjectOAuthProvider_PreservesOtherConfigKeys(t *testing.T) {
 
 	// Seed unrelated config (branding + cors) directly.
 	const seed = `{"branding":{"product_name":"Kids"},"cors":{"allowed_origins":["https://pro.example.com"]}}`
-	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, seed); err != nil {
-		t.Fatalf("seed config: %v", err)
-	}
+	seedProjectConfig(t, f, projectID, seed)
 
 	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
 		Provider:     oauthProviderOIDC,
@@ -104,7 +242,7 @@ func TestAdminSetProjectOAuthProvider_PreservesOtherConfigKeys(t *testing.T) {
 		t.Fatalf("set oidc: %v", err)
 	}
 
-	stored, err := f.projects.GetProjectConfig(ctx, projectID)
+	stored, _, err := f.projects.GetProjectConfig(ctx, projectID)
 	if err != nil {
 		t.Fatalf("GetProjectConfig: %v", err)
 	}
@@ -152,7 +290,7 @@ func TestAdminSetProjectOAuthProvider_EmptySecretKeepsExisting(t *testing.T) {
 		t.Fatalf("view = %+v", view)
 	}
 
-	stored, _ := f.projects.GetProjectConfig(ctx, projectID)
+	stored, _, _ := f.projects.GetProjectConfig(ctx, projectID)
 	cfg, err := ParseProjectConfig(stored)
 	if err != nil {
 		t.Fatalf("ParseProjectConfig: %v", err)
@@ -179,7 +317,7 @@ func TestAdminSetProjectOAuthProvider_RotatesSecret(t *testing.T) {
 	set("key-v1")
 	set("key-v2")
 
-	stored, _ := f.projects.GetProjectConfig(ctx, projectID)
+	stored, _, _ := f.projects.GetProjectConfig(ctx, projectID)
 	cfg, _ := ParseProjectConfig(stored)
 	dec, err := secretcrypto.Decrypt(cfg.OAuth.Apple.PrivateKeyEnc, testAdminSecretsKey())
 	if err != nil || dec != "key-v2" {
@@ -273,6 +411,54 @@ func TestAdminSetProjectOAuthProvider_RejectsBadIssuerFormat(t *testing.T) {
 	}
 }
 
+// TestAdminSetProjectOAuthProvider_MicrosoftAllowedTenants_RoundTrip proves the
+// nOAuth allow-list survives the write→read authoring round-trip (input →
+// config_json → redacted view) and lands on the resolved provider config.
+func TestAdminSetProjectOAuthProvider_MicrosoftAllowedTenants_RoundTrip(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	tenants := []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
+	view, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:                oauthProviderMicrosoft,
+		ClientID:                "ms",
+		ClientSecret:            "ms-secret",
+		MicrosoftAllowedTenants: append([]string{"  "}, tenants...), // a blank entry is dropped
+	})
+	if err != nil {
+		t.Fatalf("AdminSetProjectOAuthProvider: %v", err)
+	}
+	if !slices.Equal(view.MicrosoftAllowedTenants, tenants) {
+		t.Fatalf("view allowed_tenants = %v, want %v", view.MicrosoftAllowedTenants, tenants)
+	}
+
+	// The list round-trips through config_json onto the typed provider.
+	stored, _, err := f.projects.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig: %v", err)
+	}
+	cfg, err := ParseProjectConfig(stored)
+	if err != nil {
+		t.Fatalf("ParseProjectConfig: %v", err)
+	}
+	if cfg.OAuth.Microsoft == nil || !slices.Equal(cfg.OAuth.Microsoft.AllowedTenants, tenants) {
+		t.Fatalf("stored allowed_tenants = %+v, want %v", cfg.OAuth.Microsoft, tenants)
+	}
+
+	// A malformed entry (here a verified-domain form, which can never match a
+	// token's GUID `tid`) is rejected at author time.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:                oauthProviderMicrosoft,
+		ClientID:                "ms",
+		ClientSecret:            "ms-secret",
+		MicrosoftAllowedTenants: []string{"contoso.onmicrosoft.com"},
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("domain-form allowed_tenants: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestAdminSetProjectOAuthProvider_RejectsMissingRequiredFields(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(oauthAdminSecret)
@@ -295,6 +481,37 @@ func TestAdminSetProjectOAuthProvider_RejectsMissingRequiredFields(t *testing.T)
 	})
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("incomplete oidc: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+// OIDC is hosted-only and has no native-audience allow-list, so native_audiences
+// on an oidc write must be rejected (not silently dropped). The same write
+// without native_audiences succeeds.
+func TestAdminSetProjectOAuthProvider_OIDCRejectsNativeAudiences(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	_, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:        oauthProviderOIDC,
+		ClientID:        "oidc-client",
+		ClientSecret:    "oidc-secret",
+		OIDCIssuer:      "https://idp.example.com",
+		NativeAudiences: []string{"native.aud"},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("oidc with native_audiences: err = %v, want ErrInvalidArgument", err)
+	}
+
+	// The same write without native_audiences succeeds.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:     oauthProviderOIDC,
+		ClientID:     "oidc-client",
+		ClientSecret: "oidc-secret",
+		OIDCIssuer:   "https://idp.example.com",
+	}); err != nil {
+		t.Fatalf("oidc without native_audiences: %v", err)
 	}
 }
 
@@ -390,7 +607,7 @@ func TestAdminOAuthRPCs_DisabledWhenSecretEmpty(t *testing.T) {
 // config_json, so tests can assert exactly which keys survive a merge.
 func oauthSubtreeOf(t *testing.T, f *adminFixture, projectID string) map[string]json.RawMessage {
 	t.Helper()
-	stored, err := f.projects.GetProjectConfig(context.Background(), projectID)
+	stored, _, err := f.projects.GetProjectConfig(context.Background(), projectID)
 	if err != nil {
 		t.Fatalf("GetProjectConfig: %v", err)
 	}
@@ -422,9 +639,7 @@ func TestAdminOAuthProvider_PreservesUnknownOAuthKeys(t *testing.T) {
 		`"google":{"client_id":"g","client_secret_enc":"ENC","future_field":"keepme"},` +
 		`"future_provider":{"client_id":"fp","weird":123},` +
 		`"apple":{"native_audiences":["com.x"]}}}`
-	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, seed); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedProjectConfig(t, f, projectID, seed)
 
 	// Set a DIFFERENT provider and Delete ANOTHER one.
 	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
@@ -453,7 +668,7 @@ func TestAdminOAuthProvider_PreservesUnknownOAuthKeys(t *testing.T) {
 		t.Fatal("apple not deleted")
 	}
 	// The non-oauth top-level key survives.
-	stored, _ := f.projects.GetProjectConfig(ctx, projectID)
+	stored, _, _ := f.projects.GetProjectConfig(ctx, projectID)
 	if !strings.Contains(stored, `"product_name":"Kids"`) {
 		t.Fatalf("branding dropped: %s", stored)
 	}
@@ -472,9 +687,7 @@ func TestAdminDeleteProjectOAuthProvider_IgnoresInvalidNeighbor(t *testing.T) {
 	const seed = `{"oauth":{` +
 		`"google":{"client_id":"g","client_secret_enc":"ENC"},` +
 		`"microsoft":{"client_id":"m","client_secret_enc":"ENC","issuer_format":"https://login.test/no-verb"}}}`
-	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, seed); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedProjectConfig(t, f, projectID, seed)
 
 	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGoogle); err != nil {
 		t.Fatalf("delete google must succeed despite invalid neighbor: %v", err)
@@ -525,14 +738,14 @@ func TestAdminSetProjectOAuthProvider_AllProviderFields(t *testing.T) {
 		Provider:              oauthProviderMicrosoft,
 		ClientID:              "ms-client",
 		ClientSecret:          "ms-secret",
-		MicrosoftTenantID:     "tenant-abc",
+		MicrosoftTenantID:     "aaaaaaaa-1111-2222-3333-444444444444",
 		MicrosoftIssuerFormat: "https://login.test/%s/v2.0",
 		NativeAudiences:       []string{"ms-native"},
 	})
 	if err != nil {
 		t.Fatalf("set microsoft: %v", err)
 	}
-	if ms.MicrosoftTenantID != "tenant-abc" || ms.MicrosoftIssuerFormat != "https://login.test/%s/v2.0" ||
+	if ms.MicrosoftTenantID != "aaaaaaaa-1111-2222-3333-444444444444" || ms.MicrosoftIssuerFormat != "https://login.test/%s/v2.0" ||
 		!ms.HasClientSecret || len(ms.NativeAudiences) != 1 {
 		t.Fatalf("microsoft view = %+v", ms)
 	}
@@ -578,7 +791,7 @@ func TestAdminSetProjectOAuthProvider_AllProviderFields(t *testing.T) {
 			t.Fatalf("list order = %v, want %v", gotOrder, want)
 		}
 	}
-	if !list[1].HasClientSecret || list[1].MicrosoftTenantID != "tenant-abc" {
+	if !list[1].HasClientSecret || list[1].MicrosoftTenantID != "aaaaaaaa-1111-2222-3333-444444444444" {
 		t.Fatalf("listed microsoft not mapped/redacted: %+v", list[1])
 	}
 }
@@ -590,9 +803,7 @@ func TestAdminOAuthProvider_MalformedStoredSubtree(t *testing.T) {
 	f := newAdminFixture(oauthAdminSecret)
 	ctx := context.Background()
 	projectID := seedOAuthProject(t, f)
-	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, `{"oauth":["not","an","object"]}`); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedProjectConfig(t, f, projectID, `{"oauth":["not","an","object"]}`)
 	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("list malformed oauth: err = %v, want ErrInvalidArgument", err)
 	}
@@ -632,9 +843,7 @@ func TestAdminOAuthProvider_MalformedStoredTopLevel(t *testing.T) {
 	f := newAdminFixture(oauthAdminSecret)
 	ctx := context.Background()
 	projectID := seedOAuthProject(t, f)
-	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, `[1,2,3]`); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedProjectConfig(t, f, projectID, `[1,2,3]`)
 	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("list malformed top-level: err = %v, want ErrInvalidArgument", err)
 	}
@@ -647,9 +856,7 @@ func TestAdminListProjectOAuthProviders_MalformedProviderValue(t *testing.T) {
 	f := newAdminFixture(oauthAdminSecret)
 	ctx := context.Background()
 	projectID := seedOAuthProject(t, f)
-	if _, err := f.projects.UpdateProjectConfig(ctx, projectID, `{"oauth":{"google":"not-an-object"}}`); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedProjectConfig(t, f, projectID, `{"oauth":{"google":"not-an-object"}}`)
 	if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("list malformed provider: err = %v, want ErrInvalidArgument", err)
 	}
@@ -670,7 +877,7 @@ func TestAdminSetProjectOAuthProvider_EmptySecretKeepsAllProviders(t *testing.T)
 		t.Fatalf("ms set: %v", err)
 	}
 	if v, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
-		Provider: oauthProviderMicrosoft, ClientID: "m2", MicrosoftTenantID: "t",
+		Provider: oauthProviderMicrosoft, ClientID: "m2", MicrosoftTenantID: "22222222-2222-2222-2222-222222222222",
 	}); err != nil || !v.HasClientSecret || v.ClientID != "m2" {
 		t.Fatalf("ms re-set keep: v=%+v err=%v", v, err)
 	}
@@ -710,12 +917,146 @@ func TestAdminListProjectOAuthProviders_MalformedPerProvider(t *testing.T) {
 			f := newAdminFixture(oauthAdminSecret)
 			ctx := context.Background()
 			projectID := seedOAuthProject(t, f)
-			if _, err := f.projects.UpdateProjectConfig(ctx, projectID, `{"oauth":{"`+key+`":42}}`); err != nil {
-				t.Fatalf("seed: %v", err)
-			}
+			seedProjectConfig(t, f, projectID, `{"oauth":{"`+key+`":42}}`)
 			if _, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); !errors.Is(err, ErrInvalidArgument) {
 				t.Fatalf("list malformed %s: err = %v, want ErrInvalidArgument", key, err)
 			}
 		})
+	}
+}
+
+// TestAdminSetProjectOAuthProvider_ConcurrentDifferentProviders_NoLostUpdate is
+// the service-level regression proof for issue #313: two operators concurrently
+// set DIFFERENT providers on the SAME project. The config_json write is a
+// read-modify-write, so without the optimistic-concurrency CAS + retry the later
+// writer would clobber the earlier one and a provider would vanish. With it,
+// BOTH providers must be present afterward and each must emit exactly one audit
+// event (retries re-run the merge but never double-log). Run with -race.
+func TestAdminSetProjectOAuthProvider_ConcurrentDifferentProviders_NoLostUpdate(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	start := make(chan struct{})
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		_, errs[0] = f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+			Provider: oauthProviderGoogle, ClientID: "goog", ClientSecret: "goog-secret",
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		_, errs[1] = f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+			Provider: oauthProviderMicrosoft, ClientID: "ms", ClientSecret: "ms-secret",
+		})
+	}()
+	close(start)
+	wg.Wait()
+
+	if errs[0] != nil || errs[1] != nil {
+		t.Fatalf("concurrent set errors: google=%v microsoft=%v", errs[0], errs[1])
+	}
+
+	// NEITHER write was lost: both providers survive in the merged config.
+	stored, _, err := f.projects.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig: %v", err)
+	}
+	cfg, err := ParseProjectConfig(stored)
+	if err != nil {
+		t.Fatalf("ParseProjectConfig: %v", err)
+	}
+	if cfg.OAuth.Google == nil || cfg.OAuth.Google.ClientID != "goog" {
+		t.Fatalf("google provider lost to a concurrent clobber: %+v", cfg.OAuth.Google)
+	}
+	if cfg.OAuth.Microsoft == nil || cfg.OAuth.Microsoft.ClientID != "ms" {
+		t.Fatalf("microsoft provider lost to a concurrent clobber: %+v", cfg.OAuth.Microsoft)
+	}
+	// Exactly two successful sets → exactly two audit events (a retried set that
+	// re-ran the merge must not double-log).
+	if n := f.audit.countByEventType(string(audit.EventProjectOAuthProviderSet)); n != 2 {
+		t.Fatalf("project_oauth_provider_set events = %d, want 2", n)
+	}
+}
+
+// TestControlPlaneStore_ConfigCAS_StaleVersionRejected proves the store contract
+// every driver's fake must honour: a write carrying a version the row has moved
+// past is rejected with ErrProjectConfigConflict and does not mutate the blob.
+func TestControlPlaneStore_ConfigCAS_StaleVersionRejected(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	_, v0, err := f.projects.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig: %v", err)
+	}
+	if _, v1, err := f.projects.UpdateProjectConfig(ctx, projectID, v0, `{"branding":{"product_name":"A"}}`); err != nil || v1 != v0+1 {
+		t.Fatalf("first write: v1=%d err=%v", v1, err)
+	}
+	// A second write still carrying the now-stale v0 loses the CAS.
+	if _, _, err := f.projects.UpdateProjectConfig(ctx, projectID, v0, `{"branding":{"product_name":"B"}}`); !errors.Is(err, ErrProjectConfigConflict) {
+		t.Fatalf("stale write: err = %v, want ErrProjectConfigConflict", err)
+	}
+	// The blob is unchanged by the rejected write.
+	stored, _, err := f.projects.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig after stale: %v", err)
+	}
+	if !strings.Contains(stored, `"product_name":"A"`) {
+		t.Fatalf("rejected stale write mutated the blob: %s", stored)
+	}
+}
+
+// TestAdminSetProjectOAuthProvider_RetryExhaustion_Conflict proves a config
+// write that keeps losing the CAS surfaces ErrProjectConfigConflict after the
+// bounded retries — the retryable signal the Connect layer maps to CodeAborted.
+func TestAdminSetProjectOAuthProvider_RetryExhaustion_Conflict(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	// Every UpdateProjectConfig loses its CAS, so the bounded retry loop exhausts.
+	f.projects.forceConflict = true
+	_, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderGoogle, ClientID: "goog", ClientSecret: "goog-secret",
+	})
+	if !errors.Is(err, ErrProjectConfigConflict) {
+		t.Fatalf("retry exhaustion: err = %v, want ErrProjectConfigConflict", err)
+	}
+	// A persistent conflict must NOT emit a success audit event.
+	if n := f.audit.countByEventType(string(audit.EventProjectOAuthProviderSet)); n != 0 {
+		t.Fatalf("project_oauth_provider_set events = %d, want 0 on exhausted conflict", n)
+	}
+}
+
+// TestAdminSetProjectOAuthProvider_StoreErrorNotRetried proves the retry helper
+// only retries a version conflict: any OTHER store error from the write is
+// surfaced immediately (not spun on and not swallowed as a conflict).
+func TestAdminSetProjectOAuthProvider_StoreErrorNotRetried(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	sentinel := errors.New("boom: transient store failure")
+	f.projects.updateErr = sentinel
+	_, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderGoogle, ClientID: "goog", ClientSecret: "goog-secret",
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("store error: err = %v, want %v", err, sentinel)
+	}
+	if errors.Is(err, ErrProjectConfigConflict) {
+		t.Fatal("a non-conflict store error must not be reported as a config conflict")
 	}
 }

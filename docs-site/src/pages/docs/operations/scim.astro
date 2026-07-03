@@ -96,14 +96,28 @@ GATEWAY_SCIM_PROJECT_ID=<project-id>`}
   }'`}
   />
 
+  <h2>Audit &amp; lifecycle events</h2>
+  <p>
+    SCIM mutations record the same audit entries and emit the same
+    <code>user.*</code> lifecycle events as the equivalent admin/gRPC
+    operation, so a SCIM offboard fires the same downstream-deprovisioning
+    webhooks an admin-driven one does. Audit entries carry the actor
+    <code>system:scim</code> and <code>source: scim</code> in their details,
+    and always attribute to the configured project. The mapping: create emits
+    <code>user.created</code>, deactivate emits <code>user.deactivated</code>,
+    delete emits <code>user.deactivated</code> (a hard delete is a
+    deprovisioning signal), and reactivation or a profile update emits
+    <code>user.updated</code>. Every successful SCIM sync write emits a
+    <code>user.updated</code> event, so an IdP that drives full-PUT or periodic
+    attribute syncs produces one event per write — chatty by design.
+  </p>
+
   <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
     <strong>Deferred.</strong> SCIM <code>/Groups</code> is not yet
     implemented. Each bearer token is scoped to one project
     (<code>GATEWAY_SCIM_PROJECT_ID</code>); multiplexing several projects
-    through a single credential is intentionally out of scope. SCIM mutations
-    write straight through the project-scoped repository, so they do not yet
-    emit the service-layer audit events / user-lifecycle webhooks that the gRPC
-    admin path does — a tracked follow-up. The <code>/Users</code> surface
-    above is complete and tested across all storage backends.
+    through a single credential is intentionally out of scope. The
+    <code>/Users</code> surface above is complete and tested across all
+    storage backends.
   </div>
 </DocsLayout>

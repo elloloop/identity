@@ -22,32 +22,43 @@ const handlerAdminSecret = "handler-operator-secret"
 // for the admin handler tests. It records the project/credential ids it mints
 // and the last auth-domain it was asked to ensure.
 type adminControlStore struct {
-	nextID     int
-	domains    map[string]*service.AdminProjectAuthDomain // hostname → row
-	configs    map[string]string                          // projectID → config_json
-	lastDomain struct {
+	nextID         int
+	domains        map[string]*service.AdminProjectAuthDomain // hostname → row
+	configs        map[string]string                          // projectID → config_json
+	configVersions map[string]int64                           // projectID → CAS token
+	lastDomain     struct {
 		projectID string
 		hostname  string
 		isPrimary bool
 	}
 }
 
-func (s *adminControlStore) UpdateProjectConfig(_ context.Context, projectID, configJSON string) (string, error) {
+func (s *adminControlStore) UpdateProjectConfig(_ context.Context, projectID string, expectedVersion int64, configJSON string) (string, int64, error) {
 	if s.configs == nil {
 		s.configs = map[string]string{}
+	}
+	if s.configVersions == nil {
+		s.configVersions = map[string]int64{}
+	}
+	if s.configVersions[projectID] != expectedVersion {
+		return "", 0, service.ErrProjectConfigConflict
 	}
 	if configJSON == "" {
 		configJSON = "{}"
 	}
 	s.configs[projectID] = configJSON
-	return configJSON, nil
+	s.configVersions[projectID] = expectedVersion + 1
+	return configJSON, expectedVersion + 1, nil
 }
 
-func (s *adminControlStore) GetProjectConfig(_ context.Context, projectID string) (string, error) {
-	if cfg, ok := s.configs[projectID]; ok {
-		return cfg, nil
+func (s *adminControlStore) GetProjectConfig(_ context.Context, projectID string) (string, int64, error) {
+	if s.configVersions == nil {
+		s.configVersions = map[string]int64{}
 	}
-	return "{}", nil
+	if cfg, ok := s.configs[projectID]; ok {
+		return cfg, s.configVersions[projectID], nil
+	}
+	return "{}", s.configVersions[projectID], nil
 }
 
 // adminLoginPolicyStore is an in-memory LoginPolicyStore for the handler
@@ -233,7 +244,7 @@ func handlerSecretsKey() []byte {
 func newAdminControlSvc(secret string) (*service.ControlPlaneAdminService, *adminControlStore, *connectMembershipStore) {
 	store := &adminControlStore{}
 	members := &connectMembershipStore{}
-	svc := service.NewControlPlaneAdminService(secret, handlerSecretsKey(), store, &connectTenantStore{}, members, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(secret, false, handlerSecretsKey(), store, &connectTenantStore{}, members, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return svc, store, members
 }
 
@@ -327,7 +338,7 @@ func TestAdminRPCs_CustomAuthDomain_Handler(t *testing.T) {
 	t.Parallel()
 	store := &adminControlStore{}
 	dns := &adminDNSResolver{txt: map[string][]string{}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, handlerSecretsKey(), store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
 	client := startAdminServer(t, svc)
 	ctx := context.Background()
 
@@ -385,7 +396,7 @@ func TestAdminRPCs_SetPrimaryAuthDomain_UnverifiedRejected_Handler(t *testing.T)
 	t.Parallel()
 	store := &adminControlStore{}
 	dns := &adminDNSResolver{txt: map[string][]string{}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, handlerSecretsKey(), store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, false, handlerSecretsKey(), store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
 	client := startAdminServer(t, svc)
 	ctx := context.Background()
 
@@ -482,7 +493,7 @@ func TestAdminRPCs_HappyPath_Handler(t *testing.T) {
 func startBootstrapServer(t *testing.T) (identityconnectgen.IdentityServiceClient, *connectPlatformAdminStore) {
 	t.Helper()
 	admins := &connectPlatformAdminStore{}
-	svc := service.NewControlPlaneAdminService("", handlerSecretsKey(), &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService("", false, handlerSecretsKey(), &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return startAdminServer(t, svc), admins
 }
 
@@ -528,6 +539,54 @@ func TestCreateFirstPlatformAdmin_SecondCall_FailedPrecondition(t *testing.T) {
 	_, err := client.CreateFirstPlatformAdmin(ctx,
 		connect.NewRequest(&identitypb.CreateFirstPlatformAdminRequest{Email: "second@acme.com"}))
 	requireCode(t, err, connect.CodeFailedPrecondition)
+}
+
+// startBootstrapServerWithSecret mounts a bootstrap-capable admin handler with
+// the given admin secret and disable flag, so the hardening paths can be driven
+// end-to-end through the handler.
+func startBootstrapServerWithSecret(t *testing.T, secret string, disableBootstrap bool) (identityconnectgen.IdentityServiceClient, *connectPlatformAdminStore) {
+	t.Helper()
+	admins := &connectPlatformAdminStore{}
+	svc := service.NewControlPlaneAdminService(secret, disableBootstrap, handlerSecretsKey(), &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	return startAdminServer(t, svc), admins
+}
+
+func TestCreateFirstPlatformAdmin_SecretConfigured_RequiresSecret(t *testing.T) {
+	t.Parallel()
+	client, admins := startBootstrapServerWithSecret(t, handlerAdminSecret, false)
+	ctx := context.Background()
+
+	// No X-Admin-Secret header → PermissionDenied, exactly like the other admin
+	// RPCs, and nothing is written.
+	_, err := client.CreateFirstPlatformAdmin(ctx,
+		connect.NewRequest(&identitypb.CreateFirstPlatformAdminRequest{Email: "ops@acme.com"}))
+	requireCode(t, err, connect.CodePermissionDenied)
+	if admins.count != 0 {
+		t.Fatalf("admin count = %d, want 0 after a denied bootstrap", admins.count)
+	}
+
+	// Correct secret in the header → bootstrap succeeds.
+	resp, err := client.CreateFirstPlatformAdmin(ctx,
+		withAdminSecret(&identitypb.CreateFirstPlatformAdminRequest{Email: "ops@acme.com"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("CreateFirstPlatformAdmin with correct secret: %v", err)
+	}
+	if resp.Msg.GetAdminId() == "" || admins.count != 1 {
+		t.Fatalf("resp = %+v, admin count = %d", resp.Msg, admins.count)
+	}
+}
+
+func TestCreateFirstPlatformAdmin_Disabled_FailedPrecondition(t *testing.T) {
+	t.Parallel()
+	// GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP closes the surface: rejected with
+	// FAILED_PRECONDITION even when a correct admin secret is presented.
+	client, admins := startBootstrapServerWithSecret(t, handlerAdminSecret, true)
+	_, err := client.CreateFirstPlatformAdmin(context.Background(),
+		withAdminSecret(&identitypb.CreateFirstPlatformAdminRequest{Email: "ops@acme.com"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeFailedPrecondition)
+	if admins.count != 0 {
+		t.Fatalf("admin count = %d, want 0 (a disabled bootstrap must not write)", admins.count)
+	}
 }
 
 // ── LoginPolicy + ProjectConfig admin RPCs through the handler ───────────
