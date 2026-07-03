@@ -125,8 +125,10 @@ type Config struct {
 	// DisableFirstAdminBootstrap closes the CreateFirstPlatformAdmin RPC — the
 	// trust-on-first-use bootstrap of the first platform admin — entirely. When
 	// true the RPC is rejected with FAILED_PRECONDITION regardless of whether any
-	// admin exists yet, for operators who bootstrap the first admin out-of-band
-	// (e.g. a migration or seed job) and want the public bootstrap surface shut.
+	// admin exists yet, for operators who prefer the public bootstrap surface
+	// shut. With it closed the first admin must be created another way: a direct
+	// insert into platform_admins, or by toggling this off just long enough to
+	// bootstrap and back on — no first-party seed CLI or migration ships for it.
 	// It does NOT gate the other admin RPCs. The default false preserves the
 	// zero-config bootstrap; note that when GATEWAY_ADMIN_API_SECRET is set the
 	// bootstrap is already secret-gated even with this off. Driven by

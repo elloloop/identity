@@ -180,8 +180,10 @@ curl -sX POST http://localhost:8080/identity.v1.IdentityService/CreateFirstPlatf
     <li>
       <code>GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP: "true"</code> in the
       <code>identity-config</code> ConfigMap — closes the RPC entirely
-      (<code>FAILED_PRECONDITION</code>) for operators who provision the first
-      admin out-of-band (a Job or migration).
+      (<code>FAILED_PRECONDITION</code>). With it closed, create the first admin
+      by a direct insert into <code>platform_admins</code>, or toggle the flag
+      off just long enough to bootstrap and back on (no first-party seed CLI
+      ships).
     </li>
   </ul>
 </DocsLayout>

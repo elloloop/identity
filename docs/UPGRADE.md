@@ -167,8 +167,10 @@ keep:
    win the first-admin race. Create the first admin over a private network
    first, and/or set `GATEWAY_ADMIN_API_SECRET` (which then also gates the
    bootstrap on the `X-Admin-Secret` header) or
-   `GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true` (to close the RPC entirely and
-   provision the admin out-of-band).
+   `GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true` (to close the RPC entirely — the
+   first admin is then created by a direct `platform_admins` insert, or by
+   toggling the flag off just long enough to bootstrap and back on; no
+   first-party seed CLI or migration ships for this).
 
 SQLite backends are likewise a fresh start — the SQLite schema is the v1.0
 Project-keyed shape; there is no legacy data to carry forward.

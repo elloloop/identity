@@ -87,9 +87,11 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
     </li>
     <li>
       <strong>Close the surface entirely.</strong> Set
-      <code>GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true</code> and provision the
-      first admin out-of-band (a seed job or migration); the RPC then returns
-      <code>FAILED_PRECONDITION</code> regardless of whether any admin exists.
+      <code>GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true</code>; the RPC then
+      returns <code>FAILED_PRECONDITION</code> regardless of whether any admin
+      exists. With it closed, create the first admin by a direct insert into
+      <code>platform_admins</code>, or toggle the flag off just long enough to
+      bootstrap and back on — no first-party seed CLI ships.
     </li>
   </ul>
 

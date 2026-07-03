@@ -232,9 +232,11 @@ prefer one of:
   other Admin RPC (a wrong or missing secret is `PERMISSION_DENIED`). TOFU
   stays zero-config **only** when no secret is set, so anyone already running
   with an admin secret gets the hardening opt-in-by-default.
-- **Close the surface entirely.** Set `GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true`
-  and provision the first admin out-of-band (a seed job or migration); the RPC
-  then returns `FAILED_PRECONDITION` regardless of whether any admin exists.
+- **Close the surface entirely.** Set `GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true`;
+  the RPC then returns `FAILED_PRECONDITION` regardless of whether any admin
+  exists. With it closed, the first admin must be created another way — a direct
+  insert into `platform_admins`, or by toggling the flag off just long enough to
+  bootstrap and back on. No first-party seed CLI or migration ships for this.
 
 Like the other control-plane RPCs it is postgres-only; sqlite/memory
 deployments (which have no `platform_admins` table) return
