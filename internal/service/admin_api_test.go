@@ -1104,6 +1104,11 @@ func TestCreateFirstPlatformAdmin_BlockedAttemptEmitsAudit(t *testing.T) {
 	if n := f.audit.countByEventType(string(audit.EventPlatformAdminBootstrapBlocked)); n != 1 {
 		t.Fatalf("blocked events after closed-bootstrap probe = %d, want 1", n)
 	}
+	// The closed-bootstrap probe is recorded with the already_provisioned reason,
+	// distinguishing it from a secret-denied or disabled denial.
+	if n := f.audit.countByEventTypeAndDetail(string(audit.EventPlatformAdminBootstrapBlocked), "reason", bootstrapBlockedAlreadyProvisioned); n != 1 {
+		t.Fatalf("already_provisioned blocked events = %d, want 1", n)
+	}
 	// Perf contract: the unlocked CountPlatformAdmins pre-check must have
 	// short-circuited the closed-bootstrap probe BEFORE the advisory-lock
 	// transaction — so the locked create ran exactly once (the real bootstrap).
@@ -1176,6 +1181,11 @@ func TestCreateFirstPlatformAdmin_SecretConfigured_WrongOrMissingSecretDenied(t 
 		if n, _ := f.admins.CountPlatformAdmins(ctx); n != 0 {
 			t.Fatalf("secret=%q: admin count = %d, want 0 (a denied bootstrap must not write)", presented, n)
 		}
+		// The denial must be auditable — a secret-denied probe against a hardened
+		// deployment is exactly the signal this feature exists to surface.
+		if n := f.audit.countByEventTypeAndDetail(string(audit.EventPlatformAdminBootstrapBlocked), "reason", bootstrapBlockedSecretDenied); n != 1 {
+			t.Fatalf("secret=%q: secret_denied blocked events = %d, want 1", presented, n)
+		}
 	}
 }
 
@@ -1194,6 +1204,10 @@ func TestCreateFirstPlatformAdmin_SecretConfigured_CorrectSecretSucceeds(t *test
 	if n, _ := f.admins.CountPlatformAdmins(ctx); n != 1 {
 		t.Fatalf("admin count = %d, want 1", n)
 	}
+	// A successful bootstrap must NOT emit any blocked-bootstrap event.
+	if n := f.audit.countByEventType(string(audit.EventPlatformAdminBootstrapBlocked)); n != 0 {
+		t.Fatalf("blocked events after a successful secret-gated bootstrap = %d, want 0", n)
+	}
 }
 
 func TestCreateFirstPlatformAdmin_NoSecretConfigured_IgnoresPresentedSecret(t *testing.T) {
@@ -1208,6 +1222,10 @@ func TestCreateFirstPlatformAdmin_NoSecretConfigured_IgnoresPresentedSecret(t *t
 	}
 	if n, _ := f.admins.CountPlatformAdmins(ctx); n != 1 {
 		t.Fatalf("admin count = %d, want 1", n)
+	}
+	// The zero-config success path must NOT emit any blocked-bootstrap event.
+	if n := f.audit.countByEventType(string(audit.EventPlatformAdminBootstrapBlocked)); n != 0 {
+		t.Fatalf("blocked events after a zero-config bootstrap = %d, want 0", n)
 	}
 }
 
@@ -1234,6 +1252,10 @@ func TestCreateFirstPlatformAdmin_Disabled_RejectedEvenWithCorrectSecret(t *test
 			}
 			if n, _ := f.admins.CountPlatformAdmins(ctx); n != 0 {
 				t.Fatalf("admin count = %d, want 0 (a disabled bootstrap must not write)", n)
+			}
+			// A closed-bootstrap probe must be auditable with a distinct reason.
+			if n := f.audit.countByEventTypeAndDetail(string(audit.EventPlatformAdminBootstrapBlocked), "reason", bootstrapBlockedDisabled); n != 1 {
+				t.Fatalf("bootstrap_disabled blocked events = %d, want 1", n)
 			}
 		})
 	}

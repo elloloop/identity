@@ -169,8 +169,8 @@ type ControlPlaneAdminService struct {
 	// this build has no governance plane (memory), which makes the
 	// LoginPolicy admin RPCs return ErrUnimplemented.
 	policies LoginPolicyStore
-	// admins backs the zero-config first-admin bootstrap. nil when this build
-	// has no control plane (memory), which makes CreateFirstPlatformAdmin
+	// admins backs the trust-on-first-use first-admin bootstrap. nil when this
+	// build has no control plane (memory), which makes CreateFirstPlatformAdmin
 	// return ErrUnimplemented.
 	admins PlatformAdminStore
 	// resolver is the DNS TXT-lookup boundary VerifyProjectAuthDomain uses to
@@ -178,10 +178,12 @@ type ControlPlaneAdminService struct {
 	// the present/absent paths without real DNS.
 	resolver DNSResolver
 	// audit records control-plane security events. Currently it captures
-	// BLOCKED first-admin bootstrap attempts (a call after an admin already
-	// exists) so a closed-bootstrap probe is visible in the audit trail. nil
-	// is tolerated (best-effort): NewControlPlaneAdminService installs a
-	// no-op logger so call sites never nil-check.
+	// BLOCKED first-admin bootstrap attempts — a call after an admin already
+	// exists, one the admin-secret gate rejects, or one against a disabled
+	// bootstrap — each stamped with a distinct reason, so hostile first-admin
+	// probing is visible in the audit trail. nil is tolerated (best-effort):
+	// NewControlPlaneAdminService installs a no-op logger so call sites never
+	// nil-check.
 	audit   *audit.Logger
 	logger  *zap.Logger
 	nowFunc func() int64
@@ -626,12 +628,14 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 		return nil, ErrUnimplemented
 	}
 	if s.disableFirstAdminBootstrap {
+		s.recordBootstrapBlocked(ctx, canonicalizeEmail(email), bootstrapBlockedDisabled)
 		return nil, ErrFirstAdminBootstrapDisabled
 	}
 	// When an admin secret is configured the bootstrap is gated on it too, so a
 	// fresh internet-exposed deployment cannot have an anonymous caller win the
 	// first-admin race. TOFU stays zero-config ONLY when no secret is set.
 	if s.secret != "" && subtle.ConstantTimeCompare([]byte(secret), []byte(s.secret)) != 1 {
+		s.recordBootstrapBlocked(ctx, canonicalizeEmail(email), bootstrapBlockedSecretDenied)
 		return nil, ErrPermissionDenied
 	}
 	email = strings.TrimSpace(email)
@@ -649,7 +653,7 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 	// serialized CreateFirstPlatformAdmin recount below, so a concurrent first
 	// bootstrap that slips past this read is still rejected race-safely.
 	if n, err := s.admins.CountPlatformAdmins(ctx); err == nil && n > 0 {
-		s.recordBootstrapBlocked(ctx, canonicalEmail)
+		s.recordBootstrapBlocked(ctx, canonicalEmail, bootstrapBlockedAlreadyProvisioned)
 		return nil, ErrPlatformAdminExists
 	}
 
@@ -684,7 +688,7 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 		// the authoritative one (the locked recount races safe, unlike the
 		// unlocked pre-check above). Record it too: a request that lost the
 		// pre-check race but is still a closed-bootstrap probe must be visible.
-		s.recordBootstrapBlocked(ctx, canonicalEmail)
+		s.recordBootstrapBlocked(ctx, canonicalEmail, bootstrapBlockedAlreadyProvisioned)
 		return nil, ErrPlatformAdminExists
 	}
 
@@ -696,24 +700,37 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 	}, nil
 }
 
+// Reasons stamped on a blocked first-admin bootstrap audit event, so the audit
+// trail distinguishes WHY a probe was denied: a call against an already-
+// provisioned platform, one rejected by the admin-secret gate, or one against a
+// deployment that closed the bootstrap entirely. On exactly the hardened,
+// internet-exposed deployments this feature protects, the secret-denied and
+// disabled reasons are the signal that someone is probing the first-admin path.
+const (
+	bootstrapBlockedAlreadyProvisioned = "already_provisioned"
+	bootstrapBlockedSecretDenied       = "secret_denied"
+	bootstrapBlockedDisabled           = "bootstrap_disabled"
+)
+
 // recordBootstrapBlocked emits a best-effort audit event for a first-admin
-// bootstrap attempt that was rejected because the platform is already
-// provisioned (an admin exists). The bootstrap RPC is unauthenticated and
-// ungated, so a probe against the closed endpoint carries no actor identity —
-// the event records the attempted email and lands under the control-plane
-// default project (the audit Logger's boot-default binding), making
-// closed-bootstrap probes visible in the audit trail.
+// bootstrap attempt that was denied — because the platform is already
+// provisioned (an admin exists), because the presented admin secret did not
+// match, or because the bootstrap is disabled. The bootstrap RPC carries no
+// user JWT, so a probe against a denied endpoint has no actor identity — the
+// event records the attempted email plus the reason and lands under the
+// control-plane default project (the audit Logger's boot-default binding),
+// making hostile first-admin probing visible in the audit trail.
 //
 // TODO(login): once a platform-admin LOGIN path consumes platform_admins,
 // enforce PlatformAdmin.TOTPRequired there — an admin flagged TOTPRequired
 // must complete a second factor before a session is minted. There is no login
 // path yet, so this hardening pass deliberately does not build one; the flag
 // is persisted by the store and waits for that slice.
-func (s *ControlPlaneAdminService) recordBootstrapBlocked(ctx context.Context, attemptedEmail string) {
+func (s *ControlPlaneAdminService) recordBootstrapBlocked(ctx context.Context, attemptedEmail, reason string) {
 	s.audit.Log(
 		ctx, audit.EventPlatformAdminBootstrapBlocked,
 		audit.WithSuccess(false),
-		audit.WithDetails(map[string]any{"attempted_email": attemptedEmail}),
+		audit.WithDetails(map[string]any{"attempted_email": attemptedEmail, "reason": reason}),
 	)
 }
 
