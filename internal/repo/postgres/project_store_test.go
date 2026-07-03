@@ -195,13 +195,14 @@ func runProjectConfigSmoke(t *testing.T, dsn string) {
 	require.ErrorIs(t, err, service.ErrNotFound)
 }
 
-// runProjectConfigCASConcurrency is the regression proof for issue #313: two
+// runProjectConfigCASConcurrency is the regression proof for issue #313: eight
 // admin writers concurrently read-modify-write DIFFERENT keys of one project's
 // config_json. Without the optimistic-concurrency CAS the later writer would
 // clobber the earlier one (last-writer-wins, a key vanishing); with it, exactly
 // one writer wins each version and the loser observes ErrProjectConfigConflict,
-// re-reads, and retries — so BOTH keys are present at the end and NEITHER write
-// is lost. The retry loop mirrors the service-layer mutateProjectConfig helper.
+// re-reads, and retries — so ALL keys are present at the end and NO write is
+// lost. The read-modify-CAS-retry pattern (not the retry budget) mirrors the
+// service-layer mutateProjectConfig helper.
 func runProjectConfigCASConcurrency(t *testing.T, dsn string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -221,10 +222,14 @@ func runProjectConfigCASConcurrency(t *testing.T, dsn string) {
 				return gerr
 			}
 			top := map[string]json.RawMessage{}
-			require.NoError(t, json.Unmarshal([]byte(current), &top))
+			if uerr := json.Unmarshal([]byte(current), &top); uerr != nil {
+				return uerr
+			}
 			top[key] = json.RawMessage(value)
 			next, merr := json.Marshal(top)
-			require.NoError(t, merr)
+			if merr != nil {
+				return merr
+			}
 			_, _, uerr := store.UpdateProjectConfig(ctx, projectID, ver, string(next))
 			if uerr == nil {
 				return nil
