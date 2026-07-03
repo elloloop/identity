@@ -49,6 +49,17 @@ import { Code } from "astro-expressive-code/components";
   -e GATEWAY_PASSKEY_ORIGIN=http://localhost \\
   -e GATEWAY_AUTH_ALLOW_LOCAL=true \\
   ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="docker run (postgres)" />
+  <p>
+    <strong>Before you expose a fresh Postgres deployment to the internet,
+    bootstrap the first platform admin</strong> — the one-time, trust-on-first-use
+    <code>CreateFirstPlatformAdmin</code> RPC — over a private network. Otherwise
+    an anonymous caller can win the first-admin race in the window before you
+    create it. To harden the RPC itself, set <code>GATEWAY_ADMIN_API_SECRET</code>
+    (which then also gates the bootstrap on the <code>X-Admin-Secret</code>
+    header) or <code>GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true</code> to close it
+    after bootstrapping out-of-band. See
+    <a href="/docs/installation/docker">Docker</a> for the full flow.
+  </p>
 
   <h2>3. Sign up a user</h2>
   <p>

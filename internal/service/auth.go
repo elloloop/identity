@@ -921,6 +921,13 @@ var (
 	// later call cannot escalate to operator. It is a state precondition (not
 	// an authorization failure), mapped to CodeFailedPrecondition.
 	ErrPlatformAdminExists = errors.New("a platform admin already exists; bootstrap is closed")
+	// ErrFirstAdminBootstrapDisabled is returned by CreateFirstPlatformAdmin
+	// when GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP is true: an operator who
+	// bootstraps the first platform admin out-of-band can close the RPC
+	// entirely, so it is rejected regardless of whether any admin exists yet.
+	// It is a deployment-posture precondition (the feature is turned off), not
+	// an authorization failure, mapped to CodeFailedPrecondition.
+	ErrFirstAdminBootstrapDisabled = errors.New("first-admin bootstrap is disabled for this deployment")
 	// ErrAuthDomainNotVerified is returned by SetPrimaryAuthDomain when the
 	// target custom auth-domain has not proven ownership (verified_at_ms == 0).
 	// Only a DNS-verified domain may be promoted to a project's primary serving

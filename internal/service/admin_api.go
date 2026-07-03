@@ -151,6 +151,12 @@ type ControlPlaneProjectStore interface {
 type ControlPlaneAdminService struct {
 	// secret is the shared admin secret. Empty disables the whole surface.
 	secret string
+	// disableFirstAdminBootstrap closes CreateFirstPlatformAdmin entirely
+	// (GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP): when true the RPC is rejected with
+	// ErrFirstAdminBootstrapDisabled regardless of whether any admin exists yet,
+	// for operators who bootstrap the first admin out-of-band and want the public
+	// surface closed. It does NOT affect the other secret-gated admin RPCs.
+	disableFirstAdminBootstrap bool
 	// secretsKey is the AES-256 key (GATEWAY_PROJECT_SECRETS_KEY, decoded) used
 	// to ENCRYPT plaintext per-project OAuth provider secrets at author time,
 	// the same key the resolver decrypts with. Empty when unconfigured: a write
@@ -193,6 +199,7 @@ type ControlPlaneAdminService struct {
 // wall-clock epoch-millis.
 func NewControlPlaneAdminService(
 	secret string,
+	disableFirstAdminBootstrap bool,
 	secretsKey []byte,
 	projects ControlPlaneProjectStore,
 	tenants TenantStore,
@@ -213,17 +220,18 @@ func NewControlPlaneAdminService(
 		resolver = net.DefaultResolver
 	}
 	return &ControlPlaneAdminService{
-		secret:      secret,
-		secretsKey:  secretsKey,
-		projects:    projects,
-		tenants:     tenants,
-		memberships: memberships,
-		policies:    policies,
-		admins:      admins,
-		resolver:    resolver,
-		audit:       auditLog,
-		logger:      logger,
-		nowFunc:     func() int64 { return time.Now().UnixMilli() },
+		secret:                     secret,
+		disableFirstAdminBootstrap: disableFirstAdminBootstrap,
+		secretsKey:                 secretsKey,
+		projects:                   projects,
+		tenants:                    tenants,
+		memberships:                memberships,
+		policies:                   policies,
+		admins:                     admins,
+		resolver:                   resolver,
+		audit:                      auditLog,
+		logger:                     logger,
+		nowFunc:                    func() int64 { return time.Now().UnixMilli() },
 	}
 }
 
@@ -584,14 +592,24 @@ type BootstrappedAdmin struct {
 	GeneratedPassword string
 }
 
-// CreateFirstPlatformAdmin is the zero-config bootstrap that establishes the
-// FIRST platform admin on a fresh deployment. It is the one Admin RPC that is
-// NOT secret-gated: a brand-new deployer has configured nothing yet, so
-// gating it on GATEWAY_ADMIN_API_SECRET would make standing up the first
-// operator impossible. Instead it is self-securing — it succeeds ONLY while
-// the platform_admins table is empty and PERMANENTLY closes
-// (ErrPlatformAdminExists → FailedPrecondition) once any admin exists, so it
-// can never be replayed to escalate privilege on a provisioned deployment.
+// CreateFirstPlatformAdmin is the trust-on-first-use (TOFU) bootstrap that
+// establishes the FIRST platform admin on a fresh deployment. It is self-
+// securing — it succeeds ONLY while the platform_admins table is empty and
+// PERMANENTLY closes (ErrPlatformAdminExists → FailedPrecondition) once any
+// admin exists, so it can never be replayed to escalate privilege on a
+// provisioned deployment.
+//
+// Two operator-controlled hardenings narrow the fresh-deploy race window in
+// which an anonymous caller could win the first-admin bootstrap:
+//
+//   - When GATEWAY_ADMIN_API_SECRET is configured, this RPC is gated on it too
+//     — the presented secret must match in constant time (else
+//     ErrPermissionDenied), exactly like every other admin RPC. TOFU stays
+//     zero-config ONLY when no secret is set, so anyone already running with an
+//     admin secret gets the hardening opt-in-by-default.
+//   - When GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP is true the RPC is closed
+//     entirely (ErrFirstAdminBootstrapDisabled → FailedPrecondition) regardless
+//     of admin existence, for operators who bootstrap out-of-band.
 //
 // The emptiness check and the insert are one atomic, serialized store
 // operation (admins.CreateFirstPlatformAdmin), so two concurrent bootstraps
@@ -603,9 +621,18 @@ type BootstrappedAdmin struct {
 // strength policy (else ErrWeakPassword → InvalidArgument). Only the bcrypt
 // hash is ever stored. When no control plane is wired (memory have no
 // platform_admins table) it returns ErrUnimplemented.
-func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context, email, password string) (*BootstrappedAdmin, error) {
+func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context, secret, email, password string) (*BootstrappedAdmin, error) {
 	if s.admins == nil {
 		return nil, ErrUnimplemented
+	}
+	if s.disableFirstAdminBootstrap {
+		return nil, ErrFirstAdminBootstrapDisabled
+	}
+	// When an admin secret is configured the bootstrap is gated on it too, so a
+	// fresh internet-exposed deployment cannot have an anonymous caller win the
+	// first-admin race. TOFU stays zero-config ONLY when no secret is set.
+	if s.secret != "" && subtle.ConstantTimeCompare([]byte(secret), []byte(s.secret)) != 1 {
+		return nil, ErrPermissionDenied
 	}
 	email = strings.TrimSpace(email)
 	if err := validateEmailFormat(email); err != nil {

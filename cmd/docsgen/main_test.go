@@ -219,6 +219,7 @@ func TestCategoryFor(t *testing.T) {
 		{"GATEWAY_OAUTH_GOOGLE_CLIENT_ID", "OAuth"},
 		{"GATEWAY_MICROSOFT_TENANT_ID", "OAuth"},
 		{"GATEWAY_PROJECT_SECRETS_KEY", "Projects & tenancy"},
+		{"GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP", "Projects & tenancy"},
 		{"GATEWAY_JWT_SIGNER", "JWT & tokens"},
 		{"GATEWAY_METRICS_PORT", "Server & ports"},
 		{"GATEWAY_SMS_TWILIO_FROM", "Phone / SMS verification"},
