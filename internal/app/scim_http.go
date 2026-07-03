@@ -446,7 +446,7 @@ func toSCIMUser(u *service.User) scim.User {
 		Email:      u.Email,
 		GivenName:  given,
 		FamilyName: family,
-		Active:     !strings.EqualFold(u.Status, statusDeactivated),
+		Active:     isActiveStatus(u.Status),
 		CreatedAt:  u.CreatedAt,
 		UpdatedAt:  u.UpdatedAt,
 	}

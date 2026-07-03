@@ -102,7 +102,13 @@ func applyPatchAttr(patch *UserPatch, attr string, raw json.RawMessage, remove b
 		if remove {
 			return &mutabilityError{"userName cannot be removed: it is the required login identifier"}
 		}
-		patch.UserName = stringValue(raw, remove)
+		v := stringValue(raw, remove)
+		// An empty replace/add would blank the login identifier just like a
+		// remove; reject it rather than strand the account without a login.
+		if strings.TrimSpace(*v) == "" {
+			return errors.New("userName cannot be empty: it is the required login identifier")
+		}
+		patch.UserName = v
 	case "externalid":
 		patch.ExternalID = stringValue(raw, remove)
 	case "email", "emails", "emails.value":
@@ -112,6 +118,9 @@ func applyPatchAttr(patch *UserPatch, attr string, raw json.RawMessage, remove b
 		v, err := emailValue(raw, remove)
 		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(*v) == "" {
+			return errors.New("email cannot be empty: it is the required login identifier")
 		}
 		patch.Email = v
 	case "name.givenname":
