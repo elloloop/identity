@@ -715,7 +715,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "is the DEFAULT PROJECT's comma-separated allow-list of accepted Azure AD tenant ids (directory GUIDs or verified domains) for Microsoft sign-in (hosted + native).",
+    "description": "is the DEFAULT PROJECT's comma-separated allow-list of accepted Azure AD directory (tenant) GUIDs for Microsoft sign-in (hosted + native).",
     "category": "OAuth",
     "anchor": "oauth"
   },

@@ -296,21 +296,28 @@ func (s *AuthService) nativeVerifyParams(scope *ProjectScope, provider string, p
 }
 
 // microsoftTenantPinning resolves the Microsoft tenant-pinning inputs for the
-// resolved project, mirroring nativeAudiences precedence: the project's
-// config_json oauth.microsoft block wins; else, for the DEFAULT PROJECT (and a
-// control-plane-less deployment, which pins every request to it), the env seed
+// resolved project, mirroring nativeAudiences precedence: an authored tenant pin
+// (tenant_id or allowed_tenants) in the project's config_json oauth.microsoft
+// block wins; else, for the DEFAULT PROJECT (and a control-plane-less
+// deployment, which pins every request to it), the env seed
 // (GATEWAY_MICROSOFT_TENANT_ID / GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS). A
-// non-default project that configures Microsoft but pins no tenant stays fully
-// multi-tenant, so its Microsoft email is trusted only when the token proves
-// xms_edov — the nOAuth guard the verifier enforces.
+// project block that sets NO tenant fields (e.g. a native-audiences-only block)
+// does NOT suppress the env pin — otherwise a default project that authored a
+// block for audiences alone would silently lose its env tenant pin. A
+// non-default project with no pin anywhere stays fully multi-tenant, so its
+// Microsoft email is trusted only when the token proves xms_edov — the nOAuth
+// guard the verifier enforces. The block's issuer_format is always honoured.
 func (s *AuthService) microsoftTenantPinning(scope *ProjectScope) (tenantID string, allowed []string, issuerFormat string) {
 	if m := scope.OAuth.Microsoft; m != nil {
-		return m.TenantID, m.AllowedTenants, m.IssuerFormat
+		issuerFormat = m.IssuerFormat
+		if m.TenantID != "" || len(m.AllowedTenants) > 0 {
+			return m.TenantID, m.AllowedTenants, issuerFormat
+		}
 	}
 	if s.cfg.IsDefaultProject(scope.ProjectID) {
-		return s.cfg.MicrosoftTenantID, s.cfg.MicrosoftAllowedTenantList(), ""
+		return s.cfg.MicrosoftTenantID, s.cfg.MicrosoftAllowedTenantList(), issuerFormat
 	}
-	return "", nil, ""
+	return "", nil, issuerFormat
 }
 
 // nativeAudiences resolves the accepted native `aud` allow-list for a provider

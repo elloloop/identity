@@ -123,22 +123,34 @@ breaking, but the `*_BY_PRODUCT` vars shipped only the prior week.
 >   comma-separated, for the default project; `oauth.microsoft.allowed_tenants`
 >   per project); OR
 > - the token carries **`xms_edov == true`** (Microsoft's email-domain-owner-verified
->   claim, accepted as a JSON bool or the string `"true"`); OR
-> - the token carries an explicit **`verified_email == true`**.
+>   claim, accepted as a JSON bool or the string `"true"`).
 >
-> Otherwise the email is treated as unverified and the login is **rejected**
-> with `ErrEmailNotVerified` (surfaced as `Unauthenticated`) — matching the
-> existing Google/Apple unverified-email handling, so **no** silent merge into an
-> existing account is possible. Pinning a tenant also now **enforces** `tid`
-> equality during verification (previously `tenant_id` only chose the authorize
-> endpoint), so a single-tenant deployment rejects other tenants' tokens.
+> A non-standard `verified_email == true` is **not** trusted on its own (an
+> attacker tenant can set it as easily as the email), though an explicit
+> `verified_email == false` is still rejected. Otherwise the email is treated as
+> unverified and the login is **rejected** with `ErrEmailNotVerified` (surfaced as
+> `Unauthenticated`) — matching the existing Google/Apple unverified-email
+> handling, so **no** silent merge into an existing account is possible. Pinning a
+> tenant also now **enforces** `tid` equality during verification (previously
+> `tenant_id` only chose the authorize endpoint), so a single-tenant deployment
+> rejects other tenants' tokens.
+>
+> **Tenant identifiers must be directory GUIDs.** Azure always stamps the token's
+> `tid` as a directory (tenant) GUID, so every `tenant_id` / `allowed_tenants`
+> entry must be a **GUID** (matched case-insensitively). A verified-domain string
+> (e.g. `contoso.onmicrosoft.com`) can never match a `tid` and is **rejected at
+> config load / write time** rather than silently failing every login. (Note the
+> pre-existing env-var prefix divergence: the single-tenant pin is
+> `GATEWAY_MICROSOFT_TENANT_ID` while the allow-list is
+> `GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS`; the former is kept as-is to avoid a
+> breaking rename.)
 >
 > **Action required for multi-tenant Microsoft deployments:** if you relied on
 > blindly-trusted multi-tenant Microsoft email, pin your tenant(s) via
-> `tenant_id` / `allowed_tenants` (env or `config_json`), or ensure your tokens
-> carry `xms_edov` — otherwise those logins will now be rejected. A meta value
-> (`common` / `organizations` / `consumers`) is **not** a tenant pin; it keeps
-> the multi-tenant default (so `xms_edov` becomes required).
+> `tenant_id` / `allowed_tenants` (env or `config_json`, GUIDs), or ensure your
+> tokens carry `xms_edov` — otherwise those logins will now be rejected. A meta
+> value (`common` / `organizations` / `consumers`) is **not** a tenant pin; it
+> keeps the multi-tenant default (so `xms_edov` becomes required).
 
 ### Schema migrations involved
 

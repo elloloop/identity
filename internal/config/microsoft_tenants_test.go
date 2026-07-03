@@ -3,9 +3,9 @@ package config
 import "testing"
 
 func TestMicrosoftAllowedTenantList(t *testing.T) {
-	c := Config{MicrosoftAllowedTenants: " 11111111-1111-1111-1111-111111111111 , ,contoso.onmicrosoft.com "}
+	c := Config{MicrosoftAllowedTenants: " 11111111-1111-1111-1111-111111111111 , ,22222222-2222-2222-2222-222222222222 "}
 	got := c.MicrosoftAllowedTenantList()
-	if len(got) != 2 || got[0] != "11111111-1111-1111-1111-111111111111" || got[1] != "contoso.onmicrosoft.com" {
+	if len(got) != 2 || got[0] != "11111111-1111-1111-1111-111111111111" || got[1] != "22222222-2222-2222-2222-222222222222" {
 		t.Fatalf("allowed tenant list: %v", got)
 	}
 	var zero Config
@@ -20,14 +20,14 @@ func TestValidMicrosoftTenant(t *testing.T) {
 		want bool
 	}{
 		{"11111111-1111-1111-1111-111111111111", true},
-		{"AAAABBBB-CCCC-DDDD-EEEE-FFFF00001111", true},
-		{"contoso.onmicrosoft.com", true},
-		{"example.co", true},
+		{"AAAABBBB-CCCC-DDDD-EEEE-FFFF00001111", true}, // GUIDs are case-insensitive
+		{"contoso.onmicrosoft.com", false},             // domain-form never matches a token's tid
+		{"example.co", false},
 		{"", false},
 		{"common", false},        // a meta segment is not a concrete tenant
 		{"organizations", false}, // ditto
-		{"not a tenant", false},  // embedded whitespace
-		{" leading.space.com", false},
+		{"not a tenant", false},
+		{" 11111111-1111-1111-1111-111111111111", false}, // leading whitespace
 		{"nodot", false},
 		{"-", false},
 	}
@@ -39,8 +39,11 @@ func TestValidMicrosoftTenant(t *testing.T) {
 }
 
 func TestValidateMicrosoftAllowedTenants(t *testing.T) {
-	if err := (&Config{MicrosoftAllowedTenants: "11111111-1111-1111-1111-111111111111,contoso.com"}).validateMicrosoftAllowedTenants(); err != nil {
+	if err := (&Config{MicrosoftAllowedTenants: "11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222"}).validateMicrosoftAllowedTenants(); err != nil {
 		t.Fatalf("well-formed allow-list should pass: %v", err)
+	}
+	if err := (&Config{MicrosoftAllowedTenants: "contoso.onmicrosoft.com"}).validateMicrosoftAllowedTenants(); err == nil {
+		t.Fatal("a domain-form tenant in the allow-list should be rejected")
 	}
 	if err := (&Config{MicrosoftAllowedTenants: "common"}).validateMicrosoftAllowedTenants(); err == nil {
 		t.Fatal("a meta tenant in the allow-list should be rejected")

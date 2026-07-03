@@ -95,9 +95,9 @@ type NativeVerifyParams struct {
 	// Google/Apple.
 	MicrosoftTenantID string
 	// MicrosoftAllowedTenants, when non-empty, restricts the accepted tenant to
-	// the listed directory ids — the multi-tenant counterpart to the single
-	// MicrosoftTenantID pin. A token whose `tid` is not a member is rejected.
-	// Ignored for Google/Apple.
+	// the listed directory (tenant) GUIDs — the multi-tenant counterpart to the
+	// single MicrosoftTenantID pin. A token whose `tid` is not a member (matched
+	// case-insensitively) is rejected. Ignored for Google/Apple.
 	MicrosoftAllowedTenants []string
 	// MicrosoftIssuerFormat overrides the issuer format string interpolated with
 	// the tenant id to derive the expected issuer. Empty uses the live Microsoft
@@ -384,9 +384,9 @@ func (v *NativeVerifier) verifyMicrosoft(ctx context.Context, p NativeVerifyPara
 		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
 	}
 	// nOAuth guard (identical to the hosted exchanger): a multi-tenant Microsoft
-	// email is trusted only when the tenant is pinned, or xms_edov /
-	// verified_email prove it. Unproven ⇒ treat as unverified.
-	if !microsoftEmailTrusted(pinned, claims.microsoftIDClaims) {
+	// email is trusted only when the tenant is pinned, or xms_edov proves domain
+	// ownership. Unproven ⇒ treat as unverified.
+	if !microsoftEmailTrusted(pinned, &claims.microsoftIDClaims) {
 		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
 	}
 

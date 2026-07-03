@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -295,7 +296,7 @@ func TestAdminSetProjectOAuthProvider_MicrosoftAllowedTenants_RoundTrip(t *testi
 	ctx := context.Background()
 	projectID := seedOAuthProject(t, f)
 
-	tenants := []string{"11111111-1111-1111-1111-111111111111", "contoso.onmicrosoft.com"}
+	tenants := []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
 	view, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
 		Provider:                oauthProviderMicrosoft,
 		ClientID:                "ms",
@@ -305,7 +306,7 @@ func TestAdminSetProjectOAuthProvider_MicrosoftAllowedTenants_RoundTrip(t *testi
 	if err != nil {
 		t.Fatalf("AdminSetProjectOAuthProvider: %v", err)
 	}
-	if !equalStrings(view.MicrosoftAllowedTenants, tenants) {
+	if !slices.Equal(view.MicrosoftAllowedTenants, tenants) {
 		t.Fatalf("view allowed_tenants = %v, want %v", view.MicrosoftAllowedTenants, tenants)
 	}
 
@@ -318,31 +319,20 @@ func TestAdminSetProjectOAuthProvider_MicrosoftAllowedTenants_RoundTrip(t *testi
 	if err != nil {
 		t.Fatalf("ParseProjectConfig: %v", err)
 	}
-	if cfg.OAuth.Microsoft == nil || !equalStrings(cfg.OAuth.Microsoft.AllowedTenants, tenants) {
+	if cfg.OAuth.Microsoft == nil || !slices.Equal(cfg.OAuth.Microsoft.AllowedTenants, tenants) {
 		t.Fatalf("stored allowed_tenants = %+v, want %v", cfg.OAuth.Microsoft, tenants)
 	}
 
-	// A malformed entry is rejected at author time.
+	// A malformed entry (here a verified-domain form, which can never match a
+	// token's GUID `tid`) is rejected at author time.
 	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
 		Provider:                oauthProviderMicrosoft,
 		ClientID:                "ms",
 		ClientSecret:            "ms-secret",
-		MicrosoftAllowedTenants: []string{"not-a-tenant"},
+		MicrosoftAllowedTenants: []string{"contoso.onmicrosoft.com"},
 	}); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("malformed allowed_tenants: err = %v, want ErrInvalidArgument", err)
+		t.Fatalf("domain-form allowed_tenants: err = %v, want ErrInvalidArgument", err)
 	}
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func TestAdminSetProjectOAuthProvider_RejectsMissingRequiredFields(t *testing.T) {

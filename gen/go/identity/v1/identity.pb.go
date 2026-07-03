@@ -11217,11 +11217,12 @@ type ProjectOAuthProviderConfig struct {
 	MicrosoftTenantId     string `protobuf:"bytes,10,opt,name=microsoft_tenant_id,json=microsoftTenantId,proto3" json:"microsoft_tenant_id,omitempty"`
 	MicrosoftIssuerFormat string `protobuf:"bytes,11,opt,name=microsoft_issuer_format,json=microsoftIssuerFormat,proto3" json:"microsoft_issuer_format,omitempty"`
 	// microsoft_allowed_tenants is a multi-tenant allow-list of Azure AD directory
-	// ids (tenant GUIDs or verified-domain strings). When non-empty, a Microsoft
-	// token whose `tid` is not a member is rejected (hosted + native) — the
-	// several-trusted-tenants counterpart to the single microsoft_tenant_id pin,
-	// closing the nOAuth account-takeover vector for multi-tenant apps. Empty
-	// imposes no allow-list.
+	// (tenant) GUIDs. When non-empty, a Microsoft token whose `tid` is not a member
+	// is rejected (hosted + native) — the several-trusted-tenants counterpart to
+	// the single microsoft_tenant_id pin, closing the nOAuth account-takeover
+	// vector for multi-tenant apps. Entries must be GUIDs (a token's `tid` is
+	// always a directory GUID, so a domain-form entry could never match and is
+	// rejected at config time). Empty imposes no allow-list.
 	MicrosoftAllowedTenants []string `protobuf:"bytes,19,rep,name=microsoft_allowed_tenants,json=microsoftAllowedTenants,proto3" json:"microsoft_allowed_tenants,omitempty"`
 	// apple_team_id / apple_key_id identify the Apple signing key. apple_private_key
 	// is the PLAINTEXT PKCS#8 key (Apple has no client secret); it is write-only,

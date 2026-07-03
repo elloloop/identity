@@ -46,11 +46,13 @@ type MicrosoftConfig struct {
 	// multi-tenant default.
 	TenantID string
 
-	// AllowedTenants is an allow-list of Azure AD directory ids (tenant GUIDs
-	// or verified-domain strings): when non-empty, a token whose `tid` is not a
-	// member is rejected. It is the multi-tenant counterpart to the single
-	// TenantID pin — several trusted tenants instead of exactly one. Empty
-	// imposes no allow-list.
+	// AllowedTenants is an allow-list of Azure AD directory (tenant) GUIDs:
+	// when non-empty, a token whose `tid` is not a member is rejected. It is the
+	// multi-tenant counterpart to the single TenantID pin — several trusted
+	// tenants instead of exactly one. Azure always stamps `tid` as a directory
+	// GUID, so entries must be GUIDs (matched case-insensitively); a
+	// verified-domain string would never match and is rejected at config time.
+	// Empty imposes no allow-list.
 	AllowedTenants []string
 
 	// IssuerFormat is a fmt.Sprintf format string into which the
@@ -156,14 +158,16 @@ var microsoftMetaTenants = map[string]bool{"common": true, "organizations": true
 // when at least one real constraint was configured and satisfied — the signal
 // that the deployment vouches for the issuing tenant.
 func (p microsoftTenantPin) enforce(tid string) (pinned bool, err error) {
+	// Azure stamps `tid` as a directory GUID; GUIDs are case-insensitive and
+	// configs may be authored in either case, so every comparison here folds.
 	if p.TenantID != "" && !microsoftMetaTenants[strings.ToLower(p.TenantID)] {
-		if tid != p.TenantID {
+		if !strings.EqualFold(tid, p.TenantID) {
 			return false, fmt.Errorf("%w: tenant mismatch", ErrIdentityVerification)
 		}
 		pinned = true
 	}
 	if len(p.AllowedTenants) > 0 {
-		if !containsString(p.AllowedTenants, tid) {
+		if !containsFold(p.AllowedTenants, tid) {
 			return false, fmt.Errorf("%w: tenant not allow-listed", ErrIdentityVerification)
 		}
 		pinned = true
@@ -171,22 +175,30 @@ func (p microsoftTenantPin) enforce(tid string) (pinned bool, err error) {
 	return pinned, nil
 }
 
+// containsFold reports whether needle case-insensitively equals any element of
+// haystack (used for GUID membership, which is case-insensitive).
+func containsFold(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if strings.EqualFold(h, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 // microsoftEmailTrusted decides whether a Microsoft token's email may be
 // treated as VERIFIED for account federation, the nOAuth guard applied
-// identically by the hosted exchanger and the native verifier. It is trusted
-// when ANY of: the issuing tenant is pinned (the deployment/project vouches for
-// it); the token carries xms_edov==true (Microsoft asserts domain-owner
-// verification); or an explicit verified_email==true is present. A caller must
-// already have rejected an explicit verified_email==false. When this returns
-// false the email is unproven and the caller rejects it with ErrEmailNotVerified.
-func microsoftEmailTrusted(pinned bool, claims microsoftIDClaims) bool {
-	if pinned {
-		return true
-	}
-	if claimIsTrue(claims.XMSEdov) {
-		return true
-	}
-	return claims.VerifiedEmail != nil && *claims.VerifiedEmail
+// identically by the hosted exchanger and the native verifier. The only
+// legitimate proofs are: the issuing tenant is pinned (the deployment/project
+// vouches for it), OR the token carries xms_edov==true (Microsoft asserts the
+// tenant is verified to own the email's domain). A non-standard
+// verified_email==true is deliberately NOT trusted on its own — an attacker
+// tenant can set it just like the email itself; verified_email is honoured only
+// as a NEGATIVE signal (an explicit false is rejected by the caller before this).
+// When this returns false the email is unproven and the caller rejects it with
+// ErrEmailNotVerified.
+func microsoftEmailTrusted(pinned bool, claims *microsoftIDClaims) bool {
+	return pinned || claimIsTrue(claims.XMSEdov)
 }
 
 func (m *microsoftExchanger) Exchange(ctx context.Context, params ExchangeParams) (*Identity, error) {
@@ -257,8 +269,8 @@ func (m *microsoftExchanger) Exchange(ctx context.Context, params ExchangeParams
 	}
 	// nOAuth guard: a multi-tenant Microsoft token (issuer derived from its own
 	// tid, no tenant pin) may carry any tenant-set email. Trust it as verified
-	// only when the tenant is pinned, or xms_edov / verified_email prove it.
-	if !microsoftEmailTrusted(pinned, *claims) {
+	// only when the tenant is pinned, or xms_edov proves domain ownership.
+	if !microsoftEmailTrusted(pinned, claims) {
 		return nil, fmt.Errorf("%w: %s", ErrEmailNotVerified, email)
 	}
 

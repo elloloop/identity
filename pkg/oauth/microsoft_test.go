@@ -263,9 +263,10 @@ func msExchangeWith(t *testing.T, claims map[string]any, cfgMut func(*MicrosoftC
 }
 
 // TestMicrosoft_NOAuth_EmailTrust is the hardening matrix: a multi-tenant token
-// (no tenant pin) is only trusted when it proves email-domain-owner verification
-// (xms_edov) or carries an explicit verified_email; pinning the tenant (single
-// id or allow-list) trusts it regardless.
+// (no tenant pin) is trusted only when it proves email-domain-owner verification
+// (xms_edov==true); pinning the tenant (single id or allow-list) trusts it
+// regardless. A non-standard verified_email==true is NOT trusted on its own,
+// though an explicit verified_email==false still hard-rejects.
 func TestMicrosoft_NOAuth_EmailTrust(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -279,12 +280,26 @@ func TestMicrosoft_NOAuth_EmailTrust(t *testing.T) {
 		{"xms_edov string false", map[string]any{"xms_edov": "false"}, nil, ErrEmailNotVerified},
 		{"xms_edov bool false", map[string]any{"xms_edov": false}, nil, ErrEmailNotVerified},
 		{"xms_edov absent, no pin", map[string]any{}, nil, ErrEmailNotVerified},
-		{"verified_email true", map[string]any{"verified_email": true}, nil, nil},
-		{"verified_email false beats xms_edov", map[string]any{"verified_email": false, "xms_edov": true}, nil, ErrEmailNotVerified},
+		{"verified_email true is NOT trusted alone", map[string]any{"verified_email": true}, nil, ErrEmailNotVerified},
+		{"verified_email false hard-rejects despite xms_edov", map[string]any{"verified_email": false, "xms_edov": true}, nil, ErrEmailNotVerified},
 		{
 			"tenant pinned trusts without xms_edov",
 			map[string]any{},
 			func(c *MicrosoftConfig) { c.TenantID = msTenantID },
+			nil,
+		},
+		{
+			// The token tid is msTenantID; a differently-cased pin still matches
+			// (Azure tids are GUIDs, compared case-insensitively).
+			"tenant pin case-insensitive",
+			map[string]any{},
+			func(c *MicrosoftConfig) { c.TenantID = "TENANT-UUID" },
+			nil,
+		},
+		{
+			"allow-list case-insensitive match",
+			map[string]any{},
+			func(c *MicrosoftConfig) { c.AllowedTenants = []string{"TENANT-UUID"} },
 			nil,
 		},
 		{

@@ -95,13 +95,14 @@ type ProjectOAuthMicrosoft struct {
 	ClientSecretEnc string `json:"client_secret_enc"`
 	TenantID        string `json:"tenant_id,omitempty"`
 	IssuerFormat    string `json:"issuer_format,omitempty"`
-	// AllowedTenants is a multi-tenant allow-list of Azure AD directory ids
-	// (tenant GUIDs or verified-domain strings): when non-empty, a Microsoft
-	// token whose `tid` is not a member is rejected (hosted + native). It is the
-	// several-trusted-tenants counterpart to the single-tenant TenantID pin, and
-	// closes the nOAuth account-takeover vector for apps that accept more than
-	// one tenant — a token from any tenant NOT on the list can no longer assert a
-	// victim's email. Empty imposes no allow-list.
+	// AllowedTenants is a multi-tenant allow-list of Azure AD directory (tenant)
+	// GUIDs: when non-empty, a Microsoft token whose `tid` is not a member is
+	// rejected (hosted + native). It is the several-trusted-tenants counterpart
+	// to the single-tenant TenantID pin, and closes the nOAuth account-takeover
+	// vector for apps that accept more than one tenant — a token from any tenant
+	// NOT on the list can no longer assert a victim's email. Entries must be
+	// GUIDs (a domain-form string can never match a token's `tid`). Empty imposes
+	// no allow-list.
 	AllowedTenants []string `json:"allowed_tenants,omitempty"`
 	// NativeAudiences is the accepted native ID-token `aud` allow-list for this
 	// project. Empty disables Microsoft native login for the project (unless it
@@ -310,7 +311,8 @@ func (m *ProjectOAuthMicrosoft) validate() error {
 	}
 	for _, t := range m.AllowedTenants {
 		if !config.ValidMicrosoftTenant(t) {
-			return fmt.Errorf("oauth.microsoft.allowed_tenants entry %q must be an Azure AD tenant GUID or a domain (no whitespace)", t)
+			return fmt.Errorf("oauth.microsoft.allowed_tenants entry %q must be an Azure AD directory (tenant) GUID "+
+				"(a verified-domain string can never match a token's tid)", t)
 		}
 	}
 	return nil

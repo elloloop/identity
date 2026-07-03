@@ -263,12 +263,12 @@ type Config struct {
 	// MicrosoftTenantID is the Microsoft directory (tenant) id, or "common" for multi-tenant.
 	MicrosoftTenantID string
 	// MicrosoftAllowedTenants is the DEFAULT PROJECT's comma-separated allow-list
-	// of accepted Azure AD tenant ids (directory GUIDs or verified domains) for
-	// Microsoft sign-in (hosted + native). When set, a Microsoft token whose
-	// `tid` is not a member is rejected; it is the multi-tenant counterpart to
-	// the single-tenant GATEWAY_MICROSOFT_TENANT_ID pin and closes the nOAuth
-	// account-takeover vector for apps that trust several tenants. Non-default
-	// projects carry their own allow-list in config_json (oauth.microsoft.allowed_tenants).
+	// of accepted Azure AD directory (tenant) GUIDs for Microsoft sign-in
+	// (hosted + native). When set, a Microsoft token whose `tid` is not a member
+	// is rejected; it is the multi-tenant counterpart to the single-tenant
+	// GATEWAY_MICROSOFT_TENANT_ID pin and closes the nOAuth account-takeover
+	// vector for apps that trust several tenants. Non-default projects carry
+	// their own allow-list in config_json (oauth.microsoft.allowed_tenants).
 	MicrosoftAllowedTenants string
 	// GitHubClientID is the GitHub OAuth client ID.
 	GitHubClientID string
@@ -1115,27 +1115,22 @@ func (c *Config) MicrosoftAllowedTenantList() []string {
 	return splitTrimCSV(c.MicrosoftAllowedTenants)
 }
 
-// microsoftTenantGUID matches an Azure AD directory id (a canonical UUID).
+// microsoftTenantGUID matches an Azure AD directory (tenant) id — a canonical
+// UUID. Azure ALWAYS stamps the token's `tid` as this GUID form, so it is the
+// only value a tenant allow-list entry can ever match against.
 var microsoftTenantGUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// microsoftTenantDomain matches a verified-domain tenant identifier
-// (e.g. "contoso.onmicrosoft.com"): one or more DNS labels then a TLD, no
-// scheme/path/whitespace.
-var microsoftTenantDomain = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$`)
-
-// ValidMicrosoftTenant reports whether entry is a plausible Azure AD tenant
-// allow-list member: a directory GUID or a verified-domain string, with no
-// surrounding or embedded whitespace. It is the single source of the "what a
-// tenant entry may look like" rule, shared by the env allow-list validation and
-// the per-project config_json validation (internal/service). A meta segment
-// ("common"/"organizations"/"consumers") is deliberately NOT valid here — those
-// denote multi-tenant and never appear as a token's `tid`, so allow-listing one
-// is a configuration mistake.
+// ValidMicrosoftTenant reports whether entry is a usable Azure AD tenant
+// allow-list member: a directory (tenant) GUID, with no surrounding or embedded
+// whitespace. It is the single source of the "what a tenant entry may look
+// like" rule, shared by the env allow-list validation and the per-project
+// config_json validation (internal/service). A verified-domain string is
+// deliberately NOT valid — the token's `tid` is always a GUID, so a domain-form
+// entry could never match and would silently reject every login; it is rejected
+// at config time instead. A meta segment ("common"/"organizations"/"consumers")
+// is likewise invalid — those denote multi-tenant and never appear as a `tid`.
 func ValidMicrosoftTenant(entry string) bool {
-	if entry == "" || entry != strings.TrimSpace(entry) {
-		return false
-	}
-	return microsoftTenantGUID.MatchString(entry) || microsoftTenantDomain.MatchString(entry)
+	return microsoftTenantGUID.MatchString(entry)
 }
 
 // NativeOAuthAudienceList returns the default-project native audiences for a
@@ -1428,7 +1423,7 @@ func (c *Config) validateMicrosoftAllowedTenants() error {
 	for _, t := range c.MicrosoftAllowedTenantList() {
 		if !ValidMicrosoftTenant(t) {
 			return fmt.Errorf("config: GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS entry %q must be an "+
-				"Azure AD tenant GUID or a domain", t)
+				"Azure AD directory (tenant) GUID (a verified-domain string can never match a token's tid)", t)
 		}
 	}
 	return nil

@@ -514,6 +514,53 @@ func TestNativeOAuthLogin_Microsoft_NOAuthTakeoverClosed(t *testing.T) {
 	assert.Equal(t, victimID, res.User.ID, "xms_edov-proven login links to the existing account")
 }
 
+// TestNativeOAuthLogin_Microsoft_DefaultProject_NativeOnlyBlock_KeepsEnvPin
+// guards the tenant-pin precedence rule: a default project that authored a
+// Microsoft block for native_audiences ONLY (no tenant_id / allowed_tenants)
+// must still inherit the env tenant pin — authoring audiences must not silently
+// disable the nOAuth guard.
+func TestNativeOAuthLogin_Microsoft_DefaultProject_NativeOnlyBlock_KeepsEnvPin(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+	const msAud = "ms-default-app"
+	const envTenant = "11111111-1111-1111-1111-111111111111"
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+		"proj-default": {ID: "proj-default", StorageScopeID: "scope-default", Name: "proj-default", OAuth: ProjectOAuthConfig{
+			Microsoft: &ProjectOAuthMicrosoft{NativeAudiences: []string{msAud}, IssuerFormat: msSvcIssuerFormat},
+		}},
+	}}
+	svc := newNativeTestAuthServiceWith(t, repo, oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
+		GoogleJWKSURL: signer.url, AppleJWKSURL: signer.url, MicrosoftJWKSURL: signer.url,
+		Now: func() time.Time { return signer.now },
+	}), projects, func(c *config.Config) {
+		c.NativeOAuthProductProjects = "home=proj-default"
+		c.MicrosoftAllowedTenants = envTenant
+	})
+
+	msToken := func(tid string) string {
+		return signer.sign(t, map[string]any{
+			"iss": fmt.Sprintf(msSvcIssuerFormat, tid), "tid": tid, "aud": msAud,
+			"oid": "oid-" + tid, "exp": signer.now.Add(time.Hour), "iat": signer.now,
+			"email": "user@corp.com",
+		})
+	}
+
+	// A token from the env-pinned tenant is trusted WITHOUT xms_edov — proving the
+	// native-only block did not suppress the env pin.
+	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "microsoft", IDToken: msToken(envTenant), Product: "home",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "user@corp.com", res.User.Email)
+
+	// A token from a tenant NOT on the env allow-list (no xms_edov) is rejected.
+	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "microsoft", IDToken: msToken("99999999-9999-9999-9999-999999999999"), Product: "home",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "off-allow-list tenant must be rejected, got %v", err)
+}
+
 func TestNativeOAuthLogin_Disabled_FailedPrecondition(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)

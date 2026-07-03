@@ -231,21 +231,23 @@ func TestParseProjectConfig_OAuth_MicrosoftAllowedTenants_Present(t *testing.T) 
 	t.Parallel()
 
 	cfg, err := ParseProjectConfig(`{"oauth":{
-		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","allowed_tenants":["11111111-1111-1111-1111-111111111111","contoso.onmicrosoft.com"]}
+		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","allowed_tenants":["11111111-1111-1111-1111-111111111111","22222222-2222-2222-2222-222222222222"]}
 	}}`)
 	require.NoError(t, err)
 	require.NotNil(t, cfg.OAuth.Microsoft)
 	assert.Equal(t,
-		[]string{"11111111-1111-1111-1111-111111111111", "contoso.onmicrosoft.com"},
+		[]string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"},
 		cfg.OAuth.Microsoft.AllowedTenants)
 }
 
 func TestParseProjectConfig_OAuth_MicrosoftAllowedTenants_Invalid(t *testing.T) {
 	t.Parallel()
 
-	// A tenant entry that is neither a GUID nor a domain (here it embeds a space)
-	// is a config error: it would silently never match any token's `tid`.
-	for _, bad := range []string{"not a tenant", "has space", "-", ""} {
+	// Only a directory GUID is a valid entry. A verified-domain form
+	// ("contoso.onmicrosoft.com") is a config error — a token's `tid` is always a
+	// GUID, so a domain entry would silently never match. So are non-GUID junk,
+	// embedded whitespace, and empty. Every one must be rejected at parse time.
+	for _, bad := range []string{"contoso.onmicrosoft.com", "example.co", "not a tenant", "common", "-", ""} {
 		blob := `{"oauth":{"microsoft":{"client_id":"m","client_secret_enc":"enc-m","allowed_tenants":["` + bad + `"]}}}`
 		_, err := ParseProjectConfig(blob)
 		require.Error(t, err, "entry %q must be rejected", bad)
