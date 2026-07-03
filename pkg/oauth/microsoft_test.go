@@ -321,6 +321,36 @@ func TestMicrosoft_NOAuth_EmailTrust(t *testing.T) {
 			ErrIdentityVerification,
 		},
 		{
+			// Union semantics: both configured, tid equals tenant_id → accepted.
+			"both set, tid matches tenant_id",
+			map[string]any{},
+			func(c *MicrosoftConfig) {
+				c.TenantID = msTenantID
+				c.AllowedTenants = []string{"someone-else"}
+			},
+			nil,
+		},
+		{
+			// Union semantics: both configured, tid is in allow-list (not tenant_id) → accepted.
+			"both set, tid matches allow-list",
+			map[string]any{},
+			func(c *MicrosoftConfig) {
+				c.TenantID = "other-tenant"
+				c.AllowedTenants = []string{msTenantID}
+			},
+			nil,
+		},
+		{
+			// Union semantics: both configured, tid matches neither → rejected.
+			"both set, tid matches neither",
+			map[string]any{},
+			func(c *MicrosoftConfig) {
+				c.TenantID = "other-tenant"
+				c.AllowedTenants = []string{"someone-else"}
+			},
+			ErrIdentityVerification,
+		},
+		{
 			"meta tenant_id common is not a pin",
 			map[string]any{},
 			func(c *MicrosoftConfig) { c.TenantID = "common" },

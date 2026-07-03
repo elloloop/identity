@@ -152,27 +152,28 @@ type microsoftTenantPin struct {
 var microsoftMetaTenants = map[string]bool{"common": true, "organizations": true, "consumers": true}
 
 // enforce checks a token's tid against the pin and reports whether the tenant
-// was pinned. A configured single TenantID (that is not a meta value) requires
-// tid to equal it; a non-empty AllowedTenants requires tid to be a member.
-// Either mismatch is a hard reject (ErrIdentityVerification). pinned is true
-// when at least one real constraint was configured and satisfied — the signal
-// that the deployment vouches for the issuing tenant.
+// was pinned. TenantID (a single directory) and AllowedTenants (a set) form the
+// UNION of accepted tenants: when a pin is configured, tid is accepted if it
+// equals TenantID OR is a member of AllowedTenants; matching either is enough.
+// A configured pin that tid satisfies none of is a hard reject
+// (ErrIdentityVerification). A meta TenantID ("common"/"organizations"/
+// "consumers") is not a pin. pinned is true only when a real constraint was
+// configured and satisfied — the signal that the deployment vouches for the
+// issuing tenant. Azure stamps `tid` as a directory GUID; GUIDs are
+// case-insensitive, so every comparison folds.
 func (p microsoftTenantPin) enforce(tid string) (pinned bool, err error) {
-	// Azure stamps `tid` as a directory GUID; GUIDs are case-insensitive and
-	// configs may be authored in either case, so every comparison here folds.
-	if p.TenantID != "" && !microsoftMetaTenants[strings.ToLower(p.TenantID)] {
-		if !strings.EqualFold(tid, p.TenantID) {
-			return false, fmt.Errorf("%w: tenant mismatch", ErrIdentityVerification)
-		}
-		pinned = true
+	pinTenant := p.TenantID != "" && !microsoftMetaTenants[strings.ToLower(p.TenantID)]
+	if !pinTenant && len(p.AllowedTenants) == 0 {
+		// No real pin configured (empty, or only a meta TenantID) → multi-tenant.
+		return false, nil
 	}
-	if len(p.AllowedTenants) > 0 {
-		if !containsFold(p.AllowedTenants, tid) {
-			return false, fmt.Errorf("%w: tenant not allow-listed", ErrIdentityVerification)
-		}
-		pinned = true
+	if pinTenant && strings.EqualFold(tid, p.TenantID) {
+		return true, nil
 	}
-	return pinned, nil
+	if containsFold(p.AllowedTenants, tid) {
+		return true, nil
+	}
+	return false, fmt.Errorf("%w: tenant not allowed", ErrIdentityVerification)
 }
 
 // containsFold reports whether needle case-insensitively equals any element of

@@ -38,30 +38,66 @@ func TestValidMicrosoftTenant(t *testing.T) {
 	}
 }
 
-func TestValidateMicrosoftAllowedTenants(t *testing.T) {
-	if err := (&Config{MicrosoftAllowedTenants: "11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222"}).validateMicrosoftAllowedTenants(); err != nil {
-		t.Fatalf("well-formed allow-list should pass: %v", err)
+func TestValidMicrosoftTenantPin(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", true},              // no pin
+		{"common", true},        // meta = multi-tenant
+		{"organizations", true}, // meta
+		{"consumers", true},     // meta
+		{"COMMON", true},        // meta, case-insensitive
+		{"11111111-1111-1111-1111-111111111111", true},   // GUID
+		{"AAAABBBB-CCCC-DDDD-EEEE-FFFF00001111", true},   // GUID, case-insensitive
+		{"contoso.onmicrosoft.com", false},               // domain-form is NOT a valid pin
+		{"example.co", false},                            // domain-form
+		{" 11111111-1111-1111-1111-111111111111", false}, // whitespace
+		{"nonsense", false},
 	}
-	if err := (&Config{MicrosoftAllowedTenants: "contoso.onmicrosoft.com"}).validateMicrosoftAllowedTenants(); err == nil {
-		t.Fatal("a domain-form tenant in the allow-list should be rejected")
-	}
-	if err := (&Config{MicrosoftAllowedTenants: "common"}).validateMicrosoftAllowedTenants(); err == nil {
-		t.Fatal("a meta tenant in the allow-list should be rejected")
-	}
-	if err := (&Config{}).validateMicrosoftAllowedTenants(); err != nil {
-		t.Fatalf("empty allow-list should pass: %v", err)
+	for _, c := range cases {
+		if got := ValidMicrosoftTenantPin(c.in); got != c.want {
+			t.Fatalf("ValidMicrosoftTenantPin(%q) = %v, want %v", c.in, got, c.want)
+		}
 	}
 }
 
-// TestValidate_MicrosoftAllowedTenants_ThroughValidate exercises the validator
-// via the top-level Validate so the wiring is covered.
-func TestValidate_MicrosoftAllowedTenants_ThroughValidate(t *testing.T) {
+func TestValidateMicrosoftTenants(t *testing.T) {
+	if err := (&Config{MicrosoftAllowedTenants: "11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222"}).validateMicrosoftTenants(); err != nil {
+		t.Fatalf("well-formed allow-list should pass: %v", err)
+	}
+	if err := (&Config{MicrosoftAllowedTenants: "contoso.onmicrosoft.com"}).validateMicrosoftTenants(); err == nil {
+		t.Fatal("a domain-form tenant in the allow-list should be rejected")
+	}
+	if err := (&Config{MicrosoftAllowedTenants: "common"}).validateMicrosoftTenants(); err == nil {
+		t.Fatal("a meta tenant in the allow-list should be rejected")
+	}
+	// tenant_id pin: empty / meta / GUID pass; domain-form is rejected.
+	if err := (&Config{MicrosoftTenantID: "common"}).validateMicrosoftTenants(); err != nil {
+		t.Fatalf("meta tenant_id should pass: %v", err)
+	}
+	if err := (&Config{MicrosoftTenantID: "11111111-1111-1111-1111-111111111111"}).validateMicrosoftTenants(); err != nil {
+		t.Fatalf("GUID tenant_id should pass: %v", err)
+	}
+	if err := (&Config{MicrosoftTenantID: "contoso.onmicrosoft.com"}).validateMicrosoftTenants(); err == nil {
+		t.Fatal("a domain-form tenant_id must be rejected (would break every login)")
+	}
+	if err := (&Config{}).validateMicrosoftTenants(); err != nil {
+		t.Fatalf("empty config should pass: %v", err)
+	}
+}
+
+// TestValidate_MicrosoftTenants_ThroughValidate exercises the validator via the
+// top-level Validate so the wiring is covered.
+func TestValidate_MicrosoftTenants_ThroughValidate(t *testing.T) {
 	base := &Config{MicrosoftAllowedTenants: "11111111-1111-1111-1111-111111111111"}
 	if err := base.Validate(); err != nil {
 		t.Fatalf("valid allow-list should pass Validate: %v", err)
 	}
-	bad := &Config{MicrosoftAllowedTenants: "totally-bogus"}
-	if err := bad.Validate(); err == nil {
+	if err := (&Config{MicrosoftAllowedTenants: "totally-bogus"}).Validate(); err == nil {
 		t.Fatal("a malformed allow-list should fail Validate")
+	}
+	if err := (&Config{MicrosoftTenantID: "contoso.onmicrosoft.com"}).Validate(); err == nil {
+		t.Fatal("a domain-form tenant_id should fail Validate")
 	}
 }

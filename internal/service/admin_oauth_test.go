@@ -311,7 +311,7 @@ func TestAdminSetProjectOAuthProvider_MicrosoftAllowedTenants_RoundTrip(t *testi
 	}
 
 	// The list round-trips through config_json onto the typed provider.
-	stored, err := f.projects.GetProjectConfig(ctx, projectID)
+	stored, _, err := f.projects.GetProjectConfig(ctx, projectID)
 	if err != nil {
 		t.Fatalf("GetProjectConfig: %v", err)
 	}
@@ -614,14 +614,14 @@ func TestAdminSetProjectOAuthProvider_AllProviderFields(t *testing.T) {
 		Provider:              oauthProviderMicrosoft,
 		ClientID:              "ms-client",
 		ClientSecret:          "ms-secret",
-		MicrosoftTenantID:     "tenant-abc",
+		MicrosoftTenantID:     "aaaaaaaa-1111-2222-3333-444444444444",
 		MicrosoftIssuerFormat: "https://login.test/%s/v2.0",
 		NativeAudiences:       []string{"ms-native"},
 	})
 	if err != nil {
 		t.Fatalf("set microsoft: %v", err)
 	}
-	if ms.MicrosoftTenantID != "tenant-abc" || ms.MicrosoftIssuerFormat != "https://login.test/%s/v2.0" ||
+	if ms.MicrosoftTenantID != "aaaaaaaa-1111-2222-3333-444444444444" || ms.MicrosoftIssuerFormat != "https://login.test/%s/v2.0" ||
 		!ms.HasClientSecret || len(ms.NativeAudiences) != 1 {
 		t.Fatalf("microsoft view = %+v", ms)
 	}
@@ -667,7 +667,7 @@ func TestAdminSetProjectOAuthProvider_AllProviderFields(t *testing.T) {
 			t.Fatalf("list order = %v, want %v", gotOrder, want)
 		}
 	}
-	if !list[1].HasClientSecret || list[1].MicrosoftTenantID != "tenant-abc" {
+	if !list[1].HasClientSecret || list[1].MicrosoftTenantID != "aaaaaaaa-1111-2222-3333-444444444444" {
 		t.Fatalf("listed microsoft not mapped/redacted: %+v", list[1])
 	}
 }
@@ -753,7 +753,7 @@ func TestAdminSetProjectOAuthProvider_EmptySecretKeepsAllProviders(t *testing.T)
 		t.Fatalf("ms set: %v", err)
 	}
 	if v, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
-		Provider: oauthProviderMicrosoft, ClientID: "m2", MicrosoftTenantID: "t",
+		Provider: oauthProviderMicrosoft, ClientID: "m2", MicrosoftTenantID: "22222222-2222-2222-2222-222222222222",
 	}); err != nil || !v.HasClientSecret || v.ClientID != "m2" {
 		t.Fatalf("ms re-set keep: v=%+v err=%v", v, err)
 	}

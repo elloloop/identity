@@ -287,16 +287,26 @@ message NativeOAuthLoginResponse {
     <code>email → preferred_username → upn</code> (subject is <code>oid</code>
     then <code>sub</code>). The Microsoft <strong>email is trusted as verified</strong>
     (the precondition for account federation) only when the issuing tenant is
-    pinned (<code>tenant_id</code> or an <code>allowed_tenants</code> match — both
-    directory GUIDs), OR the token carries <code>xms_edov == true</code>
-    (Microsoft's email-domain-owner-verified claim, accepted as a bool or the
-    string <code>"true"</code>). A non-standard <code>verified_email == true</code>
-    is <strong>not</strong> trusted on its own (an attacker tenant can set it too),
+    pinned (<code>tid</code> equals <code>tenant_id</code> or is a member of the
+    <code>allowed_tenants</code> set — the two form a union of accepted tenants),
+    OR the token carries <code>xms_edov == true</code> (Microsoft's
+    email-domain-owner-verified claim, accepted as a bool or the string
+    <code>"true"</code>). A non-standard <code>verified_email == true</code> is
+    <strong>not</strong> trusted on its own (an attacker tenant can set it too),
     though an explicit <code>verified_email == false</code> is always rejected.
     Otherwise the email is treated as unverified and the login is rejected with
     <code>ErrEmailNotVerified</code> — exactly like Google/Apple's
     unverified-email handling. Any failure returns <code>Unauthenticated</code>
     with a safe message.
+  </p>
+  <p>
+    <strong>Enabling <code>xms_edov</code>.</strong> Azure does <strong>not</strong>
+    emit <code>xms_edov</code> by default. To rely on it (rather than pinning a
+    tenant), add it as an <strong>optional claim</strong> on the app registration
+    (Azure portal → App registration → Token configuration → add optional claim →
+    ID → <code>xms_edov</code>), and enable the "emit groups/claims as domain owner
+    verified" toggle. Without this, multi-tenant tokens carry no <code>xms_edov</code>
+    and their email is treated as unverified unless the tenant is pinned.
   </p>
   <div class="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm">
     <strong>🔒 Security — multi-tenant Microsoft &amp; account linking (nOAuth).</strong>
@@ -314,13 +324,19 @@ message NativeOAuthLoginResponse {
     unverified. This applies identically to the <strong>hosted and native</strong>
     flows. To accept a known set of tenants, set <code>allowed_tenants</code>
     (per project) or <code>GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS</code> (default
-    project) — each entry a directory (tenant) <strong>GUID</strong> (a token's
-    <code>tid</code> is always a GUID, so a verified-domain string is rejected at
-    config time); for a single tenant, pin <code>tenant_id</code> /
-    <code>GATEWAY_MICROSOFT_TENANT_ID</code>.
+    project) — each entry a directory (tenant) <strong>GUID</strong>. For a single
+    tenant, pin <code>tenant_id</code> / <code>GATEWAY_MICROSOFT_TENANT_ID</code>,
+    which accepts a directory <strong>GUID</strong> or a meta value
+    (<code>common</code>/<code>organizations</code>/<code>consumers</code>, meaning
+    "no pin — multi-tenant"). A token's <code>tid</code> is always a GUID, so a
+    <strong>verified-domain</strong> tenant identifier (e.g.
+    <code>contoso.onmicrosoft.com</code>) can never match and is <strong>rejected
+    at config load / write time</strong> rather than silently failing every login.
     <strong>Behavior change:</strong> multi-tenant Microsoft deployments that
     previously relied on blindly-trusted email must now pin a tenant or emit
-    <code>xms_edov</code>, or those logins will be rejected.
+    <code>xms_edov</code>; single-tenant deployments that pinned by a
+    <strong>verified domain</strong> must re-pin by the tenant <strong>GUID</strong>
+    before upgrading, or every Microsoft login will be rejected.
   </div>
   <p>
     <strong>Audience scoping (per-project).</strong> The accepted <code>aud</code>

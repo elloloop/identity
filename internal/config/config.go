@@ -1133,6 +1133,29 @@ func ValidMicrosoftTenant(entry string) bool {
 	return microsoftTenantGUID.MatchString(entry)
 }
 
+// microsoftMetaTenants are the Azure AD "meta" tenant segments that denote a
+// MULTI-tenant configuration (no single-directory pin). They are legal
+// tenant_id pin values (interpreted as "no pin") but never legal allow-list
+// entries. This mirrors the same set in pkg/oauth — Microsoft's fixed
+// vocabulary, small and stable enough to state in both places rather than
+// couple the packages.
+var microsoftMetaTenants = map[string]bool{"common": true, "organizations": true, "consumers": true}
+
+// ValidMicrosoftTenantPin reports whether entry is a valid single-tenant pin
+// value for GATEWAY_MICROSOFT_TENANT_ID / oauth.microsoft.tenant_id: empty (no
+// pin), a meta segment (common/organizations/consumers — multi-tenant, treated
+// as no pin), or a directory (tenant) GUID. A verified-domain string (or any
+// other non-GUID, non-meta value) is INVALID: the runtime guard requires
+// tid == tenant_id and the token's `tid` is always a GUID, so a domain-form pin
+// would reject every Microsoft login. Rejecting it at config time turns that
+// silent 100% outage into a clear boot/write error.
+func ValidMicrosoftTenantPin(entry string) bool {
+	if entry == "" || microsoftMetaTenants[strings.ToLower(entry)] {
+		return true
+	}
+	return microsoftTenantGUID.MatchString(entry)
+}
+
 // NativeOAuthAudienceList returns the default-project native audiences for a
 // provider key ("google"/"apple"/"microsoft"), or nil for an unknown provider.
 // These are the env seed the DEFAULT PROJECT falls back to; non-default projects
@@ -1351,7 +1374,7 @@ func (c *Config) Validate() error {
 		return err
 	}
 
-	if err := c.validateMicrosoftAllowedTenants(); err != nil {
+	if err := c.validateMicrosoftTenants(); err != nil {
 		return err
 	}
 
@@ -1414,12 +1437,22 @@ func (c *Config) validateNativeOAuth() error {
 	return nil
 }
 
-// validateMicrosoftAllowedTenants rejects a malformed default-project Microsoft
-// tenant allow-list at boot: every GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS entry
-// must be a directory GUID or a verified-domain string. A typo would otherwise
-// silently never match any token's `tid`, disabling Microsoft sign-in for the
-// default project — fail loudly instead.
-func (c *Config) validateMicrosoftAllowedTenants() error {
+// validateMicrosoftTenants rejects a malformed default-project Microsoft tenant
+// pin at boot. The token's `tid` is always a directory GUID and the runtime
+// guard compares against it, so a value that can never match must fail loudly
+// here rather than silently reject every Microsoft login:
+//
+//   - GATEWAY_MICROSOFT_TENANT_ID must be empty, a meta segment
+//     (common/organizations/consumers), or a directory GUID — a verified-domain
+//     pin is rejected (it would break single-tenant sign-in entirely);
+//   - every GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS entry must be a directory
+//     GUID (meta and domain forms are both invalid in the allow-list).
+func (c *Config) validateMicrosoftTenants() error {
+	if !ValidMicrosoftTenantPin(c.MicrosoftTenantID) {
+		return fmt.Errorf("config: GATEWAY_MICROSOFT_TENANT_ID %q must be an Azure AD directory (tenant) GUID, "+
+			"a meta value (common/organizations/consumers), or empty (a verified-domain string can never match a token's tid)",
+			c.MicrosoftTenantID)
+	}
 	for _, t := range c.MicrosoftAllowedTenantList() {
 		if !ValidMicrosoftTenant(t) {
 			return fmt.Errorf("config: GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS entry %q must be an "+

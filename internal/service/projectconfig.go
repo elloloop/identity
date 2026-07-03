@@ -309,6 +309,14 @@ func (m *ProjectOAuthMicrosoft) validate() error {
 			return err
 		}
 	}
+	// tenant_id pins verification (tid == tenant_id) for a concrete GUID, so a
+	// domain-form pin would reject every login. Accept empty (no pin), a meta
+	// value (multi-tenant), or a GUID; reject anything else at author time.
+	if !config.ValidMicrosoftTenantPin(m.TenantID) {
+		return fmt.Errorf("oauth.microsoft.tenant_id %q must be an Azure AD directory (tenant) GUID, "+
+			"a meta value (common/organizations/consumers), or empty (a verified-domain string can never match a token's tid)",
+			m.TenantID)
+	}
 	for _, t := range m.AllowedTenants {
 		if !config.ValidMicrosoftTenant(t) {
 			return fmt.Errorf("oauth.microsoft.allowed_tenants entry %q must be an Azure AD directory (tenant) GUID "+
