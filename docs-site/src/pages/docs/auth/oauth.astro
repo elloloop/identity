@@ -110,6 +110,7 @@ import { Code } from "astro-expressive-code/components";
     "google":    { "client_id": "...", "client_secret_enc": "<enc>", "native_audiences": ["web.g.apps.googleusercontent.com", "ios.g"] },
     "microsoft": { "client_id": "...", "client_secret_enc": "<enc>", "tenant_id": "", "allowed_tenants": ["<tenant-guid>"], "native_audiences": ["ms-native-client"] },
     "apple":     { "native_audiences": ["com.example.app"] },
+    "github":    { "client_id": "...", "client_secret_enc": "<enc>" },
     "oidc":      { "client_id": "...", "client_secret_enc": "<enc>", "issuer": "https://acme.okta.com", "scopes": "openid email profile" }
   }
 }`} lang="json" />
@@ -119,7 +120,9 @@ import { Code } from "astro-expressive-code/components";
     <code>native_audiences</code>) independently — a block may configure hosted,
     native, or both. The Apple block above is <em>native-only</em> (no hosted
     credentials). See <strong>Native mobile sign-in</strong> below for how
-    <code>native_audiences</code> is resolved per project.
+    <code>native_audiences</code> is resolved per project. GitHub and the generic
+    OIDC provider are <strong>hosted-only</strong> (GitHub OAuth issues no ID
+    token), so their blocks carry no <code>native_audiences</code>.
   </p>
   <p>
     The encryption key is a base64-encoded 32-byte key supplied via
@@ -128,8 +131,7 @@ import { Code } from "astro-expressive-code/components";
     (<code>GATEWAY_REPO_DRIVER=postgres</code>), because only postgres stores a
     non-default project's credentials; drivers without a control plane pin every
     request to the default project and need no key. Rotating or losing the key
-    invalidates every stored provider secret. GitHub is not part of the
-    per-project schema — it remains an env-only provider for the default project.
+    invalidates every stored provider secret.
   </p>
   <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
     <strong>Upgrade note.</strong> This key is <strong>mandatory</strong> for
@@ -180,7 +182,7 @@ import { Code } from "astro-expressive-code/components";
     <code>has_client_secret</code> / <code>has_private_key</code> booleans.
   </p>
   <Code code={`message ProjectOAuthProviderConfig {
-  string provider = 1;              // "google" | "microsoft" | "apple" | "oidc"
+  string provider = 1;              // "google" | "microsoft" | "apple" | "github" | "oidc"
   string client_id = 2;
   string client_secret = 3;         // write-only plaintext; empty = keep stored
   bool   has_client_secret = 4;     // read-only (redacted presence)
@@ -188,7 +190,8 @@ import { Code } from "astro-expressive-code/components";
   // google endpoint overrides (6-9), microsoft tenant_id/issuer_format (10-11),
   // apple team_id/key_id/apple_private_key (12-14, key is write-only),
   // has_private_key (15), oidc issuer/discovery_url/scopes (16-18),
-  // microsoft_allowed_tenants (19, tenant allow-list — nOAuth guard).
+  // microsoft_allowed_tenants (19, tenant allow-list — nOAuth guard),
+  // github endpoint overrides (20-23; github is hosted-only — no native_audiences).
 }
 
 rpc AdminSetProjectOAuthProvider(AdminSetProjectOAuthProviderRequest) returns (AdminSetProjectOAuthProviderResponse);

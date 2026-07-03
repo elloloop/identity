@@ -43,7 +43,7 @@ type ProjectConfig struct {
 
 	// OAuth holds the project's own hosted-flow OAuth providers (the
 	// Firebase-project model): each project enables and configures its own
-	// Google/Microsoft/Apple/OIDC providers, isolated from every other
+	// Google/Microsoft/Apple/GitHub/OIDC providers, isolated from every other
 	// project. A provider absent here is simply unavailable for the project,
 	// EXCEPT the default project, which additionally inherits the env-configured
 	// GATEWAY_OAUTH_* providers. Provider secrets are stored encrypted at rest
@@ -55,12 +55,14 @@ type ProjectConfig struct {
 // configuration. Each field is a pointer so "absent" (nil) is distinct from
 // "present but empty" — only a present provider is built for the project. The
 // keys mirror the login `provider` argument callers pass ("google",
-// "microsoft", "apple", "oidc"). GitHub is intentionally not per-project: it
-// remains an env-only provider available to the default project.
+// "microsoft", "apple", "github", "oidc"). Like every other provider, a
+// project's GitHub provider is configured here; the env GATEWAY_OAUTH_GITHUB_*
+// credentials remain the DEFAULT project's provider only.
 type ProjectOAuthConfig struct {
 	Google    *ProjectOAuthGoogle    `json:"google,omitempty"`
 	Microsoft *ProjectOAuthMicrosoft `json:"microsoft,omitempty"`
 	Apple     *ProjectOAuthApple     `json:"apple,omitempty"`
+	GitHub    *ProjectOAuthGitHub    `json:"github,omitempty"`
 	OIDC      *ProjectOAuthOIDC      `json:"oidc,omitempty"`
 }
 
@@ -125,6 +127,21 @@ type ProjectOAuthApple struct {
 	// Apple native login for the project (unless it is the default project,
 	// which falls back to the GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES env seed).
 	NativeAudiences []string `json:"native_audiences,omitempty"`
+}
+
+// ProjectOAuthGitHub configures the project's GitHub provider. GitHub OAuth is
+// NOT OIDC and has no ID token, so it is HOSTED-ONLY: ClientID and
+// ClientSecretEnc drive the code→access_token exchange, after which the provider
+// reads the user's profile and primary verified email from the GitHub REST API.
+// The URL fields are optional overrides that default to the live GitHub
+// endpoints (used by tests / self-hosted GitHub Enterprise proxies).
+type ProjectOAuthGitHub struct {
+	ClientID         string `json:"client_id"`
+	ClientSecretEnc  string `json:"client_secret_enc"`
+	AuthorizationURL string `json:"authorization_url,omitempty"`
+	TokenURL         string `json:"token_url,omitempty"`
+	UserURL          string `json:"user_url,omitempty"`
+	UserMailURL      string `json:"user_mail_url,omitempty"`
 }
 
 // ProjectOAuthOIDC configures the project's generic OIDC provider, registered
@@ -261,6 +278,11 @@ func (c ProjectOAuthConfig) validate() error {
 			return err
 		}
 	}
+	if c.GitHub != nil {
+		if err := c.GitHub.validate(); err != nil {
+			return err
+		}
+	}
 	if c.OIDC != nil {
 		if err := c.OIDC.validate(); err != nil {
 			return err
@@ -333,6 +355,28 @@ func (a *ProjectOAuthApple) validate() error {
 	}
 	if !hosted && len(a.NativeAudiences) == 0 {
 		return errors.New("oauth.apple requires client_id, team_id, key_id, and private_key_enc, or native_audiences")
+	}
+	return nil
+}
+
+func (g *ProjectOAuthGitHub) validate() error {
+	// GitHub is hosted-only (no native ID-token flow), so both credentials are
+	// unconditionally required — there is no native_audiences alternative that
+	// would make a credential-less block valid.
+	if g.ClientID == "" || g.ClientSecretEnc == "" {
+		return errors.New("oauth.github requires client_id and client_secret_enc")
+	}
+	for field, raw := range map[string]string{
+		"oauth.github.authorization_url": g.AuthorizationURL,
+		"oauth.github.token_url":         g.TokenURL,
+		"oauth.github.user_url":          g.UserURL,
+		"oauth.github.user_mail_url":     g.UserMailURL,
+	} {
+		if raw != "" {
+			if err := validateHTTPSURL(raw, field); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

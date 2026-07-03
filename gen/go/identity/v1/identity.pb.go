@@ -11196,13 +11196,13 @@ func (x *GetProjectConfigResponse) GetConfigJson() string {
 type ProjectOAuthProviderConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// provider is the provider key this block configures: "google", "microsoft",
-	// "apple", or "oidc". Required.
+	// "apple", "github", or "oidc". Required.
 	Provider string `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
 	// client_id is the OAuth client id. For the hosted flow it is required; for a
 	// native-only Google/Apple/Microsoft it is the web client id.
 	ClientId string `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	// client_secret is the PLAINTEXT client secret (Google/Microsoft/OIDC), sent
-	// only on a write over TLS and stored encrypted at rest. It is NEVER returned
+	// client_secret is the PLAINTEXT client secret (Google/Microsoft/GitHub/OIDC),
+	// sent only on a write over TLS and stored encrypted at rest. It is NEVER returned
 	// on a read (see has_client_secret). On a write an EMPTY value keeps the
 	// currently-stored secret, so non-secret fields can be edited without
 	// re-sending it; send a non-empty value to set or rotate the secret.
@@ -11249,8 +11249,15 @@ type ProjectOAuthProviderConfig struct {
 	OidcIssuer       string `protobuf:"bytes,16,opt,name=oidc_issuer,json=oidcIssuer,proto3" json:"oidc_issuer,omitempty"`
 	OidcDiscoveryUrl string `protobuf:"bytes,17,opt,name=oidc_discovery_url,json=oidcDiscoveryUrl,proto3" json:"oidc_discovery_url,omitempty"`
 	OidcScopes       string `protobuf:"bytes,18,opt,name=oidc_scopes,json=oidcScopes,proto3" json:"oidc_scopes,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// GitHub endpoint overrides — optional, default to the live GitHub endpoints
+	// (used by tests / self-hosted GitHub Enterprise proxies). GitHub is
+	// hosted-only (GitHub OAuth issues no ID token), so it has no native_audiences.
+	GithubAuthorizationUrl string `protobuf:"bytes,20,opt,name=github_authorization_url,json=githubAuthorizationUrl,proto3" json:"github_authorization_url,omitempty"`
+	GithubTokenUrl         string `protobuf:"bytes,21,opt,name=github_token_url,json=githubTokenUrl,proto3" json:"github_token_url,omitempty"`
+	GithubUserUrl          string `protobuf:"bytes,22,opt,name=github_user_url,json=githubUserUrl,proto3" json:"github_user_url,omitempty"`
+	GithubUserMailUrl      string `protobuf:"bytes,23,opt,name=github_user_mail_url,json=githubUserMailUrl,proto3" json:"github_user_mail_url,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *ProjectOAuthProviderConfig) Reset() {
@@ -11416,6 +11423,34 @@ func (x *ProjectOAuthProviderConfig) GetOidcScopes() string {
 	return ""
 }
 
+func (x *ProjectOAuthProviderConfig) GetGithubAuthorizationUrl() string {
+	if x != nil {
+		return x.GithubAuthorizationUrl
+	}
+	return ""
+}
+
+func (x *ProjectOAuthProviderConfig) GetGithubTokenUrl() string {
+	if x != nil {
+		return x.GithubTokenUrl
+	}
+	return ""
+}
+
+func (x *ProjectOAuthProviderConfig) GetGithubUserUrl() string {
+	if x != nil {
+		return x.GithubUserUrl
+	}
+	return ""
+}
+
+func (x *ProjectOAuthProviderConfig) GetGithubUserMailUrl() string {
+	if x != nil {
+		return x.GithubUserMailUrl
+	}
+	return ""
+}
+
 type AdminSetProjectOAuthProviderRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
@@ -11520,8 +11555,8 @@ func (x *AdminSetProjectOAuthProviderResponse) GetConfig() *ProjectOAuthProvider
 type AdminDeleteProjectOAuthProviderRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	// provider is the provider key to remove: "google", "microsoft", "apple", or
-	// "oidc". Removing an absent provider is a no-op (idempotent).
+	// provider is the provider key to remove: "google", "microsoft", "apple",
+	// "github", or "oidc". Removing an absent provider is a no-op (idempotent).
 	Provider      string `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -12854,7 +12889,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\";\n" +
 	"\x18GetProjectConfigResponse\x12\x1f\n" +
 	"\vconfig_json\x18\x01 \x01(\tR\n" +
-	"configJson\"\xb0\x06\n" +
+	"configJson\"\xed\a\n" +
 	"\x1aProjectOAuthProviderConfig\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12#\n" +
@@ -12878,7 +12913,11 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"oidcIssuer\x12,\n" +
 	"\x12oidc_discovery_url\x18\x11 \x01(\tR\x10oidcDiscoveryUrl\x12\x1f\n" +
 	"\voidc_scopes\x18\x12 \x01(\tR\n" +
-	"oidcScopes\"\x85\x01\n" +
+	"oidcScopes\x128\n" +
+	"\x18github_authorization_url\x18\x14 \x01(\tR\x16githubAuthorizationUrl\x12(\n" +
+	"\x10github_token_url\x18\x15 \x01(\tR\x0egithubTokenUrl\x12&\n" +
+	"\x0fgithub_user_url\x18\x16 \x01(\tR\rgithubUserUrl\x12/\n" +
+	"\x14github_user_mail_url\x18\x17 \x01(\tR\x11githubUserMailUrl\"\x85\x01\n" +
 	"#AdminSetProjectOAuthProviderRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12?\n" +
