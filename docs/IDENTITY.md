@@ -429,9 +429,12 @@ before you ship.
      (`GATEWAY_SESSION_CACHE_TTL_SECONDS`, default 60s; 0 = strict).
      `DeleteRefreshTokensForUser` additionally triggers
      `RevokeSessionsForUser`, so the existing replay-detection path
-     also kills the access tokens. Same-process revocation is
-     synchronous; cross-replica revocation is bounded by the cache
-     TTL. Required for deployers handling sensitive data.
+     also kills the access tokens. Logout, a per-tenant session-timeout
+     breach, and expired-refresh-token cleanup likewise revoke the
+     matching session (scoped to its `sid`), so an invalidated refresh
+     token never leaves its access token usable. Same-process
+     revocation is synchronous; cross-replica revocation is bounded by
+     the cache TTL. Required for deployers handling sensitive data.
 
    The two paths share no fallback or translation layer — `mode=ttl`
    is the existing zero-cost path with the startup assertion added,

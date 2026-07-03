@@ -179,6 +179,116 @@ func TestModeSession_RefreshReplayRevokesAllSessions(t *testing.T) {
 	}
 }
 
+// Logout must kill the access session too: an explicitly logged-out user must
+// not keep a working access token until its natural (uncapped in mode=session)
+// expiry.
+func TestModeSession_Logout_RevokesAccessSession(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSessionModeService(t, repo)
+
+	result, err := svc.PasswordSignup(context.Background(), "sess-logout@example.com", strongPW, "", "", 0)
+	require.NoError(t, err)
+
+	claims, err := jwt.VerifyAccessToken(result.AccessToken, svc.signer, "", "", false)
+	require.NoError(t, err)
+	require.NotEmpty(t, claims.SID)
+
+	require.NoError(t, svc.Logout(context.Background(), result.RefreshToken))
+
+	rec, err := repo.GetSessionBySid(context.Background(), claims.SID)
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	assert.NotZero(t, rec.RevokedAtMs, "logout must revoke the matching access session in mode=session")
+}
+
+func TestModeTTL_Logout_LeavesSessionStoreUntouched(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+
+	result, err := svc.PasswordSignup(context.Background(), "ttl-logout@example.com", strongPW, "", "", 0)
+	require.NoError(t, err)
+	require.NoError(t, svc.Logout(context.Background(), result.RefreshToken))
+
+	repo.mu.Lock()
+	n := len(repo.sessions)
+	repo.mu.Unlock()
+	assert.Zero(t, n, "ttl mode must not create or touch session rows on logout")
+}
+
+// The natural-expiry cleanup must kill the access session too — a deployer may
+// set the JWT expiry longer than the refresh TTL in mode=session, so the
+// access session must die with the refresh token.
+func TestModeSession_ExpiredRefreshToken_RevokesAccessSession(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSessionModeService(t, repo)
+
+	result, err := svc.PasswordSignup(context.Background(), "sess-exp@example.com", strongPW, "", "", 0)
+	require.NoError(t, err)
+	claims, err := jwt.VerifyAccessToken(result.AccessToken, svc.signer, "", "", false)
+	require.NoError(t, err)
+
+	// Age the refresh row past its natural expiry.
+	repo.mu.Lock()
+	for _, rt := range repo.refreshTokens {
+		rt.ExpiresAt = 1
+	}
+	repo.mu.Unlock()
+
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTokenExpired))
+
+	rec, err := repo.GetSessionBySid(context.Background(), claims.SID)
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	assert.NotZero(t, rec.RevokedAtMs, "expired-refresh cleanup must revoke the matching access session")
+}
+
+// A refresh row written before the sid link existed carries an empty sid, so
+// the scoped revoke is impossible; the helper must fail closed by falling back
+// to the user-scoped revoke — without touching other users' sessions.
+func TestModeSession_LegacyRowWithoutSID_FallsBackToUserScopedRevoke(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSessionModeService(t, repo)
+
+	result, err := svc.PasswordSignup(context.Background(), "sess-legacy@example.com", strongPW, "", "", 0)
+	require.NoError(t, err)
+	user, err := repo.FindUserByEmail(context.Background(), "sess-legacy@example.com")
+	require.NoError(t, err)
+	require.NotNil(t, user)
+
+	// A bystander's session must survive the user-scoped fallback.
+	_, err = repo.CreateSession(context.Background(), &SessionRecord{
+		SID: "bystander-sid", UserID: "bystander-user", CreatedAtMs: 1,
+	})
+	require.NoError(t, err)
+
+	// Simulate a pre-migration row: strip the sid link and age it past expiry.
+	repo.mu.Lock()
+	for _, rt := range repo.refreshTokens {
+		if rt.UserID == user.ID {
+			rt.SID = ""
+			rt.ExpiresAt = 1
+		}
+	}
+	repo.mu.Unlock()
+
+	_, _, _, err = svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTokenExpired))
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	for _, s := range repo.sessions {
+		switch s.UserID {
+		case user.ID:
+			assert.NotZero(t, s.RevokedAtMs, "a legacy-row breach must revoke the user's sessions (fail closed)")
+		case "bystander-user":
+			assert.Zero(t, s.RevokedAtMs, "another user's session must be untouched")
+		}
+	}
+}
+
 func TestModeSession_PasswordReset_RevokesSessions(t *testing.T) {
 	// Credential change must force re-auth; in mode=session that
 	// includes the access tokens.

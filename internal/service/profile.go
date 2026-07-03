@@ -25,6 +25,11 @@ type ProfileService struct {
 	// account's profile updates (COPPA data-minimization). Zero-value is a
 	// safe no-op, so a caller that omits WithMinorDataMinimizer is unchanged.
 	minorData MinorDataMinimizer
+	// governance, when set (postgres driver only), is the read-side bundle the
+	// per-tenant password policy resolves through, so ChangePassword enforces
+	// the same tightened complexity rules the login path does. Nil for drivers
+	// without a governance plane, in which case the global baseline applies.
+	governance *LoginGovernance
 }
 
 // NewProfileService creates a ProfileService.
@@ -51,6 +56,14 @@ func NewProfileService(repo Repository, db DB, projectID string, auditLog *audit
 // Returns the service for chaining. Off by default (zero-value is a no-op).
 func (s *ProfileService) WithMinorDataMinimizer(m MinorDataMinimizer) *ProfileService {
 	s.minorData = m
+	return s
+}
+
+// WithLoginGovernance wires the optional login-governance bundle so
+// ChangePassword enforces the owning tenant's password policy (mirrors
+// AuthService.WithLoginGovernance). A nil bundle keeps the global baseline.
+func (s *ProfileService) WithLoginGovernance(g *LoginGovernance) *ProfileService {
+	s.governance = g
 	return s
 }
 
