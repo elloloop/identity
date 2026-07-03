@@ -88,6 +88,13 @@ func (s *nativeITSigner) sign(t *testing.T, claims map[string]any) string {
 			_ = tok.Set(k, v)
 		}
 	}
+	// Stamp a unique jti unless the caller pinned one, so every minted token is a
+	// DISTINCT issued token like the real world. Without it, two runs in the same
+	// second produce byte-identical (provider|iss|sub|iat|aud|nonce) replay keys
+	// and the replay cache (correctly) rejects the second run as a replay.
+	if tok.JwtID() == "" {
+		_ = tok.Set(jwt.JwtIDKey, newNativeITJTI(t))
+	}
 	signKey, err := jwk.FromRaw(s.priv)
 	if err != nil {
 		t.Fatalf("priv jwk: %v", err)
@@ -111,6 +118,17 @@ func (s *nativeITSigner) googleToken(t *testing.T, sub, email, aud string, exp t
 func nativeITHash(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+// newNativeITJTI returns a random JWT ID so each minted token is unique across
+// runs, keeping the native happy-path tests idempotent against a persistent DB.
+func newNativeITJTI(t *testing.T) string {
+	t.Helper()
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		t.Fatalf("rand jti: %v", err)
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // nativeITHarness boots the full server with native OAuth wired to the
