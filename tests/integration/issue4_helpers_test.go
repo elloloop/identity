@@ -36,6 +36,7 @@ func startPasskeyVectorServer(t *testing.T) *Harness {
 		cfg.PasskeyRPID = "example.org"
 		cfg.PasskeyRPName = "Example"
 		cfg.PasskeyOrigin = "https://example.org"
+		cfg.PasskeySignupEnabled = true
 	}))
 }
 

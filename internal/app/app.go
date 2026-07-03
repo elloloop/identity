@@ -7,6 +7,9 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -27,6 +30,7 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/captcha"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/idv"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
@@ -46,6 +50,13 @@ type Deps struct {
 	DB       service.DB
 	Passkeys *passkeys.WebAuthnService
 	TOTPKey  []byte
+
+	// ProjectSecretsKey is the 32-byte AES-256 key that decrypts per-project
+	// secrets at rest (hosted-flow OAuth provider secrets in a project's
+	// config_json). Empty/nil on drivers without a control plane, where every
+	// request pins to the default project (env OAuth providers). Decoded from
+	// GATEWAY_PROJECT_SECRETS_KEY by the composition root.
+	ProjectSecretsKey []byte
 
 	// ProjectResolver resolves a request's control-plane project from its
 	// credential key or Host header (see middleware.NewProjectResolver).
@@ -83,6 +94,12 @@ type Deps struct {
 	// return Unimplemented. Even when wired, the surface stays disabled until
 	// Config.AdminAPISecret is set.
 	ControlPlaneStore service.ControlPlaneProjectStore
+
+	// NativeOAuthProjects is the control-plane project-by-id lookup
+	// NativeOAuthLogin uses to validate a product→project id. Non-nil ONLY for
+	// the postgres driver; nil on drivers without a control plane, where native
+	// login accepts only the product that resolves to the default project.
+	NativeOAuthProjects service.NativeOAuthProjectStore
 
 	// PlatformAdminStore backs the zero-config first-admin bootstrap
 	// (CreateFirstPlatformAdmin). Non-nil ONLY for the postgres driver; when
@@ -133,6 +150,14 @@ type Deps struct {
 	// config's GATEWAY_*_CLIENT_ID/SECRET env vars (only providers
 	// with both credentials set are registered).
 	OAuthRegistry *oauth.Registry
+
+	// NativeOAuthVerifier verifies native mobile-SDK ID tokens for
+	// NativeOAuthLogin. May be nil — in that case New builds one from config
+	// via buildNativeOAuthVerifier (which returns nil, leaving the RPC
+	// disabled, unless GATEWAY_NATIVE_OAUTH_ENABLED and audiences are set).
+	// Tests inject a verifier pointed at a mock JWKS through this override,
+	// mirroring OAuthRegistry.
+	NativeOAuthVerifier *oauth.NativeVerifier
 
 	// IDVProvider drives identity-verification (document + selfie).
 	// May be nil — in that case BeginIdentityVerification returns
@@ -239,8 +264,21 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
+			// Native mobile sign-in (Google/Apple ID-token verification) is a
+			// login surface, bound by the same per-IP login quota as OAuthLogin.
+			PathPrefix: "/identity.v1.IdentityService/NativeOAuthLogin", Tag: "native_oauth",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.v1.IdentityService/BeginPasskeyLogin", Tag: "passkey_begin",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			// Passkey-first signup: unauthenticated account creation. Bound by
+			// the same per-IP signup quota as PasswordSignup so it cannot be
+			// used to mass-create accounts or pump verification mail.
+			PathPrefix: "/identity.v1.IdentityService/BeginPasskeySignup", Tag: "passkey_signup",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/VerifyTotp", Tag: "totp_verify",
@@ -345,6 +383,9 @@ func New(deps Deps) (*Built, error) {
 	// synchronously on the calling goroutine (audit.Logger falls back to
 	// sync mode), so a never-started Built is still correct, just slower.
 	var stopAudit, stopSweeper func()
+	// Event-worker lifecycle hooks; populated below only when outbound
+	// eventing is enabled (else they stay nil and the worker never runs).
+	var startEvents, stopEvents func()
 	startWork := func() {
 		// Move audit writes off the auth hot path. Drops are counted and
 		// surfaced via auditLog.DroppedCount().
@@ -352,8 +393,14 @@ func New(deps Deps) (*Built, error) {
 		if sweep != nil {
 			stopSweeper = sweep.start()
 		}
+		if startEvents != nil {
+			startEvents()
+		}
 	}
 	stopWork := func() {
+		if stopEvents != nil {
+			stopEvents()
+		}
 		if stopSweeper != nil {
 			stopSweeper()
 		}
@@ -398,13 +445,64 @@ func New(deps Deps) (*Built, error) {
 	}
 	oauthRegistry = wrapOAuthRegistry(oauthRegistry)
 
+	// Resolve the native-OAuth verifier into the service-layer seam. Assign
+	// only a non-nil concrete verifier so the interface stays a true nil when
+	// native login is disabled — boxing a typed-nil *oauth.NativeVerifier would
+	// make WithNativeOAuth's "nil disables the RPC" guard read non-nil.
+	var nativeVerifier service.NativeIDTokenVerifier
+	if v := deps.NativeOAuthVerifier; v != nil {
+		nativeVerifier = v
+	} else if v := buildNativeOAuthVerifier(deps.Config, logger); v != nil {
+		nativeVerifier = v
+	}
+
+	// User-lifecycle eventing (#261). When GATEWAY_WEBHOOKS_ENABLED is
+	// false (the default), eventPublisher stays nil — the service treats a
+	// nil publisher as the no-op events.Discard, so no events are emitted
+	// and no worker runs. When enabled, an outbox-backed publisher fans
+	// events out to subscriptions and a background worker delivers signed
+	// webhooks with retry/backoff. The in-memory outbox backs the
+	// single-node tier; a durable SQL outbox is a follow-up.
+	var eventPublisher events.Publisher
+	if deps.Config.WebhooksEnabled {
+		outbox := events.NewMemoryOutbox()
+		pub := events.NewOutboxPublisher(outbox, randomEventID, time.Now, logger)
+		eventPublisher = pub
+		worker := events.NewWorker(events.WorkerConfig{
+			Store:  outbox,
+			Sender: events.NewHTTPSender(nil),
+			Policy: events.RetryPolicy{
+				MaxAttempts: deps.Config.WebhooksMaxAttempts,
+				BaseDelay:   time.Duration(deps.Config.WebhooksBackoffBaseSeconds) * time.Second,
+				MaxDelay:    time.Duration(deps.Config.WebhooksBackoffMaxSeconds) * time.Second,
+			},
+			Interval:    time.Duration(deps.Config.WebhooksWorkerIntervalSeconds) * time.Second,
+			Batch:       deps.Config.WebhooksBatchSize,
+			Logger:      logger,
+			FailureHook: newWebhookFailureHook(logger),
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		startEvents = func() {
+			go func() {
+				if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+					logger.Warn("events_worker_stopped", zap.Error(err))
+				}
+			}()
+		}
+		stopEvents = cancel
+	}
+
 	authSvc := service.NewAuthServiceWithOAuth(
 		repo, deps.Config, deps.Signer, deps.Passkeys,
 		auditLog, deps.TOTPKey, deps.TOTPRecoveryPepper, mailer, smsSender, logger,
 		oauthRegistry,
 	).WithTenantAutoFormer(deps.TenantAutoFormer).
-		WithLoginGovernance(deps.LoginGovernance)
-	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger)
+		WithLoginGovernance(deps.LoginGovernance).
+		WithEventPublisher(eventPublisher).
+		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
+		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger)
+	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
+		WithEventPublisher(eventPublisher)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	// COPPA data-minimization: one minimizer derived from the age gate +
@@ -463,6 +561,36 @@ func New(deps Deps) (*Built, error) {
 			zap.String("hint", "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"))
 	}
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
+
+	// Inbound SCIM 2.0 provisioning (#260). Registered only when
+	// GATEWAY_SCIM_ENABLED is true (and Validate has confirmed a bearer token
+	// + project id); otherwise /scim/v2/* 404s and the headless RPCs are
+	// unaffected. Every SCIM operation is scoped to the single configured
+	// project, so the deployment-wide bearer token can only touch that
+	// project's users.
+	if deps.Config.SCIMEnabled {
+		logger.Info("scim_server_enabled",
+			zap.String("mount", "/scim/v2/"),
+			zap.String("project_id", deps.Config.SCIMProjectID))
+		(&scimHandler{
+			repo:        repo,
+			projectID:   deps.Config.SCIMProjectID,
+			bearerToken: deps.Config.SCIMBearerToken,
+			logger:      logger,
+		}).register(mux, true)
+	} else {
+		logger.Info("scim_server_disabled",
+			zap.String("hint", "set GATEWAY_SCIM_ENABLED=true, GATEWAY_SCIM_BEARER_TOKEN and GATEWAY_SCIM_PROJECT_ID to enable /scim/v2"))
+	}
+
+	// SAML 2.0 IdP surface (#255). Mounted only when GATEWAY_SAML_IDP_ENABLED
+	// is set with valid signing material; a disabled deployment registers no
+	// routes, so /saml/* returns 404 (unchanged behavior).
+	samlIssuer, err := buildSAMLIssuer(deps.Config, logger)
+	if err != nil {
+		return nil, fmt.Errorf("saml issuer: %w", err)
+	}
+	(&samlHandler{issuer: samlIssuer, logger: logger}).register(mux)
 
 	rpcMetrics, err := middleware.NewRPCMetrics(deps.MetricsRegistry)
 	if err != nil {
@@ -611,6 +739,7 @@ func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *za
 	}
 	return service.NewControlPlaneAdminService(
 		secret,
+		deps.ProjectSecretsKey,
 		deps.ControlPlaneStore,
 		deps.TenantStore,
 		deps.MembershipStore,
@@ -661,4 +790,32 @@ func wrapOAuthRegistry(in *oauth.Registry) *oauth.Registry {
 		out.Register(name, observability.WrapOAuthExchanger(name, e))
 	}
 	return out
+}
+
+// newWebhookFailureHook returns the hook the events worker invokes when a
+// delivery is abandoned after exhausting its retry budget. It surfaces the
+// abandonment via the structured logger rather than swallowing it
+// (acceptance criterion: failures surfaced, not hidden). Audit-event
+// surfacing is a follow-up once the outbox is durable and per-tenant.
+func newWebhookFailureHook(logger *zap.Logger) events.FailureHook {
+	return func(d *events.Delivery) {
+		logger.Error(
+			"webhook_delivery_abandoned",
+			zap.String("event_id", d.EventID),
+			zap.String("subscription_id", d.SubscriptionID),
+			zap.Int("attempts", d.Attempts),
+			zap.String("last_error", d.LastError),
+		)
+	}
+}
+
+// randomEventID generates a unique outbox/event id for at-least-once
+// delivery idempotency. crypto/rand failure is unrecoverable, so it panics
+// rather than returning a guessable or empty id.
+func randomEventID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("app: crypto/rand failed generating event id: " + err.Error())
+	}
+	return "evt_" + hex.EncodeToString(b[:])
 }

@@ -7,7 +7,8 @@ import { Code } from "astro-expressive-code/components";
   <h1>OAuth</h1>
   <p>
     Identity supports Google, Microsoft, GitHub, and Apple as upstream OAuth
-    providers. The flow is server-owned: the client calls
+    providers, plus any standards-compliant OIDC provider added purely
+    through config. The flow is server-owned: the client calls
     <code>BeginOAuthLogin</code>, redirects the browser to the returned
     provider URL, then completes the callback with <code>OAuthLogin</code>.
     Identity does the provider token exchange, verifies the upstream
@@ -41,6 +42,169 @@ import { Code } from "astro-expressive-code/components";
     <strong>Apple Configuration.</strong> Apple requires a Team ID, a Services ID (used as the Client ID), a Key ID, and an ECDSA private key (PEM or Base64).
     Unlike other providers, Apple sends this headless flow's callback via <code>POST</code>. Configure an application-owned HTTPS callback that accepts <code>code</code>, <code>state</code>, and the optional <code>user</code> payload, then forwards them to <code>OAuthLogin</code>. Configure <code>https://your-api.com/oauth/callback/apple</code> only when using the hosted flow below.
   </div>
+
+  <h3>Generic OIDC provider</h3>
+  <p>
+    Register an arbitrary standards-compliant OIDC provider (Okta, Auth0,
+    Keycloak, a self-hosted issuer) without a code release. Identity resolves
+    the endpoints from the issuer's
+    <code>/.well-known/openid-configuration</code> document, verifies the
+    id_token against the discovered JWKS (issuer, audience, expiry, signature),
+    and rejects any user whose email is not verified.
+  </p>
+  <Code code={`-e GATEWAY_OAUTH_OIDC_ENABLED=true
+-e GATEWAY_OAUTH_OIDC_PROVIDER_KEY=okta
+-e GATEWAY_OAUTH_OIDC_ISSUER=https://acme.okta.com
+-e GATEWAY_OAUTH_OIDC_CLIENT_ID=...
+-e GATEWAY_OAUTH_OIDC_CLIENT_SECRET=...
+-e GATEWAY_OAUTH_OIDC_SCOPES="openid email profile"`} lang="bash" />
+  <p>
+    The provider registers under <code>GATEWAY_OAUTH_OIDC_PROVIDER_KEY</code>
+    (which becomes the reported <code>provider</code> and the value passed to
+    <code>BeginOAuthLogin</code> / <code>OAuthLogin</code>) and flows through the
+    same hosted and headless paths as every built-in provider. Override the
+    discovery URL with <code>GATEWAY_OAUTH_OIDC_DISCOVERY_URL</code>. The key
+    may not be <code>google</code>, <code>microsoft</code>, <code>github</code>,
+    or <code>apple</code>.
+  </p>
+
+  <h2>Per-project providers (the Firebase-project model)</h2>
+  <p>
+    A Project is identity's isolation container — the Firebase-project
+    equivalent. Each project configures its <strong>own</strong> OAuth providers,
+    exactly like enabling providers in a Firebase project's Auth console, and one
+    project never sees another's. The <code>GATEWAY_OAUTH_*</code> environment
+    variables above configure the <strong>default project's</strong> providers
+    only; existing single-project deployments are unchanged.
+  </p>
+  <p>
+    Precedence, per provider, for the request's resolved project:
+  </p>
+  <ul>
+    <li>
+      if the project has that provider in its <code>config_json</code> →
+      it is used (its secret is decrypted at build time);
+    </li>
+    <li>
+      else if the project <strong>is</strong> the default project
+      (<code>GATEWAY_DEFAULT_PROJECT_ID</code>) → the env-configured provider is
+      used;
+    </li>
+    <li>
+      else — a non-default project with no such provider — the provider is
+      <strong>unavailable</strong> for that project (the same
+      "unknown provider" error an unregistered provider returns). A non-default
+      project never inherits the default project's providers, so credentials
+      never leak across projects.
+    </li>
+  </ul>
+  <p>
+    A project's providers live under an <code>"oauth"</code> object in its
+    <code>config_json</code> (the same per-project blob that carries branding,
+    passkey RP-ID, and CORS), keyed by provider. Provider secrets are stored
+    <strong>encrypted at rest</strong> (<code>client_secret_enc</code>, Apple
+    <code>private_key_enc</code>) with AES-256-GCM:
+  </p>
+  <Code code={`{
+  "oauth": {
+    "google":    { "client_id": "...", "client_secret_enc": "<enc>", "native_audiences": ["web.g.apps.googleusercontent.com", "ios.g"] },
+    "microsoft": { "client_id": "...", "client_secret_enc": "<enc>", "tenant_id": "", "native_audiences": ["ms-native-client"] },
+    "apple":     { "native_audiences": ["com.example.app"] },
+    "oidc":      { "client_id": "...", "client_secret_enc": "<enc>", "issuer": "https://acme.okta.com", "scopes": "openid email profile" }
+  }
+}`} lang="json" />
+  <p>
+    Each Google/Apple/Microsoft block drives the <strong>hosted</strong> flow
+    (via the credentials) and the <strong>native</strong> flow (via
+    <code>native_audiences</code>) independently — a block may configure hosted,
+    native, or both. The Apple block above is <em>native-only</em> (no hosted
+    credentials). See <strong>Native mobile sign-in</strong> below for how
+    <code>native_audiences</code> is resolved per project.
+  </p>
+  <p>
+    The encryption key is a base64-encoded 32-byte key supplied via
+    <code>GATEWAY_PROJECT_SECRETS_KEY</code>. It is <strong>required</strong>
+    whenever the postgres control plane is enabled
+    (<code>GATEWAY_REPO_DRIVER=postgres</code>), because only postgres stores a
+    non-default project's credentials; drivers without a control plane pin every
+    request to the default project and need no key. Rotating or losing the key
+    invalidates every stored provider secret. GitHub is not part of the
+    per-project schema — it remains an env-only provider for the default project.
+  </p>
+  <div class="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+    <strong>Upgrade note.</strong> This key is <strong>mandatory</strong> for
+    postgres deployments (<code>GATEWAY_REPO_DRIVER=postgres</code>) — boot fails
+    fast without it, so existing deployments must set it before upgrading.
+    Generate one with:
+    <Code code={`openssl rand -base64 32`} lang="bash" />
+  </div>
+  <p>
+    Built exchangers (and their JWKS/discovery caches) are cached per
+    <code>(project, provider, config)</code>, so a config edit rebuilds while
+    steady-state logins reuse the cache.
+  </p>
+
+  <h2>Authoring a project's providers (admin API)</h2>
+  <p>
+    You never hand-craft the encrypted <code>*_enc</code> fields. Three
+    operator-only admin RPCs author a project's providers — the operator sends
+    the secret in <strong>plaintext over TLS</strong>, and the server encrypts it
+    with <code>GATEWAY_PROJECT_SECRETS_KEY</code> before storing it. They are
+    authenticated by the <code>X-Admin-Secret</code> header (like every other
+    <code>Admin*</code> RPC), and are <code>UNIMPLEMENTED</code> on a driver with
+    no control plane.
+  </p>
+  <ul>
+    <li>
+      <code>AdminSetProjectOAuthProvider</code> — set or rotate one provider.
+      The write carries the non-secret fields plus a write-only plaintext
+      <code>client_secret</code> (or Apple <code>apple_private_key</code>). An
+      <strong>empty</strong> secret on a subsequent write keeps the stored one,
+      so you can edit non-secret fields without re-sending it. The provider block
+      is merged into <code>config_json</code> without disturbing any other key
+      (branding, passkey, CORS, login), and the merged config is validated at
+      author time (e.g. a Microsoft <code>issuer_format</code> must contain
+      exactly one <code>%s</code>).
+    </li>
+    <li>
+      <code>AdminDeleteProjectOAuthProvider</code> — remove one provider
+      (idempotent).
+    </li>
+    <li>
+      <code>AdminListProjectOAuthProviders</code> — list configured providers.
+    </li>
+  </ul>
+  <p>
+    <strong>Reads never return secrets.</strong> The set response and the list
+    response redact all secret material, reporting only
+    <code>has_client_secret</code> / <code>has_private_key</code> booleans.
+  </p>
+  <Code code={`message ProjectOAuthProviderConfig {
+  string provider = 1;              // "google" | "microsoft" | "apple" | "oidc"
+  string client_id = 2;
+  string client_secret = 3;         // write-only plaintext; empty = keep stored
+  bool   has_client_secret = 4;     // read-only (redacted presence)
+  repeated string native_audiences = 5;
+  // google endpoint overrides (6-9), microsoft tenant_id/issuer_format (10-11),
+  // apple team_id/key_id/apple_private_key (12-14, key is write-only),
+  // has_private_key (15), oidc issuer/discovery_url/scopes (16-18).
+}
+
+rpc AdminSetProjectOAuthProvider(AdminSetProjectOAuthProviderRequest) returns (AdminSetProjectOAuthProviderResponse);
+rpc AdminDeleteProjectOAuthProvider(AdminDeleteProjectOAuthProviderRequest) returns (AdminDeleteProjectOAuthProviderResponse);
+rpc AdminListProjectOAuthProviders(AdminListProjectOAuthProvidersRequest) returns (AdminListProjectOAuthProvidersResponse);`} lang="protobuf" />
+  <Code code={`# Author a project's Google provider (secret sent in plaintext over TLS).
+curl -sS https://auth.example.com/identity.v1.IdentityService/AdminSetProjectOAuthProvider \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "project_id": "proj_123",
+    "config": {
+      "provider": "google",
+      "client_id": "1234.apps.googleusercontent.com",
+      "client_secret": "GOCSPX-plaintext-secret"
+    }
+  }'`} lang="bash" />
 
   <h2>Start RPC</h2>
   <Code code={`message BeginOAuthLoginRequest {
@@ -77,7 +241,128 @@ message BeginOAuthLoginResponse {
   int32 expires_in      = 5;
 }`} lang="proto" />
 
-  <h2>Upsert semantics</h2>
+  <h2>Native mobile sign-in</h2>
+  <p>
+    Mobile apps that use the platform account picker (the official
+    <code>google_sign_in</code> / <code>sign_in_with_apple</code> Flutter
+    plugins) obtain an <strong>ID token</strong> directly — no browser, no
+    PKCE. <code>NativeOAuthLogin</code> verifies that ID token server-side and
+    issues backend tokens, scoped to the product's project. It is public
+    (auth-exempt) and rate-limited under the per-IP login quota, exactly like
+    <code>OAuthLogin</code>.
+  </p>
+  <Code code={`message NativeOAuthLoginRequest {
+  string provider = 1;  // "google" | "apple" | "microsoft"
+  string id_token = 2;  // GoogleSignInAuthentication.idToken / Apple identityToken / MSAL id_token
+  string product  = 3;  // product selector → project (see config below)
+  string nonce    = 4;  // Apple: RAW nonce (hashed); Microsoft: verbatim nonce (both optional)
+}
+
+message NativeOAuthLoginResponse {
+  User user            = 1;
+  string access_token  = 2;
+  string refresh_token = 3;
+  int32 expires_in     = 4;
+}`} lang="proto" />
+  <p>
+    <strong>Verification.</strong> Google: the token's signature is checked
+    against Google's certs, <code>iss</code> must be
+    <code>accounts.google.com</code> (with or without the <code>https://</code>
+    prefix), <code>exp</code> must be present and in the future,
+    <code>email_verified</code> must be true, and <code>aud</code> must be an
+    accepted Google audience for the request's project (see
+    <strong>Audience scoping</strong> below). Apple: signature against Apple's
+    JWKS, <code>iss = https://appleid.apple.com</code>, a present, unexpired
+    <code>exp</code>, and an accepted Apple <code>aud</code>. Hide-my-email relay
+    addresses are accepted as-is. Microsoft: signature against the
+    common-endpoint JWKS, a present <code>tid</code> (tenant), an
+    <code>iss</code> equal to
+    <code>https://login.microsoftonline.com/&lt;tid&gt;/v2.0</code> (multi-tenant
+    by default — the issuer is derived from the token's own <code>tid</code>; a
+    project may pin <code>tenant_id</code> / <code>issuer_format</code> to accept
+    one tenant only), a present unexpired <code>exp</code>, an accepted
+    <code>aud</code>, and an email coalesced from
+    <code>email → preferred_username → upn</code> (subject is <code>oid</code>
+    then <code>sub</code>). Any failure returns <code>Unauthenticated</code> with
+    a safe message.
+  </p>
+  <div class="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm">
+    <strong>🔒 Security — multi-tenant Microsoft &amp; account linking.</strong>
+    Native (and hosted) Microsoft login defaults to <strong>multi-tenant</strong>:
+    the expected issuer is derived from the token's own <code>tid</code>, so
+    <strong>any</strong> Azure AD tenant — including one an attacker controls —
+    can mint a valid token. Because a token carries an <code>email</code>, this is
+    an <a href="https://www.descope.com/blog/post/noauth" rel="nofollow">nOAuth</a>-style
+    account-takeover vector when email is trusted for cross-provider linking: an
+    attacker can present a Microsoft token bearing a <strong>victim's email</strong>
+    and take over the account. For email-based linking,
+    <strong>pin <code>tenant_id</code></strong> (single-tenant) on the project's
+    <code>oauth.microsoft</code> block unless you fully trust every tenant that
+    can obtain a token. Do <strong>not</strong> trust a multi-tenant Microsoft
+    email for cross-provider account linking. (This matches the existing hosted
+    Microsoft provider; a tenant allowlist and the <code>xms_edov</code>
+    email-verified claim are planned hardening for both flows.)
+  </div>
+  <p>
+    <strong>Audience scoping (per-project).</strong> The accepted <code>aud</code>
+    values are resolved <strong>per project</strong> from its <code>config_json</code>
+    — <code>oauth.google.native_audiences</code>,
+    <code>oauth.apple.native_audiences</code>, and
+    <code>oauth.microsoft.native_audiences</code> (each an array of client ids /
+    bundle ids). A non-default project accepts only its own configured audiences
+    and never inherits the env seed, so a token minted for one project's client
+    id is rejected under another. The <strong>default project</strong> falls back
+    to the env seed <code>GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES</code> /
+    <code>GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES</code> /
+    <code>GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES</code> when it configures none
+    of its own; if it configures its own, config_json wins and the env seed is
+    not merged in. A provider with no audiences for the resolved project cannot
+    be used natively.
+  </p>
+  <p>
+    <strong>Single-use replay protection.</strong> A successfully verified
+    native ID token is redeemed <strong>once</strong>: the token's identifier
+    (its <code>jti</code>, or a stable digest of its claims when the provider
+    stamps none) is recorded in a repo-backed replay cache, and a second
+    presentation of the same token is rejected until the record expires (bounded
+    by the token's own <code>exp</code>). This is enforced server-side for every
+    provider, in addition to the optional nonce below. Because audiences are now
+    per-project, a token is valid for exactly one project, so single-use is not
+    weakened by any cross-project audience overlap.
+  </p>
+  <p>
+    <strong>Nonce (per-provider difference).</strong> The <code>nonce</code>
+    field is <strong>optional but recommended</strong>; the check runs only when
+    the client sends a raw nonce. <em>Apple</em> HASHES it: the server verifies
+    the id_token's <code>nonce</code> claim equals
+    <code>hex(SHA-256(raw nonce))</code> — the <code>sign_in_with_apple</code> /
+    Firebase convention (<code>base64url(SHA-256(raw))</code> is also accepted).
+    <em>Microsoft</em> echoes the nonce <strong>verbatim</strong>: the claim must
+    equal the raw nonce exactly (no hashing). <em>Google</em> does not use the
+    nonce. A missing or mismatched claim (when a nonce was supplied) is rejected;
+    when omitted, the token is still fully verified and remains single-use.
+  </p>
+  <p>
+    <strong>Product → project.</strong> <code>product</code> is mapped to an
+    identity project via
+    <code>GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS</code> (CSV of
+    <code>product=projectID</code>); a product that isn't listed is treated as a
+    project id directly. With a control plane (Postgres) the project must exist
+    and be active, otherwise the request is <code>InvalidArgument</code>; on a
+    single-project deployment only the product that resolves to the default
+    project is accepted. The resolved project is injected as the request's
+    project scope, so account linking and token issuance happen under it —
+    independent of the request Host. When
+    <code>GATEWAY_NATIVE_OAUTH_ENABLED</code> is off the RPC returns
+    <code>FailedPrecondition</code>.
+  </p>
+  <p>
+    Account linking reuses the same path as hosted OAuth (match on
+    <code>(provider, sub)</code>, then email; create if new), so the
+    <a href="#upsert-semantics">upsert semantics</a> below apply identically.
+  </p>
+
+  <h2 id="upsert-semantics">Upsert semantics</h2>
   <p>
     On a successful OAuth verification, Identity resolves the user by
     <code>(provider, provider_user_id)</code> first, then falls back to the

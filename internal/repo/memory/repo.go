@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +51,7 @@ type Repo struct {
 	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
 	qrSessions         map[string]*service.QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
+	nativeRedemptions  map[string]*service.NativeTokenRedemptionRecord
 	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
 	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
@@ -99,6 +102,7 @@ func newStore() *Repo {
 		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
+		nativeRedemptions:  make(map[string]*service.NativeTokenRedemptionRecord),
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
@@ -217,15 +221,96 @@ func (r *Repo) GetUser(_ context.Context, userID string) (*service.User, error) 
 	return &cp, nil
 }
 
+func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = service.DefaultUserListLimit
+	}
+	if limit > service.MaxUserListLimit {
+		limit = service.MaxUserListLimit
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	r.mu.Lock()
+	matched := make([]*service.User, 0, len(r.users))
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		cp := *u
+		matched = append(matched, &cp)
+	}
+	r.mu.Unlock()
+
+	// Stable ordering identical to the SQL drivers: created_at asc, then id.
+	sort.Slice(matched, func(i, j int) bool {
+		ti, tj := matched[i].CreatedAt.UnixMilli(), matched[j].CreatedAt.UnixMilli()
+		if ti != tj {
+			return ti < tj
+		}
+		return matched[i].ID < matched[j].ID
+	})
+
+	if offset >= len(matched) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], nil
+}
+
+// CountUsers returns the total number of users matching filter's equality
+// predicates (Email/ExternalID), ignoring Offset/Limit. It backs the SCIM
+// /Users totalResults so a page reports the true match count rather than the
+// page size. Mirrors the SQL drivers.
+func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
 func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
-		if existing.Email == u.Email {
-			return "", fmt.Errorf("user %q already exists", u.Email)
+		// Case-insensitive, mirroring the SQL drivers' lower(email) unique
+		// index: every backend signals a duplicate identically (the SCIM
+		// server maps this sentinel to HTTP 409 Conflict).
+		if strings.EqualFold(existing.Email, u.Email) {
+			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
+		}
+		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
+			return "", fmt.Errorf("external_id %q: %w", u.ExternalID, service.ErrAlreadyExists)
 		}
 	}
-	id := r.nextID()
+	// Honour a caller-provided id (matching the postgres/sqlite drivers).
+	// Passkey-first signup mints the user id during the Begin step and binds
+	// it as the WebAuthn user handle; CreateUser must persist that exact id so
+	// the credential's handle matches the stored user at login time.
+	id := u.ID
+	if id == "" {
+		id = r.nextID()
+	} else if _, clash := r.users[id]; clash {
+		return "", fmt.Errorf("user id %q: %w", id, service.ErrAlreadyExists)
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -238,6 +323,27 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if v, ok := fields["external_id"]; ok {
+		if ext, _ := v.(string); ext != "" {
+			for id, other := range r.users {
+				if id != userID && other.ExternalID == ext {
+					return fmt.Errorf("external_id %q: %w", ext, service.ErrAlreadyExists)
+				}
+			}
+		}
+	}
+	// Mirror the SQL drivers' per-project unique (lower(email)) index: an
+	// email change that collides with another user is a conflict, so a SCIM
+	// PUT/PATCH that reuses an address fails identically across backends.
+	if v, ok := fields["email"]; ok {
+		if email, _ := v.(string); email != "" {
+			for id, other := range r.users {
+				if id != userID && strings.EqualFold(other.Email, email) {
+					return fmt.Errorf("email %q: %w", email, service.ErrAlreadyExists)
+				}
+			}
+		}
 	}
 	applyUserFields(u, fields)
 	return nil
@@ -374,6 +480,8 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			case int:
 				u.EmailVerifiedAt = int64(x)
 			}
+		case "external_id":
+			u.ExternalID, _ = v.(string)
 		case "phone_number":
 			u.PhoneNumber, _ = v.(string)
 		case "phone_verified":
@@ -523,6 +631,16 @@ func (r *Repo) UpdatePasskeyCredential(_ context.Context, nodeID string, fields 
 	return nil
 }
 
+func (r *Repo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	deleteByUser(r.passkeyCreds, userID, func(c *service.PasskeyCredRecord) string { return c.UserID })
+	return nil
+}
+
 // ── Passkey Challenges ────────────────────────────────────────────
 
 func (r *Repo) GetPasskeyChallenge(_ context.Context, nodeID string) (*service.PasskeyChallengeRecord, error) {
@@ -653,6 +771,33 @@ func (r *Repo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, atMs 
 		return &cp, nil
 	}
 	return nil, service.ErrOAuthCodeInvalid
+}
+
+// RecordNativeTokenRedemption records a redeemed native ID token's replay
+// key, enforcing single-use. The mutex held across scan+insert makes the
+// insert-or-reject trivially atomic for the in-process driver: the first
+// call for a key inserts and returns nil; any second call with the same key
+// (a replay of the same bearer token) returns ErrNativeTokenReplayed —
+// matching the postgres/sqlite unique-index semantics.
+func (r *Repo) RecordNativeTokenRedemption(_ context.Context, rec *service.NativeTokenRedemptionRecord) (string, error) {
+	if rec == nil {
+		return "", errors.New("memory: RecordNativeTokenRedemption: nil record")
+	}
+	if rec.ReplayKey == "" {
+		return "", fmt.Errorf("%w: missing replay key", service.ErrInvalidArgument)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.nativeRedemptions {
+		if e.ReplayKey == rec.ReplayKey {
+			return "", service.ErrNativeTokenReplayed
+		}
+	}
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.nativeRedemptions[id] = &cp
+	return id, nil
 }
 
 // ── Email Login Codes (passwordless OTP) ──────────────────────────
@@ -1381,6 +1526,25 @@ func (r *Repo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs int64,
 		}
 		if c.ExpiresAt < beforeMs {
 			delete(r.oauthOneTimeCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *Repo) DeleteExpiredNativeTokenRedemptions(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memory: DeleteExpiredNativeTokenRedemptions: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, e := range r.nativeRedemptions {
+		if n >= limit {
+			break
+		}
+		if e.ExpiresAt < beforeMs {
+			delete(r.nativeRedemptions, id)
 			n++
 		}
 	}

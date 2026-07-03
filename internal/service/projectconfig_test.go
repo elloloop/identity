@@ -122,3 +122,153 @@ func TestParseProjectConfig_EmptyBlocksValid(t *testing.T) {
 	assert.Empty(t, cfg.Branding.ProductName)
 	assert.Empty(t, cfg.Passkey.RPID)
 }
+
+func TestParseProjectConfig_OAuth_Present(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"oauth":{
+		"google":{"client_id":"g","client_secret_enc":"enc-g","issuer":"https://accounts.google.com"},
+		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","tenant_id":"t"},
+		"apple":{"client_id":"a","team_id":"team","key_id":"kid","private_key_enc":"enc-pk"},
+		"oidc":{"client_id":"o","client_secret_enc":"enc-o","issuer":"https://issuer.example","scopes":"openid email"}
+	}}`)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.OAuth.Google)
+	assert.Equal(t, "g", cfg.OAuth.Google.ClientID)
+	assert.Equal(t, "enc-g", cfg.OAuth.Google.ClientSecretEnc)
+	require.NotNil(t, cfg.OAuth.Microsoft)
+	assert.Equal(t, "t", cfg.OAuth.Microsoft.TenantID)
+	require.NotNil(t, cfg.OAuth.Apple)
+	assert.Equal(t, "enc-pk", cfg.OAuth.Apple.PrivateKeyEnc)
+	require.NotNil(t, cfg.OAuth.OIDC)
+	assert.Equal(t, "openid email", cfg.OAuth.OIDC.Scopes)
+	assert.True(t, cfg.OAuth.hasAny())
+}
+
+func TestParseProjectConfig_OAuth_Absent(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"cors":{"allowed_origins":["https://a.example.com"]}}`)
+	require.NoError(t, err)
+	assert.Nil(t, cfg.OAuth.Google)
+	assert.False(t, cfg.OAuth.hasAny())
+}
+
+func TestParseProjectConfig_OAuth_PartialGoogleRejected(t *testing.T) {
+	t.Parallel()
+
+	// A configured google block missing its secret must fail the write.
+	_, err := ParseProjectConfig(`{"oauth":{"google":{"client_id":"g"}}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oauth.google requires")
+}
+
+func TestParseProjectConfig_OAuth_PartialAppleRejected(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseProjectConfig(`{"oauth":{"apple":{"client_id":"a","team_id":"team"}}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oauth.apple requires")
+}
+
+func TestParseProjectConfig_OAuth_OIDCRequiresIssuer(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseProjectConfig(`{"oauth":{"oidc":{"client_id":"o","client_secret_enc":"enc"}}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oauth.oidc requires issuer")
+}
+
+func TestParseProjectConfig_OAuth_GoogleBadURLRejected(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseProjectConfig(`{"oauth":{"google":{"client_id":"g","client_secret_enc":"enc","token_url":"ftp://nope"}}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oauth.google.token_url")
+}
+
+func TestParseProjectConfig_OAuth_NativeAudiences_Present(t *testing.T) {
+	t.Parallel()
+
+	// A provider block may carry hosted credentials AND native audiences, or
+	// either alone. Here Google has both, Microsoft has both (+tenant/issuer),
+	// Apple is native-only.
+	cfg, err := ParseProjectConfig(`{"oauth":{
+		"google":{"client_id":"g","client_secret_enc":"enc-g","native_audiences":["web.g","ios.g"]},
+		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","tenant_id":"t","issuer_format":"https://login.microsoftonline.com/%s/v2.0","native_audiences":["ms.app"]},
+		"apple":{"native_audiences":["com.a.app","com.a.web"]}
+	}}`)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.OAuth.Google)
+	assert.Equal(t, []string{"web.g", "ios.g"}, cfg.OAuth.Google.NativeAudiences)
+	require.NotNil(t, cfg.OAuth.Microsoft)
+	assert.Equal(t, []string{"ms.app"}, cfg.OAuth.Microsoft.NativeAudiences)
+	assert.Equal(t, "t", cfg.OAuth.Microsoft.TenantID)
+	require.NotNil(t, cfg.OAuth.Apple)
+	assert.Equal(t, []string{"com.a.app", "com.a.web"}, cfg.OAuth.Apple.NativeAudiences)
+
+	// The accessor returns the right list per provider.
+	assert.Equal(t, []string{"web.g", "ios.g"}, cfg.OAuth.nativeAudiences("google"))
+	assert.Equal(t, []string{"ms.app"}, cfg.OAuth.nativeAudiences("microsoft"))
+	assert.Equal(t, []string{"com.a.app", "com.a.web"}, cfg.OAuth.nativeAudiences("apple"))
+}
+
+func TestParseProjectConfig_OAuth_NativeAudiences_Absent(t *testing.T) {
+	t.Parallel()
+
+	// Hosted-only blocks (no native_audiences) yield nil for the native accessor.
+	cfg, err := ParseProjectConfig(`{"oauth":{
+		"google":{"client_id":"g","client_secret_enc":"enc-g"},
+		"apple":{"client_id":"a","team_id":"team","key_id":"kid","private_key_enc":"enc-pk"}
+	}}`)
+	require.NoError(t, err)
+	assert.Nil(t, cfg.OAuth.nativeAudiences("google"))
+	assert.Nil(t, cfg.OAuth.nativeAudiences("apple"))
+	assert.Nil(t, cfg.OAuth.nativeAudiences("microsoft")) // provider absent entirely
+}
+
+func TestParseProjectConfig_OAuth_NativeOnlyBlocks_Valid(t *testing.T) {
+	t.Parallel()
+
+	// A native-only block (native_audiences, no hosted credentials) is valid for
+	// each provider — a project may enable native login without the hosted flow.
+	for name, blob := range map[string]string{
+		"google":    `{"oauth":{"google":{"native_audiences":["web.g"]}}}`,
+		"microsoft": `{"oauth":{"microsoft":{"native_audiences":["ms.app"]}}}`,
+		"apple":     `{"oauth":{"apple":{"native_audiences":["com.a.app"]}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := ParseProjectConfig(blob)
+			require.NoError(t, err)
+			assert.Len(t, cfg.OAuth.nativeAudiences(name), 1)
+		})
+	}
+}
+
+func TestParseProjectConfig_OAuth_PartialMicrosoftHostedRejected(t *testing.T) {
+	t.Parallel()
+
+	// A Microsoft block with a hosted client_id but no secret AND no native
+	// audiences is a half-filled hosted block — rejected.
+	_, err := ParseProjectConfig(`{"oauth":{"microsoft":{"client_id":"m"}}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oauth.microsoft requires")
+}
+
+func TestParseProjectConfig_OAuth_EmptyProviderBlockRejected(t *testing.T) {
+	t.Parallel()
+
+	// A wholly-empty provider block (neither hosted creds nor native audiences)
+	// is a config error for each provider.
+	for name, blob := range map[string]string{
+		"google":    `{"oauth":{"google":{}}}`,
+		"microsoft": `{"oauth":{"microsoft":{}}}`,
+		"apple":     `{"oauth":{"apple":{}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseProjectConfig(blob)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "oauth."+name+" requires")
+		})
+	}
+}

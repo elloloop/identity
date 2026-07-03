@@ -12,7 +12,7 @@ import { Code } from "astro-expressive-code/components";
   </p>
 
   <h2>Secret</h2>
-  <p>The Postgres DSN, TOTP encryption key, and OAuth client secrets belong in a Secret:</p>
+  <p>The Postgres DSN, TOTP encryption key, per-project secrets key, and OAuth client secrets belong in a Secret:</p>
   <Code code={`apiVersion: v1
 kind: Secret
 metadata:
@@ -22,6 +22,9 @@ type: Opaque
 stringData:
   GATEWAY_POSTGRES_DSN: "postgres://identity:secret@postgres.identity.svc.cluster.local:5432/identity?sslmode=require"
   GATEWAY_TOTP_ENCRYPTION_KEY: "<base64 32-byte key>"
+  # Required with postgres — encrypts per-project OAuth secrets at rest.
+  # Generate: openssl rand -base64 32
+  GATEWAY_PROJECT_SECRETS_KEY: "<base64 32-byte key>"
   GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET: "..."
   GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET: "..."`} lang="yaml" title="secret.yaml" />
 

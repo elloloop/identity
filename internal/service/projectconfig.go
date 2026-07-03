@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/mail"
 	"net/url"
@@ -37,6 +38,118 @@ type ProjectConfig struct {
 	// who have NO claimed tenant (the common case for a consumer pool). A
 	// tenant's LoginPolicy, when one applies, fully overrides these.
 	Login ProjectLoginConfig `json:"login"`
+
+	// OAuth holds the project's own hosted-flow OAuth providers (the
+	// Firebase-project model): each project enables and configures its own
+	// Google/Microsoft/Apple/OIDC providers, isolated from every other
+	// project. A provider absent here is simply unavailable for the project,
+	// EXCEPT the default project, which additionally inherits the env-configured
+	// GATEWAY_OAUTH_* providers. Provider secrets are stored encrypted at rest
+	// (see the *_enc fields).
+	OAuth ProjectOAuthConfig `json:"oauth"`
+}
+
+// ProjectOAuthConfig is a project's per-provider hosted-flow OAuth
+// configuration. Each field is a pointer so "absent" (nil) is distinct from
+// "present but empty" — only a present provider is built for the project. The
+// keys mirror the login `provider` argument callers pass ("google",
+// "microsoft", "apple", "oidc"). GitHub is intentionally not per-project: it
+// remains an env-only provider available to the default project.
+type ProjectOAuthConfig struct {
+	Google    *ProjectOAuthGoogle    `json:"google,omitempty"`
+	Microsoft *ProjectOAuthMicrosoft `json:"microsoft,omitempty"`
+	Apple     *ProjectOAuthApple     `json:"apple,omitempty"`
+	OIDC      *ProjectOAuthOIDC      `json:"oidc,omitempty"`
+}
+
+// ProjectOAuthGoogle configures the project's Google provider. ClientID and
+// ClientSecretEnc drive the hosted (code-exchange) flow; the URL fields are
+// optional overrides that default to the live Google endpoints (used by tests /
+// self-hosted proxies). NativeAudiences drives the native (mobile-SDK ID-token)
+// flow independently — a project may configure hosted, native, or both.
+type ProjectOAuthGoogle struct {
+	ClientID         string `json:"client_id"`
+	ClientSecretEnc  string `json:"client_secret_enc"`
+	AuthorizationURL string `json:"authorization_url,omitempty"`
+	TokenURL         string `json:"token_url,omitempty"`
+	JWKSURL          string `json:"jwks_url,omitempty"`
+	Issuer           string `json:"issuer,omitempty"`
+	// NativeAudiences is the accepted native ID-token `aud` allow-list for this
+	// project — the web client id plus every per-platform (iOS/Android) OAuth
+	// client id a native SDK presents. Empty disables Google native login for
+	// the project (unless it is the default project, which falls back to the
+	// GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES env seed).
+	NativeAudiences []string `json:"native_audiences,omitempty"`
+}
+
+// ProjectOAuthMicrosoft configures the project's Microsoft (Azure AD) provider.
+// ClientID/ClientSecretEnc drive the hosted flow; NativeAudiences drives the
+// native flow; TenantID/IssuerFormat pin the accepted issuer for both. A
+// single-tenant project sets TenantID so only its tenant's tokens are accepted;
+// leaving it empty keeps the multi-tenant default (issuer derived from the
+// token's own `tid`).
+type ProjectOAuthMicrosoft struct {
+	ClientID        string `json:"client_id"`
+	ClientSecretEnc string `json:"client_secret_enc"`
+	TenantID        string `json:"tenant_id,omitempty"`
+	IssuerFormat    string `json:"issuer_format,omitempty"`
+	// NativeAudiences is the accepted native ID-token `aud` allow-list for this
+	// project. Empty disables Microsoft native login for the project (unless it
+	// is the default project, which falls back to the
+	// GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES env seed).
+	NativeAudiences []string `json:"native_audiences,omitempty"`
+}
+
+// ProjectOAuthApple configures the project's Apple provider. Apple has no
+// client secret; the hosted flow signs a client assertion with a private key,
+// stored encrypted at rest as PrivateKeyEnc. NativeAudiences drives the native
+// flow independently — a project may configure hosted, native, or both.
+type ProjectOAuthApple struct {
+	ClientID      string `json:"client_id"`
+	TeamID        string `json:"team_id"`
+	KeyID         string `json:"key_id"`
+	PrivateKeyEnc string `json:"private_key_enc"`
+	// NativeAudiences is the accepted native ID-token `aud` allow-list for this
+	// project — the Services ID plus every native bundle id. Empty disables
+	// Apple native login for the project (unless it is the default project,
+	// which falls back to the GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES env seed).
+	NativeAudiences []string `json:"native_audiences,omitempty"`
+}
+
+// ProjectOAuthOIDC configures the project's generic OIDC provider, registered
+// under the fixed key "oidc". Endpoints are discovered from Issuer's
+// well-known document (or DiscoveryURL when set), mirroring the env OIDC
+// provider — there are no per-endpoint overrides to keep dead knobs out.
+type ProjectOAuthOIDC struct {
+	ClientID        string `json:"client_id"`
+	ClientSecretEnc string `json:"client_secret_enc"`
+	Issuer          string `json:"issuer,omitempty"`
+	DiscoveryURL    string `json:"discovery_url,omitempty"`
+	// Scopes is a space-separated scope list; "openid" is always ensured by
+	// the provider. Empty defaults to "openid email profile".
+	Scopes string `json:"scopes,omitempty"`
+}
+
+// nativeAudiences returns the project's accepted native ID-token `aud`
+// allow-list for a provider key ("google"/"apple"/"microsoft"), or nil when the
+// project did not configure native audiences for it. The provider key is
+// already lower-cased/trimmed by the caller.
+func (c ProjectOAuthConfig) nativeAudiences(provider string) []string {
+	switch provider {
+	case "google":
+		if c.Google != nil {
+			return c.Google.NativeAudiences
+		}
+	case "apple":
+		if c.Apple != nil {
+			return c.Apple.NativeAudiences
+		}
+	case "microsoft":
+		if c.Microsoft != nil {
+			return c.Microsoft.NativeAudiences
+		}
+	}
+	return nil
 }
 
 // ProjectBrandingConfig is the per-project transactional-email branding.
@@ -101,6 +214,121 @@ func (c ProjectConfig) Validate() error {
 	if err := c.Passkey.validate(); err != nil {
 		return err
 	}
+	if err := c.OAuth.validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validate rejects a present-but-incomplete provider block. A provider block
+// may enable the hosted flow (code exchange), the native flow (mobile-SDK
+// ID-token verification via native_audiences), or both — independently. The
+// rules per block are:
+//
+//   - hosted credentials, when ANY are present, must be COMPLETE (a half-filled
+//     hosted block fails the write rather than silently producing a provider
+//     that can never complete a login);
+//   - a block with no hosted credentials is valid only if it enables the native
+//     flow (native_audiences non-empty); a wholly empty block is a config error.
+//
+// Absent providers (nil) are valid — they mean "not enabled for this project".
+// URL fields are validated when set. Secrets are opaque ciphertext here
+// (validated at decrypt time), so only their presence is checked.
+func (c ProjectOAuthConfig) validate() error {
+	if c.Google != nil {
+		if err := c.Google.validate(); err != nil {
+			return err
+		}
+	}
+	if c.Microsoft != nil {
+		if err := c.Microsoft.validate(); err != nil {
+			return err
+		}
+	}
+	if c.Apple != nil {
+		if err := c.Apple.validate(); err != nil {
+			return err
+		}
+	}
+	if c.OIDC != nil {
+		if err := c.OIDC.validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *ProjectOAuthGoogle) validate() error {
+	hosted := g.ClientID != "" || g.ClientSecretEnc != ""
+	if hosted && (g.ClientID == "" || g.ClientSecretEnc == "") {
+		return errors.New("oauth.google requires client_id and client_secret_enc")
+	}
+	if !hosted && len(g.NativeAudiences) == 0 {
+		return errors.New("oauth.google requires client_id and client_secret_enc, or native_audiences")
+	}
+	for field, raw := range map[string]string{
+		"oauth.google.authorization_url": g.AuthorizationURL,
+		"oauth.google.token_url":         g.TokenURL,
+		"oauth.google.jwks_url":          g.JWKSURL,
+	} {
+		if raw != "" {
+			if err := validateHTTPSURL(raw, field); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (m *ProjectOAuthMicrosoft) validate() error {
+	hosted := m.ClientID != "" || m.ClientSecretEnc != ""
+	if hosted && (m.ClientID == "" || m.ClientSecretEnc == "") {
+		return errors.New("oauth.microsoft requires client_id and client_secret_enc")
+	}
+	if !hosted && len(m.NativeAudiences) == 0 {
+		return errors.New("oauth.microsoft requires client_id and client_secret_enc, or native_audiences")
+	}
+	// The issuer is built with fmt.Sprintf(IssuerFormat, tid), so the format
+	// must carry exactly one %s verb. A format with zero or extra verbs would
+	// render a malformed issuer (…%!(EXTRA…) / %!s(MISSING)) that no real
+	// token could ever match, silently failing every login — reject it at
+	// author time. Both the write path and resolution enforce this.
+	if m.IssuerFormat != "" {
+		if err := validateSingleStringVerb(m.IssuerFormat, "oauth.microsoft.issuer_format"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *ProjectOAuthApple) validate() error {
+	hosted := a.ClientID != "" || a.TeamID != "" || a.KeyID != "" || a.PrivateKeyEnc != ""
+	if hosted && (a.ClientID == "" || a.TeamID == "" || a.KeyID == "" || a.PrivateKeyEnc == "") {
+		return errors.New("oauth.apple requires client_id, team_id, key_id, and private_key_enc")
+	}
+	if !hosted && len(a.NativeAudiences) == 0 {
+		return errors.New("oauth.apple requires client_id, team_id, key_id, and private_key_enc, or native_audiences")
+	}
+	return nil
+}
+
+func (o *ProjectOAuthOIDC) validate() error {
+	if o.ClientID == "" || o.ClientSecretEnc == "" {
+		return errors.New("oauth.oidc requires client_id and client_secret_enc")
+	}
+	if o.Issuer == "" && o.DiscoveryURL == "" {
+		return errors.New("oauth.oidc requires issuer or discovery_url")
+	}
+	if o.Issuer != "" {
+		if err := validateHTTPSURL(o.Issuer, "oauth.oidc.issuer"); err != nil {
+			return err
+		}
+	}
+	if o.DiscoveryURL != "" {
+		if err := validateHTTPSURL(o.DiscoveryURL, "oauth.oidc.discovery_url"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -134,6 +362,16 @@ func (p ProjectPasskeyConfig) validate() error {
 		if err := validateHTTPURL(p.Origin, "passkey.origin"); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateSingleStringVerb rejects a fmt format string that does not contain
+// exactly one %s verb (and no other verb). A literal percent (%%) is allowed.
+func validateSingleStringVerb(format, field string) error {
+	stripped := strings.ReplaceAll(format, "%%", "")
+	if strings.Count(stripped, "%s") != 1 || strings.Count(stripped, "%") != 1 {
+		return fmt.Errorf("%s %q must contain exactly one %%s verb", field, format)
 	}
 	return nil
 }

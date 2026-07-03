@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -219,10 +220,20 @@ func (s *connectPlatformAdminStore) CountPlatformAdmins(_ context.Context) (int,
 
 var _ service.PlatformAdminStore = (*connectPlatformAdminStore)(nil)
 
+// handlerSecretsKey is a fixed 32-byte AES-256 key so the OAuth-provider admin
+// RPCs can encrypt a plaintext secret in the handler tests.
+func handlerSecretsKey() []byte {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i + 7)
+	}
+	return key
+}
+
 func newAdminControlSvc(secret string) (*service.ControlPlaneAdminService, *adminControlStore, *connectMembershipStore) {
 	store := &adminControlStore{}
 	members := &connectMembershipStore{}
-	svc := service.NewControlPlaneAdminService(secret, store, &connectTenantStore{}, members, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(secret, handlerSecretsKey(), store, &connectTenantStore{}, members, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return svc, store, members
 }
 
@@ -316,7 +327,7 @@ func TestAdminRPCs_CustomAuthDomain_Handler(t *testing.T) {
 	t.Parallel()
 	store := &adminControlStore{}
 	dns := &adminDNSResolver{txt: map[string][]string{}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, handlerSecretsKey(), store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
 	client := startAdminServer(t, svc)
 	ctx := context.Background()
 
@@ -374,7 +385,7 @@ func TestAdminRPCs_SetPrimaryAuthDomain_UnverifiedRejected_Handler(t *testing.T)
 	t.Parallel()
 	store := &adminControlStore{}
 	dns := &adminDNSResolver{txt: map[string][]string{}}
-	svc := service.NewControlPlaneAdminService(handlerAdminSecret, store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService(handlerAdminSecret, handlerSecretsKey(), store, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, &connectPlatformAdminStore{}, dns, nil, zap.NewNop())
 	client := startAdminServer(t, svc)
 	ctx := context.Background()
 
@@ -471,7 +482,7 @@ func TestAdminRPCs_HappyPath_Handler(t *testing.T) {
 func startBootstrapServer(t *testing.T) (identityconnectgen.IdentityServiceClient, *connectPlatformAdminStore) {
 	t.Helper()
 	admins := &connectPlatformAdminStore{}
-	svc := service.NewControlPlaneAdminService("", &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
+	svc := service.NewControlPlaneAdminService("", handlerSecretsKey(), &adminControlStore{}, &connectTenantStore{}, &connectMembershipStore{}, &adminLoginPolicyStore{}, admins, &adminDNSResolver{txt: map[string][]string{}}, nil, zap.NewNop())
 	return startAdminServer(t, svc), admins
 }
 
@@ -537,12 +548,17 @@ func TestAdminRPCs_LoginPolicy_Handler(t *testing.T) {
 		t.Fatalf("expected nil policy, got %+v", got.Msg.GetPolicy())
 	}
 
-	// Upsert.
+	// Upsert, including the per-tenant password/session governance fields —
+	// they must travel through the proto, the handler, and the service without
+	// being dropped (the blocker-5 regression).
 	up, err := client.UpsertLoginPolicy(ctx, withAdminSecret(&identitypb.UpsertLoginPolicyRequest{
-		ProjectId:      "p",
-		TenantId:       "t",
-		AllowedMethods: "password,email_otp",
-		Require_2Fa:    true,
+		ProjectId:                     "p",
+		TenantId:                      "t",
+		AllowedMethods:                "password,email_otp",
+		Require_2Fa:                   true,
+		PasswordMinLength:             14,
+		SessionIdleTimeoutSeconds:     1800,
+		SessionAbsoluteTimeoutSeconds: 43200,
 	}, handlerAdminSecret))
 	if err != nil {
 		t.Fatalf("UpsertLoginPolicy: %v", err)
@@ -550,8 +566,12 @@ func TestAdminRPCs_LoginPolicy_Handler(t *testing.T) {
 	if !up.Msg.GetPolicy().GetRequire_2Fa() {
 		t.Fatalf("require_2fa not echoed: %+v", up.Msg.GetPolicy())
 	}
+	if p := up.Msg.GetPolicy(); p.GetPasswordMinLength() != 14 ||
+		p.GetSessionIdleTimeoutSeconds() != 1800 || p.GetSessionAbsoluteTimeoutSeconds() != 43200 {
+		t.Fatalf("governance fields not echoed: %+v", p)
+	}
 
-	// Get reads it back.
+	// Get reads it back, governance fields and all.
 	got, err = client.GetLoginPolicy(ctx,
 		withAdminSecret(&identitypb.GetLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, handlerAdminSecret))
 	if err != nil {
@@ -559,6 +579,10 @@ func TestAdminRPCs_LoginPolicy_Handler(t *testing.T) {
 	}
 	if got.Msg.GetPolicy().GetAllowedMethods() != "password,email_otp" {
 		t.Fatalf("allowed methods = %q", got.Msg.GetPolicy().GetAllowedMethods())
+	}
+	if p := got.Msg.GetPolicy(); p.GetPasswordMinLength() != 14 ||
+		p.GetSessionIdleTimeoutSeconds() != 1800 || p.GetSessionAbsoluteTimeoutSeconds() != 43200 {
+		t.Fatalf("read-back dropped governance fields: %+v", p)
 	}
 
 	// Delete clears it.
@@ -633,5 +657,98 @@ func TestAdminRPCs_PolicyConfig_BadSecret_Denied(t *testing.T) {
 	_, err := client.UpsertLoginPolicy(ctx, withAdminSecret(&identitypb.UpsertLoginPolicyRequest{ProjectId: "p", TenantId: "t"}, "nope"))
 	requireCode(t, err, connect.CodePermissionDenied)
 	_, err = client.UpsertProjectConfig(ctx, withAdminSecret(&identitypb.UpsertProjectConfigRequest{ProjectId: "p"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+}
+
+// ── Per-project OAuth provider admin RPCs through the handler ─────────────
+
+func TestAdminRPCs_OAuthProvider_Handler(t *testing.T) {
+	t.Parallel()
+	svc, store, _ := newAdminControlSvc(handlerAdminSecret)
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	// Set a Google provider with a PLAINTEXT secret over the API.
+	set, err := client.AdminSetProjectOAuthProvider(ctx, withAdminSecret(&identitypb.AdminSetProjectOAuthProviderRequest{
+		ProjectId: "p",
+		Config: &identitypb.ProjectOAuthProviderConfig{
+			Provider:     "google",
+			ClientId:     "goog-client",
+			ClientSecret: "goog-plaintext",
+		},
+	}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminSetProjectOAuthProvider: %v", err)
+	}
+	// The response redacts the secret but reports its presence.
+	if !set.Msg.GetConfig().GetHasClientSecret() || set.Msg.GetConfig().GetClientSecret() != "" {
+		t.Fatalf("response not redacted: %+v", set.Msg.GetConfig())
+	}
+	// The stored config carries ciphertext, never the plaintext.
+	if strings.Contains(store.configs["p"], "goog-plaintext") {
+		t.Fatalf("plaintext leaked into stored config: %s", store.configs["p"])
+	}
+
+	// List returns the provider with the secret redacted.
+	list, err := client.AdminListProjectOAuthProviders(ctx, withAdminSecret(&identitypb.AdminListProjectOAuthProvidersRequest{ProjectId: "p"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminListProjectOAuthProviders: %v", err)
+	}
+	if n := len(list.Msg.GetProviders()); n != 1 {
+		t.Fatalf("providers = %d, want 1", n)
+	}
+	if p := list.Msg.GetProviders()[0]; p.GetClientSecret() != "" || !p.GetHasClientSecret() {
+		t.Fatalf("listed provider not redacted: %+v", p)
+	}
+
+	// Delete removes it.
+	if _, err := client.AdminDeleteProjectOAuthProvider(ctx, withAdminSecret(&identitypb.AdminDeleteProjectOAuthProviderRequest{ProjectId: "p", Provider: "google"}, handlerAdminSecret)); err != nil {
+		t.Fatalf("AdminDeleteProjectOAuthProvider: %v", err)
+	}
+	list, err = client.AdminListProjectOAuthProviders(ctx, withAdminSecret(&identitypb.AdminListProjectOAuthProvidersRequest{ProjectId: "p"}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("list after delete: %v", err)
+	}
+	if n := len(list.Msg.GetProviders()); n != 0 {
+		t.Fatalf("providers after delete = %d, want 0", n)
+	}
+
+	// A bad issuer_format is rejected at author time.
+	_, err = client.AdminSetProjectOAuthProvider(ctx, withAdminSecret(&identitypb.AdminSetProjectOAuthProviderRequest{
+		ProjectId: "p",
+		Config: &identitypb.ProjectOAuthProviderConfig{
+			Provider:              "microsoft",
+			ClientId:              "ms",
+			ClientSecret:          "ms-secret",
+			MicrosoftIssuerFormat: "https://login.test/no-verb/v2.0",
+		},
+	}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeInvalidArgument)
+}
+
+func TestAdminOAuthRPCs_NilService_Unimplemented(t *testing.T) {
+	t.Parallel()
+	client := startAdminServer(t, nil)
+	ctx := context.Background()
+
+	_, err := client.AdminSetProjectOAuthProvider(ctx, withAdminSecret(&identitypb.AdminSetProjectOAuthProviderRequest{ProjectId: "p", Config: &identitypb.ProjectOAuthProviderConfig{Provider: "google"}}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.AdminDeleteProjectOAuthProvider(ctx, withAdminSecret(&identitypb.AdminDeleteProjectOAuthProviderRequest{ProjectId: "p", Provider: "google"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.AdminListProjectOAuthProviders(ctx, withAdminSecret(&identitypb.AdminListProjectOAuthProvidersRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+}
+
+func TestAdminOAuthRPCs_BadSecret_Denied(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newAdminControlSvc(handlerAdminSecret)
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	_, err := client.AdminSetProjectOAuthProvider(ctx, withAdminSecret(&identitypb.AdminSetProjectOAuthProviderRequest{ProjectId: "p", Config: &identitypb.ProjectOAuthProviderConfig{Provider: "google", ClientId: "g", ClientSecret: "s"}}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminDeleteProjectOAuthProvider(ctx, withAdminSecret(&identitypb.AdminDeleteProjectOAuthProviderRequest{ProjectId: "p", Provider: "google"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminListProjectOAuthProviders(ctx, withAdminSecret(&identitypb.AdminListProjectOAuthProvidersRequest{ProjectId: "p"}, ""))
 	requireCode(t, err, connect.CodePermissionDenied)
 }

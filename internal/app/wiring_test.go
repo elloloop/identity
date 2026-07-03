@@ -55,6 +55,50 @@ func TestBuildOAuthRegistry(t *testing.T) {
 	}
 }
 
+func TestBuildNativeOAuthVerifier(t *testing.T) {
+	// Disabled → nil verifier (RPC stays off).
+	if v := buildNativeOAuthVerifier(&config.Config{}, nil); v != nil {
+		t.Fatal("disabled native oauth should yield a nil verifier")
+	}
+	// Enabled → a real verifier even with no env audiences: audiences are now
+	// resolved per-request from the project scope (config_json), so a deployment
+	// that configures native audiences only per-project still gets a verifier.
+	if v := buildNativeOAuthVerifier(&config.Config{NativeOAuthEnabled: true}, zap.NewNop()); v == nil {
+		t.Fatal("enabled native oauth should yield a verifier")
+	}
+	// Enabled + env audiences → a real verifier (default-project seed logged).
+	cfg := &config.Config{
+		NativeOAuthEnabled:            true,
+		NativeOAuthGoogleAudiences:    "web-client",
+		NativeOAuthAppleAudiences:     "dev.easyloops.app",
+		NativeOAuthMicrosoftAudiences: "ms-client",
+	}
+	if v := buildNativeOAuthVerifier(cfg, zap.NewNop()); v == nil {
+		t.Fatal("enabled native oauth with audiences should yield a verifier")
+	}
+}
+
+// TestBuildOAuthRegistry_GenericOIDCKeyNormalized guards the blocker: a
+// mixed-case / whitespace provider key must be registered under the same
+// lowercased/trimmed key the service uses for lookups, so login resolves.
+func TestBuildOAuthRegistry_GenericOIDCKeyNormalized(t *testing.T) {
+	cfg := &config.Config{
+		OIDCEnabled:      true,
+		OIDCProviderKey:  "  Okta  ",
+		OIDCIssuer:       "https://acme.okta.com",
+		OIDCClientID:     "okta-client",
+		OIDCClientSecret: "okta-secret",
+	}
+	registry := buildOAuthRegistry(cfg, zap.NewNop())
+	if _, ok := registry.Get("okta"); !ok {
+		t.Fatalf("generic OIDC provider not registered under normalized key %q; got %v",
+			"okta", registry.Providers())
+	}
+	if _, ok := registry.Get("  Okta  "); ok {
+		t.Fatal("provider registered under the raw un-normalized key")
+	}
+}
+
 func TestBuildEmailTransport(t *testing.T) {
 	cases := []struct {
 		name string

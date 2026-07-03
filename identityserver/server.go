@@ -115,6 +115,11 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		s.cleanupOnError(ctx)
 		return nil, err
 	}
+	projectSecretsKey, err := decodeProjectSecretsKey(&cfg)
+	if err != nil {
+		s.cleanupOnError(ctx)
+		return nil, err
+	}
 
 	authRepo, dbAdapter := opts.Repo, opts.DB
 	var projectResolver service.ProjectResolver
@@ -124,6 +129,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	var membershipStore service.MembershipStore
 	var invitationStore service.InvitationStore
 	var controlPlaneStore service.ControlPlaneProjectStore
+	var nativeOAuthProjects service.NativeOAuthProjectStore
 	var platformAdminStore service.PlatformAdminStore
 	var loginPolicyStore service.LoginPolicyStore
 	var loginGovernance *service.LoginGovernance
@@ -157,6 +163,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		membershipStore = built.MembershipStoreIface()
 		invitationStore = built.InvitationStoreIface()
 		controlPlaneStore = built.ControlPlaneStore()
+		nativeOAuthProjects = built.NativeProjectLookup()
 		platformAdminStore = built.PlatformAdminStoreIface()
 		loginPolicyStore = built.LoginPolicyStoreIface()
 		loginGovernance = built.LoginGovernance()
@@ -196,31 +203,33 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	// flusher) own their root context, created and cancelled by
 	// Start/Shutdown, not the construction ctx.
 	built, err := app.New(app.Deps{ //nolint:contextcheck // workers own their context, not New's ctx
-		Config:             &cfg,
-		Logger:             logger,
-		Signer:             signer,
-		Repo:               authRepo,
-		DB:                 dbAdapter,
-		Passkeys:           webauthnSvc,
-		TOTPKey:            totpKey,
-		TOTPRecoveryPepper: totpRecoveryPepper,
-		EmailTransport:     opts.EmailTransport,
-		SMSSender:          opts.SMSSender,
-		OAuthRegistry:      opts.OAuthRegistry,
-		IDVProvider:        idvProvider,
-		CaptchaVerifier:    opts.CaptchaVerifier,
-		MetricsRegistry:    opts.MetricsRegistry,
-		ProjectResolver:    projectResolver,
-		TenantAutoFormer:   tenantAutoFormer,
-		DomainStore:        domainStore,
-		TenantStore:        tenantStore,
-		MembershipStore:    membershipStore,
-		InvitationStore:    invitationStore,
-		ControlPlaneStore:  controlPlaneStore,
-		PlatformAdminStore: platformAdminStore,
-		LoginPolicyStore:   loginPolicyStore,
-		LoginGovernance:    loginGovernance,
-		DNSResolver:        opts.DNSResolver,
+		Config:              &cfg,
+		Logger:              logger,
+		Signer:              signer,
+		Repo:                authRepo,
+		DB:                  dbAdapter,
+		Passkeys:            webauthnSvc,
+		TOTPKey:             totpKey,
+		TOTPRecoveryPepper:  totpRecoveryPepper,
+		ProjectSecretsKey:   projectSecretsKey,
+		EmailTransport:      opts.EmailTransport,
+		SMSSender:           opts.SMSSender,
+		OAuthRegistry:       opts.OAuthRegistry,
+		IDVProvider:         idvProvider,
+		CaptchaVerifier:     opts.CaptchaVerifier,
+		MetricsRegistry:     opts.MetricsRegistry,
+		ProjectResolver:     projectResolver,
+		TenantAutoFormer:    tenantAutoFormer,
+		DomainStore:         domainStore,
+		TenantStore:         tenantStore,
+		MembershipStore:     membershipStore,
+		InvitationStore:     invitationStore,
+		ControlPlaneStore:   controlPlaneStore,
+		NativeOAuthProjects: nativeOAuthProjects,
+		PlatformAdminStore:  platformAdminStore,
+		LoginPolicyStore:    loginPolicyStore,
+		LoginGovernance:     loginGovernance,
+		DNSResolver:         opts.DNSResolver,
 	})
 	if err != nil {
 		s.cleanupOnError(ctx)

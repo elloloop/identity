@@ -136,6 +136,15 @@ const (
 	EventLoginPolicyUpserted  EventType = "login_policy_upserted"
 	EventLoginPolicyDeleted   EventType = "login_policy_deleted"
 	EventProjectConfigUpdated EventType = "project_config_updated"
+
+	// EventProjectOAuthProviderSet / EventProjectOAuthProviderRemoved record an
+	// operator authoring or removing one of a project's hosted/native OAuth
+	// providers. They make a change to how a project's users can sign in with a
+	// federated provider — including a client-secret rotation — visible in the
+	// audit trail. The recorded details carry the project id and provider key
+	// only; secret material is never logged.
+	EventProjectOAuthProviderSet     EventType = "project_oauth_provider_set"
+	EventProjectOAuthProviderRemoved EventType = "project_oauth_provider_removed"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -172,6 +181,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventLoginPolicyUpserted:           {},
 	EventLoginPolicyDeleted:            {},
 	EventProjectConfigUpdated:          {},
+	EventProjectOAuthProviderSet:       {},
+	EventProjectOAuthProviderRemoved:   {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

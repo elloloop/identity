@@ -531,6 +531,51 @@
     "anchor": "age-gating-coppa"
   },
   {
+    "name": "GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the DEFAULT PROJECT's comma-separated allow-list of accepted Apple ID-token `aud` values for native login — the Services ID plus every native bundle id.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_NATIVE_OAUTH_ENABLED",
+    "type": "boolean",
+    "default": "",
+    "required": false,
+    "description": "is the kill-switch for NativeOAuthLogin (verifying Google/Apple/Microsoft ID tokens from mobile SDKs).",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the DEFAULT PROJECT's comma-separated allow-list of accepted Google ID-token `aud` values for native login — the web client id plus every per-platform (iOS/Android) OAuth client id.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the DEFAULT PROJECT's comma-separated allow-list of accepted Microsoft ID-token `aud` values for native login.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "maps a native client's product selector to an identity project id, as comma-separated product=projectID pairs (e.g. \"easyloops=proj_abc,tortoise=proj_def\").",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
     "name": "GATEWAY_OAUTH_ALLOWED_RETURN_URLS",
     "type": "string",
     "default": "",
@@ -684,6 +729,69 @@
     "anchor": "oauth"
   },
   {
+    "name": "GATEWAY_OAUTH_OIDC_CLIENT_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the generic OIDC provider's OAuth client ID.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_CLIENT_SECRET",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the generic OIDC provider's OAuth client secret.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_DISCOVERY_URL",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "overrides the generic OIDC provider's discovery document URL; empty = derived from OIDCIssuer.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "turns on the generic, config-driven OIDC provider so an operator can register an arbitrary standards-compliant IdP (Okta, Auth0, Keycloak, a self-hosted issuer) without a code release.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_ISSUER",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the generic OIDC provider's issuer URL; the discovery, authorization, token, JWKS, and userinfo endpoints are resolved from \u003cissuer\u003e/.well-known/openid-configuration unless OIDCDiscoveryURL is set.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_PROVIDER_KEY",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the registry key the generic OIDC provider is registered under and reported as Identity.Provider (e.g. \"okta\").",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_OIDC_SCOPES",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "overrides the space-separated OAuth scopes requested from the generic OIDC provider; empty = \"openid email profile\" (\"openid\" is always ensured).",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
     "name": "GATEWAY_OTEL_DEPLOYMENT_ENV",
     "type": "string",
     "default": "",
@@ -770,6 +878,15 @@
     "default": "Glassa Work",
     "required": false,
     "description": "is the human-readable WebAuthn relying-party name.",
+    "category": "Passkeys / WebAuthn",
+    "anchor": "passkeys-webauthn"
+  },
+  {
+    "name": "GATEWAY_PASSKEY_SIGNUP_ENABLED",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "gates passkey-first signup (the unauthenticated BeginPasskeySignup / CompletePasskeySignup pair that creates a brand-new account from a passkey); set false to disable it while leaving authenticated add-a-passkey registration untouched.",
     "category": "Passkeys / WebAuthn",
     "anchor": "passkeys-webauthn"
   },
@@ -918,6 +1035,15 @@
     "anchor": "projects-and-tenancy"
   },
   {
+    "name": "GATEWAY_PROJECT_SECRETS_KEY",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the base64-encoded 32-byte AES-256 key that encrypts per-project secrets at rest — currently the hosted-flow OAuth provider secrets (client secrets, Apple private keys) stored in a project's config_json.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
     "name": "GATEWAY_PUBLIC_EMAIL_DOMAINS",
     "type": "string",
     "default": "",
@@ -1051,6 +1177,87 @@
     "description": "selects how a DeleteRefreshTokensForUser propagates to in-flight access tokens — \"ttl\" or \"session\".",
     "category": "JWT \u0026 tokens",
     "anchor": "jwt-and-tokens"
+  },
+  {
+    "name": "GATEWAY_SAML_ENTITY_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the IdP entityID published in metadata (metadata URL).",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SAML_IDP_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "turns on the SAML 2.0 IdP surface.",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SAML_SIGNING_CERT",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the PEM-encoded X.509 certificate published in metadata.",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SAML_SIGNING_KEY",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the PEM-encoded RSA private key used to sign assertions.",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SAML_SLO_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the optional single-logout endpoint.",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SAML_SSO_URL",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the HTTP-POST/Redirect single sign-on endpoint.",
+    "category": "SAML 2.0 IdP",
+    "anchor": "saml-2-0-idp"
+  },
+  {
+    "name": "GATEWAY_SCIM_BEARER_TOKEN",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the shared secret an external IdP presents in the Authorization: Bearer header on every SCIM request (required when SCIMEnabled).",
+    "category": "SCIM provisioning",
+    "anchor": "scim-provisioning"
+  },
+  {
+    "name": "GATEWAY_SCIM_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "gates the inbound SCIM 2.0 routes.",
+    "category": "SCIM provisioning",
+    "anchor": "scim-provisioning"
+  },
+  {
+    "name": "GATEWAY_SCIM_PROJECT_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the single project whose users the SCIM endpoint provisions; every SCIM operation is scoped to this project (required when SCIMEnabled).",
+    "category": "SCIM provisioning",
+    "anchor": "scim-provisioning"
   },
   {
     "name": "GATEWAY_SESSION_CACHE_TTL_SECONDS",
@@ -1321,5 +1528,59 @@
     "description": "Trusted proxies: comma-separated list of CIDRs whose X-Forwarded-For headers the service will honour.",
     "category": "HTTP, CORS \u0026 cookies",
     "anchor": "http-cors-and-cookies"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS",
+    "type": "integer",
+    "default": "2",
+    "required": false,
+    "description": "is the first-retry delay; it doubles per attempt up to the ceiling.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "is the exponential-backoff ceiling.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_BATCH_SIZE",
+    "type": "integer",
+    "default": "50",
+    "required": false,
+    "description": "is the number of due deliveries claimed per tick.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "is the master switch for outbound user-lifecycle eventing; when false the service emits to a no-op publisher and runs no delivery worker.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_MAX_ATTEMPTS",
+    "type": "integer",
+    "default": "6",
+    "required": false,
+    "description": "is the per-delivery retry budget before a webhook is abandoned and surfaced via the structured logger.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS",
+    "type": "integer",
+    "default": "1",
+    "required": false,
+    "description": "is the outbox drain tick interval.",
+    "category": "Webhooks / eventing",
+    "anchor": "webhooks-eventing"
   }
 ]

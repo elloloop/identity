@@ -249,8 +249,18 @@ func RunConformance(t *testing.T, driver Driver) {
 				t.Fatalf("first CreateUser: %v", err)
 			}
 			_, err = r.CreateUser(ctx, &service.User{Email: "dup@example.com", Status: "active"})
-			if err == nil {
-				t.Fatal("CreateUser duplicate: want error, got nil")
+			// Every driver must signal a duplicate identically: the
+			// unique-violation sentinel service.ErrAlreadyExists (the SCIM
+			// server relies on it to return HTTP 409 Conflict, not 500).
+			if !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("CreateUser duplicate email: want ErrAlreadyExists, got %v", err)
+			}
+			// The uniqueness is case-insensitive on every driver (the SQL
+			// lower(email) index), so a differently-cased address is the SAME
+			// account and must also conflict.
+			_, err = r.CreateUser(ctx, &service.User{Email: "DUP@Example.COM", Status: "active"})
+			if !errors.Is(err, service.ErrAlreadyExists) {
+				t.Fatalf("CreateUser case-insensitive duplicate email: want ErrAlreadyExists, got %v", err)
 			}
 		})
 
@@ -577,6 +587,63 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("DeletePasskeyCredentialsForUser", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			victim := createTestUser(t, r, "pk-clear-victim@example.com")
+			keep := createTestUser(t, r, "pk-clear-keep@example.com")
+			for _, cid := range []string{"vc-1", "vc-2"} {
+				if _, err := r.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{
+					CredentialID: cid, UserID: victim, PublicKey: "pk",
+				}); err != nil {
+					t.Fatalf("Create victim cred %s: %v", cid, err)
+				}
+			}
+			if _, err := r.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{
+				CredentialID: "kc-1", UserID: keep, PublicKey: "pk",
+			}); err != nil {
+				t.Fatalf("Create keep cred: %v", err)
+			}
+
+			if err := r.DeletePasskeyCredentialsForUser(ctx, victim); err != nil {
+				t.Fatalf("DeletePasskeyCredentialsForUser: %v", err)
+			}
+			if list, err := r.ListPasskeyCredentials(ctx, victim); err != nil || len(list) != 0 {
+				t.Fatalf("victim creds after delete: len=%d err=%v", len(list), err)
+			}
+			// Other users' credentials are untouched.
+			if list, err := r.ListPasskeyCredentials(ctx, keep); err != nil || len(list) != 1 {
+				t.Fatalf("keep creds after delete: len=%d err=%v", len(list), err)
+			}
+			// Idempotent: deleting again (now zero creds) is a no-op.
+			if err := r.DeletePasskeyCredentialsForUser(ctx, victim); err != nil {
+				t.Fatalf("DeletePasskeyCredentialsForUser idempotent: %v", err)
+			}
+		})
+
+		t.Run("CreateUser_HonoursProvidedID", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			// Passkey-first signup binds a server-minted id as the WebAuthn
+			// user handle during Begin, then persists the user under that
+			// exact id at Complete. Every driver must therefore honour a
+			// caller-provided User.ID rather than minting its own.
+			const wantID = "fixed-handle-id-deadbeef"
+			gotID, err := r.CreateUser(ctx, &service.User{
+				ID: wantID, Email: "provided-id@example.com", Status: "active", Role: "member",
+			})
+			if err != nil {
+				t.Fatalf("CreateUser with provided id: %v", err)
+			}
+			if gotID != wantID {
+				t.Fatalf("returned id = %q, want %q", gotID, wantID)
+			}
+			got, err := r.GetUser(ctx, wantID)
+			if err != nil || got == nil || got.ID != wantID {
+				t.Fatalf("GetUser(%q) = %#v err=%v", wantID, got, err)
+			}
+		})
+
 		t.Run("PasskeyChallenge_CRUD", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
@@ -585,6 +652,7 @@ func RunConformance(t *testing.T, driver Driver) {
 				Challenge:     "c-1",
 				UserID:        userID,
 				ChallengeType: "registration",
+				Email:         "bound@example.com",
 				ExpiresAt:     1_000,
 			})
 			if err != nil {
@@ -593,6 +661,10 @@ func RunConformance(t *testing.T, driver Driver) {
 			got, err := r.GetPasskeyChallenge(ctx, id)
 			if err != nil || got == nil || got.Challenge != "c-1" {
 				t.Fatalf("Get: %v, %#v", err, got)
+			}
+			// The signup-bound email round-trips on every driver.
+			if got.Email != "bound@example.com" {
+				t.Fatalf("Email = %q, want bound@example.com", got.Email)
 			}
 			if err := r.DeletePasskeyChallenge(ctx, id); err != nil {
 				t.Fatalf("Delete: %v", err)
@@ -882,6 +954,108 @@ func RunConformance(t *testing.T, driver Driver) {
 				t.Fatalf("Consume surviving code: want nil, got %v", err)
 			}
 			if err := r.DeleteExpiredOAuthOneTimeCodes(ctx, 5_000, 0); err == nil {
+				t.Fatal("DeleteExpired with limit 0: want error, got nil")
+			}
+		})
+
+		t.Run("NativeTokenRedemption_SingleUse_AndReplay", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			// First redemption of a key wins and returns a node id.
+			id, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-key-1", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("first Record: want nil, got %v", err)
+			}
+			if id == "" {
+				t.Fatal("RecordNativeTokenRedemption did not return a node id")
+			}
+			// Replaying the SAME key is rejected with ErrNativeTokenReplayed.
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-key-1", ExpiresAt: 9_000_000_000_000, CreatedAt: 200,
+			}); !errors.Is(err, service.ErrNativeTokenReplayed) {
+				t.Fatalf("replay Record: want ErrNativeTokenReplayed, got %v", err)
+			}
+			// A DIFFERENT key is a different token and is accepted.
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-key-2", ExpiresAt: 9_000_000_000_000, CreatedAt: 300,
+			}); err != nil {
+				t.Fatalf("distinct key Record: want nil, got %v", err)
+			}
+		})
+
+		t.Run("NativeTokenRedemption_RaceSingleWinner", func(t *testing.T) {
+			// Drives RecordNativeTokenRedemption from N goroutines against the
+			// same key. Exactly one wins; all others see
+			// ErrNativeTokenReplayed. The repository is the serialization point
+			// — the cross-driver equivalent of the multi-replica redeem race.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+
+			const N = 8
+			results := make(chan error, N)
+			start := make(chan struct{})
+			for i := 0; i < N; i++ {
+				go func() {
+					<-start
+					_, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+						ReplayKey: "ntr-race", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+					})
+					results <- err
+				}()
+			}
+			close(start)
+
+			winners := 0
+			losers := 0
+			for i := 0; i < N; i++ {
+				switch err := <-results; {
+				case err == nil:
+					winners++
+				case errors.Is(err, service.ErrNativeTokenReplayed):
+					losers++
+				default:
+					t.Errorf("loser got unexpected error: %v", err)
+				}
+			}
+			if winners != 1 {
+				t.Fatalf("RecordNativeTokenRedemption winners = %d, want 1 (losers=%d)", winners, losers)
+			}
+			if losers != N-1 {
+				t.Fatalf("RecordNativeTokenRedemption losers = %d, want %d", losers, N-1)
+			}
+		})
+
+		t.Run("NativeTokenRedemption_DeleteExpired", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-old", ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Record old: %v", err)
+			}
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-fresh", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Record fresh: %v", err)
+			}
+			if err := r.DeleteExpiredNativeTokenRedemptions(ctx, 5_000, 100); err != nil {
+				t.Fatalf("DeleteExpired: %v", err)
+			}
+			// The expired key was swept, so it can be recorded again (no replay).
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-old", ExpiresAt: 9_000_000_000_000, CreatedAt: 6_000,
+			}); err != nil {
+				t.Fatalf("Record after sweep: want nil, got %v", err)
+			}
+			// The fresh key survived, so re-recording it is still a replay.
+			if _, err := r.RecordNativeTokenRedemption(ctx, &service.NativeTokenRedemptionRecord{
+				ReplayKey: "ntr-fresh", ExpiresAt: 9_000_000_000_000, CreatedAt: 6_000,
+			}); !errors.Is(err, service.ErrNativeTokenReplayed) {
+				t.Fatalf("surviving key: want ErrNativeTokenReplayed, got %v", err)
+			}
+			if err := r.DeleteExpiredNativeTokenRedemptions(ctx, 5_000, 0); err == nil {
 				t.Fatal("DeleteExpired with limit 0: want error, got nil")
 			}
 		})
@@ -2223,6 +2397,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runIsolationConformance(t, driver)
 	runProjectIsolationConformance(t, driver)
 	runGetLatestConformance(t, driver)
+	runExternalIDConformance(t, driver)
 }
 
 // uniqueHash returns a per-call unique token-hash string. Tests use

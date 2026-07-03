@@ -100,6 +100,10 @@ type governanceStores struct {
 	// newly-registered auth-domain host resolves to the freshly-created
 	// project — the same resolution the project middleware performs.
 	projects service.ProjectResolver
+	// controlPlane is the project write-store, so a test can seed a project's
+	// config_json (e.g. per-project OAuth providers) directly — the RPCs do not
+	// expose config authoring.
+	controlPlane service.ControlPlaneProjectStore
 }
 
 // RedesignHarness is a full-stack, postgres-backed identity service plus the
@@ -194,12 +198,13 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 		DNS:               dns,
 		Mailer:            mailer,
 		Stores: governanceStores{
-			tenants:     built.TenantStoreIface(),
-			domains:     built.DomainStoreIface(),
-			memberships: built.MembershipStoreIface(),
-			invitations: built.InvitationStoreIface(),
-			policies:    built.LoginPolicyStore,
-			projects:    built.ProjectResolver(),
+			tenants:      built.TenantStoreIface(),
+			domains:      built.DomainStoreIface(),
+			memberships:  built.MembershipStoreIface(),
+			invitations:  built.InvitationStoreIface(),
+			policies:     built.LoginPolicyStore,
+			projects:     built.ProjectResolver(),
+			controlPlane: built.ControlPlaneStore(),
 		},
 	}
 }

@@ -33,10 +33,12 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrUnauthenticated),
 		errors.Is(err, service.ErrTokenExpired),
+		errors.Is(err, service.ErrSessionExpired),
 		errors.Is(err, service.ErrOAuthCodeInvalid),
 		errors.Is(err, service.ErrEmailLoginCodeInvalid),
 		errors.Is(err, service.ErrMagicLinkInvalid),
-		errors.Is(err, service.ErrPhoneCodeInvalid):
+		errors.Is(err, service.ErrPhoneCodeInvalid),
+		errors.Is(err, service.ErrNativeTokenReplayed):
 		return connect.NewError(connect.CodeUnauthenticated, err)
 
 	case errors.Is(err, service.ErrInvalidArgument),
@@ -69,6 +71,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAccountNotActive),
 		errors.Is(err, service.ErrInvitationPending),
 		errors.Is(err, service.ErrSignupDisabled),
+		errors.Is(err, service.ErrPasskeySignupDisabled),
+		errors.Is(err, service.ErrNativeOAuthDisabled),
 		errors.Is(err, service.ErrParentalConsentRequired),
 		errors.Is(err, service.ErrIDVRequired),
 		errors.Is(err, service.ErrEmailVerificationRequired),
@@ -82,6 +86,7 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrLastOwner),
 		errors.Is(err, service.ErrPlatformAdminExists),
 		errors.Is(err, service.ErrAuthDomainNotVerified),
+		errors.Is(err, service.ErrProjectSecretsKeyMissing),
 		errors.Is(err, service.ErrLastCredential):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 

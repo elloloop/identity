@@ -156,8 +156,14 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 			}
 			for i, c := range cases {
 				h := fmt.Sprintf("rt-int64-%d", i)
+				// SessionStartedAt is the absolute-timeout anchor; it must
+				// survive the full int64 range like the other timestamps, and
+				// independently of created_at (it is propagated across
+				// rotations rather than re-stamped).
+				sessionStart := c.createdAt - 1
 				if _, err := r.CreateRefreshToken(ctx, &service.RefreshTokenRecord{
 					TokenHash: h, UserID: uid, ExpiresAt: c.expiresAt, CreatedAt: c.createdAt, LastUsedAt: c.createdAt,
+					SessionStartedAt: sessionStart,
 				}); err != nil {
 					t.Fatalf("%s: CreateRefreshToken: %v", c.name, err)
 				}
@@ -170,6 +176,9 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 				}
 				if got.CreatedAt != c.createdAt {
 					t.Errorf("%s: CreatedAt round-trip = %d, want %d", c.name, got.CreatedAt, c.createdAt)
+				}
+				if got.SessionStartedAt != sessionStart {
+					t.Errorf("%s: SessionStartedAt round-trip = %d, want %d", c.name, got.SessionStartedAt, sessionStart)
 				}
 			}
 		})

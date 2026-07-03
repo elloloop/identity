@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -13,6 +14,38 @@ import (
 // adapters translate the service-layer value types to the store's internal
 // row types and delegate to the typed methods, mirroring project_resolver.go.
 var _ service.ControlPlaneProjectStore = (*ProjectStore)(nil)
+
+// The ProjectStore is also the postgres driver's service.NativeOAuthProjectStore:
+// the read-side lookup NativeOAuthLogin uses to validate a product→project id.
+var _ service.NativeOAuthProjectStore = (*ProjectStore)(nil)
+
+// ActiveProjectByID resolves an ACTIVE control-plane project by id as the
+// driver-agnostic service.AdminProject, or (nil, nil) when no such active
+// project exists. It delegates to GetProjectByID and treats a suspended
+// project as a clean miss — a native login may not be scoped to a project that
+// is not serving. It backs the native-OAuth product→project validation.
+func (s *ProjectStore) ActiveProjectByID(ctx context.Context, projectID string) (*service.AdminProject, error) {
+	p, err := s.GetProjectByID(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil || p.Status != projectStatusActive {
+		return nil, nil
+	}
+	// Parse config_json so native login can bind the project's per-project OAuth
+	// audiences/issuer to the request scope. A malformed blob is a configuration
+	// error surfaced to the caller, never silently dropped.
+	cfg, err := service.ParseProjectConfig(p.ConfigJSON)
+	if err != nil {
+		return nil, fmt.Errorf("project %q: %w", p.ID, err)
+	}
+	return &service.AdminProject{
+		ID:             p.ID,
+		StorageScopeID: p.StorageScopeID,
+		Name:           p.Name,
+		OAuth:          cfg.OAuth,
+	}, nil
+}
 
 // CreateProject inserts a project from the admin service's value type and
 // returns its id. EnsureAuthDomain and the resolver read the same tables.

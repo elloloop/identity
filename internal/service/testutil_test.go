@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -98,12 +99,27 @@ type fakeRepo struct {
 	// (after the counter decrements to 0) succeed normally.
 	incrementErrCount int
 
+	// createUserHook, when set, runs at the very start of CreateUser
+	// (before the duplicate-email check). A test uses it to inject a
+	// concurrent insert and exercise the lost-create-race path: seeding a
+	// user with the same email here makes the subsequent insert fail the
+	// uniqueness check exactly as a racing winner would.
+	createUserHook func()
+
+	// The following, when non-nil, make the corresponding read/write return
+	// that error so a test can exercise the caller's repo-error-propagation
+	// path. Default nil (success).
+	getPasskeyChallengeErr error
+	findUserByEmailErr     error
+	createPasskeyCredErr   error
+
 	users              map[string]*User
 	refreshTokens      map[string]*RefreshTokenRecord
 	passkeyCreds       map[string]*PasskeyCredRecord
 	passkeyChallenges  map[string]*PasskeyChallengeRecord
 	qrSessions         map[string]*QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*OAuthOneTimeCodeRecord
+	nativeRedemptions  map[string]*NativeTokenRedemptionRecord
 	emailLoginCodes    map[string]*EmailLoginCodeRecord
 	magicLinkTokens    map[string]*MagicLinkTokenRecord
 	phoneVerifyCodes   map[string]*PhoneVerificationCodeRecord
@@ -127,6 +143,7 @@ func newFakeRepo() *fakeRepo {
 		passkeyChallenges:  make(map[string]*PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*OAuthOneTimeCodeRecord),
+		nativeRedemptions:  make(map[string]*NativeTokenRedemptionRecord),
 		emailLoginCodes:    make(map[string]*EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*PhoneVerificationCodeRecord),
@@ -148,6 +165,9 @@ func newFakeRepo() *fakeRepo {
 func (r *fakeRepo) FindUserByEmail(_ context.Context, email string) (*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.findUserByEmailErr != nil {
+		return nil, r.findUserByEmailErr
+	}
 	for _, u := range r.users {
 		if u.Email == email {
 			cp := *u
@@ -168,7 +188,43 @@ func (r *fakeRepo) GetUser(_ context.Context, userID string) (*User, error) {
 	return &cp, nil
 }
 
+func (r *fakeRepo) ListUsers(_ context.Context, filter UserListFilter) ([]*User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*User
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		cp := *u
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (r *fakeRepo) CountUsers(_ context.Context, filter UserListFilter) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
 func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
+	if r.createUserHook != nil {
+		r.createUserHook()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
@@ -176,7 +232,10 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
 			return "", fmt.Errorf("user with email %s already exists", u.Email)
 		}
 	}
-	id := nextNodeID()
+	id := u.ID
+	if id == "" {
+		id = nextNodeID()
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -482,6 +541,9 @@ func (r *fakeRepo) GetPasskeyCredentialByCredID(_ context.Context, credentialID 
 func (r *fakeRepo) CreatePasskeyCredential(_ context.Context, rec *PasskeyCredRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.createPasskeyCredErr != nil {
+		return "", r.createPasskeyCredErr
+	}
 	id := nextNodeID()
 	rec.NodeID = id
 	cp := *rec
@@ -505,11 +567,25 @@ func (r *fakeRepo) UpdatePasskeyCredential(_ context.Context, nodeID string, fie
 	return nil
 }
 
+func (r *fakeRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
+	}
+	return nil
+}
+
 // ── Passkey Challenges ─────────────────────────────────────────────────
 
 func (r *fakeRepo) GetPasskeyChallenge(_ context.Context, nodeID string) (*PasskeyChallengeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getPasskeyChallengeErr != nil {
+		return nil, r.getPasskeyChallengeErr
+	}
 	c, ok := r.passkeyChallenges[nodeID]
 	if !ok {
 		return nil, nil
@@ -621,6 +697,21 @@ func (r *fakeRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, a
 		return &cp, nil
 	}
 	return nil, ErrOAuthCodeInvalid
+}
+
+func (r *fakeRepo) RecordNativeTokenRedemption(_ context.Context, rec *NativeTokenRedemptionRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.nativeRedemptions {
+		if e.ReplayKey == rec.ReplayKey {
+			return "", ErrNativeTokenReplayed
+		}
+	}
+	id := nextNodeID()
+	rec.NodeID = id
+	cp := *rec
+	r.nativeRedemptions[id] = &cp
+	return id, nil
 }
 
 func (r *fakeRepo) UpsertEmailLoginCode(_ context.Context, rec *EmailLoginCodeRecord) (string, error) {
@@ -962,6 +1053,7 @@ func testConfig() *config.Config {
 		PasskeyRPName:                   "Test",
 		PasskeyOrigin:                   "http://localhost:9002",
 		PasskeyChallengeExpirySeconds:   300,
+		PasskeySignupEnabled:            true,
 		QRLoginBaseURL:                  "http://localhost:9002",
 		QRLoginExpirySeconds:            300,
 		TOTPIssuer:                      "Glassa Test",
@@ -1490,6 +1582,22 @@ func (r *fakeRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs in
 		}
 		if c.ExpiresAt < beforeMs {
 			delete(r.oauthOneTimeCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteExpiredNativeTokenRedemptions(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, e := range r.nativeRedemptions {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if e.ExpiresAt < beforeMs {
+			delete(r.nativeRedemptions, id)
 			n++
 		}
 	}

@@ -46,6 +46,14 @@ func (StubRepository) DeleteUser(context.Context, string) error {
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) ListUsers(context.Context, UserListFilter) ([]*User, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) CountUsers(context.Context, UserListFilter) (int, error) {
+	return 0, ErrServiceUnavailable
+}
+
 func (StubRepository) IncrementFailedLoginCount(context.Context, string) (int32, error) {
 	return 0, ErrServiceUnavailable
 }
@@ -98,6 +106,10 @@ func (StubRepository) UpdatePasskeyCredential(context.Context, string, map[strin
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) DeletePasskeyCredentialsForUser(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) GetPasskeyChallenge(context.Context, string) (*PasskeyChallengeRecord, error) {
 	return nil, ErrServiceUnavailable
 }
@@ -132,6 +144,10 @@ func (StubRepository) CreateOAuthOneTimeCode(context.Context, *OAuthOneTimeCodeR
 
 func (StubRepository) ConsumeOAuthOneTimeCode(context.Context, string, int64) (*OAuthOneTimeCodeRecord, error) {
 	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) RecordNativeTokenRedemption(context.Context, *NativeTokenRedemptionRecord) (string, error) {
+	return "", ErrServiceUnavailable
 }
 
 func (StubRepository) UpsertEmailLoginCode(context.Context, *EmailLoginCodeRecord) (string, error) {
@@ -335,6 +351,10 @@ func (StubRepository) DeleteExpiredLoginChallenges(context.Context, int64, int) 
 }
 
 func (StubRepository) DeleteExpiredOAuthOneTimeCodes(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredNativeTokenRedemptions(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }
 

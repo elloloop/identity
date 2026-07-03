@@ -19,7 +19,7 @@ import (
 	"github.com/elloloop/identity/internal/graph"
 
 	"github.com/elloloop/identity/pkg/passwords"
-	"github.com/elloloop/identity/pkg/totp"
+	"github.com/elloloop/identity/pkg/secretcrypto"
 )
 
 // ── PasswordSignup edge cases ──────────────────────────────────────────
@@ -605,7 +605,7 @@ func TestVerifyTotpSetup_HappyPath(t *testing.T) {
 	u := seedUser(repo, "verify-ok@example.com", "", "active")
 
 	secret := "JBSWY3DPEHPK3PXP" // #nosec G101 -- deterministic TOTP test vector.
-	encrypted, err := totp.EncryptSecret(secret, testTotpKey())
+	encrypted, err := secretcrypto.Encrypt(secret, testTotpKey())
 	require.NoError(t, err)
 
 	repo.mu.Lock()
@@ -703,7 +703,7 @@ func TestVerifyTotp_InvalidCode(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "wrong-totp@example.com", "", "active")
 
-	encrypted, err := totp.EncryptSecret("JBSWY3DPEHPK3PXP", testTotpKey())
+	encrypted, err := secretcrypto.Encrypt("JBSWY3DPEHPK3PXP", testTotpKey())
 	require.NoError(t, err)
 	repo.mu.Lock()
 	credID := nextNodeID()
@@ -729,7 +729,7 @@ func TestVerifyTotp_TotpHappyPath(t *testing.T) {
 	u := seedUser(repo, "totpok@example.com", "", "active")
 
 	secret := "JBSWY3DPEHPK3PXP" // #nosec G101 -- deterministic TOTP test vector.
-	encrypted, err := totp.EncryptSecret(secret, testTotpKey())
+	encrypted, err := secretcrypto.Encrypt(secret, testTotpKey())
 	require.NoError(t, err)
 	repo.mu.Lock()
 	credID := nextNodeID()
@@ -1733,6 +1733,9 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	}
 	if err := r.DeleteExpiredOAuthOneTimeCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredOAuthOneTimeCodes: %v", err)
+	}
+	if err := r.DeleteExpiredNativeTokenRedemptions(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredNativeTokenRedemptions: %v", err)
 	}
 	if err := r.DeleteExpiredEmailLoginCodes(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredEmailLoginCodes: %v", err)

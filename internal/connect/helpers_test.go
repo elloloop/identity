@@ -90,6 +90,7 @@ type fakeRepo struct {
 	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
 	qrSessions         map[string]*service.QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
+	nativeRedemptions  map[string]*service.NativeTokenRedemptionRecord
 	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
 	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
@@ -119,6 +120,7 @@ func newFakeRepo() *fakeRepo {
 		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
+		nativeRedemptions:  make(map[string]*service.NativeTokenRedemptionRecord),
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
@@ -163,6 +165,39 @@ func (r *fakeRepo) GetUser(_ context.Context, userID string) (*service.User, err
 	return &cp, nil
 }
 
+func (r *fakeRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.User
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		cp := *u
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (r *fakeRepo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
 func (r *fakeRepo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -174,7 +209,10 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *service.User) (string, error
 			return "", fmt.Errorf("user with email %s already exists", u.Email)
 		}
 	}
-	id := nextID()
+	id := u.ID
+	if id == "" {
+		id = nextID()
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -473,6 +511,17 @@ func (r *fakeRepo) UpdatePasskeyCredential(_ context.Context, nodeID string, fie
 	return nil
 }
 
+func (r *fakeRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
+	}
+	return nil
+}
+
 func (r *fakeRepo) GetPasskeyChallenge(_ context.Context, nodeID string) (*service.PasskeyChallengeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -585,6 +634,21 @@ func (r *fakeRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, a
 		return &cp, nil
 	}
 	return nil, service.ErrOAuthCodeInvalid
+}
+
+func (r *fakeRepo) RecordNativeTokenRedemption(_ context.Context, rec *service.NativeTokenRedemptionRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.nativeRedemptions {
+		if e.ReplayKey == rec.ReplayKey {
+			return "", service.ErrNativeTokenReplayed
+		}
+	}
+	id := nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.nativeRedemptions[id] = &cp
+	return id, nil
 }
 
 func (r *fakeRepo) UpsertEmailLoginCode(_ context.Context, rec *service.EmailLoginCodeRecord) (string, error) {
@@ -1250,6 +1314,22 @@ func (r *fakeRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs in
 		}
 		if c.ExpiresAt < beforeMs {
 			delete(r.oauthOneTimeCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteExpiredNativeTokenRedemptions(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, e := range r.nativeRedemptions {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if e.ExpiresAt < beforeMs {
+			delete(r.nativeRedemptions, id)
 			n++
 		}
 	}

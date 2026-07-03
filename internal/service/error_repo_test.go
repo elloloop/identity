@@ -57,6 +57,14 @@ type errorRepo struct {
 	failIncrEmailLoginCodeAttempts bool
 	failConsumeEmailLoginCode      bool
 	failDeleteUser                 bool
+	failRecordNativeTokenRedeem    bool
+}
+
+func (r *errorRepo) RecordNativeTokenRedemption(ctx context.Context, rec *NativeTokenRedemptionRecord) (string, error) {
+	if r.failRecordNativeTokenRedeem {
+		return "", errInjected
+	}
+	return r.fakeRepo.RecordNativeTokenRedemption(ctx, rec)
 }
 
 func (r *errorRepo) DeleteUser(ctx context.Context, userID string) error {

@@ -131,6 +131,7 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		Branding:           rp.Branding,
 		Passkey:            rp.Passkey,
 		LoginDefaults:      rp.LoginDefaults,
+		OAuth:              rp.OAuth,
 	}
 }
 

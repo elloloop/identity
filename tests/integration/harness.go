@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -110,9 +112,11 @@ const (
 type HarnessOption func(*harnessOptions)
 
 type harnessOptions struct {
-	oauthRegistry *oauth.Registry
-	config        func(*config.Config)
-	idvProvider   idv.Provider
+	oauthRegistry  *oauth.Registry
+	nativeVerifier *oauth.NativeVerifier
+	nativeProjects service.NativeOAuthProjectStore
+	config         func(*config.Config)
+	idvProvider    idv.Provider
 }
 
 func applyHarnessOptions(cfg *config.Config, opts []HarnessOption) harnessOptions {
@@ -137,6 +141,15 @@ func WithConfig(fn func(*config.Config)) HarnessOption {
 	return func(o *harnessOptions) { o.config = fn }
 }
 
+// WithNativeOAuth injects a native ID-token verifier (typically pointed at a
+// mock JWKS) and the optional product-lookup store used by NativeOAuthLogin.
+func WithNativeOAuth(v *oauth.NativeVerifier, projects service.NativeOAuthProjectStore) HarnessOption {
+	return func(o *harnessOptions) {
+		o.nativeVerifier = v
+		o.nativeProjects = projects
+	}
+}
+
 // WithIDVProvider sets the identity-verification provider on the harness.
 // Pass nil to leave IDV disabled (the default — RPCs return Unimplemented).
 func WithIDVProvider(p idv.Provider) HarnessOption {
@@ -150,8 +163,7 @@ func startHarness(
 	db service.DB,
 	auditDB *RecordingDB,
 	mailer *RecordingMailer,
-	oauthRegistry *oauth.Registry,
-	idvProvider idv.Provider,
+	hOpts harnessOptions,
 ) *Harness {
 	t.Helper()
 
@@ -167,17 +179,19 @@ func startHarness(
 	}
 
 	built, err := app.New(app.Deps{
-		Config:             cfg,
-		Logger:             zap.NewNop(),
-		Signer:             signer,
-		Repo:               repo,
-		DB:                 db,
-		Passkeys:           pkSvc,
-		TOTPKey:            []byte("01234567890123456789012345678901"),
-		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
-		EmailTransport:     mailer,
-		OAuthRegistry:      oauthRegistry,
-		IDVProvider:        idvProvider,
+		Config:              cfg,
+		Logger:              zap.NewNop(),
+		Signer:              signer,
+		Repo:                repo,
+		DB:                  db,
+		Passkeys:            pkSvc,
+		TOTPKey:             []byte("01234567890123456789012345678901"),
+		TOTPRecoveryPepper:  []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
+		EmailTransport:      mailer,
+		OAuthRegistry:       hOpts.oauthRegistry,
+		NativeOAuthVerifier: hOpts.nativeVerifier,
+		NativeOAuthProjects: hOpts.nativeProjects,
+		IDVProvider:         hOpts.idvProvider,
 	})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
@@ -665,9 +679,15 @@ func newReq[T any](msg *T, headers map[string]string) *connect.Request[T] {
 // override the DB and key ring elsewhere; this only sets non-zero
 // values that the service layer reads (expiries, password limits,
 // CORS origins, etc).
+// testProjectSecretsKey is a valid base64-encoded 32-byte (all-zero) AES key.
+// The postgres control plane requires GATEWAY_PROJECT_SECRETS_KEY; harnesses
+// that boot postgres inherit this so config.Validate passes.
+const testProjectSecretsKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
 func newTestConfig() *config.Config {
 	return &config.Config{
 		DefaultTenantID:                 "test-tenant",
+		ProjectSecretsKey:               testProjectSecretsKey,
 		AuthAllowLocal:                  true,
 		PasswordSignupEnabled:           true,
 		PasswordResetEnabled:            true,
@@ -718,6 +738,7 @@ type MemRepo struct {
 	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
 	qrSessions         map[string]*service.QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
+	nativeRedemptions  map[string]*service.NativeTokenRedemptionRecord
 	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
 	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
@@ -742,6 +763,7 @@ func NewMemRepo() *MemRepo {
 		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
+		nativeRedemptions:  make(map[string]*service.NativeTokenRedemptionRecord),
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
 		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
@@ -791,6 +813,68 @@ func (r *MemRepo) FindUserByEmail(_ context.Context, email string) (*service.Use
 	return nil, nil
 }
 
+func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = service.DefaultUserListLimit
+	}
+	if limit > service.MaxUserListLimit {
+		limit = service.MaxUserListLimit
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	r.mu.Lock()
+	matched := make([]*service.User, 0, len(r.users))
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		cp := *u
+		matched = append(matched, &cp)
+	}
+	r.mu.Unlock()
+
+	// Stable ordering identical to the SQL drivers: created_at asc, then id.
+	sort.Slice(matched, func(i, j int) bool {
+		ti, tj := matched[i].CreatedAt.UnixMilli(), matched[j].CreatedAt.UnixMilli()
+		if ti != tj {
+			return ti < tj
+		}
+		return matched[i].ID < matched[j].ID
+	})
+
+	if offset >= len(matched) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], nil
+}
+
+func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, u := range r.users {
+		if filter.Email != "" && !strings.EqualFold(u.Email, filter.Email) {
+			continue
+		}
+		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
 func (r *MemRepo) GetUser(_ context.Context, userID string) (*service.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -806,11 +890,19 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
-		if existing.Email == u.Email {
-			return "", fmt.Errorf("user %q already exists", u.Email)
+		// Case-insensitive + ErrAlreadyExists-wrapped, matching the production
+		// memory driver and the cross-driver conformance contract.
+		if strings.EqualFold(existing.Email, u.Email) {
+			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
+		}
+		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
+			return "", fmt.Errorf("external_id %q: %w", u.ExternalID, service.ErrAlreadyExists)
 		}
 	}
-	id := r.nextID()
+	id := u.ID
+	if id == "" {
+		id = r.nextID()
+	}
 	u.ID = id
 	cp := *u
 	r.users[id] = &cp
@@ -823,6 +915,15 @@ func (r *MemRepo) UpdateUser(_ context.Context, userID string, fields map[string
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	if v, ok := fields["external_id"]; ok {
+		if ext, _ := v.(string); ext != "" {
+			for id, other := range r.users {
+				if id != userID && other.ExternalID == ext {
+					return fmt.Errorf("external_id %q: %w", ext, service.ErrAlreadyExists)
+				}
+			}
+		}
 	}
 	applyUserFields(u, fields)
 	return nil
@@ -994,6 +1095,8 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			}
 		case "recovery_email":
 			u.RecoveryEmail, _ = v.(string)
+		case "external_id":
+			u.ExternalID, _ = v.(string)
 		case "email_verified":
 			if b, ok := v.(bool); ok {
 				u.EmailVerified = b
@@ -1134,6 +1237,17 @@ func (r *MemRepo) UpdatePasskeyCredential(_ context.Context, nodeID string, fiel
 	return nil
 }
 
+func (r *MemRepo) DeletePasskeyCredentialsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
+	}
+	return nil
+}
+
 // ── Passkey Challenges ────────────────────────────────────────────
 
 func (r *MemRepo) GetPasskeyChallenge(_ context.Context, nodeID string) (*service.PasskeyChallengeRecord, error) {
@@ -1250,6 +1364,21 @@ func (r *MemRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, at
 		return &cp, nil
 	}
 	return nil, service.ErrOAuthCodeInvalid
+}
+
+func (r *MemRepo) RecordNativeTokenRedemption(_ context.Context, rec *service.NativeTokenRedemptionRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.nativeRedemptions {
+		if e.ReplayKey == rec.ReplayKey {
+			return "", service.ErrNativeTokenReplayed
+		}
+	}
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.nativeRedemptions[id] = &cp
+	return id, nil
 }
 
 func (r *MemRepo) UpsertEmailLoginCode(_ context.Context, rec *service.EmailLoginCodeRecord) (string, error) {
@@ -1933,6 +2062,22 @@ func (r *MemRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs int
 	return nil
 }
 
+func (r *MemRepo) DeleteExpiredNativeTokenRedemptions(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, e := range r.nativeRedemptions {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if e.ExpiresAt < beforeMs {
+			delete(r.nativeRedemptions, id)
+			n++
+		}
+	}
+	return nil
+}
+
 func (r *MemRepo) DeleteExpiredEmailLoginCodes(_ context.Context, beforeMs int64, limit int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -2087,7 +2232,7 @@ func (r *MemRepo) CountSessionsForUser(userID string) (active, revoked int) {
 			revoked++
 		}
 	}
-	return
+	return active, revoked
 }
 
 // compile-time interface assertion

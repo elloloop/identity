@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"testing"
 	"time"
@@ -195,6 +196,120 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoad_GenericOIDC_Defaults(t *testing.T) {
+	clearGatewayEnv(t)
+	cfg := Load()
+	if cfg.OIDCEnabled {
+		t.Errorf("OIDCEnabled should default to false")
+	}
+	if cfg.OIDCProviderKey != "" || cfg.OIDCIssuer != "" || cfg.OIDCClientID != "" ||
+		cfg.OIDCClientSecret != "" || cfg.OIDCScopes != "" || cfg.OIDCDiscoveryURL != "" {
+		t.Errorf("generic OIDC fields should default empty: %+v", cfg)
+	}
+	if got := cfg.OIDCScopeList(); got != nil {
+		t.Errorf("OIDCScopeList default should be nil, got %v", got)
+	}
+}
+
+func TestLoad_GenericOIDC_Overrides(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_OAUTH_OIDC_ENABLED", "true")
+	t.Setenv("GATEWAY_OAUTH_OIDC_PROVIDER_KEY", "okta")
+	t.Setenv("GATEWAY_OAUTH_OIDC_ISSUER", "https://acme.okta.com")
+	t.Setenv("GATEWAY_OAUTH_OIDC_DISCOVERY_URL", "https://acme.okta.com/.well-known/openid-configuration")
+	t.Setenv("GATEWAY_OAUTH_OIDC_CLIENT_ID", "okta-client")
+	t.Setenv("GATEWAY_OAUTH_OIDC_CLIENT_SECRET", "okta-secret")
+	t.Setenv("GATEWAY_OAUTH_OIDC_SCOPES", "openid email groups")
+
+	cfg := Load()
+
+	if !cfg.OIDCEnabled || cfg.OIDCProviderKey != "okta" ||
+		cfg.OIDCIssuer != "https://acme.okta.com" ||
+		cfg.OIDCDiscoveryURL != "https://acme.okta.com/.well-known/openid-configuration" ||
+		cfg.OIDCClientID != "okta-client" || cfg.OIDCClientSecret != "okta-secret" {
+		t.Errorf("generic OIDC config not loaded: %+v", cfg)
+	}
+	scopes := cfg.OIDCScopeList()
+	if len(scopes) != 3 || scopes[2] != "groups" {
+		t.Errorf("OIDCScopeList wrong: %v", scopes)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("valid generic OIDC config should pass Validate: %v", err)
+	}
+}
+
+func TestLoad_GenericOIDC_NormalizesProviderKey(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("GATEWAY_OAUTH_OIDC_ENABLED", "true")
+	t.Setenv("GATEWAY_OAUTH_OIDC_PROVIDER_KEY", "  Okta  ")
+	t.Setenv("GATEWAY_OAUTH_OIDC_ISSUER", "https://acme.okta.com")
+	t.Setenv("GATEWAY_OAUTH_OIDC_CLIENT_ID", "okta-client")
+	t.Setenv("GATEWAY_OAUTH_OIDC_CLIENT_SECRET", "okta-secret")
+
+	cfg := Load()
+	if cfg.OIDCProviderKey != "okta" {
+		t.Errorf("provider key = %q, want normalized %q", cfg.OIDCProviderKey, "okta")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("normalized config should validate: %v", err)
+	}
+}
+
+func TestValidate_GenericOIDC_Invariants(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			OIDCEnabled:      true,
+			OIDCProviderKey:  "okta",
+			OIDCIssuer:       "https://acme.okta.com",
+			OIDCClientID:     "okta-client",
+			OIDCClientSecret: "okta-secret",
+		}
+	}
+	t.Run("missing key", func(t *testing.T) {
+		c := base()
+		c.OIDCProviderKey = ""
+		if err := c.validateOIDC(); err == nil {
+			t.Error("want error for missing provider key")
+		}
+	})
+	t.Run("reserved key", func(t *testing.T) {
+		c := base()
+		c.OIDCProviderKey = "google"
+		if err := c.validateOIDC(); err == nil {
+			t.Error("want error for reserved provider key")
+		}
+	})
+	t.Run("missing issuer and discovery", func(t *testing.T) {
+		c := base()
+		c.OIDCIssuer = ""
+		c.OIDCDiscoveryURL = ""
+		if err := c.validateOIDC(); err == nil {
+			t.Error("want error when both issuer and discovery url are empty")
+		}
+	})
+	t.Run("discovery url substitutes for issuer", func(t *testing.T) {
+		c := base()
+		c.OIDCIssuer = ""
+		c.OIDCDiscoveryURL = "https://acme.okta.com/.well-known/openid-configuration"
+		if err := c.validateOIDC(); err != nil {
+			t.Errorf("discovery url should satisfy the issuer requirement: %v", err)
+		}
+	})
+	t.Run("missing credentials", func(t *testing.T) {
+		c := base()
+		c.OIDCClientSecret = ""
+		if err := c.validateOIDC(); err == nil {
+			t.Error("want error for missing client secret")
+		}
+	})
+	t.Run("disabled skips all checks", func(t *testing.T) {
+		c := &Config{OIDCEnabled: false}
+		if err := c.validateOIDC(); err != nil {
+			t.Errorf("disabled OIDC should never error: %v", err)
+		}
+	})
+}
+
 // TestEnvStr_Default verifies envStr returns the default for unset vars.
 func TestEnvStr_Default(t *testing.T) {
 	clearGatewayEnv(t)
@@ -352,6 +467,11 @@ func clearGatewayEnv(t *testing.T) {
 			_ = os.Unsetenv(key)
 		}
 	}
+	// The postgres default driver requires a project secrets key
+	// (validateProjectSecrets); restore a valid one so "clear then Load then
+	// Validate" tests of unrelated features keep passing. Tests of the
+	// requirement itself call validateProjectSecrets directly.
+	t.Setenv("GATEWAY_PROJECT_SECRETS_KEY", base64.StdEncoding.EncodeToString(make([]byte, projectSecretsKeyBytes)))
 }
 
 func findByte(s string, b byte) int {

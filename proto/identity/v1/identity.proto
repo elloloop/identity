@@ -56,6 +56,7 @@ message User {
   int64 date_of_birth_ms = 22;            // epoch ms of date of birth; 0 = unknown
   bool is_minor = 23;                     // derived: true when age < adult age (age-gating on)
   AgeBand age_band = 24;                  // derived age band; UNSPECIFIED when unknown / gate off
+  string external_id = 25;                 // IdP-owned stable identifier (SCIM externalId); unique per project when set
 }
 
 message CreateUserRequest {
@@ -228,6 +229,55 @@ message OAuthLoginResponse {
   reserved 3;                  // was id_token (removed)
   string refresh_token  = 4;  // For token rotation (send in RefreshToken RPC body)
   int32 expires_in      = 5;  // Access token lifetime in seconds
+}
+
+// NativeOAuthLoginRequest carries a native mobile-SDK ID token for
+// server-side verification. Unlike OAuthLogin (which exchanges an OAuth
+// authorization code through identity's own web client), this path takes the
+// ID token a native SDK already obtained from the platform account picker
+// (Google `google_sign_in`, Apple `sign_in_with_apple`) — no browser, no
+// PKCE. Identity verifies the token's signature, issuer, expiry, and audience
+// against the configured native audiences, then links/creates the user and
+// issues identity tokens scoped to the product's project.
+message NativeOAuthLoginRequest {
+  // Provider key: "google" or "apple". Any other value is InvalidArgument.
+  string provider = 1;
+
+  // The native-SDK ID token (a JWT). For Google this is
+  // GoogleSignInAuthentication.idToken; for Apple it is
+  // credential.identityToken from sign_in_with_apple. Required.
+  string id_token = 2;
+
+  // Product/project selector (e.g. "easyloops" | "tortoise"), with the same
+  // semantics as the hosted hub's ?product= query. The server maps it to an
+  // identity Project (see GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS) and scopes
+  // token issuance to that project. An unknown/unresolvable product is
+  // InvalidArgument.
+  string product = 3;
+
+  // Apple only: the RAW nonce the client passed to the native Sign in with
+  // Apple request. Omit for Google.
+  //
+  // OPTIONAL but STRONGLY RECOMMENDED: nonce-based replay protection is only
+  // enforced when this field is present. The convention (sign_in_with_apple /
+  // Firebase) is that the client hashes a random raw nonce with SHA-256 and
+  // sends the HEX digest as the native request `nonce`; Apple echoes that
+  // digest verbatim in the id_token `nonce` claim. When this field is set the
+  // server verifies id_token.nonce == hex(SHA-256(raw))
+  // (base64url(SHA-256(raw)) is also accepted) and rejects a missing or
+  // mismatched claim. When omitted, the token is still fully verified
+  // (signature, iss, exp, aud) but NOT bound to a per-login nonce, so clients
+  // SHOULD always generate and send a fresh raw nonce.
+  string nonce = 4;
+}
+
+// NativeOAuthLoginResponse mirrors OAuthLoginResponse: the backend-issued
+// token pair plus the resolved user.
+message NativeOAuthLoginResponse {
+  User user            = 1;
+  string access_token  = 2;  // Backend-issued JWT
+  string refresh_token = 3;  // For token rotation (send in RefreshToken RPC body)
+  int32 expires_in     = 4;  // Access token lifetime in seconds
 }
 
 // RedeemOAuthCode exchanges the single-use one-time code handed to the
@@ -614,6 +664,43 @@ message CompletePasskeyLoginRequest {
 }
 
 message CompletePasskeyLoginResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  int32 expires_in = 4;
+}
+
+// Passkey-first signup (UNAUTHENTICATED account creation via a passkey).
+//
+// Unlike BeginPasskeyRegistration (which adds a passkey to an already
+// authenticated account), this pair creates a brand-new account whose first
+// and only credential is a passkey — no password, no session required up
+// front. The server mints the new user id during Begin and binds it as the
+// WebAuthn user handle so the credential registered here can log in later.
+message BeginPasskeySignupRequest {
+  string email = 1;
+  string device_name = 2;
+}
+
+message BeginPasskeySignupResponse {
+  // JSON string of PublicKeyCredentialCreationOptions (frontend passes to navigator.credentials.create)
+  string options_json = 1;
+  string challenge_id = 2;
+}
+
+message CompletePasskeySignupRequest {
+  string challenge_id = 1;
+  // JSON string of the PublicKeyCredential returned by navigator.credentials.create
+  string credential_json = 2;
+  string email = 3;
+  string device_name = 4;
+  // 6-digit OTP emailed by BeginPasskeySignup. Proves control of the email
+  // in-flow, so the account is created already-verified and an attacker cannot
+  // plant a passkey on an unverified address (account pre-hijacking).
+  string otp_code = 5;
+}
+
+message CompletePasskeySignupResponse {
   User user = 1;
   string access_token = 2;
   string refresh_token = 3;
@@ -1177,6 +1264,16 @@ message LoginPolicy {
   bool require_2fa = 6;
   int64 created_at_ms = 7;
   int64 updated_at_ms = 8;
+  // password_min_length is the tenant's minimum password length. 0 means "use
+  // the global minimum"; a tenant can only ever raise the floor, never lower it.
+  int32 password_min_length = 9;
+  // session_idle_timeout_seconds invalidates a session unused for this long. 0
+  // means "no idle timeout" (global behavior).
+  int64 session_idle_timeout_seconds = 10;
+  // session_absolute_timeout_seconds invalidates a session older than this,
+  // measured from the original login regardless of activity. 0 means "no
+  // absolute timeout".
+  int64 session_absolute_timeout_seconds = 11;
 }
 
 message UpsertLoginPolicyRequest {
@@ -1186,6 +1283,13 @@ message UpsertLoginPolicyRequest {
   bool sso_required = 4;
   string sso_connection_json = 5;
   bool require_2fa = 6;
+  // password_min_length tightens the tenant's minimum password length (0 =
+  // global default; tenants tighten, never loosen).
+  int32 password_min_length = 7;
+  // session_idle_timeout_seconds / session_absolute_timeout_seconds set the
+  // tenant's idle and absolute session timeouts (0 = no timeout).
+  int64 session_idle_timeout_seconds = 8;
+  int64 session_absolute_timeout_seconds = 9;
 }
 
 message UpsertLoginPolicyResponse {
@@ -1230,6 +1334,109 @@ message GetProjectConfigRequest {
 message GetProjectConfigResponse {
   // config_json is the project's stored config blob ("{}" when unset).
   string config_json = 1;
+}
+
+// ─── Per-project OAuth provider authoring (admin) ─────────────────────
+//
+// These author a project's hosted/native OAuth providers WITHOUT the
+// operator hand-crafting encrypted secrets. On a write the operator sends
+// the PLAINTEXT secret over TLS; the server encrypts it with
+// GATEWAY_PROJECT_SECRETS_KEY and stores it. Reads NEVER return a secret —
+// they set has_client_secret / has_private_key instead. Operator-only, like
+// the other Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
+
+// ProjectOAuthProviderConfig is one provider block of a project's hosted/native
+// OAuth configuration. Secret fields (client_secret, apple_private_key) are
+// WRITE-ONLY: they are accepted on a write and never returned on a read.
+message ProjectOAuthProviderConfig {
+  // provider is the provider key this block configures: "google", "microsoft",
+  // "apple", or "oidc". Required.
+  string provider = 1;
+
+  // client_id is the OAuth client id. For the hosted flow it is required; for a
+  // native-only Google/Apple/Microsoft it is the web client id.
+  string client_id = 2;
+
+  // client_secret is the PLAINTEXT client secret (Google/Microsoft/OIDC), sent
+  // only on a write over TLS and stored encrypted at rest. It is NEVER returned
+  // on a read (see has_client_secret). On a write an EMPTY value keeps the
+  // currently-stored secret, so non-secret fields can be edited without
+  // re-sending it; send a non-empty value to set or rotate the secret.
+  string client_secret = 3;
+
+  // has_client_secret is READ-only: true when a client secret is stored for the
+  // provider. It is ignored on a write.
+  bool has_client_secret = 4;
+
+  // native_audiences is the accepted native ID-token `aud` allow-list
+  // (Google/Apple/Microsoft native mobile-SDK login). Empty disables native
+  // login for the provider.
+  repeated string native_audiences = 5;
+
+  // Google endpoint overrides — optional, default to the live Google endpoints
+  // (used by tests / self-hosted proxies).
+  string google_authorization_url = 6;
+  string google_token_url = 7;
+  string google_jwks_url = 8;
+  string google_issuer = 9;
+
+  // microsoft_tenant_id pins a single Azure AD tenant (empty = multi-tenant).
+  // microsoft_issuer_format is the fmt string the accepted issuer is built from;
+  // it must contain exactly one %s verb (the token's tid). Empty uses the live
+  // default.
+  string microsoft_tenant_id = 10;
+  string microsoft_issuer_format = 11;
+
+  // apple_team_id / apple_key_id identify the Apple signing key. apple_private_key
+  // is the PLAINTEXT PKCS#8 key (Apple has no client secret); it is write-only,
+  // stored encrypted, and empty-keeps like client_secret.
+  string apple_team_id = 12;
+  string apple_key_id = 13;
+  string apple_private_key = 14;
+
+  // has_private_key is READ-only: true when an Apple private key is stored for
+  // the provider. It is ignored on a write.
+  bool has_private_key = 15;
+
+  // oidc_issuer / oidc_discovery_url locate the generic OIDC provider's metadata
+  // (one is required). oidc_scopes is a space-separated scope list (empty
+  // defaults to "openid email profile"; "openid" is always ensured).
+  string oidc_issuer = 16;
+  string oidc_discovery_url = 17;
+  string oidc_scopes = 18;
+}
+
+message AdminSetProjectOAuthProviderRequest {
+  string project_id = 1;
+  // config carries the provider key plus its non-secret fields and any
+  // plaintext secret to store. It fully replaces the named provider's block,
+  // preserving every OTHER key in the project's config (branding, passkey, …).
+  ProjectOAuthProviderConfig config = 2;
+}
+
+message AdminSetProjectOAuthProviderResponse {
+  // config is the stored provider config with secrets REDACTED (has_* flags set
+  // instead of any secret material).
+  ProjectOAuthProviderConfig config = 1;
+}
+
+message AdminDeleteProjectOAuthProviderRequest {
+  string project_id = 1;
+  // provider is the provider key to remove: "google", "microsoft", "apple", or
+  // "oidc". Removing an absent provider is a no-op (idempotent).
+  string provider = 2;
+}
+
+message AdminDeleteProjectOAuthProviderResponse {}
+
+message AdminListProjectOAuthProvidersRequest {
+  string project_id = 1;
+}
+
+message AdminListProjectOAuthProvidersResponse {
+  // providers lists every configured provider with secrets REDACTED, ordered by
+  // provider key.
+  repeated ProjectOAuthProviderConfig providers = 1;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────
@@ -1292,6 +1499,7 @@ service IdentityService {
   // Authentication
   rpc BeginOAuthLogin(BeginOAuthLoginRequest) returns (BeginOAuthLoginResponse);
   rpc OAuthLogin(OAuthLoginRequest) returns (OAuthLoginResponse);
+  rpc NativeOAuthLogin(NativeOAuthLoginRequest) returns (NativeOAuthLoginResponse);
   rpc RedeemOAuthCode(RedeemOAuthCodeRequest) returns (RedeemOAuthCodeResponse);
   rpc PasswordSignup(PasswordSignupRequest) returns (PasswordSignupResponse);
   rpc PasswordLogin(PasswordLoginRequest) returns (PasswordLoginResponse);
@@ -1339,6 +1547,9 @@ service IdentityService {
   // Passkey / WebAuthn
   rpc BeginPasskeyRegistration(BeginPasskeyRegistrationRequest) returns (BeginPasskeyRegistrationResponse);
   rpc CompletePasskeyRegistration(CompletePasskeyRegistrationRequest) returns (CompletePasskeyRegistrationResponse);
+  // Passkey-first signup — unauthenticated account creation via a passkey.
+  rpc BeginPasskeySignup(BeginPasskeySignupRequest) returns (BeginPasskeySignupResponse);
+  rpc CompletePasskeySignup(CompletePasskeySignupRequest) returns (CompletePasskeySignupResponse);
   rpc BeginPasskeyLogin(BeginPasskeyLoginRequest) returns (BeginPasskeyLoginResponse);
   rpc CompletePasskeyLogin(CompletePasskeyLoginRequest) returns (CompletePasskeyLoginResponse);
   rpc ListPasskeys(ListPasskeysRequest) returns (ListPasskeysResponse);
@@ -1463,4 +1674,15 @@ service IdentityService {
   // Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
   rpc UpsertProjectConfig(UpsertProjectConfigRequest) returns (UpsertProjectConfigResponse);
   rpc GetProjectConfig(GetProjectConfigRequest) returns (GetProjectConfigResponse);
+
+  // Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
+  // sets/rotates one provider (encrypting any plaintext secret server-side and
+  // merging it into config_json without disturbing other keys);
+  // AdminDeleteProjectOAuthProvider removes one provider;
+  // AdminListProjectOAuthProviders lists the configured providers with secrets
+  // redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
+  // build with no control plane.
+  rpc AdminSetProjectOAuthProvider(AdminSetProjectOAuthProviderRequest) returns (AdminSetProjectOAuthProviderResponse);
+  rpc AdminDeleteProjectOAuthProvider(AdminDeleteProjectOAuthProviderRequest) returns (AdminDeleteProjectOAuthProviderResponse);
+  rpc AdminListProjectOAuthProviders(AdminListProjectOAuthProvidersRequest) returns (AdminListProjectOAuthProvidersResponse);
 }

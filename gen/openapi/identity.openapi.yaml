@@ -326,6 +326,119 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.AdminCreateTenantResponse'
+  /identity.v1.IdentityService/AdminDeleteProjectOAuthProvider:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AdminDeleteProjectOAuthProvider
+      operationId: identity.v1.IdentityService.AdminDeleteProjectOAuthProvider
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AdminDeleteProjectOAuthProviderRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AdminDeleteProjectOAuthProviderResponse'
+  /identity.v1.IdentityService/AdminListProjectOAuthProviders:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AdminListProjectOAuthProviders
+      operationId: identity.v1.IdentityService.AdminListProjectOAuthProviders
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AdminListProjectOAuthProvidersRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AdminListProjectOAuthProvidersResponse'
+  /identity.v1.IdentityService/AdminSetProjectOAuthProvider:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AdminSetProjectOAuthProvider
+      description: |-
+        Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
+         sets/rotates one provider (encrypting any plaintext secret server-side and
+         merging it into config_json without disturbing other keys);
+         AdminDeleteProjectOAuthProvider removes one provider;
+         AdminListProjectOAuthProviders lists the configured providers with secrets
+         redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
+         build with no control plane.
+      operationId: identity.v1.IdentityService.AdminSetProjectOAuthProvider
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AdminSetProjectOAuthProviderRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AdminSetProjectOAuthProviderResponse'
   /identity.v1.IdentityService/ApproveQrLogin:
     post:
       tags:
@@ -504,6 +617,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.BeginPasskeyRegistrationResponse'
+  /identity.v1.IdentityService/BeginPasskeySignup:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: BeginPasskeySignup
+      description: Passkey-first signup — unauthenticated account creation via a passkey.
+      operationId: identity.v1.IdentityService.BeginPasskeySignup
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.BeginPasskeySignupRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.BeginPasskeySignupResponse'
   /identity.v1.IdentityService/BeginTotpSetup:
     post:
       tags:
@@ -646,6 +795,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.CompletePasskeyRegistrationResponse'
+  /identity.v1.IdentityService/CompletePasskeySignup:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CompletePasskeySignup
+      operationId: identity.v1.IdentityService.CompletePasskeySignup
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CompletePasskeySignupRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CompletePasskeySignupResponse'
   /identity.v1.IdentityService/ConfirmEmailChange:
     post:
       tags:
@@ -1903,6 +2087,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.LogoutResponse'
+  /identity.v1.IdentityService/NativeOAuthLogin:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: NativeOAuthLogin
+      operationId: identity.v1.IdentityService.NativeOAuthLogin
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.NativeOAuthLoginRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.NativeOAuthLoginResponse'
   /identity.v1.IdentityService/OAuthLogin:
     post:
       tags:
@@ -3652,6 +3871,24 @@ components:
           title: tenant_id
       title: AdminCreateTenantResponse
       additionalProperties: false
+    identity.v1.AdminDeleteProjectOAuthProviderRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        provider:
+          type: string
+          title: provider
+          description: |-
+            provider is the provider key to remove: "google", "microsoft", "apple", or
+             "oidc". Removing an absent provider is a no-op (idempotent).
+      title: AdminDeleteProjectOAuthProviderRequest
+      additionalProperties: false
+    identity.v1.AdminDeleteProjectOAuthProviderResponse:
+      type: object
+      title: AdminDeleteProjectOAuthProviderResponse
+      additionalProperties: false
     identity.v1.AdminHelpRequest:
       type: object
       properties:
@@ -3686,6 +3923,53 @@ components:
           title: created_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: AdminHelpRequest
+      additionalProperties: false
+    identity.v1.AdminListProjectOAuthProvidersRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+      title: AdminListProjectOAuthProvidersRequest
+      additionalProperties: false
+    identity.v1.AdminListProjectOAuthProvidersResponse:
+      type: object
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.ProjectOAuthProviderConfig'
+          title: providers
+          description: |-
+            providers lists every configured provider with secrets REDACTED, ordered by
+             provider key.
+      title: AdminListProjectOAuthProvidersResponse
+      additionalProperties: false
+    identity.v1.AdminSetProjectOAuthProviderRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        config:
+          title: config
+          description: |-
+            config carries the provider key plus its non-secret fields and any
+             plaintext secret to store. It fully replaces the named provider's block,
+             preserving every OTHER key in the project's config (branding, passkey, …).
+          $ref: '#/components/schemas/identity.v1.ProjectOAuthProviderConfig'
+      title: AdminSetProjectOAuthProviderRequest
+      additionalProperties: false
+    identity.v1.AdminSetProjectOAuthProviderResponse:
+      type: object
+      properties:
+        config:
+          title: config
+          description: |-
+            config is the stored provider config with secrets REDACTED (has_* flags set
+             instead of any secret material).
+          $ref: '#/components/schemas/identity.v1.ProjectOAuthProviderConfig'
+      title: AdminSetProjectOAuthProviderResponse
       additionalProperties: false
     identity.v1.AgeBand:
       type: string
@@ -3855,6 +4139,37 @@ components:
           title: challenge_id
       title: BeginPasskeyRegistrationResponse
       additionalProperties: false
+    identity.v1.BeginPasskeySignupRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+        deviceName:
+          type: string
+          title: device_name
+      title: BeginPasskeySignupRequest
+      additionalProperties: false
+      description: |-
+        Passkey-first signup (UNAUTHENTICATED account creation via a passkey).
+
+         Unlike BeginPasskeyRegistration (which adds a passkey to an already
+         authenticated account), this pair creates a brand-new account whose first
+         and only credential is a passkey — no password, no session required up
+         front. The server mints the new user id during Begin and binds it as the
+         WebAuthn user handle so the credential registered here can log in later.
+    identity.v1.BeginPasskeySignupResponse:
+      type: object
+      properties:
+        optionsJson:
+          type: string
+          title: options_json
+          description: JSON string of PublicKeyCredentialCreationOptions (frontend passes to navigator.credentials.create)
+        challengeId:
+          type: string
+          title: challenge_id
+      title: BeginPasskeySignupResponse
+      additionalProperties: false
     identity.v1.BeginTotpSetupRequest:
       type: object
       title: BeginTotpSetupRequest
@@ -3944,6 +4259,49 @@ components:
           title: credential
           $ref: '#/components/schemas/identity.v1.PasskeyCredentialInfo'
       title: CompletePasskeyRegistrationResponse
+      additionalProperties: false
+    identity.v1.CompletePasskeySignupRequest:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          title: challenge_id
+        credentialJson:
+          type: string
+          title: credential_json
+          description: JSON string of the PublicKeyCredential returned by navigator.credentials.create
+        email:
+          type: string
+          title: email
+        deviceName:
+          type: string
+          title: device_name
+        otpCode:
+          type: string
+          title: otp_code
+          description: |-
+            6-digit OTP emailed by BeginPasskeySignup. Proves control of the email
+             in-flow, so the account is created already-verified and an attacker cannot
+             plant a passkey on an unverified address (account pre-hijacking).
+      title: CompletePasskeySignupRequest
+      additionalProperties: false
+    identity.v1.CompletePasskeySignupResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          $ref: '#/components/schemas/identity.v1.User'
+        accessToken:
+          type: string
+          title: access_token
+        refreshToken:
+          type: string
+          title: refresh_token
+        expiresIn:
+          type: integer
+          title: expires_in
+          format: int32
+      title: CompletePasskeySignupResponse
       additionalProperties: false
     identity.v1.ConfirmEmailChangeRequest:
       type: object
@@ -4946,6 +5304,32 @@ components:
             - string
           title: updated_at_ms
           format: int64
+        passwordMinLength:
+          type: integer
+          title: password_min_length
+          format: int32
+          description: |-
+            password_min_length is the tenant's minimum password length. 0 means "use
+             the global minimum"; a tenant can only ever raise the floor, never lower it.
+        sessionIdleTimeoutSeconds:
+          type:
+            - integer
+            - string
+          title: session_idle_timeout_seconds
+          format: int64
+          description: |-
+            session_idle_timeout_seconds invalidates a session unused for this long. 0
+             means "no idle timeout" (global behavior).
+        sessionAbsoluteTimeoutSeconds:
+          type:
+            - integer
+            - string
+          title: session_absolute_timeout_seconds
+          format: int64
+          description: |-
+            session_absolute_timeout_seconds invalidates a session older than this,
+             measured from the original login regardless of activity. 0 means "no
+             absolute timeout".
       title: LoginPolicy
       additionalProperties: false
       description: |-
@@ -4963,6 +5347,81 @@ components:
       type: object
       title: LogoutResponse
       additionalProperties: false
+    identity.v1.NativeOAuthLoginRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+          title: provider
+          description: 'Provider key: "google" or "apple". Any other value is InvalidArgument.'
+        idToken:
+          type: string
+          title: id_token
+          description: |-
+            The native-SDK ID token (a JWT). For Google this is
+             GoogleSignInAuthentication.idToken; for Apple it is
+             credential.identityToken from sign_in_with_apple. Required.
+        product:
+          type: string
+          title: product
+          description: |-
+            Product/project selector (e.g. "easyloops" | "tortoise"), with the same
+             semantics as the hosted hub's ?product= query. The server maps it to an
+             identity Project (see GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS) and scopes
+             token issuance to that project. An unknown/unresolvable product is
+             InvalidArgument.
+        nonce:
+          type: string
+          title: nonce
+          description: |-
+            Apple only: the RAW nonce the client passed to the native Sign in with
+             Apple request. Omit for Google.
+
+             OPTIONAL but STRONGLY RECOMMENDED: nonce-based replay protection is only
+             enforced when this field is present. The convention (sign_in_with_apple /
+             Firebase) is that the client hashes a random raw nonce with SHA-256 and
+             sends the HEX digest as the native request `nonce`; Apple echoes that
+             digest verbatim in the id_token `nonce` claim. When this field is set the
+             server verifies id_token.nonce == hex(SHA-256(raw))
+             (base64url(SHA-256(raw)) is also accepted) and rejects a missing or
+             mismatched claim. When omitted, the token is still fully verified
+             (signature, iss, exp, aud) but NOT bound to a per-login nonce, so clients
+             SHOULD always generate and send a fresh raw nonce.
+      title: NativeOAuthLoginRequest
+      additionalProperties: false
+      description: |-
+        NativeOAuthLoginRequest carries a native mobile-SDK ID token for
+         server-side verification. Unlike OAuthLogin (which exchanges an OAuth
+         authorization code through identity's own web client), this path takes the
+         ID token a native SDK already obtained from the platform account picker
+         (Google `google_sign_in`, Apple `sign_in_with_apple`) — no browser, no
+         PKCE. Identity verifies the token's signature, issuer, expiry, and audience
+         against the configured native audiences, then links/creates the user and
+         issues identity tokens scoped to the product's project.
+    identity.v1.NativeOAuthLoginResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          $ref: '#/components/schemas/identity.v1.User'
+        accessToken:
+          type: string
+          title: access_token
+          description: Backend-issued JWT
+        refreshToken:
+          type: string
+          title: refresh_token
+          description: For token rotation (send in RefreshToken RPC body)
+        expiresIn:
+          type: integer
+          title: expires_in
+          format: int32
+          description: Access token lifetime in seconds
+      title: NativeOAuthLoginResponse
+      additionalProperties: false
+      description: |-
+        NativeOAuthLoginResponse mirrors OAuthLoginResponse: the backend-issued
+         token pair plus the resolved user.
     identity.v1.OAuthLoginRequest:
       type: object
       properties:
@@ -5192,6 +5651,109 @@ components:
          customer-facing custom-domain RPCs. verified_at_ms is 0 until ownership is
          proven (a deployer-seeded or operator-vouched domain is pre-verified); an
          unverified domain does NOT resolve requests.
+    identity.v1.ProjectOAuthProviderConfig:
+      type: object
+      properties:
+        provider:
+          type: string
+          title: provider
+          description: |-
+            provider is the provider key this block configures: "google", "microsoft",
+             "apple", or "oidc". Required.
+        clientId:
+          type: string
+          title: client_id
+          description: |-
+            client_id is the OAuth client id. For the hosted flow it is required; for a
+             native-only Google/Apple/Microsoft it is the web client id.
+        clientSecret:
+          type: string
+          title: client_secret
+          description: |-
+            client_secret is the PLAINTEXT client secret (Google/Microsoft/OIDC), sent
+             only on a write over TLS and stored encrypted at rest. It is NEVER returned
+             on a read (see has_client_secret). On a write an EMPTY value keeps the
+             currently-stored secret, so non-secret fields can be edited without
+             re-sending it; send a non-empty value to set or rotate the secret.
+        hasClientSecret:
+          type: boolean
+          title: has_client_secret
+          description: |-
+            has_client_secret is READ-only: true when a client secret is stored for the
+             provider. It is ignored on a write.
+        nativeAudiences:
+          type: array
+          items:
+            type: string
+          title: native_audiences
+          description: |-
+            native_audiences is the accepted native ID-token `aud` allow-list
+             (Google/Apple/Microsoft native mobile-SDK login). Empty disables native
+             login for the provider.
+        googleAuthorizationUrl:
+          type: string
+          title: google_authorization_url
+          description: |-
+            Google endpoint overrides — optional, default to the live Google endpoints
+             (used by tests / self-hosted proxies).
+        googleTokenUrl:
+          type: string
+          title: google_token_url
+        googleJwksUrl:
+          type: string
+          title: google_jwks_url
+        googleIssuer:
+          type: string
+          title: google_issuer
+        microsoftTenantId:
+          type: string
+          title: microsoft_tenant_id
+          description: |-
+            microsoft_tenant_id pins a single Azure AD tenant (empty = multi-tenant).
+             microsoft_issuer_format is the fmt string the accepted issuer is built from;
+             it must contain exactly one %s verb (the token's tid). Empty uses the live
+             default.
+        microsoftIssuerFormat:
+          type: string
+          title: microsoft_issuer_format
+        appleTeamId:
+          type: string
+          title: apple_team_id
+          description: |-
+            apple_team_id / apple_key_id identify the Apple signing key. apple_private_key
+             is the PLAINTEXT PKCS#8 key (Apple has no client secret); it is write-only,
+             stored encrypted, and empty-keeps like client_secret.
+        appleKeyId:
+          type: string
+          title: apple_key_id
+        applePrivateKey:
+          type: string
+          title: apple_private_key
+        hasPrivateKey:
+          type: boolean
+          title: has_private_key
+          description: |-
+            has_private_key is READ-only: true when an Apple private key is stored for
+             the provider. It is ignored on a write.
+        oidcIssuer:
+          type: string
+          title: oidc_issuer
+          description: |-
+            oidc_issuer / oidc_discovery_url locate the generic OIDC provider's metadata
+             (one is required). oidc_scopes is a space-separated scope list (empty
+             defaults to "openid email profile"; "openid" is always ensured).
+        oidcDiscoveryUrl:
+          type: string
+          title: oidc_discovery_url
+        oidcScopes:
+          type: string
+          title: oidc_scopes
+      title: ProjectOAuthProviderConfig
+      additionalProperties: false
+      description: |-
+        ProjectOAuthProviderConfig is one provider block of a project's hosted/native
+         OAuth configuration. Secret fields (client_secret, apple_private_key) are
+         WRITE-ONLY: they are accepted on a write and never returned on a read.
     identity.v1.QrLoginStatus:
       type: string
       title: QrLoginStatus
@@ -5834,6 +6396,28 @@ components:
         require2fa:
           type: boolean
           title: require_2fa
+        passwordMinLength:
+          type: integer
+          title: password_min_length
+          format: int32
+          description: |-
+            password_min_length tightens the tenant's minimum password length (0 =
+             global default; tenants tighten, never loosen).
+        sessionIdleTimeoutSeconds:
+          type:
+            - integer
+            - string
+          title: session_idle_timeout_seconds
+          format: int64
+          description: |-
+            session_idle_timeout_seconds / session_absolute_timeout_seconds set the
+             tenant's idle and absolute session timeouts (0 = no timeout).
+        sessionAbsoluteTimeoutSeconds:
+          type:
+            - integer
+            - string
+          title: session_absolute_timeout_seconds
+          format: int64
       title: UpsertLoginPolicyRequest
       additionalProperties: false
     identity.v1.UpsertLoginPolicyResponse:
@@ -5977,6 +6561,10 @@ components:
           title: age_band
           description: derived age band; UNSPECIFIED when unknown / gate off
           $ref: '#/components/schemas/identity.v1.AgeBand'
+        externalId:
+          type: string
+          title: external_id
+          description: IdP-owned stable identifier (SCIM externalId); unique per project when set
       title: User
       additionalProperties: false
     identity.v1.UserStatus:

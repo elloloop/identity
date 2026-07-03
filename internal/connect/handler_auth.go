@@ -73,6 +73,39 @@ func (h *IdentityHandler) OAuthLogin(
 	return connect.NewResponse(resp), nil
 }
 
+// NativeOAuthLogin verifies a native mobile-SDK ID token (Google idToken /
+// Apple identityToken) server-side and issues backend tokens scoped to the
+// product's project — no browser, no PKCE. The service layer performs the
+// token verification, product→project resolution, account linking, and token
+// issuance; the handler forwards the request fields and the caller's IP / UA.
+func (h *IdentityHandler) NativeOAuthLogin(
+	ctx context.Context,
+	req *connect.Request[identitypb.NativeOAuthLoginRequest],
+) (*connect.Response[identitypb.NativeOAuthLoginResponse], error) {
+	ipAddr := clientIP(req.Header())
+	userAgent := clientUserAgent(req.Header())
+
+	result, err := h.auth.NativeOAuthLogin(ctx, service.NativeOAuthLoginParams{
+		Provider:  req.Msg.Provider,
+		IDToken:   req.Msg.IdToken,
+		Product:   req.Msg.Product,
+		Nonce:     req.Msg.Nonce,
+		IPAddr:    ipAddr,
+		UserAgent: userAgent,
+	})
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	resp := &identitypb.NativeOAuthLoginResponse{
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // RedeemOAuthCode exchanges the single-use one-time code from the
 // hosted OAuth callback redirect for a backend-issued token pair. The
 // code is consumed atomically; a replay or expired code surfaces as
@@ -286,6 +319,59 @@ func (h *IdentityHandler) CompletePasskeyLogin(
 	}
 
 	resp := &identitypb.CompletePasskeyLoginResponse{
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// ─── Passkey-first Signup RPCs (unauthenticated) ─────────────────────────────
+
+// BeginPasskeySignup generates PublicKeyCredentialCreationOptions for creating
+// a brand-new account from a passkey. Unauthenticated: no session required.
+func (h *IdentityHandler) BeginPasskeySignup(
+	ctx context.Context,
+	req *connect.Request[identitypb.BeginPasskeySignupRequest],
+) (*connect.Response[identitypb.BeginPasskeySignupResponse], error) {
+	optionsJSON, challengeID, err := h.auth.BeginPasskeySignup(ctx, req.Msg.Email, req.Msg.DeviceName)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	resp := &identitypb.BeginPasskeySignupResponse{
+		OptionsJson: optionsJSON,
+		ChallengeId: challengeID,
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// CompletePasskeySignup verifies the attestation, creates the account (or
+// returns an enumeration-safe decoy when the email already exists) and issues
+// tokens. Unauthenticated: no session required.
+func (h *IdentityHandler) CompletePasskeySignup(
+	ctx context.Context,
+	req *connect.Request[identitypb.CompletePasskeySignupRequest],
+) (*connect.Response[identitypb.CompletePasskeySignupResponse], error) {
+	ipAddr := clientIP(req.Header())
+	userAgent := clientUserAgent(req.Header())
+
+	result, err := h.auth.CompletePasskeySignup(
+		ctx,
+		req.Msg.ChallengeId,
+		req.Msg.CredentialJson,
+		req.Msg.Email,
+		req.Msg.OtpCode,
+		req.Msg.DeviceName,
+		ipAddr,
+		userAgent,
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	resp := &identitypb.CompletePasskeySignupResponse{
 		User:         userToProto(result.User),
 		AccessToken:  result.AccessToken,
 		RefreshToken: result.RefreshToken,

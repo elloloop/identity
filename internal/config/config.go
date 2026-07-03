@@ -8,6 +8,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -120,6 +121,18 @@ type Config struct {
 	// work hardens this with mTLS client-certificate auth and an optional
 	// internal-only listener port bound away from the public RPC surface.
 	AdminAPISecret string
+
+	// ProjectSecretsKey is the base64-encoded 32-byte AES-256 key that
+	// encrypts per-project secrets at rest — currently the hosted-flow OAuth
+	// provider secrets (client secrets, Apple private keys) stored in a
+	// project's config_json. It is REQUIRED whenever the postgres control
+	// plane is enabled (GATEWAY_REPO_DRIVER=postgres), because a non-default
+	// project can only store provider credentials encrypted with this key;
+	// Validate enforces that. Drivers without a control plane (memory, sqlite)
+	// pin every request to the default project, which draws its OAuth
+	// providers from the GATEWAY_OAUTH_* env vars, so the key is not required
+	// there. Driven by GATEWAY_PROJECT_SECRETS_KEY.
+	ProjectSecretsKey string
 
 	// DefaultProjectAuthDomains is a comma-separated list of serving
 	// hostnames seeded onto the default project at boot (postgres driver),
@@ -261,6 +274,29 @@ type Config struct {
 	// ApplePrivateKey is the Apple Sign in private key (PEM or base64).
 	ApplePrivateKey string
 
+	// OIDCEnabled turns on the generic, config-driven OIDC provider so an
+	// operator can register an arbitrary standards-compliant IdP (Okta,
+	// Auth0, Keycloak, a self-hosted issuer) without a code release.
+	OIDCEnabled bool
+	// OIDCProviderKey is the registry key the generic OIDC provider is
+	// registered under and reported as Identity.Provider (e.g. "okta").
+	OIDCProviderKey string
+	// OIDCIssuer is the generic OIDC provider's issuer URL; the discovery,
+	// authorization, token, JWKS, and userinfo endpoints are resolved from
+	// <issuer>/.well-known/openid-configuration unless OIDCDiscoveryURL is set.
+	OIDCIssuer string
+	// OIDCDiscoveryURL overrides the generic OIDC provider's discovery
+	// document URL; empty = derived from OIDCIssuer.
+	OIDCDiscoveryURL string
+	// OIDCClientID is the generic OIDC provider's OAuth client ID.
+	OIDCClientID string
+	// OIDCClientSecret is the generic OIDC provider's OAuth client secret.
+	OIDCClientSecret string
+	// OIDCScopes overrides the space-separated OAuth scopes requested from
+	// the generic OIDC provider; empty = "openid email profile" ("openid"
+	// is always ensured).
+	OIDCScopes string
+
 	// OAuthAllowedReturnURLs is the comma-separated allowlist of app URLs
 	// the hosted OAuth flow may redirect back to (the `return_to` param of
 	// GET /oauth/start/{provider}). Each entry is an exact origin or a path
@@ -272,6 +308,39 @@ type Config struct {
 	// GET/POST /oauth/callback return 404. The headless BeginOAuthLogin / OAuthLogin
 	// RPCs are unaffected. Driven by GATEWAY_OAUTH_ALLOWED_RETURN_URLS.
 	OAuthAllowedReturnURLs string
+
+	// NativeOAuthEnabled is the kill-switch for NativeOAuthLogin (verifying
+	// Google/Apple/Microsoft ID tokens from mobile SDKs). It defaults true when
+	// at least one provider's DEFAULT-PROJECT native audiences are configured via
+	// env, false otherwise; set it explicitly to true to enable the RPC for a
+	// deployment that configures native audiences only per-project (config_json),
+	// or to false to disable it even with env audiences present.
+	NativeOAuthEnabled bool
+	// NativeOAuthGoogleAudiences is the DEFAULT PROJECT's comma-separated
+	// allow-list of accepted Google ID-token `aud` values for native login — the
+	// web client id plus every per-platform (iOS/Android) OAuth client id.
+	// Non-default projects configure their own via config_json
+	// oauth.google.native_audiences and never inherit this. Empty disables Google
+	// native login for the default project.
+	NativeOAuthGoogleAudiences string
+	// NativeOAuthAppleAudiences is the DEFAULT PROJECT's comma-separated
+	// allow-list of accepted Apple ID-token `aud` values for native login — the
+	// Services ID plus every native bundle id. Non-default projects configure
+	// their own via config_json oauth.apple.native_audiences. Empty disables
+	// Apple native login for the default project.
+	NativeOAuthAppleAudiences string
+	// NativeOAuthMicrosoftAudiences is the DEFAULT PROJECT's comma-separated
+	// allow-list of accepted Microsoft ID-token `aud` values for native login.
+	// Non-default projects configure their own via config_json
+	// oauth.microsoft.native_audiences. Empty disables Microsoft native login for
+	// the default project.
+	NativeOAuthMicrosoftAudiences string
+	// NativeOAuthProductProjects maps a native client's product selector to an
+	// identity project id, as comma-separated product=projectID pairs (e.g.
+	// "easyloops=proj_abc,tortoise=proj_def"). A product not listed falls back
+	// to being treated as a project id directly. Token issuance is scoped to
+	// the resolved project.
+	NativeOAuthProductProjects string
 
 	// Identity verification (document + selfie); the provider selects the
 	// implementation in pkg/idv.
@@ -345,6 +414,28 @@ type Config struct {
 	// accounts with an unknown age band are never affected.
 	MinorDataMinimization bool // GATEWAY_MINOR_DATA_MINIMIZATION (default false)
 
+	// SCIM 2.0 inbound provisioning (#260). When SCIMEnabled is false the
+	// /scim/v2/* routes are not registered and return 404, leaving the
+	// headless RPCs untouched. When true, SCIMBearerToken and SCIMProjectID
+	// MUST both be set (enforced by Validate). The bearer token is the shared
+	// secret an external IdP (Okta/Entra/Google) presents in the
+	// Authorization: Bearer header on every SCIM request. The project id binds
+	// that single credential to exactly one project: every SCIM operation
+	// (create/list/get/replace/patch/delete) is constrained to that project's
+	// users, so the deployment-wide token can never read or mutate another
+	// project's user pool. A deployment that needs to provision multiple
+	// projects runs one scoped credential per project.
+
+	// SCIMEnabled gates the inbound SCIM 2.0 routes (default false).
+	SCIMEnabled bool // GATEWAY_SCIM_ENABLED (default false)
+	// SCIMBearerToken is the shared secret an external IdP presents in the
+	// Authorization: Bearer header on every SCIM request (required when SCIMEnabled).
+	SCIMBearerToken string // GATEWAY_SCIM_BEARER_TOKEN (required when SCIMEnabled)
+	// SCIMProjectID is the single project whose users the SCIM endpoint
+	// provisions; every SCIM operation is scoped to this project (required
+	// when SCIMEnabled).
+	SCIMProjectID string // GATEWAY_SCIM_PROJECT_ID (required when SCIMEnabled)
+
 	// Password.
 
 	// PasswordSignupEnabled gates self-serve PasswordSignup; set false to
@@ -409,6 +500,24 @@ type Config struct {
 	// PhoneCodeCooldownSeconds is the per-request cooldown (seconds) between phone-verification sends.
 	PhoneCodeCooldownSeconds int
 
+	// SAML 2.0 Identity Provider. Disabled by default; the server mounts no
+	// SAML surface and holds a no-op issuer. When SAMLIDPEnabled is true the
+	// entityID, SSO URL, and a signing key + certificate are required
+	// (enforced by Validate). SLO URL is optional.
+
+	// SAMLIDPEnabled turns on the SAML 2.0 IdP surface (default false).
+	SAMLIDPEnabled bool
+	// SAMLEntityID is the IdP entityID published in metadata (metadata URL).
+	SAMLEntityID string
+	// SAMLSSOURL is the HTTP-POST/Redirect single sign-on endpoint.
+	SAMLSSOURL string
+	// SAMLSLOURL is the optional single-logout endpoint.
+	SAMLSLOURL string
+	// SAMLSigningKey is the PEM-encoded RSA private key used to sign assertions.
+	SAMLSigningKey string
+	// SAMLSigningCert is the PEM-encoded X.509 certificate published in metadata.
+	SAMLSigningCert string
+
 	// TOTP (2FA).
 
 	// TOTPEncryptionKey is the base64-encoded 32-byte AES-256 key that encrypts
@@ -440,6 +549,11 @@ type Config struct {
 	PasskeyOrigin string
 	// PasskeyChallengeExpirySeconds is the lifetime in seconds of registration / login challenges.
 	PasskeyChallengeExpirySeconds int
+	// PasskeySignupEnabled gates passkey-first signup (the unauthenticated
+	// BeginPasskeySignup / CompletePasskeySignup pair that creates a brand-new
+	// account from a passkey); set false to disable it while leaving
+	// authenticated add-a-passkey registration untouched.
+	PasskeySignupEnabled bool
 
 	// QR login (cross-device authorization).
 
@@ -647,6 +761,35 @@ type Config struct {
 	// SweeperGraceSeconds is extra grace past expires_at before a row is
 	// eligible for deletion (covers flows that just consumed the token).
 	SweeperGraceSeconds int
+
+	// Outbound webhooks / user-lifecycle eventing (#261). When disabled
+	// (the default), the service emits events to a no-op publisher: there is
+	// no observable behaviour change and no background worker runs. When
+	// enabled, user create/update/deactivate events are fanned out to
+	// per-tenant subscriptions and delivered as signed webhooks
+	// at-least-once, with retry/backoff recorded in a transactional outbox.
+
+	// WebhooksEnabled is the master switch for outbound user-lifecycle
+	// eventing; when false the service emits to a no-op publisher and runs no
+	// delivery worker. Driven by GATEWAY_WEBHOOKS_ENABLED (default false).
+	WebhooksEnabled bool
+	// WebhooksMaxAttempts is the per-delivery retry budget before a webhook is
+	// abandoned and surfaced via the structured logger. Driven by
+	// GATEWAY_WEBHOOKS_MAX_ATTEMPTS (default 6).
+	WebhooksMaxAttempts int
+	// WebhooksBackoffBaseSeconds is the first-retry delay; it doubles per
+	// attempt up to the ceiling. Driven by GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS
+	// (default 2).
+	WebhooksBackoffBaseSeconds int
+	// WebhooksBackoffMaxSeconds is the exponential-backoff ceiling. Driven by
+	// GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS (default 300).
+	WebhooksBackoffMaxSeconds int
+	// WebhooksWorkerIntervalSeconds is the outbox drain tick interval. Driven
+	// by GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS (default 1).
+	WebhooksWorkerIntervalSeconds int
+	// WebhooksBatchSize is the number of due deliveries claimed per tick.
+	// Driven by GATEWAY_WEBHOOKS_BATCH_SIZE (default 50).
+	WebhooksBatchSize int
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -662,6 +805,7 @@ func Load() *Config {
 		DefaultTenantID:           envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
 		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", DefaultProjectIDFallback),
 		AdminAPISecret:            envStr("GATEWAY_ADMIN_API_SECRET", ""),
+		ProjectSecretsKey:         envStr("GATEWAY_PROJECT_SECRETS_KEY", ""),
 		DefaultProjectAuthDomains: envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
 		RequireVerifiedAuthDomain: envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
 
@@ -702,7 +846,28 @@ func Load() *Config {
 		AppleKeyID:             envStr("GATEWAY_OAUTH_APPLE_KEY_ID", ""),
 		ApplePrivateKey:        envStr("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", ""),
 
+		OIDCEnabled: envBool("GATEWAY_OAUTH_OIDC_ENABLED", false),
+		// Normalize the provider key at the source so it matches the
+		// lowercased/trimmed provider name the service uses for registry
+		// lookups (see internal/service/auth_login.go).
+		OIDCProviderKey:  strings.ToLower(strings.TrimSpace(envStr("GATEWAY_OAUTH_OIDC_PROVIDER_KEY", ""))),
+		OIDCIssuer:       envStr("GATEWAY_OAUTH_OIDC_ISSUER", ""),
+		OIDCDiscoveryURL: envStr("GATEWAY_OAUTH_OIDC_DISCOVERY_URL", ""),
+		OIDCClientID:     envStr("GATEWAY_OAUTH_OIDC_CLIENT_ID", ""),
+		OIDCClientSecret: envStr("GATEWAY_OAUTH_OIDC_CLIENT_SECRET", ""),
+		OIDCScopes:       envStr("GATEWAY_OAUTH_OIDC_SCOPES", ""),
+
 		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
+
+		NativeOAuthGoogleAudiences:    envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),
+		NativeOAuthAppleAudiences:     envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES", ""),
+		NativeOAuthMicrosoftAudiences: envStr("GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES", ""),
+		NativeOAuthProductProjects:    envStr("GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS", ""),
+		NativeOAuthEnabled: envBool("GATEWAY_NATIVE_OAUTH_ENABLED", nativeOAuthDefaultEnabled(
+			envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),
+			envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES", ""),
+			envStr("GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES", ""),
+		)),
 
 		IDVProvider:           envStr("GATEWAY_IDV_PROVIDER", ""),
 		IDVAzureEndpoint:      envStr("GATEWAY_IDV_AZURE_ENDPOINT", ""),
@@ -728,6 +893,10 @@ func Load() *Config {
 
 		MinorDataMinimization: envBool("GATEWAY_MINOR_DATA_MINIMIZATION", false),
 
+		SCIMEnabled:     envBool("GATEWAY_SCIM_ENABLED", false),
+		SCIMBearerToken: envStr("GATEWAY_SCIM_BEARER_TOKEN", ""),
+		SCIMProjectID:   envStr("GATEWAY_SCIM_PROJECT_ID", ""),
+
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
 		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
@@ -752,6 +921,13 @@ func Load() *Config {
 		PhoneCodeMaxAttempts:     envInt("GATEWAY_PHONE_CODE_MAX_ATTEMPTS", 5),
 		PhoneCodeCooldownSeconds: envInt("GATEWAY_PHONE_CODE_COOLDOWN_SECONDS", 60),
 
+		SAMLIDPEnabled:  envBool("GATEWAY_SAML_IDP_ENABLED", false),
+		SAMLEntityID:    envStr("GATEWAY_SAML_ENTITY_ID", ""),
+		SAMLSSOURL:      envStr("GATEWAY_SAML_SSO_URL", ""),
+		SAMLSLOURL:      envStr("GATEWAY_SAML_SLO_URL", ""),
+		SAMLSigningKey:  envStr("GATEWAY_SAML_SIGNING_KEY", ""),
+		SAMLSigningCert: envStr("GATEWAY_SAML_SIGNING_CERT", ""),
+
 		TOTPEncryptionKey:  envStr("GATEWAY_TOTP_ENCRYPTION_KEY", ""),
 		TOTPIssuer:         envStr("GATEWAY_TOTP_ISSUER", "Glassa Work"),
 		TOTPRecoveryPepper: envStr("GATEWAY_TOTP_RECOVERY_PEPPER", ""),
@@ -762,6 +938,7 @@ func Load() *Config {
 		PasskeyRPName:                 envStr("GATEWAY_PASSKEY_RP_NAME", "Glassa Work"),
 		PasskeyOrigin:                 envStr("GATEWAY_PASSKEY_ORIGIN", "http://localhost:9002"),
 		PasskeyChallengeExpirySeconds: envInt("GATEWAY_PASSKEY_CHALLENGE_EXPIRY_SECONDS", 300),
+		PasskeySignupEnabled:          envBool("GATEWAY_PASSKEY_SIGNUP_ENABLED", true),
 
 		QRLoginBaseURL:       envStr("GATEWAY_QR_LOGIN_BASE_URL", "http://localhost:9002"),
 		QRLoginExpirySeconds: envInt("GATEWAY_QR_LOGIN_EXPIRY_SECONDS", 300),
@@ -840,6 +1017,13 @@ func Load() *Config {
 		SweeperIntervalSeconds: envInt("GATEWAY_SWEEPER_INTERVAL_SECONDS", 300),
 		SweeperBatchSize:       envInt("GATEWAY_SWEEPER_BATCH_SIZE", 500),
 		SweeperGraceSeconds:    envInt("GATEWAY_SWEEPER_GRACE_SECONDS", 60),
+
+		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
+		WebhooksMaxAttempts:           envInt("GATEWAY_WEBHOOKS_MAX_ATTEMPTS", 6),
+		WebhooksBackoffBaseSeconds:    envInt("GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS", 2),
+		WebhooksBackoffMaxSeconds:     envInt("GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS", 300),
+		WebhooksWorkerIntervalSeconds: envInt("GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS", 1),
+		WebhooksBatchSize:             envInt("GATEWAY_WEBHOOKS_BATCH_SIZE", 50),
 	}
 }
 
@@ -851,6 +1035,17 @@ const (
 	SMSProviderSNS    = "sns"
 	SMSProviderAzure  = "azure"
 )
+
+// OIDCScopeList returns the configured generic-OIDC scopes split on
+// whitespace, dropping blanks. An empty config yields nil, which lets the
+// provider fall back to its default scope set ("openid email profile").
+func (c *Config) OIDCScopeList() []string {
+	fields := strings.Fields(c.OIDCScopes)
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
 
 // DefaultProjectAuthDomainList returns the configured default-project auth
 // domains, lower-cased and de-duplicated, in order — the first entry is the
@@ -865,6 +1060,106 @@ func (c *Config) DefaultProjectAuthDomainList() []string {
 		}
 		seen[h] = true
 		out = append(out, h)
+	}
+	return out
+}
+
+// nativeOAuthDefaultEnabled reports the default for GATEWAY_NATIVE_OAUTH_ENABLED:
+// on when at least one provider's DEFAULT-PROJECT native audiences are
+// configured via env, off otherwise. Keeping the default audience-gated means a
+// deployment that never configures env native audiences is unaffected; a
+// deployment that configures native audiences only per-project (config_json)
+// opts in explicitly with GATEWAY_NATIVE_OAUTH_ENABLED=true.
+func nativeOAuthDefaultEnabled(audienceConfigs ...string) bool {
+	for _, s := range audienceConfigs {
+		if strings.TrimSpace(s) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// NativeOAuthGoogleAudienceList returns the default-project Google native
+// audiences, trimmed, blanks dropped, in order. An empty config yields nil.
+func (c *Config) NativeOAuthGoogleAudienceList() []string {
+	return splitTrimCSV(c.NativeOAuthGoogleAudiences)
+}
+
+// NativeOAuthAppleAudienceList returns the default-project Apple native
+// audiences, trimmed, blanks dropped, in order. An empty config yields nil.
+func (c *Config) NativeOAuthAppleAudienceList() []string {
+	return splitTrimCSV(c.NativeOAuthAppleAudiences)
+}
+
+// NativeOAuthMicrosoftAudienceList returns the default-project Microsoft native
+// audiences, trimmed, blanks dropped, in order. An empty config yields nil.
+func (c *Config) NativeOAuthMicrosoftAudienceList() []string {
+	return splitTrimCSV(c.NativeOAuthMicrosoftAudiences)
+}
+
+// NativeOAuthAudienceList returns the default-project native audiences for a
+// provider key ("google"/"apple"/"microsoft"), or nil for an unknown provider.
+// These are the env seed the DEFAULT PROJECT falls back to; non-default projects
+// carry their own audiences in config_json.
+func (c *Config) NativeOAuthAudienceList(provider string) []string {
+	switch provider {
+	case "google":
+		return c.NativeOAuthGoogleAudienceList()
+	case "apple":
+		return c.NativeOAuthAppleAudienceList()
+	case "microsoft":
+		return c.NativeOAuthMicrosoftAudienceList()
+	}
+	return nil
+}
+
+// IsDefaultProject reports whether id refers to the default project — the
+// project that falls back to env-configured (default-project) settings (OAuth
+// providers, native audiences). It delegates to the package-level
+// IsDefaultProject rule using this Config's DefaultProjectID.
+func (c *Config) IsDefaultProject(id string) bool {
+	return IsDefaultProject(c.DefaultProjectID, id)
+}
+
+// IsDefaultProject reports whether id refers to the default project identified
+// by defaultProjectID. An empty defaultProjectID (a Config built without a
+// control plane) or an empty id means "default", so env settings apply to every
+// request as they did before per-project config. It is the SINGLE SOURCE of the
+// default/non-default rule, shared by the OAuth exchanger resolver (which holds
+// only the id string) and native-audience resolution (via the Config method).
+func IsDefaultProject(defaultProjectID, id string) bool {
+	return defaultProjectID == "" || id == "" || id == defaultProjectID
+}
+
+// NativeOAuthProductProjectMap parses the product=projectID pairs into a map
+// keyed by the lower-cased product selector. Malformed or blank entries are
+// dropped; an empty config yields an empty (non-nil) map.
+func (c *Config) NativeOAuthProductProjectMap() map[string]string {
+	out := make(map[string]string)
+	for _, raw := range strings.Split(c.NativeOAuthProductProjects, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(raw, "=")
+		k = strings.ToLower(strings.TrimSpace(k))
+		v = strings.TrimSpace(v)
+		if !ok || k == "" || v == "" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// splitTrimCSV splits a comma-separated string, trimming whitespace and
+// dropping blank entries. An empty input yields nil.
+func splitTrimCSV(s string) []string {
+	var out []string
+	for _, raw := range strings.Split(s, ",") {
+		if v := strings.TrimSpace(raw); v != "" {
+			out = append(out, v)
+		}
 	}
 	return out
 }
@@ -996,10 +1291,183 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateWebhooks(); err != nil {
+		return err
+	}
+
 	if err := c.validateAgeGate(); err != nil {
 		return err
 	}
 
+	if err := c.validateSCIM(); err != nil {
+		return err
+	}
+
+	if err := c.validateSAML(); err != nil {
+		return err
+	}
+
+	if err := c.validateOIDC(); err != nil {
+		return err
+	}
+
+	if err := c.validateNativeOAuth(); err != nil {
+		return err
+	}
+
+	if err := c.validateProjectSecrets(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// projectSecretsKeyBytes is the required decoded length of
+// GATEWAY_PROJECT_SECRETS_KEY (AES-256).
+const projectSecretsKeyBytes = 32
+
+// validateProjectSecrets enforces the per-project secrets-encryption invariant:
+// GATEWAY_PROJECT_SECRETS_KEY is REQUIRED when the postgres control plane is
+// enabled, because a non-default project can only store OAuth provider secrets
+// encrypted with it. When set (on any driver) it must be base64 that decodes to
+// exactly 32 bytes, failing fast rather than at first decrypt.
+func (c *Config) validateProjectSecrets() error {
+	if c.ProjectSecretsKey == "" {
+		if c.RepoDriver == "postgres" {
+			return errors.New("config: GATEWAY_PROJECT_SECRETS_KEY is required when GATEWAY_REPO_DRIVER=postgres " +
+				"(it encrypts per-project OAuth provider secrets at rest); set a base64-encoded 32-byte key")
+		}
+		return nil
+	}
+	key, err := base64.StdEncoding.DecodeString(c.ProjectSecretsKey)
+	if err != nil {
+		return fmt.Errorf("config: GATEWAY_PROJECT_SECRETS_KEY is not valid base64: %w", err)
+	}
+	if len(key) != projectSecretsKeyBytes {
+		return fmt.Errorf("config: GATEWAY_PROJECT_SECRETS_KEY must decode to %d bytes, got %d",
+			projectSecretsKeyBytes, len(key))
+	}
+	return nil
+}
+
+// validateNativeOAuth enforces the native mobile sign-in invariant: when
+// enabled, either at least one provider's DEFAULT-PROJECT audiences are set via
+// env, OR the deployment opted in explicitly (non-default projects carry their
+// audiences in config_json, which config cannot see, so an explicit
+// GATEWAY_NATIVE_OAUTH_ENABLED=true with no env audiences is valid). It also
+// rejects a malformed product=projectID map.
+func (c *Config) validateNativeOAuth() error {
+	if !c.NativeOAuthEnabled {
+		return nil
+	}
+	for _, raw := range strings.Split(c.NativeOAuthProductProjects, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(raw, "=")
+		if !ok || strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			return fmt.Errorf("config: GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS entry %q is malformed "+
+				"(want product=projectID)", raw)
+		}
+	}
+	return nil
+}
+
+// reservedOAuthProviderKeys are the built-in provider keys the generic
+// OIDC provider may not reuse, so its registration cannot silently shadow
+// a first-class provider.
+var reservedOAuthProviderKeys = map[string]bool{
+	"google": true, "microsoft": true, "github": true, "apple": true,
+}
+
+// validateOIDC enforces the generic config-driven OIDC provider invariants:
+// when enabled, a provider key, client credentials, and either an issuer or
+// an explicit discovery URL are all required, and the key must not collide
+// with a built-in provider.
+func (c *Config) validateOIDC() error {
+	if !c.OIDCEnabled {
+		return nil
+	}
+	key := strings.ToLower(strings.TrimSpace(c.OIDCProviderKey))
+	if key == "" {
+		return errors.New("config: GATEWAY_OAUTH_OIDC_ENABLED=true requires GATEWAY_OAUTH_OIDC_PROVIDER_KEY")
+	}
+	if reservedOAuthProviderKeys[key] {
+		return fmt.Errorf("config: GATEWAY_OAUTH_OIDC_PROVIDER_KEY=%q is reserved for a built-in provider", key)
+	}
+	if strings.TrimSpace(c.OIDCIssuer) == "" && strings.TrimSpace(c.OIDCDiscoveryURL) == "" {
+		return errors.New("config: GATEWAY_OAUTH_OIDC_ENABLED=true requires GATEWAY_OAUTH_OIDC_ISSUER or GATEWAY_OAUTH_OIDC_DISCOVERY_URL")
+	}
+	if strings.TrimSpace(c.OIDCClientID) == "" || strings.TrimSpace(c.OIDCClientSecret) == "" {
+		return errors.New("config: GATEWAY_OAUTH_OIDC_ENABLED=true requires GATEWAY_OAUTH_OIDC_CLIENT_ID and GATEWAY_OAUTH_OIDC_CLIENT_SECRET")
+	}
+	return nil
+}
+
+// MinSCIMBearerTokenLength is the floor for GATEWAY_SCIM_BEARER_TOKEN. The
+// token is the sole credential guarding account lifecycle operations across a
+// whole project, so it must carry enough entropy to resist guessing; 32 chars
+// is the minimum a generated secret should ever be.
+const MinSCIMBearerTokenLength = 32
+
+// validateSCIM enforces the SCIM invariant: a deployment that turns the
+// inbound SCIM server on must supply a sufficiently long bearer token (the
+// only credential gating account lifecycle operations) and a project id, since
+// every SCIM operation is scoped to that single project's users. Failing closed
+// at boot beats serving an unauthenticated, weakly-authenticated, or unscoped
+// provisioning endpoint.
+func (c *Config) validateSCIM() error {
+	if !c.SCIMEnabled {
+		return nil
+	}
+	if c.SCIMBearerToken == "" {
+		return errors.New(
+			"config: GATEWAY_SCIM_ENABLED=true requires GATEWAY_SCIM_BEARER_TOKEN to be set",
+		)
+	}
+	if len(c.SCIMBearerToken) < MinSCIMBearerTokenLength {
+		return fmt.Errorf(
+			"config: GATEWAY_SCIM_BEARER_TOKEN must be at least %d characters (got %d)",
+			MinSCIMBearerTokenLength, len(c.SCIMBearerToken),
+		)
+	}
+	if c.SCIMProjectID == "" {
+		return errors.New(
+			"config: GATEWAY_SCIM_ENABLED=true requires GATEWAY_SCIM_PROJECT_ID to be set " +
+				"(the single project whose users the SCIM endpoint provisions)",
+		)
+	}
+	return nil
+}
+
+// validateWebhooks enforces the outbound-eventing invariants: the retry
+// and backoff knobs must be positive and the cap must not be smaller than
+// the base. The checks only run when eventing is enabled — a disabled
+// deployment uses a no-op publisher and runs no worker, so its (unused)
+// knobs are irrelevant.
+func (c *Config) validateWebhooks() error {
+	if !c.WebhooksEnabled {
+		return nil
+	}
+	if c.WebhooksMaxAttempts < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_MAX_ATTEMPTS=%d must be >= 1", c.WebhooksMaxAttempts)
+	}
+	if c.WebhooksBackoffBaseSeconds < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS=%d must be >= 1", c.WebhooksBackoffBaseSeconds)
+	}
+	if c.WebhooksBackoffMaxSeconds < c.WebhooksBackoffBaseSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS=%d must be >= GATEWAY_WEBHOOKS_BACKOFF_BASE_SECONDS=%d",
+			c.WebhooksBackoffMaxSeconds, c.WebhooksBackoffBaseSeconds,
+		)
+	}
+	if c.WebhooksWorkerIntervalSeconds < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS=%d must be >= 1", c.WebhooksWorkerIntervalSeconds)
+	}
+	if c.WebhooksBatchSize < 1 {
+		return fmt.Errorf("config: GATEWAY_WEBHOOKS_BATCH_SIZE=%d must be >= 1", c.WebhooksBatchSize)
+	}
 	return nil
 }
 
@@ -1018,6 +1486,30 @@ func (c *Config) validateAgeGate() error {
 		return fmt.Errorf(
 			"config: GATEWAY_AGEGATE_ADULT_AGE=%d must be greater than GATEWAY_AGEGATE_CHILD_MAX_AGE=%d",
 			c.AgeGateAdultAge, c.AgeGateChildMaxAge,
+		)
+	}
+	return nil
+}
+
+// validateSAML enforces the SAML-IdP invariant: enabling the IdP requires
+// an entityID, an SSO URL, and a signing key + certificate. A disabled
+// deployment is unconstrained — the no-op issuer is wired and the fields
+// are ignored. The cryptographic validity of the key/cert pair is checked
+// when the issuer is constructed (samlidp.NewRSAIssuer); here we only fail
+// closed on missing required values so the server never boots an "enabled
+// but unusable" SAML surface.
+func (c *Config) validateSAML() error {
+	if !c.SAMLIDPEnabled {
+		return nil
+	}
+	if c.SAMLEntityID == "" || c.SAMLSSOURL == "" {
+		return errors.New(
+			"config: GATEWAY_SAML_IDP_ENABLED=true requires GATEWAY_SAML_ENTITY_ID and GATEWAY_SAML_SSO_URL",
+		)
+	}
+	if c.SAMLSigningKey == "" || c.SAMLSigningCert == "" {
+		return errors.New(
+			"config: GATEWAY_SAML_IDP_ENABLED=true requires GATEWAY_SAML_SIGNING_KEY and GATEWAY_SAML_SIGNING_CERT (PEM)",
 		)
 	}
 	return nil

@@ -1,6 +1,7 @@
 # OAuth login
 
-identity supports OAuth/OIDC sign-in with Google, Microsoft, GitHub, and Apple.
+identity supports OAuth/OIDC sign-in with Google, Microsoft, GitHub, Apple,
+and any standards-compliant OIDC provider added purely through config.
 It does the authorization-code exchange itself — the frontend is never
 trusted to assert the user's identity. There are two flows; a deployer
 can use either or both.
@@ -28,6 +29,31 @@ A provider is enabled when its required credentials are set (client id and secre
 Microsoft also accepts `GATEWAY_MICROSOFT_TENANT_ID` (optional). At
 startup identity logs the enabled providers (`oauth_providers_enabled`)
 or warns when none are configured.
+
+### Generic OIDC provider (config-only)
+
+Any standards-compliant OIDC provider (Okta, Auth0, Keycloak, a
+self-hosted issuer) can be enabled without a code release. Set:
+
+```
+GATEWAY_OAUTH_OIDC_ENABLED=true
+GATEWAY_OAUTH_OIDC_PROVIDER_KEY=okta            # registry key + reported provider name
+GATEWAY_OAUTH_OIDC_ISSUER=https://acme.okta.com
+GATEWAY_OAUTH_OIDC_CLIENT_ID=...
+GATEWAY_OAUTH_OIDC_CLIENT_SECRET=...
+GATEWAY_OAUTH_OIDC_SCOPES=openid email profile  # optional, space-separated ("openid" is always added)
+```
+
+The exchanger resolves the authorization / token / JWKS / userinfo
+endpoints from `<ISSUER>/.well-known/openid-configuration` (override with
+`GATEWAY_OAUTH_OIDC_DISCOVERY_URL`), verifies the id_token signature
+against the discovered JWKS, checks the issuer / audience / expiry, and
+falls back to the userinfo endpoint for email and name. The user is
+rejected unless the provider asserts the email is verified.
+
+The provider registers under `GATEWAY_OAUTH_OIDC_PROVIDER_KEY` and flows
+through the same hosted and headless OAuth paths as every built-in
+provider. The key may not be `google`, `microsoft`, `github`, or `apple`.
 
 ## Hosted flow
 

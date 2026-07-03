@@ -12,6 +12,9 @@ import (
 var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/BeginOAuthLogin": true,
 	"/identity.v1.IdentityService/OAuthLogin":      true,
+	// NativeOAuthLogin verifies a native mobile-SDK ID token; the caller is
+	// anonymous until the token is verified, so no Bearer is required.
+	"/identity.v1.IdentityService/NativeOAuthLogin": true,
 	// RedeemOAuthCode trades the hosted-flow one-time code for tokens;
 	// the caller is anonymous until the code is redeemed, so it cannot
 	// carry a JWT.
@@ -29,6 +32,10 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/GetCurrentUser":        true,
 	"/identity.v1.IdentityService/BeginPasskeyLogin":     true,
 	"/identity.v1.IdentityService/CompletePasskeyLogin":  true,
+	// Passkey-first signup: the caller is anonymous — they are creating a
+	// brand-new account from a passkey and have no JWT yet.
+	"/identity.v1.IdentityService/BeginPasskeySignup":    true,
+	"/identity.v1.IdentityService/CompletePasskeySignup": true,
 	"/identity.v1.IdentityService/InitiateQrLogin":       true,
 	"/identity.v1.IdentityService/PollQrLogin":           true,
 	"/identity.v1.IdentityService/AcceptInvitation":      true,
@@ -50,18 +57,31 @@ var AuthExemptPaths = map[string]bool{
 	// X-Admin-Secret header against GATEWAY_ADMIN_API_SECRET, and the whole
 	// surface is disabled (CodeUnimplemented) when that secret is unset. So
 	// the secret check, not the JWT, is their auth.
-	"/identity.v1.IdentityService/AdminCreateProject":           true,
-	"/identity.v1.IdentityService/AdminCreateProjectCredential": true,
-	"/identity.v1.IdentityService/AdminAddProjectAuthDomain":    true,
-	"/identity.v1.IdentityService/AddProjectAuthDomain":         true,
-	"/identity.v1.IdentityService/VerifyProjectAuthDomain":      true,
-	"/identity.v1.IdentityService/ListProjectAuthDomains":       true,
-	"/identity.v1.IdentityService/SetPrimaryAuthDomain":         true,
-	"/identity.v1.IdentityService/AdminCreateTenant":            true,
-	"/identity.v1.IdentityService/AdminAddTenantAdmin":          true,
-	"/.well-known/jwks.json":                                    true,
-	"/health":                                                   true,
-	"/healthz":                                                  true,
+	"/identity.v1.IdentityService/AdminCreateProject":              true,
+	"/identity.v1.IdentityService/AdminCreateProjectCredential":    true,
+	"/identity.v1.IdentityService/AdminAddProjectAuthDomain":       true,
+	"/identity.v1.IdentityService/AddProjectAuthDomain":            true,
+	"/identity.v1.IdentityService/VerifyProjectAuthDomain":         true,
+	"/identity.v1.IdentityService/ListProjectAuthDomains":          true,
+	"/identity.v1.IdentityService/SetPrimaryAuthDomain":            true,
+	"/identity.v1.IdentityService/AdminCreateTenant":               true,
+	"/identity.v1.IdentityService/AdminAddTenantAdmin":             true,
+	"/identity.v1.IdentityService/UpsertLoginPolicy":               true,
+	"/identity.v1.IdentityService/GetLoginPolicy":                  true,
+	"/identity.v1.IdentityService/DeleteLoginPolicy":               true,
+	"/identity.v1.IdentityService/UpsertProjectConfig":             true,
+	"/identity.v1.IdentityService/GetProjectConfig":                true,
+	"/identity.v1.IdentityService/AdminSetProjectOAuthProvider":    true,
+	"/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider": true,
+	"/identity.v1.IdentityService/AdminListProjectOAuthProviders":  true,
+	// CreateFirstPlatformAdmin is the ungated zero-config bootstrap: it carries
+	// NO admin secret and NO JWT (a fresh deployer has neither), so it must be
+	// JWT-exempt or the first operator could never be created. It self-secures
+	// by closing permanently once any platform admin exists.
+	"/identity.v1.IdentityService/CreateFirstPlatformAdmin": true,
+	"/.well-known/jwks.json":                                true,
+	"/health":                                               true,
+	"/healthz":                                              true,
 }
 
 // hostedOAuthPrefix is the path prefix for the browser-facing hosted

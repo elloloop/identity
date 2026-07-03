@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/passwords"
 )
 
 const policyAdminSecret = "policy-operator-secret"
@@ -42,6 +43,110 @@ func TestUpsertLoginPolicy_AuthorsAndAudits(t *testing.T) {
 
 	if n := f.audit.countByEventType(string(audit.EventLoginPolicyUpserted)); n != 1 {
 		t.Fatalf("login_policy_upserted events = %d, want 1", n)
+	}
+}
+
+// The admin upsert must read the per-tenant password/session governance
+// fields from the request and persist them — the regression for the bug where
+// UpsertLoginPolicy silently zeroed PasswordMinLength and the two session
+// timeouts on every upsert, making them un-authorable through the RPC.
+func TestUpsertLoginPolicy_PreservesGovernanceFields(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(policyAdminSecret)
+	ctx := context.Background()
+
+	got, err := f.svc.UpsertLoginPolicy(ctx, policyAdminSecret, &LoginPolicy{
+		ProjectID:                     "proj-1",
+		TenantID:                      "tenant-1",
+		AllowedMethods:                LoginMethodPassword,
+		PasswordMinLength:             16,
+		SessionIdleTimeoutSeconds:     900,
+		SessionAbsoluteTimeoutSeconds: 86400,
+	})
+	if err != nil {
+		t.Fatalf("UpsertLoginPolicy: %v", err)
+	}
+	if got.PasswordMinLength != 16 || got.SessionIdleTimeoutSeconds != 900 || got.SessionAbsoluteTimeoutSeconds != 86400 {
+		t.Fatalf("returned policy dropped governance fields: %+v", got)
+	}
+
+	// They round-trip through the read path (the enforcement plane sees them).
+	read, err := f.svc.GetLoginPolicy(ctx, policyAdminSecret, "proj-1", "tenant-1")
+	if err != nil {
+		t.Fatalf("GetLoginPolicy: %v", err)
+	}
+	if read.PasswordMinLength != 16 || read.SessionIdleTimeoutSeconds != 900 || read.SessionAbsoluteTimeoutSeconds != 86400 {
+		t.Fatalf("read-back policy dropped governance fields: %+v", read)
+	}
+
+	// A replacing upsert with new values overwrites them (upsert is replace,
+	// not merge) — proving the path actually carries the request values
+	// rather than ignoring them.
+	got2, err := f.svc.UpsertLoginPolicy(ctx, policyAdminSecret, &LoginPolicy{
+		ProjectID: "proj-1", TenantID: "tenant-1", AllowedMethods: LoginMethodPassword,
+		PasswordMinLength: 24,
+	})
+	if err != nil {
+		t.Fatalf("second UpsertLoginPolicy: %v", err)
+	}
+	if got2.PasswordMinLength != 24 || got2.SessionIdleTimeoutSeconds != 0 || got2.SessionAbsoluteTimeoutSeconds != 0 {
+		t.Fatalf("replacing upsert = %+v, want min=24 and zeroed timeouts", got2)
+	}
+}
+
+// Negative governance values are rejected before any write.
+func TestUpsertLoginPolicy_RejectsNegativeGovernance(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(policyAdminSecret)
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t", PasswordMinLength: -1,
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+// A password_min_length above bcrypt's max byte length would make every
+// password simultaneously too short and too long, locking the tenant out of
+// all password signups/resets; the upsert must reject it.
+func TestUpsertLoginPolicy_RejectsPasswordMinLengthAboveBcryptMax(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(policyAdminSecret)
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t", PasswordMinLength: passwords.MaxPasswordLength + 1,
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("err = %v, want ErrInvalidArgument", err)
+	}
+	// The bcrypt max itself stays valid (boundary check).
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t", PasswordMinLength: passwords.MaxPasswordLength,
+	}); err != nil {
+		t.Fatalf("MaxPasswordLength must be accepted: %v", err)
+	}
+}
+
+// An absurd session timeout would overflow the seconds→ms (*1000) conversion
+// in the enforcement path and wrap negative, silently disabling the timeout;
+// the upsert must reject values above maxSessionTimeoutSeconds.
+func TestUpsertLoginPolicy_RejectsOverlargeSessionTimeout(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(policyAdminSecret)
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t", SessionIdleTimeoutSeconds: maxSessionTimeoutSeconds + 1,
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("idle timeout: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t", SessionAbsoluteTimeoutSeconds: maxSessionTimeoutSeconds + 1,
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("absolute timeout: err = %v, want ErrInvalidArgument", err)
+	}
+	// The bound itself stays valid (boundary check).
+	if _, err := f.svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{
+		ProjectID: "p", TenantID: "t",
+		SessionIdleTimeoutSeconds:     maxSessionTimeoutSeconds,
+		SessionAbsoluteTimeoutSeconds: maxSessionTimeoutSeconds,
+	}); err != nil {
+		t.Fatalf("maxSessionTimeoutSeconds must be accepted: %v", err)
 	}
 }
 
@@ -94,7 +199,7 @@ func TestLoginPolicy_DisabledWhenNoSecret(t *testing.T) {
 func TestLoginPolicy_UnimplementedWithoutStore(t *testing.T) {
 	t.Parallel()
 	// Wired with a nil policies store (the memory shape).
-	svc := NewControlPlaneAdminService(policyAdminSecret, newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil)
+	svc := NewControlPlaneAdminService(policyAdminSecret, nil, newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil)
 	if _, err := svc.UpsertLoginPolicy(context.Background(), policyAdminSecret, &LoginPolicy{ProjectID: "p", TenantID: "t"}); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("upsert err = %v, want ErrUnimplemented", err)
 	}

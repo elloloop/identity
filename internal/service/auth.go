@@ -31,6 +31,7 @@ import (
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/jwt"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -75,8 +76,29 @@ type User struct {
 	// configuration; they are NOT persisted. The service stamps them on a
 	// user before returning it so the handler/JWT layers can read a single
 	// authoritative value.
-	IsMinor bool
-	AgeBand string // "CHILD" | "TEEN" | "ADULT" | "" (unknown)
+	IsMinor    bool
+	AgeBand    string // "CHILD" | "TEEN" | "ADULT" | "" (unknown)
+	ExternalID string // IdP-owned stable identifier (SCIM externalId); unique per tenant when set
+}
+
+// DefaultUserListLimit and MaxUserListLimit bound a Repository.ListUsers
+// page so a caller (e.g. the SCIM list surface) cannot request an
+// unbounded scan. Every driver clamps to these identically.
+const (
+	DefaultUserListLimit = 50
+	MaxUserListLimit     = 500
+)
+
+// UserListFilter narrows and paginates a Repository.ListUsers query. Zero
+// values mean "no constraint": an empty Email/ExternalID does not filter,
+// and a non-positive Limit means "use the driver default". Equality
+// filters are case-insensitive for Email (RFC 7644 §3.4.2 treats userName
+// — mapped to email — case-insensitively) and exact for ExternalID.
+type UserListFilter struct {
+	Email      string // exact (case-insensitive) email match when non-empty
+	ExternalID string // exact external_id match when non-empty
+	Offset     int    // skip this many matching rows (cursor)
+	Limit      int    // max rows to return; <=0 → driver default
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -159,6 +181,22 @@ type Repository interface {
 	// graph.)
 	DeleteUser(ctx context.Context, userID string) error
 
+	// ListUsers returns users in the request's project that match filter,
+	// ordered by created_at ascending then id, with a stable offset cursor.
+	// It backs the SCIM /Users list/filter surface — including externalId
+	// correlation via UserListFilter.ExternalID, the production path an IdP
+	// uses to find a previously-provisioned account. Drivers must apply the
+	// filter and ordering identically (see conformance).
+	ListUsers(ctx context.Context, filter UserListFilter) ([]*User, error)
+
+	// CountUsers returns the total number of users in the request's project
+	// matching filter's equality predicates (Email/ExternalID), ignoring
+	// Offset/Limit. It backs the SCIM /Users totalResults so a page reports
+	// the true match count instead of the page size — and large projects are
+	// never silently truncated at the page cap. Drivers must count the same
+	// rows ListUsers would return across all pages (see conformance).
+	CountUsers(ctx context.Context, filter UserListFilter) (int, error)
+
 	// Lockout state. These are dedicated methods (rather than UpdateUser
 	// patches) so the persistence layer can implement them as single
 	// atomic writes — important for racing concurrent failed-login
@@ -218,6 +256,14 @@ type Repository interface {
 	GetPasskeyCredentialByCredID(ctx context.Context, credentialID string) (*PasskeyCredRecord, error)
 	CreatePasskeyCredential(ctx context.Context, r *PasskeyCredRecord) (string, error)
 	UpdatePasskeyCredential(ctx context.Context, nodeID string, fields map[string]any) error
+	// DeletePasskeyCredentialsForUser removes every passkey credential
+	// owned by userID, synchronously, on every driver. It backs the
+	// anti-pre-hijacking clearing in markEmailVerifiedViaExternalProof: a
+	// passkey enrolled while the email was unverified is untrusted (it may
+	// have been planted by an attacker), exactly like a planted password, so
+	// external proof of email control voids it. Idempotent: a user with no
+	// passkeys is a no-op returning nil.
+	DeletePasskeyCredentialsForUser(ctx context.Context, userID string) error
 
 	// Passkey challenges
 	GetPasskeyChallenge(ctx context.Context, nodeID string) (*PasskeyChallengeRecord, error)
@@ -253,6 +299,22 @@ type Repository interface {
 	// concurrent redeems of the same code wins.
 	CreateOAuthOneTimeCode(ctx context.Context, r *OAuthOneTimeCodeRecord) (string, error)
 	ConsumeOAuthOneTimeCode(ctx context.Context, codeHash string, atMs int64) (*OAuthOneTimeCodeRecord, error)
+
+	// Native ID-token replay cache (bearer-token single-use).
+	//
+	// Native mobile-SDK ID tokens (Google idToken / Apple identityToken) are
+	// bearer JWTs replayable until their `exp` (~1h for Google; the Apple
+	// nonce is client-optional), so a captured token could be redeemed more
+	// than once. RecordNativeTokenRedemption makes each token single-use: it
+	// atomically inserts the token's replay key (see NativeVerification.
+	// ReplayKey) and returns nil on the FIRST redemption; a second insert of
+	// the same key — a replay of the same bearer token — hits the unique
+	// index and returns ErrNativeTokenReplayed. This is the multi-replica
+	// serialization point: exactly one of N concurrent redemptions of the
+	// same token wins. Retention is bounded by ExpiresAt (= the token's `exp`,
+	// capped) so a swept row can never resurrect a still-valid token — once
+	// the row's expiry passes, the token itself can no longer be presented.
+	RecordNativeTokenRedemption(ctx context.Context, r *NativeTokenRedemptionRecord) (string, error)
 
 	// Email login codes (OTP arm of passwordless email login).
 	//
@@ -411,6 +473,7 @@ type Repository interface {
 	DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredOAuthOneTimeCodes(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredNativeTokenRedemptions(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredEmailLoginCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error
@@ -448,17 +511,25 @@ type SessionRecord struct {
 
 // RefreshTokenRecord represents a stored refresh token.
 type RefreshTokenRecord struct {
-	NodeID       string
-	TokenHash    string
-	UserID       string
-	DeviceInfo   string
-	DeviceName   string
-	IPAddress    string
-	UserAgent    string
-	ExpiresAt    int64 // epoch ms
-	CreatedAt    int64
-	LastUsedAt   int64
-	ConsumedAtMs int64 // epoch ms; 0 = unconsumed (still valid for refresh)
+	NodeID     string
+	TokenHash  string
+	UserID     string
+	DeviceInfo string
+	DeviceName string
+	IPAddress  string
+	UserAgent  string
+	ExpiresAt  int64 // epoch ms
+	CreatedAt  int64
+	LastUsedAt int64
+	// SessionStartedAt anchors the session's absolute lifetime. Unlike
+	// CreatedAt — which is re-stamped on every rotation — it is copied
+	// UNCHANGED from the consumed token across refreshes, so the per-tenant
+	// absolute session timeout is measured from the original login rather
+	// than the latest refresh. It is set to now only at initial login. 0
+	// means "no anchor recorded" (legacy rows), in which case the absolute
+	// timeout is skipped until the next rotation re-anchors it.
+	SessionStartedAt int64 // epoch ms
+	ConsumedAtMs     int64 // epoch ms; 0 = unconsumed (still valid for refresh)
 }
 
 // PasskeyCredRecord represents a stored passkey credential.
@@ -488,8 +559,12 @@ type PasskeyChallengeRecord struct {
 	Challenge     string // base64url
 	UserID        string
 	ChallengeType string // "registration" or "authentication"
-	ExpiresAt     int64
-	CreatedAt     int64
+	// Email binds the account a passkey-first signup challenge will create the
+	// user under (see BeginPasskeySignup); empty for add-a-passkey
+	// registration and for authentication challenges.
+	Email     string
+	ExpiresAt int64
+	CreatedAt int64
 }
 
 // QrLoginSessionRecord represents a stored QR login session.
@@ -523,6 +598,20 @@ type OAuthOneTimeCodeRecord struct {
 	ExpiresAt  int64 // epoch ms
 	CreatedAt  int64 // epoch ms
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
+}
+
+// NativeTokenRedemptionRecord is the replay-cache row that makes a native ID
+// token (Google idToken / Apple identityToken) single-use. ReplayKey uniquely
+// identifies one issued token — the token's `jti` when present, else a stable
+// digest of (provider|iss|sub|iat|aud|nonce); see oauth.NativeVerification.
+// ExpiresAt is the token's own `exp` (bounded to a sane max) so the row is
+// retained only as long as the token could still be presented. No token
+// material or user id is stored at rest — the key is opaque.
+type NativeTokenRedemptionRecord struct {
+	NodeID    string
+	ReplayKey string
+	ExpiresAt int64 // epoch ms
+	CreatedAt int64 // epoch ms
 }
 
 // EmailLoginCodeRecord is the OTP arm of passwordless email login. The
@@ -703,16 +792,23 @@ type InvitationRecord struct {
 // ── Sentinel errors ────────────────────────────────────────────────────
 
 var (
-	ErrUnauthenticated   = errors.New("unauthenticated")
-	ErrPermissionDenied  = errors.New("permission denied")
-	ErrInvalidArgument   = errors.New("invalid argument")
-	ErrNotFound          = errors.New("not found")
-	ErrAlreadyExists     = errors.New("already exists")
-	ErrAccountLocked     = errors.New("account locked")
-	ErrNoPasswordSet     = errors.New("no password set for this account")
-	ErrAccountNotActive  = errors.New("account is not active")
-	ErrInvitationPending = errors.New("account has not completed invitation")
-	ErrIDVRequired       = errors.New("identity verification required")
+	ErrUnauthenticated  = errors.New("unauthenticated")
+	ErrPermissionDenied = errors.New("permission denied")
+	ErrInvalidArgument  = errors.New("invalid argument")
+	ErrNotFound         = errors.New("not found")
+	// ErrProjectSecretsKeyMissing is returned when an admin write carries a
+	// plaintext provider secret to encrypt but GATEWAY_PROJECT_SECRETS_KEY is
+	// not configured, so the server cannot encrypt it for storage. It is a
+	// server-configuration precondition (mapped to FailedPrecondition), not a
+	// bad client argument. In a postgres control plane the key is required, so
+	// this only fires on a misconfigured or non-control-plane build.
+	ErrProjectSecretsKeyMissing = errors.New("GATEWAY_PROJECT_SECRETS_KEY is not configured; cannot store per-project OAuth secrets")
+	ErrAlreadyExists            = errors.New("already exists")
+	ErrAccountLocked            = errors.New("account locked")
+	ErrNoPasswordSet            = errors.New("no password set for this account")
+	ErrAccountNotActive         = errors.New("account is not active")
+	ErrInvitationPending        = errors.New("account has not completed invitation")
+	ErrIDVRequired              = errors.New("identity verification required")
 	// ErrEmailVerificationRequired is returned when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
 	// is enabled and the account's email is not yet verified. Like ErrIDVRequired
 	// it is a "do something else first" precondition (verify your email, then
@@ -738,8 +834,12 @@ var (
 	// ErrTotpRequired it is a "do something else first" signal rather than a
 	// hard failure, so the Connect handler maps it to CodeFailedPrecondition,
 	// steering the client to the tenant's SSO connection.
-	ErrSSORequired       = errors.New("sso required for this domain")
-	ErrTokenExpired      = errors.New("token expired")
+	ErrSSORequired  = errors.New("sso required for this domain")
+	ErrTokenExpired = errors.New("token expired")
+	// ErrSessionExpired is returned when a still-valid refresh token is
+	// rejected because the owning tenant's LoginPolicy idle or absolute
+	// session timeout has elapsed.
+	ErrSessionExpired    = errors.New("session expired")
 	ErrInvalidTotpCode   = errors.New("invalid totp code")
 	ErrQrLoginExpired    = errors.New("qr login session expired")
 	ErrQrLoginNotPending = errors.New("qr login session is not pending")
@@ -774,7 +874,23 @@ var (
 	ErrInvitationExpired    = errors.New("invitation has expired")
 	ErrLocalAuthDisabled    = errors.New("local auth disabled")
 	ErrOAuthDisabled        = errors.New("oauth login is not configured")
-	ErrSignupDisabled       = errors.New("signup is disabled for this deployment")
+	// ErrNativeOAuthDisabled is returned by NativeOAuthLogin when
+	// GATEWAY_NATIVE_OAUTH_ENABLED is false or no native verifier is
+	// configured. It maps to FailedPrecondition (the feature is off), distinct
+	// from ErrUnauthenticated (a token that failed verification).
+	ErrNativeOAuthDisabled = errors.New("native oauth login is not enabled")
+	// ErrNativeTokenReplayed is returned by RecordNativeTokenRedemption when a
+	// native ID token's replay key has already been recorded — the bearer
+	// token is being presented a second time. NativeOAuthLogin maps it to
+	// CodeUnauthenticated so a replay looks identical to any other rejected
+	// token.
+	ErrNativeTokenReplayed = errors.New("native id token has already been redeemed")
+	ErrSignupDisabled      = errors.New("signup is disabled for this deployment")
+	// ErrPasskeySignupDisabled is returned by BeginPasskeySignup /
+	// CompletePasskeySignup when GATEWAY_PASSKEY_SIGNUP_ENABLED is false. It
+	// is distinct from ErrSignupDisabled (password signup) so the two flows
+	// can be toggled independently; both map to FailedPrecondition.
+	ErrPasskeySignupDisabled = errors.New("passkey signup is disabled for this deployment")
 	// ErrCaptchaRequired is returned when CAPTCHA is enforced on an
 	// endpoint but the request carried no captcha token. ErrCaptchaFailed
 	// is returned when the supplied token was rejected by the provider.
@@ -827,13 +943,33 @@ type AuthService struct {
 	mailer             email.Transport
 	smsSender          sms.Sender
 	logger             *zap.Logger
-	// oauthRegistry holds per-provider Exchangers. May be nil; in that
-	// case OAuthLogin returns ErrOAuthDisabled. A non-nil but empty
-	// registry has the same effect when looking up a specific provider.
-	oauthRegistry  *oauth.Registry
-	emailThrottle  *emailSendThrottle
-	signupThrottle *emailSendThrottle
-	phoneThrottle  *emailSendThrottle
+	// oauthResolver resolves the OAuth Exchanger for a request's project and
+	// provider (per-project providers from config_json, env providers for the
+	// default project). Always non-nil once the constructor runs; OAuthLogin
+	// returns ErrOAuthDisabled when no provider is available for the project.
+	oauthResolver *OAuthResolver
+	// nativeVerifier verifies native mobile-SDK ID tokens (Google idToken /
+	// Apple identityToken) for NativeOAuthLogin. nil disables the RPC
+	// (FailedPrecondition) — the constructor leaves it nil; app.New sets it via
+	// WithNativeOAuth when GATEWAY_NATIVE_OAUTH_ENABLED and at least one
+	// provider's audiences are configured. Held behind the
+	// NativeIDTokenVerifier seam (satisfied by *oauth.NativeVerifier) so the
+	// login flow's verification-result branches are unit-testable.
+	nativeVerifier NativeIDTokenVerifier
+	// nativeProjects validates that a native login's resolved product→project
+	// id names a real, active control-plane project. nil on drivers without a
+	// control plane (memory), where NativeOAuthLogin accepts only the product
+	// that resolves to cfg.DefaultProjectID. Set alongside nativeVerifier.
+	nativeProjects NativeOAuthProjectStore
+	// nativeProductProjects is the parsed GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS
+	// map (lower-cased product → verbatim project id), precomputed once at
+	// wiring so a native login does not re-split the CSV and allocate a map per
+	// request (mirrors the verifier's precomputed audience sets). Set in
+	// WithNativeOAuth.
+	nativeProductProjects map[string]string
+	emailThrottle         *emailSendThrottle
+	signupThrottle        *emailSendThrottle
+	phoneThrottle         *emailSendThrottle
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
 	// OAuth flow uses. Parsed once at construction.
@@ -854,6 +990,14 @@ type AuthService struct {
 	// dependency kept off the already-wide constructor. Enforcement fails
 	// safe: any nil store, miss, or lookup error imposes no restriction.
 	governance *LoginGovernance
+
+	// publisher emits user-lifecycle events (create/update/deactivate) to
+	// downstream subscribers. nil disables emission (treated as the no-op
+	// events.Discard) — the constructor leaves it nil; app.New sets it via
+	// WithEventPublisher (the outbox-backed publisher when
+	// GATEWAY_WEBHOOKS_ENABLED, else left nil). Emission is best-effort and
+	// never fails the originating RPC.
+	publisher events.Publisher
 
 	// ageGate determines a user's age band from their date of birth. It is
 	// always non-nil: the constructor wires the no-op determiner when
@@ -876,6 +1020,15 @@ type AuthService struct {
 	passkeyRPCacheMu sync.RWMutex
 }
 
+// WithEventPublisher wires the optional user-lifecycle event publisher and
+// returns the service for chaining. app.New calls it once at construction
+// (with the outbox-backed publisher when outbound eventing is enabled, or
+// nil to disable emission).
+func (s *AuthService) WithEventPublisher(p events.Publisher) *AuthService {
+	s.publisher = p
+	return s
+}
+
 // WithTenantAutoFormer wires the optional tenant auto-formation store and
 // returns the service for chaining. app.New calls it once at construction
 // (with the postgres store, or nil for drivers without a control plane).
@@ -891,6 +1044,30 @@ func (s *AuthService) WithTenantAutoFormer(af TenantAutoFormStore) *AuthService 
 // for drivers without a governance plane). A nil bundle disables enforcement.
 func (s *AuthService) WithLoginGovernance(g *LoginGovernance) *AuthService {
 	s.governance = g
+	return s
+}
+
+// WithProjectOAuthSecrets wires the per-project OAuth secret-decryption key and
+// the Exchanger observability wrapper into the OAuth resolver, and returns the
+// service for chaining. app.New calls it once at construction with the decoded
+// GATEWAY_PROJECT_SECRETS_KEY and observability.WrapOAuthExchanger. Without it,
+// a project that stores encrypted provider secrets cannot be built (only the
+// default project's env providers work).
+func (s *AuthService) WithProjectOAuthSecrets(secretsKey []byte, wrap func(provider string, e oauth.Exchanger) oauth.Exchanger) *AuthService {
+	s.oauthResolver.withSecrets(secretsKey, wrap)
+	return s
+}
+
+// WithNativeOAuth wires the native mobile sign-in dependencies (the ID-token
+// verifier and the optional control-plane project lookup) and returns the
+// service for chaining. app.New calls it once at construction: with a non-nil
+// verifier when native login is enabled and audiences are configured, and with
+// the postgres project store (nil on drivers without a control plane). A nil
+// verifier leaves NativeOAuthLogin disabled.
+func (s *AuthService) WithNativeOAuth(v NativeIDTokenVerifier, projects NativeOAuthProjectStore) *AuthService {
+	s.nativeVerifier = v
+	s.nativeProjects = projects
+	s.nativeProductProjects = s.cfg.NativeOAuthProductProjectMap()
 	return s
 }
 
@@ -969,7 +1146,7 @@ func NewAuthServiceWithOAuth(
 		mailer:             mailer,
 		smsSender:          smsSender,
 		logger:             logger,
-		oauthRegistry:      oauthRegistry,
+		oauthResolver:      newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, logger),
 		emailThrottle:      newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
 		signupThrottle:     newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
 		phoneThrottle:      newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
@@ -1109,8 +1286,25 @@ func generateChallengeID() string {
 // access token also carries a `sid` claim referencing a freshly
 // minted Session row; the verification middleware looks the row up on
 // every authenticated request.
+//
+// This is the initial-login entry point: it anchors the new session's
+// absolute lifetime at now. The refresh path calls issueTokensWithSessionStart
+// directly so the anchor propagates unchanged across rotations.
 func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
+	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, 0)
+}
+
+// issueTokensWithSessionStart mints a token pair, anchoring the session's
+// absolute lifetime at sessionStartedAtMs. A value <= 0 anchors a brand-new
+// session at now (the initial-login case); the refresh path passes the consumed
+// token's SessionStartedAt so the per-tenant absolute timeout is measured from
+// the original login rather than re-set on every rotation.
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs int64) (string, string, error) {
 	now := s.nowMs()
+	sessionStart := sessionStartedAtMs
+	if sessionStart <= 0 {
+		sessionStart = now
+	}
 
 	// Stamp the derived minor flag from the stored DOB so the token carries
 	// an authoritative is_minor claim when age-gating is on. No-op (false)
@@ -1152,15 +1346,16 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 	devName := friendlyDeviceName(userAgent)
 
 	_, err = s.repo(ctx).CreateRefreshToken(ctx, &RefreshTokenRecord{
-		TokenHash:  refreshHash,
-		UserID:     user.ID,
-		DeviceInfo: devName,
-		DeviceName: devName,
-		IPAddress:  ipAddr,
-		UserAgent:  truncate(userAgent, 512),
-		ExpiresAt:  now + int64(s.cfg.RefreshExpirySeconds)*1000,
-		CreatedAt:  now,
-		LastUsedAt: now,
+		TokenHash:        refreshHash,
+		UserID:           user.ID,
+		DeviceInfo:       devName,
+		DeviceName:       devName,
+		IPAddress:        ipAddr,
+		UserAgent:        truncate(userAgent, 512),
+		ExpiresAt:        now + int64(s.cfg.RefreshExpirySeconds)*1000,
+		CreatedAt:        now,
+		LastUsedAt:       now,
+		SessionStartedAt: sessionStart,
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("storing refresh token: %w", err)
@@ -1296,9 +1491,23 @@ func (s *AuthService) storeRecoveryCodes(ctx context.Context, userID string, cod
 	return nil
 }
 
-// validatePasswordStrength checks password requirements and returns an error if weak.
+// validatePasswordStrength checks password requirements against the global
+// default policy and returns an error if weak.
 func validatePasswordStrength(pw string) error {
-	issues := passwords.ValidateStrength(pw)
+	return passwordIssuesToErr(passwords.ValidateStrength(pw))
+}
+
+// validatePasswordStrengthForEmail checks password requirements against the
+// per-tenant policy for the org that owns email's domain, falling back to the
+// global rules when no governed policy applies. Use this on any path where
+// the subject's email is known (signup, password reset, password change) so
+// an org's tightened complexity rules are enforced for its members only.
+func (s *AuthService) validatePasswordStrengthForEmail(ctx context.Context, email, pw string) error {
+	policy := s.passwordStrengthPolicyFor(ctx, email)
+	return passwordIssuesToErr(passwords.ValidateStrengthWithPolicy(pw, policy))
+}
+
+func passwordIssuesToErr(issues []string) error {
 	if len(issues) > 0 {
 		return fmt.Errorf("%w: %s", ErrWeakPassword, strings.Join(issues, "; "))
 	}
@@ -1433,6 +1642,24 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", fmt.Errorf("%w: refresh token expired", ErrTokenExpired)
 	}
 
+	// Per-tenant session timeout (idle / absolute). Enforced BEFORE the
+	// token is rotated so an expired session never mints fresh tokens, and
+	// the refresh row is deleted so the dead session can't be retried.
+	// Requires the user's email to resolve the owning tenant's policy; the
+	// lookup fails safe (no policy → no timeout) so a non-governed user is
+	// unaffected.
+	timeoutUser, err := s.repo(ctx).GetUser(ctx, record.UserID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if timeoutUser == nil {
+		return nil, "", "", fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.enforceSessionTimeout(ctx, timeoutUser.Email, s.nowMs(), record.SessionStartedAt, record.LastUsedAt); err != nil {
+		_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
+		return nil, "", "", err
+	}
+
 	// Rotation. ConsumeRefreshTokenByHash is the serialization point: it
 	// only succeeds when the row's consumed_at is currently 0, so two
 	// concurrent rotations of the same token resolve to exactly one
@@ -1445,13 +1672,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", fmt.Errorf("consuming refresh token: %w", err)
 	}
 
-	user, err := s.repo(ctx).GetUser(ctx, record.UserID)
-	if err != nil {
-		return nil, "", "", err
-	}
-	if user == nil {
-		return nil, "", "", fmt.Errorf("%w: user not found", ErrNotFound)
-	}
+	user := timeoutUser
 
 	// Re-enforce account status on every refresh: a user deactivated
 	// (or locked, or IDV-revoked) after the original login must not be
@@ -1462,7 +1683,11 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", err
 	}
 
-	accessToken, newRefresh, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	// Propagate the session-start anchor UNCHANGED across the rotation so the
+	// absolute timeout keeps measuring from the original login. A legacy row
+	// with no anchor (SessionStartedAt == 0) is re-anchored at now by
+	// issueTokensWithSessionStart.
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, record.SessionStartedAt)
 	if err != nil {
 		return nil, "", "", err
 	}

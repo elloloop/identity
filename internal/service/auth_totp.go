@@ -9,6 +9,7 @@ import (
 
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
+	"github.com/elloloop/identity/pkg/secretcrypto"
 	"github.com/elloloop/identity/pkg/totp"
 )
 
@@ -39,7 +40,7 @@ func (s *AuthService) BeginTotpSetup(ctx context.Context, userID string) (string
 		return "", "", nil, fmt.Errorf("generating TOTP secret: %w", err)
 	}
 
-	encrypted, err := totp.EncryptSecret(secret, s.totpKey)
+	encrypted, err := secretcrypto.Encrypt(secret, s.totpKey)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("encrypting TOTP secret: %w", err)
 	}
@@ -86,7 +87,7 @@ func (s *AuthService) VerifyTotpSetup(ctx context.Context, userID, code string) 
 		return false, fmt.Errorf("%w: no TOTP setup in progress", ErrNotFound)
 	}
 
-	secret, err := totp.DecryptSecret(cred.SecretEncrypted, s.totpKey)
+	secret, err := secretcrypto.Decrypt(cred.SecretEncrypted, s.totpKey)
 	if err != nil {
 		s.logger.Error("totp_decrypt_failed", zap.String("user_id", userID), zap.Error(err))
 		return false, errors.New("could not decrypt TOTP secret")
@@ -158,7 +159,7 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 	totpOK := false
 	recoveryUsed := false
 
-	secret, err := totp.DecryptSecret(cred.SecretEncrypted, s.totpKey)
+	secret, err := secretcrypto.Decrypt(cred.SecretEncrypted, s.totpKey)
 	if err != nil {
 		s.logger.Error("totp_decrypt_failed", zap.String("user_id", userID), zap.Error(err))
 		secret = ""
