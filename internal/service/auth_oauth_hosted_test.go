@@ -88,8 +88,18 @@ func TestHostedOAuth_Complete_TamperedStateRejected(t *testing.T) {
 	require.NoError(t, err)
 	stateToken := stateTokenFromAuthURL(t, begin.AuthorizationURL)
 
-	// Flip a character in the signature — verification must fail.
-	tampered := stateToken[:len(stateToken)-2] + "AA"
+	// Flip the penultimate signature character to a guaranteed-different value —
+	// verification must fail. (Overwriting the tail with a fixed literal was a
+	// no-op when the token already ended in it; the penultimate base64url char
+	// is always significant, unlike the final one which can carry padding bits.)
+	tb := []byte(stateToken)
+	i := len(tb) - 2
+	if tb[i] == 'A' {
+		tb[i] = 'B'
+	} else {
+		tb[i] = 'A'
+	}
+	tampered := string(tb)
 	_, err = svc.CompleteHostedOAuth(ctx, "google",
 		fakeOAuthCode("hosted@example.com", "Hosted", "", "google"),
 		tampered, "", "", "", []string{"csrf-123"})
