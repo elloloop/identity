@@ -1436,19 +1436,28 @@ func (s *AuthService) revokeUserSessionsIfModeSession(ctx context.Context, userI
 
 // revokeSessionIfModeSession revokes exactly the access session identified by
 // sid when the deployment runs mode=session, leaving the user's other sessions
-// untouched. It is paired with the refresh-token deletion on a session-timeout
-// breach so the still-valid access token stops working immediately rather than
-// lingering to its natural (uncapped in mode=session) expiry. sid is empty in
-// mode=ttl and for legacy rows, where there is nothing to revoke. Best-effort:
-// a failure widens the access-token validity to the middleware cache TTL, not a
-// full bypass, so it is logged rather than propagated.
-func (s *AuthService) revokeSessionIfModeSession(ctx context.Context, sid, reason string) {
-	if s.cfg.RevocationMode != config.RevocationModeSession || sid == "" {
+// untouched. It is paired with every path that invalidates a single refresh
+// token — logout, natural-expiry cleanup, and a session-timeout breach — so the
+// still-valid access token stops working immediately rather than lingering to
+// its natural (uncapped in mode=session) expiry.
+//
+// A legacy refresh row written before the sid link existed carries an empty
+// sid, making the scoped revoke impossible; it fails CLOSED by falling back to
+// the user-scoped revoke the replay-detection path uses, at the cost of ending
+// the user's other sessions. Best-effort: a failure widens the access-token
+// validity to the middleware cache TTL, not a full bypass, so it is logged
+// rather than propagated.
+func (s *AuthService) revokeSessionIfModeSession(ctx context.Context, sid, userID, reason string) {
+	if s.cfg.RevocationMode != config.RevocationModeSession {
+		return
+	}
+	if sid == "" {
+		s.revokeUserSessionsIfModeSession(ctx, userID, reason)
 		return
 	}
 	if err := s.repo(ctx).RevokeSession(ctx, sid, s.nowMs()); err != nil {
 		s.logger.Warn("session_revoke_failed",
-			zap.String("reason", reason), zap.Error(err))
+			zap.String("user_id", userID), zap.String("reason", reason), zap.Error(err))
 	}
 }
 
@@ -1663,6 +1672,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 
 	if record.ExpiresAt < s.nowMs() {
 		_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
+		// A deployer may set the JWT expiry longer than the refresh TTL in
+		// mode=session, so the access session must die with its refresh token.
+		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "refresh_token_expired")
 		return nil, "", "", fmt.Errorf("%w: refresh token expired", ErrTokenExpired)
 	}
 
@@ -1684,7 +1696,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		// Under mode=session the deleted refresh row is not enough: the access
 		// token minted alongside it is still valid until its natural expiry, so
 		// revoke the matching access session (scoped to this sid) too.
-		s.revokeSessionIfModeSession(ctx, record.SID, "session_timeout")
+		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "session_timeout")
 		return nil, "", "", err
 	}
 
@@ -1724,7 +1736,10 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 
 // ── Logout ─────────────────────────────────────────────────────────────
 
-// Logout deletes the refresh token identified by the raw token value.
+// Logout deletes the refresh token identified by the raw token value. Under
+// mode=session it also revokes the matching access session — an explicitly
+// logged-out user must not keep a working access token until its natural
+// (uncapped in mode=session) expiry.
 func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error {
 	if rawRefreshToken == "" {
 		return nil
@@ -1739,6 +1754,7 @@ func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error 
 	}
 	userID := record.UserID
 	_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
+	s.revokeSessionIfModeSession(ctx, record.SID, userID, "logout")
 
 	if userID != "" {
 		s.audit.Log(ctx, audit.EventLogout, audit.WithActor(userID))
