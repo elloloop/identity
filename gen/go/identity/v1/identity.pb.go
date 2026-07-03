@@ -10379,16 +10379,26 @@ func (x *AdminAddTenantAdminResponse) GetMembership() *TenantMembership {
 	return nil
 }
 
-// CreateFirstPlatformAdmin is the zero-config bootstrap that establishes the
-// FIRST platform admin on a fresh deployment. Unlike every other Admin* RPC
-// it is NOT authenticated by the shared admin secret — its whole purpose is
-// to let a brand-new deployer who has not yet configured anything stand up
-// the initial operator account. It is self-securing instead: it succeeds
-// ONLY while the platform_admins table is empty, and once any admin exists
-// the path is permanently closed (FAILED_PRECONDITION), so it can never be
-// used to escalate privilege on an already-provisioned deployment. The
-// emptiness check + insert are atomic, so two racing bootstraps create
-// exactly one admin and the loser is rejected.
+// CreateFirstPlatformAdmin is the trust-on-first-use (TOFU) bootstrap that
+// establishes the FIRST platform admin on a fresh deployment. It is
+// self-securing: it succeeds ONLY while the platform_admins table is empty,
+// and once any admin exists the path is permanently closed (FAILED_PRECONDITION),
+// so it can never be used to escalate privilege on an already-provisioned
+// deployment. The emptiness check + insert are atomic, so two racing bootstraps
+// create exactly one admin and the loser is rejected.
+//
+// Its authentication depends on how the deployment is configured, so a fresh
+// internet-exposed deployment can be hardened against an anonymous caller
+// winning the first-admin race:
+//   - When GATEWAY_ADMIN_API_SECRET is UNSET it is zero-config and reachable
+//     without any credential — the one Admin* RPC that does not need the shared
+//     admin secret — so a brand-new deployer can stand up the initial operator.
+//   - When GATEWAY_ADMIN_API_SECRET is SET it is gated on that secret exactly
+//     like every other Admin* RPC: the caller must present the matching
+//     X-Admin-Secret header or the call is rejected (PERMISSION_DENIED).
+//   - When GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true it is closed entirely and
+//     always rejected (FAILED_PRECONDITION), regardless of whether any admin
+//     exists — for operators who create the first admin out of band.
 //
 // It is available only on the postgres control-plane driver; the memory driver
 // deployments (which have no platform_admins table) return UNIMPLEMENTED.

@@ -382,6 +382,10 @@ func newAdminFixture(secret string) *adminFixture {
 }
 
 func newAdminFixtureWithKey(secret string, secretsKey []byte) *adminFixture {
+	return newAdminFixtureFull(secret, false, secretsKey)
+}
+
+func newAdminFixtureFull(secret string, disableBootstrap bool, secretsKey []byte) *adminFixture {
 	p := newFakeControlPlaneStore()
 	t := newFakeTenantStore()
 	m := newFakeMembershipStore()
@@ -391,7 +395,7 @@ func newAdminFixtureWithKey(secret string, secretsKey []byte) *adminFixture {
 	auditWriter := newRecordingAuditWriter()
 	auditLog := audit.NewLogger(auditWriter, "test-project", zap.NewNop())
 	return &adminFixture{
-		svc:      NewControlPlaneAdminService(secret, secretsKey, p, t, m, lp, a, dns, auditLog, zap.NewNop()),
+		svc:      NewControlPlaneAdminService(secret, disableBootstrap, secretsKey, p, t, m, lp, a, dns, auditLog, zap.NewNop()),
 		projects: p,
 		tenants:  t,
 		members:  m,
@@ -1006,7 +1010,7 @@ func TestControlPlaneAdmin_StoreErrorsPropagate(t *testing.T) {
 	t.Run("create first platform admin", func(t *testing.T) {
 		f := newAdminFixture(testAdminSecret)
 		f.admins.createErr = wantErr
-		if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "ops@acme.com", "Str0ng!Bootstrap"); !errors.Is(err, wantErr) {
+		if _, err := f.svc.CreateFirstPlatformAdmin(ctx, testAdminSecret, "ops@acme.com", "Str0ng!Bootstrap"); !errors.Is(err, wantErr) {
 			t.Fatalf("err = %v, want %v", err, wantErr)
 		}
 	})
@@ -1023,7 +1027,7 @@ func TestCreateFirstPlatformAdmin_EmptyTableCreatesAdmin(t *testing.T) {
 	f := newAdminFixture("") // empty secret: the rest of the surface is disabled
 	ctx := context.Background()
 
-	got, err := f.svc.CreateFirstPlatformAdmin(ctx, "  Ops@Acme.com ", "")
+	got, err := f.svc.CreateFirstPlatformAdmin(ctx, "", "  Ops@Acme.com ", "")
 	if err != nil {
 		t.Fatalf("CreateFirstPlatformAdmin: %v", err)
 	}
@@ -1056,7 +1060,7 @@ func TestCreateFirstPlatformAdmin_SuppliedPasswordNotReturned(t *testing.T) {
 	f := newAdminFixture("")
 	ctx := context.Background()
 
-	got, err := f.svc.CreateFirstPlatformAdmin(ctx, "ops@acme.com", "Str0ng!Bootstrap")
+	got, err := f.svc.CreateFirstPlatformAdmin(ctx, "", "ops@acme.com", "Str0ng!Bootstrap")
 	if err != nil {
 		t.Fatalf("CreateFirstPlatformAdmin: %v", err)
 	}
@@ -1071,7 +1075,7 @@ func TestCreateFirstPlatformAdmin_SuppliedPasswordNotReturned(t *testing.T) {
 func TestCreateFirstPlatformAdmin_WeakSuppliedPasswordRejected(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture("")
-	if _, err := f.svc.CreateFirstPlatformAdmin(context.Background(), "ops@acme.com", "weak"); !errors.Is(err, ErrWeakPassword) {
+	if _, err := f.svc.CreateFirstPlatformAdmin(context.Background(), "", "ops@acme.com", "weak"); !errors.Is(err, ErrWeakPassword) {
 		t.Fatalf("weak password: err = %v, want ErrWeakPassword", err)
 	}
 	if n, _ := f.admins.CountPlatformAdmins(context.Background()); n != 0 {
@@ -1082,7 +1086,7 @@ func TestCreateFirstPlatformAdmin_WeakSuppliedPasswordRejected(t *testing.T) {
 func TestCreateFirstPlatformAdmin_InvalidEmailRejected(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture("")
-	if _, err := f.svc.CreateFirstPlatformAdmin(context.Background(), "not-an-email", ""); !errors.Is(err, ErrInvalidArgument) {
+	if _, err := f.svc.CreateFirstPlatformAdmin(context.Background(), "", "not-an-email", ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("invalid email: err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -1092,12 +1096,12 @@ func TestCreateFirstPlatformAdmin_SecondCallRejected(t *testing.T) {
 	f := newAdminFixture("")
 	ctx := context.Background()
 
-	if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "first@acme.com", ""); err != nil {
+	if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "", "first@acme.com", ""); err != nil {
 		t.Fatalf("first bootstrap: %v", err)
 	}
 	// Once an admin exists the path is permanently closed — even a different
 	// email cannot create a second admin via the bootstrap.
-	_, err := f.svc.CreateFirstPlatformAdmin(ctx, "second@acme.com", "")
+	_, err := f.svc.CreateFirstPlatformAdmin(ctx, "", "second@acme.com", "")
 	if !errors.Is(err, ErrPlatformAdminExists) {
 		t.Fatalf("second bootstrap: err = %v, want ErrPlatformAdminExists", err)
 	}
@@ -1111,7 +1115,7 @@ func TestCreateFirstPlatformAdmin_BlockedAttemptEmitsAudit(t *testing.T) {
 	f := newAdminFixture("")
 	ctx := context.Background()
 
-	if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "first@acme.com", ""); err != nil {
+	if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "", "first@acme.com", ""); err != nil {
 		t.Fatalf("first bootstrap: %v", err)
 	}
 	// The happy bootstrap must NOT emit a blocked event.
@@ -1121,11 +1125,16 @@ func TestCreateFirstPlatformAdmin_BlockedAttemptEmitsAudit(t *testing.T) {
 
 	// A second (now-closed) attempt must be rejected AND recorded so a
 	// closed-bootstrap probe is visible in the audit trail.
-	if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "probe@evil.com", ""); !errors.Is(err, ErrPlatformAdminExists) {
+	if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "", "probe@evil.com", ""); !errors.Is(err, ErrPlatformAdminExists) {
 		t.Fatalf("second bootstrap: err = %v, want ErrPlatformAdminExists", err)
 	}
 	if n := f.audit.countByEventType(string(audit.EventPlatformAdminBootstrapBlocked)); n != 1 {
 		t.Fatalf("blocked events after closed-bootstrap probe = %d, want 1", n)
+	}
+	// The closed-bootstrap probe is recorded with the already_provisioned reason,
+	// distinguishing it from a secret-denied or disabled denial.
+	if n := f.audit.countByEventTypeAndDetail(string(audit.EventPlatformAdminBootstrapBlocked), "reason", bootstrapBlockedAlreadyProvisioned); n != 1 {
+		t.Fatalf("already_provisioned blocked events = %d, want 1", n)
 	}
 	// Perf contract: the unlocked CountPlatformAdmins pre-check must have
 	// short-circuited the closed-bootstrap probe BEFORE the advisory-lock
@@ -1151,7 +1160,7 @@ func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(i int) {
 			defer wg.Done()
-			_, err := f.svc.CreateFirstPlatformAdmin(ctx, "ops@acme.com", "")
+			_, err := f.svc.CreateFirstPlatformAdmin(ctx, "", "ops@acme.com", "")
 			if err == nil {
 				atomic.AddInt32(&successes, 1)
 			}
@@ -1176,8 +1185,105 @@ func TestCreateFirstPlatformAdmin_ConcurrentCreatesExactlyOne(t *testing.T) {
 func TestCreateFirstPlatformAdmin_UnimplementedWithoutStore(t *testing.T) {
 	t.Parallel()
 	// Built without a PlatformAdminStore (the memory shape).
-	svc := NewControlPlaneAdminService("", nil, newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil)
-	if _, err := svc.CreateFirstPlatformAdmin(context.Background(), "ops@acme.com", ""); !errors.Is(err, ErrUnimplemented) {
+	svc := NewControlPlaneAdminService("", false, nil, newFakeControlPlaneStore(), newFakeTenantStore(), newFakeMembershipStore(), nil, nil, nil, nil, nil)
+	if _, err := svc.CreateFirstPlatformAdmin(context.Background(), "", "ops@acme.com", ""); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("no store: err = %v, want ErrUnimplemented", err)
+	}
+}
+
+// ── bootstrap hardening: secret-gated when a secret is configured ─────────
+
+func TestCreateFirstPlatformAdmin_SecretConfigured_WrongOrMissingSecretDenied(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// A wrong, blank, or near-miss presented secret is rejected uniformly, and
+	// nothing is written — a fresh internet-exposed deploy cannot have an
+	// anonymous caller win the first-admin race once a secret is configured.
+	for _, presented := range []string{"", "wrong", testAdminSecret + "x", testAdminSecret[:len(testAdminSecret)-1]} {
+		f := newAdminFixture(testAdminSecret)
+		if _, err := f.svc.CreateFirstPlatformAdmin(ctx, presented, "ops@acme.com", ""); !errors.Is(err, ErrPermissionDenied) {
+			t.Fatalf("CreateFirstPlatformAdmin(secret=%q): err = %v, want ErrPermissionDenied", presented, err)
+		}
+		if n, _ := f.admins.CountPlatformAdmins(ctx); n != 0 {
+			t.Fatalf("secret=%q: admin count = %d, want 0 (a denied bootstrap must not write)", presented, n)
+		}
+		// The denial must be auditable — a secret-denied probe against a hardened
+		// deployment is exactly the signal this feature exists to surface.
+		if n := f.audit.countByEventTypeAndDetail(string(audit.EventPlatformAdminBootstrapBlocked), "reason", bootstrapBlockedSecretDenied); n != 1 {
+			t.Fatalf("secret=%q: secret_denied blocked events = %d, want 1", presented, n)
+		}
+	}
+}
+
+func TestCreateFirstPlatformAdmin_SecretConfigured_CorrectSecretSucceeds(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(testAdminSecret)
+	ctx := context.Background()
+
+	got, err := f.svc.CreateFirstPlatformAdmin(ctx, testAdminSecret, "ops@acme.com", "")
+	if err != nil {
+		t.Fatalf("CreateFirstPlatformAdmin with correct secret: %v", err)
+	}
+	if got.ID == "" || got.Email != "ops@acme.com" || got.GeneratedPassword == "" {
+		t.Fatalf("response = %+v", got)
+	}
+	if n, _ := f.admins.CountPlatformAdmins(ctx); n != 1 {
+		t.Fatalf("admin count = %d, want 1", n)
+	}
+	// A successful bootstrap must NOT emit any blocked-bootstrap event.
+	if n := f.audit.countByEventType(string(audit.EventPlatformAdminBootstrapBlocked)); n != 0 {
+		t.Fatalf("blocked events after a successful secret-gated bootstrap = %d, want 0", n)
+	}
+}
+
+func TestCreateFirstPlatformAdmin_NoSecretConfigured_IgnoresPresentedSecret(t *testing.T) {
+	t.Parallel()
+	// TOFU stays zero-config ONLY when no secret is set: a presented secret is
+	// simply ignored, so a fresh deployer's headless bootstrap keeps working.
+	f := newAdminFixture("")
+	ctx := context.Background()
+
+	if _, err := f.svc.CreateFirstPlatformAdmin(ctx, "some-unexpected-value", "ops@acme.com", ""); err != nil {
+		t.Fatalf("zero-config bootstrap must ignore a presented secret: %v", err)
+	}
+	if n, _ := f.admins.CountPlatformAdmins(ctx); n != 1 {
+		t.Fatalf("admin count = %d, want 1", n)
+	}
+	// The zero-config success path must NOT emit any blocked-bootstrap event.
+	if n := f.audit.countByEventType(string(audit.EventPlatformAdminBootstrapBlocked)); n != 0 {
+		t.Fatalf("blocked events after a zero-config bootstrap = %d, want 0", n)
+	}
+}
+
+func TestCreateFirstPlatformAdmin_Disabled_RejectedEvenWithCorrectSecret(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP closes the surface entirely: the RPC
+	// is rejected regardless of admin existence and regardless of a correct
+	// secret, for operators who bootstrap the first admin out-of-band.
+	cases := []struct {
+		name      string
+		secret    string
+		presented string
+	}{
+		{"no secret configured", "", ""},
+		{"secret configured, correct secret presented", testAdminSecret, testAdminSecret},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAdminFixtureFull(tc.secret, true, testAdminSecretsKey())
+			if _, err := f.svc.CreateFirstPlatformAdmin(ctx, tc.presented, "ops@acme.com", ""); !errors.Is(err, ErrFirstAdminBootstrapDisabled) {
+				t.Fatalf("err = %v, want ErrFirstAdminBootstrapDisabled", err)
+			}
+			if n, _ := f.admins.CountPlatformAdmins(ctx); n != 0 {
+				t.Fatalf("admin count = %d, want 0 (a disabled bootstrap must not write)", n)
+			}
+			// A closed-bootstrap probe must be auditable with a distinct reason.
+			if n := f.audit.countByEventTypeAndDetail(string(audit.EventPlatformAdminBootstrapBlocked), "reason", bootstrapBlockedDisabled); n != 1 {
+				t.Fatalf("bootstrap_disabled blocked events = %d, want 1", n)
+			}
+		})
 	}
 }

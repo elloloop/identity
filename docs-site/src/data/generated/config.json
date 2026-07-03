@@ -252,6 +252,15 @@
     "anchor": "projects-and-tenancy"
   },
   {
+    "name": "GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "closes the CreateFirstPlatformAdmin RPC — the trust-on-first-use bootstrap of the first platform admin — entirely.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
     "name": "GATEWAY_EMAIL_BRAND_FROM",
     "type": "string",
     "default": "",

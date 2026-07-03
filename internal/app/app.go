@@ -101,12 +101,13 @@ type Deps struct {
 	// login accepts only the product that resolves to the default project.
 	NativeOAuthProjects service.NativeOAuthProjectStore
 
-	// PlatformAdminStore backs the zero-config first-admin bootstrap
+	// PlatformAdminStore backs the trust-on-first-use first-admin bootstrap
 	// (CreateFirstPlatformAdmin). Non-nil ONLY for the postgres driver; when
-	// nil the bootstrap RPC returns Unimplemented. Unlike the other admin
-	// RPCs the bootstrap is NOT gated on Config.AdminAPISecret — it is the
-	// one path a fresh deployer uses before any secret is configured, and it
-	// self-secures by closing once any admin exists.
+	// nil the bootstrap RPC returns Unimplemented. The bootstrap stays
+	// zero-config only when no admin secret is set: when Config.AdminAPISecret
+	// is configured it is secret-gated like the other admin RPCs, and
+	// Config.DisableFirstAdminBootstrap closes it entirely. It self-secures by
+	// closing once any admin exists.
 	PlatformAdminStore service.PlatformAdminStore
 
 	// LoginPolicyStore backs the operator LoginPolicy-authoring admin RPCs
@@ -745,11 +746,14 @@ func buildControlPlaneAdminService(deps Deps, auditLog *audit.Logger, logger *za
 		return nil
 	}
 	secret := ""
+	disableBootstrap := false
 	if deps.Config != nil {
 		secret = deps.Config.AdminAPISecret
+		disableBootstrap = deps.Config.DisableFirstAdminBootstrap
 	}
 	return service.NewControlPlaneAdminService(
 		secret,
+		disableBootstrap,
 		deps.ProjectSecretsKey,
 		deps.ControlPlaneStore,
 		deps.TenantStore,

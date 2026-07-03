@@ -36,6 +36,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.AdminAPISecret != "" {
 		t.Errorf("AdminAPISecret: want empty default (admin RPCs disabled), got %q", cfg.AdminAPISecret)
 	}
+	if cfg.DisableFirstAdminBootstrap != false {
+		t.Errorf("DisableFirstAdminBootstrap: want false default (zero-config bootstrap enabled), got %v", cfg.DisableFirstAdminBootstrap)
+	}
 	if cfg.PublicEmailDomains != "" {
 		t.Errorf("PublicEmailDomains: want empty default, got %q", cfg.PublicEmailDomains)
 	}
@@ -132,6 +135,7 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_DEFAULT_TENANT_ID", "prod-tenant")
 	t.Setenv("GATEWAY_DEFAULT_PROJECT_ID", "prod-project")
 	t.Setenv("GATEWAY_ADMIN_API_SECRET", "operator-secret")
+	t.Setenv("GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP", "true")
 	t.Setenv("GATEWAY_JWT_EXPIRY_SECONDS", "1800")
 	t.Setenv("GATEWAY_AUTH_ALLOW_LOCAL", "false")
 	t.Setenv("GATEWAY_PASSWORD_SIGNUP_ENABLED", "false")
@@ -160,6 +164,9 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	}
 	if cfg.AdminAPISecret != "operator-secret" {
 		t.Errorf("AdminAPISecret: want operator-secret, got %q", cfg.AdminAPISecret)
+	}
+	if cfg.DisableFirstAdminBootstrap != true {
+		t.Errorf("DisableFirstAdminBootstrap: want true, got %v", cfg.DisableFirstAdminBootstrap)
 	}
 	if cfg.JWTExpirySeconds != 1800 {
 		t.Errorf("JWTExpirySeconds: want 1800, got %d", cfg.JWTExpirySeconds)

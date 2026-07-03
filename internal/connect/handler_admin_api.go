@@ -417,11 +417,13 @@ func loginPolicyToProto(p *service.LoginPolicy) *identitypb.LoginPolicy {
 	}
 }
 
-// CreateFirstPlatformAdmin is the zero-config bootstrap of the first platform
-// admin. Unlike the other Admin RPCs it reads NO admin secret: it succeeds
-// only while platform_admins is empty and is rejected (FailedPrecondition)
-// once any admin exists. nil controlAdmin (memory, no control plane)
-// yields Unimplemented.
+// CreateFirstPlatformAdmin is the trust-on-first-use bootstrap of the first
+// platform admin. It succeeds only while platform_admins is empty and is
+// rejected (FailedPrecondition) once any admin exists. It stays zero-config
+// only when no admin secret is set: when GATEWAY_ADMIN_API_SECRET is
+// configured the presented X-Admin-Secret must match (like the other admin
+// RPCs), and when GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP is true it is closed
+// entirely. nil controlAdmin (memory, no control plane) yields Unimplemented.
 func (h *IdentityHandler) CreateFirstPlatformAdmin(
 	ctx context.Context,
 	req *connect.Request[identitypb.CreateFirstPlatformAdminRequest],
@@ -429,7 +431,7 @@ func (h *IdentityHandler) CreateFirstPlatformAdmin(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	admin, err := h.controlAdmin.CreateFirstPlatformAdmin(ctx, req.Msg.Email, req.Msg.Password)
+	admin, err := h.controlAdmin.CreateFirstPlatformAdmin(ctx, adminSecret(req.Header()), req.Msg.Email, req.Msg.Password)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
