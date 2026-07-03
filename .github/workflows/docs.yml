@@ -41,6 +41,9 @@ jobs:
         uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
         with:
           version: '1.66.0'
+          # Anonymous requests from shared runner IPs regularly hit GitHub's
+          # API rate limit while the action resolves its download URL.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate proto HTML reference
         run: buf generate --template buf.gen.docs.yaml
