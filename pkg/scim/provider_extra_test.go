@@ -2,6 +2,7 @@ package scim
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 )
@@ -236,6 +237,45 @@ func TestPatch_InvalidActiveValueIs400(t *testing.T) {
 	}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid active value = %d, want 400", rec.Code)
+	}
+}
+
+// TestPatch_RemoveLoginIdentifierRejected asserts a PATCH remove of the
+// required login identifier (userName / email) is rejected with a SCIM 400
+// (scimType "mutability") instead of silently blanking the account's only
+// login credential.
+func TestPatch_RemoveLoginIdentifierRejected(t *testing.T) {
+	// Unit: toUserPatch surfaces a mutabilityError for either attribute.
+	for _, attr := range []string{"userName", "emails"} {
+		_, err := PatchRequest{Operations: []Operation{{Op: "remove", Path: attr}}}.toUserPatch()
+		var me *mutabilityError
+		if !errors.As(err, &me) {
+			t.Fatalf("remove %s: err = %v, want *mutabilityError", attr, err)
+		}
+	}
+
+	// HTTP: the handler maps it to 400 mutability and never reaches the store,
+	// so the login identifier is preserved.
+	for _, path := range []string{"userName", "email", "emails"} {
+		st := newMemStore()
+		u, _ := st.CreateUser(context.Background(), User{UserName: "keep@example.com", Email: "keep@example.com", Active: true})
+		h := NewProvider(st).Handler()
+		rec := do(t, h, http.MethodPatch, "/scim/v2/Users/"+u.ID, `{
+			"schemas":["`+SchemaPatchOp+`"],
+			"Operations":[{"op":"remove","path":"`+path+`"}]
+		}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("remove %s: status = %d, want 400 (body=%s)", path, rec.Code, rec.Body.String())
+		}
+		var errBody ErrorResponse
+		mustJSON(t, rec, &errBody)
+		if errBody.SCIMType != "mutability" {
+			t.Fatalf("remove %s: scimType = %q, want mutability", path, errBody.SCIMType)
+		}
+		got, _ := st.GetUser(context.Background(), u.ID)
+		if got.UserName != "keep@example.com" || got.Email != "keep@example.com" {
+			t.Fatalf("remove %s must not blank the login identifier: %+v", path, got)
+		}
 	}
 }
 

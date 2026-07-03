@@ -569,6 +569,13 @@ func New(deps Deps) (*Built, error) {
 	// project, so the deployment-wide bearer token can only touch that
 	// project's users.
 	if deps.Config.SCIMEnabled {
+		// Fail fast on a typo'd GATEWAY_SCIM_PROJECT_ID: verify at boot that it
+		// names a real, ACTIVE project rather than 500-ing on the first request.
+		// Only the postgres driver has a control plane to check against (the
+		// lookup is nil for memory, which pins all data to the default project).
+		if err := validateSCIMProject(deps.NativeOAuthProjects, deps.Config.SCIMProjectID); err != nil {
+			return nil, err
+		}
 		logger.Info("scim_server_enabled",
 			zap.String("mount", "/scim/v2/"),
 			zap.String("project_id", deps.Config.SCIMProjectID))
@@ -576,6 +583,9 @@ func New(deps Deps) (*Built, error) {
 			repo:        repo,
 			projectID:   deps.Config.SCIMProjectID,
 			bearerToken: deps.Config.SCIMBearerToken,
+			audit:       auditLog,
+			publisher:   eventPublisher,
+			tenantID:    deps.Config.DefaultTenantID,
 			logger:      logger,
 		}).register(mux, true)
 	} else {

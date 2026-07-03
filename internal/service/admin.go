@@ -294,7 +294,7 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 	// SaaS can deprovision. No-op when eventing is disabled.
 	deactivated := userFromNode(node)
 	deactivated.Status = "deactivated"
-	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeactivated, deactivated)
+	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeactivated, deactivated)
 
 	return nil
 }
