@@ -401,7 +401,7 @@ func (s *ControlPlaneAdminService) buildProvider(provider string, in *ProjectOAu
 			Scopes:          strings.TrimSpace(in.OIDCScopes),
 		}, nil
 	}
-	// Unreachable: provider is normalized to one of the four keys above.
+	// Unreachable: provider is normalized to one of the five keys above.
 	return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
 }
 
@@ -535,7 +535,7 @@ func normalizeStringList(in []string) []string {
 }
 
 // normalizeOAuthProvider lower-cases/trims a provider key and rejects any that
-// is not one of the four configurable providers.
+// is not one of the five configurable providers.
 func normalizeOAuthProvider(provider string) (string, error) {
 	switch k := strings.ToLower(strings.TrimSpace(provider)); k {
 	case oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderGitHub, oauthProviderOIDC:
