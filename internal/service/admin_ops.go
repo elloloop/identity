@@ -177,7 +177,7 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 	// user.deactivated so downstream SaaS removes access. No-op when
 	// eventing is disabled.
 	u.Status = "deactivated"
-	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeactivated, u)
+	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeactivated, u)
 
 	return nil
 }

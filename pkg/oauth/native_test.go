@@ -476,6 +476,7 @@ func TestNativeVerifier_Microsoft_Valid(t *testing.T) {
 		"oid": "oid-123", "sub": "sub-456",
 		"exp": f.now.Add(time.Hour), "iat": f.now,
 		"email": "User@Contoso.com", "name": "Msft User", "picture": "https://av",
+		"xms_edov": true,
 	})
 	res, err := f.verify(NativeVerifyParams{IDToken: tok, Audiences: []string{"ms-client-app"}})
 	if err != nil {
@@ -501,7 +502,7 @@ func TestNativeVerifier_Microsoft_SubjectFallsBackToSub(t *testing.T) {
 	const tid = "tenant-abc"
 	tok := f.key.signIDToken(t, map[string]any{
 		"iss": msTestIssuer(tid), "tid": tid, "aud": "ms-client-app", "sub": "only-sub",
-		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
+		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com", "xms_edov": true,
 	})
 	res, err := f.verify(NativeVerifyParams{IDToken: tok, Audiences: []string{"ms-client-app"}})
 	if err != nil {
@@ -528,7 +529,7 @@ func TestNativeVerifier_Microsoft_EmailCoalesce(t *testing.T) {
 			const tid = "t1"
 			claims := map[string]any{
 				"iss": msTestIssuer(tid), "tid": tid, "aud": "app", "sub": "s",
-				"exp": f.now.Add(time.Hour), "iat": f.now,
+				"exp": f.now.Add(time.Hour), "iat": f.now, "xms_edov": true,
 			}
 			for k, v := range tc.claims {
 				claims[k] = v
@@ -628,6 +629,56 @@ func TestNativeVerifier_Microsoft_TenantPinning(t *testing.T) {
 	}
 }
 
+// TestNativeVerifier_Microsoft_NOAuth is the native counterpart to the hosted
+// matrix: a multi-tenant token (no pin) is trusted only when xms_edov proves
+// domain-owner verification; pinning the tenant (single id or allow-list) trusts
+// it regardless, and an allow-list miss is rejected.
+func TestNativeVerifier_Microsoft_NOAuth(t *testing.T) {
+	const tid = "tenant-noauth"
+	cases := []struct {
+		name    string
+		edov    any // nil = claim omitted
+		params  NativeVerifyParams
+		wantErr error // nil = success
+	}{
+		{"xms_edov bool true, no pin", true, NativeVerifyParams{}, nil},
+		{"xms_edov string true, no pin", "true", NativeVerifyParams{}, nil},
+		{"xms_edov absent, no pin rejected", nil, NativeVerifyParams{}, ErrEmailNotVerified},
+		{"xms_edov false, no pin rejected", false, NativeVerifyParams{}, ErrEmailNotVerified},
+		{"tenant pin trusts without xms_edov", nil, NativeVerifyParams{MicrosoftTenantID: tid}, nil},
+		{"allow-list match trusts without xms_edov", nil, NativeVerifyParams{MicrosoftAllowedTenants: []string{"nope", tid}}, nil},
+		{"allow-list miss rejected", nil, NativeVerifyParams{MicrosoftAllowedTenants: []string{"nope"}}, ErrIdentityVerification},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newMSFixture(t)
+			claims := map[string]any{
+				"iss": msTestIssuer(tid), "tid": tid, "aud": "app", "sub": "s",
+				"exp": f.now.Add(time.Hour), "iat": f.now, "email": "victim@contoso.com",
+			}
+			if tc.edov != nil {
+				claims["xms_edov"] = tc.edov
+			}
+			p := tc.params
+			p.IDToken = f.key.signIDToken(t, claims)
+			p.Audiences = []string{"app"}
+			res, err := f.verify(p)
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("want success, got %v", err)
+				}
+				if res.Identity.Email != "victim@contoso.com" || !res.Identity.EmailVerified {
+					t.Fatalf("bad identity: %+v", res.Identity)
+				}
+				return
+			}
+			if err == nil || !errors.Is(err, tc.wantErr) {
+				t.Fatalf("want %v, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestNativeVerifier_Microsoft_MissingExpRejected(t *testing.T) {
 	f := newMSFixture(t)
 	const tid = "t1"
@@ -649,7 +700,7 @@ func TestNativeVerifier_Microsoft_VerbatimNonce(t *testing.T) {
 	tok := f.key.signIDToken(t, map[string]any{
 		"iss": msTestIssuer(tid), "tid": tid, "aud": "app", "sub": "s",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
-		"nonce": rawNonce,
+		"nonce": rawNonce, "xms_edov": true,
 	})
 	if _, err := f.verify(NativeVerifyParams{IDToken: tok, Audiences: []string{"app"}, RawNonce: rawNonce}); err != nil {
 		t.Fatalf("verbatim nonce should match: %v", err)
@@ -658,7 +709,7 @@ func TestNativeVerifier_Microsoft_VerbatimNonce(t *testing.T) {
 	hashed := f.key.signIDToken(t, map[string]any{
 		"iss": msTestIssuer(tid), "tid": tid, "aud": "app", "sub": "s",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
-		"nonce": appleNonceHashHex(rawNonce),
+		"nonce": appleNonceHashHex(rawNonce), "xms_edov": true,
 	})
 	if _, err := f.verify(NativeVerifyParams{IDToken: hashed, Audiences: []string{"app"}, RawNonce: rawNonce}); err == nil {
 		t.Fatal("expected nonce mismatch: microsoft compares verbatim")
@@ -671,7 +722,7 @@ func TestNativeVerifier_Microsoft_NoNonceProvided_Skipped(t *testing.T) {
 	tok := f.key.signIDToken(t, map[string]any{
 		"iss": msTestIssuer(tid), "tid": tid, "aud": "app", "sub": "s",
 		"exp": f.now.Add(time.Hour), "iat": f.now, "email": "a@b.com",
-		"nonce": "some-server-nonce",
+		"nonce": "some-server-nonce", "xms_edov": true,
 	})
 	if _, err := f.verify(NativeVerifyParams{IDToken: tok, Audiences: []string{"app"}}); err != nil {
 		t.Fatalf("no client nonce should skip the check: %v", err)

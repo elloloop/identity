@@ -29,6 +29,14 @@ type Operation struct {
 // silently no-op).
 var errNoSupportedPatch = errors.New("no supported attribute in patch")
 
+// mutabilityError signals a PATCH operation that would remove/blank a required,
+// login-identifier attribute (userName / email). The provider maps it to a SCIM
+// 400 with scimType "mutability" (RFC 7644 §3.12) rather than silently clearing
+// the account's only login identifier.
+type mutabilityError struct{ detail string }
+
+func (e *mutabilityError) Error() string { return e.detail }
+
 // toUserPatch folds a PatchRequest's operations into a partial UserPatch. It
 // handles the two shapes IdPs emit — a targeted op with a `path`
 // (`{"op":"replace","path":"name.givenName","value":"Ada"}`) and a no-path op
@@ -91,13 +99,28 @@ func applyPatchAttr(patch *UserPatch, attr string, raw json.RawMessage, remove b
 		}
 		patch.Active = &b
 	case "username":
-		patch.UserName = stringValue(raw, remove)
+		if remove {
+			return &mutabilityError{"userName cannot be removed: it is the required login identifier"}
+		}
+		v := stringValue(raw, remove)
+		// An empty replace/add would blank the login identifier just like a
+		// remove; reject it rather than strand the account without a login.
+		if strings.TrimSpace(*v) == "" {
+			return errors.New("userName cannot be empty: it is the required login identifier")
+		}
+		patch.UserName = v
 	case "externalid":
 		patch.ExternalID = stringValue(raw, remove)
 	case "email", "emails", "emails.value":
+		if remove {
+			return &mutabilityError{"email cannot be removed: it is the required login identifier"}
+		}
 		v, err := emailValue(raw, remove)
 		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(*v) == "" {
+			return errors.New("email cannot be empty: it is the required login identifier")
 		}
 		patch.Email = v
 	case "name.givenname":

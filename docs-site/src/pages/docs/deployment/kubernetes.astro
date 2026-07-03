@@ -152,4 +152,38 @@ spec:
     <li>The path namespace is <code>/identity.v1.IdentityService/*</code> and <code>/.well-known/jwks.json</code> + <code>/health*</code>.</li>
     <li>Make sure the ingress preserves <code>Host</code> + <code>Origin</code> headers — Connect uses them, and CORS / passkey RP-ID checks depend on them.</li>
   </ul>
+
+  <h2>Bootstrap the first platform admin before exposing it</h2>
+  <p>
+    The control plane exposes <code>CreateFirstPlatformAdmin</code> — a one-time,
+    trust-on-first-use bootstrap that creates the <strong>first</strong> platform
+    operator while <code>platform_admins</code> is empty, then permanently closes
+    once any admin exists. On a fresh, internet-reachable cluster an anonymous
+    caller could win the first-admin race in the window before you create it, so
+    <strong>bootstrap before you wire up the Ingress</strong> — while the pod is
+    only reachable via <code>kubectl port-forward</code>:
+  </p>
+  <Code code={`kubectl -n identity port-forward svc/identity 8080:80 &
+curl -sX POST http://localhost:8080/identity.v1.IdentityService/CreateFirstPlatformAdmin \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"ops@acme.example.com"}'
+# → { "adminId": "...", "email": "ops@acme.example.com", "generatedPassword": "..." }`} lang="bash" title="bootstrap while port-forwarded" />
+  <p>To also harden the RPC itself, add one of:</p>
+  <ul>
+    <li>
+      <code>GATEWAY_ADMIN_API_SECRET</code> in the <code>identity-secrets</code>
+      Secret — when set, the bootstrap requires the same
+      <code>X-Admin-Secret</code> header as the other admin RPCs (a wrong or
+      missing secret is <code>PERMISSION_DENIED</code>). TOFU stays zero-config
+      only when no secret is configured.
+    </li>
+    <li>
+      <code>GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP: "true"</code> in the
+      <code>identity-config</code> ConfigMap — closes the RPC entirely
+      (<code>FAILED_PRECONDITION</code>). With it closed, create the first admin
+      by a direct insert into <code>platform_admins</code>, or toggle the flag
+      off just long enough to bootstrap and back on (no first-party seed CLI
+      ships).
+    </li>
+  </ul>
 </DocsLayout>

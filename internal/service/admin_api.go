@@ -137,13 +137,19 @@ type ControlPlaneProjectStore interface {
 	// project does not own surfaces ErrNotFound.
 	SetPrimaryAuthDomain(ctx context.Context, projectID, hostname string) (*AdminProjectAuthDomain, error)
 
-	// UpdateProjectConfig REPLACES a project's config_json blob and returns the
-	// stored value (normalised — an empty blob becomes "{}"). A project that
-	// does not exist surfaces ErrNotFound.
-	UpdateProjectConfig(ctx context.Context, projectID, configJSON string) (string, error)
-	// GetProjectConfig returns a project's stored config_json ("{}" when
-	// unset). A project that does not exist surfaces ErrNotFound.
-	GetProjectConfig(ctx context.Context, projectID string) (string, error)
+	// UpdateProjectConfig REPLACES a project's config_json blob only when its
+	// current config_version equals expectedVersion — an optimistic-concurrency
+	// compare-and-swap that makes the read-modify-write config path safe against
+	// concurrent admin writes. On success it returns the stored (normalised —
+	// an empty blob becomes "{}") value and the NEW version. A concurrent write
+	// that advanced the version surfaces ErrProjectConfigConflict; a project
+	// that does not exist surfaces ErrNotFound.
+	UpdateProjectConfig(ctx context.Context, projectID string, expectedVersion int64, configJSON string) (stored string, version int64, err error)
+	// GetProjectConfig returns a project's stored config_json ("{}" when unset)
+	// together with its current config_version — the CAS token a caller
+	// round-trips back into UpdateProjectConfig. A project that does not exist
+	// surfaces ErrNotFound.
+	GetProjectConfig(ctx context.Context, projectID string) (configJSON string, version int64, err error)
 }
 
 // ControlPlaneAdminService provisions control-plane resources on behalf of a
@@ -151,6 +157,12 @@ type ControlPlaneProjectStore interface {
 type ControlPlaneAdminService struct {
 	// secret is the shared admin secret. Empty disables the whole surface.
 	secret string
+	// disableFirstAdminBootstrap closes CreateFirstPlatformAdmin entirely
+	// (GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP): when true the RPC is rejected with
+	// ErrFirstAdminBootstrapDisabled regardless of whether any admin exists yet,
+	// for operators who bootstrap the first admin out-of-band and want the public
+	// surface closed. It does NOT affect the other secret-gated admin RPCs.
+	disableFirstAdminBootstrap bool
 	// secretsKey is the AES-256 key (GATEWAY_PROJECT_SECRETS_KEY, decoded) used
 	// to ENCRYPT plaintext per-project OAuth provider secrets at author time,
 	// the same key the resolver decrypts with. Empty when unconfigured: a write
@@ -163,8 +175,8 @@ type ControlPlaneAdminService struct {
 	// this build has no governance plane (memory), which makes the
 	// LoginPolicy admin RPCs return ErrUnimplemented.
 	policies LoginPolicyStore
-	// admins backs the zero-config first-admin bootstrap. nil when this build
-	// has no control plane (memory), which makes CreateFirstPlatformAdmin
+	// admins backs the trust-on-first-use first-admin bootstrap. nil when this
+	// build has no control plane (memory), which makes CreateFirstPlatformAdmin
 	// return ErrUnimplemented.
 	admins PlatformAdminStore
 	// resolver is the DNS TXT-lookup boundary VerifyProjectAuthDomain uses to
@@ -172,10 +184,12 @@ type ControlPlaneAdminService struct {
 	// the present/absent paths without real DNS.
 	resolver DNSResolver
 	// audit records control-plane security events. Currently it captures
-	// BLOCKED first-admin bootstrap attempts (a call after an admin already
-	// exists) so a closed-bootstrap probe is visible in the audit trail. nil
-	// is tolerated (best-effort): NewControlPlaneAdminService installs a
-	// no-op logger so call sites never nil-check.
+	// BLOCKED first-admin bootstrap attempts — a call after an admin already
+	// exists, one the admin-secret gate rejects, or one against a disabled
+	// bootstrap — each stamped with a distinct reason, so hostile first-admin
+	// probing is visible in the audit trail. nil is tolerated (best-effort):
+	// NewControlPlaneAdminService installs a no-op logger so call sites never
+	// nil-check.
 	audit   *audit.Logger
 	logger  *zap.Logger
 	nowFunc func() int64
@@ -193,6 +207,7 @@ type ControlPlaneAdminService struct {
 // wall-clock epoch-millis.
 func NewControlPlaneAdminService(
 	secret string,
+	disableFirstAdminBootstrap bool,
 	secretsKey []byte,
 	projects ControlPlaneProjectStore,
 	tenants TenantStore,
@@ -213,17 +228,18 @@ func NewControlPlaneAdminService(
 		resolver = net.DefaultResolver
 	}
 	return &ControlPlaneAdminService{
-		secret:      secret,
-		secretsKey:  secretsKey,
-		projects:    projects,
-		tenants:     tenants,
-		memberships: memberships,
-		policies:    policies,
-		admins:      admins,
-		resolver:    resolver,
-		audit:       auditLog,
-		logger:      logger,
-		nowFunc:     func() int64 { return time.Now().UnixMilli() },
+		secret:                     secret,
+		disableFirstAdminBootstrap: disableFirstAdminBootstrap,
+		secretsKey:                 secretsKey,
+		projects:                   projects,
+		tenants:                    tenants,
+		memberships:                memberships,
+		policies:                   policies,
+		admins:                     admins,
+		resolver:                   resolver,
+		audit:                      auditLog,
+		logger:                     logger,
+		nowFunc:                    func() int64 { return time.Now().UnixMilli() },
 	}
 }
 
@@ -584,14 +600,24 @@ type BootstrappedAdmin struct {
 	GeneratedPassword string
 }
 
-// CreateFirstPlatformAdmin is the zero-config bootstrap that establishes the
-// FIRST platform admin on a fresh deployment. It is the one Admin RPC that is
-// NOT secret-gated: a brand-new deployer has configured nothing yet, so
-// gating it on GATEWAY_ADMIN_API_SECRET would make standing up the first
-// operator impossible. Instead it is self-securing — it succeeds ONLY while
-// the platform_admins table is empty and PERMANENTLY closes
-// (ErrPlatformAdminExists → FailedPrecondition) once any admin exists, so it
-// can never be replayed to escalate privilege on a provisioned deployment.
+// CreateFirstPlatformAdmin is the trust-on-first-use (TOFU) bootstrap that
+// establishes the FIRST platform admin on a fresh deployment. It is self-
+// securing — it succeeds ONLY while the platform_admins table is empty and
+// PERMANENTLY closes (ErrPlatformAdminExists → FailedPrecondition) once any
+// admin exists, so it can never be replayed to escalate privilege on a
+// provisioned deployment.
+//
+// Two operator-controlled hardenings narrow the fresh-deploy race window in
+// which an anonymous caller could win the first-admin bootstrap:
+//
+//   - When GATEWAY_ADMIN_API_SECRET is configured, this RPC is gated on it too
+//     — the presented secret must match in constant time (else
+//     ErrPermissionDenied), exactly like every other admin RPC. TOFU stays
+//     zero-config ONLY when no secret is set, so anyone already running with an
+//     admin secret gets the hardening opt-in-by-default.
+//   - When GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP is true the RPC is closed
+//     entirely (ErrFirstAdminBootstrapDisabled → FailedPrecondition) regardless
+//     of admin existence, for operators who bootstrap out-of-band.
 //
 // The emptiness check and the insert are one atomic, serialized store
 // operation (admins.CreateFirstPlatformAdmin), so two concurrent bootstraps
@@ -603,9 +629,20 @@ type BootstrappedAdmin struct {
 // strength policy (else ErrWeakPassword → InvalidArgument). Only the bcrypt
 // hash is ever stored. When no control plane is wired (memory have no
 // platform_admins table) it returns ErrUnimplemented.
-func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context, email, password string) (*BootstrappedAdmin, error) {
+func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context, secret, email, password string) (*BootstrappedAdmin, error) {
 	if s.admins == nil {
 		return nil, ErrUnimplemented
+	}
+	if s.disableFirstAdminBootstrap {
+		s.recordBootstrapBlocked(ctx, canonicalizeEmail(email), bootstrapBlockedDisabled)
+		return nil, ErrFirstAdminBootstrapDisabled
+	}
+	// When an admin secret is configured the bootstrap is gated on it too, so a
+	// fresh internet-exposed deployment cannot have an anonymous caller win the
+	// first-admin race. TOFU stays zero-config ONLY when no secret is set.
+	if s.secret != "" && subtle.ConstantTimeCompare([]byte(secret), []byte(s.secret)) != 1 {
+		s.recordBootstrapBlocked(ctx, canonicalizeEmail(email), bootstrapBlockedSecretDenied)
+		return nil, ErrPermissionDenied
 	}
 	email = strings.TrimSpace(email)
 	if err := validateEmailFormat(email); err != nil {
@@ -622,7 +659,7 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 	// serialized CreateFirstPlatformAdmin recount below, so a concurrent first
 	// bootstrap that slips past this read is still rejected race-safely.
 	if n, err := s.admins.CountPlatformAdmins(ctx); err == nil && n > 0 {
-		s.recordBootstrapBlocked(ctx, canonicalEmail)
+		s.recordBootstrapBlocked(ctx, canonicalEmail, bootstrapBlockedAlreadyProvisioned)
 		return nil, ErrPlatformAdminExists
 	}
 
@@ -657,7 +694,7 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 		// the authoritative one (the locked recount races safe, unlike the
 		// unlocked pre-check above). Record it too: a request that lost the
 		// pre-check race but is still a closed-bootstrap probe must be visible.
-		s.recordBootstrapBlocked(ctx, canonicalEmail)
+		s.recordBootstrapBlocked(ctx, canonicalEmail, bootstrapBlockedAlreadyProvisioned)
 		return nil, ErrPlatformAdminExists
 	}
 
@@ -669,24 +706,37 @@ func (s *ControlPlaneAdminService) CreateFirstPlatformAdmin(ctx context.Context,
 	}, nil
 }
 
+// Reasons stamped on a blocked first-admin bootstrap audit event, so the audit
+// trail distinguishes WHY a probe was denied: a call against an already-
+// provisioned platform, one rejected by the admin-secret gate, or one against a
+// deployment that closed the bootstrap entirely. On exactly the hardened,
+// internet-exposed deployments this feature protects, the secret-denied and
+// disabled reasons are the signal that someone is probing the first-admin path.
+const (
+	bootstrapBlockedAlreadyProvisioned = "already_provisioned"
+	bootstrapBlockedSecretDenied       = "secret_denied"
+	bootstrapBlockedDisabled           = "bootstrap_disabled"
+)
+
 // recordBootstrapBlocked emits a best-effort audit event for a first-admin
-// bootstrap attempt that was rejected because the platform is already
-// provisioned (an admin exists). The bootstrap RPC is unauthenticated and
-// ungated, so a probe against the closed endpoint carries no actor identity —
-// the event records the attempted email and lands under the control-plane
-// default project (the audit Logger's boot-default binding), making
-// closed-bootstrap probes visible in the audit trail.
+// bootstrap attempt that was denied — because the platform is already
+// provisioned (an admin exists), because the presented admin secret did not
+// match, or because the bootstrap is disabled. The bootstrap RPC carries no
+// user JWT, so a probe against a denied endpoint has no actor identity — the
+// event records the attempted email plus the reason and lands under the
+// control-plane default project (the audit Logger's boot-default binding),
+// making hostile first-admin probing visible in the audit trail.
 //
 // TODO(login): once a platform-admin LOGIN path consumes platform_admins,
 // enforce PlatformAdmin.TOTPRequired there — an admin flagged TOTPRequired
 // must complete a second factor before a session is minted. There is no login
 // path yet, so this hardening pass deliberately does not build one; the flag
 // is persisted by the store and waits for that slice.
-func (s *ControlPlaneAdminService) recordBootstrapBlocked(ctx context.Context, attemptedEmail string) {
+func (s *ControlPlaneAdminService) recordBootstrapBlocked(ctx context.Context, attemptedEmail, reason string) {
 	s.audit.Log(
 		ctx, audit.EventPlatformAdminBootstrapBlocked,
 		audit.WithSuccess(false),
-		audit.WithDetails(map[string]any{"attempted_email": attemptedEmail}),
+		audit.WithDetails(map[string]any{"attempted_email": attemptedEmail, "reason": reason}),
 	)
 }
 

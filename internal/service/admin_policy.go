@@ -2,12 +2,55 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
 )
+
+// maxConfigWriteAttempts bounds the optimistic-concurrency retries a config_json
+// read-modify-write makes before surfacing the conflict. Three attempts absorb
+// the realistic operator-concurrency window (a handful of admin writes racing on
+// one project) without letting a pathological hot-loop spin unbounded.
+const maxConfigWriteAttempts = 3
+
+// mutateProjectConfig performs an optimistic-concurrency read-modify-write on a
+// project's config_json — the single shared path every config mutator (admin
+// OAuth set/delete, UpsertProjectConfig, and any future branding/passkey/cors
+// mutator) routes through. It reads the current blob and version, applies mutate
+// to compute the next blob, and writes it back guarded by the version it read.
+// A concurrent writer that advanced the version between the read and the write
+// loses the compare-and-swap; mutateProjectConfig then re-reads fresh state and
+// retries, up to maxConfigWriteAttempts, before surfacing ErrProjectConfigConflict
+// (which the Connect layer maps to the retryable CodeAborted).
+//
+// mutate may be invoked more than once, so it must derive its result purely from
+// its current argument and carry no state across calls except through its return
+// value. It returns the stored (normalised) blob on success.
+func (s *ControlPlaneAdminService) mutateProjectConfig(ctx context.Context, projectID string, mutate func(current string) (string, error)) (string, error) {
+	for attempt := 0; attempt < maxConfigWriteAttempts; attempt++ {
+		current, version, err := s.projects.GetProjectConfig(ctx, projectID)
+		if err != nil {
+			return "", err
+		}
+		next, err := mutate(current)
+		if err != nil {
+			return "", err
+		}
+		stored, _, err := s.projects.UpdateProjectConfig(ctx, projectID, version, next)
+		switch {
+		case err == nil:
+			return stored, nil
+		case errors.Is(err, ErrProjectConfigConflict):
+			continue
+		default:
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("%w: project config write contended after %d attempts", ErrProjectConfigConflict, maxConfigWriteAttempts)
+}
 
 // maxSessionTimeoutSeconds bounds the idle/absolute session timeouts an
 // operator may author. The enforcement path converts these to epoch-ms by
@@ -200,7 +243,12 @@ func (s *ControlPlaneAdminService) UpsertProjectConfig(ctx context.Context, secr
 	if _, err := ParseProjectConfig(configJSON); err != nil {
 		return "", fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
-	stored, err := s.projects.UpdateProjectConfig(ctx, projectID, configJSON)
+	// A whole-blob replace still routes through the optimistic-concurrency helper
+	// so it is serialized against concurrent config mutators (e.g. an in-flight
+	// OAuth-provider write) rather than blindly clobbering under a lost update.
+	stored, err := s.mutateProjectConfig(ctx, projectID, func(string) (string, error) {
+		return configJSON, nil
+	})
 	if err != nil {
 		return "", err
 	}
@@ -220,5 +268,6 @@ func (s *ControlPlaneAdminService) GetProjectConfig(ctx context.Context, secret,
 	if projectID == "" {
 		return "", fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
 	}
-	return s.projects.GetProjectConfig(ctx, projectID)
+	stored, _, err := s.projects.GetProjectConfig(ctx, projectID)
+	return stored, err
 }

@@ -2,6 +2,7 @@ package scim
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 )
@@ -236,6 +237,94 @@ func TestPatch_InvalidActiveValueIs400(t *testing.T) {
 	}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid active value = %d, want 400", rec.Code)
+	}
+}
+
+// TestPatch_RemoveLoginIdentifierRejected asserts a PATCH remove of the
+// required login identifier (userName / email) is rejected with a SCIM 400
+// (scimType "mutability") instead of silently blanking the account's only
+// login credential.
+func TestPatch_RemoveLoginIdentifierRejected(t *testing.T) {
+	// Unit: toUserPatch surfaces a mutabilityError for either attribute.
+	for _, attr := range []string{"userName", "emails"} {
+		_, err := PatchRequest{Operations: []Operation{{Op: "remove", Path: attr}}}.toUserPatch()
+		var me *mutabilityError
+		if !errors.As(err, &me) {
+			t.Fatalf("remove %s: err = %v, want *mutabilityError", attr, err)
+		}
+	}
+
+	// HTTP: the handler maps it to 400 mutability and never reaches the store,
+	// so the login identifier is preserved.
+	for _, path := range []string{"userName", "email", "emails"} {
+		st := newMemStore()
+		u, _ := st.CreateUser(context.Background(), User{UserName: "keep@example.com", Email: "keep@example.com", Active: true})
+		h := NewProvider(st).Handler()
+		rec := do(t, h, http.MethodPatch, "/scim/v2/Users/"+u.ID, `{
+			"schemas":["`+SchemaPatchOp+`"],
+			"Operations":[{"op":"remove","path":"`+path+`"}]
+		}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("remove %s: status = %d, want 400 (body=%s)", path, rec.Code, rec.Body.String())
+		}
+		var errBody ErrorResponse
+		mustJSON(t, rec, &errBody)
+		if errBody.SCIMType != "mutability" {
+			t.Fatalf("remove %s: scimType = %q, want mutability", path, errBody.SCIMType)
+		}
+		got, _ := st.GetUser(context.Background(), u.ID)
+		if got.UserName != "keep@example.com" || got.Email != "keep@example.com" {
+			t.Fatalf("remove %s must not blank the login identifier: %+v", path, got)
+		}
+	}
+}
+
+// TestPatch_EmptyLoginIdentifierRejected asserts a PATCH replace/add of
+// userName or email with an empty value is rejected with a SCIM 400
+// (invalidValue) — the same guard as remove, since an empty replace blanks the
+// login identifier just as effectively.
+func TestPatch_EmptyLoginIdentifierRejected(t *testing.T) {
+	// Unit: toUserPatch rejects empty and whitespace-only values for both
+	// attributes, for replace and add alike.
+	for _, op := range []string{"replace", "add"} {
+		for _, tc := range []struct{ path, value string }{
+			{"userName", `""`},
+			{"userName", `"   "`},
+			{"emails", `""`},
+			{"emails", `[]`},
+			{"emails", `[{"value":""}]`},
+		} {
+			if _, err := (PatchRequest{Operations: []Operation{{Op: op, Path: tc.path, Value: []byte(tc.value)}}}).toUserPatch(); err == nil {
+				t.Fatalf("%s %s with %s must error", op, tc.path, tc.value)
+			}
+		}
+	}
+	// No-path value-object form: {"userName": ""} must be rejected too.
+	if _, err := (PatchRequest{Operations: []Operation{{Op: "replace", Value: []byte(`{"userName":""}`)}}}).toUserPatch(); err == nil {
+		t.Fatal("value-object empty userName must error")
+	}
+
+	// HTTP: 400 invalidValue, identifier preserved, store never reached.
+	for _, path := range []string{"userName", "email", "emails"} {
+		st := newMemStore()
+		u, _ := st.CreateUser(context.Background(), User{UserName: "keep@example.com", Email: "keep@example.com", Active: true})
+		h := NewProvider(st).Handler()
+		rec := do(t, h, http.MethodPatch, "/scim/v2/Users/"+u.ID, `{
+			"schemas":["`+SchemaPatchOp+`"],
+			"Operations":[{"op":"replace","path":"`+path+`","value":""}]
+		}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("empty %s: status = %d, want 400 (body=%s)", path, rec.Code, rec.Body.String())
+		}
+		var errBody ErrorResponse
+		mustJSON(t, rec, &errBody)
+		if errBody.SCIMType != "invalidValue" {
+			t.Fatalf("empty %s: scimType = %q, want invalidValue", path, errBody.SCIMType)
+		}
+		got, _ := st.GetUser(context.Background(), u.ID)
+		if got.UserName != "keep@example.com" || got.Email != "keep@example.com" {
+			t.Fatalf("empty %s must not blank the login identifier: %+v", path, got)
+		}
 	}
 }
 

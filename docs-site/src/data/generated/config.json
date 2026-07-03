@@ -252,6 +252,15 @@
     "anchor": "projects-and-tenancy"
   },
   {
+    "name": "GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "closes the CreateFirstPlatformAdmin RPC — the trust-on-first-use bootstrap of the first platform admin — entirely.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
     "name": "GATEWAY_EMAIL_BRAND_FROM",
     "type": "string",
     "default": "",
@@ -707,6 +716,15 @@
     "default": "",
     "required": false,
     "description": "overrides the Google OIDC userinfo endpoint; empty = the real Google endpoint.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
+    "name": "GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the DEFAULT PROJECT's comma-separated allow-list of accepted Azure AD directory (tenant) GUIDs for Microsoft sign-in (hosted + native).",
     "category": "OAuth",
     "anchor": "oauth"
   },

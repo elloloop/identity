@@ -31,17 +31,22 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPass
 		return errors.New("both current and new password are required")
 	}
 
-	issues := passwords.ValidateStrength(newPassword)
-	if len(issues) > 0 {
-		return fmt.Errorf("password too weak: %s", strings.Join(issues, "; "))
-	}
-
 	userNode, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(userID), typeUser, userID)
 	if err != nil {
 		return fmt.Errorf("fetch user: %w", err)
 	}
 	if userNode == nil {
 		return errors.New("user not found")
+	}
+
+	// Enforce the owning tenant's password policy (an org may tighten the
+	// global minimum length) for the account's own email domain — the same
+	// resolution signup/reset/passwordless use — so a member of a governed
+	// tenant cannot set a password weaker than their org allows.
+	if err := s.governance.validatePasswordStrength(
+		ctx, s.projectID(ctx), s.logger, pstr(userNode.Payload, ufEmail), newPassword,
+	); err != nil {
+		return err
 	}
 
 	pwHash := pstr(userNode.Payload, ufPasswordHash)

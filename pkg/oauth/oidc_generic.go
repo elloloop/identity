@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
 // defaultOIDCScopes is the scope set requested when a generic OIDC
@@ -170,16 +168,6 @@ func sameIssuer(a, b string) bool {
 	return strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
 }
 
-type oidcTokenResponse struct {
-	IDToken     string `json:"id_token"`
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int    `json:"expires_in"`
-	Scope       string `json:"scope"`
-	Error       string `json:"error"`
-	ErrorDesc   string `json:"error_description"`
-}
-
 func (o *oidcExchanger) AuthorizationURL(ctx context.Context, redirectURI, state, codeChallenge string) (string, error) {
 	if o.cfg.ClientID == "" {
 		return "", fmt.Errorf("%w: client credentials not configured", ErrCodeExchangeFailed)
@@ -216,45 +204,9 @@ func (o *oidcExchanger) Exchange(ctx context.Context, params ExchangeParams) (*I
 		return nil, err
 	}
 
-	form := url.Values{}
-	form.Set("code", params.Code)
-	form.Set("client_id", o.cfg.ClientID)
-	form.Set("client_secret", o.cfg.ClientSecret)
-	form.Set("redirect_uri", params.RedirectURI)
-	form.Set("grant_type", "authorization_code")
-	if params.CodeVerifier != "" {
-		form.Set("code_verifier", params.CodeVerifier)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, doc.TokenEndpoint,
-		strings.NewReader(form.Encode()))
+	tr, err := oidcTokenExchange(ctx, o.client, doc.TokenEndpoint, codeExchangeForm(o.cfg.ClientID, o.cfg.ClientSecret, params))
 	if err != nil {
-		return nil, fmt.Errorf("%w: build request: %w", ErrCodeExchangeFailed, err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := o.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrCodeExchangeFailed, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, fmt.Errorf("%w: read body: %w", ErrCodeExchangeFailed, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: provider HTTP %d", ErrCodeExchangeFailed, resp.StatusCode)
-	}
-	var tr oidcTokenResponse
-	if err := json.Unmarshal(body, &tr); err != nil {
-		return nil, fmt.Errorf("%w: parse response: %w", ErrCodeExchangeFailed, err)
-	}
-	if tr.Error != "" {
-		return nil, fmt.Errorf("%w: %s", ErrCodeExchangeFailed, tr.Error)
-	}
-	if tr.IDToken == "" {
-		return nil, fmt.Errorf("%w: provider returned no id_token", ErrCodeExchangeFailed)
+		return nil, err
 	}
 
 	claims, err := o.verifyIDToken(ctx, jwks, tr.IDToken, doc.Issuer)
@@ -335,14 +287,9 @@ type oidcIDClaims struct {
 }
 
 func (o *oidcExchanger) verifyIDToken(ctx context.Context, jwks *jwksCache, raw, issuer string) (*oidcIDClaims, error) {
-	payload, err := verifyJWSWithRotation(ctx, jwks, raw, oidcAllowedAlgs...)
+	payload, tok, err := parseVerifiedIDToken(ctx, jwks, raw, oidcAllowedAlgs...)
 	if err != nil {
 		return nil, err
-	}
-
-	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
 	}
 
 	var claims oidcIDClaims
@@ -353,13 +300,12 @@ func (o *oidcExchanger) verifyIDToken(ctx context.Context, jwks *jwksCache, raw,
 	if iss := tok.Issuer(); iss != issuer {
 		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, iss)
 	}
-	auds := tok.Audience()
-	if !containsString(auds, o.cfg.ClientID) {
-		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
+	if err := checkAudience(tok, o.cfg.ClientID); err != nil {
+		return nil, err
 	}
 	// OIDC Core 3.1.3.7: when the token carries multiple audiences, the
 	// authorized party (azp) MUST be present and equal to our client_id.
-	if len(auds) > 1 && claims.Azp != o.cfg.ClientID {
+	if auds := tok.Audience(); len(auds) > 1 && claims.Azp != o.cfg.ClientID {
 		return nil, fmt.Errorf("%w: azp does not match client_id for multi-audience token", ErrIdentityVerification)
 	}
 	now := o.cfg.Now()

@@ -57,6 +57,44 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
   -e GATEWAY_AUTH_ALLOW_LOCAL=true \\
   ghcr.io/elloloop/identity:1.2.0`} lang="bash" title="production" />
 
+  <h2>Bootstrap the first platform admin before exposing it</h2>
+  <p>
+    On a Postgres deployment the control plane exposes
+    <code>CreateFirstPlatformAdmin</code> — a one-time, trust-on-first-use
+    bootstrap that creates the <strong>first</strong> platform operator while
+    the <code>platform_admins</code> table is empty, then permanently closes
+    once any admin exists. <strong>Run it before you expose the container to the
+    public internet</strong>: on a fresh, internet-reachable deployment an
+    anonymous caller could otherwise win the first-admin race.
+  </p>
+  <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/CreateFirstPlatformAdmin \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"ops@acme.example.com"}'
+# → { "adminId": "...", "email": "ops@acme.example.com", "generatedPassword": "..." }`} lang="bash" title="one-time first-admin bootstrap" />
+  <p>Pick whichever fits your deploy pipeline:</p>
+  <ul>
+    <li>
+      <strong>Bootstrap before exposure.</strong> Create the first admin over a
+      private network or an SSH port-forward, then open the service to traffic.
+    </li>
+    <li>
+      <strong>Gate the bootstrap on the admin secret.</strong> When
+      <code>GATEWAY_ADMIN_API_SECRET</code> is set, this RPC requires the same
+      <code>X-Admin-Secret</code> header as the other admin RPCs, so it is no
+      longer anonymous. The bootstrap stays zero-config only when no secret is
+      configured, so a deployment already running with an admin secret is
+      protected by default.
+    </li>
+    <li>
+      <strong>Close the surface entirely.</strong> Set
+      <code>GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true</code>; the RPC then
+      returns <code>FAILED_PRECONDITION</code> regardless of whether any admin
+      exists. With it closed, create the first admin by a direct insert into
+      <code>platform_admins</code>, or toggle the flag off just long enough to
+      bootstrap and back on — no first-party seed CLI ships.
+    </li>
+  </ul>
+
   <h2>Building from source</h2>
   <p>The repo's <code>Dockerfile</code> is a two-stage multi-arch build:</p>
   <Code code={`FROM --platform=$BUILDPLATFORM golang:1.26.4-alpine3.23 AS builder

@@ -82,7 +82,20 @@ func TestHostedStateToken_RejectsTampered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IssueHostedStateToken: %v", err)
 	}
-	tampered := token[:len(token)-2] + "AA"
+	// Flip the second-to-last signature char to a guaranteed-different base64url
+	// value. Overwriting the final char with a fixed literal (as this test used
+	// to) is a no-op when the token already ends in that literal, and the final
+	// char also carries base64 padding bits a flip may not change on decode — so
+	// mutate the always-meaningful second-to-last char instead, making the
+	// corruption deterministic.
+	b := []byte(token)
+	i := len(b) - 2
+	if b[i] == 'A' {
+		b[i] = 'B'
+	} else {
+		b[i] = 'A'
+	}
+	tampered := string(b)
 	if _, err := VerifyHostedStateToken(tampered, ring, now.Add(time.Minute)); err == nil {
 		t.Fatal("VerifyHostedStateToken should reject a tampered token")
 	}
