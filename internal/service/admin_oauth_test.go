@@ -298,6 +298,37 @@ func TestAdminSetProjectOAuthProvider_RejectsMissingRequiredFields(t *testing.T)
 	}
 }
 
+// OIDC is hosted-only and has no native-audience allow-list, so native_audiences
+// on an oidc write must be rejected (not silently dropped). The same write
+// without native_audiences succeeds.
+func TestAdminSetProjectOAuthProvider_OIDCRejectsNativeAudiences(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	_, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:        oauthProviderOIDC,
+		ClientID:        "oidc-client",
+		ClientSecret:    "oidc-secret",
+		OIDCIssuer:      "https://idp.example.com",
+		NativeAudiences: []string{"native.aud"},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("oidc with native_audiences: err = %v, want ErrInvalidArgument", err)
+	}
+
+	// The same write without native_audiences succeeds.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:     oauthProviderOIDC,
+		ClientID:     "oidc-client",
+		ClientSecret: "oidc-secret",
+		OIDCIssuer:   "https://idp.example.com",
+	}); err != nil {
+		t.Fatalf("oidc without native_audiences: %v", err)
+	}
+}
+
 func TestAdminSetProjectOAuthProvider_RejectsBadURL(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(oauthAdminSecret)

@@ -329,6 +329,12 @@ func (s *ControlPlaneAdminService) buildProvider(provider string, in *ProjectOAu
 			NativeAudiences: normalizeAudiences(in.NativeAudiences),
 		}, nil
 	case oauthProviderOIDC:
+		// The generic OIDC provider is hosted-only: it has no native-audience
+		// allow-list, so accepting native_audiences here would silently drop
+		// them. Reject rather than discard operator intent without signal.
+		if len(normalizeAudiences(in.NativeAudiences)) > 0 {
+			return nil, fmt.Errorf("%w: oauth.oidc does not support native_audiences; native login supports google, apple, microsoft", ErrInvalidArgument)
+		}
 		keep := ""
 		if len(existingRaw) > 0 {
 			var o ProjectOAuthOIDC
