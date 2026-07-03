@@ -274,14 +274,20 @@ func (s *ProjectStore) EnsureDefaultProject(ctx context.Context, projectID, stor
 	return p, nil
 }
 
-// updateProjectConfig REPLACES a project's config_json blob and stamps
-// updated_at_ms, returning the stored value. An empty/whitespace blob is
-// normalised to "{}" (no per-project overrides). A project that does not
-// exist affects no row and surfaces service.ErrNotFound. The blob is cast to
-// jsonb so a non-object/malformed value is rejected by Postgres at write time.
-func (s *ProjectStore) updateProjectConfig(ctx context.Context, projectID, configJSON string) (string, error) {
+// updateProjectConfig REPLACES a project's config_json blob only when its
+// current config_version equals expectedVersion — an optimistic-concurrency
+// compare-and-swap. On a match it bumps config_version, stamps updated_at_ms,
+// and returns the stored value and the new version. An empty/whitespace blob is
+// normalised to "{}" (no per-project overrides). The blob is cast to jsonb so a
+// non-object/malformed value is rejected by Postgres at write time.
+//
+// A zero-row UPDATE is ambiguous — either the project does not exist, or a
+// concurrent writer advanced the version — so it re-reads the row to tell them
+// apart: a missing row is service.ErrNotFound, a present row is a lost CAS and
+// surfaces service.ErrProjectConfigConflict (the caller retries).
+func (s *ProjectStore) updateProjectConfig(ctx context.Context, projectID string, expectedVersion int64, configJSON string) (string, int64, error) {
 	if projectID == "" {
-		return "", fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
+		return "", 0, fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
 	}
 	if strings.TrimSpace(configJSON) == "" {
 		configJSON = "{}"
@@ -289,36 +295,48 @@ func (s *ProjectStore) updateProjectConfig(ctx context.Context, projectID, confi
 	const q = `
 		UPDATE projects
 		   SET config_json = $2::jsonb,
-		       updated_at_ms = $3
-		 WHERE id = $1
-		 RETURNING config_json`
+		       config_version = config_version + 1,
+		       updated_at_ms = $4
+		 WHERE id = $1 AND config_version = $3
+		 RETURNING config_json, config_version`
 	var stored string
-	err := s.pool.QueryRow(ctx, q, projectID, configJSON, nowMs()).Scan(&stored)
+	var newVersion int64
+	err := s.pool.QueryRow(ctx, q, projectID, configJSON, expectedVersion, nowMs()).Scan(&stored, &newVersion)
 	if noRows(err) {
-		return "", fmt.Errorf("%w: project", service.ErrNotFound)
+		var cur int64
+		verr := s.pool.QueryRow(ctx, `SELECT config_version FROM projects WHERE id = $1`, projectID).Scan(&cur)
+		if noRows(verr) {
+			return "", 0, fmt.Errorf("%w: project", service.ErrNotFound)
+		}
+		if verr != nil {
+			return "", 0, wrapPgErr("UpdateProjectConfig", verr)
+		}
+		return "", 0, service.ErrProjectConfigConflict
 	}
 	if err != nil {
-		return "", wrapPgErr("UpdateProjectConfig", err)
+		return "", 0, wrapPgErr("UpdateProjectConfig", err)
 	}
-	return stored, nil
+	return stored, newVersion, nil
 }
 
-// getProjectConfig returns a project's stored config_json ("{}" when unset).
-// A project that does not exist surfaces service.ErrNotFound.
-func (s *ProjectStore) getProjectConfig(ctx context.Context, projectID string) (string, error) {
+// getProjectConfig returns a project's stored config_json ("{}" when unset)
+// together with its current config_version (the CAS token). A project that does
+// not exist surfaces service.ErrNotFound.
+func (s *ProjectStore) getProjectConfig(ctx context.Context, projectID string) (string, int64, error) {
 	if projectID == "" {
-		return "", fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
+		return "", 0, fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
 	}
-	const q = `SELECT config_json FROM projects WHERE id = $1`
+	const q = `SELECT config_json, config_version FROM projects WHERE id = $1`
 	var stored string
-	err := s.pool.QueryRow(ctx, q, projectID).Scan(&stored)
+	var version int64
+	err := s.pool.QueryRow(ctx, q, projectID).Scan(&stored, &version)
 	if noRows(err) {
-		return "", fmt.Errorf("%w: project", service.ErrNotFound)
+		return "", 0, fmt.Errorf("%w: project", service.ErrNotFound)
 	}
 	if err != nil {
-		return "", wrapPgErr("GetProjectConfig", err)
+		return "", 0, wrapPgErr("GetProjectConfig", err)
 	}
-	return stored, nil
+	return stored, version, nil
 }
 
 // ── project_credentials ───────────────────────────────────────────────

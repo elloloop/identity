@@ -143,15 +143,18 @@ func (s *ProjectStore) SetPrimaryAuthDomain(ctx context.Context, projectID, host
 	return authDomainToService(d), nil
 }
 
-// UpdateProjectConfig REPLACES a project's config_json blob and returns the
-// stored (normalised) value. An unknown project surfaces service.ErrNotFound.
-func (s *ProjectStore) UpdateProjectConfig(ctx context.Context, projectID, configJSON string) (string, error) {
-	return s.updateProjectConfig(ctx, projectID, configJSON)
+// UpdateProjectConfig compare-and-swaps a project's config_json blob against
+// expectedVersion, returning the stored (normalised) value and the new version.
+// A concurrent write that advanced the version surfaces
+// service.ErrProjectConfigConflict; an unknown project surfaces
+// service.ErrNotFound.
+func (s *ProjectStore) UpdateProjectConfig(ctx context.Context, projectID string, expectedVersion int64, configJSON string) (string, int64, error) {
+	return s.updateProjectConfig(ctx, projectID, expectedVersion, configJSON)
 }
 
-// GetProjectConfig returns a project's stored config_json ("{}" when unset).
-// An unknown project surfaces service.ErrNotFound.
-func (s *ProjectStore) GetProjectConfig(ctx context.Context, projectID string) (string, error) {
+// GetProjectConfig returns a project's stored config_json ("{}" when unset) and
+// its current config_version. An unknown project surfaces service.ErrNotFound.
+func (s *ProjectStore) GetProjectConfig(ctx context.Context, projectID string) (string, int64, error) {
 	return s.getProjectConfig(ctx, projectID)
 }
 

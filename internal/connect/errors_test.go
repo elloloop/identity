@@ -48,6 +48,20 @@ func TestToConnectErrorSessionExpired(t *testing.T) {
 	}
 }
 
+// TestToConnectErrorProjectConfigConflict proves a config_json write that lost
+// its optimistic-concurrency compare-and-swap after exhausting retries maps to
+// Aborted — gRPC's retryable code for a concurrency/sequencer conflict, so the
+// operator can simply retry the whole write.
+func TestToConnectErrorProjectConfigConflict(t *testing.T) {
+	err := toConnectError(service.ErrProjectConfigConflict)
+	if err == nil {
+		t.Fatal("toConnectError(ErrProjectConfigConflict) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeAborted {
+		t.Fatalf("code = %v, want Aborted", got)
+	}
+}
+
 // TestToConnectErrorMinorDataMinimized proves COPPA data-minimization rejection
 // maps to FailedPrecondition: the account may not collect this PII, a "do
 // something else" precondition rather than an auth or argument failure.

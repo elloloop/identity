@@ -2,6 +2,9 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -122,10 +125,23 @@ func TestProjectStore_Config_Smoke(t *testing.T) {
 	runProjectConfigSmoke(t, dsn)
 }
 
+// TestProjectStore_ConfigCAS_Smoke runs the concurrent config_json CAS
+// regression body (issue #313) against a live Postgres pointed to by
+// GATEWAY_TEST_POSTGRES_DSN, skipping when unset. The dockerpostgres container
+// test runs the same body locally.
+func TestProjectStore_ConfigCAS_Smoke(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping project config CAS test")
+	}
+	runProjectConfigCASConcurrency(t, dsn)
+}
+
 // runProjectConfigSmoke asserts the operator-authored config_json round-trips
-// identically: a created project starts at "{}", UpdateProjectConfig replaces
-// the blob and returns the stored value, GetProjectConfig reads it back, an
-// empty blob normalises to "{}", and an unknown project surfaces ErrNotFound.
+// identically: a created project starts at "{}"/version 0, UpdateProjectConfig
+// compare-and-swaps against the version and bumps it, GetProjectConfig reads
+// both back, a stale-version write is rejected, an empty blob normalises to
+// "{}", and an unknown project surfaces ErrNotFound.
 func runProjectConfigSmoke(t *testing.T, dsn string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -137,35 +153,119 @@ func runProjectConfigSmoke(t *testing.T, dsn string) {
 	projectID, err := store.createProject(ctx, &Project{StorageScopeID: "scope-cfg", Name: "Cfg"})
 	require.NoError(t, err)
 
-	// A fresh project's config is the empty object.
-	got, err := store.GetProjectConfig(ctx, projectID)
+	// A fresh project's config is the empty object at version 0.
+	got, ver, err := store.GetProjectConfig(ctx, projectID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{}`, got)
+	require.Equal(t, int64(0), ver)
 
-	// Update replaces the blob and returns the stored value.
+	// Update compare-and-swaps against the read version and bumps it.
 	const cfg = `{"cors": {"allowed_origins": ["https://kids.example.com"]}}`
-	stored, err := store.UpdateProjectConfig(ctx, projectID, cfg)
+	stored, newVer, err := store.UpdateProjectConfig(ctx, projectID, ver, cfg)
 	require.NoError(t, err)
 	require.JSONEq(t, cfg, stored)
+	require.Equal(t, ver+1, newVer)
 
-	got, err = store.GetProjectConfig(ctx, projectID)
+	got, ver, err = store.GetProjectConfig(ctx, projectID)
 	require.NoError(t, err)
 	require.JSONEq(t, cfg, got)
+	require.Equal(t, newVer, ver)
 	// The stored blob decodes to the typed config the resolver consumes.
 	parsed, err := service.ParseProjectConfig(got)
 	require.NoError(t, err)
 	require.Equal(t, []string{"https://kids.example.com"}, parsed.CORS.AllowedOrigins)
 
+	// A write carrying a STALE version is rejected without mutating the row.
+	_, _, err = store.UpdateProjectConfig(ctx, projectID, ver-1, `{"branding":{"product_name":"stale"}}`)
+	require.ErrorIs(t, err, service.ErrProjectConfigConflict)
+	after, afterVer, err := store.GetProjectConfig(ctx, projectID)
+	require.NoError(t, err)
+	require.JSONEq(t, cfg, after, "a rejected stale write must not mutate the blob")
+	require.Equal(t, ver, afterVer, "a rejected stale write must not bump the version")
+
 	// An empty blob normalises to "{}".
-	stored, err = store.UpdateProjectConfig(ctx, projectID, "")
+	stored, _, err = store.UpdateProjectConfig(ctx, projectID, ver, "")
 	require.NoError(t, err)
 	require.JSONEq(t, `{}`, stored)
 
-	// Unknown project is ErrNotFound for both read and write.
-	_, err = store.UpdateProjectConfig(ctx, "no-such-project", cfg)
+	// Unknown project is ErrNotFound for both read and write (never a conflict).
+	_, _, err = store.UpdateProjectConfig(ctx, "no-such-project", 0, cfg)
 	require.ErrorIs(t, err, service.ErrNotFound)
-	_, err = store.GetProjectConfig(ctx, "no-such-project")
+	_, _, err = store.GetProjectConfig(ctx, "no-such-project")
 	require.ErrorIs(t, err, service.ErrNotFound)
+}
+
+// runProjectConfigCASConcurrency is the regression proof for issue #313: two
+// admin writers concurrently read-modify-write DIFFERENT keys of one project's
+// config_json. Without the optimistic-concurrency CAS the later writer would
+// clobber the earlier one (last-writer-wins, a key vanishing); with it, exactly
+// one writer wins each version and the loser observes ErrProjectConfigConflict,
+// re-reads, and retries — so BOTH keys are present at the end and NEITHER write
+// is lost. The retry loop mirrors the service-layer mutateProjectConfig helper.
+func runProjectConfigCASConcurrency(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	require.NoError(t, truncateAll(ctx, dsn))
+	store := newProjectStore(ctx, t, dsn)
+
+	projectID, err := store.createProject(ctx, &Project{StorageScopeID: "scope-cas", Name: "CAS"})
+	require.NoError(t, err)
+
+	// setKey read-modify-writes a single top-level key, retrying on a lost CAS.
+	setKey := func(key, value string) error {
+		for attempt := 0; attempt < 20; attempt++ {
+			current, ver, gerr := store.GetProjectConfig(ctx, projectID)
+			if gerr != nil {
+				return gerr
+			}
+			top := map[string]json.RawMessage{}
+			require.NoError(t, json.Unmarshal([]byte(current), &top))
+			top[key] = json.RawMessage(value)
+			next, merr := json.Marshal(top)
+			require.NoError(t, merr)
+			_, _, uerr := store.UpdateProjectConfig(ctx, projectID, ver, string(next))
+			if uerr == nil {
+				return nil
+			}
+			if errors.Is(uerr, service.ErrProjectConfigConflict) {
+				continue // a concurrent writer won this version — re-read and retry.
+			}
+			return uerr
+		}
+		return errors.New("exceeded CAS retry budget")
+	}
+
+	const writers = 8
+	var wg sync.WaitGroup
+	errs := make([]error, writers)
+	start := make(chan struct{})
+	for i := range writers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			errs[i] = setKey(fmt.Sprintf("k%d", i), fmt.Sprintf(`{"n":%d}`, i))
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i := range writers {
+		require.NoErrorf(t, errs[i], "writer %d", i)
+	}
+
+	// Every writer's key survives: no update was lost to a clobber.
+	final, _, err := store.GetProjectConfig(ctx, projectID)
+	require.NoError(t, err)
+	var top map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(final), &top))
+	for i := range writers {
+		key := fmt.Sprintf("k%d", i)
+		require.Containsf(t, top, key, "writer %d's key was lost to a concurrent clobber", i)
+		require.JSONEq(t, fmt.Sprintf(`{"n":%d}`, i), string(top[key]))
+	}
 }
 
 // TestProjectStore_EnsureDefaultProject_Smoke runs the default-project
