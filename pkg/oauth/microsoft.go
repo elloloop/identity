@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
 // Default Microsoft Azure AD common-endpoint URLs.
@@ -97,16 +95,6 @@ func NewMicrosoft(cfg MicrosoftConfig) Exchanger {
 		client: client,
 		jwks:   newJWKSCache(cfg.JWKSURL, cfg.JWKSCacheTTL, client),
 	}
-}
-
-type microsoftTokenResponse struct {
-	IDToken     string `json:"id_token"`
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int    `json:"expires_in"`
-	Scope       string `json:"scope"`
-	Error       string `json:"error"`
-	ErrorDesc   string `json:"error_description"`
 }
 
 // microsoftIDClaims captures the subset of an MS ID token we use.
@@ -209,46 +197,14 @@ func (m *microsoftExchanger) Exchange(ctx context.Context, params ExchangeParams
 		return nil, fmt.Errorf("%w: client credentials not configured", ErrCodeExchangeFailed)
 	}
 
-	form := url.Values{}
-	form.Set("code", params.Code)
-	form.Set("client_id", m.cfg.ClientID)
-	form.Set("client_secret", m.cfg.ClientSecret)
-	form.Set("redirect_uri", params.RedirectURI)
-	form.Set("grant_type", "authorization_code")
+	// Microsoft requires the scope on the token request; the rest of the
+	// authorization-code grant is the shared OIDC form.
+	form := codeExchangeForm(m.cfg.ClientID, m.cfg.ClientSecret, params)
 	form.Set("scope", "openid email profile")
-	if params.CodeVerifier != "" {
-		form.Set("code_verifier", params.CodeVerifier)
-	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.cfg.TokenURL,
-		strings.NewReader(form.Encode()))
+	tr, err := oidcTokenExchange(ctx, m.client, m.cfg.TokenURL, form)
 	if err != nil {
-		return nil, fmt.Errorf("%w: build request: %w", ErrCodeExchangeFailed, err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrCodeExchangeFailed, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, fmt.Errorf("%w: read body: %w", ErrCodeExchangeFailed, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: provider HTTP %d", ErrCodeExchangeFailed, resp.StatusCode)
-	}
-	var tr microsoftTokenResponse
-	if err := json.Unmarshal(body, &tr); err != nil {
-		return nil, fmt.Errorf("%w: parse response: %w", ErrCodeExchangeFailed, err)
-	}
-	if tr.Error != "" {
-		return nil, fmt.Errorf("%w: %s", ErrCodeExchangeFailed, tr.Error)
-	}
-	if tr.IDToken == "" {
-		return nil, fmt.Errorf("%w: provider returned no id_token", ErrCodeExchangeFailed)
+		return nil, err
 	}
 
 	claims, pinned, err := m.verifyIDToken(ctx, tr.IDToken)
@@ -324,16 +280,13 @@ func (m *microsoftExchanger) AuthorizationURL(_ context.Context, redirectURI, st
 // that the token's tid satisfied) — the caller folds pinned into the email-trust
 // decision.
 func (m *microsoftExchanger) verifyIDToken(ctx context.Context, raw string) (*microsoftIDClaims, bool, error) {
-	payload, err := verifyJWSWithRotation(ctx, m.jwks, raw, jwa.RS256)
+	payload, tok, err := parseVerifiedIDToken(ctx, m.jwks, raw, jwa.RS256)
 	if err != nil {
 		return nil, false, err
 	}
 
-	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
-	if err != nil {
-		return nil, false, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
-	}
-
+	// Microsoft's issuer and tenant pin both derive from the token's own
+	// `tid`, so the claims are decoded before the issuer check.
 	var claims microsoftIDClaims
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return nil, false, fmt.Errorf("%w: decode claims: %w", ErrIdentityVerification, err)
@@ -350,9 +303,8 @@ func (m *microsoftExchanger) verifyIDToken(ctx context.Context, raw string) (*mi
 	if iss := tok.Issuer(); iss != expectedIss {
 		return nil, false, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, iss)
 	}
-	auds := tok.Audience()
-	if !containsString(auds, m.cfg.ClientID) {
-		return nil, false, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
+	if err := checkAudience(tok, m.cfg.ClientID); err != nil {
+		return nil, false, err
 	}
 	if err := checkTokenTimes(tok, m.cfg.Now()); err != nil {
 		return nil, false, err
