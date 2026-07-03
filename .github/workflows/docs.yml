@@ -71,8 +71,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
-        with:
-          # Pages' deployment queue regularly exceeds the 10-minute default
-          # poll window, failing the run even though the deployment lands
-          # shortly after. Poll for up to 30 minutes instead.
-          timeout: 1800000
