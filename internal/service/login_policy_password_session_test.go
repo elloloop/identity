@@ -304,18 +304,18 @@ func TestRefreshToken_AbsoluteTimeoutAnchoredAcrossRefreshes(t *testing.T) {
 	require.True(t, errors.Is(err, ErrSessionExpired), "absolute cap must fire once the session is older than 2h")
 }
 
-// passwordStrengthPolicyFor maps the LoginPolicy fields onto the passwords
+// passwordStrengthPolicy maps the LoginPolicy fields onto the passwords
 // StrengthPolicy and falls back to the zero policy when ungoverned.
-func TestPasswordStrengthPolicyFor(t *testing.T) {
+func TestPasswordStrengthPolicy(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	ctx := withProject("proj-1")
 
 	g := withPasswordMinLength(16)
 	svc.WithLoginGovernance(g)
 
-	got := svc.passwordStrengthPolicyFor(ctx, "alice@acme.com")
+	got := g.passwordStrengthPolicy(ctx, "proj-1", svc.logger, "alice@acme.com")
 	require.Equal(t, passwords.StrengthPolicy{MinLength: 16}, got)
 
 	// Ungoverned → zero policy (global default).
-	require.Equal(t, passwords.StrengthPolicy{}, svc.passwordStrengthPolicyFor(ctx, "x@nowhere.example"))
+	require.Equal(t, passwords.StrengthPolicy{}, g.passwordStrengthPolicy(ctx, "proj-1", svc.logger, "x@nowhere.example"))
 }

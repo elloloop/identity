@@ -10,13 +10,6 @@ import (
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
-// passwordStrengthPolicyFor returns the per-tenant password StrengthPolicy
-// for the org that owns email's domain, binding the request's project scope to
-// the shared governance lookup.
-func (s *AuthService) passwordStrengthPolicyFor(ctx context.Context, email string) passwords.StrengthPolicy {
-	return s.governance.passwordStrengthPolicy(ctx, s.projectID(ctx), s.logger, email)
-}
-
 // enforceSessionTimeout invalidates a session whose refresh token has gone
 // idle or exceeded its absolute lifetime under the owning tenant's
 // LoginPolicy. nowMs is the current epoch ms; sessionStartedAtMs is the
