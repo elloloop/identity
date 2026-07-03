@@ -238,6 +238,79 @@ func assertAuditWrite(t *testing.T, aud *captureNodeWriter, eventType string) {
 	t.Fatalf("no audit write of type %q found in %+v", eventType, aud.all())
 }
 
+// newObservedStore builds a repoSCIMStore over repo wired to capture fakes, for
+// asserting emission at the store level (no HTTP round-trip). The audit logger
+// has no scoper, so writes attribute to its boot-default project.
+func newObservedStore(repo service.Repository) (*repoSCIMStore, *captureEventPublisher, *captureNodeWriter) {
+	aud := &captureNodeWriter{}
+	pub := &captureEventPublisher{}
+	store := &repoSCIMStore{
+		repo:      repo,
+		audit:     audit.NewLogger(aud, testSCIMProjectID, zap.NewNop()),
+		publisher: pub,
+		projectID: testSCIMProjectID,
+		tenantID:  scimEventTenantID,
+		logger:    zap.NewNop(),
+	}
+	return store, pub, aud
+}
+
+// TestSCIM_DeactivateDeprovisionSignalNeverLost is the regression for the
+// correctness hole: a deactivation must emit user.deactivated derived from the
+// REQUESTED target state, so the deprovisioning signal survives a retry after a
+// partial-failure deactivation and is never silently downgraded to user.updated.
+func TestSCIM_DeactivateDeprovisionSignalNeverLost(t *testing.T) {
+	ctx := context.Background()
+
+	// (1) A PATCH active:false on a row that is ALREADY deactivated — exactly
+	// what a retry sees after a prior status-write-committed-but-revoke-failed
+	// attempt — must re-emit user.deactivated + user_deactivated audit, never
+	// user.updated. The old transition-gated code dropped the signal here.
+	fr := &scimFakeRepo{user: &service.User{ID: "id", Status: "deactivated"}}
+	store, pub, aud := newObservedStore(fr)
+	if _, err := store.PatchUser(ctx, "id", scim.UserPatch{Active: boolPtr(false)}); err != nil {
+		t.Fatalf("patch active:false on already-deactivated row: %v", err)
+	}
+	if evs := pub.all(); len(evs) != 1 || evs[0].Type != events.EventUserDeactivated {
+		t.Fatalf("events = %+v, want one user.deactivated (never user.updated)", evs)
+	}
+	assertAuditWrite(t, aud, "user_deactivated")
+
+	// (2) When revocation fails, the operation surfaces the error before emit —
+	// no event is dropped in the sense of being emitted incorrectly.
+	fr = &scimFakeRepo{user: &service.User{ID: "id", Status: "active"}, errRevoke: errors.New("revoke boom")}
+	store, pub, _ = newObservedStore(fr)
+	if _, err := store.PatchUser(ctx, "id", scim.UserPatch{Active: boolPtr(false)}); err == nil {
+		t.Fatal("patch deactivate must surface the revoke error")
+	}
+	if n := len(pub.all()); n != 0 {
+		t.Fatalf("failed-revoke attempt emitted %d events, want 0 (the retry re-emits)", n)
+	}
+
+	// ...and the retry (row now committed to deactivated, revoke now succeeds)
+	// re-emits user.deactivated — so across the retry the signal is never lost.
+	fr = &scimFakeRepo{user: &service.User{ID: "id", Status: "deactivated"}}
+	store, pub, aud = newObservedStore(fr)
+	if _, err := store.PatchUser(ctx, "id", scim.UserPatch{Active: boolPtr(false)}); err != nil {
+		t.Fatalf("deactivate retry: %v", err)
+	}
+	if evs := pub.all(); len(evs) != 1 || evs[0].Type != events.EventUserDeactivated {
+		t.Fatalf("retry-after-revoke-failure events = %+v, want user.deactivated (not user.updated)", evs)
+	}
+	assertAuditWrite(t, aud, "user_deactivated")
+
+	// PUT twin: a PUT active:false on an already-deactivated row also re-emits
+	// user.deactivated rather than downgrading to user.updated.
+	fr = &scimFakeRepo{user: &service.User{ID: "id", Status: "deactivated"}}
+	store, pub, _ = newObservedStore(fr)
+	if _, err := store.ReplaceUser(ctx, "id", scim.User{Email: "a@b.com", Active: false}); err != nil {
+		t.Fatalf("PUT active:false on already-deactivated row: %v", err)
+	}
+	if evs := pub.all(); len(evs) != 1 || evs[0].Type != events.EventUserDeactivated {
+		t.Fatalf("PUT retry deactivate events = %+v, want user.deactivated", evs)
+	}
+}
+
 // countingListRepo records how many times CountUsers / ListUsers run so a test
 // can prove the count=0 path never issues the page SELECT.
 type countingListRepo struct {

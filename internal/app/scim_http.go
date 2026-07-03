@@ -180,18 +180,30 @@ func (s *repoSCIMStore) emitLifecycle(ctx context.Context, t events.EventType, u
 	service.EmitUserEvent(ctx, s.publisher, s.logger, s.projectID, s.tenantID, t, u)
 }
 
-// emitUserChange records the audit entry + lifecycle event for a PUT/PATCH that
-// changed a user, mirroring the admin service's transition semantics: a
-// deactivation (active true→false) → user_deactivated audit + user.deactivated
-// event (the deprovisioning signal); a reactivation (false→true) →
-// user_reactivated audit + user.updated event; any other change → user.updated
-// event only (matching AdminService.UpdateUser, which records no audit entry).
-func (s *repoSCIMStore) emitUserChange(ctx context.Context, wasActive, nowActive bool, updated *service.User) {
+// emitUserChange records the audit entry + lifecycle event for a PUT/PATCH,
+// mirroring AdminService's UNCONDITIONAL-on-target-state behavior so the
+// deprovisioning signal is never lost:
+//
+//   - deactivating (the request set active:false) → user_deactivated audit +
+//     user.deactivated event, emitted REGARDLESS of the pre-write state. This
+//     is the fix for the retry-after-partial-failure hole: if the status write
+//     committed but revocation failed on a prior attempt, the row is already
+//     "deactivated", yet a retry — whose request still sets active:false — must
+//     re-emit user.deactivated (a transition-gated check would misclassify it
+//     as a no-op profile update and permanently drop the deprovision signal).
+//   - reactivating (the request set active:true on a previously-deactivated
+//     account) → user_reactivated audit + user.updated event.
+//   - any other change → user.updated event only (matching
+//     AdminService.UpdateUser, which records no audit entry).
+//
+// deactivating/reactivating are derived from the REQUESTED target state by the
+// caller, not from the observed transition.
+func (s *repoSCIMStore) emitUserChange(ctx context.Context, deactivating, reactivating bool, updated *service.User) {
 	switch {
-	case wasActive && !nowActive:
+	case deactivating:
 		s.logAudit(ctx, audit.EventUserDeactivated, updated.ID, map[string]any{"source": scimAuditSource})
 		s.emitLifecycle(ctx, events.EventUserDeactivated, updated)
-	case !wasActive && nowActive:
+	case reactivating:
 		s.logAudit(ctx, audit.EventUserReactivated, updated.ID, map[string]any{"source": scimAuditSource})
 		s.emitLifecycle(ctx, events.EventUserUpdated, updated)
 	default:
@@ -281,7 +293,10 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 	if updated == nil {
 		return scim.User{}, scim.ErrNotFound
 	}
-	s.emitUserChange(ctx, isActiveStatus(existing.Status), u.Active, updated)
+	// A PUT always carries the full target active state, so a false deactivates
+	// and a true on a previously-deactivated account reactivates.
+	wasActive := isActiveStatus(existing.Status)
+	s.emitUserChange(ctx, !u.Active, u.Active && !wasActive, updated)
 	return toSCIMUser(updated), nil
 }
 
@@ -363,13 +378,14 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 	if updated == nil {
 		return scim.User{}, scim.ErrNotFound
 	}
-	// An absent active in the patch leaves the account state unchanged.
-	wasActive := isActiveStatus(existing.Status)
-	nowActive := wasActive
-	if patch.Active != nil {
-		nowActive = *patch.Active
-	}
-	s.emitUserChange(ctx, wasActive, nowActive, updated)
+	// The deactivation / reactivation events derive from the REQUESTED target
+	// state (patch.Active / the deactivate flag above), not the observed
+	// transition, so a retry after a partial-failure deactivation re-emits
+	// user.deactivated rather than misclassifying the already-deactivated row as
+	// a plain profile update. An absent active leaves the account state
+	// unchanged (a profile-only patch).
+	reactivating := patch.Active != nil && *patch.Active && !isActiveStatus(existing.Status)
+	s.emitUserChange(ctx, deactivate, reactivating, updated)
 	return toSCIMUser(updated), nil
 }
 

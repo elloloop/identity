@@ -7,13 +7,14 @@
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS external_id TEXT NOT NULL DEFAULT '';
 
--- Both indexes below build non-CONCURRENTLY, which takes a brief ACCESS
--- EXCLUSIVE lock on `users` for the duration of the build — acceptable here
--- (this migration ships before any project provisions users at scale, and the
--- runner already serializes migrations under an advisory lock). A deployment
--- that adds SCIM to an already-large `users` table should instead pre-build
--- these with CREATE INDEX CONCURRENTLY (outside a transaction) before deploying
--- the binary, then let the IF NOT EXISTS clauses no-op.
+-- Both indexes below build non-CONCURRENTLY, which takes a brief SHARE lock on
+-- `users` for the duration of the build — it blocks concurrent writes
+-- (INSERT/UPDATE/DELETE) but still allows reads. Acceptable here (this migration
+-- ships before any project provisions users at scale, and the runner already
+-- serializes migrations under an advisory lock). A deployment that adds SCIM to
+-- an already-large `users` table should instead pre-build these with CREATE
+-- INDEX CONCURRENTLY (outside a transaction) before deploying the binary, then
+-- let the IF NOT EXISTS clauses no-op.
 CREATE UNIQUE INDEX IF NOT EXISTS users_project_external_id_uidx
     ON users (project_id, external_id)
     WHERE external_id <> '';
