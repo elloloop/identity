@@ -99,6 +99,130 @@ func TestAdminSetProjectOAuthProvider_EncryptsAndResolves(t *testing.T) {
 	}
 }
 
+// TestAdminSetProjectOAuthProvider_GitHub_RoundTrip proves GitHub authoring
+// mirrors the other providers: the plaintext secret is encrypted at rest and
+// redacted on read, the endpoint overrides round-trip through config_json, and
+// the resolver decrypts and builds the authored provider end-to-end.
+func TestAdminSetProjectOAuthProvider_GitHub_RoundTrip(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	const plaintext = "github-top-secret"
+	view, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:               oauthProviderGitHub,
+		ClientID:               "gh-client",
+		ClientSecret:           plaintext,
+		GitHubAuthorizationURL: "https://ghe.example/login/oauth/authorize",
+		GitHubTokenURL:         "https://ghe.example/login/oauth/access_token",
+		GitHubUserURL:          "https://ghe.example/api/v3/user",
+		GitHubUserMailURL:      "https://ghe.example/api/v3/user/emails",
+	})
+	if err != nil {
+		t.Fatalf("AdminSetProjectOAuthProvider: %v", err)
+	}
+	// The response redacts the secret but reports its presence + the overrides.
+	if !view.HasClientSecret || view.ClientID != "gh-client" {
+		t.Fatalf("view = %+v", view)
+	}
+	if view.GitHubTokenURL != "https://ghe.example/login/oauth/access_token" || view.GitHubUserURL != "https://ghe.example/api/v3/user" {
+		t.Fatalf("github overrides not mapped in view: %+v", view)
+	}
+
+	stored, _, err := f.projects.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig: %v", err)
+	}
+	if strings.Contains(stored, plaintext) {
+		t.Fatalf("plaintext secret leaked into config_json: %s", stored)
+	}
+
+	cfg, err := ParseProjectConfig(stored)
+	if err != nil {
+		t.Fatalf("ParseProjectConfig: %v", err)
+	}
+	if cfg.OAuth.GitHub == nil || cfg.OAuth.GitHub.ClientSecretEnc == "" {
+		t.Fatalf("github secret not stored: %+v", cfg.OAuth.GitHub)
+	}
+	dec, err := secretcrypto.Decrypt(cfg.OAuth.GitHub.ClientSecretEnc, testAdminSecretsKey())
+	if err != nil || dec != plaintext {
+		t.Fatalf("decrypt = %q, %v; want %q", dec, err, plaintext)
+	}
+
+	// The resolver builds the exchanger for this project end-to-end.
+	r := newOAuthResolver("default-proj", nil, zap.NewNop()).withSecrets(testAdminSecretsKey(), nil)
+	rctx := WithProjectScope(ctx, &ProjectScope{ProjectID: projectID, OAuth: cfg.OAuth})
+	if ex, ok := r.exchangerFor(rctx, oauthProviderGitHub); !ok || ex == nil {
+		t.Fatal("resolver could not build the authored github provider")
+	}
+
+	// List surfaces github (redacted) with the endpoint overrides intact.
+	list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID)
+	if err != nil || len(list) != 1 || list[0].Provider != oauthProviderGitHub || list[0].GitHubUserURL == "" {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+
+	// An empty-secret re-set keeps the stored secret, fully replacing the rest of
+	// the block (so the previously-set overrides are cleared).
+	if v, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderGitHub, ClientID: "gh-client-2",
+	}); err != nil || !v.HasClientSecret || v.ClientID != "gh-client-2" || v.GitHubUserURL != "" {
+		t.Fatalf("empty-secret keep: v=%+v err=%v", v, err)
+	}
+
+	// Delete removes only it.
+	if err := f.svc.AdminDeleteProjectOAuthProvider(ctx, oauthAdminSecret, projectID, oauthProviderGitHub); err != nil {
+		t.Fatalf("delete github: %v", err)
+	}
+	if list, err := f.svc.AdminListProjectOAuthProviders(ctx, oauthAdminSecret, projectID); err != nil || len(list) != 0 {
+		t.Fatalf("after delete list = %+v, err = %v; want empty", list, err)
+	}
+}
+
+// GitHub is hosted-only (GitHub OAuth issues no ID token), so native_audiences
+// on a github write must be rejected — never silently dropped.
+func TestAdminSetProjectOAuthProvider_GitHubRejectsNativeAudiences(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	_, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:        oauthProviderGitHub,
+		ClientID:        "gh",
+		ClientSecret:    "gh-secret",
+		NativeAudiences: []string{"native.aud"},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("github with native_audiences: err = %v, want ErrInvalidArgument", err)
+	}
+
+	// The same write without native_audiences succeeds.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderGitHub, ClientID: "gh", ClientSecret: "gh-secret",
+	}); err != nil {
+		t.Fatalf("github without native_audiences: %v", err)
+	}
+}
+
+// A github block missing its required credentials is rejected at author time
+// (hosted-only: there is no native-audience alternative).
+func TestAdminSetProjectOAuthProvider_GitHubRejectsIncomplete(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	_, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider: oauthProviderGitHub,
+		ClientID: "gh",
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("incomplete github: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestAdminSetProjectOAuthProvider_PreservesOtherConfigKeys(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(oauthAdminSecret)

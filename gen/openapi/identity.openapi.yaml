@@ -3884,8 +3884,8 @@ components:
           type: string
           title: provider
           description: |-
-            provider is the provider key to remove: "google", "microsoft", "apple", or
-             "oidc". Removing an absent provider is a no-op (idempotent).
+            provider is the provider key to remove: "google", "microsoft", "apple",
+             "github", or "oidc". Removing an absent provider is a no-op (idempotent).
       title: AdminDeleteProjectOAuthProviderRequest
       additionalProperties: false
     identity.v1.AdminDeleteProjectOAuthProviderResponse:
@@ -5672,7 +5672,7 @@ components:
           title: provider
           description: |-
             provider is the provider key this block configures: "google", "microsoft",
-             "apple", or "oidc". Required.
+             "apple", "github", or "oidc". Required.
         clientId:
           type: string
           title: client_id
@@ -5683,8 +5683,8 @@ components:
           type: string
           title: client_secret
           description: |-
-            client_secret is the PLAINTEXT client secret (Google/Microsoft/OIDC), sent
-             only on a write over TLS and stored encrypted at rest. It is NEVER returned
+            client_secret is the PLAINTEXT client secret (Google/Microsoft/GitHub/OIDC),
+             sent only on a write over TLS and stored encrypted at rest. It is NEVER returned
              on a read (see has_client_secret). On a write an EMPTY value keeps the
              currently-stored secret, so non-secret fields can be edited without
              re-sending it; send a non-empty value to set or rotate the secret.
@@ -5774,6 +5774,22 @@ components:
         oidcScopes:
           type: string
           title: oidc_scopes
+        githubAuthorizationUrl:
+          type: string
+          title: github_authorization_url
+          description: |-
+            GitHub endpoint overrides — optional, default to the live GitHub endpoints
+             (used by tests / self-hosted GitHub Enterprise proxies). GitHub is
+             hosted-only (GitHub OAuth issues no ID token), so it has no native_audiences.
+        githubTokenUrl:
+          type: string
+          title: github_token_url
+        githubUserUrl:
+          type: string
+          title: github_user_url
+        githubUserMailUrl:
+          type: string
+          title: github_user_mail_url
       title: ProjectOAuthProviderConfig
       additionalProperties: false
       description: |-

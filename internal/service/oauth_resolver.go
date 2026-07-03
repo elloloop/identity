@@ -228,6 +228,19 @@ func (r *OAuthResolver) build(provider string, raw any) (oauth.Exchanger, error)
 			KeyID:      c.KeyID,
 			PrivateKey: key,
 		}), nil
+	case *ProjectOAuthGitHub:
+		secret, err := r.decrypt(c.ClientSecretEnc)
+		if err != nil {
+			return nil, fmt.Errorf("github client_secret: %w", err)
+		}
+		return oauth.NewGitHub(oauth.GitHubConfig{
+			ClientID:         c.ClientID,
+			ClientSecret:     secret,
+			AuthorizationURL: c.AuthorizationURL,
+			TokenURL:         c.TokenURL,
+			UserURL:          c.UserURL,
+			UserMailURL:      c.UserMailURL,
+		}), nil
 	case *ProjectOAuthOIDC:
 		secret, err := r.decrypt(c.ClientSecretEnc)
 		if err != nil {
@@ -273,6 +286,10 @@ func (c ProjectOAuthConfig) provider(provider string) (any, bool) {
 		if c.Apple != nil {
 			return c.Apple, true
 		}
+	case "github":
+		if c.GitHub != nil {
+			return c.GitHub, true
+		}
 	case "oidc":
 		if c.OIDC != nil {
 			return c.OIDC, true
@@ -283,7 +300,7 @@ func (c ProjectOAuthConfig) provider(provider string) (any, bool) {
 
 // hasAny reports whether the project configured at least one provider.
 func (c ProjectOAuthConfig) hasAny() bool {
-	return c.Google != nil || c.Microsoft != nil || c.Apple != nil || c.OIDC != nil
+	return c.Google != nil || c.Microsoft != nil || c.Apple != nil || c.GitHub != nil || c.OIDC != nil
 }
 
 // providerConfigHash is the cache-key component that changes when a provider's

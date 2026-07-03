@@ -35,12 +35,13 @@ const (
 	oauthProviderGoogle    = "google"
 	oauthProviderMicrosoft = "microsoft"
 	oauthProviderApple     = "apple"
+	oauthProviderGitHub    = "github"
 	oauthProviderOIDC      = "oidc"
 )
 
 // oauthProviderKeys is the canonical (sorted) set of configurable provider
 // keys, used to enumerate a project's providers deterministically.
-var oauthProviderKeys = []string{oauthProviderApple, oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderOIDC}
+var oauthProviderKeys = []string{oauthProviderApple, oauthProviderGitHub, oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderOIDC}
 
 // ProjectOAuthProviderInput is the operator-supplied authoring input for one of
 // a project's OAuth providers. Secret fields (ClientSecret, ApplePrivateKey)
@@ -65,6 +66,11 @@ type ProjectOAuthProviderInput struct {
 	AppleTeamID     string
 	AppleKeyID      string
 	ApplePrivateKey string
+
+	GitHubAuthorizationURL string
+	GitHubTokenURL         string
+	GitHubUserURL          string
+	GitHubUserMailURL      string
 
 	OIDCIssuer       string
 	OIDCDiscoveryURL string
@@ -92,6 +98,11 @@ type ProjectOAuthProviderView struct {
 	AppleTeamID   string
 	AppleKeyID    string
 	HasPrivateKey bool
+
+	GitHubAuthorizationURL string
+	GitHubTokenURL         string
+	GitHubUserURL          string
+	GitHubUserMailURL      string
 
 	OIDCIssuer       string
 	OIDCDiscoveryURL string
@@ -338,6 +349,32 @@ func (s *ControlPlaneAdminService) buildProvider(provider string, in *ProjectOAu
 			PrivateKeyEnc:   enc,
 			NativeAudiences: normalizeStringList(in.NativeAudiences),
 		}, nil
+	case oauthProviderGitHub:
+		// GitHub is hosted-only: GitHub OAuth issues no ID token, so there is no
+		// native-audience allow-list. Accepting native_audiences here would
+		// silently drop them — reject rather than discard operator intent.
+		if len(normalizeStringList(in.NativeAudiences)) > 0 {
+			return nil, fmt.Errorf("%w: oauth.github does not support native_audiences; native login supports google, apple, microsoft", ErrInvalidArgument)
+		}
+		keep := ""
+		if len(existingRaw) > 0 {
+			var g ProjectOAuthGitHub
+			if json.Unmarshal(existingRaw, &g) == nil {
+				keep = g.ClientSecretEnc
+			}
+		}
+		enc, err := s.encryptOrKeep(in.ClientSecret, keep)
+		if err != nil {
+			return nil, err
+		}
+		return &ProjectOAuthGitHub{
+			ClientID:         strings.TrimSpace(in.ClientID),
+			ClientSecretEnc:  enc,
+			AuthorizationURL: strings.TrimSpace(in.GitHubAuthorizationURL),
+			TokenURL:         strings.TrimSpace(in.GitHubTokenURL),
+			UserURL:          strings.TrimSpace(in.GitHubUserURL),
+			UserMailURL:      strings.TrimSpace(in.GitHubUserMailURL),
+		}, nil
 	case oauthProviderOIDC:
 		// The generic OIDC provider is hosted-only: it has no native-audience
 		// allow-list, so accepting native_audiences here would silently drop
@@ -364,7 +401,7 @@ func (s *ControlPlaneAdminService) buildProvider(provider string, in *ProjectOAu
 			Scopes:          strings.TrimSpace(in.OIDCScopes),
 		}, nil
 	}
-	// Unreachable: provider is normalized to one of the four keys above.
+	// Unreachable: provider is normalized to one of the five keys above.
 	return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
 }
 
@@ -390,6 +427,12 @@ func decodeProvider(provider string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return &a, nil
+	case oauthProviderGitHub:
+		var g ProjectOAuthGitHub
+		if err := json.Unmarshal(raw, &g); err != nil {
+			return nil, err
+		}
+		return &g, nil
 	case oauthProviderOIDC:
 		var o ProjectOAuthOIDC
 		if err := json.Unmarshal(raw, &o); err != nil {
@@ -411,6 +454,8 @@ func assignProvider(cfg *ProjectOAuthConfig, provider string, prov any) {
 		cfg.Microsoft = p
 	case *ProjectOAuthApple:
 		cfg.Apple = p
+	case *ProjectOAuthGitHub:
+		cfg.GitHub = p
 	case *ProjectOAuthOIDC:
 		cfg.OIDC = p
 	}
@@ -456,6 +501,13 @@ func providerView(provider string, prov any) *ProjectOAuthProviderView {
 		v.NativeAudiences = p.NativeAudiences
 		v.AppleTeamID = p.TeamID
 		v.AppleKeyID = p.KeyID
+	case *ProjectOAuthGitHub:
+		v.ClientID = p.ClientID
+		v.HasClientSecret = p.ClientSecretEnc != ""
+		v.GitHubAuthorizationURL = p.AuthorizationURL
+		v.GitHubTokenURL = p.TokenURL
+		v.GitHubUserURL = p.UserURL
+		v.GitHubUserMailURL = p.UserMailURL
 	case *ProjectOAuthOIDC:
 		v.ClientID = p.ClientID
 		v.HasClientSecret = p.ClientSecretEnc != ""
@@ -483,13 +535,13 @@ func normalizeStringList(in []string) []string {
 }
 
 // normalizeOAuthProvider lower-cases/trims a provider key and rejects any that
-// is not one of the four configurable providers.
+// is not one of the five configurable providers.
 func normalizeOAuthProvider(provider string) (string, error) {
 	switch k := strings.ToLower(strings.TrimSpace(provider)); k {
-	case oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderOIDC:
+	case oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderGitHub, oauthProviderOIDC:
 		return k, nil
 	default:
-		return "", fmt.Errorf("%w: unknown oauth provider %q (want %q, %q, %q, or %q)",
-			ErrInvalidArgument, provider, oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderOIDC)
+		return "", fmt.Errorf("%w: unknown oauth provider %q (want %q, %q, %q, %q, or %q)",
+			ErrInvalidArgument, provider, oauthProviderGoogle, oauthProviderMicrosoft, oauthProviderApple, oauthProviderGitHub, oauthProviderOIDC)
 	}
 }

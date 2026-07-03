@@ -145,6 +145,50 @@ func TestParseProjectConfig_OAuth_Present(t *testing.T) {
 	assert.True(t, cfg.OAuth.hasAny())
 }
 
+func TestParseProjectConfig_OAuth_GitHub_Present(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"oauth":{
+		"github":{"client_id":"gh","client_secret_enc":"enc-gh","token_url":"https://ghe.example/login/oauth/access_token","user_url":"https://ghe.example/user","user_mail_url":"https://ghe.example/user/emails"}
+	}}`)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.OAuth.GitHub)
+	assert.Equal(t, "gh", cfg.OAuth.GitHub.ClientID)
+	assert.Equal(t, "enc-gh", cfg.OAuth.GitHub.ClientSecretEnc)
+	assert.Equal(t, "https://ghe.example/login/oauth/access_token", cfg.OAuth.GitHub.TokenURL)
+	assert.Equal(t, "https://ghe.example/user", cfg.OAuth.GitHub.UserURL)
+	assert.Equal(t, "https://ghe.example/user/emails", cfg.OAuth.GitHub.UserMailURL)
+	assert.True(t, cfg.OAuth.hasAny())
+	// GitHub is hosted-only: it never carries a native-audience allow-list.
+	assert.Nil(t, cfg.OAuth.nativeAudiences("github"))
+}
+
+func TestParseProjectConfig_OAuth_GitHub_PartialRejected(t *testing.T) {
+	t.Parallel()
+
+	// GitHub is hosted-only, so any half-filled or empty block is a config error:
+	// there is no native-audience alternative that would make it valid.
+	for name, blob := range map[string]string{
+		"missing secret":    `{"oauth":{"github":{"client_id":"gh"}}}`,
+		"missing client_id": `{"oauth":{"github":{"client_secret_enc":"enc"}}}`,
+		"empty block":       `{"oauth":{"github":{}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseProjectConfig(blob)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "oauth.github requires")
+		})
+	}
+}
+
+func TestParseProjectConfig_OAuth_GitHub_BadURLRejected(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseProjectConfig(`{"oauth":{"github":{"client_id":"gh","client_secret_enc":"enc","user_url":"http://insecure.example/user"}}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "oauth.github.user_url")
+}
+
 func TestParseProjectConfig_OAuth_Absent(t *testing.T) {
 	t.Parallel()
 
