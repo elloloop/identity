@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -152,53 +151,17 @@ func (a *appleExchanger) Exchange(ctx context.Context, params ExchangeParams) (*
 		return nil, fmt.Errorf("%w: client credentials not configured", ErrCodeExchangeFailed)
 	}
 
+	// Apple's client_secret is a short-lived ES256 JWT the exchanger mints
+	// itself; the rest of the exchange is the shared OIDC authorization-code
+	// grant.
 	secret, err := a.clientSecret()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrCodeExchangeFailed, err)
 	}
 
-	form := url.Values{}
-	form.Set("code", params.Code)
-	form.Set("client_id", a.cfg.ClientID)
-	form.Set("client_secret", secret)
-	form.Set("redirect_uri", params.RedirectURI)
-	form.Set("grant_type", "authorization_code")
-	if params.CodeVerifier != "" {
-		form.Set("code_verifier", params.CodeVerifier)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.TokenURL, strings.NewReader(form.Encode()))
+	tr, err := oidcTokenExchange(ctx, a.client, a.cfg.TokenURL, codeExchangeForm(a.cfg.ClientID, secret, params))
 	if err != nil {
-		return nil, fmt.Errorf("%w: build request: %w", ErrCodeExchangeFailed, err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrCodeExchangeFailed, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, fmt.Errorf("%w: read body: %w", ErrCodeExchangeFailed, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: provider HTTP %d", ErrCodeExchangeFailed, resp.StatusCode)
-	}
-
-	var tr struct {
-		IDToken string `json:"id_token"`
-		Error   string `json:"error"`
-	}
-	if err := json.Unmarshal(body, &tr); err != nil {
-		return nil, fmt.Errorf("%w: parse response: %w", ErrCodeExchangeFailed, err)
-	}
-	if tr.Error != "" {
-		return nil, fmt.Errorf("%w: %s", ErrCodeExchangeFailed, tr.Error)
-	}
-	if tr.IDToken == "" {
-		return nil, fmt.Errorf("%w: provider returned no id_token", ErrCodeExchangeFailed)
+		return nil, err
 	}
 
 	claims, err := a.verifyIDToken(ctx, tr.IDToken)
@@ -248,21 +211,16 @@ type appleIDClaims struct {
 }
 
 func (a *appleExchanger) verifyIDToken(ctx context.Context, raw string) (*appleIDClaims, error) {
-	payload, err := verifyJWSWithRotation(ctx, a.jwks, raw, jwa.RS256)
+	payload, tok, err := parseVerifiedIDToken(ctx, a.jwks, raw, jwa.RS256)
 	if err != nil {
 		return nil, err
 	}
 
-	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
-	}
 	if iss := tok.Issuer(); iss != a.cfg.Issuer {
 		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, iss)
 	}
-	auds := tok.Audience()
-	if !containsString(auds, a.cfg.ClientID) {
-		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
+	if err := checkAudience(tok, a.cfg.ClientID); err != nil {
+		return nil, err
 	}
 	if err := checkTokenTimes(tok, a.cfg.Now()); err != nil {
 		return nil, err

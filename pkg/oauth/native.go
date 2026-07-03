@@ -196,13 +196,9 @@ func (v *NativeVerifier) verifyGoogle(ctx context.Context, p NativeVerifyParams)
 	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: google native login not configured", ErrIdentityVerification)
 	}
-	payload, err := verifyJWSWithRotation(ctx, v.googleJWKS, p.IDToken, jwa.RS256)
+	payload, tok, err := parseVerifiedIDToken(ctx, v.googleJWKS, p.IDToken, jwa.RS256)
 	if err != nil {
 		return nil, err
-	}
-	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
 	}
 	if !containsString(v.googleIssuers, tok.Issuer()) {
 		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, tok.Issuer())
@@ -253,13 +249,9 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, p NativeVerifyParams) 
 	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: apple native login not configured", ErrIdentityVerification)
 	}
-	payload, err := verifyJWSWithRotation(ctx, v.appleJWKS, p.IDToken, jwa.RS256)
+	payload, tok, err := parseVerifiedIDToken(ctx, v.appleJWKS, p.IDToken, jwa.RS256)
 	if err != nil {
 		return nil, err
-	}
-	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
 	}
 	if tok.Issuer() != v.appleIssuer {
 		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, tok.Issuer())
@@ -331,13 +323,9 @@ func (v *NativeVerifier) verifyMicrosoft(ctx context.Context, p NativeVerifyPara
 	if len(auds) == 0 {
 		return nil, fmt.Errorf("%w: microsoft native login not configured", ErrIdentityVerification)
 	}
-	payload, err := verifyJWSWithRotation(ctx, v.microsoftJWKS, p.IDToken, jwa.RS256)
+	payload, tok, err := parseVerifiedIDToken(ctx, v.microsoftJWKS, p.IDToken, jwa.RS256)
 	if err != nil {
 		return nil, err
-	}
-	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
 	}
 
 	var claims nativeMicrosoftClaims

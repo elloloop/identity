@@ -12,6 +12,52 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
+// parseVerifiedIDToken is the shared id_token verification CORE: it verifies
+// the compact JWS against the provider's JWKS cache (restricting the signature
+// to algs and retrying once across a key rotation), then parses the resulting
+// payload into a jwt.Token WITHOUT re-validating any standard claim. The
+// provider-specific rules — issuer (Google's dual form, Microsoft's tid-derived
+// issuer, the generic exact match), audience/azp, expiry strictness, and the
+// claim struct decoded from the returned payload — are enforced by the caller,
+// which owns those differences. Returning both the signature-verified payload
+// (for the caller's json.Unmarshal) and the parsed token keeps that ownership
+// clean. Errors already wrap ErrIdentityVerification.
+func parseVerifiedIDToken(ctx context.Context, cache *jwksCache, raw string, algs ...jwa.SignatureAlgorithm) ([]byte, jwt.Token, error) {
+	payload, err := verifyJWSWithRotation(ctx, cache, raw, algs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
+	}
+	return payload, tok, nil
+}
+
+// checkAudience enforces the OIDC rule that the id_token's `aud` contains our
+// client_id — i.e. the token was issued for THIS relying party. Defined once
+// here so the exact-match providers (Google/Microsoft/Apple, and the generic
+// OIDC provider before it layers its multi-audience azp check on top) can never
+// diverge. The native verifier deliberately does NOT use this: it matches `aud`
+// against a per-request audience SET, a different rule.
+func checkAudience(tok jwt.Token, clientID string) error {
+	if !containsString(tok.Audience(), clientID) {
+		return fmt.Errorf("%w: bad aud", ErrIdentityVerification)
+	}
+	return nil
+}
+
+// containsString reports whether needle is an exact element of haystack. Shared
+// by the audience check and the native verifier's issuer allow-list.
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
 // This file is the single home for the security-sensitive ID-token
 // verification rules shared by every provider (the hosted Exchangers —
 // Google/Apple/Microsoft/generic OIDC — and the native mobile-SDK
