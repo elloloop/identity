@@ -530,6 +530,13 @@ type RefreshTokenRecord struct {
 	// timeout is skipped until the next rotation re-anchors it.
 	SessionStartedAt int64 // epoch ms
 	ConsumedAtMs     int64 // epoch ms; 0 = unconsumed (still valid for refresh)
+	// SID links this refresh token to the access-token Session minted alongside
+	// it under GATEWAY_REVOCATION_MODE=session — it carries the same value as
+	// the access token's `sid` claim. A path that invalidates the refresh token
+	// (a session-timeout breach) uses it to revoke the still-valid access
+	// session scoped to exactly this session, not the user's others. Empty in
+	// mode=ttl and for legacy rows, where there is no session to revoke.
+	SID string
 }
 
 // PasskeyCredRecord represents a stored passkey credential.
@@ -1325,8 +1332,9 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		claims.Audience = []string{s.cfg.JWTAudience}
 	}
 
+	var sid string
 	if s.cfg.RevocationMode == config.RevocationModeSession {
-		sid := generateSessionID()
+		sid = generateSessionID()
 		if _, err := s.repo(ctx).CreateSession(ctx, &SessionRecord{
 			SID:         sid,
 			UserID:      user.ID,
@@ -1356,6 +1364,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		CreatedAt:        now,
 		LastUsedAt:       now,
 		SessionStartedAt: sessionStart,
+		SID:              sid,
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("storing refresh token: %w", err)
@@ -1422,6 +1431,24 @@ func (s *AuthService) revokeUserSessionsIfModeSession(ctx context.Context, userI
 	if err := s.repo(ctx).RevokeSessionsForUser(ctx, userID, s.nowMs()); err != nil {
 		s.logger.Warn("session_revoke_for_user_failed",
 			zap.String("user_id", userID), zap.String("reason", reason), zap.Error(err))
+	}
+}
+
+// revokeSessionIfModeSession revokes exactly the access session identified by
+// sid when the deployment runs mode=session, leaving the user's other sessions
+// untouched. It is paired with the refresh-token deletion on a session-timeout
+// breach so the still-valid access token stops working immediately rather than
+// lingering to its natural (uncapped in mode=session) expiry. sid is empty in
+// mode=ttl and for legacy rows, where there is nothing to revoke. Best-effort:
+// a failure widens the access-token validity to the middleware cache TTL, not a
+// full bypass, so it is logged rather than propagated.
+func (s *AuthService) revokeSessionIfModeSession(ctx context.Context, sid, reason string) {
+	if s.cfg.RevocationMode != config.RevocationModeSession || sid == "" {
+		return
+	}
+	if err := s.repo(ctx).RevokeSession(ctx, sid, s.nowMs()); err != nil {
+		s.logger.Warn("session_revoke_failed",
+			zap.String("reason", reason), zap.Error(err))
 	}
 }
 
@@ -1657,6 +1684,10 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	}
 	if err := s.enforceSessionTimeout(ctx, timeoutUser.Email, s.nowMs(), record.SessionStartedAt, record.LastUsedAt); err != nil {
 		_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
+		// Under mode=session the deleted refresh row is not enough: the access
+		// token minted alongside it is still valid until its natural expiry, so
+		// revoke the matching access session (scoped to this sid) too.
+		s.revokeSessionIfModeSession(ctx, record.SID, "session_timeout")
 		return nil, "", "", err
 	}
 
