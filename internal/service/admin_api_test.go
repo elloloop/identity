@@ -24,11 +24,25 @@ type fakeControlPlaneStore struct {
 	authDomains map[string]string                             // hostname → projectID (ownership, any state)
 	domainRows  map[string]map[string]*AdminProjectAuthDomain // projectID → hostname → row
 	configs     map[string]string                             // projectID → config_json
-	createErr   error
-	credErr     error
-	domainErr   error
-	nextID      int
-	lastDomain  struct {
+	// configVersions is the per-project optimistic-concurrency token the real
+	// postgres store keeps in the config_version column; the fake tracks it so it
+	// enforces the same compare-and-swap semantics the service retry loop relies
+	// on. configMu guards configs/configVersions so the concurrent-RMW tests run
+	// clean under -race.
+	configVersions map[string]int64
+	configMu       sync.Mutex
+	// forceConflict makes every UpdateProjectConfig lose its CAS, so a test can
+	// drive the retry loop to exhaustion (ErrProjectConfigConflict → Aborted).
+	forceConflict bool
+	// updateErr makes UpdateProjectConfig fail with a NON-conflict store error, so
+	// a test can prove the retry helper surfaces such an error immediately rather
+	// than retrying it.
+	updateErr  error
+	createErr  error
+	credErr    error
+	domainErr  error
+	nextID     int
+	lastDomain struct {
 		projectID    string
 		hostname     string
 		isPrimary    bool
@@ -38,11 +52,12 @@ type fakeControlPlaneStore struct {
 
 func newFakeControlPlaneStore() *fakeControlPlaneStore {
 	return &fakeControlPlaneStore{
-		projects:    map[string]*AdminProject{},
-		credentials: map[string]*AdminProjectCredential{},
-		authDomains: map[string]string{},
-		domainRows:  map[string]map[string]*AdminProjectAuthDomain{},
-		configs:     map[string]string{},
+		projects:       map[string]*AdminProject{},
+		credentials:    map[string]*AdminProjectCredential{},
+		authDomains:    map[string]string{},
+		domainRows:     map[string]map[string]*AdminProjectAuthDomain{},
+		configs:        map[string]string{},
+		configVersions: map[string]int64{},
 	}
 }
 
@@ -177,25 +192,37 @@ func (f *fakeControlPlaneStore) SetPrimaryAuthDomain(_ context.Context, projectI
 	return &cp, nil
 }
 
-func (f *fakeControlPlaneStore) UpdateProjectConfig(_ context.Context, projectID, configJSON string) (string, error) {
+func (f *fakeControlPlaneStore) UpdateProjectConfig(_ context.Context, projectID string, expectedVersion int64, configJSON string) (string, int64, error) {
+	f.configMu.Lock()
+	defer f.configMu.Unlock()
 	if _, ok := f.projects[projectID]; !ok {
-		return "", ErrNotFound
+		return "", 0, ErrNotFound
+	}
+	if f.updateErr != nil {
+		return "", 0, f.updateErr
+	}
+	if f.forceConflict || f.configVersions[projectID] != expectedVersion {
+		return "", 0, ErrProjectConfigConflict
 	}
 	if strings.TrimSpace(configJSON) == "" {
 		configJSON = "{}"
 	}
 	f.configs[projectID] = configJSON
-	return configJSON, nil
+	f.configVersions[projectID] = expectedVersion + 1
+	return configJSON, expectedVersion + 1, nil
 }
 
-func (f *fakeControlPlaneStore) GetProjectConfig(_ context.Context, projectID string) (string, error) {
+func (f *fakeControlPlaneStore) GetProjectConfig(_ context.Context, projectID string) (string, int64, error) {
+	f.configMu.Lock()
+	defer f.configMu.Unlock()
 	if _, ok := f.projects[projectID]; !ok {
-		return "", ErrNotFound
+		return "", 0, ErrNotFound
 	}
-	if cfg, ok := f.configs[projectID]; ok {
-		return cfg, nil
+	cfg, ok := f.configs[projectID]
+	if !ok {
+		cfg = "{}"
 	}
-	return "{}", nil
+	return cfg, f.configVersions[projectID], nil
 }
 
 var _ ControlPlaneProjectStore = (*fakeControlPlaneStore)(nil)

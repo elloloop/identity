@@ -54,8 +54,10 @@ func seedProjectWithGoogle(t *testing.T, h *RedesignHarness, googleClientID stri
 	}
 	cfgJSON := fmt.Sprintf(
 		`{"oauth":{"google":{"client_id":%q,"client_secret_enc":%q,"authorization_url":"https://accounts.example/authorize"}}}`,
-		googleClientID, enc)
-	if _, err := h.Stores.controlPlane.UpdateProjectConfig(ctx, projectID, cfgJSON); err != nil {
+		googleClientID, enc,
+	)
+	// A freshly-created project is at config_version 0; CAS against it.
+	if _, _, err := h.Stores.controlPlane.UpdateProjectConfig(ctx, projectID, 0, cfgJSON); err != nil {
 		t.Fatalf("UpdateProjectConfig: %v", err)
 	}
 	return credResp.Msg.GetPublicId()

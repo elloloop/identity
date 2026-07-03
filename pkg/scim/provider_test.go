@@ -276,6 +276,35 @@ func TestProvider_CreateRequiresUserName(t *testing.T) {
 	}
 }
 
+// TestProvider_ReplaceRejectsEmptyUserName asserts a PUT that omits or blanks
+// the userName is rejected with a 400 and never reaches the store, so the full
+// replace cannot strand the account by blanking its login identifier.
+func TestProvider_ReplaceRejectsEmptyUserName(t *testing.T) {
+	for _, body := range []string{
+		`{"schemas":["` + SchemaUser + `"],"active":true}`,                           // omitted
+		`{"schemas":["` + SchemaUser + `"],"userName":"","active":true}`,             // empty
+		`{"schemas":["` + SchemaUser + `"],"userName":"   ","active":true}`,          // whitespace
+		`{"schemas":["` + SchemaUser + `"],"userName":"u","emails":[{"value":" "}]}`, // blank email column
+	} {
+		st := newMemStore()
+		u, _ := st.CreateUser(context.Background(), User{UserName: "keep@example.com", Email: "keep@example.com", Active: true})
+		h := NewProvider(st).Handler()
+		rec := do(t, h, http.MethodPut, "/scim/v2/Users/"+u.ID, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("PUT %s = %d, want 400 (resp=%s)", body, rec.Code, rec.Body.String())
+		}
+		var errBody ErrorResponse
+		mustJSON(t, rec, &errBody)
+		if errBody.SCIMType != "invalidValue" {
+			t.Fatalf("PUT %s scimType = %q, want invalidValue", body, errBody.SCIMType)
+		}
+		got, _ := st.GetUser(context.Background(), u.ID)
+		if got.UserName != "keep@example.com" || got.Email != "keep@example.com" {
+			t.Fatalf("PUT %s must not strand the account: %+v", body, got)
+		}
+	}
+}
+
 func TestProvider_PatchUnsupportedAttributeRejected(t *testing.T) {
 	st := newMemStore()
 	u, _ := st.CreateUser(context.Background(), User{UserName: "x@example.com", Email: "x@example.com", Active: true})

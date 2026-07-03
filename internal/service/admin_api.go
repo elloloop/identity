@@ -137,13 +137,19 @@ type ControlPlaneProjectStore interface {
 	// project does not own surfaces ErrNotFound.
 	SetPrimaryAuthDomain(ctx context.Context, projectID, hostname string) (*AdminProjectAuthDomain, error)
 
-	// UpdateProjectConfig REPLACES a project's config_json blob and returns the
-	// stored value (normalised — an empty blob becomes "{}"). A project that
-	// does not exist surfaces ErrNotFound.
-	UpdateProjectConfig(ctx context.Context, projectID, configJSON string) (string, error)
-	// GetProjectConfig returns a project's stored config_json ("{}" when
-	// unset). A project that does not exist surfaces ErrNotFound.
-	GetProjectConfig(ctx context.Context, projectID string) (string, error)
+	// UpdateProjectConfig REPLACES a project's config_json blob only when its
+	// current config_version equals expectedVersion — an optimistic-concurrency
+	// compare-and-swap that makes the read-modify-write config path safe against
+	// concurrent admin writes. On success it returns the stored (normalised —
+	// an empty blob becomes "{}") value and the NEW version. A concurrent write
+	// that advanced the version surfaces ErrProjectConfigConflict; a project
+	// that does not exist surfaces ErrNotFound.
+	UpdateProjectConfig(ctx context.Context, projectID string, expectedVersion int64, configJSON string) (stored string, version int64, err error)
+	// GetProjectConfig returns a project's stored config_json ("{}" when unset)
+	// together with its current config_version — the CAS token a caller
+	// round-trips back into UpdateProjectConfig. A project that does not exist
+	// surfaces ErrNotFound.
+	GetProjectConfig(ctx context.Context, projectID string) (configJSON string, version int64, err error)
 }
 
 // ControlPlaneAdminService provisions control-plane resources on behalf of a
