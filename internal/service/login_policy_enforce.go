@@ -11,18 +11,10 @@ import (
 )
 
 // passwordStrengthPolicyFor returns the per-tenant password StrengthPolicy
-// for the org that owns email's domain. When no governed policy applies it
-// returns the zero StrengthPolicy, which is the global default — so callers
-// can always validate without a nil check and a tenant only ever tightens
-// the global baseline.
+// for the org that owns email's domain, binding the request's project scope to
+// the shared governance lookup.
 func (s *AuthService) passwordStrengthPolicyFor(ctx context.Context, email string) passwords.StrengthPolicy {
-	_, policy := s.resolveLoginPolicy(ctx, email)
-	if policy == nil {
-		return passwords.StrengthPolicy{}
-	}
-	return passwords.StrengthPolicy{
-		MinLength: policy.PasswordMinLength,
-	}
+	return s.governance.passwordStrengthPolicy(ctx, s.projectID(ctx), s.logger, email)
 }
 
 // enforceSessionTimeout invalidates a session whose refresh token has gone
@@ -191,23 +183,26 @@ func (s *AuthService) enforceLoginPolicy(ctx context.Context, email, method stri
 	return noop, nil
 }
 
-// resolveLoginPolicy walks the governance plane (domain → tenant → policy)
-// for the claimed tenant that owns email's domain and returns its
-// LoginPolicy, or (nil, nil) when there is no governed policy to apply.
+// resolveLoginPolicy binds the request's project scope to the shared
+// governance lookup for the claimed tenant that owns email's domain.
+func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Tenant, *LoginPolicy) {
+	return s.governance.resolvePolicy(ctx, s.projectID(ctx), s.logger, email)
+}
+
+// resolvePolicy walks the governance plane (domain → tenant → policy) for the
+// claimed tenant that owns email's domain and returns its LoginPolicy, or
+// (nil, nil) when there is no governed policy to apply.
 //
 // It is the single fail-safe lookup the method, password-strength, and
-// session-timeout enforcement all share. It fails SAFE at every step — no
-// governance bundle, no resolved project, an unverified or unknown domain, an
+// session-timeout enforcement all share — across both the auth and profile
+// services. It fails SAFE at every step: a nil bundle (a driver with no
+// governance plane), an empty project, an unverified or unknown domain, an
 // unclaimed tenant, an absent policy, or any lookup error all return
 // (nil, nil) so a caller imposes NO restriction. The tenant is returned
 // alongside the policy so callers that audit or log can name the org without
 // a second lookup.
-func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Tenant, *LoginPolicy) {
-	if s.governance == nil {
-		return nil, nil
-	}
-	projectID := s.projectID(ctx)
-	if projectID == "" {
+func (g *LoginGovernance) resolvePolicy(ctx context.Context, projectID string, logger *zap.Logger, email string) (*Tenant, *LoginPolicy) {
+	if g == nil || projectID == "" {
 		return nil, nil
 	}
 	_, domainName, ok := strings.Cut(email, "@")
@@ -215,9 +210,9 @@ func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Te
 		return nil, nil
 	}
 
-	domain, err := s.governance.Domains.GetDomainByName(ctx, projectID, domainName)
+	domain, err := g.Domains.GetDomainByName(ctx, projectID, domainName)
 	if err != nil {
-		s.logger.Warn("login_policy_domain_lookup_failed",
+		logger.Warn("login_policy_domain_lookup_failed",
 			zap.String("project_id", projectID), zap.Error(err))
 		return nil, nil
 	}
@@ -225,9 +220,9 @@ func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Te
 		return nil, nil
 	}
 
-	tenant, err := s.governance.Tenants.GetTenant(ctx, projectID, domain.TenantID)
+	tenant, err := g.Tenants.GetTenant(ctx, projectID, domain.TenantID)
 	if err != nil {
-		s.logger.Warn("login_policy_tenant_lookup_failed",
+		logger.Warn("login_policy_tenant_lookup_failed",
 			zap.String("project_id", projectID), zap.String("tenant_id", domain.TenantID), zap.Error(err))
 		return nil, nil
 	}
@@ -235,9 +230,9 @@ func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Te
 		return nil, nil
 	}
 
-	policy, err := s.governance.Policies.GetLoginPolicy(ctx, projectID, tenant.ID)
+	policy, err := g.Policies.GetLoginPolicy(ctx, projectID, tenant.ID)
 	if err != nil {
-		s.logger.Warn("login_policy_lookup_failed",
+		logger.Warn("login_policy_lookup_failed",
 			zap.String("project_id", projectID), zap.String("tenant_id", tenant.ID), zap.Error(err))
 		return nil, nil
 	}
@@ -245,6 +240,29 @@ func (s *AuthService) resolveLoginPolicy(ctx context.Context, email string) (*Te
 		return nil, nil
 	}
 	return tenant, policy
+}
+
+// passwordStrengthPolicy returns the per-tenant password StrengthPolicy for the
+// org that owns email's domain. When no governed policy applies it returns the
+// zero StrengthPolicy, which is the global default — so callers can always
+// validate without a nil check and a tenant only ever tightens the global
+// baseline.
+func (g *LoginGovernance) passwordStrengthPolicy(ctx context.Context, projectID string, logger *zap.Logger, email string) passwords.StrengthPolicy {
+	_, policy := g.resolvePolicy(ctx, projectID, logger, email)
+	if policy == nil {
+		return passwords.StrengthPolicy{}
+	}
+	return passwords.StrengthPolicy{MinLength: policy.PasswordMinLength}
+}
+
+// validatePasswordStrength checks pw against the per-tenant password policy for
+// the org that owns email's domain, falling back to the global rules when no
+// governed policy applies. It is shared by every credential-setting path —
+// signup, reset, passwordless, and the profile password change — so an org's
+// tightened complexity rules are enforced for its members on all of them.
+func (g *LoginGovernance) validatePasswordStrength(ctx context.Context, projectID string, logger *zap.Logger, email, pw string) error {
+	policy := g.passwordStrengthPolicy(ctx, projectID, logger, email)
+	return passwordIssuesToErr(passwords.ValidateStrengthWithPolicy(pw, policy))
 }
 
 // effectiveLoginPolicy resolves the login-method controls that govern email's

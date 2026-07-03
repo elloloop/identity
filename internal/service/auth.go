@@ -1525,13 +1525,10 @@ func validatePasswordStrength(pw string) error {
 }
 
 // validatePasswordStrengthForEmail checks password requirements against the
-// per-tenant policy for the org that owns email's domain, falling back to the
-// global rules when no governed policy applies. Use this on any path where
-// the subject's email is known (signup, password reset, password change) so
-// an org's tightened complexity rules are enforced for its members only.
+// per-tenant policy for the org that owns email's domain, binding the request's
+// project scope to the shared governance validation.
 func (s *AuthService) validatePasswordStrengthForEmail(ctx context.Context, email, pw string) error {
-	policy := s.passwordStrengthPolicyFor(ctx, email)
-	return passwordIssuesToErr(passwords.ValidateStrengthWithPolicy(pw, policy))
+	return s.governance.validatePasswordStrength(ctx, s.projectID(ctx), s.logger, email, pw)
 }
 
 func passwordIssuesToErr(issues []string) error {
