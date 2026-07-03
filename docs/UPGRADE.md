@@ -160,6 +160,17 @@ keep:
 3. Set v1.0 config (drop the removed `mode` vars; the default project id and
    storage scope default to `default` / `local`).
 4. Start the service.
+5. **Before opening the service to public traffic, bootstrap the first platform
+   admin.** `CreateFirstPlatformAdmin` is a one-time, trust-on-first-use RPC
+   that stays open only while `platform_admins` is empty, so a fresh,
+   internet-exposed deployment has a window in which an anonymous caller could
+   win the first-admin race. Create the first admin over a private network
+   first, and/or set `GATEWAY_ADMIN_API_SECRET` (which then also gates the
+   bootstrap on the `X-Admin-Secret` header) or
+   `GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true` (to close the RPC entirely — the
+   first admin is then created by a direct `platform_admins` insert, or by
+   toggling the flag off just long enough to bootstrap and back on; no
+   first-party seed CLI or migration ships for this).
 
 SQLite backends are likewise a fresh start — the SQLite schema is the v1.0
 Project-keyed shape; there is no legacy data to carry forward.

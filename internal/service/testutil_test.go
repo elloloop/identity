@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -26,10 +27,12 @@ import (
 
 // recordingAuditWriter implements audit.NodeWriter and captures the
 // audit events emitted by the service so tests can assert on them.
-// Event type lives at field "1" of the Data map (see pkg/audit/logger.go).
+// Event type lives at field "1" of the Data map, and the JSON-encoded
+// WithDetails map at field "7" (see pkg/audit/logger.go).
 type recordingAuditWriter struct {
-	mu     sync.Mutex
-	events []string
+	mu      sync.Mutex
+	events  []string
+	details []string // JSON details ("7"), index-aligned with events
 }
 
 func newRecordingAuditWriter() *recordingAuditWriter {
@@ -44,6 +47,8 @@ func (w *recordingAuditWriter) ExecuteAtomic(
 	for _, op := range ops {
 		if et, ok := op.Data["1"].(string); ok {
 			w.events = append(w.events, et)
+			detail, _ := op.Data["7"].(string)
+			w.details = append(w.details, detail)
 		}
 	}
 	return &graph.CommitResult{}, nil
@@ -55,6 +60,27 @@ func (w *recordingAuditWriter) countByEventType(eventType string) int {
 	n := 0
 	for _, et := range w.events {
 		if et == eventType {
+			n++
+		}
+	}
+	return n
+}
+
+// countByEventTypeAndDetail counts recorded events of eventType whose
+// JSON-encoded WithDetails map maps key to want (a string value).
+func (w *recordingAuditWriter) countByEventTypeAndDetail(eventType, key, want string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := 0
+	for i, et := range w.events {
+		if et != eventType {
+			continue
+		}
+		var m map[string]any
+		if json.Unmarshal([]byte(w.details[i]), &m) != nil {
+			continue
+		}
+		if v, ok := m[key].(string); ok && v == want {
 			n++
 		}
 	}

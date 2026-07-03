@@ -122,6 +122,19 @@ type Config struct {
 	// internal-only listener port bound away from the public RPC surface.
 	AdminAPISecret string
 
+	// DisableFirstAdminBootstrap closes the CreateFirstPlatformAdmin RPC — the
+	// trust-on-first-use bootstrap of the first platform admin — entirely. When
+	// true the RPC is rejected with FAILED_PRECONDITION regardless of whether any
+	// admin exists yet, for operators who prefer the public bootstrap surface
+	// shut. With it closed the first admin must be created another way: a direct
+	// insert into platform_admins, or by toggling this off just long enough to
+	// bootstrap and back on — no first-party seed CLI or migration ships for it.
+	// It does NOT gate the other admin RPCs. The default false preserves the
+	// zero-config bootstrap; note that when GATEWAY_ADMIN_API_SECRET is set the
+	// bootstrap is already secret-gated even with this off. Driven by
+	// GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP.
+	DisableFirstAdminBootstrap bool
+
 	// ProjectSecretsKey is the base64-encoded 32-byte AES-256 key that
 	// encrypts per-project secrets at rest — currently the hosted-flow OAuth
 	// provider secrets (client secrets, Apple private keys) stored in a
@@ -802,12 +815,13 @@ func Load() *Config {
 
 		RepoDriver: envStr("GATEWAY_REPO_DRIVER", "postgres"),
 
-		DefaultTenantID:           envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
-		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", DefaultProjectIDFallback),
-		AdminAPISecret:            envStr("GATEWAY_ADMIN_API_SECRET", ""),
-		ProjectSecretsKey:         envStr("GATEWAY_PROJECT_SECRETS_KEY", ""),
-		DefaultProjectAuthDomains: envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
-		RequireVerifiedAuthDomain: envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
+		DefaultTenantID:            envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
+		DefaultProjectID:           envStr("GATEWAY_DEFAULT_PROJECT_ID", DefaultProjectIDFallback),
+		AdminAPISecret:             envStr("GATEWAY_ADMIN_API_SECRET", ""),
+		DisableFirstAdminBootstrap: envBool("GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP", false),
+		ProjectSecretsKey:          envStr("GATEWAY_PROJECT_SECRETS_KEY", ""),
+		DefaultProjectAuthDomains:  envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
+		RequireVerifiedAuthDomain:  envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
 
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),
