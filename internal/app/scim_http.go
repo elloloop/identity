@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/scim"
 )
 
@@ -27,7 +30,18 @@ type scimHandler struct {
 	repo        service.Repository
 	projectID   string
 	bearerToken string
-	logger      *zap.Logger
+	// audit records the account-lifecycle audit entries a SCIM mutation
+	// produces, using the SAME audit.Logger the admin/gRPC paths write through
+	// (nil ⇒ no audit, matching the best-effort contract).
+	audit *audit.Logger
+	// publisher emits the user.* lifecycle events a SCIM mutation produces, via
+	// the SAME service.EmitUserEvent construction site the admin/gRPC paths use
+	// (nil ⇒ the no-op publisher).
+	publisher events.Publisher
+	// tenantID stamps the lifecycle event's TenantID, mirroring the admin path
+	// (Config.DefaultTenantID).
+	tenantID string
+	logger   *zap.Logger
 }
 
 // register wires the SCIM routes onto mux when enabled is true. The bearer
@@ -40,6 +54,27 @@ func (h *scimHandler) register(mux *http.ServeMux, enabled bool) {
 	mux.Handle("/scim/v2/", h.authenticate(h.scimProvider()))
 }
 
+// validateSCIMProject fails boot when GATEWAY_SCIM_PROJECT_ID does not name a
+// real, ACTIVE control-plane project, so a typo surfaces as a clear startup
+// error rather than a 500 on the first SCIM request. lookup is the driver's
+// control-plane project-by-id read; it is nil on drivers without a control
+// plane (memory), where there is nothing to verify against and the check is a
+// no-op — matching how the native-OAuth product→project validation and
+// ensureDefaultProject skip the memory driver.
+func validateSCIMProject(lookup service.NativeOAuthProjectStore, projectID string) error {
+	if lookup == nil {
+		return nil
+	}
+	proj, err := lookup.ActiveProjectByID(context.Background(), projectID)
+	if err != nil {
+		return fmt.Errorf("scim: verify GATEWAY_SCIM_PROJECT_ID %q: %w", projectID, err)
+	}
+	if proj == nil {
+		return fmt.Errorf("scim: GATEWAY_SCIM_PROJECT_ID %q does not name an active project", projectID)
+	}
+	return nil
+}
+
 // scimProvider builds the scim.Provider over the repository bound to the single
 // configured project. The binding is fixed (it does NOT read the request's
 // resolved project), so the deployment-wide bearer token is constrained to that
@@ -47,12 +82,27 @@ func (h *scimHandler) register(mux *http.ServeMux, enabled bool) {
 // built once and reused: every SCIM request shares the same project scope.
 func (h *scimHandler) scimProvider() http.Handler {
 	repo := service.ProjectBoundRepository(h.repo, h.projectID)
-	store := &repoSCIMStore{repo: repo}
+	store := &repoSCIMStore{
+		repo:      repo,
+		audit:     h.audit,
+		publisher: h.publisher,
+		projectID: h.projectID,
+		tenantID:  h.tenantID,
+		logger:    h.logger,
+	}
 	return scim.NewProvider(store).Handler()
 }
 
 // authenticate enforces the SCIM bearer token using a constant-time compare.
 // A missing or wrong token is a 401 with a SCIM-shaped JSON error.
+//
+// On success it pins the request to the configured project by OVERWRITING any
+// ProjectScope the upstream project-resolution middleware injected from the
+// request's Host/auth-domain. This is the same fixed binding the store's
+// repository uses, so an audit write — which resolves its project from the
+// request scope — lands under GATEWAY_SCIM_PROJECT_ID and never the
+// Host-resolved project. It is what keeps the deployment-wide bearer token
+// constrained to exactly one project across BOTH the data write and its audit.
 func (h *scimHandler) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		const prefix = "Bearer "
@@ -65,7 +115,8 @@ func (h *scimHandler) authenticate(next http.Handler) http.Handler {
 			_, _ = w.Write([]byte(`{"schemas":["urn:ietf:params:scim:api:messages:2.0:Error"],"detail":"invalid or missing bearer token","status":"401"}`))
 			return
 		}
-		next.ServeHTTP(w, r)
+		ctx := service.WithProjectScope(r.Context(), &service.ProjectScope{ProjectID: h.projectID})
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -76,14 +127,95 @@ func (h *scimHandler) authenticate(next http.Handler) http.Handler {
 // read for round-tripping. active is the inverse of the "deactivated" status;
 // deactivation also revokes sessions + refresh tokens to take effect at once,
 // matching AdminService.DeactivateUser.
+//
+// Every mutation records the SAME audit entry and emits the SAME user.*
+// lifecycle event the equivalent admin/gRPC operation does, so a SCIM offboard
+// fires the downstream-deprovisioning webhooks an admin-driven one would. The
+// event is built through the one shared site (service.EmitUserEvent), not
+// reimplemented here. audit/publisher are nil-tolerant (best-effort).
 type repoSCIMStore struct {
-	repo service.Repository
+	repo      service.Repository
+	audit     *audit.Logger
+	publisher events.Publisher
+	projectID string
+	tenantID  string
+	logger    *zap.Logger
 }
 
 const (
 	statusActive      = "active"
 	statusDeactivated = "deactivated"
 )
+
+// scimAuditActor is the fixed actor recorded on a SCIM-driven audit entry: the
+// SCIM surface has no user principal (its sole credential is the deployment-wide
+// bearer token), so the acting identity is the SCIM system. scimAuditSource tags
+// the entry's details so the audit trail distinguishes SCIM-driven lifecycle
+// changes from admin/gRPC ones.
+const (
+	scimAuditActor  = "system:scim"
+	scimAuditSource = "scim"
+)
+
+// logAudit records a best-effort SCIM audit entry, mirroring the admin path's
+// audit.Logger.Log call shape. A nil logger is a no-op.
+func (s *repoSCIMStore) logAudit(ctx context.Context, event audit.EventType, targetID string, details map[string]any) {
+	if s.audit == nil {
+		return
+	}
+	opts := []audit.Option{
+		audit.WithActor(scimAuditActor),
+		audit.WithTarget(targetID),
+		audit.WithSuccess(true),
+	}
+	if details != nil {
+		opts = append(opts, audit.WithDetails(details))
+	}
+	s.audit.Log(ctx, event, opts...)
+}
+
+// emitLifecycle publishes one user.* lifecycle event through the shared
+// construction site. A nil publisher is a no-op.
+func (s *repoSCIMStore) emitLifecycle(ctx context.Context, t events.EventType, u *service.User) {
+	service.EmitUserEvent(ctx, s.publisher, s.logger, s.projectID, s.tenantID, t, u)
+}
+
+// emitUserChange records the audit entry + lifecycle event for a PUT/PATCH,
+// mirroring AdminService's UNCONDITIONAL-on-target-state behavior so the
+// deprovisioning signal is never lost:
+//
+//   - deactivating (the request set active:false) → user_deactivated audit +
+//     user.deactivated event, emitted REGARDLESS of the pre-write state. This
+//     is the fix for the retry-after-partial-failure hole: if the status write
+//     committed but revocation failed on a prior attempt, the row is already
+//     "deactivated", yet a retry — whose request still sets active:false — must
+//     re-emit user.deactivated (a transition-gated check would misclassify it
+//     as a no-op profile update and permanently drop the deprovision signal).
+//   - reactivating (the request set active:true on a previously-deactivated
+//     account) → user_reactivated audit + user.updated event.
+//   - any other change → user.updated event only (matching
+//     AdminService.UpdateUser, which records no audit entry).
+//
+// deactivating/reactivating are derived from the REQUESTED target state by the
+// caller, not from the observed transition.
+func (s *repoSCIMStore) emitUserChange(ctx context.Context, deactivating, reactivating bool, updated *service.User) {
+	switch {
+	case deactivating:
+		s.logAudit(ctx, audit.EventUserDeactivated, updated.ID, map[string]any{"source": scimAuditSource})
+		s.emitLifecycle(ctx, events.EventUserDeactivated, updated)
+	case reactivating:
+		s.logAudit(ctx, audit.EventUserReactivated, updated.ID, map[string]any{"source": scimAuditSource})
+		s.emitLifecycle(ctx, events.EventUserUpdated, updated)
+	default:
+		s.emitLifecycle(ctx, events.EventUserUpdated, updated)
+	}
+}
+
+// isActiveStatus reports whether a host status string is an active (non-
+// deactivated) account, the inverse of the "deactivated" sentinel.
+func isActiveStatus(status string) bool {
+	return !strings.EqualFold(status, statusDeactivated)
+}
 
 func (s *repoSCIMStore) CreateUser(ctx context.Context, u scim.User) (scim.User, error) {
 	status := statusActive
@@ -102,6 +234,13 @@ func (s *repoSCIMStore) CreateUser(ctx context.Context, u scim.User) (scim.User,
 		return scim.User{}, mapStoreErr(err)
 	}
 	su.ID = id
+
+	// Mirror AdminService.InviteUser(createImmediately): a provisioned user
+	// records a user_invited audit entry and emits user.created so downstream
+	// SaaS can provision access.
+	s.logAudit(ctx, audit.EventUserInvited, id, map[string]any{"source": scimAuditSource, "email": su.Email})
+	s.emitLifecycle(ctx, events.EventUserCreated, su)
+
 	return toSCIMUser(su), nil
 }
 
@@ -147,7 +286,18 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 			return scim.User{}, err
 		}
 	}
-	return s.GetUser(ctx, id)
+	updated, err := s.repo.GetUser(ctx, id)
+	if err != nil {
+		return scim.User{}, mapStoreErr(err)
+	}
+	if updated == nil {
+		return scim.User{}, scim.ErrNotFound
+	}
+	// A PUT always carries the full target active state, so a false deactivates
+	// and a true on a previously-deactivated account reactivates.
+	wasActive := isActiveStatus(existing.Status)
+	s.emitUserChange(ctx, !u.Active, u.Active && !wasActive, updated)
+	return toSCIMUser(updated), nil
 }
 
 // revokeUserAccess kills a user's live sessions and refresh tokens so a
@@ -221,7 +371,22 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 			return scim.User{}, err
 		}
 	}
-	return s.GetUser(ctx, id)
+	updated, err := s.repo.GetUser(ctx, id)
+	if err != nil {
+		return scim.User{}, mapStoreErr(err)
+	}
+	if updated == nil {
+		return scim.User{}, scim.ErrNotFound
+	}
+	// The deactivation / reactivation events derive from the REQUESTED target
+	// state (patch.Active / the deactivate flag above), not the observed
+	// transition, so a retry after a partial-failure deactivation re-emits
+	// user.deactivated rather than misclassifying the already-deactivated row as
+	// a plain profile update. An absent active leaves the account state
+	// unchanged (a profile-only patch).
+	reactivating := patch.Active != nil && *patch.Active && !isActiveStatus(existing.Status)
+	s.emitUserChange(ctx, deactivate, reactivating, updated)
+	return toSCIMUser(updated), nil
 }
 
 func (s *repoSCIMStore) DeleteUser(ctx context.Context, id string) error {
@@ -235,6 +400,14 @@ func (s *repoSCIMStore) DeleteUser(ctx context.Context, id string) error {
 	if err := s.repo.DeleteUser(ctx, id); err != nil {
 		return mapStoreErr(err)
 	}
+
+	// Mirror AdminService.DeleteUser: a hard delete records a user_deleted audit
+	// entry and is a deprovisioning signal, so it emits user.deactivated for
+	// downstream access removal.
+	s.logAudit(ctx, audit.EventUserDeleted, id, map[string]any{"source": scimAuditSource})
+	existing.Status = statusDeactivated
+	s.emitLifecycle(ctx, events.EventUserDeactivated, existing)
+
 	return nil
 }
 
@@ -263,6 +436,12 @@ func (s *repoSCIMStore) ListUsers(ctx context.Context, f scim.ListFilter) ([]sci
 	if err != nil {
 		return nil, 0, mapStoreErr(err)
 	}
+	// count=0 (RFC 7644 §3.4.2.4) is a totals-only request: the provider emits
+	// zero resources, so skip the page SELECT entirely rather than fetch and
+	// discard a window.
+	if f.Count == 0 {
+		return nil, total, nil
+	}
 	page, err := s.repo.ListUsers(ctx, filter)
 	if err != nil {
 		return nil, 0, mapStoreErr(err)
@@ -283,7 +462,7 @@ func toSCIMUser(u *service.User) scim.User {
 		Email:      u.Email,
 		GivenName:  given,
 		FamilyName: family,
-		Active:     !strings.EqualFold(u.Status, statusDeactivated),
+		Active:     isActiveStatus(u.Status),
 		CreatedAt:  u.CreatedAt,
 		UpdatedAt:  u.UpdatedAt,
 	}

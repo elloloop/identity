@@ -203,7 +203,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 
 	// Best-effort: emit a user.created lifecycle event for downstream
 	// provisioning. No-op when eventing is disabled.
-	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, user)
+	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, user)
 
 	// Best-effort: fire a verification email. Failures are logged but
 	// must never fail signup itself.
@@ -927,7 +927,7 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email stri
 
 	// Best-effort: emit a user.created lifecycle event. No-op when eventing
 	// is disabled.
-	emitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, newUser)
+	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, newUser)
 
 	return newUser, true, nil
 }

@@ -154,7 +154,8 @@ func TestSCIM_CreatePatchListThroughRepo(t *testing.T) {
 // provisioning hole: the SCIM credential is bound to ONE configured project, so
 // a request that resolves (via Host/auth-domain) to a DIFFERENT project must
 // still operate on the configured project's users only — never the resolved
-// one. The handler injects no scope of its own; here we forge a foreign
+// one. The handler OVERWRITES the request scope with its own fixed project
+// (so audit + events also attribute to it); here we forge a foreign
 // ProjectScope on the request context and assert the created user lands in the
 // configured project and is absent from the forged one.
 func TestSCIM_IgnoresRequestProjectScope(t *testing.T) {
