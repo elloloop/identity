@@ -22,32 +22,43 @@ const handlerAdminSecret = "handler-operator-secret"
 // for the admin handler tests. It records the project/credential ids it mints
 // and the last auth-domain it was asked to ensure.
 type adminControlStore struct {
-	nextID     int
-	domains    map[string]*service.AdminProjectAuthDomain // hostname → row
-	configs    map[string]string                          // projectID → config_json
-	lastDomain struct {
+	nextID         int
+	domains        map[string]*service.AdminProjectAuthDomain // hostname → row
+	configs        map[string]string                          // projectID → config_json
+	configVersions map[string]int64                           // projectID → CAS token
+	lastDomain     struct {
 		projectID string
 		hostname  string
 		isPrimary bool
 	}
 }
 
-func (s *adminControlStore) UpdateProjectConfig(_ context.Context, projectID, configJSON string) (string, error) {
+func (s *adminControlStore) UpdateProjectConfig(_ context.Context, projectID string, expectedVersion int64, configJSON string) (string, int64, error) {
 	if s.configs == nil {
 		s.configs = map[string]string{}
+	}
+	if s.configVersions == nil {
+		s.configVersions = map[string]int64{}
+	}
+	if s.configVersions[projectID] != expectedVersion {
+		return "", 0, service.ErrProjectConfigConflict
 	}
 	if configJSON == "" {
 		configJSON = "{}"
 	}
 	s.configs[projectID] = configJSON
-	return configJSON, nil
+	s.configVersions[projectID] = expectedVersion + 1
+	return configJSON, expectedVersion + 1, nil
 }
 
-func (s *adminControlStore) GetProjectConfig(_ context.Context, projectID string) (string, error) {
-	if cfg, ok := s.configs[projectID]; ok {
-		return cfg, nil
+func (s *adminControlStore) GetProjectConfig(_ context.Context, projectID string) (string, int64, error) {
+	if s.configVersions == nil {
+		s.configVersions = map[string]int64{}
 	}
-	return "{}", nil
+	if cfg, ok := s.configs[projectID]; ok {
+		return cfg, s.configVersions[projectID], nil
+	}
+	return "{}", s.configVersions[projectID], nil
 }
 
 // adminLoginPolicyStore is an in-memory LoginPolicyStore for the handler

@@ -117,36 +117,42 @@ func (s *ControlPlaneAdminService) AdminSetProjectOAuthProvider(ctx context.Cont
 		return nil, err
 	}
 
-	top, oauthSub, err := s.loadOAuthSubtree(ctx, projectID)
-	if err != nil {
+	// The whole merge runs inside the optimistic-concurrency helper so a
+	// concurrent write to a SIBLING provider can no longer clobber this one: on a
+	// version conflict the helper re-reads fresh state and replays the merge.
+	var view *ProjectOAuthProviderView
+	if _, err := s.mutateProjectConfig(ctx, projectID, func(current string) (string, error) {
+		top, oauthSub, err := decodeOAuthSubtree(current)
+		if err != nil {
+			return "", err
+		}
+		// Build the typed provider (encrypting any new secret, keeping the stored
+		// one when the input secret is empty) and validate ONLY this provider.
+		prov, err := s.buildProvider(provider, in, oauthSub[provider])
+		if err != nil {
+			return "", err
+		}
+		single := ProjectOAuthConfig{}
+		assignProvider(&single, provider, prov)
+		if err := single.validate(); err != nil {
+			return "", fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+		}
+		raw, err := json.Marshal(prov)
+		if err != nil {
+			return "", fmt.Errorf("marshal oauth provider: %w", err)
+		}
+		oauthSub[provider] = raw
+		view = providerView(provider, prov)
+		return encodeOAuthSubtree(top, oauthSub)
+	}); err != nil {
 		return nil, err
 	}
 
-	// Build the typed provider (encrypting any new secret, keeping the stored
-	// one when the input secret is empty) and validate ONLY this provider.
-	prov, err := s.buildProvider(provider, in, oauthSub[provider])
-	if err != nil {
-		return nil, err
-	}
-	single := ProjectOAuthConfig{}
-	assignProvider(&single, provider, prov)
-	if err := single.validate(); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
-	}
-
-	raw, err := json.Marshal(prov)
-	if err != nil {
-		return nil, fmt.Errorf("marshal oauth provider: %w", err)
-	}
-	oauthSub[provider] = raw
-	if err := s.storeOAuthSubtree(ctx, projectID, top, oauthSub); err != nil {
-		return nil, err
-	}
 	s.audit.Log(ctx, audit.EventProjectOAuthProviderSet, audit.WithSuccess(true), audit.WithDetails(map[string]any{
 		"project_id": projectID,
 		"provider":   provider,
 	}))
-	return providerView(provider, prov), nil
+	return view, nil
 }
 
 // AdminDeleteProjectOAuthProvider removes one provider block from a project's
@@ -168,12 +174,14 @@ func (s *ControlPlaneAdminService) AdminDeleteProjectOAuthProvider(ctx context.C
 		return err
 	}
 
-	top, oauthSub, err := s.loadOAuthSubtree(ctx, projectID)
-	if err != nil {
-		return err
-	}
-	delete(oauthSub, provider)
-	if err := s.storeOAuthSubtree(ctx, projectID, top, oauthSub); err != nil {
+	if _, err := s.mutateProjectConfig(ctx, projectID, func(current string) (string, error) {
+		top, oauthSub, err := decodeOAuthSubtree(current)
+		if err != nil {
+			return "", err
+		}
+		delete(oauthSub, provider)
+		return encodeOAuthSubtree(top, oauthSub)
+	}); err != nil {
 		return err
 	}
 	s.audit.Log(ctx, audit.EventProjectOAuthProviderRemoved, audit.WithSuccess(true), audit.WithDetails(map[string]any{
@@ -196,7 +204,11 @@ func (s *ControlPlaneAdminService) AdminListProjectOAuthProviders(ctx context.Co
 	if projectID == "" {
 		return nil, fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
 	}
-	_, oauthSub, err := s.loadOAuthSubtree(ctx, projectID)
+	stored, _, err := s.projects.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	_, oauthSub, err := decodeOAuthSubtree(stored)
 	if err != nil {
 		return nil, err
 	}
@@ -215,16 +227,12 @@ func (s *ControlPlaneAdminService) AdminListProjectOAuthProviders(ctx context.Co
 	return out, nil
 }
 
-// loadOAuthSubtree reads a project's config_json and decodes both the top-level
-// object and its "oauth" subtree into raw-message maps, so every untouched key
-// round-trips byte-for-byte. An unknown project surfaces ErrNotFound from the
-// store; a stored blob that is not a JSON object, or whose "oauth" value is not
-// an object, is an ErrInvalidArgument.
-func (s *ControlPlaneAdminService) loadOAuthSubtree(ctx context.Context, projectID string) (top, oauthSub map[string]json.RawMessage, err error) {
-	stored, err := s.projects.GetProjectConfig(ctx, projectID)
-	if err != nil {
-		return nil, nil, err
-	}
+// decodeOAuthSubtree decodes a stored config_json blob into its top-level object
+// and its "oauth" subtree as raw-message maps, so every untouched key round-trips
+// byte-for-byte. A blob that is not a JSON object, or whose "oauth" value is not
+// an object, is an ErrInvalidArgument. It is pure — the read-modify-write helper
+// owns the store I/O — so it can be replayed on a CAS retry.
+func decodeOAuthSubtree(stored string) (top, oauthSub map[string]json.RawMessage, err error) {
 	top = map[string]json.RawMessage{}
 	if strings.TrimSpace(stored) != "" {
 		if err := json.Unmarshal([]byte(stored), &top); err != nil {
@@ -240,16 +248,16 @@ func (s *ControlPlaneAdminService) loadOAuthSubtree(ctx context.Context, project
 	return top, oauthSub, nil
 }
 
-// storeOAuthSubtree re-marshals the merged oauth subtree back into the top-level
-// map (dropping the "oauth" key entirely when no key remains, so a project with
-// no providers is not left with a dangling empty object) and persists it.
-// RawMessage values are emitted verbatim, so untouched providers and unknown
-// keys are byte-preserved.
-func (s *ControlPlaneAdminService) storeOAuthSubtree(ctx context.Context, projectID string, top, oauthSub map[string]json.RawMessage) error {
+// encodeOAuthSubtree re-marshals the merged oauth subtree back into the
+// top-level map (dropping the "oauth" key entirely when no key remains, so a
+// project with no providers is not left with a dangling empty object) and
+// returns the serialized blob. RawMessage values are emitted verbatim, so
+// untouched providers and unknown keys are byte-preserved.
+func encodeOAuthSubtree(top, oauthSub map[string]json.RawMessage) (string, error) {
 	if len(oauthSub) > 0 {
 		raw, err := json.Marshal(oauthSub)
 		if err != nil {
-			return fmt.Errorf("marshal oauth config: %w", err)
+			return "", fmt.Errorf("marshal oauth config: %w", err)
 		}
 		top["oauth"] = raw
 	} else {
@@ -257,10 +265,9 @@ func (s *ControlPlaneAdminService) storeOAuthSubtree(ctx context.Context, projec
 	}
 	final, err := json.Marshal(top)
 	if err != nil {
-		return fmt.Errorf("marshal project config: %w", err)
+		return "", fmt.Errorf("marshal project config: %w", err)
 	}
-	_, err = s.projects.UpdateProjectConfig(ctx, projectID, string(final))
-	return err
+	return string(final), nil
 }
 
 // buildProvider builds the typed provider sub-struct from the input, encrypting

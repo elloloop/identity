@@ -933,6 +933,15 @@ var (
 	// precondition (not an authorization failure), mapped to
 	// CodeFailedPrecondition.
 	ErrLastCredential = errors.New("cannot remove the last sign-in credential")
+	// ErrProjectConfigConflict is returned by the control-plane project store
+	// when an optimistic-concurrency config_json write loses its version
+	// compare-and-swap — a concurrent writer advanced the row's config_version
+	// between the read and the write. The service retries the read-modify-write a
+	// bounded number of times, so a caller only observes it when retries are
+	// exhausted under sustained contention. The Connect layer maps it to
+	// CodeAborted — gRPC's documented, retryable code for a concurrency/sequencer
+	// conflict.
+	ErrProjectConfigConflict = errors.New("project config write conflicted with a concurrent update")
 )
 
 // ── AuthService ────────────────────────────────────────────────────────

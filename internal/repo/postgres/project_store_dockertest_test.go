@@ -123,6 +123,17 @@ func TestProjectConfig_Container(t *testing.T) {
 	runProjectConfigSmoke(t, dsn)
 }
 
+// TestProjectConfigCAS_Container runs the concurrent config_json CAS regression
+// body (issue #313 — two writers, no lost update) against a throwaway Postgres
+// container.
+func TestProjectConfigCAS_Container(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	dsn := startPostgresContainer(ctx, t)
+	runProjectConfigCASConcurrency(t, dsn)
+}
+
 // TestMembershipStore_Container runs the membership + invitation store body
 // against a throwaway Postgres container.
 func TestMembershipStore_Container(t *testing.T) {
