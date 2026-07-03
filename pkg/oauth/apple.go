@@ -278,7 +278,7 @@ func (a *appleExchanger) verifyIDToken(ctx context.Context, raw string) (*appleI
 	if claims.Email == "" {
 		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
 	}
-	if !appleEmailVerified(claims.EmailVerified) {
+	if !claimIsTrue(claims.EmailVerified) {
 		return nil, fmt.Errorf("%w: email not verified: %s", ErrEmailNotVerified, claims.Email)
 	}
 

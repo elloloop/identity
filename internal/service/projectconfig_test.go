@@ -227,6 +227,32 @@ func TestParseProjectConfig_OAuth_NativeAudiences_Absent(t *testing.T) {
 	assert.Nil(t, cfg.OAuth.nativeAudiences("microsoft")) // provider absent entirely
 }
 
+func TestParseProjectConfig_OAuth_MicrosoftAllowedTenants_Present(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"oauth":{
+		"microsoft":{"client_id":"m","client_secret_enc":"enc-m","allowed_tenants":["11111111-1111-1111-1111-111111111111","contoso.onmicrosoft.com"]}
+	}}`)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.OAuth.Microsoft)
+	assert.Equal(t,
+		[]string{"11111111-1111-1111-1111-111111111111", "contoso.onmicrosoft.com"},
+		cfg.OAuth.Microsoft.AllowedTenants)
+}
+
+func TestParseProjectConfig_OAuth_MicrosoftAllowedTenants_Invalid(t *testing.T) {
+	t.Parallel()
+
+	// A tenant entry that is neither a GUID nor a domain (here it embeds a space)
+	// is a config error: it would silently never match any token's `tid`.
+	for _, bad := range []string{"not a tenant", "has space", "-", ""} {
+		blob := `{"oauth":{"microsoft":{"client_id":"m","client_secret_enc":"enc-m","allowed_tenants":["` + bad + `"]}}}`
+		_, err := ParseProjectConfig(blob)
+		require.Error(t, err, "entry %q must be rejected", bad)
+		assert.Contains(t, err.Error(), "allowed_tenants")
+	}
+}
+
 func TestParseProjectConfig_OAuth_NativeOnlyBlocks_Valid(t *testing.T) {
 	t.Parallel()
 

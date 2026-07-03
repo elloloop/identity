@@ -103,26 +103,42 @@ breaking, but the `*_BY_PRODUCT` vars shipped only the prior week.
 > `FailedPrecondition`. Such deployments **must set
 > `GATEWAY_NATIVE_OAUTH_ENABLED=true` explicitly.**
 
-> **Microsoft tenant pinning needs `config_json`.** The env seed
-> (`GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES`) enables Microsoft native login for
-> the **default project** but cannot pin a tenant — it is multi-tenant. To pin a
-> single tenant you must configure a `config_json` `oauth.microsoft` block
-> (`tenant_id` / `issuer_format` + `native_audiences`), which **supersedes** the
-> env seed for that project (config_json wins; the env seed is not merged in).
-
-> **🔒 Security — multi-tenant Microsoft + email-based account linking.** Native
-> (and hosted) Microsoft login defaults to **multi-tenant**: the expected issuer
-> is derived from the token's own `tid`, so **any** Azure AD tenant — including
-> an attacker-controlled one — can mint a token. Combined with email-based
-> account federation this is an nOAuth-style account-takeover vector: an attacker
-> can present a Microsoft token carrying a **victim's email** and, if that email
-> is trusted for cross-provider linking, take over the victim's account. For
-> email-based linking, **pin `tenant_id`** (single-tenant) unless you fully trust
-> every tenant that can obtain a token; do **not** trust a multi-tenant Microsoft
-> email for cross-provider account linking. This release ships parity with the
-> existing hosted provider and does not change verification behavior — deeper
-> hardening (a tenant allowlist and the `xms_edov` email-verified claim, for both
-> hosted and native) is tracked as a follow-up.
+> **🔒 Security — Microsoft nOAuth hardening (behavior change, hosted + native).**
+> Microsoft sign-in defaults to **multi-tenant**: the expected issuer is derived
+> from the token's own `tid`, so **any** Azure AD tenant — including an
+> attacker-controlled one — can mint a valid token bearing an arbitrary `email`.
+> Combined with email-based account federation this is an
+> [nOAuth](https://www.descope.com/blog/post/noauth)-class account-takeover
+> vector: an attacker presents a token carrying a **victim's email** and takes
+> over the victim's account.
+>
+> This release **closes the vector by default** — hosted (`pkg/oauth/microsoft.go`)
+> and native (`pkg/oauth/native.go`) alike. A Microsoft email is now trusted as
+> verified (the precondition for federation) **only** when **one** of:
+>
+> - the issuing tenant is **pinned** — a single-tenant `tenant_id`
+>   (`GATEWAY_MICROSOFT_TENANT_ID` for the default project, or
+>   `oauth.microsoft.tenant_id` per project), OR the token's `tid` matches a new
+>   **tenant allow-list** (`GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS`,
+>   comma-separated, for the default project; `oauth.microsoft.allowed_tenants`
+>   per project); OR
+> - the token carries **`xms_edov == true`** (Microsoft's email-domain-owner-verified
+>   claim, accepted as a JSON bool or the string `"true"`); OR
+> - the token carries an explicit **`verified_email == true`**.
+>
+> Otherwise the email is treated as unverified and the login is **rejected**
+> with `ErrEmailNotVerified` (surfaced as `Unauthenticated`) — matching the
+> existing Google/Apple unverified-email handling, so **no** silent merge into an
+> existing account is possible. Pinning a tenant also now **enforces** `tid`
+> equality during verification (previously `tenant_id` only chose the authorize
+> endpoint), so a single-tenant deployment rejects other tenants' tokens.
+>
+> **Action required for multi-tenant Microsoft deployments:** if you relied on
+> blindly-trusted multi-tenant Microsoft email, pin your tenant(s) via
+> `tenant_id` / `allowed_tenants` (env or `config_json`), or ensure your tokens
+> carry `xms_edov` — otherwise those logins will now be rejected. A meta value
+> (`common` / `organizations` / `consumers`) is **not** a tenant pin; it keeps
+> the multi-tenant default (so `xms_edov` becomes required).
 
 ### Schema migrations involved
 

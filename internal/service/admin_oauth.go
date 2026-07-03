@@ -58,8 +58,9 @@ type ProjectOAuthProviderInput struct {
 	GoogleJWKSURL          string
 	GoogleIssuer           string
 
-	MicrosoftTenantID     string
-	MicrosoftIssuerFormat string
+	MicrosoftTenantID       string
+	MicrosoftIssuerFormat   string
+	MicrosoftAllowedTenants []string
 
 	AppleTeamID     string
 	AppleKeyID      string
@@ -84,8 +85,9 @@ type ProjectOAuthProviderView struct {
 	GoogleJWKSURL          string
 	GoogleIssuer           string
 
-	MicrosoftTenantID     string
-	MicrosoftIssuerFormat string
+	MicrosoftTenantID       string
+	MicrosoftIssuerFormat   string
+	MicrosoftAllowedTenants []string
 
 	AppleTeamID   string
 	AppleKeyID    string
@@ -295,7 +297,7 @@ func (s *ControlPlaneAdminService) buildProvider(provider string, in *ProjectOAu
 			TokenURL:         strings.TrimSpace(in.GoogleTokenURL),
 			JWKSURL:          strings.TrimSpace(in.GoogleJWKSURL),
 			Issuer:           strings.TrimSpace(in.GoogleIssuer),
-			NativeAudiences:  normalizeAudiences(in.NativeAudiences),
+			NativeAudiences:  normalizeStringList(in.NativeAudiences),
 		}, nil
 	case oauthProviderMicrosoft:
 		keep := ""
@@ -314,7 +316,8 @@ func (s *ControlPlaneAdminService) buildProvider(provider string, in *ProjectOAu
 			ClientSecretEnc: enc,
 			TenantID:        strings.TrimSpace(in.MicrosoftTenantID),
 			IssuerFormat:    strings.TrimSpace(in.MicrosoftIssuerFormat),
-			NativeAudiences: normalizeAudiences(in.NativeAudiences),
+			AllowedTenants:  normalizeStringList(in.MicrosoftAllowedTenants),
+			NativeAudiences: normalizeStringList(in.NativeAudiences),
 		}, nil
 	case oauthProviderApple:
 		keep := ""
@@ -333,13 +336,13 @@ func (s *ControlPlaneAdminService) buildProvider(provider string, in *ProjectOAu
 			TeamID:          strings.TrimSpace(in.AppleTeamID),
 			KeyID:           strings.TrimSpace(in.AppleKeyID),
 			PrivateKeyEnc:   enc,
-			NativeAudiences: normalizeAudiences(in.NativeAudiences),
+			NativeAudiences: normalizeStringList(in.NativeAudiences),
 		}, nil
 	case oauthProviderOIDC:
 		// The generic OIDC provider is hosted-only: it has no native-audience
 		// allow-list, so accepting native_audiences here would silently drop
 		// them. Reject rather than discard operator intent without signal.
-		if len(normalizeAudiences(in.NativeAudiences)) > 0 {
+		if len(normalizeStringList(in.NativeAudiences)) > 0 {
 			return nil, fmt.Errorf("%w: oauth.oidc does not support native_audiences; native login supports google, apple, microsoft", ErrInvalidArgument)
 		}
 		keep := ""
@@ -446,6 +449,7 @@ func providerView(provider string, prov any) *ProjectOAuthProviderView {
 		v.NativeAudiences = p.NativeAudiences
 		v.MicrosoftTenantID = p.TenantID
 		v.MicrosoftIssuerFormat = p.IssuerFormat
+		v.MicrosoftAllowedTenants = p.AllowedTenants
 	case *ProjectOAuthApple:
 		v.ClientID = p.ClientID
 		v.HasPrivateKey = p.PrivateKeyEnc != ""
@@ -462,9 +466,10 @@ func providerView(provider string, prov any) *ProjectOAuthProviderView {
 	return v
 }
 
-// normalizeAudiences trims each native-audience entry and drops the empties,
-// returning nil when nothing remains (so an all-blank list is stored as absent).
-func normalizeAudiences(in []string) []string {
+// normalizeStringList trims each entry and drops the empties, returning nil when
+// nothing remains (so an all-blank list is stored as absent). Shared by the
+// native-audience and Microsoft allowed-tenant authoring paths.
+func normalizeStringList(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, a := range in {
 		if a = strings.TrimSpace(a); a != "" {

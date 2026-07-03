@@ -287,12 +287,30 @@ func (s *AuthService) nativeVerifyParams(scope *ProjectScope, provider string, p
 		Audiences: s.nativeAudiences(scope, provider),
 	}
 	if provider == "microsoft" {
-		if m := scope.OAuth.Microsoft; m != nil {
-			vp.MicrosoftTenantID = m.TenantID
-			vp.MicrosoftIssuerFormat = m.IssuerFormat
-		}
+		tenantID, allowed, issuerFormat := s.microsoftTenantPinning(scope)
+		vp.MicrosoftTenantID = tenantID
+		vp.MicrosoftAllowedTenants = allowed
+		vp.MicrosoftIssuerFormat = issuerFormat
 	}
 	return vp
+}
+
+// microsoftTenantPinning resolves the Microsoft tenant-pinning inputs for the
+// resolved project, mirroring nativeAudiences precedence: the project's
+// config_json oauth.microsoft block wins; else, for the DEFAULT PROJECT (and a
+// control-plane-less deployment, which pins every request to it), the env seed
+// (GATEWAY_MICROSOFT_TENANT_ID / GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS). A
+// non-default project that configures Microsoft but pins no tenant stays fully
+// multi-tenant, so its Microsoft email is trusted only when the token proves
+// xms_edov — the nOAuth guard the verifier enforces.
+func (s *AuthService) microsoftTenantPinning(scope *ProjectScope) (tenantID string, allowed []string, issuerFormat string) {
+	if m := scope.OAuth.Microsoft; m != nil {
+		return m.TenantID, m.AllowedTenants, m.IssuerFormat
+	}
+	if s.cfg.IsDefaultProject(scope.ProjectID) {
+		return s.cfg.MicrosoftTenantID, s.cfg.MicrosoftAllowedTenantList(), ""
+	}
+	return "", nil, ""
 }
 
 // nativeAudiences resolves the accepted native `aud` allow-list for a provider

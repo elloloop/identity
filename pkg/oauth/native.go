@@ -88,10 +88,17 @@ type NativeVerifyParams struct {
 	// provider. Empty means the provider is not configured for the project, so
 	// the token is rejected.
 	Audiences []string
-	// MicrosoftTenantID, when set, pins the accepted tenant: the token's `tid`
-	// must equal it. Empty keeps the multi-tenant default (issuer derived from
-	// the token's own `tid`). Ignored for Google/Apple.
+	// MicrosoftTenantID, when set to a concrete directory id, pins the accepted
+	// tenant: the token's `tid` must equal it. A meta value
+	// ("common"/"organizations"/"consumers") or empty keeps the multi-tenant
+	// default (issuer derived from the token's own `tid`). Ignored for
+	// Google/Apple.
 	MicrosoftTenantID string
+	// MicrosoftAllowedTenants, when non-empty, restricts the accepted tenant to
+	// the listed directory ids — the multi-tenant counterpart to the single
+	// MicrosoftTenantID pin. A token whose `tid` is not a member is rejected.
+	// Ignored for Google/Apple.
+	MicrosoftAllowedTenants []string
 	// MicrosoftIssuerFormat overrides the issuer format string interpolated with
 	// the tenant id to derive the expected issuer. Empty uses the live Microsoft
 	// format. Ignored for Google/Apple.
@@ -293,7 +300,7 @@ func (v *NativeVerifier) verifyApple(ctx context.Context, p NativeVerifyParams) 
 	// email_verified is polymorphic (bool OR string "true") — reuse the hosted
 	// Apple flow's stance. Relay (Hide My Email) addresses arrive verified and
 	// are accepted as-is, exactly like apple.go's Exchange path.
-	if !appleEmailVerified(claims.EmailVerified) {
+	if !claimIsTrue(claims.EmailVerified) {
 		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
 	}
 	return v.buildVerification(&Identity{
@@ -340,8 +347,10 @@ func (v *NativeVerifier) verifyMicrosoft(ctx context.Context, p NativeVerifyPara
 	if claims.TID == "" {
 		return nil, fmt.Errorf("%w: missing tid", ErrIdentityVerification)
 	}
-	if p.MicrosoftTenantID != "" && claims.TID != p.MicrosoftTenantID {
-		return nil, fmt.Errorf("%w: tenant mismatch", ErrIdentityVerification)
+	pin := microsoftTenantPin{TenantID: p.MicrosoftTenantID, AllowedTenants: p.MicrosoftAllowedTenants}
+	pinned, err := pin.enforce(claims.TID)
+	if err != nil {
+		return nil, err
 	}
 	issuerFormat := p.MicrosoftIssuerFormat
 	if issuerFormat == "" {
@@ -372,6 +381,12 @@ func (v *NativeVerifier) verifyMicrosoft(ctx context.Context, p NativeVerifyPara
 		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
 	}
 	if claims.VerifiedEmail != nil && !*claims.VerifiedEmail {
+		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
+	}
+	// nOAuth guard (identical to the hosted exchanger): a multi-tenant Microsoft
+	// email is trusted only when the tenant is pinned, or xms_edov /
+	// verified_email prove it. Unproven ⇒ treat as unverified.
+	if !microsoftEmailTrusted(pinned, claims.microsoftIDClaims) {
 		return nil, fmt.Errorf("%w: provider reports email unverified", ErrEmailNotVerified)
 	}
 

@@ -286,6 +286,65 @@ func TestAdminSetProjectOAuthProvider_RejectsBadIssuerFormat(t *testing.T) {
 	}
 }
 
+// TestAdminSetProjectOAuthProvider_MicrosoftAllowedTenants_RoundTrip proves the
+// nOAuth allow-list survives the write→read authoring round-trip (input →
+// config_json → redacted view) and lands on the resolved provider config.
+func TestAdminSetProjectOAuthProvider_MicrosoftAllowedTenants_RoundTrip(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	tenants := []string{"11111111-1111-1111-1111-111111111111", "contoso.onmicrosoft.com"}
+	view, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:                oauthProviderMicrosoft,
+		ClientID:                "ms",
+		ClientSecret:            "ms-secret",
+		MicrosoftAllowedTenants: append([]string{"  "}, tenants...), // a blank entry is dropped
+	})
+	if err != nil {
+		t.Fatalf("AdminSetProjectOAuthProvider: %v", err)
+	}
+	if !equalStrings(view.MicrosoftAllowedTenants, tenants) {
+		t.Fatalf("view allowed_tenants = %v, want %v", view.MicrosoftAllowedTenants, tenants)
+	}
+
+	// The list round-trips through config_json onto the typed provider.
+	stored, err := f.projects.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig: %v", err)
+	}
+	cfg, err := ParseProjectConfig(stored)
+	if err != nil {
+		t.Fatalf("ParseProjectConfig: %v", err)
+	}
+	if cfg.OAuth.Microsoft == nil || !equalStrings(cfg.OAuth.Microsoft.AllowedTenants, tenants) {
+		t.Fatalf("stored allowed_tenants = %+v, want %v", cfg.OAuth.Microsoft, tenants)
+	}
+
+	// A malformed entry is rejected at author time.
+	if _, err := f.svc.AdminSetProjectOAuthProvider(ctx, oauthAdminSecret, projectID, &ProjectOAuthProviderInput{
+		Provider:                oauthProviderMicrosoft,
+		ClientID:                "ms",
+		ClientSecret:            "ms-secret",
+		MicrosoftAllowedTenants: []string{"not-a-tenant"},
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("malformed allowed_tenants: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestAdminSetProjectOAuthProvider_RejectsMissingRequiredFields(t *testing.T) {
 	t.Parallel()
 	f := newAdminFixture(oauthAdminSecret)

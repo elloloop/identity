@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -261,6 +262,14 @@ type Config struct {
 	MicrosoftClientSecret string
 	// MicrosoftTenantID is the Microsoft directory (tenant) id, or "common" for multi-tenant.
 	MicrosoftTenantID string
+	// MicrosoftAllowedTenants is the DEFAULT PROJECT's comma-separated allow-list
+	// of accepted Azure AD tenant ids (directory GUIDs or verified domains) for
+	// Microsoft sign-in (hosted + native). When set, a Microsoft token whose
+	// `tid` is not a member is rejected; it is the multi-tenant counterpart to
+	// the single-tenant GATEWAY_MICROSOFT_TENANT_ID pin and closes the nOAuth
+	// account-takeover vector for apps that trust several tenants. Non-default
+	// projects carry their own allow-list in config_json (oauth.microsoft.allowed_tenants).
+	MicrosoftAllowedTenants string
 	// GitHubClientID is the GitHub OAuth client ID.
 	GitHubClientID string
 	// GitHubClientSecret is the GitHub OAuth client secret.
@@ -828,23 +837,24 @@ func Load() *Config {
 		ProjectResolutionCacheTTLSeconds: envInt("GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS", 30),
 		ProjectResolutionCacheMaxEntries: envInt("GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES", 10000),
 
-		GoogleClientID:         envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", ""),
-		GoogleClientSecret:     envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", ""),
-		GoogleAuthorizationURL: envStr("GATEWAY_OAUTH_GOOGLE_AUTHORIZATION_URL", ""),
-		GoogleTokenURL:         envStr("GATEWAY_OAUTH_GOOGLE_TOKEN_URL", ""),
-		GoogleJWKSURL:          envStr("GATEWAY_OAUTH_GOOGLE_JWKS_URL", ""),
-		GoogleDiscoveryURL:     envStr("GATEWAY_OAUTH_GOOGLE_DISCOVERY_URL", ""),
-		GoogleUserinfoURL:      envStr("GATEWAY_OAUTH_GOOGLE_USERINFO_URL", ""),
-		GoogleIssuer:           envStr("GATEWAY_OAUTH_GOOGLE_ISSUER", ""),
-		MicrosoftClientID:      envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_ID", ""),
-		MicrosoftClientSecret:  envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET", ""),
-		MicrosoftTenantID:      envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
-		GitHubClientID:         envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
-		GitHubClientSecret:     envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
-		AppleClientID:          envStr("GATEWAY_OAUTH_APPLE_CLIENT_ID", ""),
-		AppleTeamID:            envStr("GATEWAY_OAUTH_APPLE_TEAM_ID", ""),
-		AppleKeyID:             envStr("GATEWAY_OAUTH_APPLE_KEY_ID", ""),
-		ApplePrivateKey:        envStr("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", ""),
+		GoogleClientID:          envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:      envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", ""),
+		GoogleAuthorizationURL:  envStr("GATEWAY_OAUTH_GOOGLE_AUTHORIZATION_URL", ""),
+		GoogleTokenURL:          envStr("GATEWAY_OAUTH_GOOGLE_TOKEN_URL", ""),
+		GoogleJWKSURL:           envStr("GATEWAY_OAUTH_GOOGLE_JWKS_URL", ""),
+		GoogleDiscoveryURL:      envStr("GATEWAY_OAUTH_GOOGLE_DISCOVERY_URL", ""),
+		GoogleUserinfoURL:       envStr("GATEWAY_OAUTH_GOOGLE_USERINFO_URL", ""),
+		GoogleIssuer:            envStr("GATEWAY_OAUTH_GOOGLE_ISSUER", ""),
+		MicrosoftClientID:       envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_ID", ""),
+		MicrosoftClientSecret:   envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET", ""),
+		MicrosoftTenantID:       envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
+		MicrosoftAllowedTenants: envStr("GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS", ""),
+		GitHubClientID:          envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:      envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
+		AppleClientID:           envStr("GATEWAY_OAUTH_APPLE_CLIENT_ID", ""),
+		AppleTeamID:             envStr("GATEWAY_OAUTH_APPLE_TEAM_ID", ""),
+		AppleKeyID:              envStr("GATEWAY_OAUTH_APPLE_KEY_ID", ""),
+		ApplePrivateKey:         envStr("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", ""),
 
 		OIDCEnabled: envBool("GATEWAY_OAUTH_OIDC_ENABLED", false),
 		// Normalize the provider key at the source so it matches the
@@ -1097,6 +1107,37 @@ func (c *Config) NativeOAuthMicrosoftAudienceList() []string {
 	return splitTrimCSV(c.NativeOAuthMicrosoftAudiences)
 }
 
+// MicrosoftAllowedTenantList returns the default-project Microsoft tenant
+// allow-list, trimmed, blanks dropped, in order. An empty config yields nil,
+// which imposes no allow-list (the single-tenant GATEWAY_MICROSOFT_TENANT_ID
+// pin, when set, still applies).
+func (c *Config) MicrosoftAllowedTenantList() []string {
+	return splitTrimCSV(c.MicrosoftAllowedTenants)
+}
+
+// microsoftTenantGUID matches an Azure AD directory id (a canonical UUID).
+var microsoftTenantGUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// microsoftTenantDomain matches a verified-domain tenant identifier
+// (e.g. "contoso.onmicrosoft.com"): one or more DNS labels then a TLD, no
+// scheme/path/whitespace.
+var microsoftTenantDomain = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$`)
+
+// ValidMicrosoftTenant reports whether entry is a plausible Azure AD tenant
+// allow-list member: a directory GUID or a verified-domain string, with no
+// surrounding or embedded whitespace. It is the single source of the "what a
+// tenant entry may look like" rule, shared by the env allow-list validation and
+// the per-project config_json validation (internal/service). A meta segment
+// ("common"/"organizations"/"consumers") is deliberately NOT valid here — those
+// denote multi-tenant and never appear as a token's `tid`, so allow-listing one
+// is a configuration mistake.
+func ValidMicrosoftTenant(entry string) bool {
+	if entry == "" || entry != strings.TrimSpace(entry) {
+		return false
+	}
+	return microsoftTenantGUID.MatchString(entry) || microsoftTenantDomain.MatchString(entry)
+}
+
 // NativeOAuthAudienceList returns the default-project native audiences for a
 // provider key ("google"/"apple"/"microsoft"), or nil for an unknown provider.
 // These are the env seed the DEFAULT PROJECT falls back to; non-default projects
@@ -1315,6 +1356,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateMicrosoftAllowedTenants(); err != nil {
+		return err
+	}
+
 	if err := c.validateProjectSecrets(); err != nil {
 		return err
 	}
@@ -1369,6 +1414,21 @@ func (c *Config) validateNativeOAuth() error {
 		if !ok || strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
 			return fmt.Errorf("config: GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS entry %q is malformed "+
 				"(want product=projectID)", raw)
+		}
+	}
+	return nil
+}
+
+// validateMicrosoftAllowedTenants rejects a malformed default-project Microsoft
+// tenant allow-list at boot: every GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS entry
+// must be a directory GUID or a verified-domain string. A typo would otherwise
+// silently never match any token's `tid`, disabling Microsoft sign-in for the
+// default project — fail loudly instead.
+func (c *Config) validateMicrosoftAllowedTenants() error {
+	for _, t := range c.MicrosoftAllowedTenantList() {
+		if !ValidMicrosoftTenant(t) {
+			return fmt.Errorf("config: GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS entry %q must be an "+
+				"Azure AD tenant GUID or a domain", t)
 		}
 	}
 	return nil
