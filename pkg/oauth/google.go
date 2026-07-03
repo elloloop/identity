@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
 // Default Google OIDC endpoints. Overridable via GoogleConfig for
@@ -101,20 +99,6 @@ func NewGoogle(cfg GoogleConfig) Exchanger {
 	}
 }
 
-// tokenResponse is the subset of a Google token response we care
-// about. We only consume `id_token`; the access_token / refresh_token
-// fields are intentionally discarded — Identity does not store
-// provider tokens for ongoing API access.
-type googleTokenResponse struct {
-	IDToken     string `json:"id_token"`
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int    `json:"expires_in"`
-	Scope       string `json:"scope"`
-	Error       string `json:"error"`
-	ErrorDesc   string `json:"error_description"`
-}
-
 func (g *googleExchanger) Exchange(ctx context.Context, params ExchangeParams) (*Identity, error) {
 	if params.Code == "" {
 		return nil, fmt.Errorf("%w: missing authorization code", ErrCodeExchangeFailed)
@@ -147,45 +131,9 @@ func (g *googleExchanger) Exchange(ctx context.Context, params ExchangeParams) (
 		g.jwks = newJWKSCache(jwksURL, g.cfg.JWKSCacheTTL, g.client)
 	}
 
-	form := url.Values{}
-	form.Set("code", params.Code)
-	form.Set("client_id", g.cfg.ClientID)
-	form.Set("client_secret", g.cfg.ClientSecret)
-	form.Set("redirect_uri", params.RedirectURI)
-	form.Set("grant_type", "authorization_code")
-	if params.CodeVerifier != "" {
-		form.Set("code_verifier", params.CodeVerifier)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL,
-		strings.NewReader(form.Encode()))
+	tr, err := oidcTokenExchange(ctx, g.client, tokenURL, codeExchangeForm(g.cfg.ClientID, g.cfg.ClientSecret, params))
 	if err != nil {
-		return nil, fmt.Errorf("%w: build request: %w", ErrCodeExchangeFailed, err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrCodeExchangeFailed, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, fmt.Errorf("%w: read body: %w", ErrCodeExchangeFailed, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: provider HTTP %d", ErrCodeExchangeFailed, resp.StatusCode)
-	}
-	var tr googleTokenResponse
-	if err := json.Unmarshal(body, &tr); err != nil {
-		return nil, fmt.Errorf("%w: parse response: %w", ErrCodeExchangeFailed, err)
-	}
-	if tr.Error != "" {
-		return nil, fmt.Errorf("%w: %s", ErrCodeExchangeFailed, tr.Error)
-	}
-	if tr.IDToken == "" {
-		return nil, fmt.Errorf("%w: provider returned no id_token", ErrCodeExchangeFailed)
+		return nil, err
 	}
 
 	claims, err := g.verifyIDToken(ctx, tr.IDToken)
@@ -272,23 +220,18 @@ type googleIDClaims struct {
 // verifyIDToken verifies the signature, issuer, audience, and
 // expiry of a Google-issued ID token, then returns its claims.
 func (g *googleExchanger) verifyIDToken(ctx context.Context, raw string) (*googleIDClaims, error) {
-	payload, err := verifyJWSWithRotation(ctx, g.jwks, raw, jwa.RS256)
+	payload, tok, err := parseVerifiedIDToken(ctx, g.jwks, raw, jwa.RS256)
 	if err != nil {
 		return nil, err
 	}
 
-	// Decode the JWT for issuer/audience/exp checks via jwx's parser
-	// (without verification — we already verified the signature).
-	tok, err := jwt.Parse(payload, jwt.WithVerify(false), jwt.WithValidate(false))
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse claims: %w", ErrIdentityVerification, err)
-	}
+	// Google stamps the issuer with or without the https:// scheme; both
+	// historical forms are accepted.
 	if iss := tok.Issuer(); iss != g.cfg.Issuer && iss != strings.TrimPrefix(g.cfg.Issuer, "https://") {
 		return nil, fmt.Errorf("%w: bad iss: %s", ErrIdentityVerification, iss)
 	}
-	auds := tok.Audience()
-	if !containsString(auds, g.cfg.ClientID) {
-		return nil, fmt.Errorf("%w: bad aud", ErrIdentityVerification)
+	if err := checkAudience(tok, g.cfg.ClientID); err != nil {
+		return nil, err
 	}
 	if err := checkTokenTimes(tok, g.cfg.Now()); err != nil {
 		return nil, err
@@ -305,13 +248,4 @@ func (g *googleExchanger) verifyIDToken(ctx context.Context, raw string) (*googl
 		return nil, fmt.Errorf("%w: missing email", ErrIdentityVerification)
 	}
 	return &claims, nil
-}
-
-func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
 }

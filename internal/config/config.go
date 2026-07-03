@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -121,6 +122,19 @@ type Config struct {
 	// work hardens this with mTLS client-certificate auth and an optional
 	// internal-only listener port bound away from the public RPC surface.
 	AdminAPISecret string
+
+	// DisableFirstAdminBootstrap closes the CreateFirstPlatformAdmin RPC — the
+	// trust-on-first-use bootstrap of the first platform admin — entirely. When
+	// true the RPC is rejected with FAILED_PRECONDITION regardless of whether any
+	// admin exists yet, for operators who prefer the public bootstrap surface
+	// shut. With it closed the first admin must be created another way: a direct
+	// insert into platform_admins, or by toggling this off just long enough to
+	// bootstrap and back on — no first-party seed CLI or migration ships for it.
+	// It does NOT gate the other admin RPCs. The default false preserves the
+	// zero-config bootstrap; note that when GATEWAY_ADMIN_API_SECRET is set the
+	// bootstrap is already secret-gated even with this off. Driven by
+	// GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP.
+	DisableFirstAdminBootstrap bool
 
 	// ProjectSecretsKey is the base64-encoded 32-byte AES-256 key that
 	// encrypts per-project secrets at rest — currently the hosted-flow OAuth
@@ -261,6 +275,14 @@ type Config struct {
 	MicrosoftClientSecret string
 	// MicrosoftTenantID is the Microsoft directory (tenant) id, or "common" for multi-tenant.
 	MicrosoftTenantID string
+	// MicrosoftAllowedTenants is the DEFAULT PROJECT's comma-separated allow-list
+	// of accepted Azure AD directory (tenant) GUIDs for Microsoft sign-in
+	// (hosted + native). When set, a Microsoft token whose `tid` is not a member
+	// is rejected; it is the multi-tenant counterpart to the single-tenant
+	// GATEWAY_MICROSOFT_TENANT_ID pin and closes the nOAuth account-takeover
+	// vector for apps that trust several tenants. Non-default projects carry
+	// their own allow-list in config_json (oauth.microsoft.allowed_tenants).
+	MicrosoftAllowedTenants string
 	// GitHubClientID is the GitHub OAuth client ID.
 	GitHubClientID string
 	// GitHubClientSecret is the GitHub OAuth client secret.
@@ -802,12 +824,13 @@ func Load() *Config {
 
 		RepoDriver: envStr("GATEWAY_REPO_DRIVER", "postgres"),
 
-		DefaultTenantID:           envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
-		DefaultProjectID:          envStr("GATEWAY_DEFAULT_PROJECT_ID", DefaultProjectIDFallback),
-		AdminAPISecret:            envStr("GATEWAY_ADMIN_API_SECRET", ""),
-		ProjectSecretsKey:         envStr("GATEWAY_PROJECT_SECRETS_KEY", ""),
-		DefaultProjectAuthDomains: envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
-		RequireVerifiedAuthDomain: envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
+		DefaultTenantID:            envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
+		DefaultProjectID:           envStr("GATEWAY_DEFAULT_PROJECT_ID", DefaultProjectIDFallback),
+		AdminAPISecret:             envStr("GATEWAY_ADMIN_API_SECRET", ""),
+		DisableFirstAdminBootstrap: envBool("GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP", false),
+		ProjectSecretsKey:          envStr("GATEWAY_PROJECT_SECRETS_KEY", ""),
+		DefaultProjectAuthDomains:  envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
+		RequireVerifiedAuthDomain:  envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
 
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),
@@ -828,23 +851,24 @@ func Load() *Config {
 		ProjectResolutionCacheTTLSeconds: envInt("GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS", 30),
 		ProjectResolutionCacheMaxEntries: envInt("GATEWAY_PROJECT_RESOLUTION_CACHE_MAX_ENTRIES", 10000),
 
-		GoogleClientID:         envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", ""),
-		GoogleClientSecret:     envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", ""),
-		GoogleAuthorizationURL: envStr("GATEWAY_OAUTH_GOOGLE_AUTHORIZATION_URL", ""),
-		GoogleTokenURL:         envStr("GATEWAY_OAUTH_GOOGLE_TOKEN_URL", ""),
-		GoogleJWKSURL:          envStr("GATEWAY_OAUTH_GOOGLE_JWKS_URL", ""),
-		GoogleDiscoveryURL:     envStr("GATEWAY_OAUTH_GOOGLE_DISCOVERY_URL", ""),
-		GoogleUserinfoURL:      envStr("GATEWAY_OAUTH_GOOGLE_USERINFO_URL", ""),
-		GoogleIssuer:           envStr("GATEWAY_OAUTH_GOOGLE_ISSUER", ""),
-		MicrosoftClientID:      envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_ID", ""),
-		MicrosoftClientSecret:  envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET", ""),
-		MicrosoftTenantID:      envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
-		GitHubClientID:         envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
-		GitHubClientSecret:     envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
-		AppleClientID:          envStr("GATEWAY_OAUTH_APPLE_CLIENT_ID", ""),
-		AppleTeamID:            envStr("GATEWAY_OAUTH_APPLE_TEAM_ID", ""),
-		AppleKeyID:             envStr("GATEWAY_OAUTH_APPLE_KEY_ID", ""),
-		ApplePrivateKey:        envStr("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", ""),
+		GoogleClientID:          envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:      envStr("GATEWAY_OAUTH_GOOGLE_CLIENT_SECRET", ""),
+		GoogleAuthorizationURL:  envStr("GATEWAY_OAUTH_GOOGLE_AUTHORIZATION_URL", ""),
+		GoogleTokenURL:          envStr("GATEWAY_OAUTH_GOOGLE_TOKEN_URL", ""),
+		GoogleJWKSURL:           envStr("GATEWAY_OAUTH_GOOGLE_JWKS_URL", ""),
+		GoogleDiscoveryURL:      envStr("GATEWAY_OAUTH_GOOGLE_DISCOVERY_URL", ""),
+		GoogleUserinfoURL:       envStr("GATEWAY_OAUTH_GOOGLE_USERINFO_URL", ""),
+		GoogleIssuer:            envStr("GATEWAY_OAUTH_GOOGLE_ISSUER", ""),
+		MicrosoftClientID:       envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_ID", ""),
+		MicrosoftClientSecret:   envStr("GATEWAY_OAUTH_MICROSOFT_CLIENT_SECRET", ""),
+		MicrosoftTenantID:       envStr("GATEWAY_MICROSOFT_TENANT_ID", ""),
+		MicrosoftAllowedTenants: envStr("GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS", ""),
+		GitHubClientID:          envStr("GATEWAY_OAUTH_GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:      envStr("GATEWAY_OAUTH_GITHUB_CLIENT_SECRET", ""),
+		AppleClientID:           envStr("GATEWAY_OAUTH_APPLE_CLIENT_ID", ""),
+		AppleTeamID:             envStr("GATEWAY_OAUTH_APPLE_TEAM_ID", ""),
+		AppleKeyID:              envStr("GATEWAY_OAUTH_APPLE_KEY_ID", ""),
+		ApplePrivateKey:         envStr("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", ""),
 
 		OIDCEnabled: envBool("GATEWAY_OAUTH_OIDC_ENABLED", false),
 		// Normalize the provider key at the source so it matches the
@@ -1097,6 +1121,55 @@ func (c *Config) NativeOAuthMicrosoftAudienceList() []string {
 	return splitTrimCSV(c.NativeOAuthMicrosoftAudiences)
 }
 
+// MicrosoftAllowedTenantList returns the default-project Microsoft tenant
+// allow-list, trimmed, blanks dropped, in order. An empty config yields nil,
+// which imposes no allow-list (the single-tenant GATEWAY_MICROSOFT_TENANT_ID
+// pin, when set, still applies).
+func (c *Config) MicrosoftAllowedTenantList() []string {
+	return splitTrimCSV(c.MicrosoftAllowedTenants)
+}
+
+// microsoftTenantGUID matches an Azure AD directory (tenant) id — a canonical
+// UUID. Azure ALWAYS stamps the token's `tid` as this GUID form, so it is the
+// only value a tenant allow-list entry can ever match against.
+var microsoftTenantGUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// ValidMicrosoftTenant reports whether entry is a usable Azure AD tenant
+// allow-list member: a directory (tenant) GUID, with no surrounding or embedded
+// whitespace. It is the single source of the "what a tenant entry may look
+// like" rule, shared by the env allow-list validation and the per-project
+// config_json validation (internal/service). A verified-domain string is
+// deliberately NOT valid — the token's `tid` is always a GUID, so a domain-form
+// entry could never match and would silently reject every login; it is rejected
+// at config time instead. A meta segment ("common"/"organizations"/"consumers")
+// is likewise invalid — those denote multi-tenant and never appear as a `tid`.
+func ValidMicrosoftTenant(entry string) bool {
+	return microsoftTenantGUID.MatchString(entry)
+}
+
+// microsoftMetaTenants are the Azure AD "meta" tenant segments that denote a
+// MULTI-tenant configuration (no single-directory pin). They are legal
+// tenant_id pin values (interpreted as "no pin") but never legal allow-list
+// entries. This mirrors the same set in pkg/oauth — Microsoft's fixed
+// vocabulary, small and stable enough to state in both places rather than
+// couple the packages.
+var microsoftMetaTenants = map[string]bool{"common": true, "organizations": true, "consumers": true}
+
+// ValidMicrosoftTenantPin reports whether entry is a valid single-tenant pin
+// value for GATEWAY_MICROSOFT_TENANT_ID / oauth.microsoft.tenant_id: empty (no
+// pin), a meta segment (common/organizations/consumers — multi-tenant, treated
+// as no pin), or a directory (tenant) GUID. A verified-domain string (or any
+// other non-GUID, non-meta value) is INVALID: the runtime guard requires
+// tid == tenant_id and the token's `tid` is always a GUID, so a domain-form pin
+// would reject every Microsoft login. Rejecting it at config time turns that
+// silent 100% outage into a clear boot/write error.
+func ValidMicrosoftTenantPin(entry string) bool {
+	if entry == "" || microsoftMetaTenants[strings.ToLower(entry)] {
+		return true
+	}
+	return microsoftTenantGUID.MatchString(entry)
+}
+
 // NativeOAuthAudienceList returns the default-project native audiences for a
 // provider key ("google"/"apple"/"microsoft"), or nil for an unknown provider.
 // These are the env seed the DEFAULT PROJECT falls back to; non-default projects
@@ -1315,6 +1388,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateMicrosoftTenants(); err != nil {
+		return err
+	}
+
 	if err := c.validateProjectSecrets(); err != nil {
 		return err
 	}
@@ -1369,6 +1446,31 @@ func (c *Config) validateNativeOAuth() error {
 		if !ok || strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
 			return fmt.Errorf("config: GATEWAY_NATIVE_OAUTH_PRODUCT_PROJECTS entry %q is malformed "+
 				"(want product=projectID)", raw)
+		}
+	}
+	return nil
+}
+
+// validateMicrosoftTenants rejects a malformed default-project Microsoft tenant
+// pin at boot. The token's `tid` is always a directory GUID and the runtime
+// guard compares against it, so a value that can never match must fail loudly
+// here rather than silently reject every Microsoft login:
+//
+//   - GATEWAY_MICROSOFT_TENANT_ID must be empty, a meta segment
+//     (common/organizations/consumers), or a directory GUID — a verified-domain
+//     pin is rejected (it would break single-tenant sign-in entirely);
+//   - every GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS entry must be a directory
+//     GUID (meta and domain forms are both invalid in the allow-list).
+func (c *Config) validateMicrosoftTenants() error {
+	if !ValidMicrosoftTenantPin(c.MicrosoftTenantID) {
+		return fmt.Errorf("config: GATEWAY_MICROSOFT_TENANT_ID %q must be an Azure AD directory (tenant) GUID, "+
+			"a meta value (common/organizations/consumers), or empty (a verified-domain string can never match a token's tid)",
+			c.MicrosoftTenantID)
+	}
+	for _, t := range c.MicrosoftAllowedTenantList() {
+		if !ValidMicrosoftTenant(t) {
+			return fmt.Errorf("config: GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS entry %q must be an "+
+				"Azure AD directory (tenant) GUID (a verified-domain string can never match a token's tid)", t)
 		}
 	}
 	return nil

@@ -530,6 +530,13 @@ type RefreshTokenRecord struct {
 	// timeout is skipped until the next rotation re-anchors it.
 	SessionStartedAt int64 // epoch ms
 	ConsumedAtMs     int64 // epoch ms; 0 = unconsumed (still valid for refresh)
+	// SID links this refresh token to the access-token Session minted alongside
+	// it under GATEWAY_REVOCATION_MODE=session — it carries the same value as
+	// the access token's `sid` claim. A path that invalidates the refresh token
+	// (a session-timeout breach) uses it to revoke the still-valid access
+	// session scoped to exactly this session, not the user's others. Empty in
+	// mode=ttl and for legacy rows, where there is no session to revoke.
+	SID string
 }
 
 // PasskeyCredRecord represents a stored passkey credential.
@@ -914,6 +921,13 @@ var (
 	// later call cannot escalate to operator. It is a state precondition (not
 	// an authorization failure), mapped to CodeFailedPrecondition.
 	ErrPlatformAdminExists = errors.New("a platform admin already exists; bootstrap is closed")
+	// ErrFirstAdminBootstrapDisabled is returned by CreateFirstPlatformAdmin
+	// when GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP is true: an operator who
+	// bootstraps the first platform admin out-of-band can close the RPC
+	// entirely, so it is rejected regardless of whether any admin exists yet.
+	// It is a deployment-posture precondition (the feature is turned off), not
+	// an authorization failure, mapped to CodeFailedPrecondition.
+	ErrFirstAdminBootstrapDisabled = errors.New("first-admin bootstrap is disabled for this deployment")
 	// ErrAuthDomainNotVerified is returned by SetPrimaryAuthDomain when the
 	// target custom auth-domain has not proven ownership (verified_at_ms == 0).
 	// Only a DNS-verified domain may be promoted to a project's primary serving
@@ -926,6 +940,15 @@ var (
 	// precondition (not an authorization failure), mapped to
 	// CodeFailedPrecondition.
 	ErrLastCredential = errors.New("cannot remove the last sign-in credential")
+	// ErrProjectConfigConflict is returned by the control-plane project store
+	// when an optimistic-concurrency config_json write loses its version
+	// compare-and-swap — a concurrent writer advanced the row's config_version
+	// between the read and the write. The service retries the read-modify-write a
+	// bounded number of times, so a caller only observes it when retries are
+	// exhausted under sustained contention. The Connect layer maps it to
+	// CodeAborted — gRPC's documented, retryable code for a concurrency/sequencer
+	// conflict.
+	ErrProjectConfigConflict = errors.New("project config write conflicted with a concurrent update")
 )
 
 // ── AuthService ────────────────────────────────────────────────────────
@@ -1325,8 +1348,9 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		claims.Audience = []string{s.cfg.JWTAudience}
 	}
 
+	var sid string
 	if s.cfg.RevocationMode == config.RevocationModeSession {
-		sid := generateSessionID()
+		sid = generateSessionID()
 		if _, err := s.repo(ctx).CreateSession(ctx, &SessionRecord{
 			SID:         sid,
 			UserID:      user.ID,
@@ -1356,6 +1380,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		CreatedAt:        now,
 		LastUsedAt:       now,
 		SessionStartedAt: sessionStart,
+		SID:              sid,
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("storing refresh token: %w", err)
@@ -1421,6 +1446,33 @@ func (s *AuthService) revokeUserSessionsIfModeSession(ctx context.Context, userI
 	}
 	if err := s.repo(ctx).RevokeSessionsForUser(ctx, userID, s.nowMs()); err != nil {
 		s.logger.Warn("session_revoke_for_user_failed",
+			zap.String("user_id", userID), zap.String("reason", reason), zap.Error(err))
+	}
+}
+
+// revokeSessionIfModeSession revokes exactly the access session identified by
+// sid when the deployment runs mode=session, leaving the user's other sessions
+// untouched. It is paired with every path that invalidates a single refresh
+// token — logout, natural-expiry cleanup, and a session-timeout breach — so the
+// still-valid access token stops working immediately rather than lingering to
+// its natural (uncapped in mode=session) expiry.
+//
+// A legacy refresh row written before the sid link existed carries an empty
+// sid, making the scoped revoke impossible; it fails CLOSED by falling back to
+// the user-scoped revoke the replay-detection path uses, at the cost of ending
+// the user's other sessions. Best-effort: a failure widens the access-token
+// validity to the middleware cache TTL, not a full bypass, so it is logged
+// rather than propagated.
+func (s *AuthService) revokeSessionIfModeSession(ctx context.Context, sid, userID, reason string) {
+	if s.cfg.RevocationMode != config.RevocationModeSession {
+		return
+	}
+	if sid == "" {
+		s.revokeUserSessionsIfModeSession(ctx, userID, reason)
+		return
+	}
+	if err := s.repo(ctx).RevokeSession(ctx, sid, s.nowMs()); err != nil {
+		s.logger.Warn("session_revoke_failed",
 			zap.String("user_id", userID), zap.String("reason", reason), zap.Error(err))
 	}
 }
@@ -1498,13 +1550,10 @@ func validatePasswordStrength(pw string) error {
 }
 
 // validatePasswordStrengthForEmail checks password requirements against the
-// per-tenant policy for the org that owns email's domain, falling back to the
-// global rules when no governed policy applies. Use this on any path where
-// the subject's email is known (signup, password reset, password change) so
-// an org's tightened complexity rules are enforced for its members only.
+// per-tenant policy for the org that owns email's domain, binding the request's
+// project scope to the shared governance validation.
 func (s *AuthService) validatePasswordStrengthForEmail(ctx context.Context, email, pw string) error {
-	policy := s.passwordStrengthPolicyFor(ctx, email)
-	return passwordIssuesToErr(passwords.ValidateStrengthWithPolicy(pw, policy))
+	return s.governance.validatePasswordStrength(ctx, s.projectID(ctx), s.logger, email, pw)
 }
 
 func passwordIssuesToErr(issues []string) error {
@@ -1639,6 +1688,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 
 	if record.ExpiresAt < s.nowMs() {
 		_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
+		// A deployer may set the JWT expiry longer than the refresh TTL in
+		// mode=session, so the access session must die with its refresh token.
+		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "refresh_token_expired")
 		return nil, "", "", fmt.Errorf("%w: refresh token expired", ErrTokenExpired)
 	}
 
@@ -1657,6 +1709,10 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	}
 	if err := s.enforceSessionTimeout(ctx, timeoutUser.Email, s.nowMs(), record.SessionStartedAt, record.LastUsedAt); err != nil {
 		_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
+		// Under mode=session the deleted refresh row is not enough: the access
+		// token minted alongside it is still valid until its natural expiry, so
+		// revoke the matching access session (scoped to this sid) too.
+		s.revokeSessionIfModeSession(ctx, record.SID, record.UserID, "session_timeout")
 		return nil, "", "", err
 	}
 
@@ -1696,7 +1752,10 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 
 // ── Logout ─────────────────────────────────────────────────────────────
 
-// Logout deletes the refresh token identified by the raw token value.
+// Logout deletes the refresh token identified by the raw token value. Under
+// mode=session it also revokes the matching access session — an explicitly
+// logged-out user must not keep a working access token until its natural
+// (uncapped in mode=session) expiry.
 func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error {
 	if rawRefreshToken == "" {
 		return nil
@@ -1711,6 +1770,7 @@ func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error 
 	}
 	userID := record.UserID
 	_ = s.repo(ctx).DeleteRefreshToken(ctx, record.NodeID)
+	s.revokeSessionIfModeSession(ctx, record.SID, userID, "logout")
 
 	if userID != "" {
 		s.audit.Log(ctx, audit.EventLogout, audit.WithActor(userID))

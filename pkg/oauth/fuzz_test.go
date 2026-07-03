@@ -75,7 +75,7 @@ func FuzzVerifyIDToken(f *testing.F) {
 		ctx := context.Background()
 		_, _ = apple.(*appleExchanger).verifyIDToken(ctx, token)
 		_, _ = google.(*googleExchanger).verifyIDToken(ctx, token)
-		_, _ = microsoft.(*microsoftExchanger).verifyIDToken(ctx, token)
+		_, _, _ = microsoft.(*microsoftExchanger).verifyIDToken(ctx, token)
 	})
 }
 

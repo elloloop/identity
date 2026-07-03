@@ -103,26 +103,83 @@ breaking, but the `*_BY_PRODUCT` vars shipped only the prior week.
 > `FailedPrecondition`. Such deployments **must set
 > `GATEWAY_NATIVE_OAUTH_ENABLED=true` explicitly.**
 
-> **Microsoft tenant pinning needs `config_json`.** The env seed
-> (`GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES`) enables Microsoft native login for
-> the **default project** but cannot pin a tenant — it is multi-tenant. To pin a
-> single tenant you must configure a `config_json` `oauth.microsoft` block
-> (`tenant_id` / `issuer_format` + `native_audiences`), which **supersedes** the
-> env seed for that project (config_json wins; the env seed is not merged in).
-
-> **🔒 Security — multi-tenant Microsoft + email-based account linking.** Native
-> (and hosted) Microsoft login defaults to **multi-tenant**: the expected issuer
-> is derived from the token's own `tid`, so **any** Azure AD tenant — including
-> an attacker-controlled one — can mint a token. Combined with email-based
-> account federation this is an nOAuth-style account-takeover vector: an attacker
-> can present a Microsoft token carrying a **victim's email** and, if that email
-> is trusted for cross-provider linking, take over the victim's account. For
-> email-based linking, **pin `tenant_id`** (single-tenant) unless you fully trust
-> every tenant that can obtain a token; do **not** trust a multi-tenant Microsoft
-> email for cross-provider account linking. This release ships parity with the
-> existing hosted provider and does not change verification behavior — deeper
-> hardening (a tenant allowlist and the `xms_edov` email-verified claim, for both
-> hosted and native) is tracked as a follow-up.
+> **🔒 Security — Microsoft nOAuth hardening (behavior change, hosted + native).**
+> Microsoft sign-in defaults to **multi-tenant**: the expected issuer is derived
+> from the token's own `tid`, so **any** Azure AD tenant — including an
+> attacker-controlled one — can mint a valid token bearing an arbitrary `email`.
+> Combined with email-based account federation this is an
+> [nOAuth](https://www.descope.com/blog/post/noauth)-class account-takeover
+> vector: an attacker presents a token carrying a **victim's email** and takes
+> over the victim's account.
+>
+> This release **closes the vector by default** — hosted (`pkg/oauth/microsoft.go`)
+> and native (`pkg/oauth/native.go`) alike. A Microsoft email is now trusted as
+> verified (the precondition for federation) **only** when **one** of:
+>
+> - the issuing tenant is **pinned** — a single-tenant `tenant_id`
+>   (`GATEWAY_MICROSOFT_TENANT_ID` for the default project, or
+>   `oauth.microsoft.tenant_id` per project), OR the token's `tid` matches a new
+>   **tenant allow-list** (`GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS`,
+>   comma-separated, for the default project; `oauth.microsoft.allowed_tenants`
+>   per project); OR
+> - the token carries **`xms_edov == true`** (Microsoft's email-domain-owner-verified
+>   claim, accepted as a JSON bool or the string `"true"`).
+>
+> A non-standard `verified_email == true` is **not** trusted on its own (an
+> attacker tenant can set it as easily as the email), though an explicit
+> `verified_email == false` is still rejected. Otherwise the email is treated as
+> unverified and the login is **rejected** with `ErrEmailNotVerified` (surfaced as
+> `Unauthenticated`) — matching the existing Google/Apple unverified-email
+> handling, so **no** silent merge into an existing account is possible. Pinning a
+> tenant also now **enforces** `tid` equality during verification (previously
+> `tenant_id` only chose the authorize endpoint), so a single-tenant deployment
+> rejects other tenants' tokens.
+>
+> **Tenant identifiers must be directory GUIDs.** Azure always stamps the token's
+> `tid` as a directory (tenant) GUID, and the runtime pin compares against it
+> (case-insensitively), so a value that can never equal a `tid` is **rejected by
+> config validation** rather than silently failing every login. Where that
+> rejection surfaces depends on where the value lives:
+>
+> - **env** (`GATEWAY_MICROSOFT_TENANT_ID` / `GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS`)
+>   — fails fast at **boot** (`Config.Validate`);
+> - **per-project `config_json`** (`oauth.microsoft.*`) — rejected at **admin
+>   write time** for new values, but a value **already stored** from before this
+>   release is validated on the **per-request project-resolution path**, so it
+>   fails at request time and (until re-pinned) takes down that project's whole
+>   resolution — not just Microsoft. There is no boot scan, so audit stored
+>   configs before upgrading. The fields:
+>
+> - `allowed_tenants` (env `GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS` /
+>   `oauth.microsoft.allowed_tenants`) — every entry must be a **GUID**;
+> - `tenant_id` (env `GATEWAY_MICROSOFT_TENANT_ID` / `oauth.microsoft.tenant_id`) —
+>   a **GUID**, a **meta** value (`common`/`organizations`/`consumers`, meaning "no
+>   pin — multi-tenant"), or empty.
+>
+> When both `tenant_id` and `allowed_tenants` are set they form a **union**: a
+> `tid` is accepted if it equals `tenant_id` OR is a member of `allowed_tenants`.
+> A verified-domain string (e.g. `contoso.onmicrosoft.com`) is invalid in either.
+> (Note the pre-existing env-var prefix divergence: `GATEWAY_MICROSOFT_TENANT_ID`
+> vs `GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS`; the former is kept as-is to avoid a
+> breaking rename.)
+>
+> **`xms_edov` is opt-in on the Azure side.** Azure does not emit it by default —
+> add it as an optional ID-token claim on the app registration (Token
+> configuration → optional claim → `xms_edov`) if you want to rely on it instead
+> of pinning a tenant.
+>
+> **Action required:**
+> - _Multi-tenant deployments that relied on blindly-trusted email_ — pin your
+>   tenant(s) via `tenant_id` / `allowed_tenants` (GUIDs), or enable `xms_edov`,
+>   or those logins are now rejected.
+> - _Single-tenant deployments pinned by a **verified domain**_ — this is a
+>   **breaking change**: re-pin `tenant_id` (or `GATEWAY_MICROSOFT_TENANT_ID`) to
+>   your directory **GUID** before upgrading. An env domain-form value fails fast
+>   at boot; a domain-form value **already stored** in a project's `config_json`
+>   fails at request-time project resolution (no boot signal) and disables that
+>   whole project until corrected — so audit and re-pin stored per-project
+>   Microsoft configs first. Previously a domain-form pin silently rejected every
+>   Microsoft login at runtime.
 
 ### Schema migrations involved
 
@@ -160,6 +217,17 @@ keep:
 3. Set v1.0 config (drop the removed `mode` vars; the default project id and
    storage scope default to `default` / `local`).
 4. Start the service.
+5. **Before opening the service to public traffic, bootstrap the first platform
+   admin.** `CreateFirstPlatformAdmin` is a one-time, trust-on-first-use RPC
+   that stays open only while `platform_admins` is empty, so a fresh,
+   internet-exposed deployment has a window in which an anonymous caller could
+   win the first-admin race. Create the first admin over a private network
+   first, and/or set `GATEWAY_ADMIN_API_SECRET` (which then also gates the
+   bootstrap on the `X-Admin-Secret` header) or
+   `GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true` (to close the RPC entirely — the
+   first admin is then created by a direct `platform_admins` insert, or by
+   toggling the flag off just long enough to bootstrap and back on; no
+   first-party seed CLI or migration ships for this).
 
 SQLite backends are likewise a fresh start — the SQLite schema is the v1.0
 Project-keyed shape; there is no legacy data to carry forward.

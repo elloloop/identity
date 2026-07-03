@@ -444,6 +444,123 @@ func TestNativeOAuthLogin_Microsoft_Accepted(t *testing.T) {
 	assert.Equal(t, "ms@contoso.com", res.User.Email)
 }
 
+// TestNativeOAuthLogin_Microsoft_NOAuthTakeoverClosed is the end-to-end proof
+// that the nOAuth account-takeover vector is closed: an attacker who controls an
+// arbitrary Azure AD tenant mints a valid multi-tenant Microsoft token bearing a
+// VICTIM's email. On the default project WITHOUT a tenant pin, that token is
+// trusted only when it proves email-domain-owner verification (xms_edov). With
+// no xms_edov the login is rejected and the victim's existing account is NOT
+// merged into; the same token WITH xms_edov (which, in production, Microsoft
+// emits only when the issuing tenant is verified to own the email's domain — an
+// attacker tenant cannot truthfully set it for a domain it does not own) proves
+// the gate is exactly that claim.
+func TestNativeOAuthLogin_Microsoft_NOAuthTakeoverClosed(t *testing.T) {
+	repo := newFakeRepo()
+	ctx := context.Background()
+	// Pre-existing victim account (password-based, email verified) with no linked
+	// Microsoft identity — the account an nOAuth attacker would try to hijack.
+	victimID, err := repo.CreateUser(ctx, &User{
+		Email: "ceo@victimcorp.com", Name: "Victim CEO",
+		PasswordHash: "victim-hash", EmailVerified: true,
+	})
+	require.NoError(t, err)
+
+	const msAud = "ms-multitenant-app"
+	const attackerTID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	signer := newNativeTokenSigner(t)
+	// The default project has Microsoft native audiences (env) but NO tenant pin,
+	// so it is fully multi-tenant — exactly the exposed configuration.
+	svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), func(c *config.Config) {
+		c.NativeOAuthMicrosoftAudiences = msAud
+		c.NativeOAuthProductProjects = "home=proj-default"
+	})
+
+	attackerToken := func(edov any) string {
+		claims := map[string]any{
+			"iss": fmt.Sprintf("https://login.microsoftonline.com/%s/v2.0", attackerTID),
+			"tid": attackerTID, "aud": msAud, "oid": "attacker-oid", "sub": "attacker-sub",
+			"exp": signer.now.Add(time.Hour), "iat": signer.now,
+			"email": "ceo@victimcorp.com", "name": "Not The CEO",
+		}
+		if edov != nil {
+			claims["xms_edov"] = edov
+		}
+		return signer.sign(t, claims)
+	}
+
+	// Attack: no xms_edov, unpinned tenant → rejected, victim NOT merged.
+	_, err = svc.NativeOAuthLogin(ctx, NativeOAuthLoginParams{
+		Provider: "microsoft", IDToken: attackerToken(nil), Product: "home",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "nOAuth attack must be rejected, got %v", err)
+
+	linked, err := repo.FindUserByProviderID(ctx, "microsoft", "attacker-oid")
+	require.NoError(t, err)
+	assert.Nil(t, linked, "attacker identity must NOT be linked to any account")
+	victim, err := repo.GetUser(ctx, victimID)
+	require.NoError(t, err)
+	require.NotNil(t, victim)
+	assert.Equal(t, "Victim CEO", victim.Name, "victim profile must be untouched")
+	assert.Equal(t, "victim-hash", victim.PasswordHash, "victim credentials must be untouched")
+
+	// Control: the SAME token carrying xms_edov=true passes the gate and links —
+	// proving the block is specifically the missing domain-owner proof.
+	res, err := svc.NativeOAuthLogin(ctx, NativeOAuthLoginParams{
+		Provider: "microsoft", IDToken: attackerToken(true), Product: "home",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res.User)
+	assert.Equal(t, victimID, res.User.ID, "xms_edov-proven login links to the existing account")
+}
+
+// TestNativeOAuthLogin_Microsoft_DefaultProject_NativeOnlyBlock_KeepsEnvPin
+// guards the tenant-pin precedence rule: a default project that authored a
+// Microsoft block for native_audiences ONLY (no tenant_id / allowed_tenants)
+// must still inherit the env tenant pin — authoring audiences must not silently
+// disable the nOAuth guard.
+func TestNativeOAuthLogin_Microsoft_DefaultProject_NativeOnlyBlock_KeepsEnvPin(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+	const msAud = "ms-default-app"
+	const envTenant = "11111111-1111-1111-1111-111111111111"
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{
+		"proj-default": {ID: "proj-default", StorageScopeID: "scope-default", Name: "proj-default", OAuth: ProjectOAuthConfig{
+			Microsoft: &ProjectOAuthMicrosoft{NativeAudiences: []string{msAud}, IssuerFormat: msSvcIssuerFormat},
+		}},
+	}}
+	svc := newNativeTestAuthServiceWith(t, repo, oauth.NewNativeVerifier(oauth.NativeVerifierConfig{
+		GoogleJWKSURL: signer.url, AppleJWKSURL: signer.url, MicrosoftJWKSURL: signer.url,
+		Now: func() time.Time { return signer.now },
+	}), projects, func(c *config.Config) {
+		c.NativeOAuthProductProjects = "home=proj-default"
+		c.MicrosoftAllowedTenants = envTenant
+	})
+
+	msToken := func(tid string) string {
+		return signer.sign(t, map[string]any{
+			"iss": fmt.Sprintf(msSvcIssuerFormat, tid), "tid": tid, "aud": msAud,
+			"oid": "oid-" + tid, "exp": signer.now.Add(time.Hour), "iat": signer.now,
+			"email": "user@corp.com",
+		})
+	}
+
+	// A token from the env-pinned tenant is trusted WITHOUT xms_edov — proving the
+	// native-only block did not suppress the env pin.
+	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "microsoft", IDToken: msToken(envTenant), Product: "home",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "user@corp.com", res.User.Email)
+
+	// A token from a tenant NOT on the env allow-list (no xms_edov) is rejected.
+	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "microsoft", IDToken: msToken("99999999-9999-9999-9999-999999999999"), Product: "home",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrUnauthenticated), "off-allow-list tenant must be rejected, got %v", err)
+}
+
 func TestNativeOAuthLogin_Disabled_FailedPrecondition(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)

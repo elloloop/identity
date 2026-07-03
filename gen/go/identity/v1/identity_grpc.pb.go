@@ -252,8 +252,11 @@ type IdentityServiceClient interface {
 	SetPrimaryAuthDomain(ctx context.Context, in *SetPrimaryAuthDomainRequest, opts ...grpc.CallOption) (*SetPrimaryAuthDomainResponse, error)
 	AdminCreateTenant(ctx context.Context, in *AdminCreateTenantRequest, opts ...grpc.CallOption) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(ctx context.Context, in *AdminAddTenantAdminRequest, opts ...grpc.CallOption) (*AdminAddTenantAdminResponse, error)
-	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
-	// succeeds only while platform_admins is empty, then permanently closes
+	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
+	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
+	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
+	// call requires the X-Admin-Secret header (PERMISSION_DENIED otherwise), and
+	// GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true closes it entirely
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(ctx context.Context, in *CreateFirstPlatformAdminRequest, opts ...grpc.CallOption) (*CreateFirstPlatformAdminResponse, error)
 	// Self-service linked identities (connected accounts). Authenticated by the
@@ -1399,8 +1402,11 @@ type IdentityServiceServer interface {
 	SetPrimaryAuthDomain(context.Context, *SetPrimaryAuthDomainRequest) (*SetPrimaryAuthDomainResponse, error)
 	AdminCreateTenant(context.Context, *AdminCreateTenantRequest) (*AdminCreateTenantResponse, error)
 	AdminAddTenantAdmin(context.Context, *AdminAddTenantAdminRequest) (*AdminAddTenantAdminResponse, error)
-	// Zero-config bootstrap of the FIRST platform admin. NOT secret-gated:
-	// succeeds only while platform_admins is empty, then permanently closes
+	// Trust-on-first-use bootstrap of the FIRST platform admin: succeeds only
+	// while platform_admins is empty, then permanently closes (FAILED_PRECONDITION).
+	// Zero-config only when GATEWAY_ADMIN_API_SECRET is unset; when it is set the
+	// call requires the X-Admin-Secret header (PERMISSION_DENIED otherwise), and
+	// GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP=true closes it entirely
 	// (FAILED_PRECONDITION). Postgres-only; the memory driver returns UNIMPLEMENTED.
 	CreateFirstPlatformAdmin(context.Context, *CreateFirstPlatformAdminRequest) (*CreateFirstPlatformAdminResponse, error)
 	// Self-service linked identities (connected accounts). Authenticated by the

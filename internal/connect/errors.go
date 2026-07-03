@@ -85,6 +85,7 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrLastOwner),
 		errors.Is(err, service.ErrPlatformAdminExists),
+		errors.Is(err, service.ErrFirstAdminBootstrapDisabled),
 		errors.Is(err, service.ErrAuthDomainNotVerified),
 		errors.Is(err, service.ErrProjectSecretsKeyMissing),
 		errors.Is(err, service.ErrLastCredential):
@@ -92,6 +93,13 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrQrLoginNotPending):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
+
+	case errors.Is(err, service.ErrProjectConfigConflict):
+		// A per-project config_json write lost its optimistic-concurrency
+		// compare-and-swap after exhausting retries. CodeAborted is gRPC's
+		// documented, retryable signal for a concurrency/sequencer conflict —
+		// the operator can simply retry the whole write.
+		return connect.NewError(connect.CodeAborted, err)
 
 	case errors.Is(err, service.ErrLocalAuthDisabled),
 		errors.Is(err, service.ErrOAuthDisabled),

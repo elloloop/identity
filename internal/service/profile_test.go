@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
@@ -306,9 +307,44 @@ func TestProfileService_ChangePassword_WeakNew(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for weak new password")
 	}
-	if !strings.Contains(err.Error(), "too weak") {
+	if !errors.Is(err, ErrWeakPassword) {
 		t.Errorf("unexpected error: %v", err)
 	}
+}
+
+// A member of a tenant that tightens password_min_length cannot set a password
+// shorter than the tenant floor via ChangePassword — the same per-tenant policy
+// signup/reset/passwordless enforce. Regression for #303.
+func TestProfileService_ChangePassword_EnforcesTenantMinLength(t *testing.T) {
+	db := newFakeDB()
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	// alice@acme.com belongs to the governed tenant (min length 16).
+	db.addUserWithPassword("user-1", "alice@acme.com", "Alice", "member", "active", pwHash)
+	svc := newTestProfileService(db).WithLoginGovernance(withPasswordMinLength(16))
+	ctx := withProject("proj-1")
+
+	// A 10-char all-class password clears the global 8 floor but not the
+	// tenant's 16 — it must be rejected.
+	err := svc.ChangePassword(ctx, "user-1", "OldStr0ng!Pass", "Aa1!aaaaaa")
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrWeakPassword))
+
+	// A 16-char password satisfies the tightened policy.
+	require.NoError(t, svc.ChangePassword(ctx, "user-1", "OldStr0ng!Pass", "Aa1!aaaaaaaaaaaa"))
+}
+
+// A user outside any governed tenant keeps the global 8-char baseline even when
+// the deployment has a governance plane wired — the tightening is per-tenant.
+func TestProfileService_ChangePassword_UngovernedUsesGlobalBaseline(t *testing.T) {
+	db := newFakeDB()
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	db.addUserWithPassword("user-2", "bob@other.example", "Bob", "member", "active", pwHash)
+	svc := newTestProfileService(db).WithLoginGovernance(withPasswordMinLength(16))
+	ctx := withProject("proj-1")
+
+	// 8-char all-class password: meets the global baseline, and no governed
+	// policy applies to other.example, so it is accepted.
+	require.NoError(t, svc.ChangePassword(ctx, "user-2", "OldStr0ng!Pass", "Aa1!aaaa"))
 }
 
 func TestProfileService_ListAuditEvents_AdminOnly(t *testing.T) {

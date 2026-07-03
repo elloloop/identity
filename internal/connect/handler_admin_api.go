@@ -348,22 +348,27 @@ func oauthProviderInputFromProto(c *identitypb.ProjectOAuthProviderConfig) *serv
 		return nil
 	}
 	return &service.ProjectOAuthProviderInput{
-		Provider:               c.Provider,
-		ClientID:               c.ClientId,
-		ClientSecret:           c.ClientSecret,
-		NativeAudiences:        c.NativeAudiences,
-		GoogleAuthorizationURL: c.GoogleAuthorizationUrl,
-		GoogleTokenURL:         c.GoogleTokenUrl,
-		GoogleJWKSURL:          c.GoogleJwksUrl,
-		GoogleIssuer:           c.GoogleIssuer,
-		MicrosoftTenantID:      c.MicrosoftTenantId,
-		MicrosoftIssuerFormat:  c.MicrosoftIssuerFormat,
-		AppleTeamID:            c.AppleTeamId,
-		AppleKeyID:             c.AppleKeyId,
-		ApplePrivateKey:        c.ApplePrivateKey,
-		OIDCIssuer:             c.OidcIssuer,
-		OIDCDiscoveryURL:       c.OidcDiscoveryUrl,
-		OIDCScopes:             c.OidcScopes,
+		Provider:                c.Provider,
+		ClientID:                c.ClientId,
+		ClientSecret:            c.ClientSecret,
+		NativeAudiences:         c.NativeAudiences,
+		GoogleAuthorizationURL:  c.GoogleAuthorizationUrl,
+		GoogleTokenURL:          c.GoogleTokenUrl,
+		GoogleJWKSURL:           c.GoogleJwksUrl,
+		GoogleIssuer:            c.GoogleIssuer,
+		MicrosoftTenantID:       c.MicrosoftTenantId,
+		MicrosoftIssuerFormat:   c.MicrosoftIssuerFormat,
+		MicrosoftAllowedTenants: c.MicrosoftAllowedTenants,
+		AppleTeamID:             c.AppleTeamId,
+		AppleKeyID:              c.AppleKeyId,
+		ApplePrivateKey:         c.ApplePrivateKey,
+		GitHubAuthorizationURL:  c.GithubAuthorizationUrl,
+		GitHubTokenURL:          c.GithubTokenUrl,
+		GitHubUserURL:           c.GithubUserUrl,
+		GitHubUserMailURL:       c.GithubUserMailUrl,
+		OIDCIssuer:              c.OidcIssuer,
+		OIDCDiscoveryURL:        c.OidcDiscoveryUrl,
+		OIDCScopes:              c.OidcScopes,
 	}
 }
 
@@ -375,22 +380,27 @@ func oauthProviderViewToProto(v *service.ProjectOAuthProviderView) *identitypb.P
 		return nil
 	}
 	return &identitypb.ProjectOAuthProviderConfig{
-		Provider:               v.Provider,
-		ClientId:               v.ClientID,
-		HasClientSecret:        v.HasClientSecret,
-		NativeAudiences:        v.NativeAudiences,
-		GoogleAuthorizationUrl: v.GoogleAuthorizationURL,
-		GoogleTokenUrl:         v.GoogleTokenURL,
-		GoogleJwksUrl:          v.GoogleJWKSURL,
-		GoogleIssuer:           v.GoogleIssuer,
-		MicrosoftTenantId:      v.MicrosoftTenantID,
-		MicrosoftIssuerFormat:  v.MicrosoftIssuerFormat,
-		AppleTeamId:            v.AppleTeamID,
-		AppleKeyId:             v.AppleKeyID,
-		HasPrivateKey:          v.HasPrivateKey,
-		OidcIssuer:             v.OIDCIssuer,
-		OidcDiscoveryUrl:       v.OIDCDiscoveryURL,
-		OidcScopes:             v.OIDCScopes,
+		Provider:                v.Provider,
+		ClientId:                v.ClientID,
+		HasClientSecret:         v.HasClientSecret,
+		NativeAudiences:         v.NativeAudiences,
+		GoogleAuthorizationUrl:  v.GoogleAuthorizationURL,
+		GoogleTokenUrl:          v.GoogleTokenURL,
+		GoogleJwksUrl:           v.GoogleJWKSURL,
+		GoogleIssuer:            v.GoogleIssuer,
+		MicrosoftTenantId:       v.MicrosoftTenantID,
+		MicrosoftIssuerFormat:   v.MicrosoftIssuerFormat,
+		MicrosoftAllowedTenants: v.MicrosoftAllowedTenants,
+		AppleTeamId:             v.AppleTeamID,
+		AppleKeyId:              v.AppleKeyID,
+		HasPrivateKey:           v.HasPrivateKey,
+		GithubAuthorizationUrl:  v.GitHubAuthorizationURL,
+		GithubTokenUrl:          v.GitHubTokenURL,
+		GithubUserUrl:           v.GitHubUserURL,
+		GithubUserMailUrl:       v.GitHubUserMailURL,
+		OidcIssuer:              v.OIDCIssuer,
+		OidcDiscoveryUrl:        v.OIDCDiscoveryURL,
+		OidcScopes:              v.OIDCScopes,
 	}
 }
 
@@ -415,11 +425,13 @@ func loginPolicyToProto(p *service.LoginPolicy) *identitypb.LoginPolicy {
 	}
 }
 
-// CreateFirstPlatformAdmin is the zero-config bootstrap of the first platform
-// admin. Unlike the other Admin RPCs it reads NO admin secret: it succeeds
-// only while platform_admins is empty and is rejected (FailedPrecondition)
-// once any admin exists. nil controlAdmin (memory, no control plane)
-// yields Unimplemented.
+// CreateFirstPlatformAdmin is the trust-on-first-use bootstrap of the first
+// platform admin. It succeeds only while platform_admins is empty and is
+// rejected (FailedPrecondition) once any admin exists. It stays zero-config
+// only when no admin secret is set: when GATEWAY_ADMIN_API_SECRET is
+// configured the presented X-Admin-Secret must match (like the other admin
+// RPCs), and when GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP is true it is closed
+// entirely. nil controlAdmin (memory, no control plane) yields Unimplemented.
 func (h *IdentityHandler) CreateFirstPlatformAdmin(
 	ctx context.Context,
 	req *connect.Request[identitypb.CreateFirstPlatformAdminRequest],
@@ -427,7 +439,7 @@ func (h *IdentityHandler) CreateFirstPlatformAdmin(
 	if h.controlAdmin == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
-	admin, err := h.controlAdmin.CreateFirstPlatformAdmin(ctx, req.Msg.Email, req.Msg.Password)
+	admin, err := h.controlAdmin.CreateFirstPlatformAdmin(ctx, adminSecret(req.Header()), req.Msg.Email, req.Msg.Password)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

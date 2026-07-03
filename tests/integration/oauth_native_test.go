@@ -88,6 +88,13 @@ func (s *nativeITSigner) sign(t *testing.T, claims map[string]any) string {
 			_ = tok.Set(k, v)
 		}
 	}
+	// Stamp a unique jti unless the caller pinned one, so every minted token is a
+	// DISTINCT issued token like the real world. Without it, two runs in the same
+	// second produce byte-identical (provider|iss|sub|iat|aud|nonce) replay keys
+	// and the replay cache (correctly) rejects the second run as a replay.
+	if tok.JwtID() == "" {
+		_ = tok.Set(jwt.JwtIDKey, newNativeITJTI(t))
+	}
 	signKey, err := jwk.FromRaw(s.priv)
 	if err != nil {
 		t.Fatalf("priv jwk: %v", err)
@@ -113,6 +120,17 @@ func nativeITHash(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// newNativeITJTI returns a random JWT ID so each minted token is unique across
+// runs, keeping the native happy-path tests idempotent against a persistent DB.
+func newNativeITJTI(t *testing.T) string {
+	t.Helper()
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		t.Fatalf("rand jti: %v", err)
+	}
+	return hex.EncodeToString(b[:])
+}
+
 // nativeITHarness boots the full server with native OAuth wired to the
 // signer's mock JWKS. enabled toggles GATEWAY_NATIVE_OAUTH_ENABLED.
 func nativeITHarness(t *testing.T, signer *nativeITSigner, enabled bool) *Harness {
@@ -123,6 +141,9 @@ func nativeITHarness(t *testing.T, signer *nativeITSigner, enabled bool) *Harnes
 		c.NativeOAuthGoogleAudiences = nativeITGoogleAud
 		c.NativeOAuthAppleAudiences = nativeITAppleAud
 		c.NativeOAuthMicrosoftAudiences = nativeITMicrosoftAud
+		// Pin the default project's accepted Microsoft tenant via the env
+		// allow-list so a multi-tenant token's email is trusted (nOAuth guard).
+		c.MicrosoftAllowedTenants = nativeITMSTenant
 		c.NativeOAuthProductProjects = "easyloops=" + nativeITProject
 	})
 	if !enabled {
@@ -141,7 +162,7 @@ func nativeITHarness(t *testing.T, signer *nativeITSigner, enabled bool) *Harnes
 
 const (
 	nativeITMicrosoftAud  = "ms-native-client"
-	nativeITMSTenant      = "tenant-it-1"
+	nativeITMSTenant      = "aaaabbbb-cccc-dddd-eeee-ffff00001111"
 	nativeITPerProjAud    = "perproject-ios.apps.googleusercontent.com"
 	nativeITMSIssuerFmt   = "https://login.microsoftonline.com/%s/v2.0"
 	nativeITPerProjProdID = "perproject"

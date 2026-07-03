@@ -150,6 +150,66 @@ func TestOAuthResolver_DefaultProjectConfigOverridesEnv(t *testing.T) {
 	}
 }
 
+// envGitHubRegistry builds a registry with a real GitHub exchanger whose
+// client_id is clientID, so its authorization URL is distinguishable from a
+// per-project one (GitHub's authorization URL is built offline, no network).
+func envGitHubRegistry(clientID string) *oauth.Registry {
+	r := oauth.NewRegistry()
+	r.Register("github", oauth.NewGitHub(oauth.GitHubConfig{
+		ClientID:     clientID,
+		ClientSecret: "env-secret",
+	}))
+	return r
+}
+
+func projectGitHubScope(t *testing.T, projectID, clientID string) context.Context {
+	t.Helper()
+	return WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: projectID,
+		OAuth: ProjectOAuthConfig{
+			GitHub: &ProjectOAuthGitHub{
+				ClientID:        clientID,
+				ClientSecretEnc: encForProject(t, "proj-gh-secret"),
+			},
+		},
+	})
+}
+
+// TestOAuthResolver_GitHubPerProjectIsolation is the GitHub counterpart of the
+// Google isolation test: a project's own config_json GitHub provider wins, the
+// default project falls back to the env-configured provider, and a non-default
+// project without a GitHub block cannot use GitHub (no env inheritance).
+func TestOAuthResolver_GitHubPerProjectIsolation(t *testing.T) {
+	r := newOAuthResolver("default", envGitHubRegistry("env-github"), nil).
+		withSecrets(resolverSecretsKey(), nil)
+
+	// A non-default project with its OWN github client_id resolves to THAT id.
+	projCtx := projectGitHubScope(t, "other", "proj-github")
+	e, ok := r.exchangerFor(projCtx, "github")
+	if !ok {
+		t.Fatal("project-configured github must resolve")
+	}
+	if got := authURL(t, e); !strings.Contains(got, "client_id=proj-github") {
+		t.Errorf("want project client_id in %q", got)
+	}
+
+	// The default project still uses the env client_id — no cross-contamination.
+	defCtx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "default"})
+	de, ok := r.exchangerFor(defCtx, "github")
+	if !ok {
+		t.Fatal("default project must resolve the env github provider")
+	}
+	if got := authURL(t, de); !strings.Contains(got, "client_id=env-github") {
+		t.Errorf("default project must keep env client_id, got %q", got)
+	}
+
+	// A non-default project WITHOUT a github block never inherits the env one.
+	bareCtx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "bare"})
+	if _, ok := r.exchangerFor(bareCtx, "github"); ok {
+		t.Fatal("non-default project without github config must NOT inherit env github (isolation leak)")
+	}
+}
+
 func TestOAuthResolver_CacheReusesAndRebuilds(t *testing.T) {
 	r := newOAuthResolver("default", oauth.NewRegistry(), nil).
 		withSecrets(resolverSecretsKey(), nil)
@@ -188,6 +248,7 @@ func TestOAuthResolver_MissingSecretsKey_ProviderUnavailable(t *testing.T) {
 		"google":    {Google: &ProjectOAuthGoogle{ClientID: "g", ClientSecretEnc: "enc"}},
 		"microsoft": {Microsoft: &ProjectOAuthMicrosoft{ClientID: "m", ClientSecretEnc: "enc"}},
 		"apple":     {Apple: &ProjectOAuthApple{ClientID: "a", TeamID: "t", KeyID: "k", PrivateKeyEnc: "enc"}},
+		"github":    {GitHub: &ProjectOAuthGitHub{ClientID: "gh", ClientSecretEnc: "enc"}},
 		"oidc":      {OIDC: &ProjectOAuthOIDC{ClientID: "o", ClientSecretEnc: "enc", Issuer: "https://issuer.example"}},
 	}
 	for provider, cfg := range cases {
@@ -228,6 +289,7 @@ func TestOAuthResolver_BuildsAllProviders(t *testing.T) {
 		"google":    {Google: &ProjectOAuthGoogle{ClientID: "g", ClientSecretEnc: encForProject(t, "s")}},
 		"microsoft": {Microsoft: &ProjectOAuthMicrosoft{ClientID: "m", ClientSecretEnc: encForProject(t, "s")}},
 		"apple":     {Apple: &ProjectOAuthApple{ClientID: "a", TeamID: "t", KeyID: "k", PrivateKeyEnc: encForProject(t, "apple-private-key-pem")}},
+		"github":    {GitHub: &ProjectOAuthGitHub{ClientID: "gh", ClientSecretEnc: encForProject(t, "s")}},
 		"oidc":      {OIDC: &ProjectOAuthOIDC{ClientID: "o", ClientSecretEnc: encForProject(t, "s"), Issuer: "https://issuer.example"}},
 	}
 	for provider, cfg := range cases {
