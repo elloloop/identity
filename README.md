@@ -2,7 +2,17 @@
 
 Authentication and user-management service. Deploys as a single container; pulls a pinned image, points at a Postgres datastore, exposes Connect-RPC over HTTP/JSON.
 
-Treat this like [tenant-shard-db](https://github.com/elloloop/tenant-shard-db): one image, deployed once per product, fully isolated user pools.
+## Documentation
+
+Full docs, including guides and API reference, are published at
+**[elloloop.github.io/identity](https://elloloop.github.io/identity)**:
+
+- [Introduction](https://elloloop.github.io/identity/docs/introduction) / [Quickstart](https://elloloop.github.io/identity/docs/quickstart)
+- [Proto reference](https://elloloop.github.io/identity/docs/api-reference/proto) — generated from [`proto/identity/v1/identity.proto`](./proto/identity/v1/identity.proto)
+- [gRPC reference](https://elloloop.github.io/identity/docs/api-reference/grpc)
+- [REST / OpenAPI reference](https://elloloop.github.io/identity/docs/api-reference/rest)
+
+The proto schema is also published to the [Buf Schema Registry](https://buf.build/elloloop/identity).
 
 > ## v1.0 breaking changes
 >
