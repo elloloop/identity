@@ -112,6 +112,25 @@ func TestCORS_Preflight_SetsAllowMethods(t *testing.T) {
 	assert.Equal(t, "86400", rec.Header().Get("Access-Control-Max-Age"))
 }
 
+func TestCORS_Preflight_AllowsGrpcWebRequestHeaders(t *testing.T) {
+	// Regression: browser gRPC-Web clients (grpc-dart, grpc-web js) send
+	// x-user-agent, x-grpc-web and grpc-timeout on the actual request, so a
+	// preflight naming them must be permitted or every gRPC-Web call from a
+	// browser fails CORS even when the origin is allowed.
+	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+	req := httptest.NewRequest(http.MethodOptions, "/identity.v1.IdentityService/PasswordSignup", nil)
+	req.Header.Set("Origin", "http://localhost:9002")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "content-type, x-user-agent, x-grpc-web, grpc-timeout")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	allowed := rec.Header().Get("Access-Control-Allow-Headers")
+	for _, header := range []string{"x-user-agent", "x-grpc-web", "grpc-timeout"} {
+		assert.Contains(t, allowed, header)
+	}
+}
+
 func TestCORS_Preflight_DisallowedOrigin_StillReturns204(t *testing.T) {
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
 	req := httptest.NewRequest(http.MethodOptions, "/some-path", nil)
