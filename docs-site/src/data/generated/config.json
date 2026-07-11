@@ -180,6 +180,15 @@
     "anchor": "captcha"
   },
   {
+    "name": "GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the Cloudflare Turnstile PUBLIC site key (provider \"turnstile\").",
+    "category": "CAPTCHA",
+    "anchor": "captcha"
+  },
+  {
     "name": "GATEWAY_CONNECT_PORT",
     "type": "integer",
     "default": "80",
