@@ -14,6 +14,7 @@ func captchaConfig(provider string) *Config {
 		CaptchaEnabled:                 true,
 		CaptchaProvider:                provider,
 		CaptchaTurnstileSecret:         "ts-secret",
+		CaptchaTurnstileSiteKey:        "ts-sitekey",
 		CaptchaRecaptchaSecret:         "rc-secret",
 		CaptchaRecaptchaScoreThreshold: 0.5,
 	}
@@ -50,6 +51,11 @@ func TestValidate_Captcha(t *testing.T) {
 		{
 			name:    "turnstile without secret",
 			mutate:  func(c *Config) { *c = *captchaConfig(CaptchaProviderTurnstile); c.CaptchaTurnstileSecret = "" },
+			wantErr: true,
+		},
+		{
+			name:    "turnstile without site key",
+			mutate:  func(c *Config) { *c = *captchaConfig(CaptchaProviderTurnstile); c.CaptchaTurnstileSiteKey = "" },
 			wantErr: true,
 		},
 		{

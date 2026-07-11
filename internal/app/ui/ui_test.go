@@ -48,3 +48,103 @@ func TestHandler_InjectsServerConfig(t *testing.T) {
 		}
 	}
 }
+
+// TestHandler_InjectsCaptchaConfig confirms the public CAPTCHA provider + site
+// key reach the SPA only when CAPTCHA is enabled with a Turnstile site key —
+// so the sign-up widget renders exactly when it should and never leaks a key
+// while CAPTCHA is off.
+func TestHandler_InjectsCaptchaConfig(t *testing.T) {
+	t.Run("enabled with turnstile site key", func(t *testing.T) {
+		h := Handler(&config.Config{
+			CaptchaEnabled:               true,
+			CaptchaProvider:              config.CaptchaProviderTurnstile,
+			CaptchaTurnstileSiteKey:      "0xSITEKEY",
+			CaptchaEnforcePasswordLogin:  true,
+			CaptchaEnforcePasswordSignup: true,
+		})
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/", nil))
+		body := rec.Body.String()
+
+		for _, want := range []string{
+			`"captchaProvider":"turnstile"`,
+			`"captchaSiteKey":"0xSITEKEY"`,
+			`"captchaEnforceLogin":true`,
+			`"captchaEnforceSignup":true`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("rendered page missing injected %q", want)
+			}
+		}
+	})
+
+	t.Run("enforce flags mirror per-flow config", func(t *testing.T) {
+		h := Handler(&config.Config{
+			CaptchaEnabled:               true,
+			CaptchaProvider:              config.CaptchaProviderTurnstile,
+			CaptchaTurnstileSiteKey:      "0xSITEKEY",
+			CaptchaEnforcePasswordLogin:  false,
+			CaptchaEnforcePasswordSignup: true,
+		})
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/", nil))
+		body := rec.Body.String()
+
+		for _, want := range []string{`"captchaEnforceLogin":false`, `"captchaEnforceSignup":true`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("rendered page missing injected %q", want)
+			}
+		}
+	})
+
+	t.Run("disabled injects empty captcha config", func(t *testing.T) {
+		h := Handler(&config.Config{
+			CaptchaEnabled:               false,
+			CaptchaProvider:              config.CaptchaProviderTurnstile,
+			CaptchaTurnstileSiteKey:      "0xSITEKEY",
+			CaptchaEnforcePasswordLogin:  true,
+			CaptchaEnforcePasswordSignup: true,
+		})
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/", nil))
+		body := rec.Body.String()
+
+		if strings.Contains(body, "0xSITEKEY") {
+			t.Error("site key leaked into the page while CAPTCHA is disabled")
+		}
+		if !strings.Contains(body, `"captchaProvider":""`) {
+			t.Error("expected empty captchaProvider while CAPTCHA is disabled")
+		}
+		for _, want := range []string{`"captchaEnforceLogin":false`, `"captchaEnforceSignup":false`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("enforce flag should be off with no renderable widget: missing %q", want)
+			}
+		}
+	})
+
+	t.Run("non-turnstile provider injects empty captcha config", func(t *testing.T) {
+		// recaptcha_v3 has no hosted-UI widget support; the page must not
+		// advertise a provider (or enforcement) it cannot render.
+		h := Handler(&config.Config{
+			CaptchaEnabled:               true,
+			CaptchaProvider:              config.CaptchaProviderRecaptchaV3,
+			CaptchaTurnstileSiteKey:      "0xSITEKEY",
+			CaptchaEnforcePasswordLogin:  true,
+			CaptchaEnforcePasswordSignup: true,
+		})
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/", nil))
+		body := rec.Body.String()
+
+		for _, want := range []string{
+			`"captchaProvider":""`,
+			`"captchaSiteKey":""`,
+			`"captchaEnforceLogin":false`,
+			`"captchaEnforceSignup":false`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("rendered page missing %q for a non-turnstile provider", want)
+			}
+		}
+	})
+}
