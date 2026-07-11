@@ -18,6 +18,11 @@ var staticFS embed.FS
 // configData holds the serialized configuration injected into the template.
 type configData struct {
 	PasswordSignupEnabled bool `json:"passwordSignupEnabled"`
+	// CaptchaProvider is the active CAPTCHA provider ("turnstile", "recaptcha_v3"),
+	// or empty when CAPTCHA is off — the sign-up UI renders a widget only when set.
+	CaptchaProvider string `json:"captchaProvider"`
+	// CaptchaSiteKey is the provider's PUBLIC site key for the widget.
+	CaptchaSiteKey string `json:"captchaSiteKey"`
 }
 
 // Handler returns an http.Handler that serves the embedded static files.
@@ -31,6 +36,8 @@ func Handler(cfg *config.Config) http.Handler {
 
 	data := configData{
 		PasswordSignupEnabled: cfg.PasswordSignupEnabled,
+		CaptchaProvider:       captchaUIProvider(cfg),
+		CaptchaSiteKey:        captchaUISiteKey(cfg),
 	}
 
 	b, err := json.Marshal(data)
@@ -65,4 +72,26 @@ func Handler(cfg *config.Config) http.Handler {
 		}
 		fsHandler.ServeHTTP(w, r)
 	})
+}
+
+// captchaUISiteKey returns the PUBLIC site key for the active provider, or ""
+// when CAPTCHA is disabled or no site key is configured — in which case the
+// hosted sign-up UI renders no widget.
+func captchaUISiteKey(cfg *config.Config) string {
+	if !cfg.CaptchaEnabled {
+		return ""
+	}
+	if cfg.CaptchaProvider == config.CaptchaProviderTurnstile {
+		return cfg.CaptchaTurnstileSiteKey
+	}
+	return ""
+}
+
+// captchaUIProvider names the provider the sign-up UI should render, or ""
+// when there is no public site key to render a widget for.
+func captchaUIProvider(cfg *config.Config) string {
+	if captchaUISiteKey(cfg) == "" {
+		return ""
+	}
+	return cfg.CaptchaProvider
 }

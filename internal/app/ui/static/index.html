@@ -197,6 +197,10 @@
                 <input type="password" id="password" required autocomplete="current-password" placeholder="••••••••">
             </div>
 
+            <!-- CAPTCHA widget, rendered only when configured and only for
+                 sign-up (enforcement is scoped to PasswordSignup). -->
+            <div id="captcha-container" style="display: none; margin-bottom: 16px;"></div>
+
             <button type="submit" class="submit-btn" id="submit-btn">Log in</button>
         </form>
 
@@ -227,6 +231,54 @@
             document.querySelector('.toggle-mode').style.display = 'none';
         }
 
+        // CAPTCHA: rendered only when the server injected a provider + site key.
+        // Enforcement is scoped to sign-up, so the widget shows in sign-up mode
+        // only. The token is attached to the PasswordSignup request below.
+        const captchaEnabled = config.captchaProvider === 'turnstile' && !!config.captchaSiteKey;
+        const captchaContainer = document.getElementById('captcha-container');
+        let captchaToken = '';
+        let captchaWidgetId = null;
+
+        function loadTurnstile() {
+            return new Promise((resolve) => {
+                if (window.turnstile) { resolve(); return; }
+                const s = document.createElement('script');
+                s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+                s.async = true;
+                s.defer = true;
+                s.onload = () => resolve();
+                document.head.appendChild(s);
+            });
+        }
+
+        async function ensureCaptcha() {
+            if (!captchaEnabled || captchaWidgetId !== null) return;
+            await loadTurnstile();
+            captchaWidgetId = window.turnstile.render(captchaContainer, {
+                sitekey: config.captchaSiteKey,
+                callback: (token) => { captchaToken = token; },
+                'error-callback': () => { captchaToken = ''; },
+                'expired-callback': () => { captchaToken = ''; },
+            });
+        }
+
+        function resetCaptcha() {
+            captchaToken = '';
+            if (captchaWidgetId !== null && window.turnstile) {
+                window.turnstile.reset(captchaWidgetId);
+            }
+        }
+
+        function syncCaptchaVisibility() {
+            if (!captchaEnabled) return;
+            if (isLogin) {
+                captchaContainer.style.display = 'none';
+            } else {
+                captchaContainer.style.display = 'block';
+                ensureCaptcha();
+            }
+        }
+
         toggleLink.addEventListener('click', () => {
             isLogin = !isLogin;
             errorMsg.style.display = 'none';
@@ -246,36 +298,54 @@
                 toggleText.textContent = 'Already have an account?';
                 toggleLink.textContent = 'Log in';
             }
+            syncCaptchaVisibility();
         });
+
+        // Show the widget if the page loads directly in sign-up mode.
+        syncCaptchaVisibility();
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
-            
+
+            // Sign-up requires a CAPTCHA token when the widget is active.
+            if (!isLogin && captchaEnabled && !captchaToken) {
+                errorMsg.textContent = 'Please complete the CAPTCHA to continue.';
+                errorMsg.style.display = 'block';
+                return;
+            }
+
             submitBtn.disabled = true;
             submitBtn.textContent = 'Please wait...';
             errorMsg.style.display = 'none';
             successMsg.style.display = 'none';
             resultData.style.display = 'none';
-            
-            const endpoint = isLogin 
-                ? '/identity.v1.IdentityService/PasswordLogin' 
+
+            const endpoint = isLogin
+                ? '/identity.v1.IdentityService/PasswordLogin'
                 : '/identity.v1.IdentityService/PasswordSignup';
-                
+
+            const payload = { email, password };
+            if (!isLogin && captchaEnabled) {
+                payload.captchaToken = captchaToken;
+            }
+
             try {
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ email, password })
+                    body: JSON.stringify(payload)
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (!response.ok) {
+                    // A used/expired token can't be replayed — mint a fresh one.
+                    if (!isLogin && captchaEnabled) resetCaptcha();
                     throw new Error(data.message || data.code || 'Authentication failed');
                 }
                 

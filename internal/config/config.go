@@ -395,6 +395,10 @@ type Config struct {
 	CaptchaProvider string
 	// CaptchaTurnstileSecret is the Cloudflare Turnstile secret key (provider "turnstile").
 	CaptchaTurnstileSecret string
+	// CaptchaTurnstileSiteKey is the Cloudflare Turnstile PUBLIC site key
+	// (provider "turnstile"). Safe to expose: the hosted sign-up UI needs it
+	// to render the widget, and the client passes the resulting token back.
+	CaptchaTurnstileSiteKey string
 	// CaptchaRecaptchaSecret is the reCAPTCHA v3 secret key (provider "recaptcha_v3").
 	CaptchaRecaptchaSecret string
 	// CaptchaRecaptchaScoreThreshold is the reCAPTCHA v3 score below which a
@@ -902,6 +906,7 @@ func Load() *Config {
 		CaptchaEnabled:                 envBool("GATEWAY_CAPTCHA_ENABLED", false),
 		CaptchaProvider:                envStr("GATEWAY_CAPTCHA_PROVIDER", ""),
 		CaptchaTurnstileSecret:         envStr("GATEWAY_CAPTCHA_TURNSTILE_SECRET", ""),
+		CaptchaTurnstileSiteKey:        envStr("GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY", ""),
 		CaptchaRecaptchaSecret:         envStr("GATEWAY_CAPTCHA_RECAPTCHA_SECRET", ""),
 		CaptchaRecaptchaScoreThreshold: envFloat("GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD", DefaultCaptchaRecaptchaScoreThreshold),
 		CaptchaEnforcePasswordSignup:   envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP", true),
@@ -1667,6 +1672,11 @@ func (c *Config) validateCaptcha() error {
 	case CaptchaProviderTurnstile:
 		if c.CaptchaTurnstileSecret == "" {
 			return fmt.Errorf("config: GATEWAY_CAPTCHA_ENABLED=true with provider %q requires GATEWAY_CAPTCHA_TURNSTILE_SECRET", CaptchaProviderTurnstile)
+		}
+		// The hosted sign-up UI needs the public site key to render the widget;
+		// without it, enforcement would reject every browser sign-up.
+		if c.CaptchaTurnstileSiteKey == "" {
+			return fmt.Errorf("config: GATEWAY_CAPTCHA_ENABLED=true with provider %q requires GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY", CaptchaProviderTurnstile)
 		}
 	case CaptchaProviderRecaptchaV3:
 		if c.CaptchaRecaptchaSecret == "" {

@@ -48,3 +48,44 @@ func TestHandler_InjectsServerConfig(t *testing.T) {
 		}
 	}
 }
+
+// TestHandler_InjectsCaptchaConfig confirms the public CAPTCHA provider + site
+// key reach the SPA only when CAPTCHA is enabled with a Turnstile site key —
+// so the sign-up widget renders exactly when it should and never leaks a key
+// while CAPTCHA is off.
+func TestHandler_InjectsCaptchaConfig(t *testing.T) {
+	t.Run("enabled with turnstile site key", func(t *testing.T) {
+		h := Handler(&config.Config{
+			CaptchaEnabled:          true,
+			CaptchaProvider:         config.CaptchaProviderTurnstile,
+			CaptchaTurnstileSiteKey: "0xSITEKEY",
+		})
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/", nil))
+		body := rec.Body.String()
+
+		for _, want := range []string{`"captchaProvider":"turnstile"`, `"captchaSiteKey":"0xSITEKEY"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("rendered page missing injected %q", want)
+			}
+		}
+	})
+
+	t.Run("disabled injects empty captcha config", func(t *testing.T) {
+		h := Handler(&config.Config{
+			CaptchaEnabled:          false,
+			CaptchaProvider:         config.CaptchaProviderTurnstile,
+			CaptchaTurnstileSiteKey: "0xSITEKEY",
+		})
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/", nil))
+		body := rec.Body.String()
+
+		if strings.Contains(body, "0xSITEKEY") {
+			t.Error("site key leaked into the page while CAPTCHA is disabled")
+		}
+		if !strings.Contains(body, `"captchaProvider":""`) {
+			t.Error("expected empty captchaProvider while CAPTCHA is disabled")
+		}
+	})
+}
