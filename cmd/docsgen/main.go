@@ -115,6 +115,7 @@ func missingDescriptions(vars []ConfigVar) []string {
 // These are the helper function names defined in internal/config/config.go.
 var envHelperType = map[string]string{
 	"envStr":                "string",
+	"envStrRaw":             "string",
 	"envInt":                "integer",
 	"envFloat":              "number",
 	"envBool":               "boolean",
