@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.26.4'
+  GO_VERSION: '1.26.5'
   K6_IMAGE: grafana/k6:0.49.0
   IDENTITY_LOAD_PROFILE: ${{ github.event_name == 'schedule' && 'soak' || inputs.profile }}
 
