@@ -97,7 +97,7 @@ docker pull ghcr.io/elloloop/identity:latest`} lang="bash" />
 
   <h2>Building from source</h2>
   <p>The repo's <code>Dockerfile</code> is a two-stage multi-arch build:</p>
-  <Code code={`FROM --platform=$BUILDPLATFORM golang:1.26.4-alpine3.23 AS builder
+  <Code code={`FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine3.23 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
