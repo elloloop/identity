@@ -183,7 +183,7 @@
             <p id="subtitle">Log in to your account to continue</p>
         </div>
 
-        <div id="error-message" class="error-message"></div>
+        <div id="error-message" class="error-message" role="alert"></div>
         <div id="success-message" class="success-message"></div>
 
         <form id="auth-form">
@@ -197,8 +197,8 @@
                 <input type="password" id="password" required autocomplete="current-password" placeholder="••••••••">
             </div>
 
-            <!-- CAPTCHA widget, rendered only when configured and only for
-                 sign-up (enforcement is scoped to PasswordSignup). -->
+            <!-- CAPTCHA widget, rendered only when configured and only in the
+                 modes (login / sign-up) the server actually enforces. -->
             <div id="captcha-container" style="display: none; margin-bottom: 16px;"></div>
 
             <button type="submit" class="submit-btn" id="submit-btn">Log in</button>
@@ -231,29 +231,50 @@
             document.querySelector('.toggle-mode').style.display = 'none';
         }
 
-        // CAPTCHA: rendered only when the server injected a provider + site key.
-        // Enforcement is scoped to sign-up, so the widget shows in sign-up mode
-        // only. The token is attached to the PasswordSignup request below.
-        const captchaEnabled = config.captchaProvider === 'turnstile' && !!config.captchaSiteKey;
+        // CAPTCHA: the server injects the provider, PUBLIC site key and the
+        // per-flow enforcement flags, so the widget renders exactly in the
+        // modes where the server will require a token. The token is attached
+        // to the request of whichever enforced mode is submitted.
+        const captchaAvailable = config.captchaProvider === 'turnstile' && !!config.captchaSiteKey;
         const captchaContainer = document.getElementById('captcha-container');
         let captchaToken = '';
         let captchaWidgetId = null;
+        let turnstileLoad = null;
+
+        function captchaRequired() {
+            if (!captchaAvailable) return false;
+            return isLogin ? !!config.captchaEnforceLogin : !!config.captchaEnforceSignup;
+        }
 
         function loadTurnstile() {
-            return new Promise((resolve) => {
+            if (turnstileLoad) return turnstileLoad;
+            turnstileLoad = new Promise((resolve, reject) => {
                 if (window.turnstile) { resolve(); return; }
                 const s = document.createElement('script');
                 s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
                 s.async = true;
                 s.defer = true;
                 s.onload = () => resolve();
+                s.onerror = () => {
+                    turnstileLoad = null; // allow a retry on the next sync
+                    reject(new Error('captcha script failed to load'));
+                };
                 document.head.appendChild(s);
             });
+            return turnstileLoad;
         }
 
         async function ensureCaptcha() {
-            if (!captchaEnabled || captchaWidgetId !== null) return;
-            await loadTurnstile();
+            if (captchaWidgetId !== null) return;
+            try {
+                await loadTurnstile();
+            } catch {
+                errorMsg.textContent = 'The CAPTCHA failed to load. Check your connection and reload the page.';
+                errorMsg.style.display = 'block';
+                return;
+            }
+            // Re-check after the await: a concurrent call may have rendered.
+            if (captchaWidgetId !== null) return;
             captchaWidgetId = window.turnstile.render(captchaContainer, {
                 sitekey: config.captchaSiteKey,
                 callback: (token) => { captchaToken = token; },
@@ -270,12 +291,11 @@
         }
 
         function syncCaptchaVisibility() {
-            if (!captchaEnabled) return;
-            if (isLogin) {
-                captchaContainer.style.display = 'none';
-            } else {
+            if (captchaRequired()) {
                 captchaContainer.style.display = 'block';
                 ensureCaptcha();
+            } else {
+                captchaContainer.style.display = 'none';
             }
         }
 
@@ -310,8 +330,8 @@
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
 
-            // Sign-up requires a CAPTCHA token when the widget is active.
-            if (!isLogin && captchaEnabled && !captchaToken) {
+            // The current mode requires a CAPTCHA token when enforced.
+            if (captchaRequired() && !captchaToken) {
                 errorMsg.textContent = 'Please complete the CAPTCHA to continue.';
                 errorMsg.style.display = 'block';
                 return;
@@ -328,7 +348,7 @@
                 : '/identity.v1.IdentityService/PasswordSignup';
 
             const payload = { email, password };
-            if (!isLogin && captchaEnabled) {
+            if (captchaRequired()) {
                 payload.captchaToken = captchaToken;
             }
 
@@ -345,7 +365,7 @@
 
                 if (!response.ok) {
                     // A used/expired token can't be replayed — mint a fresh one.
-                    if (!isLogin && captchaEnabled) resetCaptcha();
+                    if (captchaRequired()) resetCaptcha();
                     throw new Error(data.message || data.code || 'Authentication failed');
                 }
                 

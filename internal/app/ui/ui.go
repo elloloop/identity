@@ -23,6 +23,12 @@ type configData struct {
 	CaptchaProvider string `json:"captchaProvider"`
 	// CaptchaSiteKey is the provider's PUBLIC site key for the widget.
 	CaptchaSiteKey string `json:"captchaSiteKey"`
+	// CaptchaEnforceLogin and CaptchaEnforceSignup mirror the server's per-flow
+	// enforcement (GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN / _SIGNUP) so the SPA
+	// renders the widget exactly where the server will require a token. Both
+	// are false whenever no widget can render.
+	CaptchaEnforceLogin  bool `json:"captchaEnforceLogin"`
+	CaptchaEnforceSignup bool `json:"captchaEnforceSignup"`
 }
 
 // Handler returns an http.Handler that serves the embedded static files.
@@ -34,10 +40,13 @@ func Handler(cfg *config.Config) http.Handler {
 		panic(err)
 	}
 
+	siteKey := captchaUISiteKey(cfg)
 	data := configData{
 		PasswordSignupEnabled: cfg.PasswordSignupEnabled,
 		CaptchaProvider:       captchaUIProvider(cfg),
-		CaptchaSiteKey:        captchaUISiteKey(cfg),
+		CaptchaSiteKey:        siteKey,
+		CaptchaEnforceLogin:   siteKey != "" && cfg.CaptchaEnforcePasswordLogin,
+		CaptchaEnforceSignup:  siteKey != "" && cfg.CaptchaEnforcePasswordSignup,
 	}
 
 	b, err := json.Marshal(data)
@@ -47,8 +56,9 @@ func Handler(cfg *config.Config) http.Handler {
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]any{
-		// b is json.Marshal of a static configData struct (a single bool),
-		// with no user-controlled input, so injecting it unescaped is safe.
+		// b is json.Marshal of a static configData struct (bools plus
+		// operator-set strings from server env config), with no
+		// user-controlled input, so injecting it unescaped is safe.
 		"JSONConfig": template.JS("window.serverConfig = " + string(b) + ";"), //nolint:gosec // G203: static server-generated config, no user input
 	}); err != nil {
 		panic(err)
