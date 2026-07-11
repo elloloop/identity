@@ -331,6 +331,16 @@ type Config struct {
 	// RPCs are unaffected. Driven by GATEWAY_OAUTH_ALLOWED_RETURN_URLS.
 	OAuthAllowedReturnURLs string
 
+	// OAuthPrompt is the OAuth `prompt` parameter forwarded to providers that
+	// support it (Google, Microsoft) on the hosted authorization request.
+	// Defaults to "select_account" so a signed-in user is always offered the
+	// account chooser — without it the provider silently reuses its existing
+	// SSO session, so after signing out of an app (whose local tokens were
+	// cleared but whose provider session persists) the user cannot switch to a
+	// different account. Set empty to disable (provider default). Driven by
+	// GATEWAY_OAUTH_PROMPT.
+	OAuthPrompt string
+
 	// NativeOAuthEnabled is the kill-switch for NativeOAuthLogin (verifying
 	// Google/Apple/Microsoft ID tokens from mobile SDKs). It defaults true when
 	// at least one provider's DEFAULT-PROJECT native audiences are configured via
@@ -882,6 +892,7 @@ func Load() *Config {
 		OIDCScopes:       envStr("GATEWAY_OAUTH_OIDC_SCOPES", ""),
 
 		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
+		OAuthPrompt:            envStrRaw("GATEWAY_OAUTH_PROMPT", "select_account"),
 
 		NativeOAuthGoogleAudiences:    envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),
 		NativeOAuthAppleAudiences:     envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES", ""),
@@ -1270,6 +1281,16 @@ func (c *Config) EmailServiceAddress() string {
 // envStr reads a string environment variable, returning def if unset or empty.
 func envStr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// envStrRaw returns the env value when the key is SET — even to the empty
+// string — and def only when the key is unset. Use it (instead of envStr) where
+// an explicit empty value is a meaningful "disable", not "fall back to default".
+func envStrRaw(key, def string) string {
+	if v, ok := os.LookupEnv(key); ok {
 		return v
 	}
 	return def
