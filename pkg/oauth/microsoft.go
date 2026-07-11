@@ -25,6 +25,11 @@ type MicrosoftConfig struct {
 	ClientID     string
 	ClientSecret string
 
+	// Prompt is the OAuth `prompt` value sent on the authorization request
+	// (e.g. "select_account" to force the account chooser). Empty omits it,
+	// falling back to Microsoft's default behaviour.
+	Prompt string
+
 	HTTPClient *http.Client
 
 	// AuthorizationURL overrides the authorization endpoint. Optional.
@@ -269,6 +274,9 @@ func (m *microsoftExchanger) AuthorizationURL(_ context.Context, redirectURI, st
 	params.Set("redirect_uri", redirectURI)
 	params.Set("response_type", "code")
 	params.Set("scope", "openid email profile")
+	if m.cfg.Prompt != "" {
+		params.Set("prompt", m.cfg.Prompt)
+	}
 	if err := addPKCEParams(params, state, codeChallenge); err != nil {
 		return "", err
 	}

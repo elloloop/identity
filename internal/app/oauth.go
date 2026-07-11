@@ -51,6 +51,7 @@ func buildOAuthRegistry(cfg *config.Config, logger *zap.Logger) *oauth.Registry 
 		r.Register("google", oauth.NewGoogle(oauth.GoogleConfig{
 			ClientID:         cfg.GoogleClientID,
 			ClientSecret:     cfg.GoogleClientSecret,
+			Prompt:           cfg.OAuthPrompt,
 			AuthorizationURL: cfg.GoogleAuthorizationURL,
 			TokenURL:         cfg.GoogleTokenURL,
 			JWKSURL:          cfg.GoogleJWKSURL,
@@ -63,6 +64,7 @@ func buildOAuthRegistry(cfg *config.Config, logger *zap.Logger) *oauth.Registry 
 		r.Register("microsoft", oauth.NewMicrosoft(oauth.MicrosoftConfig{
 			ClientID:       cfg.MicrosoftClientID,
 			ClientSecret:   cfg.MicrosoftClientSecret,
+			Prompt:         cfg.OAuthPrompt,
 			TenantID:       cfg.MicrosoftTenantID,
 			AllowedTenants: cfg.MicrosoftAllowedTenantList(),
 		}))

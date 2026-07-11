@@ -76,6 +76,26 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com/,https://admin.example
 The active allowlist is logged at startup
 (`oauth_hosted_flow_enabled` / `oauth_hosted_flow_disabled`).
 
+### Account chooser (`prompt`)
+
+`GATEWAY_OAUTH_PROMPT` sets the OAuth `prompt` parameter forwarded to
+providers that support it (Google, Microsoft) on the hosted authorization
+request. It defaults to `select_account`, so a signed-in user is always
+offered the provider's account chooser — without it the provider silently
+reuses its existing SSO session, and a user who signed out of an app (local
+tokens cleared, provider session intact) could not switch accounts.
+
+- Set it to another value the provider accepts (e.g. `consent`) to forward
+  that instead.
+- Set it **explicitly empty** (`GATEWAY_OAUTH_PROMPT=`) to disable
+  forwarding and restore the provider's default behavior.
+- Upgrade note: because the default is on, existing deployments show the
+  account chooser on Google/Microsoft login after upgrading unless the
+  variable is set empty.
+- Scope: applies to the env-configured (default-project) Google and
+  Microsoft providers. Per-project providers configured via `config_json`
+  and the generic OIDC provider are not affected by this variable.
+
 ### Single redirect URI per provider
 
 identity owns one redirect URI per provider:

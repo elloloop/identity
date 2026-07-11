@@ -4,11 +4,54 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 )
 
 const msTenantID = "tenant-uuid"
+
+func TestMicrosoft_AuthorizationURL_Prompt(t *testing.T) {
+	t.Parallel()
+
+	az, ok := NewMicrosoft(MicrosoftConfig{
+		ClientID:         "ms-client-id",
+		Prompt:           "select_account",
+		AuthorizationURL: "https://login.example.test/authorize",
+	}).(Authorizer)
+	if !ok {
+		t.Fatal("microsoft exchanger does not implement Authorizer")
+	}
+
+	got, err := az.AuthorizationURL(context.Background(), "https://app.test/callback", "state-abc", "challenge-xyz")
+	if err != nil {
+		t.Fatalf("AuthorizationURL: %v", err)
+	}
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse %q: %v", got, err)
+	}
+	if p := u.Query().Get("prompt"); p != "select_account" {
+		t.Errorf("prompt = %q, want %q; url=%s", p, "select_account", got)
+	}
+
+	// Empty Prompt omits the param entirely (falls back to the provider default).
+	az2, _ := NewMicrosoft(MicrosoftConfig{
+		ClientID:         "ms-client-id",
+		AuthorizationURL: "https://login.example.test/authorize",
+	}).(Authorizer)
+	got2, err := az2.AuthorizationURL(context.Background(), "https://app.test/callback", "s", "c")
+	if err != nil {
+		t.Fatalf("AuthorizationURL(empty prompt): %v", err)
+	}
+	u2, err := url.Parse(got2)
+	if err != nil {
+		t.Fatalf("parse %q: %v", got2, err)
+	}
+	if u2.Query().Has("prompt") {
+		t.Errorf("expected no prompt param when Prompt empty; url=%s", got2)
+	}
+}
 
 func msIssuer() string {
 	return "https://login.test/" + msTenantID + "/v2.0"

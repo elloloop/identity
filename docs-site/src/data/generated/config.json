@@ -819,6 +819,15 @@
     "anchor": "oauth"
   },
   {
+    "name": "GATEWAY_OAUTH_PROMPT",
+    "type": "string",
+    "default": "select_account",
+    "required": false,
+    "description": "is the OAuth `prompt` parameter forwarded to providers that support it (Google, Microsoft) on the hosted authorization request.",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
     "name": "GATEWAY_OTEL_DEPLOYMENT_ENV",
     "type": "string",
     "default": "",

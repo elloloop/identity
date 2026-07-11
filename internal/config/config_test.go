@@ -42,6 +42,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.PublicEmailDomains != "" {
 		t.Errorf("PublicEmailDomains: want empty default, got %q", cfg.PublicEmailDomains)
 	}
+	if cfg.OAuthPrompt != "select_account" {
+		t.Errorf("OAuthPrompt: want select_account default (account chooser on), got %q", cfg.OAuthPrompt)
+	}
 	if cfg.JWTExpirySeconds != 900 {
 		t.Errorf("JWTExpirySeconds: want 900, got %d", cfg.JWTExpirySeconds)
 	}
@@ -147,6 +150,7 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_OAUTH_APPLE_TEAM_ID", "apple-team")
 	t.Setenv("GATEWAY_OAUTH_APPLE_KEY_ID", "apple-key")
 	t.Setenv("GATEWAY_OAUTH_APPLE_PRIVATE_KEY", "apple-private")
+	t.Setenv("GATEWAY_OAUTH_PROMPT", "")
 
 	cfg := Load()
 
@@ -167,6 +171,9 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	}
 	if cfg.DisableFirstAdminBootstrap != true {
 		t.Errorf("DisableFirstAdminBootstrap: want true, got %v", cfg.DisableFirstAdminBootstrap)
+	}
+	if cfg.OAuthPrompt != "" {
+		t.Errorf("OAuthPrompt: want empty (override disables the account chooser), got %q", cfg.OAuthPrompt)
 	}
 	if cfg.JWTExpirySeconds != 1800 {
 		t.Errorf("JWTExpirySeconds: want 1800, got %d", cfg.JWTExpirySeconds)

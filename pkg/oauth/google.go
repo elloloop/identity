@@ -28,6 +28,11 @@ type GoogleConfig struct {
 	ClientID     string
 	ClientSecret string
 
+	// Prompt is the OAuth `prompt` value sent on the authorization request
+	// (e.g. "select_account" to force the account chooser). Empty omits it,
+	// falling back to Google's default behaviour.
+	Prompt string
+
 	// HTTPClient overrides the http.Client used for token + JWKS
 	// requests. Optional; defaults to a 10s-timeout client.
 	HTTPClient *http.Client
@@ -202,6 +207,9 @@ func (g *googleExchanger) AuthorizationURL(ctx context.Context, redirectURI, sta
 	params.Set("redirect_uri", redirectURI)
 	params.Set("response_type", "code")
 	params.Set("scope", "openid email profile")
+	if g.cfg.Prompt != "" {
+		params.Set("prompt", g.cfg.Prompt)
+	}
 	if err := addPKCEParams(params, state, codeChallenge); err != nil {
 		return "", err
 	}
