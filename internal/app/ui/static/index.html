@@ -127,7 +127,12 @@
             color: var(--muted-text);
         }
 
-        .toggle-mode a {
+        .toggle-mode button {
+            background: none;
+            border: none;
+            padding: 0;
+            font-family: inherit;
+            font-size: inherit;
             color: var(--primary);
             text-decoration: none;
             font-weight: 500;
@@ -135,7 +140,7 @@
             transition: color 0.2s ease;
         }
 
-        .toggle-mode a:hover {
+        .toggle-mode button:hover {
             color: #60a5fa;
             text-decoration: underline;
         }
@@ -184,7 +189,7 @@
         </div>
 
         <div id="error-message" class="error-message" role="alert"></div>
-        <div id="success-message" class="success-message"></div>
+        <div id="success-message" class="success-message" role="status"></div>
 
         <form id="auth-form">
             <div class="form-group">
@@ -206,7 +211,7 @@
 
         <div class="toggle-mode">
             <span id="toggle-text">Don't have an account?</span>
-            <a id="toggle-link">Sign up</a>
+            <button type="button" id="toggle-link">Sign up</button>
         </div>
         
         <div id="result-data" class="result-data"></div>
@@ -236,6 +241,7 @@
         // modes where the server will require a token. The token is attached
         // to the request of whichever enforced mode is submitted.
         const captchaAvailable = config.captchaProvider === 'turnstile' && !!config.captchaSiteKey;
+        const captchaLoadFailedMsg = 'The CAPTCHA failed to load. Check your connection and reload the page.';
         const captchaContainer = document.getElementById('captcha-container');
         let captchaToken = '';
         let captchaWidgetId = null;
@@ -269,7 +275,7 @@
             try {
                 await loadTurnstile();
             } catch {
-                errorMsg.textContent = 'The CAPTCHA failed to load. Check your connection and reload the page.';
+                errorMsg.textContent = captchaLoadFailedMsg;
                 errorMsg.style.display = 'block';
                 return;
             }
@@ -330,9 +336,13 @@
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
 
-            // The current mode requires a CAPTCHA token when enforced.
+            // The current mode requires a CAPTCHA token when enforced. With no
+            // rendered widget there is nothing the user can complete — keep the
+            // load-failure guidance instead of asking for the impossible.
             if (captchaRequired() && !captchaToken) {
-                errorMsg.textContent = 'Please complete the CAPTCHA to continue.';
+                errorMsg.textContent = captchaWidgetId === null
+                    ? captchaLoadFailedMsg
+                    : 'Please complete the CAPTCHA to continue.';
                 errorMsg.style.display = 'block';
                 return;
             }
