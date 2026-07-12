@@ -43,6 +43,7 @@ func enableCaptcha(c *config.Config) {
 	c.CaptchaEnforcePasswordReset = true
 	c.CaptchaEnforceEmailLoginCode = true
 	c.CaptchaEnforceMagicLink = true
+	c.CaptchaEnforcePasskeySignup = true
 }
 
 func seedLoginUser(t *testing.T, h *testHarness) *service.User {
@@ -220,5 +221,93 @@ func TestCaptcha_RequestPasswordReset_ValidTokenStaysEnumerationSafe(t *testing.
 	}
 	if fv.calls != 1 {
 		t.Fatalf("verifier calls = %d; want 1", fv.calls)
+	}
+}
+
+// ── BeginPasskeySignup (account-creation endpoint) ──────────────────────
+//
+// WebAuthn's user-presence/verification flags are asserted by the authenticator
+// itself, so a scripted attacker can forge them in software and spam this
+// endpoint into creating dummy accounts + sending emails. The CAPTCHA gate is
+// the real bot wall — it must run BEFORE any passkey work.
+
+func TestCaptcha_BeginPasskeySignup_MissingTokenPermissionDenied(t *testing.T) {
+	fv := &fakeVerifier{}
+	h := newHarnessWithCaptcha(t, fv, enableCaptcha)
+
+	_, err := h.client.BeginPasskeySignup(context.Background(), connect.NewRequest(&identitypb.BeginPasskeySignupRequest{
+		Email:      "passkey-captcha@example.com",
+		DeviceName: "iPhone",
+	}))
+	if connectCodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("code = %v; want PermissionDenied (err=%v)", connectCodeOf(err), err)
+	}
+	if fv.calls != 0 {
+		t.Fatalf("verifier must not be called for a missing token; calls = %d", fv.calls)
+	}
+}
+
+func TestCaptcha_BeginPasskeySignup_InvalidTokenPermissionDenied(t *testing.T) {
+	fv := &fakeVerifier{err: errors.New("provider rejected")}
+	h := newHarnessWithCaptcha(t, fv, enableCaptcha)
+
+	_, err := h.client.BeginPasskeySignup(context.Background(), withClientHeaders(connect.NewRequest(&identitypb.BeginPasskeySignupRequest{
+		Email:        "passkey-captcha@example.com",
+		DeviceName:   "iPhone",
+		CaptchaToken: "rejected-token",
+	})))
+	if connectCodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("code = %v; want PermissionDenied (err=%v)", connectCodeOf(err), err)
+	}
+	if fv.calls != 1 {
+		t.Fatalf("verifier calls = %d; want 1", fv.calls)
+	}
+}
+
+func TestCaptcha_BeginPasskeySignup_EnabledValidTokenPasses(t *testing.T) {
+	fv := &fakeVerifier{}
+	h := newHarnessWithCaptcha(t, fv, func(c *config.Config) {
+		enableCaptcha(c)
+		c.PasskeySignupEnabled = true
+	})
+
+	resp, err := h.client.BeginPasskeySignup(context.Background(), withClientHeaders(connect.NewRequest(&identitypb.BeginPasskeySignupRequest{
+		Email:        "passkey-captcha@example.com",
+		DeviceName:   "iPhone",
+		CaptchaToken: "valid-token",
+	})))
+	if err != nil {
+		t.Fatalf("BeginPasskeySignup (valid captcha): %v", err)
+	}
+	if resp.Msg.GetOptionsJson() == "" || resp.Msg.GetChallengeId() == "" {
+		t.Fatalf("expected creation options + challenge id; got %+v", resp.Msg)
+	}
+	if fv.calls != 1 {
+		t.Fatalf("verifier calls = %d; want 1", fv.calls)
+	}
+	if fv.lastToken != "valid-token" {
+		t.Fatalf("verifier token = %q; want valid-token", fv.lastToken)
+	}
+	if fv.lastRemote != "10.0.0.1" {
+		t.Fatalf("verifier remoteip = %q; want forwarded client IP", fv.lastRemote)
+	}
+}
+
+func TestCaptcha_BeginPasskeySignup_PerEndpointToggleOffSkipsCheck(t *testing.T) {
+	fv := &fakeVerifier{err: errors.New("would reject if called")}
+	h := newHarnessWithCaptcha(t, fv, func(c *config.Config) {
+		enableCaptcha(c)
+		c.PasskeySignupEnabled = true
+		c.CaptchaEnforcePasskeySignup = false
+	})
+
+	if _, err := h.client.BeginPasskeySignup(context.Background(), withClientHeaders(connect.NewRequest(&identitypb.BeginPasskeySignupRequest{
+		Email:      "passkey-captcha@example.com",
+		DeviceName: "iPhone",
+	}))); err != nil {
+		t.Fatalf("BeginPasskeySignup (passkey toggle off): %v", err)
+	}
+	if fv.calls != 0 {
+		t.Fatalf("verifier must not be called when the passkey toggle is off; calls = %d", fv.calls)
 	}
 }

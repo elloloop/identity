@@ -117,6 +117,15 @@
     "anchor": "captcha"
   },
   {
+    "name": "GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "gates CAPTCHA on the BeginPasskeySignup endpoint.",
+    "category": "CAPTCHA",
+    "anchor": "captcha"
+  },
+  {
     "name": "GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN",
     "type": "boolean",
     "default": "true",

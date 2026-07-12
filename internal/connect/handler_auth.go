@@ -335,6 +335,9 @@ func (h *IdentityHandler) BeginPasskeySignup(
 	ctx context.Context,
 	req *connect.Request[identitypb.BeginPasskeySignupRequest],
 ) (*connect.Response[identitypb.BeginPasskeySignupResponse], error) {
+	if err := h.checkCaptcha(ctx, h.captchaEnforcePasskeySignup(), req.Msg.CaptchaToken, clientIP(req.Header())); err != nil {
+		return nil, toConnectError(err)
+	}
 	optionsJSON, challengeID, err := h.auth.BeginPasskeySignup(ctx, req.Msg.Email, req.Msg.DeviceName)
 	if err != nil {
 		return nil, toConnectError(err)
