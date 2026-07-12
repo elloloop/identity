@@ -5610,6 +5610,7 @@ type BeginPasskeySignupRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
 	DeviceName    string                 `protobuf:"bytes,2,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
+	CaptchaToken  string                 `protobuf:"bytes,3,opt,name=captcha_token,json=captchaToken,proto3" json:"captcha_token,omitempty"` // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5654,6 +5655,13 @@ func (x *BeginPasskeySignupRequest) GetEmail() string {
 func (x *BeginPasskeySignupRequest) GetDeviceName() string {
 	if x != nil {
 		return x.DeviceName
+	}
+	return ""
+}
+
+func (x *BeginPasskeySignupRequest) GetCaptchaToken() string {
+	if x != nil {
+		return x.CaptchaToken
 	}
 	return ""
 }
@@ -12485,11 +12493,12 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"R\n" +
+	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"w\n" +
 	"\x19BeginPasskeySignupRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1f\n" +
 	"\vdevice_name\x18\x02 \x01(\tR\n" +
-	"deviceName\"b\n" +
+	"deviceName\x12#\n" +
+	"\rcaptcha_token\x18\x03 \x01(\tR\fcaptchaToken\"b\n" +
 	"\x1aBeginPasskeySignupResponse\x12!\n" +
 	"\foptions_json\x18\x01 \x01(\tR\voptionsJson\x12!\n" +
 	"\fchallenge_id\x18\x02 \x01(\tR\vchallengeId\"\xbc\x01\n" +

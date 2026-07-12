@@ -680,6 +680,7 @@ message CompletePasskeyLoginResponse {
 message BeginPasskeySignupRequest {
   string email = 1;
   string device_name = 2;
+  string captcha_token = 3;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
 }
 
 message BeginPasskeySignupResponse {

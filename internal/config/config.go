@@ -424,6 +424,11 @@ type Config struct {
 	CaptchaEnforceEmailLoginCode bool
 	// CaptchaEnforceMagicLink gates CAPTCHA on the RequestMagicLink endpoint.
 	CaptchaEnforceMagicLink bool
+	// CaptchaEnforcePasskeySignup gates CAPTCHA on the BeginPasskeySignup endpoint.
+	// Passkey registration is spammable without it — a script can forge valid
+	// FIDO2 keypairs in software and set the UP/UV flags itself, so BeginPasskeySignup
+	// is an unmetered account-creation + email-send surface just like PasswordSignup.
+	CaptchaEnforcePasskeySignup bool
 
 	// Age-gating (COPPA). When disabled the no-op determiner is wired (everyone
 	// classifies as adult, no consent gating) and signup behaves as before.
@@ -925,6 +930,7 @@ func Load() *Config {
 		CaptchaEnforcePasswordReset:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET", true),
 		CaptchaEnforceEmailLoginCode:   envBool("GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE", true),
 		CaptchaEnforceMagicLink:        envBool("GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK", true),
+		CaptchaEnforcePasskeySignup:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP", true),
 
 		AgeGateEnabled:     envBool("GATEWAY_AGEGATE_ENABLED", false),
 		AgeGateChildMaxAge: envInt("GATEWAY_AGEGATE_CHILD_MAX_AGE", DefaultAgeGateChildMaxAge),

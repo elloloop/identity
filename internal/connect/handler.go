@@ -132,6 +132,10 @@ func (h *IdentityHandler) captchaEnforceMagicLink() bool {
 	return h.cfg != nil && h.cfg.CaptchaEnforceMagicLink
 }
 
+func (h *IdentityHandler) captchaEnforcePasskeySignup() bool {
+	return h.cfg != nil && h.cfg.CaptchaEnforcePasskeySignup
+}
+
 // headerReader is a minimal interface satisfied by connect.Request (which
 // embeds http.Header) — used to extract headers without depending on
 // the concrete connect.Request type.

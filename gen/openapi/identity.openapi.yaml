@@ -4151,6 +4151,10 @@ components:
         deviceName:
           type: string
           title: device_name
+        captchaToken:
+          type: string
+          title: captcha_token
+          description: 'Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED'
       title: BeginPasskeySignupRequest
       additionalProperties: false
       description: |-
