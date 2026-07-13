@@ -1227,6 +1227,22 @@ func (r *fakeRepo) ListAuditEventsForUser(_ context.Context, userID string, limi
 	return out, nil
 }
 
+func (r *fakeRepo) DeleteAuditEventsBefore(_ context.Context, cutoffMs int64) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := r.auditEvents[:0]
+	deleted := 0
+	for _, e := range r.auditEvents {
+		if e.CreatedAt < cutoffMs {
+			deleted++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	r.auditEvents = kept
+	return deleted, nil
+}
+
 // ── Identity Verification ──────────────────────────────────────────────
 
 func (r *fakeRepo) CreateIdentityVerification(_ context.Context, rec *service.IdentityVerificationRecord) error {

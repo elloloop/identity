@@ -76,6 +76,18 @@ const DefaultPostgresConnTimeoutMs = 5000
 // clamp) so the boundary default matches the service's own fallback.
 const DefaultExportMaxAuditEvents = 1000
 
+// DefaultAuditRetentionDays is the default audit-log retention window in days
+// (730 = 24 months). Audit events record security-relevant actions together
+// with the caller's IP address and user-agent, so retaining them forever holds
+// personal data with no storage limit; the background sweeper deletes events
+// older than this window (GDPR Art 5(1)(e) storage limitation). 24 months is
+// long enough for accountability and incident forensics yet bounded, so the
+// trail cannot grow without end. GATEWAY_AUDIT_RETENTION_DAYS=0 (or negative)
+// disables the sweep, preserving the pre-retention behaviour of keeping the
+// trail indefinitely — the explicit opt-out for a legal hold or a longer
+// statutory retention obligation.
+const DefaultAuditRetentionDays = 730
+
 // DefaultProjectIDFallback is the project id used when none is configured.
 // It is the env-loader default for GATEWAY_DEFAULT_PROJECT_ID and the value
 // app.New normalizes an empty DefaultProjectID to, so a directly-constructed
@@ -824,6 +836,17 @@ type Config struct {
 	// a non-positive value falls back to the safe default.
 	ExportMaxAuditEvents int
 
+	// AuditRetentionDays is the audit-log retention window in days: on each tick
+	// the background sweeper deletes audit events whose occurred-at instant is
+	// older than now - AuditRetentionDays, so the service stops holding
+	// audit/security logs (which record IP address and user-agent) indefinitely
+	// (GDPR Art 5(1)(e) storage limitation). Driven by
+	// GATEWAY_AUDIT_RETENTION_DAYS (default 730 = 24 months). A value <= 0
+	// DISABLES retention — the sweep becomes a no-op and the trail is kept
+	// forever — the explicit opt-out for a legal hold or a longer statutory
+	// retention obligation.
+	AuditRetentionDays int
+
 	// Outbound webhooks / user-lifecycle eventing (#261). When disabled
 	// (the default), the service emits events to a no-op publisher: there is
 	// no observable behaviour change and no background worker runs. When
@@ -1095,6 +1118,7 @@ func Load() *Config {
 
 		AccountDeletionGraceDays: envInt("GATEWAY_ACCOUNT_DELETION_GRACE_DAYS", 30),
 		ExportMaxAuditEvents:     envInt("GATEWAY_EXPORT_MAX_AUDIT_EVENTS", DefaultExportMaxAuditEvents),
+		AuditRetentionDays:       envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
 
 		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
 		WebhooksMaxAttempts:           envInt("GATEWAY_WEBHOOKS_MAX_ATTEMPTS", 6),

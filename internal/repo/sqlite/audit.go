@@ -80,6 +80,39 @@ func (r *sqliteRepository) ListAuditEventsForUser(ctx context.Context, userID st
 	return out, nil
 }
 
+// auditRetentionSweepBatch caps how many audit rows a single DELETE statement
+// removes, matching the postgres driver so the storage-limitation sweep drains
+// in bounded chunks rather than one unbounded table-wide delete.
+const auditRetentionSweepBatch = 1000
+
+// DeleteAuditEventsBefore deletes audit events whose occurred_at_ms is strictly
+// less than cutoffMs, in capped batches, and returns the total number removed.
+// The pure-Go SQLite build has no DELETE ... LIMIT, so each batch pins its work
+// with a subquery ordered by occurred_at_ms ASC — the same shape as the postgres
+// driver. The loop ends once a batch removes fewer rows than the cap.
+func (r *sqliteRepository) DeleteAuditEventsBefore(ctx context.Context, cutoffMs int64) (int, error) {
+	const q = `
+		DELETE FROM audit_events
+		 WHERE id IN (
+		     SELECT id FROM audit_events
+		      WHERE project_id = $1 AND occurred_at_ms < $2
+		      ORDER BY occurred_at_ms ASC
+		      LIMIT $3
+		 )`
+	total := 0
+	for {
+		tag, err := r.db.Exec(ctx, q, r.projectID, cutoffMs, auditRetentionSweepBatch)
+		if err != nil {
+			return total, wrapErr("DeleteAuditEventsBefore", err)
+		}
+		removed := int(tag.RowsAffected())
+		total += removed
+		if removed < auditRetentionSweepBatch {
+			return total, nil
+		}
+	}
+}
+
 // marshalAuditDetails encodes an audit event's details map as a JSON object
 // string. An empty map is stored as "{}".
 func marshalAuditDetails(details map[string]any) (string, error) {

@@ -1974,6 +1974,22 @@ func (r *MemRepo) ListAuditEventsForUser(_ context.Context, userID string, limit
 	return out, nil
 }
 
+func (r *MemRepo) DeleteAuditEventsBefore(_ context.Context, cutoffMs int64) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := r.auditEvents[:0]
+	deleted := 0
+	for _, e := range r.auditEvents {
+		if e.CreatedAt < cutoffMs {
+			deleted++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	r.auditEvents = kept
+	return deleted, nil
+}
+
 // ── Identity Verification ──────────────────────────────────────────────
 
 func (r *MemRepo) CreateIdentityVerification(_ context.Context, rec *service.IdentityVerificationRecord) error {

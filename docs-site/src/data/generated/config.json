@@ -81,6 +81,15 @@
     "anchor": "audit"
   },
   {
+    "name": "GATEWAY_AUDIT_RETENTION_DAYS",
+    "type": "integer",
+    "default": "730",
+    "required": false,
+    "description": "is the audit-log retention window in days: on each tick the background sweeper deletes audit events whose occurred-at instant is older than now - AuditRetentionDays, so the service stops holding audit/security logs (which record IP address and user-agent) indefinitely (GDPR Art 5(1)(e) storage limitation).",
+    "category": "Audit",
+    "anchor": "audit"
+  },
+  {
     "name": "GATEWAY_AUTH_ALLOW_LOCAL",
     "type": "boolean",
     "default": "true",

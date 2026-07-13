@@ -80,6 +80,16 @@ type accountPurger interface {
 // account-deletion purge step of a sweep cycle.
 const accountDeletionLabel = "pending_deletion_users"
 
+// auditRetentionLabel is the metrics node_type label for the audit-log
+// retention step of a sweep cycle (GDPR Art 5(1)(e) storage limitation).
+const auditRetentionLabel = "audit_events"
+
+// auditRetentionDay is the fixed-duration day used to turn the configured
+// retention window (whole days) into a cutoff instant. A coarse retention
+// window (months) needs no calendar/DST precision, so a flat 24h day matches
+// the service layer's msPerDay multiplier.
+const auditRetentionDay = 24 * time.Hour
+
 // sweeper periodically deletes expired ephemeral rows in batches.
 // One instance per app.New; started immediately and stopped via the
 // returned cancel func.
@@ -90,6 +100,11 @@ type sweeper struct {
 	interval time.Duration
 	batch    int
 	grace    time.Duration
+
+	// auditRetentionDays bounds how long audit events are kept; each tick
+	// deletes events older than now - auditRetentionDays. 0 (or negative)
+	// disables the audit-retention step — the trail is kept forever.
+	auditRetentionDays int
 
 	// now is the time source; tests override it. nil means time.Now.
 	now func() time.Time
@@ -105,7 +120,8 @@ type sweeper struct {
 // newSweeper constructs a sweeper from config. Returns nil when
 // sweeping is disabled (interval <= 0); the caller must handle the
 // nil case. purger may be nil to disable the account-deletion sweep.
-func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batch, graceSec int, logger *zap.Logger) *sweeper {
+// auditRetentionDays <= 0 disables the audit-retention step.
+func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batch, graceSec, auditRetentionDays int, logger *zap.Logger) *sweeper {
 	if intervalSec <= 0 {
 		return nil
 	}
@@ -120,13 +136,14 @@ func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batc
 	}
 	initSweeperMetrics()
 	return &sweeper{
-		repo:       repo,
-		purger:     purger,
-		logger:     logger,
-		interval:   time.Duration(intervalSec) * time.Second,
-		batch:      batch,
-		grace:      time.Duration(graceSec) * time.Second,
-		skipLogged: make(map[string]bool, 5),
+		repo:               repo,
+		purger:             purger,
+		logger:             logger,
+		interval:           time.Duration(intervalSec) * time.Second,
+		batch:              batch,
+		grace:              time.Duration(graceSec) * time.Second,
+		auditRetentionDays: auditRetentionDays,
+		skipLogged:         make(map[string]bool, 5),
 	}
 }
 
@@ -175,7 +192,32 @@ func (s *sweeper) runOnce(ctx context.Context) {
 		s.sweepType(ctx, t, beforeMs)
 	}
 
-	s.purgeExpiredAccountDeletions(ctx, nowFn().UnixMilli())
+	now := nowFn()
+	s.purgeExpiredAccountDeletions(ctx, now.UnixMilli())
+	s.sweepAuditRetention(ctx, now)
+}
+
+// sweepAuditRetention deletes audit events older than the retention window
+// (now - auditRetentionDays), the GDPR Art 5(1)(e) storage-limitation step. It
+// is a no-op when retention is disabled (auditRetentionDays <= 0): the operator
+// has opted into keeping the trail forever. Errors are logged and counted; a
+// failure never aborts the surrounding sweep cycle.
+func (s *sweeper) sweepAuditRetention(ctx context.Context, now time.Time) {
+	if s.auditRetentionDays <= 0 {
+		return
+	}
+	cutoffMs := now.Add(-time.Duration(s.auditRetentionDays) * auditRetentionDay).UnixMilli()
+	if _, err := s.repo.DeleteAuditEventsBefore(ctx, cutoffMs); err != nil {
+		sweeperErrors.WithLabelValues(auditRetentionLabel).Inc()
+		s.logger.Warn(
+			"sweeper_audit_retention_failed",
+			zap.Int64("cutoff_ms", cutoffMs),
+			zap.Int("retention_days", s.auditRetentionDays),
+			zap.Error(err),
+		)
+		return
+	}
+	sweeperRuns.WithLabelValues(auditRetentionLabel).Inc()
 }
 
 // purgeExpiredAccountDeletions hard-deletes accounts whose self-service
