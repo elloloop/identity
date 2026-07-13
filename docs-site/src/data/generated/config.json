@@ -1636,5 +1636,14 @@
     "description": "is the outbox drain tick interval.",
     "category": "Webhooks / eventing",
     "anchor": "webhooks-eventing"
+  },
+  {
+    "name": "GATEWAY_WEBHOOK_SUBSCRIPTIONS",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the raw JSON array declaring the outbound-webhook endpoints seeded into the outbox at boot.",
+    "category": "Other",
+    "anchor": "other"
   }
 ]
