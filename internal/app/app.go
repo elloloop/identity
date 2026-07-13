@@ -8,6 +8,7 @@ package app
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -463,6 +464,15 @@ func New(deps Deps) (*Built, error) {
 	var eventPublisher events.Publisher
 	if deps.Config.WebhooksEnabled {
 		outbox := events.NewMemoryOutbox()
+		// Config.Validate (above) already parsed and validated the
+		// subscriptions, so this cannot fail here; the error is threaded
+		// through only so a caller that constructs Config out-of-band still
+		// gets a clear boot failure instead of a silent empty outbox.
+		subscriptions, subErr := deps.Config.WebhookSubscriptionList()
+		if subErr != nil {
+			return nil, subErr
+		}
+		seedWebhookSubscriptions(outbox, subscriptions, deps.Config.DefaultProjectID, logger)
 		pub := events.NewOutboxPublisher(outbox, randomEventID, time.Now, logger)
 		eventPublisher = pub
 		worker := events.NewWorker(events.WorkerConfig{
@@ -811,6 +821,71 @@ func wrapOAuthRegistry(in *oauth.Registry) *oauth.Registry {
 			continue
 		}
 		out.Register(name, observability.WrapOAuthExchanger(name, e))
+	}
+	return out
+}
+
+// seedWebhookSubscriptions registers each configured subscription in the
+// outbox so ListActiveSubscriptions returns them for the project the events
+// are emitted under. A subscription with no explicit project is scoped to
+// defaultProjectID — the project single-project deployments emit
+// user-lifecycle events under. When no subscriptions are configured it logs a
+// warning: webhooks are enabled but nothing will be delivered.
+//
+// The subscription secret is sensitive, so only the URL, resolved project,
+// and event-type filter are logged — never the secret.
+func seedWebhookSubscriptions(
+	outbox *events.MemoryOutbox,
+	subscriptions []config.WebhookSubscription,
+	defaultProjectID string,
+	logger *zap.Logger,
+) {
+	if len(subscriptions) == 0 {
+		logger.Warn(
+			"webhooks_enabled_without_subscriptions",
+			zap.String("hint",
+				"GATEWAY_WEBHOOKS_ENABLED=true but GATEWAY_WEBHOOK_SUBSCRIPTIONS is empty; "+
+					"no events will be delivered"),
+		)
+		return
+	}
+	for _, sub := range subscriptions {
+		projectID := sub.ProjectID
+		if projectID == "" {
+			projectID = defaultProjectID
+		}
+		outbox.AddSubscription(events.Subscription{
+			ID:         webhookSubscriptionID(projectID, sub.URL),
+			ProjectID:  projectID,
+			URL:        sub.URL,
+			Secret:     sub.Secret,
+			EventTypes: sub.EventTypes,
+			Active:     true,
+		})
+		logger.Info(
+			"webhook_subscription_seeded",
+			zap.String("url", sub.URL),
+			zap.String("project_id", projectID),
+			zap.Strings("event_types", eventTypeStrings(sub.EventTypes)),
+		)
+	}
+}
+
+// webhookSubscriptionID derives a stable subscription id from its project and
+// URL. Stable (not random) so an operator can trace a delivery back to a
+// config entry and so two identical entries collapse to one rather than
+// double-delivering. The secret is deliberately excluded from the id.
+func webhookSubscriptionID(projectID, url string) string {
+	sum := sha256.Sum256([]byte(projectID + "\n" + url))
+	return "whsub_" + hex.EncodeToString(sum[:8])
+}
+
+// eventTypeStrings renders an event-type filter for structured logging. An
+// empty filter (matches all types) renders as an empty slice.
+func eventTypeStrings(types []events.EventType) []string {
+	out := make([]string, len(types))
+	for i, t := range types {
+		out[i] = string(t)
 	}
 	return out
 }

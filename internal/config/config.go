@@ -838,6 +838,14 @@ type Config struct {
 	// WebhooksBatchSize is the number of due deliveries claimed per tick.
 	// Driven by GATEWAY_WEBHOOKS_BATCH_SIZE (default 50).
 	WebhooksBatchSize int
+	// WebhookSubscriptions is the raw JSON array declaring the outbound-webhook
+	// endpoints seeded into the outbox at boot. Driven by
+	// GATEWAY_WEBHOOK_SUBSCRIPTIONS; each element is a WebhookSubscription.
+	// Parsed and validated by WebhookSubscriptionList (see
+	// webhook_subscriptions.go). Empty ⇒ no subscriptions: with webhooks
+	// enabled that is legal but inert (nothing is delivered). The secret in
+	// each entry is sensitive and never logged.
+	WebhookSubscriptions string
 }
 
 // Load reads configuration from environment variables with GATEWAY_
@@ -1079,6 +1087,7 @@ func Load() *Config {
 		WebhooksBackoffMaxSeconds:     envInt("GATEWAY_WEBHOOKS_BACKOFF_MAX_SECONDS", 300),
 		WebhooksWorkerIntervalSeconds: envInt("GATEWAY_WEBHOOKS_WORKER_INTERVAL_SECONDS", 1),
 		WebhooksBatchSize:             envInt("GATEWAY_WEBHOOKS_BATCH_SIZE", 50),
+		WebhookSubscriptions:          envStr("GATEWAY_WEBHOOK_SUBSCRIPTIONS", ""),
 	}
 }
 
@@ -1584,13 +1593,25 @@ func (c *Config) validateSCIM() error {
 	return nil
 }
 
-// validateWebhooks enforces the outbound-eventing invariants: the retry
-// and backoff knobs must be positive and the cap must not be smaller than
-// the base. The checks only run when eventing is enabled — a disabled
-// deployment uses a no-op publisher and runs no worker, so its (unused)
-// knobs are irrelevant.
+// validateWebhooks enforces the outbound-eventing invariants: the retry and
+// backoff knobs must be positive, the cap must not be smaller than the base,
+// and every declared subscription must be well-formed. The knob checks only
+// run when eventing is enabled — a disabled deployment uses a no-op publisher
+// and runs no worker, so its (unused) knobs are irrelevant — but a disabled
+// deployment that nonetheless declares subscriptions is rejected, since those
+// events would be silently dropped.
 func (c *Config) validateWebhooks() error {
 	if !c.WebhooksEnabled {
+		// A subscription declared with the master switch off is almost
+		// certainly a mistake: the events it asks for would be emitted to a
+		// no-op publisher and silently dropped. Fail fast rather than boot
+		// into a state that looks configured but delivers nothing.
+		if strings.TrimSpace(c.WebhookSubscriptions) != "" {
+			return errors.New(
+				"config: GATEWAY_WEBHOOK_SUBSCRIPTIONS is set but GATEWAY_WEBHOOKS_ENABLED=false; " +
+					"enable webhooks (GATEWAY_WEBHOOKS_ENABLED=true) or unset the subscriptions",
+			)
+		}
 		return nil
 	}
 	if c.WebhooksMaxAttempts < 1 {
@@ -1610,6 +1631,13 @@ func (c *Config) validateWebhooks() error {
 	}
 	if c.WebhooksBatchSize < 1 {
 		return fmt.Errorf("config: GATEWAY_WEBHOOKS_BATCH_SIZE=%d must be >= 1", c.WebhooksBatchSize)
+	}
+	// Fail fast on a malformed subscription (bad JSON, non-HTTPS URL, empty
+	// secret, unknown event type) so a misconfigured deploy never serves a
+	// request believing its webhooks are wired. Zero subscriptions is legal:
+	// the composition root logs a warning that nothing will be delivered.
+	if _, err := c.WebhookSubscriptionList(); err != nil {
+		return err
 	}
 	return nil
 }
