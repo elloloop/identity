@@ -104,6 +104,15 @@ const (
 	EventUserDeactivated    EventType = "user_deactivated"
 	EventUserReactivated    EventType = "user_reactivated"
 	EventUserDeleted        EventType = "user_deleted"
+
+	// EventAccountDeletionRequested records an authenticated user scheduling
+	// self-service deletion of their OWN account (GDPR Art 17). The account
+	// enters PENDING_DELETION and is purged after the grace window elapses.
+	// EventAccountDeletionCancelled records the pending deletion being called
+	// off — either explicitly, or automatically on a successful login during
+	// the grace window.
+	EventAccountDeletionRequested EventType = "account_deletion_requested"
+	EventAccountDeletionCancelled EventType = "account_deletion_cancelled"
 	EventAdminResetPassword EventType = "admin_reset_password"
 	EventOAuthLogin         EventType = "oauth_login"
 	EventQrLoginApproved    EventType = "qr_login_approved"
@@ -167,6 +176,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventUserDeactivated:               {},
 	EventUserReactivated:               {},
 	EventUserDeleted:                   {},
+	EventAccountDeletionRequested:      {},
+	EventAccountDeletionCancelled:      {},
 	EventAdminResetPassword:            {},
 	EventOAuthLogin:                    {},
 	EventQrLoginApproved:               {},

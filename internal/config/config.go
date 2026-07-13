@@ -803,6 +803,13 @@ type Config struct {
 	// eligible for deletion (covers flows that just consumed the token).
 	SweeperGraceSeconds int
 
+	// AccountDeletionGraceDays is the self-service deletion grace window (GDPR
+	// Art 17): the number of days a PENDING_DELETION account is retained before
+	// the sweeper hard-deletes it. A successful login (or explicit cancel)
+	// during the window restores the account. Driven by
+	// GATEWAY_ACCOUNT_DELETION_GRACE_DAYS (default 30); must be >= 1.
+	AccountDeletionGraceDays int
+
 	// Outbound webhooks / user-lifecycle eventing (#261). When disabled
 	// (the default), the service emits events to a no-op publisher: there is
 	// no observable behaviour change and no background worker runs. When
@@ -1063,6 +1070,8 @@ func Load() *Config {
 		SweeperIntervalSeconds: envInt("GATEWAY_SWEEPER_INTERVAL_SECONDS", 300),
 		SweeperBatchSize:       envInt("GATEWAY_SWEEPER_BATCH_SIZE", 500),
 		SweeperGraceSeconds:    envInt("GATEWAY_SWEEPER_GRACE_SECONDS", 60),
+
+		AccountDeletionGraceDays: envInt("GATEWAY_ACCOUNT_DELETION_GRACE_DAYS", 30),
 
 		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
 		WebhooksMaxAttempts:           envInt("GATEWAY_WEBHOOKS_MAX_ATTEMPTS", 6),

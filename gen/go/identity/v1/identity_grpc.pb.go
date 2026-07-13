@@ -35,6 +35,8 @@ const (
 	IdentityService_RefreshToken_FullMethodName                    = "/identity.v1.IdentityService/RefreshToken"
 	IdentityService_Logout_FullMethodName                          = "/identity.v1.IdentityService/Logout"
 	IdentityService_UpdateProfile_FullMethodName                   = "/identity.v1.IdentityService/UpdateProfile"
+	IdentityService_DeleteMyAccount_FullMethodName                 = "/identity.v1.IdentityService/DeleteMyAccount"
+	IdentityService_CancelAccountDeletion_FullMethodName           = "/identity.v1.IdentityService/CancelAccountDeletion"
 	IdentityService_ChangePassword_FullMethodName                  = "/identity.v1.IdentityService/ChangePassword"
 	IdentityService_RequestPasswordReset_FullMethodName            = "/identity.v1.IdentityService/RequestPasswordReset"
 	IdentityService_ConfirmPasswordReset_FullMethodName            = "/identity.v1.IdentityService/ConfirmPasswordReset"
@@ -143,6 +145,11 @@ type IdentityServiceClient interface {
 	Logout(ctx context.Context, in *LogoutRequest, opts ...grpc.CallOption) (*LogoutResponse, error)
 	// Self-service profile
 	UpdateProfile(ctx context.Context, in *UpdateProfileRequest, opts ...grpc.CallOption) (*UpdateProfileResponse, error)
+	// Self-service account deletion (GDPR Art 17). The caller schedules
+	// deletion of their OWN account (grace-period soft delete); a login during
+	// the window, or an explicit cancel, restores it.
+	DeleteMyAccount(ctx context.Context, in *DeleteMyAccountRequest, opts ...grpc.CallOption) (*DeleteMyAccountResponse, error)
+	CancelAccountDeletion(ctx context.Context, in *CancelAccountDeletionRequest, opts ...grpc.CallOption) (*CancelAccountDeletionResponse, error)
 	// Password Management
 	ChangePassword(ctx context.Context, in *ChangePasswordRequest, opts ...grpc.CallOption) (*ChangePasswordResponse, error)
 	RequestPasswordReset(ctx context.Context, in *RequestPasswordResetRequest, opts ...grpc.CallOption) (*RequestPasswordResetResponse, error)
@@ -452,6 +459,26 @@ func (c *identityServiceClient) UpdateProfile(ctx context.Context, in *UpdatePro
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateProfileResponse)
 	err := c.cc.Invoke(ctx, IdentityService_UpdateProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) DeleteMyAccount(ctx context.Context, in *DeleteMyAccountRequest, opts ...grpc.CallOption) (*DeleteMyAccountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteMyAccountResponse)
+	err := c.cc.Invoke(ctx, IdentityService_DeleteMyAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) CancelAccountDeletion(ctx context.Context, in *CancelAccountDeletionRequest, opts ...grpc.CallOption) (*CancelAccountDeletionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelAccountDeletionResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CancelAccountDeletion_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1293,6 +1320,11 @@ type IdentityServiceServer interface {
 	Logout(context.Context, *LogoutRequest) (*LogoutResponse, error)
 	// Self-service profile
 	UpdateProfile(context.Context, *UpdateProfileRequest) (*UpdateProfileResponse, error)
+	// Self-service account deletion (GDPR Art 17). The caller schedules
+	// deletion of their OWN account (grace-period soft delete); a login during
+	// the window, or an explicit cancel, restores it.
+	DeleteMyAccount(context.Context, *DeleteMyAccountRequest) (*DeleteMyAccountResponse, error)
+	CancelAccountDeletion(context.Context, *CancelAccountDeletionRequest) (*CancelAccountDeletionResponse, error)
 	// Password Management
 	ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error)
 	RequestPasswordReset(context.Context, *RequestPasswordResetRequest) (*RequestPasswordResetResponse, error)
@@ -1495,6 +1527,12 @@ func (UnimplementedIdentityServiceServer) Logout(context.Context, *LogoutRequest
 }
 func (UnimplementedIdentityServiceServer) UpdateProfile(context.Context, *UpdateProfileRequest) (*UpdateProfileResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateProfile not implemented")
+}
+func (UnimplementedIdentityServiceServer) DeleteMyAccount(context.Context, *DeleteMyAccountRequest) (*DeleteMyAccountResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteMyAccount not implemented")
+}
+func (UnimplementedIdentityServiceServer) CancelAccountDeletion(context.Context, *CancelAccountDeletionRequest) (*CancelAccountDeletionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelAccountDeletion not implemented")
 }
 func (UnimplementedIdentityServiceServer) ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ChangePassword not implemented")
@@ -2044,6 +2082,42 @@ func _IdentityService_UpdateProfile_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).UpdateProfile(ctx, req.(*UpdateProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_DeleteMyAccount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteMyAccountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).DeleteMyAccount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_DeleteMyAccount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).DeleteMyAccount(ctx, req.(*DeleteMyAccountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_CancelAccountDeletion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelAccountDeletionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CancelAccountDeletion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CancelAccountDeletion_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CancelAccountDeletion(ctx, req.(*CancelAccountDeletionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3576,6 +3650,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateProfile",
 			Handler:    _IdentityService_UpdateProfile_Handler,
+		},
+		{
+			MethodName: "DeleteMyAccount",
+			Handler:    _IdentityService_DeleteMyAccount_Handler,
+		},
+		{
+			MethodName: "CancelAccountDeletion",
+			Handler:    _IdentityService_CancelAccountDeletion_Handler,
 		},
 		{
 			MethodName: "ChangePassword",

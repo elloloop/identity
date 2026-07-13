@@ -76,6 +76,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrParentalConsentRequired),
 		errors.Is(err, service.ErrIDVRequired),
 		errors.Is(err, service.ErrEmailVerificationRequired),
+		errors.Is(err, service.ErrAccountDeletionNotAllowed),
 		errors.Is(err, service.ErrMinorDataMinimized):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 

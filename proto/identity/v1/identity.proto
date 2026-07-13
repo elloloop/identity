@@ -19,6 +19,12 @@ enum UserStatus {
   // an account exists but cannot mint full access tokens until consent is
   // granted. Additive; all existing statuses keep their numbers.
   USER_STATUS_PENDING_PARENTAL_CONSENT = 5;
+  // PENDING_DELETION marks an account whose owner requested self-service
+  // deletion (GDPR Art 17). The account is disabled and scheduled for a
+  // permanent purge once the grace window elapses; until then a successful
+  // interactive login by the owner cancels the pending deletion and restores
+  // the account to ACTIVE. Additive; all existing statuses keep their numbers.
+  USER_STATUS_PENDING_DELETION = 6;
 }
 
 // AgeBand is the coarse age classification derived from a user's date of
@@ -461,6 +467,24 @@ message ChangePasswordRequest {
 }
 
 message ChangePasswordResponse {}
+
+// ─── Self-Service Account Deletion ───────────────────────────────────
+// The caller is the account being deleted; it is derived from the auth
+// header (there is no user_id field), matching the self-service pattern.
+
+message DeleteMyAccountRequest {
+  string reason = 1; // optional free-text, retained for audit only
+}
+
+message DeleteMyAccountResponse {
+  int64 deletion_scheduled_at_ms = 1; // epoch ms the account is purged at
+}
+
+message CancelAccountDeletionRequest {}
+
+message CancelAccountDeletionResponse {
+  UserStatus status = 1; // resulting status (ACTIVE after a successful cancel)
+}
 
 // Password reset (replaces the deprecated self-serve ForgotPassword flow).
 // The reset link is sent to the account's PRIMARY verified email — the
@@ -1549,6 +1573,12 @@ service IdentityService {
 
   // Self-service profile
   rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+
+  // Self-service account deletion (GDPR Art 17). The caller schedules
+  // deletion of their OWN account (grace-period soft delete); a login during
+  // the window, or an explicit cancel, restores it.
+  rpc DeleteMyAccount(DeleteMyAccountRequest) returns (DeleteMyAccountResponse);
+  rpc CancelAccountDeletion(CancelAccountDeletionRequest) returns (CancelAccountDeletionResponse);
 
   // Password Management
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);

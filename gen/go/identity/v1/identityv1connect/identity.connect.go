@@ -80,6 +80,12 @@ const (
 	// IdentityServiceUpdateProfileProcedure is the fully-qualified name of the IdentityService's
 	// UpdateProfile RPC.
 	IdentityServiceUpdateProfileProcedure = "/identity.v1.IdentityService/UpdateProfile"
+	// IdentityServiceDeleteMyAccountProcedure is the fully-qualified name of the IdentityService's
+	// DeleteMyAccount RPC.
+	IdentityServiceDeleteMyAccountProcedure = "/identity.v1.IdentityService/DeleteMyAccount"
+	// IdentityServiceCancelAccountDeletionProcedure is the fully-qualified name of the
+	// IdentityService's CancelAccountDeletion RPC.
+	IdentityServiceCancelAccountDeletionProcedure = "/identity.v1.IdentityService/CancelAccountDeletion"
 	// IdentityServiceChangePasswordProcedure is the fully-qualified name of the IdentityService's
 	// ChangePassword RPC.
 	IdentityServiceChangePasswordProcedure = "/identity.v1.IdentityService/ChangePassword"
@@ -347,6 +353,11 @@ type IdentityServiceClient interface {
 	Logout(context.Context, *connect.Request[v1.LogoutRequest]) (*connect.Response[v1.LogoutResponse], error)
 	// Self-service profile
 	UpdateProfile(context.Context, *connect.Request[v1.UpdateProfileRequest]) (*connect.Response[v1.UpdateProfileResponse], error)
+	// Self-service account deletion (GDPR Art 17). The caller schedules
+	// deletion of their OWN account (grace-period soft delete); a login during
+	// the window, or an explicit cancel, restores it.
+	DeleteMyAccount(context.Context, *connect.Request[v1.DeleteMyAccountRequest]) (*connect.Response[v1.DeleteMyAccountResponse], error)
+	CancelAccountDeletion(context.Context, *connect.Request[v1.CancelAccountDeletionRequest]) (*connect.Response[v1.CancelAccountDeletionResponse], error)
 	// Password Management
 	ChangePassword(context.Context, *connect.Request[v1.ChangePasswordRequest]) (*connect.Response[v1.ChangePasswordResponse], error)
 	RequestPasswordReset(context.Context, *connect.Request[v1.RequestPasswordResetRequest]) (*connect.Response[v1.RequestPasswordResetResponse], error)
@@ -599,6 +610,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceUpdateProfileProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("UpdateProfile")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteMyAccount: connect.NewClient[v1.DeleteMyAccountRequest, v1.DeleteMyAccountResponse](
+			httpClient,
+			baseURL+IdentityServiceDeleteMyAccountProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("DeleteMyAccount")),
+			connect.WithClientOptions(opts...),
+		),
+		cancelAccountDeletion: connect.NewClient[v1.CancelAccountDeletionRequest, v1.CancelAccountDeletionResponse](
+			httpClient,
+			baseURL+IdentityServiceCancelAccountDeletionProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CancelAccountDeletion")),
 			connect.WithClientOptions(opts...),
 		),
 		changePassword: connect.NewClient[v1.ChangePasswordRequest, v1.ChangePasswordResponse](
@@ -1108,6 +1131,8 @@ type identityServiceClient struct {
 	refreshToken                    *connect.Client[v1.RefreshTokenRequest, v1.RefreshTokenResponse]
 	logout                          *connect.Client[v1.LogoutRequest, v1.LogoutResponse]
 	updateProfile                   *connect.Client[v1.UpdateProfileRequest, v1.UpdateProfileResponse]
+	deleteMyAccount                 *connect.Client[v1.DeleteMyAccountRequest, v1.DeleteMyAccountResponse]
+	cancelAccountDeletion           *connect.Client[v1.CancelAccountDeletionRequest, v1.CancelAccountDeletionResponse]
 	changePassword                  *connect.Client[v1.ChangePasswordRequest, v1.ChangePasswordResponse]
 	requestPasswordReset            *connect.Client[v1.RequestPasswordResetRequest, v1.RequestPasswordResetResponse]
 	confirmPasswordReset            *connect.Client[v1.ConfirmPasswordResetRequest, v1.ConfirmPasswordResetResponse]
@@ -1269,6 +1294,16 @@ func (c *identityServiceClient) Logout(ctx context.Context, req *connect.Request
 // UpdateProfile calls identity.v1.IdentityService.UpdateProfile.
 func (c *identityServiceClient) UpdateProfile(ctx context.Context, req *connect.Request[v1.UpdateProfileRequest]) (*connect.Response[v1.UpdateProfileResponse], error) {
 	return c.updateProfile.CallUnary(ctx, req)
+}
+
+// DeleteMyAccount calls identity.v1.IdentityService.DeleteMyAccount.
+func (c *identityServiceClient) DeleteMyAccount(ctx context.Context, req *connect.Request[v1.DeleteMyAccountRequest]) (*connect.Response[v1.DeleteMyAccountResponse], error) {
+	return c.deleteMyAccount.CallUnary(ctx, req)
+}
+
+// CancelAccountDeletion calls identity.v1.IdentityService.CancelAccountDeletion.
+func (c *identityServiceClient) CancelAccountDeletion(ctx context.Context, req *connect.Request[v1.CancelAccountDeletionRequest]) (*connect.Response[v1.CancelAccountDeletionResponse], error) {
+	return c.cancelAccountDeletion.CallUnary(ctx, req)
 }
 
 // ChangePassword calls identity.v1.IdentityService.ChangePassword.
@@ -1700,6 +1735,11 @@ type IdentityServiceHandler interface {
 	Logout(context.Context, *connect.Request[v1.LogoutRequest]) (*connect.Response[v1.LogoutResponse], error)
 	// Self-service profile
 	UpdateProfile(context.Context, *connect.Request[v1.UpdateProfileRequest]) (*connect.Response[v1.UpdateProfileResponse], error)
+	// Self-service account deletion (GDPR Art 17). The caller schedules
+	// deletion of their OWN account (grace-period soft delete); a login during
+	// the window, or an explicit cancel, restores it.
+	DeleteMyAccount(context.Context, *connect.Request[v1.DeleteMyAccountRequest]) (*connect.Response[v1.DeleteMyAccountResponse], error)
+	CancelAccountDeletion(context.Context, *connect.Request[v1.CancelAccountDeletionRequest]) (*connect.Response[v1.CancelAccountDeletionResponse], error)
 	// Password Management
 	ChangePassword(context.Context, *connect.Request[v1.ChangePasswordRequest]) (*connect.Response[v1.ChangePasswordResponse], error)
 	RequestPasswordReset(context.Context, *connect.Request[v1.RequestPasswordResetRequest]) (*connect.Response[v1.RequestPasswordResetResponse], error)
@@ -1948,6 +1988,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceUpdateProfileProcedure,
 		svc.UpdateProfile,
 		connect.WithSchema(identityServiceMethods.ByName("UpdateProfile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceDeleteMyAccountHandler := connect.NewUnaryHandler(
+		IdentityServiceDeleteMyAccountProcedure,
+		svc.DeleteMyAccount,
+		connect.WithSchema(identityServiceMethods.ByName("DeleteMyAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceCancelAccountDeletionHandler := connect.NewUnaryHandler(
+		IdentityServiceCancelAccountDeletionProcedure,
+		svc.CancelAccountDeletion,
+		connect.WithSchema(identityServiceMethods.ByName("CancelAccountDeletion")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceChangePasswordHandler := connect.NewUnaryHandler(
@@ -2470,6 +2522,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceLogoutHandler.ServeHTTP(w, r)
 		case IdentityServiceUpdateProfileProcedure:
 			identityServiceUpdateProfileHandler.ServeHTTP(w, r)
+		case IdentityServiceDeleteMyAccountProcedure:
+			identityServiceDeleteMyAccountHandler.ServeHTTP(w, r)
+		case IdentityServiceCancelAccountDeletionProcedure:
+			identityServiceCancelAccountDeletionHandler.ServeHTTP(w, r)
 		case IdentityServiceChangePasswordProcedure:
 			identityServiceChangePasswordHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestPasswordResetProcedure:
@@ -2703,6 +2759,14 @@ func (UnimplementedIdentityServiceHandler) Logout(context.Context, *connect.Requ
 
 func (UnimplementedIdentityServiceHandler) UpdateProfile(context.Context, *connect.Request[v1.UpdateProfileRequest]) (*connect.Response[v1.UpdateProfileResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UpdateProfile is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) DeleteMyAccount(context.Context, *connect.Request[v1.DeleteMyAccountRequest]) (*connect.Response[v1.DeleteMyAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DeleteMyAccount is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CancelAccountDeletion(context.Context, *connect.Request[v1.CancelAccountDeletionRequest]) (*connect.Response[v1.CancelAccountDeletionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CancelAccountDeletion is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) ChangePassword(context.Context, *connect.Request[v1.ChangePasswordRequest]) (*connect.Response[v1.ChangePasswordResponse], error) {

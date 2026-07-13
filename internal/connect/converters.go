@@ -81,6 +81,8 @@ func userStatusToProto(s string) identitypb.UserStatus {
 		return identitypb.UserStatus_USER_STATUS_SUSPENDED
 	case "pending_parental_consent":
 		return identitypb.UserStatus_USER_STATUS_PENDING_PARENTAL_CONSENT
+	case "pending_deletion":
+		return identitypb.UserStatus_USER_STATUS_PENDING_DELETION
 	default:
 		return identitypb.UserStatus_USER_STATUS_UNSPECIFIED
 	}
@@ -98,6 +100,8 @@ func protoToUserStatusString(s identitypb.UserStatus) string {
 		return "suspended"
 	case identitypb.UserStatus_USER_STATUS_PENDING_PARENTAL_CONSENT:
 		return "pending_parental_consent"
+	case identitypb.UserStatus_USER_STATUS_PENDING_DELETION:
+		return "pending_deletion"
 	default:
 		return ""
 	}

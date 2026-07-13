@@ -365,17 +365,13 @@ func New(deps Deps) (*Built, error) {
 			return scopedDB, projectID
 		})
 
-	// Garbage-collection sweeper for expired ephemeral rows (#94).
-	// Disabled when SweeperIntervalSeconds <= 0 — deployers who
-	// already run their own GC, and the unit-test harness, both
-	// flip it off via GATEWAY_SWEEPER_INTERVAL_SECONDS=0.
-	sweep := newSweeper(
-		deps.Repo,
-		deps.Config.SweeperIntervalSeconds,
-		deps.Config.SweeperBatchSize,
-		deps.Config.SweeperGraceSeconds,
-		logger,
-	)
+	// Garbage-collection sweeper for expired ephemeral rows (#94) plus the
+	// self-service account-deletion purge. Disabled when
+	// SweeperIntervalSeconds <= 0 — deployers who already run their own GC, and
+	// the unit-test harness, both flip it off via
+	// GATEWAY_SWEEPER_INTERVAL_SECONDS=0. Constructed below once adminSvc (the
+	// account purger) exists.
+	var sweep *sweeper
 
 	// Background-worker lifecycle. The audit flusher and sweeper do NOT
 	// start in New — they start when the consumer calls (*Built).Start,
@@ -504,6 +500,17 @@ func New(deps Deps) (*Built, error) {
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger)
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher)
+
+	// Now that the account purger (adminSvc) exists, build the sweeper. It runs
+	// the ephemeral-row GC AND the account-deletion purge on the same tick.
+	sweep = newSweeper(
+		deps.Repo,
+		adminSvc,
+		deps.Config.SweeperIntervalSeconds,
+		deps.Config.SweeperBatchSize,
+		deps.Config.SweeperGraceSeconds,
+		logger,
+	)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
 	// COPPA data-minimization: one minimizer derived from the age gate +
@@ -518,7 +525,8 @@ func New(deps Deps) (*Built, error) {
 
 	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, logger).
 		WithMinorDataMinimizer(minorData).
-		WithLoginGovernance(deps.LoginGovernance)
+		WithLoginGovernance(deps.LoginGovernance).
+		WithAccountDeletionGraceDays(deps.Config.AccountDeletionGraceDays)
 
 	var idvSvc *service.IdentityVerificationService
 	if deps.IDVProvider != nil {

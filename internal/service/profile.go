@@ -30,6 +30,13 @@ type ProfileService struct {
 	// the same tightened complexity rules the login path does. Nil for drivers
 	// without a governance plane, in which case the global baseline applies.
 	governance *LoginGovernance
+
+	// accountDeletionGraceDays is the self-service deletion grace window (days)
+	// DeleteMyAccount schedules the purge after. A non-positive value falls back
+	// to DefaultAccountDeletionGraceDays so a misconfiguration can never schedule
+	// an immediate (grace-less) purge. Wired from config via
+	// WithAccountDeletionGraceDays.
+	accountDeletionGraceDays int
 }
 
 // NewProfileService creates a ProfileService.
