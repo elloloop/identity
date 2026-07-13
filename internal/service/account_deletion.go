@@ -202,9 +202,10 @@ func (s *AuthService) cancelPendingDeletionOnLogin(ctx context.Context, user *Us
 // deletion grace window has elapsed (status = pending_deletion and
 // deletion_scheduled_at_ms <= cutoffMs), up to limit accounts. It reuses the
 // exact admin delete cascade — session/token revocation, group-edge cleanup,
-// the repo cascade, the user_deleted audit entry, and the downstream deprovision
-// event — so external services (the Nesta relay) cascade identically to an
-// admin delete. Returns the number of accounts purged.
+// the repo cascade, the user_deleted audit entry, and the downstream
+// user.deactivated + user.deleted events — so external services (the Nesta
+// relay) cascade identically to an admin delete. Returns the number of accounts
+// purged.
 //
 // A per-account failure is logged and skipped rather than aborting the batch, so
 // one poisoned row cannot stall the whole sweep.
@@ -248,10 +249,13 @@ func (s *AdminService) purgeUser(ctx context.Context, auditActorID string, u *Us
 	s.audit.Log(ctx, audit.EventUserDeleted,
 		audit.WithActor(auditActorID), audit.WithTarget(u.ID), audit.WithSuccess(true))
 
-	// Best-effort: a hard delete is also a deprovisioning signal — emit
-	// user.deactivated so downstream SaaS removes access. No-op when eventing is
-	// disabled.
+	// Best-effort, both emitted on a purge (no-op when eventing is disabled):
+	// user.deactivated is the deprovision signal legacy SCIM subscribers already
+	// act on and must keep firing on delete; user.deleted is the distinct
+	// permanent-erasure signal a consumer (the Nesta relay) uses to tear down
+	// data that must survive a reversible deactivation but not a real deletion.
 	u.Status = "deactivated"
 	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeactivated, u)
+	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeleted, u)
 	return nil
 }

@@ -86,6 +86,69 @@ func TestAdminDeactivateUser_EmitsDeactivatedEvent(t *testing.T) {
 	require.NotEmpty(t, got[0].ID)
 }
 
+// eventByType returns the first captured event of type t, or false when none
+// was emitted.
+func eventByType(evs []events.Event, t events.EventType) (events.Event, bool) {
+	for _, e := range evs {
+		if e.Type == t {
+			return e, true
+		}
+	}
+	return events.Event{}, false
+}
+
+// TestPurgeExpiredPendingDeletions_EmitsDeactivatedAndDeleted proves the
+// self-service sweeper path emits BOTH the reversible-deprovision signal
+// (user.deactivated, kept for legacy SCIM subscribers) and the distinct
+// permanent-erasure signal (user.deleted) on a purge.
+func TestPurgeExpiredPendingDeletions_EmitsDeactivatedAndDeleted(t *testing.T) {
+	require.True(t, events.EventUserDeleted.Valid(), "user.deleted must be accepted at the Emit boundary")
+
+	ctx := context.Background()
+	repo := newFakeRepo()
+	pub := &capturePublisher{}
+	admin := newTestAdminServiceWithRepo(newFakeDB(), repo).WithEventPublisher(pub)
+
+	due := seedRevocableUser(t, repo, "due@example.com", StatusPendingDeletion)
+	due.DeletionScheduledAtMs = 100
+
+	purged, err := admin.PurgeExpiredPendingDeletions(ctx, 500, 100)
+	require.NoError(t, err)
+	require.Equal(t, 1, purged)
+
+	got := pub.all()
+	require.Len(t, got, 2, "a purge emits exactly user.deactivated + user.deleted")
+	_, hasDeactivated := eventByType(got, events.EventUserDeactivated)
+	require.True(t, hasDeactivated, "legacy deprovision signal must still fire on purge")
+	deleted, hasDeleted := eventByType(got, events.EventUserDeleted)
+	require.True(t, hasDeleted, "permanent-erasure signal must fire on purge")
+	require.Equal(t, due.ID, deleted.User.ID)
+}
+
+// TestAdminDeleteUser_EmitsDeactivatedAndDeleted proves the admin DeleteUser
+// path (the other caller of purgeUser) emits BOTH events, so a hard delete is
+// distinguishable from a reversible admin deactivation regardless of trigger.
+func TestAdminDeleteUser_EmitsDeactivatedAndDeleted(t *testing.T) {
+	ctx := context.Background()
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	repo := newFakeRepo()
+	repo.users["target-1"] = &User{ID: "target-1", Email: "target@test.com", Status: "active"}
+	pub := &capturePublisher{}
+	svc := newTestAdminServiceWithRepo(db, repo).WithEventPublisher(pub)
+
+	require.NoError(t, svc.DeleteUser(ctx, "admin-1", "target-1"))
+
+	got := pub.all()
+	require.Len(t, got, 2, "a delete emits exactly user.deactivated + user.deleted")
+	_, hasDeactivated := eventByType(got, events.EventUserDeactivated)
+	require.True(t, hasDeactivated, "legacy deprovision signal must still fire on delete")
+	deleted, hasDeleted := eventByType(got, events.EventUserDeleted)
+	require.True(t, hasDeleted, "permanent-erasure signal must fire on delete")
+	require.Equal(t, "target-1", deleted.User.ID)
+	require.NotEmpty(t, deleted.ID, "each emitted event carries a distinct idempotency id")
+}
+
 func TestToEventUser_OmitsSecrets(t *testing.T) {
 	u := &User{ID: "u1", Email: "e@x.com", Name: "N", Status: "active", PasswordHash: "secret"}
 	got := toEventUser(u)
