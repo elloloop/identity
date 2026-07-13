@@ -27,7 +27,14 @@ func runMigrations(pool *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("sqlite: open migrations source: %w", err)
 	}
-	driver, err := sqlitemigrate.WithInstance(pool, &sqlitemigrate.Config{})
+	// NoTxWrap disables golang-migrate's per-migration transaction wrapper.
+	// SQLite schema changes that touch a CHECK constraint (e.g. widening the
+	// users.status set) require the table-rebuild recipe, which in turn needs
+	// `PRAGMA foreign_keys=OFF` so DROP TABLE does not cascade-delete child
+	// rows. That pragma is a no-op inside a transaction, so migrate must NOT
+	// wrap the migration in one; each migration that needs atomicity carries
+	// its own explicit BEGIN/COMMIT instead (see 0009).
+	driver, err := sqlitemigrate.WithInstance(pool, &sqlitemigrate.Config{NoTxWrap: true})
 	if err != nil {
 		return fmt.Errorf("sqlite: init migrate driver: %w", err)
 	}

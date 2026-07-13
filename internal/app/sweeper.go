@@ -67,11 +67,25 @@ type nodeTypeSweeper struct {
 	fn   func(ctx context.Context, beforeMs int64, limit int) error
 }
 
+// accountPurger hard-deletes accounts whose self-service deletion grace window
+// has elapsed. It is the service-level cascade (session/token revocation, the
+// repo delete, and the downstream deprovision event), not a repo batch delete,
+// so it does not fit the nodeTypeSweeper shape. Implemented by
+// *service.AdminService; nil disables the account-deletion sweep.
+type accountPurger interface {
+	PurgeExpiredPendingDeletions(ctx context.Context, cutoffMs int64, limit int) (int, error)
+}
+
+// accountDeletionLabel is the metrics node_type label for the
+// account-deletion purge step of a sweep cycle.
+const accountDeletionLabel = "pending_deletion_users"
+
 // sweeper periodically deletes expired ephemeral rows in batches.
 // One instance per app.New; started immediately and stopped via the
 // returned cancel func.
 type sweeper struct {
 	repo     service.Repository
+	purger   accountPurger
 	logger   *zap.Logger
 	interval time.Duration
 	batch    int
@@ -90,8 +104,8 @@ type sweeper struct {
 
 // newSweeper constructs a sweeper from config. Returns nil when
 // sweeping is disabled (interval <= 0); the caller must handle the
-// nil case.
-func newSweeper(repo service.Repository, intervalSec, batch, graceSec int, logger *zap.Logger) *sweeper {
+// nil case. purger may be nil to disable the account-deletion sweep.
+func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batch, graceSec int, logger *zap.Logger) *sweeper {
 	if intervalSec <= 0 {
 		return nil
 	}
@@ -107,6 +121,7 @@ func newSweeper(repo service.Repository, intervalSec, batch, graceSec int, logge
 	initSweeperMetrics()
 	return &sweeper{
 		repo:       repo,
+		purger:     purger,
 		logger:     logger,
 		interval:   time.Duration(intervalSec) * time.Second,
 		batch:      batch,
@@ -159,6 +174,30 @@ func (s *sweeper) runOnce(ctx context.Context) {
 	for _, t := range s.targets() {
 		s.sweepType(ctx, t, beforeMs)
 	}
+
+	s.purgeExpiredAccountDeletions(ctx, nowFn().UnixMilli())
+}
+
+// purgeExpiredAccountDeletions hard-deletes accounts whose self-service
+// deletion grace window has elapsed. The cutoff is `now` (not now - grace): the
+// grace window is already baked into each account's deletion_scheduled_at_ms
+// when the owner requested deletion, so an account is due exactly once its
+// scheduled instant has passed. No-op when no purger is wired.
+func (s *sweeper) purgeExpiredAccountDeletions(ctx context.Context, cutoffMs int64) {
+	if s.purger == nil {
+		return
+	}
+	if _, err := s.purger.PurgeExpiredPendingDeletions(ctx, cutoffMs, s.batch); err != nil {
+		sweeperErrors.WithLabelValues(accountDeletionLabel).Inc()
+		s.logger.Warn(
+			"sweeper_account_deletion_failed",
+			zap.Int64("cutoff_ms", cutoffMs),
+			zap.Int("batch", s.batch),
+			zap.Error(err),
+		)
+		return
+	}
+	sweeperRuns.WithLabelValues(accountDeletionLabel).Inc()
 }
 
 // targets returns the node-type sweepers in a deterministic order.

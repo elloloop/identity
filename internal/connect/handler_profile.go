@@ -32,6 +32,52 @@ func (h *IdentityHandler) UpdateProfile(
 	return connect.NewResponse(resp), nil
 }
 
+// ─── Self-Service Account Deletion RPCs ─────────────────────────────────────
+
+// DeleteMyAccount schedules grace-period deletion of the authenticated caller's
+// OWN account (GDPR Art 17). The caller is derived from the auth header; there
+// is no user_id in the request.
+func (h *IdentityHandler) DeleteMyAccount(
+	ctx context.Context,
+	req *connect.Request[identitypb.DeleteMyAccountRequest],
+) (*connect.Response[identitypb.DeleteMyAccountResponse], error) {
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	scheduledAt, err := h.profile.DeleteMyAccount(ctx, userID, req.Msg.Reason)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	return connect.NewResponse(&identitypb.DeleteMyAccountResponse{
+		DeletionScheduledAtMs: scheduledAt,
+	}), nil
+}
+
+// CancelAccountDeletion calls off a pending self-service deletion for the
+// authenticated caller, restoring the account. Idempotent when nothing is
+// pending.
+func (h *IdentityHandler) CancelAccountDeletion(
+	ctx context.Context,
+	req *connect.Request[identitypb.CancelAccountDeletionRequest],
+) (*connect.Response[identitypb.CancelAccountDeletionResponse], error) {
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	status, err := h.profile.CancelAccountDeletion(ctx, userID)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	return connect.NewResponse(&identitypb.CancelAccountDeletionResponse{
+		Status: userStatusToProto(status),
+	}), nil
+}
+
 // ─── Password Management RPCs ───────────────────────────────────────────────
 
 // ChangePassword changes the authenticated user's password after verifying

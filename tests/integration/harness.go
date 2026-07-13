@@ -875,6 +875,36 @@ func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (
 	return n, nil
 }
 
+func (r *MemRepo) ListUsersPendingDeletionBefore(_ context.Context, cutoffMs int64, limit int) ([]*service.User, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("mem: ListUsersPendingDeletionBefore: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	matched := make([]*service.User, 0)
+	for _, u := range r.users {
+		if u.Status != service.StatusPendingDeletion {
+			continue
+		}
+		if u.DeletionScheduledAtMs <= 0 || u.DeletionScheduledAtMs > cutoffMs {
+			continue
+		}
+		cp := *u
+		matched = append(matched, &cp)
+	}
+	r.mu.Unlock()
+
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].DeletionScheduledAtMs != matched[j].DeletionScheduledAtMs {
+			return matched[i].DeletionScheduledAtMs < matched[j].DeletionScheduledAtMs
+		}
+		return matched[i].ID < matched[j].ID
+	})
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched, nil
+}
+
 func (r *MemRepo) GetUser(_ context.Context, userID string) (*service.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -39,6 +39,13 @@ const (
 	// set to a non-active value, or the account deleted). This is the
 	// deprovisioning signal outbound SCIM connectors act on.
 	EventUserDeactivated EventType = "user.deactivated"
+	// EventUserDeleted is emitted after a user account is permanently
+	// purged/hard-deleted; distinct from the reversible user.deactivated.
+	// A purge fires both — deactivated as the deprovision signal legacy
+	// subscribers already act on, deleted as the permanent-erasure signal a
+	// consumer uses to tear down data that must not survive a reversible
+	// deactivation.
+	EventUserDeleted EventType = "user.deleted"
 )
 
 // Valid reports whether t is one of the known event types. Unknown types
@@ -46,7 +53,7 @@ const (
 // undeliverable outbox row.
 func (t EventType) Valid() bool {
 	switch t {
-	case EventUserCreated, EventUserUpdated, EventUserDeactivated:
+	case EventUserCreated, EventUserUpdated, EventUserDeactivated, EventUserDeleted:
 		return true
 	default:
 		return false

@@ -46,6 +46,10 @@ func (StubRepository) DeleteUser(context.Context, string) error {
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) ListUsersPendingDeletionBefore(context.Context, int64, int) ([]*User, error) {
+	return nil, ErrServiceUnavailable
+}
+
 func (StubRepository) ListUsers(context.Context, UserListFilter) ([]*User, error) {
 	return nil, ErrServiceUnavailable
 }

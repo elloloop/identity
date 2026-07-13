@@ -1,5 +1,14 @@
 [
   {
+    "name": "GATEWAY_ACCOUNT_DELETION_GRACE_DAYS",
+    "type": "integer",
+    "default": "30",
+    "required": false,
+    "description": "is the self-service deletion grace window (GDPR Art 17): the number of days a PENDING_DELETION account is retained before the sweeper hard-deletes it.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_ADMIN_API_SECRET",
     "type": "string",
     "default": "",

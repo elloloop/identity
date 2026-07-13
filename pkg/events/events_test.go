@@ -21,7 +21,7 @@ func TestDiscard_EmitDoesNothing(t *testing.T) {
 }
 
 func TestEventType_Valid(t *testing.T) {
-	for _, ty := range []EventType{EventUserCreated, EventUserUpdated, EventUserDeactivated} {
+	for _, ty := range []EventType{EventUserCreated, EventUserUpdated, EventUserDeactivated, EventUserDeleted} {
 		if !ty.Valid() {
 			t.Errorf("%q should be valid", ty)
 		}

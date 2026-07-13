@@ -276,11 +276,8 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		return fmt.Errorf("deactivate user: %w", err)
 	}
 
-	if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, targetUserID); err != nil {
-		return fmt.Errorf("deactivate user: revoke refresh tokens: %w", err)
-	}
-	if err := s.repo(ctx).RevokeSessionsForUser(ctx, targetUserID, now); err != nil {
-		return fmt.Errorf("deactivate user: revoke sessions: %w", err)
+	if err := revokeAllUserSessions(ctx, s.repo(ctx), targetUserID, now); err != nil {
+		return fmt.Errorf("deactivate user: %w", err)
 	}
 
 	s.audit.Log(

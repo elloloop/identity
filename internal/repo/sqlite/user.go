@@ -25,6 +25,7 @@ const userColumns = `
 	date_of_birth_ms,
 	last_login_at_ms,
 	external_id,
+	deletion_scheduled_at_ms,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed qualifies every column with the given table alias so
@@ -45,6 +46,7 @@ func scanUser(s scanner) (*service.User, error) {
 		failedLoginCount                                       int64
 		emailVerifiedAtMs, idvVerifiedAtMs, lastLoginAtMs      int64
 		phoneVerifiedAtMs, dateOfBirthMs                       int64
+		deletionScheduledAtMs                                  int64
 		emailVerified, idvVerified, totpRequired               int64
 		phoneVerified                                          int64
 		id, email, name, role, avatar, status, recovery, phash string
@@ -61,6 +63,7 @@ func scanUser(s scanner) (*service.User, error) {
 		&dateOfBirthMs,
 		&lastLoginAtMs,
 		&externalID,
+		&deletionScheduledAtMs,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -87,6 +90,7 @@ func scanUser(s scanner) (*service.User, error) {
 	u.DateOfBirthMs = dateOfBirthMs
 	u.LastLoginAtMs = lastLoginAtMs
 	u.ExternalID = externalID
+	u.DeletionScheduledAtMs = deletionScheduledAtMs
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -235,6 +239,7 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 			date_of_birth_ms,
 			last_login_at_ms,
 			external_id,
+			deletion_scheduled_at_ms,
 			created_at_ms, updated_at_ms
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
@@ -246,7 +251,8 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 			$21,
 			$22,
 			$23,
-			$24, $25
+			$24,
+			$25, $26
 		)`
 	_, err := r.db.Exec(
 		ctx, q,
@@ -259,6 +265,7 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 		u.DateOfBirthMs,
 		u.LastLoginAtMs,
 		u.ExternalID,
+		u.DeletionScheduledAtMs,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	)
 	if err != nil {
@@ -274,28 +281,29 @@ var userFieldColumns = map[string]struct {
 	col  string
 	kind string // "string" | "bool" | "int64"
 }{
-	"email":              {"email", "string"},
-	"name":               {"name", "string"},
-	"role":               {"role", "string"},
-	"avatar_url":         {"avatar_url", "string"},
-	"password_hash":      {"password_hash", "string"},
-	"totp_required":      {"totp_required", "bool"},
-	"failed_login_count": {"failed_login_count", "int64"},
-	"locked_until":       {"locked_until_ms", "int64"},
-	"status":             {"status", "string"},
-	"recovery_email":     {"recovery_email", "string"},
-	"quota_bytes":        {"quota_bytes", "int64"},
-	"last_login_at":      {"last_login_at_ms", "int64"},
-	"updated_at":         {"updated_at_ms", "int64"},
-	"email_verified":     {"email_verified", "bool"},
-	"email_verified_at":  {"email_verified_at_ms", "int64"},
-	"idv_verified":       {"idv_verified", "bool"},
-	"idv_verified_at":    {"idv_verified_at_ms", "int64"},
-	"phone_number":       {"phone_number", "string"},
-	"phone_verified":     {"phone_verified", "bool"},
-	"phone_verified_at":  {"phone_verified_at_ms", "int64"},
-	"date_of_birth_ms":   {"date_of_birth_ms", "int64"},
-	"external_id":        {"external_id", "string"},
+	"email":                    {"email", "string"},
+	"name":                     {"name", "string"},
+	"role":                     {"role", "string"},
+	"avatar_url":               {"avatar_url", "string"},
+	"password_hash":            {"password_hash", "string"},
+	"totp_required":            {"totp_required", "bool"},
+	"failed_login_count":       {"failed_login_count", "int64"},
+	"locked_until":             {"locked_until_ms", "int64"},
+	"status":                   {"status", "string"},
+	"recovery_email":           {"recovery_email", "string"},
+	"quota_bytes":              {"quota_bytes", "int64"},
+	"last_login_at":            {"last_login_at_ms", "int64"},
+	"updated_at":               {"updated_at_ms", "int64"},
+	"email_verified":           {"email_verified", "bool"},
+	"email_verified_at":        {"email_verified_at_ms", "int64"},
+	"idv_verified":             {"idv_verified", "bool"},
+	"idv_verified_at":          {"idv_verified_at_ms", "int64"},
+	"phone_number":             {"phone_number", "string"},
+	"phone_verified":           {"phone_verified", "bool"},
+	"phone_verified_at":        {"phone_verified_at_ms", "int64"},
+	"date_of_birth_ms":         {"date_of_birth_ms", "int64"},
+	"external_id":              {"external_id", "string"},
+	"deletion_scheduled_at_ms": {"deletion_scheduled_at_ms", "int64"},
 }
 
 func (r *sqliteRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
@@ -390,6 +398,43 @@ func (r *sqliteRepository) DeleteUser(ctx context.Context, userID string) error 
 		return wrapErr("DeleteUser", err)
 	}
 	return nil
+}
+
+// ListUsersPendingDeletionBefore returns users whose self-service deletion
+// grace window has elapsed (status = pending_deletion, deletion_scheduled_at_ms
+// in (0, cutoffMs]), ordered by deletion_scheduled_at_ms then id, capped at
+// limit. It backs the account-deletion sweeper. limit <= 0 is rejected so an
+// uncapped scan can never lock the users table. Mirrors the postgres driver.
+func (r *sqliteRepository) ListUsersPendingDeletionBefore(ctx context.Context, cutoffMs int64, limit int) ([]*service.User, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("sqlite: ListUsersPendingDeletionBefore: limit must be > 0, got %d", limit)
+	}
+	q := `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1
+		  AND status = $2
+		  AND deletion_scheduled_at_ms > 0
+		  AND deletion_scheduled_at_ms <= $3
+		ORDER BY deletion_scheduled_at_ms ASC, id ASC
+		LIMIT $4`
+	rows, err := r.db.Query(ctx, q, r.projectID, service.StatusPendingDeletion, cutoffMs, limit)
+	if err != nil {
+		return nil, wrapErr("ListUsersPendingDeletionBefore", err)
+	}
+	defer rows.Close()
+
+	var out []*service.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, wrapErr("ListUsersPendingDeletionBefore", err)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapErr("ListUsersPendingDeletionBefore", err)
+	}
+	return out, nil
 }
 
 // ── Lockout state ─────────────────────────────────────────────────

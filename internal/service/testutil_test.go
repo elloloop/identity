@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -231,6 +232,35 @@ func (r *fakeRepo) ListUsers(_ context.Context, filter UserListFilter) ([]*User,
 	return out, nil
 }
 
+func (r *fakeRepo) ListUsersPendingDeletionBefore(_ context.Context, cutoffMs int64, limit int) ([]*User, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("fakeRepo: ListUsersPendingDeletionBefore: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	matched := make([]*User, 0)
+	for _, u := range r.users {
+		if u.Status != StatusPendingDeletion {
+			continue
+		}
+		if u.DeletionScheduledAtMs <= 0 || u.DeletionScheduledAtMs > cutoffMs {
+			continue
+		}
+		cp := *u
+		matched = append(matched, &cp)
+	}
+	r.mu.Unlock()
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].DeletionScheduledAtMs != matched[j].DeletionScheduledAtMs {
+			return matched[i].DeletionScheduledAtMs < matched[j].DeletionScheduledAtMs
+		}
+		return matched[i].ID < matched[j].ID
+	})
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched, nil
+}
+
 func (r *fakeRepo) CountUsers(_ context.Context, filter UserListFilter) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -372,6 +402,13 @@ func applyUserFields(u *User, fields map[string]any) {
 				u.EmailVerifiedAt = x
 			case int:
 				u.EmailVerifiedAt = int64(x)
+			}
+		case "deletion_scheduled_at_ms":
+			switch x := v.(type) {
+			case int64:
+				u.DeletionScheduledAtMs = x
+			case int:
+				u.DeletionScheduledAtMs = int64(x)
 			}
 		}
 	}

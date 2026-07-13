@@ -267,6 +267,41 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 	return matched[offset:end], nil
 }
 
+// ListUsersPendingDeletionBefore returns users whose self-service deletion
+// grace window has elapsed (status = pending_deletion, deletion_scheduled_at_ms
+// in (0, cutoffMs]), ordered by deletion_scheduled_at_ms then id, capped at
+// limit. It backs the account-deletion sweeper. limit <= 0 is rejected so the
+// contract matches the SQL drivers, which refuse an uncapped scan.
+func (r *Repo) ListUsersPendingDeletionBefore(_ context.Context, cutoffMs int64, limit int) ([]*service.User, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("memory: ListUsersPendingDeletionBefore: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	matched := make([]*service.User, 0)
+	for _, u := range r.users {
+		if u.Status != service.StatusPendingDeletion {
+			continue
+		}
+		if u.DeletionScheduledAtMs <= 0 || u.DeletionScheduledAtMs > cutoffMs {
+			continue
+		}
+		cp := *u
+		matched = append(matched, &cp)
+	}
+	r.mu.Unlock()
+
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].DeletionScheduledAtMs != matched[j].DeletionScheduledAtMs {
+			return matched[i].DeletionScheduledAtMs < matched[j].DeletionScheduledAtMs
+		}
+		return matched[i].ID < matched[j].ID
+	})
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched, nil
+}
+
 // CountUsers returns the total number of users matching filter's equality
 // predicates (Email/ExternalID), ignoring Offset/Limit. It backs the SCIM
 // /Users totalResults so a page reports the true match count rather than the
@@ -501,6 +536,13 @@ func applyUserFields(u *service.User, fields map[string]any) {
 				u.DateOfBirthMs = x
 			case int:
 				u.DateOfBirthMs = int64(x)
+			}
+		case "deletion_scheduled_at_ms":
+			switch x := v.(type) {
+			case int64:
+				u.DeletionScheduledAtMs = x
+			case int:
+				u.DeletionScheduledAtMs = int64(x)
 			}
 		}
 	}

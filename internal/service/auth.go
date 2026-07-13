@@ -47,6 +47,18 @@ import (
 // consent. Such an account exists but cannot be issued access tokens.
 const StatusPendingParentalConsent = "pending_parental_consent"
 
+// User status strings shared across the service. Persisted verbatim in the
+// status column; the connect layer maps them to the UserStatus proto enum.
+const (
+	// StatusActive is a normal, fully-usable account.
+	StatusActive = "active"
+	// StatusPendingDeletion marks an account whose owner requested
+	// self-service deletion. It is disabled and scheduled for a permanent
+	// purge once the grace window elapses; a successful interactive login
+	// during the window cancels it and restores StatusActive.
+	StatusPendingDeletion = "pending_deletion"
+)
+
 // User represents a user in the identity system.
 type User struct {
 	ID               string
@@ -72,6 +84,11 @@ type User struct {
 	PhoneVerified    bool
 	PhoneVerifiedAt  int64 // epoch ms; 0 = never verified
 	DateOfBirthMs    int64 // epoch ms of date of birth; 0 = unknown (persisted)
+	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
+	// is permanently purged. 0 when the account is not pending self-service
+	// deletion. Set when the owner requests deletion; cleared on cancel or a
+	// login-time auto-cancel.
+	DeletionScheduledAtMs int64
 	// IsMinor and AgeBand are DERIVED from DateOfBirthMs + the age-gate
 	// configuration; they are NOT persisted. The service stamps them on a
 	// user before returning it so the handler/JWT layers can read a single
@@ -180,6 +197,15 @@ type Repository interface {
 	// exposes no invitation create method; they are written via the graph
 	// graph.)
 	DeleteUser(ctx context.Context, userID string) error
+
+	// ListUsersPendingDeletionBefore returns users whose status is
+	// pending_deletion AND whose deletion_scheduled_at_ms is > 0 and <=
+	// cutoffMs, ordered by deletion_scheduled_at_ms ascending then id, capped
+	// at limit rows. It backs the account-deletion sweeper: rows it returns are
+	// past their grace window and due for the hard-delete cascade. limit <= 0
+	// is rejected (an uncapped scan could lock a hot table). Drivers must apply
+	// the status/cutoff filter and ordering identically (see conformance).
+	ListUsersPendingDeletionBefore(ctx context.Context, cutoffMs int64, limit int) ([]*User, error)
 
 	// ListUsers returns users in the request's project that match filter,
 	// ordered by created_at ascending then id, with a stable offset cursor.
@@ -814,7 +840,12 @@ var (
 	ErrAccountLocked            = errors.New("account locked")
 	ErrNoPasswordSet            = errors.New("no password set for this account")
 	ErrAccountNotActive         = errors.New("account is not active")
-	ErrInvitationPending        = errors.New("account has not completed invitation")
+	// ErrAccountDeletionNotAllowed is returned by DeleteMyAccount when the
+	// caller's account is in a state from which self-service deletion makes no
+	// sense (e.g. already deactivated or suspended by an admin). Mapped to
+	// CodeFailedPrecondition by the Connect layer.
+	ErrAccountDeletionNotAllowed = errors.New("account cannot be self-deleted in its current state")
+	ErrInvitationPending         = errors.New("account has not completed invitation")
 	ErrIDVRequired              = errors.New("identity verification required")
 	// ErrEmailVerificationRequired is returned when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
 	// is enabled and the account's email is not yet verified. Like ErrIDVRequired
@@ -1314,6 +1345,11 @@ func generateChallengeID() string {
 // absolute lifetime at now. The refresh path calls issueTokensWithSessionStart
 // directly so the anchor propagates unchanged across rotations.
 func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
+	// issueTokens is the single chokepoint every INTERACTIVE login funnels
+	// through (the refresh path calls issueTokensWithSessionStart directly), so
+	// it is the one place to auto-cancel a pending self-service deletion: an
+	// owner who signs back in during the grace window has reclaimed the account.
+	s.cancelPendingDeletionOnLogin(ctx, user)
 	return s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, 0)
 }
 

@@ -1,4 +1,6 @@
 [
+  "account_deletion_cancelled",
+  "account_deletion_requested",
   "account_locked",
   "admin_help_requested",
   "admin_help_resolved",

@@ -689,6 +689,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.BeginTotpSetupResponse'
+  /identity.v1.IdentityService/CancelAccountDeletion:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CancelAccountDeletion
+      operationId: identity.v1.IdentityService.CancelAccountDeletion
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CancelAccountDeletionRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CancelAccountDeletionResponse'
   /identity.v1.IdentityService/ChangePassword:
     post:
       tags:
@@ -1204,6 +1239,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.DeleteLoginPolicyResponse'
+  /identity.v1.IdentityService/DeleteMyAccount:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: DeleteMyAccount
+      description: |-
+        Self-service account deletion (GDPR Art 17). The caller schedules
+         deletion of their OWN account (grace-period soft delete); a login during
+         the window, or an explicit cancel, restores it.
+      operationId: identity.v1.IdentityService.DeleteMyAccount
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.DeleteMyAccountRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.DeleteMyAccountResponse'
   /identity.v1.IdentityService/DeletePasskey:
     post:
       tags:
@@ -4200,6 +4274,19 @@ components:
           description: 10 one-time recovery codes (shown once)
       title: BeginTotpSetupResponse
       additionalProperties: false
+    identity.v1.CancelAccountDeletionRequest:
+      type: object
+      title: CancelAccountDeletionRequest
+      additionalProperties: false
+    identity.v1.CancelAccountDeletionResponse:
+      type: object
+      properties:
+        status:
+          title: status
+          description: resulting status (ACTIVE after a successful cancel)
+          $ref: '#/components/schemas/identity.v1.UserStatus'
+      title: CancelAccountDeletionResponse
+      additionalProperties: false
     identity.v1.ChangePasswordRequest:
       type: object
       properties:
@@ -4561,6 +4648,27 @@ components:
     identity.v1.DeleteLoginPolicyResponse:
       type: object
       title: DeleteLoginPolicyResponse
+      additionalProperties: false
+    identity.v1.DeleteMyAccountRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          title: reason
+          description: optional free-text, retained for audit only
+      title: DeleteMyAccountRequest
+      additionalProperties: false
+    identity.v1.DeleteMyAccountResponse:
+      type: object
+      properties:
+        deletionScheduledAtMs:
+          type:
+            - integer
+            - string
+          title: deletion_scheduled_at_ms
+          format: int64
+          description: epoch ms the account is purged at
+      title: DeleteMyAccountResponse
       additionalProperties: false
     identity.v1.DeletePasskeyRequest:
       type: object
@@ -6623,6 +6731,7 @@ components:
         - USER_STATUS_DEACTIVATED
         - USER_STATUS_SUSPENDED
         - USER_STATUS_PENDING_PARENTAL_CONSENT
+        - USER_STATUS_PENDING_DELETION
     identity.v1.VerifyDomainRequest:
       type: object
       properties:

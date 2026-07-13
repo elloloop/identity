@@ -264,9 +264,36 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 			}
 		case "recovery_email":
 			u.RecoveryEmail = v.(string)
+		case "deletion_scheduled_at_ms":
+			switch x := v.(type) {
+			case int64:
+				u.DeletionScheduledAtMs = x
+			case int:
+				u.DeletionScheduledAtMs = int64(x)
+			}
 		}
 	}
 	return nil
+}
+
+func (r *fakeRepo) ListUsersPendingDeletionBefore(_ context.Context, cutoffMs int64, limit int) ([]*service.User, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("fakeRepo: ListUsersPendingDeletionBefore: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.User
+	for _, u := range r.users {
+		if u.Status != service.StatusPendingDeletion {
+			continue
+		}
+		if u.DeletionScheduledAtMs <= 0 || u.DeletionScheduledAtMs > cutoffMs {
+			continue
+		}
+		cp := *u
+		out = append(out, &cp)
+	}
+	return out, nil
 }
 
 func (r *fakeRepo) IncrementFailedLoginCount(_ context.Context, userID string) (int32, error) {
