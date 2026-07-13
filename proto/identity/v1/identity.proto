@@ -486,6 +486,52 @@ message CancelAccountDeletionResponse {
   UserStatus status = 1; // resulting status (ACTIVE after a successful cancel)
 }
 
+// ─── Self-Service Data Export (GDPR Art 15 access + Art 20 portability) ──
+// The caller downloads a structured, machine-readable copy of the personal
+// data the identity service holds about them. The caller is derived from the
+// auth header (there is no user_id field), matching the self-service pattern.
+//
+// The payload carries NO secret material: never a password hash, TOTP secret,
+// recovery codes, or raw/hashed tokens — only the metadata a user is entitled
+// to see about their own account, auth, and security records.
+
+message ExportMyDataRequest {}
+
+message ExportMyDataResponse {
+  // format_version identifies the schema of this export document so a later
+  // importer can evolve the shape unambiguously. The first version is 1.
+  int32 format_version = 1;
+
+  // exported_at_ms is the epoch-ms instant this export was produced.
+  int64 exported_at_ms = 2;
+
+  // user is the caller's full profile. The User message carries no secret
+  // fields (no password hash, no TOTP secret).
+  User user = 3;
+
+  // sessions are the caller's active sessions — the same shape ListMySessions
+  // returns (the session id is a node id, never the raw refresh token).
+  repeated Session sessions = 4;
+
+  // passkeys are the caller's registered passkey credentials — metadata only
+  // (credential id, device name, timestamps), the same shape ListPasskeys
+  // returns. Private keys / secrets are never included.
+  repeated PasskeyCredentialInfo passkeys = 5;
+
+  // linked_identities are the caller's connected OAuth provider identities —
+  // the same shape ListLinkedIdentities returns (provider, provider_user_id,
+  // email-at-link-time, linked-at).
+  repeated LinkedIdentity linked_identities = 6;
+
+  // totp_enabled reports whether the caller has an enrolled, verified TOTP
+  // credential. The TOTP secret itself is NEVER included.
+  bool totp_enabled = 7;
+
+  // audit_events are the security/audit events where the caller is the actor
+  // OR the target, newest first, capped by GATEWAY_EXPORT_MAX_AUDIT_EVENTS.
+  repeated AuditEvent audit_events = 8;
+}
+
 // Password reset (replaces the deprecated self-serve ForgotPassword flow).
 // The reset link is sent to the account's PRIMARY verified email — the
 // address matching the supplied `email`. If no account matches, the
@@ -1579,6 +1625,11 @@ service IdentityService {
   // the window, or an explicit cancel, restores it.
   rpc DeleteMyAccount(DeleteMyAccountRequest) returns (DeleteMyAccountResponse);
   rpc CancelAccountDeletion(CancelAccountDeletionRequest) returns (CancelAccountDeletionResponse);
+
+  // Self-service data export (GDPR Art 15 access + Art 20 portability). The
+  // caller downloads a structured, machine-readable copy of the personal data
+  // the identity service holds about them. Secret material is never included.
+  rpc ExportMyData(ExportMyDataRequest) returns (ExportMyDataResponse);
 
   // Password Management
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);

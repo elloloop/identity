@@ -536,7 +536,8 @@ func New(deps Deps) (*Built, error) {
 	profileSvc := service.NewProfileService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, logger).
 		WithMinorDataMinimizer(minorData).
 		WithLoginGovernance(deps.LoginGovernance).
-		WithAccountDeletionGraceDays(deps.Config.AccountDeletionGraceDays)
+		WithAccountDeletionGraceDays(deps.Config.AccountDeletionGraceDays).
+		WithExportMaxAuditEvents(deps.Config.ExportMaxAuditEvents)
 
 	var idvSvc *service.IdentityVerificationService
 	if deps.IDVProvider != nil {

@@ -475,6 +475,22 @@ type Repository interface {
 	// ErrNotFound when no matching link exists for that user.
 	DeleteOAuthIdentity(ctx context.Context, userID, provider, providerUserID string) error
 
+	// Audit events.
+	//
+	// CreateAuditEvent persists one audit event and returns its node id. A
+	// blank Event.ID is server-minted; a non-empty one is honoured. The
+	// audit trail is retained for accountability and is NOT removed by
+	// DeleteUser.
+	//
+	// ListAuditEventsForUser returns the audit events where userID is EITHER
+	// the actor OR the target, newest first (occurred-at descending, then id
+	// descending), capped at limit rows. It backs the self-service data
+	// export (GDPR Art 15): it is scoped to the one user and never returns
+	// another user's events. Implementations MUST reject limit <= 0 — an
+	// uncapped scan of a hot table is never acceptable.
+	CreateAuditEvent(ctx context.Context, e *AuditEvent) (string, error)
+	ListAuditEventsForUser(ctx context.Context, userID string, limit int) ([]*AuditEvent, error)
+
 	// Garbage-collection sweepers for ephemeral state. The
 	// background sweeper started by app.New calls these every
 	// GATEWAY_SWEEPER_INTERVAL_SECONDS; each call deletes up to
@@ -846,7 +862,7 @@ var (
 	// CodeFailedPrecondition by the Connect layer.
 	ErrAccountDeletionNotAllowed = errors.New("account cannot be self-deleted in its current state")
 	ErrInvitationPending         = errors.New("account has not completed invitation")
-	ErrIDVRequired              = errors.New("identity verification required")
+	ErrIDVRequired               = errors.New("identity verification required")
 	// ErrEmailVerificationRequired is returned when GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
 	// is enabled and the account's email is not yet verified. Like ErrIDVRequired
 	// it is a "do something else first" precondition (verify your email, then

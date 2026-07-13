@@ -160,6 +160,7 @@ type fakeRepo struct {
 	oauthIdentities    map[string]*OAuthIdentity
 	idvRecords         map[string]*IdentityVerificationRecord
 	sessions           map[string]*SessionRecord
+	auditEvents        []*AuditEvent
 }
 
 func newFakeRepo() *fakeRepo {
@@ -1490,6 +1491,46 @@ func (r *fakeRepo) DeleteOAuthIdentity(_ context.Context, userID, provider, prov
 		}
 	}
 	return ErrNotFound
+}
+
+// ── Audit Events ────────────────────────────────────────────────────────
+
+func (r *fakeRepo) CreateAuditEvent(_ context.Context, e *AuditEvent) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := e.ID
+	if id == "" {
+		id = nextNodeID()
+	}
+	cp := *e
+	cp.ID = id
+	r.auditEvents = append(r.auditEvents, &cp)
+	return id, nil
+}
+
+func (r *fakeRepo) ListAuditEventsForUser(_ context.Context, userID string, limit int) ([]*AuditEvent, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("fakeRepo: ListAuditEventsForUser: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*AuditEvent, 0)
+	for _, e := range r.auditEvents {
+		if e.ActorUserID == userID || e.TargetUserID == userID {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt > out[j].CreatedAt
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 // ── Identity Verification ──────────────────────────────────────────────

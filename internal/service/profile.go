@@ -37,6 +37,12 @@ type ProfileService struct {
 	// an immediate (grace-less) purge. Wired from config via
 	// WithAccountDeletionGraceDays.
 	accountDeletionGraceDays int
+
+	// exportMaxAuditEvents caps how many of the caller's own audit events a
+	// self-service data export includes (newest first). A non-positive value
+	// falls back to DefaultExportMaxAuditEvents so an export can never trigger
+	// an unbounded audit scan. Wired from config via WithExportMaxAuditEvents.
+	exportMaxAuditEvents int
 }
 
 // NewProfileService creates a ProfileService.

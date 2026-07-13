@@ -334,6 +334,14 @@ func (StubRepository) DeleteOAuthIdentity(context.Context, string, string, strin
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) CreateAuditEvent(context.Context, *AuditEvent) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) ListAuditEventsForUser(context.Context, string, int) ([]*AuditEvent, error) {
+	return nil, ErrServiceUnavailable
+}
+
 func (StubRepository) DeleteExpiredWebAuthnChallenges(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }

@@ -1516,6 +1516,90 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("AuditEvent_CreateAndListForUser_Scoped", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			alice := createTestUser(t, r, "audit-alice@example.com")
+			bob := createTestUser(t, r, "audit-bob@example.com")
+
+			// Alice as actor; Alice as target of an admin action; an event
+			// where Alice is neither party (Bob's); and one more of Alice's.
+			seed := []*service.AuditEvent{
+				{EventType: "login_success", ActorUserID: alice, TargetUserID: alice, Success: true, CreatedAt: 100, Details: map[string]any{"method": "password"}},
+				{EventType: "admin_reset_password", ActorUserID: "system:admin", TargetUserID: alice, Success: true, CreatedAt: 300},
+				{EventType: "login_failure", ActorUserID: bob, TargetUserID: bob, Success: false, CreatedAt: 200},
+				{EventType: "password_changed", ActorUserID: alice, TargetUserID: alice, Success: true, CreatedAt: 200},
+			}
+			for i, e := range seed {
+				id, err := r.CreateAuditEvent(ctx, e)
+				if err != nil {
+					t.Fatalf("CreateAuditEvent[%d]: %v", i, err)
+				}
+				if id == "" {
+					t.Fatalf("CreateAuditEvent[%d]: empty id", i)
+				}
+			}
+
+			// Alice's view: the login, the admin reset (she is the target),
+			// and the password change — but NEVER Bob's event. Newest first
+			// (created-at desc): 300, 200, 100.
+			got, err := r.ListAuditEventsForUser(ctx, alice, 50)
+			if err != nil {
+				t.Fatalf("ListAuditEventsForUser(alice): %v", err)
+			}
+			if len(got) != 3 {
+				t.Fatalf("alice events = %d, want 3: %+v", len(got), got)
+			}
+			for _, e := range got {
+				if e.ActorUserID != alice && e.TargetUserID != alice {
+					t.Fatalf("alice export leaked a non-alice event: %+v", e)
+				}
+				if e.EventType == "login_failure" {
+					t.Fatalf("alice export leaked bob's event: %+v", e)
+				}
+			}
+			if got[0].CreatedAt != 300 || got[1].CreatedAt != 200 || got[2].CreatedAt != 100 {
+				t.Fatalf("ordering not newest-first: %d,%d,%d", got[0].CreatedAt, got[1].CreatedAt, got[2].CreatedAt)
+			}
+			// Details round-trips for the caller's own events.
+			if got[2].EventType != "login_success" || got[2].Details["method"] != "password" {
+				t.Fatalf("details did not round-trip: %+v", got[2])
+			}
+
+			// Bob's view is exactly his own single event.
+			bobEvents, err := r.ListAuditEventsForUser(ctx, bob, 50)
+			if err != nil {
+				t.Fatalf("ListAuditEventsForUser(bob): %v", err)
+			}
+			if len(bobEvents) != 1 || bobEvents[0].ActorUserID != bob {
+				t.Fatalf("bob events = %+v, want exactly his own", bobEvents)
+			}
+
+			// The limit caps to the newest N.
+			capped, err := r.ListAuditEventsForUser(ctx, alice, 2)
+			if err != nil {
+				t.Fatalf("ListAuditEventsForUser(alice, limit=2): %v", err)
+			}
+			if len(capped) != 2 || capped[0].CreatedAt != 300 || capped[1].CreatedAt != 200 {
+				t.Fatalf("limit=2 returned %+v, want the two newest", capped)
+			}
+
+			// A non-positive limit is rejected — an export must never
+			// trigger an unbounded scan.
+			if _, err := r.ListAuditEventsForUser(ctx, alice, 0); err == nil {
+				t.Fatal("ListAuditEventsForUser(limit=0): want error, got nil")
+			}
+
+			// A user with no events gets an empty (non-nil) slice.
+			empty, err := r.ListAuditEventsForUser(ctx, createTestUser(t, r, "audit-empty@example.com"), 50)
+			if err != nil {
+				t.Fatalf("ListAuditEventsForUser(empty): %v", err)
+			}
+			if len(empty) != 0 {
+				t.Fatalf("empty user events = %+v, want none", empty)
+			}
+		})
+
 		t.Run("Invitation_FindUpdate", func(t *testing.T) {
 			// Only Find + Update are on the Repository interface; the
 			// driver-specific create path is exercised via service.DB
