@@ -1445,6 +1445,24 @@ func (r *Repo) ListAuditEventsForUser(_ context.Context, userID string, limit in
 	return out, nil
 }
 
+// DeleteAuditEventsBefore removes every stored audit event whose occurred-at
+// instant (CreatedAt) is strictly older than cutoffMs, returning the number
+// removed. It is the in-memory equivalent of the storage-limitation sweep the
+// postgres/sqlite drivers run in batches; the map fits in memory, so it deletes
+// the whole eligible set in one pass.
+func (r *Repo) DeleteAuditEventsBefore(_ context.Context, cutoffMs int64) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	deleted := 0
+	for id, e := range r.auditEvents {
+		if e.CreatedAt < cutoffMs {
+			delete(r.auditEvents, id)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
 // copyDetails returns a shallow copy of an audit event's details map so the
 // stored/returned event does not alias the caller's map. Nil in, nil out.
 func copyDetails(in map[string]any) map[string]any {

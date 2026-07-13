@@ -102,6 +102,12 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.SweeperGraceSeconds != 60 {
 		t.Errorf("SweeperGraceSeconds: want 60, got %d", cfg.SweeperGraceSeconds)
 	}
+	if cfg.AuditRetentionDays != DefaultAuditRetentionDays {
+		t.Errorf("AuditRetentionDays: want %d (24 months), got %d", DefaultAuditRetentionDays, cfg.AuditRetentionDays)
+	}
+	if DefaultAuditRetentionDays != 730 {
+		t.Errorf("DefaultAuditRetentionDays: want 730, got %d", DefaultAuditRetentionDays)
+	}
 	if cfg.AppleClientID != "" {
 		t.Errorf("AppleClientID: want empty default, got %q", cfg.AppleClientID)
 	}
@@ -128,6 +134,33 @@ func TestLoad_SweeperDisabledWhenIntervalZero(t *testing.T) {
 	if cfg.SweeperIntervalSeconds != 0 {
 		t.Errorf("SweeperIntervalSeconds: want 0, got %d", cfg.SweeperIntervalSeconds)
 	}
+}
+
+// TestLoad_AuditRetentionDays covers the audit-log retention knob: a positive
+// override is honoured, and 0 / a negative value load through as-is so the
+// sweeper reads them as "retention disabled" (keep the trail forever).
+func TestLoad_AuditRetentionDays(t *testing.T) {
+	t.Run("override", func(t *testing.T) {
+		clearGatewayEnv(t)
+		t.Setenv("GATEWAY_AUDIT_RETENTION_DAYS", "365")
+		if got := Load().AuditRetentionDays; got != 365 {
+			t.Errorf("AuditRetentionDays: want 365, got %d", got)
+		}
+	})
+	t.Run("zero disables", func(t *testing.T) {
+		clearGatewayEnv(t)
+		t.Setenv("GATEWAY_AUDIT_RETENTION_DAYS", "0")
+		if got := Load().AuditRetentionDays; got != 0 {
+			t.Errorf("AuditRetentionDays: want 0 (disabled), got %d", got)
+		}
+	})
+	t.Run("negative disables", func(t *testing.T) {
+		clearGatewayEnv(t)
+		t.Setenv("GATEWAY_AUDIT_RETENTION_DAYS", "-1")
+		if got := Load().AuditRetentionDays; got > 0 {
+			t.Errorf("AuditRetentionDays: want <= 0 (disabled), got %d", got)
+		}
+	})
 }
 
 // TestLoad_OverrideFromEnv verifies that environment variables override defaults.

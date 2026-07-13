@@ -11,6 +11,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"go.uber.org/zap/zaptest"
 
+	"github.com/elloloop/identity/internal/repo/memory"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -40,11 +41,25 @@ type mockSweepRepo struct {
 	lastBefore atomic.Int64
 	lastLimit  atomic.Int64
 
+	// auditCalls/auditCutoff record the audit-retention sweep separately —
+	// it has a distinct signature (a cutoff, no limit, a returned count) and
+	// its own metrics label. auditErr, when set, is returned from it so the
+	// audit-retention error path can be exercised independently of err.
+	auditCalls  atomic.Int64
+	auditCutoff atomic.Int64
+	auditErr    error
+
 	// err and skip control the per-method behaviour. err is returned
 	// for every method when non-nil. skip causes every method to
 	// return service.ErrSweepNotImplemented.
 	err  error
 	skip bool
+}
+
+func (m *mockSweepRepo) DeleteAuditEventsBefore(_ context.Context, cutoffMs int64) (int, error) {
+	m.auditCalls.Add(1)
+	m.auditCutoff.Store(cutoffMs)
+	return 0, m.auditErr
 }
 
 func (m *mockSweepRepo) sweep(beforeMs int64, limit int) error {
@@ -107,7 +122,7 @@ func (m *mockSweepRepo) DeleteExpiredInvitations(_ context.Context, b int64, l i
 
 func TestSweeper_DisabledWhenIntervalIsZero(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(&mockSweepRepo{}, nil, 0, 100, 30, logger)
+	s := newSweeper(&mockSweepRepo{}, nil, 0, 100, 30, 0, logger)
 	if s != nil {
 		t.Fatal("interval=0 must yield a nil sweeper (sweep disabled)")
 	}
@@ -115,7 +130,7 @@ func TestSweeper_DisabledWhenIntervalIsZero(t *testing.T) {
 
 func TestSweeper_DisabledWhenIntervalNegative(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(&mockSweepRepo{}, nil, -1, 100, 30, logger)
+	s := newSweeper(&mockSweepRepo{}, nil, -1, 100, 30, 0, logger)
 	if s != nil {
 		t.Fatal("interval<0 must yield a nil sweeper (sweep disabled)")
 	}
@@ -124,7 +139,7 @@ func TestSweeper_DisabledWhenIntervalNegative(t *testing.T) {
 func TestSweeper_RunOnceCallsEveryMethod(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
 	if s == nil {
 		t.Fatal("newSweeper returned nil with positive interval")
 	}
@@ -165,7 +180,7 @@ func TestSweeper_RunOncePurgesExpiredAccountDeletions(t *testing.T) {
 	repo := &mockSweepRepo{}
 	purger := &mockPurger{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, purger, 1, 50, 30, logger)
+	s := newSweeper(repo, purger, 1, 50, 30, 0, logger)
 
 	fixedNow := time.UnixMilli(1_700_000_000_000)
 	s.now = func() time.Time { return fixedNow }
@@ -188,7 +203,7 @@ func TestSweeper_RunOncePurgesExpiredAccountDeletions(t *testing.T) {
 func TestSweeper_NilPurgerSkipsAccountDeletion(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
 	// Must not panic when no purger is wired.
 	s.runOnce(context.Background())
 }
@@ -200,7 +215,7 @@ func TestSweeper_PurgeErrorIncrementsErrorCounter(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperErrors.WithLabelValues(accountDeletionLabel))
 
-	s := newSweeper(repo, purger, 1, 50, 30, logger)
+	s := newSweeper(repo, purger, 1, 50, 30, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues(accountDeletionLabel))
@@ -212,7 +227,7 @@ func TestSweeper_PurgeErrorIncrementsErrorCounter(t *testing.T) {
 func TestSweeper_SkipNotImplementedLogsOncePerNodeType(t *testing.T) {
 	repo := &mockSweepRepo{skip: true}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
 
 	// Run three ticks; we must only log skip once per node type.
 	for i := 0; i < 3; i++ {
@@ -233,7 +248,7 @@ func TestSweeper_SkipNotImplementedDoesNotIncrementErrors(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperErrors.WithLabelValues("webauthn_challenges"))
 
-	s := newSweeper(repo, nil, 1, 50, 30, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues("webauthn_challenges"))
@@ -249,7 +264,7 @@ func TestSweeper_RealErrorIncrementsErrorCounter(t *testing.T) {
 
 	baseline := readCounter(sweeperErrors.WithLabelValues("password_reset_tokens"))
 
-	s := newSweeper(repo, nil, 1, 50, 30, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues("password_reset_tokens"))
@@ -271,13 +286,157 @@ func TestSweeper_SuccessfulRunIncrementsRunsCounter(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperRuns.WithLabelValues("login_challenges"))
 
-	s := newSweeper(repo, nil, 1, 50, 30, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperRuns.WithLabelValues("login_challenges"))
 	if got != baseline+1 {
 		t.Fatalf("expected runs counter +1, got %v -> %v", baseline, got)
 	}
+}
+
+func TestSweeper_RetentionDisabledSkipsAuditSweep(t *testing.T) {
+	repo := &mockSweepRepo{}
+	logger := zaptest.NewLogger(t)
+	// auditRetentionDays = 0 → retention disabled: the audit sweep is a no-op.
+	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+
+	s.runOnce(context.Background())
+
+	if got := repo.auditCalls.Load(); got != 0 {
+		t.Fatalf("audit sweep called %d times with retention disabled, want 0", got)
+	}
+}
+
+func TestSweeper_RetentionNegativeSkipsAuditSweep(t *testing.T) {
+	repo := &mockSweepRepo{}
+	logger := zaptest.NewLogger(t)
+	s := newSweeper(repo, nil, 1, 50, 30, -5, logger)
+
+	s.runOnce(context.Background())
+
+	if got := repo.auditCalls.Load(); got != 0 {
+		t.Fatalf("audit sweep called %d times with negative retention, want 0", got)
+	}
+}
+
+func TestSweeper_RetentionEnabledSweepsAtCutoff(t *testing.T) {
+	repo := &mockSweepRepo{}
+	logger := zaptest.NewLogger(t)
+	const retentionDays = 30
+	s := newSweeper(repo, nil, 1, 50, 30, retentionDays, logger)
+
+	fixedNow := time.UnixMilli(1_700_000_000_000)
+	s.now = func() time.Time { return fixedNow }
+
+	s.runOnce(context.Background())
+
+	if got := repo.auditCalls.Load(); got != 1 {
+		t.Fatalf("audit sweep called %d times, want 1", got)
+	}
+	// The cutoff is now - retentionDays (a flat 24h day), NOT now - sweeper grace.
+	wantCutoff := fixedNow.Add(-retentionDays * 24 * time.Hour).UnixMilli()
+	if got := repo.auditCutoff.Load(); got != wantCutoff {
+		t.Fatalf("audit cutoff = %d, want %d (now - %d days)", got, wantCutoff, retentionDays)
+	}
+}
+
+func TestSweeper_AuditRetentionSuccessIncrementsRunsCounter(t *testing.T) {
+	repo := &mockSweepRepo{}
+	logger := zaptest.NewLogger(t)
+	initSweeperMetrics()
+	baseline := readCounter(sweeperRuns.WithLabelValues(auditRetentionLabel))
+
+	s := newSweeper(repo, nil, 1, 50, 30, 30, logger)
+	s.runOnce(context.Background())
+
+	got := readCounter(sweeperRuns.WithLabelValues(auditRetentionLabel))
+	if got != baseline+1 {
+		t.Fatalf("expected audit-retention runs counter +1, got %v -> %v", baseline, got)
+	}
+}
+
+func TestSweeper_AuditRetentionErrorIncrementsErrorCounter(t *testing.T) {
+	repo := &mockSweepRepo{auditErr: errors.New("boom")}
+	logger := zaptest.NewLogger(t)
+	initSweeperMetrics()
+	baseline := readCounter(sweeperErrors.WithLabelValues(auditRetentionLabel))
+
+	s := newSweeper(repo, nil, 1, 50, 30, 30, logger)
+	s.runOnce(context.Background())
+
+	got := readCounter(sweeperErrors.WithLabelValues(auditRetentionLabel))
+	if got != baseline+1 {
+		t.Fatalf("expected audit-retention errors counter +1, got %v -> %v", baseline, got)
+	}
+}
+
+// TestSweeper_RetentionDeletesOnlyPastCutoff drives the retention step end to
+// end against a real in-memory repository: a tick must delete audit events
+// older than now - retentionDays and keep newer ones, and a disabled sweep
+// must leave every event in place.
+func TestSweeper_RetentionDeletesOnlyPastCutoff(t *testing.T) {
+	ctx := context.Background()
+	logger := zaptest.NewLogger(t)
+	const retentionDays = 30
+	day := 24 * time.Hour
+	fixedNow := time.UnixMilli(1_700_000_000_000)
+	cutoffMs := fixedNow.Add(-retentionDays * day).UnixMilli()
+
+	const actor = "audit-retention-user"
+	seed := func(repo *memory.Repo) {
+		events := []*service.AuditEvent{
+			{EventType: "stale", ActorUserID: actor, TargetUserID: actor, CreatedAt: cutoffMs - day.Milliseconds()},
+			{EventType: "boundary", ActorUserID: actor, TargetUserID: actor, CreatedAt: cutoffMs},
+			{EventType: "fresh", ActorUserID: actor, TargetUserID: actor, CreatedAt: fixedNow.Add(-day).UnixMilli()},
+		}
+		for i, e := range events {
+			if _, err := repo.CreateAuditEvent(ctx, e); err != nil {
+				t.Fatalf("seed audit event[%d]: %v", i, err)
+			}
+		}
+	}
+
+	t.Run("enabled deletes only stale", func(t *testing.T) {
+		repo := memory.New()
+		seed(repo)
+		s := newSweeper(repo, nil, 1, 50, 30, retentionDays, logger)
+		s.now = func() time.Time { return fixedNow }
+
+		s.runOnce(ctx)
+
+		got, err := repo.ListAuditEventsForUser(ctx, actor, 50)
+		if err != nil {
+			t.Fatalf("ListAuditEventsForUser: %v", err)
+		}
+		// The stale event (older than the cutoff) is gone; the boundary event
+		// (exactly at the cutoff, so not strictly older) and the fresh event stay.
+		if len(got) != 2 {
+			t.Fatalf("after sweep: %d events, want 2 (boundary + fresh): %+v", len(got), got)
+		}
+		for _, e := range got {
+			if e.EventType == "stale" {
+				t.Fatalf("stale event survived retention sweep: %+v", e)
+			}
+		}
+	})
+
+	t.Run("disabled keeps everything", func(t *testing.T) {
+		repo := memory.New()
+		seed(repo)
+		s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+		s.now = func() time.Time { return fixedNow }
+
+		s.runOnce(ctx)
+
+		got, err := repo.ListAuditEventsForUser(ctx, actor, 50)
+		if err != nil {
+			t.Fatalf("ListAuditEventsForUser: %v", err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("retention disabled must keep all events, got %d: %+v", len(got), got)
+		}
+	})
 }
 
 func TestSweeper_StartStopCleanly(t *testing.T) {
@@ -287,7 +446,7 @@ func TestSweeper_StartStopCleanly(t *testing.T) {
 	// A very short interval lets the loop tick at least once before
 	// we shut it down. The test asserts the stop func returns
 	// promptly rather than races the still-running goroutine.
-	s := newSweeper(repo, nil, 1, 50, 30, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
 	stop := s.start()
 
 	// Allow a couple of ticks. We don't assert exact tick counts —

@@ -72,6 +72,40 @@ func (r *pgRepository) ListAuditEventsForUser(ctx context.Context, userID string
 	return out, nil
 }
 
+// auditRetentionSweepBatch caps how many audit rows a single DELETE statement
+// removes, so the storage-limitation sweep never takes a table-wide lock on a
+// large audit_events table. DeleteAuditEventsBefore loops at this size until the
+// backlog older than the cutoff is fully drained.
+const auditRetentionSweepBatch = 1000
+
+// DeleteAuditEventsBefore deletes audit events whose occurred_at_ms is strictly
+// less than cutoffMs, in capped batches, and returns the total number removed.
+// Postgres has no native DELETE ... LIMIT, so each batch pins its work with a
+// subquery ordered by occurred_at_ms ASC (oldest first) — deterministic across
+// retries and index-friendly. The loop ends once a batch removes fewer rows
+// than the cap, i.e. the eligible set is exhausted.
+func (r *pgRepository) DeleteAuditEventsBefore(ctx context.Context, cutoffMs int64) (int, error) {
+	total := 0
+	for {
+		tag, err := r.pool.Exec(ctx, `
+			DELETE FROM audit_events
+			 WHERE id IN (
+			     SELECT id FROM audit_events
+			      WHERE project_id = $1 AND occurred_at_ms < $2
+			      ORDER BY occurred_at_ms ASC
+			      LIMIT $3
+			 )`, r.projectID, cutoffMs, auditRetentionSweepBatch)
+		if err != nil {
+			return total, wrapPgErr("DeleteAuditEventsBefore", err)
+		}
+		removed := int(tag.RowsAffected())
+		total += removed
+		if removed < auditRetentionSweepBatch {
+			return total, nil
+		}
+	}
+}
+
 // scanAuditEventRow reads one audit_events row into the service domain type.
 func scanAuditEventRow(row interface{ Scan(...any) error }) (*service.AuditEvent, error) {
 	var id, eventType, actor, target, ipAddress, userAgent, details string

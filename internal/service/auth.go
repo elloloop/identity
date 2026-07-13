@@ -491,6 +491,19 @@ type Repository interface {
 	CreateAuditEvent(ctx context.Context, e *AuditEvent) (string, error)
 	ListAuditEventsForUser(ctx context.Context, userID string, limit int) ([]*AuditEvent, error)
 
+	// DeleteAuditEventsBefore removes every audit event whose occurred-at
+	// instant is strictly older than cutoffMs, returning the number deleted.
+	// It is the GDPR Art 5(1)(e) storage-limitation sweep for the audit trail:
+	// the background sweeper calls it once per tick with a cutoff of
+	// now - GATEWAY_AUDIT_RETENTION_DAYS so audit/security logs (which record
+	// IP + user-agent) are not held forever. Unlike the DeleteExpired* sweeps
+	// this returns a real deleted count — it is a direct delete on the audit
+	// store, not the count-less tenant-shard-db OpDeleteWhere path — which the
+	// sweeper surfaces for operability. Implementations that could face a large
+	// backlog (postgres) delete in internally-capped batches so a single call
+	// never takes a table-wide lock; the whole eligible set is drained per call.
+	DeleteAuditEventsBefore(ctx context.Context, cutoffMs int64) (int, error)
+
 	// Garbage-collection sweepers for ephemeral state. The
 	// background sweeper started by app.New calls these every
 	// GATEWAY_SWEEPER_INTERVAL_SECONDS; each call deletes up to

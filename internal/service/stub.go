@@ -342,6 +342,10 @@ func (StubRepository) ListAuditEventsForUser(context.Context, string, int) ([]*A
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) DeleteAuditEventsBefore(context.Context, int64) (int, error) {
+	return 0, ErrServiceUnavailable
+}
+
 func (StubRepository) DeleteExpiredWebAuthnChallenges(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }

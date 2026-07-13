@@ -367,11 +367,11 @@ func New(deps Deps) (*Built, error) {
 		})
 
 	// Garbage-collection sweeper for expired ephemeral rows (#94) plus the
-	// self-service account-deletion purge. Disabled when
-	// SweeperIntervalSeconds <= 0 — deployers who already run their own GC, and
-	// the unit-test harness, both flip it off via
-	// GATEWAY_SWEEPER_INTERVAL_SECONDS=0. Constructed below once adminSvc (the
-	// account purger) exists.
+	// self-service account-deletion purge and the audit-log retention sweep
+	// (GDPR Art 5(1)(e)). Disabled when SweeperIntervalSeconds <= 0 — deployers
+	// who already run their own GC, and the unit-test harness, both flip it off
+	// via GATEWAY_SWEEPER_INTERVAL_SECONDS=0. Constructed below once adminSvc
+	// (the account purger) exists.
 	var sweep *sweeper
 
 	// Background-worker lifecycle. The audit flusher and sweeper do NOT
@@ -519,6 +519,7 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.SweeperIntervalSeconds,
 		deps.Config.SweeperBatchSize,
 		deps.Config.SweeperGraceSeconds,
+		deps.Config.AuditRetentionDays,
 		logger,
 	)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
