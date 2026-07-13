@@ -178,6 +178,65 @@ func TestExportMyData_Validation(t *testing.T) {
 	}
 }
 
+// TestExportMyData_PropagatesRepoErrors exercises the repo-error branches so a
+// failed read surfaces (wrapped) rather than being swallowed or partial.
+func TestExportMyData_PropagatesRepoErrors(t *testing.T) {
+	ctx := context.Background()
+	sentinel := errors.New("repo boom")
+
+	t.Run("GetUser error", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.getUserErr = sentinel
+		svc := newExportProfileService(repo, newFakeDB())
+		if _, err := svc.ExportMyData(ctx, "any-user"); !errors.Is(err, sentinel) {
+			t.Fatalf("want wrapped sentinel, got %v", err)
+		}
+	})
+
+	t.Run("GetTotpCredential error", func(t *testing.T) {
+		repo := newFakeRepo()
+		id, err := repo.CreateUser(ctx, &User{Email: "err@export.test", Status: StatusActive})
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		repo.getTotpCredentialErr = sentinel
+		svc := newExportProfileService(repo, newFakeDB())
+		if _, err := svc.ExportMyData(ctx, id); !errors.Is(err, sentinel) {
+			t.Fatalf("want wrapped sentinel, got %v", err)
+		}
+	})
+}
+
+// TestExportMyData_AuditLimitConfig covers the audit-cap setter and its
+// non-positive clamp so a misconfigured limit can never trigger an unbounded
+// scan and the wired value is honoured.
+func TestExportMyData_AuditLimitConfig(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	id, err := repo.CreateUser(ctx, &User{Email: "limit@export.test", Status: StatusActive})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Non-positive → clamps to the safe default (exportAuditLimit branch).
+	clamped := newExportProfileService(repo, newFakeDB()).WithExportMaxAuditEvents(0)
+	if clamped.exportAuditLimit() != DefaultExportMaxAuditEvents {
+		t.Fatalf("clamp: got %d, want %d", clamped.exportAuditLimit(), DefaultExportMaxAuditEvents)
+	}
+	if _, err := clamped.ExportMyData(ctx, id); err != nil {
+		t.Fatalf("export (clamped limit): %v", err)
+	}
+
+	// Positive → honoured verbatim.
+	wired := newExportProfileService(repo, newFakeDB()).WithExportMaxAuditEvents(5)
+	if wired.exportAuditLimit() != 5 {
+		t.Fatalf("wired limit: got %d, want 5", wired.exportAuditLimit())
+	}
+	if _, err := wired.ExportMyData(ctx, id); err != nil {
+		t.Fatalf("export (wired limit): %v", err)
+	}
+}
+
 func seedAudit(t *testing.T, repo *fakeRepo, e *AuditEvent) {
 	t.Helper()
 	if _, err := repo.CreateAuditEvent(context.Background(), e); err != nil {

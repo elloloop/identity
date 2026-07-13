@@ -139,6 +139,8 @@ type fakeRepo struct {
 	getPasskeyChallengeErr error
 	findUserByEmailErr     error
 	createPasskeyCredErr   error
+	getUserErr             error
+	getTotpCredentialErr   error
 
 	users              map[string]*User
 	refreshTokens      map[string]*RefreshTokenRecord
@@ -208,6 +210,9 @@ func (r *fakeRepo) FindUserByEmail(_ context.Context, email string) (*User, erro
 func (r *fakeRepo) GetUser(_ context.Context, userID string) (*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getUserErr != nil {
+		return nil, r.getUserErr
+	}
 	u, ok := r.users[userID]
 	if !ok {
 		return nil, nil
@@ -933,6 +938,9 @@ func (r *fakeRepo) SetUserPhoneVerified(_ context.Context, userID, phoneNumber s
 func (r *fakeRepo) GetTotpCredential(_ context.Context, userID string) (*TotpCredRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getTotpCredentialErr != nil {
+		return nil, r.getTotpCredentialErr
+	}
 	for _, c := range r.totpCreds {
 		if c.UserID == userID {
 			cp := *c
