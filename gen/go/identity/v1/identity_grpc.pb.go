@@ -37,6 +37,7 @@ const (
 	IdentityService_UpdateProfile_FullMethodName                   = "/identity.v1.IdentityService/UpdateProfile"
 	IdentityService_DeleteMyAccount_FullMethodName                 = "/identity.v1.IdentityService/DeleteMyAccount"
 	IdentityService_CancelAccountDeletion_FullMethodName           = "/identity.v1.IdentityService/CancelAccountDeletion"
+	IdentityService_ExportMyData_FullMethodName                    = "/identity.v1.IdentityService/ExportMyData"
 	IdentityService_ChangePassword_FullMethodName                  = "/identity.v1.IdentityService/ChangePassword"
 	IdentityService_RequestPasswordReset_FullMethodName            = "/identity.v1.IdentityService/RequestPasswordReset"
 	IdentityService_ConfirmPasswordReset_FullMethodName            = "/identity.v1.IdentityService/ConfirmPasswordReset"
@@ -150,6 +151,10 @@ type IdentityServiceClient interface {
 	// the window, or an explicit cancel, restores it.
 	DeleteMyAccount(ctx context.Context, in *DeleteMyAccountRequest, opts ...grpc.CallOption) (*DeleteMyAccountResponse, error)
 	CancelAccountDeletion(ctx context.Context, in *CancelAccountDeletionRequest, opts ...grpc.CallOption) (*CancelAccountDeletionResponse, error)
+	// Self-service data export (GDPR Art 15 access + Art 20 portability). The
+	// caller downloads a structured, machine-readable copy of the personal data
+	// the identity service holds about them. Secret material is never included.
+	ExportMyData(ctx context.Context, in *ExportMyDataRequest, opts ...grpc.CallOption) (*ExportMyDataResponse, error)
 	// Password Management
 	ChangePassword(ctx context.Context, in *ChangePasswordRequest, opts ...grpc.CallOption) (*ChangePasswordResponse, error)
 	RequestPasswordReset(ctx context.Context, in *RequestPasswordResetRequest, opts ...grpc.CallOption) (*RequestPasswordResetResponse, error)
@@ -479,6 +484,16 @@ func (c *identityServiceClient) CancelAccountDeletion(ctx context.Context, in *C
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CancelAccountDeletionResponse)
 	err := c.cc.Invoke(ctx, IdentityService_CancelAccountDeletion_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ExportMyData(ctx context.Context, in *ExportMyDataRequest, opts ...grpc.CallOption) (*ExportMyDataResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExportMyDataResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ExportMyData_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1325,6 +1340,10 @@ type IdentityServiceServer interface {
 	// the window, or an explicit cancel, restores it.
 	DeleteMyAccount(context.Context, *DeleteMyAccountRequest) (*DeleteMyAccountResponse, error)
 	CancelAccountDeletion(context.Context, *CancelAccountDeletionRequest) (*CancelAccountDeletionResponse, error)
+	// Self-service data export (GDPR Art 15 access + Art 20 portability). The
+	// caller downloads a structured, machine-readable copy of the personal data
+	// the identity service holds about them. Secret material is never included.
+	ExportMyData(context.Context, *ExportMyDataRequest) (*ExportMyDataResponse, error)
 	// Password Management
 	ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error)
 	RequestPasswordReset(context.Context, *RequestPasswordResetRequest) (*RequestPasswordResetResponse, error)
@@ -1533,6 +1552,9 @@ func (UnimplementedIdentityServiceServer) DeleteMyAccount(context.Context, *Dele
 }
 func (UnimplementedIdentityServiceServer) CancelAccountDeletion(context.Context, *CancelAccountDeletionRequest) (*CancelAccountDeletionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CancelAccountDeletion not implemented")
+}
+func (UnimplementedIdentityServiceServer) ExportMyData(context.Context, *ExportMyDataRequest) (*ExportMyDataResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ExportMyData not implemented")
 }
 func (UnimplementedIdentityServiceServer) ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ChangePassword not implemented")
@@ -2118,6 +2140,24 @@ func _IdentityService_CancelAccountDeletion_Handler(srv interface{}, ctx context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).CancelAccountDeletion(ctx, req.(*CancelAccountDeletionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ExportMyData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExportMyDataRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ExportMyData(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ExportMyData_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ExportMyData(ctx, req.(*ExportMyDataRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3658,6 +3698,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CancelAccountDeletion",
 			Handler:    _IdentityService_CancelAccountDeletion_Handler,
+		},
+		{
+			MethodName: "ExportMyData",
+			Handler:    _IdentityService_ExportMyData_Handler,
 		},
 		{
 			MethodName: "ChangePassword",

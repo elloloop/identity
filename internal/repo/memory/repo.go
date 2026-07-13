@@ -65,6 +65,7 @@ type Repo struct {
 	oauthIdentities    map[string]*service.OAuthIdentity
 	idvRecords         map[string]*service.IdentityVerificationRecord
 	sessions           map[string]*service.SessionRecord
+	auditEvents        map[string]*service.AuditEvent
 }
 
 // projectRegistry memoises the per-project Repo siblings produced by
@@ -116,6 +117,7 @@ func newStore() *Repo {
 		oauthIdentities:    make(map[string]*service.OAuthIdentity),
 		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
 		sessions:           make(map[string]*service.SessionRecord),
+		auditEvents:        make(map[string]*service.AuditEvent),
 	}
 }
 
@@ -1389,6 +1391,71 @@ func (r *Repo) DeleteOAuthIdentity(_ context.Context, userID, provider, provider
 		}
 	}
 	return service.ErrNotFound
+}
+
+// ── Audit Events ──────────────────────────────────────────────────
+
+// CreateAuditEvent stores a copy of the event and returns its id. A blank
+// Event.ID is server-minted; a non-empty one is honoured (so a caller can
+// pin an id). The stored Details map is deep-copied so a later mutation of
+// the caller's map cannot alter the persisted event.
+func (r *Repo) CreateAuditEvent(_ context.Context, e *service.AuditEvent) (string, error) {
+	if e == nil {
+		return "", errors.New("memory: CreateAuditEvent: nil event")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := e.ID
+	if id == "" {
+		id = r.nextID()
+	}
+	cp := *e
+	cp.ID = id
+	cp.Details = copyDetails(e.Details)
+	r.auditEvents[id] = &cp
+	return id, nil
+}
+
+// ListAuditEventsForUser returns the events where userID is the actor OR the
+// target, newest first (created-at desc, then id desc), capped at limit.
+func (r *Repo) ListAuditEventsForUser(_ context.Context, userID string, limit int) ([]*service.AuditEvent, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("memory: ListAuditEventsForUser: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*service.AuditEvent, 0)
+	for _, e := range r.auditEvents {
+		if e.ActorUserID != userID && e.TargetUserID != userID {
+			continue
+		}
+		cp := *e
+		cp.Details = copyDetails(e.Details)
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt > out[j].CreatedAt
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// copyDetails returns a shallow copy of an audit event's details map so the
+// stored/returned event does not alias the caller's map. Nil in, nil out.
+func copyDetails(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // ── Identity Verification Records ─────────────────────────────────

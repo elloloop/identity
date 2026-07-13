@@ -86,6 +86,9 @@ const (
 	// IdentityServiceCancelAccountDeletionProcedure is the fully-qualified name of the
 	// IdentityService's CancelAccountDeletion RPC.
 	IdentityServiceCancelAccountDeletionProcedure = "/identity.v1.IdentityService/CancelAccountDeletion"
+	// IdentityServiceExportMyDataProcedure is the fully-qualified name of the IdentityService's
+	// ExportMyData RPC.
+	IdentityServiceExportMyDataProcedure = "/identity.v1.IdentityService/ExportMyData"
 	// IdentityServiceChangePasswordProcedure is the fully-qualified name of the IdentityService's
 	// ChangePassword RPC.
 	IdentityServiceChangePasswordProcedure = "/identity.v1.IdentityService/ChangePassword"
@@ -358,6 +361,10 @@ type IdentityServiceClient interface {
 	// the window, or an explicit cancel, restores it.
 	DeleteMyAccount(context.Context, *connect.Request[v1.DeleteMyAccountRequest]) (*connect.Response[v1.DeleteMyAccountResponse], error)
 	CancelAccountDeletion(context.Context, *connect.Request[v1.CancelAccountDeletionRequest]) (*connect.Response[v1.CancelAccountDeletionResponse], error)
+	// Self-service data export (GDPR Art 15 access + Art 20 portability). The
+	// caller downloads a structured, machine-readable copy of the personal data
+	// the identity service holds about them. Secret material is never included.
+	ExportMyData(context.Context, *connect.Request[v1.ExportMyDataRequest]) (*connect.Response[v1.ExportMyDataResponse], error)
 	// Password Management
 	ChangePassword(context.Context, *connect.Request[v1.ChangePasswordRequest]) (*connect.Response[v1.ChangePasswordResponse], error)
 	RequestPasswordReset(context.Context, *connect.Request[v1.RequestPasswordResetRequest]) (*connect.Response[v1.RequestPasswordResetResponse], error)
@@ -622,6 +629,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceCancelAccountDeletionProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("CancelAccountDeletion")),
+			connect.WithClientOptions(opts...),
+		),
+		exportMyData: connect.NewClient[v1.ExportMyDataRequest, v1.ExportMyDataResponse](
+			httpClient,
+			baseURL+IdentityServiceExportMyDataProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ExportMyData")),
 			connect.WithClientOptions(opts...),
 		),
 		changePassword: connect.NewClient[v1.ChangePasswordRequest, v1.ChangePasswordResponse](
@@ -1133,6 +1146,7 @@ type identityServiceClient struct {
 	updateProfile                   *connect.Client[v1.UpdateProfileRequest, v1.UpdateProfileResponse]
 	deleteMyAccount                 *connect.Client[v1.DeleteMyAccountRequest, v1.DeleteMyAccountResponse]
 	cancelAccountDeletion           *connect.Client[v1.CancelAccountDeletionRequest, v1.CancelAccountDeletionResponse]
+	exportMyData                    *connect.Client[v1.ExportMyDataRequest, v1.ExportMyDataResponse]
 	changePassword                  *connect.Client[v1.ChangePasswordRequest, v1.ChangePasswordResponse]
 	requestPasswordReset            *connect.Client[v1.RequestPasswordResetRequest, v1.RequestPasswordResetResponse]
 	confirmPasswordReset            *connect.Client[v1.ConfirmPasswordResetRequest, v1.ConfirmPasswordResetResponse]
@@ -1304,6 +1318,11 @@ func (c *identityServiceClient) DeleteMyAccount(ctx context.Context, req *connec
 // CancelAccountDeletion calls identity.v1.IdentityService.CancelAccountDeletion.
 func (c *identityServiceClient) CancelAccountDeletion(ctx context.Context, req *connect.Request[v1.CancelAccountDeletionRequest]) (*connect.Response[v1.CancelAccountDeletionResponse], error) {
 	return c.cancelAccountDeletion.CallUnary(ctx, req)
+}
+
+// ExportMyData calls identity.v1.IdentityService.ExportMyData.
+func (c *identityServiceClient) ExportMyData(ctx context.Context, req *connect.Request[v1.ExportMyDataRequest]) (*connect.Response[v1.ExportMyDataResponse], error) {
+	return c.exportMyData.CallUnary(ctx, req)
 }
 
 // ChangePassword calls identity.v1.IdentityService.ChangePassword.
@@ -1740,6 +1759,10 @@ type IdentityServiceHandler interface {
 	// the window, or an explicit cancel, restores it.
 	DeleteMyAccount(context.Context, *connect.Request[v1.DeleteMyAccountRequest]) (*connect.Response[v1.DeleteMyAccountResponse], error)
 	CancelAccountDeletion(context.Context, *connect.Request[v1.CancelAccountDeletionRequest]) (*connect.Response[v1.CancelAccountDeletionResponse], error)
+	// Self-service data export (GDPR Art 15 access + Art 20 portability). The
+	// caller downloads a structured, machine-readable copy of the personal data
+	// the identity service holds about them. Secret material is never included.
+	ExportMyData(context.Context, *connect.Request[v1.ExportMyDataRequest]) (*connect.Response[v1.ExportMyDataResponse], error)
 	// Password Management
 	ChangePassword(context.Context, *connect.Request[v1.ChangePasswordRequest]) (*connect.Response[v1.ChangePasswordResponse], error)
 	RequestPasswordReset(context.Context, *connect.Request[v1.RequestPasswordResetRequest]) (*connect.Response[v1.RequestPasswordResetResponse], error)
@@ -2000,6 +2023,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceCancelAccountDeletionProcedure,
 		svc.CancelAccountDeletion,
 		connect.WithSchema(identityServiceMethods.ByName("CancelAccountDeletion")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceExportMyDataHandler := connect.NewUnaryHandler(
+		IdentityServiceExportMyDataProcedure,
+		svc.ExportMyData,
+		connect.WithSchema(identityServiceMethods.ByName("ExportMyData")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceChangePasswordHandler := connect.NewUnaryHandler(
@@ -2526,6 +2555,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceDeleteMyAccountHandler.ServeHTTP(w, r)
 		case IdentityServiceCancelAccountDeletionProcedure:
 			identityServiceCancelAccountDeletionHandler.ServeHTTP(w, r)
+		case IdentityServiceExportMyDataProcedure:
+			identityServiceExportMyDataHandler.ServeHTTP(w, r)
 		case IdentityServiceChangePasswordProcedure:
 			identityServiceChangePasswordHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestPasswordResetProcedure:
@@ -2767,6 +2798,10 @@ func (UnimplementedIdentityServiceHandler) DeleteMyAccount(context.Context, *con
 
 func (UnimplementedIdentityServiceHandler) CancelAccountDeletion(context.Context, *connect.Request[v1.CancelAccountDeletionRequest]) (*connect.Response[v1.CancelAccountDeletionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CancelAccountDeletion is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ExportMyData(context.Context, *connect.Request[v1.ExportMyDataRequest]) (*connect.Response[v1.ExportMyDataResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ExportMyData is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) ChangePassword(context.Context, *connect.Request[v1.ChangePasswordRequest]) (*connect.Response[v1.ChangePasswordResponse], error) {

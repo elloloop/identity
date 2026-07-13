@@ -139,6 +139,8 @@ type fakeRepo struct {
 	getPasskeyChallengeErr error
 	findUserByEmailErr     error
 	createPasskeyCredErr   error
+	getUserErr             error
+	getTotpCredentialErr   error
 
 	users              map[string]*User
 	refreshTokens      map[string]*RefreshTokenRecord
@@ -160,6 +162,7 @@ type fakeRepo struct {
 	oauthIdentities    map[string]*OAuthIdentity
 	idvRecords         map[string]*IdentityVerificationRecord
 	sessions           map[string]*SessionRecord
+	auditEvents        []*AuditEvent
 }
 
 func newFakeRepo() *fakeRepo {
@@ -207,6 +210,9 @@ func (r *fakeRepo) FindUserByEmail(_ context.Context, email string) (*User, erro
 func (r *fakeRepo) GetUser(_ context.Context, userID string) (*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getUserErr != nil {
+		return nil, r.getUserErr
+	}
 	u, ok := r.users[userID]
 	if !ok {
 		return nil, nil
@@ -932,6 +938,9 @@ func (r *fakeRepo) SetUserPhoneVerified(_ context.Context, userID, phoneNumber s
 func (r *fakeRepo) GetTotpCredential(_ context.Context, userID string) (*TotpCredRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getTotpCredentialErr != nil {
+		return nil, r.getTotpCredentialErr
+	}
 	for _, c := range r.totpCreds {
 		if c.UserID == userID {
 			cp := *c
@@ -1490,6 +1499,46 @@ func (r *fakeRepo) DeleteOAuthIdentity(_ context.Context, userID, provider, prov
 		}
 	}
 	return ErrNotFound
+}
+
+// ── Audit Events ────────────────────────────────────────────────────────
+
+func (r *fakeRepo) CreateAuditEvent(_ context.Context, e *AuditEvent) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := e.ID
+	if id == "" {
+		id = nextNodeID()
+	}
+	cp := *e
+	cp.ID = id
+	r.auditEvents = append(r.auditEvents, &cp)
+	return id, nil
+}
+
+func (r *fakeRepo) ListAuditEventsForUser(_ context.Context, userID string, limit int) ([]*AuditEvent, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("fakeRepo: ListAuditEventsForUser: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*AuditEvent, 0)
+	for _, e := range r.auditEvents {
+		if e.ActorUserID == userID || e.TargetUserID == userID {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt > out[j].CreatedAt
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 // ── Identity Verification ──────────────────────────────────────────────

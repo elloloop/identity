@@ -387,6 +387,15 @@
     "anchor": "email-and-branding"
   },
   {
+    "name": "GATEWAY_EXPORT_MAX_AUDIT_EVENTS",
+    "type": "integer",
+    "default": "1000",
+    "required": false,
+    "description": "caps how many of the caller's own audit events a self-service data export (GDPR Art 15) includes, newest first.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_GRPC_PORT",
     "type": "integer",
     "default": "50051",

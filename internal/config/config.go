@@ -69,6 +69,13 @@ const (
 // driver's own zero-value fallback.
 const DefaultPostgresConnTimeoutMs = 5000
 
+// DefaultExportMaxAuditEvents is the default cap on how many of the caller's
+// own audit events a self-service data export includes (newest first). It
+// bounds the export's audit scan when GATEWAY_EXPORT_MAX_AUDIT_EVENTS is unset;
+// it mirrors service.DefaultExportMaxAuditEvents (the service-side safety
+// clamp) so the boundary default matches the service's own fallback.
+const DefaultExportMaxAuditEvents = 1000
+
 // DefaultProjectIDFallback is the project id used when none is configured.
 // It is the env-loader default for GATEWAY_DEFAULT_PROJECT_ID and the value
 // app.New normalizes an empty DefaultProjectID to, so a directly-constructed
@@ -810,6 +817,13 @@ type Config struct {
 	// GATEWAY_ACCOUNT_DELETION_GRACE_DAYS (default 30); must be >= 1.
 	AccountDeletionGraceDays int
 
+	// ExportMaxAuditEvents caps how many of the caller's own audit events a
+	// self-service data export (GDPR Art 15) includes, newest first. It bounds
+	// the export's audit scan so a long-lived account can never return an
+	// unbounded log. Driven by GATEWAY_EXPORT_MAX_AUDIT_EVENTS (default 1000);
+	// a non-positive value falls back to the safe default.
+	ExportMaxAuditEvents int
+
 	// Outbound webhooks / user-lifecycle eventing (#261). When disabled
 	// (the default), the service emits events to a no-op publisher: there is
 	// no observable behaviour change and no background worker runs. When
@@ -1080,6 +1094,7 @@ func Load() *Config {
 		SweeperGraceSeconds:    envInt("GATEWAY_SWEEPER_GRACE_SECONDS", 60),
 
 		AccountDeletionGraceDays: envInt("GATEWAY_ACCOUNT_DELETION_GRACE_DAYS", 30),
+		ExportMaxAuditEvents:     envInt("GATEWAY_EXPORT_MAX_AUDIT_EVENTS", DefaultExportMaxAuditEvents),
 
 		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
 		WebhooksMaxAttempts:           envInt("GATEWAY_WEBHOOKS_MAX_ATTEMPTS", 6),

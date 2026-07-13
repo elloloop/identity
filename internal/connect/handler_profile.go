@@ -78,6 +78,44 @@ func (h *IdentityHandler) CancelAccountDeletion(
 	}), nil
 }
 
+// ─── Self-Service Data Export RPC ───────────────────────────────────────────
+
+// ExportMyData returns a structured, machine-readable copy of the personal
+// data the identity service holds about the authenticated caller (GDPR Art 15
+// access + Art 20 portability). The caller is derived from the auth header;
+// there is no user_id in the request. The payload carries no secret material.
+func (h *IdentityHandler) ExportMyData(
+	ctx context.Context,
+	req *connect.Request[identitypb.ExportMyDataRequest],
+) (*connect.Response[identitypb.ExportMyDataResponse], error) {
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	export, err := h.profile.ExportMyData(ctx, userID)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+
+	linked := make([]*identitypb.LinkedIdentity, 0, len(export.LinkedIdentities))
+	for _, l := range export.LinkedIdentities {
+		linked = append(linked, linkedIdentityToProto(l))
+	}
+
+	resp := &identitypb.ExportMyDataResponse{
+		FormatVersion:    intToProtoInt32(export.FormatVersion),
+		ExportedAtMs:     export.ExportedAtMs,
+		User:             userToProto(export.User),
+		Sessions:         sessionsToProto(export.Sessions),
+		Passkeys:         passkeysToProto(export.Passkeys),
+		LinkedIdentities: linked,
+		TotpEnabled:      export.TotpEnabled,
+		AuditEvents:      auditEventsToProto(export.AuditEvents),
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // ─── Password Management RPCs ───────────────────────────────────────────────
 
 // ChangePassword changes the authenticated user's password after verifying

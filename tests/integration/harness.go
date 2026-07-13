@@ -752,6 +752,7 @@ type MemRepo struct {
 	oauthIdentities    map[string]*service.OAuthIdentity
 	idvRecords         map[string]*service.IdentityVerificationRecord
 	sessions           map[string]*service.SessionRecord
+	auditEvents        []*service.AuditEvent
 }
 
 // NewMemRepo returns an empty MemRepo.
@@ -1931,6 +1932,46 @@ func (r *MemRepo) DeleteOAuthIdentity(_ context.Context, userID, provider, provi
 		}
 	}
 	return service.ErrNotFound
+}
+
+// ── Audit Events ────────────────────────────────────────────────────────
+
+func (r *MemRepo) CreateAuditEvent(_ context.Context, e *service.AuditEvent) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := e.ID
+	if id == "" {
+		id = r.nextID()
+	}
+	cp := *e
+	cp.ID = id
+	r.auditEvents = append(r.auditEvents, &cp)
+	return id, nil
+}
+
+func (r *MemRepo) ListAuditEventsForUser(_ context.Context, userID string, limit int) ([]*service.AuditEvent, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("MemRepo: ListAuditEventsForUser: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*service.AuditEvent, 0)
+	for _, e := range r.auditEvents {
+		if e.ActorUserID == userID || e.TargetUserID == userID {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt > out[j].CreatedAt
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 // ── Identity Verification ──────────────────────────────────────────────
