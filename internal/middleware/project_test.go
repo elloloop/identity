@@ -218,3 +218,33 @@ func TestProjectResolver_HostError_Unavailable(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	assert.False(t, cap.called)
 }
+
+// A valid project_key query parameter resolves its project.
+func TestProjectResolver_ResolvesByQueryParam(t *testing.T) {
+	resolver := &fakeProjectResolver{
+		byKey: map[string]*service.ResolvedProject{"pk_live_q": {ID: "proj-q", StorageScopeID: "scope-q"}},
+	}
+	rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
+		r.URL.Path = "/oauth/start"
+		r.URL.RawQuery = "project_key=pk_live_q"
+	})
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, "proj-q", cap.scope.ProjectID)
+}
+
+// A valid state query parameter with a prefix resolves its project.
+func TestProjectResolver_ResolvesByStatePrefix(t *testing.T) {
+	resolver := &fakeProjectResolver{
+		byKey: map[string]*service.ResolvedProject{"pk_live_s": {ID: "proj-s", StorageScopeID: "scope-s"}},
+	}
+	rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
+		r.URL.Path = "/oauth/callback"
+		r.URL.RawQuery = "state=pk_live_s:some-jwt-token"
+	})
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, "proj-s", cap.scope.ProjectID)
+}

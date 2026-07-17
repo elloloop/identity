@@ -33,6 +33,7 @@ type HostedStateClaims struct {
 	State        string
 	CodeVerifier string
 	CSRFToken    string
+	ProjectID    string
 	IssuedAt     int64
 	ExpiresAt    int64
 }
@@ -43,7 +44,7 @@ type HostedStateClaims struct {
 func IssueHostedStateToken(
 	ctx context.Context,
 	signer identityjwt.Signer,
-	provider, redirectURI, returnTo, state, codeVerifier, csrfToken string,
+	provider, redirectURI, returnTo, state, codeVerifier, csrfToken, projectID string,
 	expiry time.Duration,
 	now time.Time,
 ) (string, error) {
@@ -53,7 +54,7 @@ func IssueHostedStateToken(
 	state = strings.TrimSpace(state)
 	codeVerifier = strings.TrimSpace(codeVerifier)
 	csrfToken = strings.TrimSpace(csrfToken)
-	if provider == "" || redirectURI == "" || returnTo == "" || state == "" || codeVerifier == "" || csrfToken == "" {
+	if provider == "" || redirectURI == "" || returnTo == "" || state == "" || codeVerifier == "" || csrfToken == "" || projectID == "" {
 		return "", fmt.Errorf("%w: missing required hosted-state claim", ErrStateValidation)
 	}
 	if signer == nil {
@@ -68,6 +69,7 @@ func IssueHostedStateToken(
 		"oauth_state":   state,
 		"code_verifier": codeVerifier,
 		"csrf_token":    csrfToken,
+		"project_id":    projectID,
 		"iat":           now.Unix(),
 		"exp":           now.Add(expiry).Unix(),
 	}
@@ -136,6 +138,7 @@ func VerifyHostedStateToken(
 		State:        getStringClaim(tok, "oauth_state"),
 		CodeVerifier: getStringClaim(tok, "code_verifier"),
 		CSRFToken:    getStringClaim(tok, "csrf_token"),
+		ProjectID:    getStringClaim(tok, "project_id"),
 		IssuedAt:     tok.IssuedAt().Unix(),
 		ExpiresAt:    tok.Expiration().Unix(),
 	}

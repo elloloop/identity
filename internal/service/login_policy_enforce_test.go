@@ -503,7 +503,7 @@ func TestRedeemOAuthCode_DeniedByPolicy(t *testing.T) {
 	ctx := withProject("proj-1")
 
 	begin, err := svc.BeginHostedOAuth(ctx, "google",
-		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123")
+		"https://identity.test/oauth/callback/google", "https://app.test/finish", "csrf-123", "")
 	require.NoError(t, err)
 	cb, err := svc.CompleteHostedOAuth(ctx, "google",
 		fakeOAuthCode("alice@acme.com", "Alice", "", "google"),

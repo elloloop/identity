@@ -81,18 +81,41 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 	ctx := r.Context()
 
 	// 1. Explicit credential key — must resolve when present.
-	if key := r.Header.Get(ProjectKeyHeader); key != "" && pr.resolver != nil {
+	key := r.Header.Get(ProjectKeyHeader)
+	isFormKey := false
+	if key == "" && strings.HasPrefix(r.URL.Path, "/oauth/") {
+		key = r.FormValue("project_key")
+		if key == "" {
+			state := r.FormValue("state")
+			if idx := strings.LastIndexByte(state, ':'); idx > 0 {
+				key = state[:idx]
+			}
+		}
+		if key != "" {
+			isFormKey = true
+		}
+	}
+
+	if key != "" && pr.resolver != nil {
 		rp, err := pr.resolver.ResolveByCredential(ctx, key)
 		if err != nil {
-			pr.logger.Error("project_resolve_by_key_failed", zap.Error(err))
-			writeConnectError(w, http.StatusServiceUnavailable, "unavailable", "project resolution failed")
-			return nil, false
+			if isFormKey {
+				pr.logger.Warn("project_resolve_by_form_key_failed_falling_through", zap.Error(err))
+			} else {
+				pr.logger.Error("project_resolve_by_key_failed", zap.Error(err))
+				writeConnectError(w, http.StatusServiceUnavailable, "unavailable", "project resolution failed")
+				return nil, false
+			}
+		} else if rp == nil {
+			if isFormKey {
+				pr.logger.Warn("project_resolve_by_form_key_not_found_falling_through")
+			} else {
+				writeConnectError(w, http.StatusUnauthorized, "unauthenticated", "invalid project key")
+				return nil, false
+			}
+		} else {
+			return scopeFromResolved(rp), true
 		}
-		if rp == nil {
-			writeConnectError(w, http.StatusUnauthorized, "unauthenticated", "invalid project key")
-			return nil, false
-		}
-		return scopeFromResolved(rp), true
 	}
 
 	// 2. Host → auth-domain.

@@ -80,8 +80,13 @@ func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request)
 		csrfTokens = nil
 	}
 
+	projectKey := r.URL.Query().Get("project_key")
+	if projectKey == "" {
+		projectKey = r.Header.Get("X-Project-Key")
+	}
+
 	redirectURI := h.callbackURL(r, provider)
-	result, err := h.auth.BeginHostedOAuth(r.Context(), provider, redirectURI, returnTo, csrfToken)
+	result, err := h.auth.BeginHostedOAuth(r.Context(), provider, redirectURI, returnTo, csrfToken, projectKey)
 	if err != nil {
 		h.logger.Info("hosted_oauth_start_failed", zap.String("provider", provider), zap.Error(err))
 		status := http.StatusBadRequest
