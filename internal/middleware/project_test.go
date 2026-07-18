@@ -1,10 +1,15 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -219,13 +224,14 @@ func TestProjectResolver_HostError_Unavailable(t *testing.T) {
 	assert.False(t, cap.called)
 }
 
-// A valid project_key query parameter resolves its project.
-func TestProjectResolver_ResolvesByQueryParam(t *testing.T) {
+// A valid project_key query parameter on a hosted OAuth route resolves its
+// project — browser redirects cannot carry the X-Project-Key header.
+func TestProjectResolver_OAuthRoute_ResolvesByQueryParam(t *testing.T) {
 	resolver := &fakeProjectResolver{
 		byKey: map[string]*service.ResolvedProject{"pk_live_q": {ID: "proj-q", StorageScopeID: "scope-q"}},
 	}
 	rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
-		r.URL.Path = "/oauth/start"
+		r.URL.Path = "/oauth/start/google"
 		r.URL.RawQuery = "project_key=pk_live_q"
 	})
 
@@ -234,17 +240,117 @@ func TestProjectResolver_ResolvesByQueryParam(t *testing.T) {
 	assert.Equal(t, "proj-q", cap.scope.ProjectID)
 }
 
-// A valid state query parameter with a prefix resolves its project.
-func TestProjectResolver_ResolvesByStatePrefix(t *testing.T) {
+// The plaintext project-key prefix of a composite OAuth state resolves its
+// project on the callback route.
+func TestProjectResolver_OAuthRoute_ResolvesByStatePrefix(t *testing.T) {
 	resolver := &fakeProjectResolver{
 		byKey: map[string]*service.ResolvedProject{"pk_live_s": {ID: "proj-s", StorageScopeID: "scope-s"}},
 	}
 	rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
-		r.URL.Path = "/oauth/callback"
-		r.URL.RawQuery = "state=pk_live_s:some-jwt-token"
+		r.Method = http.MethodGet
+		r.URL.Path = "/oauth/callback/google"
+		r.URL.RawQuery = "state=" + url.QueryEscape("pk_live_s:some-jwt-token")
 	})
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotNil(t, cap.scope)
 	assert.Equal(t, "proj-s", cap.scope.ProjectID)
+}
+
+// An explicit project key that does not resolve is rejected — never
+// silently downgraded to host/default resolution, which would start the
+// flow against the wrong project.
+func TestProjectResolver_OAuthRoute_UnknownKeyRejected(t *testing.T) {
+	rec, cap := serve(t, &fakeProjectResolver{}, defProjectID, defScopeID, func(r *http.Request) {
+		r.URL.Path = "/oauth/start/google"
+		r.URL.RawQuery = "project_key=pk_typo"
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.False(t, cap.called)
+}
+
+// A resolver infrastructure failure on a parameter-sourced key is a 503,
+// exactly like the header path.
+func TestProjectResolver_OAuthRoute_ResolverErrorUnavailable(t *testing.T) {
+	rec, cap := serve(t, &fakeProjectResolver{err: errors.New("db down")}, defProjectID, defScopeID, func(r *http.Request) {
+		r.URL.Path = "/oauth/start/google"
+		r.URL.RawQuery = "project_key=pk_live_q"
+	})
+
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.False(t, cap.called)
+}
+
+// Apple's form_post callback carries state in an urlencoded POST body.
+func TestProjectResolver_OAuthRoute_ResolvesByFormBody(t *testing.T) {
+	resolver := &fakeProjectResolver{
+		byKey: map[string]*service.ResolvedProject{"pk_live_f": {ID: "proj-f", StorageScopeID: "scope-f"}},
+	}
+	body := url.Values{"state": {"pk_live_f:some-jwt-token"}}.Encode()
+	rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
+		r.URL.Path = "/oauth/callback/apple"
+		r.Body = io.NopCloser(strings.NewReader(body))
+		r.ContentLength = int64(len(body))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	})
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, "proj-f", cap.scope.ProjectID)
+}
+
+// A POST body beyond the middleware's cap is rejected before it is read
+// in full — the unauthenticated callback cannot be used to buffer
+// arbitrarily large bodies.
+func TestProjectResolver_OAuthRoute_OversizedBodyRejected(t *testing.T) {
+	body := "state=" + strings.Repeat("a", 2<<20) // 2 MiB > 1 MiB cap
+	rec, cap := serve(t, &fakeProjectResolver{}, defProjectID, defScopeID, func(r *http.Request) {
+		r.URL.Path = "/oauth/callback/google"
+		r.Body = io.NopCloser(strings.NewReader(body))
+		r.ContentLength = int64(len(body))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	})
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.False(t, cap.called)
+}
+
+// The middleware never invokes the multipart parser: a multipart body's
+// fields are ignored (no memory/disk spill), and resolution proceeds by
+// host/default as if no key were supplied.
+func TestProjectResolver_OAuthRoute_MultipartBodyIgnored(t *testing.T) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	require.NoError(t, mw.WriteField("project_key", "pk_live_q"))
+	require.NoError(t, mw.Close())
+
+	resolver := &fakeProjectResolver{
+		byKey: map[string]*service.ResolvedProject{"pk_live_q": {ID: "proj-q", StorageScopeID: "scope-q"}},
+	}
+	rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
+		r.URL.Path = "/oauth/callback/google"
+		r.Body = io.NopCloser(&buf)
+		r.ContentLength = int64(buf.Len())
+		r.Header.Set("Content-Type", mw.FormDataContentType())
+	})
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, defProjectID, cap.scope.ProjectID)
+}
+
+// Parameter-based keys are scoped to the hosted OAuth routes: a project_key
+// query parameter anywhere else is ignored.
+func TestProjectResolver_NonOAuthRoute_QueryParamIgnored(t *testing.T) {
+	resolver := &fakeProjectResolver{
+		byKey: map[string]*service.ResolvedProject{"pk_live_q": {ID: "proj-q", StorageScopeID: "scope-q"}},
+	}
+	rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
+		r.URL.RawQuery = "project_key=pk_live_q"
+	})
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, defProjectID, cap.scope.ProjectID)
 }

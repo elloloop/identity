@@ -623,7 +623,6 @@ type OAuthLoginParams struct {
 	AppleUserPayload string
 	IPAddr           string
 	UserAgent        string
-	Exchanger        oauth.Exchanger
 }
 
 // OAuthLogin performs the full OAuth code-exchange flow: it looks up
@@ -769,15 +768,9 @@ func (s *AuthService) verifyOAuthExchange(
 		return nil, fmt.Errorf("%w: redirect uri is required", ErrInvalidArgument)
 	}
 
-	var exchanger oauth.Exchanger
-	var ok bool
-	if params.Exchanger != nil {
-		exchanger, ok = params.Exchanger, true
-	} else {
-		exchanger, ok = s.oauthResolver.exchangerFor(ctx, provider)
-		if !ok {
-			return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
-		}
+	exchanger, ok := s.oauthResolver.exchangerFor(ctx, provider)
+	if !ok {
+		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
 	}
 
 	codeVerifier := params.CodeVerifier

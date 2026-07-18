@@ -78,7 +78,7 @@ func authURL(t *testing.T, e oauth.Exchanger) string {
 }
 
 func TestOAuthResolver_DefaultProjectUsesEnv(t *testing.T) {
-	r := newOAuthResolver("default", envGoogleRegistry("env-google"), nil).
+	r := newOAuthResolver("default", envGoogleRegistry("env-google"), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 
 	// Unscoped and default-project-scoped requests both use the env provider.
@@ -100,7 +100,7 @@ func TestOAuthResolver_DefaultProjectUsesEnv(t *testing.T) {
 }
 
 func TestOAuthResolver_NonDefaultProjectWithoutConfig_Unavailable(t *testing.T) {
-	r := newOAuthResolver("default", envGoogleRegistry("env-google"), nil).
+	r := newOAuthResolver("default", envGoogleRegistry("env-google"), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 	ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "other"})
 
@@ -112,8 +112,43 @@ func TestOAuthResolver_NonDefaultProjectWithoutConfig_Unavailable(t *testing.T) 
 	}
 }
 
+// Hub sharing (GATEWAY_OAUTH_HUB_SHARING) relaxes precedence rule 3: a
+// non-default project with no config of its own borrows the default
+// project's providers (ADR-0011).
+func TestOAuthResolver_HubSharing_NonDefaultBorrowsDefault(t *testing.T) {
+	r := newOAuthResolver("default", envGoogleRegistry("env-google"), true, nil).
+		withSecrets(resolverSecretsKey(), nil)
+	ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "other"})
+
+	if !r.available(ctx) {
+		t.Fatal("hub sharing must make the default providers available to a non-default project")
+	}
+	e, ok := r.exchangerFor(ctx, "google")
+	if !ok {
+		t.Fatal("hub sharing must resolve the env google provider for a non-default project")
+	}
+	if got := authURL(t, e); !strings.Contains(got, "client_id=env-google") {
+		t.Errorf("want borrowed env client_id in %q", got)
+	}
+}
+
+// Hub sharing never overrides rule 1: a project's own provider config still
+// wins over the hub's.
+func TestOAuthResolver_HubSharing_ProjectConfigStillWins(t *testing.T) {
+	r := newOAuthResolver("default", envGoogleRegistry("env-google"), true, nil).
+		withSecrets(resolverSecretsKey(), nil)
+
+	e, ok := r.exchangerFor(projectGoogleScope(t, "other", "proj-google"), "google")
+	if !ok {
+		t.Fatal("project-configured google must resolve")
+	}
+	if got := authURL(t, e); !strings.Contains(got, "client_id=proj-google") {
+		t.Errorf("project config must win over the hub provider, got %q", got)
+	}
+}
+
 func TestOAuthResolver_ProjectConfigWinsAndIsolated(t *testing.T) {
-	r := newOAuthResolver("default", envGoogleRegistry("env-google"), nil).
+	r := newOAuthResolver("default", envGoogleRegistry("env-google"), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 
 	// A second project with its OWN google client_id resolves to THAT client_id.
@@ -137,7 +172,7 @@ func TestOAuthResolver_ProjectConfigWinsAndIsolated(t *testing.T) {
 func TestOAuthResolver_DefaultProjectConfigOverridesEnv(t *testing.T) {
 	// Even for the default project, an explicit config_json provider wins over
 	// the env-configured one.
-	r := newOAuthResolver("default", envGoogleRegistry("env-google"), nil).
+	r := newOAuthResolver("default", envGoogleRegistry("env-google"), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 	ctx := projectGoogleScope(t, "default", "override-google")
 
@@ -180,7 +215,7 @@ func projectGitHubScope(t *testing.T, projectID, clientID string) context.Contex
 // default project falls back to the env-configured provider, and a non-default
 // project without a GitHub block cannot use GitHub (no env inheritance).
 func TestOAuthResolver_GitHubPerProjectIsolation(t *testing.T) {
-	r := newOAuthResolver("default", envGitHubRegistry("env-github"), nil).
+	r := newOAuthResolver("default", envGitHubRegistry("env-github"), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 
 	// A non-default project with its OWN github client_id resolves to THAT id.
@@ -211,7 +246,7 @@ func TestOAuthResolver_GitHubPerProjectIsolation(t *testing.T) {
 }
 
 func TestOAuthResolver_CacheReusesAndRebuilds(t *testing.T) {
-	r := newOAuthResolver("default", oauth.NewRegistry(), nil).
+	r := newOAuthResolver("default", oauth.NewRegistry(), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 	ctx := projectGoogleScope(t, "other", "proj-google")
 
@@ -243,7 +278,7 @@ func TestOAuthResolver_MissingSecretsKey_ProviderUnavailable(t *testing.T) {
 	// No withSecrets: a project that stores an encrypted secret cannot be built.
 	// The secret ciphertext value is irrelevant here — the key is absent — so a
 	// plain marker string exercises every provider's decrypt-error branch.
-	r := newOAuthResolver("default", oauth.NewRegistry(), nil)
+	r := newOAuthResolver("default", oauth.NewRegistry(), false, nil)
 	cases := map[string]ProjectOAuthConfig{
 		"google":    {Google: &ProjectOAuthGoogle{ClientID: "g", ClientSecretEnc: "enc"}},
 		"microsoft": {Microsoft: &ProjectOAuthMicrosoft{ClientID: "m", ClientSecretEnc: "enc"}},
@@ -265,7 +300,7 @@ func TestOAuthResolver_MissingSecretsKey_ProviderUnavailable(t *testing.T) {
 }
 
 func TestOAuthResolver_UnknownProviderMisses(t *testing.T) {
-	r := newOAuthResolver("default", envGoogleRegistry("env-google"), nil).
+	r := newOAuthResolver("default", envGoogleRegistry("env-google"), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 	ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "default"})
 	if _, ok := r.exchangerFor(ctx, "github"); ok {
@@ -274,7 +309,7 @@ func TestOAuthResolver_UnknownProviderMisses(t *testing.T) {
 }
 
 func TestOAuthResolver_DisabledWhenNoProviders(t *testing.T) {
-	r := newOAuthResolver("default", oauth.NewRegistry(), nil).
+	r := newOAuthResolver("default", oauth.NewRegistry(), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 	if r.available(context.Background()) {
 		t.Fatal("empty env registry + no project config must be unavailable")
@@ -282,7 +317,7 @@ func TestOAuthResolver_DisabledWhenNoProviders(t *testing.T) {
 }
 
 func TestOAuthResolver_BuildsAllProviders(t *testing.T) {
-	r := newOAuthResolver("default", oauth.NewRegistry(), nil).
+	r := newOAuthResolver("default", oauth.NewRegistry(), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 
 	cases := map[string]ProjectOAuthConfig{
@@ -301,7 +336,7 @@ func TestOAuthResolver_BuildsAllProviders(t *testing.T) {
 }
 
 func TestOAuthResolver_CacheSingleSlotPerProviderEvictsSuperseded(t *testing.T) {
-	r := newOAuthResolver("default", oauth.NewRegistry(), nil).
+	r := newOAuthResolver("default", oauth.NewRegistry(), false, nil).
 		withSecrets(resolverSecretsKey(), nil)
 
 	// Build the initial config, then a rotated one (different hash) for the SAME
@@ -324,7 +359,7 @@ func TestOAuthResolver_CacheSingleSlotPerProviderEvictsSuperseded(t *testing.T) 
 func TestOAuthResolver_NegativeResultCachedNoRebuildOrRelog(t *testing.T) {
 	core, logs := observer.New(zap.WarnLevel)
 	// No withSecrets: every build fails (cannot decrypt) and logs a warning.
-	r := newOAuthResolver("default", oauth.NewRegistry(), zap.New(core))
+	r := newOAuthResolver("default", oauth.NewRegistry(), false, zap.New(core))
 	ctx := projectGoogleScope(t, "other", "proj-google")
 
 	// Repeated logins with the SAME broken config must neither rebuild nor

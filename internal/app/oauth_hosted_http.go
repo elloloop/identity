@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -80,9 +81,13 @@ func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request)
 		csrfTokens = nil
 	}
 
+	// The key that scoped this request (already validated by the project
+	// middleware) is threaded into BeginHostedOAuth so it can prefix the
+	// OAuth state — that prefix is how the callback, arriving on the hub
+	// host with no header, re-scopes to the same project.
 	projectKey := r.URL.Query().Get("project_key")
 	if projectKey == "" {
-		projectKey = r.Header.Get("X-Project-Key")
+		projectKey = r.Header.Get(middleware.ProjectKeyHeader)
 	}
 
 	redirectURI := h.callbackURL(r, provider)

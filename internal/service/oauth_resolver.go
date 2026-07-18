@@ -26,7 +26,16 @@ import (
 //  1. the project's config_json.oauth.P — built (secret decrypted) and cached;
 //  2. else, if the project IS the default project (or the request is unscoped),
 //     the env-built defaultRegistry entry for P (today's behaviour);
-//  3. else — a non-default project with no config for P — P is unavailable.
+//  3. else — a non-default project with no config for P — P is unavailable,
+//     UNLESS hub sharing is enabled (GATEWAY_OAUTH_HUB_SHARING, ADR-0011):
+//     then the default project's entry for P is borrowed, so hundreds of
+//     projects can share one provider client routed via the central hub.
+//
+// Hub sharing is a deployment-level opt-in because it is only safe when every
+// project belongs to the same trust domain as the hub (the provider consent
+// screen shows the shared client's branding). It never overrides rule 1: a
+// project's own provider config always wins, including a configured-but-broken
+// one.
 //
 // Building an Exchanger creates a JWKS/discovery cache, so instances are cached
 // keyed by (projectID, provider, configHash): a config change rebuilds, steady
@@ -34,6 +43,7 @@ import (
 type OAuthResolver struct {
 	defaultProjectID string
 	defaultRegistry  *oauth.Registry
+	hubSharing       bool
 	logger           *zap.Logger
 
 	// secretsKey decrypts per-project provider secrets at rest (AES-256-GCM).
@@ -64,13 +74,16 @@ type oauthCacheEntry struct {
 // newOAuthResolver builds a resolver over the env-built default-project
 // registry. defaultRegistry may be nil/empty (OAuth disabled for the default
 // project); per-project providers still work once withSecrets is wired.
-func newOAuthResolver(defaultProjectID string, defaultRegistry *oauth.Registry, logger *zap.Logger) *OAuthResolver {
+// hubSharing enables precedence rule 3's borrow of the default project's
+// providers by non-default projects (GATEWAY_OAUTH_HUB_SHARING).
+func newOAuthResolver(defaultProjectID string, defaultRegistry *oauth.Registry, hubSharing bool, logger *zap.Logger) *OAuthResolver {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &OAuthResolver{
 		defaultProjectID: defaultProjectID,
 		defaultRegistry:  defaultRegistry,
+		hubSharing:       hubSharing,
 		logger:           logger,
 		cache:            make(map[string]oauthCacheEntry),
 	}
@@ -96,7 +109,7 @@ func (r *OAuthResolver) available(ctx context.Context) bool {
 		if scope.OAuth.hasAny() {
 			return true
 		}
-		if r.isNonDefaultProject(scope.ProjectID) {
+		if r.isNonDefaultProject(scope.ProjectID) && !r.hubSharing {
 			return false
 		}
 	}
@@ -121,8 +134,11 @@ func (r *OAuthResolver) exchangerFor(ctx context.Context, provider string) (oaut
 			return built, built != nil
 		}
 		// The provider is not in the project's config. Isolation: a non-default
-		// project never inherits the env (default-project) providers.
-		if r.isNonDefaultProject(scope.ProjectID) {
+		// project never inherits the env (default-project) providers — unless
+		// the deployment opted into hub sharing (ADR-0011), which borrows the
+		// default project's entry so the central-hub flow can serve projects
+		// that configure no client of their own.
+		if r.isNonDefaultProject(scope.ProjectID) && !r.hubSharing {
 			return nil, false
 		}
 	}

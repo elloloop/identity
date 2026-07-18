@@ -59,9 +59,6 @@ func (s *AuthService) BeginHostedOAuth(
 	}
 
 	exchanger, ok := s.oauthResolver.exchangerFor(ctx, provider)
-	if !ok && projectKey != "" {
-		exchanger, ok = s.oauthResolver.exchangerFor(context.Background(), provider)
-	}
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, provider)
 	}
@@ -101,9 +98,11 @@ func (s *AuthService) BeginHostedOAuth(
 		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 	}
 
-	if projectKey != "" {
-		stateToken = projectKey + ":" + stateToken
-	}
+	// A hub-routed request additionally carries the plaintext project key
+	// in front of the signed token, so the callback middleware can scope
+	// the request before verification; the signed project_id claim is what
+	// actually binds the flow to the project.
+	stateToken = oauth.JoinProjectKeyState(projectKey, stateToken)
 
 	// The signed hosted state token IS the OAuth `state` parameter, so
 	// the single callback URL can recover provider + verifier + return_to
@@ -145,9 +144,7 @@ func (s *AuthService) CompleteHostedOAuth(
 	providerFromPath, code, stateToken, appleUserPayload, ipAddr, userAgent string,
 	csrfTokens []string,
 ) (*HostedOAuthCallbackResult, error) {
-	if idx := strings.LastIndexByte(stateToken, ':'); idx > 0 {
-		stateToken = stateToken[idx+1:]
-	}
+	_, stateToken = oauth.SplitProjectKeyState(stateToken)
 
 	claims, err := oauth.VerifyHostedStateToken(stateToken, s.signer, s.nowFunc().UTC())
 	if err != nil {
@@ -168,18 +165,13 @@ func (s *AuthService) CompleteHostedOAuth(
 		return nil, fmt.Errorf("%w: provider mismatch", ErrUnauthenticated)
 	}
 
+	// The token's project_id claim must name the project the request
+	// resolved to: a state minted for project A cannot complete a login in
+	// project B, whatever prefix or host the callback arrived with.
 	scope := ProjectScopeFromContext(ctx)
-	if scope == nil || (claims.ProjectID != "" && claims.ProjectID != scope.ProjectID) {
+	if scope == nil || claims.ProjectID != scope.ProjectID {
 		s.logger.Info("hosted_oauth_project_mismatch", zap.String("expected", claims.ProjectID))
 		return nil, fmt.Errorf("%w: project mismatch", ErrUnauthenticated)
-	}
-
-	exchanger, ok := s.oauthResolver.exchangerFor(ctx, claims.Provider)
-	if !ok && claims.ProjectID != "" {
-		exchanger, ok = s.oauthResolver.exchangerFor(context.Background(), claims.Provider)
-	}
-	if !ok {
-		return nil, fmt.Errorf("%w: unknown oauth provider %q", ErrInvalidArgument, claims.Provider)
 	}
 
 	// Reuse the headless exchange end to end: same state-token-free path
@@ -197,7 +189,6 @@ func (s *AuthService) CompleteHostedOAuth(
 		AppleUserPayload: appleUserPayload,
 		IPAddr:           ipAddr,
 		UserAgent:        userAgent,
-		Exchanger:        exchanger,
 	})
 	if err != nil {
 		return nil, err

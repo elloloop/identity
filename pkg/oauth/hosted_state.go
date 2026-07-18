@@ -38,6 +38,38 @@ type HostedStateClaims struct {
 	ExpiresAt    int64
 }
 
+// projectKeyStateSeparator joins an optional plaintext project key onto the
+// signed hosted state token so the OAuth provider round-trips both in the
+// single `state` parameter. The signed token is a JWS compact serialization —
+// base64url segments joined by '.' — so it NEVER contains ':', while a
+// project key may. That invariant is load-bearing: the LAST ':' in a
+// composite state is always the key/token boundary, which is why
+// SplitProjectKeyState uses LastIndexByte.
+const projectKeyStateSeparator = ':'
+
+// JoinProjectKeyState prefixes the signed hosted state token with the
+// plaintext project key that routed the request, producing the composite
+// OAuth `state` value the central-hub flow sends to the provider. An empty
+// key returns the token unchanged (the default-project flow carries no
+// prefix).
+func JoinProjectKeyState(projectKey, stateToken string) string {
+	if projectKey == "" {
+		return stateToken
+	}
+	return projectKey + string(projectKeyStateSeparator) + stateToken
+}
+
+// SplitProjectKeyState splits a composite OAuth `state` back into its
+// plaintext project-key prefix and the signed hosted state token. A state
+// with no separator is a bare token (projectKey == ""). It is the single
+// inverse of JoinProjectKeyState — no other code may parse this format.
+func SplitProjectKeyState(state string) (projectKey, stateToken string) {
+	if idx := strings.LastIndexByte(state, byte(projectKeyStateSeparator)); idx >= 0 {
+		return state[:idx], state[idx+1:]
+	}
+	return "", state
+}
+
 // IssueHostedStateToken signs a hosted-flow state token. redirectURI is
 // the identity-owned callback URL registered with the provider;
 // returnTo is the validated app URL the callback redirects to.

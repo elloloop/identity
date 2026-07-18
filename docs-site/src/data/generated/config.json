@@ -765,6 +765,15 @@
     "anchor": "oauth"
   },
   {
+    "name": "GATEWAY_OAUTH_HUB_SHARING",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "lets a non-default project with no OAuth provider of its own borrow the default project's env-configured providers when routing hosted OAuth through the central hub (the Firebase/Auth0 model: one provider client + one registered redirect URI serve every project).",
+    "category": "OAuth",
+    "anchor": "oauth"
+  },
+  {
     "name": "GATEWAY_OAUTH_MICROSOFT_ALLOWED_TENANTS",
     "type": "string",
     "default": "",

@@ -6,6 +6,44 @@ import (
 	"time"
 )
 
+func TestProjectKeyState_JoinSplit(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, key, token string
+	}{
+		{"no key", "", "eyJhbGciOi.eyJmbG93Ijo.c2ln"},
+		{"simple key", "pk_live_abc", "eyJhbGciOi.eyJmbG93Ijo.c2ln"},
+		{"key containing separators", "proj:with:colon", "eyJhbGciOi.eyJmbG93Ijo.c2ln"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			composite := JoinProjectKeyState(tc.key, tc.token)
+			key, token := SplitProjectKeyState(composite)
+			if key != tc.key {
+				t.Errorf("key = %q, want %q", key, tc.key)
+			}
+			if token != tc.token {
+				t.Errorf("token = %q, want %q", token, tc.token)
+			}
+		})
+	}
+}
+
+// A bare token with no prefix splits to an empty key — the default-project
+// flow round-trips unchanged.
+func TestProjectKeyState_SplitBareToken(t *testing.T) {
+	t.Parallel()
+
+	key, token := SplitProjectKeyState("eyJhbGciOi.eyJmbG93Ijo.c2ln")
+	if key != "" {
+		t.Errorf("key = %q, want empty", key)
+	}
+	if token != "eyJhbGciOi.eyJmbG93Ijo.c2ln" {
+		t.Errorf("token = %q", token)
+	}
+}
+
 func TestHostedStateToken_RoundTrip(t *testing.T) {
 	t.Parallel()
 
