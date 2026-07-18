@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -143,6 +144,49 @@ func (r *OAuthResolver) exchangerFor(ctx context.Context, provider string) (oaut
 		}
 	}
 	return r.defaultRegistry.Get(provider)
+}
+
+// providersFor returns the provider keys CONFIGURED for the request's
+// project, split by where their flow must start, mirroring exchangerFor's
+// precedence without building any Exchanger. own are the providers whose
+// client belongs to the request's project (its config_json ones — and the
+// env registry's when the request IS the default project or unscoped);
+// borrowed are the default project's providers a non-default project may
+// use under hub sharing, whose client is registered for the HUB's callback
+// URL and whose flow must therefore start on the hub origin. Both lists are
+// sorted; a key never appears in both (the project's own config wins). A
+// configured but unbuildable provider (bad secret) still lists — building
+// every Exchanger per page render would decrypt secrets and hit
+// JWKS/discovery each time; the login attempt itself surfaces the
+// misconfiguration.
+func (r *OAuthResolver) providersFor(ctx context.Context) (own, borrowed []string) {
+	if r == nil {
+		return nil, nil
+	}
+	seen := make(map[string]bool)
+	add := func(dst *[]string, providers []string) {
+		for _, p := range providers {
+			if !seen[p] {
+				seen[p] = true
+				*dst = append(*dst, p)
+			}
+		}
+	}
+	scope := ProjectScopeFromContext(ctx)
+	if scope != nil {
+		add(&own, scope.OAuth.providers())
+		if r.isNonDefaultProject(scope.ProjectID) {
+			if r.hubSharing {
+				add(&borrowed, r.defaultRegistry.Providers())
+			}
+			sort.Strings(own)
+			sort.Strings(borrowed)
+			return own, borrowed
+		}
+	}
+	add(&own, r.defaultRegistry.Providers())
+	sort.Strings(own)
+	return own, nil
 }
 
 // isNonDefaultProject reports whether projectID names a project OTHER than the
@@ -317,6 +361,27 @@ func (c ProjectOAuthConfig) provider(provider string) (any, bool) {
 // hasAny reports whether the project configured at least one provider.
 func (c ProjectOAuthConfig) hasAny() bool {
 	return c.Google != nil || c.Microsoft != nil || c.Apple != nil || c.GitHub != nil || c.OIDC != nil
+}
+
+// providers returns the provider keys the project configured, in declaration
+// order. The keys are the same ones provider() switches on.
+func (c ProjectOAuthConfig) providers() []string {
+	var out []string
+	for _, p := range []struct {
+		key string
+		set bool
+	}{
+		{"google", c.Google != nil},
+		{"microsoft", c.Microsoft != nil},
+		{"apple", c.Apple != nil},
+		{"github", c.GitHub != nil},
+		{"oidc", c.OIDC != nil},
+	} {
+		if p.set {
+			out = append(out, p.key)
+		}
+	}
+	return out
 }
 
 // providerConfigHash is the cache-key component that changes when a provider's

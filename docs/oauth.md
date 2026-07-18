@@ -197,6 +197,35 @@ https://auth.example.com/oauth/start/google?return_to=<app-url>&project_key=<pk>
   the same operator as the hub — the provider consent screen shows the
   shared client's branding for all of them. It is off by default.
 
+### The hosted auth UI (`/auth/`)
+
+The built-in sign-in page is rendered **per request** and mirrors the
+options the resolved project enables server-side. (It reflects the
+project-wide policy; a tenant's own `LoginPolicy` can restrict further and
+is still enforced server-side on every login attempt.)
+
+- The **password form** renders only when the project's `login.allowed_methods`
+  (config_json) is empty or includes `password`; the **sign-up toggle**
+  additionally requires `GATEWAY_PASSWORD_SIGNUP_ENABLED`.
+- **Provider buttons** render for exactly the providers a login attempt
+  through that project would resolve — its own `config_json.oauth` providers,
+  plus the hub's under `GATEWAY_OAUTH_HUB_SHARING` — and only when the hosted
+  flow is enabled and the page was opened with a `return_to`. Each button
+  starts the flow on the origin its provider client is registered for: own
+  providers on the project's auth-domain, borrowed (hub-shared) providers on
+  the hub — a borrowed button therefore also requires the page's
+  `project_key` and is hidden without it.
+- Served on a project's **own auth-domain**, the Host resolves the project.
+  Served on the **central hub**, pass the project explicitly:
+
+  ```
+  https://auth.example.com/auth/?project_key=<pk>&return_to=<app-url>
+  ```
+
+  The page threads `project_key` and `return_to` into every provider
+  button's `/oauth/start` link and scopes its password RPCs with the
+  `X-Project-Key` header. An unknown `project_key` is rejected with 401.
+
 ### The one-time code
 
 - Opaque, single-use, ~60s TTL.

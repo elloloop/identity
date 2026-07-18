@@ -85,16 +85,22 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 	ctx := r.Context()
 
 	// 1. Explicit credential key — must resolve when present. Browser
-	// redirects cannot carry the header, so the hosted OAuth routes also
-	// accept the key from the request parameters (see oauthProjectKey);
-	// an explicit key that does not resolve is rejected either way — it
-	// is never silently downgraded to host/default resolution.
+	// navigations cannot carry the header, so the hosted OAuth routes also
+	// accept the key from the request parameters (see oauthProjectKey) and
+	// the hosted auth UI from its query string; an explicit key that does
+	// not resolve is rejected either way — it is never silently downgraded
+	// to host/default resolution.
 	key := r.Header.Get(ProjectKeyHeader)
-	if key == "" && strings.HasPrefix(r.URL.Path, oauthPathPrefix) {
-		var ok bool
-		if key, ok = oauthProjectKey(w, r); !ok {
-			writeConnectError(w, http.StatusBadRequest, "invalid_argument", "malformed form body")
-			return nil, false
+	if key == "" {
+		switch {
+		case strings.HasPrefix(r.URL.Path, oauthPathPrefix):
+			var ok bool
+			if key, ok = oauthProjectKey(w, r); !ok {
+				writeConnectError(w, http.StatusBadRequest, "invalid_argument", "malformed form body")
+				return nil, false
+			}
+		case strings.HasPrefix(r.URL.Path, authUIPathPrefix):
+			key = r.URL.Query().Get(ProjectKeyParam)
 		}
 	}
 	if key != "" && pr.resolver != nil {
@@ -149,9 +155,12 @@ const (
 	// other's.
 	OAuthFormMaxBytes = 1 << 20
 	// oauthPathPrefix scopes the parameter-based project-key extraction to
-	// the browser-facing hosted OAuth routes (/oauth/start, /oauth/callback)
-	// — the only routes a key can arrive without the header.
-	oauthPathPrefix = "/oauth/"
+	// the browser-facing hosted OAuth routes (/oauth/start, /oauth/callback);
+	// authUIPathPrefix extends it (query-only) to the hosted auth UI, so the
+	// page can render a non-default project's options when served from the
+	// central hub. These are the only routes a key arrives without the header.
+	oauthPathPrefix  = "/oauth/"
+	authUIPathPrefix = "/auth/"
 )
 
 // oauthProjectKey extracts the project key a hosted OAuth request carries in
