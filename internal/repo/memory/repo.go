@@ -467,6 +467,19 @@ func (r *Repo) SetUserLockedUntil(_ context.Context, userID string, lockedUntilM
 	return nil
 }
 
+// fieldInt64 coerces a fields-map numeric value to int64. Production
+// callers pass timestamps and counters as int64; plain int literals reach
+// the map from tests and helpers, so both are accepted.
+func fieldInt64(v any) (int64, bool) {
+	switch x := v.(type) {
+	case int64:
+		return x, true
+	case int:
+		return int64(x), true
+	}
+	return 0, false
+}
+
 func applyUserFields(u *service.User, fields map[string]any) {
 	for k, v := range fields {
 		switch k {
@@ -483,25 +496,19 @@ func applyUserFields(u *service.User, fields map[string]any) {
 		case "totp_required":
 			u.TotpRequired, _ = v.(bool)
 		case "failed_login_count":
-			switch x := v.(type) {
-			case int:
-				u.FailedLoginCount = x
-			case int64:
+			if x, ok := fieldInt64(v); ok {
 				u.FailedLoginCount = int(x)
 			}
 		case "locked_until":
-			switch x := v.(type) {
-			case int64:
+			if x, ok := fieldInt64(v); ok {
 				u.LockedUntil = x
-			case int:
-				u.LockedUntil = int64(x)
 			}
 		case "updated_at":
-			if x, ok := v.(int64); ok {
+			if x, ok := fieldInt64(v); ok {
 				u.UpdatedAt = time.UnixMilli(x)
 			}
 		case "last_login_at":
-			if x, ok := v.(int64); ok {
+			if x, ok := fieldInt64(v); ok {
 				u.LastLoginAtMs = x
 			}
 		case "recovery_email":
@@ -511,11 +518,8 @@ func applyUserFields(u *service.User, fields map[string]any) {
 				u.EmailVerified = b
 			}
 		case "email_verified_at":
-			switch x := v.(type) {
-			case int64:
+			if x, ok := fieldInt64(v); ok {
 				u.EmailVerifiedAt = x
-			case int:
-				u.EmailVerifiedAt = int64(x)
 			}
 		case "external_id":
 			u.ExternalID, _ = v.(string)
@@ -526,25 +530,16 @@ func applyUserFields(u *service.User, fields map[string]any) {
 				u.PhoneVerified = b
 			}
 		case "phone_verified_at":
-			switch x := v.(type) {
-			case int64:
+			if x, ok := fieldInt64(v); ok {
 				u.PhoneVerifiedAt = x
-			case int:
-				u.PhoneVerifiedAt = int64(x)
 			}
 		case "date_of_birth_ms":
-			switch x := v.(type) {
-			case int64:
+			if x, ok := fieldInt64(v); ok {
 				u.DateOfBirthMs = x
-			case int:
-				u.DateOfBirthMs = int64(x)
 			}
 		case "deletion_scheduled_at_ms":
-			switch x := v.(type) {
-			case int64:
+			if x, ok := fieldInt64(v); ok {
 				u.DeletionScheduledAtMs = x
-			case int:
-				u.DeletionScheduledAtMs = int64(x)
 			}
 		}
 	}
