@@ -199,9 +199,10 @@ https://auth.example.com/oauth/start/google?return_to=<app-url>&project_key=<pk>
 
 ### The hosted auth UI (`/auth/`)
 
-The built-in sign-in page is rendered **per request** and offers exactly the
-options the resolved project enables server-side — it can never advertise a
-method the server would reject:
+The built-in sign-in page is rendered **per request** and mirrors the
+options the resolved project enables server-side. (It reflects the
+project-wide policy; a tenant's own `LoginPolicy` can restrict further and
+is still enforced server-side on every login attempt.)
 
 - The **password form** renders only when the project's `login.allowed_methods`
   (config_json) is empty or includes `password`; the **sign-up toggle**

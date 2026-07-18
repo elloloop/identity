@@ -146,12 +146,14 @@ func (r *OAuthResolver) exchangerFor(ctx context.Context, provider string) (oaut
 	return r.defaultRegistry.Get(provider)
 }
 
-// providersFor returns the provider keys usable for the request's project in
-// sorted order, mirroring exchangerFor's precedence without building any
-// Exchanger: the project's own configured providers, plus the default
-// registry's when the request is the default project (or unscoped) or hub
-// sharing is enabled. It backs the hosted auth UI, which must offer exactly
-// the providers a login attempt would resolve.
+// providersFor returns the provider keys CONFIGURED for the request's
+// project in sorted order, mirroring exchangerFor's precedence without
+// building any Exchanger: the project's own configured providers, plus the
+// default registry's when the request is the default project (or unscoped)
+// or hub sharing is enabled. It backs the hosted auth UI. A configured but
+// unbuildable provider (bad secret) still lists — building every Exchanger
+// per page render would decrypt secrets and hit JWKS/discovery each time;
+// the login attempt itself surfaces the misconfiguration.
 func (r *OAuthResolver) providersFor(ctx context.Context) []string {
 	if r == nil {
 		return nil

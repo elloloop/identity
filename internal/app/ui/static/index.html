@@ -312,7 +312,7 @@
         // send the user back (return_to).
         const oauthProviders = Array.isArray(config.oauthProviders) ? config.oauthProviders : [];
         const oauthReady = !!config.hostedOAuthEnabled && oauthProviders.length > 0 && returnTo !== '';
-        const providerLabels = { google: 'Google', microsoft: 'Microsoft', github: 'GitHub', apple: 'Apple' };
+        const providerLabels = { google: 'Google', microsoft: 'Microsoft', github: 'GitHub', apple: 'Apple', oidc: 'OIDC' };
 
         function providerLabel(key) {
             if (providerLabels[key]) return providerLabels[key];
@@ -337,7 +337,16 @@
         }
 
         if (!passwordEnabled && !oauthReady) {
-            document.getElementById('no-methods').style.display = 'block';
+            // Name the real reason: an OAuth-only project with providers
+            // configured may still be un-renderable HERE (hosted flow off,
+            // or the page opened without a return_to destination).
+            const noMethods = document.getElementById('no-methods');
+            if (oauthProviders.length > 0 && !config.hostedOAuthEnabled) {
+                noMethods.textContent = 'OAuth providers are configured, but the hosted sign-in flow is disabled on this server (GATEWAY_OAUTH_ALLOWED_RETURN_URLS is empty).';
+            } else if (oauthProviders.length > 0 && returnTo === '') {
+                noMethods.textContent = 'Sign-in with ' + oauthProviders.map(providerLabel).join(', ') + ' is available, but this page was opened without a return_to destination. Use your app\'s sign-in link.';
+            }
+            noMethods.style.display = 'block';
         }
 
         // CAPTCHA: the server injects the provider, PUBLIC site key and the
