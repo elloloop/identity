@@ -387,6 +387,14 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
+          # Without this, sarif format scans ALL severities including
+          # unfixed ones (so the report is complete) and exit-code then
+          # gates on that full set — silently overriding the two options
+          # above. This failed the v2.6.0 release on two UNKNOWN-severity
+          # findings. Limit the SARIF to the configured gate so exit-code
+          # means what the severity/ignore-unfixed inputs say.
+          limit-severities-for-sarif: true
+          trivyignores: .trivyignore
 
       - name: Upload Trivy SARIF to GitHub Security
         if: always()

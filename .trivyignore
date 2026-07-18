@@ -1,0 +1,8 @@
+# GO-2026-5932: golang.org/x/crypto/openpgp is unmaintained / unsafe by design.
+# Module-level advisory with NO fixed version — it flags every consumer of the
+# x/crypto module regardless of which packages are imported. This repo does not
+# import x/crypto/openpgp anywhere (grep the tree), and the call-graph-aware
+# govulncheck gate (make vuln, CI "Vulnerability scan") remains the
+# authoritative reachability check and stays green. Remove this entry if
+# openpgp is ever imported or the advisory gains a fixed version.
+GO-2026-5932
