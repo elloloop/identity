@@ -340,6 +340,35 @@ func TestProjectResolver_OAuthRoute_MultipartBodyIgnored(t *testing.T) {
 	assert.Equal(t, defProjectID, cap.scope.ProjectID)
 }
 
+// The hosted auth UI accepts the project key from its query string, so the
+// page served on the hub renders the routed project's options.
+func TestProjectResolver_AuthUIRoute_ResolvesByQueryParam(t *testing.T) {
+	resolver := &fakeProjectResolver{
+		byKey: map[string]*service.ResolvedProject{"pk_ui": {ID: "proj-ui", StorageScopeID: "scope-ui"}},
+	}
+	rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
+		r.Method = http.MethodGet
+		r.URL.Path = "/auth/"
+		r.URL.RawQuery = "project_key=pk_ui&return_to=https%3A%2F%2Fapp.test%2Fdone"
+	})
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, "proj-ui", cap.scope.ProjectID)
+}
+
+// An unknown key on the auth UI is rejected like everywhere else.
+func TestProjectResolver_AuthUIRoute_UnknownKeyRejected(t *testing.T) {
+	rec, cap := serve(t, &fakeProjectResolver{}, defProjectID, defScopeID, func(r *http.Request) {
+		r.Method = http.MethodGet
+		r.URL.Path = "/auth/"
+		r.URL.RawQuery = "project_key=pk_typo"
+	})
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.False(t, cap.called)
+}
+
 // Parameter-based keys are scoped to the hosted OAuth routes: a project_key
 // query parameter anywhere else is ignored.
 func TestProjectResolver_NonOAuthRoute_QueryParamIgnored(t *testing.T) {

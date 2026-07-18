@@ -179,6 +179,56 @@
             display: none;
             word-wrap: break-word;
         }
+
+        .oauth-buttons {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        a.oauth-btn {
+            display: block;
+            padding: 12px 16px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            color: var(--text-color);
+            font-size: 15px;
+            font-weight: 500;
+            text-align: center;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+
+        a.oauth-btn:hover {
+            border-color: var(--primary);
+            background: rgba(15, 23, 42, 0.8);
+        }
+
+        .divider {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            margin: 20px 0;
+            color: var(--muted-text);
+            font-size: 13px;
+        }
+
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--glass-border);
+        }
+
+        .no-methods {
+            display: none;
+            text-align: center;
+            color: var(--muted-text);
+            font-size: 14px;
+            padding: 16px 0;
+        }
     </style>
 </head>
 <body>
@@ -190,6 +240,13 @@
 
         <div id="error-message" class="error-message" role="alert"></div>
         <div id="success-message" class="success-message" role="status"></div>
+
+        <!-- OAuth provider buttons: rendered from the server-injected
+             per-project provider list, linking into the hosted flow with the
+             page's own return_to / project_key passed through. -->
+        <div id="oauth-buttons" class="oauth-buttons"></div>
+        <div id="divider" class="divider">or</div>
+        <div id="no-methods" class="no-methods">No sign-in methods are enabled for this project.</div>
 
         <form id="auth-form">
             <div class="form-group">
@@ -219,7 +276,7 @@
 
     <script>
         {{.JSONConfig}}
-        const config = window.serverConfig || { passwordSignupEnabled: true };
+        const config = window.serverConfig || { passwordLoginEnabled: true, passwordSignupEnabled: true };
 
         let isLogin = true;
         const form = document.getElementById('auth-form');
@@ -232,8 +289,55 @@
         const successMsg = document.getElementById('success-message');
         const resultData = document.getElementById('result-data');
 
-        if (!config.passwordSignupEnabled) {
+        // Hub routing context: an app sends users here as
+        // /auth/?return_to=<app-url>&project_key=<pk>. Both values pass
+        // through to the hosted OAuth start URL, and the key scopes the
+        // password RPCs via the X-Project-Key header. Served on a project's
+        // own auth-domain, neither is needed — the Host resolves the project.
+        const pageQuery = new URLSearchParams(window.location.search);
+        const projectKey = pageQuery.get('project_key') || '';
+        const returnTo = pageQuery.get('return_to') || '';
+
+        const passwordEnabled = config.passwordLoginEnabled !== false;
+        if (!passwordEnabled) {
+            form.style.display = 'none';
+        }
+        if (!passwordEnabled || !config.passwordSignupEnabled) {
             document.querySelector('.toggle-mode').style.display = 'none';
+        }
+
+        // OAuth buttons render only for the providers the server enabled for
+        // THIS project, and only when the hosted flow can actually complete:
+        // the /oauth/start routes are mounted and the page knows where to
+        // send the user back (return_to).
+        const oauthProviders = Array.isArray(config.oauthProviders) ? config.oauthProviders : [];
+        const oauthReady = !!config.hostedOAuthEnabled && oauthProviders.length > 0 && returnTo !== '';
+        const providerLabels = { google: 'Google', microsoft: 'Microsoft', github: 'GitHub', apple: 'Apple' };
+
+        function providerLabel(key) {
+            if (providerLabels[key]) return providerLabels[key];
+            return key.charAt(0).toUpperCase() + key.slice(1);
+        }
+
+        if (oauthReady) {
+            const container = document.getElementById('oauth-buttons');
+            for (const provider of oauthProviders) {
+                const params = new URLSearchParams({ return_to: returnTo });
+                if (projectKey) params.set('project_key', projectKey);
+                const a = document.createElement('a');
+                a.className = 'oauth-btn';
+                a.href = '/oauth/start/' + encodeURIComponent(provider) + '?' + params.toString();
+                a.textContent = 'Continue with ' + providerLabel(provider);
+                container.appendChild(a);
+            }
+            container.style.display = 'flex';
+            if (passwordEnabled) {
+                document.getElementById('divider').style.display = 'flex';
+            }
+        }
+
+        if (!passwordEnabled && !oauthReady) {
+            document.getElementById('no-methods').style.display = 'block';
         }
 
         // CAPTCHA: the server injects the provider, PUBLIC site key and the
@@ -363,11 +467,14 @@
             }
 
             try {
+                const headers = { 'Content-Type': 'application/json' };
+                // Scope the RPC to the routed project when this page was
+                // reached through the hub with a project_key — the browser
+                // cannot rely on Host-based resolution there.
+                if (projectKey) headers['X-Project-Key'] = projectKey;
                 const response = await fetch(endpoint, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers,
                     body: JSON.stringify(payload)
                 });
 

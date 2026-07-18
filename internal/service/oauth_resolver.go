@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -143,6 +144,39 @@ func (r *OAuthResolver) exchangerFor(ctx context.Context, provider string) (oaut
 		}
 	}
 	return r.defaultRegistry.Get(provider)
+}
+
+// providersFor returns the provider keys usable for the request's project in
+// sorted order, mirroring exchangerFor's precedence without building any
+// Exchanger: the project's own configured providers, plus the default
+// registry's when the request is the default project (or unscoped) or hub
+// sharing is enabled. It backs the hosted auth UI, which must offer exactly
+// the providers a login attempt would resolve.
+func (r *OAuthResolver) providersFor(ctx context.Context) []string {
+	if r == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var out []string
+	add := func(providers []string) {
+		for _, p := range providers {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	scope := ProjectScopeFromContext(ctx)
+	if scope != nil {
+		add(scope.OAuth.providers())
+		if r.isNonDefaultProject(scope.ProjectID) && !r.hubSharing {
+			sort.Strings(out)
+			return out
+		}
+	}
+	add(r.defaultRegistry.Providers())
+	sort.Strings(out)
+	return out
 }
 
 // isNonDefaultProject reports whether projectID names a project OTHER than the
@@ -317,6 +351,27 @@ func (c ProjectOAuthConfig) provider(provider string) (any, bool) {
 // hasAny reports whether the project configured at least one provider.
 func (c ProjectOAuthConfig) hasAny() bool {
 	return c.Google != nil || c.Microsoft != nil || c.Apple != nil || c.GitHub != nil || c.OIDC != nil
+}
+
+// providers returns the provider keys the project configured, in declaration
+// order. The keys are the same ones provider() switches on.
+func (c ProjectOAuthConfig) providers() []string {
+	var out []string
+	for _, p := range []struct {
+		key string
+		set bool
+	}{
+		{"google", c.Google != nil},
+		{"microsoft", c.Microsoft != nil},
+		{"apple", c.Apple != nil},
+		{"github", c.GitHub != nil},
+		{"oidc", c.OIDC != nil},
+	} {
+		if p.set {
+			out = append(out, p.key)
+		}
+	}
+	return out
 }
 
 // providerConfigHash is the cache-key component that changes when a provider's

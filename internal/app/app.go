@@ -569,13 +569,14 @@ func New(deps Deps) (*Built, error) {
 	path, svcHandler := identityconnectgen.NewIdentityServiceHandler(handler, connectOpts...)
 	mux.Handle(path, svcHandler)
 
-	// Default auth UI (login/signup)
-	mux.Handle("/auth/", ui.Handler(deps.Config))
-
 	// Browser-facing hosted OAuth routes (#126). Registered only when
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS is non-empty; the headless
 	// BeginOAuthLogin / OAuthLogin RPCs work regardless.
 	returnAllow := service.ParseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
+
+	// Default auth UI (login/signup). Rendered per request so it offers
+	// exactly the sign-in options the resolved project enables server-side.
+	mux.Handle("/auth/", ui.Handler(deps.Config, authSvc, returnAllow.Enabled()))
 	if returnAllow.Enabled() {
 		logger.Info("oauth_hosted_flow_enabled", zap.Strings("allowed_return_urls", returnAllow.Entries()))
 	} else {
