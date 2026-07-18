@@ -139,15 +139,19 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 }
 
 const (
+	// ProjectKeyParam is the query/form parameter that carries the same
+	// project credential key as ProjectKeyHeader on the hosted OAuth
+	// routes, where browser redirects cannot set headers.
+	ProjectKeyParam = "project_key"
+	// OAuthFormMaxBytes bounds how much of a hosted-OAuth request body is
+	// parsed, both here and in the callback handler — the middleware
+	// parses first, so a larger limit in either place would defeat the
+	// other's.
+	OAuthFormMaxBytes = 1 << 20
 	// oauthPathPrefix scopes the parameter-based project-key extraction to
 	// the browser-facing hosted OAuth routes (/oauth/start, /oauth/callback)
 	// — the only routes a key can arrive without the header.
 	oauthPathPrefix = "/oauth/"
-	// oauthFormMaxBytes bounds how much of a hosted-OAuth request body the
-	// middleware will parse for the project key. It matches the callback
-	// handler's own body cap so the limit holds end-to-end — the middleware
-	// parses first, so an unbounded read here would defeat the handler's.
-	oauthFormMaxBytes = 1 << 20
 )
 
 // oauthProjectKey extracts the project key a hosted OAuth request carries in
@@ -163,12 +167,12 @@ const (
 // spilling to memory or disk beyond the cap.
 func oauthProjectKey(w http.ResponseWriter, r *http.Request) (key string, ok bool) {
 	if r.Method == http.MethodPost {
-		r.Body = http.MaxBytesReader(w, r.Body, oauthFormMaxBytes)
+		r.Body = http.MaxBytesReader(w, r.Body, OAuthFormMaxBytes)
 	}
 	if err := r.ParseForm(); err != nil {
 		return "", false
 	}
-	if key := r.Form.Get("project_key"); key != "" {
+	if key := r.Form.Get(ProjectKeyParam); key != "" {
 		return key, true
 	}
 	key, _ = oauth.SplitProjectKeyState(r.Form.Get("state"))
