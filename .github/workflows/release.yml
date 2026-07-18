@@ -375,25 +375,35 @@ jobs:
           first_tag="$(echo "$TAGS" | head -n1)"
           echo "image=${first_tag}" >> "$GITHUB_OUTPUT"
 
-      - name: Run Trivy vulnerability scanner
+      # The gate and the report are SEPARATE scans on purpose. With
+      # format:sarif the action scans all severities including unfixed
+      # findings so the report is complete — and exit-code then gates on
+      # that full set, silently overriding severity/ignore-unfixed (this
+      # failed the v2.6.0 release on two UNKNOWN-severity findings).
+      # Splitting keeps the release gate at exactly the advertised
+      # fixed-CRITICAL/HIGH policy while the Security tab still receives
+      # every severity.
+      - name: Gate on fixable CRITICAL/HIGH vulnerabilities
         # v0.36.0 (2026-04-22), pinned by commit SHA. Tags 0.0.1–0.34.2
         # are flagged as compromised by the Trivy March 2026 advisory.
         # SHA pin defends against future tag retargeting.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.tag.outputs.image }}
-          format: sarif
-          output: trivy-results.sarif
+          format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
-          # Without this, sarif format scans ALL severities including
-          # unfixed ones (so the report is complete) and exit-code then
-          # gates on that full set — silently overriding the two options
-          # above. This failed the v2.6.0 release on two UNKNOWN-severity
-          # findings. Limit the SARIF to the configured gate so exit-code
-          # means what the severity/ignore-unfixed inputs say.
-          limit-severities-for-sarif: true
+          trivyignores: .trivyignore
+
+      - name: Report all severities to GitHub Security (non-gating)
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.tag.outputs.image }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '0'
           trivyignores: .trivyignore
 
       - name: Upload Trivy SARIF to GitHub Security
