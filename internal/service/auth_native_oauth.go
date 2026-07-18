@@ -165,6 +165,14 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		return nil, err
 	}
 
+	// Project access mode (login context) — the resolved project's config is
+	// bound to ctx above, so a restricted project denies a returning
+	// (provider, sub) non-member here just as the hosted flow does. JIT creation
+	// of a NEW user is gated as self-signup inside resolveOrCreateUserByEmail.
+	if err := s.enforceProjectAccessLogin(ctx, user.Email); err != nil {
+		return nil, err
+	}
+
 	decision, err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodOAuth)
 	if err != nil {
 		return nil, err
@@ -264,16 +272,42 @@ func (s *AuthService) resolveNativeProject(ctx context.Context, product string) 
 		if p == nil {
 			return nil, fmt.Errorf("%w: unknown product %q", ErrInvalidArgument, product)
 		}
-		return &ProjectScope{ProjectID: p.ID, StorageScopeID: p.StorageScopeID, OAuth: p.OAuth}, nil
+		return &ProjectScope{ProjectID: p.ID, StorageScopeID: p.StorageScopeID, OAuth: p.OAuth, Access: p.Access}, nil
 	}
 
 	// No control plane: only the default project exists. Its native audiences
 	// come from the env seed (nativeAudiences falls back for the default
-	// project), so no config_json is loaded here.
+	// project), so no config_json is loaded here; its access mode likewise comes
+	// from the env-configured default (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE),
+	// matching the middleware's default-project pin so native login is gated the
+	// same way as every other path.
 	if projectID != s.cfg.DefaultProjectID {
 		return nil, fmt.Errorf("%w: unknown product %q", ErrInvalidArgument, product)
 	}
-	return &ProjectScope{ProjectID: projectID, StorageScopeID: s.cfg.DefaultTenantID}, nil
+	return &ProjectScope{
+		ProjectID:      projectID,
+		StorageScopeID: s.cfg.DefaultTenantID,
+		Access:         s.defaultProjectAccessConfig(),
+	}, nil
+}
+
+// defaultProjectAccessConfig builds the env-configured default project's access
+// policy from this service's config. It is used where the default project is
+// pinned without a config_json (native login with no control plane), mirroring
+// the middleware's default-project pin. It fails CLOSED: a spec that does not
+// validate (only possible for a directly-constructed Config, since app.New
+// validates it at boot) yields a deny-all closed policy rather than an open one.
+func (s *AuthService) defaultProjectAccessConfig() ProjectAccessConfig {
+	access, err := NewProjectAccessConfig(
+		s.cfg.DefaultProjectAccessMode,
+		s.cfg.DefaultProjectAllowedEmailList(),
+		s.cfg.DefaultProjectAllowedDomainList(),
+	)
+	if err != nil {
+		s.logger.Warn("default_project_access_invalid_failing_closed", zap.Error(err))
+		return ProjectAccessConfig{Mode: AccessModeClosed}
+	}
+	return access
 }
 
 // nativeVerifyParams builds the per-request verifier inputs from the resolved

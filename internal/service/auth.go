@@ -858,6 +858,26 @@ var (
 	ErrPermissionDenied = errors.New("permission denied")
 	ErrInvalidArgument  = errors.New("invalid argument")
 	ErrNotFound         = errors.New("not found")
+	// ErrAccessNotAllowed is returned when a project's access mode
+	// (config_json access.mode, or GATEWAY_DEFAULT_PROJECT_ACCESS_MODE for the
+	// default project) denies the authenticating email: an allowlist mode whose
+	// list omits the email, a closed mode, or an unset/unrecognized mode (the
+	// default-DENY posture). It gates provisioning (OAuth/OTP/magic-link JIT
+	// create, password signup, passkey signup), login for an existing user, and
+	// invitation acceptance. Unlike ErrPermissionDenied (a login-method policy
+	// denial) it is a membership denial, kept as a distinct sentinel so callers
+	// and tests can tell the two apart; both map to CodePermissionDenied. The
+	// message is deliberately generic — it discloses neither whether an account
+	// exists nor the allowlist's contents.
+	ErrAccessNotAllowed = errors.New("access not allowed for this project")
+	// ErrSignupByInvitationOnly is returned when a project's access mode is
+	// "invite": self-signup is blocked, but login for an existing user and
+	// admin-issued invitation acceptance still work. It is distinct from
+	// ErrAccessNotAllowed so a client can route the user to request an invite
+	// rather than show a generic denial. Both map to CodePermissionDenied, and
+	// the denial is uniform across every email (invite-only is a project
+	// property, not a per-account signal), so it discloses no account existence.
+	ErrSignupByInvitationOnly = errors.New("this project is invitation-only; self-signup is disabled")
 	// ErrProjectSecretsKeyMissing is returned when an admin write carries a
 	// plaintext provider secret to encrypt but GATEWAY_PROJECT_SECRETS_KEY is
 	// not configured, so the server cannot encrypt it for storage. It is a

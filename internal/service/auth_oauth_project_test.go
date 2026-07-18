@@ -101,6 +101,9 @@ func TestOAuthLogin_PerProjectGitHub_EndToEnd(t *testing.T) {
 
 	scope := &ProjectScope{
 		ProjectID: "gh-proj",
+		// Open access: this test exercises per-project GitHub OAuth, not the
+		// access gate, which under default-DENY must be opened explicitly.
+		Access: ProjectAccessConfig{Mode: AccessModeOpen},
 		OAuth: ProjectOAuthConfig{GitHub: &ProjectOAuthGitHub{
 			ClientID:        "proj-github",
 			ClientSecretEnc: encForProject(t, "gh-secret"),

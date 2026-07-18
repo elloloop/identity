@@ -49,6 +49,13 @@ type ProjectConfig struct {
 	// GATEWAY_OAUTH_* providers. Provider secrets are stored encrypted at rest
 	// (see the *_enc fields).
 	OAuth ProjectOAuthConfig `json:"oauth"`
+
+	// Access holds the project's authentication allowlist. When NON-EMPTY it
+	// restricts which users may authenticate to (or be provisioned in) the
+	// project to an explicit set of emails and/or domains; EMPTY (the common
+	// case) imposes no restriction, so a project without an access block behaves
+	// exactly as before. See ProjectAccessConfig for the fail direction.
+	Access ProjectAccessConfig `json:"access"`
 }
 
 // ProjectOAuthConfig is a project's per-provider hosted-flow OAuth
@@ -243,6 +250,9 @@ func (c ProjectConfig) Validate() error {
 		return err
 	}
 	if err := c.OAuth.validate(); err != nil {
+		return err
+	}
+	if err := c.Access.validate(); err != nil {
 		return err
 	}
 	return nil
@@ -484,6 +494,182 @@ type ProjectLoginConfig struct {
 	Require2FA bool `json:"require_2fa"`
 }
 
+// Access modes an operator selects per project via config_json `access.mode`
+// (and, for the env-configured default project, via
+// GATEWAY_DEFAULT_PROJECT_ACCESS_MODE). The mode is REQUIRED to authenticate:
+// an unset/empty/unrecognized mode denies (see enforceProjectAccess). This is
+// the deliberate default-DENY posture — the inverse of an opt-in allowlist —
+// so a project (or a whole deployment) that has not been explicitly opened
+// cannot authenticate anyone.
+const (
+	// AccessModeOpen permits everyone — signup and login are unrestricted.
+	// This reproduces the pre-access-control behavior; a consumer product
+	// (e.g. Nesta) that wants open self-signup sets this explicitly.
+	AccessModeOpen = "open"
+	// AccessModeAllowlist permits only a user whose canonical email is in
+	// AllowedEmails OR whose domain is in AllowedDomains — for BOTH signup and
+	// login (and invitation acceptance). Requires at least one entry.
+	AccessModeAllowlist = "allowlist"
+	// AccessModeInvite denies self-signup but permits login for an already
+	// provisioned user and permits admin-issued invitation acceptance — genuine
+	// per-project invite-only, independent of the deployment-global signup
+	// toggles. AllowedEmails/AllowedDomains are unused (rejected if supplied).
+	AccessModeInvite = "invite"
+	// AccessModeClosed denies everyone — signup, login, and invitation
+	// acceptance all fail. The explicit "this project is sealed" mode.
+	AccessModeClosed = "closed"
+)
+
+// ProjectAccessConfig is the per-project authentication access policy, parsed
+// from config_json `access` (or, for the default project, assembled from env).
+// Its Mode selects one of the four behaviors above; AllowedEmails/AllowedDomains
+// apply only to AccessModeAllowlist.
+//
+// Fail direction — DEFAULT-DENY. Unlike the login-method policy
+// (login_policy_enforce.go), which fails OPEN so a misconfiguration never locks
+// a tenant out, access control exists to gate membership, so an unset/empty/
+// unrecognized mode DENIES (enforceProjectAccess), and a malformed access block
+// is rejected by ParseProjectConfig — which makes the project resolver refuse
+// the project entirely rather than silently resolve it open.
+type ProjectAccessConfig struct {
+	// Mode is one of AccessMode{Open,Allowlist,Invite,Closed}. Empty/unset or
+	// unrecognized is treated as deny-all at enforcement time.
+	Mode string `json:"mode"`
+
+	// AllowedEmails is the explicit per-address allowlist for AccessModeAllowlist.
+	// Entries are validated as well-formed emails and canonicalized
+	// (canonicalizeEmail) at parse time, so a listed alice.smith+tag@gmail.com
+	// matches a login as alicesmith@gmail.com.
+	AllowedEmails []string `json:"allowed_emails"`
+
+	// AllowedDomains is the allowlist of email domains (the part after '@') for
+	// AccessModeAllowlist. Entries are canonicalized (canonicalizeDomain —
+	// lower-cased, IDN-punycoded, googlemail.com folded to gmail.com) at parse
+	// time. A user whose email domain is listed is permitted even when their
+	// exact address is absent from AllowedEmails.
+	AllowedDomains []string `json:"allowed_domains"`
+}
+
+// NewProjectAccessConfig builds and validates an access policy from the parts
+// an operator supplies out-of-band for the env-configured default project
+// (which has no config_json to carry one). It applies the SAME validation and
+// canonicalization as the config_json path, so the default project is gated by
+// identical rules. A malformed spec is returned as an error the caller must
+// surface (app.New fails to boot) — never silently downgraded.
+func NewProjectAccessConfig(mode string, allowedEmails, allowedDomains []string) (ProjectAccessConfig, error) {
+	a := ProjectAccessConfig{Mode: mode, AllowedEmails: allowedEmails, AllowedDomains: allowedDomains}
+	if err := a.validate(); err != nil {
+		return ProjectAccessConfig{}, err
+	}
+	return a.canonicalized(), nil
+}
+
+// mode returns the normalized (trimmed, lower-cased) access mode.
+func (a ProjectAccessConfig) mode() string {
+	return strings.TrimSpace(strings.ToLower(a.Mode))
+}
+
+// validate rejects a malformed access block so it fails the whole config parse
+// (and thus project resolution) rather than degrading to an open project. The
+// rules encode the mode matrix: allowlist REQUIRES at least one entry (use
+// "closed" for deny-all); every other mode REJECTS allowlist entries (they would
+// be inert — fail loud); an unrecognized non-empty mode is rejected. An empty
+// mode with no entries is a valid config that denies at enforcement time (the
+// default-DENY posture for a project with no access block).
+func (a ProjectAccessConfig) validate() error {
+	hasEntries := len(a.AllowedEmails) > 0 || len(a.AllowedDomains) > 0
+	switch a.mode() {
+	case "", AccessModeOpen, AccessModeClosed, AccessModeInvite:
+		if hasEntries {
+			return fmt.Errorf("access: allowed_emails/allowed_domains are only valid with mode %q (mode is %q)", AccessModeAllowlist, a.Mode)
+		}
+	case AccessModeAllowlist:
+		if !hasEntries {
+			return fmt.Errorf("access: mode %q requires at least one allowed_emails or allowed_domains entry (use mode %q to deny all)", AccessModeAllowlist, AccessModeClosed)
+		}
+		if err := a.validateEntries(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("access.mode %q must be one of %q, %q, %q, %q", a.Mode,
+			AccessModeOpen, AccessModeAllowlist, AccessModeInvite, AccessModeClosed)
+	}
+	return nil
+}
+
+// validateEntries checks each allowlist entry is well-formed: emails via the
+// same validateEmailFormat gate every email-bearing RPC runs; domains as a bare
+// domain (no '@') carrying a dot.
+func (a ProjectAccessConfig) validateEntries() error {
+	for _, raw := range a.AllowedEmails {
+		e := strings.TrimSpace(raw)
+		if e == "" {
+			return errors.New("access.allowed_emails entries must not be empty")
+		}
+		if err := validateEmailFormat(strings.ToLower(e)); err != nil {
+			return fmt.Errorf("access.allowed_emails entry %q is not a valid email: %w", raw, err)
+		}
+	}
+	for _, raw := range a.AllowedDomains {
+		d := strings.TrimSpace(raw)
+		if d == "" {
+			return errors.New("access.allowed_domains entries must not be empty")
+		}
+		if strings.Contains(d, "@") {
+			return fmt.Errorf("access.allowed_domains entry %q must be a bare domain, not an email address", raw)
+		}
+		if !strings.Contains(d, ".") {
+			return fmt.Errorf("access.allowed_domains entry %q must be a domain containing a dot", raw)
+		}
+	}
+	return nil
+}
+
+// canonicalized returns a copy whose mode is normalized and whose emails and
+// domains are canonicalized to the same form a login email is compared against,
+// so allowlist matching is like-against-like. Applied once at parse time
+// (ParseProjectConfig) so every downstream copy carries canonical values.
+func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
+	out := ProjectAccessConfig{Mode: a.mode()}
+	if len(a.AllowedEmails) > 0 {
+		out.AllowedEmails = make([]string, 0, len(a.AllowedEmails))
+		for _, e := range a.AllowedEmails {
+			out.AllowedEmails = append(out.AllowedEmails, canonicalizeEmail(e))
+		}
+	}
+	if len(a.AllowedDomains) > 0 {
+		out.AllowedDomains = make([]string, 0, len(a.AllowedDomains))
+		for _, d := range a.AllowedDomains {
+			out.AllowedDomains = append(out.AllowedDomains, canonicalizeDomain(d))
+		}
+	}
+	return out
+}
+
+// permits reports whether canonicalEmail is on the allowlist. The caller MUST
+// pass an already-canonicalized email (canonicalizeEmail); the entries were
+// canonicalized at parse time, so the comparison is like-against-like. It is a
+// pure set-membership predicate: canonicalEmail is permitted iff it is in
+// AllowedEmails OR its domain is in AllowedDomains. Only consulted for
+// AccessModeAllowlist.
+func (a ProjectAccessConfig) permits(canonicalEmail string) bool {
+	for _, e := range a.AllowedEmails {
+		if e == canonicalEmail {
+			return true
+		}
+	}
+	domain := emailDomain(canonicalEmail)
+	if domain == "" {
+		return false
+	}
+	for _, d := range a.AllowedDomains {
+		if d == domain {
+			return true
+		}
+	}
+	return false
+}
+
 // ProjectCORSConfig is the per-project CORS policy. AllowedOrigins is layered
 // on top of the global GATEWAY_ALLOWED_ORIGINS floor: a browser origin is
 // accepted when it is in either set. Each entry must be a bare scheme+host(+port)
@@ -511,5 +697,9 @@ func ParseProjectConfig(configJSON string) (ProjectConfig, error) {
 	if err := cfg.Validate(); err != nil {
 		return ProjectConfig{}, fmt.Errorf("parse project config: %w", err)
 	}
+	// Normalize the access allowlist to canonical comparison form AFTER
+	// validation, so every downstream copy of the config (resolver scope, native
+	// login, admin reads) matches a canonicalized login email like-against-like.
+	cfg.Access = cfg.Access.canonicalized()
 	return cfg, nil
 }

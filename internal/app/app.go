@@ -664,9 +664,21 @@ func New(deps Deps) (*Built, error) {
 	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)
 	chain = middleware.ClientIPMiddleware(trustedProxies)(chain)
 	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
+	// Build the env-configured default project's access policy once, failing the
+	// boot loudly if the operator supplied an invalid mode/allowlist. The
+	// resolver stamps it onto the default-project pin so the access guard is
+	// deny-by-default until GATEWAY_DEFAULT_PROJECT_ACCESS_MODE opens it.
+	defaultAccess, err := service.NewProjectAccessConfig(
+		deps.Config.DefaultProjectAccessMode,
+		deps.Config.DefaultProjectAllowedEmailList(),
+		deps.Config.DefaultProjectAllowedDomainList(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("default project access config: %w", err)
+	}
 	chain = middleware.NewProjectResolver(
 		deps.Config.DefaultProjectID, deps.Config.DefaultTenantID,
-		deps.Config.DefaultPrimaryAuthDomain(),
+		deps.Config.DefaultPrimaryAuthDomain(), defaultAccess,
 		service.NewCachingProjectResolver(
 			deps.ProjectResolver,
 			deps.Config.ProjectResolutionCacheTTL(),

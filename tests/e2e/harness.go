@@ -220,7 +220,10 @@ func StartServer(t *testing.T) *Harness {
 		// this id; we point the default project at the same id as the tenant so
 		// the service layer reads/writes a single consistent store (postgres
 		// seeds the projects(id) FK row below; memory tolerates any id).
-		DefaultProjectID:              tenantID,
+		DefaultProjectID: tenantID,
+		// Open-signup deployment fixture: default-DENY requires an explicit mode,
+		// so the e2e suite exercises the flows rather than the access gate.
+		DefaultProjectAccessMode:      "open",
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

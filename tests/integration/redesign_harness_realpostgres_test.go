@@ -188,6 +188,12 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 		t.Cleanup(closer.Close)
 	}
 
+	// The branded default project is resolved via the control plane (its
+	// config_json), so the env default-project access mode does NOT apply to
+	// branded-host requests. Open its config explicitly so these governance
+	// flows exercise the redesign, not the default-DENY access gate.
+	openProjectAccess(t, built.ControlPlaneStore(), projectID)
+
 	return &RedesignHarness{
 		BaseURL:           httpSrv.URL,
 		HTTP:              httpSrv.Client(),
@@ -228,6 +234,21 @@ func newRedesignTestConfig(dsn, projectID, tenantID, brandedAuthDomain string) c
 	base.PasswordSignupEnabled = true
 	base.PasswordlessSignupEnabled = true
 	return *base
+}
+
+// openProjectAccess writes an open access mode into a project's config_json so
+// control-plane (branded-host) resolution permits auth. Without it the project
+// resolves with no access block and the default-DENY gate rejects every signup.
+func openProjectAccess(t *testing.T, cp service.ControlPlaneProjectStore, projectID string) {
+	t.Helper()
+	ctx := context.Background()
+	_, version, err := cp.GetProjectConfig(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectConfig(%q): %v", projectID, err)
+	}
+	if _, _, err := cp.UpdateProjectConfig(ctx, projectID, version, `{"access":{"mode":"open"}}`); err != nil {
+		t.Fatalf("UpdateProjectConfig(%q): %v", projectID, err)
+	}
 }
 
 // AuthedClient returns a Connect client that carries a bearer token on every

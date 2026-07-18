@@ -338,6 +338,12 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr, 
 		invalidErr = ErrMagicLinkInvalid
 	}
 
+	// Project access mode is enforced inside resolveOrCreateUserByEmail below,
+	// which is the only place that can tell a NEW account (self-signup context —
+	// denied by invite/closed) apart from an EXISTING one (login context —
+	// invite-only still admits it). Enforcing a single blanket check here could
+	// not make that distinction, so it deliberately lives in the resolver.
+
 	// Both passwordless arms — OTP and magic link — prove control of the
 	// email before reaching here, so they are the one governance method
 	// (email_otp). Consult the tenant's LoginPolicy before issuing tokens.

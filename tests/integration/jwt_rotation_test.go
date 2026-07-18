@@ -307,7 +307,9 @@ func jwksKIDSet(t *testing.T, baseURL string) map[string]bool {
 // newRotationCfg returns a config sufficient for the rotation test.
 func newRotationCfg() *config.Config {
 	return &config.Config{
-		DefaultTenantID:               "rotation",
+		DefaultTenantID: "rotation",
+		// Open-signup deployment fixture (default-DENY requires an explicit mode).
+		DefaultProjectAccessMode:      "open",
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

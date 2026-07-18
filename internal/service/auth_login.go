@@ -97,6 +97,14 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	// @googlemail.com local parts, universal '+' tag stripping,
 	// googlemail.com → gmail.com. One human ↔ one account.
 	email = canonicalizeEmail(email)
+	// Per-project access mode: refuse self-signup before any password work when
+	// the project is invite-only, closed, or an allowlist the email is not on, so
+	// a restricted project never mints a disallowed account. Placed before the
+	// duplicate-email handling so the denial is uniform for new and existing
+	// addresses (anti-enumeration) and runs on the canonical email.
+	if err := s.enforceProjectAccessSignup(ctx, email); err != nil {
+		return nil, err
+	}
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
@@ -504,6 +512,17 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return nil, ErrEmailVerificationRequired
 	}
 
+	// Credentials are proven; enforce the project access mode (login context)
+	// before tokens so a user provisioned before the project was restricted (or
+	// one that belongs to another project's pool) cannot authenticate to a
+	// closed/allowlist project. Login context, so invite-only still lets an
+	// existing user in. Placed after credential verification, mirroring
+	// enforceLoginPolicy, so a denial is reached only by the password holder and
+	// never becomes an existence oracle.
+	if err := s.enforceProjectAccessLogin(ctx, email); err != nil {
+		return nil, err
+	}
+
 	// Credentials are proven; consult the tenant's LoginPolicy. This runs
 	// only after authentication so a denial never reveals account existence,
 	// and before tokens are issued so a disallowed method yields no session.
@@ -669,6 +688,17 @@ func (s *AuthService) OAuthLogin(
 	}
 
 	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent); err != nil {
+		return nil, err
+	}
+
+	// Project access mode (login context). upsertOAuthUser's (provider, sub) fast
+	// path returns a RETURNING user WITHOUT passing through
+	// resolveOrCreateUserByEmail, so that branch alone would let a pre-linked
+	// non-member back in — enforce it here too. A first-time (new-user) OAuth
+	// login is gated as SELF-SIGNUP inside resolveOrCreateUserByEmail, so an
+	// invite-only/closed project never JIT-provisions a new user; this login
+	// check then permits the (now existing) user for invite mode.
+	if err := s.enforceProjectAccessLogin(ctx, user.Email); err != nil {
 		return nil, err
 	}
 
@@ -888,7 +918,21 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email stri
 		return nil, false, err
 	}
 	if existing != nil {
+		// Resolving an EXISTING account is a login-context access check: an
+		// invite-only project lets an already-provisioned user back in, while
+		// still blocking the self-signup create branch below. This is the single
+		// by-email chokepoint OAuth (email fallback) and passwordless (OTP + magic
+		// link) share for existing users.
+		if err := s.enforceProjectAccessLogin(ctx, email); err != nil {
+			return nil, false, err
+		}
 		return existing, false, nil
+	}
+
+	// Creating a NEW account is a self-signup access check — an invite-only or
+	// closed project (or a non-matching allowlist) denies JIT provisioning here.
+	if err := s.enforceProjectAccessSignup(ctx, email); err != nil {
+		return nil, false, err
 	}
 
 	now := s.nowMs()
@@ -1192,6 +1236,15 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	}
 	if user == nil {
 		return nil, fmt.Errorf("%w: user for invitation not found", ErrNotFound)
+	}
+
+	// Enforce the project access mode (login/invite context) on the invitee.
+	// Invitation acceptance is the sanctioned way into an invite-only project, so
+	// invite/open permit it; but an allowlist project still requires the invitee
+	// be on the list (an admin cannot invite someone the allowlist excludes), and
+	// a closed project refuses every acceptance.
+	if err := s.enforceProjectAccessLogin(ctx, user.Email); err != nil {
+		return nil, err
 	}
 
 	// Enforce the invited member's tenant password policy now that the

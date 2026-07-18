@@ -59,6 +59,13 @@ type ProjectScope struct {
 	// falls back to the env-configured GATEWAY_OAUTH_* providers. Empty for a
 	// zero-config project, which then behaves exactly as before.
 	OAuth ProjectOAuthConfig
+
+	// Access is the project's authentication allowlist, parsed from config_json.
+	// When non-empty it restricts BOTH provisioning and login to the listed
+	// emails/domains (enforced by enforceProjectAccess at every entry point);
+	// empty imposes no restriction, so a project that configures none behaves
+	// exactly as before.
+	Access ProjectAccessConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -94,6 +101,7 @@ type ResolvedProject struct {
 	Passkey            ProjectPasskeyConfig
 	LoginDefaults      ProjectLoginConfig
 	OAuth              ProjectOAuthConfig
+	Access             ProjectAccessConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

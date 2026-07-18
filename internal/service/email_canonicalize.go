@@ -84,24 +84,39 @@ func canonicalizeEmail(addr string) string {
 		return addr
 	}
 	local := addr[:at]
-	domain := addr[at+1:]
+	domain := canonicalizeDomain(addr[at+1:])
 
 	// Strip plus-tag from local part (universal).
 	if i := strings.Index(local, "+"); i >= 0 {
 		local = local[:i]
 	}
 
-	// Punycode the domain. Errors leave the original domain in place —
-	// validateEmailFormat will catch malformed inputs before this.
+	// canonicalizeDomain has already folded @googlemail.com to @gmail.com, so
+	// this single check covers both shared-inbox domains; dot-stripping in the
+	// local part applies only to them.
+	if domain == "gmail.com" {
+		local = strings.ReplaceAll(local, ".", "")
+	}
+	return local + "@" + domain
+}
+
+// canonicalizeDomain returns the canonical form of a bare email domain, matching
+// the domain handling inside canonicalizeEmail: lower-cased, trimmed,
+// IDN-punycoded so a visually-equivalent unicode domain compares equal, and
+// googlemail.com folded to gmail.com. It is the shared normalizer used both by
+// canonicalizeEmail and by the per-project access allowlist, so a listed domain
+// compares equal to the domain of a canonicalized login email. A domain that
+// cannot be punycoded is left unchanged — validateEmailFormat catches malformed
+// inputs before an email ever reaches this.
+func canonicalizeDomain(domain string) string {
+	domain = strings.TrimSpace(strings.ToLower(domain))
 	if ascii, err := idna.Lookup.ToASCII(domain); err == nil {
 		domain = ascii
 	}
-
 	if gmailDomains[domain] {
-		local = strings.ReplaceAll(local, ".", "")
-		domain = "gmail.com"
+		return "gmail.com"
 	}
-	return local + "@" + domain
+	return domain
 }
 
 // validateEmailFormat is the gate every email-bearing RPC runs before

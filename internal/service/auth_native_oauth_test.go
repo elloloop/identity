@@ -122,6 +122,12 @@ func (f *fakeNativeProjects) ActiveProjectByID(_ context.Context, id string) (*A
 		return nil, nil
 	}
 	cp := *p
+	// These native tests exercise native OAuth, not the access gate, so a fixture
+	// that does not set a mode defaults to open — otherwise default-DENY would
+	// reject every native login here. Access-mode behavior has its own tests.
+	if cp.Access.mode() == "" {
+		cp.Access = ProjectAccessConfig{Mode: AccessModeOpen}
+	}
 	return &cp, nil
 }
 
@@ -173,6 +179,9 @@ func newNativeTestAuthServiceWith(t *testing.T, repo Repository, verifier Native
 	t.Helper()
 	cfg := testConfig()
 	cfg.DefaultProjectID = "proj-default"
+	// The env default project is open in these tests so the no-control-plane
+	// default-project native path exercises native OAuth, not the access gate.
+	cfg.DefaultProjectAccessMode = AccessModeOpen
 	cfg.NativeOAuthEnabled = true
 	cfg.NativeOAuthGoogleAudiences = nativeGoogleAud
 	cfg.NativeOAuthAppleAudiences = nativeAppleAud

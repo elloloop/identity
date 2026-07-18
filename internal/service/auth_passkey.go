@@ -283,6 +283,15 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, err
 	}
 
+	// Project access mode (login context). A valid assertion proves possession of
+	// a stored credential, but a closed/allowlist project must still refuse a user
+	// who is not permitted — otherwise a passkey enrolled before the project was
+	// restricted could authenticate. Login context, so invite-only still admits an
+	// existing user.
+	if err := s.enforceProjectAccessLogin(ctx, user.Email); err != nil {
+		return nil, err
+	}
+
 	// Consult the tenant's LoginPolicy before issuing tokens. A passkey is a
 	// distinct authentication method, so a tenant that disallows it via its
 	// AllowedMethods allow-list — or one that requires SSO — must be honoured

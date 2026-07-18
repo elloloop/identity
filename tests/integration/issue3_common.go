@@ -97,7 +97,9 @@ func loginViaPassword(t *testing.T, h *issue3Harness, email, password string) *i
 
 func newIssue3TestConfig() *config.Config {
 	return &config.Config{
-		DefaultTenantID:               "test-tenant",
+		DefaultTenantID: "test-tenant",
+		// Open-signup deployment fixture (default-DENY requires an explicit mode).
+		DefaultProjectAccessMode:      "open",
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

@@ -27,7 +27,10 @@ func newTestServer(t *testing.T) *identityserver.Server {
 
 	repo := memory.New()
 	cfg := config.Config{ // #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
-		DefaultTenantID:               "tenant",
+		DefaultTenantID: "tenant",
+		// Open the env default project so this mount test drives the handler chain,
+		// not the access gate (default-DENY requires an explicit mode).
+		DefaultProjectAccessMode:      "open",
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

@@ -201,6 +201,16 @@ func (s *AuthService) CompletePasskeySignup(
 	// loses.
 	_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
 
+	// Project access mode (self-signup context): refuse to provision a non-member.
+	// Placed before the existence check so a denied address returns the same
+	// generic error whether or not it already has an account — no existence
+	// oracle — and the guard runs on the canonical bound email the account would
+	// be created under. Invite/closed modes deny; an existing invite-only user
+	// keeps signing in via CompletePasskeyLogin (a login-context check).
+	if err := s.enforceProjectAccessSignup(ctx, boundEmail); err != nil {
+		return nil, err
+	}
+
 	// Anti-takeover + enumeration-safety: an existing account is never given a
 	// new passkey by an unauthenticated caller, and its existence is never
 	// disclosed. Mirror the duplicate-PasswordSignup decoy exactly.

@@ -80,6 +80,11 @@ type AdminProject struct {
 	// the request scope) and ignored on WRITES (CreateProject persists the row,
 	// not the config). Zero value = no per-project OAuth configured.
 	OAuth ProjectOAuthConfig
+
+	// Access is the project's parsed config_json access allowlist, populated on
+	// the same reads as OAuth so native OAuth login binds it to the request scope
+	// and enforces the allowlist. Ignored on writes. Zero value = no restriction.
+	Access ProjectAccessConfig
 }
 
 // AdminProjectCredential is the credential row an operator mints. Only the

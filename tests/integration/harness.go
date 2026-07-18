@@ -686,8 +686,11 @@ const testProjectSecretsKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 func newTestConfig() *config.Config {
 	return &config.Config{
-		DefaultTenantID:                 "test-tenant",
-		ProjectSecretsKey:               testProjectSecretsKey,
+		DefaultTenantID:   "test-tenant",
+		ProjectSecretsKey: testProjectSecretsKey,
+		// Integration harness models an open-signup deployment. Under default-DENY
+		// the mode must be set explicitly (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open).
+		DefaultProjectAccessMode:        "open",
 		AuthAllowLocal:                  true,
 		PasswordSignupEnabled:           true,
 		PasswordResetEnabled:            true,

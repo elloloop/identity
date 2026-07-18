@@ -178,6 +178,25 @@ type Config struct {
 	// GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS.
 	DefaultProjectAuthDomains string
 
+	// DefaultProjectAccessMode is the authentication access mode for the
+	// env-configured default project, which has no config_json to carry an
+	// `access` block: one of "open", "allowlist", "invite", or "closed" (see
+	// service.AccessMode*). It DEFAULTS to "closed" (deny-all) so a deployment
+	// that upgrades and sets nothing fails closed; a consumer product with open
+	// self-signup (e.g. Nesta) sets GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open.
+	// The project-resolution middleware stamps this onto the default-project
+	// scope so the access guard sees a mode on every request. Driven by
+	// GATEWAY_DEFAULT_PROJECT_ACCESS_MODE.
+	DefaultProjectAccessMode string
+
+	// DefaultProjectAllowedEmails / DefaultProjectAllowedDomains are the
+	// comma-separated allowlists applied to the default project when
+	// DefaultProjectAccessMode is "allowlist" (ignored for open/invite/closed).
+	// Driven by GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS /
+	// GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS.
+	DefaultProjectAllowedEmails  string
+	DefaultProjectAllowedDomains string
+
 	// RequireVerifiedAuthDomain governs whether an UNVERIFIED custom
 	// auth-domain marked is_primary may become a project's primary
 	// auth-domain — the host that drives branded link URLs (magic links,
@@ -913,7 +932,13 @@ func Load() *Config {
 		DisableFirstAdminBootstrap: envBool("GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP", false),
 		ProjectSecretsKey:          envStr("GATEWAY_PROJECT_SECRETS_KEY", ""),
 		DefaultProjectAuthDomains:  envStr("GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS", ""),
-		RequireVerifiedAuthDomain:  envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
+		// Default project access mode defaults to "closed" (deny-all): a
+		// deployment that upgrades and configures nothing fails closed. Set
+		// GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open to restore unrestricted signup.
+		DefaultProjectAccessMode:     envStr("GATEWAY_DEFAULT_PROJECT_ACCESS_MODE", "closed"),
+		DefaultProjectAllowedEmails:  envStr("GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS", ""),
+		DefaultProjectAllowedDomains: envStr("GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS", ""),
+		RequireVerifiedAuthDomain:    envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
 
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),
@@ -1176,6 +1201,33 @@ func (c *Config) DefaultProjectAuthDomainList() []string {
 		}
 		seen[h] = true
 		out = append(out, h)
+	}
+	return out
+}
+
+// DefaultProjectAllowedEmailList returns the default project's access
+// allowlist emails (comma-separated), trimmed with blanks dropped. Used only
+// when DefaultProjectAccessMode is "allowlist". Canonicalization happens in the
+// service layer (service.NewProjectAccessConfig), keeping this a pure split.
+func (c *Config) DefaultProjectAllowedEmailList() []string {
+	return splitNonEmptyCSV(c.DefaultProjectAllowedEmails)
+}
+
+// DefaultProjectAllowedDomainList returns the default project's access
+// allowlist domains (comma-separated), trimmed with blanks dropped. Used only
+// when DefaultProjectAccessMode is "allowlist".
+func (c *Config) DefaultProjectAllowedDomainList() []string {
+	return splitNonEmptyCSV(c.DefaultProjectAllowedDomains)
+}
+
+// splitNonEmptyCSV splits a comma-separated value, trimming each entry and
+// dropping blanks. An empty input yields nil.
+func splitNonEmptyCSV(csv string) []string {
+	var out []string
+	for _, raw := range strings.Split(csv, ",") {
+		if v := strings.TrimSpace(raw); v != "" {
+			out = append(out, v)
+		}
 	}
 	return out
 }
