@@ -32,10 +32,11 @@ type configData struct {
 	// and its sign-up toggle to what the server enforces for the project.
 	PasswordLoginEnabled  bool `json:"passwordLoginEnabled"`
 	PasswordSignupEnabled bool `json:"passwordSignupEnabled"`
-	// OAuthProviders are the provider keys the page renders buttons for —
-	// exactly the providers a login attempt through this request's project
-	// would resolve (own config, or the hub's under hub sharing).
-	OAuthProviders []string `json:"oauthProviders"`
+	// OAuthProviders are the providers the page renders buttons for — the
+	// providers a login attempt through this request's project would
+	// resolve (own config, or the hub's under hub sharing), each with the
+	// origin its flow must start on.
+	OAuthProviders []service.HostedUIProvider `json:"oauthProviders"`
 	// HostedOAuthEnabled reports whether the /oauth/start routes are
 	// registered (GATEWAY_OAUTH_ALLOWED_RETURN_URLS non-empty); without
 	// them provider buttons would 404 and are not rendered.
@@ -79,7 +80,7 @@ func Handler(cfg *config.Config, options OptionsSource, hostedOAuthEnabled bool)
 		opts := options.HostedUIOptions(r.Context())
 		providers := opts.OAuthProviders
 		if providers == nil {
-			providers = []string{}
+			providers = []service.HostedUIProvider{}
 		}
 		data := configData{
 			PasswordLoginEnabled:  opts.PasswordLoginEnabled,

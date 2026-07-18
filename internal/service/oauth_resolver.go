@@ -147,38 +147,46 @@ func (r *OAuthResolver) exchangerFor(ctx context.Context, provider string) (oaut
 }
 
 // providersFor returns the provider keys CONFIGURED for the request's
-// project in sorted order, mirroring exchangerFor's precedence without
-// building any Exchanger: the project's own configured providers, plus the
-// default registry's when the request is the default project (or unscoped)
-// or hub sharing is enabled. It backs the hosted auth UI. A configured but
-// unbuildable provider (bad secret) still lists — building every Exchanger
-// per page render would decrypt secrets and hit JWKS/discovery each time;
-// the login attempt itself surfaces the misconfiguration.
-func (r *OAuthResolver) providersFor(ctx context.Context) []string {
+// project, split by where their flow must start, mirroring exchangerFor's
+// precedence without building any Exchanger. own are the providers whose
+// client belongs to the request's project (its config_json ones — and the
+// env registry's when the request IS the default project or unscoped);
+// borrowed are the default project's providers a non-default project may
+// use under hub sharing, whose client is registered for the HUB's callback
+// URL and whose flow must therefore start on the hub origin. Both lists are
+// sorted; a key never appears in both (the project's own config wins). A
+// configured but unbuildable provider (bad secret) still lists — building
+// every Exchanger per page render would decrypt secrets and hit
+// JWKS/discovery each time; the login attempt itself surfaces the
+// misconfiguration.
+func (r *OAuthResolver) providersFor(ctx context.Context) (own, borrowed []string) {
 	if r == nil {
-		return nil
+		return nil, nil
 	}
 	seen := make(map[string]bool)
-	var out []string
-	add := func(providers []string) {
+	add := func(dst *[]string, providers []string) {
 		for _, p := range providers {
 			if !seen[p] {
 				seen[p] = true
-				out = append(out, p)
+				*dst = append(*dst, p)
 			}
 		}
 	}
 	scope := ProjectScopeFromContext(ctx)
 	if scope != nil {
-		add(scope.OAuth.providers())
-		if r.isNonDefaultProject(scope.ProjectID) && !r.hubSharing {
-			sort.Strings(out)
-			return out
+		add(&own, scope.OAuth.providers())
+		if r.isNonDefaultProject(scope.ProjectID) {
+			if r.hubSharing {
+				add(&borrowed, r.defaultRegistry.Providers())
+			}
+			sort.Strings(own)
+			sort.Strings(borrowed)
+			return own, borrowed
 		}
 	}
-	add(r.defaultRegistry.Providers())
-	sort.Strings(out)
-	return out
+	add(&own, r.defaultRegistry.Providers())
+	sort.Strings(own)
+	return own, nil
 }
 
 // isNonDefaultProject reports whether projectID names a project OTHER than the

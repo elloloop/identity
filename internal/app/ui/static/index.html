@@ -308,10 +308,13 @@
 
         // OAuth buttons render only for the providers the server enabled for
         // THIS project, and only when the hosted flow can actually complete:
-        // the /oauth/start routes are mounted and the page knows where to
-        // send the user back (return_to).
+        // the /oauth/start routes are mounted, the page knows where to send
+        // the user back (return_to), and a borrowed (hub-shared) provider —
+        // whose flow must start on the hub origin — has the project_key it
+        // needs to re-scope the callback.
         const oauthProviders = Array.isArray(config.oauthProviders) ? config.oauthProviders : [];
-        const oauthReady = !!config.hostedOAuthEnabled && oauthProviders.length > 0 && returnTo !== '';
+        const renderableProviders = oauthProviders.filter((p) => !p.needsProjectKey || projectKey);
+        const oauthReady = !!config.hostedOAuthEnabled && renderableProviders.length > 0 && returnTo !== '';
         const providerLabels = { google: 'Google', microsoft: 'Microsoft', github: 'GitHub', apple: 'Apple', oidc: 'OIDC' };
 
         function providerLabel(key) {
@@ -321,13 +324,16 @@
 
         if (oauthReady) {
             const container = document.getElementById('oauth-buttons');
-            for (const provider of oauthProviders) {
+            for (const provider of renderableProviders) {
                 const params = new URLSearchParams({ return_to: returnTo });
                 if (projectKey) params.set('project_key', projectKey);
                 const a = document.createElement('a');
                 a.className = 'oauth-btn';
-                a.href = '/oauth/start/' + encodeURIComponent(provider) + '?' + params.toString();
-                a.textContent = 'Continue with ' + providerLabel(provider);
+                // startOrigin routes the flow to the origin the provider's
+                // client is registered for (the project's own auth-domain, or
+                // the hub for a borrowed provider); '' means this origin.
+                a.href = (provider.startOrigin || '') + '/oauth/start/' + encodeURIComponent(provider.key) + '?' + params.toString();
+                a.textContent = 'Continue with ' + providerLabel(provider.key);
                 container.appendChild(a);
             }
             container.style.display = 'flex';
@@ -339,12 +345,15 @@
         if (!passwordEnabled && !oauthReady) {
             // Name the real reason: an OAuth-only project with providers
             // configured may still be un-renderable HERE (hosted flow off,
-            // or the page opened without a return_to destination).
+            // missing return_to, or a hub-shared provider without the
+            // project_key it needs).
             const noMethods = document.getElementById('no-methods');
             if (oauthProviders.length > 0 && !config.hostedOAuthEnabled) {
                 noMethods.textContent = 'OAuth providers are configured, but the hosted sign-in flow is disabled on this server (GATEWAY_OAUTH_ALLOWED_RETURN_URLS is empty).';
             } else if (oauthProviders.length > 0 && returnTo === '') {
-                noMethods.textContent = 'Sign-in with ' + oauthProviders.map(providerLabel).join(', ') + ' is available, but this page was opened without a return_to destination. Use your app\'s sign-in link.';
+                noMethods.textContent = 'Sign-in with ' + oauthProviders.map((p) => providerLabel(p.key)).join(', ') + ' is available, but this page was opened without a return_to destination. Use your app\'s sign-in link.';
+            } else if (oauthProviders.length > 0 && renderableProviders.length === 0) {
+                noMethods.textContent = 'Sign-in for this project goes through the central hub and needs a project_key. Use your app\'s sign-in link.';
             }
             noMethods.style.display = 'block';
         }

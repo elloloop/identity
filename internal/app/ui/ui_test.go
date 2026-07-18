@@ -84,12 +84,16 @@ func TestHandler_InjectsServerConfig(t *testing.T) {
 			want: []string{`"passwordSignupEnabled":false`},
 		},
 		{
-			name:   "providers with hosted flow on",
-			opts:   service.HostedUIOptions{OAuthProviders: []string{"github", "google"}},
+			name: "providers with hosted flow on",
+			opts: service.HostedUIOptions{OAuthProviders: []service.HostedUIProvider{
+				{Key: "github"},
+				{Key: "google", StartOrigin: "https://auth.hub.test", NeedsProjectKey: true},
+			}},
 			hosted: true,
 			want: []string{
 				`"passwordLoginEnabled":false`,
-				`"oauthProviders":["github","google"]`,
+				`{"key":"github","startOrigin":"","needsProjectKey":false}`,
+				`{"key":"google","startOrigin":"https://auth.hub.test","needsProjectKey":true}`,
 				`"hostedOAuthEnabled":true`,
 			},
 		},
@@ -113,7 +117,7 @@ type scopeOptions struct{}
 
 func (scopeOptions) HostedUIOptions(ctx context.Context) service.HostedUIOptions {
 	if sc := service.ProjectScopeFromContext(ctx); sc != nil && sc.ProjectID == "proj-google" {
-		return service.HostedUIOptions{OAuthProviders: []string{"google"}}
+		return service.HostedUIOptions{OAuthProviders: []service.HostedUIProvider{{Key: "google"}}}
 	}
 	return service.HostedUIOptions{PasswordLoginEnabled: true, PasswordSignupEnabled: true}
 }
@@ -125,7 +129,7 @@ func TestHandler_RendersPerRequestProjectOptions(t *testing.T) {
 		ctx := service.WithProjectScope(r.Context(), &service.ProjectScope{ProjectID: "proj-google"})
 		*r = *r.WithContext(ctx)
 	}).Body.String()
-	if !strings.Contains(withScope, `"oauthProviders":["google"]`) {
+	if !strings.Contains(withScope, `"key":"google"`) {
 		t.Error("scoped request must render the project's provider list")
 	}
 	if !strings.Contains(withScope, `"passwordLoginEnabled":false`) {

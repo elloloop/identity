@@ -210,7 +210,11 @@ is still enforced server-side on every login attempt.)
 - **Provider buttons** render for exactly the providers a login attempt
   through that project would resolve — its own `config_json.oauth` providers,
   plus the hub's under `GATEWAY_OAUTH_HUB_SHARING` — and only when the hosted
-  flow is enabled and the page was opened with a `return_to`.
+  flow is enabled and the page was opened with a `return_to`. Each button
+  starts the flow on the origin its provider client is registered for: own
+  providers on the project's auth-domain, borrowed (hub-shared) providers on
+  the hub — a borrowed button therefore also requires the page's
+  `project_key` and is hidden without it.
 - Served on a project's **own auth-domain**, the Host resolves the project.
   Served on the **central hub**, pass the project explicitly:
 
