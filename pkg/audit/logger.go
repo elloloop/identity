@@ -86,24 +86,24 @@ type ProjectScoper func(ctx context.Context) (writer NodeWriter, projectID strin
 type EventType string
 
 const (
-	EventLoginSuccess       EventType = "login_success"
-	EventLoginFailure       EventType = "login_failure"
-	EventLoginLocked        EventType = "login_locked"   // login attempt while account is in lockout window
-	EventAccountLocked      EventType = "account_locked" // threshold tripped, lockout window opened
-	EventLogout             EventType = "logout"
-	EventPasswordChanged    EventType = "password_changed"
-	EventPasswordReset      EventType = "password_reset"
-	EventTotpEnabled        EventType = "totp_enabled"
-	EventTotpDisabled       EventType = "totp_disabled"
-	EventTotpVerified       EventType = "totp_verified"
-	EventPasskeyAdded       EventType = "passkey_added"
-	EventPasskeyRemoved     EventType = "passkey_removed"
-	EventPasskeyUsed        EventType = "passkey_used"
-	EventSessionRevoked     EventType = "session_revoked"
-	EventUserInvited        EventType = "user_invited"
-	EventUserDeactivated    EventType = "user_deactivated"
-	EventUserReactivated    EventType = "user_reactivated"
-	EventUserDeleted        EventType = "user_deleted"
+	EventLoginSuccess    EventType = "login_success"
+	EventLoginFailure    EventType = "login_failure"
+	EventLoginLocked     EventType = "login_locked"   // login attempt while account is in lockout window
+	EventAccountLocked   EventType = "account_locked" // threshold tripped, lockout window opened
+	EventLogout          EventType = "logout"
+	EventPasswordChanged EventType = "password_changed"
+	EventPasswordReset   EventType = "password_reset"
+	EventTotpEnabled     EventType = "totp_enabled"
+	EventTotpDisabled    EventType = "totp_disabled"
+	EventTotpVerified    EventType = "totp_verified"
+	EventPasskeyAdded    EventType = "passkey_added"
+	EventPasskeyRemoved  EventType = "passkey_removed"
+	EventPasskeyUsed     EventType = "passkey_used"
+	EventSessionRevoked  EventType = "session_revoked"
+	EventUserInvited     EventType = "user_invited"
+	EventUserDeactivated EventType = "user_deactivated"
+	EventUserReactivated EventType = "user_reactivated"
+	EventUserDeleted     EventType = "user_deleted"
 
 	// EventAccountDeletionRequested records an authenticated user scheduling
 	// self-service deletion of their OWN account (GDPR Art 17). The account
@@ -113,12 +113,12 @@ const (
 	// the grace window.
 	EventAccountDeletionRequested EventType = "account_deletion_requested"
 	EventAccountDeletionCancelled EventType = "account_deletion_cancelled"
-	EventAdminResetPassword EventType = "admin_reset_password"
-	EventOAuthLogin         EventType = "oauth_login"
-	EventQrLoginApproved    EventType = "qr_login_approved"
-	EventQrLoginRejected    EventType = "qr_login_rejected"
-	EventAdminHelpRequested EventType = "admin_help_requested"
-	EventAdminHelpResolved  EventType = "admin_help_resolved"
+	EventAdminResetPassword       EventType = "admin_reset_password"
+	EventOAuthLogin               EventType = "oauth_login"
+	EventQrLoginApproved          EventType = "qr_login_approved"
+	EventQrLoginRejected          EventType = "qr_login_rejected"
+	EventAdminHelpRequested       EventType = "admin_help_requested"
+	EventAdminHelpResolved        EventType = "admin_help_resolved"
 
 	EventPhoneVerificationRequested EventType = "phone_verification_requested"
 	EventPhoneVerified              EventType = "phone_verified"
