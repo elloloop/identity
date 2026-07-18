@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/pkg/oauth"
 )
 
 // ProjectKeyHeader carries a project's publishable/secret credential
@@ -19,8 +20,11 @@ const ProjectKeyHeader = "X-Project-Key"
 // resolution and threads it through the request context as a
 // service.ProjectScope. Resolution precedence:
 //
-//  1. the X-Project-Key credential header (an explicit, invalid key is
-//     rejected — it is not silently downgraded to the default);
+//  1. the X-Project-Key credential header — or, on the hosted OAuth
+//     routes only, the project_key request parameter / the plaintext key
+//     prefix of the OAuth state (browser redirects cannot carry headers).
+//     An explicit, invalid key is rejected — it is not silently
+//     downgraded to the default;
 //  2. the request Host, matched against a project auth-domain;
 //  3. the configured default project (zero-config single-project pin).
 //
@@ -80,8 +84,20 @@ func (pr *ProjectResolver) middleware(next http.Handler) http.Handler {
 func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*service.ProjectScope, bool) {
 	ctx := r.Context()
 
-	// 1. Explicit credential key — must resolve when present.
-	if key := r.Header.Get(ProjectKeyHeader); key != "" && pr.resolver != nil {
+	// 1. Explicit credential key — must resolve when present. Browser
+	// redirects cannot carry the header, so the hosted OAuth routes also
+	// accept the key from the request parameters (see oauthProjectKey);
+	// an explicit key that does not resolve is rejected either way — it
+	// is never silently downgraded to host/default resolution.
+	key := r.Header.Get(ProjectKeyHeader)
+	if key == "" && strings.HasPrefix(r.URL.Path, oauthPathPrefix) {
+		var ok bool
+		if key, ok = oauthProjectKey(w, r); !ok {
+			writeConnectError(w, http.StatusBadRequest, "invalid_argument", "malformed form body")
+			return nil, false
+		}
+	}
+	if key != "" && pr.resolver != nil {
 		rp, err := pr.resolver.ResolveByCredential(ctx, key)
 		if err != nil {
 			pr.logger.Error("project_resolve_by_key_failed", zap.Error(err))
@@ -120,6 +136,47 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 		StorageScopeID:    pr.defaultScopeID,
 		PrimaryAuthDomain: pr.defaultPrimaryAuthDom,
 	}, true
+}
+
+const (
+	// ProjectKeyParam is the query/form parameter that carries the same
+	// project credential key as ProjectKeyHeader on the hosted OAuth
+	// routes, where browser redirects cannot set headers.
+	ProjectKeyParam = "project_key"
+	// OAuthFormMaxBytes bounds how much of a hosted-OAuth request body is
+	// parsed, both here and in the callback handler — the middleware
+	// parses first, so a larger limit in either place would defeat the
+	// other's.
+	OAuthFormMaxBytes = 1 << 20
+	// oauthPathPrefix scopes the parameter-based project-key extraction to
+	// the browser-facing hosted OAuth routes (/oauth/start, /oauth/callback)
+	// — the only routes a key can arrive without the header.
+	oauthPathPrefix = "/oauth/"
+)
+
+// oauthProjectKey extracts the project key a hosted OAuth request carries in
+// its parameters: the explicit project_key (start), else the plaintext prefix
+// of the composite state (callback — the provider echoes state verbatim, so
+// the key BeginHostedOAuth prefixed survives the round-trip; the signed
+// project_id claim inside the token is verified by CompleteHostedOAuth).
+// ok=false means the form body was malformed or oversized.
+//
+// Only the URL query and an application/x-www-form-urlencoded body are
+// consulted (ParseForm): Apple's form_post callback is urlencoded, and never
+// invoking the multipart parser here keeps attacker-controlled bodies from
+// spilling to memory or disk beyond the cap.
+func oauthProjectKey(w http.ResponseWriter, r *http.Request) (key string, ok bool) {
+	if r.Method == http.MethodPost {
+		r.Body = http.MaxBytesReader(w, r.Body, OAuthFormMaxBytes)
+	}
+	if err := r.ParseForm(); err != nil {
+		return "", false
+	}
+	if key := r.Form.Get(ProjectKeyParam); key != "" {
+		return key, true
+	}
+	key, _ = oauth.SplitProjectKeyState(r.Form.Get("state"))
+	return key, true
 }
 
 func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {

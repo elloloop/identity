@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -80,8 +81,19 @@ func (h *hostedOAuthHandler) handleStart(w http.ResponseWriter, r *http.Request)
 		csrfTokens = nil
 	}
 
+	// The key that scoped this request (already validated by the project
+	// middleware) is threaded into BeginHostedOAuth so it can prefix the
+	// OAuth state — that prefix is how the callback, arriving on the hub
+	// host with no header, re-scopes to the same project. Header first,
+	// matching the middleware's resolution precedence, so the prefixed key
+	// always names the project the request actually resolved to.
+	projectKey := r.Header.Get(middleware.ProjectKeyHeader)
+	if projectKey == "" {
+		projectKey = r.URL.Query().Get(middleware.ProjectKeyParam)
+	}
+
 	redirectURI := h.callbackURL(r, provider)
-	result, err := h.auth.BeginHostedOAuth(r.Context(), provider, redirectURI, returnTo, csrfToken)
+	result, err := h.auth.BeginHostedOAuth(r.Context(), provider, redirectURI, returnTo, csrfToken, projectKey)
 	if err != nil {
 		h.logger.Info("hosted_oauth_start_failed", zap.String("provider", provider), zap.Error(err))
 		status := http.StatusBadRequest
@@ -104,7 +116,7 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if r.Method == http.MethodPost {
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MiB limit
+		r.Body = http.MaxBytesReader(w, r.Body, middleware.OAuthFormMaxBytes)
 	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)

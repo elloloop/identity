@@ -1229,7 +1229,7 @@ func NewAuthServiceWithOAuth(
 		mailer:             mailer,
 		smsSender:          smsSender,
 		logger:             logger,
-		oauthResolver:      newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, logger),
+		oauthResolver:      newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
 		emailThrottle:      newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
 		signupThrottle:     newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
 		phoneThrottle:      newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),

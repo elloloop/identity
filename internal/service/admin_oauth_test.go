@@ -88,7 +88,7 @@ func TestAdminSetProjectOAuthProvider_EncryptsAndResolves(t *testing.T) {
 
 	// The resolver builds the exchanger for this project, proving it can decrypt
 	// and use the authored secret end-to-end (build fails → ok=false otherwise).
-	r := newOAuthResolver("default-proj", nil, zap.NewNop()).withSecrets(testAdminSecretsKey(), nil)
+	r := newOAuthResolver("default-proj", nil, false, zap.NewNop()).withSecrets(testAdminSecretsKey(), nil)
 	rctx := WithProjectScope(ctx, &ProjectScope{ProjectID: projectID, OAuth: cfg.OAuth})
 	if ex, ok := r.exchangerFor(rctx, oauthProviderGoogle); !ok || ex == nil {
 		t.Fatal("resolver could not build the authored google provider")
@@ -151,7 +151,7 @@ func TestAdminSetProjectOAuthProvider_GitHub_RoundTrip(t *testing.T) {
 	}
 
 	// The resolver builds the exchanger for this project end-to-end.
-	r := newOAuthResolver("default-proj", nil, zap.NewNop()).withSecrets(testAdminSecretsKey(), nil)
+	r := newOAuthResolver("default-proj", nil, false, zap.NewNop()).withSecrets(testAdminSecretsKey(), nil)
 	rctx := WithProjectScope(ctx, &ProjectScope{ProjectID: projectID, OAuth: cfg.OAuth})
 	if ex, ok := r.exchangerFor(rctx, oauthProviderGitHub); !ok || ex == nil {
 		t.Fatal("resolver could not build the authored github provider")

@@ -163,6 +163,40 @@ Browser                 identity                       Provider
 3. **`RedeemOAuthCode{code}`** (Connect RPC) — the SPA exchanges the
    one-time code for `{user, access_token, refresh_token, expires_in}`.
 
+### Central-hub routing for non-default projects (`GATEWAY_OAUTH_HUB_SHARING`)
+
+By default a non-default project must configure its **own** providers in
+`config_json` and originate the hosted flow from its **own** auth-domain
+host — strict per-project isolation (ADR-0010). `GATEWAY_OAUTH_HUB_SHARING=true`
+opts a deployment into the Firebase/Auth0 model instead: any project may
+route the hosted flow through the default project's host (the "central
+hub") and, when it has no provider of its own, **borrow the default
+project's provider client** — one registered redirect URI and one client
+id serve every project (ADR-0011).
+
+```
+https://auth.example.com/oauth/start/google?return_to=<app-url>&project_key=<pk>
+```
+
+- `project_key` is the project's credential key (the same value the
+  `X-Project-Key` header carries; browser redirects cannot set headers).
+  The middleware resolves it **before** the handler runs; an unknown key
+  is rejected with `401` — it is never silently downgraded to the
+  default project.
+- The key is prefixed onto the OAuth `state` (`<project_key>:<signed token>`)
+  so the callback — arriving on the hub host with no header — re-scopes
+  to the same project. The signed token additionally carries a
+  `project_id` claim, so the prefix cannot re-route a flow: a mismatch
+  between claim and resolved scope fails the callback.
+- The user and one-time code are created **in the routed project**, and
+  `RedeemOAuthCode` is called with that project's `X-Project-Key` as
+  usual.
+- A project's own `config_json` providers always win over the hub's;
+  borrowing applies only to providers the project did not configure.
+- **Trust caveat**: only enable hub sharing when every project belongs to
+  the same operator as the hub — the provider consent screen shows the
+  shared client's branding for all of them. It is off by default.
+
 ### The one-time code
 
 - Opaque, single-use, ~60s TTL.

@@ -6,6 +6,44 @@ import (
 	"time"
 )
 
+func TestProjectKeyState_JoinSplit(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, key, token string
+	}{
+		{"no key", "", "eyJhbGciOi.eyJmbG93Ijo.c2ln"},
+		{"simple key", "pk_live_abc", "eyJhbGciOi.eyJmbG93Ijo.c2ln"},
+		{"key containing separators", "proj:with:colon", "eyJhbGciOi.eyJmbG93Ijo.c2ln"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			composite := JoinProjectKeyState(tc.key, tc.token)
+			key, token := SplitProjectKeyState(composite)
+			if key != tc.key {
+				t.Errorf("key = %q, want %q", key, tc.key)
+			}
+			if token != tc.token {
+				t.Errorf("token = %q, want %q", token, tc.token)
+			}
+		})
+	}
+}
+
+// A bare token with no prefix splits to an empty key — the default-project
+// flow round-trips unchanged.
+func TestProjectKeyState_SplitBareToken(t *testing.T) {
+	t.Parallel()
+
+	key, token := SplitProjectKeyState("eyJhbGciOi.eyJmbG93Ijo.c2ln")
+	if key != "" {
+		t.Errorf("key = %q, want empty", key)
+	}
+	if token != "eyJhbGciOi.eyJmbG93Ijo.c2ln" {
+		t.Errorf("token = %q", token)
+	}
+}
+
 func TestHostedStateToken_RoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -21,6 +59,7 @@ func TestHostedStateToken_RoundTrip(t *testing.T) {
 		"state-abc",
 		"verifier-abc",
 		"csrf-123",
+		"proj-123",
 		5*time.Minute,
 		now,
 	)
@@ -47,6 +86,9 @@ func TestHostedStateToken_RoundTrip(t *testing.T) {
 	if claims.CSRFToken != "csrf-123" {
 		t.Errorf("csrf_token = %q", claims.CSRFToken)
 	}
+	if claims.ProjectID != "proj-123" {
+		t.Errorf("project_id = %q", claims.ProjectID)
+	}
 }
 
 func TestHostedStateToken_RejectsExpired(t *testing.T) {
@@ -57,7 +99,7 @@ func TestHostedStateToken_RejectsExpired(t *testing.T) {
 
 	token, err := IssueHostedStateToken(
 		context.Background(), ring,
-		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c",
+		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c", "proj-123",
 		5*time.Minute, now,
 	)
 	if err != nil {
@@ -76,7 +118,7 @@ func TestHostedStateToken_RejectsTampered(t *testing.T) {
 
 	token, err := IssueHostedStateToken(
 		context.Background(), ring,
-		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c",
+		"google", "https://identity.example.com/cb", "https://app.example.com/", "s", "v", "c", "proj-123",
 		5*time.Minute, now,
 	)
 	if err != nil {
@@ -128,7 +170,7 @@ func TestHostedStateToken_MissingClaims(t *testing.T) {
 	ring := newOAuthStateSigner(t)
 	now := time.Now().UTC()
 	if _, err := IssueHostedStateToken(
-		context.Background(), ring, "google", "https://cb", "", "s", "v", "c", time.Minute, now,
+		context.Background(), ring, "google", "https://cb", "", "s", "v", "c", "proj-123", time.Minute, now,
 	); err == nil {
 		t.Fatal("IssueHostedStateToken should reject an empty return_to")
 	}

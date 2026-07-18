@@ -350,6 +350,18 @@ type Config struct {
 	// RPCs are unaffected. Driven by GATEWAY_OAUTH_ALLOWED_RETURN_URLS.
 	OAuthAllowedReturnURLs string
 
+	// OAuthHubSharing lets a non-default project with no OAuth provider of its
+	// own borrow the default project's env-configured providers when routing
+	// hosted OAuth through the central hub (the Firebase/Auth0 model: one
+	// provider client + one registered redirect URI serve every project).
+	// It is a deployment-level opt-in because it is only safe when all
+	// projects belong to the same trust domain as the hub — the provider
+	// consent screen shows the shared client's branding. A project's own
+	// config_json.oauth providers always take precedence (ADR-0011). Driven
+	// by GATEWAY_OAUTH_HUB_SHARING; defaults false (strict ADR-0010
+	// isolation).
+	OAuthHubSharing bool
+
 	// OAuthPrompt is the OAuth `prompt` parameter forwarded to providers that
 	// support it (Google, Microsoft) on the hosted authorization request.
 	// Defaults to "select_account" so a signed-in user is always offered the
@@ -953,6 +965,7 @@ func Load() *Config {
 		OIDCScopes:       envStr("GATEWAY_OAUTH_OIDC_SCOPES", ""),
 
 		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
+		OAuthHubSharing:        envBool("GATEWAY_OAUTH_HUB_SHARING", false),
 		OAuthPrompt:            envStrRaw("GATEWAY_OAUTH_PROMPT", "select_account"),
 
 		NativeOAuthGoogleAudiences:    envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),

@@ -39,7 +39,7 @@ type HostedOAuthBeginResult struct {
 // BeginOAuthLogin uses — there is no forked authorization path.
 func (s *AuthService) BeginHostedOAuth(
 	ctx context.Context,
-	provider, redirectURI, returnTo, csrfToken string,
+	provider, redirectURI, returnTo, csrfToken, projectKey string,
 ) (*HostedOAuthBeginResult, error) {
 	if !s.oauthResolver.available(ctx) {
 		return nil, ErrOAuthDisabled
@@ -75,6 +75,12 @@ func (s *AuthService) BeginHostedOAuth(
 	if err != nil {
 		return nil, fmt.Errorf("generating oauth code verifier: %w", err)
 	}
+
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil {
+		return nil, fmt.Errorf("%w: missing project scope", ErrUnauthenticated)
+	}
+
 	stateToken, err := oauth.IssueHostedStateToken(
 		ctx,
 		s.signer,
@@ -84,12 +90,19 @@ func (s *AuthService) BeginHostedOAuth(
 		state,
 		codeVerifier,
 		csrfToken,
+		scope.ProjectID,
 		oauthStateTokenExpiry,
 		s.nowFunc().UTC(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 	}
+
+	// A hub-routed request additionally carries the plaintext project key
+	// in front of the signed token, so the callback middleware can scope
+	// the request before verification; the signed project_id claim is what
+	// actually binds the flow to the project.
+	stateToken = oauth.JoinProjectKeyState(projectKey, stateToken)
 
 	// The signed hosted state token IS the OAuth `state` parameter, so
 	// the single callback URL can recover provider + verifier + return_to
@@ -131,6 +144,8 @@ func (s *AuthService) CompleteHostedOAuth(
 	providerFromPath, code, stateToken, appleUserPayload, ipAddr, userAgent string,
 	csrfTokens []string,
 ) (*HostedOAuthCallbackResult, error) {
+	_, stateToken = oauth.SplitProjectKeyState(stateToken)
+
 	claims, err := oauth.VerifyHostedStateToken(stateToken, s.signer, s.nowFunc().UTC())
 	if err != nil {
 		s.logger.Info("hosted_oauth_state_validation_failed", zap.Error(err))
@@ -148,6 +163,15 @@ func (s *AuthService) CompleteHostedOAuth(
 		s.logger.Info("hosted_oauth_provider_mismatch",
 			zap.String("path_provider", want), zap.String("token_provider", claims.Provider))
 		return nil, fmt.Errorf("%w: provider mismatch", ErrUnauthenticated)
+	}
+
+	// The token's project_id claim must name the project the request
+	// resolved to: a state minted for project A cannot complete a login in
+	// project B, whatever prefix or host the callback arrived with.
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil || claims.ProjectID != scope.ProjectID {
+		s.logger.Info("hosted_oauth_project_mismatch", zap.String("expected", claims.ProjectID))
+		return nil, fmt.Errorf("%w: project mismatch", ErrUnauthenticated)
 	}
 
 	// Reuse the headless exchange end to end: same state-token-free path
