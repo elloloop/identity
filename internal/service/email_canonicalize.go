@@ -102,11 +102,10 @@ func canonicalizeEmail(addr string) string {
 
 // canonicalizeDomain returns the canonical form of a bare email domain,
 // mirroring the domain handling inside canonicalizeEmail so a domain compared on
-// its own resolves identically to the domain of a canonicalized address:
-// lower-cased, trimmed, IDN-punycoded so a visually-equivalent unicode domain
-// compares equal, and googlemail.com folded to gmail.com. A domain that cannot
-// be punycoded is left unchanged — validateEmailFormat catches malformed inputs
-// before an email ever reaches this.
+// its own resolves identically to the domain of a canonicalized address (IDN
+// punycoding makes visually-equivalent unicode domains compare equal). A domain
+// that cannot be punycoded is returned unchanged — validateEmailFormat rejects
+// malformed inputs upstream.
 func canonicalizeDomain(domain string) string {
 	domain = strings.TrimSpace(strings.ToLower(domain))
 	if ascii, err := idna.Lookup.ToASCII(domain); err == nil {

@@ -81,9 +81,10 @@ type AdminProject struct {
 	// not the config). Zero value = no per-project OAuth configured.
 	OAuth ProjectOAuthConfig
 
-	// Access is the project's parsed config_json access allowlist, populated on
-	// the same reads as OAuth so native OAuth login binds it to the request scope
-	// and enforces the allowlist. Ignored on writes. Zero value = no restriction.
+	// Access is the project's parsed config_json access policy, populated on the
+	// same reads as OAuth so native OAuth login binds it to the request scope and
+	// enforces the mode. Ignored on writes. DEFAULT-DENY: a zero value (empty or
+	// unset mode) fails closed and denies all authentication.
 	Access ProjectAccessConfig
 }
 

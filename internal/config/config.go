@@ -1220,8 +1220,8 @@ func (c *Config) DefaultProjectAllowedDomainList() []string {
 	return splitNonEmptyCSV(c.DefaultProjectAllowedDomains)
 }
 
-// splitNonEmptyCSV splits a comma-separated value, trimming each entry and
-// dropping blanks. An empty input yields nil.
+// splitNonEmptyCSV drops blank entries and yields nil (not an empty slice) for
+// empty input, so an unset allowlist env var reads as "no entries".
 func splitNonEmptyCSV(csv string) []string {
 	var out []string
 	for _, raw := range strings.Split(csv, ",") {

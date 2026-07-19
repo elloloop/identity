@@ -564,7 +564,8 @@ func NewProjectAccessConfig(mode string, allowedEmails, allowedDomains []string)
 	return a.canonicalized(), nil
 }
 
-// mode returns the normalized (trimmed, lower-cased) access mode.
+// mode normalizes the raw mode (trim + lower-case) so comparisons against the
+// AccessMode* constants hold regardless of config casing or whitespace.
 func (a ProjectAccessConfig) mode() string {
 	return strings.TrimSpace(strings.ToLower(a.Mode))
 }
@@ -597,9 +598,9 @@ func (a ProjectAccessConfig) validate() error {
 	return nil
 }
 
-// validateEntries checks each allowlist entry is well-formed: emails via the
-// same validateEmailFormat gate every email-bearing RPC runs; domains as a bare
-// domain (no '@') carrying a dot.
+// validateEntries rejects malformed allowlist entries up front, routing emails
+// through the same validateEmailFormat gate as every email-bearing RPC so the
+// allowlist can never admit an address the system would otherwise reject.
 func (a ProjectAccessConfig) validateEntries() error {
 	for _, raw := range a.AllowedEmails {
 		e := strings.TrimSpace(raw)
@@ -647,11 +648,9 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 }
 
 // permits reports whether canonicalEmail is on the allowlist. The caller MUST
-// pass an already-canonicalized email (canonicalizeEmail); the entries were
-// canonicalized at parse time, so the comparison is like-against-like. It is a
-// pure set-membership predicate: canonicalEmail is permitted iff it is in
-// AllowedEmails OR its domain is in AllowedDomains. Only consulted for
-// AccessModeAllowlist.
+// pass an already-canonicalized email (canonicalizeEmail): entries are
+// canonicalized at parse time, so a raw address would spuriously miss. Only
+// consulted for AccessModeAllowlist.
 func (a ProjectAccessConfig) permits(canonicalEmail string) bool {
 	for _, e := range a.AllowedEmails {
 		if e == canonicalEmail {

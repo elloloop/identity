@@ -108,9 +108,9 @@ func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email string) bo
 	}
 }
 
-// userExists reports whether an account is stored under email. A lookup error
-// is treated as "does not exist" so, on the failure path, the caller fails
-// closed rather than acting as though an account is present.
+// userExists treats a lookup error as "does not exist" so the caller fails
+// closed on the DB-error path rather than admitting a send as though an account
+// were present.
 func (s *AuthService) userExists(ctx context.Context, email string) bool {
 	u, err := s.repo(ctx).FindUserByEmail(ctx, email)
 	if err != nil {
