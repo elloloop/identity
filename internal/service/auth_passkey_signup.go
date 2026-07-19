@@ -62,6 +62,15 @@ func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName 
 	// human maps to one account regardless of gmail dot/+tag variants.
 	email = canonicalizeEmail(email)
 
+	// Fail fast on a project that forbids self-signup, before building the
+	// WebAuthn challenge or emailing an OTP — otherwise the user completes a full
+	// biometric ceremony only to have a silently-dropped OTP never arrive. The
+	// check is DB-free (email + config only), so failing fast leaks no
+	// account-existence signal; this mirrors PasswordSignup.
+	if err := s.enforceProjectAccessSignup(ctx, email); err != nil {
+		return "", "", err
+	}
+
 	newUserID := s.newPasskeySignupUserID()
 
 	optionsJSON, challengeB64, err := s.passkeysFor(ctx).BeginRegistration(
@@ -85,20 +94,11 @@ func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName 
 	}
 
 	// Email the in-flow proof-of-control OTP. Enumeration-safe and silent
-	// (throttle/send failures are logged, never surfaced), exactly like
-	// RequestEmailLoginCode — keyed by the same canonical email the challenge
-	// is bound to, so CompletePasskeySignup verifies against the matching code.
-	//
-	// Gated on the project access mode (SIGNUP context): a closed, invite-only, or
-	// off-list allowlist project must not emit the signup OTP. The response
-	// (options + challengeID) is returned unchanged so the ceremony looks
-	// identical to an allowed one (no enumeration signal); CompletePasskeySignup
-	// is the authoritative deny.
-	if s.accessAllowsCodeSend(ctx, email, true) {
-		s.sendEmailLoginCode(ctx, email)
-	} else {
-		s.logger.Info("passkey_signup_otp_suppressed_by_access", zap.String("email", redactEmail(email)))
-	}
+	// (throttle/send failures are logged, never surfaced), keyed by the same
+	// canonical email the challenge is bound to, so CompletePasskeySignup
+	// verifies against the matching code. Access was already enforced above, so
+	// reaching here means the send is permitted.
+	s.sendEmailLoginCode(ctx, email)
 
 	s.logger.Info(
 		"passkey_signup_begin",

@@ -427,17 +427,13 @@ func TestProjectAccess_Invite_SelfSignupDeniedAllMethods(t *testing.T) {
 	})
 
 	t.Run("passkey", func(t *testing.T) {
-		svc, repo, rec := newPasskeyVectorSvc(t)
+		svc, _, rec := newPasskeyVectorSvc(t)
 		ctx := accessScope(t, ctxJSON)
+		// invite mode fails the ceremony fast: no challenge, no OTP.
 		_, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "Key")
-		require.NoError(t, err)
-		// invite suppresses the signup OTP (Blocker 1); seed a valid one past the
-		// gate so the ceremony reaches the redemption-phase signup guard.
-		require.Empty(t, rec.Sent(), "invite mode must not email a passkey-signup OTP")
-		seedEmailLoginCode(t, repo, pkVectorEmail, "123456")
-		setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
-		_, err = svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, "123456", "Key", "1.2.3.4", "a")
 		require.ErrorIs(t, err, ErrSignupByInvitationOnly)
+		assert.Empty(t, challengeID)
+		assert.Empty(t, rec.Sent())
 	})
 }
 
@@ -565,37 +561,59 @@ func TestProjectAccess_RequestMagicLink_SendGatedByMode(t *testing.T) {
 	assert.Equal(t, 0, send(t, `{"access":{"mode":"closed"}}`), "closed must not send the magic link")
 }
 
-func TestProjectAccess_BeginPasskeySignup_OTPGatedByMode(t *testing.T) {
+// BeginPasskeySignup FAILS FAST on a project that forbids self-signup — the
+// access check is DB-free, so it can deny before building the WebAuthn challenge
+// or emailing an OTP (no biometric-ceremony-then-silent-drop UX). A denied
+// begin returns no options, no challenge, and sends no OTP.
+func TestProjectAccess_BeginPasskeySignup_FailFastByMode(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		cfgJSON  string
-		wantSent bool
+		name    string
+		cfgJSON string
+		wantErr error // nil = permitted
 	}{
-		{"open_sends", `{"access":{"mode":"open"}}`, true},
-		{"closed_never_sends", `{"access":{"mode":"closed"}}`, false},
-		{"invite_signup_dropped", `{"access":{"mode":"invite"}}`, false},
-		{"allowlist_onlist_sends", `{"access":{"mode":"allowlist","allowed_domains":["example.org"]}}`, true},
-		{"allowlist_offlist_dropped", `{"access":{"mode":"allowlist","allowed_domains":["cursive.ai"]}}`, false},
+		{"open_permits", `{"access":{"mode":"open"}}`, nil},
+		{"allowlist_onlist_permits", `{"access":{"mode":"allowlist","allowed_domains":["example.org"]}}`, nil},
+		{"closed_denies", `{"access":{"mode":"closed"}}`, ErrAccessNotAllowed},
+		{"invite_denies", `{"access":{"mode":"invite"}}`, ErrSignupByInvitationOnly},
+		{"allowlist_offlist_denies", `{"access":{"mode":"allowlist","allowed_domains":["cursive.ai"]}}`, ErrAccessNotAllowed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, _, rec := newPasskeyVectorSvc(t)
 			ctx := accessScope(t, tc.cfgJSON)
 
-			// Response is identical: options + challengeID always returned, so the
-			// ceremony looks the same whether or not the OTP was mailed.
 			optionsJSON, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "Key")
-			require.NoError(t, err)
-			require.NotEmpty(t, optionsJSON)
-			require.NotEmpty(t, challengeID)
-
-			got := len(rec.Sent())
-			if tc.wantSent {
-				assert.Equal(t, 1, got, "expected a signup OTP email")
-			} else {
-				assert.Equal(t, 0, got, "expected NO signup OTP email (spam/abuse gate)")
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+				require.NotEmpty(t, optionsJSON)
+				require.NotEmpty(t, challengeID)
+				require.Len(t, rec.Sent(), 1, "a permitted signup emails the in-flow OTP")
+				return
 			}
+			require.ErrorIs(t, err, tc.wantErr)
+			assert.Empty(t, optionsJSON, "denied begin must not return options")
+			assert.Empty(t, challengeID, "denied begin must not create a challenge")
+			assert.Empty(t, rec.Sent(), "denied begin must not email an OTP")
 		})
 	}
+}
+
+// A project flipped to a signup-denying mode BETWEEN begin and complete is
+// still refused at CompletePasskeySignup (defense in depth), and no account is
+// created.
+func TestProjectAccess_PasskeySignup_FlippedDenyBetweenBeginAndComplete(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+
+	open := accessScope(t, `{"access":{"mode":"open"}}`)
+	_, challengeID, err := svc.BeginPasskeySignup(open, pkVectorEmail, "Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, pkVectorEmail)
+	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
+
+	closed := accessScope(t, `{"access":{"mode":"closed"}}`)
+	_, err = svc.CompletePasskeySignup(closed, challengeID, pkRegCredentialJSON(t), pkVectorEmail, otp, "Key", "1.2.3.4", "a")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+	got, _ := repo.FindUserByEmail(context.Background(), pkVectorEmail)
+	assert.Nil(t, got, "a denied completion must not create an account")
 }
 
 // ── Blocker 2: RefreshToken re-validates the project access mode ─────────

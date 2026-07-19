@@ -100,14 +100,13 @@ func canonicalizeEmail(addr string) string {
 	return local + "@" + domain
 }
 
-// canonicalizeDomain returns the canonical form of a bare email domain, matching
-// the domain handling inside canonicalizeEmail: lower-cased, trimmed,
-// IDN-punycoded so a visually-equivalent unicode domain compares equal, and
-// googlemail.com folded to gmail.com. It is the shared normalizer used both by
-// canonicalizeEmail and by the per-project access allowlist, so a listed domain
-// compares equal to the domain of a canonicalized login email. A domain that
-// cannot be punycoded is left unchanged — validateEmailFormat catches malformed
-// inputs before an email ever reaches this.
+// canonicalizeDomain returns the canonical form of a bare email domain,
+// mirroring the domain handling inside canonicalizeEmail so a domain compared on
+// its own resolves identically to the domain of a canonicalized address:
+// lower-cased, trimmed, IDN-punycoded so a visually-equivalent unicode domain
+// compares equal, and googlemail.com folded to gmail.com. A domain that cannot
+// be punycoded is left unchanged — validateEmailFormat catches malformed inputs
+// before an email ever reaches this.
 func canonicalizeDomain(domain string) string {
 	domain = strings.TrimSpace(strings.ToLower(domain))
 	if ascii, err := idna.Lookup.ToASCII(domain); err == nil {

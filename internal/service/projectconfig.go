@@ -551,12 +551,11 @@ type ProjectAccessConfig struct {
 	AllowedDomains []string `json:"allowed_domains"`
 }
 
-// NewProjectAccessConfig builds and validates an access policy from the parts
-// an operator supplies out-of-band for the env-configured default project
-// (which has no config_json to carry one). It applies the SAME validation and
-// canonicalization as the config_json path, so the default project is gated by
-// identical rules. A malformed spec is returned as an error the caller must
-// surface (app.New fails to boot) — never silently downgraded.
+// NewProjectAccessConfig builds and validates an access policy from separate
+// mode + allowlist parts (as opposed to a config_json blob), applying the SAME
+// validation and canonicalization as the config_json path so both are gated by
+// identical rules. A malformed spec is returned as an error — never silently
+// downgraded to open.
 func NewProjectAccessConfig(mode string, allowedEmails, allowedDomains []string) (ProjectAccessConfig, error) {
 	a := ProjectAccessConfig{Mode: mode, AllowedEmails: allowedEmails, AllowedDomains: allowedDomains}
 	if err := a.validate(); err != nil {

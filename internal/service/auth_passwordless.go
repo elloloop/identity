@@ -83,11 +83,10 @@ func (s *AuthService) RequestEmailLoginCode(ctx context.Context, emailAddr strin
 		s.logger.Info("email_login_code_requested_invalid_email")
 		return nil
 	}
-	// Gate the SEND on the project access mode (login context): a closed or
-	// off-list project must not emit an OTP to an arbitrary address. The response
-	// is unchanged (always nil) whether or not we send, so this adds no
-	// enumeration signal; the authoritative deny is at VerifyEmailLoginCode.
-	if !s.accessAllowsCodeSend(ctx, emailAddr, false) {
+	// A closed or off-list project must not emit an OTP to an arbitrary address.
+	// The response is unchanged (nil) whether or not we send, preserving
+	// anti-enumeration; the authoritative deny is at VerifyEmailLoginCode.
+	if !s.accessAllowsCodeSend(ctx, emailAddr) {
 		s.logger.Info("email_login_code_send_suppressed_by_access",
 			zap.String("email", redactEmail(emailAddr)))
 		return nil
@@ -252,11 +251,10 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 		return nil
 	}
 
-	// Gate the SEND on the project access mode (login context), mirroring
-	// RequestEmailLoginCode: a closed or off-list project must not email a
-	// sign-in link to an arbitrary address. Response is unchanged (nil) either
-	// way; the authoritative deny is at RedeemMagicLink.
-	if !s.accessAllowsCodeSend(ctx, emailAddr, false) {
+	// A closed or off-list project must not email a sign-in link to an arbitrary
+	// address. Response is unchanged (nil) either way, preserving
+	// anti-enumeration; the authoritative deny is at RedeemMagicLink.
+	if !s.accessAllowsCodeSend(ctx, emailAddr) {
 		s.logger.Info("magic_link_send_suppressed_by_access",
 			zap.String("email", redactEmail(emailAddr)))
 		return nil

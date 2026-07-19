@@ -75,21 +75,22 @@ func (s *AuthService) enforceProjectAccess(ctx context.Context, email string, is
 	return ErrAccessNotAllowed
 }
 
-// accessAllowsCodeSend reports whether a REQUEST-PHASE credential email (a
-// passwordless OTP, a magic link, or the passkey-signup OTP) may be dispatched
-// to email under the resolved project's access mode. It never surfaces a denial
-// — the authoritative deny stays at redemption — so callers use it only to
-// SILENTLY skip the send while returning their usual enumeration-safe response.
+// accessAllowsCodeSend reports whether a request-phase LOGIN credential email (a
+// passwordless OTP or magic link) may be dispatched to email under the resolved
+// project's access mode. It exists for the login endpoints that must stay
+// enumeration-safe: a fail-fast denial there would leak account existence, so
+// instead the send is silently skipped while the response is unchanged, and the
+// authoritative deny happens at redemption. (Self-signup endpoints do not use
+// this — they fail fast, since their access check is DB-free and leaks nothing.)
 //
-// It gates spam/SMTP-abuse: a closed or off-list allowlist project must not emit
-// credential mail to arbitrary addresses. For invite mode a login-context
-// request (isSignup=false) may send only to an already-provisioned user, since
-// self-signup is denied at redemption anyway and an OTP to a stranger would be
-// undeliverable spam; a signup-context request (isSignup=true) never sends.
+// It gates spam/SMTP-abuse — a closed or off-list allowlist project must not
+// emit credential mail to arbitrary addresses. Invite mode may send only to an
+// already-provisioned user, because self-signup is denied at redemption anyway
+// and an OTP to a stranger would be undeliverable spam.
 //
-// It fails CLOSED: no permit → no send. A user-existence lookup error (invite
-// mode only) also suppresses the send rather than risk mailing a stranger.
-func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email string, isSignup bool) bool {
+// It fails CLOSED: no permit → no send, and a user-existence lookup error also
+// suppresses the send.
+func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email string) bool {
 	scope := ProjectScopeFromContext(ctx)
 	if scope == nil {
 		return true
@@ -100,17 +101,16 @@ func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email string, is
 	case AccessModeAllowlist:
 		return scope.Access.permits(canonicalizeEmail(email))
 	case AccessModeInvite:
-		return !isSignup && s.userExists(ctx, email)
+		return s.userExists(ctx, email)
 	default:
 		// AccessModeClosed and any unset/unrecognized mode: never send.
 		return false
 	}
 }
 
-// userExists reports whether an account is stored under email (the lookup key
-// the redemption path uses). Used only by the invite-mode send decision; a
-// lookup error is treated as "does not exist" so a transient failure suppresses
-// the send rather than mailing a possibly-disallowed address.
+// userExists reports whether an account is stored under email. A lookup error
+// is treated as "does not exist" so, on the failure path, the caller fails
+// closed rather than acting as though an account is present.
 func (s *AuthService) userExists(ctx context.Context, email string) bool {
 	u, err := s.repo(ctx).FindUserByEmail(ctx, email)
 	if err != nil {

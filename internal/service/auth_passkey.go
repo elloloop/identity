@@ -283,11 +283,9 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, err
 	}
 
-	// Project access mode (login context). A valid assertion proves possession of
-	// a stored credential, but a closed/allowlist project must still refuse a user
-	// who is not permitted — otherwise a passkey enrolled before the project was
-	// restricted could authenticate. Login context, so invite-only still admits an
-	// existing user.
+	// A valid assertion proves credential possession, but a closed/allowlist
+	// project must still refuse a non-member — otherwise a passkey enrolled
+	// before the project was restricted would keep working.
 	if err := s.enforceProjectAccessLogin(ctx, user.Email); err != nil {
 		return nil, err
 	}

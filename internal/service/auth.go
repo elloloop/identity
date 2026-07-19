@@ -858,17 +858,13 @@ var (
 	ErrPermissionDenied = errors.New("permission denied")
 	ErrInvalidArgument  = errors.New("invalid argument")
 	ErrNotFound         = errors.New("not found")
-	// ErrAccessNotAllowed is returned when a project's access mode
-	// (config_json access.mode, or GATEWAY_DEFAULT_PROJECT_ACCESS_MODE for the
-	// default project) denies the authenticating email: an allowlist mode whose
-	// list omits the email, a closed mode, or an unset/unrecognized mode (the
-	// default-DENY posture). It gates provisioning (OAuth/OTP/magic-link JIT
-	// create, password signup, passkey signup), login for an existing user, and
-	// invitation acceptance. Unlike ErrPermissionDenied (a login-method policy
-	// denial) it is a membership denial, kept as a distinct sentinel so callers
-	// and tests can tell the two apart; both map to CodePermissionDenied. The
-	// message is deliberately generic — it discloses neither whether an account
-	// exists nor the allowlist's contents.
+	// ErrAccessNotAllowed is returned when a project's access mode denies the
+	// authenticating email: an allowlist mode whose list omits the email, a
+	// closed mode, or an unset/unrecognized mode (the default-DENY posture). It
+	// is a membership denial, distinct from ErrPermissionDenied (a login-method
+	// policy denial) so the two can be told apart; both map to
+	// CodePermissionDenied. The message is deliberately generic — it discloses
+	// neither whether an account exists nor the allowlist's contents.
 	ErrAccessNotAllowed = errors.New("access not allowed for this project")
 	// ErrSignupByInvitationOnly is returned when a project's access mode is
 	// "invite": self-signup is blocked, but login for an existing user and
@@ -1268,12 +1264,10 @@ func NewAuthServiceWithOAuth(
 }
 
 // buildDefaultProjectAccess parses the env-configured default project's access
-// policy (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE + allowlists) ONCE at construction,
-// so the native-login default-project fallback does not re-split the CSVs and
-// re-punycode the domains on every request. It fails CLOSED: an invalid spec
-// (only reachable from a directly-constructed Config, since app.New validates it
-// at boot) yields a deny-all closed policy rather than an open one, and logs a
-// WARN so the misconfiguration is visible.
+// policy (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE + allowlists) ONCE, so the value
+// is canonicalized a single time rather than re-split and re-punycoded per use.
+// It fails CLOSED: an invalid spec yields a deny-all closed policy rather than
+// an open one, and logs a WARN so the misconfiguration is visible.
 func buildDefaultProjectAccess(cfg *config.Config, logger *zap.Logger) ProjectAccessConfig {
 	access, err := NewProjectAccessConfig(
 		cfg.DefaultProjectAccessMode,
