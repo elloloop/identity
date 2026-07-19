@@ -98,6 +98,13 @@ type Options struct {
 	// only on the postgres control-plane driver, where the DomainService is
 	// wired; other drivers leave the domain RPCs Unimplemented.
 	DNSResolver service.DNSResolver
+
+	// SynchronousEmailSend forces request-phase credential emails to send
+	// inline rather than on a detached goroutine. Production leaves it false
+	// (async, so SMTP latency cannot time the gated send decision); full-stack
+	// tests that read the recording mailer immediately after a request set it
+	// true for deterministic observation.
+	SynchronousEmailSend bool
 }
 
 // OptionsFromEnv loads Options from the environment exactly as the

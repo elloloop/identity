@@ -97,12 +97,22 @@ func (s *AuthService) RequestEmailLoginCode(ctx context.Context, emailAddr strin
 
 // sendEmailLoginCode mints, stores, and emails a fresh 6-digit OTP for the
 // (already-normalized/canonical) address, honouring the per-email send
-// cooldown. It is the single mint-and-dispatch primitive shared by the
-// passwordless email-code arm and passkey-first signup, so both produce an
-// identical, enumeration-safe observable: it is silent — throttled, render, and
-// send failures are logged, never surfaced — and behaves the same whether or
-// not the address has an account (the account, if any, is never looked up here).
+// cooldown. It is the single mint-and-dispatch primitive for the passwordless
+// email-code arm and passkey-first signup: silent (throttled, render, and send
+// failures are logged, never surfaced) and behaving the same whether or not the
+// address has an account (the account, if any, is never looked up here).
+//
+// The whole body runs via dispatchEmailSend so the SMTP latency never times the
+// RPC response. The mint→store→send ordering is preserved inside that unit, so
+// any delivered email implies the code was already stored — no redemption race.
 func (s *AuthService) sendEmailLoginCode(ctx context.Context, emailAddr string) {
+	s.dispatchEmailSend(ctx, "email_login_code", func(ctx context.Context) {
+		s.sendEmailLoginCodeNow(ctx, emailAddr)
+	})
+}
+
+// sendEmailLoginCodeNow is the synchronous body of sendEmailLoginCode.
+func (s *AuthService) sendEmailLoginCodeNow(ctx context.Context, emailAddr string) {
 	// Per-email send cooldown — a single inbox can't be flooded. Reuses
 	// the shared transactional-email throttle. A throttled request is
 	// silent (same response as success) so the cooldown can't be probed.
@@ -260,9 +270,23 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 		return nil
 	}
 
+	// Mint + email the link off the request goroutine so SMTP latency never times
+	// the RPC. The token is stored before the email inside this unit, so a
+	// delivered link always has a redeemable token — no race with RedeemMagicLink.
+	s.dispatchEmailSend(ctx, "magic_link", func(ctx context.Context) {
+		s.sendMagicLinkNow(ctx, emailAddr, returnTo)
+	})
+	return nil
+}
+
+// sendMagicLinkNow is the synchronous body of RequestMagicLink's dispatch: it
+// honours the per-email cooldown, mints and stores the single-use token, then
+// emails the link. Silent — throttle/create/render/send failures are logged,
+// never surfaced.
+func (s *AuthService) sendMagicLinkNow(ctx context.Context, emailAddr, returnTo string) {
 	if !s.emailThrottle.allow(emailAddr, s.nowMs()) {
 		s.logger.Info("magic_link_throttled", zap.String("email", redactEmail(emailAddr)))
-		return nil
+		return
 	}
 
 	rawToken := randomToken(32)
@@ -277,7 +301,7 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 	}); err != nil {
 		s.logger.Warn("magic_link_create_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
-		return nil
+		return
 	}
 
 	link := fmt.Sprintf("%s/auth/magic-link?token=%s", s.appBaseURL(ctx), rawToken)
@@ -288,7 +312,7 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 	}))
 	if err != nil {
 		s.logger.Warn("magic_link_render_failed", zap.Error(err))
-		return nil
+		return
 	}
 	msg := email.Message{
 		To:      emailAddr,
@@ -303,7 +327,6 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
 	}
 	s.logger.Info("magic_link_requested", zap.String("email", redactEmail(emailAddr)))
-	return nil
 }
 
 // ── RedeemMagicLink ────────────────────────────────────────────────────

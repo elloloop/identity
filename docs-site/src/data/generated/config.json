@@ -261,6 +261,33 @@
     "anchor": "email-and-branding"
   },
   {
+    "name": "GATEWAY_DEFAULT_PROJECT_ACCESS_MODE",
+    "type": "string",
+    "default": "closed",
+    "required": false,
+    "description": "is the authentication access mode for the env-configured default project, which has no config_json to carry an `access` block: one of \"open\", \"allowlist\", \"invite\", or \"closed\" (see service.AccessMode*).",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
+    "name": "GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the comma-separated email-domain allowlist applied to the default project when DefaultProjectAccessMode is \"allowlist\" (ignored for open/invite/closed).",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
+    "name": "GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the comma-separated email allowlist applied to the default project when DefaultProjectAccessMode is \"allowlist\" (ignored for open/invite/closed).",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
     "name": "GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS",
     "type": "string",
     "default": "",

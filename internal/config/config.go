@@ -189,12 +189,16 @@ type Config struct {
 	// GATEWAY_DEFAULT_PROJECT_ACCESS_MODE.
 	DefaultProjectAccessMode string
 
-	// DefaultProjectAllowedEmails / DefaultProjectAllowedDomains are the
-	// comma-separated allowlists applied to the default project when
-	// DefaultProjectAccessMode is "allowlist" (ignored for open/invite/closed).
-	// Driven by GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS /
+	// DefaultProjectAllowedEmails is the comma-separated email allowlist applied
+	// to the default project when DefaultProjectAccessMode is "allowlist"
+	// (ignored for open/invite/closed). Driven by
+	// GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS.
+	DefaultProjectAllowedEmails string
+
+	// DefaultProjectAllowedDomains is the comma-separated email-domain allowlist
+	// applied to the default project when DefaultProjectAccessMode is "allowlist"
+	// (ignored for open/invite/closed). Driven by
 	// GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS.
-	DefaultProjectAllowedEmails  string
 	DefaultProjectAllowedDomains string
 
 	// RequireVerifiedAuthDomain governs whether an UNVERIFIED custom

@@ -159,6 +159,9 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 		MetricsRegistry: prometheus.NewRegistry(), // isolated: avoid cross-harness collisions
 		EmailTransport:  mailer,
 		DNSResolver:     dns,
+		// Send synchronously so the recording mailer is readable right after a
+		// request in these full-stack governance tests.
+		SynchronousEmailSend: true,
 	})
 	if err != nil {
 		t.Fatalf("identityserver.New: %v", err)

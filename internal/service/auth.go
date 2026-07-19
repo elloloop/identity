@@ -1083,6 +1083,14 @@ type AuthService struct {
 	// so a served deployment surfaces the error there.
 	defaultProjectAccess ProjectAccessConfig
 
+	// runEmailSend runs a request-phase credential-email send. It defaults to
+	// SYNCHRONOUS (run inline); app.New swaps in an asynchronous dispatcher via
+	// WithAsyncEmailDispatch so the RPC response time cannot depend on — and thus
+	// leak — the gated send/no-send decision (a timing oracle that, in invite
+	// mode, would reveal account existence). Kept injectable so tests observe
+	// sends deterministically without polling.
+	runEmailSend func(func())
+
 	// autoFormer, when set (postgres driver only), auto-forms a tenant from
 	// a new user's company email domain at signup. nil disables the
 	// behaviour — the constructor leaves it nil; app.New sets it via
@@ -1260,7 +1268,47 @@ func NewAuthServiceWithOAuth(
 		phoneThrottle:        newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
 		returnAllow:          ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
 		nowFunc:              time.Now,
+		// Default to synchronous sends; app.New opts into async via
+		// WithAsyncEmailDispatch. A synchronous default keeps every
+		// directly-constructed service (tests, embedders) deterministic.
+		runEmailSend: func(fn func()) { fn() },
 	}
+}
+
+// WithAsyncEmailDispatch switches request-phase credential-email sends to run
+// on a detached background goroutine, so the RPC response time is independent
+// of the gated send/no-send decision (closing the timing oracle). app.New
+// enables this for the served deployment; it is a set-once option that returns
+// the receiver for chaining. One goroutine per permitted send is acceptable
+// because the per-IP rate limiter and captcha upstream already bound this path.
+func (s *AuthService) WithAsyncEmailDispatch() *AuthService {
+	s.runEmailSend = func(fn func()) { go fn() }
+	return s
+}
+
+// asyncEmailSendTimeout caps a detached background send so a stuck SMTP dial
+// cannot leak a goroutine indefinitely.
+const asyncEmailSendTimeout = 30 * time.Second
+
+// dispatchEmailSend runs send via runEmailSend (sync or async per construction).
+// It hands send a DETACHED context — context.WithoutCancel(ctx) with a bounded
+// timeout — NOT the request ctx, which is cancelled when the RPC returns and
+// would abort an async send mid-flight; the detached copy still carries
+// request-scoped values (the resolved project scope, etc.). Panics in the
+// background goroutine are recovered and logged, since the send is now
+// fire-and-forget.
+func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send func(context.Context)) {
+	detached := context.WithoutCancel(ctx)
+	s.runEmailSend(func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("email_send_panic", zap.String("op", op), zap.Any("panic", r))
+			}
+		}()
+		sendCtx, cancel := context.WithTimeout(detached, asyncEmailSendTimeout)
+		defer cancel()
+		send(sendCtx)
+	})
 }
 
 // buildDefaultProjectAccess parses the env-configured default project's access

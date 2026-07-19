@@ -294,6 +294,9 @@ func StartServer(t *testing.T) *Harness {
 		TOTPKey:            []byte("01234567890123456789012345678901"),
 		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
 		EmailTransport:     mailer,
+		// Send synchronously so the recording mailer is readable immediately
+		// after a request (the served deployment dispatches async).
+		SynchronousEmailSend: true,
 	})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)

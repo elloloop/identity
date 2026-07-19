@@ -101,7 +101,11 @@ func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email string) bo
 	case AccessModeAllowlist:
 		return scope.Access.permits(canonicalizeEmail(email))
 	case AccessModeInvite:
-		return s.userExists(ctx, email)
+		// Canonicalize so the existence check uses the same key accounts are
+		// stored under (canonicalizeEmail) — otherwise a real user requesting with
+		// non-canonical casing/dots would miss and have their OTP silently
+		// dropped. Mirrors the allowlist branch above.
+		return s.userExists(ctx, canonicalizeEmail(email))
 	default:
 		// AccessModeClosed and any unset/unrecognized mode: never send.
 		return false

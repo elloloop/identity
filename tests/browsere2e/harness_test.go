@@ -223,6 +223,8 @@ func startServer(t *testing.T, signupEnabled bool) *browserHarness {
 		TOTPKey:            []byte(totpKey),
 		TOTPRecoveryPepper: []byte(totpRecoveryPepper),
 		ProjectResolver:    built.ProjectResolver(),
+		// Synchronous sends keep the browser flow deterministic.
+		SynchronousEmailSend: true,
 	})
 	require.NoError(t, err)
 	appBuilt.Start()

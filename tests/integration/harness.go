@@ -192,6 +192,9 @@ func startHarness(
 		NativeOAuthVerifier: hOpts.nativeVerifier,
 		NativeOAuthProjects: hOpts.nativeProjects,
 		IDVProvider:         hOpts.idvProvider,
+		// Send synchronously so the recording mailer is readable immediately
+		// after a request (the served deployment dispatches async).
+		SynchronousEmailSend: true,
 	})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)

@@ -389,6 +389,17 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	// under the canonical form. PasswordSignup writes the canonical
 	// form, so lookup must use the same.
 	email = canonicalizeEmail(email)
+
+	// Enforce the project access mode (login context) BEFORE the user lookup and
+	// bcrypt: the check is DB-free (email + config), so failing fast on a
+	// closed/off-list project avoids a bcrypt CPU-DoS on disallowed addresses and
+	// keeps the denial identical regardless of password correctness (no
+	// password-guessing oracle). It reveals only allowlist membership — a project
+	// property, not account existence — matching PasswordSignup's fail-fast.
+	if err := s.enforceProjectAccessLogin(ctx, email); err != nil {
+		return nil, err
+	}
+
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
@@ -508,14 +519,6 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 				zap.String("user_id", user.ID), zap.Error(sendErr))
 		}
 		return nil, ErrEmailVerificationRequired
-	}
-
-	// After credential verification (mirroring enforceLoginPolicy) so a denial is
-	// reached only by the password holder and never becomes an existence oracle:
-	// a user provisioned before the project was restricted, or one from another
-	// project's pool, cannot authenticate to a closed/allowlist project.
-	if err := s.enforceProjectAccessLogin(ctx, email); err != nil {
-		return nil, err
 	}
 
 	// Credentials are proven; consult the tenant's LoginPolicy. This runs

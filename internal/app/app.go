@@ -179,6 +179,14 @@ type Deps struct {
 	// isolated registry so they can read counters without colliding
 	// with other tests in the same process.
 	MetricsRegistry prometheus.Registerer
+
+	// SynchronousEmailSend forces request-phase credential-email sends to run
+	// inline instead of on a detached goroutine. Production leaves it false, so
+	// New enables asynchronous dispatch (decoupling SMTP latency from RPC
+	// response time — the send timing oracle). Full-stack tests that read the
+	// recording mailer right after a request set it true for deterministic
+	// observation without polling.
+	SynchronousEmailSend bool
 }
 
 // Built is the result of New: the assembled identity service, ready to
@@ -508,6 +516,12 @@ func New(deps Deps) (*Built, error) {
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger)
+	// Dispatch credential emails asynchronously in the served deployment so SMTP
+	// latency cannot time the gated send/no-send decision. Tests that read the
+	// mailer synchronously opt out via Deps.SynchronousEmailSend.
+	if !deps.SynchronousEmailSend {
+		authSvc = authSvc.WithAsyncEmailDispatch()
+	}
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher)
 

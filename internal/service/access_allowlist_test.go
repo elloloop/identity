@@ -2,12 +2,28 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elloloop/identity/pkg/email"
 )
+
+// blockingTransport blocks in Send until release is closed, then signals sent.
+// It lets a test prove the RPC does not wait on the (slow) SMTP send.
+type blockingTransport struct {
+	release chan struct{}
+	sent    chan struct{}
+}
+
+func (b *blockingTransport) Send(context.Context, email.Message) error {
+	<-b.release
+	close(b.sent)
+	return nil
+}
 
 // glossAccessJSON is the config_json an operator sets to restrict a project
 // (e.g. the future admin-gloss project) to an explicit two-email membership. It
@@ -636,5 +652,47 @@ func TestProjectAccess_RefreshToken_RevalidatesMode(t *testing.T) {
 	// mint fresh access tokens.
 	closed := accessScope(t, `{"access":{"mode":"closed"}}`)
 	_, _, _, err = svc.RefreshToken(closed, rt, "1.2.3.4", "a")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+}
+
+// ── Blocker 3: request-phase send is async (no timing oracle) ────────────
+
+// With async dispatch enabled (as app.New does in production), the RPC returns
+// without waiting on the SMTP send, so its response time cannot leak the gated
+// send/no-send decision. The send still runs (on a detached context).
+func TestProjectAccess_RequestEmailLoginCode_AsyncDoesNotBlock(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	svc.WithAsyncEmailDispatch()
+	mailer := &blockingTransport{release: make(chan struct{}), sent: make(chan struct{})}
+	svc.mailer = mailer
+	ctx := accessScope(t, `{"access":{"mode":"open"}}`)
+
+	start := time.Now()
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, "async@ex.com"))
+	require.Less(t, time.Since(start), 500*time.Millisecond,
+		"RPC must not block on the SMTP send")
+
+	// The send is in flight on a detached context; release it and confirm it ran
+	// (proving the detached ctx was NOT cancelled when the RPC returned).
+	close(mailer.release)
+	select {
+	case <-mailer.sent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("async send did not run after release")
+	}
+}
+
+// ── Blocker 4: PasswordLogin access check precedes lookup + bcrypt ───────
+
+// An off-list PasswordLogin is denied BEFORE FindUserByEmail (hence before
+// bcrypt): forcing the repo lookup to error proves it is never reached, and the
+// denial is ErrAccessNotAllowed regardless of the password (no bcrypt CPU-DoS,
+// no password-guessing oracle for disallowed addresses).
+func TestProjectAccess_PasswordLogin_OffListDeniedBeforeLookup(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := accessScope(t, gmailAllowlistJSON) // permits cursive.ai only
+	repo.findUserByEmailErr = errors.New("FindUserByEmail must not be reached for an off-list login")
+
+	_, err := svc.PasswordLogin(ctx, "outsider@other.com", "any-Passw0rd!", "1.2.3.4", "a")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 }
