@@ -50,11 +50,12 @@ type ProjectConfig struct {
 	// (see the *_enc fields).
 	OAuth ProjectOAuthConfig `json:"oauth"`
 
-	// Access holds the project's authentication allowlist. When NON-EMPTY it
-	// restricts which users may authenticate to (or be provisioned in) the
-	// project to an explicit set of emails and/or domains; EMPTY (the common
-	// case) imposes no restriction, so a project without an access block behaves
-	// exactly as before. See ProjectAccessConfig for the fail direction.
+	// Access holds the project's authentication access policy — the mode
+	// (open/allowlist/invite/closed) that decides who may sign up, log in, and
+	// accept invitations. It is DEFAULT-DENY: an empty or unset access block
+	// (no mode) FAILS CLOSED and denies all authentication. A project must
+	// explicitly set mode:open (or an allowlist/invite mode) to admit users.
+	// See ProjectAccessConfig.
 	Access ProjectAccessConfig `json:"access"`
 }
 

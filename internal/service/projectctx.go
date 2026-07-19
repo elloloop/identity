@@ -60,11 +60,12 @@ type ProjectScope struct {
 	// zero-config project, which then behaves exactly as before.
 	OAuth ProjectOAuthConfig
 
-	// Access is the project's authentication allowlist, parsed from config_json.
-	// When non-empty it restricts BOTH provisioning and login to the listed
-	// emails/domains (enforced by enforceProjectAccess at every entry point);
-	// empty imposes no restriction, so a project that configures none behaves
-	// exactly as before.
+	// Access is the project's authentication access policy (mode + optional
+	// allowlist), parsed from config_json — or, for the env default project,
+	// assembled from GATEWAY_DEFAULT_PROJECT_ACCESS_MODE and stamped on by the
+	// project-resolution middleware. It is DEFAULT-DENY: an empty/unset access
+	// block (no mode) FAILS CLOSED and denies all authentication. A project is
+	// unrestricted only when it explicitly sets mode:open.
 	Access ProjectAccessConfig
 }
 

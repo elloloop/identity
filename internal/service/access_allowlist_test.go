@@ -52,6 +52,22 @@ func seedInvitedUser(t *testing.T, repo *fakeRepo, email string) string {
 	return rawToken
 }
 
+// seedEmailLoginCode writes a valid, unconsumed OTP directly into the repo,
+// bypassing the request-phase send gate so a test can drive redemption for an
+// address the send gate would otherwise suppress.
+func seedEmailLoginCode(t *testing.T, repo *fakeRepo, email, code string) {
+	t.Helper()
+	now := time.Now().UnixMilli()
+	_, err := repo.UpsertEmailLoginCode(context.Background(), &EmailLoginCodeRecord{
+		Email:       email,
+		CodeHash:    sha256Hex(code),
+		ExpiresAt:   now + int64(5*time.Minute/time.Millisecond),
+		CreatedAt:   now,
+		MaxAttempts: 5,
+	})
+	require.NoError(t, err)
+}
+
 // ── Pure units: mode(), permits(), accessPermits() matrix ────────────────
 
 func TestProjectAccessConfig_ModeNormalizes(t *testing.T) {
@@ -304,17 +320,25 @@ func TestProjectAccess_Allowlist_OAuth_JITAndFastPath(t *testing.T) {
 }
 
 func TestProjectAccess_Allowlist_Passwordless(t *testing.T) {
-	svc, _, rec := newAuthSvcWithMailer(t)
+	svc, repo, rec := newAuthSvcWithMailer(t)
 	ctx := accessScope(t, gmailAllowlistJSON)
 
+	// On-list: the OTP is sent and redemption logs in.
 	require.NoError(t, svc.RequestEmailLoginCode(ctx, "arun@cursive.ai"))
+	require.Len(t, rec.Sent(), 1)
 	res, err := svc.VerifyEmailLoginCode(ctx, "arun@cursive.ai", extractCodeFromEmail(t, rec.Sent()[0].Text), "1.2.3.4", "a")
 	require.NoError(t, err)
 	require.NotEmpty(t, res.AccessToken)
 
+	// Off-list: the send is suppressed (Blocker 1)...
 	rec.Reset()
 	require.NoError(t, svc.RequestEmailLoginCode(ctx, "outsider@other.com"))
-	_, err = svc.VerifyEmailLoginCode(ctx, "outsider@other.com", extractCodeFromEmail(t, rec.Sent()[0].Text), "1.2.3.4", "a")
+	require.Empty(t, rec.Sent(), "off-list address must not receive an OTP")
+
+	// ...and even a valid OTP (seeded past the send gate) is refused at
+	// redemption (defense in depth).
+	seedEmailLoginCode(t, repo, "outsider@other.com", "123456")
+	_, err = svc.VerifyEmailLoginCode(ctx, "outsider@other.com", "123456", "1.2.3.4", "a")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 }
 
@@ -391,10 +415,14 @@ func TestProjectAccess_Invite_SelfSignupDeniedAllMethods(t *testing.T) {
 	})
 
 	t.Run("passwordless", func(t *testing.T) {
-		svc, _, rec := newAuthSvcWithMailer(t)
+		svc, repo, rec := newAuthSvcWithMailer(t)
 		ctx := accessScope(t, ctxJSON)
+		// invite mode suppresses the OTP for a new (non-existent) address, so seed
+		// a valid code past the send gate to prove redemption itself denies signup.
 		require.NoError(t, svc.RequestEmailLoginCode(ctx, "new@x.com"))
-		_, err := svc.VerifyEmailLoginCode(ctx, "new@x.com", extractCodeFromEmail(t, rec.Sent()[0].Text), "1.2.3.4", "a")
+		require.Empty(t, rec.Sent(), "invite mode must not email an OTP to a new address")
+		seedEmailLoginCode(t, repo, "new@x.com", "123456")
+		_, err := svc.VerifyEmailLoginCode(ctx, "new@x.com", "123456", "1.2.3.4", "a")
 		require.ErrorIs(t, err, ErrSignupByInvitationOnly)
 	})
 
@@ -403,9 +431,12 @@ func TestProjectAccess_Invite_SelfSignupDeniedAllMethods(t *testing.T) {
 		ctx := accessScope(t, ctxJSON)
 		_, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "Key")
 		require.NoError(t, err)
-		otp := passkeySignupOTP(t, rec, pkVectorEmail)
+		// invite suppresses the signup OTP (Blocker 1); seed a valid one past the
+		// gate so the ceremony reaches the redemption-phase signup guard.
+		require.Empty(t, rec.Sent(), "invite mode must not email a passkey-signup OTP")
+		seedEmailLoginCode(t, repo, pkVectorEmail, "123456")
 		setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
-		_, err = svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, otp, "Key", "1.2.3.4", "a")
+		_, err = svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), pkVectorEmail, "123456", "Key", "1.2.3.4", "a")
 		require.ErrorIs(t, err, ErrSignupByInvitationOnly)
 	})
 }
@@ -478,4 +509,114 @@ func TestProjectAccess_AdminGlossDocumentedConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, AccessModeAllowlist, cfg.Access.Mode)
 	assert.Equal(t, []string{"arun88m@gmail.com", "sowjanya@tinykite.co"}, cfg.Access.AllowedEmails)
+}
+
+// ── Blocker 1: request-phase email dispatch is gated by access mode ──────
+//
+// The RPC response must stay byte-identical (always nil / same shape) whether
+// or not the email is sent, so gating adds no enumeration signal; only the
+// side-effecting send is suppressed.
+
+func TestProjectAccess_RequestEmailLoginCode_SendGatedByMode(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		cfgJSON      string
+		email        string
+		seedExisting bool
+		wantSent     bool
+	}{
+		{"open_sends", `{"access":{"mode":"open"}}`, "x@any.com", false, true},
+		{"closed_never_sends", `{"access":{"mode":"closed"}}`, "x@any.com", false, false},
+		{"allowlist_onlist_sends", gmailAllowlistJSON, "arun@cursive.ai", false, true},
+		{"allowlist_offlist_dropped", gmailAllowlistJSON, "outsider@other.com", false, false},
+		{"invite_no_user_dropped", `{"access":{"mode":"invite"}}`, "newbie@x.com", false, false},
+		{"invite_existing_user_sends", `{"access":{"mode":"invite"}}`, "member@x.com", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, rec := newAuthSvcWithMailer(t)
+			if tc.seedExisting {
+				seedUser(repo, tc.email, "", "active")
+			}
+			ctx := accessScope(t, tc.cfgJSON)
+
+			// Response is identical (nil) regardless of the send decision.
+			require.NoError(t, svc.RequestEmailLoginCode(ctx, tc.email))
+
+			got := len(rec.Sent())
+			if tc.wantSent {
+				assert.Equal(t, 1, got, "expected an OTP email to be sent")
+			} else {
+				assert.Equal(t, 0, got, "expected NO OTP email (spam/abuse gate)")
+			}
+		})
+	}
+}
+
+func TestProjectAccess_RequestMagicLink_SendGatedByMode(t *testing.T) {
+	send := func(t *testing.T, cfgJSON string) int {
+		t.Helper()
+		svc, _, rec := newAuthSvcWithMailer(t)
+		svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+		ctx := accessScope(t, cfgJSON)
+		require.NoError(t, svc.RequestMagicLink(ctx, "x@any.com", "https://app.test/cb"))
+		return len(rec.Sent())
+	}
+	assert.Equal(t, 1, send(t, `{"access":{"mode":"open"}}`), "open must send the magic link")
+	assert.Equal(t, 0, send(t, `{"access":{"mode":"closed"}}`), "closed must not send the magic link")
+}
+
+func TestProjectAccess_BeginPasskeySignup_OTPGatedByMode(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		cfgJSON  string
+		wantSent bool
+	}{
+		{"open_sends", `{"access":{"mode":"open"}}`, true},
+		{"closed_never_sends", `{"access":{"mode":"closed"}}`, false},
+		{"invite_signup_dropped", `{"access":{"mode":"invite"}}`, false},
+		{"allowlist_onlist_sends", `{"access":{"mode":"allowlist","allowed_domains":["example.org"]}}`, true},
+		{"allowlist_offlist_dropped", `{"access":{"mode":"allowlist","allowed_domains":["cursive.ai"]}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, rec := newPasskeyVectorSvc(t)
+			ctx := accessScope(t, tc.cfgJSON)
+
+			// Response is identical: options + challengeID always returned, so the
+			// ceremony looks the same whether or not the OTP was mailed.
+			optionsJSON, challengeID, err := svc.BeginPasskeySignup(ctx, pkVectorEmail, "Key")
+			require.NoError(t, err)
+			require.NotEmpty(t, optionsJSON)
+			require.NotEmpty(t, challengeID)
+
+			got := len(rec.Sent())
+			if tc.wantSent {
+				assert.Equal(t, 1, got, "expected a signup OTP email")
+			} else {
+				assert.Equal(t, 0, got, "expected NO signup OTP email (spam/abuse gate)")
+			}
+		})
+	}
+}
+
+// ── Blocker 2: RefreshToken re-validates the project access mode ─────────
+
+func TestProjectAccess_RefreshToken_RevalidatesMode(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	open := accessScope(t, `{"access":{"mode":"open"}}`)
+
+	reg, err := svc.PasswordSignup(open, "user@ex.com", accessTestPassword, "U", "", 0)
+	require.NoError(t, err)
+	require.NotEmpty(t, reg.RefreshToken)
+
+	// Under an open project the refresh rotates normally.
+	_, at, rt, err := svc.RefreshToken(open, reg.RefreshToken, "1.2.3.4", "a")
+	require.NoError(t, err)
+	require.NotEmpty(t, at)
+	require.NotEmpty(t, rt)
+
+	// Flip the project to closed: the still-valid refresh token can no longer
+	// mint fresh access tokens.
+	closed := accessScope(t, `{"access":{"mode":"closed"}}`)
+	_, _, _, err = svc.RefreshToken(closed, rt, "1.2.3.4", "a")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
 }

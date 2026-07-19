@@ -287,27 +287,10 @@ func (s *AuthService) resolveNativeProject(ctx context.Context, product string) 
 	return &ProjectScope{
 		ProjectID:      projectID,
 		StorageScopeID: s.cfg.DefaultTenantID,
-		Access:         s.defaultProjectAccessConfig(),
+		// Precomputed once at construction (buildDefaultProjectAccess) rather than
+		// re-split/re-punycoded per login.
+		Access: s.defaultProjectAccess,
 	}, nil
-}
-
-// defaultProjectAccessConfig builds the env-configured default project's access
-// policy from this service's config. It is used where the default project is
-// pinned without a config_json (native login with no control plane), mirroring
-// the middleware's default-project pin. It fails CLOSED: a spec that does not
-// validate (only possible for a directly-constructed Config, since app.New
-// validates it at boot) yields a deny-all closed policy rather than an open one.
-func (s *AuthService) defaultProjectAccessConfig() ProjectAccessConfig {
-	access, err := NewProjectAccessConfig(
-		s.cfg.DefaultProjectAccessMode,
-		s.cfg.DefaultProjectAllowedEmailList(),
-		s.cfg.DefaultProjectAllowedDomainList(),
-	)
-	if err != nil {
-		s.logger.Warn("default_project_access_invalid_failing_closed", zap.Error(err))
-		return ProjectAccessConfig{Mode: AccessModeClosed}
-	}
-	return access
 }
 
 // nativeVerifyParams builds the per-request verifier inputs from the resolved

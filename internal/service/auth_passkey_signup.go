@@ -88,7 +88,17 @@ func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName 
 	// (throttle/send failures are logged, never surfaced), exactly like
 	// RequestEmailLoginCode — keyed by the same canonical email the challenge
 	// is bound to, so CompletePasskeySignup verifies against the matching code.
-	s.sendEmailLoginCode(ctx, email)
+	//
+	// Gated on the project access mode (SIGNUP context): a closed, invite-only, or
+	// off-list allowlist project must not emit the signup OTP. The response
+	// (options + challengeID) is returned unchanged so the ceremony looks
+	// identical to an allowed one (no enumeration signal); CompletePasskeySignup
+	// is the authoritative deny.
+	if s.accessAllowsCodeSend(ctx, email, true) {
+		s.sendEmailLoginCode(ctx, email)
+	} else {
+		s.logger.Info("passkey_signup_otp_suppressed_by_access", zap.String("email", redactEmail(email)))
+	}
 
 	s.logger.Info(
 		"passkey_signup_begin",

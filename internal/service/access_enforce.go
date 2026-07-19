@@ -7,25 +7,18 @@ import (
 )
 
 // enforceProjectAccessSignup gates a SELF-SIGNUP (account-creation) attempt
-// against the resolved project's access mode. It is the guard the by-email
-// creation chokepoints call: PasswordSignup, CompletePasskeySignup, and the
-// create branch of resolveOrCreateUserByEmail (OAuth/native/passwordless JIT).
-//
-// In invite mode self-signup is DENIED (the distinguishing behavior of that
-// mode) while login and invitation acceptance are still allowed.
+// against the resolved project's access mode. In invite mode self-signup is
+// DENIED (its distinguishing behavior); open permits, closed/unset deny, and
+// allowlist permits only a listed email.
 func (s *AuthService) enforceProjectAccessSignup(ctx context.Context, email string) error {
 	return s.enforceProjectAccess(ctx, email, true)
 }
 
-// enforceProjectAccessLogin gates a LOGIN (or invitation acceptance) by an
-// already-provisioned user against the resolved project's access mode. It is
-// the guard every login-completion path calls (password, oauth + native oauth
-// fast path, passwordless/OTP, passkey assertion), the resolve-existing branch
-// of resolveOrCreateUserByEmail, and AcceptInvitation.
-//
-// In invite mode this PERMITS (an existing/invited user gets in); it differs
-// from the signup guard only there — every other mode behaves identically for
-// both contexts.
+// enforceProjectAccessLogin gates a LOGIN or invitation acceptance by an
+// already-provisioned user against the resolved project's access mode. In invite
+// mode it PERMITS (an existing/invited user gets in) — the only mode where it
+// diverges from the signup guard; open permits, closed/unset deny, and allowlist
+// permits only a listed email.
 func (s *AuthService) enforceProjectAccessLogin(ctx context.Context, email string) error {
 	return s.enforceProjectAccess(ctx, email, false)
 }
@@ -80,6 +73,51 @@ func (s *AuthService) enforceProjectAccess(ctx context.Context, email string, is
 		return ErrSignupByInvitationOnly
 	}
 	return ErrAccessNotAllowed
+}
+
+// accessAllowsCodeSend reports whether a REQUEST-PHASE credential email (a
+// passwordless OTP, a magic link, or the passkey-signup OTP) may be dispatched
+// to email under the resolved project's access mode. It never surfaces a denial
+// — the authoritative deny stays at redemption — so callers use it only to
+// SILENTLY skip the send while returning their usual enumeration-safe response.
+//
+// It gates spam/SMTP-abuse: a closed or off-list allowlist project must not emit
+// credential mail to arbitrary addresses. For invite mode a login-context
+// request (isSignup=false) may send only to an already-provisioned user, since
+// self-signup is denied at redemption anyway and an OTP to a stranger would be
+// undeliverable spam; a signup-context request (isSignup=true) never sends.
+//
+// It fails CLOSED: no permit → no send. A user-existence lookup error (invite
+// mode only) also suppresses the send rather than risk mailing a stranger.
+func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email string, isSignup bool) bool {
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil {
+		return true
+	}
+	switch scope.Access.mode() {
+	case AccessModeOpen:
+		return true
+	case AccessModeAllowlist:
+		return scope.Access.permits(canonicalizeEmail(email))
+	case AccessModeInvite:
+		return !isSignup && s.userExists(ctx, email)
+	default:
+		// AccessModeClosed and any unset/unrecognized mode: never send.
+		return false
+	}
+}
+
+// userExists reports whether an account is stored under email (the lookup key
+// the redemption path uses). Used only by the invite-mode send decision; a
+// lookup error is treated as "does not exist" so a transient failure suppresses
+// the send rather than mailing a possibly-disallowed address.
+func (s *AuthService) userExists(ctx context.Context, email string) bool {
+	u, err := s.repo(ctx).FindUserByEmail(ctx, email)
+	if err != nil {
+		s.logger.Warn("access_send_user_lookup_failed", zap.Error(err))
+		return false
+	}
+	return u != nil
 }
 
 // accessPermits applies the mode matrix to a single (email, context) pair. It is

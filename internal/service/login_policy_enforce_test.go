@@ -174,6 +174,10 @@ func seedVerifiedTotp(t *testing.T, repo *fakeRepo, userID string) {
 func withProjectLoginDefaults(projectID, allowedMethods string, require2FA bool) context.Context {
 	return WithProjectScope(context.Background(), &ProjectScope{
 		ProjectID: projectID,
+		// These tests exercise the login-METHOD policy, which is orthogonal to the
+		// access mode; the project is open-access (default-DENY requires setting
+		// it explicitly) so the method policy is what governs.
+		Access: ProjectAccessConfig{Mode: AccessModeOpen},
 		LoginDefaults: ProjectLoginConfig{
 			AllowedMethods: allowedMethods,
 			Require2FA:     require2FA,

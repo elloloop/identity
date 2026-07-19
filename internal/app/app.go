@@ -676,6 +676,13 @@ func New(deps Deps) (*Built, error) {
 	if err != nil {
 		return nil, fmt.Errorf("default project access config: %w", err)
 	}
+	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
+	// default project denies all auth, so a fresh deployment that forgot to open
+	// it isn't silently locked out with no signal.
+	if defaultAccess.Mode == service.AccessModeClosed || defaultAccess.Mode == "" {
+		logger.Warn("default_project_access_closed",
+			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))
+	}
 	chain = middleware.NewProjectResolver(
 		deps.Config.DefaultProjectID, deps.Config.DefaultTenantID,
 		deps.Config.DefaultPrimaryAuthDomain(), defaultAccess,

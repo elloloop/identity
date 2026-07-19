@@ -1079,6 +1079,14 @@ type AuthService struct {
 	returnAllow ReturnAllowlist
 	nowFunc     func() time.Time // overridable for testing
 
+	// defaultProjectAccess is the env-configured default project's access policy
+	// (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE + allowlists), parsed and canonicalized
+	// ONCE at construction. It backs the native-login default-project fallback
+	// (which has no config_json to carry a mode). An invalid spec fails closed to
+	// AccessModeClosed at construction (with a WARN); app.New validates it at boot,
+	// so a served deployment surfaces the error there.
+	defaultProjectAccess ProjectAccessConfig
+
 	// autoFormer, when set (postgres driver only), auto-forms a tenant from
 	// a new user's company email domain at signup. nil disables the
 	// behaviour — the constructor leaves it nil; app.New sets it via
@@ -1236,26 +1244,47 @@ func NewAuthServiceWithOAuth(
 	}
 	ageGate := BuildAgeGate(cfg, logger)
 	return &AuthService{
-		defaultRepo:        repo,
-		defaultTenantID:    cfg.DefaultTenantID,
-		ageGate:            ageGate,
-		minorData:          NewMinorDataMinimizer(cfg.MinorDataMinimization, ageGate, time.Now),
-		signer:             signer,
-		passkeys:           passkeysSvc,
-		audit:              auditLogger,
-		cfg:                cfg,
-		totpKey:            totpKey,
-		totpRecoveryPepper: totpRecoveryPepper,
-		mailer:             mailer,
-		smsSender:          smsSender,
-		logger:             logger,
-		oauthResolver:      newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
-		emailThrottle:      newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
-		signupThrottle:     newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
-		phoneThrottle:      newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
-		returnAllow:        ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
-		nowFunc:            time.Now,
+		defaultRepo:          repo,
+		defaultTenantID:      cfg.DefaultTenantID,
+		defaultProjectAccess: buildDefaultProjectAccess(cfg, logger),
+		ageGate:              ageGate,
+		minorData:            NewMinorDataMinimizer(cfg.MinorDataMinimization, ageGate, time.Now),
+		signer:               signer,
+		passkeys:             passkeysSvc,
+		audit:                auditLogger,
+		cfg:                  cfg,
+		totpKey:              totpKey,
+		totpRecoveryPepper:   totpRecoveryPepper,
+		mailer:               mailer,
+		smsSender:            smsSender,
+		logger:               logger,
+		oauthResolver:        newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
+		emailThrottle:        newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
+		signupThrottle:       newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
+		phoneThrottle:        newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
+		returnAllow:          ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
+		nowFunc:              time.Now,
 	}
+}
+
+// buildDefaultProjectAccess parses the env-configured default project's access
+// policy (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE + allowlists) ONCE at construction,
+// so the native-login default-project fallback does not re-split the CSVs and
+// re-punycode the domains on every request. It fails CLOSED: an invalid spec
+// (only reachable from a directly-constructed Config, since app.New validates it
+// at boot) yields a deny-all closed policy rather than an open one, and logs a
+// WARN so the misconfiguration is visible.
+func buildDefaultProjectAccess(cfg *config.Config, logger *zap.Logger) ProjectAccessConfig {
+	access, err := NewProjectAccessConfig(
+		cfg.DefaultProjectAccessMode,
+		cfg.DefaultProjectAllowedEmailList(),
+		cfg.DefaultProjectAllowedDomainList(),
+	)
+	if err != nil {
+		logger.Warn("default_project_access_invalid_failing_closed", zap.Error(err))
+		return ProjectAccessConfig{Mode: AccessModeClosed}
+	}
+	return access
 }
 
 // BuildAgeGate selects the age-determination provider from config. When
@@ -1821,6 +1850,15 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// refresh token. A hard-deleted user is already covered above (the
 	// refresh row is gone, so the lookup returns nil → unauthenticated).
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return nil, "", "", err
+	}
+
+	// Re-enforce the project access mode (login context) on every refresh: a user
+	// removed from an allowlist, or a project switched to closed, must stop
+	// minting fresh access tokens rather than coast on a still-valid refresh
+	// token until it expires. Login context, so invite mode keeps admitting an
+	// already-provisioned user.
+	if err := s.enforceProjectAccessLogin(ctx, user.Email); err != nil {
 		return nil, "", "", err
 	}
 
