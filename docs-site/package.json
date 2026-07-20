@@ -10,19 +10,19 @@
     "preview": "astro preview"
   },
   "dependencies": {
-    "@fontsource-variable/inter": "5.2.8",
-    "@fontsource-variable/jetbrains-mono": "5.2.8",
+    "@fontsource-variable/inter": "5.3.0",
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
     "@pagefind/default-ui": "1.5.2",
-    "@refraction-ui/astro": "0.15.2",
+    "@refraction-ui/astro": "0.17.0",
     "@refraction-ui/tailwind-config": "0.1.7",
-    "@scalar/api-reference": "1.62.4",
+    "@scalar/api-reference": "1.62.9",
     "astro": "6.4.6",
     "astro-expressive-code": "0.44.0",
     "astro-pagefind": "2.0.1",
-    "tailwindcss": "4.3.2"
+    "tailwindcss": "4.3.3"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "4.3.2"
+    "@tailwindcss/vite": "4.3.3"
   },
   "pnpm": {
     "overrides": {
