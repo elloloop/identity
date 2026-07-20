@@ -133,6 +133,33 @@ func TestRequestPasswordReset_Success(t *testing.T) {
 	}
 }
 
+func TestRequestPasswordReset_CanonicalizesEmail(t *testing.T) {
+	// A request with non-canonical casing/dots/+tag must still find the account
+	// stored under its canonical key rather than silently report "unknown".
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
+	user := seedUser(repo, "alicesmith@gmail.com", pwHash, "active")
+
+	if err := svc.RequestPasswordReset(context.Background(), "Alice.Smith+promo@gmail.com"); err != nil {
+		t.Fatalf("RequestPasswordReset err: %v", err)
+	}
+	sent := rec.Sent()
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 email to the canonical account, got %d", len(sent))
+	}
+	if sent[0].To != "alicesmith@gmail.com" {
+		t.Errorf("To: got %q, want alicesmith@gmail.com", sent[0].To)
+	}
+	token := extractTokenFromLink(t, sent[0].Text)
+	rec2, err := repo.FindPasswordResetTokenByHash(context.Background(), sha256Hex(token))
+	if err != nil || rec2 == nil {
+		t.Fatalf("token not stored: err=%v rec=%v", err, rec2)
+	}
+	if rec2.UserID != user.ID {
+		t.Errorf("token user_id: got %q, want %q", rec2.UserID, user.ID)
+	}
+}
+
 func TestRequestPasswordReset_UnknownEmail_NoEnumeration(t *testing.T) {
 	svc, _, rec := newAuthSvcWithMailer(t)
 	if err := svc.RequestPasswordReset(context.Background(), "nobody@test.com"); err != nil {
