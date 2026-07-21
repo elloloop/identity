@@ -41,11 +41,17 @@ func (s *AuthService) enforceSessionTimeout(ctx context.Context, email string, n
 	return nil
 }
 
-// emailDomain returns the domain part of an email for low-cardinality
-// logging, or "" when the address has no domain.
+// emailDomain returns the domain part of an email. It splits on the LAST '@'
+// so it computes exactly the same domain as canonicalizeEmail — a quoted local
+// part may itself contain '@' (e.g. "a@b"@cursive.ai), and splitting on the
+// first '@' would yield a bogus domain that mis-resolves the tenant LoginPolicy
+// and the access allowlist. Returns "" when the address has no '@'.
 func emailDomain(email string) string {
-	_, domain, _ := strings.Cut(email, "@")
-	return domain
+	at := strings.LastIndex(email, "@")
+	if at < 0 {
+		return ""
+	}
+	return email[at+1:]
 }
 
 // msPerSecond converts the policy's second-granularity timeouts to the
@@ -198,8 +204,11 @@ func (g *LoginGovernance) resolvePolicy(ctx context.Context, projectID string, l
 	if g == nil || projectID == "" {
 		return nil, nil
 	}
-	_, domainName, ok := strings.Cut(email, "@")
-	if !ok || domainName == "" {
+	// Split on the LAST '@' (via emailDomain) so the tenant lookup key matches
+	// canonicalizeEmail's domain — a quoted local part containing '@' must not
+	// resolve to a bogus domain and thereby skip the tenant's SSO/2FA policy.
+	domainName := emailDomain(email)
+	if domainName == "" {
 		return nil, nil
 	}
 
