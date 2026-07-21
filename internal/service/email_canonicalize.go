@@ -100,6 +100,26 @@ func canonicalizeEmail(addr string) string {
 	return local + "@" + domain
 }
 
+// canonicalEmail is an email address that has been through canonicalizeEmail
+// (via canonicalize). It is the ONLY thing the per-project access gate accepts,
+// so the compiler rejects a raw, possibly-non-canonical string at the gate
+// boundary: the "canonicalize once, at the caller, then compare like-for-like"
+// invariant the gate depends on is enforced by the type system rather than by a
+// convention a caller could forget. The single producer is canonicalize.
+type canonicalEmail string
+
+// canonicalize is the sole constructor for canonicalEmail: it runs
+// canonicalizeEmail and tags the result canonical. Call it exactly once per
+// request at the entry point and reuse the value for BOTH the access gate and
+// the DB/user operations (string(cemail)), so a request canonicalizes once
+// rather than once per consumer. It is idempotent — re-wrapping an
+// already-canonical address (e.g. a DB-persisted user.Email or a stored
+// challenge/token email) yields the same value and self-heals a legacy
+// non-canonical row.
+func canonicalize(raw string) canonicalEmail {
+	return canonicalEmail(canonicalizeEmail(raw))
+}
+
 // canonicalizeDomain returns the canonical form of a bare email domain,
 // mirroring the domain handling inside canonicalizeEmail so a domain compared on
 // its own resolves identically to the domain of a canonicalized address (IDN

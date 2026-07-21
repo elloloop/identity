@@ -647,17 +647,19 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 	return out
 }
 
-// permits reports whether canonicalEmail is on the allowlist. The caller MUST
-// pass an already-canonicalized email (canonicalizeEmail): entries are
-// canonicalized at parse time, so a raw address would spuriously miss. Only
+// permits reports whether email is on the allowlist. Its parameter is a
+// canonicalEmail, so the "caller MUST pass an already-canonicalized address"
+// precondition (entries are canonicalized at parse time, so a raw address would
+// spuriously miss) is now enforced by the compiler rather than a comment. Only
 // consulted for AccessModeAllowlist.
-func (a ProjectAccessConfig) permits(canonicalEmail string) bool {
+func (a ProjectAccessConfig) permits(email canonicalEmail) bool {
+	canonical := string(email)
 	for _, e := range a.AllowedEmails {
-		if e == canonicalEmail {
+		if e == canonical {
 			return true
 		}
 	}
-	domain := emailDomain(canonicalEmail)
+	domain := emailDomain(canonical)
 	if domain == "" {
 		return false
 	}

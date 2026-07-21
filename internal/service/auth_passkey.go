@@ -285,8 +285,9 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 
 	// A valid assertion proves credential possession, but a closed/allowlist
 	// project must still refuse a non-member — otherwise a passkey enrolled
-	// before the project was restricted would keep working.
-	if err := s.enforceProjectAccessLogin(ctx, user.Email); err != nil {
+	// before the project was restricted would keep working. user.Email is the
+	// DB-persisted (canonical) account email; wrap once (idempotent, self-heals).
+	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
 		return nil, err
 	}
 

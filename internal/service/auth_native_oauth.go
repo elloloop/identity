@@ -156,13 +156,15 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 	// upsertOAuthUser → resolveOrCreateUserByEmail uses the SAME canonical key
 	// every other flow stores under, rather than minting a duplicate of an
 	// account held as alicesmith@gmail.com. canonicalizeEmail trims + lowercases,
-	// so the empty-email guard still holds.
-	email := canonicalizeEmail(identity.Email)
+	// so the empty-email guard still holds. Canonicalized ONCE here; carried as
+	// cemail into upsert/resolve (gate) and as email (string) for logging.
+	cemail := canonicalize(identity.Email)
+	email := string(cemail)
 	if email == "" {
 		return nil, fmt.Errorf("%w: provider returned no email", ErrUnauthenticated)
 	}
 
-	user, isNew, err := s.upsertOAuthUser(ctx, identity, email)
+	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +176,9 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 	// bound to ctx above, so a restricted project denies a returning
 	// (provider, sub) non-member here just as the hosted flow does. JIT creation
 	// of a NEW user is gated as self-signup inside resolveOrCreateUserByEmail.
-	if err := s.enforceProjectAccessLogin(ctx, user.Email); err != nil {
+	// user.Email is the DB-persisted (canonical) account email; wrap once
+	// (idempotent, self-heals a legacy row).
+	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
 		return nil, err
 	}
 

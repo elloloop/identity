@@ -111,7 +111,7 @@ func TestProjectAccessConfig_Permits(t *testing.T) {
 		{"no_at", "garbage", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, a.permits(tc.email))
+			assert.Equal(t, tc.want, a.permits(canonicalize(tc.email)))
 		})
 	}
 }
@@ -145,7 +145,7 @@ func TestAccessPermits_Matrix(t *testing.T) {
 		{"unrecognized_denied", ProjectAccessConfig{Mode: "bogus"}, listed, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.wantPermit, accessPermits(tc.access, tc.email, tc.signup))
+			assert.Equal(t, tc.wantPermit, accessPermits(tc.access, canonicalize(tc.email), tc.signup))
 		})
 	}
 }
@@ -221,30 +221,30 @@ func TestEnforceProjectAccess_NilScope_Permits(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newAuthSvcWithMailer(t)
 	// No scope in context (direct call / non-project deployment) → no gate.
-	require.NoError(t, svc.enforceProjectAccessSignup(context.Background(), "anyone@anywhere.com"))
-	require.NoError(t, svc.enforceProjectAccessLogin(context.Background(), "anyone@anywhere.com"))
+	require.NoError(t, svc.enforceProjectAccessSignup(context.Background(), canonicalize("anyone@anywhere.com")))
+	require.NoError(t, svc.enforceProjectAccessLogin(context.Background(), canonicalize("anyone@anywhere.com")))
 }
 
 func TestEnforceProjectAccess_SignupVsLogin(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 
 	invite := accessScope(t, `{"access":{"mode":"invite"}}`)
-	require.ErrorIs(t, svc.enforceProjectAccessSignup(invite, "x@y.com"), ErrSignupByInvitationOnly)
-	require.NoError(t, svc.enforceProjectAccessLogin(invite, "x@y.com"))
+	require.ErrorIs(t, svc.enforceProjectAccessSignup(invite, canonicalize("x@y.com")), ErrSignupByInvitationOnly)
+	require.NoError(t, svc.enforceProjectAccessLogin(invite, canonicalize("x@y.com")))
 
 	closed := accessScope(t, `{"access":{"mode":"closed"}}`)
-	require.ErrorIs(t, svc.enforceProjectAccessSignup(closed, "x@y.com"), ErrAccessNotAllowed)
-	require.ErrorIs(t, svc.enforceProjectAccessLogin(closed, "x@y.com"), ErrAccessNotAllowed)
+	require.ErrorIs(t, svc.enforceProjectAccessSignup(closed, canonicalize("x@y.com")), ErrAccessNotAllowed)
+	require.ErrorIs(t, svc.enforceProjectAccessLogin(closed, canonicalize("x@y.com")), ErrAccessNotAllowed)
 
 	open := accessScope(t, `{"access":{"mode":"open"}}`)
-	require.NoError(t, svc.enforceProjectAccessSignup(open, "x@y.com"))
-	require.NoError(t, svc.enforceProjectAccessLogin(open, "x@y.com"))
+	require.NoError(t, svc.enforceProjectAccessSignup(open, canonicalize("x@y.com")))
+	require.NoError(t, svc.enforceProjectAccessLogin(open, canonicalize("x@y.com")))
 
-	// The guard canonicalizes, so a dotted/cased variant of the listed gmail
-	// address is admitted by the allowlist.
+	// The caller canonicalizes (via canonicalize) before the gate, so a
+	// dotted/cased variant of the listed gmail address is admitted by the allowlist.
 	allow := accessScope(t, gmailAllowlistJSON)
-	require.NoError(t, svc.enforceProjectAccessLogin(allow, "Alice.Smith@gmail.com"))
-	require.ErrorIs(t, svc.enforceProjectAccessSignup(allow, "nope@nowhere.com"), ErrAccessNotAllowed)
+	require.NoError(t, svc.enforceProjectAccessLogin(allow, canonicalize("Alice.Smith@gmail.com")))
+	require.ErrorIs(t, svc.enforceProjectAccessSignup(allow, canonicalize("nope@nowhere.com")), ErrAccessNotAllowed)
 }
 
 // ── Default-DENY regression: unconfigured project denies everything ──────
@@ -505,12 +505,12 @@ func TestProjectAccess_EnvDefaultProject_ModeGovernsDenyOrPermit(t *testing.T) {
 	}
 
 	// GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open → permit.
-	require.NoError(t, svc.enforceProjectAccessSignup(build(AccessModeOpen), "x@y.com"))
+	require.NoError(t, svc.enforceProjectAccessSignup(build(AccessModeOpen), canonicalize("x@y.com")))
 
 	// unset ("") and closed → deny (what a deployment gets if it sets nothing).
-	require.ErrorIs(t, svc.enforceProjectAccessSignup(build(""), "x@y.com"), ErrAccessNotAllowed)
-	require.ErrorIs(t, svc.enforceProjectAccessLogin(build(""), "x@y.com"), ErrAccessNotAllowed)
-	require.ErrorIs(t, svc.enforceProjectAccessLogin(build(AccessModeClosed), "x@y.com"), ErrAccessNotAllowed)
+	require.ErrorIs(t, svc.enforceProjectAccessSignup(build(""), canonicalize("x@y.com")), ErrAccessNotAllowed)
+	require.ErrorIs(t, svc.enforceProjectAccessLogin(build(""), canonicalize("x@y.com")), ErrAccessNotAllowed)
+	require.ErrorIs(t, svc.enforceProjectAccessLogin(build(AccessModeClosed), canonicalize("x@y.com")), ErrAccessNotAllowed)
 }
 
 // ── The documented admin-gloss config parses to the intended allowlist ───
@@ -695,4 +695,197 @@ func TestProjectAccess_PasswordLogin_OffListDeniedBeforeLookup(t *testing.T) {
 
 	_, err := svc.PasswordLogin(ctx, "outsider@other.com", "any-Passw0rd!", "1.2.3.4", "a")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
+}
+
+// ── One-shot canonicalization: NON-CANONICAL input at every gated entry point ─
+//
+// The access gate now takes a canonicalEmail — the caller canonicalizes ONCE and
+// the gate never re-canonicalizes. These tests drive every gated entry point
+// with a NON-CANONICAL variant (dots + mixed case + '+tag') that canonicalizes
+// ONTO the allowlist, and assert the access decision AND provisioning are
+// correct: an on-list variant is admitted and the account is resolved under the
+// single canonical key, while an off-list variant is denied. They are the
+// regression guard that the type-driven "canonicalize once" refactor did not
+// weaken the gate.
+
+const (
+	// All three canonicalize to nonCanonCanonical, which gmailAllowlistJSON lists
+	// (allowed_emails ["alice.smith+work@gmail.com"] → "alicesmith@gmail.com").
+	nonCanonSignup      = "Alice.Smith+promo@GMAIL.com"
+	nonCanonSignupLower = "alice.smith+promo@gmail.com" // the non-canonical key, lower-cased
+	nonCanonLogin       = "aLiCe.SMITH+news@gmail.com"
+	nonCanonCanonical   = "alicesmith@gmail.com"
+	// Canonicalizes to bobjones@gmail.com — NOT on the list (gmail.com is not an
+	// allowed domain; only cursive.ai is), so every variant is denied.
+	nonCanonOffList          = "Bob.Jones+x@GMAIL.com"
+	nonCanonOffListCanonical = "bobjones@gmail.com"
+)
+
+func TestProjectAccess_NonCanonical_PasswordSignupAndLogin(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := accessScope(t, gmailAllowlistJSON)
+
+	// A dotted/+tagged/mixed-case signup is admitted and stored ONCE under the
+	// canonical key — never under the non-canonical form the client typed.
+	res, err := svc.PasswordSignup(ctx, nonCanonSignup, accessTestPassword, "Alice", "", 0)
+	require.NoError(t, err)
+	require.NotEmpty(t, res.AccessToken)
+
+	u, _ := repo.FindUserByEmail(context.Background(), nonCanonCanonical)
+	require.NotNil(t, u, "account must be provisioned under the canonical key")
+	dup, _ := repo.FindUserByEmail(context.Background(), nonCanonSignupLower)
+	assert.Nil(t, dup, "no account may be stored under the non-canonical key")
+
+	// A DIFFERENT non-canonical variant logs into the SAME account.
+	login, err := svc.PasswordLogin(ctx, nonCanonLogin, accessTestPassword, "1.2.3.4", "a")
+	require.NoError(t, err)
+	require.NotEmpty(t, login.AccessToken)
+	require.Equal(t, u.ID, login.User.ID)
+
+	// An off-list variant is denied at signup, nothing created.
+	_, err = svc.PasswordSignup(ctx, nonCanonOffList, accessTestPassword, "Bob", "", 0)
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+	got, _ := repo.FindUserByEmail(context.Background(), nonCanonOffListCanonical)
+	assert.Nil(t, got)
+}
+
+func TestProjectAccess_NonCanonical_OAuthJIT(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := accessScope(t, gmailAllowlistJSON)
+
+	// On-list (after canonicalization) → JIT provisioned under the canonical key.
+	_, err := svc.OAuthLogin(ctx, OAuthLoginParams{
+		Code: fakeOAuthCode(nonCanonSignup, "Alice", "", "google"), Provider: "google", RedirectURI: "https://app/cb",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, mustFindUser(t, repo, nonCanonCanonical))
+	dup, _ := repo.FindUserByEmail(context.Background(), nonCanonSignupLower)
+	assert.Nil(t, dup, "no duplicate under the non-canonical key")
+
+	// Off-list variant → denied, nothing created.
+	_, err = svc.OAuthLogin(ctx, OAuthLoginParams{
+		Code: fakeOAuthCode(nonCanonOffList, "Bob", "", "google"), Provider: "google", RedirectURI: "https://app/cb",
+	})
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+	got, _ := repo.FindUserByEmail(context.Background(), nonCanonOffListCanonical)
+	assert.Nil(t, got)
+}
+
+// The strongest proof of the passwordless canonicalization fix: an OTP minted
+// for one non-canonical variant is redeemable by a DIFFERENT non-canonical
+// variant, because both key the SAME canonical OTP record (previously the send
+// keyed on the non-canonical address while the gate canonicalized internally).
+func TestProjectAccess_NonCanonical_PasswordlessOTP_CrossVariant(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	ctx := accessScope(t, gmailAllowlistJSON)
+
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, nonCanonSignup))
+	require.Len(t, rec.Sent(), 1)
+	assert.Equal(t, nonCanonCanonical, rec.Sent()[0].To, "OTP addressed to the canonical form")
+	code := extractCodeFromEmail(t, rec.Sent()[0].Text)
+
+	res, err := svc.VerifyEmailLoginCode(ctx, nonCanonLogin, code, "1.2.3.4", "a")
+	require.NoError(t, err)
+	require.NotEmpty(t, res.AccessToken)
+	require.NotNil(t, mustFindUser(t, repo, nonCanonCanonical))
+
+	// Off-list variant: the send is suppressed (spam/abuse gate) with an
+	// unchanged response.
+	rec.Reset()
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, nonCanonOffList))
+	assert.Empty(t, rec.Sent())
+}
+
+func TestProjectAccess_NonCanonical_MagicLink(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	ctx := accessScope(t, gmailAllowlistJSON)
+
+	require.NoError(t, svc.RequestMagicLink(ctx, nonCanonSignup, "https://app.test/cb"))
+	require.Len(t, rec.Sent(), 1)
+	assert.Equal(t, nonCanonCanonical, rec.Sent()[0].To, "link addressed to the canonical form")
+	token := extractTokenFromLink(t, rec.Sent()[0].Text)
+
+	res, err := svc.RedeemMagicLink(ctx, token, "1.2.3.4", "a")
+	require.NoError(t, err)
+	require.NotEmpty(t, res.AccessToken)
+	require.NotNil(t, mustFindUser(t, repo, nonCanonCanonical))
+
+	// Off-list variant: no link sent.
+	rec.Reset()
+	require.NoError(t, svc.RequestMagicLink(ctx, nonCanonOffList, "https://app.test/cb"))
+	assert.Empty(t, rec.Sent())
+}
+
+func TestProjectAccess_NonCanonical_PasskeySignupAndLogin(t *testing.T) {
+	svc, repo, rec := newPasskeyVectorSvc(t)
+	ctx := accessScope(t, gmailAllowlistJSON)
+
+	// Begin with variant A: the gate permits and the OTP is addressed to canonical.
+	_, challengeID, err := svc.BeginPasskeySignup(ctx, nonCanonSignup, "Key")
+	require.NoError(t, err)
+	otp := passkeySignupOTP(t, rec, nonCanonCanonical)
+	setFakeChallengeValue(repo, challengeID, pkB64URL(t, pkRegChallengeHex))
+
+	// Complete presenting variant B as the request email: it canonicalizes to the
+	// same bound address (so the match guard passes) and provisions under canonical.
+	res, err := svc.CompletePasskeySignup(ctx, challengeID, pkRegCredentialJSON(t), nonCanonLogin, otp, "Key", "1.2.3.4", "a")
+	require.NoError(t, err)
+	require.NotEmpty(t, res.AccessToken)
+	require.NotNil(t, mustFindUser(t, repo, nonCanonCanonical))
+
+	// Login (login-context gate on the canonical account email) succeeds.
+	_, loginChallengeID, err := svc.BeginPasskeyLogin(ctx, nonCanonLogin)
+	require.NoError(t, err)
+	setFakeChallengeValue(repo, loginChallengeID, pkB64URL(t, pkLoginChallengeHex))
+	login, err := svc.CompletePasskeyLogin(ctx, loginChallengeID, pkAssertionCredentialJSON(t), "1.2.3.4", "a")
+	require.NoError(t, err)
+	require.NotEmpty(t, login.AccessToken)
+}
+
+func TestProjectAccess_NonCanonical_AcceptInvitation(t *testing.T) {
+	svc, repo, _ := newAuthSvcWithMailer(t)
+	ctx := accessScope(t, gmailAllowlistJSON)
+
+	// A LEGACY invited user seeded under a NON-canonical email: the login-context
+	// gate wraps user.Email via canonicalize (self-healing the row for the
+	// decision) and admits the on-list invitee.
+	token := seedInvitedUser(t, repo, nonCanonSignupLower)
+	res, err := svc.AcceptInvitation(ctx, token, accessTestPassword, "Alice", "", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, res.AccessToken)
+
+	// An off-list invitee is refused (an admin cannot invite past the allowlist).
+	off := seedInvitedUser(t, repo, nonCanonOffListCanonical)
+	_, err = svc.AcceptInvitation(ctx, off, accessTestPassword, "Bob", "", "")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+}
+
+func TestProjectAccess_NonCanonical_RefreshTokenRevalidates(t *testing.T) {
+	svc, _, _ := newAuthSvcWithMailer(t)
+	ctx := accessScope(t, gmailAllowlistJSON)
+
+	// Sign up (non-canonical → canonical account), then refresh: the login-context
+	// gate wraps the canonical user.Email and still admits under the allowlist.
+	reg, err := svc.PasswordSignup(ctx, nonCanonSignup, accessTestPassword, "Alice", "", 0)
+	require.NoError(t, err)
+	_, at, rt, err := svc.RefreshToken(ctx, reg.RefreshToken, "1.2.3.4", "a")
+	require.NoError(t, err)
+	require.NotEmpty(t, at)
+	require.NotEmpty(t, rt)
+
+	// Flip the project to closed: the still-valid refresh token can no longer mint.
+	closed := accessScope(t, `{"access":{"mode":"closed"}}`)
+	_, _, _, err = svc.RefreshToken(closed, rt, "1.2.3.4", "a")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+}
+
+// mustFindUser returns the user stored under email, failing the test when absent.
+func mustFindUser(t *testing.T, repo *fakeRepo, email string) *User {
+	t.Helper()
+	u, err := repo.FindUserByEmail(context.Background(), email)
+	require.NoError(t, err)
+	require.NotNil(t, u)
+	return u
 }

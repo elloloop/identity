@@ -60,14 +60,17 @@ func (s *AuthService) BeginPasskeySignup(ctx context.Context, email, deviceName 
 	}
 	// Canonicalize for dedup + storage, exactly as PasswordSignup does, so one
 	// human maps to one account regardless of gmail dot/+tag variants.
-	email = canonicalizeEmail(email)
+	// Canonicalized ONCE here and reused for the gate (cemail), the WebAuthn
+	// options, the stored challenge email, and the in-flow OTP send (email).
+	cemail := canonicalize(email)
+	email = string(cemail)
 
 	// Fail fast on a project that forbids self-signup, before building the
 	// WebAuthn challenge or emailing an OTP — otherwise the user completes a full
 	// biometric ceremony only to have a silently-dropped OTP never arrive. The
 	// check is DB-free (email + config only), so failing fast leaks no
 	// account-existence signal; this mirrors PasswordSignup.
-	if err := s.enforceProjectAccessSignup(ctx, email); err != nil {
+	if err := s.enforceProjectAccessSignup(ctx, cemail); err != nil {
 		return "", "", err
 	}
 
@@ -168,8 +171,13 @@ func (s *AuthService) CompletePasskeySignup(
 	// the user during the ceremony), never the request-supplied value. If the
 	// client did pass an email it must match, so a client cannot complete under
 	// a different address than the user consented to.
-	boundEmail := challenge.Email
-	if reqEmail := canonicalizeEmail(strings.TrimSpace(strings.ToLower(email))); reqEmail != "" && reqEmail != boundEmail {
+	// boundEmail is the challenge's stored (already canonical) email; wrap once —
+	// idempotent, self-heals a legacy row, and produces the canonicalEmail the
+	// gate requires. The optional request email is canonicalized the same way so
+	// the match compares like-for-like (dotted/tagged variants still match).
+	boundEmail := canonicalize(challenge.Email)
+	boundEmailStr := string(boundEmail)
+	if reqEmail := canonicalize(strings.TrimSpace(strings.ToLower(email))); reqEmail != "" && reqEmail != boundEmail {
 		return nil, fmt.Errorf("%w: email does not match the signup challenge", ErrInvalidArgument)
 	}
 
@@ -180,7 +188,7 @@ func (s *AuthService) CompletePasskeySignup(
 	if err != nil {
 		s.logger.Warn(
 			"passkey_signup_verify_failed",
-			zap.String("email", redactEmail(boundEmail)), zap.Error(err),
+			zap.String("email", redactEmail(boundEmailStr)), zap.Error(err),
 		)
 		return nil, fmt.Errorf("%w: attestation verification failed", ErrInvalidArgument)
 	}
@@ -201,8 +209,8 @@ func (s *AuthService) CompletePasskeySignup(
 	// challenge before the OTP would burn it on the first mistyped code, forcing
 	// a fresh BeginPasskeySignup + a second navigator.credentials.create ceremony
 	// (orphaning the first credential) on the most error-prone step.
-	if err := s.verifyAndConsumeEmailLoginCode(ctx, boundEmail, otpCode, "passkey_signup", ipAddr, userAgent); err != nil {
-		s.logger.Warn("passkey_signup_otp_failed", zap.String("email", redactEmail(boundEmail)))
+	if err := s.verifyAndConsumeEmailLoginCode(ctx, boundEmailStr, otpCode, "passkey_signup", ipAddr, userAgent); err != nil {
+		s.logger.Warn("passkey_signup_otp_failed", zap.String("email", redactEmail(boundEmailStr)))
 		return nil, err
 	}
 
@@ -224,19 +232,19 @@ func (s *AuthService) CompletePasskeySignup(
 	// Anti-takeover + enumeration-safety: an existing account is never given a
 	// new passkey by an unauthenticated caller, and its existence is never
 	// disclosed. Mirror the duplicate-PasswordSignup decoy exactly.
-	existing, err := s.repo(ctx).FindUserByEmail(ctx, boundEmail)
+	existing, err := s.repo(ctx).FindUserByEmail(ctx, boundEmailStr)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		return s.handleDuplicatePasskeySignup(ctx, existing, boundEmail)
+		return s.handleDuplicatePasskeySignup(ctx, existing, boundEmailStr)
 	}
 
 	now := s.nowMs()
 	user := &User{
 		ID:     challenge.UserID, // == WebAuthn handle minted at Begin
-		Email:  boundEmail,
-		Name:   fallbackDisplayName(boundEmail, ""),
+		Email:  boundEmailStr,
+		Name:   fallbackDisplayName(boundEmailStr, ""),
 		Role:   "member",
 		Status: "active",
 		// The consumed OTP proved control of this inbox, so the account is
@@ -252,8 +260,8 @@ func (s *AuthService) CompletePasskeySignup(
 		// Lost a create race (a concurrent caller registered the email between
 		// our lookup and insert). Treat as duplicate: enumeration-safe, and the
 		// passkey is NOT attached to the winner's account.
-		if raced, lookupErr := s.repo(ctx).FindUserByEmail(ctx, boundEmail); lookupErr == nil && raced != nil {
-			return s.handleDuplicatePasskeySignup(ctx, raced, boundEmail)
+		if raced, lookupErr := s.repo(ctx).FindUserByEmail(ctx, boundEmailStr); lookupErr == nil && raced != nil {
+			return s.handleDuplicatePasskeySignup(ctx, raced, boundEmailStr)
 		}
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
@@ -283,7 +291,7 @@ func (s *AuthService) CompletePasskeySignup(
 
 	s.logger.Info(
 		"passkey_signup_success",
-		zap.String("email", redactEmail(boundEmail)),
+		zap.String("email", redactEmail(boundEmailStr)),
 		zap.String("user_id", userID),
 		zap.String("credential_id", result.CredentialID),
 	)

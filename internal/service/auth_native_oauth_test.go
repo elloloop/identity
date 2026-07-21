@@ -289,6 +289,41 @@ func TestNativeOAuthLogin_CanonicalizesProviderEmail(t *testing.T) {
 	assert.Equal(t, "alicesmith@gmail.com", res.User.Email)
 }
 
+// Native OAuth is access-gated too: a project restricted by an allowlist admits
+// a NON-CANONICAL (dots + '+tag' + mixed-case) provider email that canonicalizes
+// onto the list and JIT-provisions under the single canonical key, while an
+// off-list variant is denied. Proves the canonicalEmail gate refactor did not
+// regress the native path (which wraps user.Email via canonicalize).
+func TestNativeOAuthLogin_Allowlist_NonCanonical(t *testing.T) {
+	repo := newFakeRepo()
+	signer := newNativeTokenSigner(t)
+
+	proj := nativeProjWithAuds("proj-tortoise", "scope-tortoise")
+	access, err := NewProjectAccessConfig(AccessModeAllowlist, []string{"alicesmith@gmail.com"}, nil)
+	require.NoError(t, err)
+	proj.Access = access
+	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-tortoise": proj}}
+	svc := newNativeTestAuthService(t, repo, signer, projects, nil)
+
+	// A dotted/+tagged/mixed-case token variant is JIT-provisioned under canonical.
+	tok := signer.googleToken(t, "g-sub-nc", "Alice.Smith+promo@GMAIL.com", nativeGoogleAud)
+	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok, Product: "tortoise",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res.User)
+	assert.Equal(t, "alicesmith@gmail.com", res.User.Email)
+
+	// An off-list variant is denied and no account is created.
+	offTok := signer.googleToken(t, "g-sub-off", "Bob.Jones+x@GMAIL.com", nativeGoogleAud)
+	_, err = svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: offTok, Product: "tortoise",
+	})
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+	got, _ := repo.FindUserByEmail(context.Background(), "bobjones@gmail.com")
+	assert.Nil(t, got)
+}
+
 func TestNativeOAuthLogin_Apple_WithNonce(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)

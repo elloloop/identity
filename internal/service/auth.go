@@ -1899,8 +1899,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// removed from an allowlist, or a project switched to closed, must stop
 	// minting fresh access tokens rather than coast on a still-valid refresh
 	// token until it expires. Login context, so invite mode keeps admitting an
-	// already-provisioned user.
-	if err := s.enforceProjectAccessLogin(ctx, user.Email); err != nil {
+	// already-provisioned user. user.Email is the DB-persisted (canonical) account
+	// email; wrap once (idempotent, self-heals a legacy non-canonical row).
+	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
 		return nil, "", "", err
 	}
 
