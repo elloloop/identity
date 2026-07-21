@@ -19,6 +19,7 @@ import (
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo/memory"
+	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
 )
@@ -26,7 +27,10 @@ import (
 func newTestConfig() *config.Config {
 	// #nosec G101 -- passkey relying-party settings are public WebAuthn metadata.
 	return &config.Config{
-		DefaultTenantID:               "tenant",
+		DefaultTenantID: "tenant",
+		// Open the env default project so the full-stack app tests exercise the
+		// handler chain, not the access gate (default-DENY without this).
+		DefaultProjectAccessMode:      service.AccessModeOpen,
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,

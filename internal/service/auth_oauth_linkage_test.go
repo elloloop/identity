@@ -63,6 +63,32 @@ func TestOAuthLogin_FirstTimeLinkToExistingUser(t *testing.T) {
 	assert.Equal(t, "alice@example.com", links[0].EmailAtLinkTime)
 }
 
+// TestOAuthLogin_CanonicalizesProviderEmail verifies the provider email is
+// canonicalized before the by-email resolve, so an OAuth login for a
+// non-canonical variant (dots/casing) links to the SAME account stored under
+// the canonical key rather than minting a duplicate — the one-account-per-email
+// invariant must hold across OAuth too.
+func TestOAuthLogin_CanonicalizesProviderEmail(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := context.Background()
+
+	// Existing account under the canonical gmail key.
+	seed := seedUser(repo, "alicesmith@gmail.com", "", "active")
+
+	// Provider returns a dotted, mixed-case variant of the same address.
+	code := fakeOAuthCode("Alice.Smith@gmail.com", "Alice", "", "google")
+	res, err := svc.OAuthLogin(ctx, OAuthLoginParams{Code: code, Provider: "google", RedirectURI: "https://app/cb"})
+	require.NoError(t, err)
+	assert.Equal(t, seed.ID, res.User.ID, "OAuth login must link to the existing canonical account")
+
+	// No duplicate: the only account resolves under the canonical key.
+	got, err := repo.FindUserByEmail(ctx, "alicesmith@gmail.com")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, seed.ID, got.ID)
+}
+
 // TestOAuthLogin_NewUserGetsIdentityLink verifies that a brand-new
 // OAuth user gets both a User row and an OAuthIdentity row.
 func TestOAuthLogin_NewUserGetsIdentityLink(t *testing.T) {

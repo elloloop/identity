@@ -86,6 +86,10 @@ func newNativeHarness(t *testing.T, signer *nativeHandlerSigner, enabled bool) *
 	db := newFakeDB()
 	cfg := testConfig()
 	cfg.DefaultProjectID = "proj-default"
+	// Open the default project so this native-OAuth handler test exercises the
+	// RPC wiring, not the access gate (which has its own tests). Under
+	// default-DENY the mode must be set explicitly.
+	cfg.DefaultProjectAccessMode = service.AccessModeOpen
 	cfg.NativeOAuthEnabled = enabled
 	cfg.NativeOAuthGoogleAudiences = nativeHandlerGoogleAud
 	cfg.NativeOAuthProductProjects = "easyloops=proj-default"

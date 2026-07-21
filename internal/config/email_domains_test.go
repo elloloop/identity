@@ -33,6 +33,30 @@ func TestDefaultProjectAuthDomainList(t *testing.T) {
 	}
 }
 
+func TestDefaultProjectAllowedLists(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"   ", nil},
+		{"a@b.com", []string{"a@b.com"}},
+		{" a@b.com , c@d.com ,", []string{"a@b.com", "c@d.com"}}, // trimmed, blanks dropped
+	}
+	for _, tc := range cases {
+		emails := (&Config{DefaultProjectAllowedEmails: tc.in}).DefaultProjectAllowedEmailList()
+		if !reflect.DeepEqual(emails, tc.want) {
+			t.Errorf("DefaultProjectAllowedEmailList(%q) = %v, want %v", tc.in, emails, tc.want)
+		}
+		domains := (&Config{DefaultProjectAllowedDomains: tc.in}).DefaultProjectAllowedDomainList()
+		if !reflect.DeepEqual(domains, tc.want) {
+			t.Errorf("DefaultProjectAllowedDomainList(%q) = %v, want %v", tc.in, domains, tc.want)
+		}
+	}
+}
+
 func TestIsPublicEmailDomain_BuiltIn(t *testing.T) {
 	t.Parallel()
 	c := &Config{}

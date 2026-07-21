@@ -65,7 +65,7 @@ const (
 func serve(t *testing.T, resolver service.ProjectResolver, defaultID, defaultScope string, mutate func(*http.Request)) (*httptest.ResponseRecorder, *projectScopeCapture) {
 	t.Helper()
 	cap := &projectScopeCapture{}
-	h := NewProjectResolver(defaultID, defaultScope, "", resolver, nil)(cap.handler())
+	h := NewProjectResolver(defaultID, defaultScope, "", service.ProjectAccessConfig{Mode: service.AccessModeOpen}, resolver, nil)(cap.handler())
 	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetCurrentUser", nil)
 	if mutate != nil {
 		mutate(req)
@@ -92,7 +92,7 @@ func TestProjectResolver_NilResolver_PinsDefault(t *testing.T) {
 // lookup.
 func TestProjectResolver_DefaultPin_CarriesPrimaryAuthDomain(t *testing.T) {
 	cap := &projectScopeCapture{}
-	h := NewProjectResolver(defProjectID, defScopeID, "auth.appa.com", nil, nil)(cap.handler())
+	h := NewProjectResolver(defProjectID, defScopeID, "auth.appa.com", service.ProjectAccessConfig{Mode: service.AccessModeOpen}, nil, nil)(cap.handler())
 	req := httptest.NewRequest(http.MethodPost, "/x", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -100,6 +100,20 @@ func TestProjectResolver_DefaultPin_CarriesPrimaryAuthDomain(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotNil(t, cap.scope)
 	assert.Equal(t, "auth.appa.com", cap.scope.PrimaryAuthDomain)
+}
+
+// The default-project pin carries the env-configured access mode so the access
+// guard is gated on every default-project request (the config-less default
+// project has no config_json to carry one).
+func TestProjectResolver_DefaultPin_CarriesAccessMode(t *testing.T) {
+	access := service.ProjectAccessConfig{Mode: service.AccessModeClosed}
+	cap := &projectScopeCapture{}
+	h := NewProjectResolver(defProjectID, defScopeID, "", access, nil, nil)(cap.handler())
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	require.NotNil(t, cap.scope)
+	assert.Equal(t, service.AccessModeClosed, cap.scope.Access.Mode)
 }
 
 // A resolved project carries the primary auth-domain the resolver returned.

@@ -858,6 +858,22 @@ var (
 	ErrPermissionDenied = errors.New("permission denied")
 	ErrInvalidArgument  = errors.New("invalid argument")
 	ErrNotFound         = errors.New("not found")
+	// ErrAccessNotAllowed is returned when a project's access mode denies the
+	// authenticating email: an allowlist mode whose list omits the email, a
+	// closed mode, or an unset/unrecognized mode (the default-DENY posture). It
+	// is a membership denial, distinct from ErrPermissionDenied (a login-method
+	// policy denial) so the two can be told apart; both map to
+	// CodePermissionDenied. The message is deliberately generic — it discloses
+	// neither whether an account exists nor the allowlist's contents.
+	ErrAccessNotAllowed = errors.New("access not allowed for this project")
+	// ErrSignupByInvitationOnly is returned when a project's access mode is
+	// "invite": self-signup is blocked, but login for an existing user and
+	// admin-issued invitation acceptance still work. It is distinct from
+	// ErrAccessNotAllowed so a client can route the user to request an invite
+	// rather than show a generic denial. Both map to CodePermissionDenied, and
+	// the denial is uniform across every email (invite-only is a project
+	// property, not a per-account signal), so it discloses no account existence.
+	ErrSignupByInvitationOnly = errors.New("this project is invitation-only; self-signup is disabled")
 	// ErrProjectSecretsKeyMissing is returned when an admin write carries a
 	// plaintext provider secret to encrypt but GATEWAY_PROJECT_SECRETS_KEY is
 	// not configured, so the server cannot encrypt it for storage. It is a
@@ -1059,6 +1075,22 @@ type AuthService struct {
 	returnAllow ReturnAllowlist
 	nowFunc     func() time.Time // overridable for testing
 
+	// defaultProjectAccess is the env-configured default project's access policy
+	// (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE + allowlists), parsed and canonicalized
+	// ONCE at construction. It backs the native-login default-project fallback
+	// (which has no config_json to carry a mode). An invalid spec fails closed to
+	// AccessModeClosed at construction (with a WARN); app.New validates it at boot,
+	// so a served deployment surfaces the error there.
+	defaultProjectAccess ProjectAccessConfig
+
+	// runEmailSend runs a request-phase credential-email send. It defaults to
+	// SYNCHRONOUS (run inline); app.New swaps in an asynchronous dispatcher via
+	// WithAsyncEmailDispatch so the RPC response time cannot depend on — and thus
+	// leak — the gated send/no-send decision (a timing oracle that, in invite
+	// mode, would reveal account existence). Kept injectable so tests observe
+	// sends deterministically without polling.
+	runEmailSend func(func())
+
 	// autoFormer, when set (postgres driver only), auto-forms a tenant from
 	// a new user's company email domain at signup. nil disables the
 	// behaviour — the constructor leaves it nil; app.New sets it via
@@ -1216,26 +1248,85 @@ func NewAuthServiceWithOAuth(
 	}
 	ageGate := BuildAgeGate(cfg, logger)
 	return &AuthService{
-		defaultRepo:        repo,
-		defaultTenantID:    cfg.DefaultTenantID,
-		ageGate:            ageGate,
-		minorData:          NewMinorDataMinimizer(cfg.MinorDataMinimization, ageGate, time.Now),
-		signer:             signer,
-		passkeys:           passkeysSvc,
-		audit:              auditLogger,
-		cfg:                cfg,
-		totpKey:            totpKey,
-		totpRecoveryPepper: totpRecoveryPepper,
-		mailer:             mailer,
-		smsSender:          smsSender,
-		logger:             logger,
-		oauthResolver:      newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
-		emailThrottle:      newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
-		signupThrottle:     newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
-		phoneThrottle:      newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
-		returnAllow:        ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
-		nowFunc:            time.Now,
+		defaultRepo:          repo,
+		defaultTenantID:      cfg.DefaultTenantID,
+		defaultProjectAccess: buildDefaultProjectAccess(cfg, logger),
+		ageGate:              ageGate,
+		minorData:            NewMinorDataMinimizer(cfg.MinorDataMinimization, ageGate, time.Now),
+		signer:               signer,
+		passkeys:             passkeysSvc,
+		audit:                auditLogger,
+		cfg:                  cfg,
+		totpKey:              totpKey,
+		totpRecoveryPepper:   totpRecoveryPepper,
+		mailer:               mailer,
+		smsSender:            smsSender,
+		logger:               logger,
+		oauthResolver:        newOAuthResolver(cfg.DefaultProjectID, oauthRegistry, cfg.OAuthHubSharing, logger),
+		emailThrottle:        newEmailSendThrottle(int64(cfg.EmailSendCooldownSeconds)*1000, 0),
+		signupThrottle:       newEmailSendThrottle(int64(cfg.SignupEmailCooldownSeconds)*1000, 0),
+		phoneThrottle:        newEmailSendThrottle(int64(cfg.PhoneCodeCooldownSeconds)*1000, 0),
+		returnAllow:          ParseReturnAllowlist(cfg.OAuthAllowedReturnURLs),
+		nowFunc:              time.Now,
+		// Default to synchronous sends; app.New opts into async via
+		// WithAsyncEmailDispatch. A synchronous default keeps every
+		// directly-constructed service (tests, embedders) deterministic.
+		runEmailSend: func(fn func()) { fn() },
 	}
+}
+
+// WithAsyncEmailDispatch switches request-phase credential-email sends to run
+// on a detached background goroutine, so the RPC response time is independent
+// of the gated send/no-send decision (closing the timing oracle). app.New
+// enables this for the served deployment; it is a set-once option that returns
+// the receiver for chaining. One goroutine per permitted send is acceptable
+// because the per-IP rate limiter and captcha upstream already bound this path.
+func (s *AuthService) WithAsyncEmailDispatch() *AuthService {
+	s.runEmailSend = func(fn func()) { go fn() }
+	return s
+}
+
+// asyncEmailSendTimeout caps a detached background send so a stuck SMTP dial
+// cannot leak a goroutine indefinitely.
+const asyncEmailSendTimeout = 30 * time.Second
+
+// dispatchEmailSend runs send via runEmailSend (sync or async per construction).
+// It hands send a DETACHED context — context.WithoutCancel(ctx) with a bounded
+// timeout — NOT the request ctx, which is cancelled when the RPC returns and
+// would abort an async send mid-flight; the detached copy still carries
+// request-scoped values (the resolved project scope, etc.). Panics in the
+// background goroutine are recovered and logged, since the send is now
+// fire-and-forget.
+func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send func(context.Context)) {
+	detached := context.WithoutCancel(ctx)
+	s.runEmailSend(func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("email_send_panic", zap.String("op", op), zap.Any("panic", r))
+			}
+		}()
+		sendCtx, cancel := context.WithTimeout(detached, asyncEmailSendTimeout)
+		defer cancel()
+		send(sendCtx)
+	})
+}
+
+// buildDefaultProjectAccess parses the env-configured default project's access
+// policy (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE + allowlists) ONCE, so the value
+// is canonicalized a single time rather than re-split and re-punycoded per use.
+// It fails CLOSED: an invalid spec yields a deny-all closed policy rather than
+// an open one, and logs a WARN so the misconfiguration is visible.
+func buildDefaultProjectAccess(cfg *config.Config, logger *zap.Logger) ProjectAccessConfig {
+	access, err := NewProjectAccessConfig(
+		cfg.DefaultProjectAccessMode,
+		cfg.DefaultProjectAllowedEmailList(),
+		cfg.DefaultProjectAllowedDomainList(),
+	)
+	if err != nil {
+		logger.Warn("default_project_access_invalid_failing_closed", zap.Error(err))
+		return ProjectAccessConfig{Mode: AccessModeClosed}
+	}
+	return access
 }
 
 // BuildAgeGate selects the age-determination provider from config. When
@@ -1304,8 +1395,11 @@ func (s *AuthService) maybeAutoFormTenant(ctx context.Context, user *User) {
 	if projectID == "" {
 		return
 	}
-	_, domain, ok := strings.Cut(user.Email, "@")
-	if !ok || domain == "" || s.cfg.IsPublicEmailDomain(domain) {
+	// Split on the last '@' (via emailDomain) so the auto-formed tenant keys on
+	// the same domain canonicalizeEmail produced — a quoted local part with '@'
+	// must not yield a bogus domain and spawn a spurious tenant.
+	domain := emailDomain(user.Email)
+	if domain == "" || s.cfg.IsPublicEmailDomain(domain) {
 		return
 	}
 	if _, err := s.autoFormer.EnsureTenantForDomain(ctx, projectID, domain, user.ID); err != nil {
@@ -1801,6 +1895,16 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// refresh token. A hard-deleted user is already covered above (the
 	// refresh row is gone, so the lookup returns nil → unauthenticated).
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return nil, "", "", err
+	}
+
+	// Re-enforce the project access mode (login context) on every refresh: a user
+	// removed from an allowlist, or a project switched to closed, must stop
+	// minting fresh access tokens rather than coast on a still-valid refresh
+	// token until it expires. Login context, so invite mode keeps admitting an
+	// already-provisioned user. user.Email is the DB-persisted (canonical) account
+	// email; wrap once (idempotent, self-heals a legacy non-canonical row).
+	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
 		return nil, "", "", err
 	}
 

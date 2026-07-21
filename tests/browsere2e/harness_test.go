@@ -138,19 +138,21 @@ func startPostgresContainer(ctx context.Context, t *testing.T) string {
 // window.serverConfig.passwordSignupEnabled the page reads.
 func newUIConfig(signupEnabled bool, projectID string) *config.Config {
 	return &config.Config{
-		DefaultTenantID:        projectID,
-		DefaultProjectID:       projectID,
-		AuthAllowLocal:         true,
-		PasswordSignupEnabled:  signupEnabled,
-		PasswordResetEnabled:   true,
-		JWTExpirySeconds:       jwtExpirySeconds,
-		RefreshExpirySeconds:   refreshExpirySeconds,
-		LoginMaxFailedAttempts: 5,
-		LoginLockoutSeconds:    900,
-		PasskeyRPID:            "localhost",
-		PasskeyRPName:          "IdentityBrowserE2E",
-		PasskeyOrigin:          "http://localhost",
-		AppBaseURL:             "https://app.test",
+		DefaultTenantID:  projectID,
+		DefaultProjectID: projectID,
+		// Open-signup deployment fixture (default-DENY requires an explicit mode).
+		DefaultProjectAccessMode: "open",
+		AuthAllowLocal:           true,
+		PasswordSignupEnabled:    signupEnabled,
+		PasswordResetEnabled:     true,
+		JWTExpirySeconds:         jwtExpirySeconds,
+		RefreshExpirySeconds:     refreshExpirySeconds,
+		LoginMaxFailedAttempts:   5,
+		LoginLockoutSeconds:      900,
+		PasskeyRPID:              "localhost",
+		PasskeyRPName:            "IdentityBrowserE2E",
+		PasskeyOrigin:            "http://localhost",
+		AppBaseURL:               "https://app.test",
 		// app.New rejects an empty allowed-origins list. The browser drives the
 		// page same-origin (the httptest URL), so cross-origin CORS is never
 		// exercised; any non-empty value satisfies the validator.
@@ -221,6 +223,8 @@ func startServer(t *testing.T, signupEnabled bool) *browserHarness {
 		TOTPKey:            []byte(totpKey),
 		TOTPRecoveryPepper: []byte(totpRecoveryPepper),
 		ProjectResolver:    built.ProjectResolver(),
+		// Synchronous sends keep the browser flow deterministic.
+		SynchronousEmailSend: true,
 	})
 	require.NoError(t, err)
 	appBuilt.Start()

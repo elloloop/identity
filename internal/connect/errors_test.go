@@ -34,6 +34,20 @@ func TestToConnectErrorEmailVerificationRequired(t *testing.T) {
 	}
 }
 
+// TestToConnectErrorAccessNotAllowed proves a per-project access-allowlist
+// denial maps to PermissionDenied: the authenticating email is not a member of
+// the restricted project, an authorization failure (not FailedPrecondition or
+// Unauthenticated, which would leak whether the account or its credential exist).
+func TestToConnectErrorAccessNotAllowed(t *testing.T) {
+	err := toConnectError(service.ErrAccessNotAllowed)
+	if err == nil {
+		t.Fatal("toConnectError(ErrAccessNotAllowed) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodePermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", got)
+	}
+}
+
 // TestToConnectErrorSessionExpired proves a session killed by the tenant's
 // idle/absolute timeout maps to Unauthenticated (like ErrTokenExpired): the
 // presented refresh token is no longer valid, so the client must re-authenticate

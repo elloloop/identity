@@ -76,25 +76,49 @@ func normalizeEmail(raw string) (string, bool) {
 // difference between a known and an unknown address. The account is NOT
 // created here — only VerifyEmailLoginCode resolves or creates the user.
 func (s *AuthService) RequestEmailLoginCode(ctx context.Context, emailAddr string) error {
-	emailAddr, ok := normalizeEmail(emailAddr)
+	normalized, ok := normalizeEmail(emailAddr)
 	if !ok {
 		// Silent: the proto guarantees no enumeration even for malformed
 		// input. Log so operators can spot obvious client bugs.
 		s.logger.Info("email_login_code_requested_invalid_email")
 		return nil
 	}
-	s.sendEmailLoginCode(ctx, emailAddr)
+	// Canonicalize ONCE and use the canonical form for the access gate, the OTP
+	// storage key, and the send. VerifyEmailLoginCode canonicalizes identically,
+	// so a dotted/tagged variant keys and later looks up the SAME OTP record —
+	// fixing the prior inconsistency where the send keyed on the non-canonical
+	// address while the gate canonicalized internally.
+	cemail := canonicalize(normalized)
+	// A closed or off-list project must not emit an OTP to an arbitrary address.
+	// The response is unchanged (nil) whether or not we send, preserving
+	// anti-enumeration; the authoritative deny is at VerifyEmailLoginCode.
+	if !s.accessAllowsCodeSend(ctx, cemail) {
+		s.logger.Info("email_login_code_send_suppressed_by_access",
+			zap.String("email", redactEmail(string(cemail))))
+		return nil
+	}
+	s.sendEmailLoginCode(ctx, string(cemail))
 	return nil
 }
 
 // sendEmailLoginCode mints, stores, and emails a fresh 6-digit OTP for the
 // (already-normalized/canonical) address, honouring the per-email send
-// cooldown. It is the single mint-and-dispatch primitive shared by the
-// passwordless email-code arm and passkey-first signup, so both produce an
-// identical, enumeration-safe observable: it is silent — throttled, render, and
-// send failures are logged, never surfaced — and behaves the same whether or
-// not the address has an account (the account, if any, is never looked up here).
+// cooldown. It is the single mint-and-dispatch primitive for the passwordless
+// email-code arm and passkey-first signup: silent (throttled, render, and send
+// failures are logged, never surfaced) and behaving the same whether or not the
+// address has an account (the account, if any, is never looked up here).
+//
+// The whole body runs via dispatchEmailSend so the SMTP latency never times the
+// RPC response. The mint→store→send ordering is preserved inside that unit, so
+// any delivered email implies the code was already stored — no redemption race.
 func (s *AuthService) sendEmailLoginCode(ctx context.Context, emailAddr string) {
+	s.dispatchEmailSend(ctx, "email_login_code", func(ctx context.Context) {
+		s.sendEmailLoginCodeNow(ctx, emailAddr)
+	})
+}
+
+// sendEmailLoginCodeNow is the synchronous body of sendEmailLoginCode.
+func (s *AuthService) sendEmailLoginCodeNow(ctx context.Context, emailAddr string) {
 	// Per-email send cooldown — a single inbox can't be flooded. Reuses
 	// the shared transactional-email throttle. A throttled request is
 	// silent (same response as success) so the cooldown can't be probed.
@@ -154,16 +178,20 @@ func (s *AuthService) sendEmailLoginCode(ctx context.Context, emailAddr string) 
 // cap captured at mint time the code is consumed (invalidated) to stop a
 // brute-force walk of the 6-digit space.
 func (s *AuthService) VerifyEmailLoginCode(ctx context.Context, emailAddr, code string, ipAddr, userAgent string) (*LoginResult, error) {
-	emailAddr, ok := normalizeEmail(emailAddr)
+	normalized, ok := normalizeEmail(emailAddr)
 	if !ok || strings.TrimSpace(code) == "" {
 		return nil, ErrEmailLoginCodeInvalid
 	}
+	// Canonicalize ONCE: the OTP was stored under the canonical key by
+	// RequestEmailLoginCode, and the resolve/gate downstream require the canonical
+	// form. Reused for both the lookup (string) and completion (canonicalEmail).
+	cemail := canonicalize(normalized)
 
-	if err := s.verifyAndConsumeEmailLoginCode(ctx, emailAddr, code, "email_code", ipAddr, userAgent); err != nil {
+	if err := s.verifyAndConsumeEmailLoginCode(ctx, string(cemail), code, "email_code", ipAddr, userAgent); err != nil {
 		return nil, err
 	}
 
-	return s.completePasswordlessLogin(ctx, emailAddr, "email_code", ipAddr, userAgent)
+	return s.completePasswordlessLogin(ctx, cemail, "email_code", ipAddr, userAgent)
 }
 
 // verifyAndConsumeEmailLoginCode validates the OTP for the (already-normalized/
@@ -237,15 +265,42 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 		return fmt.Errorf("%w: return_to is not allowed", ErrInvalidArgument)
 	}
 
-	emailAddr, ok := normalizeEmail(emailAddr)
+	normalized, ok := normalizeEmail(emailAddr)
 	if !ok {
 		s.logger.Info("magic_link_requested_invalid_email")
 		return nil
 	}
+	// Canonicalize ONCE and use the canonical form for the access gate and the
+	// magic-link token's bound email, so RedeemMagicLink resolves the account
+	// under the same canonical key (fixing the prior non-canonical inconsistency).
+	cemail := canonicalize(normalized)
 
+	// A closed or off-list project must not email a sign-in link to an arbitrary
+	// address. Response is unchanged (nil) either way, preserving
+	// anti-enumeration; the authoritative deny is at RedeemMagicLink.
+	if !s.accessAllowsCodeSend(ctx, cemail) {
+		s.logger.Info("magic_link_send_suppressed_by_access",
+			zap.String("email", redactEmail(string(cemail))))
+		return nil
+	}
+
+	// Mint + email the link off the request goroutine so SMTP latency never times
+	// the RPC. The token is stored before the email inside this unit, so a
+	// delivered link always has a redeemable token — no race with RedeemMagicLink.
+	s.dispatchEmailSend(ctx, "magic_link", func(ctx context.Context) {
+		s.sendMagicLinkNow(ctx, string(cemail), returnTo)
+	})
+	return nil
+}
+
+// sendMagicLinkNow is the synchronous body of RequestMagicLink's dispatch: it
+// honours the per-email cooldown, mints and stores the single-use token, then
+// emails the link. Silent — throttle/create/render/send failures are logged,
+// never surfaced.
+func (s *AuthService) sendMagicLinkNow(ctx context.Context, emailAddr, returnTo string) {
 	if !s.emailThrottle.allow(emailAddr, s.nowMs()) {
 		s.logger.Info("magic_link_throttled", zap.String("email", redactEmail(emailAddr)))
-		return nil
+		return
 	}
 
 	rawToken := randomToken(32)
@@ -260,7 +315,7 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 	}); err != nil {
 		s.logger.Warn("magic_link_create_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
-		return nil
+		return
 	}
 
 	link := fmt.Sprintf("%s/auth/magic-link?token=%s", s.appBaseURL(ctx), rawToken)
@@ -271,7 +326,7 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 	}))
 	if err != nil {
 		s.logger.Warn("magic_link_render_failed", zap.Error(err))
-		return nil
+		return
 	}
 	msg := email.Message{
 		To:      emailAddr,
@@ -286,7 +341,6 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
 	}
 	s.logger.Info("magic_link_requested", zap.String("email", redactEmail(emailAddr)))
-	return nil
 }
 
 // ── RedeemMagicLink ────────────────────────────────────────────────────
@@ -313,7 +367,9 @@ func (s *AuthService) RedeemMagicLink(ctx context.Context, token, ipAddr, userAg
 		return nil, fmt.Errorf("consuming magic link token: %w", err)
 	}
 
-	result, err := s.completePasswordlessLogin(ctx, rec.Email, "magic_link", ipAddr, userAgent)
+	// rec.Email is the token's bound (canonical) email; wrap once — idempotent,
+	// self-heals a legacy row, and produces the canonicalEmail the resolve/gate need.
+	result, err := s.completePasswordlessLogin(ctx, canonicalize(rec.Email), "magic_link", ipAddr, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -332,28 +388,35 @@ func (s *AuthService) RedeemMagicLink(ctx context.Context, token, ipAddr, userAg
 // every other "this didn't work" path returns. The proof-of-control step
 // already happened, so this leaks nothing an attacker who controls the
 // inbox doesn't already know.
-func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr, method, ipAddr, userAgent string) (*LoginResult, error) {
+func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr canonicalEmail, method, ipAddr, userAgent string) (*LoginResult, error) {
+	emailStr := string(emailAddr)
 	invalidErr := ErrEmailLoginCodeInvalid
 	if method == "magic_link" {
 		invalidErr = ErrMagicLinkInvalid
 	}
 
+	// Project access mode is enforced inside resolveOrCreateUserByEmail below,
+	// which is the only place that can tell a NEW account (self-signup context —
+	// denied by invite/closed) apart from an EXISTING one (login context —
+	// invite-only still admits it). Enforcing a single blanket check here could
+	// not make that distinction, so it deliberately lives in the resolver.
+
 	// Both passwordless arms — OTP and magic link — prove control of the
 	// email before reaching here, so they are the one governance method
 	// (email_otp). Consult the tenant's LoginPolicy before issuing tokens.
-	decision, err := s.enforceLoginPolicy(ctx, emailAddr, LoginMethodEmailOTP)
+	decision, err := s.enforceLoginPolicy(ctx, emailStr, LoginMethodEmailOTP)
 	if err != nil {
 		return nil, err
 	}
 
 	if !s.cfg.PasswordlessSignupEnabled {
-		existing, err := s.repo(ctx).FindUserByEmail(ctx, emailAddr)
+		existing, err := s.repo(ctx).FindUserByEmail(ctx, emailStr)
 		if err != nil {
 			return nil, err
 		}
 		if existing == nil {
 			s.logger.Info("passwordless_signup_disabled_unknown_email",
-				zap.String("email", redactEmail(emailAddr)), zap.String("method", method))
+				zap.String("email", redactEmail(emailStr)), zap.String("method", method))
 			return nil, invalidErr
 		}
 	}
@@ -387,7 +450,7 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr, 
 
 	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info("passwordless_login_success",
-		zap.String("email", redactEmail(emailAddr)),
+		zap.String("email", redactEmail(emailStr)),
 		zap.String("user_id", user.ID),
 		zap.String("method", method),
 		zap.Bool("new_user", isNew))

@@ -44,6 +44,7 @@ func (s *ProjectStore) ActiveProjectByID(ctx context.Context, projectID string) 
 		StorageScopeID: p.StorageScopeID,
 		Name:           p.Name,
 		OAuth:          cfg.OAuth,
+		Access:         cfg.Access,
 	}, nil
 }
 

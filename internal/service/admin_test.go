@@ -135,6 +135,42 @@ func TestAdminService_InviteUser_InvalidEmail(t *testing.T) {
 	}
 }
 
+func TestAdminService_InviteUser_DeniedByAccessMode(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	svc := newTestAdminService(db)
+
+	// Allowlist project that does NOT list the invitee: the invite would
+	// dead-end at redemption, so it must be refused up front.
+	ctx := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "test-tenant",
+		Access:    ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"allowed@test.com"}},
+	})
+	_, err := svc.InviteUser(ctx, "admin-1", "outsider@test.com", "Outsider", "member", "", 1024, false)
+	if !errors.Is(err, ErrAccessNotAllowed) {
+		t.Fatalf("expected ErrAccessNotAllowed, got %v", err)
+	}
+}
+
+func TestAdminService_InviteUser_AllowedByAccessMode(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	svc := newTestAdminService(db)
+
+	// Same allowlist project, invitee IS on the list → the invite proceeds.
+	ctx := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "test-tenant",
+		Access:    ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"allowed@test.com"}},
+	})
+	result, err := svc.InviteUser(ctx, "admin-1", "allowed@test.com", "Allowed", "member", "", 1024, false)
+	if err != nil {
+		t.Fatalf("unexpected error for on-list invitee: %v", err)
+	}
+	if result.User == nil || result.User.Email != "allowed@test.com" {
+		t.Fatalf("expected invited user allowed@test.com, got %+v", result.User)
+	}
+}
+
 func TestAdminService_DeactivateUser_HappyPath(t *testing.T) {
 	db := newFakeDB()
 	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")

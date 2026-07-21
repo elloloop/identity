@@ -283,6 +283,14 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, err
 	}
 
+	// A valid assertion proves credential possession, but a closed/allowlist
+	// project must still refuse a non-member — otherwise a passkey enrolled
+	// before the project was restricted would keep working. user.Email is the
+	// DB-persisted (canonical) account email; wrap once (idempotent, self-heals).
+	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+		return nil, err
+	}
+
 	// Consult the tenant's LoginPolicy before issuing tokens. A passkey is a
 	// distinct authentication method, so a tenant that disallows it via its
 	// AllowedMethods allow-list — or one that requires SSO — must be honoured

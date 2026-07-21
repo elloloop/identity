@@ -152,16 +152,33 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		return nil, err
 	}
 
-	email := strings.ToLower(strings.TrimSpace(identity.Email))
+	// Canonicalize the provider email so the by-email lookup/create in
+	// upsertOAuthUser → resolveOrCreateUserByEmail uses the SAME canonical key
+	// every other flow stores under, rather than minting a duplicate of an
+	// account held as alicesmith@gmail.com. canonicalizeEmail trims + lowercases,
+	// so the empty-email guard still holds. Canonicalized ONCE here; carried as
+	// cemail into upsert/resolve (gate) and as email (string) for logging.
+	cemail := canonicalize(identity.Email)
+	email := string(cemail)
 	if email == "" {
 		return nil, fmt.Errorf("%w: provider returned no email", ErrUnauthenticated)
 	}
 
-	user, isNew, err := s.upsertOAuthUser(ctx, identity, email)
+	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail)
 	if err != nil {
 		return nil, err
 	}
 	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent); err != nil {
+		return nil, err
+	}
+
+	// Project access mode (login context) — the resolved project's config is
+	// bound to ctx above, so a restricted project denies a returning
+	// (provider, sub) non-member here just as the hosted flow does. JIT creation
+	// of a NEW user is gated as self-signup inside resolveOrCreateUserByEmail.
+	// user.Email is the DB-persisted (canonical) account email; wrap once
+	// (idempotent, self-heals a legacy row).
+	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
 		return nil, err
 	}
 
@@ -264,16 +281,25 @@ func (s *AuthService) resolveNativeProject(ctx context.Context, product string) 
 		if p == nil {
 			return nil, fmt.Errorf("%w: unknown product %q", ErrInvalidArgument, product)
 		}
-		return &ProjectScope{ProjectID: p.ID, StorageScopeID: p.StorageScopeID, OAuth: p.OAuth}, nil
+		return &ProjectScope{ProjectID: p.ID, StorageScopeID: p.StorageScopeID, OAuth: p.OAuth, Access: p.Access}, nil
 	}
 
 	// No control plane: only the default project exists. Its native audiences
 	// come from the env seed (nativeAudiences falls back for the default
-	// project), so no config_json is loaded here.
+	// project), so no config_json is loaded here; its access mode likewise comes
+	// from the env-configured default (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE),
+	// matching the middleware's default-project pin so native login is gated the
+	// same way as every other path.
 	if projectID != s.cfg.DefaultProjectID {
 		return nil, fmt.Errorf("%w: unknown product %q", ErrInvalidArgument, product)
 	}
-	return &ProjectScope{ProjectID: projectID, StorageScopeID: s.cfg.DefaultTenantID}, nil
+	return &ProjectScope{
+		ProjectID:      projectID,
+		StorageScopeID: s.cfg.DefaultTenantID,
+		// Precomputed once at construction (buildDefaultProjectAccess) rather than
+		// re-split/re-punycoded per login.
+		Access: s.defaultProjectAccess,
+	}, nil
 }
 
 // nativeVerifyParams builds the per-request verifier inputs from the resolved

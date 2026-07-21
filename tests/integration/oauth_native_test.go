@@ -189,6 +189,12 @@ func (f *fakeITProjects) ActiveProjectByID(_ context.Context, id string) (*servi
 		return nil, nil
 	}
 	cp := *p
+	// These native-OAuth integration tests exercise per-project audiences, not
+	// the access gate, so a fixture without a mode defaults to open (default-DENY
+	// would otherwise reject every native login here).
+	if cp.Access.Mode == "" {
+		cp.Access = service.ProjectAccessConfig{Mode: service.AccessModeOpen}
+	}
 	return &cp, nil
 }
 

@@ -27,9 +27,14 @@ func (f *fakeAutoFormer) EnsureTenantForDomain(_ context.Context, projectID, dom
 var _ TenantAutoFormStore = (*fakeAutoFormer)(nil)
 
 // withProject returns a context carrying a resolved project scope, so
-// signup auto-formation has a project to attribute the tenant to.
+// signup auto-formation has a project to attribute the tenant to. The project
+// is open-access (these tests exercise tenant auto-formation, not the access
+// gate), which under default-DENY must be set explicitly.
 func withProject(projectID string) context.Context {
-	return WithProjectScope(context.Background(), &ProjectScope{ProjectID: projectID})
+	return WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: projectID,
+		Access:    ProjectAccessConfig{Mode: AccessModeOpen},
+	})
 }
 
 // A signup with a company email domain auto-forms its tenant.

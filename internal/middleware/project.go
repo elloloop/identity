@@ -38,6 +38,7 @@ type ProjectResolver struct {
 	defaultProjectID      string
 	defaultScopeID        string
 	defaultPrimaryAuthDom string
+	defaultAccess         service.ProjectAccessConfig
 	resolver              service.ProjectResolver
 	logger                *zap.Logger
 }
@@ -51,7 +52,7 @@ type ProjectResolver struct {
 // per-request lookup. resolver may be nil (drivers without a control
 // plane). When there is nothing to do — no resolver and no default project
 // — the returned middleware is a no-op pass-through.
-func NewProjectResolver(defaultProjectID, defaultScopeID, defaultPrimaryAuthDomain string, resolver service.ProjectResolver, logger *zap.Logger) func(http.Handler) http.Handler {
+func NewProjectResolver(defaultProjectID, defaultScopeID, defaultPrimaryAuthDomain string, defaultAccess service.ProjectAccessConfig, resolver service.ProjectResolver, logger *zap.Logger) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -62,6 +63,7 @@ func NewProjectResolver(defaultProjectID, defaultScopeID, defaultPrimaryAuthDoma
 		defaultProjectID:      defaultProjectID,
 		defaultScopeID:        defaultScopeID,
 		defaultPrimaryAuthDom: defaultPrimaryAuthDomain,
+		defaultAccess:         defaultAccess,
 		resolver:              resolver,
 		logger:                logger,
 	}
@@ -141,6 +143,12 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 		ProjectID:         pr.defaultProjectID,
 		StorageScopeID:    pr.defaultScopeID,
 		PrimaryAuthDomain: pr.defaultPrimaryAuthDom,
+		// The env-configured default project has no config_json, so its access
+		// mode is carried here (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE, default
+		// "closed"). Stamping it onto the pin means the access guard sees a mode
+		// on every default-project request — deny-by-default until an operator
+		// sets mode=open/allowlist/invite.
+		Access: pr.defaultAccess,
 	}, true
 }
 
@@ -198,6 +206,7 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		Passkey:            rp.Passkey,
 		LoginDefaults:      rp.LoginDefaults,
 		OAuth:              rp.OAuth,
+		Access:             rp.Access,
 	}
 }
 

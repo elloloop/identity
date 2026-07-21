@@ -179,6 +179,14 @@ type Deps struct {
 	// isolated registry so they can read counters without colliding
 	// with other tests in the same process.
 	MetricsRegistry prometheus.Registerer
+
+	// SynchronousEmailSend forces request-phase credential-email sends to run
+	// inline instead of on a detached goroutine. Production leaves it false, so
+	// New enables asynchronous dispatch (decoupling SMTP latency from RPC
+	// response time — the send timing oracle). Full-stack tests that read the
+	// recording mailer right after a request set it true for deterministic
+	// observation without polling.
+	SynchronousEmailSend bool
 }
 
 // Built is the result of New: the assembled identity service, ready to
@@ -508,6 +516,12 @@ func New(deps Deps) (*Built, error) {
 		WithEventPublisher(eventPublisher).
 		WithNativeOAuth(nativeVerifier, deps.NativeOAuthProjects).
 		WithProjectOAuthSecrets(deps.ProjectSecretsKey, observability.WrapOAuthExchanger)
+	// Dispatch credential emails asynchronously in the served deployment so SMTP
+	// latency cannot time the gated send/no-send decision. Tests that read the
+	// mailer synchronously opt out via Deps.SynchronousEmailSend.
+	if !deps.SynchronousEmailSend {
+		authSvc = authSvc.WithAsyncEmailDispatch()
+	}
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher)
 
@@ -664,9 +678,28 @@ func New(deps Deps) (*Built, error) {
 	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)
 	chain = middleware.ClientIPMiddleware(trustedProxies)(chain)
 	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
+	// Build the env-configured default project's access policy once, failing the
+	// boot loudly if the operator supplied an invalid mode/allowlist. The
+	// resolver stamps it onto the default-project pin so the access guard is
+	// deny-by-default until GATEWAY_DEFAULT_PROJECT_ACCESS_MODE opens it.
+	defaultAccess, err := service.NewProjectAccessConfig(
+		deps.Config.DefaultProjectAccessMode,
+		deps.Config.DefaultProjectAllowedEmailList(),
+		deps.Config.DefaultProjectAllowedDomainList(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("default project access config: %w", err)
+	}
+	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
+	// default project denies all auth, so a fresh deployment that forgot to open
+	// it isn't silently locked out with no signal.
+	if defaultAccess.Mode == service.AccessModeClosed || defaultAccess.Mode == "" {
+		logger.Warn("default_project_access_closed",
+			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))
+	}
 	chain = middleware.NewProjectResolver(
 		deps.Config.DefaultProjectID, deps.Config.DefaultTenantID,
-		deps.Config.DefaultPrimaryAuthDomain(),
+		deps.Config.DefaultPrimaryAuthDomain(), defaultAccess,
 		service.NewCachingProjectResolver(
 			deps.ProjectResolver,
 			deps.Config.ProjectResolutionCacheTTL(),

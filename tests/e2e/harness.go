@@ -220,7 +220,10 @@ func StartServer(t *testing.T) *Harness {
 		// this id; we point the default project at the same id as the tenant so
 		// the service layer reads/writes a single consistent store (postgres
 		// seeds the projects(id) FK row below; memory tolerates any id).
-		DefaultProjectID:              tenantID,
+		DefaultProjectID: tenantID,
+		// Open-signup deployment fixture: default-DENY requires an explicit mode,
+		// so the e2e suite exercises the flows rather than the access gate.
+		DefaultProjectAccessMode:      "open",
 		AuthAllowLocal:                true,
 		PasswordSignupEnabled:         true,
 		PasswordResetEnabled:          true,
@@ -291,6 +294,9 @@ func StartServer(t *testing.T) *Harness {
 		TOTPKey:            []byte("01234567890123456789012345678901"),
 		TOTPRecoveryPepper: []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
 		EmailTransport:     mailer,
+		// Send synchronously so the recording mailer is readable immediately
+		// after a request (the served deployment dispatches async).
+		SynchronousEmailSend: true,
 	})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)

@@ -174,11 +174,35 @@ func seedVerifiedTotp(t *testing.T, repo *fakeRepo, userID string) {
 func withProjectLoginDefaults(projectID, allowedMethods string, require2FA bool) context.Context {
 	return WithProjectScope(context.Background(), &ProjectScope{
 		ProjectID: projectID,
+		// These tests exercise the login-METHOD policy, which is orthogonal to the
+		// access mode; the project is open-access (default-DENY requires setting
+		// it explicitly) so the method policy is what governs.
+		Access: ProjectAccessConfig{Mode: AccessModeOpen},
 		LoginDefaults: ProjectLoginConfig{
 			AllowedMethods: allowedMethods,
 			Require2FA:     require2FA,
 		},
 	})
+}
+
+// TestEmailDomain_SplitsOnLastAt guards the invariant that emailDomain extracts
+// the domain exactly as canonicalizeEmail does (LAST '@'). A quoted local part
+// containing '@' must not be split on the first '@' — that would mis-resolve the
+// tenant LoginPolicy (SSO/2FA bypass) and the access allowlist.
+func TestEmailDomain_SplitsOnLastAt(t *testing.T) {
+	cases := map[string]string{
+		"alice@cursive.ai":        "cursive.ai",
+		`"a@b"@cursive.ai`:        "cursive.ai", // quoted local part with '@'
+		"no-at-symbol":            "",
+		"trailing@":               "",
+		"a@b@example.com":         "example.com",
+		"user+tag@sub.example.co": "sub.example.co",
+	}
+	for in, want := range cases {
+		if got := emailDomain(in); got != want {
+			t.Errorf("emailDomain(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 // ── Project-wide login default (tenant-less users) ───────────────────────

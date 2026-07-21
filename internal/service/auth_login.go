@@ -95,8 +95,16 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	}
 	// Canonicalize for dedup + storage: dot-stripping for @gmail.com /
 	// @googlemail.com local parts, universal '+' tag stripping,
-	// googlemail.com → gmail.com. One human ↔ one account.
-	email = canonicalizeEmail(email)
+	// googlemail.com → gmail.com. One human ↔ one account. Canonicalized ONCE
+	// here and reused for both the access gate (cemail) and every DB op (email).
+	cemail := canonicalize(email)
+	email = string(cemail)
+	// Before any password work, so a restricted project never mints a disallowed
+	// account. Placed before the duplicate-email handling so the denial is
+	// uniform for new and existing addresses (anti-enumeration).
+	if err := s.enforceProjectAccessSignup(ctx, cemail); err != nil {
+		return nil, err
+	}
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
@@ -381,8 +389,21 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	// Canonicalize the lookup key so alice.smith@gmail.com and
 	// alicesmith@gmail.com both resolve to the one User row stored
 	// under the canonical form. PasswordSignup writes the canonical
-	// form, so lookup must use the same.
-	email = canonicalizeEmail(email)
+	// form, so lookup must use the same. Canonicalized ONCE here and reused for
+	// both the access gate (cemail) and the DB lookup (email).
+	cemail := canonicalize(email)
+	email = string(cemail)
+
+	// Enforce the project access mode (login context) BEFORE the user lookup and
+	// bcrypt: the check is DB-free (email + config), so failing fast on a
+	// closed/off-list project avoids a bcrypt CPU-DoS on disallowed addresses and
+	// keeps the denial identical regardless of password correctness (no
+	// password-guessing oracle). It reveals only allowlist membership — a project
+	// property, not account existence — matching PasswordSignup's fail-fast.
+	if err := s.enforceProjectAccessLogin(ctx, cemail); err != nil {
+		return nil, err
+	}
+
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
@@ -658,17 +679,39 @@ func (s *AuthService) OAuthLogin(
 		return nil, err
 	}
 
-	email := strings.TrimSpace(strings.ToLower(identity.Email))
+	// Canonicalize the provider email (gmail dot/+tag, domain lowercasing) so the
+	// by-email lookup/create in upsertOAuthUser → resolveOrCreateUserByEmail uses
+	// the SAME key every other flow stores under — otherwise an OAuth login for
+	// alice.smith@gmail.com would mint a duplicate of an account stored as
+	// alicesmith@gmail.com, breaking the one-account-per-email invariant.
+	// canonicalizeEmail already trims + lowercases, so the empty-email guard holds.
+	// Canonicalized ONCE here; carried as cemail into upsert/resolve (gate) and as
+	// email (string) for the DB link/profile writes and logging.
+	cemail := canonicalize(identity.Email)
+	email := string(cemail)
 	if email == "" {
 		return nil, fmt.Errorf("%w: provider returned no email", ErrUnauthenticated)
 	}
 
-	user, isNew, err := s.upsertOAuthUser(ctx, identity, email)
+	user, isNew, err := s.upsertOAuthUser(ctx, identity, cemail)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := s.checkAccountStatus(ctx, user, params.IPAddr, params.UserAgent); err != nil {
+		return nil, err
+	}
+
+	// Project access mode (login context). upsertOAuthUser's (provider, sub) fast
+	// path returns a RETURNING user WITHOUT passing through
+	// resolveOrCreateUserByEmail, so that branch alone would let a pre-linked
+	// non-member back in — enforce it here too. A first-time (new-user) OAuth
+	// login is gated as SELF-SIGNUP inside resolveOrCreateUserByEmail, so an
+	// invite-only/closed project never JIT-provisions a new user; this login
+	// check then permits the (now existing) user for invite mode. user.Email is
+	// the DB-persisted (already canonical) account email; wrap once — idempotent,
+	// and it self-heals a legacy non-canonical row.
+	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
 		return nil, err
 	}
 
@@ -817,8 +860,9 @@ func (s *AuthService) verifyOAuthExchange(
 // Returns (user, isNewUser, error). isNewUser is true only when a new
 // User row was created (not when an existing user got a fresh provider
 // link).
-func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Identity, email string) (*User, bool, error) {
+func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Identity, email canonicalEmail) (*User, bool, error) {
 	now := s.nowMs()
+	emailStr := string(email)
 
 	// 1. (provider, sub) lookup — survives provider-side email change.
 	if identity.ProviderUserID != "" {
@@ -827,7 +871,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 			return nil, false, err
 		}
 		if linked != nil {
-			s.applyOAuthProfileUpdates(ctx, linked, identity, email, now)
+			s.applyOAuthProfileUpdates(ctx, linked, identity, emailStr, now)
 			return linked, false, nil
 		}
 	}
@@ -845,13 +889,13 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		return nil, false, err
 	}
 	if !isNew {
-		s.applyOAuthProfileUpdates(ctx, user, identity, email, now)
+		s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now)
 	}
-	s.linkOAuthIdentity(ctx, user.ID, identity, email, now)
+	s.linkOAuthIdentity(ctx, user.ID, identity, emailStr, now)
 	if isNew {
 		s.logger.Info(
 			"oauth_user_provisioned",
-			zap.String("email", redactEmail(email)),
+			zap.String("email", redactEmail(emailStr)),
 			zap.String("user_id", user.ID),
 			zap.String("provider", identity.Provider),
 		)
@@ -869,36 +913,46 @@ type resolveOrCreateOpts struct {
 	emailVerified bool
 }
 
-// resolveOrCreateUserByEmail is the single by-email account resolver
-// shared by every login method that authenticates with an email address
-// (OAuth, OTP, magic link). It looks the user up by email and, when none
-// exists, creates one. This is what guarantees the unified-by-email
-// invariant: a passwordless login for an address that already has a
-// password or OAuth account links to the SAME user instead of minting a
-// duplicate.
+// resolveOrCreateUserByEmail is the single by-email account resolver: it looks
+// the user up by email and, when none exists, creates one. This guarantees the
+// unified-by-email invariant — an email-authenticated login for an address that
+// already has an account links to the SAME user instead of minting a duplicate.
 //
 // Returns (user, isNewUser, error). isNewUser is true only when a User
 // row was created here. On a create race (a concurrent caller created the
 // row between the lookup and the insert) it re-resolves by email and
 // returns the existing row with isNewUser=false, so two simultaneous
 // first-time logins for the same email still converge on one account.
-func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email string, opts resolveOrCreateOpts) (*User, bool, error) {
-	existing, err := s.repo(ctx).FindUserByEmail(ctx, email)
+func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email canonicalEmail, opts resolveOrCreateOpts) (*User, bool, error) {
+	emailStr := string(email)
+	existing, err := s.repo(ctx).FindUserByEmail(ctx, emailStr)
 	if err != nil {
 		return nil, false, err
 	}
 	if existing != nil {
+		// Resolving an EXISTING account is a login-context access check, so an
+		// invite-only project lets an already-provisioned user back in while still
+		// blocking the self-signup create branch below.
+		if err := s.enforceProjectAccessLogin(ctx, email); err != nil {
+			return nil, false, err
+		}
 		return existing, false, nil
 	}
 
+	// Creating a NEW account is a self-signup access check — an invite-only or
+	// closed project (or a non-matching allowlist) denies JIT provisioning here.
+	if err := s.enforceProjectAccessSignup(ctx, email); err != nil {
+		return nil, false, err
+	}
+
 	now := s.nowMs()
-	displayName := fallbackDisplayName(email, opts.name)
+	displayName := fallbackDisplayName(emailStr, opts.name)
 	emailVerifiedAt := int64(0)
 	if opts.emailVerified {
 		emailVerifiedAt = now
 	}
 	newUser := &User{
-		Email:           email,
+		Email:           emailStr,
 		Name:            displayName,
 		AvatarURL:       opts.avatarURL,
 		Role:            "member",
@@ -914,7 +968,7 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email stri
 		// between our lookup and insert. Re-resolve so both callers land
 		// on the one account rather than surfacing a unique-constraint
 		// error to the user.
-		if raced, lookupErr := s.repo(ctx).FindUserByEmail(ctx, email); lookupErr == nil && raced != nil {
+		if raced, lookupErr := s.repo(ctx).FindUserByEmail(ctx, emailStr); lookupErr == nil && raced != nil {
 			return raced, false, nil
 		}
 		return nil, false, fmt.Errorf("creating user: %w", err)
@@ -1192,6 +1246,16 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	}
 	if user == nil {
 		return nil, fmt.Errorf("%w: user for invitation not found", ErrNotFound)
+	}
+
+	// Enforce the project access mode (login/invite context) on the invitee.
+	// Invitation acceptance is the sanctioned way into an invite-only project, so
+	// invite/open permit it; but an allowlist project still requires the invitee
+	// be on the list (an admin cannot invite someone the allowlist excludes), and
+	// a closed project refuses every acceptance. user.Email is the DB-persisted
+	// (canonical) account email; wrap once (idempotent, self-heals a legacy row).
+	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+		return nil, err
 	}
 
 	// Enforce the invited member's tenant password policy now that the

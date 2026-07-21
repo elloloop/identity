@@ -59,6 +59,14 @@ type ProjectScope struct {
 	// falls back to the env-configured GATEWAY_OAUTH_* providers. Empty for a
 	// zero-config project, which then behaves exactly as before.
 	OAuth ProjectOAuthConfig
+
+	// Access is the project's authentication access policy (mode + optional
+	// allowlist), parsed from config_json — or, for the env default project,
+	// assembled from GATEWAY_DEFAULT_PROJECT_ACCESS_MODE and stamped on by the
+	// project-resolution middleware. It is DEFAULT-DENY: an empty/unset access
+	// block (no mode) FAILS CLOSED and denies all authentication. A project is
+	// unrestricted only when it explicitly sets mode:open.
+	Access ProjectAccessConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -94,6 +102,7 @@ type ResolvedProject struct {
 	Passkey            ProjectPasskeyConfig
 	LoginDefaults      ProjectLoginConfig
 	OAuth              ProjectOAuthConfig
+	Access             ProjectAccessConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it
