@@ -1395,8 +1395,11 @@ func (s *AuthService) maybeAutoFormTenant(ctx context.Context, user *User) {
 	if projectID == "" {
 		return
 	}
-	_, domain, ok := strings.Cut(user.Email, "@")
-	if !ok || domain == "" || s.cfg.IsPublicEmailDomain(domain) {
+	// Split on the last '@' (via emailDomain) so the auto-formed tenant keys on
+	// the same domain canonicalizeEmail produced — a quoted local part with '@'
+	// must not yield a bogus domain and spawn a spurious tenant.
+	domain := emailDomain(user.Email)
+	if domain == "" || s.cfg.IsPublicEmailDomain(domain) {
 		return
 	}
 	if _, err := s.autoFormer.EnsureTenantForDomain(ctx, projectID, domain, user.ID); err != nil {

@@ -119,6 +119,13 @@ func (s *AdminService) InviteUser(
 	if email == "" || !strings.Contains(email, "@") {
 		return nil, errors.New("valid email is required")
 	}
+	// Refuse an invite the invitee could never redeem: under an allowlist/closed
+	// project the access gate denies at AcceptInvitation, so sending one would
+	// dead-end onboarding while the admin thinks it worked. Login-context
+	// (isSignup=false) permits open and invite mode and checks the allowlist.
+	if scope := ProjectScopeFromContext(ctx); scope != nil && !accessPermits(scope.Access, canonicalize(email), false) {
+		return nil, ErrAccessNotAllowed
+	}
 	role = strings.ToLower(strings.TrimSpace(role))
 	if role == "" {
 		role = "member"
