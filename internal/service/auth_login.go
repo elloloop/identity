@@ -675,7 +675,13 @@ func (s *AuthService) OAuthLogin(
 		return nil, err
 	}
 
-	email := strings.TrimSpace(strings.ToLower(identity.Email))
+	// Canonicalize the provider email (gmail dot/+tag, domain lowercasing) so the
+	// by-email lookup/create in upsertOAuthUser → resolveOrCreateUserByEmail uses
+	// the SAME key every other flow stores under — otherwise an OAuth login for
+	// alice.smith@gmail.com would mint a duplicate of an account stored as
+	// alicesmith@gmail.com, breaking the one-account-per-email invariant.
+	// canonicalizeEmail already trims + lowercases, so the empty-email guard holds.
+	email := canonicalizeEmail(identity.Email)
 	if email == "" {
 		return nil, fmt.Errorf("%w: provider returned no email", ErrUnauthenticated)
 	}

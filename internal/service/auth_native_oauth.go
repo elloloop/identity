@@ -152,7 +152,12 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		return nil, err
 	}
 
-	email := strings.ToLower(strings.TrimSpace(identity.Email))
+	// Canonicalize the provider email so the by-email lookup/create in
+	// upsertOAuthUser → resolveOrCreateUserByEmail uses the SAME canonical key
+	// every other flow stores under, rather than minting a duplicate of an
+	// account held as alicesmith@gmail.com. canonicalizeEmail trims + lowercases,
+	// so the empty-email guard still holds.
+	email := canonicalizeEmail(identity.Email)
 	if email == "" {
 		return nil, fmt.Errorf("%w: provider returned no email", ErrUnauthenticated)
 	}

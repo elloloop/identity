@@ -269,6 +269,26 @@ func TestNativeOAuthLogin_Google_LinksExistingEmail(t *testing.T) {
 	assert.Equal(t, res.User.ID, linked.ID)
 }
 
+func TestNativeOAuthLogin_CanonicalizesProviderEmail(t *testing.T) {
+	repo := newFakeRepo()
+	// Existing account under the canonical gmail key.
+	seedID, err := repo.CreateUser(context.Background(), &User{Email: "alicesmith@gmail.com", Name: "Alice"})
+	require.NoError(t, err)
+
+	signer := newNativeTokenSigner(t)
+	svc := newNativeTestAuthService(t, repo, signer, defaultNativeProjects(), nil)
+
+	// Provider token carries a dotted, mixed-case variant of the same address.
+	tok := signer.googleToken(t, "g-sub-canon", "Alice.Smith@gmail.com", nativeGoogleAud)
+	res, err := svc.NativeOAuthLogin(context.Background(), NativeOAuthLoginParams{
+		Provider: "google", IDToken: tok, Product: "tortoise",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res.User)
+	assert.Equal(t, seedID, res.User.ID, "native OAuth must link to the existing canonical account, not duplicate")
+	assert.Equal(t, "alicesmith@gmail.com", res.User.Email)
+}
+
 func TestNativeOAuthLogin_Apple_WithNonce(t *testing.T) {
 	repo := newFakeRepo()
 	signer := newNativeTokenSigner(t)
