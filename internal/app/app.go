@@ -462,49 +462,13 @@ func New(deps Deps) (*Built, error) {
 		nativeVerifier = v
 	}
 
-	// User-lifecycle eventing (#261). When GATEWAY_WEBHOOKS_ENABLED is
-	// false (the default), eventPublisher stays nil — the service treats a
-	// nil publisher as the no-op events.Discard, so no events are emitted
-	// and no worker runs. When enabled, an outbox-backed publisher fans
-	// events out to subscriptions and a background worker delivers signed
-	// webhooks with retry/backoff. The in-memory outbox backs the
-	// single-node tier; a durable SQL outbox is a follow-up.
-	var eventPublisher events.Publisher
-	if deps.Config.WebhooksEnabled {
-		outbox := events.NewMemoryOutbox()
-		// Config.Validate (above) already parsed and validated the
-		// subscriptions, so this cannot fail here; the error is threaded
-		// through only so a caller that constructs Config out-of-band still
-		// gets a clear boot failure instead of a silent empty outbox.
-		subscriptions, subErr := deps.Config.WebhookSubscriptionList()
-		if subErr != nil {
-			return nil, subErr
-		}
-		seedWebhookSubscriptions(outbox, subscriptions, deps.Config.DefaultProjectID, logger)
-		pub := events.NewOutboxPublisher(outbox, randomEventID, time.Now, logger)
-		eventPublisher = pub
-		worker := events.NewWorker(events.WorkerConfig{
-			Store:  outbox,
-			Sender: events.NewHTTPSender(nil),
-			Policy: events.RetryPolicy{
-				MaxAttempts: deps.Config.WebhooksMaxAttempts,
-				BaseDelay:   time.Duration(deps.Config.WebhooksBackoffBaseSeconds) * time.Second,
-				MaxDelay:    time.Duration(deps.Config.WebhooksBackoffMaxSeconds) * time.Second,
-			},
-			Interval:    time.Duration(deps.Config.WebhooksWorkerIntervalSeconds) * time.Second,
-			Batch:       deps.Config.WebhooksBatchSize,
-			Logger:      logger,
-			FailureHook: newWebhookFailureHook(logger),
-		})
-		ctx, cancel := context.WithCancel(context.Background())
-		startEvents = func() {
-			go func() {
-				if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-					logger.Warn("events_worker_stopped", zap.Error(err))
-				}
-			}()
-		}
-		stopEvents = cancel
+	// User-lifecycle eventing (#261): webhooks disabled yields a nil publisher
+	// (the service treats nil as the no-op path) and nil lifecycle hooks; enabled,
+	// an outbox-backed publisher plus a background worker deliver signed webhooks.
+	// Extracted to buildEventing so New's wiring stays flat.
+	eventPublisher, startEvents, stopEvents, err := buildEventing(deps, logger)
+	if err != nil {
+		return nil, err
 	}
 
 	authSvc := service.NewAuthServiceWithOAuth(
@@ -737,6 +701,50 @@ func buildConnectHandlerOptions(cfg *config.Config) ([]connect.HandlerOption, er
 		return nil, err
 	}
 	return []connect.HandlerOption{connect.WithInterceptors(interceptor)}, nil
+}
+
+// buildEventing wires user-lifecycle eventing (#261). Webhooks disabled returns
+// a nil publisher — the service treats nil as the no-op events.Discard — and nil
+// start/stop hooks so no worker runs. Enabled, it returns an outbox-backed
+// publisher plus start/stop hooks that gate a background webhook worker
+// (retry/backoff), so the embedding host controls when its goroutine runs. The
+// in-memory outbox backs the single-node tier; a durable SQL outbox is a follow-up.
+func buildEventing(deps Deps, logger *zap.Logger) (events.Publisher, func(), func(), error) {
+	if !deps.Config.WebhooksEnabled {
+		return nil, nil, nil, nil
+	}
+	outbox := events.NewMemoryOutbox()
+	// Config.Validate (in New) already parsed these; the error is threaded only
+	// so an out-of-band Config still fails boot loudly rather than silently
+	// running with an empty outbox.
+	subscriptions, err := deps.Config.WebhookSubscriptionList()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	seedWebhookSubscriptions(outbox, subscriptions, deps.Config.DefaultProjectID, logger)
+	pub := events.NewOutboxPublisher(outbox, randomEventID, time.Now, logger)
+	worker := events.NewWorker(events.WorkerConfig{
+		Store:  outbox,
+		Sender: events.NewHTTPSender(nil),
+		Policy: events.RetryPolicy{
+			MaxAttempts: deps.Config.WebhooksMaxAttempts,
+			BaseDelay:   time.Duration(deps.Config.WebhooksBackoffBaseSeconds) * time.Second,
+			MaxDelay:    time.Duration(deps.Config.WebhooksBackoffMaxSeconds) * time.Second,
+		},
+		Interval:    time.Duration(deps.Config.WebhooksWorkerIntervalSeconds) * time.Second,
+		Batch:       deps.Config.WebhooksBatchSize,
+		Logger:      logger,
+		FailureHook: newWebhookFailureHook(logger),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	start := func() {
+		go func() {
+			if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("events_worker_stopped", zap.Error(err))
+			}
+		}()
+	}
+	return pub, start, cancel, nil
 }
 
 // buildDomainService returns the wired DomainService backing the tenant
