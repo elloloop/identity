@@ -131,6 +131,21 @@ func TestCORS_Preflight_AllowsGrpcWebRequestHeaders(t *testing.T) {
 	}
 }
 
+func TestCORS_Preflight_AllowsProjectKeyHeader(t *testing.T) {
+	// Regression: a browser SPA selecting a non-default control-plane project
+	// sends the publishable key as x-project-key; the preflight must permit it or
+	// the cross-origin call fails CORS even when the origin is allowed.
+	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+	req := httptest.NewRequest(http.MethodOptions, "/identity.v1.IdentityService/RequestEmailLoginCode", nil)
+	req.Header.Set("Origin", "http://localhost:9002")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "content-type, x-project-key")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Contains(t, rec.Header().Get("Access-Control-Allow-Headers"), "x-project-key")
+}
+
 func TestCORS_Preflight_DisallowedOrigin_StillReturns204(t *testing.T) {
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
 	req := httptest.NewRequest(http.MethodOptions, "/some-path", nil)
