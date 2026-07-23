@@ -131,7 +131,10 @@ func CORSMiddleware(globalOrigins []string) func(http.Handler) http.Handler {
 
 			if r.Method == http.MethodOptions {
 				w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, connect-protocol-version, connect-timeout-ms, x-user-id, cookie, x-user-agent, x-grpc-web, grpc-timeout")
+				// x-project-key carries the publishable project credential (ProjectKeyHeader)
+				// that routes a browser request to its control-plane project; without it in
+				// the allow-list a cross-origin SPA cannot select a non-default project.
+				w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, connect-protocol-version, connect-timeout-ms, x-user-id, cookie, x-user-agent, x-grpc-web, grpc-timeout, x-project-key")
 				w.Header().Set("Access-Control-Max-Age", "86400")
 				w.WriteHeader(http.StatusNoContent)
 				return
