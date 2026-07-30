@@ -125,14 +125,32 @@ import { Code } from "astro-expressive-code/components";
   </ul>
   <p>
     Per-project app identities live in the project's <code>config_json</code>
-    under <code>assurance</code> (<code>ios.team_id</code>,
-    <code>ios.bundle_id</code>, <code>android.package_name</code>,
-    <code>android.cert_sha256_digests</code>,
-    <code>android.service_account_key_enc</code> — the service-account key is
-    stored encrypted under <code>GATEWAY_PROJECT_SECRETS_KEY</code>, exactly
-    like per-project OAuth secrets). The env identity applies to the default
-    project only.
+    under <code>assurance</code>. Author them with the operator RPC
+    <code>AdminSetProjectAssurance</code>, which takes the Play Integrity
+    service-account key in <strong>plaintext</strong> and encrypts it
+    server-side under <code>GATEWAY_PROJECT_SECRETS_KEY</code> — exactly like
+    <code>AdminSetProjectOAuthProvider</code> handles an OAuth client secret.
+    Reads never echo the key back, only whether one is stored. A project's own
+    block always wins; the env identity applies to the default project when it
+    configures none.
   </p>
+  <Code
+    lang="bash"
+    code={`curl -s https://id.example.com/identity.v1.IdentityService/AdminSetProjectAssurance \
+  -H 'Content-Type: application/json' \
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \
+  -d '{
+        "projectId": "proj_123",
+        "config": {
+          "iosTeamId": "ABCDE12345",
+          "iosBundleId": "com.example.app",
+          "androidPackageName": "com.example.app",
+          "androidCertSha256Digests": ["<base64url-sha256>"],
+          "androidServiceAccountKey": "{\"client_email\":\"…\",\"private_key\":\"…\"}"
+        }
+      }'
+# → {"config":{…,"hasServiceAccountKey":true}}   (the key itself is never returned)`}
+  />
 
   <h2>Example: web exchange</h2>
   <Code

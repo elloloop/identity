@@ -103,6 +103,15 @@ func wireAssurance(deps Deps, authSvc *service.AuthService, logger *zap.Logger) 
 	if err != nil {
 		return fmt.Errorf("assurance resolver: %w", err)
 	}
+	// An operator who opted into a per-project-only deployment gets one loud
+	// line at boot: any project without its own assurance block cannot mint a
+	// token, so its gated endpoints deny. Mirrors the
+	// default_project_access_closed warning.
+	if resolver != nil && webAssurance == nil &&
+		deps.Config.AssuranceIOSTeamID == "" && deps.Config.AssuranceAndroidPackageName == "" {
+		logger.Warn("assurance_enabled_no_env_arm",
+			zap.String("detail", "assurance is enabled with no deployment-level arm; only projects with their own config_json assurance block can obtain a token, and the web arm is unavailable to every project"))
+	}
 	if resolver != nil {
 		authSvc.WithAssurance(resolver, webAssurance)
 	}

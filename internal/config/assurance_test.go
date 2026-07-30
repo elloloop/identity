@@ -306,45 +306,46 @@ func TestValidate_AssuranceTTLCaps(t *testing.T) {
 	})
 }
 
-// TestValidate_AssuranceProjectOnlyDeployments pins the relaxation: a
-// deployment whose app identities all live in per-project config_json is
-// legitimate, so the env-arm requirement applies only where no control
-// plane can carry that config — or when the operator opts out explicitly.
+// TestValidate_AssuranceProjectOnlyDeployments pins that a
+// per-project-only deployment must ACKNOWLEDGE itself. Exempting the
+// control-plane drivers automatically would be unsound: the default
+// driver is postgres, so the invariant would never fire by default, and
+// the web arm is deployment-global — no per-project config can restore a
+// missing web provider.
 func TestValidate_AssuranceProjectOnlyDeployments(t *testing.T) {
-	base := func() *Config {
-		return &Config{
+	base := func(driver string) *Config {
+		c := &Config{
 			AssuranceEnabled:             true,
 			AssuranceChallengeTTLSeconds: 300,
 			AssuranceTokenTTLSeconds:     3600,
+			RepoDriver:                   driver,
 		}
+		if driver == "postgres" {
+			// Unrelated postgres invariant: the driver requires the secrets
+			// key that encrypts per-project provider secrets at rest.
+			c.ProjectSecretsKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
+		}
+		return c
 	}
-	t.Run("postgres control plane may carry identities per project", func(t *testing.T) {
-		c := base()
-		c.RepoDriver = "postgres"
-		// Unrelated postgres invariant: the driver requires the secrets key
-		// that encrypts per-project provider secrets at rest.
-		c.ProjectSecretsKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
-		if err := c.Validate(); err != nil {
-			t.Fatalf("Validate() = %v; want nil (per-project config can supply the arm)", err)
-		}
-	})
-	t.Run("explicit opt-out is honoured without a control plane", func(t *testing.T) {
-		c := base()
-		c.RepoDriver = "memory"
-		c.AssuranceAllowProjectOnly = true
-		if err := c.Validate(); err != nil {
-			t.Fatalf("Validate() = %v; want nil with the explicit opt-out", err)
-		}
-	})
-	t.Run("no control plane and no opt-out still fails", func(t *testing.T) {
-		c := base()
-		c.RepoDriver = "memory"
-		err := c.Validate()
-		if err == nil {
-			t.Fatal("Validate() = nil; want failure — nothing could ever mint a token")
-		}
-		if !strings.Contains(err.Error(), "GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY") {
-			t.Errorf("error should name the opt-out: %v", err)
-		}
-	})
+
+	// The control plane does NOT buy an exemption — postgres is the default
+	// driver, so that would disable the invariant for almost everyone.
+	for _, driver := range []string{"postgres", "sqlite", "memory"} {
+		t.Run(driver+" without an arm or the opt-out fails", func(t *testing.T) {
+			err := base(driver).Validate()
+			if err == nil {
+				t.Fatal("Validate() = nil; want failure — nothing could ever mint a token")
+			}
+			if !strings.Contains(err.Error(), "GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY") {
+				t.Errorf("error should name the opt-out: %v", err)
+			}
+		})
+		t.Run(driver+" with the explicit opt-out boots", func(t *testing.T) {
+			c := base(driver)
+			c.AssuranceAllowProjectOnly = true
+			if err := c.Validate(); err != nil {
+				t.Fatalf("Validate() = %v; want nil with the explicit opt-out", err)
+			}
+		})
+	}
 }

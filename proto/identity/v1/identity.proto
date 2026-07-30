@@ -1518,6 +1518,41 @@ message AdminSetProjectOAuthProviderResponse {
   ProjectOAuthProviderConfig config = 1;
 }
 
+// AdminSetProjectAssurance authors a project's client-assurance app
+// identity (config_json `assurance`). The Play Integrity service-account
+// key is supplied in PLAINTEXT and encrypted server-side under
+// GATEWAY_PROJECT_SECRETS_KEY, exactly like an OAuth client secret; leave
+// it empty to keep the stored one when rotating other fields.
+message AdminSetProjectAssuranceRequest {
+  string project_id = 1;
+  ProjectAssuranceConfig config = 2;
+}
+
+message AdminSetProjectAssuranceResponse {
+  // config is the stored assurance config with the service-account key
+  // REDACTED (has_service_account_key set instead of any key material).
+  ProjectAssuranceConfig config = 1;
+}
+
+// ProjectAssuranceConfig is one project's attestation app identity. Both
+// platform blocks are optional and independent.
+message ProjectAssuranceConfig {
+  // iOS App Attest: team id + bundle id form the App ID; env is
+  // "production" (default) or "development".
+  string ios_team_id   = 1;
+  string ios_bundle_id = 2;
+  string ios_env       = 3;
+
+  // Android Play Integrity.
+  string android_package_name = 4;
+  repeated string android_cert_sha256_digests = 5;
+  // Write-only: the Google service-account JSON key, in plaintext. Stored
+  // encrypted; never returned by a read.
+  string android_service_account_key = 6;
+  // Read-only: whether a service-account key is stored.
+  bool has_service_account_key = 7;
+}
+
 message AdminDeleteProjectOAuthProviderRequest {
   string project_id = 1;
   // provider is the provider key to remove: "google", "microsoft", "apple",
@@ -1863,6 +1898,10 @@ service IdentityService {
   // redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
   // build with no control plane.
   rpc AdminSetProjectOAuthProvider(AdminSetProjectOAuthProviderRequest) returns (AdminSetProjectOAuthProviderResponse);
+  // Per-project client-assurance authoring. Takes the Play Integrity
+  // service-account key in plaintext and encrypts it server-side, so an
+  // operator never has to reimplement the at-rest encryption.
+  rpc AdminSetProjectAssurance(AdminSetProjectAssuranceRequest) returns (AdminSetProjectAssuranceResponse);
   rpc AdminDeleteProjectOAuthProvider(AdminDeleteProjectOAuthProviderRequest) returns (AdminDeleteProjectOAuthProviderResponse);
   rpc AdminListProjectOAuthProviders(AdminListProjectOAuthProvidersRequest) returns (AdminListProjectOAuthProvidersResponse);
 }

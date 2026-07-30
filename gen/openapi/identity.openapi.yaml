@@ -396,6 +396,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.AdminListProjectOAuthProvidersResponse'
+  /identity.v1.IdentityService/AdminSetProjectAssurance:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AdminSetProjectAssurance
+      description: |-
+        Per-project client-assurance authoring. Takes the Play Integrity
+         service-account key in plaintext and encrypts it server-side, so an
+         operator never has to reimplement the at-rest encryption.
+      operationId: identity.v1.IdentityService.AdminSetProjectAssurance
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AdminSetProjectAssuranceRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AdminSetProjectAssuranceResponse'
   /identity.v1.IdentityService/AdminSetProjectOAuthProvider:
     post:
       tags:
@@ -4172,6 +4211,34 @@ components:
              provider key.
       title: AdminListProjectOAuthProvidersResponse
       additionalProperties: false
+    identity.v1.AdminSetProjectAssuranceRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        config:
+          title: config
+          $ref: '#/components/schemas/identity.v1.ProjectAssuranceConfig'
+      title: AdminSetProjectAssuranceRequest
+      additionalProperties: false
+      description: |-
+        AdminSetProjectAssurance authors a project's client-assurance app
+         identity (config_json `assurance`). The Play Integrity service-account
+         key is supplied in PLAINTEXT and encrypted server-side under
+         GATEWAY_PROJECT_SECRETS_KEY, exactly like an OAuth client secret; leave
+         it empty to keep the stored one when rotating other fields.
+    identity.v1.AdminSetProjectAssuranceResponse:
+      type: object
+      properties:
+        config:
+          title: config
+          description: |-
+            config is the stored assurance config with the service-account key
+             REDACTED (has_service_account_key set instead of any key material).
+          $ref: '#/components/schemas/identity.v1.ProjectAssuranceConfig'
+      title: AdminSetProjectAssuranceResponse
+      additionalProperties: false
     identity.v1.AdminSetProjectOAuthProviderRequest:
       type: object
       properties:
@@ -6044,6 +6111,45 @@ components:
           format: int32
       title: PollQrLoginResponse
       additionalProperties: false
+    identity.v1.ProjectAssuranceConfig:
+      type: object
+      properties:
+        iosTeamId:
+          type: string
+          title: ios_team_id
+          description: |-
+            iOS App Attest: team id + bundle id form the App ID; env is
+             "production" (default) or "development".
+        iosBundleId:
+          type: string
+          title: ios_bundle_id
+        iosEnv:
+          type: string
+          title: ios_env
+        androidPackageName:
+          type: string
+          title: android_package_name
+          description: Android Play Integrity.
+        androidCertSha256Digests:
+          type: array
+          items:
+            type: string
+          title: android_cert_sha256_digests
+        androidServiceAccountKey:
+          type: string
+          title: android_service_account_key
+          description: |-
+            Write-only: the Google service-account JSON key, in plaintext. Stored
+             encrypted; never returned by a read.
+        hasServiceAccountKey:
+          type: boolean
+          title: has_service_account_key
+          description: 'Read-only: whether a service-account key is stored.'
+      title: ProjectAssuranceConfig
+      additionalProperties: false
+      description: |-
+        ProjectAssuranceConfig is one project's attestation app identity. Both
+         platform blocks are optional and independent.
     identity.v1.ProjectAuthDomain:
       type: object
       properties:

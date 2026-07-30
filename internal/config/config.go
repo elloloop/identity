@@ -1484,12 +1484,6 @@ func (c *Config) JWTExpiry() time.Duration {
 	return time.Duration(c.JWTExpirySeconds) * time.Second
 }
 
-// HasControlPlane reports whether the selected persistence driver carries
-// a control plane — i.e. whether projects can hold their own config_json
-// (and therefore their own assurance app identities). Only the postgres
-// driver does; memory and sqlite pin every request to the default project.
-func (c *Config) HasControlPlane() bool { return c.RepoDriver == "postgres" }
-
 // AssuranceTokenTTL returns the assurance-token lifetime as a Duration.
 func (c *Config) AssuranceTokenTTL() time.Duration {
 	return time.Duration(c.AssuranceTokenTTLSeconds) * time.Second
@@ -2035,17 +2029,17 @@ func (c *Config) validateAssurance() error {
 	// signup, login, reset, email-code, magic-link and passkey-signup. Fail
 	// boot instead — v3's validateCaptcha refused the analogous state.
 	//
-	// "Anywhere" matters: per-project app identities live in each project's
-	// config_json, so a deployment WITH a control plane can legitimately
-	// configure no env arm at all (the hub-style deployment the docs
-	// describe). The env-arm requirement therefore applies only when there is
-	// no control plane to carry per-project config, or when the operator
-	// opts out explicitly.
+	// A per-project deployment (app identities in each project's config_json)
+	// is legitimate, but it must SAY so: GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY
+	// is the single, driver-independent acknowledgement. Exempting the
+	// control-plane drivers automatically would be unsound — the default
+	// driver IS postgres, so the invariant would never fire by default, and
+	// the WEB arm is deployment-global by design (ADR-0012), so no amount of
+	// per-project config can ever restore a missing web provider.
 	hasWeb := c.AssuranceWebProvider != ""
 	hasIOS := c.AssuranceIOSTeamID != "" && c.AssuranceIOSBundleID != ""
 	hasAndroid := c.AssuranceAndroidPackageName != ""
-	if !hasWeb && !hasIOS && !hasAndroid &&
-		!c.AssuranceAllowProjectOnly && !c.HasControlPlane() {
+	if !hasWeb && !hasIOS && !hasAndroid && !c.AssuranceAllowProjectOnly {
 		return errors.New(
 			"config: GATEWAY_ASSURANCE_ENABLED=true requires at least one configured arm — " +
 				"a web provider (GATEWAY_ASSURANCE_WEB_PROVIDER), an iOS app " +

@@ -34,8 +34,16 @@ New (all optional): `GATEWAY_ASSURANCE_IOS_TEAM_ID` / `_IOS_BUNDLE_ID` /
 `_ANDROID_CERT_SHA256_DIGESTS` / `_ANDROID_SA_KEY_JSON`,
 `GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS`,
 `GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS`; per-project app identities go
-in `config_json` `assurance` (service-account key encrypted under
-`GATEWAY_PROJECT_SECRETS_KEY`).
+in `config_json` `assurance`, authored with the operator RPC
+`AdminSetProjectAssurance` (it takes the Play service-account key in
+plaintext and encrypts it server-side under `GATEWAY_PROJECT_SECRETS_KEY`,
+mirroring `AdminSetProjectOAuthProvider`).
+
+**Native gRPC embedders:** the three assurance RPCs are bridged onto
+`RegisterGRPC` alongside the existing ones, so a host that enables any
+`GATEWAY_ASSURANCE_ENFORCE_*` toggle can still obtain a token from the
+same surface (the v3 CAPTCHA solution used to ride inside the request
+message; it is now the `X-Assurance-Token` metadata key).
 
 **Embedders:** `Options.CaptchaVerifier` is now
 `Options.AssuranceWebVerifier`; the handler constructor no longer takes a

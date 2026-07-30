@@ -334,6 +334,9 @@ const (
 	// IdentityServiceAdminSetProjectOAuthProviderProcedure is the fully-qualified name of the
 	// IdentityService's AdminSetProjectOAuthProvider RPC.
 	IdentityServiceAdminSetProjectOAuthProviderProcedure = "/identity.v1.IdentityService/AdminSetProjectOAuthProvider"
+	// IdentityServiceAdminSetProjectAssuranceProcedure is the fully-qualified name of the
+	// IdentityService's AdminSetProjectAssurance RPC.
+	IdentityServiceAdminSetProjectAssuranceProcedure = "/identity.v1.IdentityService/AdminSetProjectAssurance"
 	// IdentityServiceAdminDeleteProjectOAuthProviderProcedure is the fully-qualified name of the
 	// IdentityService's AdminDeleteProjectOAuthProvider RPC.
 	IdentityServiceAdminDeleteProjectOAuthProviderProcedure = "/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider"
@@ -525,6 +528,10 @@ type IdentityServiceClient interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error)
+	// Per-project client-assurance authoring. Takes the Play Integrity
+	// service-account key in plaintext and encrypts it server-side, so an
+	// operator never has to reimplement the at-rest encryption.
+	AdminSetProjectAssurance(context.Context, *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error)
 	AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error)
 	AdminListProjectOAuthProviders(context.Context, *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error)
 }
@@ -1146,6 +1153,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectOAuthProvider")),
 			connect.WithClientOptions(opts...),
 		),
+		adminSetProjectAssurance: connect.NewClient[v1.AdminSetProjectAssuranceRequest, v1.AdminSetProjectAssuranceResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminSetProjectAssuranceProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectAssurance")),
+			connect.WithClientOptions(opts...),
+		),
 		adminDeleteProjectOAuthProvider: connect.NewClient[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse](
 			httpClient,
 			baseURL+IdentityServiceAdminDeleteProjectOAuthProviderProcedure,
@@ -1264,6 +1277,7 @@ type identityServiceClient struct {
 	upsertProjectConfig             *connect.Client[v1.UpsertProjectConfigRequest, v1.UpsertProjectConfigResponse]
 	getProjectConfig                *connect.Client[v1.GetProjectConfigRequest, v1.GetProjectConfigResponse]
 	adminSetProjectOAuthProvider    *connect.Client[v1.AdminSetProjectOAuthProviderRequest, v1.AdminSetProjectOAuthProviderResponse]
+	adminSetProjectAssurance        *connect.Client[v1.AdminSetProjectAssuranceRequest, v1.AdminSetProjectAssuranceResponse]
 	adminDeleteProjectOAuthProvider *connect.Client[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse]
 	adminListProjectOAuthProviders  *connect.Client[v1.AdminListProjectOAuthProvidersRequest, v1.AdminListProjectOAuthProvidersResponse]
 }
@@ -1773,6 +1787,11 @@ func (c *identityServiceClient) AdminSetProjectOAuthProvider(ctx context.Context
 	return c.adminSetProjectOAuthProvider.CallUnary(ctx, req)
 }
 
+// AdminSetProjectAssurance calls identity.v1.IdentityService.AdminSetProjectAssurance.
+func (c *identityServiceClient) AdminSetProjectAssurance(ctx context.Context, req *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error) {
+	return c.adminSetProjectAssurance.CallUnary(ctx, req)
+}
+
 // AdminDeleteProjectOAuthProvider calls
 // identity.v1.IdentityService.AdminDeleteProjectOAuthProvider.
 func (c *identityServiceClient) AdminDeleteProjectOAuthProvider(ctx context.Context, req *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error) {
@@ -1967,6 +1986,10 @@ type IdentityServiceHandler interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error)
+	// Per-project client-assurance authoring. Takes the Play Integrity
+	// service-account key in plaintext and encrypts it server-side, so an
+	// operator never has to reimplement the at-rest encryption.
+	AdminSetProjectAssurance(context.Context, *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error)
 	AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error)
 	AdminListProjectOAuthProviders(context.Context, *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error)
 }
@@ -2584,6 +2607,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectOAuthProvider")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceAdminSetProjectAssuranceHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminSetProjectAssuranceProcedure,
+		svc.AdminSetProjectAssurance,
+		connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectAssurance")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceAdminDeleteProjectOAuthProviderHandler := connect.NewUnaryHandler(
 		IdentityServiceAdminDeleteProjectOAuthProviderProcedure,
 		svc.AdminDeleteProjectOAuthProvider,
@@ -2800,6 +2829,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceGetProjectConfigHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminSetProjectOAuthProviderProcedure:
 			identityServiceAdminSetProjectOAuthProviderHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminSetProjectAssuranceProcedure:
+			identityServiceAdminSetProjectAssuranceHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminDeleteProjectOAuthProviderProcedure:
 			identityServiceAdminDeleteProjectOAuthProviderHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminListProjectOAuthProvidersProcedure:
@@ -3215,6 +3246,10 @@ func (UnimplementedIdentityServiceHandler) GetProjectConfig(context.Context, *co
 
 func (UnimplementedIdentityServiceHandler) AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminSetProjectOAuthProvider is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminSetProjectAssurance(context.Context, *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminSetProjectAssurance is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error) {
