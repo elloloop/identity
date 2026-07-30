@@ -153,6 +153,14 @@ func VerifyAccessToken(tokenStr string, kp KeyProvider, expectedTenant, expected
 	if v, ok := tok.Get("sub"); ok {
 		claims.Sub, _ = v.(string)
 	}
+	// A token without a subject is never a valid ACCESS token — every
+	// mint path stamps sub. Rejecting here keeps other token species
+	// signed by the same keys (e.g. audience-marked assurance tokens)
+	// from ever passing as an authenticated user in a deployment that
+	// leaves audience checking unconfigured.
+	if claims.Sub == "" {
+		return nil, errors.New("token missing sub claim")
+	}
 	if v, ok := tok.Get("email"); ok {
 		claims.Email, _ = v.(string)
 	}
