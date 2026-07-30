@@ -509,20 +509,28 @@ type Config struct {
 	AssuranceChallengeTTLSeconds int
 	// AssuranceTokenTTLSeconds is the minted assurance token's lifetime.
 	AssuranceTokenTTLSeconds int
-	// AssuranceIOSTeamID / AssuranceIOSBundleID / AssuranceIOSEnv are the
-	// DEFAULT project's App Attest app identity (per-project apps configure
-	// theirs in config_json `assurance.ios`). Empty disables iOS assurance
-	// for the default project.
-	AssuranceIOSTeamID   string
+	// AssuranceIOSTeamID is the DEFAULT project's Apple Developer team id for
+	// App Attest (per-project apps configure theirs in config_json
+	// `assurance.ios`). Empty disables iOS assurance for the default project.
+	AssuranceIOSTeamID string
+	// AssuranceIOSBundleID is the DEFAULT project's App Attest bundle id; set
+	// together with AssuranceIOSTeamID (TeamID.BundleID forms the App ID).
 	AssuranceIOSBundleID string
-	AssuranceIOSEnv      string
-	// AssuranceAndroidPackageName / AssuranceAndroidCertDigests /
-	// AssuranceAndroidSAKeyJSON are the DEFAULT project's Play Integrity app
-	// identity and Google service-account key (JSON, inline). Empty disables
-	// Android assurance for the default project.
+	// AssuranceIOSEnv selects the App Attest environment for the default
+	// project: "production" (default) or "development".
+	AssuranceIOSEnv string
+	// AssuranceAndroidPackageName is the DEFAULT project's Play Integrity
+	// Android package name (per-project apps configure theirs in config_json
+	// `assurance.android`). Empty disables Android assurance for the default
+	// project.
 	AssuranceAndroidPackageName string
-	AssuranceAndroidCertDigests string // comma-separated, base64url SHA-256
-	AssuranceAndroidSAKeyJSON   string
+	// AssuranceAndroidCertDigests is the comma-separated allowlist of the
+	// app's signing-certificate SHA-256 digests (unpadded base64url, as Play
+	// reports them).
+	AssuranceAndroidCertDigests string
+	// AssuranceAndroidSAKeyJSON is the Google service-account key (inline
+	// JSON) used to decode Play Integrity verdicts server-side.
+	AssuranceAndroidSAKeyJSON string
 
 	// Age-gating (COPPA). When disabled the no-op determiner is wired (everyone
 	// classifies as adult, no consent gating) and signup behaves as before.

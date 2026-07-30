@@ -56,6 +56,24 @@ var allowedGatewayTokens = map[string]string{
 	"GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT": "removed; migrate to per-project config_json native_audiences (docs/UPGRADE.md)",
 	"GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT":  "removed; migrate to per-project config_json native_audiences (docs/UPGRADE.md)",
 
+	// Removed in v4.0 (client-assurance layer, ADR-0012): the inline-CAPTCHA
+	// env surface, renamed to GATEWAY_ASSURANCE_*; the upgrade guide's
+	// rename table names the old vars so operators know what to replace.
+	"GATEWAY_CAPTCHA_ENABLED":                   "removed in v4.0; renamed to GATEWAY_ASSURANCE_ENABLED (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_PROVIDER":                  "removed in v4.0; renamed to GATEWAY_ASSURANCE_WEB_PROVIDER (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_TURNSTILE_SECRET":          "removed in v4.0; renamed to GATEWAY_ASSURANCE_TURNSTILE_SECRET (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY":        "removed in v4.0; renamed to GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_RECAPTCHA_SECRET":          "removed in v4.0; renamed to GATEWAY_ASSURANCE_RECAPTCHA_SECRET (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD": "removed in v4.0; renamed to GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP":   "removed in v4.0; renamed to GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN":    "removed in v4.0; renamed to GATEWAY_ASSURANCE_ENFORCE_PASSWORD_LOGIN (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET":    "removed in v4.0; renamed to GATEWAY_ASSURANCE_ENFORCE_PASSWORD_RESET (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE":  "removed in v4.0; renamed to GATEWAY_ASSURANCE_ENFORCE_EMAIL_LOGIN_CODE (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK":        "removed in v4.0; renamed to GATEWAY_ASSURANCE_ENFORCE_MAGIC_LINK (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP":    "removed in v4.0; renamed to GATEWAY_ASSURANCE_ENFORCE_PASSKEY_SIGNUP (docs/UPGRADE.md)",
+	"GATEWAY_CAPTCHA_ENFORCE_":                  "prefix fragment of the removed v3.x enforce family named in the UPGRADE rename table",
+	"GATEWAY_CAPTCHA_":                          "prefix fragment of the removed v3.x captcha family named in ADR-0012 and the UPGRADE rename table",
+
 	// (2) Test-harness only: read by internal/repo/postgres/*_test.go and the
 	// CI postgres legs, referenced in ops/testing docs (postgres-rls, redesign).
 	"GATEWAY_TEST_POSTGRES_DSN": "test-harness env var (read by *_test.go and CI), not a runtime config key",

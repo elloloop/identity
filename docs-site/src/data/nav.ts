@@ -54,6 +54,7 @@ export const sidebarSections: NavSection[] = [
       { label: "Passkey", href: `${BASE}/docs/auth/passkey` },
       { label: "TOTP (2FA)", href: `${BASE}/docs/auth/totp` },
       { label: "Identity Verification (KYC)", href: `${BASE}/docs/auth/identity-verification` },
+      { label: "Client Assurance (Attestation)", href: `${BASE}/docs/auth/assurance` },
     ],
   },
   {

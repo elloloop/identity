@@ -1,5 +1,48 @@
 # Upgrade guide
 
+## v3.x → v4.0 — CAPTCHA becomes the client-assurance layer (breaking)
+
+v4.0 replaces the inline-CAPTCHA design with the client-assurance layer
+(App Attest / Play Integrity / Turnstile / reCAPTCHA behind one short-lived
+assurance token — see
+[ADR-0012](./adr/0012-client-assurance-layer.md) and the
+[docs-site page](../docs-site/src/pages/docs/auth/assurance.astro)).
+Deployments that never enabled CAPTCHA are unaffected: the new surface
+defaults off and nothing else changes.
+
+**Wire (clients):** the `captcha_token` request field is removed from
+`PasswordSignup`, `PasswordLogin`, `RequestPasswordReset`,
+`RequestEmailLoginCode`, `RequestMagicLink`, and `BeginPasskeySignup`
+(field numbers reserved). A web client now exchanges its captcha solution
+first — `IssueAssuranceToken {platform:"web", webToken:…}` — and attaches
+the returned token as the `X-Assurance-Token` header on the gated call.
+The storage migrations (postgres 0027, sqlite 0012) are ordinary additive
+migrations applied with `identity migrate`.
+
+**Environment:** rename / replace:
+
+| v3.x | v4.0 |
+| --- | --- |
+| `GATEWAY_CAPTCHA_ENABLED` | `GATEWAY_ASSURANCE_ENABLED` |
+| `GATEWAY_CAPTCHA_PROVIDER` | `GATEWAY_ASSURANCE_WEB_PROVIDER` |
+| `GATEWAY_CAPTCHA_TURNSTILE_SECRET` / `_SITE_KEY` | `GATEWAY_ASSURANCE_TURNSTILE_SECRET` / `_SITE_KEY` |
+| `GATEWAY_CAPTCHA_RECAPTCHA_SECRET` / `_SCORE_THRESHOLD` | `GATEWAY_ASSURANCE_RECAPTCHA_SECRET` / `_SCORE_THRESHOLD` |
+| `GATEWAY_CAPTCHA_ENFORCE_*` (6 toggles) | `GATEWAY_ASSURANCE_ENFORCE_*` (same six, same defaults) |
+
+New (all optional): `GATEWAY_ASSURANCE_IOS_TEAM_ID` / `_IOS_BUNDLE_ID` /
+`_IOS_ENV`, `GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME` /
+`_ANDROID_CERT_SHA256_DIGESTS` / `_ANDROID_SA_KEY_JSON`,
+`GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS`,
+`GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS`; per-project app identities go
+in `config_json` `assurance` (service-account key encrypted under
+`GATEWAY_PROJECT_SECRETS_KEY`).
+
+**Embedders:** `Options.CaptchaVerifier` is now
+`Options.AssuranceWebVerifier`; the handler constructor no longer takes a
+verifier (it is wired into the auth service).
+
+---
+
 ## TL;DR
 
 Upgrading from any **pre-v1.0** release to **v1.0** is a **breaking schema

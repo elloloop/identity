@@ -5,6 +5,7 @@
   "admin_help_requested",
   "admin_help_resolved",
   "admin_reset_password",
+  "assurance_attested",
   "identity_linked",
   "identity_unlinked",
   "login_failure",

@@ -72,6 +72,186 @@
     "anchor": "email-and-branding"
   },
   {
+    "name": "GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the comma-separated allowlist of the app's signing-certificate SHA-256 digests (unpadded base64url, as Play reports them).",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the DEFAULT project's Play Integrity Android package name (per-project apps configure theirs in config_json `assurance.android`).",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the Google service-account key (inline JSON) used to decode Play Integrity verdicts server-side.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "bounds how long an issued attestation challenge stays redeemable.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "Client assurance (App Attest / Play Integrity / web captcha exchange).",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_ENFORCE_EMAIL_LOGIN_CODE",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "requires an assurance token on the RequestEmailLoginCode endpoint.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_ENFORCE_MAGIC_LINK",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "requires an assurance token on the RequestMagicLink endpoint.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_ENFORCE_PASSKEY_SIGNUP",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "requires an assurance token on the BeginPasskeySignup endpoint.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_LOGIN",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "requires an assurance token on the PasswordLogin endpoint.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_RESET",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "requires an assurance token on the RequestPasswordReset endpoint.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP",
+    "type": "boolean",
+    "default": "true",
+    "required": false,
+    "description": "requires an assurance token on the PasswordSignup endpoint.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_IOS_BUNDLE_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the DEFAULT project's App Attest bundle id; set together with AssuranceIOSTeamID (TeamID.BundleID forms the App ID).",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_IOS_ENV",
+    "type": "string",
+    "default": "production",
+    "required": false,
+    "description": "selects the App Attest environment for the default project: \"production\" or \"development\".",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_IOS_TEAM_ID",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the DEFAULT project's Apple Developer team id for App Attest (per-project apps configure theirs in config_json `assurance.ios`).",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD",
+    "type": "number",
+    "default": "0.5",
+    "required": false,
+    "description": "is the reCAPTCHA v3 score below which a response is rejected; must be in [0,1].",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_RECAPTCHA_SECRET",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the reCAPTCHA v3 secret key (provider \"recaptcha_v3\").",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS",
+    "type": "integer",
+    "default": "3600",
+    "required": false,
+    "description": "is the minted assurance token's lifetime.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_TURNSTILE_SECRET",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the Cloudflare Turnstile secret key (provider \"turnstile\").",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "is the Cloudflare Turnstile PUBLIC site key (provider \"turnstile\").",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_ASSURANCE_WEB_PROVIDER",
+    "type": "string",
+    "default": "",
+    "required": true,
+    "description": "selects the pkg/assurance web implementation — \"turnstile\" or \"recaptcha_v3\"; the matching secret must be set.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_AUDIT_QUEUE_SIZE",
     "type": "integer",
     "default": "4096",
@@ -106,114 +286,6 @@
     "description": "blocks authentication until the account's email is verified.",
     "category": "Authentication",
     "anchor": "authentication"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_ENABLED",
-    "type": "boolean",
-    "default": "false",
-    "required": false,
-    "description": "is the global on/off for CAPTCHA on unauthenticated endpoints.",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE",
-    "type": "boolean",
-    "default": "true",
-    "required": false,
-    "description": "gates CAPTCHA on the RequestEmailLoginCode endpoint.",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK",
-    "type": "boolean",
-    "default": "true",
-    "required": false,
-    "description": "gates CAPTCHA on the RequestMagicLink endpoint.",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP",
-    "type": "boolean",
-    "default": "true",
-    "required": false,
-    "description": "gates CAPTCHA on the BeginPasskeySignup endpoint.",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN",
-    "type": "boolean",
-    "default": "true",
-    "required": false,
-    "description": "gates CAPTCHA on the PasswordLogin endpoint.",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET",
-    "type": "boolean",
-    "default": "true",
-    "required": false,
-    "description": "gates CAPTCHA on the RequestPasswordReset endpoint.",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP",
-    "type": "boolean",
-    "default": "true",
-    "required": false,
-    "description": "gates CAPTCHA on the PasswordSignup endpoint.",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_PROVIDER",
-    "type": "string",
-    "default": "",
-    "required": true,
-    "description": "selects the pkg/captcha implementation — \"turnstile\" or \"recaptcha_v3\"; the matching secret must be set.",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD",
-    "type": "number",
-    "default": "0.5",
-    "required": false,
-    "description": "is the reCAPTCHA v3 score below which a response is rejected; must be in [0,1].",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_RECAPTCHA_SECRET",
-    "type": "string",
-    "default": "",
-    "required": true,
-    "description": "is the reCAPTCHA v3 secret key (provider \"recaptcha_v3\").",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_TURNSTILE_SECRET",
-    "type": "string",
-    "default": "",
-    "required": true,
-    "description": "is the Cloudflare Turnstile secret key (provider \"turnstile\").",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
-  },
-  {
-    "name": "GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY",
-    "type": "string",
-    "default": "",
-    "required": true,
-    "description": "is the Cloudflare Turnstile PUBLIC site key (provider \"turnstile\").",
-    "category": "CAPTCHA",
-    "anchor": "captcha"
   },
   {
     "name": "GATEWAY_CONNECT_PORT",

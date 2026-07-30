@@ -1,0 +1,145 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Client assurance (attestation)">
+  <h1>Client assurance (attestation)</h1>
+  <p>
+    Client assurance proves what a <em>client</em> is — a genuine, unmodified
+    build of your app on genuine hardware (iOS App Attest, Android Play
+    Integrity) or a human-passed web client (Cloudflare Turnstile, Google
+    reCAPTCHA v3) — independently of whether anyone is signed in. Verified
+    evidence is exchanged for a short-lived <strong>assurance token</strong>
+    that clients attach as the <code>X-Assurance-Token</code> header. It is
+    the equivalent of Firebase App Check.
+  </p>
+  <p>
+    The token is a JWT signed by the deployment's JWKS with
+    <code>aud: "assurance"</code>, an <code>amr</code> claim naming the
+    provider that passed, the minting project, and — deliberately — no
+    subject. It can never authenticate as a user, and a user token can never
+    pass as assurance. Downstream services can require it on their own APIs
+    by validating against <code>/.well-known/jwks.json</code> and checking
+    the audience.
+  </p>
+
+  <h2>Flow</h2>
+  <ol>
+    <li>
+      <strong>iOS</strong> — <code>CreateAssuranceChallenge</code>
+      (platform <code>ios</code>) → generate a key with
+      <code>DCAppAttestService</code>, attest over the challenge string's
+      UTF-8 bytes → <code>IssueAssuranceToken</code> with the key id +
+      attestation object. The attested key is registered server-side. To
+      renew, sign a fresh challenge with the same key and call
+      <code>RefreshAssuranceToken</code> — the hardware counter provides
+      replay protection, so there is no stored refresh secret to steal.
+    </li>
+    <li>
+      <strong>Android</strong> — <code>CreateAssuranceChallenge</code>
+      (platform <code>android</code>) → request a Play Integrity token with
+      the challenge string as the nonce → <code>IssueAssuranceToken</code>
+      with the integrity token. The verdict is decoded server-side via
+      Google (never locally). Renewal repeats the same exchange.
+    </li>
+    <li>
+      <strong>Web</strong> — solve the captcha, then
+      <code>IssueAssuranceToken</code> with platform <code>web</code> and
+      the solution. No challenge round-trip; the provider runs its own.
+    </li>
+  </ol>
+
+  <h2>Enforcement</h2>
+  <p>
+    When assurance is enabled, six unauthenticated endpoints require a valid
+    assurance token, each independently switchable (all default on):
+    <code>PasswordSignup</code>, <code>PasswordLogin</code>,
+    <code>RequestPasswordReset</code>, <code>RequestEmailLoginCode</code>,
+    <code>RequestMagicLink</code>, and <code>BeginPasskeySignup</code>.
+    The token is reusable until it expires — verification is a local JWKS
+    check, no provider round-trip per request.
+  </p>
+
+  <h2>Configuration</h2>
+  <ul>
+    <li>
+      <code>GATEWAY_ASSURANCE_ENABLED</code> (default <code>false</code>) —
+      global switch for the whole surface. Off: the three RPCs return
+      Unimplemented and nothing is gated.
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_WEB_PROVIDER</code> —
+      <code>turnstile</code> or <code>recaptcha_v3</code>, with
+      <code>GATEWAY_ASSURANCE_TURNSTILE_SECRET</code> /
+      <code>GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY</code> or
+      <code>GATEWAY_ASSURANCE_RECAPTCHA_SECRET</code> /
+      <code>GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD</code>. Empty
+      disables web assurance (mobile-attestation-only deployment).
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_IOS_TEAM_ID</code> +
+      <code>GATEWAY_ASSURANCE_IOS_BUNDLE_ID</code> (+ optional
+      <code>GATEWAY_ASSURANCE_IOS_ENV</code>, <code>production</code> |
+      <code>development</code>) — the default project's App Attest app
+      identity.
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME</code> +
+      <code>GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS</code>
+      (comma-separated, base64url) +
+      <code>GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON</code> (Google
+      service-account key) — the default project's Play Integrity identity.
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS</code> (default 3600) and
+      <code>GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS</code> (default 300).
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP</code>,
+      <code>…_PASSWORD_LOGIN</code>, <code>…_PASSWORD_RESET</code>,
+      <code>…_EMAIL_LOGIN_CODE</code>, <code>…_MAGIC_LINK</code>,
+      <code>…_PASSKEY_SIGNUP</code> (all default <code>true</code>) —
+      per-endpoint gates, active only while assurance is enabled.
+    </li>
+  </ul>
+  <p>
+    Per-project app identities live in the project's <code>config_json</code>
+    under <code>assurance</code> (<code>ios.team_id</code>,
+    <code>ios.bundle_id</code>, <code>android.package_name</code>,
+    <code>android.cert_sha256_digests</code>,
+    <code>android.service_account_key_enc</code> — the service-account key is
+    stored encrypted under <code>GATEWAY_PROJECT_SECRETS_KEY</code>, exactly
+    like per-project OAuth secrets). The env identity applies to the default
+    project only.
+  </p>
+
+  <h2>Example: web exchange</h2>
+  <Code
+    lang="bash"
+    code={`# 1. Exchange a captcha solution for an assurance token
+curl -s https://id.example.com/identity.v1.IdentityService/IssueAssuranceToken \\
+  -H 'Content-Type: application/json' \\
+  -d '{"platform":"web","webToken":"<captcha-solution>"}'
+# → {"assuranceToken":"eyJ…","expiresAtMs":…}
+
+# 2. Attach it to a gated endpoint
+curl -s https://id.example.com/identity.v1.IdentityService/PasswordSignup \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Assurance-Token: eyJ…' \\
+  -d '{"email":"a@example.com","password":"…"}'`}
+  />
+
+  <h2>What assurance is not</h2>
+  <p>
+    Attestation proves <em>genuine app on genuine hardware</em>, not
+    human-rate usage — one real device driven by automation still passes.
+    Its durable value is a stable, expensive-to-farm identifier (the
+    attested device) for downstream rate-limiting to key on. It is also
+    orthogonal to the per-project <a href="/docs/projects/access">access
+    mode</a>: assurance authenticates the client, the access mode governs
+    which users may authenticate. See
+    <a href="https://github.com/elloloop/identity/blob/main/docs/adr/0012-client-assurance-layer.md">ADR-0012</a>
+    for the design.
+  </p>
+</DocsLayout>
