@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -277,4 +278,113 @@ func TestNewConfigValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTokenEndpointFailures(t *testing.T) {
+	nonce := []byte("nonce")
+
+	t.Run("token endpoint 500", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("upstream broken"))
+		})
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+		v, err := playintegrity.New(playintegrity.Config{
+			PackageName:        testPackage,
+			CertSHA256Digests:  []string{testDigest},
+			ServiceAccountJSON: testSAKey(t, srv.URL+"/token"),
+			BaseURL:            srv.URL,
+			HTTPClient:         srv.Client(),
+			Now:                func() time.Time { return testNow },
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if _, err := v.Verify(context.Background(), "tok", nonce); !errors.Is(err, assurance.ErrProviderUnavailable) {
+			t.Fatalf("err = %v, want ErrProviderUnavailable", err)
+		}
+	})
+
+	t.Run("token endpoint malformed body", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("{"))
+		})
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+		v, err := playintegrity.New(playintegrity.Config{
+			PackageName:        testPackage,
+			CertSHA256Digests:  []string{testDigest},
+			ServiceAccountJSON: testSAKey(t, srv.URL+"/token"),
+			BaseURL:            srv.URL,
+			HTTPClient:         srv.Client(),
+			Now:                func() time.Time { return testNow },
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if _, err := v.Verify(context.Background(), "tok", nonce); !errors.Is(err, assurance.ErrProviderUnavailable) {
+			t.Fatalf("err = %v, want ErrProviderUnavailable", err)
+		}
+	})
+
+	t.Run("decode endpoint malformed body", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "fake-access-token", "expires_in": 3600})
+		})
+		mux.HandleFunc(fmt.Sprintf("/v1/%s:decodeIntegrityToken", testPackage), func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("not json"))
+		})
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+		v, err := playintegrity.New(playintegrity.Config{
+			PackageName:        testPackage,
+			CertSHA256Digests:  []string{testDigest},
+			ServiceAccountJSON: testSAKey(t, srv.URL+"/token"),
+			BaseURL:            srv.URL,
+			HTTPClient:         srv.Client(),
+			Now:                func() time.Time { return testNow },
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if _, err := v.Verify(context.Background(), "tok", nonce); !errors.Is(err, assurance.ErrProviderUnavailable) {
+			t.Fatalf("err = %v, want ErrProviderUnavailable", err)
+		}
+	})
+
+	t.Run("long error body truncated in message", func(t *testing.T) {
+		long := strings.Repeat("x", 2048)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "fake-access-token", "expires_in": 3600})
+		})
+		mux.HandleFunc(fmt.Sprintf("/v1/%s:decodeIntegrityToken", testPackage), func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(long))
+		})
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+		v, err := playintegrity.New(playintegrity.Config{
+			PackageName:        testPackage,
+			CertSHA256Digests:  []string{testDigest},
+			ServiceAccountJSON: testSAKey(t, srv.URL+"/token"),
+			BaseURL:            srv.URL,
+			HTTPClient:         srv.Client(),
+			Now:                func() time.Time { return testNow },
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		_, err = v.Verify(context.Background(), "tok", nonce)
+		if !errors.Is(err, assurance.ErrProviderUnavailable) {
+			t.Fatalf("err = %v", err)
+		}
+		if len(err.Error()) > 700 {
+			t.Fatalf("error message not truncated: %d bytes", len(err.Error()))
+		}
+	})
 }
