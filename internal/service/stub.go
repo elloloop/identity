@@ -445,3 +445,27 @@ func (StubDB) SearchNodes(context.Context, string, string, int, string) ([]*grap
 func (StubDB) RegisterUserInTenant(context.Context, string, string, string, string, string) error {
 	return ErrServiceUnavailable
 }
+
+func (StubRepository) CreateAttestedDevice(context.Context, *AttestedDeviceRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) GetAttestedDeviceByKeyID(context.Context, string) (*AttestedDeviceRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) UpdateAttestedDeviceCounter(context.Context, string, int64, int64, int64) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) CreateAssuranceChallenge(context.Context, *AssuranceChallengeRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) ConsumeAssuranceChallenge(context.Context, string) (*AssuranceChallengeRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredAssuranceChallenges(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}

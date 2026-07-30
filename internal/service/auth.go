@@ -296,6 +296,25 @@ type Repository interface {
 	CreatePasskeyChallenge(ctx context.Context, r *PasskeyChallengeRecord) (string, error)
 	DeletePasskeyChallenge(ctx context.Context, nodeID string) error
 
+	// Assurance: hardware-attested devices and their one-shot challenges.
+	// CreateAttestedDevice returns ErrAlreadyExists when the project
+	// already holds the KeyID (one hardware key, one record).
+	// GetAttestedDeviceByKeyID returns (nil, nil) when absent.
+	// UpdateAttestedDeviceCounter is a compare-and-swap: it advances
+	// SignCount from fromCount to toCount (stamping LastUsedAt) and
+	// returns ErrCounterStale when the stored count is no longer
+	// fromCount, or ErrNotFound when the device is gone — the CAS is what
+	// keeps the App Attest counter strictly increasing under concurrent
+	// assertions. ConsumeAssuranceChallenge atomically deletes and
+	// returns the challenge so a nonce can never be redeemed twice;
+	// (nil, nil) when absent or already consumed.
+	CreateAttestedDevice(ctx context.Context, r *AttestedDeviceRecord) (string, error)
+	GetAttestedDeviceByKeyID(ctx context.Context, keyID string) (*AttestedDeviceRecord, error)
+	UpdateAttestedDeviceCounter(ctx context.Context, nodeID string, fromCount, toCount, lastUsedAtMs int64) error
+	CreateAssuranceChallenge(ctx context.Context, r *AssuranceChallengeRecord) (string, error)
+	ConsumeAssuranceChallenge(ctx context.Context, nodeID string) (*AssuranceChallengeRecord, error)
+	DeleteExpiredAssuranceChallenges(ctx context.Context, beforeMs int64, limit int) error
+
 	// QR login sessions
 	FindQrLoginSession(ctx context.Context, sessionID string) (*QrLoginSessionRecord, error)
 	CreateQrLoginSession(ctx context.Context, r *QrLoginSessionRecord) (string, error)

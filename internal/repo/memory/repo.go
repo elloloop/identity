@@ -48,6 +48,8 @@ type Repo struct {
 	users              map[string]*service.User
 	refreshTokens      map[string]*service.RefreshTokenRecord
 	passkeyCreds       map[string]*service.PasskeyCredRecord
+	attestedDevices    map[string]*service.AttestedDeviceRecord
+	assuranceChallenges map[string]*service.AssuranceChallengeRecord
 	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
 	qrSessions         map[string]*service.QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
@@ -100,6 +102,8 @@ func newStore() *Repo {
 		users:              make(map[string]*service.User),
 		refreshTokens:      make(map[string]*service.RefreshTokenRecord),
 		passkeyCreds:       make(map[string]*service.PasskeyCredRecord),
+		attestedDevices:    make(map[string]*service.AttestedDeviceRecord),
+		assuranceChallenges: make(map[string]*service.AssuranceChallengeRecord),
 		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),

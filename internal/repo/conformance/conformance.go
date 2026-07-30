@@ -2484,6 +2484,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runExternalIDConformance(t, driver)
 	runAccountDeletionConformance(t, driver)
 	runAuditRetentionConformance(t, driver)
+	runAssuranceConformance(t, driver)
 }
 
 // uniqueHash returns a per-call unique token-hash string. Tests use
