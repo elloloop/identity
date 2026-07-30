@@ -500,6 +500,30 @@ type Config struct {
 	// is an unmetered account-creation + email-send surface just like PasswordSignup.
 	CaptchaEnforcePasskeySignup bool
 
+	// Client assurance (App Attest / Play Integrity / web captcha exchange).
+	// AssuranceEnabled is the global on/off for the assurance token surface:
+	// challenge issuance, evidence exchange, and refresh.
+	AssuranceEnabled bool
+	// AssuranceChallengeTTLSeconds bounds how long an issued attestation
+	// challenge stays redeemable.
+	AssuranceChallengeTTLSeconds int
+	// AssuranceTokenTTLSeconds is the minted assurance token's lifetime.
+	AssuranceTokenTTLSeconds int
+	// AssuranceIOSTeamID / AssuranceIOSBundleID / AssuranceIOSEnv are the
+	// DEFAULT project's App Attest app identity (per-project apps configure
+	// theirs in config_json `assurance.ios`). Empty disables iOS assurance
+	// for the default project.
+	AssuranceIOSTeamID   string
+	AssuranceIOSBundleID string
+	AssuranceIOSEnv      string
+	// AssuranceAndroidPackageName / AssuranceAndroidCertDigests /
+	// AssuranceAndroidSAKeyJSON are the DEFAULT project's Play Integrity app
+	// identity and Google service-account key (JSON, inline). Empty disables
+	// Android assurance for the default project.
+	AssuranceAndroidPackageName string
+	AssuranceAndroidCertDigests string // comma-separated, base64url SHA-256
+	AssuranceAndroidSAKeyJSON   string
+
 	// Age-gating (COPPA). When disabled the no-op determiner is wired (everyone
 	// classifies as adult, no consent gating) and signup behaves as before.
 
@@ -1042,6 +1066,15 @@ func Load() *Config {
 		CaptchaEnforceEmailLoginCode:   envBool("GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE", true),
 		CaptchaEnforceMagicLink:        envBool("GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK", true),
 		CaptchaEnforcePasskeySignup:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP", true),
+		AssuranceEnabled:               envBool("GATEWAY_ASSURANCE_ENABLED", false),
+		AssuranceChallengeTTLSeconds:   envInt("GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS", 300),
+		AssuranceTokenTTLSeconds:       envInt("GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS", 3600),
+		AssuranceIOSTeamID:             envStr("GATEWAY_ASSURANCE_IOS_TEAM_ID", ""),
+		AssuranceIOSBundleID:           envStr("GATEWAY_ASSURANCE_IOS_BUNDLE_ID", ""),
+		AssuranceIOSEnv:                envStr("GATEWAY_ASSURANCE_IOS_ENV", "production"),
+		AssuranceAndroidPackageName:    envStr("GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME", ""),
+		AssuranceAndroidCertDigests:    envStr("GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS", ""),
+		AssuranceAndroidSAKeyJSON:      envStr("GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON", ""),
 
 		AgeGateEnabled:     envBool("GATEWAY_AGEGATE_ENABLED", false),
 		AgeGateChildMaxAge: envInt("GATEWAY_AGEGATE_CHILD_MAX_AGE", DefaultAgeGateChildMaxAge),
@@ -1415,6 +1448,24 @@ func (c *Config) DefaultPrimaryAuthDomain() string {
 // JWTExpiry returns the JWT expiry as a time.Duration.
 func (c *Config) JWTExpiry() time.Duration {
 	return time.Duration(c.JWTExpirySeconds) * time.Second
+}
+
+// AssuranceTokenTTL returns the assurance-token lifetime as a Duration.
+func (c *Config) AssuranceTokenTTL() time.Duration {
+	return time.Duration(c.AssuranceTokenTTLSeconds) * time.Second
+}
+
+// AssuranceAndroidCertDigestList splits the comma-separated digest list,
+// dropping empties.
+func (c *Config) AssuranceAndroidCertDigestList() []string {
+	parts := strings.Split(c.AssuranceAndroidCertDigests, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // RefreshExpiry returns the refresh token expiry as a time.Duration.

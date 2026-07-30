@@ -146,6 +146,8 @@ type fakeRepo struct {
 	refreshTokens      map[string]*RefreshTokenRecord
 	passkeyCreds       map[string]*PasskeyCredRecord
 	passkeyChallenges  map[string]*PasskeyChallengeRecord
+	attestedDevices    map[string]*AttestedDeviceRecord
+	assuranceChallenges map[string]*AssuranceChallengeRecord
 	qrSessions         map[string]*QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*OAuthOneTimeCodeRecord
 	nativeRedemptions  map[string]*NativeTokenRedemptionRecord
@@ -1864,6 +1866,102 @@ func (r *fakeRepo) RevokeSessionsForUser(_ context.Context, userID string, atMs 
 	for _, s := range r.sessions {
 		if s.UserID == userID && s.RevokedAtMs == 0 {
 			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+// ── Assurance (attested devices + one-shot challenges) ────────────────
+
+func (r *fakeRepo) CreateAttestedDevice(_ context.Context, d *AttestedDeviceRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.attestedDevices == nil {
+		r.attestedDevices = make(map[string]*AttestedDeviceRecord)
+	}
+	for _, existing := range r.attestedDevices {
+		if existing.KeyID == d.KeyID {
+			return "", fmt.Errorf("fake: CreateAttestedDevice: %w", ErrAlreadyExists)
+		}
+	}
+	id := d.NodeID
+	if id == "" {
+		id = nextNodeID()
+	}
+	cp := *d
+	cp.NodeID = id
+	r.attestedDevices[id] = &cp
+	d.NodeID = id
+	return id, nil
+}
+
+func (r *fakeRepo) GetAttestedDeviceByKeyID(_ context.Context, keyID string) (*AttestedDeviceRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, d := range r.attestedDevices {
+		if d.KeyID == keyID {
+			cp := *d
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) UpdateAttestedDeviceCounter(_ context.Context, nodeID string, fromCount, toCount, lastUsedAtMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d, ok := r.attestedDevices[nodeID]
+	if !ok {
+		return fmt.Errorf("%w: attested device", ErrNotFound)
+	}
+	if d.SignCount != fromCount {
+		return ErrCounterStale
+	}
+	d.SignCount = toCount
+	d.LastUsedAt = lastUsedAtMs
+	return nil
+}
+
+func (r *fakeRepo) CreateAssuranceChallenge(_ context.Context, c *AssuranceChallengeRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.assuranceChallenges == nil {
+		r.assuranceChallenges = make(map[string]*AssuranceChallengeRecord)
+	}
+	id := c.NodeID
+	if id == "" {
+		id = nextNodeID()
+	}
+	cp := *c
+	cp.NodeID = id
+	r.assuranceChallenges[id] = &cp
+	c.NodeID = id
+	return id, nil
+}
+
+func (r *fakeRepo) ConsumeAssuranceChallenge(_ context.Context, nodeID string) (*AssuranceChallengeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.assuranceChallenges[nodeID]
+	if !ok {
+		return nil, nil
+	}
+	delete(r.assuranceChallenges, nodeID)
+	cp := *c
+	return &cp, nil
+}
+
+func (r *fakeRepo) DeleteExpiredAssuranceChallenges(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.assuranceChallenges {
+		if n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.assuranceChallenges, id)
+			n++
 		}
 	}
 	return nil

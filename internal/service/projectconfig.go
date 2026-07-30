@@ -65,6 +65,14 @@ type ProjectConfig struct {
 	// issued for it. A product absent here is unrestricted.
 	// See ProjectProductsConfig.
 	Products ProjectProductsConfig `json:"products"`
+	// Assurance holds the project's client-attestation identity — the mobile
+	// app(s) whose hardware attestations this project accepts. A platform
+	// absent here is unavailable for the project, EXCEPT the default project,
+	// which inherits the env-configured GATEWAY_ASSURANCE_* app identity. The
+	// Play service-account key is stored encrypted at rest (see the *_enc
+	// field). Orthogonal to Access: assurance authenticates the CLIENT, the
+	// access mode governs which USERS may authenticate.
+	Assurance ProjectAssuranceConfig `json:"assurance"`
 }
 
 // ProjectOAuthConfig is a project's per-provider hosted-flow OAuth
@@ -265,6 +273,9 @@ func (c ProjectConfig) Validate() error {
 		return err
 	}
 	if err := c.Products.validate(); err != nil {
+		return err
+	}
+	if err := c.Assurance.validate(); err != nil {
 		return err
 	}
 	return nil

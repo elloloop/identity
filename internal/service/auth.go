@@ -29,6 +29,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/agegate"
+	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/events"
@@ -1092,8 +1093,14 @@ type AuthService struct {
 	// request (mirrors the verifier's precomputed audience sets). Set in
 	// WithNativeOAuth.
 	nativeProductProjects map[string]string
-	emailThrottle         *emailSendThrottle
-	signupThrottle        *emailSendThrottle
+	// assuranceResolver resolves per-project attestation verifiers and
+	// webAssurance is the deployment-global captcha verifier; both are set
+	// via WithAssurance when GATEWAY_ASSURANCE_ENABLED. nil resolver/web
+	// disables the corresponding assurance surface (ErrAssuranceDisabled).
+	assuranceResolver *AssuranceResolver
+	webAssurance      assurance.Verifier
+	emailThrottle     *emailSendThrottle
+	signupThrottle    *emailSendThrottle
 	phoneThrottle         *emailSendThrottle
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
@@ -1209,6 +1216,16 @@ func (s *AuthService) WithNativeOAuth(v NativeIDTokenVerifier, projects NativeOA
 	s.nativeVerifier = v
 	s.nativeProjects = projects
 	s.nativeProductProjects = s.cfg.NativeOAuthProductProjectMap()
+	return s
+}
+
+// WithAssurance wires the client-assurance layer: the per-project
+// attestation resolver and the deployment-global web verifier. Called by
+// app wiring when GATEWAY_ASSURANCE_ENABLED; without it every assurance
+// RPC returns ErrAssuranceDisabled.
+func (s *AuthService) WithAssurance(resolver *AssuranceResolver, web assurance.Verifier) *AuthService {
+	s.assuranceResolver = resolver
+	s.webAssurance = web
 	return s
 }
 

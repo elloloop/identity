@@ -99,6 +99,10 @@ const (
 	EventPasskeyAdded    EventType = "passkey_added"
 	EventPasskeyRemoved  EventType = "passkey_removed"
 	EventPasskeyUsed     EventType = "passkey_used"
+	// EventAssuranceAttested records a client-attestation attempt
+	// (App Attest / Play Integrity / web captcha exchange). Actor-less:
+	// assurance verifies the client before anyone signs in.
+	EventAssuranceAttested EventType = "assurance_attested"
 	EventSessionRevoked  EventType = "session_revoked"
 	EventUserInvited     EventType = "user_invited"
 	EventUserDeactivated EventType = "user_deactivated"
@@ -171,6 +175,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventPasskeyAdded:                  {},
 	EventPasskeyRemoved:                {},
 	EventPasskeyUsed:                   {},
+	EventAssuranceAttested:             {},
 	EventSessionRevoked:                {},
 	EventUserInvited:                   {},
 	EventUserDeactivated:               {},
