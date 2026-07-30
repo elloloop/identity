@@ -129,9 +129,12 @@ func VerifyToken(tokenStr string, kp jwt.KeyProvider, expectedProject string, no
 		return nil, fmt.Errorf("%w: missing expiration", ErrTokenInvalid)
 	}
 
-	claims := &TokenClaims{
-		IssuedAt:  tok.IssuedAt().Unix(),
-		ExpiresAt: tok.Expiration().Unix(),
+	claims := &TokenClaims{ExpiresAt: tok.Expiration().Unix()}
+	// An absent iat decodes to the zero time, whose Unix() is a large
+	// negative sentinel; report 0 ("unknown") instead, mirroring how the
+	// sibling exp case is guarded above.
+	if iat := tok.IssuedAt(); !iat.IsZero() {
+		claims.IssuedAt = iat.Unix()
 	}
 	if v, ok := tok.Get("project"); ok {
 		claims.Project, _ = v.(string)

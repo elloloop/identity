@@ -40,6 +40,13 @@ const scope = "https://www.googleapis.com/auth/playintegrity"
 // replay.
 const DefaultMaxTokenAge = 10 * time.Minute
 
+// clockSkew is how far a verdict may sit in the FUTURE relative to our
+// clock before it is rejected. Google's clock and ours drift by ordinary
+// NTP amounts, and a zero allowance would lock every Android user out on
+// a few milliseconds of skew. Matches the tolerance pkg/oauth applies to
+// ID-token iat.
+const clockSkew = 2 * time.Minute
+
 // maxResponseBytes caps a decodeIntegrityToken response read.
 const maxResponseBytes = 1 << 20
 
@@ -203,7 +210,7 @@ func (v *Verifier) Verify(ctx context.Context, integrityToken, expectedNonce str
 		return nil, failf("malformed verdict timestamp %q", ext.RequestDetails.TimestampMillis)
 	}
 	age := v.now().Sub(time.UnixMilli(tsMillis))
-	if age < 0 || age > v.maxAge {
+	if age < -clockSkew || age > v.maxAge {
 		return nil, failf("verdict timestamp outside freshness window (age %s)", age)
 	}
 

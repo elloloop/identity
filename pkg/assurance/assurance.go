@@ -63,8 +63,8 @@ var ErrProviderUnavailable = errors.New("assurance: provider unavailable")
 // token). The service holds exactly one web Verifier for the lifetime of
 // the process.
 type Verifier interface {
-	// Name returns the provider identifier (e.g. "turnstile",
-	// "recaptcha_v3", "noop").
+	// Name returns the provider identifier (e.g. "turnstile" or
+	// "recaptcha_v3"). It is recorded in the assurance token's `amr`.
 	Name() string
 
 	// Verify checks token, optionally binding it to remoteip (the

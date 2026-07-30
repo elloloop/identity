@@ -58,6 +58,25 @@ func TestAssuranceResolver_DefaultProjectUsesEnvDefaults(t *testing.T) {
 	}
 }
 
+// TestAssuranceResolver_DefaultProjectConfigWins pins the precedence fix:
+// a stored assurance block on the DEFAULT project must be honoured, not
+// silently shadowed by the env defaults. Before this, a validated block
+// written to the default project was inert with no log line — the
+// challenge RPC succeeded while the exchange returned Unimplemented
+// forever.
+func TestAssuranceResolver_DefaultProjectConfigWins(t *testing.T) {
+	defaults := defaultsWithAppAttest(t)
+	r := NewAssuranceResolver("proj-default", defaults, nil, nil)
+
+	got := r.For(assuranceCtx("proj-default", iosBlock("TEAMOWNAAA", "com.example.own")))
+	if got.AppAttest == nil {
+		t.Fatal("default project's own assurance block produced no verifier")
+	}
+	if got.AppAttest == defaults.AppAttest {
+		t.Fatal("default project's stored block was shadowed by the env defaults")
+	}
+}
+
 func TestAssuranceResolver_NonDefaultProjectWithoutConfigGetsNothing(t *testing.T) {
 	defaults := defaultsWithAppAttest(t)
 	r := NewAssuranceResolver("proj-default", defaults, nil, nil)

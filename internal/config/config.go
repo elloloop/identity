@@ -542,6 +542,11 @@ type Config struct {
 	// AssuranceAndroidSAKeyJSON is the Google service-account key (inline
 	// JSON) used to decode Play Integrity verdicts server-side.
 	AssuranceAndroidSAKeyJSON string
+	// AssuranceAllowProjectOnly permits booting with assurance enabled and NO
+	// env-configured arm, for deployments where every app identity lives in
+	// per-project config_json. It is an explicit acknowledgement that a
+	// project without its own assurance block cannot authenticate at all.
+	AssuranceAllowProjectOnly bool
 
 	// Age-gating (COPPA). When disabled the no-op determiner is wired (everyone
 	// classifies as adult, no consent gating) and signup behaves as before.
@@ -1102,6 +1107,7 @@ func Load() *Config {
 		AssuranceAndroidPackageName:      envStr("GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME", ""),
 		AssuranceAndroidCertDigests:      envStr("GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS", ""),
 		AssuranceAndroidSAKeyJSON:        envStr("GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON", ""),
+		AssuranceAllowProjectOnly:        envBool("GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY", false),
 
 		AgeGateEnabled:     envBool("GATEWAY_AGEGATE_ENABLED", false),
 		AgeGateChildMaxAge: envInt("GATEWAY_AGEGATE_CHILD_MAX_AGE", DefaultAgeGateChildMaxAge),
@@ -1477,6 +1483,12 @@ func (c *Config) DefaultPrimaryAuthDomain() string {
 func (c *Config) JWTExpiry() time.Duration {
 	return time.Duration(c.JWTExpirySeconds) * time.Second
 }
+
+// HasControlPlane reports whether the selected persistence driver carries
+// a control plane — i.e. whether projects can hold their own config_json
+// (and therefore their own assurance app identities). Only the postgres
+// driver does; memory and sqlite pin every request to the default project.
+func (c *Config) HasControlPlane() bool { return c.RepoDriver == "postgres" }
 
 // AssuranceTokenTTL returns the assurance-token lifetime as a Duration.
 func (c *Config) AssuranceTokenTTL() time.Duration {
@@ -2022,16 +2034,26 @@ func (c *Config) validateAssurance() error {
 	// with nothing configured would boot cleanly and lock every user out of
 	// signup, login, reset, email-code, magic-link and passkey-signup. Fail
 	// boot instead — v3's validateCaptcha refused the analogous state.
+	//
+	// "Anywhere" matters: per-project app identities live in each project's
+	// config_json, so a deployment WITH a control plane can legitimately
+	// configure no env arm at all (the hub-style deployment the docs
+	// describe). The env-arm requirement therefore applies only when there is
+	// no control plane to carry per-project config, or when the operator
+	// opts out explicitly.
 	hasWeb := c.AssuranceWebProvider != ""
 	hasIOS := c.AssuranceIOSTeamID != "" && c.AssuranceIOSBundleID != ""
 	hasAndroid := c.AssuranceAndroidPackageName != ""
-	if !hasWeb && !hasIOS && !hasAndroid {
+	if !hasWeb && !hasIOS && !hasAndroid &&
+		!c.AssuranceAllowProjectOnly && !c.HasControlPlane() {
 		return errors.New(
 			"config: GATEWAY_ASSURANCE_ENABLED=true requires at least one configured arm — " +
 				"a web provider (GATEWAY_ASSURANCE_WEB_PROVIDER), an iOS app " +
 				"(GATEWAY_ASSURANCE_IOS_TEAM_ID + GATEWAY_ASSURANCE_IOS_BUNDLE_ID), " +
-				"or an Android app (GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME); " +
-				"otherwise the enforce toggles deny every auth endpoint with no way to obtain a token",
+				"or an Android app (GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME) — " +
+				"or GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY=true when every app identity " +
+				"lives in per-project config_json; otherwise the enforce toggles deny " +
+				"every auth endpoint with no way to obtain a token",
 		)
 	}
 

@@ -209,7 +209,9 @@ func TestVerifyRejections(t *testing.T) {
 		{"wrong request package", func(p *verdictPayload) { p.requestPackage = "com.other" }},
 		{"nonce mismatch", func(p *verdictPayload) { p.nonce = "some-other-nonce" }},
 		{"stale timestamp", func(p *verdictPayload) { p.timestampMs = testNow.Add(-time.Hour).UnixMilli() }},
-		{"future timestamp", func(p *verdictPayload) { p.timestampMs = testNow.Add(time.Minute).UnixMilli() }},
+		// Beyond the clock-skew allowance: ordinary NTP drift is tolerated
+		// (covered below), a far-future stamp is not.
+		{"future timestamp beyond skew", func(p *verdictPayload) { p.timestampMs = testNow.Add(10 * time.Minute).UnixMilli() }},
 		{"malformed timestamp", func(p *verdictPayload) { p.timestampRaw = "not-a-number" }},
 		{"unrecognized app", func(p *verdictPayload) { p.appVerdict = "UNRECOGNIZED_VERSION" }},
 		{"wrong app package", func(p *verdictPayload) { p.appPackage = "com.other" }},
@@ -387,4 +389,18 @@ func TestTokenEndpointFailures(t *testing.T) {
 			t.Fatalf("error message not truncated: %d bytes", len(err.Error()))
 		}
 	})
+}
+
+// TestVerifyToleratesClockSkew pins that a verdict stamped slightly in the
+// future — ordinary NTP drift between Google's clock and ours — is
+// accepted. A zero allowance would lock every Android user out of every
+// enforced endpoint with no retry that helps.
+func TestVerifyToleratesClockSkew(t *testing.T) {
+	nonce := "nonce"
+	p := validPayload(nonce)
+	p.timestampMs = testNow.Add(30 * time.Second).UnixMilli()
+	f := newFakeGoogle(t, p)
+	if _, err := f.verifier(t).Verify(context.Background(), "tok", nonce); err != nil {
+		t.Fatalf("Verify with 30s of future skew: %v", err)
+	}
 }

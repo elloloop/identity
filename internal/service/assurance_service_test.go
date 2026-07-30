@@ -2,13 +2,22 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/assurance/appattest"
 	"github.com/elloloop/identity/pkg/assurance/appattest/appattesttest"
+	"github.com/elloloop/identity/pkg/assurance/playintegrity"
 )
 
 const (
@@ -25,6 +34,78 @@ type fakeWebVerifier struct {
 func (fakeWebVerifier) Name() string { return "fake-web" }
 func (f fakeWebVerifier) Verify(context.Context, string, string) error {
 	return f.err
+}
+
+// fakePlayServer stands up a Google stand-in serving both the OAuth
+// token endpoint and decodeIntegrityToken, and returns a Verifier wired
+// to it. verdictNonce is echoed back as requestDetails.nonce — tests set
+// it to the challenge string a real client would have passed. decodeCode
+// != 200 makes the decode endpoint fail with that status.
+func fakePlayServer(t *testing.T, verdictNonce *string, decodeCode *int) *playintegrity.Verifier {
+	t.Helper()
+	const pkg = "com.example.dictionary"
+	const digest = "ZGlnZXN0"
+
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(rsaKey)
+	if err != nil {
+		t.Fatalf("MarshalPKCS8PrivateKey: %v", err)
+	}
+	saKey, err := json.Marshal(map[string]string{
+		"client_email": "svc@test.iam.gserviceaccount.com",
+		"private_key":  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+	})
+	if err != nil {
+		t.Fatalf("marshal sa key: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "fake", "expires_in": 3600})
+	})
+	mux.HandleFunc("/v1/"+pkg+":decodeIntegrityToken", func(w http.ResponseWriter, _ *http.Request) {
+		if *decodeCode != http.StatusOK {
+			w.WriteHeader(*decodeCode)
+			_, _ = w.Write([]byte(`{"error":"upstream"}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tokenPayloadExternal": map[string]any{
+				"requestDetails": map[string]any{
+					"requestPackageName": pkg,
+					"nonce":              *verdictNonce,
+					"timestampMillis":    strconv.FormatInt(time.Now().UnixMilli(), 10),
+				},
+				"appIntegrity": map[string]any{
+					"appRecognitionVerdict":   "PLAY_RECOGNIZED",
+					"packageName":             pkg,
+					"certificateSha256Digest": []string{digest},
+					"versionCode":             "7",
+				},
+				"deviceIntegrity": map[string]any{
+					"deviceRecognitionVerdict": []string{"MEETS_DEVICE_INTEGRITY"},
+				},
+			},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	v, err := playintegrity.New(playintegrity.Config{
+		PackageName:        pkg,
+		CertSHA256Digests:  []string{digest},
+		ServiceAccountJSON: saKey,
+		BaseURL:            srv.URL,
+		TokenURL:           srv.URL + "/token",
+		HTTPClient:         srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("playintegrity.New: %v", err)
+	}
+	return v
 }
 
 // newAssuranceService builds an AuthService with assurance enabled, an
@@ -354,4 +435,104 @@ func TestProjectAssuranceConfigValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIssueAssuranceTokenPlayIntegrity covers the Android service glue
+// end-to-end against a fake Google: the challenge is consumed, the
+// challenge STRING (not its base64 re-encoding) is what Play must echo
+// back, a success mints a play_integrity token with no device id, and an
+// upstream outage maps to ErrAssuranceUnavailable rather than a rejection.
+func TestIssueAssuranceTokenPlayIntegrity(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newAssuranceService(t, repo, nil, nil)
+	ctx := context.Background()
+
+	nonce := ""
+	decodeCode := http.StatusOK
+	verifier := fakePlayServer(t, &nonce, &decodeCode)
+	svc.WithAssurance(
+		NewAssuranceResolver("", AssuranceProviders{PlayIntegrity: verifier}, nil, nil),
+		nil,
+	)
+
+	// Happy path: the client passes the challenge string verbatim as the
+	// Play nonce, so that is what the verdict echoes.
+	ch, err := svc.CreateAssuranceChallenge(ctx, AssurancePlatformAndroid)
+	if err != nil {
+		t.Fatalf("CreateAssuranceChallenge: %v", err)
+	}
+	nonce = ch.Challenge
+
+	tok, err := svc.IssueAssuranceToken(ctx, AssuranceEvidence{
+		Platform:       AssurancePlatformAndroid,
+		ChallengeID:    ch.ID,
+		IntegrityToken: "integrity-token",
+	})
+	if err != nil {
+		t.Fatalf("IssueAssuranceToken(android): %v", err)
+	}
+	claims, err := svc.VerifyAssuranceToken(ctx, tok.Token)
+	if err != nil {
+		t.Fatalf("VerifyAssuranceToken: %v", err)
+	}
+	if len(claims.Providers) != 1 || claims.Providers[0] != assurance.ProviderPlayIntegrity {
+		t.Errorf("Providers = %v, want [%s]", claims.Providers, assurance.ProviderPlayIntegrity)
+	}
+	if claims.DeviceID != "" {
+		t.Errorf("android token carries a device id %q; Play Integrity registers no device", claims.DeviceID)
+	}
+
+	t.Run("challenge is single use", func(t *testing.T) {
+		if _, err := svc.IssueAssuranceToken(ctx, AssuranceEvidence{
+			Platform: AssurancePlatformAndroid, ChallengeID: ch.ID, IntegrityToken: "integrity-token",
+		}); !errors.Is(err, ErrAssuranceFailed) {
+			t.Fatalf("replayed challenge err = %v, want ErrAssuranceFailed", err)
+		}
+	})
+
+	t.Run("nonce mismatch rejected", func(t *testing.T) {
+		fresh, err := svc.CreateAssuranceChallenge(ctx, AssurancePlatformAndroid)
+		if err != nil {
+			t.Fatalf("challenge: %v", err)
+		}
+		nonce = "a-different-nonce" // Play echoes something else back
+		if _, err := svc.IssueAssuranceToken(ctx, AssuranceEvidence{
+			Platform: AssurancePlatformAndroid, ChallengeID: fresh.ID, IntegrityToken: "t",
+		}); !errors.Is(err, ErrAssuranceFailed) {
+			t.Fatalf("nonce mismatch err = %v, want ErrAssuranceFailed", err)
+		}
+	})
+
+	t.Run("ios challenge cannot be redeemed as android", func(t *testing.T) {
+		iosCh, err := svc.CreateAssuranceChallenge(ctx, AssurancePlatformIOS)
+		if err != nil {
+			t.Fatalf("challenge: %v", err)
+		}
+		nonce = iosCh.Challenge
+		if _, err := svc.IssueAssuranceToken(ctx, AssuranceEvidence{
+			Platform: AssurancePlatformAndroid, ChallengeID: iosCh.ID, IntegrityToken: "t",
+		}); !errors.Is(err, ErrAssuranceFailed) {
+			t.Fatalf("cross-platform challenge err = %v, want ErrAssuranceFailed", err)
+		}
+	})
+
+	t.Run("upstream outage is unavailable, not a rejection", func(t *testing.T) {
+		fresh, err := svc.CreateAssuranceChallenge(ctx, AssurancePlatformAndroid)
+		if err != nil {
+			t.Fatalf("challenge: %v", err)
+		}
+		nonce = fresh.Challenge
+		decodeCode = http.StatusInternalServerError
+		defer func() { decodeCode = http.StatusOK }()
+
+		_, err = svc.IssueAssuranceToken(ctx, AssuranceEvidence{
+			Platform: AssurancePlatformAndroid, ChallengeID: fresh.ID, IntegrityToken: "t",
+		})
+		if !errors.Is(err, ErrAssuranceUnavailable) {
+			t.Fatalf("outage err = %v, want ErrAssuranceUnavailable", err)
+		}
+		if errors.Is(err, ErrAssuranceFailed) {
+			t.Fatal("an outage must not be reported as a verification failure")
+		}
+	})
 }

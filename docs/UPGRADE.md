@@ -39,7 +39,15 @@ in `config_json` `assurance` (service-account key encrypted under
 
 **Embedders:** `Options.CaptchaVerifier` is now
 `Options.AssuranceWebVerifier`; the handler constructor no longer takes a
-verifier (it is wired into the auth service).
+verifier (it is wired into the auth service). The public `pkg/captcha`
+package is gone — it moved to `pkg/assurance` with a shape-identical
+`Verifier` interface, so a custom verifier only needs its import swapped.
+
+**Token verifiers:** `pkg/jwt.VerifyAccessToken` now rejects a token with
+no `sub` claim. Every access token this server has ever minted carries
+one, so this affects only callers that hand it non-access tokens; it is
+what keeps an assurance token (deliberately subject-less) from ever
+authenticating as a user.
 
 ---
 

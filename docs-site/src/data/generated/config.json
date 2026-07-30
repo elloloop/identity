@@ -72,6 +72,15 @@
     "anchor": "email-and-branding"
   },
   {
+    "name": "GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "permits booting with assurance enabled and NO env-configured arm, for deployments where every app identity lives in per-project config_json.",
+    "category": "Client assurance",
+    "anchor": "client-assurance"
+  },
+  {
     "name": "GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS",
     "type": "string",
     "default": "",

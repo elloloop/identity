@@ -108,6 +108,14 @@ import { Code } from "astro-expressive-code/components";
       per-IP quota per rate-limit window on all three assurance RPCs.
     </li>
     <li>
+      <code>GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY</code> (default
+      <code>false</code>) — boot with assurance enabled and no env arm,
+      for deployments where every app identity lives in per-project
+      <code>config_json</code>. Not needed on Postgres (a control plane can
+      carry that config, so it is assumed); required to opt in on drivers
+      without one.
+    </li>
+    <li>
       <code>GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP</code>,
       <code>…_PASSWORD_LOGIN</code>, <code>…_PASSWORD_RESET</code>,
       <code>…_EMAIL_LOGIN_CODE</code>, <code>…_MAGIC_LINK</code>,

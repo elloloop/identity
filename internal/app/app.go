@@ -168,7 +168,10 @@ type Deps struct {
 	IDVProvider idv.Provider
 
 	// AssuranceWebVerifier is the web (captcha) arm of the client-assurance
-	// layer, gating the unauthenticated auth endpoints. May be
+	// layer, gating the unauthenticated auth endpoints. nil builds the
+	// provider named by GATEWAY_ASSURANCE_WEB_PROVIDER; when none is
+	// configured there is no web verifier and only the mobile-attestation
+	// arms apply. May be
 	// nil — in that case New builds one from Config (the no-op verifier
 	// when CAPTCHA is disabled). Tests inject a fake to drive pass/fail
 	// without network calls.

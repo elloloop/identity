@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"go.uber.org/zap"
@@ -62,15 +63,23 @@ func NewAssuranceResolver(defaultProjectID string, defaults AssuranceProviders, 
 	}
 }
 
-// For returns the providers for the request's resolved project. The
-// default project (or a request with no scope) gets the env defaults; a
-// project with its own assurance block gets verifiers built from it.
+// For returns the providers for the request's resolved project.
+//
+// Precedence mirrors OAuthResolver.exchangerFor: a project's OWN
+// config_json assurance block always wins — including for the default
+// project, so a stored block is never inert. Only when a project
+// configures nothing does the default project fall back to the
+// env-configured app identity; a non-default project inherits nothing
+// (isolation: one product's attestation must not satisfy another's).
 func (r *AssuranceResolver) For(ctx context.Context) AssuranceProviders {
 	scope := ProjectScopeFromContext(ctx)
-	if scope == nil || scope.ProjectID == "" || scope.ProjectID == r.defaultProjectID {
+	if scope == nil || scope.ProjectID == "" {
 		return r.defaults
 	}
 	if scope.Assurance.isZero() {
+		if scope.ProjectID == r.defaultProjectID {
+			return r.defaults
+		}
 		return AssuranceProviders{}
 	}
 	hash := scope.Assurance.hash()
@@ -82,10 +91,16 @@ func (r *AssuranceResolver) For(ctx context.Context) AssuranceProviders {
 		return entry.providers
 	}
 
-	built := r.build(scope.ProjectID, scope.Assurance)
+	// Build under the write lock and re-check: a cold start that fans out
+	// across concurrent requests would otherwise build (and, for Android,
+	// perform a Google service-account exchange) once per racer.
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if entry, ok := r.cache[scope.ProjectID]; ok && entry.hash == hash {
+		return entry.providers
+	}
+	built := r.build(scope.ProjectID, scope.Assurance)
 	r.cache[scope.ProjectID] = assuranceCacheEntry{hash: hash, providers: built}
-	r.mu.Unlock()
 	return built
 }
 
@@ -130,8 +145,12 @@ func (r *AssuranceResolver) build(projectID string, cfg ProjectAssuranceConfig) 
 }
 
 // decrypt unwraps a *_enc value with the deployment's project-secrets
-// key.
+// key. An unset key is by far the likeliest misconfiguration, so it is
+// named explicitly rather than surfacing as a raw secretcrypto error.
 func (r *AssuranceResolver) decrypt(enc string) ([]byte, error) {
+	if len(r.secretsKey) == 0 {
+		return nil, errors.New("GATEWAY_PROJECT_SECRETS_KEY is not configured; per-project assurance secrets cannot be decrypted")
+	}
 	plain, err := secretcrypto.Decrypt(enc, r.secretsKey)
 	if err != nil {
 		return nil, err
