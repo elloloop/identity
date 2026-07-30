@@ -315,6 +315,12 @@ type Repository interface {
 	CreateAssuranceChallenge(ctx context.Context, r *AssuranceChallengeRecord) (string, error)
 	ConsumeAssuranceChallenge(ctx context.Context, nodeID string) (*AssuranceChallengeRecord, error)
 	DeleteExpiredAssuranceChallenges(ctx context.Context, beforeMs int64, limit int) error
+	// DeleteStaleAttestedDevices reaps device rows whose LastUsedAt is older
+	// than beforeMs. Attestation inserts a permanent row per key, and a
+	// reinstall or key regeneration yields a NEW key id, so without a
+	// retention sweep the table only ever grows. A reaped device simply
+	// re-attests on its next refresh.
+	DeleteStaleAttestedDevices(ctx context.Context, beforeMs int64, limit int) error
 
 	// QR login sessions
 	FindQrLoginSession(ctx context.Context, sessionID string) (*QrLoginSessionRecord, error)

@@ -346,7 +346,8 @@ func (h *IdentityHandler) AdminGetProjectAssurance(
 }
 
 // assuranceInputFromProto maps the wire config onto the service input.
-// A nil message yields an empty input, which clears the block.
+// A nil message yields an empty input, which changes NOTHING — the write
+// merges per platform, and removal is explicit via the clear flags.
 func assuranceInputFromProto(in *identitypb.ProjectAssuranceConfig) *service.ProjectAssuranceInput {
 	if in == nil {
 		return &service.ProjectAssuranceInput{}

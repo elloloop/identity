@@ -152,6 +152,46 @@ func runAssuranceConformance(t *testing.T, driver Driver) {
 		}
 	})
 
+	t.Run(driver.Name+"/AttestedDeviceStalenessSweep", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+
+		stale, err := r.CreateAttestedDevice(ctx, &service.AttestedDeviceRecord{
+			Platform: "ios", KeyID: "stale-key", PublicKeySPKI: "k",
+			CreatedAt: 100, LastUsedAt: 1000,
+		})
+		if err != nil {
+			t.Fatalf("create stale: %v", err)
+		}
+		if _, err := r.CreateAttestedDevice(ctx, &service.AttestedDeviceRecord{
+			Platform: "ios", KeyID: "fresh-key", PublicKeySPKI: "k",
+			CreatedAt: 100, LastUsedAt: 9000,
+		}); err != nil {
+			t.Fatalf("create fresh: %v", err)
+		}
+
+		if err := r.DeleteStaleAttestedDevices(ctx, 5000, 100); err != nil {
+			if errors.Is(err, service.ErrSweepNotImplemented) {
+				t.Skip("sweep not implemented for this backend")
+			}
+			t.Fatalf("sweep: %v", err)
+		}
+
+		// Staleness keys on LastUsedAt, not CreatedAt: a long-lived device
+		// that refreshed recently must survive.
+		if got, _ := r.GetAttestedDeviceByKeyID(ctx, "stale-key"); got != nil {
+			t.Errorf("stale device %s survived the sweep", stale)
+		}
+		if got, _ := r.GetAttestedDeviceByKeyID(ctx, "fresh-key"); got == nil {
+			t.Error("recently-used device was swept")
+		}
+
+		// A non-positive limit is rejected rather than running unbounded.
+		if err := r.DeleteStaleAttestedDevices(ctx, 5000, 0); err == nil {
+			t.Error("limit <= 0 must be rejected")
+		}
+	})
+
 	t.Run(driver.Name+"/AssuranceChallengeSingleUse", func(t *testing.T) {
 		ctx := context.Background()
 		r := driver.NewRepo(t)

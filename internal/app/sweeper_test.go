@@ -124,6 +124,10 @@ func (m *mockSweepRepo) DeleteExpiredAssuranceChallenges(_ context.Context, b in
 	return m.sweep(b, l)
 }
 
+func (m *mockSweepRepo) DeleteStaleAttestedDevices(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
 func TestSweeper_DisabledWhenIntervalIsZero(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	s := newSweeper(&mockSweepRepo{}, nil, 0, 100, 30, 0, logger)
@@ -501,6 +505,7 @@ func TestSweeperTargetsCoverEveryRepositorySweep(t *testing.T) {
 		"qr_login_sessions",
 		"user_invitations",
 		"assurance_challenges",
+		"attested_devices",
 	}
 	for _, w := range want {
 		if !names[w] {

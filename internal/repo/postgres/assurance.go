@@ -133,3 +133,23 @@ func (r *pgRepository) ConsumeAssuranceChallenge(ctx context.Context, nodeID str
 func (r *pgRepository) DeleteExpiredAssuranceChallenges(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredAssuranceChallenges", "assurance_challenges", beforeMs, limit)
 }
+
+func (r *pgRepository) DeleteStaleAttestedDevices(ctx context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("postgres: DeleteStaleAttestedDevices: limit must be > 0, got %d", limit)
+	}
+	// Mirrors deleteExpiredBatch, but keys on last_used_at_ms (a device has
+	// no expiry — staleness is the retention signal).
+	const q = `
+		DELETE FROM attested_devices
+		 WHERE id IN (
+		     SELECT id FROM attested_devices
+		      WHERE project_id = $1 AND last_used_at_ms < $2
+		      ORDER BY last_used_at_ms ASC
+		      LIMIT $3
+		 )`
+	if _, err := r.pool.Exec(ctx, q, r.projectID, beforeMs, limit); err != nil {
+		return wrapPgErr("DeleteStaleAttestedDevices", err)
+	}
+	return nil
+}

@@ -469,3 +469,7 @@ func (StubRepository) ConsumeAssuranceChallenge(context.Context, string) (*Assur
 func (StubRepository) DeleteExpiredAssuranceChallenges(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }
+
+func (StubRepository) DeleteStaleAttestedDevices(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}

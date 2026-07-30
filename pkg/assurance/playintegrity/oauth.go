@@ -136,7 +136,9 @@ func (ts *tokenSource) get(ctx context.Context) (string, error) {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int64  `json:"expires_in"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil || out.AccessToken == "" {
+	// A non-positive expires_in would make every cached token look already
+	// expired, so each call would re-run the exchange forever.
+	if err := json.Unmarshal(raw, &out); err != nil || out.AccessToken == "" || out.ExpiresIn <= 0 {
 		return "", fmt.Errorf("%w: playintegrity: malformed token response", assurance.ErrProviderUnavailable)
 	}
 

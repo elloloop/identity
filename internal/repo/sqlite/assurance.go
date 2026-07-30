@@ -131,3 +131,21 @@ func (r *sqliteRepository) ConsumeAssuranceChallenge(ctx context.Context, nodeID
 func (r *sqliteRepository) DeleteExpiredAssuranceChallenges(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredAssuranceChallenges", "assurance_challenges", beforeMs, limit)
 }
+
+func (r *sqliteRepository) DeleteStaleAttestedDevices(ctx context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("sqlite: DeleteStaleAttestedDevices: limit must be > 0, got %d", limit)
+	}
+	const q = `
+		DELETE FROM attested_devices
+		 WHERE id IN (
+		     SELECT id FROM attested_devices
+		      WHERE project_id = $1 AND last_used_at_ms < $2
+		      ORDER BY last_used_at_ms ASC
+		      LIMIT $3
+		 )`
+	if _, err := r.db.Exec(ctx, q, r.projectID, beforeMs, limit); err != nil {
+		return wrapErr("DeleteStaleAttestedDevices", err)
+	}
+	return nil
+}

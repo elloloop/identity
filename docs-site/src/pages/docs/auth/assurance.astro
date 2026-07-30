@@ -80,7 +80,12 @@ import { Code } from "astro-expressive-code/components";
       <code>GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY</code> or
       <code>GATEWAY_ASSURANCE_RECAPTCHA_SECRET</code> /
       <code>GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD</code>. Empty
-      disables web assurance (mobile-attestation-only deployment).
+      disables web assurance — a mobile-attestation-only deployment. Note the
+      enforce toggles are per-endpoint, not per-platform: with no web arm
+      every browser client (including the hosted <code>/auth/</code> UI, which
+      renders no widget and never attempts the exchange) is denied on each
+      gated endpoint. Turn the relevant toggles off if browsers must still
+      reach them.
     </li>
     <li>
       <code>GATEWAY_ASSURANCE_IOS_TEAM_ID</code> +
@@ -191,15 +196,25 @@ curl -s https://id.example.com/identity.v1.IdentityService/PasswordSignup \\
   -d '{"email":"a@example.com","password":"…"}'`}
   />
 
+  <h2>Retention</h2>
+  <p>
+    A verified iOS attestation stores one device row (public key + replay
+    counter). A reinstall or key regeneration produces a <em>new</em> key, so
+    those rows would otherwise accumulate forever — the sweeper reaps devices
+    whose last refresh predates the retention window, alongside expired
+    challenges. A reaped device re-attests on its next refresh with no user
+    interaction. Both sweeps run on the existing
+    <code>GATEWAY_SWEEPER_*</code> schedule.
+  </p>
+
   <h2>What assurance is not</h2>
   <p>
     Attestation proves <em>genuine app on genuine hardware</em>, not
     human-rate usage — one real device driven by automation still passes.
     Its durable value is a stable, expensive-to-farm identifier (the
     attested device) for downstream rate-limiting to key on. It is also
-    orthogonal to the per-project <a href="/docs/projects/access">access
-    mode</a>: assurance authenticates the client, the access mode governs
-    which users may authenticate. See
+    orthogonal to the per-project access mode: assurance authenticates the
+    client, the access mode governs which users may authenticate. See
     <a href="https://github.com/elloloop/identity/blob/main/docs/adr/0012-client-assurance-layer.md">ADR-0012</a>
     for the design.
   </p>

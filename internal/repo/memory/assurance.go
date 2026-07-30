@@ -111,3 +111,22 @@ func (r *Repo) DeleteExpiredAssuranceChallenges(_ context.Context, beforeMs int6
 	}
 	return nil
 }
+
+func (r *Repo) DeleteStaleAttestedDevices(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memory: DeleteStaleAttestedDevices: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	deleted := 0
+	for id, d := range r.attestedDevices {
+		if deleted >= limit {
+			break
+		}
+		if d.LastUsedAt < beforeMs {
+			delete(r.attestedDevices, id)
+			deleted++
+		}
+	}
+	return nil
+}

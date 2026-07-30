@@ -25,6 +25,11 @@ CREATE TABLE attested_devices (
 -- One hardware key, one record, per project.
 CREATE UNIQUE INDEX attested_devices_key_uidx
     ON attested_devices (project_id, key_id);
+-- Backing index for the staleness sweep: a device row is permanent until
+-- reaped, and a reinstall or key regeneration mints a NEW key id, so
+-- without retention the table only ever grows.
+CREATE INDEX attested_devices_last_used_idx
+    ON attested_devices (project_id, last_used_at_ms);
 
 CREATE TABLE assurance_challenges (
     id            TEXT PRIMARY KEY,

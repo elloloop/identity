@@ -115,6 +115,13 @@ adopt that split.
   max 24h), and all three assurance RPCs carry a per-IP rate limit. Deployments
   wanting the old per-request property should set a short web TTL; single-use
   (`jti` + redemption store) and IP binding are candidate follow-ups.
+- Attested devices are retained on a staleness sweep, not forever: a
+  reinstall or key regeneration mints a NEW key id, so an attestation row
+  is otherwise permanent and the table only ever grows. The sweeper reaps
+  rows whose `last_used_at_ms` predates the retention window (backed by a
+  `(project_id, last_used_at_ms)` index); a reaped device simply
+  re-attests on its next refresh, which costs one round-trip and no user
+  interaction.
 - Genuine Apple attestations cannot be minted in CI. The verifier accepts
   injectable trust roots, and `appattesttest` mints spec-shaped attestation
   objects from a synthetic CA with per-check corruption knobs; the DER/CBOR

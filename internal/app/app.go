@@ -170,11 +170,9 @@ type Deps struct {
 	// AssuranceWebVerifier is the web (captcha) arm of the client-assurance
 	// layer, gating the unauthenticated auth endpoints. nil builds the
 	// provider named by GATEWAY_ASSURANCE_WEB_PROVIDER; when none is
-	// configured there is no web verifier and only the mobile-attestation
-	// arms apply. May be
-	// nil — in that case New builds one from Config (the no-op verifier
-	// when CAPTCHA is disabled). Tests inject a fake to drive pass/fail
-	// without network calls.
+	// configured there is no web verifier at all, so browser clients cannot
+	// obtain an assurance token and only the mobile-attestation arms apply.
+	// Used only while GATEWAY_ASSURANCE_ENABLED is set.
 	AssuranceWebVerifier assurance.Verifier
 
 	// MetricsRegistry is the Prometheus registry the server records

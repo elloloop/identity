@@ -128,6 +128,14 @@ func VerifyToken(tokenStr string, kp jwt.KeyProvider, expectedProject string, no
 	if tok.Expiration().IsZero() {
 		return nil, fmt.Errorf("%w: missing expiration", ErrTokenInvalid)
 	}
+	// An assurance token asserts a CLIENT, never a subject. Rejecting a
+	// sub-bearing token makes the access→assurance direction structural
+	// rather than resting on the audience string alone — a deployment that
+	// set its JWT audience to "assurance" would otherwise turn every access
+	// token into an assurance token.
+	if tok.Subject() != "" {
+		return nil, fmt.Errorf("%w: assurance tokens carry no subject", ErrTokenInvalid)
+	}
 
 	claims := &TokenClaims{ExpiresAt: tok.Expiration().Unix()}
 	// An absent iat decodes to the zero time, whose Unix() is a large

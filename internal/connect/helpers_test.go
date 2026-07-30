@@ -2104,3 +2104,19 @@ func (r *fakeRepo) DeleteExpiredAssuranceChallenges(_ context.Context, beforeMs 
 	}
 	return nil
 }
+
+func (r *fakeRepo) DeleteStaleAttestedDevices(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, d := range r.attestedDevices {
+		if n >= limit {
+			break
+		}
+		if d.LastUsedAt < beforeMs {
+			delete(r.attestedDevices, id)
+			n++
+		}
+	}
+	return nil
+}
