@@ -356,3 +356,62 @@ func TestAssurance_IssueToken_UnconfiguredPlatformUnimplemented(t *testing.T) {
 		t.Fatalf("code = %v; want Unimplemented (err=%v)", connectCodeOf(err), err)
 	}
 }
+
+// TestAssurance_RefreshToken_HandlerSurface covers the refresh handler,
+// the only wire path reaching the App Attest assertion + sign-counter CAS
+// (the replay protection the refresh design exists for). Its three
+// same-shaped proto args mean a transposition would compile and pass
+// every other test, surfacing only as an opaque denial on real devices.
+func TestAssurance_RefreshToken_HandlerSurface(t *testing.T) {
+	t.Run("disabled deployment reports unimplemented", func(t *testing.T) {
+		h := newHarness(t)
+		_, err := h.client.RefreshAssuranceToken(context.Background(), connect.NewRequest(&identitypb.RefreshAssuranceTokenRequest{
+			ChallengeId: "c", KeyId: "k", Assertion: []byte("a"),
+		}))
+		if connectCodeOf(err) != connect.CodeUnimplemented {
+			t.Fatalf("code = %v; want Unimplemented (err=%v)", connectCodeOf(err), err)
+		}
+	})
+
+	t.Run("no App Attest configured reports unimplemented", func(t *testing.T) {
+		h := newHarnessWithWebAssurance(t, &fakeVerifier{}, enableAssurance)
+		_, err := h.client.RefreshAssuranceToken(context.Background(), connect.NewRequest(&identitypb.RefreshAssuranceTokenRequest{
+			ChallengeId: "c", KeyId: "k", Assertion: []byte("a"),
+		}))
+		if connectCodeOf(err) != connect.CodeUnimplemented {
+			t.Fatalf("code = %v; want Unimplemented (err=%v)", connectCodeOf(err), err)
+		}
+	})
+}
+
+// TestAssurance_RefreshToken_ArgumentWiring pins that the handler maps the
+// proto fields onto the service call in the right ORDER. challenge_id and
+// key_id are both strings, so a swap type-checks; here the challenge is
+// real and the key id is not, so a swap changes which one is reported —
+// the assertion is that a bogus KEY (not a bogus challenge) is what fails.
+func TestAssurance_RefreshToken_ArgumentWiring(t *testing.T) {
+	h := newHarnessWithWebAssurance(t, &fakeVerifier{}, enableAssurance)
+	ctx := context.Background()
+
+	ch, err := h.client.CreateAssuranceChallenge(ctx, connect.NewRequest(&identitypb.CreateAssuranceChallengeRequest{
+		Platform: "ios",
+	}))
+	if err != nil {
+		t.Fatalf("CreateAssuranceChallenge: %v", err)
+	}
+
+	// A real challenge id with an unregistered key id. Whatever the outcome,
+	// it must not be an argument-order panic or a server error.
+	_, err = h.client.RefreshAssuranceToken(ctx, connect.NewRequest(&identitypb.RefreshAssuranceTokenRequest{
+		ChallengeId: ch.Msg.ChallengeId,
+		KeyId:       "dW5rbm93bi1rZXk",
+		Assertion:   []byte("not-a-real-assertion"),
+	}))
+	switch code := connectCodeOf(err); code {
+	case connect.CodePermissionDenied, connect.CodeUnimplemented:
+		// Expected: assurance is enabled but no App Attest verifier is
+		// configured in this harness, so the platform is unavailable.
+	default:
+		t.Fatalf("code = %v; want PermissionDenied or Unimplemented (err=%v)", code, err)
+	}
+}

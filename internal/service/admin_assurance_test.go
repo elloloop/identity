@@ -66,7 +66,26 @@ func TestAdminSetProjectAssurance(t *testing.T) {
 		t.Errorf("the write clobbered the project's other config keys: %+v", cfg.Branding)
 	}
 
-	t.Run("rotation without re-supplying the key keeps it", func(t *testing.T) {
+	t.Run("iOS-only rotation preserves the Android block and its key", func(t *testing.T) {
+		// The regression this pins: a write mentioning only iOS used to
+		// replace the whole block, silently destroying the encrypted Play
+		// service-account key — ciphertext the operator cannot recover.
+		v, err := f.svc.AdminSetProjectAssurance(ctx, oauthAdminSecret, projectID, &ProjectAssuranceInput{
+			IOSTeamID:   "TEAM123456",
+			IOSBundleID: "com.example.renamed",
+		})
+		if err != nil {
+			t.Fatalf("ios-only rotate: %v", err)
+		}
+		if v.IOSBundleID != "com.example.renamed" {
+			t.Errorf("iOS block not updated: %+v", v)
+		}
+		if !v.HasServiceAccountKey || v.AndroidPackageName == "" {
+			t.Fatalf("iOS-only write destroyed the Android block: %+v", v)
+		}
+	})
+
+	t.Run("android rotation without re-supplying the key keeps it", func(t *testing.T) {
 		v, err := f.svc.AdminSetProjectAssurance(ctx, oauthAdminSecret, projectID, &ProjectAssuranceInput{
 			AndroidPackageName:       "com.example.renamed",
 			AndroidCertSHA256Digests: []string{"ZGlnZXN0"},
@@ -76,6 +95,9 @@ func TestAdminSetProjectAssurance(t *testing.T) {
 		}
 		if !v.HasServiceAccountKey {
 			t.Fatal("stored key was dropped when the caller supplied none")
+		}
+		if v.IOSTeamID == "" {
+			t.Errorf("android-only write destroyed the iOS block: %+v", v)
 		}
 	})
 
@@ -97,16 +119,44 @@ func TestAdminSetProjectAssurance(t *testing.T) {
 		}
 	})
 
-	t.Run("empty input clears the block", func(t *testing.T) {
+	t.Run("empty input changes nothing", func(t *testing.T) {
 		if _, err := f.svc.AdminSetProjectAssurance(ctx, oauthAdminSecret, projectID, &ProjectAssuranceInput{}); err != nil {
-			t.Fatalf("clear: %v", err)
+			t.Fatalf("no-op write: %v", err)
 		}
 		v, err := f.svc.GetProjectAssurance(ctx, oauthAdminSecret, projectID)
 		if err != nil {
 			t.Fatalf("GetProjectAssurance: %v", err)
 		}
-		if v.HasServiceAccountKey || v.IOSTeamID != "" {
-			t.Errorf("block not cleared: %+v", v)
+		if !v.HasServiceAccountKey || v.IOSTeamID == "" {
+			t.Errorf("a no-op write destroyed stored state: %+v", v)
+		}
+	})
+
+	t.Run("explicit clear removes only the named platform", func(t *testing.T) {
+		if _, err := f.svc.AdminSetProjectAssurance(ctx, oauthAdminSecret, projectID, &ProjectAssuranceInput{
+			ClearAndroid: true,
+		}); err != nil {
+			t.Fatalf("clear android: %v", err)
+		}
+		v, err := f.svc.GetProjectAssurance(ctx, oauthAdminSecret, projectID)
+		if err != nil {
+			t.Fatalf("GetProjectAssurance: %v", err)
+		}
+		if v.HasServiceAccountKey || v.AndroidPackageName != "" {
+			t.Errorf("android not cleared: %+v", v)
+		}
+		if v.IOSTeamID == "" {
+			t.Errorf("clearing android removed the iOS block: %+v", v)
+		}
+
+		if _, err := f.svc.AdminSetProjectAssurance(ctx, oauthAdminSecret, projectID, &ProjectAssuranceInput{
+			ClearIOS: true,
+		}); err != nil {
+			t.Fatalf("clear ios: %v", err)
+		}
+		v, _ = f.svc.GetProjectAssurance(ctx, oauthAdminSecret, projectID)
+		if v.IOSTeamID != "" {
+			t.Errorf("ios not cleared: %+v", v)
 		}
 	})
 

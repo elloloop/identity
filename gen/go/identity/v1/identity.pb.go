@@ -11845,7 +11845,14 @@ func (x *AdminSetProjectOAuthProviderResponse) GetConfig() *ProjectOAuthProvider
 // identity (config_json `assurance`). The Play Integrity service-account
 // key is supplied in PLAINTEXT and encrypted server-side under
 // GATEWAY_PROJECT_SECRETS_KEY, exactly like an OAuth client secret; leave
-// it empty to keep the stored one when rotating other fields.
+// it empty to keep the stored one when rotating other Android fields.
+//
+// The write MERGES per platform: supplying any field of a platform
+// replaces that platform's block, while a platform you do not mention is
+// left exactly as stored. That matters because the stored
+// service-account key is ciphertext the operator cannot recover — an
+// iOS-only rotation must never destroy it. To remove a platform, set its
+// clear_ios / clear_android flag explicitly.
 type AdminSetProjectAssuranceRequest struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
 	ProjectId     string                  `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
@@ -11961,8 +11968,13 @@ type ProjectAssuranceConfig struct {
 	AndroidServiceAccountKey string `protobuf:"bytes,6,opt,name=android_service_account_key,json=androidServiceAccountKey,proto3" json:"android_service_account_key,omitempty"`
 	// Read-only: whether a service-account key is stored.
 	HasServiceAccountKey bool `protobuf:"varint,7,opt,name=has_service_account_key,json=hasServiceAccountKey,proto3" json:"has_service_account_key,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Explicit removal. Setting a clear flag deletes that platform's stored
+	// block (including, for Android, the encrypted service-account key).
+	// Omitting a platform LEAVES IT UNCHANGED — deletion is never implicit.
+	ClearIos      bool `protobuf:"varint,8,opt,name=clear_ios,json=clearIos,proto3" json:"clear_ios,omitempty"`
+	ClearAndroid  bool `protobuf:"varint,9,opt,name=clear_android,json=clearAndroid,proto3" json:"clear_android,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ProjectAssuranceConfig) Reset() {
@@ -12040,6 +12052,20 @@ func (x *ProjectAssuranceConfig) GetAndroidServiceAccountKey() string {
 func (x *ProjectAssuranceConfig) GetHasServiceAccountKey() bool {
 	if x != nil {
 		return x.HasServiceAccountKey
+	}
+	return false
+}
+
+func (x *ProjectAssuranceConfig) GetClearIos() bool {
+	if x != nil {
+		return x.ClearIos
+	}
+	return false
+}
+
+func (x *ProjectAssuranceConfig) GetClearAndroid() bool {
+	if x != nil {
+		return x.ClearAndroid
 	}
 	return false
 }
@@ -13895,7 +13921,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12;\n" +
 	"\x06config\x18\x02 \x01(\v2#.identity.v1.ProjectAssuranceConfigR\x06config\"_\n" +
 	" AdminSetProjectAssuranceResponse\x12;\n" +
-	"\x06config\x18\x01 \x01(\v2#.identity.v1.ProjectAssuranceConfigR\x06config\"\xdc\x02\n" +
+	"\x06config\x18\x01 \x01(\v2#.identity.v1.ProjectAssuranceConfigR\x06config\"\x9e\x03\n" +
 	"\x16ProjectAssuranceConfig\x12\x1e\n" +
 	"\vios_team_id\x18\x01 \x01(\tR\tiosTeamId\x12\"\n" +
 	"\rios_bundle_id\x18\x02 \x01(\tR\viosBundleId\x12\x17\n" +
@@ -13903,7 +13929,9 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x14android_package_name\x18\x04 \x01(\tR\x12androidPackageName\x12=\n" +
 	"\x1bandroid_cert_sha256_digests\x18\x05 \x03(\tR\x18androidCertSha256Digests\x12=\n" +
 	"\x1bandroid_service_account_key\x18\x06 \x01(\tR\x18androidServiceAccountKey\x125\n" +
-	"\x17has_service_account_key\x18\a \x01(\bR\x14hasServiceAccountKey\"@\n" +
+	"\x17has_service_account_key\x18\a \x01(\bR\x14hasServiceAccountKey\x12\x1b\n" +
+	"\tclear_ios\x18\b \x01(\bR\bclearIos\x12#\n" +
+	"\rclear_android\x18\t \x01(\bR\fclearAndroid\"@\n" +
 	"\x1fAdminGetProjectAssuranceRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\"_\n" +

@@ -4282,7 +4282,14 @@ components:
          identity (config_json `assurance`). The Play Integrity service-account
          key is supplied in PLAINTEXT and encrypted server-side under
          GATEWAY_PROJECT_SECRETS_KEY, exactly like an OAuth client secret; leave
-         it empty to keep the stored one when rotating other fields.
+         it empty to keep the stored one when rotating other Android fields.
+
+         The write MERGES per platform: supplying any field of a platform
+         replaces that platform's block, while a platform you do not mention is
+         left exactly as stored. That matters because the stored
+         service-account key is ciphertext the operator cannot recover — an
+         iOS-only rotation must never destroy it. To remove a platform, set its
+         clear_ios / clear_android flag explicitly.
     identity.v1.AdminSetProjectAssuranceResponse:
       type: object
       properties:
@@ -6200,6 +6207,16 @@ components:
           type: boolean
           title: has_service_account_key
           description: 'Read-only: whether a service-account key is stored.'
+        clearIos:
+          type: boolean
+          title: clear_ios
+          description: |-
+            Explicit removal. Setting a clear flag deletes that platform's stored
+             block (including, for Android, the encrypted service-account key).
+             Omitting a platform LEAVES IT UNCHANGED — deletion is never implicit.
+        clearAndroid:
+          type: boolean
+          title: clear_android
       title: ProjectAssuranceConfig
       additionalProperties: false
       description: |-

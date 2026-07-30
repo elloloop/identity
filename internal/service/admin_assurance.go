@@ -21,6 +21,13 @@ type ProjectAssuranceInput struct {
 	AndroidPackageName       string
 	AndroidCertSHA256Digests []string
 	AndroidServiceAccountKey string // plaintext; empty = keep stored
+
+	// ClearIOS / ClearAndroid remove that platform's stored block. Removal
+	// is only ever explicit: a write that does not mention a platform
+	// leaves it untouched, because the stored Android service-account key
+	// is ciphertext the operator cannot reconstruct.
+	ClearIOS     bool
+	ClearAndroid bool
 }
 
 // ProjectAssuranceView is the redacted read shape: it reports WHETHER a
@@ -36,15 +43,17 @@ type ProjectAssuranceView struct {
 }
 
 // AdminSetProjectAssurance writes a project's `assurance` config block,
-// encrypting the supplied Play service-account key at rest. It replaces
-// the whole block while preserving every OTHER key in the project's
-// config (branding, passkey, oauth, access, …), and runs inside the
-// optimistic-concurrency helper so a concurrent write to a sibling block
-// cannot clobber it.
+// encrypting the supplied Play service-account key at rest. It preserves
+// every OTHER key in the project's config (branding, passkey, oauth,
+// access, …) and runs inside the optimistic-concurrency helper so a
+// concurrent write to a sibling block cannot clobber it.
 //
-// Supplying neither platform clears the block — the project then falls
-// back to the deployment-level app identity (default project) or has no
-// attestation arm at all.
+// The merge is PER PLATFORM: supplying any field of a platform replaces
+// that platform's block; a platform the caller does not mention is left
+// exactly as stored. Deletion is therefore never implicit — an iOS-only
+// rotation cannot destroy the Android service-account key, which is
+// ciphertext the operator cannot recover. Use ClearIOS / ClearAndroid to
+// remove a platform on purpose.
 func (s *ControlPlaneAdminService) AdminSetProjectAssurance(ctx context.Context, secret, projectID string, in *ProjectAssuranceInput) (*ProjectAssuranceView, error) {
 	if err := s.authorize(secret); err != nil {
 		return nil, err
@@ -121,9 +130,13 @@ func (s *ControlPlaneAdminService) GetProjectAssurance(ctx context.Context, secr
 // newly supplied service-account key and keeping the stored ciphertext
 // when the caller supplies none.
 func (s *ControlPlaneAdminService) buildAssurance(in *ProjectAssuranceInput, existing ProjectAssuranceConfig) (ProjectAssuranceConfig, error) {
-	var out ProjectAssuranceConfig
+	// Start from what is stored: an unmentioned platform survives.
+	out := existing
 
-	if in.IOSTeamID != "" || in.IOSBundleID != "" || in.IOSEnv != "" {
+	switch {
+	case in.ClearIOS:
+		out.IOS = nil
+	case in.IOSTeamID != "" || in.IOSBundleID != "" || in.IOSEnv != "":
 		out.IOS = &ProjectAssuranceIOS{
 			TeamID:   strings.TrimSpace(in.IOSTeamID),
 			BundleID: strings.TrimSpace(in.IOSBundleID),
@@ -131,7 +144,10 @@ func (s *ControlPlaneAdminService) buildAssurance(in *ProjectAssuranceInput, exi
 		}
 	}
 
-	if in.AndroidPackageName != "" || len(in.AndroidCertSHA256Digests) > 0 || in.AndroidServiceAccountKey != "" {
+	switch {
+	case in.ClearAndroid:
+		out.Android = nil
+	case in.AndroidPackageName != "" || len(in.AndroidCertSHA256Digests) > 0 || in.AndroidServiceAccountKey != "":
 		var keep string
 		if existing.Android != nil {
 			keep = existing.Android.ServiceAccountKeyEnc

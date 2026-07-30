@@ -205,6 +205,12 @@ func TestRegisterGRPCAssuranceParity(t *testing.T) {
 		c.AssuranceWebProvider = config.AssuranceWebProviderTurnstile
 		c.AssuranceTurnstileSecret = "secret"
 		c.AssuranceTurnstileSiteKey = "sitekey"
+		// A real iOS arm, so a REACHED RefreshAssuranceToken handler rejects
+		// the bogus assertion with PermissionDenied. Without it the handler
+		// would answer Unimplemented — indistinguishable from an unbridged
+		// method, which would make the parity assertion vacuous.
+		c.AssuranceIOSTeamID = "TEAM123456"
+		c.AssuranceIOSBundleID = "com.example.app"
 		c.AssuranceEnforcePasswordSignup = true
 	}, func(o *identityserver.Options) {
 		o.AssuranceWebVerifier = stubAssuranceVerifier{}
@@ -253,10 +259,29 @@ func TestRegisterGRPCAssuranceParity(t *testing.T) {
 	}
 
 	// The challenge RPC is bridged too (mobile clients start here).
-	if _, err := client.CreateAssuranceChallenge(ctx, &identitypb.CreateAssuranceChallengeRequest{
+	ch, err := client.CreateAssuranceChallenge(ctx, &identitypb.CreateAssuranceChallengeRequest{
 		Platform: "ios",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("CreateAssuranceChallenge over *grpc.Server: %v", err)
+	}
+
+	// The refresh RPC must be bridged too: it is the only wire path to the
+	// App Attest assertion + sign-counter CAS, so an unbridged method would
+	// leave iOS clients unable to renew without a full re-attestation. This
+	// deployment configures no App Attest verifier, so Unimplemented is the
+	// expected verdict — what matters is that the call REACHES the handler
+	// rather than hitting the bridge's UnimplementedIdentityServiceServer.
+	_, err = client.RefreshAssuranceToken(ctx, &identitypb.RefreshAssuranceTokenRequest{
+		ChallengeId: ch.GetChallengeId(),
+		KeyId:       "dW5rbm93bi1rZXk",
+		Assertion:   []byte("assertion"),
+	})
+	// PermissionDenied means the handler ran and rejected the evidence.
+	// Unimplemented here would mean the bridge method is missing entirely.
+	if code := status.Code(err); code != codes.PermissionDenied {
+		t.Fatalf("RefreshAssuranceToken over *grpc.Server: code = %v, want PermissionDenied "+
+			"(Unimplemented means the bridge method is missing) (err=%v)", code, err)
 	}
 
 	// Metadata carries the token into the Connect handler, so the gated RPC

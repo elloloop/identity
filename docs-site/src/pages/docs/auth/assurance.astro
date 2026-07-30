@@ -141,20 +141,38 @@ import { Code } from "astro-expressive-code/components";
   </p>
   <Code
     lang="bash"
-    code={`curl -s https://id.example.com/identity.v1.IdentityService/AdminSetProjectAssurance \
-  -H 'Content-Type: application/json' \
-  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \
-  -d '{
-        "projectId": "proj_123",
-        "config": {
-          "iosTeamId": "ABCDE12345",
-          "iosBundleId": "com.example.app",
-          "androidPackageName": "com.example.app",
-          "androidCertSha256Digests": ["<base64url-sha256>"],
-          "androidServiceAccountKey": "{\"client_email\":\"…\",\"private_key\":\"…\"}"
+    code={`# Author a project's app identity. The service-account key goes in as
+# PLAINTEXT; the server encrypts it under GATEWAY_PROJECT_SECRETS_KEY.
+# Writes MERGE per platform: a platform you omit is left untouched, so an
+# iOS-only rotation never destroys the stored Android key.
+SA_KEY=$(cat service-account.json)
+
+curl -s https://id.example.com/identity.v1.IdentityService/AdminSetProjectAssurance \\
+  -H 'Content-Type: application/json' \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -d "$(jq -n --arg sa "$SA_KEY" '{
+        projectId: "proj_123",
+        config: {
+          iosTeamId: "ABCDE12345",
+          iosBundleId: "com.example.app",
+          androidPackageName: "com.example.app",
+          androidCertSha256Digests: ["<base64url-sha256>"],
+          androidServiceAccountKey: $sa
         }
-      }'
-# → {"config":{…,"hasServiceAccountKey":true}}   (the key itself is never returned)`}
+      }')"
+# -> {"config":{ ... ,"hasServiceAccountKey":true}}   the key is never returned
+
+# Read it back (key redacted; hasServiceAccountKey is the survival signal):
+curl -s https://id.example.com/identity.v1.IdentityService/AdminGetProjectAssurance \\
+  -H 'Content-Type: application/json' \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -d '{"projectId": "proj_123"}'
+
+# Remove a platform on purpose (never implicit):
+curl -s https://id.example.com/identity.v1.IdentityService/AdminSetProjectAssurance \\
+  -H 'Content-Type: application/json' \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -d '{"projectId": "proj_123", "config": {"clearAndroid": true}}'`}
   />
 
   <h2>Example: web exchange</h2>

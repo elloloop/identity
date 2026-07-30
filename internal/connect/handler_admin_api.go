@@ -358,6 +358,8 @@ func assuranceInputFromProto(in *identitypb.ProjectAssuranceConfig) *service.Pro
 		AndroidPackageName:       in.GetAndroidPackageName(),
 		AndroidCertSHA256Digests: in.GetAndroidCertSha256Digests(),
 		AndroidServiceAccountKey: in.GetAndroidServiceAccountKey(),
+		ClearIOS:                 in.GetClearIos(),
+		ClearAndroid:             in.GetClearAndroid(),
 	}
 }
 
