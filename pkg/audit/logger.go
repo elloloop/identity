@@ -103,11 +103,11 @@ const (
 	// (App Attest / Play Integrity / web captcha exchange). Actor-less:
 	// assurance verifies the client before anyone signs in.
 	EventAssuranceAttested EventType = "assurance_attested"
-	EventSessionRevoked  EventType = "session_revoked"
-	EventUserInvited     EventType = "user_invited"
-	EventUserDeactivated EventType = "user_deactivated"
-	EventUserReactivated EventType = "user_reactivated"
-	EventUserDeleted     EventType = "user_deleted"
+	EventSessionRevoked    EventType = "session_revoked"
+	EventUserInvited       EventType = "user_invited"
+	EventUserDeactivated   EventType = "user_deactivated"
+	EventUserReactivated   EventType = "user_reactivated"
+	EventUserDeleted       EventType = "user_deleted"
 
 	// EventAccountDeletionRequested records an authenticated user scheduling
 	// self-service deletion of their OWN account (GDPR Art 17). The account

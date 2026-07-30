@@ -150,7 +150,7 @@ func (h *IdentityHandler) RequestPasswordReset(
 	// The CAPTCHA gate runs before the enumeration-safe stub. A failed or
 	// missing CAPTCHA is not an account-existence oracle — it is the same
 	// rejection for any email — so returning the error here is safe.
-	if err := h.checkCaptcha(ctx, h.captchaEnforcePasswordReset(), req.Msg.CaptchaToken, clientIP(req.Header())); err != nil {
+	if err := h.requireAssurance(ctx, h.assuranceEnforcePasswordReset(), req.Header()); err != nil {
 		return nil, toConnectError(err)
 	}
 	// RequestPasswordReset is intentionally enumeration-safe: even if

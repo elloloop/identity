@@ -23,6 +23,7 @@ import (
 
 // jwtBearerGrant is the OAuth 2.0 JWT-bearer grant type (RFC 7523) Google
 // token endpoints accept for service accounts.
+// #nosec G101 -- a public RFC 7523 grant-type URN, not a credential.
 const jwtBearerGrant = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 
 // assertionLifetime is the validity window claimed in the signed

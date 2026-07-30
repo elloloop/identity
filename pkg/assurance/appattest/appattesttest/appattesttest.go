@@ -16,7 +16,9 @@ import (
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"time"
 
@@ -130,7 +132,10 @@ func (a *Authority) Mint(now time.Time, opts MintOpts) (*Attestation, error) {
 	if err != nil {
 		return nil, err
 	}
-	pubPoint := uncompressedPoint(&key.PublicKey)
+	pubPoint, err := key.PublicKey.Bytes()
+	if err != nil {
+		return nil, err
+	}
 	keyIDBytes := sha256.Sum256(pubPoint)
 	keyID := base64.StdEncoding.EncodeToString(keyIDBytes[:])
 	if opts.KeyIDOverride != "" {
@@ -216,7 +221,7 @@ func buildAuthData(opts MintOpts, credID []byte) ([]byte, error) {
 		aaguid = aaguidProduction
 	}
 	if len(aaguid) != 16 {
-		return nil, fmt.Errorf("aaguid must be 16 bytes")
+		return nil, errors.New("aaguid must be 16 bytes")
 	}
 	if opts.CredIDOverride != nil {
 		credID = opts.CredIDOverride
@@ -227,7 +232,10 @@ func buildAuthData(opts MintOpts, credID []byte) ([]byte, error) {
 	out = append(out, 0x40) // attested credential data present
 	out = binary.BigEndian.AppendUint32(out, opts.SignCount)
 	out = append(out, aaguid...)
-	out = binary.BigEndian.AppendUint16(out, uint16(len(credID)))
+	if len(credID) > math.MaxUint16 {
+		return nil, errors.New("credential id too long")
+	}
+	out = binary.BigEndian.AppendUint16(out, uint16(len(credID))) // #nosec G115 -- bounded by the MaxUint16 check above
 	out = append(out, credID...)
 	if opts.TruncateAuthData {
 		out = out[:40]
@@ -259,14 +267,4 @@ func MintAssertion(key *ecdsa.PrivateKey, appID string, counter uint32, clientDa
 		"signature":         sig,
 		"authenticatorData": authData,
 	})
-}
-
-// uncompressedPoint returns 0x04||X||Y for a P-256 key.
-func uncompressedPoint(pub *ecdsa.PublicKey) []byte {
-	byteLen := (pub.Curve.Params().BitSize + 7) / 8
-	out := make([]byte, 1+2*byteLen)
-	out[0] = 0x04
-	pub.X.FillBytes(out[1 : 1+byteLen])
-	pub.Y.FillBytes(out[1+byteLen:])
-	return out
 }

@@ -121,7 +121,7 @@ func VerifyToken(tokenStr string, kp jwt.KeyProvider, expectedProject string, no
 		jwtoken.WithAudience(TokenAudience),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrTokenInvalid, err)
+		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
 	}
 	// jwx treats an absent exp as "no expiration"; an unbounded
 	// assurance token must never verify.

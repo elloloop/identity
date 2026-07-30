@@ -22,8 +22,8 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/graph"
 	"github.com/elloloop/identity/internal/service"
-	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/assurance"
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -85,29 +85,29 @@ func nextID() string { return fmt.Sprintf("n-%d", nodeIDSeq.Add(1)) }
 type fakeRepo struct {
 	mu sync.Mutex
 
-	users              map[string]*service.User
-	refreshTokens      map[string]*service.RefreshTokenRecord
-	passkeyCreds       map[string]*service.PasskeyCredRecord
-	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
-	attestedDevices    map[string]*service.AttestedDeviceRecord
+	users               map[string]*service.User
+	refreshTokens       map[string]*service.RefreshTokenRecord
+	passkeyCreds        map[string]*service.PasskeyCredRecord
+	passkeyChallenges   map[string]*service.PasskeyChallengeRecord
+	attestedDevices     map[string]*service.AttestedDeviceRecord
 	assuranceChallenges map[string]*service.AssuranceChallengeRecord
-	qrSessions         map[string]*service.QrLoginSessionRecord
-	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
-	nativeRedemptions  map[string]*service.NativeTokenRedemptionRecord
-	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
-	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
-	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
-	totpCreds          map[string]*service.TotpCredRecord
-	recoveryCodes      map[string]*service.RecoveryCodeRecord
-	loginChallenges    map[string]*service.LoginChallengeRecord
-	invitations        map[string]*service.InvitationRecord
-	passwordResets     map[string]*service.PasswordResetToken
-	emailVerifications map[string]*service.EmailVerificationToken
-	emailChanges       map[string]*service.EmailChangeToken
-	oauthIdentities    map[string]*service.OAuthIdentity
-	idvRecords         map[string]*service.IdentityVerificationRecord
-	sessions           map[string]*service.SessionRecord
-	auditEvents        []*service.AuditEvent
+	qrSessions          map[string]*service.QrLoginSessionRecord
+	oauthOneTimeCodes   map[string]*service.OAuthOneTimeCodeRecord
+	nativeRedemptions   map[string]*service.NativeTokenRedemptionRecord
+	emailLoginCodes     map[string]*service.EmailLoginCodeRecord
+	magicLinkTokens     map[string]*service.MagicLinkTokenRecord
+	phoneVerifyCodes    map[string]*service.PhoneVerificationCodeRecord
+	totpCreds           map[string]*service.TotpCredRecord
+	recoveryCodes       map[string]*service.RecoveryCodeRecord
+	loginChallenges     map[string]*service.LoginChallengeRecord
+	invitations         map[string]*service.InvitationRecord
+	passwordResets      map[string]*service.PasswordResetToken
+	emailVerifications  map[string]*service.EmailVerificationToken
+	emailChanges        map[string]*service.EmailChangeToken
+	oauthIdentities     map[string]*service.OAuthIdentity
+	idvRecords          map[string]*service.IdentityVerificationRecord
+	sessions            map[string]*service.SessionRecord
+	auditEvents         []*service.AuditEvent
 
 	// Optional error injections for specific calls.
 	errFindUser   error
@@ -1903,9 +1903,9 @@ func newHarnessWithOAuthRegistry(t *testing.T, registry *oauth.Registry) *testHa
 
 // newHarnessWithCaptcha builds a harness whose handler enforces CAPTCHA via
 // the supplied verifier and a config produced by mutating testConfig (so a
-// test can flip CaptchaEnabled and the per-endpoint toggles). A nil mutate
+// test can flip AssuranceEnabled and the per-endpoint toggles). A nil mutate
 // leaves the default config; a nil verifier exercises the disabled path.
-func newHarnessWithCaptcha(t *testing.T, verifier assurance.Verifier, mutate func(*config.Config)) *testHarness {
+func newHarnessWithWebAssurance(t *testing.T, verifier assurance.Verifier, mutate func(*config.Config)) *testHarness {
 	t.Helper()
 	return newHarnessWith(t, nil, verifier, mutate)
 }
@@ -1913,7 +1913,7 @@ func newHarnessWithCaptcha(t *testing.T, verifier assurance.Verifier, mutate fun
 func newHarnessWith(
 	t *testing.T,
 	registry *oauth.Registry,
-	captchaVerifier assurance.Verifier,
+	webAssurance assurance.Verifier,
 	mutate func(*config.Config),
 ) *testHarness {
 	t.Helper()
@@ -1940,12 +1940,15 @@ func newHarnessWith(
 	totpRecoveryPepper := []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH")
 
 	authSvc := service.NewAuthServiceWithOAuth(repo, cfg, kr, pkSvc, auditLog, totpKey, totpRecoveryPepper, nil, nil, zap.NewNop(), registry)
+	if webAssurance != nil {
+		authSvc.WithAssurance(service.NewAssuranceResolver(cfg.DefaultProjectID, service.AssuranceProviders{}, nil, nil), webAssurance)
+	}
 	adminSvc := service.NewAdminService(repo, db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 
-	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, nil, captchaVerifier, cfg)
+	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, nil, cfg)
 
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)

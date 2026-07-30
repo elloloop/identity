@@ -44,30 +44,30 @@ type Repo struct {
 
 	mu sync.Mutex
 
-	seq                int64
-	users              map[string]*service.User
-	refreshTokens      map[string]*service.RefreshTokenRecord
-	passkeyCreds       map[string]*service.PasskeyCredRecord
-	attestedDevices    map[string]*service.AttestedDeviceRecord
+	seq                 int64
+	users               map[string]*service.User
+	refreshTokens       map[string]*service.RefreshTokenRecord
+	passkeyCreds        map[string]*service.PasskeyCredRecord
+	attestedDevices     map[string]*service.AttestedDeviceRecord
 	assuranceChallenges map[string]*service.AssuranceChallengeRecord
-	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
-	qrSessions         map[string]*service.QrLoginSessionRecord
-	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
-	nativeRedemptions  map[string]*service.NativeTokenRedemptionRecord
-	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
-	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
-	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
-	totpCreds          map[string]*service.TotpCredRecord
-	recoveryCodes      map[string]*service.RecoveryCodeRecord
-	loginChallenges    map[string]*service.LoginChallengeRecord
-	invitations        map[string]*service.InvitationRecord
-	passwordResets     map[string]*service.PasswordResetToken
-	emailVerifications map[string]*service.EmailVerificationToken
-	emailChanges       map[string]*service.EmailChangeToken
-	oauthIdentities    map[string]*service.OAuthIdentity
-	idvRecords         map[string]*service.IdentityVerificationRecord
-	sessions           map[string]*service.SessionRecord
-	auditEvents        map[string]*service.AuditEvent
+	passkeyChallenges   map[string]*service.PasskeyChallengeRecord
+	qrSessions          map[string]*service.QrLoginSessionRecord
+	oauthOneTimeCodes   map[string]*service.OAuthOneTimeCodeRecord
+	nativeRedemptions   map[string]*service.NativeTokenRedemptionRecord
+	emailLoginCodes     map[string]*service.EmailLoginCodeRecord
+	magicLinkTokens     map[string]*service.MagicLinkTokenRecord
+	phoneVerifyCodes    map[string]*service.PhoneVerificationCodeRecord
+	totpCreds           map[string]*service.TotpCredRecord
+	recoveryCodes       map[string]*service.RecoveryCodeRecord
+	loginChallenges     map[string]*service.LoginChallengeRecord
+	invitations         map[string]*service.InvitationRecord
+	passwordResets      map[string]*service.PasswordResetToken
+	emailVerifications  map[string]*service.EmailVerificationToken
+	emailChanges        map[string]*service.EmailChangeToken
+	oauthIdentities     map[string]*service.OAuthIdentity
+	idvRecords          map[string]*service.IdentityVerificationRecord
+	sessions            map[string]*service.SessionRecord
+	auditEvents         map[string]*service.AuditEvent
 }
 
 // projectRegistry memoises the per-project Repo siblings produced by
@@ -99,29 +99,29 @@ func New() *Repo {
 // carries no project binding or registry; New / WithProject set those.
 func newStore() *Repo {
 	return &Repo{
-		users:              make(map[string]*service.User),
-		refreshTokens:      make(map[string]*service.RefreshTokenRecord),
-		passkeyCreds:       make(map[string]*service.PasskeyCredRecord),
-		attestedDevices:    make(map[string]*service.AttestedDeviceRecord),
+		users:               make(map[string]*service.User),
+		refreshTokens:       make(map[string]*service.RefreshTokenRecord),
+		passkeyCreds:        make(map[string]*service.PasskeyCredRecord),
+		attestedDevices:     make(map[string]*service.AttestedDeviceRecord),
 		assuranceChallenges: make(map[string]*service.AssuranceChallengeRecord),
-		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
-		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
-		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
-		nativeRedemptions:  make(map[string]*service.NativeTokenRedemptionRecord),
-		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
-		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
-		phoneVerifyCodes:   make(map[string]*service.PhoneVerificationCodeRecord),
-		totpCreds:          make(map[string]*service.TotpCredRecord),
-		recoveryCodes:      make(map[string]*service.RecoveryCodeRecord),
-		loginChallenges:    make(map[string]*service.LoginChallengeRecord),
-		invitations:        make(map[string]*service.InvitationRecord),
-		passwordResets:     make(map[string]*service.PasswordResetToken),
-		emailVerifications: make(map[string]*service.EmailVerificationToken),
-		emailChanges:       make(map[string]*service.EmailChangeToken),
-		oauthIdentities:    make(map[string]*service.OAuthIdentity),
-		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
-		sessions:           make(map[string]*service.SessionRecord),
-		auditEvents:        make(map[string]*service.AuditEvent),
+		passkeyChallenges:   make(map[string]*service.PasskeyChallengeRecord),
+		qrSessions:          make(map[string]*service.QrLoginSessionRecord),
+		oauthOneTimeCodes:   make(map[string]*service.OAuthOneTimeCodeRecord),
+		nativeRedemptions:   make(map[string]*service.NativeTokenRedemptionRecord),
+		emailLoginCodes:     make(map[string]*service.EmailLoginCodeRecord),
+		magicLinkTokens:     make(map[string]*service.MagicLinkTokenRecord),
+		phoneVerifyCodes:    make(map[string]*service.PhoneVerificationCodeRecord),
+		totpCreds:           make(map[string]*service.TotpCredRecord),
+		recoveryCodes:       make(map[string]*service.RecoveryCodeRecord),
+		loginChallenges:     make(map[string]*service.LoginChallengeRecord),
+		invitations:         make(map[string]*service.InvitationRecord),
+		passwordResets:      make(map[string]*service.PasswordResetToken),
+		emailVerifications:  make(map[string]*service.EmailVerificationToken),
+		emailChanges:        make(map[string]*service.EmailChangeToken),
+		oauthIdentities:     make(map[string]*service.OAuthIdentity),
+		idvRecords:          make(map[string]*service.IdentityVerificationRecord),
+		sessions:            make(map[string]*service.SessionRecord),
+		auditEvents:         make(map[string]*service.AuditEvent),
 	}
 }
 

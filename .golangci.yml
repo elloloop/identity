@@ -74,6 +74,9 @@ linters:
       - path: internal/repo/memory/repo\.go
         linters:
           - nilnil
+      - path: internal/repo/memory/assurance\.go
+        linters:
+          - nilnil
       - path: internal/repo/postgres/.*\.go
         linters:
           - nilnil
@@ -85,6 +88,9 @@ linters:
           - nilnil
       # Provider factory: nil + nil intentionally signals "disabled".
       - path: identityserver/adapters\.go
+        linters:
+          - nilnil
+      - path: internal/app/assurance\.go
         linters:
           - nilnil
 

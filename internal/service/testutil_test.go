@@ -142,29 +142,29 @@ type fakeRepo struct {
 	getUserErr             error
 	getTotpCredentialErr   error
 
-	users              map[string]*User
-	refreshTokens      map[string]*RefreshTokenRecord
-	passkeyCreds       map[string]*PasskeyCredRecord
-	passkeyChallenges  map[string]*PasskeyChallengeRecord
-	attestedDevices    map[string]*AttestedDeviceRecord
+	users               map[string]*User
+	refreshTokens       map[string]*RefreshTokenRecord
+	passkeyCreds        map[string]*PasskeyCredRecord
+	passkeyChallenges   map[string]*PasskeyChallengeRecord
+	attestedDevices     map[string]*AttestedDeviceRecord
 	assuranceChallenges map[string]*AssuranceChallengeRecord
-	qrSessions         map[string]*QrLoginSessionRecord
-	oauthOneTimeCodes  map[string]*OAuthOneTimeCodeRecord
-	nativeRedemptions  map[string]*NativeTokenRedemptionRecord
-	emailLoginCodes    map[string]*EmailLoginCodeRecord
-	magicLinkTokens    map[string]*MagicLinkTokenRecord
-	phoneVerifyCodes   map[string]*PhoneVerificationCodeRecord
-	totpCreds          map[string]*TotpCredRecord
-	recoveryCodes      map[string]*RecoveryCodeRecord
-	loginChallenges    map[string]*LoginChallengeRecord
-	invitations        map[string]*InvitationRecord
-	passwordResets     map[string]*PasswordResetToken
-	emailVerifications map[string]*EmailVerificationToken
-	emailChanges       map[string]*EmailChangeToken
-	oauthIdentities    map[string]*OAuthIdentity
-	idvRecords         map[string]*IdentityVerificationRecord
-	sessions           map[string]*SessionRecord
-	auditEvents        []*AuditEvent
+	qrSessions          map[string]*QrLoginSessionRecord
+	oauthOneTimeCodes   map[string]*OAuthOneTimeCodeRecord
+	nativeRedemptions   map[string]*NativeTokenRedemptionRecord
+	emailLoginCodes     map[string]*EmailLoginCodeRecord
+	magicLinkTokens     map[string]*MagicLinkTokenRecord
+	phoneVerifyCodes    map[string]*PhoneVerificationCodeRecord
+	totpCreds           map[string]*TotpCredRecord
+	recoveryCodes       map[string]*RecoveryCodeRecord
+	loginChallenges     map[string]*LoginChallengeRecord
+	invitations         map[string]*InvitationRecord
+	passwordResets      map[string]*PasswordResetToken
+	emailVerifications  map[string]*EmailVerificationToken
+	emailChanges        map[string]*EmailChangeToken
+	oauthIdentities     map[string]*OAuthIdentity
+	idvRecords          map[string]*IdentityVerificationRecord
+	sessions            map[string]*SessionRecord
+	auditEvents         []*AuditEvent
 }
 
 func newFakeRepo() *fakeRepo {

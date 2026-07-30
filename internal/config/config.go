@@ -44,16 +44,17 @@ const (
 	RevocationModeTTLAccessTokenCap = 900
 )
 
-// CAPTCHA provider names accepted in GATEWAY_CAPTCHA_PROVIDER. They mirror
-// the captcha.Provider* constants; config validates against these without
-// importing pkg/captcha (config has no dependencies on the service tree).
+// Web-assurance provider names accepted in GATEWAY_ASSURANCE_WEB_PROVIDER.
+// They mirror the assurance.Provider* constants; config validates against
+// these without importing pkg/assurance (config has no dependencies on the
+// service tree).
 const (
-	CaptchaProviderTurnstile   = "turnstile"
-	CaptchaProviderRecaptchaV3 = "recaptcha_v3"
+	AssuranceWebProviderTurnstile   = "turnstile"
+	AssuranceWebProviderRecaptchaV3 = "recaptcha_v3"
 
-	// DefaultCaptchaRecaptchaScoreThreshold is the reCAPTCHA v3 score below
+	// DefaultAssuranceRecaptchaScoreThreshold is the reCAPTCHA v3 score below
 	// which a response is rejected when no threshold is configured.
-	DefaultCaptchaRecaptchaScoreThreshold = 0.5
+	DefaultAssuranceRecaptchaScoreThreshold = 0.5
 
 	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
 	// users 12 and under (i.e. under 13) are in the protected CHILD band.
@@ -463,42 +464,41 @@ type Config struct {
 	// pattern. Tenants that need stricter onboarding flip this on.
 	IDVRequired bool
 
-	// CAPTCHA verification on unauthenticated endpoints. When disabled the
-	// no-op verifier is wired and the per-endpoint toggles are ignored; the
-	// toggles default true, so enabling CAPTCHA gates every endpoint unless one
-	// is flipped off.
+	// Web-assurance (captcha) verification, the browser arm of the client-
+	// assurance layer. When assurance is disabled the per-endpoint enforce
+	// toggles are ignored; the toggles default true, so enabling assurance
+	// gates every listed endpoint unless one is flipped off.
 
-	// CaptchaEnabled is the global on/off for CAPTCHA on unauthenticated endpoints.
-	CaptchaEnabled bool
-	// CaptchaProvider selects the pkg/captcha implementation — "turnstile" or
-	// "recaptcha_v3"; the matching secret must be set.
-	CaptchaProvider string
-	// CaptchaTurnstileSecret is the Cloudflare Turnstile secret key (provider "turnstile").
-	CaptchaTurnstileSecret string
-	// CaptchaTurnstileSiteKey is the Cloudflare Turnstile PUBLIC site key
+	// AssuranceWebProvider selects the pkg/assurance web implementation —
+	// "turnstile" or "recaptcha_v3"; the matching secret must be set. Empty
+	// disables web assurance (mobile-attestation-only deployment).
+	AssuranceWebProvider string
+	// AssuranceTurnstileSecret is the Cloudflare Turnstile secret key (provider "turnstile").
+	AssuranceTurnstileSecret string
+	// AssuranceTurnstileSiteKey is the Cloudflare Turnstile PUBLIC site key
 	// (provider "turnstile"). Safe to expose: the hosted sign-up UI needs it
 	// to render the widget, and the client passes the resulting token back.
-	CaptchaTurnstileSiteKey string
-	// CaptchaRecaptchaSecret is the reCAPTCHA v3 secret key (provider "recaptcha_v3").
-	CaptchaRecaptchaSecret string
-	// CaptchaRecaptchaScoreThreshold is the reCAPTCHA v3 score below which a
+	AssuranceTurnstileSiteKey string
+	// AssuranceRecaptchaSecret is the reCAPTCHA v3 secret key (provider "recaptcha_v3").
+	AssuranceRecaptchaSecret string
+	// AssuranceRecaptchaScoreThreshold is the reCAPTCHA v3 score below which a
 	// response is rejected; must be in [0,1].
-	CaptchaRecaptchaScoreThreshold float64
-	// CaptchaEnforcePasswordSignup gates CAPTCHA on the PasswordSignup endpoint.
-	CaptchaEnforcePasswordSignup bool
-	// CaptchaEnforcePasswordLogin gates CAPTCHA on the PasswordLogin endpoint.
-	CaptchaEnforcePasswordLogin bool
-	// CaptchaEnforcePasswordReset gates CAPTCHA on the RequestPasswordReset endpoint.
-	CaptchaEnforcePasswordReset bool
-	// CaptchaEnforceEmailLoginCode gates CAPTCHA on the RequestEmailLoginCode endpoint.
-	CaptchaEnforceEmailLoginCode bool
-	// CaptchaEnforceMagicLink gates CAPTCHA on the RequestMagicLink endpoint.
-	CaptchaEnforceMagicLink bool
-	// CaptchaEnforcePasskeySignup gates CAPTCHA on the BeginPasskeySignup endpoint.
+	AssuranceRecaptchaScoreThreshold float64
+	// AssuranceEnforcePasswordSignup requires an assurance token on the PasswordSignup endpoint.
+	AssuranceEnforcePasswordSignup bool
+	// AssuranceEnforcePasswordLogin requires an assurance token on the PasswordLogin endpoint.
+	AssuranceEnforcePasswordLogin bool
+	// AssuranceEnforcePasswordReset requires an assurance token on the RequestPasswordReset endpoint.
+	AssuranceEnforcePasswordReset bool
+	// AssuranceEnforceEmailLoginCode requires an assurance token on the RequestEmailLoginCode endpoint.
+	AssuranceEnforceEmailLoginCode bool
+	// AssuranceEnforceMagicLink requires an assurance token on the RequestMagicLink endpoint.
+	AssuranceEnforceMagicLink bool
+	// AssuranceEnforcePasskeySignup requires an assurance token on the BeginPasskeySignup endpoint.
 	// Passkey registration is spammable without it — a script can forge valid
 	// FIDO2 keypairs in software and set the UP/UV flags itself, so BeginPasskeySignup
 	// is an unmetered account-creation + email-send surface just like PasswordSignup.
-	CaptchaEnforcePasskeySignup bool
+	AssuranceEnforcePasskeySignup bool
 
 	// Client assurance (App Attest / Play Integrity / web captcha exchange).
 	// AssuranceEnabled is the global on/off for the assurance token surface:
@@ -1054,27 +1054,26 @@ func Load() *Config {
 		IDVAzureSessionTTLSec: envInt("GATEWAY_IDV_AZURE_SESSION_TTL_SECONDS", 600),
 		IDVRequired:           envBool("GATEWAY_IDV_REQUIRED", false),
 
-		CaptchaEnabled:                 envBool("GATEWAY_CAPTCHA_ENABLED", false),
-		CaptchaProvider:                envStr("GATEWAY_CAPTCHA_PROVIDER", ""),
-		CaptchaTurnstileSecret:         envStr("GATEWAY_CAPTCHA_TURNSTILE_SECRET", ""),
-		CaptchaTurnstileSiteKey:        envStr("GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY", ""),
-		CaptchaRecaptchaSecret:         envStr("GATEWAY_CAPTCHA_RECAPTCHA_SECRET", ""),
-		CaptchaRecaptchaScoreThreshold: envFloat("GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD", DefaultCaptchaRecaptchaScoreThreshold),
-		CaptchaEnforcePasswordSignup:   envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP", true),
-		CaptchaEnforcePasswordLogin:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN", true),
-		CaptchaEnforcePasswordReset:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET", true),
-		CaptchaEnforceEmailLoginCode:   envBool("GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE", true),
-		CaptchaEnforceMagicLink:        envBool("GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK", true),
-		CaptchaEnforcePasskeySignup:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP", true),
-		AssuranceEnabled:               envBool("GATEWAY_ASSURANCE_ENABLED", false),
-		AssuranceChallengeTTLSeconds:   envInt("GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS", 300),
-		AssuranceTokenTTLSeconds:       envInt("GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS", 3600),
-		AssuranceIOSTeamID:             envStr("GATEWAY_ASSURANCE_IOS_TEAM_ID", ""),
-		AssuranceIOSBundleID:           envStr("GATEWAY_ASSURANCE_IOS_BUNDLE_ID", ""),
-		AssuranceIOSEnv:                envStr("GATEWAY_ASSURANCE_IOS_ENV", "production"),
-		AssuranceAndroidPackageName:    envStr("GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME", ""),
-		AssuranceAndroidCertDigests:    envStr("GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS", ""),
-		AssuranceAndroidSAKeyJSON:      envStr("GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON", ""),
+		AssuranceWebProvider:             envStr("GATEWAY_ASSURANCE_WEB_PROVIDER", ""),
+		AssuranceTurnstileSecret:         envStr("GATEWAY_ASSURANCE_TURNSTILE_SECRET", ""),
+		AssuranceTurnstileSiteKey:        envStr("GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY", ""),
+		AssuranceRecaptchaSecret:         envStr("GATEWAY_ASSURANCE_RECAPTCHA_SECRET", ""),
+		AssuranceRecaptchaScoreThreshold: envFloat("GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD", DefaultAssuranceRecaptchaScoreThreshold),
+		AssuranceEnforcePasswordSignup:   envBool("GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP", true),
+		AssuranceEnforcePasswordLogin:    envBool("GATEWAY_ASSURANCE_ENFORCE_PASSWORD_LOGIN", true),
+		AssuranceEnforcePasswordReset:    envBool("GATEWAY_ASSURANCE_ENFORCE_PASSWORD_RESET", true),
+		AssuranceEnforceEmailLoginCode:   envBool("GATEWAY_ASSURANCE_ENFORCE_EMAIL_LOGIN_CODE", true),
+		AssuranceEnforceMagicLink:        envBool("GATEWAY_ASSURANCE_ENFORCE_MAGIC_LINK", true),
+		AssuranceEnforcePasskeySignup:    envBool("GATEWAY_ASSURANCE_ENFORCE_PASSKEY_SIGNUP", true),
+		AssuranceEnabled:                 envBool("GATEWAY_ASSURANCE_ENABLED", false),
+		AssuranceChallengeTTLSeconds:     envInt("GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS", 300),
+		AssuranceTokenTTLSeconds:         envInt("GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS", 3600),
+		AssuranceIOSTeamID:               envStr("GATEWAY_ASSURANCE_IOS_TEAM_ID", ""),
+		AssuranceIOSBundleID:             envStr("GATEWAY_ASSURANCE_IOS_BUNDLE_ID", ""),
+		AssuranceIOSEnv:                  envStr("GATEWAY_ASSURANCE_IOS_ENV", "production"),
+		AssuranceAndroidPackageName:      envStr("GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME", ""),
+		AssuranceAndroidCertDigests:      envStr("GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS", ""),
+		AssuranceAndroidSAKeyJSON:        envStr("GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON", ""),
 
 		AgeGateEnabled:     envBool("GATEWAY_AGEGATE_ENABLED", false),
 		AgeGateChildMaxAge: envInt("GATEWAY_AGEGATE_CHILD_MAX_AGE", DefaultAgeGateChildMaxAge),
@@ -1586,7 +1585,7 @@ func (c *Config) Validate() error {
 		return err
 	}
 
-	if err := c.validateCaptcha(); err != nil {
+	if err := c.validateAssurance(); err != nil {
 		return err
 	}
 
@@ -1898,40 +1897,69 @@ func (c *Config) validateSMS() error {
 	return nil
 }
 
-// validateCaptcha enforces the CAPTCHA invariants: a deployment that turns
-// CAPTCHA on must name a supported provider, supply that provider's secret,
-// and (for reCAPTCHA v3) configure a score threshold within [0,1]. A
-// disabled deployment is unconstrained — the no-op verifier is wired and
-// the provider/secret fields are ignored.
-func (c *Config) validateCaptcha() error {
-	if !c.CaptchaEnabled {
+// validateAssurance enforces the client-assurance invariants: an enabled
+// deployment's configured surfaces must each be complete — a named web
+// provider needs its secret (and, for reCAPTCHA v3, a threshold within
+// [0,1]), a partially-specified default-project iOS or Android app
+// identity fails rather than silently disabling the platform. A disabled
+// deployment is unconstrained — the fields are ignored. A web provider is
+// OPTIONAL when enabled: mobile-only deployments configure no captcha,
+// and per-project deployments may configure everything in config_json.
+func (c *Config) validateAssurance() error {
+	if !c.AssuranceEnabled {
 		return nil
 	}
 
-	switch c.CaptchaProvider {
-	case CaptchaProviderTurnstile:
-		if c.CaptchaTurnstileSecret == "" {
-			return fmt.Errorf("config: GATEWAY_CAPTCHA_ENABLED=true with provider %q requires GATEWAY_CAPTCHA_TURNSTILE_SECRET", CaptchaProviderTurnstile)
+	if (c.AssuranceIOSTeamID == "") != (c.AssuranceIOSBundleID == "") {
+		return errors.New("config: GATEWAY_ASSURANCE_IOS_TEAM_ID and GATEWAY_ASSURANCE_IOS_BUNDLE_ID must be set together")
+	}
+	switch c.AssuranceIOSEnv {
+	case "", "production", "development":
+	default:
+		return fmt.Errorf("config: GATEWAY_ASSURANCE_IOS_ENV must be production or development, got %q", c.AssuranceIOSEnv)
+	}
+	if c.AssuranceAndroidPackageName != "" {
+		if len(c.AssuranceAndroidCertDigestList()) == 0 {
+			return errors.New("config: GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME requires GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS")
+		}
+		if c.AssuranceAndroidSAKeyJSON == "" {
+			return errors.New("config: GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME requires GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON")
+		}
+	}
+	if c.AssuranceChallengeTTLSeconds <= 0 {
+		return fmt.Errorf("config: GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS must be > 0, got %d", c.AssuranceChallengeTTLSeconds)
+	}
+	if c.AssuranceTokenTTLSeconds <= 0 {
+		return fmt.Errorf("config: GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS must be > 0, got %d", c.AssuranceTokenTTLSeconds)
+	}
+
+	switch c.AssuranceWebProvider {
+	case "":
+		// No web provider: mobile-attestation-only deployment.
+		return nil
+	case AssuranceWebProviderTurnstile:
+		if c.AssuranceTurnstileSecret == "" {
+			return fmt.Errorf("config: GATEWAY_ASSURANCE_ENABLED=true with provider %q requires GATEWAY_ASSURANCE_TURNSTILE_SECRET", AssuranceWebProviderTurnstile)
 		}
 		// The hosted sign-up UI needs the public site key to render the widget;
 		// without it, enforcement would reject every browser sign-up.
-		if c.CaptchaTurnstileSiteKey == "" {
-			return fmt.Errorf("config: GATEWAY_CAPTCHA_ENABLED=true with provider %q requires GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY", CaptchaProviderTurnstile)
+		if c.AssuranceTurnstileSiteKey == "" {
+			return fmt.Errorf("config: GATEWAY_ASSURANCE_ENABLED=true with provider %q requires GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY", AssuranceWebProviderTurnstile)
 		}
-	case CaptchaProviderRecaptchaV3:
-		if c.CaptchaRecaptchaSecret == "" {
-			return fmt.Errorf("config: GATEWAY_CAPTCHA_ENABLED=true with provider %q requires GATEWAY_CAPTCHA_RECAPTCHA_SECRET", CaptchaProviderRecaptchaV3)
+	case AssuranceWebProviderRecaptchaV3:
+		if c.AssuranceRecaptchaSecret == "" {
+			return fmt.Errorf("config: GATEWAY_ASSURANCE_ENABLED=true with provider %q requires GATEWAY_ASSURANCE_RECAPTCHA_SECRET", AssuranceWebProviderRecaptchaV3)
 		}
-		if c.CaptchaRecaptchaScoreThreshold < 0 || c.CaptchaRecaptchaScoreThreshold > 1 {
+		if c.AssuranceRecaptchaScoreThreshold < 0 || c.AssuranceRecaptchaScoreThreshold > 1 {
 			return fmt.Errorf(
-				"config: GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD=%v must be in [0,1]",
-				c.CaptchaRecaptchaScoreThreshold,
+				"config: GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD=%v must be in [0,1]",
+				c.AssuranceRecaptchaScoreThreshold,
 			)
 		}
 	default:
 		return fmt.Errorf(
-			"config: GATEWAY_CAPTCHA_ENABLED=true requires GATEWAY_CAPTCHA_PROVIDER to be one of: %q, %q; got %q",
-			CaptchaProviderTurnstile, CaptchaProviderRecaptchaV3, c.CaptchaProvider,
+			"config: GATEWAY_ASSURANCE_ENABLED=true requires GATEWAY_ASSURANCE_WEB_PROVIDER to be one of: %q, %q; got %q",
+			AssuranceWebProviderTurnstile, AssuranceWebProviderRecaptchaV3, c.AssuranceWebProvider,
 		)
 	}
 

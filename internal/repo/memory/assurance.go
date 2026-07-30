@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/elloloop/identity/internal/service"
@@ -9,7 +10,7 @@ import (
 
 func (r *Repo) CreateAttestedDevice(_ context.Context, d *service.AttestedDeviceRecord) (string, error) {
 	if d == nil {
-		return "", fmt.Errorf("memory: CreateAttestedDevice: nil record")
+		return "", errors.New("memory: CreateAttestedDevice: nil record")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -61,7 +62,7 @@ func (r *Repo) UpdateAttestedDeviceCounter(_ context.Context, nodeID string, fro
 
 func (r *Repo) CreateAssuranceChallenge(_ context.Context, c *service.AssuranceChallengeRecord) (string, error) {
 	if c == nil {
-		return "", fmt.Errorf("memory: CreateAssuranceChallenge: nil record")
+		return "", errors.New("memory: CreateAssuranceChallenge: nil record")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

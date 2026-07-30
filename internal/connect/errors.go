@@ -26,8 +26,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAccessNotAllowed),
 		errors.Is(err, service.ErrSignupByInvitationOnly),
 		errors.Is(err, service.ErrProductAgeRestricted),
-		errors.Is(err, service.ErrCaptchaRequired),
-		errors.Is(err, service.ErrCaptchaFailed):
+		errors.Is(err, service.ErrAssuranceRequired),
+		errors.Is(err, service.ErrAssuranceFailed):
 		return connect.NewError(connect.CodePermissionDenied, err)
 
 	case errors.Is(err, service.ErrAlreadyExists),

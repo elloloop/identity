@@ -935,6 +935,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ConfirmPasswordResetResponse'
+  /identity.v1.IdentityService/CreateAssuranceChallenge:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CreateAssuranceChallenge
+      description: |-
+        Client assurance — App Check-style attestation, independent of user
+         identity. A client proves it is a genuine build on genuine hardware
+         (iOS App Attest / Android Play Integrity) or a human-passed web
+         client (Turnstile / reCAPTCHA), and receives a short-lived assurance
+         token to attach as the X-Assurance-Token header on subsequent RPCs.
+      operationId: identity.v1.IdentityService.CreateAssuranceChallenge
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CreateAssuranceChallengeRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CreateAssuranceChallengeResponse'
   /identity.v1.IdentityService/CreateDomain:
     post:
       tags:
@@ -1707,6 +1748,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.InviteUserResponse'
+  /identity.v1.IdentityService/IssueAssuranceToken:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: IssueAssuranceToken
+      operationId: identity.v1.IdentityService.IssueAssuranceToken
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.IssueAssuranceTokenRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.IssueAssuranceTokenResponse'
   /identity.v1.IdentityService/LinkIdentity:
     post:
       tags:
@@ -2483,6 +2559,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RedeemOAuthCodeResponse'
+  /identity.v1.IdentityService/RefreshAssuranceToken:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RefreshAssuranceToken
+      operationId: identity.v1.IdentityService.RefreshAssuranceToken
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RefreshAssuranceTokenRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RefreshAssuranceTokenResponse'
   /identity.v1.IdentityService/RefreshToken:
     post:
       tags:
@@ -4264,10 +4375,6 @@ components:
         deviceName:
           type: string
           title: device_name
-        captchaToken:
-          type: string
-          title: captcha_token
-          description: 'Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED'
       title: BeginPasskeySignupRequest
       additionalProperties: false
       description: |-
@@ -4466,6 +4573,39 @@ components:
     identity.v1.ConfirmPasswordResetResponse:
       type: object
       title: ConfirmPasswordResetResponse
+      additionalProperties: false
+    identity.v1.CreateAssuranceChallengeRequest:
+      type: object
+      properties:
+        platform:
+          type: string
+          title: platform
+          description: '"ios" | "android"'
+      title: CreateAssuranceChallengeRequest
+      additionalProperties: false
+      description: |-
+        CreateAssuranceChallenge issues a one-time nonce an attestation or
+         assertion must be bound to. Web evidence needs no challenge (the
+         captcha provider runs its own).
+    identity.v1.CreateAssuranceChallengeResponse:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          title: challenge_id
+        challenge:
+          type: string
+          title: challenge
+          description: |-
+            challenge is a base64url nonce. The client uses this STRING's UTF-8
+             bytes as the App Attest clientData / Play Integrity nonce input.
+        expiresAtMs:
+          type:
+            - integer
+            - string
+          title: expires_at_ms
+          format: int64
+      title: CreateAssuranceChallengeResponse
       additionalProperties: false
     identity.v1.CreateDomainRequest:
       type: object
@@ -5130,6 +5270,57 @@ components:
           description: Only set when create_immediately = true
       title: InviteUserResponse
       additionalProperties: false
+    identity.v1.IssueAssuranceTokenRequest:
+      type: object
+      properties:
+        platform:
+          type: string
+          title: platform
+          description: '"ios" | "android" | "web"'
+        challengeId:
+          type: string
+          title: challenge_id
+          description: ios + android
+        keyId:
+          type: string
+          title: key_id
+          description: 'iOS: DCAppAttestService.attestKey output. standard-base64 key identifier'
+        attestationObject:
+          type: string
+          title: attestation_object
+          format: byte
+          description: raw CBOR attestation object
+        integrityToken:
+          type: string
+          title: integrity_token
+          description: 'Android: Play Integrity API token (server-side decoded via Google).'
+        webToken:
+          type: string
+          title: web_token
+          description: 'Web: Turnstile / reCAPTCHA solution.'
+      title: IssueAssuranceTokenRequest
+      additionalProperties: false
+      description: |-
+        IssueAssuranceToken exchanges verified platform evidence for an
+         assurance token. Exactly the fields for `platform` are consulted.
+    identity.v1.IssueAssuranceTokenResponse:
+      type: object
+      properties:
+        assuranceToken:
+          type: string
+          title: assurance_token
+          description: |-
+            assurance_token is a JWT signed by this deployment's JWKS with
+             aud="assurance" and NO subject — it asserts the client, never a user.
+             Attach it as the X-Assurance-Token header.
+        expiresAtMs:
+          type:
+            - integer
+            - string
+          title: expires_at_ms
+          format: int64
+      title: IssueAssuranceTokenResponse
+      additionalProperties: false
     identity.v1.LinkIdentityRequest:
       type: object
       properties:
@@ -5737,10 +5928,6 @@ components:
         password:
           type: string
           title: password
-        captchaToken:
-          type: string
-          title: captcha_token
-          description: 'Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED'
       title: PasswordLoginRequest
       additionalProperties: false
     identity.v1.PasswordLoginResponse:
@@ -5789,10 +5976,6 @@ components:
           type: string
           title: recovery_email
           description: 'Optional: secondary contact address. Note: password reset links are sent to the account''s PRIMARY verified email, not this address.'
-        captchaToken:
-          type: string
-          title: captcha_token
-          description: 'Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED'
         dateOfBirthMs:
           type:
             - integer
@@ -6108,6 +6291,41 @@ components:
           description: Access token lifetime in seconds
       title: RedeemOAuthCodeResponse
       additionalProperties: false
+    identity.v1.RefreshAssuranceTokenRequest:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          title: challenge_id
+        keyId:
+          type: string
+          title: key_id
+        assertion:
+          type: string
+          title: assertion
+          format: byte
+          description: raw CBOR assertion object
+      title: RefreshAssuranceTokenRequest
+      additionalProperties: false
+      description: |-
+        RefreshAssuranceToken renews an assurance token without a full
+         re-attestation: iOS-only, via an App Attest assertion over a fresh
+         challenge signed by the device's Secure Enclave key. Android clients
+         re-run IssueAssuranceToken (Play Integrity has no persistent key).
+    identity.v1.RefreshAssuranceTokenResponse:
+      type: object
+      properties:
+        assuranceToken:
+          type: string
+          title: assurance_token
+        expiresAtMs:
+          type:
+            - integer
+            - string
+          title: expires_at_ms
+          format: int64
+      title: RefreshAssuranceTokenResponse
+      additionalProperties: false
     identity.v1.RefreshTokenRequest:
       type: object
       properties:
@@ -6219,10 +6437,6 @@ components:
         email:
           type: string
           title: email
-        captchaToken:
-          type: string
-          title: captcha_token
-          description: 'Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED'
       title: RequestEmailLoginCodeRequest
       additionalProperties: false
       description: |-
@@ -6244,10 +6458,6 @@ components:
           type: string
           title: return_to
           description: app URL to return to; must match the allowlist
-        captchaToken:
-          type: string
-          title: captcha_token
-          description: 'Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED'
       title: RequestMagicLinkRequest
       additionalProperties: false
       description: |-
@@ -6266,10 +6476,6 @@ components:
         email:
           type: string
           title: email
-        captchaToken:
-          type: string
-          title: captcha_token
-          description: 'Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED'
       title: RequestPasswordResetRequest
       additionalProperties: false
       description: |-

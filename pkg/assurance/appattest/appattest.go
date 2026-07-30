@@ -247,7 +247,11 @@ func (v *Verifier) VerifyAttestation(attestationCBOR []byte, keyID string, chall
 	if !ok {
 		return nil, failf("credential certificate key is %T, want *ecdsa.PublicKey", credCert.PublicKey)
 	}
-	pubHash := sha256.Sum256(uncompressedPoint(pub))
+	point, err := uncompressedPoint(pub)
+	if err != nil {
+		return nil, failf("credential certificate key does not encode: %v", err)
+	}
+	pubHash := sha256.Sum256(point)
 	if !bytes.Equal(pubHash[:], keyIDBytes) {
 		return nil, failf("key id does not match attested public key")
 	}
@@ -314,11 +318,6 @@ func nonceFromCert(cert *x509.Certificate) ([]byte, error) {
 // uncompressedPoint returns the SEC1 uncompressed encoding (0x04||X||Y)
 // of a P-256 public key — the bytes Apple hashes to form the key
 // identifier.
-func uncompressedPoint(pub *ecdsa.PublicKey) []byte {
-	byteLen := (pub.Curve.Params().BitSize + 7) / 8
-	out := make([]byte, 1+2*byteLen)
-	out[0] = 0x04
-	pub.X.FillBytes(out[1 : 1+byteLen])
-	pub.Y.FillBytes(out[1+byteLen:])
-	return out
+func uncompressedPoint(pub *ecdsa.PublicKey) ([]byte, error) {
+	return pub.Bytes()
 }

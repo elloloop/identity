@@ -1001,13 +1001,6 @@ var (
 	// is distinct from ErrSignupDisabled (password signup) so the two flows
 	// can be toggled independently; both map to FailedPrecondition.
 	ErrPasskeySignupDisabled = errors.New("passkey signup is disabled for this deployment")
-	// ErrCaptchaRequired is returned when CAPTCHA is enforced on an
-	// endpoint but the request carried no captcha token. ErrCaptchaFailed
-	// is returned when the supplied token was rejected by the provider.
-	// Both map to CodePermissionDenied so a forged token and a missing one
-	// look the same to a client.
-	ErrCaptchaRequired = errors.New("captcha token required")
-	ErrCaptchaFailed   = errors.New("captcha verification failed")
 	// ErrUnimplemented signals that the requested RPC is intentionally
 	// disabled for the active repository driver (e.g. the redesign
 	// Domain/Tenant RPCs are postgres-only; memory returns this).
@@ -1101,7 +1094,7 @@ type AuthService struct {
 	webAssurance      assurance.Verifier
 	emailThrottle     *emailSendThrottle
 	signupThrottle    *emailSendThrottle
-	phoneThrottle         *emailSendThrottle
+	phoneThrottle     *emailSendThrottle
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
 	// OAuth flow uses. Parsed once at construction.

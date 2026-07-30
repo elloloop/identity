@@ -43,20 +43,6 @@ func assertForm(t *testing.T, r *http.Request, wantSecret, wantResponse, wantRem
 	}
 }
 
-func TestNoopVerifier_AlwaysSucceeds(t *testing.T) {
-	t.Parallel()
-	v := assurance.NewNoopVerifier()
-	if v.Name() != "noop" {
-		t.Fatalf("Name = %q; want noop", v.Name())
-	}
-	if err := v.Verify(context.Background(), "", ""); err != nil {
-		t.Fatalf("Verify empty token: %v", err)
-	}
-	if err := v.Verify(context.Background(), "anything", "1.2.3.4"); err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-}
-
 func TestNewTurnstileVerifier_RequiresSecret(t *testing.T) {
 	t.Parallel()
 	if _, err := assurance.NewTurnstileVerifier(assurance.TurnstileConfig{}); err == nil {

@@ -305,7 +305,7 @@ message PasswordSignupRequest {
   string email    = 1;
   string password = 2;
   string recovery_email = 3;  // Optional: secondary contact address. Note: password reset links are sent to the account's PRIMARY verified email, not this address.
-  string captcha_token = 4;   // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
+  reserved 4; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
   int64 date_of_birth_ms = 5; // Optional; epoch ms of date of birth. Required at signup when GATEWAY_AGEGATE_REQUIRE_DOB.
 }
 
@@ -320,7 +320,7 @@ message PasswordSignupResponse {
 message PasswordLoginRequest {
   string email    = 1;
   string password = 2;
-  string captcha_token = 3;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
+  reserved 3; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
 }
 
 message PasswordLoginResponse {
@@ -346,7 +346,7 @@ message PasswordLoginResponse {
 // already has an account (and whether or not auto-create is enabled).
 message RequestEmailLoginCodeRequest {
   string email = 1;
-  string captcha_token = 2;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
+  reserved 2; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
 }
 
 message RequestEmailLoginCodeResponse {
@@ -375,7 +375,7 @@ message VerifyEmailLoginCodeResponse {
 message RequestMagicLinkRequest {
   string email     = 1;
   string return_to = 2;  // app URL to return to; must match the allowlist
-  string captcha_token = 3;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
+  reserved 3; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
 }
 
 message RequestMagicLinkResponse {
@@ -538,7 +538,7 @@ message ExportMyDataResponse {
 // request silently succeeds (no enumeration).
 message RequestPasswordResetRequest {
   string email = 1;
-  string captcha_token = 2;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
+  reserved 2; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
 }
 
 message RequestPasswordResetResponse {
@@ -750,7 +750,7 @@ message CompletePasskeyLoginResponse {
 message BeginPasskeySignupRequest {
   string email = 1;
   string device_name = 2;
-  string captcha_token = 3;  // Optional: CAPTCHA solution, enforced when GATEWAY_CAPTCHA_ENABLED
+  reserved 3; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
 }
 
 message BeginPasskeySignupResponse {
@@ -1539,6 +1539,63 @@ message AdminListProjectOAuthProvidersResponse {
 
 // ─── Service ─────────────────────────────────────────────────────────
 
+// ── Client assurance (attestation) ─────────────────────────────────────────
+
+// CreateAssuranceChallenge issues a one-time nonce an attestation or
+// assertion must be bound to. Web evidence needs no challenge (the
+// captcha provider runs its own).
+message CreateAssuranceChallengeRequest {
+  string platform = 1;  // "ios" | "android"
+}
+
+message CreateAssuranceChallengeResponse {
+  string challenge_id = 1;
+  // challenge is a base64url nonce. The client uses this STRING's UTF-8
+  // bytes as the App Attest clientData / Play Integrity nonce input.
+  string challenge     = 2;
+  int64  expires_at_ms = 3;
+}
+
+// IssueAssuranceToken exchanges verified platform evidence for an
+// assurance token. Exactly the fields for `platform` are consulted.
+message IssueAssuranceTokenRequest {
+  string platform     = 1;  // "ios" | "android" | "web"
+  string challenge_id = 2;  // ios + android
+
+  // iOS: DCAppAttestService.attestKey output.
+  string key_id             = 3;  // standard-base64 key identifier
+  bytes  attestation_object = 4;  // raw CBOR attestation object
+
+  // Android: Play Integrity API token (server-side decoded via Google).
+  string integrity_token = 5;
+
+  // Web: Turnstile / reCAPTCHA solution.
+  string web_token = 6;
+}
+
+message IssueAssuranceTokenResponse {
+  // assurance_token is a JWT signed by this deployment's JWKS with
+  // aud="assurance" and NO subject — it asserts the client, never a user.
+  // Attach it as the X-Assurance-Token header.
+  string assurance_token = 1;
+  int64  expires_at_ms   = 2;
+}
+
+// RefreshAssuranceToken renews an assurance token without a full
+// re-attestation: iOS-only, via an App Attest assertion over a fresh
+// challenge signed by the device's Secure Enclave key. Android clients
+// re-run IssueAssuranceToken (Play Integrity has no persistent key).
+message RefreshAssuranceTokenRequest {
+  string challenge_id = 1;
+  string key_id       = 2;
+  bytes  assertion    = 3;  // raw CBOR assertion object
+}
+
+message RefreshAssuranceTokenResponse {
+  string assurance_token = 1;
+  int64  expires_at_ms   = 2;
+}
+
 // ── Linked identities (self-service connected accounts) ────────────────────
 //
 // User-managed OAuth/OIDC identity links. These let an authenticated user
@@ -1607,6 +1664,15 @@ service IdentityService {
   rpc VerifyEmailLoginCode(VerifyEmailLoginCodeRequest) returns (VerifyEmailLoginCodeResponse);
   rpc RequestMagicLink(RequestMagicLinkRequest) returns (RequestMagicLinkResponse);
   rpc RedeemMagicLink(RedeemMagicLinkRequest) returns (RedeemMagicLinkResponse);
+
+  // Client assurance — App Check-style attestation, independent of user
+  // identity. A client proves it is a genuine build on genuine hardware
+  // (iOS App Attest / Android Play Integrity) or a human-passed web
+  // client (Turnstile / reCAPTCHA), and receives a short-lived assurance
+  // token to attach as the X-Assurance-Token header on subsequent RPCs.
+  rpc CreateAssuranceChallenge(CreateAssuranceChallengeRequest) returns (CreateAssuranceChallengeResponse);
+  rpc IssueAssuranceToken(IssueAssuranceTokenRequest) returns (IssueAssuranceTokenResponse);
+  rpc RefreshAssuranceToken(RefreshAssuranceTokenRequest) returns (RefreshAssuranceTokenResponse);
 
   // Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
   rpc RequestPhoneVerification(RequestPhoneVerificationRequest) returns (RequestPhoneVerificationResponse);

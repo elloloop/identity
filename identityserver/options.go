@@ -86,10 +86,11 @@ type Options struct {
 	// disabled, leaving the IDV RPCs Unimplemented).
 	IDVProvider idv.Provider
 
-	// CaptchaVerifier gates the unauthenticated auth endpoints. nil builds
+	// AssuranceWebVerifier is the web (captcha) arm of the client-assurance
+	// layer, gating the unauthenticated auth endpoints. nil builds
 	// the Config.CaptchaProvider backend (the no-op verifier when CAPTCHA
 	// is disabled).
-	CaptchaVerifier assurance.Verifier
+	AssuranceWebVerifier assurance.Verifier
 
 	// DNSResolver is the TXT-lookup boundary VerifyDomain uses to confirm a
 	// custom domain's ownership challenge. nil defaults to net.DefaultResolver

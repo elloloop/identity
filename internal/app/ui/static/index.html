@@ -480,9 +480,6 @@
                 : '/identity.v1.IdentityService/PasswordSignup';
 
             const payload = { email, password };
-            if (captchaRequired()) {
-                payload.captchaToken = captchaToken;
-            }
 
             try {
                 const headers = { 'Content-Type': 'application/json' };
@@ -490,6 +487,22 @@
                 // reached through the hub with a project_key — the browser
                 // cannot rely on Host-based resolution there.
                 if (projectKey) headers['X-Project-Key'] = projectKey;
+                if (captchaRequired()) {
+                    // Exchange the captcha solution for an assurance token:
+                    // the auth RPCs read X-Assurance-Token, never a raw
+                    // captcha in the body.
+                    const exchange = await fetch('/identity.v1.IdentityService/IssueAssuranceToken', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ platform: 'web', webToken: captchaToken })
+                    });
+                    const exchangeData = await exchange.json();
+                    if (!exchange.ok) {
+                        resetCaptcha();
+                        throw new Error(exchangeData.message || exchangeData.code || 'Verification failed');
+                    }
+                    headers['X-Assurance-Token'] = exchangeData.assuranceToken;
+                }
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     headers,

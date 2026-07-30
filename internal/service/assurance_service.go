@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 
 	"go.uber.org/zap"
 
@@ -252,6 +253,9 @@ func (s *AuthService) RefreshAssuranceToken(ctx context.Context, challengeID, ke
 	spki, err := base64.StdEncoding.DecodeString(dev.PublicKeySPKI)
 	if err != nil {
 		return nil, fmt.Errorf("stored device key corrupt: %w", err)
+	}
+	if dev.SignCount < 0 || dev.SignCount > math.MaxUint32 {
+		return nil, fmt.Errorf("stored device counter out of range: %d", dev.SignCount)
 	}
 	newCount, err := verifier.VerifyAssertion(assertion, []byte(ch.Challenge), spki, uint32(dev.SignCount))
 	if err != nil {

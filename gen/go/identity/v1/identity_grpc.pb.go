@@ -29,6 +29,9 @@ const (
 	IdentityService_VerifyEmailLoginCode_FullMethodName            = "/identity.v1.IdentityService/VerifyEmailLoginCode"
 	IdentityService_RequestMagicLink_FullMethodName                = "/identity.v1.IdentityService/RequestMagicLink"
 	IdentityService_RedeemMagicLink_FullMethodName                 = "/identity.v1.IdentityService/RedeemMagicLink"
+	IdentityService_CreateAssuranceChallenge_FullMethodName        = "/identity.v1.IdentityService/CreateAssuranceChallenge"
+	IdentityService_IssueAssuranceToken_FullMethodName             = "/identity.v1.IdentityService/IssueAssuranceToken"
+	IdentityService_RefreshAssuranceToken_FullMethodName           = "/identity.v1.IdentityService/RefreshAssuranceToken"
 	IdentityService_RequestPhoneVerification_FullMethodName        = "/identity.v1.IdentityService/RequestPhoneVerification"
 	IdentityService_VerifyPhoneCode_FullMethodName                 = "/identity.v1.IdentityService/VerifyPhoneCode"
 	IdentityService_GetCurrentUser_FullMethodName                  = "/identity.v1.IdentityService/GetCurrentUser"
@@ -137,6 +140,14 @@ type IdentityServiceClient interface {
 	VerifyEmailLoginCode(ctx context.Context, in *VerifyEmailLoginCodeRequest, opts ...grpc.CallOption) (*VerifyEmailLoginCodeResponse, error)
 	RequestMagicLink(ctx context.Context, in *RequestMagicLinkRequest, opts ...grpc.CallOption) (*RequestMagicLinkResponse, error)
 	RedeemMagicLink(ctx context.Context, in *RedeemMagicLinkRequest, opts ...grpc.CallOption) (*RedeemMagicLinkResponse, error)
+	// Client assurance — App Check-style attestation, independent of user
+	// identity. A client proves it is a genuine build on genuine hardware
+	// (iOS App Attest / Android Play Integrity) or a human-passed web
+	// client (Turnstile / reCAPTCHA), and receives a short-lived assurance
+	// token to attach as the X-Assurance-Token header on subsequent RPCs.
+	CreateAssuranceChallenge(ctx context.Context, in *CreateAssuranceChallengeRequest, opts ...grpc.CallOption) (*CreateAssuranceChallengeResponse, error)
+	IssueAssuranceToken(ctx context.Context, in *IssueAssuranceTokenRequest, opts ...grpc.CallOption) (*IssueAssuranceTokenResponse, error)
+	RefreshAssuranceToken(ctx context.Context, in *RefreshAssuranceTokenRequest, opts ...grpc.CallOption) (*RefreshAssuranceTokenResponse, error)
 	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(ctx context.Context, in *RequestPhoneVerificationRequest, opts ...grpc.CallOption) (*RequestPhoneVerificationResponse, error)
 	VerifyPhoneCode(ctx context.Context, in *VerifyPhoneCodeRequest, opts ...grpc.CallOption) (*VerifyPhoneCodeResponse, error)
@@ -404,6 +415,36 @@ func (c *identityServiceClient) RedeemMagicLink(ctx context.Context, in *RedeemM
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RedeemMagicLinkResponse)
 	err := c.cc.Invoke(ctx, IdentityService_RedeemMagicLink_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) CreateAssuranceChallenge(ctx context.Context, in *CreateAssuranceChallengeRequest, opts ...grpc.CallOption) (*CreateAssuranceChallengeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateAssuranceChallengeResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CreateAssuranceChallenge_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) IssueAssuranceToken(ctx context.Context, in *IssueAssuranceTokenRequest, opts ...grpc.CallOption) (*IssueAssuranceTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IssueAssuranceTokenResponse)
+	err := c.cc.Invoke(ctx, IdentityService_IssueAssuranceToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RefreshAssuranceToken(ctx context.Context, in *RefreshAssuranceTokenRequest, opts ...grpc.CallOption) (*RefreshAssuranceTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefreshAssuranceTokenResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RefreshAssuranceToken_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1326,6 +1367,14 @@ type IdentityServiceServer interface {
 	VerifyEmailLoginCode(context.Context, *VerifyEmailLoginCodeRequest) (*VerifyEmailLoginCodeResponse, error)
 	RequestMagicLink(context.Context, *RequestMagicLinkRequest) (*RequestMagicLinkResponse, error)
 	RedeemMagicLink(context.Context, *RedeemMagicLinkRequest) (*RedeemMagicLinkResponse, error)
+	// Client assurance — App Check-style attestation, independent of user
+	// identity. A client proves it is a genuine build on genuine hardware
+	// (iOS App Attest / Android Play Integrity) or a human-passed web
+	// client (Turnstile / reCAPTCHA), and receives a short-lived assurance
+	// token to attach as the X-Assurance-Token header on subsequent RPCs.
+	CreateAssuranceChallenge(context.Context, *CreateAssuranceChallengeRequest) (*CreateAssuranceChallengeResponse, error)
+	IssueAssuranceToken(context.Context, *IssueAssuranceTokenRequest) (*IssueAssuranceTokenResponse, error)
+	RefreshAssuranceToken(context.Context, *RefreshAssuranceTokenRequest) (*RefreshAssuranceTokenResponse, error)
 	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *RequestPhoneVerificationRequest) (*RequestPhoneVerificationResponse, error)
 	VerifyPhoneCode(context.Context, *VerifyPhoneCodeRequest) (*VerifyPhoneCodeResponse, error)
@@ -1528,6 +1577,15 @@ func (UnimplementedIdentityServiceServer) RequestMagicLink(context.Context, *Req
 }
 func (UnimplementedIdentityServiceServer) RedeemMagicLink(context.Context, *RedeemMagicLinkRequest) (*RedeemMagicLinkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RedeemMagicLink not implemented")
+}
+func (UnimplementedIdentityServiceServer) CreateAssuranceChallenge(context.Context, *CreateAssuranceChallengeRequest) (*CreateAssuranceChallengeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateAssuranceChallenge not implemented")
+}
+func (UnimplementedIdentityServiceServer) IssueAssuranceToken(context.Context, *IssueAssuranceTokenRequest) (*IssueAssuranceTokenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IssueAssuranceToken not implemented")
+}
+func (UnimplementedIdentityServiceServer) RefreshAssuranceToken(context.Context, *RefreshAssuranceTokenRequest) (*RefreshAssuranceTokenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RefreshAssuranceToken not implemented")
 }
 func (UnimplementedIdentityServiceServer) RequestPhoneVerification(context.Context, *RequestPhoneVerificationRequest) (*RequestPhoneVerificationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RequestPhoneVerification not implemented")
@@ -1996,6 +2054,60 @@ func _IdentityService_RedeemMagicLink_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).RedeemMagicLink(ctx, req.(*RedeemMagicLinkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_CreateAssuranceChallenge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateAssuranceChallengeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CreateAssuranceChallenge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CreateAssuranceChallenge_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CreateAssuranceChallenge(ctx, req.(*CreateAssuranceChallengeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_IssueAssuranceToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssueAssuranceTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).IssueAssuranceToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_IssueAssuranceToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).IssueAssuranceToken(ctx, req.(*IssueAssuranceTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RefreshAssuranceToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshAssuranceTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RefreshAssuranceToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RefreshAssuranceToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RefreshAssuranceToken(ctx, req.(*RefreshAssuranceTokenRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3666,6 +3778,18 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RedeemMagicLink",
 			Handler:    _IdentityService_RedeemMagicLink_Handler,
+		},
+		{
+			MethodName: "CreateAssuranceChallenge",
+			Handler:    _IdentityService_CreateAssuranceChallenge_Handler,
+		},
+		{
+			MethodName: "IssueAssuranceToken",
+			Handler:    _IdentityService_IssueAssuranceToken_Handler,
+		},
+		{
+			MethodName: "RefreshAssuranceToken",
+			Handler:    _IdentityService_RefreshAssuranceToken_Handler,
 		},
 		{
 			MethodName: "RequestPhoneVerification",

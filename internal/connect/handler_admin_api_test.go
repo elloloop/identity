@@ -198,7 +198,7 @@ var _ service.ControlPlaneProjectStore = (*adminControlStore)(nil)
 // the no-control-plane build.
 func startAdminServer(t *testing.T, svc *service.ControlPlaneAdminService) identityconnectgen.IdentityServiceClient {
 	t.Helper()
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, svc, nil, testConfig())
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, svc, testConfig())
 	mux := http.NewServeMux()
 	path, handler := identityconnectgen.NewIdentityServiceHandler(h)
 	mux.Handle(path, handler)

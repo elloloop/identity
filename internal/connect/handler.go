@@ -19,6 +19,7 @@ package connect
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
@@ -42,7 +43,6 @@ type IdentityHandler struct {
 	// JWT. nil on memory (no control plane) and when no secret is
 	// configured — both disable the surface (CodeUnimplemented).
 	controlAdmin *service.ControlPlaneAdminService
-	captcha      assurance.Verifier
 	cfg          *config.Config
 }
 
@@ -58,11 +58,6 @@ type IdentityHandler struct {
 //
 // controlAdmin is optional: nil (memory, or no configured admin secret)
 // causes the control-plane admin RPCs to return CodeUnimplemented.
-//
-// captchaVerifier is optional: a nil verifier is treated as disabled, so
-// the CAPTCHA gate behaves as a no-op regardless of the per-endpoint
-// toggles. Production wiring passes a concrete verifier (or the no-op one)
-// built from config.
 func NewIdentityHandler(
 	auth *service.AuthService,
 	admin *service.AdminService,
@@ -73,7 +68,6 @@ func NewIdentityHandler(
 	domains *service.DomainService,
 	members *service.MembershipService,
 	controlAdmin *service.ControlPlaneAdminService,
-	captchaVerifier assurance.Verifier,
 	cfg *config.Config,
 ) *IdentityHandler {
 	return &IdentityHandler{
@@ -86,54 +80,51 @@ func NewIdentityHandler(
 		domains:      domains,
 		members:      members,
 		controlAdmin: controlAdmin,
-		captcha:      captchaVerifier,
 		cfg:          cfg,
 	}
 }
 
-// checkCaptcha runs the CAPTCHA gate for an unauthenticated endpoint. It
-// returns nil (skip) when CAPTCHA is globally disabled, the per-endpoint
-// toggle is off, or no verifier is wired. Otherwise an empty token maps to
-// ErrCaptchaRequired and a provider rejection maps to ErrCaptchaFailed —
-// both surface to the client as CodePermissionDenied.
-func (h *IdentityHandler) checkCaptcha(ctx context.Context, enforce bool, token, ip string) error {
-	if h.cfg == nil || !h.cfg.CaptchaEnabled || !enforce || h.captcha == nil {
+// requireAssurance runs the client-assurance gate for an unauthenticated
+// endpoint. It returns nil (skip) when assurance is globally disabled or
+// the per-endpoint toggle is off. Otherwise the request must carry a
+// valid assurance token (obtained via IssueAssuranceToken) in the
+// X-Assurance-Token header; a missing or invalid token surfaces to the
+// client as CodePermissionDenied.
+func (h *IdentityHandler) requireAssurance(ctx context.Context, enforce bool, hdr http.Header) error {
+	if h.cfg == nil || !h.cfg.AssuranceEnabled || !enforce {
 		return nil
 	}
-	if token == "" {
-		return service.ErrCaptchaRequired
-	}
-	if err := h.captcha.Verify(ctx, token, ip); err != nil {
-		return service.ErrCaptchaFailed
+	if _, err := h.auth.VerifyAssuranceToken(ctx, hdr.Get(assurance.HeaderName)); err != nil {
+		return err
 	}
 	return nil
 }
 
-// The per-endpoint enforce accessors nil-check cfg so checkCaptcha's
+// The per-endpoint enforce accessors nil-check cfg so requireAssurance's
 // short-circuit (cfg == nil) is reachable without a panic when a test
 // constructs a handler without a config.
-func (h *IdentityHandler) captchaEnforcePasswordSignup() bool {
-	return h.cfg != nil && h.cfg.CaptchaEnforcePasswordSignup
+func (h *IdentityHandler) assuranceEnforcePasswordSignup() bool {
+	return h.cfg != nil && h.cfg.AssuranceEnforcePasswordSignup
 }
 
-func (h *IdentityHandler) captchaEnforcePasswordLogin() bool {
-	return h.cfg != nil && h.cfg.CaptchaEnforcePasswordLogin
+func (h *IdentityHandler) assuranceEnforcePasswordLogin() bool {
+	return h.cfg != nil && h.cfg.AssuranceEnforcePasswordLogin
 }
 
-func (h *IdentityHandler) captchaEnforcePasswordReset() bool {
-	return h.cfg != nil && h.cfg.CaptchaEnforcePasswordReset
+func (h *IdentityHandler) assuranceEnforcePasswordReset() bool {
+	return h.cfg != nil && h.cfg.AssuranceEnforcePasswordReset
 }
 
-func (h *IdentityHandler) captchaEnforceEmailLoginCode() bool {
-	return h.cfg != nil && h.cfg.CaptchaEnforceEmailLoginCode
+func (h *IdentityHandler) assuranceEnforceEmailLoginCode() bool {
+	return h.cfg != nil && h.cfg.AssuranceEnforceEmailLoginCode
 }
 
-func (h *IdentityHandler) captchaEnforceMagicLink() bool {
-	return h.cfg != nil && h.cfg.CaptchaEnforceMagicLink
+func (h *IdentityHandler) assuranceEnforceMagicLink() bool {
+	return h.cfg != nil && h.cfg.AssuranceEnforceMagicLink
 }
 
-func (h *IdentityHandler) captchaEnforcePasskeySignup() bool {
-	return h.cfg != nil && h.cfg.CaptchaEnforcePasskeySignup
+func (h *IdentityHandler) assuranceEnforcePasskeySignup() bool {
+	return h.cfg != nil && h.cfg.AssuranceEnforcePasskeySignup
 }
 
 // headerReader is a minimal interface satisfied by connect.Request (which

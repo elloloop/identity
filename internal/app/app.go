@@ -28,8 +28,8 @@ import (
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/service"
-	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/assurance"
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/idv"
@@ -167,11 +167,12 @@ type Deps struct {
 	// other real provider; tests typically pass an idv.StubProvider.
 	IDVProvider idv.Provider
 
-	// CaptchaVerifier gates the unauthenticated auth endpoints. May be
+	// AssuranceWebVerifier is the web (captcha) arm of the client-assurance
+	// layer, gating the unauthenticated auth endpoints. May be
 	// nil — in that case New builds one from Config (the no-op verifier
 	// when CAPTCHA is disabled). Tests inject a fake to drive pass/fail
 	// without network calls.
-	CaptchaVerifier assurance.Verifier
+	AssuranceWebVerifier assurance.Verifier
 
 	// MetricsRegistry is the Prometheus registry the server records
 	// RED metrics into. May be nil — in that case the default
@@ -525,18 +526,14 @@ func New(deps Deps) (*Built, error) {
 		).WithMinorDataMinimizer(minorData)
 	}
 
-	captchaVerifier := deps.CaptchaVerifier
-	if captchaVerifier == nil {
-		captchaVerifier, err = buildCaptchaVerifier(deps.Config, logger)
-		if err != nil {
-			return nil, fmt.Errorf("captcha verifier: %w", err)
-		}
+	if err := wireAssurance(deps, authSvc, logger); err != nil {
+		return nil, err
 	}
 
 	domainSvc := buildDomainService(deps, logger)
 	membershipSvc := buildMembershipService(deps, repo, mailer, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, auditLog, logger)
-	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, captchaVerifier, deps.Config)
+	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, deps.Config)
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {
