@@ -6,7 +6,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
-	"github.com/elloloop/identity/pkg/captcha"
+	"github.com/elloloop/identity/pkg/assurance"
 )
 
 func TestBuildCaptchaVerifier(t *testing.T) {
@@ -31,7 +31,7 @@ func TestBuildCaptchaVerifier(t *testing.T) {
 			name: "turnstile builds",
 			cfg: &config.Config{
 				CaptchaEnabled:         true,
-				CaptchaProvider:        captcha.ProviderTurnstile,
+				CaptchaProvider:        assurance.ProviderTurnstile,
 				CaptchaTurnstileSecret: "secret",
 			},
 		},
@@ -39,7 +39,7 @@ func TestBuildCaptchaVerifier(t *testing.T) {
 			name: "recaptcha_v3 builds",
 			cfg: &config.Config{
 				CaptchaEnabled:                 true,
-				CaptchaProvider:                captcha.ProviderRecaptchaV3,
+				CaptchaProvider:                assurance.ProviderRecaptchaV3,
 				CaptchaRecaptchaSecret:         "secret",
 				CaptchaRecaptchaScoreThreshold: 0.5,
 			},
@@ -48,7 +48,7 @@ func TestBuildCaptchaVerifier(t *testing.T) {
 			name: "turnstile without secret errors",
 			cfg: &config.Config{
 				CaptchaEnabled:  true,
-				CaptchaProvider: captcha.ProviderTurnstile,
+				CaptchaProvider: assurance.ProviderTurnstile,
 			},
 			wantErr: true,
 		},
@@ -77,7 +77,7 @@ func TestBuildCaptchaVerifier(t *testing.T) {
 			if v == nil {
 				t.Fatal("expected non-nil verifier")
 			}
-			_, isNoop := v.(captcha.NoopVerifier)
+			_, isNoop := v.(assurance.NoopVerifier)
 			if tc.wantNoop && !isNoop {
 				t.Fatalf("expected no-op verifier, got %T", v)
 			}

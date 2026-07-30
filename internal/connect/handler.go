@@ -22,7 +22,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
-	"github.com/elloloop/identity/pkg/captcha"
+	"github.com/elloloop/identity/pkg/assurance"
 )
 
 // IdentityHandler implements identityconnect.IdentityServiceHandler.
@@ -42,7 +42,7 @@ type IdentityHandler struct {
 	// JWT. nil on memory (no control plane) and when no secret is
 	// configured — both disable the surface (CodeUnimplemented).
 	controlAdmin *service.ControlPlaneAdminService
-	captcha      captcha.Verifier
+	captcha      assurance.Verifier
 	cfg          *config.Config
 }
 
@@ -73,7 +73,7 @@ func NewIdentityHandler(
 	domains *service.DomainService,
 	members *service.MembershipService,
 	controlAdmin *service.ControlPlaneAdminService,
-	captchaVerifier captcha.Verifier,
+	captchaVerifier assurance.Verifier,
 	cfg *config.Config,
 ) *IdentityHandler {
 	return &IdentityHandler{

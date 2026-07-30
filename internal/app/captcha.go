@@ -6,37 +6,37 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
-	"github.com/elloloop/identity/pkg/captcha"
+	"github.com/elloloop/identity/pkg/assurance"
 )
 
-// buildCaptchaVerifier constructs the captcha.Verifier selected by config.
+// buildCaptchaVerifier constructs the assurance.Verifier selected by config.
 // When CAPTCHA is disabled (or no provider is set) it returns the no-op
 // verifier, so the handler can call Verify unconditionally. Config.Validate
 // has already guaranteed the provider/secret/threshold invariants by the
 // time this runs, so the only error here is a provider constructor
 // rejecting its inputs (which would indicate a validation gap).
-func buildCaptchaVerifier(cfg *config.Config, logger *zap.Logger) (captcha.Verifier, error) {
+func buildCaptchaVerifier(cfg *config.Config, logger *zap.Logger) (assurance.Verifier, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 
 	if !cfg.CaptchaEnabled || cfg.CaptchaProvider == "" {
 		logger.Info("captcha_disabled")
-		return captcha.NewNoopVerifier(), nil
+		return assurance.NewNoopVerifier(), nil
 	}
 
 	switch cfg.CaptchaProvider {
-	case captcha.ProviderTurnstile:
-		v, err := captcha.NewTurnstileVerifier(captcha.TurnstileConfig{
+	case assurance.ProviderTurnstile:
+		v, err := assurance.NewTurnstileVerifier(assurance.TurnstileConfig{
 			Secret: cfg.CaptchaTurnstileSecret,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("turnstile: %w", err)
 		}
-		logger.Info("captcha_provider_loaded", zap.String("provider", captcha.ProviderTurnstile))
+		logger.Info("captcha_provider_loaded", zap.String("provider", assurance.ProviderTurnstile))
 		return v, nil
-	case captcha.ProviderRecaptchaV3:
-		v, err := captcha.NewRecaptchaV3Verifier(captcha.RecaptchaConfig{
+	case assurance.ProviderRecaptchaV3:
+		v, err := assurance.NewRecaptchaV3Verifier(assurance.RecaptchaConfig{
 			Secret:         cfg.CaptchaRecaptchaSecret,
 			ScoreThreshold: cfg.CaptchaRecaptchaScoreThreshold,
 		})
@@ -45,7 +45,7 @@ func buildCaptchaVerifier(cfg *config.Config, logger *zap.Logger) (captcha.Verif
 		}
 		logger.Info(
 			"captcha_provider_loaded",
-			zap.String("provider", captcha.ProviderRecaptchaV3),
+			zap.String("provider", assurance.ProviderRecaptchaV3),
 			zap.Float64("score_threshold", cfg.CaptchaRecaptchaScoreThreshold),
 		)
 		return v, nil

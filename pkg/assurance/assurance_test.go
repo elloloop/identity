@@ -1,4 +1,4 @@
-package captcha_test
+package assurance_test
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/elloloop/identity/pkg/captcha"
+	"github.com/elloloop/identity/pkg/assurance"
 )
 
 // newServer returns an httptest server running handler, registered for
@@ -45,7 +45,7 @@ func assertForm(t *testing.T, r *http.Request, wantSecret, wantResponse, wantRem
 
 func TestNoopVerifier_AlwaysSucceeds(t *testing.T) {
 	t.Parallel()
-	v := captcha.NewNoopVerifier()
+	v := assurance.NewNoopVerifier()
 	if v.Name() != "noop" {
 		t.Fatalf("Name = %q; want noop", v.Name())
 	}
@@ -59,20 +59,20 @@ func TestNoopVerifier_AlwaysSucceeds(t *testing.T) {
 
 func TestNewTurnstileVerifier_RequiresSecret(t *testing.T) {
 	t.Parallel()
-	if _, err := captcha.NewTurnstileVerifier(captcha.TurnstileConfig{}); err == nil {
+	if _, err := assurance.NewTurnstileVerifier(assurance.TurnstileConfig{}); err == nil {
 		t.Fatal("missing secret should error")
 	}
 }
 
 func TestNewRecaptchaV3Verifier_RequiresSecretAndThresholdRange(t *testing.T) {
 	t.Parallel()
-	if _, err := captcha.NewRecaptchaV3Verifier(captcha.RecaptchaConfig{ScoreThreshold: 0.5}); err == nil {
+	if _, err := assurance.NewRecaptchaV3Verifier(assurance.RecaptchaConfig{ScoreThreshold: 0.5}); err == nil {
 		t.Fatal("missing secret should error")
 	}
-	if _, err := captcha.NewRecaptchaV3Verifier(captcha.RecaptchaConfig{Secret: "s", ScoreThreshold: 1.5}); err == nil {
+	if _, err := assurance.NewRecaptchaV3Verifier(assurance.RecaptchaConfig{Secret: "s", ScoreThreshold: 1.5}); err == nil {
 		t.Fatal("threshold > 1 should error")
 	}
-	if _, err := captcha.NewRecaptchaV3Verifier(captcha.RecaptchaConfig{Secret: "s", ScoreThreshold: -0.1}); err == nil {
+	if _, err := assurance.NewRecaptchaV3Verifier(assurance.RecaptchaConfig{Secret: "s", ScoreThreshold: -0.1}); err == nil {
 		t.Fatal("threshold < 0 should error")
 	}
 }
@@ -112,7 +112,7 @@ func TestTurnstileVerifier_Verify(t *testing.T) {
 			handler: func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = io.WriteString(w, `{"success":false,"error-codes":["invalid-input-response"]}`)
 			},
-			wantErr: captcha.ErrVerificationFailed,
+			wantErr: assurance.ErrVerificationFailed,
 		},
 		{
 			name:  "empty token rejected without a request",
@@ -120,19 +120,19 @@ func TestTurnstileVerifier_Verify(t *testing.T) {
 			handler: func(http.ResponseWriter, *http.Request) {
 				t.Error("verifier must not call siteverify for an empty token")
 			},
-			wantErr: captcha.ErrVerificationFailed,
+			wantErr: assurance.ErrVerificationFailed,
 		},
 		{
 			name:    "non-200 is provider unavailable",
 			token:   "good-token",
 			handler: func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) },
-			wantErr: captcha.ErrProviderUnavailable,
+			wantErr: assurance.ErrProviderUnavailable,
 		},
 		{
 			name:    "malformed json is provider unavailable",
 			token:   "good-token",
 			handler: func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, `{not json`) },
-			wantErr: captcha.ErrProviderUnavailable,
+			wantErr: assurance.ErrProviderUnavailable,
 		},
 	}
 
@@ -140,7 +140,7 @@ func TestTurnstileVerifier_Verify(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			srv := newServer(t, tc.handler)
-			v, err := captcha.NewTurnstileVerifier(captcha.TurnstileConfig{
+			v, err := assurance.NewTurnstileVerifier(assurance.TurnstileConfig{
 				Secret:     secret,
 				HTTPClient: srv.Client(),
 				VerifyURL:  srv.URL,
@@ -148,7 +148,7 @@ func TestTurnstileVerifier_Verify(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewTurnstileVerifier: %v", err)
 			}
-			if v.Name() != captcha.ProviderTurnstile {
+			if v.Name() != assurance.ProviderTurnstile {
 				t.Fatalf("Name = %q", v.Name())
 			}
 
@@ -197,7 +197,7 @@ func TestRecaptchaV3Verifier_Verify(t *testing.T) {
 			name:    "score below threshold rejected (boundary)",
 			token:   "good",
 			handler: scoreBody(0.49),
-			wantErr: captcha.ErrVerificationFailed,
+			wantErr: assurance.ErrVerificationFailed,
 		},
 		{
 			name:  "success false rejected",
@@ -205,25 +205,25 @@ func TestRecaptchaV3Verifier_Verify(t *testing.T) {
 			handler: func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = io.WriteString(w, `{"success":false,"error-codes":["timeout-or-duplicate"]}`)
 			},
-			wantErr: captcha.ErrVerificationFailed,
+			wantErr: assurance.ErrVerificationFailed,
 		},
 		{
 			name:    "empty token rejected",
 			token:   "",
 			handler: func(http.ResponseWriter, *http.Request) { t.Error("must not call siteverify for empty token") },
-			wantErr: captcha.ErrVerificationFailed,
+			wantErr: assurance.ErrVerificationFailed,
 		},
 		{
 			name:    "non-200 is provider unavailable",
 			token:   "good",
 			handler: func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) },
-			wantErr: captcha.ErrProviderUnavailable,
+			wantErr: assurance.ErrProviderUnavailable,
 		},
 		{
 			name:    "malformed json is provider unavailable",
 			token:   "good",
 			handler: func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, `not-json`) },
-			wantErr: captcha.ErrProviderUnavailable,
+			wantErr: assurance.ErrProviderUnavailable,
 		},
 	}
 
@@ -231,7 +231,7 @@ func TestRecaptchaV3Verifier_Verify(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			srv := newServer(t, tc.handler)
-			v, err := captcha.NewRecaptchaV3Verifier(captcha.RecaptchaConfig{
+			v, err := assurance.NewRecaptchaV3Verifier(assurance.RecaptchaConfig{
 				Secret:         secret,
 				ScoreThreshold: threshold,
 				HTTPClient:     srv.Client(),
@@ -240,7 +240,7 @@ func TestRecaptchaV3Verifier_Verify(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewRecaptchaV3Verifier: %v", err)
 			}
-			if v.Name() != captcha.ProviderRecaptchaV3 {
+			if v.Name() != assurance.ProviderRecaptchaV3 {
 				t.Fatalf("Name = %q", v.Name())
 			}
 
@@ -267,7 +267,7 @@ func TestTurnstileVerifier_TransportError(t *testing.T) {
 	client := srv.Client()
 	srv.Close()
 
-	v, err := captcha.NewTurnstileVerifier(captcha.TurnstileConfig{
+	v, err := assurance.NewTurnstileVerifier(assurance.TurnstileConfig{
 		Secret:     "s",
 		VerifyURL:  closedURL,
 		HTTPClient: client,
@@ -275,7 +275,7 @@ func TestTurnstileVerifier_TransportError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTurnstileVerifier: %v", err)
 	}
-	if err := v.Verify(context.Background(), "token", ""); !errors.Is(err, captcha.ErrProviderUnavailable) {
+	if err := v.Verify(context.Background(), "token", ""); !errors.Is(err, assurance.ErrProviderUnavailable) {
 		t.Fatalf("Verify err = %v; want ErrProviderUnavailable", err)
 	}
 }
@@ -290,7 +290,7 @@ func TestRecaptchaV3Verifier_ContextCanceled(t *testing.T) {
 	srv := newServer(t, func(http.ResponseWriter, *http.Request) {
 		t.Error("must not reach the handler with a cancelled context")
 	})
-	v, err := captcha.NewRecaptchaV3Verifier(captcha.RecaptchaConfig{
+	v, err := assurance.NewRecaptchaV3Verifier(assurance.RecaptchaConfig{
 		Secret:         "s",
 		ScoreThreshold: 0.5,
 		HTTPClient:     srv.Client(),
@@ -302,7 +302,7 @@ func TestRecaptchaV3Verifier_ContextCanceled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := v.Verify(ctx, "token", ""); !errors.Is(err, captcha.ErrProviderUnavailable) {
+	if err := v.Verify(ctx, "token", ""); !errors.Is(err, assurance.ErrProviderUnavailable) {
 		t.Fatalf("Verify err = %v; want ErrProviderUnavailable", err)
 	}
 }

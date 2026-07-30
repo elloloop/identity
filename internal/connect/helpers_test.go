@@ -23,7 +23,7 @@ import (
 	"github.com/elloloop/identity/internal/graph"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
-	"github.com/elloloop/identity/pkg/captcha"
+	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -1903,7 +1903,7 @@ func newHarnessWithOAuthRegistry(t *testing.T, registry *oauth.Registry) *testHa
 // the supplied verifier and a config produced by mutating testConfig (so a
 // test can flip CaptchaEnabled and the per-endpoint toggles). A nil mutate
 // leaves the default config; a nil verifier exercises the disabled path.
-func newHarnessWithCaptcha(t *testing.T, verifier captcha.Verifier, mutate func(*config.Config)) *testHarness {
+func newHarnessWithCaptcha(t *testing.T, verifier assurance.Verifier, mutate func(*config.Config)) *testHarness {
 	t.Helper()
 	return newHarnessWith(t, nil, verifier, mutate)
 }
@@ -1911,7 +1911,7 @@ func newHarnessWithCaptcha(t *testing.T, verifier captcha.Verifier, mutate func(
 func newHarnessWith(
 	t *testing.T,
 	registry *oauth.Registry,
-	captchaVerifier captcha.Verifier,
+	captchaVerifier assurance.Verifier,
 	mutate func(*config.Config),
 ) *testHarness {
 	t.Helper()

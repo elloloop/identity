@@ -29,7 +29,7 @@ import (
 	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/audit"
-	"github.com/elloloop/identity/pkg/captcha"
+	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/idv"
@@ -171,7 +171,7 @@ type Deps struct {
 	// nil — in that case New builds one from Config (the no-op verifier
 	// when CAPTCHA is disabled). Tests inject a fake to drive pass/fail
 	// without network calls.
-	CaptchaVerifier captcha.Verifier
+	CaptchaVerifier assurance.Verifier
 
 	// MetricsRegistry is the Prometheus registry the server records
 	// RED metrics into. May be nil — in that case the default

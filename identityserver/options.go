@@ -6,7 +6,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
-	"github.com/elloloop/identity/pkg/captcha"
+	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/idv"
 	"github.com/elloloop/identity/pkg/jwt"
@@ -89,7 +89,7 @@ type Options struct {
 	// CaptchaVerifier gates the unauthenticated auth endpoints. nil builds
 	// the Config.CaptchaProvider backend (the no-op verifier when CAPTCHA
 	// is disabled).
-	CaptchaVerifier captcha.Verifier
+	CaptchaVerifier assurance.Verifier
 
 	// DNSResolver is the TXT-lookup boundary VerifyDomain uses to confirm a
 	// custom domain's ownership challenge. nil defaults to net.DefaultResolver
