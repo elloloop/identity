@@ -32,6 +32,13 @@ func startAssuredServer(t *testing.T) *Harness {
 		c.AssuranceEnabled = true
 		c.AssuranceChallengeTTLSeconds = 300
 		c.AssuranceTokenTTLSeconds = 3600
+		// Declare a real web arm: an enabled deployment must configure at
+		// least one, or Validate refuses to boot (otherwise the enforce
+		// toggles would deny every auth endpoint with no way to obtain a
+		// token). The stub verifier below replaces the built one via deps.
+		c.AssuranceWebProvider = config.AssuranceWebProviderTurnstile
+		c.AssuranceTurnstileSecret = "e2e-secret"
+		c.AssuranceTurnstileSiteKey = "e2e-sitekey"
 		c.AssuranceEnforcePasswordSignup = true
 		c.AssuranceEnforcePasswordLogin = true
 		c.AssuranceEnforcePasswordReset = true

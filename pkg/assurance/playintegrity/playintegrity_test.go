@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -64,10 +63,11 @@ type verdictPayload struct {
 	deviceVerdicts []string
 }
 
-func validPayload(nonce []byte) *verdictPayload {
+func validPayload(nonce string) *verdictPayload {
 	return &verdictPayload{
 		requestPackage: testPackage,
-		nonce:          base64.RawURLEncoding.EncodeToString(nonce),
+		// Play echoes the nonce the client set: our challenge string, verbatim.
+		nonce:          nonce,
 		timestampMs:    testNow.Add(-time.Minute).UnixMilli(),
 		appVerdict:     "PLAY_RECOGNIZED",
 		appPackage:     testPackage,
@@ -168,7 +168,7 @@ func (f *fakeGoogle) verifier(t *testing.T) *playintegrity.Verifier {
 }
 
 func TestVerifyHappyPath(t *testing.T) {
-	nonce := []byte("one-time-nonce")
+	nonce := "one-time-nonce"
 	f := newFakeGoogle(t, validPayload(nonce))
 	v := f.verifier(t)
 
@@ -190,9 +190,9 @@ func TestVerifyHappyPath(t *testing.T) {
 }
 
 func TestVerifyPaddedDigestAndNonceNormalize(t *testing.T) {
-	nonce := []byte("nonce-bytes")
+	nonce := "nonce-bytes"
 	p := validPayload(nonce)
-	p.nonce = base64.URLEncoding.EncodeToString(nonce) // padded variant
+	p.nonce = nonce + "==" // padded variant
 	p.certDigests = []string{testDigest + "=="}
 	f := newFakeGoogle(t, p)
 	if _, err := f.verifier(t).Verify(context.Background(), "tok", nonce); err != nil {
@@ -201,13 +201,13 @@ func TestVerifyPaddedDigestAndNonceNormalize(t *testing.T) {
 }
 
 func TestVerifyRejections(t *testing.T) {
-	nonce := []byte("nonce")
+	nonce := "nonce"
 	cases := []struct {
 		name   string
 		mutate func(p *verdictPayload)
 	}{
 		{"wrong request package", func(p *verdictPayload) { p.requestPackage = "com.other" }},
-		{"nonce mismatch", func(p *verdictPayload) { p.nonce = base64.RawURLEncoding.EncodeToString([]byte("other")) }},
+		{"nonce mismatch", func(p *verdictPayload) { p.nonce = "some-other-nonce" }},
 		{"stale timestamp", func(p *verdictPayload) { p.timestampMs = testNow.Add(-time.Hour).UnixMilli() }},
 		{"future timestamp", func(p *verdictPayload) { p.timestampMs = testNow.Add(time.Minute).UnixMilli() }},
 		{"malformed timestamp", func(p *verdictPayload) { p.timestampRaw = "not-a-number" }},
@@ -232,7 +232,7 @@ func TestVerifyRejections(t *testing.T) {
 }
 
 func TestVerifyGoogleRejectsToken(t *testing.T) {
-	nonce := []byte("nonce")
+	nonce := "nonce"
 	f := newFakeGoogle(t, validPayload(nonce))
 	f.decodeCode = http.StatusBadRequest
 	_, err := f.verifier(t).Verify(context.Background(), "tok", nonce)
@@ -242,7 +242,7 @@ func TestVerifyGoogleRejectsToken(t *testing.T) {
 }
 
 func TestVerifyUpstreamUnavailable(t *testing.T) {
-	nonce := []byte("nonce")
+	nonce := "nonce"
 	f := newFakeGoogle(t, validPayload(nonce))
 	f.decodeCode = http.StatusInternalServerError
 	_, err := f.verifier(t).Verify(context.Background(), "tok", nonce)
@@ -252,8 +252,8 @@ func TestVerifyUpstreamUnavailable(t *testing.T) {
 }
 
 func TestVerifyEmptyToken(t *testing.T) {
-	f := newFakeGoogle(t, validPayload([]byte("n")))
-	if _, err := f.verifier(t).Verify(context.Background(), "", []byte("n")); !errors.Is(err, assurance.ErrVerificationFailed) {
+	f := newFakeGoogle(t, validPayload("n"))
+	if _, err := f.verifier(t).Verify(context.Background(), "", "n"); !errors.Is(err, assurance.ErrVerificationFailed) {
 		t.Fatalf("err = %v, want ErrVerificationFailed", err)
 	}
 }
@@ -281,7 +281,7 @@ func TestNewConfigValidation(t *testing.T) {
 }
 
 func TestTokenEndpointFailures(t *testing.T) {
-	nonce := []byte("nonce")
+	nonce := "nonce"
 
 	t.Run("token endpoint 500", func(t *testing.T) {
 		mux := http.NewServeMux()

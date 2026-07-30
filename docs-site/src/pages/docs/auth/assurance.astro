@@ -38,10 +38,12 @@ import { Code } from "astro-expressive-code/components";
     </li>
     <li>
       <strong>Android</strong> — <code>CreateAssuranceChallenge</code>
-      (platform <code>android</code>) → request a Play Integrity token with
-      the challenge string as the nonce → <code>IssueAssuranceToken</code>
-      with the integrity token. The verdict is decoded server-side via
-      Google (never locally). Renewal repeats the same exchange.
+      (platform <code>android</code>) → request a Play Integrity token
+      passing the challenge string <em>verbatim</em> as the nonce (Play
+      echoes it back, and the server compares it as a string) →
+      <code>IssueAssuranceToken</code> with the integrity token. The verdict
+      is decoded server-side via Google (never locally). Renewal repeats the
+      same exchange.
     </li>
     <li>
       <strong>Web</strong> — solve the captcha, then
@@ -66,7 +68,10 @@ import { Code } from "astro-expressive-code/components";
     <li>
       <code>GATEWAY_ASSURANCE_ENABLED</code> (default <code>false</code>) —
       global switch for the whole surface. Off: the three RPCs return
-      Unimplemented and nothing is gated.
+      Unimplemented and nothing is gated. On, the server refuses to boot
+      unless at least one arm (web provider, iOS app, or Android app) is
+      configured — otherwise the enforce toggles would deny every auth
+      endpoint with no way to obtain a token.
     </li>
     <li>
       <code>GATEWAY_ASSURANCE_WEB_PROVIDER</code> —
@@ -92,8 +97,15 @@ import { Code } from "astro-expressive-code/components";
       service-account key) — the default project's Play Integrity identity.
     </li>
     <li>
-      <code>GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS</code> (default 3600) and
-      <code>GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS</code> (default 300).
+      <code>GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS</code> (default 3600, max
+      86400) and <code>GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS</code>
+      (default 300, max 3600). An assurance token cannot be revoked, so the
+      lifetime is capped; a web token is reusable for its whole TTL, so
+      shorten it if you want closer to per-request captcha assurance.
+    </li>
+    <li>
+      <code>GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP</code> (default 20) —
+      per-IP quota per rate-limit window on all three assurance RPCs.
     </li>
     <li>
       <code>GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP</code>,

@@ -26,6 +26,12 @@ var (
 	// ErrAssuranceRequired: the RPC requires a valid assurance token and
 	// none (or an invalid one) was presented.
 	ErrAssuranceRequired = errors.New("assurance token required")
+	// ErrAssuranceUnavailable: the evidence could not be JUDGED because the
+	// upstream provider was unreachable — distinct from a rejection so the
+	// client learns the call is retryable. The upstream error is logged
+	// server-side and deliberately NOT surfaced: it can carry provider
+	// response text, and this RPC is unauthenticated.
+	ErrAssuranceUnavailable = errors.New("assurance provider unavailable")
 )
 
 // Assurance platform identifiers accepted by the challenge and issue
@@ -78,6 +84,9 @@ type AssuranceToken struct {
 // assertion. Web evidence needs no challenge (the captcha provider runs
 // its own).
 func (s *AuthService) CreateAssuranceChallenge(ctx context.Context, platform string) (*AssuranceChallenge, error) {
+	if !s.cfg.AssuranceEnabled {
+		return nil, ErrAssuranceDisabled
+	}
 	switch platform {
 	case AssurancePlatformIOS, AssurancePlatformAndroid:
 	default:
@@ -194,12 +203,15 @@ func (s *AuthService) issueForPlayIntegrity(ctx context.Context, ev AssuranceEvi
 	if err != nil {
 		return nil, err
 	}
-	// The client passed the challenge string to the Play Integrity API as
-	// its nonce; Play reports it base64url-encoded, so the expected raw
-	// nonce is the challenge string's bytes.
-	if _, err := verifier.Verify(ctx, ev.IntegrityToken, []byte(ch.Challenge)); err != nil {
+	// The client passes the challenge STRING to the Play Integrity API as
+	// its nonce and Play echoes it back verbatim, so the verifier compares
+	// against that same string (see the docs-site page and the proto
+	// comment, which tell clients exactly this).
+	if _, err := verifier.Verify(ctx, ev.IntegrityToken, ch.Challenge); err != nil {
 		if errors.Is(err, assurance.ErrProviderUnavailable) {
-			return nil, fmt.Errorf("play integrity decode: %w", err)
+			s.logger.Error("assurance_provider_unavailable",
+				zap.String("platform", AssurancePlatformAndroid), zap.Error(err))
+			return nil, fmt.Errorf("%w: play integrity decode failed", ErrAssuranceUnavailable)
 		}
 		s.logger.Info("assurance_attestation_rejected",
 			zap.String("platform", AssurancePlatformAndroid), zap.Error(err))
@@ -217,7 +229,10 @@ func (s *AuthService) issueForWeb(ctx context.Context, ev AssuranceEvidence) (*A
 	}
 	if err := verifier.Verify(ctx, ev.WebToken, ev.ClientIP); err != nil {
 		if errors.Is(err, assurance.ErrProviderUnavailable) {
-			return nil, fmt.Errorf("web assurance verify: %w", err)
+			s.logger.Error("assurance_provider_unavailable",
+				zap.String("platform", AssurancePlatformWeb),
+				zap.String("provider", verifier.Name()), zap.Error(err))
+			return nil, fmt.Errorf("%w: web assurance provider unreachable", ErrAssuranceUnavailable)
 		}
 		s.auditAssurance(ctx, false, AssurancePlatformWeb)
 		return nil, ErrAssuranceFailed

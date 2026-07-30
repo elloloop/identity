@@ -4597,8 +4597,10 @@ components:
           type: string
           title: challenge
           description: |-
-            challenge is a base64url nonce. The client uses this STRING's UTF-8
-             bytes as the App Attest clientData / Play Integrity nonce input.
+            challenge is a base64url nonce. iOS uses this STRING's UTF-8 bytes as
+             the App Attest clientData; Android passes the STRING verbatim as the
+             Play Integrity nonce (Play echoes it back and the server compares it
+             as a string).
         expiresAtMs:
           type:
             - integer

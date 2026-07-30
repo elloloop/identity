@@ -11,21 +11,17 @@ lint:
 breaking:
   use:
     - FILE
-  # Intentional, documented breaking change (v1.0 cleanup): the current
-  # API surface was promoted to a real versioned package — the proto moved
-  # from proto/identity/identity.proto (package `identity`) to
-  # proto/identity/v1/identity.proto (package `identity.v1`), making the
-  # wire path /identity.v1.IdentityService/*. This is intentionally
-  # WIRE-BREAKING and accepted because there are no production consumers.
-  # buf breaking sees the old file path as deleted, so it trips
-  # FILE_NO_DELETE / PACKAGE_NO_DELETE on the retired path. These
-  # ignore_only entries are scoped to the deletion rules on exactly the
-  # old path, so every other breaking guarantee (renumbered tags, reused
-  # field ids, signature changes on the surviving RPCs in the v1 file)
-  # stays enforced. Remove these entries once the v1 move has landed on
-  # the baseline branch buf breaking runs against.
+  # Intentional, documented breaking change (v4.0.0, ADR-0012): the six
+  # `captcha_token` request fields were removed when inline CAPTCHA became
+  # the client-assurance layer — clients now send the assurance token in the
+  # X-Assurance-Token header instead. Both the field NUMBER and the field
+  # NAME are `reserved` in identity.proto, so the wire and JSON surfaces are
+  # protected against reuse; the FILE ruleset's FIELD_NO_DELETE rule rejects
+  # a deletion regardless of `reserved` (only the WIRE/WIRE_JSON rulesets
+  # treat reserved as sufficient), so it is waived on exactly that one file.
+  # Every other breaking guarantee — renumbered tags, reused field ids,
+  # signature changes on surviving RPCs — stays enforced. Remove this entry
+  # once v4.0.0 is the baseline buf breaking runs against.
   ignore_only:
-    FILE_NO_DELETE:
-      - proto/identity/identity.proto
-    PACKAGE_NO_DELETE:
-      - proto/identity/identity.proto
+    FIELD_NO_DELETE:
+      - proto/identity/v1/identity.proto

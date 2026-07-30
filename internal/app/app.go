@@ -271,6 +271,23 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0),
 		},
 		{
+			// Client assurance: unauthenticated by design (the caller is
+			// proving what the client IS before anyone signs in). The
+			// challenge write and, on the exchange paths, an outbound
+			// provider call + signature + audit row are all attacker-driven,
+			// so every assurance path carries a per-IP quota.
+			PathPrefix: "/identity.v1.IdentityService/CreateAssuranceChallenge", Tag: "assurance_challenge",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitAssurancePerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/IssueAssuranceToken", Tag: "assurance_issue",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitAssurancePerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/RefreshAssuranceToken", Tag: "assurance_refresh",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitAssurancePerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.v1.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},

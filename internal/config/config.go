@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,16 @@ const (
 	// DefaultAssuranceRecaptchaScoreThreshold is the reCAPTCHA v3 score below
 	// which a response is rejected when no threshold is configured.
 	DefaultAssuranceRecaptchaScoreThreshold = 0.5
+
+	// MaxAssuranceTokenTTLSeconds caps the assurance-token lifetime (24h). An
+	// assurance token carries no session and cannot be revoked, so an
+	// unbounded TTL would be a permanent bearer credential.
+	MaxAssuranceTokenTTLSeconds = 86400
+
+	// MaxAssuranceChallengeTTLSeconds caps how long an attestation challenge
+	// stays redeemable (1h). A challenge is a one-shot nonce; a long window
+	// only widens the replay surface and the unreclaimed-row window.
+	MaxAssuranceChallengeTTLSeconds = 3600
 
 	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
 	// users 12 and under (i.e. under 13) are in the protected CHILD band.
@@ -843,6 +854,15 @@ type Config struct {
 	// RateLimitPasswordlessPerIP is the per-IP cap per window on
 	// RequestEmailLoginCode + RequestMagicLink.
 	RateLimitPasswordlessPerIP int
+	// RateLimitAssurancePerIP is the per-IP request cap per window on the
+	// client-assurance endpoints. These are unauthenticated and each
+	// IssueAssuranceToken / RefreshAssuranceToken call spends an outbound
+	// provider request (Turnstile/reCAPTCHA siteverify, Google
+	// decodeIntegrityToken), an RSA signature and an audit row, while
+	// CreateAssuranceChallenge writes a DB row — so an uncapped path lets an
+	// anonymous caller drive third-party quota, storage and outbound
+	// amplification.
+	RateLimitAssurancePerIP int
 	// RateLimitPhonePerIP is the per-IP cap per window on RequestPhoneVerification.
 	RateLimitPhonePerIP int
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
@@ -1193,6 +1213,7 @@ func Load() *Config {
 		RateLimitResetPerIP:        envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
 		RateLimitVerifyPerIP:       envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
 		RateLimitPasswordlessPerIP: envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
+		RateLimitAssurancePerIP:    envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
 		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 
@@ -1565,7 +1586,52 @@ func revocationModeFromEnv(key string, def RevocationMode) RevocationMode {
 // silent failure mode there would re-introduce the bug this
 // function prevents. Callers that synthesise a Config must invoke
 // Validate before handing it to app.New.
+// removedEnvVars maps an environment variable removed in a breaking
+// release to the replacement an operator must set instead. Load ignores
+// unknown variables by design, so a rename would otherwise take effect
+// SILENTLY — for the v4.0.0 assurance rename that means an operator who
+// pulls the new image keeps their old GATEWAY_CAPTCHA_* values, gets
+// AssuranceEnabled=false, and loses anti-automation on six auth endpoints
+// with no signal at all. Validate fails boot instead.
+var removedEnvVars = map[string]string{
+	"GATEWAY_CAPTCHA_ENABLED":                   "GATEWAY_ASSURANCE_ENABLED",
+	"GATEWAY_CAPTCHA_PROVIDER":                  "GATEWAY_ASSURANCE_WEB_PROVIDER",
+	"GATEWAY_CAPTCHA_TURNSTILE_SECRET":          "GATEWAY_ASSURANCE_TURNSTILE_SECRET",
+	"GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY":        "GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY",
+	"GATEWAY_CAPTCHA_RECAPTCHA_SECRET":          "GATEWAY_ASSURANCE_RECAPTCHA_SECRET",
+	"GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD": "GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP":   "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN":    "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_LOGIN",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET":    "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_RESET",
+	"GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE":  "GATEWAY_ASSURANCE_ENFORCE_EMAIL_LOGIN_CODE",
+	"GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK":        "GATEWAY_ASSURANCE_ENFORCE_MAGIC_LINK",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP":    "GATEWAY_ASSURANCE_ENFORCE_PASSKEY_SIGNUP",
+}
+
+// validateRemovedEnvVars fails boot when a removed variable is still set,
+// naming its replacement. Sorted so the message is deterministic.
+func validateRemovedEnvVars() error {
+	var found []string
+	for old, replacement := range removedEnvVars {
+		if _, ok := os.LookupEnv(old); ok {
+			found = append(found, fmt.Sprintf("%s (use %s)", old, replacement))
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	sort.Strings(found)
+	return fmt.Errorf(
+		"config: %d environment variable(s) removed in v4.0.0 are still set: %s; see docs/UPGRADE.md",
+		len(found), strings.Join(found, ", "),
+	)
+}
+
 func (c *Config) Validate() error {
+	if err := validateRemovedEnvVars(); err != nil {
+		return err
+	}
+
 	switch c.RevocationMode {
 	case "":
 		// Empty means "use default" in Load(); a directly-constructed
@@ -1934,16 +2000,45 @@ func (c *Config) validateAssurance() error {
 			return errors.New("config: GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME requires GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON")
 		}
 	}
-	if c.AssuranceChallengeTTLSeconds <= 0 {
-		return fmt.Errorf("config: GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS must be > 0, got %d", c.AssuranceChallengeTTLSeconds)
+	if c.AssuranceChallengeTTLSeconds <= 0 || c.AssuranceChallengeTTLSeconds > MaxAssuranceChallengeTTLSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS must be in (0, %d], got %d",
+			MaxAssuranceChallengeTTLSeconds, c.AssuranceChallengeTTLSeconds,
+		)
 	}
-	if c.AssuranceTokenTTLSeconds <= 0 {
-		return fmt.Errorf("config: GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS must be > 0, got %d", c.AssuranceTokenTTLSeconds)
+	// An assurance token is an unrevocable bearer credential for its whole
+	// lifetime, so the TTL is capped as well as floored — the same reasoning
+	// as RevocationModeTTLAccessTokenCap.
+	if c.AssuranceTokenTTLSeconds <= 0 || c.AssuranceTokenTTLSeconds > MaxAssuranceTokenTTLSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS must be in (0, %d], got %d",
+			MaxAssuranceTokenTTLSeconds, c.AssuranceTokenTTLSeconds,
+		)
+	}
+
+	// At least one arm must be usable. Enabling assurance turns the
+	// per-endpoint enforce toggles on (all default true) while every path to
+	// OBTAIN a token reports ErrAssuranceDisabled, so an enabled deployment
+	// with nothing configured would boot cleanly and lock every user out of
+	// signup, login, reset, email-code, magic-link and passkey-signup. Fail
+	// boot instead — v3's validateCaptcha refused the analogous state.
+	hasWeb := c.AssuranceWebProvider != ""
+	hasIOS := c.AssuranceIOSTeamID != "" && c.AssuranceIOSBundleID != ""
+	hasAndroid := c.AssuranceAndroidPackageName != ""
+	if !hasWeb && !hasIOS && !hasAndroid {
+		return errors.New(
+			"config: GATEWAY_ASSURANCE_ENABLED=true requires at least one configured arm — " +
+				"a web provider (GATEWAY_ASSURANCE_WEB_PROVIDER), an iOS app " +
+				"(GATEWAY_ASSURANCE_IOS_TEAM_ID + GATEWAY_ASSURANCE_IOS_BUNDLE_ID), " +
+				"or an Android app (GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME); " +
+				"otherwise the enforce toggles deny every auth endpoint with no way to obtain a token",
+		)
 	}
 
 	switch c.AssuranceWebProvider {
 	case "":
-		// No web provider: mobile-attestation-only deployment.
+		// No web provider: mobile-attestation-only deployment (an iOS or
+		// Android arm is present — the check above guarantees it).
 		return nil
 	case AssuranceWebProviderTurnstile:
 		if c.AssuranceTurnstileSecret == "" {

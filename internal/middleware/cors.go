@@ -136,8 +136,11 @@ func CORSMiddleware(globalOrigins []string) func(http.Handler) http.Handler {
 				// the allow-list a cross-origin SPA cannot select a non-default project.
 				// x-product (ProductHeader) names the product the request authenticates for,
 				// so a browser app is gated by its own product's guardrails rather than
-				// silently falling back to the deployment default.
-				w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, connect-protocol-version, connect-timeout-ms, x-user-id, cookie, x-user-agent, x-grpc-web, grpc-timeout, x-project-key, x-product")
+				// silently falling back to the deployment default. x-assurance-token
+				// carries the client-assurance token (assurance.HeaderName) the gated
+				// auth endpoints require; without it a cross-origin SPA that completed
+				// the exchange could never attach the token.
+				w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, connect-protocol-version, connect-timeout-ms, x-user-id, cookie, x-user-agent, x-grpc-web, grpc-timeout, x-project-key, x-product, x-assurance-token")
 				w.Header().Set("Access-Control-Max-Age", "86400")
 				w.WriteHeader(http.StatusNoContent)
 				return

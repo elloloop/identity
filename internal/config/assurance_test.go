@@ -42,9 +42,20 @@ func TestValidate_Assurance(t *testing.T) {
 		},
 		{
 			// No web provider while enabled is a mobile-attestation-only
-			// deployment — valid, web assurance simply unavailable.
-			name:   "enabled without web provider",
-			mutate: func(c *Config) { *c = *assuranceConfig("") },
+			// deployment: valid ONLY when a mobile arm is configured. With
+			// no arm at all the enforce toggles would deny every auth
+			// endpoint while no token could be minted, so boot must fail.
+			name: "enabled without web provider but with an iOS arm",
+			mutate: func(c *Config) {
+				*c = *assuranceConfig("")
+				c.AssuranceIOSTeamID = "TEAM123456"
+				c.AssuranceIOSBundleID = "com.example.app"
+			},
+		},
+		{
+			name:    "enabled with no arm at all",
+			mutate:  func(c *Config) { *c = *assuranceConfig("") },
+			wantErr: true,
 		},
 		{
 			name: "enabled with zero challenge TTL",
@@ -180,4 +191,116 @@ func TestValidateAssurance_ErrorMentionsProvider(t *testing.T) {
 	if !strings.Contains(err.Error(), "GATEWAY_ASSURANCE_TURNSTILE_SECRET") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+// TestValidate_RemovedCaptchaEnvVarsFailBoot pins the v4.0.0 upgrade
+// safety net: the GATEWAY_CAPTCHA_* rename must not take effect silently.
+// An operator who pulls v4 while still setting the old variables would
+// otherwise boot with assurance disabled and lose the anti-automation
+// gate on six auth endpoints with no signal.
+func TestValidate_RemovedCaptchaEnvVarsFailBoot(t *testing.T) {
+	for _, tc := range []struct {
+		envVar string
+		want   string
+	}{
+		{"GATEWAY_CAPTCHA_ENABLED", "GATEWAY_ASSURANCE_ENABLED"},
+		{"GATEWAY_CAPTCHA_PROVIDER", "GATEWAY_ASSURANCE_WEB_PROVIDER"},
+		{"GATEWAY_CAPTCHA_TURNSTILE_SECRET", "GATEWAY_ASSURANCE_TURNSTILE_SECRET"},
+		{"GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN", "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_LOGIN"},
+	} {
+		t.Run(tc.envVar, func(t *testing.T) {
+			t.Setenv(tc.envVar, "true")
+			cfg := &Config{}
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() = nil; want a boot failure naming the removed var")
+			}
+			if !strings.Contains(err.Error(), tc.envVar) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error must name both the removed var and its replacement: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidate_AssuranceEnabledWithNoArm pins that enabling assurance with
+// nothing configured fails boot rather than silently denying every auth
+// endpoint (the enforce toggles default true while no token can be minted).
+func TestValidate_AssuranceEnabledWithNoArm(t *testing.T) {
+	cfg := &Config{
+		AssuranceEnabled:             true,
+		AssuranceChallengeTTLSeconds: 300,
+		AssuranceTokenTTLSeconds:     3600,
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil; want failure when assurance is enabled with no arm")
+	}
+	for _, want := range []string{"GATEWAY_ASSURANCE_WEB_PROVIDER", "GATEWAY_ASSURANCE_IOS_TEAM_ID", "GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name %s as an option: %v", want, err)
+		}
+	}
+
+	t.Run("ios-only arm is valid", func(t *testing.T) {
+		c := &Config{
+			AssuranceEnabled:             true,
+			AssuranceChallengeTTLSeconds: 300,
+			AssuranceTokenTTLSeconds:     3600,
+			AssuranceIOSTeamID:           "TEAM123456",
+			AssuranceIOSBundleID:         "com.example.app",
+		}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() = %v; want nil for a mobile-only deployment", err)
+		}
+	})
+	t.Run("android-only arm is valid", func(t *testing.T) {
+		c := &Config{
+			AssuranceEnabled:             true,
+			AssuranceChallengeTTLSeconds: 300,
+			AssuranceTokenTTLSeconds:     3600,
+			AssuranceAndroidPackageName:  "com.example.app",
+			AssuranceAndroidCertDigests:  "ZGlnZXN0",
+			AssuranceAndroidSAKeyJSON:    "{}",
+		}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() = %v; want nil for an android-only deployment", err)
+		}
+	})
+}
+
+// TestValidate_AssuranceTTLCaps pins the upper bounds: an unbounded
+// assurance TTL would be an unrevocable permanent bearer credential.
+func TestValidate_AssuranceTTLCaps(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			AssuranceEnabled:             true,
+			AssuranceWebProvider:         AssuranceWebProviderTurnstile,
+			AssuranceTurnstileSecret:     "s",
+			AssuranceTurnstileSiteKey:    "k",
+			AssuranceChallengeTTLSeconds: 300,
+			AssuranceTokenTTLSeconds:     3600,
+		}
+	}
+	t.Run("token TTL over cap", func(t *testing.T) {
+		c := base()
+		c.AssuranceTokenTTLSeconds = MaxAssuranceTokenTTLSeconds + 1
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() = nil; want failure above the token TTL cap")
+		}
+	})
+	t.Run("challenge TTL over cap", func(t *testing.T) {
+		c := base()
+		c.AssuranceChallengeTTLSeconds = MaxAssuranceChallengeTTLSeconds + 1
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() = nil; want failure above the challenge TTL cap")
+		}
+	})
+	t.Run("at the caps is valid", func(t *testing.T) {
+		c := base()
+		c.AssuranceTokenTTLSeconds = MaxAssuranceTokenTTLSeconds
+		c.AssuranceChallengeTTLSeconds = MaxAssuranceChallengeTTLSeconds
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() = %v; want nil at the caps", err)
+		}
+	})
 }

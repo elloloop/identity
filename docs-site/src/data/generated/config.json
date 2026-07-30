@@ -77,8 +77,8 @@
     "default": "",
     "required": true,
     "description": "is the comma-separated allowlist of the app's signing-certificate SHA-256 digests (unpadded base64url, as Play reports them).",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME",
@@ -86,8 +86,8 @@
     "default": "",
     "required": true,
     "description": "is the DEFAULT project's Play Integrity Android package name (per-project apps configure theirs in config_json `assurance.android`).",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON",
@@ -95,8 +95,8 @@
     "default": "",
     "required": true,
     "description": "is the Google service-account key (inline JSON) used to decode Play Integrity verdicts server-side.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS",
@@ -104,8 +104,8 @@
     "default": "300",
     "required": false,
     "description": "bounds how long an issued attestation challenge stays redeemable.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_ENABLED",
@@ -113,8 +113,8 @@
     "default": "false",
     "required": false,
     "description": "Client assurance (App Attest / Play Integrity / web captcha exchange).",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_ENFORCE_EMAIL_LOGIN_CODE",
@@ -122,8 +122,8 @@
     "default": "true",
     "required": false,
     "description": "requires an assurance token on the RequestEmailLoginCode endpoint.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_ENFORCE_MAGIC_LINK",
@@ -131,8 +131,8 @@
     "default": "true",
     "required": false,
     "description": "requires an assurance token on the RequestMagicLink endpoint.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_ENFORCE_PASSKEY_SIGNUP",
@@ -140,8 +140,8 @@
     "default": "true",
     "required": false,
     "description": "requires an assurance token on the BeginPasskeySignup endpoint.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_LOGIN",
@@ -149,8 +149,8 @@
     "default": "true",
     "required": false,
     "description": "requires an assurance token on the PasswordLogin endpoint.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_RESET",
@@ -158,8 +158,8 @@
     "default": "true",
     "required": false,
     "description": "requires an assurance token on the RequestPasswordReset endpoint.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP",
@@ -167,8 +167,8 @@
     "default": "true",
     "required": false,
     "description": "requires an assurance token on the PasswordSignup endpoint.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_IOS_BUNDLE_ID",
@@ -176,8 +176,8 @@
     "default": "",
     "required": true,
     "description": "is the DEFAULT project's App Attest bundle id; set together with AssuranceIOSTeamID (TeamID.BundleID forms the App ID).",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_IOS_ENV",
@@ -185,8 +185,8 @@
     "default": "production",
     "required": false,
     "description": "selects the App Attest environment for the default project: \"production\" or \"development\".",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_IOS_TEAM_ID",
@@ -194,8 +194,8 @@
     "default": "",
     "required": true,
     "description": "is the DEFAULT project's Apple Developer team id for App Attest (per-project apps configure theirs in config_json `assurance.ios`).",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD",
@@ -203,8 +203,8 @@
     "default": "0.5",
     "required": false,
     "description": "is the reCAPTCHA v3 score below which a response is rejected; must be in [0,1].",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_RECAPTCHA_SECRET",
@@ -212,8 +212,8 @@
     "default": "",
     "required": true,
     "description": "is the reCAPTCHA v3 secret key (provider \"recaptcha_v3\").",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS",
@@ -221,8 +221,8 @@
     "default": "3600",
     "required": false,
     "description": "is the minted assurance token's lifetime.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_TURNSTILE_SECRET",
@@ -230,8 +230,8 @@
     "default": "",
     "required": true,
     "description": "is the Cloudflare Turnstile secret key (provider \"turnstile\").",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY",
@@ -239,8 +239,8 @@
     "default": "",
     "required": true,
     "description": "is the Cloudflare Turnstile PUBLIC site key (provider \"turnstile\").",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_ASSURANCE_WEB_PROVIDER",
@@ -248,8 +248,8 @@
     "default": "",
     "required": true,
     "description": "selects the pkg/assurance web implementation — \"turnstile\" or \"recaptcha_v3\"; the matching secret must be set.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Client assurance",
+    "anchor": "client-assurance"
   },
   {
     "name": "GATEWAY_AUDIT_QUEUE_SIZE",
@@ -1258,6 +1258,15 @@
     "description": "is the QR login-session lifetime in seconds.",
     "category": "QR cross-device login",
     "anchor": "qr-cross-device-login"
+  },
+  {
+    "name": "GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP",
+    "type": "integer",
+    "default": "20",
+    "required": false,
+    "description": "is the per-IP request cap per window on the client-assurance endpoints.",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
   },
   {
     "name": "GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP",

@@ -120,6 +120,10 @@ func (m *mockSweepRepo) DeleteExpiredInvitations(_ context.Context, b int64, l i
 	return m.sweep(b, l)
 }
 
+func (m *mockSweepRepo) DeleteExpiredAssuranceChallenges(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
 func TestSweeper_DisabledWhenIntervalIsZero(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	s := newSweeper(&mockSweepRepo{}, nil, 0, 100, 30, 0, logger)
@@ -467,4 +471,43 @@ func TestSweeper_StartStopCleanly(t *testing.T) {
 
 	// Second stop() must be safe (idempotent).
 	stop()
+}
+
+// TestSweeperTargetsCoverEveryRepositorySweep is the guard the
+// assurance-challenges omission proved necessary: a DeleteExpired* method
+// can be declared on service.Repository, implemented in every driver, and
+// conformance-tested — and still never run in production if it is absent
+// from targets(). Pin the wiring by NAME so adding a Repository sweep
+// without wiring it here fails loudly.
+func TestSweeperTargetsCoverEveryRepositorySweep(t *testing.T) {
+	s := &sweeper{repo: &mockSweepRepo{}}
+	names := map[string]bool{}
+	for _, tgt := range s.targets() {
+		names[tgt.name] = true
+	}
+	// One entry per DeleteExpired* method on service.Repository. Update
+	// this list in the same change that adds the Repository method.
+	want := []string{
+		"webauthn_challenges",
+		"email_verification_tokens",
+		"password_reset_tokens",
+		"email_change_tokens",
+		"login_challenges",
+		"oauth_one_time_codes",
+		"native_token_redemptions",
+		"email_login_codes",
+		"magic_link_tokens",
+		"phone_verification_codes",
+		"qr_login_sessions",
+		"user_invitations",
+		"assurance_challenges",
+	}
+	for _, w := range want {
+		if !names[w] {
+			t.Errorf("sweeper.targets() is missing %q — the table will grow unbounded", w)
+		}
+	}
+	if len(names) != len(want) {
+		t.Errorf("targets() has %d entries, want %d — update this guard alongside targets()", len(names), len(want))
+	}
 }

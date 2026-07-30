@@ -17,7 +17,6 @@ package playintegrity
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -176,10 +175,14 @@ func failf(format string, args ...any) error {
 // Verify decodes integrityToken via Google and checks the verdict:
 // package name, nonce binding to expectedNonce, timestamp freshness,
 // PLAY_RECOGNIZED app integrity with an allowed signing-cert digest, and
-// MEETS_DEVICE_INTEGRITY. expectedNonce is the raw one-time challenge the
-// server issued (Play reports it base64url-encoded); single-use
-// enforcement is the caller's job.
-func (v *Verifier) Verify(ctx context.Context, integrityToken string, expectedNonce []byte) (*Verdict, error) {
+// MEETS_DEVICE_INTEGRITY.
+//
+// expectedNonce is the challenge STRING the server issued and the client
+// passed verbatim to the Play Integrity API. Play echoes that string back
+// in requestDetails.nonce, so the comparison is string-to-string (padding
+// normalized, since the challenge is itself base64url and producers differ
+// on padding). Single-use enforcement is the caller's job.
+func (v *Verifier) Verify(ctx context.Context, integrityToken, expectedNonce string) (*Verdict, error) {
 	if integrityToken == "" {
 		return nil, failf("empty integrity token")
 	}
@@ -192,8 +195,7 @@ func (v *Verifier) Verify(ctx context.Context, integrityToken string, expectedNo
 	if ext.RequestDetails.RequestPackageName != v.packageName {
 		return nil, failf("request package %q, want %q", ext.RequestDetails.RequestPackageName, v.packageName)
 	}
-	wantNonce := base64.RawURLEncoding.EncodeToString(expectedNonce)
-	if normalizeB64(ext.RequestDetails.Nonce) != wantNonce {
+	if expectedNonce == "" || normalizeB64(ext.RequestDetails.Nonce) != normalizeB64(expectedNonce) {
 		return nil, failf("nonce mismatch")
 	}
 	tsMillis, err := strconv.ParseInt(ext.RequestDetails.TimestampMillis, 10, 64)

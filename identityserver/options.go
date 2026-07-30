@@ -87,9 +87,13 @@ type Options struct {
 	IDVProvider idv.Provider
 
 	// AssuranceWebVerifier is the web (captcha) arm of the client-assurance
-	// layer, gating the unauthenticated auth endpoints. nil builds
-	// the Config.CaptchaProvider backend (the no-op verifier when CAPTCHA
-	// is disabled).
+	// layer, gating the unauthenticated auth endpoints. nil builds the
+	// backend named by GATEWAY_ASSURANCE_WEB_PROVIDER (Turnstile or
+	// reCAPTCHA v3); when no web provider is configured there is no web
+	// verifier at all, so browser clients cannot obtain an assurance token
+	// and only the mobile-attestation arms apply. Used only while
+	// GATEWAY_ASSURANCE_ENABLED is set — a disabled deployment ignores any
+	// verifier supplied here.
 	AssuranceWebVerifier assurance.Verifier
 
 	// DNSResolver is the TXT-lookup boundary VerifyDomain uses to confirm a

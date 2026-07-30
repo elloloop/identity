@@ -12071,8 +12071,10 @@ func (x *CreateAssuranceChallengeRequest) GetPlatform() string {
 type CreateAssuranceChallengeResponse struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	ChallengeId string                 `protobuf:"bytes,1,opt,name=challenge_id,json=challengeId,proto3" json:"challenge_id,omitempty"`
-	// challenge is a base64url nonce. The client uses this STRING's UTF-8
-	// bytes as the App Attest clientData / Play Integrity nonce input.
+	// challenge is a base64url nonce. iOS uses this STRING's UTF-8 bytes as
+	// the App Attest clientData; Android passes the STRING verbatim as the
+	// Play Integrity nonce (Play echoes it back and the server compares it
+	// as a string).
 	Challenge     string `protobuf:"bytes,2,opt,name=challenge,proto3" json:"challenge,omitempty"`
 	ExpiresAtMs   int64  `protobuf:"varint,3,opt,name=expires_at_ms,json=expiresAtMs,proto3" json:"expires_at_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields

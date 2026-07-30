@@ -98,7 +98,18 @@ adopt that split.
   rate-limiting can key on; that enforcement is the consumer's half.
 - Breaking release: `captcha_token` fields and `GATEWAY_CAPTCHA_*` are gone
   (see UPGRADE.md). Web clients gain one extra round-trip (the exchange),
-  matching App Check's shape.
+  matching App Check's shape. Removed variables are detected at boot and
+  fail closed, so the rename cannot silently disable enforcement.
+- **The web arm trades a per-request captcha for a reusable token.** Under
+  the old design every gated call carried a fresh captcha solution; now one
+  solve buys a token reusable until it expires. That is inherent to the App
+  Check shape (and is what removes a provider round-trip from the auth hot
+  path), but it is a real reduction in per-request assurance: a bot pays one
+  solve and replays for the token's lifetime. Mitigations shipped: the TTL is
+  operator-controlled and hard-capped (`GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS`,
+  max 24h), and all three assurance RPCs carry a per-IP rate limit. Deployments
+  wanting the old per-request property should set a short web TTL; single-use
+  (`jti` + redemption store) and IP binding are candidate follow-ups.
 - Genuine Apple attestations cannot be minted in CI. The verifier accepts
   injectable trust roots, and `appattesttest` mints spec-shaped attestation
   objects from a synthetic CA with per-check corruption knobs; the DER/CBOR
