@@ -109,11 +109,14 @@ import { Code } from "astro-expressive-code/components";
     </li>
     <li>
       <code>GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY</code> (default
-      <code>false</code>) — boot with assurance enabled and no env arm,
-      for deployments where every app identity lives in per-project
-      <code>config_json</code>. Not needed on Postgres (a control plane can
-      carry that config, so it is assumed); required to opt in on drivers
-      without one.
+      <code>false</code>) — required on <strong>every</strong> driver to boot
+      with assurance enabled and no env arm, acknowledging that only projects
+      carrying their own <code>assurance</code> block can mint a token. It is
+      only <em>useful</em> on Postgres, the sole driver with a control plane
+      to hold per-project <code>config_json</code>: on sqlite/memory every
+      request is pinned to the default project with no block to read, so
+      setting it yields a deployment where no client can ever obtain a token
+      and all six gated endpoints deny.
     </li>
     <li>
       <code>GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP</code>,
@@ -131,8 +134,10 @@ import { Code } from "astro-expressive-code/components";
     server-side under <code>GATEWAY_PROJECT_SECRETS_KEY</code> — exactly like
     <code>AdminSetProjectOAuthProvider</code> handles an OAuth client secret.
     Reads never echo the key back, only whether one is stored. A project's own
-    block always wins; the env identity applies to the default project when it
-    configures none.
+    block wins whenever the request <em>resolves</em> that project (via
+    <code>X-Project-Key</code> or a mapped auth-domain host); the zero-config
+    default-project pin carries no <code>config_json</code>, so those requests
+    always use the <code>GATEWAY_ASSURANCE_*</code> env identity.
   </p>
   <Code
     lang="bash"

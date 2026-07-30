@@ -66,11 +66,17 @@ func NewAssuranceResolver(defaultProjectID string, defaults AssuranceProviders, 
 // For returns the providers for the request's resolved project.
 //
 // Precedence mirrors OAuthResolver.exchangerFor: a project's OWN
-// config_json assurance block always wins — including for the default
-// project, so a stored block is never inert. Only when a project
-// configures nothing does the default project fall back to the
-// env-configured app identity; a non-default project inherits nothing
-// (isolation: one product's attestation must not satisfy another's).
+// config_json assurance block wins — including for the default project,
+// so a stored block is never shadowed. Only when a project configures
+// nothing does the default project fall back to the env-configured app
+// identity; a non-default project inherits nothing (isolation: one
+// product's attestation must not satisfy another's).
+//
+// Note the scope must actually CARRY the block: the zero-config
+// default-project pin (internal/middleware/project.go) stamps no
+// config_json, so those requests always take the env defaults. A stored
+// block on the default project applies to requests that resolve it
+// explicitly (X-Project-Key or a mapped auth-domain host).
 func (r *AssuranceResolver) For(ctx context.Context) AssuranceProviders {
 	scope := ProjectScopeFromContext(ctx)
 	if scope == nil || scope.ProjectID == "" {

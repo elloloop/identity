@@ -327,6 +327,24 @@ func (h *IdentityHandler) AdminSetProjectAssurance(
 	}), nil
 }
 
+// AdminGetProjectAssurance reads a project's client-assurance app identity
+// with the service-account key redacted. Operator-only.
+func (h *IdentityHandler) AdminGetProjectAssurance(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminGetProjectAssuranceRequest],
+) (*connect.Response[identitypb.AdminGetProjectAssuranceResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	view, err := h.controlAdmin.GetProjectAssurance(ctx, adminSecret(req.Header()), req.Msg.ProjectId)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminGetProjectAssuranceResponse{
+		Config: assuranceViewToProto(view),
+	}), nil
+}
+
 // assuranceInputFromProto maps the wire config onto the service input.
 // A nil message yields an empty input, which clears the block.
 func assuranceInputFromProto(in *identitypb.ProjectAssuranceConfig) *service.ProjectAssuranceInput {

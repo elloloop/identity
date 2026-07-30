@@ -215,3 +215,28 @@ func TestProjectAssuranceConfigHashAndIsZero(t *testing.T) {
 		t.Error("differing configs must hash differently")
 	}
 }
+
+// TestAssuranceResolver_ScopeWithoutBlockTakesDefaults pins the
+// zero-config default-project pin's behaviour explicitly: the
+// project-resolution middleware stamps no config_json on that path, so
+// those requests take the env identity. This is what makes
+// AdminSetProjectAssurance on the DEFAULT project apply only to requests
+// that resolve it (X-Project-Key / mapped host) — the docs, the resolver
+// comment and ADR-0012 all state it, so pin it.
+func TestAssuranceResolver_ScopeWithoutBlockTakesDefaults(t *testing.T) {
+	defaults := defaultsWithAppAttest(t)
+	r := NewAssuranceResolver("proj-default", defaults, nil, nil)
+
+	// Exactly the shape internal/middleware/project.go builds for the pin:
+	// a project id and access mode, no Assurance block.
+	pin := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "proj-default"})
+	if got := r.For(pin); got.AppAttest != defaults.AppAttest {
+		t.Fatal("the default-project pin must fall back to the env identity")
+	}
+
+	// The same project WITH a resolved block uses the block instead.
+	resolved := r.For(assuranceCtx("proj-default", iosBlock("TEAMOWNAAA", "com.example.own")))
+	if resolved.AppAttest == nil || resolved.AppAttest == defaults.AppAttest {
+		t.Fatal("a resolved default-project block must win over the env identity")
+	}
+}

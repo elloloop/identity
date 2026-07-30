@@ -83,8 +83,10 @@ adopt that split.
    under `GATEWAY_PROJECT_SECRETS_KEY` and an `AdminSetProjectAssurance`
    RPC that takes the key in plaintext and encrypts it server-side (an
    operator must never reimplement the at-rest format); a project's own
-   block always wins, and the default project inherits the
-   `GATEWAY_ASSURANCE_*` env identity only when it configures none. Web captcha stays deployment-global —
+   block wins on any request that RESOLVES that project, and the
+   `GATEWAY_ASSURANCE_*` env identity covers both the project that
+   configures none and the zero-config default-project pin (which carries
+   no `config_json` at all). Web captcha stays deployment-global —
    its secret authenticates our server to the captcha provider, not one app
    to us.
 

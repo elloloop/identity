@@ -1553,6 +1553,17 @@ message ProjectAssuranceConfig {
   bool has_service_account_key = 7;
 }
 
+// AdminGetProjectAssurance reads back a project's assurance app identity
+// with the service-account key REDACTED — has_service_account_key is the
+// signal that an encrypted key survived a rotation.
+message AdminGetProjectAssuranceRequest {
+  string project_id = 1;
+}
+
+message AdminGetProjectAssuranceResponse {
+  ProjectAssuranceConfig config = 1;
+}
+
 message AdminDeleteProjectOAuthProviderRequest {
   string project_id = 1;
   // provider is the provider key to remove: "google", "microsoft", "apple",
@@ -1902,6 +1913,7 @@ service IdentityService {
   // service-account key in plaintext and encrypts it server-side, so an
   // operator never has to reimplement the at-rest encryption.
   rpc AdminSetProjectAssurance(AdminSetProjectAssuranceRequest) returns (AdminSetProjectAssuranceResponse);
+  rpc AdminGetProjectAssurance(AdminGetProjectAssuranceRequest) returns (AdminGetProjectAssuranceResponse);
   rpc AdminDeleteProjectOAuthProvider(AdminDeleteProjectOAuthProviderRequest) returns (AdminDeleteProjectOAuthProviderResponse);
   rpc AdminListProjectOAuthProviders(AdminListProjectOAuthProvidersRequest) returns (AdminListProjectOAuthProvidersResponse);
 }

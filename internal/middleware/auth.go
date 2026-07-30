@@ -81,6 +81,7 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider": true,
 	"/identity.v1.IdentityService/AdminListProjectOAuthProviders":  true,
 	"/identity.v1.IdentityService/AdminSetProjectAssurance":        true,
+	"/identity.v1.IdentityService/AdminGetProjectAssurance":        true,
 	// CreateFirstPlatformAdmin is the trust-on-first-use bootstrap: a fresh
 	// deployer carries NO JWT (no operator user exists yet), so it must be
 	// JWT-exempt or the first operator could never be created. It is not

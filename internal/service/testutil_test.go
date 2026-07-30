@@ -137,6 +137,8 @@ type fakeRepo struct {
 	// that error so a test can exercise the caller's repo-error-propagation
 	// path. Default nil (success).
 	getPasskeyChallengeErr error
+	updateCounterErr       error
+	consumeChallengeErr    error
 	findUserByEmailErr     error
 	createPasskeyCredErr   error
 	getUserErr             error
@@ -1910,6 +1912,12 @@ func (r *fakeRepo) GetAttestedDeviceByKeyID(_ context.Context, keyID string) (*A
 func (r *fakeRepo) UpdateAttestedDeviceCounter(_ context.Context, nodeID string, fromCount, toCount, lastUsedAtMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// updateCounterErr lets a test drive the CAS outcomes the service must
+	// collapse to a replay rejection (ErrCounterStale / ErrNotFound) without
+	// racing a real concurrent assertion.
+	if r.updateCounterErr != nil {
+		return r.updateCounterErr
+	}
 	d, ok := r.attestedDevices[nodeID]
 	if !ok {
 		return fmt.Errorf("%w: attested device", ErrNotFound)
@@ -1942,6 +1950,9 @@ func (r *fakeRepo) CreateAssuranceChallenge(_ context.Context, c *AssuranceChall
 func (r *fakeRepo) ConsumeAssuranceChallenge(_ context.Context, nodeID string) (*AssuranceChallengeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.consumeChallengeErr != nil {
+		return nil, r.consumeChallengeErr
+	}
 	c, ok := r.assuranceChallenges[nodeID]
 	if !ok {
 		return nil, nil

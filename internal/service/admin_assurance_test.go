@@ -116,3 +116,19 @@ func TestAdminSetProjectAssurance(t *testing.T) {
 		}
 	})
 }
+
+// TestGetProjectAssuranceRejectsBadInput covers the read half's guards:
+// an unauthorized caller and a missing project id are both refused before
+// any store read.
+func TestGetProjectAssuranceRejectsBadInput(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+
+	if _, err := f.svc.GetProjectAssurance(ctx, "wrong", "proj"); err == nil {
+		t.Fatal("expected an authorization failure")
+	}
+	if _, err := f.svc.GetProjectAssurance(ctx, oauthAdminSecret, "  "); err == nil {
+		t.Fatal("expected a missing-project_id failure")
+	}
+}

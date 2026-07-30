@@ -121,6 +121,7 @@ const (
 	IdentityService_GetProjectConfig_FullMethodName                = "/identity.v1.IdentityService/GetProjectConfig"
 	IdentityService_AdminSetProjectOAuthProvider_FullMethodName    = "/identity.v1.IdentityService/AdminSetProjectOAuthProvider"
 	IdentityService_AdminSetProjectAssurance_FullMethodName        = "/identity.v1.IdentityService/AdminSetProjectAssurance"
+	IdentityService_AdminGetProjectAssurance_FullMethodName        = "/identity.v1.IdentityService/AdminGetProjectAssurance"
 	IdentityService_AdminDeleteProjectOAuthProvider_FullMethodName = "/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider"
 	IdentityService_AdminListProjectOAuthProviders_FullMethodName  = "/identity.v1.IdentityService/AdminListProjectOAuthProviders"
 )
@@ -314,6 +315,7 @@ type IdentityServiceClient interface {
 	// service-account key in plaintext and encrypts it server-side, so an
 	// operator never has to reimplement the at-rest encryption.
 	AdminSetProjectAssurance(ctx context.Context, in *AdminSetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminSetProjectAssuranceResponse, error)
+	AdminGetProjectAssurance(ctx context.Context, in *AdminGetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminGetProjectAssuranceResponse, error)
 	AdminDeleteProjectOAuthProvider(ctx context.Context, in *AdminDeleteProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminDeleteProjectOAuthProviderResponse, error)
 	AdminListProjectOAuthProviders(ctx context.Context, in *AdminListProjectOAuthProvidersRequest, opts ...grpc.CallOption) (*AdminListProjectOAuthProvidersResponse, error)
 }
@@ -1346,6 +1348,16 @@ func (c *identityServiceClient) AdminSetProjectAssurance(ctx context.Context, in
 	return out, nil
 }
 
+func (c *identityServiceClient) AdminGetProjectAssurance(ctx context.Context, in *AdminGetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminGetProjectAssuranceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminGetProjectAssuranceResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminGetProjectAssurance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) AdminDeleteProjectOAuthProvider(ctx context.Context, in *AdminDeleteProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminDeleteProjectOAuthProviderResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminDeleteProjectOAuthProviderResponse)
@@ -1555,6 +1567,7 @@ type IdentityServiceServer interface {
 	// service-account key in plaintext and encrypts it server-side, so an
 	// operator never has to reimplement the at-rest encryption.
 	AdminSetProjectAssurance(context.Context, *AdminSetProjectAssuranceRequest) (*AdminSetProjectAssuranceResponse, error)
+	AdminGetProjectAssurance(context.Context, *AdminGetProjectAssuranceRequest) (*AdminGetProjectAssuranceResponse, error)
 	AdminDeleteProjectOAuthProvider(context.Context, *AdminDeleteProjectOAuthProviderRequest) (*AdminDeleteProjectOAuthProviderResponse, error)
 	AdminListProjectOAuthProviders(context.Context, *AdminListProjectOAuthProvidersRequest) (*AdminListProjectOAuthProvidersResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
@@ -1872,6 +1885,9 @@ func (UnimplementedIdentityServiceServer) AdminSetProjectOAuthProvider(context.C
 }
 func (UnimplementedIdentityServiceServer) AdminSetProjectAssurance(context.Context, *AdminSetProjectAssuranceRequest) (*AdminSetProjectAssuranceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminSetProjectAssurance not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminGetProjectAssurance(context.Context, *AdminGetProjectAssuranceRequest) (*AdminGetProjectAssuranceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminGetProjectAssurance not implemented")
 }
 func (UnimplementedIdentityServiceServer) AdminDeleteProjectOAuthProvider(context.Context, *AdminDeleteProjectOAuthProviderRequest) (*AdminDeleteProjectOAuthProviderResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminDeleteProjectOAuthProvider not implemented")
@@ -3736,6 +3752,24 @@ func _IdentityService_AdminSetProjectAssurance_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_AdminGetProjectAssurance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminGetProjectAssuranceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminGetProjectAssurance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminGetProjectAssurance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminGetProjectAssurance(ctx, req.(*AdminGetProjectAssuranceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_AdminDeleteProjectOAuthProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminDeleteProjectOAuthProviderRequest)
 	if err := dec(in); err != nil {
@@ -4186,6 +4220,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminSetProjectAssurance",
 			Handler:    _IdentityService_AdminSetProjectAssurance_Handler,
+		},
+		{
+			MethodName: "AdminGetProjectAssurance",
+			Handler:    _IdentityService_AdminGetProjectAssurance_Handler,
 		},
 		{
 			MethodName: "AdminDeleteProjectOAuthProvider",

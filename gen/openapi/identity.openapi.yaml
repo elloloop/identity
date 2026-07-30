@@ -361,6 +361,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.AdminDeleteProjectOAuthProviderResponse'
+  /identity.v1.IdentityService/AdminGetProjectAssurance:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: AdminGetProjectAssurance
+      operationId: identity.v1.IdentityService.AdminGetProjectAssurance
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.AdminGetProjectAssuranceRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.AdminGetProjectAssuranceResponse'
   /identity.v1.IdentityService/AdminListProjectOAuthProviders:
     post:
       tags:
@@ -4154,6 +4189,26 @@ components:
     identity.v1.AdminDeleteProjectOAuthProviderResponse:
       type: object
       title: AdminDeleteProjectOAuthProviderResponse
+      additionalProperties: false
+    identity.v1.AdminGetProjectAssuranceRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+      title: AdminGetProjectAssuranceRequest
+      additionalProperties: false
+      description: |-
+        AdminGetProjectAssurance reads back a project's assurance app identity
+         with the service-account key REDACTED — has_service_account_key is the
+         signal that an encrypted key survived a rotation.
+    identity.v1.AdminGetProjectAssuranceResponse:
+      type: object
+      properties:
+        config:
+          title: config
+          $ref: '#/components/schemas/identity.v1.ProjectAssuranceConfig'
+      title: AdminGetProjectAssuranceResponse
       additionalProperties: false
     identity.v1.AdminHelpRequest:
       type: object
