@@ -16,15 +16,17 @@ Highlights for quick recall:
   Conformance suites get extended, not bypassed.
 - **Clean commit messages.** Imperative mood, no AI attribution, no
   references to inaccessible context.
-- **PR review gate on every PR.** A multi-agent gate (Triage → Review →
-  Verify) via `Workflow({name: 'review-gate', args: <pr-number>})`: five
-  always-on reviewers (Product, Security, Performance, Maintainability,
-  Correctness) plus a Contract/Migration reviewer when proto/API/schema/
-  migration files change and an Accessibility reviewer when UI changes,
-  with every blocking finding adversarially re-verified. A maintainer
-  step that runs inside the Claude Code harness; advisory (posts a
-  comment, never blocks merge), runs alongside CI. Clear its confirmed
-  blockers before merging.
+- **PR review gate on every PR.** A fixed-roster multi-agent gate via
+  `Workflow({name: 'review-gate', args: <pr-number>})`: eight specialist
+  reviewers (Correctness, Security & Auth, API Contract, Data &
+  Migrations, Config & Operability, Maintainability & Tests, Performance
+  & Concurrency, Product & Docs) all launch on every run; each first
+  decides whether its lens applies to the diff (skipping cleanly when
+  not), then does its complete review single-handed — no triage stage,
+  no verification stage, no sub-agents. A maintainer step that runs
+  inside the Claude Code harness; advisory (posts a comment, never
+  blocks merge), runs alongside CI. Clear its blocking findings before
+  merging.
 
 If existing code violates these rules and your change touches it, fix
 the violation as part of your change. Do not preserve the wrong pattern.
