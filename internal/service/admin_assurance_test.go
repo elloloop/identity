@@ -182,3 +182,65 @@ func TestGetProjectAssuranceRejectsBadInput(t *testing.T) {
 		t.Fatal("expected a missing-project_id failure")
 	}
 }
+
+// TestAdminSetProjectAssuranceRejectsBadInput covers the guard branches:
+// authorization, a missing project id, a nil config, and a stored blob
+// that is not decodable as the assurance subtree.
+func TestAdminSetProjectAssuranceRejectsBadInput(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	if _, err := f.svc.AdminSetProjectAssurance(ctx, "wrong", projectID, &ProjectAssuranceInput{}); err == nil {
+		t.Error("expected an authorization failure")
+	}
+	if _, err := f.svc.AdminSetProjectAssurance(ctx, oauthAdminSecret, "  ", &ProjectAssuranceInput{}); err == nil {
+		t.Error("expected a missing-project_id failure")
+	}
+	if _, err := f.svc.AdminSetProjectAssurance(ctx, oauthAdminSecret, projectID, nil); err == nil {
+		t.Error("expected a nil-config failure")
+	}
+
+	t.Run("stored config that is not JSON is rejected", func(t *testing.T) {
+		ctx := context.Background()
+		seedProjectConfig(t, f, projectID, "not json at all")
+		if _, err := f.svc.AdminSetProjectAssurance(ctx, oauthAdminSecret, projectID, &ProjectAssuranceInput{
+			IOSTeamID: "T", IOSBundleID: "b",
+		}); err == nil {
+			t.Error("expected a decode failure on a corrupt stored config")
+		}
+		if _, err := f.svc.GetProjectAssurance(ctx, oauthAdminSecret, projectID); err == nil {
+			t.Error("the read half must reject a corrupt stored config too")
+		}
+	})
+
+	t.Run("stored assurance block that is not an object is rejected", func(t *testing.T) {
+		ctx := context.Background()
+		id := seedOAuthProject(t, f)
+		seedProjectConfig(t, f, id, `{"assurance":"nope"}`)
+		if _, err := f.svc.GetProjectAssurance(ctx, oauthAdminSecret, id); err == nil {
+			t.Error("expected a decode failure on a malformed assurance block")
+		}
+	})
+}
+
+// TestAdminSetProjectAssuranceWithoutSecretsKey pins that an unset
+// GATEWAY_PROJECT_SECRETS_KEY is reported as such rather than as a raw
+// crypto error, since it is the likeliest misconfiguration.
+func TestAdminSetProjectAssuranceWithoutSecretsKey(t *testing.T) {
+	t.Parallel()
+	f := newAdminFixture(oauthAdminSecret)
+	f.svc.secretsKey = nil
+	ctx := context.Background()
+	projectID := seedOAuthProject(t, f)
+
+	_, err := f.svc.AdminSetProjectAssurance(ctx, oauthAdminSecret, projectID, &ProjectAssuranceInput{
+		AndroidPackageName:       "com.example.app",
+		AndroidCertSHA256Digests: []string{"ZGln"},
+		AndroidServiceAccountKey: `{"client_email":"a"}`,
+	})
+	if err == nil {
+		t.Fatal("expected a failure when no secrets key is configured")
+	}
+}

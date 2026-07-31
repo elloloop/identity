@@ -772,3 +772,102 @@ func TestAttestKeyIDIsCanonicalized(t *testing.T) {
 		t.Error("a key id that is not a SHA-256 must be rejected")
 	}
 }
+
+// TestAssuranceServiceGuardBranches covers the remaining guard branches on
+// the unauthenticated surface: the disabled-deployment short-circuits on
+// each RPC, the unknown-platform rejection, and the nil-resolver path an
+// embedder hits when it never calls WithAssurance.
+func TestAssuranceServiceGuardBranches(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("challenge is refused when assurance is disabled", func(t *testing.T) {
+		svc := newTestAuthService(t, newFakeRepo())
+		if _, err := svc.CreateAssuranceChallenge(ctx, AssurancePlatformIOS); !errors.Is(err, ErrAssuranceDisabled) {
+			t.Fatalf("err = %v, want ErrAssuranceDisabled", err)
+		}
+	})
+
+	t.Run("unknown platform is an invalid argument", func(t *testing.T) {
+		svc := newAssuranceService(t, newFakeRepo(), nil, fakeWebVerifier{})
+		if _, err := svc.IssueAssuranceToken(ctx, AssuranceEvidence{Platform: "symbian"}); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("no resolver wired yields no providers", func(t *testing.T) {
+		// An embedder that enables assurance but never calls WithAssurance:
+		// every platform must report disabled rather than panic.
+		svc := newTestAuthService(t, newFakeRepo())
+		svc.cfg.AssuranceEnabled = true
+		svc.cfg.AssuranceChallengeTTLSeconds = 300
+		svc.cfg.AssuranceTokenTTLSeconds = 3600
+		for _, platform := range []string{AssurancePlatformIOS, AssurancePlatformAndroid, AssurancePlatformWeb} {
+			if _, err := svc.IssueAssuranceToken(ctx, AssuranceEvidence{
+				Platform: platform, ChallengeID: "x",
+			}); !errors.Is(err, ErrAssuranceDisabled) {
+				t.Errorf("%s: err = %v, want ErrAssuranceDisabled", platform, err)
+			}
+		}
+	})
+
+	t.Run("challenge storage failure propagates", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.createChallengeErr = errors.New("datastore down")
+		svc := newAssuranceService(t, repo, nil, fakeWebVerifier{})
+		_, err := svc.CreateAssuranceChallenge(ctx, AssurancePlatformIOS)
+		if err == nil || errors.Is(err, ErrAssuranceFailed) {
+			t.Fatalf("err = %v; a storage outage must surface as an error, not a rejection", err)
+		}
+	})
+}
+
+// TestRefreshAssuranceTokenGuards covers the remaining refresh branches:
+// a stored device key that no longer decodes, a malformed client key id,
+// and a repository read failure — none of which may be reported as a
+// verification failure when they are OUR problem rather than bad evidence.
+func TestRefreshAssuranceTokenGuards(t *testing.T) {
+	authy, err := appattesttest.NewAuthority(time.Now())
+	if err != nil {
+		t.Fatalf("NewAuthority: %v", err)
+	}
+	ctx := context.Background()
+
+	t.Run("malformed client key id is rejected", func(t *testing.T) {
+		svc := newAssuranceService(t, newFakeRepo(), authy, nil)
+		ch, err := svc.CreateAssuranceChallenge(ctx, AssurancePlatformIOS)
+		if err != nil {
+			t.Fatalf("challenge: %v", err)
+		}
+		if _, err := svc.RefreshAssuranceToken(ctx, ch.ID, "!!not-base64!!", []byte("a")); !errors.Is(err, ErrAssuranceFailed) {
+			t.Fatalf("err = %v, want ErrAssuranceFailed", err)
+		}
+	})
+
+	t.Run("corrupt stored device key is an error, not a rejection", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newAssuranceService(t, repo, authy, nil)
+		chID, att := mintAttestation(ctx, t, svc, authy)
+		if _, err := svc.IssueAssuranceToken(ctx, AssuranceEvidence{
+			Platform: AssurancePlatformIOS, ChallengeID: chID,
+			KeyID: att.KeyID, AttestationObject: att.CBOR,
+		}); err != nil {
+			t.Fatalf("attest: %v", err)
+		}
+		// Corrupt the stored SPKI behind the service's back.
+		dev, _ := repo.GetAttestedDeviceByKeyID(ctx, att.KeyID)
+		repo.attestedDevices[dev.NodeID].PublicKeySPKI = "!!!"
+
+		ch, err := svc.CreateAssuranceChallenge(ctx, AssurancePlatformIOS)
+		if err != nil {
+			t.Fatalf("challenge: %v", err)
+		}
+		assertion, err := appattesttest.MintAssertion(att.Key, assurAppID, 1, []byte(ch.Challenge), nil)
+		if err != nil {
+			t.Fatalf("MintAssertion: %v", err)
+		}
+		_, err = svc.RefreshAssuranceToken(ctx, ch.ID, att.KeyID, assertion)
+		if err == nil || errors.Is(err, ErrAssuranceFailed) {
+			t.Fatalf("err = %v; corrupt STORED state is our problem, not bad evidence", err)
+		}
+	})
+}

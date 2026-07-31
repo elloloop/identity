@@ -398,3 +398,137 @@ func TestValidate_AssuranceRetentionBoundAppliesWhenDisabled(t *testing.T) {
 		t.Fatal("Validate() = nil; the overflow bound must apply even when assurance is disabled")
 	}
 }
+
+// TestAssuranceTTLAccessors covers the duration accessors, including the
+// web arm's fallback to the global TTL when its own knob is unset.
+func TestAssuranceTTLAccessors(t *testing.T) {
+	c := &Config{AssuranceTokenTTLSeconds: 3600, AssuranceWebTokenTTLSeconds: 300}
+	if got := c.AssuranceTokenTTL(); got.Seconds() != 3600 {
+		t.Errorf("AssuranceTokenTTL = %v", got)
+	}
+	if got := c.AssuranceWebTokenTTL(); got.Seconds() != 300 {
+		t.Errorf("AssuranceWebTokenTTL = %v", got)
+	}
+	c.AssuranceWebTokenTTLSeconds = 0
+	if got := c.AssuranceWebTokenTTL(); got.Seconds() != 3600 {
+		t.Errorf("AssuranceWebTokenTTL with the knob unset = %v; want the global 3600s", got)
+	}
+}
+
+// TestValidateAssuranceLifetimeBounds walks every lifetime branch: each TTL
+// floored and capped, and the web TTL's 0-means-inherit sentinel.
+func TestValidateAssuranceLifetimeBounds(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			AssuranceEnabled:             true,
+			AssuranceWebProvider:         AssuranceWebProviderTurnstile,
+			AssuranceTurnstileSecret:     "s",
+			AssuranceTurnstileSiteKey:    "k",
+			AssuranceChallengeTTLSeconds: 300,
+			AssuranceTokenTTLSeconds:     3600,
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr bool
+	}{
+		{"challenge TTL zero", func(c *Config) { c.AssuranceChallengeTTLSeconds = 0 }, true},
+		{"challenge TTL negative", func(c *Config) { c.AssuranceChallengeTTLSeconds = -1 }, true},
+		{"token TTL zero", func(c *Config) { c.AssuranceTokenTTLSeconds = 0 }, true},
+		{"token TTL negative", func(c *Config) { c.AssuranceTokenTTLSeconds = -1 }, true},
+		{"web TTL negative", func(c *Config) { c.AssuranceWebTokenTTLSeconds = -1 }, true},
+		{"web TTL over cap", func(c *Config) { c.AssuranceWebTokenTTLSeconds = MaxAssuranceTokenTTLSeconds + 1 }, true},
+		{"web TTL zero inherits", func(c *Config) { c.AssuranceWebTokenTTLSeconds = 0 }, false},
+		{"web TTL at cap", func(c *Config) { c.AssuranceWebTokenTTLSeconds = MaxAssuranceTokenTTLSeconds }, false},
+		{
+			"retention shorter than the token TTL",
+			func(c *Config) { c.AssuranceDeviceRetentionDays = 1; c.AssuranceTokenTTLSeconds = 86400 },
+			true,
+		},
+		{"retention disabled skips the relation", func(c *Config) { c.AssuranceDeviceRetentionDays = 0 }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := base()
+			tc.mutate(c)
+			err := c.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatal("Validate() = nil; want error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("Validate() = %v; want nil", err)
+			}
+		})
+	}
+}
+
+// TestValidateAssuranceArmBranches walks the remaining arm branches: the
+// iOS pair, the iOS environment, and Android completeness in both
+// directions.
+func TestValidateAssuranceArmBranches(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			AssuranceEnabled:             true,
+			AssuranceChallengeTTLSeconds: 300,
+			AssuranceTokenTTLSeconds:     3600,
+			AssuranceAllowProjectOnly:    true,
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr bool
+	}{
+		{"ios bundle without team", func(c *Config) { c.AssuranceIOSBundleID = "com.example.app" }, true},
+		{"ios env development", func(c *Config) {
+			c.AssuranceIOSTeamID, c.AssuranceIOSBundleID, c.AssuranceIOSEnv = "T", "b", "development"
+		}, false},
+		{"android package without digests", func(c *Config) {
+			c.AssuranceAndroidPackageName, c.AssuranceAndroidSAKeyJSON = "com.example.app", "{}"
+		}, true},
+		{"android package without key", func(c *Config) {
+			c.AssuranceAndroidPackageName, c.AssuranceAndroidCertDigests = "com.example.app", "ZGln"
+		}, true},
+		{"android complete", func(c *Config) {
+			c.AssuranceAndroidPackageName = "com.example.app"
+			c.AssuranceAndroidCertDigests = "ZGln"
+			c.AssuranceAndroidSAKeyJSON = "{}"
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := base()
+			tc.mutate(c)
+			err := c.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatal("Validate() = nil; want error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("Validate() = %v; want nil", err)
+			}
+		})
+	}
+}
+
+// TestIsDefaultProject pins the single source of the default/non-default
+// rule that the OAuth and assurance resolvers both consult: an unset
+// default id, or an unset request id, means "default", so env settings
+// apply exactly as they did before per-project config existed.
+func TestIsDefaultProject(t *testing.T) {
+	for _, tc := range []struct {
+		defaultID, id string
+		want          bool
+	}{
+		{"", "anything", true},
+		{"proj-default", "", true},
+		{"proj-default", "proj-default", true},
+		{"proj-default", "proj-other", false},
+	} {
+		if got := IsDefaultProject(tc.defaultID, tc.id); got != tc.want {
+			t.Errorf("IsDefaultProject(%q, %q) = %v, want %v", tc.defaultID, tc.id, got, tc.want)
+		}
+		c := &Config{DefaultProjectID: tc.defaultID}
+		if got := c.IsDefaultProject(tc.id); got != tc.want {
+			t.Errorf("Config.IsDefaultProject(%q) = %v, want %v", tc.id, got, tc.want)
+		}
+	}
+}

@@ -139,6 +139,7 @@ type fakeRepo struct {
 	getPasskeyChallengeErr error
 	updateCounterErr       error
 	consumeChallengeErr    error
+	createChallengeErr     error
 	findUserByEmailErr     error
 	createPasskeyCredErr   error
 	getUserErr             error
@@ -1933,6 +1934,9 @@ func (r *fakeRepo) UpdateAttestedDeviceCounter(_ context.Context, nodeID string,
 func (r *fakeRepo) CreateAssuranceChallenge(_ context.Context, c *AssuranceChallengeRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.createChallengeErr != nil {
+		return "", r.createChallengeErr
+	}
 	if r.assuranceChallenges == nil {
 		r.assuranceChallenges = make(map[string]*AssuranceChallengeRecord)
 	}

@@ -283,3 +283,58 @@ func TestAssuranceResolver_DefaultProjectPathsAgree(t *testing.T) {
 		}
 	})
 }
+
+// TestAssuranceResolverErrorPaths covers the build/decrypt failure
+// branches: a missing deployment secrets key (named explicitly, since it
+// is the likeliest misconfiguration), and a cached NEGATIVE result so a
+// persistently misconfigured project neither rebuilds nor re-logs.
+func TestAssuranceResolverErrorPaths(t *testing.T) {
+	t.Run("missing secrets key is named", func(t *testing.T) {
+		r := NewAssuranceResolver("proj-default", AssuranceProviders{}, nil, nil)
+		got := r.For(assuranceCtx("proj-a", ProjectAssuranceConfig{
+			Android: &ProjectAssuranceAndroid{
+				PackageName:          "com.example.a",
+				CertSHA256Digests:    []string{"ZGln"},
+				ServiceAccountKeyEnc: "ciphertext",
+			},
+		}))
+		if got.PlayIntegrity != nil {
+			t.Error("no secrets key must leave PlayIntegrity nil")
+		}
+	})
+
+	t.Run("a failed build is cached, not retried per request", func(t *testing.T) {
+		r := NewAssuranceResolver("proj-default", AssuranceProviders{}, make([]byte, 32), nil)
+		cfg := ProjectAssuranceConfig{
+			Android: &ProjectAssuranceAndroid{
+				PackageName:          "com.example.a",
+				CertSHA256Digests:    []string{"ZGln"},
+				ServiceAccountKeyEnc: "not-decryptable",
+			},
+		}
+		first := r.For(assuranceCtx("proj-a", cfg))
+		second := r.For(assuranceCtx("proj-a", cfg))
+		if first.PlayIntegrity != nil || second.PlayIntegrity != nil {
+			t.Error("an undecryptable key must yield no verifier on either call")
+		}
+	})
+
+	t.Run("an unbuildable android config leaves the arm nil", func(t *testing.T) {
+		key := make([]byte, 32)
+		enc, err := secretcrypto.Encrypt("not-a-service-account-key", key)
+		if err != nil {
+			t.Fatalf("encrypt: %v", err)
+		}
+		r := NewAssuranceResolver("proj-default", AssuranceProviders{}, key, nil)
+		got := r.For(assuranceCtx("proj-a", ProjectAssuranceConfig{
+			Android: &ProjectAssuranceAndroid{
+				PackageName:          "com.example.a",
+				CertSHA256Digests:    []string{"ZGln"},
+				ServiceAccountKeyEnc: enc,
+			},
+		}))
+		if got.PlayIntegrity != nil {
+			t.Error("a malformed service-account key must leave PlayIntegrity nil")
+		}
+	})
+}

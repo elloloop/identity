@@ -74,12 +74,12 @@ func (a ProjectAssuranceConfig) isZero() bool { return a.IOS == nil && a.Android
 
 // hash pins a resolver cache entry to one exact assurance config; any
 // field change produces a new hash and therefore a rebuild.
+//
+// The struct holds only strings, string slices and pointers to the same,
+// so json.Marshal cannot fail — the error is discarded rather than
+// guarded with an unreachable branch.
 func (a ProjectAssuranceConfig) hash() string {
-	raw, err := json.Marshal(a)
-	if err != nil {
-		// Marshal of this struct cannot fail; keep the resolver safe anyway.
-		return "unhashable"
-	}
+	raw, _ := json.Marshal(a) //nolint:errchkjson // only strings and slices; cannot fail
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
