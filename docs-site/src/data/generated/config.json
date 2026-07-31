@@ -117,6 +117,15 @@
     "anchor": "client-assurance"
   },
   {
+    "name": "GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS",
+    "type": "integer",
+    "default": "90",
+    "required": false,
+    "description": "bounds how long an attested device row is kept after its LAST USE.",
+    "category": "Client assurance",
+    "anchor": "client-assurance"
+  },
+  {
     "name": "GATEWAY_ASSURANCE_ENABLED",
     "type": "boolean",
     "default": "false",

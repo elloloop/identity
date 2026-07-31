@@ -33,7 +33,10 @@ New (all optional): `GATEWAY_ASSURANCE_IOS_TEAM_ID` / `_IOS_BUNDLE_ID` /
 `_IOS_ENV`, `GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME` /
 `_ANDROID_CERT_SHA256_DIGESTS` / `_ANDROID_SA_KEY_JSON`,
 `GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS`,
-`GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS`; per-project app identities go
+`GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS`,
+`GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS` (default 90 — how long an
+attested device survives after its last refresh; 0 keeps them forever),
+`GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP`; per-project app identities go
 in `config_json` `assurance`, authored with the operator RPC
 `AdminSetProjectAssurance` (it takes the Play service-account key in
 plaintext and encrypts it server-side under `GATEWAY_PROJECT_SECRETS_KEY`,

@@ -517,6 +517,7 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.SweeperBatchSize,
 		deps.Config.SweeperGraceSeconds,
 		deps.Config.AuditRetentionDays,
+		deps.Config.AssuranceDeviceRetentionDays,
 		logger,
 	)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)

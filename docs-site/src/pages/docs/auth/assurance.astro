@@ -202,9 +202,21 @@ curl -s https://id.example.com/identity.v1.IdentityService/PasswordSignup \\
     counter). A reinstall or key regeneration produces a <em>new</em> key, so
     those rows would otherwise accumulate forever — the sweeper reaps devices
     whose last refresh predates the retention window, alongside expired
-    challenges. A reaped device re-attests on its next refresh with no user
-    interaction. Both sweeps run on the existing
-    <code>GATEWAY_SWEEPER_*</code> schedule.
+    challenges. The window is
+    <code>GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS</code> (default 90; 0
+    disables the sweep and keeps devices forever) — a <em>retention</em>
+    window, deliberately independent of <code>GATEWAY_SWEEPER_GRACE_SECONDS</code>,
+    which is expiry slack for rows that carry their own expiry. It must
+    exceed the token TTL, and the server refuses to boot if it does not: a
+    device reaped before its own token expires could never refresh. Both
+    sweeps run on the existing <code>GATEWAY_SWEEPER_*</code> schedule.
+  </p>
+  <p>
+    Note that reaping a device is not free for the client: Apple's
+    <code>attestKey</code> may be called only once per generated key, so a
+    client that persists its Secure Enclave key must generate a new one to
+    re-attest, and each re-attestation mints a new device id. Keep the window
+    generous.
   </p>
 
   <h2>What assurance is not</h2>

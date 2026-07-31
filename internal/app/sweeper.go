@@ -84,6 +84,11 @@ const accountDeletionLabel = "pending_deletion_users"
 // retention step of a sweep cycle (GDPR Art 5(1)(e) storage limitation).
 const auditRetentionLabel = "audit_events"
 
+// deviceRetentionLabel is the metrics node_type label for the attested-device
+// retention sweep. Like the audit sweep this is NOT an expiry target: a device
+// row has no expires_at_ms, so it must never share the expiry cutoff.
+const deviceRetentionLabel = "attested_devices"
+
 // auditRetentionDay is the fixed-duration day used to turn the configured
 // retention window (whole days) into a cutoff instant. A coarse retention
 // window (months) needs no calendar/DST precision, so a flat 24h day matches
@@ -105,6 +110,9 @@ type sweeper struct {
 	// deletes events older than now - auditRetentionDays. 0 (or negative)
 	// disables the audit-retention step — the trail is kept forever.
 	auditRetentionDays int
+	// deviceRetentionDays bounds how long an attested device is kept after
+	// its LAST USE. 0 (or negative) disables the step.
+	deviceRetentionDays int
 
 	// now is the time source; tests override it. nil means time.Now.
 	now func() time.Time
@@ -121,7 +129,7 @@ type sweeper struct {
 // sweeping is disabled (interval <= 0); the caller must handle the
 // nil case. purger may be nil to disable the account-deletion sweep.
 // auditRetentionDays <= 0 disables the audit-retention step.
-func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batch, graceSec, auditRetentionDays int, logger *zap.Logger) *sweeper {
+func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batch, graceSec, auditRetentionDays, deviceRetentionDays int, logger *zap.Logger) *sweeper {
 	if intervalSec <= 0 {
 		return nil
 	}
@@ -136,14 +144,15 @@ func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batc
 	}
 	initSweeperMetrics()
 	return &sweeper{
-		repo:               repo,
-		purger:             purger,
-		logger:             logger,
-		interval:           time.Duration(intervalSec) * time.Second,
-		batch:              batch,
-		grace:              time.Duration(graceSec) * time.Second,
-		auditRetentionDays: auditRetentionDays,
-		skipLogged:         make(map[string]bool, 5),
+		repo:                repo,
+		purger:              purger,
+		logger:              logger,
+		interval:            time.Duration(intervalSec) * time.Second,
+		batch:               batch,
+		grace:               time.Duration(graceSec) * time.Second,
+		auditRetentionDays:  auditRetentionDays,
+		deviceRetentionDays: deviceRetentionDays,
+		skipLogged:          make(map[string]bool, 5),
 	}
 }
 
@@ -195,6 +204,37 @@ func (s *sweeper) runOnce(ctx context.Context) {
 	now := nowFn()
 	s.purgeExpiredAccountDeletions(ctx, now.UnixMilli())
 	s.sweepAuditRetention(ctx, now)
+	s.sweepDeviceRetention(ctx, now)
+}
+
+// sweepDeviceRetention deletes attested devices whose LAST USE predates the
+// retention window (now - deviceRetentionDays). It deliberately does NOT ride
+// the expiry cutoff the targets() sweeps share: that cutoff is `now - grace`
+// (default 60s), which is slack past a row's OWN expires_at_ms. A device row
+// has no expiry — reaping one forces a full re-attestation, and Apple's
+// attestKey may be called only once per generated key — so sharing the cutoff
+// would erase the device registry roughly every tick and break refresh
+// entirely. No-op when retention is disabled (deviceRetentionDays <= 0).
+func (s *sweeper) sweepDeviceRetention(ctx context.Context, now time.Time) {
+	if s.deviceRetentionDays <= 0 {
+		return
+	}
+	cutoffMs := now.Add(-time.Duration(s.deviceRetentionDays) * auditRetentionDay).UnixMilli()
+	if err := s.repo.DeleteStaleAttestedDevices(ctx, cutoffMs, s.batch); err != nil {
+		if errors.Is(err, service.ErrSweepNotImplemented) {
+			s.logSkipOnce(deviceRetentionLabel)
+			return
+		}
+		sweeperErrors.WithLabelValues(deviceRetentionLabel).Inc()
+		s.logger.Warn(
+			"sweeper_device_retention_failed",
+			zap.Int64("cutoff_ms", cutoffMs),
+			zap.Int("retention_days", s.deviceRetentionDays),
+			zap.Error(err),
+		)
+		return
+	}
+	sweeperRuns.WithLabelValues(deviceRetentionLabel).Inc()
 }
 
 // sweepAuditRetention deletes audit events older than the retention window
@@ -260,7 +300,6 @@ func (s *sweeper) targets() []nodeTypeSweeper {
 		{"qr_login_sessions", s.repo.DeleteExpiredQrLoginSessions},
 		{"user_invitations", s.repo.DeleteExpiredInvitations},
 		{"assurance_challenges", s.repo.DeleteExpiredAssuranceChallenges},
-		{"attested_devices", s.repo.DeleteStaleAttestedDevices},
 	}
 }
 

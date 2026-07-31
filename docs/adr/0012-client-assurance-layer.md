@@ -121,7 +121,11 @@ adopt that split.
   rows whose `last_used_at_ms` predates the retention window (backed by a
   `(project_id, last_used_at_ms)` index); a reaped device simply
   re-attests on its next refresh, which costs one round-trip and no user
-  interaction.
+  interaction. The window is its own knob
+  (`GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS`, default 90) with its own
+  sweep step, deliberately NOT the shared expiry cutoff: that cutoff is
+  slack past a row's own `expires_at_ms`, and a device row has no expiry.
+  Config validation requires the window to exceed the token TTL.
 - Genuine Apple attestations cannot be minted in CI. The verifier accepts
   injectable trust roots, and `appattesttest` mints spec-shaped attestation
   objects from a synthetic CA with per-check corruption knobs; the DER/CBOR

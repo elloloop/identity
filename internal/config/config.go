@@ -67,6 +67,15 @@ const (
 	// only widens the replay surface and the unreclaimed-row window.
 	MaxAssuranceChallengeTTLSeconds = 3600
 
+	// DefaultAssuranceDeviceRetentionDays is how long an attested device row
+	// is kept after its last refresh. It must be MUCH longer than the token
+	// TTL: the device row is what makes refresh (and the duplicate-key_id
+	// replay guard) work, and Apple's attestKey may be called only once per
+	// generated key, so a client that persists its Secure Enclave key cannot
+	// simply re-attest. 90 days keeps a returning user's device while still
+	// reaping devices that are genuinely gone.
+	DefaultAssuranceDeviceRetentionDays = 90
+
 	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
 	// users 12 and under (i.e. under 13) are in the protected CHILD band.
 	DefaultAgeGateChildMaxAge = 12
@@ -542,6 +551,12 @@ type Config struct {
 	// AssuranceAndroidSAKeyJSON is the Google service-account key (inline
 	// JSON) used to decode Play Integrity verdicts server-side.
 	AssuranceAndroidSAKeyJSON string
+	// AssuranceDeviceRetentionDays bounds how long an attested device row is
+	// kept after its LAST USE. This is a retention window, not an expiry: a
+	// device row has no expires_at, and reaping one forces a full
+	// re-attestation. 0 (or negative) disables the sweep, keeping devices
+	// forever.
+	AssuranceDeviceRetentionDays int
 	// AssuranceAllowProjectOnly permits booting with assurance enabled and NO
 	// env-configured arm, for deployments where every app identity lives in
 	// per-project config_json. It is an explicit acknowledgement that a
@@ -1107,6 +1122,7 @@ func Load() *Config {
 		AssuranceAndroidPackageName:      envStr("GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME", ""),
 		AssuranceAndroidCertDigests:      envStr("GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS", ""),
 		AssuranceAndroidSAKeyJSON:        envStr("GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON", ""),
+		AssuranceDeviceRetentionDays:     envInt("GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS", DefaultAssuranceDeviceRetentionDays),
 		AssuranceAllowProjectOnly:        envBool("GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY", false),
 
 		AgeGateEnabled:     envBool("GATEWAY_AGEGATE_ENABLED", false),
@@ -2020,6 +2036,19 @@ func (c *Config) validateAssurance() error {
 			"config: GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS must be in (0, %d], got %d",
 			MaxAssuranceTokenTTLSeconds, c.AssuranceTokenTTLSeconds,
 		)
+	}
+
+	// A retention window shorter than the token lifetime would delete a
+	// device before its own token expires, so refresh could never succeed.
+	if c.AssuranceDeviceRetentionDays > 0 {
+		retentionSeconds := c.AssuranceDeviceRetentionDays * 24 * 60 * 60
+		if retentionSeconds <= c.AssuranceTokenTTLSeconds {
+			return fmt.Errorf(
+				"config: GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS=%d (%ds) must exceed GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS=%d — "+
+					"a device reaped before its own token expires can never refresh",
+				c.AssuranceDeviceRetentionDays, retentionSeconds, c.AssuranceTokenTTLSeconds,
+			)
+		}
 	}
 
 	// At least one arm must be usable. Enabling assurance turns the
