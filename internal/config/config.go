@@ -2031,7 +2031,7 @@ func (c *Config) validateSMS() error {
 // OPTIONAL when enabled: mobile-only deployments configure no captcha,
 // and per-project deployments may configure everything in config_json.
 func (c *Config) validateAssurance() error {
-	// Bound the retention window BEFORE the disabled-early-return: the
+	// The retention bound is checked BEFORE the disabled-early-return: the
 	// sweeper is wired from this value regardless of AssuranceEnabled, and
 	// past MaxAssuranceDeviceRetentionDays the cutoff duration overflows
 	// int64 and inverts, turning the sweep into a deleter of live rows.
@@ -2046,8 +2046,42 @@ func (c *Config) validateAssurance() error {
 		return nil
 	}
 
-	// A retention window shorter than the token lifetime would delete a
-	// device before its own token expires, so refresh could never succeed.
+	// Order matters: the lifetimes are bounded first, so the arm checks can
+	// compare against values already known to be sane.
+	if err := c.validateAssuranceLifetimes(); err != nil {
+		return err
+	}
+	if err := c.validateAssuranceArms(); err != nil {
+		return err
+	}
+	return c.validateAssuranceWebProvider()
+}
+
+// validateAssuranceLifetimes bounds every assurance duration. An assurance
+// token is an unrevocable bearer credential for its whole lifetime, so each
+// TTL is capped as well as floored (the same reasoning as
+// RevocationModeTTLAccessTokenCap), and the device-retention window must
+// outlive the token: a device reaped before its own token expires could
+// never refresh.
+func (c *Config) validateAssuranceLifetimes() error {
+	if c.AssuranceChallengeTTLSeconds <= 0 || c.AssuranceChallengeTTLSeconds > MaxAssuranceChallengeTTLSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS must be in (0, %d], got %d",
+			MaxAssuranceChallengeTTLSeconds, c.AssuranceChallengeTTLSeconds,
+		)
+	}
+	if c.AssuranceTokenTTLSeconds <= 0 || c.AssuranceTokenTTLSeconds > MaxAssuranceTokenTTLSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS must be in (0, %d], got %d",
+			MaxAssuranceTokenTTLSeconds, c.AssuranceTokenTTLSeconds,
+		)
+	}
+	if c.AssuranceWebTokenTTLSeconds < 0 || c.AssuranceWebTokenTTLSeconds > MaxAssuranceTokenTTLSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS must be in [0, %d] (0 = use the global TTL), got %d",
+			MaxAssuranceTokenTTLSeconds, c.AssuranceWebTokenTTLSeconds,
+		)
+	}
 	if c.AssuranceDeviceRetentionDays > 0 {
 		retentionSeconds := c.AssuranceDeviceRetentionDays * 24 * 60 * 60
 		if retentionSeconds <= c.AssuranceTokenTTLSeconds {
@@ -2058,13 +2092,50 @@ func (c *Config) validateAssurance() error {
 			)
 		}
 	}
+	return nil
+}
+
+// validateAssuranceArms enforces which attestation arms exist and that each
+// one is COMPLETE. Companion variables are checked in both directions: a
+// one-directional check lets a half-configured arm be silently inactive —
+// the operator believes it is on, the server disagrees, and nothing says so.
+func (c *Config) validateAssuranceArms() error {
+	if c.AssuranceAndroidPackageName == "" &&
+		(c.AssuranceAndroidSAKeyJSON != "" || c.AssuranceAndroidCertDigests != "") {
+		return errors.New(
+			"config: GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON / _CERT_SHA256_DIGESTS are set without " +
+				"GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME, so the Android arm is silently inactive",
+		)
+	}
+	if c.AssuranceWebProvider == "" &&
+		(c.AssuranceTurnstileSecret != "" || c.AssuranceTurnstileSiteKey != "" || c.AssuranceRecaptchaSecret != "") {
+		return errors.New(
+			"config: a web-provider secret is set without GATEWAY_ASSURANCE_WEB_PROVIDER, " +
+				"so the web arm is silently inactive (set the provider, or unset the secret)",
+		)
+	}
+	if (c.AssuranceIOSTeamID == "") != (c.AssuranceIOSBundleID == "") {
+		return errors.New("config: GATEWAY_ASSURANCE_IOS_TEAM_ID and GATEWAY_ASSURANCE_IOS_BUNDLE_ID must be set together")
+	}
+	switch c.AssuranceIOSEnv {
+	case "", "production", "development":
+	default:
+		return fmt.Errorf("config: GATEWAY_ASSURANCE_IOS_ENV must be production or development, got %q", c.AssuranceIOSEnv)
+	}
+	if c.AssuranceAndroidPackageName != "" {
+		if len(c.AssuranceAndroidCertDigestList()) == 0 {
+			return errors.New("config: GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME requires GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS")
+		}
+		if c.AssuranceAndroidSAKeyJSON == "" {
+			return errors.New("config: GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME requires GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON")
+		}
+	}
 
 	// At least one arm must be usable. Enabling assurance turns the
 	// per-endpoint enforce toggles on (all default true) while every path to
 	// OBTAIN a token reports ErrAssuranceDisabled, so an enabled deployment
 	// with nothing configured would boot cleanly and lock every user out of
-	// signup, login, reset, email-code, magic-link and passkey-signup. Fail
-	// boot instead — v3's validateCaptcha refused the analogous state.
+	// signup, login, reset, email-code, magic-link and passkey-signup.
 	//
 	// A per-project deployment (app identities in each project's config_json)
 	// is legitimate, but it must SAY so: GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY
@@ -2087,87 +2158,16 @@ func (c *Config) validateAssurance() error {
 				"every auth endpoint with no way to obtain a token",
 		)
 	}
-	if err := c.validateAssuranceArms(); err != nil {
-		return err
-	}
-	return c.validateAssuranceWebProvider()
-}
-
-// validateAssuranceArms enforces the per-arm invariants: companion
-// variables must be set together in BOTH directions (a half-configured arm
-// that is silently inactive is the failure mode this exists to prevent),
-// the iOS environment must be known, and at least one arm — or the
-// explicit project-only acknowledgement — must be present.
-func (c *Config) validateAssuranceArms() error {
-	// Companion-variable checks run in BOTH directions. A one-directional
-	// check lets a half-configured arm be silently ignored — the same
-	// failure mode as the v3→v4 rename taking effect unnoticed: the
-	// operator believes an arm is on, the server disagrees, and nothing
-	// says so.
-	if c.AssuranceAndroidPackageName == "" &&
-		(c.AssuranceAndroidSAKeyJSON != "" || c.AssuranceAndroidCertDigests != "") {
-		return errors.New(
-			"config: GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON / _CERT_SHA256_DIGESTS are set without " +
-				"GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME, so the Android arm is silently inactive",
-		)
-	}
-	if c.AssuranceWebProvider == "" &&
-		(c.AssuranceTurnstileSecret != "" || c.AssuranceTurnstileSiteKey != "" || c.AssuranceRecaptchaSecret != "") {
-		return errors.New(
-			"config: a web-provider secret is set without GATEWAY_ASSURANCE_WEB_PROVIDER, " +
-				"so the web arm is silently inactive (set the provider, or unset the secret)",
-		)
-	}
-
-	if (c.AssuranceIOSTeamID == "") != (c.AssuranceIOSBundleID == "") {
-		return errors.New("config: GATEWAY_ASSURANCE_IOS_TEAM_ID and GATEWAY_ASSURANCE_IOS_BUNDLE_ID must be set together")
-	}
-	switch c.AssuranceIOSEnv {
-	case "", "production", "development":
-	default:
-		return fmt.Errorf("config: GATEWAY_ASSURANCE_IOS_ENV must be production or development, got %q", c.AssuranceIOSEnv)
-	}
-	if c.AssuranceAndroidPackageName != "" {
-		if len(c.AssuranceAndroidCertDigestList()) == 0 {
-			return errors.New("config: GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME requires GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS")
-		}
-		if c.AssuranceAndroidSAKeyJSON == "" {
-			return errors.New("config: GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME requires GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON")
-		}
-	}
-	if c.AssuranceChallengeTTLSeconds <= 0 || c.AssuranceChallengeTTLSeconds > MaxAssuranceChallengeTTLSeconds {
-		return fmt.Errorf(
-			"config: GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS must be in (0, %d], got %d",
-			MaxAssuranceChallengeTTLSeconds, c.AssuranceChallengeTTLSeconds,
-		)
-	}
-	// An assurance token is an unrevocable bearer credential for its whole
-	// lifetime, so the TTL is capped as well as floored — the same reasoning
-	// as RevocationModeTTLAccessTokenCap.
-	if c.AssuranceTokenTTLSeconds <= 0 || c.AssuranceTokenTTLSeconds > MaxAssuranceTokenTTLSeconds {
-		return fmt.Errorf(
-			"config: GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS must be in (0, %d], got %d",
-			MaxAssuranceTokenTTLSeconds, c.AssuranceTokenTTLSeconds,
-		)
-	}
-
-	if c.AssuranceWebTokenTTLSeconds < 0 || c.AssuranceWebTokenTTLSeconds > MaxAssuranceTokenTTLSeconds {
-		return fmt.Errorf(
-			"config: GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS must be in [0, %d] (0 = use the global TTL), got %d",
-			MaxAssuranceTokenTTLSeconds, c.AssuranceWebTokenTTLSeconds,
-		)
-	}
 	return nil
 }
 
 // validateAssuranceWebProvider enforces the web arm's provider/secret
 // invariants. An empty provider is valid: a mobile-attestation-only
-// deployment (the arm check above has already guaranteed some arm exists).
+// deployment, which validateAssuranceArms has already confirmed has some
+// other arm (or the explicit project-only acknowledgement).
 func (c *Config) validateAssuranceWebProvider() error {
 	switch c.AssuranceWebProvider {
 	case "":
-		// No web provider: mobile-attestation-only deployment (an iOS or
-		// Android arm is present — the check above guarantees it).
 		return nil
 	case AssuranceWebProviderTurnstile:
 		if c.AssuranceTurnstileSecret == "" {
@@ -2194,7 +2194,6 @@ func (c *Config) validateAssuranceWebProvider() error {
 			AssuranceWebProviderTurnstile, AssuranceWebProviderRecaptchaV3, c.AssuranceWebProvider,
 		)
 	}
-
 	return nil
 }
 
