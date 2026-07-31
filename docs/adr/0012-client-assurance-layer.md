@@ -110,11 +110,12 @@ adopt that split.
   solve buys a token reusable until it expires. That is inherent to the App
   Check shape (and is what removes a provider round-trip from the auth hot
   path), but it is a real reduction in per-request assurance: a bot pays one
-  solve and replays for the token's lifetime. Mitigations shipped: the TTL is
-  operator-controlled and hard-capped (`GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS`,
-  max 24h), and all three assurance RPCs carry a per-IP rate limit. Deployments
-  wanting the old per-request property should set a short web TTL; single-use
-  (`jti` + redemption store) and IP binding are candidate follow-ups.
+  solve and replays for the token's lifetime. Mitigations shipped: the web arm has
+  its OWN lifetime (`GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS`, default 5
+  minutes) so it can be shortened without also shortening the
+  hardware-attested arms, both TTLs are hard-capped at 24h, and all three
+  assurance RPCs carry a per-IP rate limit. Single-use (`jti` + redemption
+  store) and IP binding remain candidate follow-ups.
 - Attested devices are retained on a staleness sweep, not forever: a
   reinstall or key regeneration mints a NEW key id, so an attestation row
   is otherwise permanent and the table only ever grows. The sweeper reaps

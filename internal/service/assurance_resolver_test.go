@@ -10,8 +10,16 @@ import (
 	"testing"
 
 	"github.com/elloloop/identity/pkg/assurance/appattest"
+	"github.com/elloloop/identity/pkg/assurance/playintegrity"
 	"github.com/elloloop/identity/pkg/secretcrypto"
 )
+
+// probePlayVerifier builds a Play Integrity verifier pointed at a fake
+// Google, so a test can assert an Android arm is present without network.
+func probePlayVerifier(t *testing.T) *playintegrity.Verifier {
+	t.Helper()
+	return fakePlayServer(t, new(string), new(int))
+}
 
 // assuranceCtx returns a context carrying a ProjectScope with the given
 // project id and assurance block — the shape the project-resolution
@@ -239,4 +247,39 @@ func TestAssuranceResolver_ScopeWithoutBlockTakesDefaults(t *testing.T) {
 	if resolved.AppAttest == nil || resolved.AppAttest == defaults.AppAttest {
 		t.Fatal("a resolved default-project block must win over the env identity")
 	}
+}
+
+// TestAssuranceResolver_DefaultProjectPathsAgree pins the regression the
+// gate reproduced: the DEFAULT project must resolve to the same arms
+// whichever way the request arrived. The zero-config pin stamps no
+// config_json and yields the env defaults; an X-Project-Key-resolved
+// request carrying an iOS-only block must not silently lose Android.
+func TestAssuranceResolver_DefaultProjectPathsAgree(t *testing.T) {
+	iosDefault, err := appattest.New(appattest.Config{TeamID: "ENVTEAM001", BundleID: "com.example.env"})
+	if err != nil {
+		t.Fatalf("appattest.New: %v", err)
+	}
+	defaults := AssuranceProviders{AppAttest: iosDefault, PlayIntegrity: probePlayVerifier(t)}
+	r := NewAssuranceResolver("proj-default", defaults, nil, nil)
+
+	pin := r.For(WithProjectScope(context.Background(), &ProjectScope{ProjectID: "proj-default"}))
+	resolved := r.For(assuranceCtx("proj-default", iosBlock("TEAMOWNAAA", "com.example.own")))
+
+	if (pin.PlayIntegrity != nil) != (resolved.PlayIntegrity != nil) {
+		t.Fatal("same project, different Android arm depending on resolution path")
+	}
+	if resolved.PlayIntegrity == nil {
+		t.Error("an iOS-only block must not drop the default project's env Android arm")
+	}
+	// The project's OWN iOS block still wins over the env one.
+	if resolved.AppAttest == nil || resolved.AppAttest == defaults.AppAttest {
+		t.Error("the project's own iOS block must win over the env identity")
+	}
+
+	t.Run("a non-default project inherits nothing", func(t *testing.T) {
+		other := r.For(assuranceCtx("proj-other", iosBlock("TEAMOTHERX", "com.example.other")))
+		if other.PlayIntegrity != nil {
+			t.Error("a non-default project must not inherit the env Android arm")
+		}
+	})
 }

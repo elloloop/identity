@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -100,8 +101,8 @@ type Verifier struct {
 
 // New returns a Verifier for cfg.
 func New(cfg Config) (*Verifier, error) {
-	if cfg.PackageName == "" {
-		return nil, errors.New("playintegrity: PackageName is required")
+	if !validPackageName(cfg.PackageName) {
+		return nil, fmt.Errorf("playintegrity: PackageName %q is not a valid Android package name", cfg.PackageName)
 	}
 	if len(cfg.CertSHA256Digests) == 0 {
 		return nil, errors.New("playintegrity: at least one certificate digest is required")
@@ -172,6 +173,18 @@ type tokenPayload struct {
 			DeviceRecognitionVerdict []string `json:"deviceRecognitionVerdict"`
 		} `json:"deviceIntegrity"`
 	} `json:"tokenPayloadExternal"`
+}
+
+// packageNameRe is the Android package grammar. The package name is
+// interpolated into the decodeIntegrityToken request PATH, so anything
+// carrying '/', '?', '#' or whitespace could retarget or break the call —
+// validate it once at construction rather than escaping at every use.
+var packageNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$`)
+
+// validPackageName reports whether name is a syntactically valid Android
+// package name.
+func validPackageName(name string) bool {
+	return len(name) <= 255 && packageNameRe.MatchString(name)
 }
 
 // failf wraps assurance.ErrVerificationFailed with step detail.

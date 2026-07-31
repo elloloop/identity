@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -171,9 +172,17 @@ func (s *AuthService) issueForAppAttest(ctx context.Context, ev AssuranceEvidenc
 		return nil, ErrAssuranceFailed
 	}
 	now := s.nowMs()
+	// Store the CANONICAL encoding: several base64 strings decode to the
+	// same 32 bytes, so persisting the client's spelling would let a
+	// re-encoding split one device across rows and slip past the
+	// duplicate-key_id replay guard.
+	canonicalKeyID, err := canonicalAttestKeyID(res.KeyID)
+	if err != nil {
+		return nil, ErrAssuranceFailed
+	}
 	dev := &AttestedDeviceRecord{
 		Platform:      AssurancePlatformIOS,
-		KeyID:         res.KeyID,
+		KeyID:         canonicalKeyID,
 		PublicKeySPKI: base64.StdEncoding.EncodeToString(res.PublicKeySPKI),
 		SignCount:     0,
 		Environment:   res.Environment,
@@ -258,7 +267,11 @@ func (s *AuthService) RefreshAssuranceToken(ctx context.Context, challengeID, ke
 	if err != nil {
 		return nil, err
 	}
-	dev, err := s.repo(ctx).GetAttestedDeviceByKeyID(ctx, keyID)
+	lookupKeyID, err := canonicalAttestKeyID(keyID)
+	if err != nil {
+		return nil, ErrAssuranceFailed
+	}
+	dev, err := s.repo(ctx).GetAttestedDeviceByKeyID(ctx, lookupKeyID)
 	if err != nil {
 		return nil, fmt.Errorf("loading attested device: %w", err)
 	}
@@ -295,7 +308,13 @@ func (s *AuthService) RefreshAssuranceToken(ctx context.Context, challengeID, ke
 // mintAssuranceToken signs the token for the resolved project.
 func (s *AuthService) mintAssuranceToken(ctx context.Context, provider, deviceID string) (*AssuranceToken, error) {
 	now := s.nowFunc()
+	// The web arm gets its own (shorter) lifetime: a captcha solve buys a
+	// reusable, transferable token, where a hardware-attested one is bound
+	// to a key the Secure Enclave never releases.
 	ttl := s.cfg.AssuranceTokenTTL()
+	if deviceID == "" && provider != assurance.ProviderAppAttest && provider != assurance.ProviderPlayIntegrity {
+		ttl = s.cfg.AssuranceWebTokenTTL()
+	}
 	tok, err := assurance.MintToken(ctx, s.signer, assurance.TokenClaims{
 		Project:   s.projectID(ctx),
 		Providers: []string{provider},
@@ -329,4 +348,16 @@ func (s *AuthService) VerifyAssuranceToken(ctx context.Context, token string) (*
 		return nil, ErrAssuranceRequired
 	}
 	return claims, nil
+}
+
+// canonicalAttestKeyID re-encodes an App Attest key identifier from its
+// decoded bytes, so two spellings of the same key compare equal. The
+// identifier is the SHA-256 of the attested public key, so anything that
+// does not decode to exactly that length is not a key id.
+func canonicalAttestKeyID(keyID string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(keyID)
+	if err != nil || len(raw) != sha256.Size {
+		return "", fmt.Errorf("%w: malformed key id", ErrInvalidArgument)
+	}
+	return base64.StdEncoding.EncodeToString(raw), nil
 }

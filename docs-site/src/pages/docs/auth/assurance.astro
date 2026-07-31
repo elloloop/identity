@@ -109,6 +109,13 @@ import { Code } from "astro-expressive-code/components";
       shorten it if you want closer to per-request captcha assurance.
     </li>
     <li>
+      <code>GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS</code> (default 300; 0
+      uses the global TTL) — the web arm's own token lifetime. A captcha
+      solve buys a reusable, transferable token, so it wants a much shorter
+      window than a hardware-attested one; this knob shortens web without
+      shortening App Attest / Play Integrity.
+    </li>
+    <li>
       <code>GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP</code> (default 20) —
       per-IP quota per rate-limit window on all three assurance RPCs.
     </li>
@@ -217,6 +224,12 @@ curl -s https://id.example.com/identity.v1.IdentityService/PasswordSignup \\
     client that persists its Secure Enclave key must generate a new one to
     re-attest, and each re-attestation mints a new device id. Keep the window
     generous.
+  </p>
+  <p>
+    One current limitation: both sweeps run against the boot-default project,
+    so a multi-project deployment does not yet reap other projects' expired
+    challenges or stale devices. Track it if you run many projects with
+    per-project assurance.
   </p>
 
   <h2>What assurance is not</h2>

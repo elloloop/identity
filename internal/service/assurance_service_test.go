@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -687,4 +688,87 @@ func TestConsumeAssuranceChallengeGuards(t *testing.T) {
 			t.Fatalf("a datastore outage must not read as rejected evidence: %v", err)
 		}
 	})
+}
+
+// TestAssuranceTokenIsProjectScoped threads TWO different project scopes
+// through mint and verify. Both sides call the same s.projectID(ctx)
+// helper, so a regression that dropped the claim at mint or passed "" at
+// verify would leave every other test green while making a project-A
+// token valid on project-B requests.
+func TestAssuranceTokenIsProjectScoped(t *testing.T) {
+	svc := newAssuranceService(t, newFakeRepo(), nil, fakeWebVerifier{})
+	projA := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "proj-a"})
+	projB := WithProjectScope(context.Background(), &ProjectScope{ProjectID: "proj-b"})
+
+	tok, err := svc.IssueAssuranceToken(projA, AssuranceEvidence{
+		Platform: AssurancePlatformWeb, WebToken: "solution",
+	})
+	if err != nil {
+		t.Fatalf("mint under project A: %v", err)
+	}
+
+	if _, err := svc.VerifyAssuranceToken(projA, tok.Token); err != nil {
+		t.Fatalf("project A token must verify on a project A request: %v", err)
+	}
+	if _, err := svc.VerifyAssuranceToken(projB, tok.Token); !errors.Is(err, ErrAssuranceRequired) {
+		t.Fatalf("project A token verified on a project B request: err = %v", err)
+	}
+}
+
+// TestAssuranceWebTokenUsesShorterTTL pins that the web arm gets its own
+// lifetime. ADR-0012 offers "set a short web TTL" as the mitigation for
+// the web token being reusable and transferable; before this the knob did
+// not exist and shortening web would have shortened the hardware arms too.
+func TestAssuranceWebTokenUsesShorterTTL(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newAssuranceService(t, repo, nil, fakeWebVerifier{})
+	svc.cfg.AssuranceTokenTTLSeconds = 3600
+	svc.cfg.AssuranceWebTokenTTLSeconds = 300
+	ctx := context.Background()
+
+	tok, err := svc.IssueAssuranceToken(ctx, AssuranceEvidence{
+		Platform: AssurancePlatformWeb, WebToken: "solution",
+	})
+	if err != nil {
+		t.Fatalf("web issue: %v", err)
+	}
+	gotTTL := tok.ExpiresAt - svc.nowFunc().UnixMilli()
+	if gotTTL > 300*1000 {
+		t.Fatalf("web token TTL = %dms, want <= 300s — the web arm must not inherit the mobile TTL", gotTTL)
+	}
+
+	t.Run("unset falls back to the global TTL", func(t *testing.T) {
+		svc.cfg.AssuranceWebTokenTTLSeconds = 0
+		tok, err := svc.IssueAssuranceToken(ctx, AssuranceEvidence{
+			Platform: AssurancePlatformWeb, WebToken: "solution",
+		})
+		if err != nil {
+			t.Fatalf("web issue: %v", err)
+		}
+		if ttl := tok.ExpiresAt - svc.nowFunc().UnixMilli(); ttl <= 300*1000 {
+			t.Fatalf("TTL = %dms, want the global 3600s fallback", ttl)
+		}
+	})
+}
+
+// TestAttestKeyIDIsCanonicalized pins that a non-canonical re-encoding of
+// the same key cannot slip past the duplicate-key_id replay guard by
+// landing in a second row.
+func TestAttestKeyIDIsCanonicalized(t *testing.T) {
+	raw := make([]byte, 32)
+	for i := range raw {
+		raw[i] = byte(i)
+	}
+	canonical := base64.StdEncoding.EncodeToString(raw)
+
+	got, err := canonicalAttestKeyID(canonical)
+	if err != nil || got != canonical {
+		t.Fatalf("canonical input round-trip = (%q, %v)", got, err)
+	}
+	if _, err := canonicalAttestKeyID("not-base64!!"); err == nil {
+		t.Error("malformed key id must be rejected")
+	}
+	if _, err := canonicalAttestKeyID(base64.StdEncoding.EncodeToString([]byte("short"))); err == nil {
+		t.Error("a key id that is not a SHA-256 must be rejected")
+	}
 }

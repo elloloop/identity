@@ -270,6 +270,15 @@
     "anchor": "client-assurance"
   },
   {
+    "name": "GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS",
+    "type": "integer",
+    "default": "300",
+    "required": false,
+    "description": "is the assurance-token lifetime for the WEB arm specifically.",
+    "category": "Client assurance",
+    "anchor": "client-assurance"
+  },
+  {
     "name": "GATEWAY_AUDIT_QUEUE_SIZE",
     "type": "integer",
     "default": "4096",

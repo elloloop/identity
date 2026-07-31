@@ -76,6 +76,19 @@ const (
 	// reaping devices that are genuinely gone.
 	DefaultAssuranceDeviceRetentionDays = 90
 
+	// DefaultAssuranceWebTokenTTLSeconds is the web arm's token lifetime (5
+	// minutes). It is deliberately far shorter than the mobile default: a
+	// captcha solve is a one-off human signal, and the token it buys is
+	// reusable and transferable, so a long window turns one solve into an
+	// hour of bot traffic.
+	DefaultAssuranceWebTokenTTLSeconds = 300
+
+	// MaxAssuranceDeviceRetentionDays caps the retention window at ~27
+	// years. Beyond ~106752 days the nanosecond duration used to compute the
+	// cutoff overflows int64 and INVERTS it, which would make the sweep
+	// delete live devices instead of stale ones.
+	MaxAssuranceDeviceRetentionDays = 10000
+
 	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
 	// users 12 and under (i.e. under 13) are in the protected CHILD band.
 	DefaultAgeGateChildMaxAge = 12
@@ -551,6 +564,12 @@ type Config struct {
 	// AssuranceAndroidSAKeyJSON is the Google service-account key (inline
 	// JSON) used to decode Play Integrity verdicts server-side.
 	AssuranceAndroidSAKeyJSON string
+	// AssuranceWebTokenTTLSeconds is the assurance-token lifetime for the WEB
+	// arm specifically. A captcha solve buys a reusable, transferable bearer
+	// token, so the web arm wants a much shorter window than a
+	// hardware-attested one, whose device is bound to a Secure Enclave key.
+	// 0 falls back to AssuranceTokenTTLSeconds.
+	AssuranceWebTokenTTLSeconds int
 	// AssuranceDeviceRetentionDays bounds how long an attested device row is
 	// kept after its LAST USE. This is a retention window, not an expiry: a
 	// device row has no expires_at, and reaping one forces a full
@@ -1122,6 +1141,7 @@ func Load() *Config {
 		AssuranceAndroidPackageName:      envStr("GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME", ""),
 		AssuranceAndroidCertDigests:      envStr("GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS", ""),
 		AssuranceAndroidSAKeyJSON:        envStr("GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON", ""),
+		AssuranceWebTokenTTLSeconds:      envInt("GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS", DefaultAssuranceWebTokenTTLSeconds),
 		AssuranceDeviceRetentionDays:     envInt("GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS", DefaultAssuranceDeviceRetentionDays),
 		AssuranceAllowProjectOnly:        envBool("GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY", false),
 
@@ -1498,6 +1518,15 @@ func (c *Config) DefaultPrimaryAuthDomain() string {
 // JWTExpiry returns the JWT expiry as a time.Duration.
 func (c *Config) JWTExpiry() time.Duration {
 	return time.Duration(c.JWTExpirySeconds) * time.Second
+}
+
+// AssuranceWebTokenTTL returns the WEB arm's token lifetime, falling back
+// to the global TTL when unset.
+func (c *Config) AssuranceWebTokenTTL() time.Duration {
+	if c.AssuranceWebTokenTTLSeconds > 0 {
+		return time.Duration(c.AssuranceWebTokenTTLSeconds) * time.Second
+	}
+	return c.AssuranceTokenTTL()
 }
 
 // AssuranceTokenTTL returns the assurance-token lifetime as a Duration.
@@ -2038,8 +2067,21 @@ func (c *Config) validateAssurance() error {
 		)
 	}
 
+	if c.AssuranceWebTokenTTLSeconds < 0 || c.AssuranceWebTokenTTLSeconds > MaxAssuranceTokenTTLSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS must be in [0, %d] (0 = use the global TTL), got %d",
+			MaxAssuranceTokenTTLSeconds, c.AssuranceWebTokenTTLSeconds,
+		)
+	}
+
 	// A retention window shorter than the token lifetime would delete a
 	// device before its own token expires, so refresh could never succeed.
+	if c.AssuranceDeviceRetentionDays > MaxAssuranceDeviceRetentionDays {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS must be <= %d, got %d",
+			MaxAssuranceDeviceRetentionDays, c.AssuranceDeviceRetentionDays,
+		)
+	}
 	if c.AssuranceDeviceRetentionDays > 0 {
 		retentionSeconds := c.AssuranceDeviceRetentionDays * 24 * 60 * 60
 		if retentionSeconds <= c.AssuranceTokenTTLSeconds {

@@ -106,6 +106,20 @@ func (r *AssuranceResolver) For(ctx context.Context) AssuranceProviders {
 		return entry.providers
 	}
 	built := r.build(scope.ProjectID, scope.Assurance)
+	// The default project falls back PER PLATFORM to the env identity for an
+	// arm its block does not configure. Without this the same project
+	// resolves to different arms depending on how the request arrived: the
+	// zero-config pin stamps no config_json and yields the full env
+	// defaults, while an X-Project-Key-resolved request carrying an
+	// iOS-only block would silently lose Android.
+	if scope.ProjectID == r.defaultProjectID {
+		if built.AppAttest == nil {
+			built.AppAttest = r.defaults.AppAttest
+		}
+		if built.PlayIntegrity == nil {
+			built.PlayIntegrity = r.defaults.PlayIntegrity
+		}
+	}
 	r.cache[scope.ProjectID] = assuranceCacheEntry{hash: hash, providers: built}
 	return built
 }

@@ -36,11 +36,14 @@ New (all optional): `GATEWAY_ASSURANCE_IOS_TEAM_ID` / `_IOS_BUNDLE_ID` /
 `GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS`,
 `GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS` (default 90 — how long an
 attested device survives after its last refresh; 0 keeps them forever),
-`GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP`; per-project app identities go
+`GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS` (default 300 — the web arm's
+own, shorter token lifetime), `GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP`; per-project app identities go
 in `config_json` `assurance`, authored with the operator RPC
 `AdminSetProjectAssurance` (it takes the Play service-account key in
 plaintext and encrypts it server-side under `GATEWAY_PROJECT_SECRETS_KEY`,
-mirroring `AdminSetProjectOAuthProvider`).
+mirroring `AdminSetProjectOAuthProvider`), and read back with
+`AdminGetProjectAssurance` — the only way to confirm an encrypted key
+survived a rotation.
 
 **Native gRPC embedders:** the three assurance RPCs are bridged onto
 `RegisterGRPC` alongside the existing ones, so a host that enables any
