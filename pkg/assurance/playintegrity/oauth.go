@@ -116,7 +116,7 @@ func (ts *tokenSource) get(ctx context.Context) (string, error) {
 	form.Set("assertion", assertion)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", fmt.Errorf("playintegrity: building token request: %w", err)
+		return "", fmt.Errorf("%w: playintegrity: building token request: %w", assurance.ErrProviderUnavailable, err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -148,7 +148,10 @@ func (ts *tokenSource) get(ctx context.Context) (string, error) {
 }
 
 // signAssertion builds and RS256-signs the service-account JWT for the
-// bearer grant.
+// bearer grant. Its failures are OUR misconfiguration, not bad client
+// evidence, so they carry ErrProviderUnavailable — otherwise a broken
+// Android config would surface to operators as a wave of rejected
+// attestations pointing at hostile clients.
 func (ts *tokenSource) signAssertion() (string, error) {
 	now := ts.now()
 	claims := map[string]any{
@@ -160,11 +163,11 @@ func (ts *tokenSource) signAssertion() (string, error) {
 	}
 	payload, err := json.Marshal(claims)
 	if err != nil {
-		return "", fmt.Errorf("playintegrity: encoding assertion claims: %w", err)
+		return "", fmt.Errorf("%w: playintegrity: encoding assertion claims: %w", assurance.ErrProviderUnavailable, err)
 	}
 	signed, err := jws.Sign(payload, jws.WithKey(jwa.RS256, ts.key))
 	if err != nil {
-		return "", fmt.Errorf("playintegrity: signing assertion: %w", err)
+		return "", fmt.Errorf("%w: playintegrity: signing assertion: %w", assurance.ErrProviderUnavailable, err)
 	}
 	return string(signed), nil
 }

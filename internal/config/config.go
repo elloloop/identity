@@ -2031,8 +2031,92 @@ func (c *Config) validateSMS() error {
 // OPTIONAL when enabled: mobile-only deployments configure no captcha,
 // and per-project deployments may configure everything in config_json.
 func (c *Config) validateAssurance() error {
+	// Bound the retention window BEFORE the disabled-early-return: the
+	// sweeper is wired from this value regardless of AssuranceEnabled, and
+	// past MaxAssuranceDeviceRetentionDays the cutoff duration overflows
+	// int64 and inverts, turning the sweep into a deleter of live rows.
+	if c.AssuranceDeviceRetentionDays > MaxAssuranceDeviceRetentionDays {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS must be <= %d, got %d",
+			MaxAssuranceDeviceRetentionDays, c.AssuranceDeviceRetentionDays,
+		)
+	}
+
 	if !c.AssuranceEnabled {
 		return nil
+	}
+
+	// A retention window shorter than the token lifetime would delete a
+	// device before its own token expires, so refresh could never succeed.
+	if c.AssuranceDeviceRetentionDays > 0 {
+		retentionSeconds := c.AssuranceDeviceRetentionDays * 24 * 60 * 60
+		if retentionSeconds <= c.AssuranceTokenTTLSeconds {
+			return fmt.Errorf(
+				"config: GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS=%d (%ds) must exceed GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS=%d — "+
+					"a device reaped before its own token expires can never refresh",
+				c.AssuranceDeviceRetentionDays, retentionSeconds, c.AssuranceTokenTTLSeconds,
+			)
+		}
+	}
+
+	// At least one arm must be usable. Enabling assurance turns the
+	// per-endpoint enforce toggles on (all default true) while every path to
+	// OBTAIN a token reports ErrAssuranceDisabled, so an enabled deployment
+	// with nothing configured would boot cleanly and lock every user out of
+	// signup, login, reset, email-code, magic-link and passkey-signup. Fail
+	// boot instead — v3's validateCaptcha refused the analogous state.
+	//
+	// A per-project deployment (app identities in each project's config_json)
+	// is legitimate, but it must SAY so: GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY
+	// is the single, driver-independent acknowledgement. Exempting the
+	// control-plane drivers automatically would be unsound — the default
+	// driver IS postgres, so the invariant would never fire by default, and
+	// the WEB arm is deployment-global by design (ADR-0012), so no amount of
+	// per-project config can ever restore a missing web provider.
+	hasWeb := c.AssuranceWebProvider != ""
+	hasIOS := c.AssuranceIOSTeamID != "" && c.AssuranceIOSBundleID != ""
+	hasAndroid := c.AssuranceAndroidPackageName != ""
+	if !hasWeb && !hasIOS && !hasAndroid && !c.AssuranceAllowProjectOnly {
+		return errors.New(
+			"config: GATEWAY_ASSURANCE_ENABLED=true requires at least one configured arm — " +
+				"a web provider (GATEWAY_ASSURANCE_WEB_PROVIDER), an iOS app " +
+				"(GATEWAY_ASSURANCE_IOS_TEAM_ID + GATEWAY_ASSURANCE_IOS_BUNDLE_ID), " +
+				"or an Android app (GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME) — " +
+				"or GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY=true when every app identity " +
+				"lives in per-project config_json; otherwise the enforce toggles deny " +
+				"every auth endpoint with no way to obtain a token",
+		)
+	}
+	if err := c.validateAssuranceArms(); err != nil {
+		return err
+	}
+	return c.validateAssuranceWebProvider()
+}
+
+// validateAssuranceArms enforces the per-arm invariants: companion
+// variables must be set together in BOTH directions (a half-configured arm
+// that is silently inactive is the failure mode this exists to prevent),
+// the iOS environment must be known, and at least one arm — or the
+// explicit project-only acknowledgement — must be present.
+func (c *Config) validateAssuranceArms() error {
+	// Companion-variable checks run in BOTH directions. A one-directional
+	// check lets a half-configured arm be silently ignored — the same
+	// failure mode as the v3→v4 rename taking effect unnoticed: the
+	// operator believes an arm is on, the server disagrees, and nothing
+	// says so.
+	if c.AssuranceAndroidPackageName == "" &&
+		(c.AssuranceAndroidSAKeyJSON != "" || c.AssuranceAndroidCertDigests != "") {
+		return errors.New(
+			"config: GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON / _CERT_SHA256_DIGESTS are set without " +
+				"GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME, so the Android arm is silently inactive",
+		)
+	}
+	if c.AssuranceWebProvider == "" &&
+		(c.AssuranceTurnstileSecret != "" || c.AssuranceTurnstileSiteKey != "" || c.AssuranceRecaptchaSecret != "") {
+		return errors.New(
+			"config: a web-provider secret is set without GATEWAY_ASSURANCE_WEB_PROVIDER, " +
+				"so the web arm is silently inactive (set the provider, or unset the secret)",
+		)
 	}
 
 	if (c.AssuranceIOSTeamID == "") != (c.AssuranceIOSBundleID == "") {
@@ -2073,55 +2157,13 @@ func (c *Config) validateAssurance() error {
 			MaxAssuranceTokenTTLSeconds, c.AssuranceWebTokenTTLSeconds,
 		)
 	}
+	return nil
+}
 
-	// A retention window shorter than the token lifetime would delete a
-	// device before its own token expires, so refresh could never succeed.
-	if c.AssuranceDeviceRetentionDays > MaxAssuranceDeviceRetentionDays {
-		return fmt.Errorf(
-			"config: GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS must be <= %d, got %d",
-			MaxAssuranceDeviceRetentionDays, c.AssuranceDeviceRetentionDays,
-		)
-	}
-	if c.AssuranceDeviceRetentionDays > 0 {
-		retentionSeconds := c.AssuranceDeviceRetentionDays * 24 * 60 * 60
-		if retentionSeconds <= c.AssuranceTokenTTLSeconds {
-			return fmt.Errorf(
-				"config: GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS=%d (%ds) must exceed GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS=%d — "+
-					"a device reaped before its own token expires can never refresh",
-				c.AssuranceDeviceRetentionDays, retentionSeconds, c.AssuranceTokenTTLSeconds,
-			)
-		}
-	}
-
-	// At least one arm must be usable. Enabling assurance turns the
-	// per-endpoint enforce toggles on (all default true) while every path to
-	// OBTAIN a token reports ErrAssuranceDisabled, so an enabled deployment
-	// with nothing configured would boot cleanly and lock every user out of
-	// signup, login, reset, email-code, magic-link and passkey-signup. Fail
-	// boot instead — v3's validateCaptcha refused the analogous state.
-	//
-	// A per-project deployment (app identities in each project's config_json)
-	// is legitimate, but it must SAY so: GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY
-	// is the single, driver-independent acknowledgement. Exempting the
-	// control-plane drivers automatically would be unsound — the default
-	// driver IS postgres, so the invariant would never fire by default, and
-	// the WEB arm is deployment-global by design (ADR-0012), so no amount of
-	// per-project config can ever restore a missing web provider.
-	hasWeb := c.AssuranceWebProvider != ""
-	hasIOS := c.AssuranceIOSTeamID != "" && c.AssuranceIOSBundleID != ""
-	hasAndroid := c.AssuranceAndroidPackageName != ""
-	if !hasWeb && !hasIOS && !hasAndroid && !c.AssuranceAllowProjectOnly {
-		return errors.New(
-			"config: GATEWAY_ASSURANCE_ENABLED=true requires at least one configured arm — " +
-				"a web provider (GATEWAY_ASSURANCE_WEB_PROVIDER), an iOS app " +
-				"(GATEWAY_ASSURANCE_IOS_TEAM_ID + GATEWAY_ASSURANCE_IOS_BUNDLE_ID), " +
-				"or an Android app (GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME) — " +
-				"or GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY=true when every app identity " +
-				"lives in per-project config_json; otherwise the enforce toggles deny " +
-				"every auth endpoint with no way to obtain a token",
-		)
-	}
-
+// validateAssuranceWebProvider enforces the web arm's provider/secret
+// invariants. An empty provider is valid: a mobile-attestation-only
+// deployment (the arm check above has already guaranteed some arm exists).
+func (c *Config) validateAssuranceWebProvider() error {
 	switch c.AssuranceWebProvider {
 	case "":
 		// No web provider: mobile-attestation-only deployment (an iOS or

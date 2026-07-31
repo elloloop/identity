@@ -37,7 +37,11 @@ New (all optional): `GATEWAY_ASSURANCE_IOS_TEAM_ID` / `_IOS_BUNDLE_ID` /
 `GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS` (default 90 — how long an
 attested device survives after its last refresh; 0 keeps them forever),
 `GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS` (default 300 — the web arm's
-own, shorter token lifetime), `GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP`; per-project app identities go
+own, shorter token lifetime), `GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP`;
+plus `GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY` — optional in general, but
+**required** when you enable assurance with no env-level arm (every app
+identity in per-project `config_json`), since the server otherwise
+refuses to boot; per-project app identities go
 in `config_json` `assurance`, authored with the operator RPC
 `AdminSetProjectAssurance` (it takes the Play service-account key in
 plaintext and encrypts it server-side under `GATEWAY_PROJECT_SECRETS_KEY`,

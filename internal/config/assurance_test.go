@@ -49,6 +49,11 @@ func TestValidate_Assurance(t *testing.T) {
 			name: "enabled without web provider but with an iOS arm",
 			mutate: func(c *Config) {
 				*c = *assuranceConfig("")
+				// No provider means no web secrets either — a secret without
+				// a provider is now itself an error (see below).
+				c.AssuranceTurnstileSecret = ""
+				c.AssuranceTurnstileSiteKey = ""
+				c.AssuranceRecaptchaSecret = ""
 				c.AssuranceIOSTeamID = "TEAM123456"
 				c.AssuranceIOSBundleID = "com.example.app"
 			},
@@ -56,6 +61,35 @@ func TestValidate_Assurance(t *testing.T) {
 		{
 			name:    "enabled with no arm at all",
 			mutate:  func(c *Config) { *c = *assuranceConfig("") },
+			wantErr: true,
+		},
+		{
+			// Half-configured arms must not be silently ignored: the
+			// operator believes the arm is on and the server disagrees.
+			name: "android secrets without a package name",
+			mutate: func(c *Config) {
+				*c = *assuranceConfig(AssuranceWebProviderTurnstile)
+				c.AssuranceAndroidSAKeyJSON = "{}"
+				c.AssuranceAndroidCertDigests = "ZGlnZXN0"
+			},
+			wantErr: true,
+		},
+		{
+			name: "web secret without a provider",
+			mutate: func(c *Config) {
+				*c = *assuranceConfig("")
+				c.AssuranceIOSTeamID = "TEAM123456"
+				c.AssuranceIOSBundleID = "com.example.app"
+				c.AssuranceTurnstileSecret = "orphaned"
+			},
+			wantErr: true,
+		},
+		{
+			name: "retention beyond the overflow bound",
+			mutate: func(c *Config) {
+				*c = *assuranceConfig(AssuranceWebProviderTurnstile)
+				c.AssuranceDeviceRetentionDays = MaxAssuranceDeviceRetentionDays + 1
+			},
 			wantErr: true,
 		},
 		{
@@ -347,5 +381,20 @@ func TestValidate_AssuranceProjectOnlyDeployments(t *testing.T) {
 				t.Fatalf("Validate() = %v; want nil with the explicit opt-out", err)
 			}
 		})
+	}
+}
+
+// TestValidate_AssuranceRetentionBoundAppliesWhenDisabled pins that the
+// retention bound is checked even with assurance off: the sweeper is wired
+// from the value regardless, and past the bound the cutoff duration
+// overflows int64 and inverts, turning the sweep into a deleter of live
+// device rows left over from a previously-enabled period.
+func TestValidate_AssuranceRetentionBoundAppliesWhenDisabled(t *testing.T) {
+	cfg := &Config{
+		AssuranceEnabled:             false,
+		AssuranceDeviceRetentionDays: MaxAssuranceDeviceRetentionDays + 1,
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() = nil; the overflow bound must apply even when assurance is disabled")
 	}
 }
