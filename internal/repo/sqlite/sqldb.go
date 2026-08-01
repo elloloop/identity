@@ -92,6 +92,13 @@ func (t *tx) Exec(ctx context.Context, q string, args ...any) (commandTag, error
 	return execOn(ctx, t.t, q, args...)
 }
 
+// Query lets a transaction read the rows it is about to modify — the
+// batched anonymous-user sweep selects its victims and deletes them and
+// their non-FK child rows in one transaction.
+func (t *tx) Query(ctx context.Context, q string, args ...any) (rows, error) {
+	return queryOn(ctx, t.t, q, args...)
+}
+
 func (t *tx) Commit(ctx context.Context) error   { return t.t.Commit() }
 func (t *tx) Rollback(ctx context.Context) error { return t.t.Rollback() }
 

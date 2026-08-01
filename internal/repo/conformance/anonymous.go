@@ -164,6 +164,45 @@ func runAnonymousConformance(t *testing.T, driver Driver) {
 		}
 	})
 
+	t.Run(driver.Name+"/RetentionSweepDrainsNonFKRows", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+
+		id := newAnon(t, ctx, r, 1000)
+		// passkey_challenges has no FK to users (its user_id defaults to ''
+		// so pre-account flows can write it), so a bare DELETE FROM users
+		// leaves this row behind. BeginPasskeyRegistration writes one, and
+		// the drivers must agree on what the sweep reclaims.
+		challengeID, err := r.CreatePasskeyChallenge(ctx, &service.PasskeyChallengeRecord{
+			UserID: id, Challenge: "c", ChallengeType: "registration", ExpiresAt: 9_000_000, CreatedAt: 1,
+		})
+		if err != nil {
+			t.Fatalf("CreatePasskeyChallenge: %v", err)
+		}
+
+		if err := r.DeleteStaleAnonymousUsers(ctx, 5000, 100); err != nil {
+			if errors.Is(err, service.ErrSweepNotImplemented) {
+				t.Skip("sweep not implemented for this backend")
+			}
+			t.Fatalf("sweep: %v", err)
+		}
+
+		got, err := r.GetUser(ctx, id)
+		if err != nil && !errors.Is(err, service.ErrNotFound) {
+			t.Fatalf("GetUser: %v", err)
+		}
+		if got != nil {
+			t.Fatal("the stale anonymous user survived")
+		}
+		orphan, err := r.GetPasskeyChallenge(ctx, challengeID)
+		if err != nil && !errors.Is(err, service.ErrNotFound) {
+			t.Fatalf("GetPasskeyChallenge: %v", err)
+		}
+		if orphan != nil {
+			t.Error("sweep orphaned a passkey challenge; DeleteUser clears the non-FK tables, so the drivers would disagree")
+		}
+	})
+
 	t.Run(driver.Name+"/RetentionSweepRespectsLimit", func(t *testing.T) {
 		ctx := context.Background()
 		r := driver.NewRepo(t)

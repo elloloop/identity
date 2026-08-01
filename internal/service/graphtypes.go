@@ -42,6 +42,10 @@ const (
 	ufQuotaBytes    = "15"
 	ufDeactivatedAt = "16"
 	ufLastLoginAt   = "17"
+	// ufIsAnonymous carries the credential-less flag through the graph
+	// layer. Without it userFromNode leaves User.IsAnonymous at its zero
+	// value, so the admin surfaces would report every account as permanent.
+	ufIsAnonymous = "20"
 )
 
 // ── WorkingGroup field IDs (type_id 2) ─────────────────────────────

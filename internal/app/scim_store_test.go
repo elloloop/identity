@@ -26,6 +26,11 @@ type scimFakeRepo struct {
 
 	delRefreshCalled bool
 	revokeCalled     bool
+	// updateCalled / deleteCalled make "the row was not mutated" assertable.
+	// A refusal that still wrote would return the same error as one that
+	// did not, so asserting the error alone proves nothing.
+	updateCalled bool
+	deleteCalled bool
 }
 
 func (r *scimFakeRepo) GetUser(context.Context, string) (*service.User, error) {
@@ -40,10 +45,14 @@ func (r *scimFakeRepo) CreateUser(context.Context, *service.User) (string, error
 }
 
 func (r *scimFakeRepo) UpdateUser(context.Context, string, map[string]any) error {
+	r.updateCalled = true
 	return r.errUpdate
 }
 
-func (r *scimFakeRepo) DeleteUser(context.Context, string) error { return r.errDelete }
+func (r *scimFakeRepo) DeleteUser(context.Context, string) error {
+	r.deleteCalled = true
+	return r.errDelete
+}
 
 func (r *scimFakeRepo) DeleteRefreshTokensForUser(context.Context, string) error {
 	r.delRefreshCalled = true
@@ -211,4 +220,74 @@ func TestSplitDisplayName(t *testing.T) {
 	if g, f := splitDisplayName("Ada Lovelace"); g != "Ada" || f != "Lovelace" {
 		t.Fatalf("two: %q %q", g, f)
 	}
+}
+
+// TestRepoSCIMStore_AnonymousUsersAreNotAddressable pins that every by-id
+// SCIM method treats an anonymous account as absent.
+//
+// They have no email, and RFC 7643 §4.1.1 makes userName REQUIRED and
+// unique, which is why the list filter excludes them. The write half is the
+// one that loses data: an IdP "repairing" a blank userName would give the
+// account a real address while is_anonymous stayed true, making it
+// email-loginable AND still matched by the retention sweep — hard-deleted
+// with its sessions after the window. Asserting the error is not enough;
+// these assert the row was never touched.
+func TestRepoSCIMStore_AnonymousUsersAreNotAddressable(t *testing.T) {
+	ctx := context.Background()
+	anon := func() *service.User {
+		return &service.User{ID: "anon-1", IsAnonymous: true}
+	}
+
+	t.Run("GetUser", func(t *testing.T) {
+		s := &repoSCIMStore{repo: &scimFakeRepo{user: anon()}}
+		if _, err := s.GetUser(ctx, "anon-1"); !errors.Is(err, scim.ErrNotFound) {
+			t.Fatalf("GetUser → %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("ReplaceUser does not mutate", func(t *testing.T) {
+		repo := &scimFakeRepo{user: anon()}
+		s := &repoSCIMStore{repo: repo}
+		_, err := s.ReplaceUser(ctx, "anon-1", scim.User{Email: "claimed@example.com", Active: true})
+		if !errors.Is(err, scim.ErrNotFound) {
+			t.Fatalf("ReplaceUser → %v, want ErrNotFound", err)
+		}
+		if repo.updateCalled {
+			t.Fatal("ReplaceUser wrote to an anonymous account: it would become email-loginable while still reapable")
+		}
+	})
+
+	t.Run("PatchUser does not mutate", func(t *testing.T) {
+		repo := &scimFakeRepo{user: anon()}
+		s := &repoSCIMStore{repo: repo}
+		name := "claimed@example.com"
+		_, err := s.PatchUser(ctx, "anon-1", scim.UserPatch{UserName: &name})
+		if !errors.Is(err, scim.ErrNotFound) {
+			t.Fatalf("PatchUser → %v, want ErrNotFound", err)
+		}
+		if repo.updateCalled {
+			t.Fatal("PatchUser wrote to an anonymous account")
+		}
+	})
+
+	t.Run("DeleteUser does not delete", func(t *testing.T) {
+		repo := &scimFakeRepo{user: anon()}
+		s := &repoSCIMStore{repo: repo}
+		if err := s.DeleteUser(ctx, "anon-1"); !errors.Is(err, scim.ErrNotFound) {
+			t.Fatalf("DeleteUser → %v, want ErrNotFound", err)
+		}
+		// Otherwise DELETE hard-deletes and emits user_deleted for an id
+		// that PUT and PATCH answer 404 for.
+		if repo.deleteCalled {
+			t.Fatal("DeleteUser deleted an account the other methods report as absent")
+		}
+	})
+
+	// A permanent account is unaffected — the guard must not swallow real users.
+	t.Run("permanent accounts still resolve", func(t *testing.T) {
+		s := &repoSCIMStore{repo: &scimFakeRepo{user: &service.User{ID: "u1", Email: "real@example.com"}}}
+		if _, err := s.GetUser(ctx, "u1"); err != nil {
+			t.Fatalf("GetUser on a permanent account → %v", err)
+		}
+	})
 }

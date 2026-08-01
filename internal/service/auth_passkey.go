@@ -18,6 +18,13 @@ import (
 // BeginPasskeyRegistration generates WebAuthn registration options for the
 // authenticated user. Returns (optionsJSON, challengeID, error).
 func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID, deviceName string) (string, string, error) {
+	// Refused at BEGIN, not only at completion: this call persists a
+	// challenge row, and the anonymous retention sweep does not reach the
+	// challenge tables (no FK to users), so an anonymous caller could
+	// accumulate rows the sweep never reclaims. Completion is guarded too.
+	if err := s.refuseAnonymousCredentialAttach(ctx, userID); err != nil {
+		return "", "", err
+	}
 	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return "", "", err

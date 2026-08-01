@@ -27,6 +27,7 @@ func userFromNode(n *graph.Node) *User {
 		CreatedAt:     time.UnixMilli(pi64(p, ufCreatedAt)),
 		UpdatedAt:     time.UnixMilli(pi64(p, ufUpdatedAt)),
 		PasswordHash:  pstr(p, ufPasswordHash),
+		IsAnonymous:   pbool(p, ufIsAnonymous),
 	}
 }
 
