@@ -349,8 +349,20 @@ func TestRefreshToken_AnonymousStopsWhenTheFeatureIsDisabled(t *testing.T) {
 	}
 
 	_, _, _, err = svc.RefreshToken(anonCtx(false, AccessModeOpen), res.RefreshToken, "1.2.3.4", "ua")
-	if !errors.Is(err, ErrAnonymousDisabled) {
-		t.Fatalf("refresh after disabling err = %v, want ErrAnonymousDisabled", err)
+	if !errors.Is(err, ErrAnonymousRefreshDisabled) {
+		t.Fatalf("refresh after disabling err = %v, want ErrAnonymousRefreshDisabled", err)
+	}
+
+	// The refusal must NOT have consumed the token. It is the account's only
+	// credential, so burning it makes re-enabling the feature useless and
+	// leaves the account permanently unreachable — then hard-deleted by the
+	// retention sweep. Re-enable and confirm the same token still works.
+	user, access, refresh, err := svc.RefreshToken(anonCtx(true, AccessModeOpen), res.RefreshToken, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("the refusal burned the token: re-enabling did not restore the session: %v", err)
+	}
+	if user.ID != res.User.ID || access == "" || refresh == "" {
+		t.Fatalf("recovery returned %#v / empty tokens", user)
 	}
 }
 

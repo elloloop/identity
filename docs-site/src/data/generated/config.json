@@ -85,7 +85,7 @@
     "type": "integer",
     "default": "30",
     "required": false,
-    "description": "bounds how long an anonymous user is kept after its LAST ACTIVITY.",
+    "description": "bounds how long an anonymous user is kept after its LAST ACTIVITY; when left unset it is raised automatically to outlive the refresh-token lifetime, and the adjustment is logged once at boot as anonymous_retention_raised.",
     "category": "Anonymous identity",
     "anchor": "anonymous-identity"
   },

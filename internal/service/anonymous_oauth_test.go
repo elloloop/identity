@@ -493,3 +493,42 @@ func TestUpgradeAnonymousWithPassword_RevokesTheAccessSessionToo(t *testing.T) {
 		t.Fatal("the pre-upgrade access session is still active — the withheld session remains reachable")
 	}
 }
+
+// TestUpgradeAnonymousWithPassword_DoesNotLeakAddressExistence pins the
+// ordering that closes an enumeration oracle.
+//
+// The address probe answers a question about OTHER accounts, and its
+// ALREADY_EXISTS was distinguishable from the not-anonymous refusal — so
+// checking it first let ANY authenticated caller walk the project's
+// registered addresses, straight around the decoy-success anti-enumeration
+// work PasswordSignup invests in.
+func TestUpgradeAnonymousWithPassword_DoesNotLeakAddressExistence(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := anonCtx(true, AccessModeOpen)
+
+	if _, err := repo.CreateUser(ctx, &User{Email: "registered@example.com"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// A permanent (non-anonymous) caller — the enumerating party.
+	caller, err := repo.CreateUser(ctx, &User{Email: "caller@example.com"})
+	if err != nil {
+		t.Fatalf("seed caller: %v", err)
+	}
+
+	_, errTaken := svc.UpgradeAnonymousWithPassword(ctx, caller, AnonymousPasswordCredential{
+		Email: "registered@example.com", Password: "Str0ng-Passw0rd!x",
+	})
+	_, errFree := svc.UpgradeAnonymousWithPassword(ctx, caller, AnonymousPasswordCredential{
+		Email: "definitely-unused@example.com", Password: "Str0ng-Passw0rd!x",
+	})
+
+	// Both must be the SAME refusal — the caller is not anonymous, and that
+	// is all it may learn. A differing error is the oracle.
+	if !errors.Is(errTaken, ErrNotAnonymous) || !errors.Is(errFree, ErrNotAnonymous) {
+		t.Fatalf("taken=%v free=%v; both should be ErrNotAnonymous", errTaken, errFree)
+	}
+	if errTaken.Error() != errFree.Error() {
+		t.Fatalf("responses differ by address existence:\n taken: %v\n free:  %v", errTaken, errFree)
+	}
+}

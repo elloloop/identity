@@ -40,8 +40,9 @@ import { Code } from "astro-expressive-code/components";
 # Needs GATEWAY_ASSURANCE_ENABLED=true, or the server refuses to boot.
 GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE=true
 
-# Days of inactivity before an anonymous account is reaped (default 30).
-# Must exceed GATEWAY_REFRESH_EXPIRY_SECONDS. 0 disables the sweep.
+# Days of inactivity before an anonymous account is reaped (default 30,
+# raised automatically to exceed GATEWAY_REFRESH_EXPIRY_SECONDS when left
+# unset — see Retention). 0 disables the sweep.
 GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
   />
   <p>
@@ -273,10 +274,27 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
     matches on the anonymous flag, which the upgrade clears.
   </p>
   <p>
-    The window must exceed <code>GATEWAY_REFRESH_EXPIRY_SECONDS</code> or the server
-    refuses to boot — reaping an account while its refresh token is still valid
-    would destroy a session the client still holds and cannot re-establish.
+    The window must exceed <code>GATEWAY_REFRESH_EXPIRY_SECONDS</code>: reaping
+    an account while its refresh token is still valid would destroy a session
+    the client still holds and cannot re-establish. What happens when it does
+    not depends on whether you set it:
   </p>
+  <ul>
+    <li>
+      <strong>Set explicitly</strong> — the server <strong>refuses to
+      boot</strong>, naming both variables. You asked for a window it cannot
+      honour.
+    </li>
+    <li>
+      <strong>Left unset</strong> — the default (30) is <strong>raised</strong>
+      to one day past your refresh lifetime, and the adjustment is logged once
+      at boot as <code>anonymous_retention_raised</code>. A deployment that
+      never enabled anonymous sign-in must not fail to start over a value it
+      never chose, so with a 60-day refresh lifetime the effective window is
+      61 days, not 30. Set the variable explicitly if you need a specific
+      number — for a privacy statement, say.
+    </li>
+  </ul>
   <p>
     <strong>The sweep covers the boot-default project only.</strong> It runs
     against the repository bound at startup, so anonymous users in other

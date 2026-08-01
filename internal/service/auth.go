@@ -1942,6 +1942,17 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", err
 	}
 
+	// The anonymous kill switch is checked BEFORE the token is consumed. A
+	// refresh token is an anonymous account's ONLY credential, so consuming
+	// it and then refusing burns it: re-enabling the feature does not
+	// restore the session, and the retry an SDK makes on the error lands on
+	// replay detection, leaving the account permanently unreachable — and
+	// hard-deleted once the retention window elapses. Every other check on
+	// this path guards an account that has some other way back in.
+	if timeoutUser.IsAnonymous && !s.anonymousEnabled(ctx) {
+		return nil, "", "", ErrAnonymousRefreshDisabled
+	}
+
 	// Rotation. ConsumeRefreshTokenByHash is the serialization point: it
 	// only succeeds when the row's consumed_at is currently 0, so two
 	// concurrent rotations of the same token resolve to exactly one
@@ -1982,11 +1993,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// governed by the project's anonymous switch, re-checked here so that
 	// turning the feature OFF does stop refreshes.
 	if user.IsAnonymous {
-		if !s.anonymousEnabled(ctx) {
-			return nil, "", "", ErrAnonymousDisabled
-		}
-		// Refresh is an anonymous account's only recurring sign of life;
-		// stamping it here is what keeps an active one out of the sweep.
+		// The kill switch was already checked above, before the token was
+		// consumed. Refresh is an anonymous account's only recurring sign of
+		// life; stamping it here is what keeps an active one out of the sweep.
 		s.touchAnonymousActivity(ctx, user)
 	} else if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
 		return nil, "", "", err

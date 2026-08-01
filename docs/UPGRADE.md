@@ -44,7 +44,7 @@ for every user that has an address.
 | --- | --- | --- |
 | `GATEWAY_ANONYMOUS_ENABLED` | `false` | turns on `SignInAnonymously` |
 | `GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE` | `false` | gates it on the assurance layer; **boot fails** if set while `GATEWAY_ASSURANCE_ENABLED=false` |
-| `GATEWAY_ANONYMOUS_RETENTION_DAYS` | `30` | days of inactivity before reaping; **must exceed `GATEWAY_REFRESH_EXPIRY_SECONDS`**; `0` disables the sweep. Deployment-wide, and the sweep reaches the **boot-default project only** — see below |
+| `GATEWAY_ANONYMOUS_RETENTION_DAYS` | `30`, raised automatically to exceed `GATEWAY_REFRESH_EXPIRY_SECONDS` when left unset (logged once at boot as `anonymous_retention_raised`) | days of inactivity before reaping; an **explicitly set** window that does not exceed the refresh lifetime **fails boot**; `0` disables the sweep. Deployment-wide, and the sweep reaches the **boot-default project only** — see below |
 
 Two things to know before enabling:
 

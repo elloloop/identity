@@ -41,6 +41,11 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrAnonymousDisabled):
 		return connect.NewError(connect.CodeUnimplemented, err)
 
+	// PermissionDenied, not Unimplemented: this arrives on RefreshToken,
+	// which IS implemented. The caller is refused, the RPC is not absent.
+	case errors.Is(err, service.ErrAnonymousRefreshDisabled):
+		return connect.NewError(connect.CodePermissionDenied, err)
+
 	case errors.Is(err, service.ErrNotAnonymous),
 		errors.Is(err, service.ErrAnonymousMustUpgrade):
 		return connect.NewError(connect.CodeFailedPrecondition, err)

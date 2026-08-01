@@ -129,9 +129,12 @@ corrected.
 Refresh stamps the activity clock. An anonymous account has no login event, so
 refresh is its only recurring sign of life; without the stamp the timestamp
 never advances and every anonymous user is deleted exactly one retention window
-after creation however actively it is being used. Boot fails if the window does
-not exceed the refresh-token lifetime, since reaping a user whose refresh token
-is still live destroys a session the client still holds.
+after creation however actively it is being used. An EXPLICITLY set window that does
+not exceed the refresh-token lifetime fails boot, since reaping a user whose
+refresh token is still live destroys a session the client still holds; an
+UNSET one is raised past the refresh lifetime instead and logged once, so a
+deployment that never enabled the feature cannot fail to start over a default
+it never chose.
 
 ### The token carries an `anonymous` claim
 

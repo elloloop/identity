@@ -26,6 +26,14 @@ var (
 	// permanent credential through a path that cannot also clear the
 	// anonymous flag. See refuseAnonymousCredentialAttach.
 	ErrAnonymousMustUpgrade = errors.New("anonymous accounts gain credentials through UpgradeAnonymousAccount")
+
+	// ErrAnonymousRefreshDisabled: the project turned anonymous sign-in off
+	// while this session was live. Distinct from ErrAnonymousDisabled
+	// because it surfaces on RefreshToken — a shipped, implemented RPC —
+	// where UNIMPLEMENTED would read as a routing fault (HTTP 404 under
+	// Connect) and some SDK layers cache it as a capability probe. This is
+	// an authorization outcome for one caller, not an absent capability.
+	ErrAnonymousRefreshDisabled = errors.New("anonymous sign-in was disabled for this project")
 )
 
 // AnonymousPasswordCredential upgrades an anonymous account to an email +

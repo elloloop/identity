@@ -610,10 +610,14 @@ type Config struct {
 	// mode.
 	AnonymousEnabled bool
 	// AnonymousRetentionDays bounds how long an anonymous user is kept after
-	// its LAST ACTIVITY. Like the device window this is retention, not
-	// expiry. 0 (or negative) disables the sweep, keeping anonymous users
-	// forever. Deployment-wide: there is no per-project override, because the
-	// sweeper runs against the repository bound at boot.
+	// its LAST ACTIVITY; when left unset it is raised automatically to outlive
+	// the refresh-token lifetime, and the adjustment is logged once at boot
+	// as anonymous_retention_raised. Like the device window this is
+	// retention, not expiry. 0 (or negative) disables the sweep, keeping
+	// anonymous users forever. Deployment-wide: there is no per-project
+	// override, because the sweeper runs against the repository bound at
+	// boot. An EXPLICITLY set window that does not exceed the refresh
+	// lifetime fails boot instead of being raised.
 	AnonymousRetentionDays int
 	// AnonymousRequireAssurance makes SignInAnonymously require a valid
 	// assurance token, exactly like the six enforce flags on the identified
@@ -1065,10 +1069,10 @@ type Config struct {
 	// each entry is sensitive and never logged.
 	WebhookSubscriptions string
 
-	// anonymousRetentionExplicit records that the operator set
-	// GATEWAY_ANONYMOUS_RETENTION_DAYS. Only an explicit value is held to
-	// the refresh-lifetime invariant; an unset one is raised instead of
-	// failing a boot the operator never asked for.
+	// anonymousRetentionExplicit records that the operator set the retention
+	// window rather than inheriting the default. Only an explicit value is
+	// held to the refresh-lifetime invariant; an unset one is raised instead
+	// of failing a boot the operator never asked for.
 	anonymousRetentionExplicit bool
 	// AnonymousRetentionRaisedFrom is the unset default that was raised,
 	// or 0 when no adjustment happened. Boot logs it once.

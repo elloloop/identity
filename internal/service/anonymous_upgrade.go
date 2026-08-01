@@ -70,10 +70,27 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 		return nil, err
 	}
 
-	// Check the address BEFORE hashing (bcrypt-class work) and before the
-	// promotion, so a taken address costs nothing and changes nothing. The
-	// unique index is still the authority — this is the friendly error, not
-	// the guarantee; a racing signup is caught by the index below.
+	// Confirm the caller is anonymous BEFORE probing whether the address is
+	// taken. The probe answers a question about OTHER accounts, and its
+	// ALREADY_EXISTS is distinguishable from the not-anonymous refusal — so
+	// checking it first let ANY authenticated caller walk the project's
+	// registered addresses, straight around the decoy-success
+	// anti-enumeration work PasswordSignup invests in. The OAuth arm already
+	// ordered these correctly.
+	u, err := s.repo(ctx).GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if u == nil {
+		return nil, ErrNotFound
+	}
+	if !u.IsAnonymous {
+		return nil, ErrNotAnonymous
+	}
+
+	// Now the address. Checked before hashing (bcrypt-class work) so a taken
+	// address costs nothing; the unique index remains the authority, this is
+	// the friendly error.
 	existing, err := s.repo(ctx).FindUserByEmail(ctx, email)
 	if err != nil {
 		return nil, err
@@ -184,7 +201,10 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 	})
 	if err != nil {
 		if errors.Is(err, errOAuthExchangeFailed) {
-			return nil, s.mapOAuthErr(errors.Unwrap(err))
+			// NOT errors.Unwrap: the error wraps two verbs, and Unwrap
+			// returns nil for a multi-%w error — which reached the client as
+			// the literal "unauthenticated: %!w(<nil>)".
+			return nil, s.mapOAuthErr(err)
 		}
 		return nil, err
 	}
