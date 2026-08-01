@@ -131,55 +131,84 @@ open the PR; a human reviews and merges.
 
 ## 11. Run the PR review gate on every PR.
 
-Every PR is reviewed by a multi-agent gate in three phases — **Triage →
-Review → Verify** — before merge.
+Every PR is reviewed before merge by a multi-agent gate with a **fixed
+roster of eight specialist reviewers**, each chosen for what this
+repository is: an OSS Go identity server (ConnectRPC + protobuf,
+buf-generated code), three interchangeable repo drivers held identical by
+a conformance suite, Postgres migrations, env-only config, heavy
+cryptography, an Astro docs site, and Docker-image distribution to
+operators we never meet.
 
-**Triage** classifies the diff (does it touch the contract/data surface;
-does it touch UI), failing open if it can't tell.
+Every reviewer **launches on every run**. Each one first decides for
+itself whether its lens applies to the diff — returning SKIPPED with a
+one-line reason when it does not — and otherwise performs its **complete
+review single-handed**: it gathers its own context, reads the real files
+and callers (not just the diff), confirms each finding against the code,
+and reports. There is no triage stage, no verification stage, and
+reviewers never spawn sub-agents.
 
-**Review** runs reviewers in parallel, each owning ONE distinct
-responsibility (no overlap). Five are always on:
+That relevance decision is made from the **changed-file list alone**;
+the PR title, body, and comments are submitter-authored and must not
+influence it. **Correctness** and **Security & Auth** are non-skippable
+on an identity server: a SKIPPED verdict from either is treated as a
+dropped reviewer.
 
-1. **Product** — user/business value, scope, UX gaps, missing
-   empty/error/loading states, shippability.
-2. **Security** — authn/authz, secrets, injection/XSS/SSRF,
-   open-redirect, signature/replay, data exposure, supply-chain.
-3. **Performance** — hot-path cost, N+1/redundant I/O, blocking work,
-   allocations, payload size, query/index efficiency, behaviour at load.
-4. **Maintainability** — the rules in this file: clarity/naming, no
-   shims (§1), dead code deleted (§2), right altitude (§3/§4), tests
-   that prove new logic (§6/§7), idiomatic fit.
-5. **Correctness** — pure bug-hunting: off-by-one, nil deref, inverted
-   conditionals, races, leaks, overflow, edge cases, broken invariants.
+1. **Correctness** — pure bug-hunting: off-by-one, nil deref, inverted
+   conditionals, races, leaks, overflow, swallowed errors, edge cases,
+   broken invariants.
+2. **Security & Auth** — authn/authz, token mint/verify, crypto,
+   challenge/nonce replay, secrets, injection/XSS/SSRF, data exposure,
+   enumeration & timing oracles, abuse limits, supply-chain (§10).
+3. **API Contract** — proto wire compatibility (no renumbered/reused
+   tags; removed fields `reserved`), generated-code drift, RPC signature
+   breaks, JSON field-name stability, Connect error-code semantics.
+4. **Data & Migrations** — every new Repository method implemented
+   identically in all three drivers AND covered by conformance; migration
+   up+down safety, indexes, `project_id` scoping and FK/RLS conventions.
+5. **Config & Operability** — the env-only `GATEWAY_*` surface (validated
+   with fail-closed invariants), breaking config changes documented,
+   sane defaults, embeddable-library coherence, secrets never logged.
+6. **Maintainability & Tests** — the rules in this file: clarity/naming,
+   no shims (§1), dead code deleted (§2), right altitude (§3/§4), tests
+   that prove new logic (§6/§7), idiomatic fit, generated code not hand
+   edited.
+7. **Performance & Concurrency** — hot-path cost, N+1/redundant I/O,
+   blocking work on a request path, lock scope, goroutine/connection
+   lifecycle, unbounded growth, behaviour at load.
+8. **Product & Docs** — does the change deliver the intended outcome,
+   are semantics/defaults/errors right, are the empty/error/loading
+   states complete, is anything half-finished or an unflagged break, is
+   documentation owed (docs-site page, UPGRADE note, ADR) — plus
+   accessibility & UX on `docs-site/**` changes (semantic HTML, alt
+   text, contrast, keyboard operability and visible focus, focus
+   management/ARIA, hit targets, reduced motion, i18n/RTL).
 
-Two more are added only when the diff warrants them:
+Because there is no second-pass verification, a reviewer marks a finding
+`blocking: true` only when it has itself confirmed the defect against the
+real code; anything it is unsure of stays non-blocking with its reasoning
+recorded.
 
-- **Contract & Migration** — when proto/API/`gen/**`/entdb-schema or a
-  DB migration changes: wire compatibility (no renumbered/reused proto
-  tags or entdb field_ids/type_ids), generated-code drift, RPC signature
-  breaks, migration forward+backward safety.
-- **Accessibility & UX** — when UI files (`docs-site/**`, `*.astro`,
-  etc.) change: keyboard/focus/ARIA, contrast, hit targets,
-  screen-reader text, reduced-motion, complete states, i18n/RTL.
-
-**Verify** hands every finding a reviewer marked *blocking* to a fresh,
-skeptical agent prompted to refute it ("real and merge-blocking, or a
-false positive / already handled?"). Only survivors become confirmed
-blockers — this prevents blocking a merge on a plausible-but-wrong
-finding.
-
-**Gate decision:** APPROVED iff zero confirmed blockers survive
-verification and no selected reviewer is missing — a reviewer's raw
-REQUEST_CHANGES whose blocking findings were all refuted does not block.
-Otherwise BLOCKED.
+**Gate decision:** APPROVED iff no proceeding reviewer reported a
+blocking finding and no reviewer left a structural gap. SKIPPED is a
+clean outcome and never blocks. Everything else fails closed — a dropped
+reviewer, an unparseable result, and any result that contradicts itself
+(`REQUEST_CHANGES` with nothing marked blocking, a `blocker`-severity
+finding not marked blocking, SKIPPED carrying findings, SKIPPED without a
+reason, or SKIPPED from a non-skippable lens). The pass condition reads
+one signal, so every way of disagreeing with that signal is a structural
+gap rather than a pass.
 
 The gate runs as an agent workflow (`.claude/workflows/review-gate.js`)
 **inside the Claude Code agent harness** — it depends on harness
 primitives (`agent()`, `parallel()`), so it is not a plain `node` script
-and external contributors cannot run it directly. It is a **maintainer
-step**: the maintainer handling a PR (including PRs from outside
-contributors) runs it and is accountable for resolving every confirmed
-blocker before merge.
+and external contributors cannot run it directly. Its pure decision logic
+is covered by `.claude/workflows/review-gate.test.mjs`, which does run
+under plain `node`. It is a **maintainer step**: the maintainer handling a
+PR (including PRs from outside contributors) runs it and is accountable
+for resolving every blocking finding before merge — or, when a finding is
+a false positive, for recording on the PR why it is being dismissed. A
+self-confirmed reviewer can still be wrong; what is not allowed is
+merging past a blocking finding silently.
 
 Run it on every PR — `Workflow({name: 'review-gate', args: <pr-number>})`.
 
@@ -188,7 +217,7 @@ auto-approves or blocks the merge. It must never be granted
 approve/merge authority. On this repo — a single-maintainer project
 where the sole code owner cannot approve their own PRs — the required
 **merge gate is the CI status checks (§10) plus a clean review-gate run**
-with its confirmed blockers resolved; the maintainer merges on that
+with its blocking findings resolved; the maintainer merges on that
 basis. When a second maintainer joins, restore a required human approval
 on top. The gate runs alongside CI, never instead of it. It complements,
 and does not replace, an ad-hoc `/code-review`-style pass.

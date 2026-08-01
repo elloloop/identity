@@ -106,4 +106,4 @@ per-tenant one).
   releases; back up before destructive prod migrations.
 - New shared-`Repository` methods land on memory + postgres + entdb (until entdb
   retires from identity) and the conformance suite, with identical semantics.
-- One review-gate per PR; clear confirmed blockers before merge.
+- One review-gate per PR; clear blocking findings before merge.
