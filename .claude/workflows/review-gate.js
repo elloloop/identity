@@ -140,7 +140,9 @@ STEP 2 — FULL REVIEW. Read the ACTUAL FILES AND CALLERS in the working tree (n
 //   - a severity:'blocker' finding whose `blocking` flag is falsy — same
 //     contradiction, one level down;
 //   - SKIPPED carrying findings — it both did and did not review;
-//   - SKIPPED from a lens declared alwaysApplies — see REVIEWERS.
+//   - SKIPPED from a lens declared alwaysApplies — see REVIEWERS;
+//   - SKIPPED with no reason — a skip is the one outcome nothing else
+//     checks, so an unexplained one is an unaccountable pass.
 //
 // Returns '' when the result is usable, else the reason it is not.
 function inconsistency(reviewer, got) {
@@ -150,6 +152,9 @@ function inconsistency(reviewer, got) {
   if (got.verdict === 'SKIPPED') {
     if (reviewer.alwaysApplies) return 'skipped a lens that is declared non-skippable'
     if (got.findings.length > 0) return 'skipped its lens yet reported findings'
+    if (typeof got.skipReason !== 'string' || got.skipReason.trim() === '') {
+      return 'skipped its lens without giving a reason'
+    }
     return ''
   }
   if (got.findings.some((f) => f && f.severity === 'blocker' && !f.blocking)) {

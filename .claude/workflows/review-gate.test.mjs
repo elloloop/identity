@@ -79,6 +79,7 @@ const skippedWithFindings = only(3, skipped({
   findings: [{ severity: 'major', blocking: false, title: 't', detail: 'd' }],
 }))
 const nonSkippableSkipped = only(0, skipped())
+const skippedWithoutReason = only(3, { verdict: 'SKIPPED', findings: [] })
 
 const tests = {
   async 'all approve -> APPROVED with full roster'() {
@@ -126,6 +127,11 @@ const tests = {
   },
   async 'SKIPPED while reporting findings -> fail closed'() {
     const r = await run({ reviewerVerdict: skippedWithFindings })
+    assert.equal(r.gate, 'BLOCKED')
+    assert.equal(r.structuralGaps, 1)
+  },
+  async 'SKIPPED without a reason -> fail closed'() {
+    const r = await run({ reviewerVerdict: skippedWithoutReason })
     assert.equal(r.gate, 'BLOCKED')
     assert.equal(r.structuralGaps, 1)
   },

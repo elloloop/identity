@@ -193,9 +193,10 @@ blocking finding and no reviewer left a structural gap. SKIPPED is a
 clean outcome and never blocks. Everything else fails closed — a dropped
 reviewer, an unparseable result, and any result that contradicts itself
 (`REQUEST_CHANGES` with nothing marked blocking, a `blocker`-severity
-finding not marked blocking, SKIPPED carrying findings, or SKIPPED from a
-non-skippable lens). The pass condition reads one signal, so every way of
-disagreeing with that signal is a structural gap rather than a pass.
+finding not marked blocking, SKIPPED carrying findings, SKIPPED without a
+reason, or SKIPPED from a non-skippable lens). The pass condition reads
+one signal, so every way of disagreeing with that signal is a structural
+gap rather than a pass.
 
 The gate runs as an agent workflow (`.claude/workflows/review-gate.js`)
 **inside the Claude Code agent harness** — it depends on harness
