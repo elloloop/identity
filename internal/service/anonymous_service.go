@@ -21,6 +21,11 @@ var (
 	// holds a credential. Upgrading twice would silently rebind an
 	// identified account to a new credential, so it is refused.
 	ErrNotAnonymous = errors.New("account is not anonymous")
+
+	// ErrAnonymousMustUpgrade: an anonymous caller tried to attach a
+	// permanent credential through a path that cannot also clear the
+	// anonymous flag. See refuseAnonymousCredentialAttach.
+	ErrAnonymousMustUpgrade = errors.New("anonymous accounts gain credentials through UpgradeAnonymousAccount")
 )
 
 // AnonymousPasswordCredential upgrades an anonymous account to an email +
@@ -193,4 +198,33 @@ func (s *AuthService) touchAnonymousActivity(ctx context.Context, u *User) {
 		s.logger.Warn("anonymous_activity_stamp_failed",
 			zap.String("user_id", u.ID), zap.Error(err))
 	}
+}
+
+// refuseAnonymousCredentialAttach blocks a permanent credential from being
+// attached to an anonymous account by any path other than
+// UpgradeAnonymousAccount.
+//
+// The retention sweep keys on is_anonymous, and every other credential
+// endpoint (LinkIdentity, passkey registration, phone verification) is
+// reachable by an anonymous access token — it carries a sub and role:member
+// like any other. Attaching there leaves the flag set, so the account holds
+// a working credential AND stays in the sweep's reach: after the retention
+// window it is hard-deleted, cascading its sessions and credentials, with no
+// signal to anyone. Refusing keeps a single door through which an anonymous
+// account can become permanent, which is the only place the project access
+// mode has to be enforced.
+//
+// A lookup failure refuses too: guessing "probably not anonymous" is the
+// direction that loses data.
+func (s *AuthService) refuseAnonymousCredentialAttach(ctx context.Context, userID string) error {
+	u, err := s.repo(ctx).GetUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if u != nil && u.IsAnonymous {
+		return fmt.Errorf(
+			"%w: attaching one here would leave the account subject to the anonymous "+
+				"retention sweep despite holding a working credential", ErrAnonymousMustUpgrade)
+	}
+	return nil
 }

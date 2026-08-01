@@ -30,6 +30,20 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAssuranceFailed):
 		return connect.NewError(connect.CodePermissionDenied, err)
 
+	// ErrAnonymousDisabled reaches this mapper from the REFRESH path (the two
+	// anonymous handlers map it themselves). Without a case it fell through
+	// to CodeInternal, so flipping the documented kill switch returned 500 to
+	// every live anonymous client — which SDKs retry, against an
+	// already-consumed refresh token — and fired the operator's 5xx alerting
+	// on a deliberate config change. Unimplemented matches what the handlers
+	// return, so one sentinel means one code everywhere.
+	case errors.Is(err, service.ErrAnonymousDisabled):
+		return connect.NewError(connect.CodeUnimplemented, err)
+
+	case errors.Is(err, service.ErrNotAnonymous),
+		errors.Is(err, service.ErrAnonymousMustUpgrade):
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+
 	case errors.Is(err, service.ErrAssuranceUnavailable):
 		// The evidence could not be judged (upstream provider unreachable) —
 		// retryable, and deliberately generic: the underlying error can carry

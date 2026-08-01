@@ -411,6 +411,14 @@ func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.deleteUserLocked(userID)
+	return nil
+}
+
+// deleteUserLocked drains a user and every user-owned row. The caller must
+// hold r.mu — it exists so a sweep can select and delete under ONE lock
+// rather than snapshotting ids and deleting after releasing it.
+func (r *Repo) deleteUserLocked(userID string) {
 	deleteByUser(r.refreshTokens, userID, func(t *service.RefreshTokenRecord) string { return t.UserID })
 	deleteByUser(r.sessions, userID, func(s *service.SessionRecord) string { return s.UserID })
 	deleteByUser(r.passkeyCreds, userID, func(c *service.PasskeyCredRecord) string { return c.UserID })
@@ -428,7 +436,6 @@ func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 	deleteByUser(r.idvRecords, userID, func(rec *service.IdentityVerificationRecord) string { return rec.UserID })
 	deleteByUser(r.phoneVerifyCodes, userID, func(c *service.PhoneVerificationCodeRecord) string { return c.UserID })
 	delete(r.users, userID)
-	return nil
 }
 
 // deleteByUser removes every entry of m whose record's user id (read via

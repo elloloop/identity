@@ -436,6 +436,10 @@ paths:
       tags:
         - identity.v1.IdentityService
       summary: AdminSetProjectAssurance
+      description: |-
+        Per-project client-assurance authoring. Takes the Play Integrity
+         service-account key in plaintext and encrypts it server-side, so an
+         operator never has to reimplement the at-rest encryption.
       operationId: identity.v1.IdentityService.AdminSetProjectAssurance
       parameters:
         - name: Connect-Protocol-Version
@@ -3274,9 +3278,10 @@ paths:
         - identity.v1.IdentityService
       summary: SignInAnonymously
       description: |-
-        Per-project client-assurance authoring. Takes the Play Integrity
-         service-account key in plaintext and encrypts it server-side, so an
-         operator never has to reimplement the at-rest encryption.
+        SignInAnonymously creates a credential-less account and returns it with
+         a token pair. Every call mints a NEW user; the refresh token is the
+         account's only means of return. Per-project switch, default off, and
+         independent of the access mode.
       operationId: identity.v1.IdentityService.SignInAnonymously
       parameters:
         - name: Connect-Protocol-Version
@@ -3488,6 +3493,10 @@ paths:
       tags:
         - identity.v1.IdentityService
       summary: UpgradeAnonymousAccount
+      description: |-
+        UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+         anonymous account in place, preserving its id. Requires an
+         authenticated anonymous caller; exactly one credential must be set.
       operationId: identity.v1.IdentityService.UpgradeAnonymousAccount
       parameters:
         - name: Connect-Protocol-Version

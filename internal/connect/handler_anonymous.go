@@ -28,7 +28,7 @@ func (h *IdentityHandler) SignInAnonymously(
 	}
 	res, err := h.auth.SignInAnonymously(ctx, clientIP(req.Header()), req.Header().Get("User-Agent"))
 	if err != nil {
-		return nil, mapAnonymousError(err)
+		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.SignInAnonymouslyResponse{
 		User:         userToProto(res.User),
@@ -81,7 +81,7 @@ func (h *IdentityHandler) UpgradeAnonymousAccount(
 			errors.New("upgrade requires exactly one credential (password or oauth)"))
 	}
 	if err != nil {
-		return nil, mapAnonymousError(err)
+		return nil, toConnectError(err)
 	}
 	// The service reissues the pair: the caller's old access token still
 	// carries anonymous=true, and without a new one every downstream service
@@ -99,21 +99,4 @@ func (h *IdentityHandler) UpgradeAnonymousAccount(
 // matching the six per-endpoint enforce accessors.
 func (h *IdentityHandler) anonymousRequireAssurance() bool {
 	return h.cfg != nil && h.cfg.AnonymousRequireAssurance
-}
-
-// mapAnonymousError maps the anonymous-identity sentinels onto Connect
-// codes. Unimplemented for a disabled feature matches the assurance
-// handlers: the capability is absent from this deployment, not refused for
-// this caller. FailedPrecondition (not InvalidArgument) for a non-anonymous
-// caller: the request is well-formed, the account is simply in the wrong
-// state.
-func mapAnonymousError(err error) error {
-	switch {
-	case errors.Is(err, service.ErrAnonymousDisabled):
-		return connect.NewError(connect.CodeUnimplemented, err)
-	case errors.Is(err, service.ErrNotAnonymous):
-		return connect.NewError(connect.CodeFailedPrecondition, err)
-	default:
-		return toConnectError(err)
-	}
 }

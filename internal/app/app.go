@@ -297,6 +297,16 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
+			// The upgrade probes whether an address is already registered
+			// and says so plainly (unlike PasswordSignup's decoy), so
+			// without a quota it is an email-enumeration oracle that walks
+			// straight around the anti-enumeration work signup invests in.
+			// A failed probe does not consume the anonymous account, so one
+			// account can drive the whole walk.
+			PathPrefix: "/identity.v1.IdentityService/UpgradeAnonymousAccount", Tag: "anonymous_upgrade",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.v1.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
@@ -701,10 +711,7 @@ func New(deps Deps) (*Built, error) {
 			// control-plane project parses out of its own config, so the
 			// resolver stamps one type either way. Deliberately NOT derived
 			// from the access mode: the two gate different things.
-			Anonymous: service.ProjectAnonymousConfig{
-				Enabled:       deps.Config.AnonymousEnabled,
-				RetentionDays: deps.Config.AnonymousRetentionDays,
-			},
+			Anonymous: service.ProjectAnonymousConfig{Enabled: deps.Config.AnonymousEnabled},
 		},
 		service.NewCachingProjectResolver(
 			deps.ProjectResolver,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -21,10 +22,22 @@ import (
 // has a permanent account it cannot log into. What is shared is the rules:
 // the same format validation, canonicalization, and strength policy.
 //
-// The access mode is not consulted. It governs who may sign up as a new
-// identified user; this account already exists and is merely gaining a way
-// to log back in. Gating it here would mean an anonymous user on a closed
-// project could never become permanent, stranding the data they accrued.
+// The access mode IS enforced, with SIGNUP semantics. An earlier version of
+// this reasoned that the account already exists and is merely gaining a way
+// to log back in, so the mode need not apply — that was wrong, and it was a
+// full bypass of invite-only projects. Under `mode: invite` the guard denies
+// self-signup but permits login, so an unauthenticated caller could chain
+// SignInAnonymously (no access check, by design) into an upgrade (no check
+// at all) and end with a permanent, provisioned, indefinitely-refreshable
+// account on a project whose entire boundary is "invited users only".
+//
+// Signup semantics, not login: this call is what turns an anonymous session
+// into an email-identified account in the project's namespace, which is
+// precisely the act `mode` governs. The cost is real and accepted — an
+// anonymous user on a closed project cannot become permanent — but the
+// alternative is that the access mode means nothing. Operators who want that
+// data retained should open the project, or upgrade the account
+// administratively.
 func (s *AuthService) UpgradeAnonymousWithPassword(
 	ctx context.Context, userID string, cred AnonymousPasswordCredential,
 ) (*LoginResult, error) {
@@ -37,6 +50,12 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 	}
 	cemail := canonicalize(email)
 	email = string(cemail)
+	// Before any password work, and before the address probe below, so a
+	// restricted project neither mints a disallowed account nor answers
+	// existence questions about addresses it would refuse anyway.
+	if err := s.enforceProjectAccessSignup(ctx, cemail); err != nil {
+		return nil, err
+	}
 	if cred.Password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
@@ -86,40 +105,103 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 func (s *AuthService) UpgradeAnonymousWithOAuth(
 	ctx context.Context, userID string, cred AnonymousOAuthCredential,
 ) (*LoginResult, error) {
-	// LinkIdentity already owns the exchange, the unclaimed-identity check,
-	// and the audit trail for attaching a provider to an authenticated user.
-	// It is reused whole rather than reimplemented: the only thing an
-	// anonymous upgrade adds is the promotion afterwards.
-	identity, err := s.LinkIdentity(ctx, userID, cred.Code, cred.Provider,
-		cred.RedirectURI, cred.CodeVerifier, cred.State, cred.StateToken)
+	// Every check that can refuse runs BEFORE anything is persisted. An
+	// earlier version linked the identity first (via LinkIdentity) and
+	// decided afterwards, so a rejected upgrade still permanently mutated
+	// the account — and, when the provider's address could not be adopted,
+	// produced a PERMANENT account with an empty email. That state is
+	// invalid: it is the one thing the partial email index tolerates
+	// multiple of, so it silently blocks any future rollback of 0028, and
+	// the account has no address despite being permanent.
+	u, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-
-	fields := map[string]any{}
-	if email := strings.TrimSpace(strings.ToLower(identity.EmailAtLinkTime)); email != "" {
-		// Only claim the address if it is genuinely free. A collision here
-		// means the provider's email already belongs to another account: the
-		// link itself is legitimate (that account has no such provider
-		// identity) but adopting the address would breach the per-project
-		// uniqueness index, so the upgrade completes WITHOUT an email. The
-		// account is permanent and reachable via the provider either way.
-		taken, lookupErr := s.repo(ctx).FindUserByEmail(ctx, email)
-		if lookupErr != nil {
-			return nil, lookupErr
-		}
-		if taken == nil {
-			fields["email"] = email
-			// Federated addresses are provider-verified, unlike a typed one.
-			fields["email_verified"] = true
-			fields["email_verified_at"] = s.nowMs()
-			fields["name"] = fallbackDisplayName(email, "")
-		}
+	if u == nil {
+		return nil, ErrNotFound
+	}
+	if !u.IsAnonymous {
+		return nil, ErrNotAnonymous
 	}
 
-	if err := s.UpgradeAnonymousUser(ctx, userID, fields); err != nil {
+	identity, err := s.verifyOAuthExchange(ctx, OAuthLoginParams{
+		Code:         cred.Code,
+		Provider:     cred.Provider,
+		RedirectURI:  cred.RedirectURI,
+		CodeVerifier: cred.CodeVerifier,
+		State:        cred.State,
+		StateToken:   cred.StateToken,
+	})
+	if err != nil {
+		if errors.Is(err, errOAuthExchangeFailed) {
+			return nil, s.mapOAuthErr(errors.Unwrap(err))
+		}
+		return nil, err
+	}
+	if identity.ProviderUserID == "" {
+		return nil, fmt.Errorf("%w: provider returned no stable subject", ErrUnauthenticated)
+	}
+
+	email := canonicalize(strings.TrimSpace(strings.ToLower(identity.Email)))
+	if email == "" {
+		// A permanent account must have an address. Without one it cannot be
+		// recovered, cannot be allowlisted, and occupies the empty-email slot
+		// the partial index exists to keep free for anonymous users.
+		return nil, fmt.Errorf("%w: provider returned no email, which a permanent account requires", ErrInvalidArgument)
+	}
+	// Same gate as the password path: this is what provisions an identified
+	// account in the project's namespace.
+	if err := s.enforceProjectAccessSignup(ctx, email); err != nil {
+		return nil, err
+	}
+	taken, err := s.repo(ctx).FindUserByEmail(ctx, string(email))
+	if err != nil {
+		return nil, err
+	}
+	if taken != nil {
+		return nil, fmt.Errorf("%w: email already registered", ErrAlreadyExists)
+	}
+	existing, err := s.repo(ctx).FindUserByProviderID(ctx, identity.Provider, identity.ProviderUserID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		// Firebase's credential-already-in-use. Deliberately NOT a merge:
+		// choosing which account survives is the application's decision.
+		return nil, fmt.Errorf("%w: provider identity already linked", ErrAlreadyExists)
+	}
+
+	// Everything is permitted; now mutate.
+	if err := s.repo(ctx).CreateOAuthIdentity(ctx, &OAuthIdentity{
+		UserID:          userID,
+		Provider:        identity.Provider,
+		ProviderUserID:  identity.ProviderUserID,
+		EmailAtLinkTime: string(email),
+		CreatedAt:       s.nowMs(),
+	}); err != nil {
+		// A racing link that beat us to the unique (provider, sub) pair.
+		return nil, fmt.Errorf("%w: provider identity already linked", ErrAlreadyExists)
+	}
+	if err := s.UpgradeAnonymousUser(ctx, userID, map[string]any{
+		"email": string(email),
+		// Federated addresses are provider-verified, unlike a typed one.
+		"email_verified":    true,
+		"email_verified_at": s.nowMs(),
+		"name":              fallbackDisplayName(string(email), identity.Name),
+	}); err != nil {
 		return nil, s.mapUpgradeConflict(err)
 	}
+	s.audit.Log(
+		ctx, audit.EventIdentityLinked,
+		audit.WithActor(userID),
+		audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{
+			"provider":           identity.Provider,
+			"provider_user_id":   identity.ProviderUserID,
+			"source":             "anonymous_upgrade",
+			"email_at_link_time": string(email),
+		}),
+	)
 	return s.reissueAfterUpgrade(ctx, userID)
 }
 

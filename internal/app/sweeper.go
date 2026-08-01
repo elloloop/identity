@@ -226,6 +226,15 @@ func (s *sweeper) runOnce(ctx context.Context) {
 // account about a minute after its last refresh — and since a refresh token
 // is an anonymous account's ONLY credential, the session would be
 // unrecoverable. No-op when retention is disabled (<= 0).
+//
+// SCOPE: like every sweep here, this runs against the repo bound to the
+// boot-default project, so it reaps only that project's rows. In a
+// control-plane deployment, anonymous users in OTHER projects are never
+// reaped — and unlike the other tables, these rows are minted by an
+// unauthenticated endpoint. Until a per-project sweep loop exists (rebinding
+// via WithProject), a multi-project deployment should keep anonymous
+// sign-in to the default project or accept the growth. ADR-0013 records
+// this in its "Not shipped" list.
 func (s *sweeper) sweepAnonymousRetention(ctx context.Context, now time.Time) {
 	if s.anonymousRetentionDays <= 0 {
 		return

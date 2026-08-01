@@ -109,7 +109,7 @@ func (r *pgRepository) FindUserByEmail(ctx context.Context, email string) (*serv
 	}
 	const q = `SELECT ` + userColumns + `
 		FROM users
-		WHERE project_id = $1 AND lower(email) = lower($2)
+		WHERE project_id = $1 AND email <> '' AND lower(email) = lower($2)
 		LIMIT 1`
 	row := r.pool.QueryRow(ctx, q, r.projectID, email)
 	u, err := scanUser(row)
@@ -204,7 +204,9 @@ func (r *pgRepository) userFilterWhere(filter service.UserListFilter) (where []s
 	args = []any{r.projectID}
 	if filter.Email != "" {
 		args = append(args, filter.Email)
-		where = append(where, fmt.Sprintf("lower(email) = lower($%d)", len(args)))
+		// email <> '' keeps the partial unique index (0028/0013) usable;
+		// without it the planner cannot prove the index covers this filter.
+		where = append(where, fmt.Sprintf("email <> '' AND lower(email) = lower($%d)", len(args)))
 	}
 	if filter.ExternalID != "" {
 		args = append(args, filter.ExternalID)

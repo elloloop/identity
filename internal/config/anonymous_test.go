@@ -95,12 +95,15 @@ func TestValidateAnonymous(t *testing.T) {
 			},
 		},
 		{
-			// Inert rather than contradictory: a per-project config_json may
-			// still turn anonymous on, and the flag then applies to it.
-			name: "require-assurance while anonymous is off is inert",
+			// NOT inert — this was the fail-open. requireAssurance
+			// short-circuits to ALLOW when the layer is off, so a project
+			// enabling anonymous in config_json would be served unenforced
+			// while the environment claims the opposite.
+			name: "require-assurance while anonymous is off still fails",
 			mutate: func(c *Config) {
 				*c = Config{AnonymousEnabled: false, AnonymousRequireAssurance: true}
 			},
+			wantErr: "GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE",
 		},
 	}
 

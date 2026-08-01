@@ -160,6 +160,11 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID, phoneNumber, 
 	if userID == "" {
 		return nil, fmt.Errorf("%w: missing user id", ErrUnauthenticated)
 	}
+	// A verified phone is a permanent credential (it backs SMS login); an
+	// anonymous caller must go through UpgradeAnonymousAccount instead.
+	if err := s.refuseAnonymousCredentialAttach(ctx, userID); err != nil {
+		return nil, err
+	}
 	phone, ok := normalizePhone(phoneNumber)
 	if !ok || strings.TrimSpace(code) == "" {
 		return nil, ErrPhoneCodeInvalid

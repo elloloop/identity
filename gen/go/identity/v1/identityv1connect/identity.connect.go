@@ -537,11 +537,18 @@ type IdentityServiceClient interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error)
+	// SignInAnonymously creates a credential-less account and returns it with
+	// a token pair. Every call mints a NEW user; the refresh token is the
+	// account's only means of return. Per-project switch, default off, and
+	// independent of the access mode.
+	SignInAnonymously(context.Context, *connect.Request[v1.SignInAnonymouslyRequest]) (*connect.Response[v1.SignInAnonymouslyResponse], error)
+	// UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+	// anonymous account in place, preserving its id. Requires an
+	// authenticated anonymous caller; exactly one credential must be set.
+	UpgradeAnonymousAccount(context.Context, *connect.Request[v1.UpgradeAnonymousAccountRequest]) (*connect.Response[v1.UpgradeAnonymousAccountResponse], error)
 	// Per-project client-assurance authoring. Takes the Play Integrity
 	// service-account key in plaintext and encrypts it server-side, so an
 	// operator never has to reimplement the at-rest encryption.
-	SignInAnonymously(context.Context, *connect.Request[v1.SignInAnonymouslyRequest]) (*connect.Response[v1.SignInAnonymouslyResponse], error)
-	UpgradeAnonymousAccount(context.Context, *connect.Request[v1.UpgradeAnonymousAccountRequest]) (*connect.Response[v1.UpgradeAnonymousAccountResponse], error)
 	AdminSetProjectAssurance(context.Context, *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error)
 	AdminGetProjectAssurance(context.Context, *connect.Request[v1.AdminGetProjectAssuranceRequest]) (*connect.Response[v1.AdminGetProjectAssuranceResponse], error)
 	AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error)
@@ -2034,11 +2041,18 @@ type IdentityServiceHandler interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error)
+	// SignInAnonymously creates a credential-less account and returns it with
+	// a token pair. Every call mints a NEW user; the refresh token is the
+	// account's only means of return. Per-project switch, default off, and
+	// independent of the access mode.
+	SignInAnonymously(context.Context, *connect.Request[v1.SignInAnonymouslyRequest]) (*connect.Response[v1.SignInAnonymouslyResponse], error)
+	// UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+	// anonymous account in place, preserving its id. Requires an
+	// authenticated anonymous caller; exactly one credential must be set.
+	UpgradeAnonymousAccount(context.Context, *connect.Request[v1.UpgradeAnonymousAccountRequest]) (*connect.Response[v1.UpgradeAnonymousAccountResponse], error)
 	// Per-project client-assurance authoring. Takes the Play Integrity
 	// service-account key in plaintext and encrypts it server-side, so an
 	// operator never has to reimplement the at-rest encryption.
-	SignInAnonymously(context.Context, *connect.Request[v1.SignInAnonymouslyRequest]) (*connect.Response[v1.SignInAnonymouslyResponse], error)
-	UpgradeAnonymousAccount(context.Context, *connect.Request[v1.UpgradeAnonymousAccountRequest]) (*connect.Response[v1.UpgradeAnonymousAccountResponse], error)
 	AdminSetProjectAssurance(context.Context, *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error)
 	AdminGetProjectAssurance(context.Context, *connect.Request[v1.AdminGetProjectAssuranceRequest]) (*connect.Response[v1.AdminGetProjectAssuranceResponse], error)
 	AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error)

@@ -313,11 +313,18 @@ type IdentityServiceClient interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(ctx context.Context, in *AdminSetProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminSetProjectOAuthProviderResponse, error)
+	// SignInAnonymously creates a credential-less account and returns it with
+	// a token pair. Every call mints a NEW user; the refresh token is the
+	// account's only means of return. Per-project switch, default off, and
+	// independent of the access mode.
+	SignInAnonymously(ctx context.Context, in *SignInAnonymouslyRequest, opts ...grpc.CallOption) (*SignInAnonymouslyResponse, error)
+	// UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+	// anonymous account in place, preserving its id. Requires an
+	// authenticated anonymous caller; exactly one credential must be set.
+	UpgradeAnonymousAccount(ctx context.Context, in *UpgradeAnonymousAccountRequest, opts ...grpc.CallOption) (*UpgradeAnonymousAccountResponse, error)
 	// Per-project client-assurance authoring. Takes the Play Integrity
 	// service-account key in plaintext and encrypts it server-side, so an
 	// operator never has to reimplement the at-rest encryption.
-	SignInAnonymously(ctx context.Context, in *SignInAnonymouslyRequest, opts ...grpc.CallOption) (*SignInAnonymouslyResponse, error)
-	UpgradeAnonymousAccount(ctx context.Context, in *UpgradeAnonymousAccountRequest, opts ...grpc.CallOption) (*UpgradeAnonymousAccountResponse, error)
 	AdminSetProjectAssurance(ctx context.Context, in *AdminSetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminSetProjectAssuranceResponse, error)
 	AdminGetProjectAssurance(ctx context.Context, in *AdminGetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminGetProjectAssuranceResponse, error)
 	AdminDeleteProjectOAuthProvider(ctx context.Context, in *AdminDeleteProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminDeleteProjectOAuthProviderResponse, error)
@@ -1587,11 +1594,18 @@ type IdentityServiceServer interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(context.Context, *AdminSetProjectOAuthProviderRequest) (*AdminSetProjectOAuthProviderResponse, error)
+	// SignInAnonymously creates a credential-less account and returns it with
+	// a token pair. Every call mints a NEW user; the refresh token is the
+	// account's only means of return. Per-project switch, default off, and
+	// independent of the access mode.
+	SignInAnonymously(context.Context, *SignInAnonymouslyRequest) (*SignInAnonymouslyResponse, error)
+	// UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+	// anonymous account in place, preserving its id. Requires an
+	// authenticated anonymous caller; exactly one credential must be set.
+	UpgradeAnonymousAccount(context.Context, *UpgradeAnonymousAccountRequest) (*UpgradeAnonymousAccountResponse, error)
 	// Per-project client-assurance authoring. Takes the Play Integrity
 	// service-account key in plaintext and encrypts it server-side, so an
 	// operator never has to reimplement the at-rest encryption.
-	SignInAnonymously(context.Context, *SignInAnonymouslyRequest) (*SignInAnonymouslyResponse, error)
-	UpgradeAnonymousAccount(context.Context, *UpgradeAnonymousAccountRequest) (*UpgradeAnonymousAccountResponse, error)
 	AdminSetProjectAssurance(context.Context, *AdminSetProjectAssuranceRequest) (*AdminSetProjectAssuranceResponse, error)
 	AdminGetProjectAssurance(context.Context, *AdminGetProjectAssuranceRequest) (*AdminGetProjectAssuranceResponse, error)
 	AdminDeleteProjectOAuthProvider(context.Context, *AdminDeleteProjectOAuthProviderRequest) (*AdminDeleteProjectOAuthProviderResponse, error)

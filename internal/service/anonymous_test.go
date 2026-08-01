@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -411,26 +410,24 @@ func TestRefreshToken_AnonymousActivityIsStamped(t *testing.T) {
 }
 
 func TestProjectAnonymousConfig_Validate(t *testing.T) {
-	if err := (ProjectAnonymousConfig{RetentionDays: -1}).validate(); err == nil {
-		t.Error("a negative retention window was accepted")
-	}
-	if err := (ProjectAnonymousConfig{RetentionDays: 1 << 30}).validate(); err == nil {
-		t.Error("an unbounded retention window was accepted — the cutoff duration would overflow and invert")
-	}
-	if err := (ProjectAnonymousConfig{Enabled: true, RetentionDays: 30}).validate(); err != nil {
-		t.Errorf("a sane config was rejected: %v", err)
+	// The block carries a single boolean; both states are valid. There is
+	// deliberately no per-project retention override — the sweeper runs
+	// against the default-project repo, so one would be config the server
+	// silently ignores.
+	if err := (ProjectAnonymousConfig{Enabled: true}).validate(); err != nil {
+		t.Errorf("enabled config rejected: %v", err)
 	}
 	if err := (ProjectAnonymousConfig{}).validate(); err != nil {
-		t.Errorf("the zero config (feature off) was rejected: %v", err)
+		t.Errorf("zero config rejected: %v", err)
 	}
 }
 
 func TestParseProjectConfig_AnonymousBlock(t *testing.T) {
-	cfg, err := ParseProjectConfig(`{"anonymous":{"enabled":true,"retention_days":7}}`)
+	cfg, err := ParseProjectConfig(`{"anonymous":{"enabled":true}}`)
 	if err != nil {
 		t.Fatalf("ParseProjectConfig: %v", err)
 	}
-	if !cfg.Anonymous.Enabled || cfg.Anonymous.RetentionDays != 7 {
+	if !cfg.Anonymous.Enabled {
 		t.Fatalf("anonymous block = %#v", cfg.Anonymous)
 	}
 
@@ -441,13 +438,5 @@ func TestParseProjectConfig_AnonymousBlock(t *testing.T) {
 	}
 	if cfg.Anonymous.Enabled {
 		t.Error("anonymous defaulted to enabled")
-	}
-
-	// An invalid block fails the whole config rather than silently
-	// disabling the feature.
-	if _, err := ParseProjectConfig(`{"anonymous":{"enabled":true,"retention_days":-5}}`); err == nil {
-		t.Error("a negative retention window was accepted through ParseProjectConfig")
-	} else if !strings.Contains(err.Error(), "retention_days") {
-		t.Errorf("error does not name the offending field: %v", err)
 	}
 }

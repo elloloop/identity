@@ -2003,11 +2003,18 @@ service IdentityService {
   // redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
   // build with no control plane.
   rpc AdminSetProjectOAuthProvider(AdminSetProjectOAuthProviderRequest) returns (AdminSetProjectOAuthProviderResponse);
+  // SignInAnonymously creates a credential-less account and returns it with
+  // a token pair. Every call mints a NEW user; the refresh token is the
+  // account's only means of return. Per-project switch, default off, and
+  // independent of the access mode.
+  rpc SignInAnonymously(SignInAnonymouslyRequest) returns (SignInAnonymouslyResponse);
+  // UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+  // anonymous account in place, preserving its id. Requires an
+  // authenticated anonymous caller; exactly one credential must be set.
+  rpc UpgradeAnonymousAccount(UpgradeAnonymousAccountRequest) returns (UpgradeAnonymousAccountResponse);
   // Per-project client-assurance authoring. Takes the Play Integrity
   // service-account key in plaintext and encrypts it server-side, so an
   // operator never has to reimplement the at-rest encryption.
-  rpc SignInAnonymously(SignInAnonymouslyRequest) returns (SignInAnonymouslyResponse);
-  rpc UpgradeAnonymousAccount(UpgradeAnonymousAccountRequest) returns (UpgradeAnonymousAccountResponse);
   rpc AdminSetProjectAssurance(AdminSetProjectAssuranceRequest) returns (AdminSetProjectAssuranceResponse);
   rpc AdminGetProjectAssurance(AdminGetProjectAssuranceRequest) returns (AdminGetProjectAssuranceResponse);
   rpc AdminDeleteProjectOAuthProvider(AdminDeleteProjectOAuthProviderRequest) returns (AdminDeleteProjectOAuthProviderResponse);

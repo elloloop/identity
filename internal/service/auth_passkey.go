@@ -73,6 +73,11 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 	if challengeID == "" || credentialJSON == "" {
 		return nil, fmt.Errorf("%w: challenge_id and credential_json are required", ErrInvalidArgument)
 	}
+	// A passkey is a permanent credential; an anonymous caller must go
+	// through UpgradeAnonymousAccount so the flag is cleared with it.
+	if err := s.refuseAnonymousCredentialAttach(ctx, userID); err != nil {
+		return nil, err
+	}
 
 	challenge, err := s.repo(ctx).GetPasskeyChallenge(ctx, challengeID)
 	if err != nil {

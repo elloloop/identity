@@ -2090,14 +2090,6 @@ func (c *Config) validateSMS() error {
 	return nil
 }
 
-// validateAssurance enforces the client-assurance invariants: an enabled
-// deployment's configured surfaces must each be complete — a named web
-// provider needs its secret (and, for reCAPTCHA v3, a threshold within
-// [0,1]), a partially-specified default-project iOS or Android app
-// identity fails rather than silently disabling the platform. A disabled
-// deployment is unconstrained — the fields are ignored. A web provider is
-// OPTIONAL when enabled: mobile-only deployments configure no captcha,
-// and per-project deployments may configure everything in config_json.
 // validateAnonymous bounds the anonymous retention window and rejects the
 // one combination that cannot be honoured: requiring an assurance token for
 // anonymous sign-in while the assurance layer is off, which would deny 100%
@@ -2114,17 +2106,26 @@ func (c *Config) validateAnonymous() error {
 			MaxAnonymousRetentionDays, c.AnonymousRetentionDays,
 		)
 	}
-	if !c.AnonymousEnabled {
-		// REQUIRE_ASSURANCE without ENABLED is inert, not contradictory: a
-		// per-project config_json may still turn anonymous on, and the flag
-		// then applies to it.
-		return nil
-	}
+	// Checked BEFORE the disabled early-return, and this ordering is the
+	// whole point. requireAssurance short-circuits to ALLOWED whenever
+	// AssuranceEnabled is false, whatever the per-endpoint flag says — so
+	// REQUIRE_ASSURANCE=true with ASSURANCE_ENABLED=false does not deny, it
+	// silently permits. A per-project config_json can still switch anonymous
+	// ON, and that project then serves the unauthenticated, row-minting
+	// SignInAnonymously with ZERO enforcement while the operator's
+	// environment says the opposite. Treating the pair as "inert while
+	// anonymous is off" was exactly the fail-OPEN the assurance validator
+	// refuses to permit for its own arms.
 	if c.AnonymousRequireAssurance && !c.AssuranceEnabled {
 		return errors.New(
 			"config: GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE=true requires GATEWAY_ASSURANCE_ENABLED=true — " +
-				"anonymous sign-in would demand a token no arm can issue, denying every request",
+				"assurance enforcement short-circuits to ALLOW when the layer is off, so anonymous " +
+				"sign-in would be served unenforced (including for a project that enables it in " +
+				"config_json) while this setting claims otherwise",
 		)
+	}
+	if !c.AnonymousEnabled {
+		return nil
 	}
 	// An anonymous session survives only as long as its refresh token: that
 	// token is the account's ONLY credential. Reaping the user before the
@@ -2144,6 +2145,14 @@ func (c *Config) validateAnonymous() error {
 	return nil
 }
 
+// validateAssurance enforces the client-assurance invariants: an enabled
+// deployment's configured surfaces must each be complete — a named web
+// provider needs its secret (and, for reCAPTCHA v3, a threshold within
+// [0,1]), a partially-specified default-project iOS or Android app
+// identity fails rather than silently disabling the platform. A disabled
+// deployment is unconstrained — the fields are ignored. A web provider is
+// OPTIONAL when enabled: mobile-only deployments configure no captcha,
+// and per-project deployments may configure everything in config_json.
 func (c *Config) validateAssurance() error {
 	// The retention bound is checked BEFORE the disabled-early-return: the
 	// sweeper is wired from this value regardless of AssuranceEnabled, and
