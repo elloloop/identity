@@ -29,9 +29,13 @@ for every user that has an address.
 > ```sql
 > CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS users_project_email_partial_uidx
 >     ON users (project_id, lower(email)) WHERE email <> '';
-> CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_anonymous_last_login_idx
->     ON users (project_id, last_login_at_ms) WHERE is_anonymous;
 > ```
+>
+> Only that one. The sweep index (`users_project_anonymous_last_login_idx`)
+> cannot be pre-built — its `WHERE is_anonymous` predicate is parsed even
+> under `IF NOT EXISTS`, and the column does not exist until the migration
+> adds it. It needs no pre-build anyway: the predicate is false for every
+> pre-existing row, so it builds empty in constant time.
 
 **To enable it**, per deployment (default project) or per project in
 `config_json`:
@@ -40,18 +44,28 @@ for every user that has an address.
 | --- | --- | --- |
 | `GATEWAY_ANONYMOUS_ENABLED` | `false` | turns on `SignInAnonymously` |
 | `GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE` | `false` | gates it on the assurance layer; **boot fails** if set while `GATEWAY_ASSURANCE_ENABLED=false` |
-| `GATEWAY_ANONYMOUS_RETENTION_DAYS` | `30` | days of inactivity before reaping; **must exceed `GATEWAY_REFRESH_EXPIRY_SECONDS`**; `0` disables the sweep |
+| `GATEWAY_ANONYMOUS_RETENTION_DAYS` | `30` | days of inactivity before reaping; **must exceed `GATEWAY_REFRESH_EXPIRY_SECONDS`**; `0` disables the sweep. Deployment-wide, and the sweep reaches the **boot-default project only** — see below |
 
 Two things to know before enabling:
 
-1. **It is independent of `access.mode`.** A project running `mode: closed`
-   still hands out anonymous sessions. The access mode governs
-   email-identified humans; anonymous sign-in has its own switch. Control
-   anonymous traffic with assurance and rate limits.
+1. **Sign-in is independent of `access.mode`; upgrading is not.** A project
+   running `mode: closed` still hands out anonymous sessions — but
+   `UpgradeAnonymousAccount` is enforced with signup semantics and returns
+   `PERMISSION_DENIED` under `closed` (the default),
+   `invite`, or an off-list `allowlist`. Setting only the
+   `GATEWAY_ANONYMOUS_*` variables therefore gives you working sign-in and an
+   upgrade path that always fails; open the project for the upgrade half to
+   work. Control anonymous traffic with assurance and rate limits, not the
+   access mode.
 2. **Downstream services must check the `anonymous` claim** before granting
    anything that assumes a verified human. An anonymous `sub` is cheap to
    mint, and `email` is empty rather than absent-because-unverified, so code
    that only tests "is there a sub?" will treat a farmed account as a user.
+
+**The retention sweep covers the boot-default project only.** A
+control-plane deployment that enables anonymous sign-in on other projects
+must reap those rows itself; otherwise they accumulate indefinitely from an
+unauthenticated endpoint.
 
 **Rollback** (`0028.down` / `0013.down`) **deletes anonymous users.** They
 cannot be represented in the pre-0028 schema and hold no credential to sign

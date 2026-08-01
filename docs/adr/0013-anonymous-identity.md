@@ -89,10 +89,22 @@ obtain a token.
 clears `is_anonymous`, keeping the id. The account comes from the access token
 and there is no `user_id` field, so one account can never upgrade another.
 
-Two credentials ship: email+password, and OAuth (the server performs the code
-exchange itself, reusing `LinkIdentity` whole). The token pair is reissued,
+Two credentials ship: email+password, and OAuth. The OAuth arm performs its
+own exchange and link rather than calling `LinkIdentity`, so that every
+refusal — not anonymous, access mode, address taken, identity claimed —
+precedes any mutation; `LinkIdentity` itself refuses anonymous callers, so
+the upgrade is the single door through which an anonymous account gains a
+credential. The token pair is reissued,
 because the caller's existing access token still asserts `anonymous: true` and
 every downstream service would keep believing it until it expired.
+
+The upgrade is gated by the project access mode with **signup** semantics —
+attaching a credential is what provisions an email-identified account in the
+project's namespace. Sign-in stays independent of the mode; only the upgrade
+is gated. When `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` is on (the default), the
+password arm promotes the account and issues **no** tokens, exactly as
+`PasswordSignup` does, rather than handing out a live session on an address
+the caller merely typed.
 
 Firebase's `credential-already-in-use` is matched, and like Firebase we **do
 not merge** the two accounts: merging silently destroys one account's data, and
@@ -103,7 +115,9 @@ an identified account to a different credential.
 ### Retention is its own window and its own sweep step
 
 `GATEWAY_ANONYMOUS_RETENTION_DAYS`, default 30 (matching Firebase's anonymous
-auto-cleanup), measured from last activity, per-project overridable.
+auto-cleanup), measured from last activity. Deployment-wide: there is no
+per-project override, because the sweeper runs against the repository bound
+at boot.
 
 It is deliberately **not** the shared expiry cutoff the other sweeps use. That
 cutoff is `now - grace` (default 60s) applied to a row's own `expires_at_ms`,
@@ -148,6 +162,14 @@ empty rather than absent-because-unverified.
   the pre-0028 schema — they share the empty email the restored total index
   forbids more than one of — and they hold no credential to sign back in with,
   so the deletion is the honest outcome rather than a half-applied rollback.
-- **Not shipped:** anonymous-to-anonymous merge, passkey and phone as upgrade
-  credentials, and a per-project cap on live anonymous accounts. Each is
-  additive; none changes the shape above.
+- **The retention sweep covers the boot-default project only.** It runs
+  against the repository bound at startup, so a control-plane deployment that
+  enables anonymous sign-in on other projects accumulates one permanent row
+  per app install there, forever, from an unauthenticated endpoint. The
+  attested-device sweep (ADR-0012) has the same limitation. A per-project
+  sweep loop rebinding via `WithProject` is the fix; until it ships, such a
+  deployment must reap those rows itself.
+- **Not shipped:** a per-project retention override (the sweep scope above is
+  why one would be misleading), a per-project sweep loop, anonymous-to-anonymous
+  merge, passkey and phone as upgrade credentials, and a per-project cap on
+  live anonymous accounts. Each is additive; none changes the shape above.

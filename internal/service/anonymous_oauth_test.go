@@ -163,3 +163,115 @@ func TestAnonymousAccount_CannotAttachCredentialsOutsideUpgrade(t *testing.T) {
 		t.Fatalf("a refused link persisted %d identities", len(ids))
 	}
 }
+
+// TestUpgradeAnonymousWithPassword_HonoursVerifiedEmailGate pins the control
+// that makes the upgrade no more powerful than signup.
+//
+// GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL defaults TRUE. Without it honoured
+// here, an unauthenticated caller could chain SignInAnonymously into a LIVE
+// session whose JWT asserts an address they merely typed — someone else's —
+// with no verification mail and so no signal to its owner. Via PasswordSignup
+// the same caller receives zero tokens.
+func TestUpgradeAnonymousWithPassword_HonoursVerifiedEmailGate(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.AuthRequireVerifiedEmail = true // the production default
+	ctx := anonCtx(true, AccessModeOpen)
+
+	signIn, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+	anonID := signIn.User.ID
+
+	up, err := svc.UpgradeAnonymousWithPassword(ctx, anonID, AnonymousPasswordCredential{
+		Email: "victim@corp.example.com", Password: "Str0ng-Passw0rd!x",
+	})
+	if err != nil {
+		t.Fatalf("UpgradeAnonymousWithPassword: %v", err)
+	}
+
+	// Promoted — but with NO session, mirroring PasswordSignup.
+	if up.AccessToken != "" || up.RefreshToken != "" {
+		t.Fatal("the upgrade issued a live session on an unverified, caller-supplied address")
+	}
+	if up.User == nil || up.User.IsAnonymous {
+		t.Fatal("the account should still have been promoted")
+	}
+	if up.User.EmailVerified {
+		t.Error("a typed address must not be marked verified")
+	}
+
+	// The prior anonymous session must not survive as a back door to the
+	// session the gate just withheld.
+	if _, _, _, err := svc.RefreshToken(ctx, signIn.RefreshToken, "1.2.3.4", "ua"); err == nil {
+		t.Error("the pre-upgrade refresh token still works — the withheld session is reachable anyway")
+	}
+}
+
+// With the gate off, the upgrade behaves as before: promoted and signed in.
+func TestUpgradeAnonymousWithPassword_IssuesASessionWhenVerificationIsNotRequired(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.AuthRequireVerifiedEmail = false
+	ctx := anonCtx(true, AccessModeOpen)
+
+	signIn, _ := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	up, err := svc.UpgradeAnonymousWithPassword(ctx, signIn.User.ID, AnonymousPasswordCredential{
+		Email: "ok@example.com", Password: "Str0ng-Passw0rd!x",
+	})
+	if err != nil {
+		t.Fatalf("UpgradeAnonymousWithPassword: %v", err)
+	}
+	if up.AccessToken == "" || up.RefreshToken == "" {
+		t.Fatal("no session issued with the verification gate off")
+	}
+}
+
+// TestUpgradeAnonymousWithOAuth_RetryAfterAFailedPromotion pins the
+// idempotence that makes the two-write path recoverable.
+//
+// The OAuth arm writes the provider identity and then promotes the account,
+// with no transaction. If the promotion fails, the identity must not be
+// stranded on a still-anonymous account: that account stays inside the
+// retention sweep's reach and is hard-deleted with the credential, and
+// because the identity is claimed, no account on the deployment could ever
+// link it again.
+func TestUpgradeAnonymousWithOAuth_RetryAfterAFailedPromotion(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := anonCtx(true, AccessModeOpen)
+
+	signIn, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+	anonID := signIn.User.ID
+
+	// Fail the promotion write.
+	repo.updateUserErr = errors.New("connection reset by peer")
+	if _, err := svc.UpgradeAnonymousWithOAuth(ctx, anonID, oauthCred()); err == nil {
+		t.Fatal("upgrade reported success despite a failed promotion")
+	}
+
+	// The compensation must have removed the identity, leaving the account
+	// exactly as it was.
+	ids, err := repo.ListOAuthIdentitiesForUser(ctx, anonID)
+	if err != nil {
+		t.Fatalf("ListOAuthIdentitiesForUser: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("a failed promotion stranded %d provider identities", len(ids))
+	}
+
+	// And the retry succeeds rather than returning ALREADY_EXISTS against
+	// the caller's own identity.
+	repo.updateUserErr = nil
+	up, err := svc.UpgradeAnonymousWithOAuth(ctx, anonID, oauthCred())
+	if err != nil {
+		t.Fatalf("retry after a failed promotion: %v", err)
+	}
+	if up.User.ID != anonID || up.User.IsAnonymous {
+		t.Fatalf("retry produced %#v", up.User)
+	}
+}

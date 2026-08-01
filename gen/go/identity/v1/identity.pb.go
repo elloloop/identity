@@ -12732,12 +12732,13 @@ func (x *RefreshAssuranceTokenResponse) GetExpiresAtMs() int64 {
 //
 // Availability is a per-project switch (`anonymous.enabled` in the project
 // config, GATEWAY_ANONYMOUS_ENABLED for the default project), default OFF.
-// It is INDEPENDENT of the project access mode: a project running
+// SIGN-IN is INDEPENDENT of the project access mode: a project running
 // mode=closed — admitting no new identified users — may still hand out
 // anonymous sessions, because the access mode governs which
 // email-identified humans may sign up and log in, a different question.
 // Gate anonymous traffic with the assurance layer
 // (GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE) rather than the access mode.
+// UpgradeAnonymousAccount is NOT independent of it — see that RPC.
 //
 // Anonymous users are reaped after GATEWAY_ANONYMOUS_RETENTION_DAYS of
 // inactivity (default 30, measured from the last token refresh).
@@ -12854,11 +12855,22 @@ func (x *SignInAnonymouslyResponse) GetExpiresIn() int32 {
 // the account; there is no user_id field, so one account can never upgrade
 // another). Exactly one credential must be set.
 //
-// Errors: FAILED_PRECONDITION when the caller is not anonymous (a second
-// upgrade would silently rebind an identified account); ALREADY_EXISTS
-// when the credential already belongs to someone else — matching
+// Enforced with SIGNUP semantics against the project access mode, because
+// attaching a credential provisions an email-identified account in the
+// project's namespace. Under mode=closed (the DEFAULT), invite, or an
+// off-list allowlist this returns PERMISSION_DENIED and the account stays
+// anonymous — so a project must be open for the upgrade half to work.
+//
+// When GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default), the password
+// arm promotes the account and returns NO tokens, mirroring PasswordSignup;
+// the client drives "check your email".
+//
+// Errors: PERMISSION_DENIED when the access mode forbids provisioning;
+// FAILED_PRECONDITION when the caller is not anonymous (a second upgrade
+// would silently rebind an identified account); ALREADY_EXISTS when the
+// credential already belongs to someone else — matching
 // linkWithCredential's credential-already-in-use, and deliberately NOT
-// merging the two accounts.
+// merging the two accounts; UNAVAILABLE when local auth is disabled.
 type UpgradeAnonymousAccountRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Credential:

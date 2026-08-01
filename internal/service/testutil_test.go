@@ -141,9 +141,12 @@ type fakeRepo struct {
 	consumeChallengeErr    error
 	createChallengeErr     error
 	findUserByEmailErr     error
-	createPasskeyCredErr   error
-	getUserErr             error
-	getTotpCredentialErr   error
+	// updateUserErr, when set, fails every UpdateUser. Drives the
+	// partial-write path of the two-write anonymous OAuth upgrade.
+	updateUserErr        error
+	createPasskeyCredErr error
+	getUserErr           error
+	getTotpCredentialErr error
 
 	users               map[string]*User
 	refreshTokens       map[string]*RefreshTokenRecord
@@ -320,6 +323,9 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
 func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[string]any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.updateUserErr != nil {
+		return r.updateUserErr
+	}
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)

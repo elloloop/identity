@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
 )
@@ -43,6 +45,11 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 ) (*LoginResult, error) {
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
+	}
+	// The upgrade creates a password account, so it is bound by the same
+	// switch that governs creating one directly.
+	if !s.cfg.PasswordSignupEnabled {
+		return nil, ErrSignupDisabled
 	}
 	email := strings.TrimSpace(strings.ToLower(cred.Email))
 	if err := validateEmailFormat(email); err != nil {
@@ -91,7 +98,39 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 	}); err != nil {
 		return nil, s.mapUpgradeConflict(err)
 	}
-	return s.reissueAfterUpgrade(ctx, userID)
+
+	// Prove the address before it buys anything. GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL
+	// defaults TRUE and is this codebase's anti-pre-hijacking control:
+	// PasswordSignup honours it by returning the user with no tokens, and
+	// PasswordLogin refuses an unverified account. Without the same gate here
+	// the upgrade was strictly more powerful than signup — an unauthenticated
+	// caller could chain SignInAnonymously into a live session whose JWT
+	// asserts someone else's address, with no verification mail and so no
+	// signal to its owner. Same shape as signup: promoted account, no tokens.
+	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail {
+		if err := s.SendEmailVerification(ctx, userID); err != nil {
+			s.logger.Warn("anonymous_upgrade_verification_send_failed",
+				zap.String("user_id", userID), zap.Error(err))
+		}
+		u, err := s.repo(ctx).GetUser(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		// The anonymous session is deliberately revoked with the promotion:
+		// leaving it live would return exactly the session this gate exists
+		// to withhold, just under the previous credential.
+		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, userID); err != nil {
+			s.logger.Warn("anonymous_upgrade_session_revoke_failed",
+				zap.String("user_id", userID), zap.Error(err))
+		}
+		return &LoginResult{User: u}, nil
+	}
+
+	if err := s.SendEmailVerification(ctx, userID); err != nil {
+		s.logger.Warn("anonymous_upgrade_verification_send_failed",
+			zap.String("user_id", userID), zap.Error(err))
+	}
+	return s.reissueAfterUpgrade(ctx, userID, cred.IPAddress, cred.UserAgent)
 }
 
 // UpgradeAnonymousWithOAuth attaches a federated identity to the calling
@@ -165,22 +204,37 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil {
+	if existing != nil && existing.ID != userID {
 		// Firebase's credential-already-in-use. Deliberately NOT a merge:
 		// choosing which account survives is the application's decision.
 		return nil, fmt.Errorf("%w: provider identity already linked", ErrAlreadyExists)
 	}
 
-	// Everything is permitted; now mutate.
-	if err := s.repo(ctx).CreateOAuthIdentity(ctx, &OAuthIdentity{
-		UserID:          userID,
-		Provider:        identity.Provider,
-		ProviderUserID:  identity.ProviderUserID,
-		EmailAtLinkTime: string(email),
-		CreatedAt:       s.nowMs(),
-	}); err != nil {
-		// A racing link that beat us to the unique (provider, sub) pair.
-		return nil, fmt.Errorf("%w: provider identity already linked", ErrAlreadyExists)
+	// This writes TWO rows without a transaction, so the ordering and the
+	// compensation below are what keep it recoverable. If the promotion
+	// failed after the link was created, the account is still anonymous but
+	// already owns the identity — `existing.ID == userID` above is that
+	// case, and skipping the create makes the retry succeed instead of
+	// returning ALREADY_EXISTS forever against the caller's own identity.
+	// Without it a single transient failure stranded the provider identity
+	// on an account the sweep then reaps, and no account on the deployment
+	// could ever claim that identity again without manual repair.
+	if existing == nil {
+		if err := s.repo(ctx).CreateOAuthIdentity(ctx, &OAuthIdentity{
+			UserID:          userID,
+			Provider:        identity.Provider,
+			ProviderUserID:  identity.ProviderUserID,
+			EmailAtLinkTime: string(email),
+			CreatedAt:       s.nowMs(),
+		}); err != nil {
+			// Only a genuine uniqueness conflict is a racing link; anything
+			// else (pool exhaustion, statement timeout) must not surface as
+			// a terminal 409 the caller can never retry past.
+			if errors.Is(err, ErrAlreadyExists) {
+				return nil, fmt.Errorf("%w: provider identity already linked", ErrAlreadyExists)
+			}
+			return nil, err
+		}
 	}
 	if err := s.UpgradeAnonymousUser(ctx, userID, map[string]any{
 		"email": string(email),
@@ -189,6 +243,18 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 		"email_verified_at": s.nowMs(),
 		"name":              fallbackDisplayName(string(email), identity.Name),
 	}); err != nil {
+		// Compensate: drop the identity we just created so the account does
+		// not keep a credential while remaining anonymous (and therefore
+		// reapable). Best-effort — the retry path above recovers even if
+		// this fails.
+		if existing == nil {
+			if delErr := s.repo(ctx).DeleteOAuthIdentity(ctx, userID, identity.Provider, identity.ProviderUserID); delErr != nil {
+				s.logger.Warn("anonymous_upgrade_compensation_failed",
+					zap.String("user_id", userID),
+					zap.String("provider", identity.Provider),
+					zap.Error(delErr))
+			}
+		}
 		return nil, s.mapUpgradeConflict(err)
 	}
 	s.audit.Log(
@@ -202,7 +268,7 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 			"email_at_link_time": string(email),
 		}),
 	)
-	return s.reissueAfterUpgrade(ctx, userID)
+	return s.reissueAfterUpgrade(ctx, userID, cred.IPAddress, cred.UserAgent)
 }
 
 // reissueAfterUpgrade re-reads the promoted account and mints a fresh token
@@ -214,7 +280,7 @@ func (s *AuthService) UpgradeAnonymousWithOAuth(
 // caller's existing access token asserts anonymous=true, so without a new
 // one every downstream service would keep treating a now-permanent account
 // as anonymous until that token happened to expire.
-func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID string) (*LoginResult, error) {
+func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID, ipAddr, userAgent string) (*LoginResult, error) {
 	u, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -222,7 +288,7 @@ func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID string) (*
 	if u == nil {
 		return nil, ErrNotFound
 	}
-	access, refresh, err := s.issueTokens(ctx, u, "", "")
+	access, refresh, err := s.issueTokens(ctx, u, ipAddr, userAgent)
 	if err != nil {
 		return nil, err
 	}

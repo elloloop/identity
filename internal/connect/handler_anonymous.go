@@ -59,9 +59,11 @@ func (h *IdentityHandler) UpgradeAnonymousAccount(
 	switch cred := req.Msg.GetCredential().(type) {
 	case *identitypb.UpgradeAnonymousAccountRequest_Password:
 		res, err = h.auth.UpgradeAnonymousWithPassword(ctx, userID, service.AnonymousPasswordCredential{
-			Email:    cred.Password.GetEmail(),
-			Password: cred.Password.GetPassword(),
-			Name:     cred.Password.GetName(),
+			Email:     cred.Password.GetEmail(),
+			Password:  cred.Password.GetPassword(),
+			Name:      cred.Password.GetName(),
+			IPAddress: clientIP(req.Header()),
+			UserAgent: req.Header().Get("User-Agent"),
 		})
 	case *identitypb.UpgradeAnonymousAccountRequest_Oauth:
 		res, err = h.auth.UpgradeAnonymousWithOAuth(ctx, userID, service.AnonymousOAuthCredential{
@@ -71,6 +73,8 @@ func (h *IdentityHandler) UpgradeAnonymousAccount(
 			CodeVerifier: cred.Oauth.GetCodeVerifier(),
 			State:        cred.Oauth.GetState(),
 			StateToken:   cred.Oauth.GetStateToken(),
+			IPAddress:    clientIP(req.Header()),
+			UserAgent:    req.Header().Get("User-Agent"),
 		})
 	default:
 		// A oneof with nothing set. Refused rather than treated as a no-op

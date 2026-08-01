@@ -75,8 +75,9 @@ type ProjectConfig struct {
 	Assurance ProjectAssuranceConfig `json:"assurance"`
 
 	// Anonymous holds the project's anonymous-sign-in policy: whether the
-	// project hands out credential-less sessions at all, and how long an
-	// idle one is retained. Default OFF. Orthogonal to Access — see
+	// project hands out credential-less sessions at all. Default OFF. Its
+	// only key is `enabled` — retention is deployment-wide. Sign-in is
+	// orthogonal to Access; the UPGRADE is not (signup semantics). See
 	// ProjectAnonymousConfig.
 	Anonymous ProjectAnonymousConfig `json:"anonymous"`
 }

@@ -545,6 +545,8 @@ type IdentityServiceClient interface {
 	// UpgradeAnonymousAccount attaches a permanent credential to the CALLING
 	// anonymous account in place, preserving its id. Requires an
 	// authenticated anonymous caller; exactly one credential must be set.
+	// Gated by the project access mode with signup semantics, so it returns
+	// PERMISSION_DENIED on a closed/invite/off-list project.
 	UpgradeAnonymousAccount(context.Context, *connect.Request[v1.UpgradeAnonymousAccountRequest]) (*connect.Response[v1.UpgradeAnonymousAccountResponse], error)
 	// Per-project client-assurance authoring. Takes the Play Integrity
 	// service-account key in plaintext and encrypts it server-side, so an
@@ -2049,6 +2051,8 @@ type IdentityServiceHandler interface {
 	// UpgradeAnonymousAccount attaches a permanent credential to the CALLING
 	// anonymous account in place, preserving its id. Requires an
 	// authenticated anonymous caller; exactly one credential must be set.
+	// Gated by the project access mode with signup semantics, so it returns
+	// PERMISSION_DENIED on a closed/invite/off-list project.
 	UpgradeAnonymousAccount(context.Context, *connect.Request[v1.UpgradeAnonymousAccountRequest]) (*connect.Response[v1.UpgradeAnonymousAccountResponse], error)
 	// Per-project client-assurance authoring. Takes the Play Integrity
 	// service-account key in plaintext and encrypts it server-side, so an

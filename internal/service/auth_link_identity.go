@@ -40,16 +40,6 @@ func (s *AuthService) LinkIdentity(
 	if err := s.refuseAnonymousCredentialAttach(ctx, userID); err != nil {
 		return nil, err
 	}
-	return s.linkIdentityUnguarded(ctx, userID, code, provider, redirectURI, codeVerifier, state, stateToken)
-}
-
-// linkIdentityUnguarded is LinkIdentity without the anonymous refusal, for
-// the anonymous-upgrade path which legitimately attaches a provider to an
-// anonymous account and promotes it in the same operation.
-func (s *AuthService) linkIdentityUnguarded(
-	ctx context.Context,
-	userID, code, provider, redirectURI, codeVerifier, state, stateToken string,
-) (*OAuthIdentity, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 
 	identity, err := s.verifyOAuthExchange(ctx, OAuthLoginParams{

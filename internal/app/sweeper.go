@@ -233,8 +233,9 @@ func (s *sweeper) runOnce(ctx context.Context) {
 // reaped — and unlike the other tables, these rows are minted by an
 // unauthenticated endpoint. Until a per-project sweep loop exists (rebinding
 // via WithProject), a multi-project deployment should keep anonymous
-// sign-in to the default project or accept the growth. ADR-0013 records
-// this in its "Not shipped" list.
+// sign-in to the default project or reap those rows itself. ADR-0013
+// records this in its Consequences and "Not shipped" list, and the
+// docs-site Retention section and UPGRADE.md state it for operators.
 func (s *sweeper) sweepAnonymousRetention(ctx context.Context, now time.Time) {
 	if s.anonymousRetentionDays <= 0 {
 		return

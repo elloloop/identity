@@ -612,7 +612,8 @@ type Config struct {
 	// AnonymousRetentionDays bounds how long an anonymous user is kept after
 	// its LAST ACTIVITY. Like the device window this is retention, not
 	// expiry. 0 (or negative) disables the sweep, keeping anonymous users
-	// forever. A per-project override may narrow or widen it.
+	// forever. Deployment-wide: there is no per-project override, because the
+	// sweeper runs against the repository bound at boot.
 	AnonymousRetentionDays int
 	// AnonymousRequireAssurance makes SignInAnonymously require a valid
 	// assurance token, exactly like the six enforce flags on the identified
@@ -2124,9 +2125,10 @@ func (c *Config) validateAnonymous() error {
 				"config_json) while this setting claims otherwise",
 		)
 	}
-	if !c.AnonymousEnabled {
-		return nil
-	}
+	// Checked before the early-return for the same reason as the pair
+	// above: a per-project config_json can enable anonymous sign-in on a
+	// deployment whose env leaves it off, and the sweeper is wired from this
+	// value either way.
 	// An anonymous session survives only as long as its refresh token: that
 	// token is the account's ONLY credential. Reaping the user before the
 	// token expires destroys a session the client still believes in and
@@ -2141,6 +2143,10 @@ func (c *Config) validateAnonymous() error {
 				retention, refresh,
 			)
 		}
+	}
+
+	if !c.AnonymousEnabled {
+		return nil
 	}
 	return nil
 }

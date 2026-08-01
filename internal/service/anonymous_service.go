@@ -36,6 +36,11 @@ type AnonymousPasswordCredential struct {
 	Email    string
 	Password string
 	Name     string
+	// IPAddress / UserAgent describe the client, recorded on the refresh
+	// token the upgrade issues so a promoted session is as attributable as
+	// one from an ordinary login.
+	IPAddress string
+	UserAgent string
 }
 
 type AnonymousOAuthCredential struct {
@@ -45,6 +50,8 @@ type AnonymousOAuthCredential struct {
 	CodeVerifier string
 	State        string
 	StateToken   string
+	IPAddress    string
+	UserAgent    string
 }
 
 // anonymousEnabled reports whether the resolved project offers anonymous

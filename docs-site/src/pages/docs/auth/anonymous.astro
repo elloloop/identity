@@ -51,13 +51,18 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
     lang="json"
     code={`{
   "anonymous": {
-    "enabled": true,
-    "retention_days": 30
+    "enabled": true
   }
 }`}
   />
+  <p>
+    <code>enabled</code> is the only key. Retention is
+    <strong>deployment-wide</strong> — there is no per-project override,
+    because the sweeper runs against the boot-default project (see
+    <a href="#retention">Retention</a>).
+  </p>
 
-  <h2 id="access-mode">It is independent of the access mode</h2>
+  <h2 id="access-mode">Sign-in is independent of the access mode</h2>
   <p>
     <code>access.mode</code> (<code>open</code> / <code>allowlist</code> /
     <code>invite</code> / <code>closed</code>) governs which
@@ -74,6 +79,23 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
     a wide-open <code>mode: open</code> project does not get anonymous sign-in
     either. Control anonymous traffic with assurance and rate limits, not with
     the access mode.
+  </p>
+  <p>
+    <strong>Upgrading is not independent of it.</strong>
+    <code>UpgradeAnonymousAccount</code> is enforced with <em>signup</em>
+    semantics, because attaching a credential is what provisions an
+    email-identified account in the project's namespace. Under
+    <code>invite</code>, <code>closed</code>, or an off-list
+    <code>allowlist</code> it returns <code>PERMISSION_DENIED</code>, and the
+    account stays anonymous.
+  </p>
+  <p>
+    This matters at the default: <code>GATEWAY_DEFAULT_PROJECT_ACCESS_MODE</code>
+    defaults to <code>closed</code>. Enabling only the
+    <code>GATEWAY_ANONYMOUS_*</code> variables above gives you working
+    anonymous sign-in and an upgrade path that <em>always</em> fails. Open the
+    project (<code>mode: open</code>, or allowlist/invite as appropriate) for
+    the upgrade half to work at all.
   </p>
 
   <h2>Signing in</h2>
@@ -188,13 +210,21 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
         </td>
       </tr>
       <tr>
+        <td><code>PERMISSION_DENIED</code></td>
+        <td>
+          the project's access mode forbids provisioning this account —
+          <code>closed</code> (the default), <code>invite</code>, or an
+          off-list <code>allowlist</code>. The account remains anonymous.
+        </td>
+      </tr>
+      <tr>
         <td><code>INVALID_ARGUMENT</code></td>
         <td>no credential set, or the password fails the strength policy</td>
       </tr>
     </tbody>
   </table>
 
-  <h2>Retention</h2>
+  <h2 id="retention">Retention</h2>
   <p>
     Anonymous accounts are reaped after
     <code>GATEWAY_ANONYMOUS_RETENTION_DAYS</code> of inactivity (default 30),
@@ -210,6 +240,15 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
     The window must exceed <code>GATEWAY_REFRESH_EXPIRY_SECONDS</code> or the server
     refuses to boot — reaping an account while its refresh token is still valid
     would destroy a session the client still holds and cannot re-establish.
+  </p>
+  <p>
+    <strong>The sweep covers the boot-default project only.</strong> It runs
+    against the repository bound at startup, so anonymous users in other
+    control-plane projects are <em>not</em> reaped. A deployment that enables
+    anonymous sign-in on non-default projects must reap those rows itself
+    until a per-project sweep ships — otherwise the table grows by one
+    permanent row per app install, from an unauthenticated endpoint. The
+    attested-device sweep has the same limitation.
   </p>
 
   <h2>Operational notes</h2>
