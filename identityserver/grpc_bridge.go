@@ -123,6 +123,14 @@ func (b *grpcBridge) IssueAssuranceToken(ctx context.Context, in *identitypb.Iss
 	return invoke(ctx, in, b.h.IssueAssuranceToken)
 }
 
+func (b *grpcBridge) SignInAnonymously(ctx context.Context, in *identitypb.SignInAnonymouslyRequest) (*identitypb.SignInAnonymouslyResponse, error) {
+	return invoke(ctx, in, b.h.SignInAnonymously)
+}
+
+func (b *grpcBridge) UpgradeAnonymousAccount(ctx context.Context, in *identitypb.UpgradeAnonymousAccountRequest) (*identitypb.UpgradeAnonymousAccountResponse, error) {
+	return invoke(ctx, in, b.h.UpgradeAnonymousAccount)
+}
+
 func (b *grpcBridge) RefreshAssuranceToken(ctx context.Context, in *identitypb.RefreshAssuranceTokenRequest) (*identitypb.RefreshAssuranceTokenResponse, error) {
 	return invoke(ctx, in, b.h.RefreshAssuranceToken)
 }

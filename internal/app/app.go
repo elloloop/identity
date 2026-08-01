@@ -289,6 +289,14 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitAssurancePerIP, 0),
 		},
 		{
+			// Anonymous sign-in creates a real user row per call, from an
+			// unauthenticated caller: without a quota it is an unbounded
+			// row-insert primitive. Shares the signup budget because that is
+			// what it is — account creation.
+			PathPrefix: "/identity.v1.IdentityService/SignInAnonymously", Tag: "anonymous_signin",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.v1.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
@@ -518,6 +526,7 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.SweeperGraceSeconds,
 		deps.Config.AuditRetentionDays,
 		deps.Config.AssuranceDeviceRetentionDays,
+		deps.Config.AnonymousRetentionDays,
 		logger,
 	)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
@@ -682,8 +691,21 @@ func New(deps Deps) (*Built, error) {
 			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))
 	}
 	chain = middleware.NewProjectResolver(
-		deps.Config.DefaultProjectID, deps.Config.DefaultTenantID,
-		deps.Config.DefaultPrimaryAuthDomain(), defaultAccess,
+		middleware.DefaultProject{
+			ProjectID:         deps.Config.DefaultProjectID,
+			StorageScopeID:    deps.Config.DefaultTenantID,
+			PrimaryAuthDomain: deps.Config.DefaultPrimaryAuthDomain(),
+			Access:            defaultAccess,
+			// The default project has no config_json, so its anonymous
+			// policy comes from GATEWAY_ANONYMOUS_* — in the same shape a
+			// control-plane project parses out of its own config, so the
+			// resolver stamps one type either way. Deliberately NOT derived
+			// from the access mode: the two gate different things.
+			Anonymous: service.ProjectAnonymousConfig{
+				Enabled:       deps.Config.AnonymousEnabled,
+				RetentionDays: deps.Config.AnonymousRetentionDays,
+			},
+		},
 		service.NewCachingProjectResolver(
 			deps.ProjectResolver,
 			deps.Config.ProjectResolutionCacheTTL(),

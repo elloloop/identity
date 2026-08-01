@@ -120,6 +120,8 @@ const (
 	IdentityService_UpsertProjectConfig_FullMethodName             = "/identity.v1.IdentityService/UpsertProjectConfig"
 	IdentityService_GetProjectConfig_FullMethodName                = "/identity.v1.IdentityService/GetProjectConfig"
 	IdentityService_AdminSetProjectOAuthProvider_FullMethodName    = "/identity.v1.IdentityService/AdminSetProjectOAuthProvider"
+	IdentityService_SignInAnonymously_FullMethodName               = "/identity.v1.IdentityService/SignInAnonymously"
+	IdentityService_UpgradeAnonymousAccount_FullMethodName         = "/identity.v1.IdentityService/UpgradeAnonymousAccount"
 	IdentityService_AdminSetProjectAssurance_FullMethodName        = "/identity.v1.IdentityService/AdminSetProjectAssurance"
 	IdentityService_AdminGetProjectAssurance_FullMethodName        = "/identity.v1.IdentityService/AdminGetProjectAssurance"
 	IdentityService_AdminDeleteProjectOAuthProvider_FullMethodName = "/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider"
@@ -314,6 +316,8 @@ type IdentityServiceClient interface {
 	// Per-project client-assurance authoring. Takes the Play Integrity
 	// service-account key in plaintext and encrypts it server-side, so an
 	// operator never has to reimplement the at-rest encryption.
+	SignInAnonymously(ctx context.Context, in *SignInAnonymouslyRequest, opts ...grpc.CallOption) (*SignInAnonymouslyResponse, error)
+	UpgradeAnonymousAccount(ctx context.Context, in *UpgradeAnonymousAccountRequest, opts ...grpc.CallOption) (*UpgradeAnonymousAccountResponse, error)
 	AdminSetProjectAssurance(ctx context.Context, in *AdminSetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminSetProjectAssuranceResponse, error)
 	AdminGetProjectAssurance(ctx context.Context, in *AdminGetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminGetProjectAssuranceResponse, error)
 	AdminDeleteProjectOAuthProvider(ctx context.Context, in *AdminDeleteProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminDeleteProjectOAuthProviderResponse, error)
@@ -1338,6 +1342,26 @@ func (c *identityServiceClient) AdminSetProjectOAuthProvider(ctx context.Context
 	return out, nil
 }
 
+func (c *identityServiceClient) SignInAnonymously(ctx context.Context, in *SignInAnonymouslyRequest, opts ...grpc.CallOption) (*SignInAnonymouslyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SignInAnonymouslyResponse)
+	err := c.cc.Invoke(ctx, IdentityService_SignInAnonymously_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) UpgradeAnonymousAccount(ctx context.Context, in *UpgradeAnonymousAccountRequest, opts ...grpc.CallOption) (*UpgradeAnonymousAccountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpgradeAnonymousAccountResponse)
+	err := c.cc.Invoke(ctx, IdentityService_UpgradeAnonymousAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) AdminSetProjectAssurance(ctx context.Context, in *AdminSetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminSetProjectAssuranceResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminSetProjectAssuranceResponse)
@@ -1566,6 +1590,8 @@ type IdentityServiceServer interface {
 	// Per-project client-assurance authoring. Takes the Play Integrity
 	// service-account key in plaintext and encrypts it server-side, so an
 	// operator never has to reimplement the at-rest encryption.
+	SignInAnonymously(context.Context, *SignInAnonymouslyRequest) (*SignInAnonymouslyResponse, error)
+	UpgradeAnonymousAccount(context.Context, *UpgradeAnonymousAccountRequest) (*UpgradeAnonymousAccountResponse, error)
 	AdminSetProjectAssurance(context.Context, *AdminSetProjectAssuranceRequest) (*AdminSetProjectAssuranceResponse, error)
 	AdminGetProjectAssurance(context.Context, *AdminGetProjectAssuranceRequest) (*AdminGetProjectAssuranceResponse, error)
 	AdminDeleteProjectOAuthProvider(context.Context, *AdminDeleteProjectOAuthProviderRequest) (*AdminDeleteProjectOAuthProviderResponse, error)
@@ -1882,6 +1908,12 @@ func (UnimplementedIdentityServiceServer) GetProjectConfig(context.Context, *Get
 }
 func (UnimplementedIdentityServiceServer) AdminSetProjectOAuthProvider(context.Context, *AdminSetProjectOAuthProviderRequest) (*AdminSetProjectOAuthProviderResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminSetProjectOAuthProvider not implemented")
+}
+func (UnimplementedIdentityServiceServer) SignInAnonymously(context.Context, *SignInAnonymouslyRequest) (*SignInAnonymouslyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SignInAnonymously not implemented")
+}
+func (UnimplementedIdentityServiceServer) UpgradeAnonymousAccount(context.Context, *UpgradeAnonymousAccountRequest) (*UpgradeAnonymousAccountResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpgradeAnonymousAccount not implemented")
 }
 func (UnimplementedIdentityServiceServer) AdminSetProjectAssurance(context.Context, *AdminSetProjectAssuranceRequest) (*AdminSetProjectAssuranceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminSetProjectAssurance not implemented")
@@ -3734,6 +3766,42 @@ func _IdentityService_AdminSetProjectOAuthProvider_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_SignInAnonymously_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SignInAnonymouslyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).SignInAnonymously(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_SignInAnonymously_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).SignInAnonymously(ctx, req.(*SignInAnonymouslyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_UpgradeAnonymousAccount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpgradeAnonymousAccountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).UpgradeAnonymousAccount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_UpgradeAnonymousAccount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).UpgradeAnonymousAccount(ctx, req.(*UpgradeAnonymousAccountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_AdminSetProjectAssurance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminSetProjectAssuranceRequest)
 	if err := dec(in); err != nil {
@@ -4216,6 +4284,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminSetProjectOAuthProvider",
 			Handler:    _IdentityService_AdminSetProjectOAuthProvider_Handler,
+		},
+		{
+			MethodName: "SignInAnonymously",
+			Handler:    _IdentityService_SignInAnonymously_Handler,
+		},
+		{
+			MethodName: "UpgradeAnonymousAccount",
+			Handler:    _IdentityService_UpgradeAnonymousAccount_Handler,
 		},
 		{
 			MethodName: "AdminSetProjectAssurance",

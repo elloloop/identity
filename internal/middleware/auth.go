@@ -33,6 +33,10 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/CreateAssuranceChallenge": true,
 	"/identity.v1.IdentityService/IssueAssuranceToken":      true,
 	"/identity.v1.IdentityService/RefreshAssuranceToken":    true,
+	// Anonymous sign-in: the caller has no identity yet — creating one IS
+	// the request. UpgradeAnonymousAccount is deliberately NOT here: it
+	// promotes the CALLING account, which the access token identifies.
+	"/identity.v1.IdentityService/SignInAnonymously": true,
 	"/identity.v1.IdentityService/RefreshToken":             true,
 	"/identity.v1.IdentityService/Logout":                   true,
 	"/identity.v1.IdentityService/GetCurrentUser":           true,

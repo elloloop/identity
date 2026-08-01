@@ -37,6 +37,14 @@ type Claims struct {
 	// on, so downstream apps can suppress profiling/behavioral features for
 	// minors. Existing verifiers that don't know the claim ignore it.
 	IsMinor   bool     `json:"is_minor,omitempty"`
+	// Anonymous marks the subject as an anonymous account — a real user with
+	// a stable sub but no credential of any kind. Emitted only when true
+	// (omitempty), so tokens for identified users are byte-identical to
+	// before. Downstream services MUST read it before granting anything that
+	// assumes a verified human: an anonymous sub is cheap to mint, and
+	// `email` is empty rather than absent-because-unverified. Firebase
+	// carries the same signal as sign_in_provider="anonymous".
+	Anonymous bool `json:"anonymous,omitempty"`
 	SID       string   `json:"sid,omitempty"`
 	Audience  []string `json:"aud,omitempty"`
 	IssuedAt  int64    `json:"iat"`
@@ -65,6 +73,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if c.IsMinor {
 		m["is_minor"] = true
+	}
+	if c.Anonymous {
+		m["anonymous"] = true
 	}
 	if c.SID != "" {
 		m["sid"] = c.SID
@@ -184,6 +195,9 @@ func VerifyAccessToken(tokenStr string, kp KeyProvider, expectedTenant, expected
 	}
 	if v, ok := tok.Get("is_minor"); ok {
 		claims.IsMinor, _ = v.(bool)
+	}
+	if v, ok := tok.Get("anonymous"); ok {
+		claims.Anonymous, _ = v.(bool)
 	}
 	claims.Audience = tok.Audience()
 

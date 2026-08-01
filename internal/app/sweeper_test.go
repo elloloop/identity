@@ -130,7 +130,7 @@ func (m *mockSweepRepo) DeleteStaleAttestedDevices(_ context.Context, b int64, l
 
 func TestSweeper_DisabledWhenIntervalIsZero(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(&mockSweepRepo{}, nil, 0, 100, 30, 0, 0, logger)
+	s := newSweeper(&mockSweepRepo{}, nil, 0, 100, 30, 0, 0, 0, logger)
 	if s != nil {
 		t.Fatal("interval=0 must yield a nil sweeper (sweep disabled)")
 	}
@@ -138,7 +138,7 @@ func TestSweeper_DisabledWhenIntervalIsZero(t *testing.T) {
 
 func TestSweeper_DisabledWhenIntervalNegative(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(&mockSweepRepo{}, nil, -1, 100, 30, 0, 0, logger)
+	s := newSweeper(&mockSweepRepo{}, nil, -1, 100, 30, 0, 0, 0, logger)
 	if s != nil {
 		t.Fatal("interval<0 must yield a nil sweeper (sweep disabled)")
 	}
@@ -147,7 +147,7 @@ func TestSweeper_DisabledWhenIntervalNegative(t *testing.T) {
 func TestSweeper_RunOnceCallsEveryMethod(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, 0, logger)
 	if s == nil {
 		t.Fatal("newSweeper returned nil with positive interval")
 	}
@@ -188,7 +188,7 @@ func TestSweeper_RunOncePurgesExpiredAccountDeletions(t *testing.T) {
 	repo := &mockSweepRepo{}
 	purger := &mockPurger{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, purger, 1, 50, 30, 0, 0, logger)
+	s := newSweeper(repo, purger, 1, 50, 30, 0, 0, 0, logger)
 
 	fixedNow := time.UnixMilli(1_700_000_000_000)
 	s.now = func() time.Time { return fixedNow }
@@ -211,7 +211,7 @@ func TestSweeper_RunOncePurgesExpiredAccountDeletions(t *testing.T) {
 func TestSweeper_NilPurgerSkipsAccountDeletion(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, 0, logger)
 	// Must not panic when no purger is wired.
 	s.runOnce(context.Background())
 }
@@ -223,7 +223,7 @@ func TestSweeper_PurgeErrorIncrementsErrorCounter(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperErrors.WithLabelValues(accountDeletionLabel))
 
-	s := newSweeper(repo, purger, 1, 50, 30, 0, 0, logger)
+	s := newSweeper(repo, purger, 1, 50, 30, 0, 0, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues(accountDeletionLabel))
@@ -235,7 +235,7 @@ func TestSweeper_PurgeErrorIncrementsErrorCounter(t *testing.T) {
 func TestSweeper_SkipNotImplementedLogsOncePerNodeType(t *testing.T) {
 	repo := &mockSweepRepo{skip: true}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, 0, logger)
 
 	// Run three ticks; we must only log skip once per node type.
 	for i := 0; i < 3; i++ {
@@ -256,7 +256,7 @@ func TestSweeper_SkipNotImplementedDoesNotIncrementErrors(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperErrors.WithLabelValues("webauthn_challenges"))
 
-	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues("webauthn_challenges"))
@@ -272,7 +272,7 @@ func TestSweeper_RealErrorIncrementsErrorCounter(t *testing.T) {
 
 	baseline := readCounter(sweeperErrors.WithLabelValues("password_reset_tokens"))
 
-	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues("password_reset_tokens"))
@@ -294,7 +294,7 @@ func TestSweeper_SuccessfulRunIncrementsRunsCounter(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperRuns.WithLabelValues("login_challenges"))
 
-	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperRuns.WithLabelValues("login_challenges"))
@@ -307,7 +307,7 @@ func TestSweeper_RetentionDisabledSkipsAuditSweep(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
 	// auditRetentionDays = 0 → retention disabled: the audit sweep is a no-op.
-	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, 0, logger)
 
 	s.runOnce(context.Background())
 
@@ -319,7 +319,7 @@ func TestSweeper_RetentionDisabledSkipsAuditSweep(t *testing.T) {
 func TestSweeper_RetentionNegativeSkipsAuditSweep(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, -5, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, -5, 0, 0, logger)
 
 	s.runOnce(context.Background())
 
@@ -332,7 +332,7 @@ func TestSweeper_RetentionEnabledSweepsAtCutoff(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
 	const retentionDays = 30
-	s := newSweeper(repo, nil, 1, 50, 30, retentionDays, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, retentionDays, 0, 0, logger)
 
 	fixedNow := time.UnixMilli(1_700_000_000_000)
 	s.now = func() time.Time { return fixedNow }
@@ -355,7 +355,7 @@ func TestSweeper_AuditRetentionSuccessIncrementsRunsCounter(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperRuns.WithLabelValues(auditRetentionLabel))
 
-	s := newSweeper(repo, nil, 1, 50, 30, 30, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 30, 0, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperRuns.WithLabelValues(auditRetentionLabel))
@@ -370,7 +370,7 @@ func TestSweeper_AuditRetentionErrorIncrementsErrorCounter(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperErrors.WithLabelValues(auditRetentionLabel))
 
-	s := newSweeper(repo, nil, 1, 50, 30, 30, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 30, 0, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues(auditRetentionLabel))
@@ -408,7 +408,7 @@ func TestSweeper_RetentionDeletesOnlyPastCutoff(t *testing.T) {
 	t.Run("enabled deletes only stale", func(t *testing.T) {
 		repo := memory.New()
 		seed(repo)
-		s := newSweeper(repo, nil, 1, 50, 30, retentionDays, 0, logger)
+		s := newSweeper(repo, nil, 1, 50, 30, retentionDays, 0, 0, logger)
 		s.now = func() time.Time { return fixedNow }
 
 		s.runOnce(ctx)
@@ -432,7 +432,7 @@ func TestSweeper_RetentionDeletesOnlyPastCutoff(t *testing.T) {
 	t.Run("disabled keeps everything", func(t *testing.T) {
 		repo := memory.New()
 		seed(repo)
-		s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
+		s := newSweeper(repo, nil, 1, 50, 30, 0, 0, 0, logger)
 		s.now = func() time.Time { return fixedNow }
 
 		s.runOnce(ctx)
@@ -454,7 +454,7 @@ func TestSweeper_StartStopCleanly(t *testing.T) {
 	// A very short interval lets the loop tick at least once before
 	// we shut it down. The test asserts the stop func returns
 	// promptly rather than races the still-running goroutine.
-	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, 0, logger)
 	stop := s.start()
 
 	// Allow a couple of ticks. We don't assert exact tick counts —
@@ -538,7 +538,7 @@ func TestSweeper_DeviceRetentionUsesItsOwnCutoff(t *testing.T) {
 		retentionDays = 90 // GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS default
 	)
 	repo := &recordingDeviceSweepRepo{}
-	s := newSweeper(repo, nil, 1, 500, graceSeconds, 0, retentionDays, zaptest.NewLogger(t))
+	s := newSweeper(repo, nil, 1, 500, graceSeconds, 0, retentionDays, 0, zaptest.NewLogger(t))
 
 	now := time.UnixMilli(1_800_000_000_000)
 	s.now = func() time.Time { return now }
@@ -569,7 +569,7 @@ func TestSweeper_DeviceRetentionUsesItsOwnCutoff(t *testing.T) {
 
 	t.Run("retention disabled skips the sweep entirely", func(t *testing.T) {
 		r := &recordingDeviceSweepRepo{}
-		s := newSweeper(r, nil, 1, 500, graceSeconds, 0, 0, zaptest.NewLogger(t))
+		s := newSweeper(r, nil, 1, 500, graceSeconds, 0, 0, 0, zaptest.NewLogger(t))
 		s.now = func() time.Time { return now }
 		s.runOnce(context.Background())
 		if r.deviceCalls != 0 {

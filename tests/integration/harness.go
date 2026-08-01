@@ -2406,6 +2406,25 @@ func (r *MemRepo) DeleteStaleAttestedDevices(_ context.Context, beforeMs int64, 
 	return nil
 }
 
+func (r *MemRepo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memrepo: DeleteStaleAnonymousUsers: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, u := range r.users {
+		if n >= limit {
+			break
+		}
+		if u.IsAnonymous && u.LastLoginAtMs < beforeMs {
+			delete(r.users, id)
+			n++
+		}
+	}
+	return nil
+}
+
 func (r *MemRepo) CreateAssuranceChallenge(_ context.Context, c *service.AssuranceChallengeRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

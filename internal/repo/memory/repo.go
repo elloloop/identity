@@ -205,6 +205,12 @@ func (r *Repo) CountPasskeyChallenges() int {
 // ── Users ─────────────────────────────────────────────────────────
 
 func (r *Repo) FindUserByEmail(_ context.Context, email string) (*service.User, error) {
+	// An empty address matches nobody, mirroring the SQL drivers' early
+	// return. Without this an anonymous user (Email == "") would be
+	// resolvable by a lookup for the empty string.
+	if email == "" {
+		return nil, nil
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, u := range r.users {
@@ -334,8 +340,10 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	for _, existing := range r.users {
 		// Case-insensitive, mirroring the SQL drivers' lower(email) unique
 		// index: every backend signals a duplicate identically (the SCIM
-		// server maps this sentinel to HTTP 409 Conflict).
-		if strings.EqualFold(existing.Email, u.Email) {
+		// server maps this sentinel to HTTP 409 Conflict). The index is
+		// PARTIAL (WHERE email <> ''), so users without an address — every
+		// anonymous user — do not collide with each other.
+		if u.Email != "" && strings.EqualFold(existing.Email, u.Email) {
 			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
 		}
 		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
@@ -527,6 +535,10 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			}
 		case "external_id":
 			u.ExternalID, _ = v.(string)
+		case "is_anonymous":
+			if b, ok := v.(bool); ok {
+				u.IsAnonymous = b
+			}
 		case "phone_number":
 			u.PhoneNumber, _ = v.(string)
 		case "phone_verified":

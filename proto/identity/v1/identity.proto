@@ -63,6 +63,11 @@ message User {
   bool is_minor = 23;                     // derived: true when age < adult age (age-gating on)
   AgeBand age_band = 24;                  // derived age band; UNSPECIFIED when unknown / gate off
   string external_id = 25;                 // IdP-owned stable identifier (SCIM externalId); unique per project when set
+  // is_anonymous marks an account created by SignInAnonymously: a real
+  // user with a stable id but NO credential of any kind. It has no email,
+  // and is reachable only through its refresh token. Clears permanently on
+  // UpgradeAnonymousAccount, which preserves the id.
+  bool is_anonymous = 26;
 }
 
 message CreateUserRequest {
@@ -1657,6 +1662,82 @@ message RefreshAssuranceTokenResponse {
   int64  expires_at_ms   = 2;
 }
 
+// ── Anonymous identity ─────────────────────────────────────────────────────
+
+// SignInAnonymously creates a brand-new account with NO credential and
+// returns it with a token pair. Every call mints a NEW user: there is
+// nothing to authenticate against, so a returning client is recognised
+// only by the refresh token it persisted. Lose that token and the account
+// is unreachable forever.
+//
+// Availability is a per-project switch (`anonymous.enabled` in the project
+// config, GATEWAY_ANONYMOUS_ENABLED for the default project), default OFF.
+// It is INDEPENDENT of the project access mode: a project running
+// mode=closed — admitting no new identified users — may still hand out
+// anonymous sessions, because the access mode governs which
+// email-identified humans may sign up and log in, a different question.
+// Gate anonymous traffic with the assurance layer
+// (GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE) rather than the access mode.
+//
+// Anonymous users are reaped after GATEWAY_ANONYMOUS_RETENTION_DAYS of
+// inactivity (default 30, measured from the last token refresh).
+message SignInAnonymouslyRequest {}
+
+message SignInAnonymouslyResponse {
+  User   user          = 1;  // is_anonymous is true; email is empty
+  string access_token  = 2;
+  string refresh_token = 3;  // the account's ONLY means of return — persist it
+  int32  expires_in    = 4;  // access token lifetime in seconds
+}
+
+// UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+// anonymous account, in place, PRESERVING ITS ID — the server half of
+// Firebase's linkWithCredential. Everything written against the anonymous
+// id stays attached to the same subject, so no data migration is needed.
+//
+// Requires an authenticated anonymous caller (the access token identifies
+// the account; there is no user_id field, so one account can never upgrade
+// another). Exactly one credential must be set.
+//
+// Errors: FAILED_PRECONDITION when the caller is not anonymous (a second
+// upgrade would silently rebind an identified account); ALREADY_EXISTS
+// when the credential already belongs to someone else — matching
+// linkWithCredential's credential-already-in-use, and deliberately NOT
+// merging the two accounts.
+message UpgradeAnonymousAccountRequest {
+  oneof credential {
+    PasswordCredential password = 1;
+    OAuthCredential    oauth    = 2;
+  }
+}
+
+// PasswordCredential upgrades the account to an email + password login.
+// The email must be unclaimed within the project.
+message PasswordCredential {
+  string email    = 1;
+  string password = 2;
+  string name     = 3;  // optional display name
+}
+
+// OAuthCredential upgrades the account to a federated login. The server
+// performs the provider code exchange itself — the client never asserts
+// the identity — exactly as OAuthLogin and LinkIdentity do.
+message OAuthCredential {
+  string provider      = 1;  // "google" | "microsoft" | "apple" | "github" | "oidc"
+  string code          = 2;
+  string redirect_uri  = 3;
+  string code_verifier = 4;
+  string state         = 5;
+  string state_token   = 6;
+}
+
+message UpgradeAnonymousAccountResponse {
+  User   user          = 1;  // same id as before; is_anonymous now false
+  string access_token  = 2;  // reissued so the anonymous claim is dropped
+  string refresh_token = 3;
+  int32  expires_in    = 4;
+}
+
 // ── Linked identities (self-service connected accounts) ────────────────────
 //
 // User-managed OAuth/OIDC identity links. These let an authenticated user
@@ -1925,6 +2006,8 @@ service IdentityService {
   // Per-project client-assurance authoring. Takes the Play Integrity
   // service-account key in plaintext and encrypts it server-side, so an
   // operator never has to reimplement the at-rest encryption.
+  rpc SignInAnonymously(SignInAnonymouslyRequest) returns (SignInAnonymouslyResponse);
+  rpc UpgradeAnonymousAccount(UpgradeAnonymousAccountRequest) returns (UpgradeAnonymousAccountResponse);
   rpc AdminSetProjectAssurance(AdminSetProjectAssuranceRequest) returns (AdminSetProjectAssuranceResponse);
   rpc AdminGetProjectAssurance(AdminGetProjectAssuranceRequest) returns (AdminGetProjectAssuranceResponse);
   rpc AdminDeleteProjectOAuthProvider(AdminDeleteProjectOAuthProviderRequest) returns (AdminDeleteProjectOAuthProviderResponse);

@@ -59,6 +59,7 @@ func userToProto(u *service.User) *identitypb.User {
 		IsMinor:          u.IsMinor,
 		AgeBand:          ageBandToProto(u.AgeBand),
 		ExternalId:       u.ExternalID,
+		IsAnonymous:      u.IsAnonymous,
 	}
 	if !u.CreatedAt.IsZero() {
 		pb.CreatedAt = timestamppb.New(u.CreatedAt)

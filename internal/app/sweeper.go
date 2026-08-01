@@ -89,6 +89,11 @@ const auditRetentionLabel = "audit_events"
 // row has no expires_at_ms, so it must never share the expiry cutoff.
 const deviceRetentionLabel = "attested_devices"
 
+// anonymousRetentionLabel is the metrics node_type label for the
+// anonymous-user retention sweep. Like the device sweep it is NOT one of
+// targets(): it keys on last activity, not on a row's own expires_at_ms.
+const anonymousRetentionLabel = "anonymous_users"
+
 // auditRetentionDay is the fixed-duration day used to turn the configured
 // retention window (whole days) into a cutoff instant. A coarse retention
 // window (months) needs no calendar/DST precision, so a flat 24h day matches
@@ -113,6 +118,10 @@ type sweeper struct {
 	// deviceRetentionDays bounds how long an attested device is kept after
 	// its LAST USE. 0 (or negative) disables the step.
 	deviceRetentionDays int
+	// anonymousRetentionDays bounds how long an anonymous user is kept after
+	// its last activity. Its own window, for the same reason the device one
+	// is: an anonymous user row has no expires_at_ms to be slack past.
+	anonymousRetentionDays int
 
 	// now is the time source; tests override it. nil means time.Now.
 	now func() time.Time
@@ -129,7 +138,7 @@ type sweeper struct {
 // sweeping is disabled (interval <= 0); the caller must handle the
 // nil case. purger may be nil to disable the account-deletion sweep.
 // auditRetentionDays <= 0 disables the audit-retention step.
-func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batch, graceSec, auditRetentionDays, deviceRetentionDays int, logger *zap.Logger) *sweeper {
+func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batch, graceSec, auditRetentionDays, deviceRetentionDays, anonymousRetentionDays int, logger *zap.Logger) *sweeper {
 	if intervalSec <= 0 {
 		return nil
 	}
@@ -151,7 +160,8 @@ func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batc
 		batch:               batch,
 		grace:               time.Duration(graceSec) * time.Second,
 		auditRetentionDays:  auditRetentionDays,
-		deviceRetentionDays: deviceRetentionDays,
+		deviceRetentionDays:    deviceRetentionDays,
+		anonymousRetentionDays: anonymousRetentionDays,
 		skipLogged:          make(map[string]bool, 5),
 	}
 }
@@ -205,6 +215,37 @@ func (s *sweeper) runOnce(ctx context.Context) {
 	s.purgeExpiredAccountDeletions(ctx, now.UnixMilli())
 	s.sweepAuditRetention(ctx, now)
 	s.sweepDeviceRetention(ctx, now)
+	s.sweepAnonymousRetention(ctx, now)
+}
+
+// sweepAnonymousRetention deletes anonymous users whose LAST ACTIVITY
+// predates the retention window (now - anonymousRetentionDays). Like the
+// device sweep it does NOT ride the shared expiry cutoff: that cutoff is
+// `now - grace` (default 60s) applied to a row's own expires_at_ms, and an
+// anonymous user row has no expiry. Sharing it would delete every anonymous
+// account about a minute after its last refresh — and since a refresh token
+// is an anonymous account's ONLY credential, the session would be
+// unrecoverable. No-op when retention is disabled (<= 0).
+func (s *sweeper) sweepAnonymousRetention(ctx context.Context, now time.Time) {
+	if s.anonymousRetentionDays <= 0 {
+		return
+	}
+	cutoffMs := now.Add(-time.Duration(s.anonymousRetentionDays) * auditRetentionDay).UnixMilli()
+	if err := s.repo.DeleteStaleAnonymousUsers(ctx, cutoffMs, s.batch); err != nil {
+		if errors.Is(err, service.ErrSweepNotImplemented) {
+			s.logSkipOnce(anonymousRetentionLabel)
+			return
+		}
+		sweeperErrors.WithLabelValues(anonymousRetentionLabel).Inc()
+		s.logger.Warn(
+			"sweeper_anonymous_retention_failed",
+			zap.Int64("cutoff_ms", cutoffMs),
+			zap.Int("retention_days", s.anonymousRetentionDays),
+			zap.Error(err),
+		)
+		return
+	}
+	sweeperRuns.WithLabelValues(anonymousRetentionLabel).Inc()
 }
 
 // sweepDeviceRetention deletes attested devices whose LAST USE predates the
