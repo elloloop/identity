@@ -275,3 +275,179 @@ func TestUpgradeAnonymousWithOAuth_RetryAfterAFailedPromotion(t *testing.T) {
 		t.Fatalf("retry produced %#v", up.User)
 	}
 }
+
+// The upgrade's guard rails, each of which refuses before touching the
+// account. These are cheap to get wrong and expensive to notice: a missing
+// refusal here is an account promoted into a state the deployment's own
+// switches say is impossible.
+func TestUpgradeAnonymousWithPassword_Refusals(t *testing.T) {
+	newAnon := func(t *testing.T) (*AuthService, *fakeRepo, context.Context, string) {
+		t.Helper()
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		ctx := anonCtx(true, AccessModeOpen)
+		res, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+		if err != nil {
+			t.Fatalf("SignInAnonymously: %v", err)
+		}
+		return svc, repo, ctx, res.User.ID
+	}
+
+	t.Run("local auth disabled", func(t *testing.T) {
+		svc, _, ctx, id := newAnon(t)
+		svc.cfg.AuthAllowLocal = false
+		if _, err := svc.UpgradeAnonymousWithPassword(ctx, id, AnonymousPasswordCredential{
+			Email: "a@example.com", Password: "Str0ng-Passw0rd!x",
+		}); !errors.Is(err, ErrLocalAuthDisabled) {
+			t.Fatalf("err = %v, want ErrLocalAuthDisabled", err)
+		}
+	})
+
+	t.Run("password signup disabled", func(t *testing.T) {
+		svc, _, ctx, id := newAnon(t)
+		svc.cfg.PasswordSignupEnabled = false
+		if _, err := svc.UpgradeAnonymousWithPassword(ctx, id, AnonymousPasswordCredential{
+			Email: "b@example.com", Password: "Str0ng-Passw0rd!x",
+		}); !errors.Is(err, ErrSignupDisabled) {
+			t.Fatalf("err = %v, want ErrSignupDisabled", err)
+		}
+	})
+
+	t.Run("malformed address", func(t *testing.T) {
+		svc, _, ctx, id := newAnon(t)
+		if _, err := svc.UpgradeAnonymousWithPassword(ctx, id, AnonymousPasswordCredential{
+			Email: "not-an-address", Password: "Str0ng-Passw0rd!x",
+		}); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("empty password", func(t *testing.T) {
+		svc, _, ctx, id := newAnon(t)
+		if _, err := svc.UpgradeAnonymousWithPassword(ctx, id, AnonymousPasswordCredential{
+			Email: "c@example.com",
+		}); !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("a repo failure is surfaced, not swallowed", func(t *testing.T) {
+		svc, repo, ctx, id := newAnon(t)
+		repo.findUserByEmailErr = errors.New("connection reset")
+		if _, err := svc.UpgradeAnonymousWithPassword(ctx, id, AnonymousPasswordCredential{
+			Email: "d@example.com", Password: "Str0ng-Passw0rd!x",
+		}); err == nil {
+			t.Fatal("a lookup failure was swallowed")
+		}
+		after, _ := repo.GetUser(ctx, id)
+		if after == nil || !after.IsAnonymous {
+			t.Error("a failed upgrade must leave the account anonymous")
+		}
+	})
+}
+
+// The OAuth arm refuses a provider that returns no email: a permanent
+// account must have an address, or it occupies the empty-email slot the
+// partial index reserves for anonymous users and cannot be recovered.
+func TestUpgradeAnonymousWithOAuth_RefusesAnEmailessProvider(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := anonCtx(true, AccessModeOpen)
+
+	res, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+	cred := oauthCred()
+	cred.Code = fakeOAuthCode("", "No Email", "", testOAuthProvider)
+
+	if _, err := svc.UpgradeAnonymousWithOAuth(ctx, res.User.ID, cred); err == nil {
+		t.Fatal("upgrade accepted a provider identity with no email")
+	}
+	after, _ := repo.GetUser(ctx, res.User.ID)
+	if after == nil || !after.IsAnonymous {
+		t.Error("the account must stay anonymous")
+	}
+	ids, _ := repo.ListOAuthIdentitiesForUser(ctx, res.User.ID)
+	if len(ids) != 0 {
+		t.Errorf("a refused upgrade persisted %d identities", len(ids))
+	}
+}
+
+// A caller that does not exist, and one already promoted, are both refused
+// before the exchange.
+func TestUpgradeAnonymousWithOAuth_UnknownCaller(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := anonCtx(true, AccessModeOpen)
+
+	if _, err := svc.UpgradeAnonymousWithOAuth(ctx, "no-such-user", oauthCred()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// A failed activity stamp must not fail the refresh: losing one stamp only
+// makes the account look idle until its next refresh, whereas failing the
+// refresh would strand a session whose token is the account's only
+// credential.
+func TestRefreshToken_AnonymousActivityStampFailureIsNotFatal(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := anonCtx(true, AccessModeOpen)
+
+	res, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+	repo.updateUserErr = errors.New("connection reset")
+
+	if _, access, refresh, err := svc.RefreshToken(ctx, res.RefreshToken, "1.2.3.4", "ua"); err != nil {
+		t.Fatalf("a failed activity stamp broke the refresh: %v", err)
+	} else if access == "" || refresh == "" {
+		t.Fatal("refresh returned no tokens")
+	}
+}
+
+// The credential-attach guard fails CLOSED on a lookup error: guessing
+// "probably not anonymous" is the direction that loses data.
+func TestRefuseAnonymousCredentialAttach_FailsClosedOnLookupError(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	repo.getUserErr = errors.New("connection reset")
+
+	if err := svc.refuseAnonymousCredentialAttach(context.Background(), "some-user"); err == nil {
+		t.Fatal("a lookup failure admitted the credential attach")
+	}
+}
+
+// The provider identity must be unclaimed by ANOTHER account; Firebase's
+// credential-already-in-use, deliberately not a merge.
+func TestUpgradeAnonymousWithOAuth_RefusesAnIdentityOwnedByAnother(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := anonCtx(true, AccessModeOpen)
+
+	// Another account already holds this provider identity.
+	other, err := repo.CreateUser(ctx, &User{Email: "other@example.com"})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
+		UserID: other, Provider: testOAuthProvider,
+		ProviderUserID: "sub-" + testOAuthEmail, CreatedAt: 1,
+	}); err != nil {
+		t.Fatalf("seed identity: %v", err)
+	}
+
+	res, _ := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	// A different address, so the email pre-check passes and the identity
+	// check is what refuses.
+	cred := oauthCred()
+	if _, err := svc.UpgradeAnonymousWithOAuth(ctx, res.User.ID, cred); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("err = %v, want ErrAlreadyExists", err)
+	}
+	after, _ := repo.GetUser(ctx, res.User.ID)
+	if after == nil || !after.IsAnonymous {
+		t.Error("a refused upgrade must leave the account anonymous")
+	}
+}
