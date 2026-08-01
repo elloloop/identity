@@ -304,3 +304,59 @@ func TestUpgradeAnonymousAccount_WireOAuthArm(t *testing.T) {
 		t.Fatalf("unmapped error escaped as CodeUnknown: %v", err)
 	}
 }
+
+// The upgrade PROVISIONS an identified account, so it answers to the same
+// assurance toggle as PasswordSignup. Without this gate a deployment that
+// requires attestation for signup still had an attestation-free route to a
+// normal email+password account: SignInAnonymously, then upgrade.
+func TestUpgradeAnonymousAccount_WireRequiresAssurance(t *testing.T) {
+	h := newAnonHarness(t, true, service.AccessModeOpen, func(c *config.Config) {
+		c.AssuranceEnabled = true
+		c.AssuranceEnforcePasswordSignup = true
+		c.AnonymousRequireAssurance = false // the signup toggle alone must suffice
+		c.AssuranceWebProvider = config.AssuranceWebProviderTurnstile
+	})
+
+	req := connect.NewRequest(&identitypb.UpgradeAnonymousAccountRequest{
+		Credential: &identitypb.UpgradeAnonymousAccountRequest_Password{
+			Password: &identitypb.PasswordCredential{
+				Email: "claimed@example.com", Password: strongPW,
+			},
+		},
+	})
+	req.Header().Set(authUserHeader, "some-anon-id")
+
+	_, err := h.client.UpgradeAnonymousAccount(context.Background(), req)
+	if got := connect.CodeOf(err); got != connect.CodePermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied for a missing assurance token", got)
+	}
+}
+
+// With both toggles off, the same deployment admits the upgrade — the gate
+// must not fire on its own.
+func TestUpgradeAnonymousAccount_WireAssuranceOffAdmits(t *testing.T) {
+	h := newAnonHarness(t, true, service.AccessModeOpen, func(c *config.Config) {
+		c.AssuranceEnabled = true
+		c.AssuranceEnforcePasswordSignup = false
+		c.AnonymousRequireAssurance = false
+		c.AssuranceWebProvider = config.AssuranceWebProviderTurnstile
+	})
+
+	signIn, err := h.client.SignInAnonymously(context.Background(),
+		connect.NewRequest(&identitypb.SignInAnonymouslyRequest{}))
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+	req := connect.NewRequest(&identitypb.UpgradeAnonymousAccountRequest{
+		Credential: &identitypb.UpgradeAnonymousAccountRequest_Password{
+			Password: &identitypb.PasswordCredential{
+				Email: "ok@example.com", Password: strongPW,
+			},
+		},
+	})
+	req.Header().Set(authUserHeader, signIn.Msg.GetUser().GetId())
+
+	if _, err := h.client.UpgradeAnonymousAccount(context.Background(), req); connect.CodeOf(err) == connect.CodePermissionDenied {
+		t.Fatalf("assurance not required, yet the upgrade was refused: %v", err)
+	}
+}
