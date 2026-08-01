@@ -167,13 +167,12 @@ func TestAnonymousDefaults_AreMutuallyConsistent(t *testing.T) {
 	}
 }
 
-// TestLoad_AnonymousRetentionDefaultNeverBreaksBoot is the regression guard
-// for a real defect: the retention-vs-refresh invariant was enforced against
-// the UNSET 30-day default, so v4.1 refused to start on any v4.0 deployment
-// whose refresh lifetime was >= 30 days — with anonymous entirely off and no
-// GATEWAY_ANONYMOUS_* variable ever set. A 30/60/90-day refresh is ordinary
-// for a mobile deployment, so this bricked upgrades mid rolling-deploy over
-// a value the operator had never chosen.
+// TestLoad_AnonymousRetentionDefaultNeverBreaksBoot pins that a deployment
+// which never enabled anonymous sign-in boots regardless of its refresh
+// lifetime. The retention-vs-refresh invariant must not be enforced against
+// the unset default: a 30/60/90-day refresh is ordinary for mobile, and
+// failing the boot would strand an upgrade over a value the operator never
+// chose.
 func TestLoad_AnonymousRetentionDefaultNeverBreaksBoot(t *testing.T) {
 	for _, refreshDays := range []int{7, 30, 60, 90} {
 		t.Run(fmt.Sprintf("refresh_%dd", refreshDays), func(t *testing.T) {

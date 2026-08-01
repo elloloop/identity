@@ -9,13 +9,12 @@ import (
 // DeleteStaleAnonymousUsers reaps anonymous users whose last activity
 // predates beforeMs, oldest first, matching the SQL drivers' batched delete.
 //
-// Selection and deletion happen under ONE lock. Snapshotting *service.User
-// pointers and deleting after releasing it was both a data race (the sweep
-// read LastLoginAtMs while touchAnonymousActivity wrote it) and a TOCTOU:
-// an account upgraded between the snapshot and the delete was reaped anyway,
-// destroying a permanent account with a working credential — the exact
-// outcome the is_anonymous predicate exists to prevent. The SQL drivers get
-// this from executing one statement; the memory driver has to hold the lock.
+// Selection and deletion happen under ONE lock. Holding it across both is
+// what makes the is_anonymous predicate meaningful here: releasing it in
+// between would race touchAnonymousActivity's write and let an account
+// upgraded in the gap be reaped anyway, destroying a permanent account with
+// a working credential. The SQL drivers get this from executing a single
+// statement; the memory driver has to hold the lock.
 func (r *Repo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, limit int) error {
 	if limit <= 0 {
 		return fmt.Errorf("memory: DeleteStaleAnonymousUsers: limit must be > 0, got %d", limit)

@@ -255,6 +255,12 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
 			continue
 		}
+		// Anonymous accounts have no email, so consumers that present users
+		// by address would render them blank. Mirrors the SQL drivers'
+		// NOT is_anonymous predicate.
+		if !filter.IncludeAnonymous && u.IsAnonymous {
+			continue
+		}
 		cp := *u
 		matched = append(matched, &cp)
 	}
@@ -327,6 +333,9 @@ func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
 		n++

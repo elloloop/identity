@@ -246,6 +246,12 @@ func (r *fakeRepo) ListUsers(_ context.Context, filter UserListFilter) ([]*User,
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
 			continue
 		}
+		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
+		// accounts have no email, so a surface presenting users by address
+		// must not receive them unless it opts in.
+		if !filter.IncludeAnonymous && u.IsAnonymous {
+			continue
+		}
 		cp := *u
 		out = append(out, &cp)
 	}
@@ -290,6 +296,12 @@ func (r *fakeRepo) CountUsers(_ context.Context, filter UserListFilter) (int, er
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
+		// accounts have no email, so a surface presenting users by address
+		// must not receive them unless it opts in.
+		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
 		n++

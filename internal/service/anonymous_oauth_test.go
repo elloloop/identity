@@ -532,3 +532,54 @@ func TestUpgradeAnonymousWithPassword_DoesNotLeakAddressExistence(t *testing.T) 
 		t.Fatalf("responses differ by address existence:\n taken: %v\n free:  %v", errTaken, errFree)
 	}
 }
+
+// Anonymous accounts must be invisible to the user-listing surface: they
+// have no email, and every consumer presents users by one. SCIM makes
+// userName REQUIRED and unique (RFC 7643 §4.1.1), so exporting them yields
+// resources with an empty userName and inflates totalResults.
+func TestListUsers_ExcludesAnonymousByDefault(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	ctx := anonCtx(true, AccessModeOpen)
+
+	if _, err := repo.CreateUser(ctx, &User{Email: "real@example.com"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua"); err != nil {
+			t.Fatalf("SignInAnonymously: %v", err)
+		}
+	}
+
+	listed, err := repo.ListUsers(ctx, UserListFilter{})
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	for _, u := range listed {
+		if u.IsAnonymous {
+			t.Fatalf("an anonymous account leaked into the default listing: %#v", u)
+		}
+	}
+	if len(listed) != 1 {
+		t.Fatalf("listed %d users, want 1 (the addressed one)", len(listed))
+	}
+
+	n, err := repo.CountUsers(ctx, UserListFilter{})
+	if err != nil {
+		t.Fatalf("CountUsers: %v", err)
+	}
+	// The count must agree with the rows, or a paginated consumer walks off
+	// the end of a page that never arrives.
+	if n != len(listed) {
+		t.Fatalf("CountUsers = %d but ListUsers returned %d", n, len(listed))
+	}
+
+	// Opt-in still sees them, for surfaces that genuinely want the whole pool.
+	all, err := repo.ListUsers(ctx, UserListFilter{IncludeAnonymous: true})
+	if err != nil {
+		t.Fatalf("ListUsers(IncludeAnonymous): %v", err)
+	}
+	if len(all) != 4 {
+		t.Fatalf("IncludeAnonymous listed %d, want 4", len(all))
+	}
+}

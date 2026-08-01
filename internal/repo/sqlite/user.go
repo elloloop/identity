@@ -207,6 +207,12 @@ func (r *sqliteRepository) userFilterWhere(filter service.UserListFilter) (where
 		args = append(args, filter.ExternalID)
 		where = append(where, fmt.Sprintf("external_id = $%d", len(args)))
 	}
+	if !filter.IncludeAnonymous {
+		// Anonymous accounts have no email, so every consumer that presents
+		// users by address would render them blank. Excluded here rather
+		// than by the caller so ListUsers and CountUsers agree.
+		where = append(where, "NOT is_anonymous")
+	}
 	return where, args
 }
 

@@ -263,6 +263,16 @@ func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User)
 	if existing == nil {
 		return scim.User{}, scim.ErrNotFound
 	}
+	if existing.IsAnonymous {
+		// An anonymous account is invisible to SCIM reads (the list filter
+		// excludes it), so a write naming one is addressing something the
+		// IdP cannot have seen. Refusing also closes a real hole: giving it
+		// an address here would make it email-loginable while is_anonymous
+		// stayed true, so it would keep matching the retention sweep and be
+		// hard-deleted with its sessions. UpgradeAnonymousAccount is the one
+		// path that attaches an identity AND clears the flag.
+		return scim.User{}, scim.ErrNotFound
+	}
 	status := statusActive
 	if !u.Active {
 		status = statusDeactivated
@@ -326,6 +336,16 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 		return scim.User{}, mapStoreErr(err)
 	}
 	if existing == nil {
+		return scim.User{}, scim.ErrNotFound
+	}
+	if existing.IsAnonymous {
+		// An anonymous account is invisible to SCIM reads (the list filter
+		// excludes it), so a write naming one is addressing something the
+		// IdP cannot have seen. Refusing also closes a real hole: giving it
+		// an address here would make it email-loginable while is_anonymous
+		// stayed true, so it would keep matching the retention sweep and be
+		// hard-deleted with its sessions. UpgradeAnonymousAccount is the one
+		// path that attaches an identity AND clears the flag.
 		return scim.User{}, scim.ErrNotFound
 	}
 

@@ -179,7 +179,10 @@ func runAnonymousConformance(t *testing.T, driver Driver) {
 			}
 			t.Fatalf("sweep: %v", err)
 		}
-		remaining, err := r.ListUsers(ctx, service.UserListFilter{})
+		// IncludeAnonymous: the default listing excludes them, which is the
+		// point of that filter — but this assertion is about which ones the
+		// SWEEP left behind.
+		remaining, err := r.ListUsers(ctx, service.UserListFilter{IncludeAnonymous: true})
 		if err != nil {
 			t.Fatalf("ListUsers: %v", err)
 		}

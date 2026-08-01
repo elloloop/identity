@@ -126,6 +126,13 @@ type UserListFilter struct {
 	ExternalID string // exact external_id match when non-empty
 	Offset     int    // skip this many matching rows (cursor)
 	Limit      int    // max rows to return; <=0 → driver default
+	// IncludeAnonymous admits credential-less accounts. It defaults FALSE
+	// because an anonymous user has no email, and every consumer of this
+	// filter presents users by one: SCIM makes userName REQUIRED and unique
+	// (RFC 7643 §4.1.1), so exporting them yields N resources all carrying
+	// an empty userName. Excluded in the DRIVER, not the caller, so a
+	// paginated count matches the rows returned.
+	IncludeAnonymous bool
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.

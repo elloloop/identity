@@ -24,22 +24,17 @@ import (
 // has a permanent account it cannot log into. What is shared is the rules:
 // the same format validation, canonicalization, and strength policy.
 //
-// The access mode IS enforced, with SIGNUP semantics. An earlier version of
-// this reasoned that the account already exists and is merely gaining a way
-// to log back in, so the mode need not apply — that was wrong, and it was a
-// full bypass of invite-only projects. Under `mode: invite` the guard denies
-// self-signup but permits login, so an unauthenticated caller could chain
-// SignInAnonymously (no access check, by design) into an upgrade (no check
-// at all) and end with a permanent, provisioned, indefinitely-refreshable
-// account on a project whose entire boundary is "invited users only".
+// The access mode is enforced with SIGNUP semantics, not login: this call
+// turns an anonymous session into an email-identified account in the
+// project's namespace, which is precisely the act `mode` governs. Under
+// `mode: invite` the access guard denies self-signup but permits login, so
+// gating on login semantics here would let SignInAnonymously (ungated by
+// design) chain into a permanent, indefinitely-refreshable account on a
+// project whose entire boundary is "invited users only".
 //
-// Signup semantics, not login: this call is what turns an anonymous session
-// into an email-identified account in the project's namespace, which is
-// precisely the act `mode` governs. The cost is real and accepted — an
-// anonymous user on a closed project cannot become permanent — but the
-// alternative is that the access mode means nothing. Operators who want that
-// data retained should open the project, or upgrade the account
-// administratively.
+// The cost is real and accepted: an anonymous user on a closed project
+// cannot become permanent. Operators who want that data retained open the
+// project, or upgrade the account administratively.
 func (s *AuthService) UpgradeAnonymousWithPassword(
 	ctx context.Context, userID string, cred AnonymousPasswordCredential,
 ) (*LoginResult, error) {
@@ -145,11 +140,10 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 		}
 		// Deleting refresh tokens alone does NOT end the session. Under
 		// GATEWAY_REVOCATION_MODE=session the access token's lifetime is
-		// uncapped and it is revocable only through its Session row, so
-		// without this the caller keeps a working token against a subject
-		// that now bears the address they just claimed — exactly the
-		// session this gate exists to withhold. Every other revocation site
-		// pairs these two calls; this one had omitted it.
+		// uncapped and it is revocable only through its Session row, so both
+		// calls are required — otherwise the caller keeps a working token
+		// against a subject that now bears the address they just claimed,
+		// exactly the session this gate exists to withhold.
 		s.revokeUserSessionsIfModeSession(ctx, userID, "anonymous_upgrade_pending_verification")
 		return &LoginResult{User: u}, nil
 	}
@@ -172,14 +166,12 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 func (s *AuthService) UpgradeAnonymousWithOAuth(
 	ctx context.Context, userID string, cred AnonymousOAuthCredential,
 ) (*LoginResult, error) {
-	// Every check that can refuse runs BEFORE anything is persisted. An
-	// earlier version linked the identity first (via LinkIdentity) and
-	// decided afterwards, so a rejected upgrade still permanently mutated
-	// the account — and, when the provider's address could not be adopted,
-	// produced a PERMANENT account with an empty email. That state is
-	// invalid: it is the one thing the partial email index tolerates
-	// multiple of, so it silently blocks any future rollback of 0028, and
-	// the account has no address despite being permanent.
+	// Every check that can refuse runs BEFORE anything is persisted, so a
+	// rejected upgrade leaves the account exactly as it was. Deciding after
+	// the link would also allow a PERMANENT account with an empty email —
+	// invalid, since that is the one state the partial email index tolerates
+	// multiples of, and the account would have no address despite being
+	// permanent.
 	u, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, err

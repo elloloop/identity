@@ -851,6 +851,12 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
 			continue
 		}
+		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
+		// accounts have no email, so a surface presenting users by address
+		// must not receive them unless it opts in.
+		if !filter.IncludeAnonymous && u.IsAnonymous {
+			continue
+		}
 		cp := *u
 		matched = append(matched, &cp)
 	}
@@ -884,6 +890,12 @@ func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
+		// accounts have no email, so a surface presenting users by address
+		// must not receive them unless it opts in.
+		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
 		n++
@@ -2430,9 +2442,9 @@ func (r *MemRepo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, l
 	defer r.mu.Unlock()
 
 	// Oldest-first, matching the contract all three production drivers
-	// implement: iterating the map directly deleted an arbitrary subset when
-	// the batch limit bit, so a harness-backed test could observe a
-	// different survivor than production would produce.
+	// implement — iterating the map directly would delete an arbitrary
+	// subset once the batch limit bites, so a harness-backed test could
+	// observe a different survivor than production produces.
 	type victim struct {
 		id          string
 		lastLoginMs int64
@@ -2453,9 +2465,8 @@ func (r *MemRepo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, l
 		stale = stale[:limit]
 	}
 	for _, v := range stale {
-		// Drain the user-owned rows too — the SQL drivers get this from FK
-		// cascades, so dropping only the users entry left orphans a test
-		// could then observe.
+		// Drain the user-owned rows too: the SQL drivers get this from FK
+		// cascades, so dropping only the users entry would leave orphans.
 		r.deleteUserRowsLocked(v.id)
 	}
 	return nil

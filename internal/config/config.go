@@ -98,6 +98,11 @@ const (
 	// reaped while their refresh token is live.
 	DefaultAnonymousRetentionDays = 30
 
+	// secondsPerDay converts the refresh lifetime to whole days so the
+	// raise in Load and the invariant in validateAnonymous derive the
+	// boundary from one constant.
+	secondsPerDay = 86400
+
 	// MaxAnonymousRetentionDays caps the window for the same reason
 	// MaxAssuranceDeviceRetentionDays does: past ~106752 days the nanosecond
 	// cutoff duration overflows int64 and INVERTS, turning the sweep into a
@@ -1069,11 +1074,6 @@ type Config struct {
 	// each entry is sensitive and never logged.
 	WebhookSubscriptions string
 
-	// anonymousRetentionExplicit records that the operator set the retention
-	// window rather than inheriting the default. Only an explicit value is
-	// held to the refresh-lifetime invariant; an unset one is raised instead
-	// of failing a boot the operator never asked for.
-	anonymousRetentionExplicit bool
 	// AnonymousRetentionRaisedFrom is the unset default that was raised,
 	// or 0 when no adjustment happened. Boot logs it once.
 	AnonymousRetentionRaisedFrom int
@@ -1094,22 +1094,21 @@ func Load() *Config {
 
 	// The anonymous retention window must outlive the refresh lifetime, or
 	// the sweep reaps accounts whose only credential is still valid. That
-	// invariant must NOT be enforced against a value the operator never
-	// chose: v4.1 briefly failed to boot on any v4.0 deployment with a
-	// refresh lifetime >= the 30-day default, with anonymous entirely off
-	// and no GATEWAY_ANONYMOUS_* variable ever set. An UNSET window is
-	// therefore raised to clear the refresh lifetime; an explicitly set one
-	// still fails Validate loudly, because there the operator stated an
-	// intent the server cannot honour.
+	// invariant is NOT enforced against a value the operator never chose: a
+	// deployment with a long refresh lifetime and anonymous entirely off
+	// would otherwise fail to boot over the default. An UNSET window is
+	// raised to clear the refresh lifetime; an explicitly set one fails
+	// Validate loudly, because there the operator stated an intent the
+	// server cannot honour.
 	// Literal, not a constant: cmd/docsgen extracts the GATEWAY_* surface by
 	// scanning for string literals, so hoisting this to a named constant
 	// silently drops the variable from the published config reference.
-	if _, explicit := os.LookupEnv("GATEWAY_ANONYMOUS_RETENTION_DAYS"); explicit {
-		c.anonymousRetentionExplicit = true
-	} else if refreshDays := c.RefreshExpirySeconds / 86400; c.AnonymousRetentionDays > 0 &&
-		c.AnonymousRetentionDays <= refreshDays {
-		c.AnonymousRetentionRaisedFrom = c.AnonymousRetentionDays
-		c.AnonymousRetentionDays = refreshDays + 1
+	if _, explicit := os.LookupEnv("GATEWAY_ANONYMOUS_RETENTION_DAYS"); !explicit {
+		if refreshDays := c.RefreshExpirySeconds / secondsPerDay; c.AnonymousRetentionDays > 0 &&
+			c.AnonymousRetentionDays <= refreshDays {
+			c.AnonymousRetentionRaisedFrom = c.AnonymousRetentionDays
+			c.AnonymousRetentionDays = refreshDays + 1
+		}
 	}
 	return c
 }
@@ -2140,8 +2139,9 @@ func (c *Config) validateAnonymous() error {
 			MaxAnonymousRetentionDays, c.AnonymousRetentionDays,
 		)
 	}
-	// Checked BEFORE the disabled early-return, and this ordering is the
-	// whole point. requireAssurance short-circuits to ALLOWED whenever
+	// Unconditional, and deliberately so: a per-project config_json can
+	// enable anonymous sign-in on a deployment whose environment leaves it
+	// off. requireAssurance short-circuits to ALLOWED whenever
 	// AssuranceEnabled is false, whatever the per-endpoint flag says — so
 	// REQUIRE_ASSURANCE=true with ASSURANCE_ENABLED=false does not deny, it
 	// silently permits. A per-project config_json can still switch anonymous
@@ -2158,10 +2158,9 @@ func (c *Config) validateAnonymous() error {
 				"config_json) while this setting claims otherwise",
 		)
 	}
-	// Checked before the early-return for the same reason as the pair
-	// above: a per-project config_json can enable anonymous sign-in on a
-	// deployment whose env leaves it off, and the sweeper is wired from this
-	// value either way.
+	// Unconditional for the same reason as the check above, and because the
+	// sweeper is wired from this value whether or not the env enables the
+	// feature.
 	// An anonymous session survives only as long as its refresh token: that
 	// token is the account's ONLY credential. Reaping the user before the
 	// token expires destroys a session the client still believes in and
@@ -2178,9 +2177,6 @@ func (c *Config) validateAnonymous() error {
 		}
 	}
 
-	if !c.AnonymousEnabled {
-		return nil
-	}
 	return nil
 }
 
