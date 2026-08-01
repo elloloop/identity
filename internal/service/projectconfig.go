@@ -57,6 +57,14 @@ type ProjectConfig struct {
 	// explicitly set mode:open (or an allowlist/invite mode) to admit users.
 	// See ProjectAccessConfig.
 	Access ProjectAccessConfig `json:"access"`
+
+	// Products holds the per-product guardrails applied to the products this
+	// project's account pool signs into, keyed by the product slug a client
+	// sends in the X-Product header. One account authenticates everywhere, but
+	// each product's door checks the account's age band before a session is
+	// issued for it. A product absent here is unrestricted.
+	// See ProjectProductsConfig.
+	Products ProjectProductsConfig `json:"products"`
 }
 
 // ProjectOAuthConfig is a project's per-provider hosted-flow OAuth
@@ -254,6 +262,9 @@ func (c ProjectConfig) Validate() error {
 		return err
 	}
 	if err := c.Access.validate(); err != nil {
+		return err
+	}
+	if err := c.Products.validate(); err != nil {
 		return err
 	}
 	return nil
@@ -671,6 +682,109 @@ func (a ProjectAccessConfig) permits(email canonicalEmail) bool {
 	return false
 }
 
+// Minimum age bands an operator may set on a product via config_json
+// `products.<slug>.minimum_age_band`. They are the lower-cased spellings of the
+// agegate.Band* classifications a user's date of birth derives into, so config
+// reads as prose ("hold is teen and up") while the comparison stays a single
+// ordering.
+const (
+	// MinimumAgeBandChild admits every account with a known band — the CHILD
+	// band is already the lowest. It exists so an operator can state "no
+	// restriction" explicitly rather than by omission.
+	MinimumAgeBandChild = "child"
+	// MinimumAgeBandTeen refuses CHILD accounts; TEEN and ADULT pass.
+	MinimumAgeBandTeen = "teen"
+	// MinimumAgeBandAdult refuses CHILD and TEEN accounts; only ADULT passes.
+	MinimumAgeBandAdult = "adult"
+)
+
+// ProjectProductConfig is one product's guardrail policy.
+type ProjectProductConfig struct {
+	// MinimumAgeBand is the lowest age band this product issues a session for,
+	// one of MinimumAgeBand{Child,Teen,Adult}. Empty means the product imposes
+	// no age restriction.
+	MinimumAgeBand string `json:"minimum_age_band"`
+}
+
+// ProjectProductsConfig maps a product slug (the value of the X-Product header)
+// to that product's guardrail policy. It is the enforcement half of "one
+// account, many products": the account pool is shared, so a product's audience
+// rating has to be enforced at the door rather than assumed from store listing
+// copy.
+//
+// Fail direction — FAIL OPEN, the opposite of ProjectAccessConfig. An absent
+// products block, an absent slug, and an absent minimum_age_band all mean "no
+// age restriction", so adding the feature changes no existing deployment's
+// behavior and a product is gated only once an operator says so. What DOES fail
+// loudly is a malformed policy: an unrecognized band string is rejected by
+// ParseProjectConfig, which makes the project resolver refuse the project rather
+// than serve a typo as "unrestricted".
+type ProjectProductsConfig map[string]ProjectProductConfig
+
+// minimumAgeBandRank orders the bands for the "is this account old enough"
+// comparison. Rank 0 is "no constraint / unknown" and always passes, which is
+// what makes both an unconfigured product and an account with no derived band
+// (agegate.BandUnknown) fall through the gate.
+var minimumAgeBandRank = map[string]int{
+	MinimumAgeBandChild: 1,
+	MinimumAgeBandTeen:  2,
+	MinimumAgeBandAdult: 3,
+}
+
+// validate rejects a malformed products block so the whole config parse fails
+// (and with it project resolution) rather than silently ignoring a policy the
+// operator believes is in force. A blank slug is rejected because it can never
+// match a header; an unrecognized band is rejected because "chid" would
+// otherwise read as "unrestricted" — exactly the guardrail the operator asked
+// for, silently absent.
+func (p ProjectProductsConfig) validate() error {
+	for slug, product := range p {
+		if strings.TrimSpace(slug) == "" {
+			return errors.New("products: product slugs must not be empty")
+		}
+		band := normalizeProductSlug(product.MinimumAgeBand)
+		if band == "" {
+			continue
+		}
+		if _, ok := minimumAgeBandRank[band]; !ok {
+			return fmt.Errorf("products.%s.minimum_age_band %q must be one of %q, %q, %q",
+				slug, product.MinimumAgeBand, MinimumAgeBandChild, MinimumAgeBandTeen, MinimumAgeBandAdult)
+		}
+	}
+	return nil
+}
+
+// canonicalized returns a copy whose slugs and bands are normalized to the form
+// the guard compares against, applied once at parse time so no lookup has to
+// re-normalize on the auth hot path.
+func (p ProjectProductsConfig) canonicalized() ProjectProductsConfig {
+	if len(p) == 0 {
+		return nil
+	}
+	out := make(ProjectProductsConfig, len(p))
+	for slug, product := range p {
+		out[normalizeProductSlug(slug)] = ProjectProductConfig{
+			MinimumAgeBand: normalizeProductSlug(product.MinimumAgeBand),
+		}
+	}
+	return out
+}
+
+// minimumAgeBand returns the minimum band configured for slug, or "" when the
+// product is unconfigured or imposes no restriction. slug must already be
+// normalized (the product middleware does it once per request).
+func (p ProjectProductsConfig) minimumAgeBand(slug string) string {
+	return p[slug].MinimumAgeBand
+}
+
+// normalizeProductSlug trims and lower-cases a slug or band string so config
+// authored as "Hold" / " TEEN " matches a header sent as "hold" / a band
+// constant. Shared by slugs and bands because both are case-insensitive
+// identifiers with the same normalization rule.
+func normalizeProductSlug(raw string) string {
+	return strings.TrimSpace(strings.ToLower(raw))
+}
+
 // ProjectCORSConfig is the per-project CORS policy. AllowedOrigins is layered
 // on top of the global GATEWAY_ALLOWED_ORIGINS floor: a browser origin is
 // accepted when it is in either set. Each entry must be a bare scheme+host(+port)
@@ -702,5 +816,8 @@ func ParseProjectConfig(configJSON string) (ProjectConfig, error) {
 	// validation, so every downstream copy of the config (resolver scope, native
 	// login, admin reads) matches a canonicalized login email like-against-like.
 	cfg.Access = cfg.Access.canonicalized()
+	// Same reason for the product slugs and their minimum bands: the guard
+	// compares against the slug an X-Product header carried, normalized once here.
+	cfg.Products = cfg.Products.canonicalized()
 	return cfg, nil
 }

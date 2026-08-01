@@ -613,7 +613,7 @@ func New(deps Deps) (*Built, error) {
 	authExpectedTenant := deps.Config.DefaultTenantID
 
 	// Order (outermost runs first on request path):
-	//   logging → recover → health → project → CORS → client-IP → rate-limit → JWKS → auth → project-guard → metrics → Connect
+	//   logging → recover → health → project → CORS → product → client-IP → rate-limit → JWKS → auth → project-guard → metrics → Connect
 	// client-IP must precede rate-limit (the limiter keys on the resolved
 	// IP). health is the outermost functional hop so liveness/readiness
 	// probes short-circuit before any per-request work — including the
@@ -626,9 +626,12 @@ func New(deps Deps) (*Built, error) {
 	// floor and short-circuits the preflight before rate-limit, so a
 	// preflight is never rate-limited. The resolver still precedes auth and
 	// the service layer, and pins the default project when no control-plane
-	// resolver is wired. metrics sits just outside the Connect mux so it
-	// observes every RPC's final status, including any failure synthesized
-	// by the otelconnect interceptor.
+	// resolver is wired. product resolution sits just INSIDE CORS, so it is
+	// skipped for a short-circuited preflight but stamps every real request —
+	// including the ones the rate limiter or auth will reject — with the
+	// X-Product slug the session-issuing paths gate on. metrics sits just
+	// outside the Connect mux so it observes every RPC's final status,
+	// including any failure synthesized by the otelconnect interceptor.
 	var chain http.Handler = mux
 	chain = middleware.MetricsMiddleware(rpcMetrics)(chain)
 	// Project-scope guard runs just after auth (which surfaces the verified
@@ -641,6 +644,7 @@ func New(deps Deps) (*Built, error) {
 	chain = middleware.JWKSMiddleware(deps.Signer)(chain)
 	chain = middleware.RateLimitMiddleware(rateLimits, logger)(chain)
 	chain = middleware.ClientIPMiddleware(trustedProxies)(chain)
+	chain = middleware.NewProductResolver(deps.Config.DefaultProduct)(chain)
 	chain = middleware.CORSMiddleware(allowedOrigins)(chain)
 	// Build the env-configured default project's access policy once, failing the
 	// boot loudly if the operator supplied an invalid mode/allowlist. The

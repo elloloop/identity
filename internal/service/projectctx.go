@@ -67,6 +67,15 @@ type ProjectScope struct {
 	// block (no mode) FAILS CLOSED and denies all authentication. A project is
 	// unrestricted only when it explicitly sets mode:open.
 	Access ProjectAccessConfig
+
+	// Products is the project's per-product guardrail policy, parsed from
+	// config_json and keyed by the product slug a request carries in its
+	// X-Product header. It FAILS OPEN (the inverse of Access): an absent
+	// products block, an absent slug, or an absent minimum_age_band all mean
+	// "no restriction", so a project that configures none behaves exactly as
+	// before. The env default project has no config_json and therefore no
+	// product policy — gating a product requires a control-plane project.
+	Products ProjectProductsConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -103,6 +112,7 @@ type ResolvedProject struct {
 	LoginDefaults      ProjectLoginConfig
 	OAuth              ProjectOAuthConfig
 	Access             ProjectAccessConfig
+	Products           ProjectProductsConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

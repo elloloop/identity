@@ -1,6 +1,7 @@
 package connect
 
 import (
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -86,5 +87,23 @@ func TestToConnectErrorMinorDataMinimized(t *testing.T) {
 	}
 	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition", got)
+	}
+}
+
+// TestToConnectErrorProductAgeRestricted pins the wire contract clients build
+// against: an account refused by a product's age guardrail comes back as
+// permission_denied with the stable `product_age_restricted` token in the
+// message. Clients match on that token to show kind, child-appropriate copy, so
+// neither the code nor the token may be reworded.
+func TestToConnectErrorProductAgeRestricted(t *testing.T) {
+	err := toConnectError(service.ErrProductAgeRestricted)
+	if err == nil {
+		t.Fatal("toConnectError(ErrProductAgeRestricted) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodePermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", got)
+	}
+	if !strings.Contains(err.Error(), "product_age_restricted") {
+		t.Fatalf("message = %q, want it to contain product_age_restricted", err.Error())
 	}
 }
