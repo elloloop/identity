@@ -36,7 +36,7 @@ type Claims struct {
 	// It is emitted only when true (omitempty) and only when age-gating is
 	// on, so downstream apps can suppress profiling/behavioral features for
 	// minors. Existing verifiers that don't know the claim ignore it.
-	IsMinor   bool     `json:"is_minor,omitempty"`
+	IsMinor bool `json:"is_minor,omitempty"`
 	// Anonymous marks the subject as an anonymous account — a real user with
 	// a stable sub but no credential of any kind. Emitted only when true
 	// (omitempty), so tokens for identified users are byte-identical to
@@ -44,7 +44,7 @@ type Claims struct {
 	// assumes a verified human: an anonymous sub is cheap to mint, and
 	// `email` is empty rather than absent-because-unverified. Firebase
 	// carries the same signal as sign_in_provider="anonymous".
-	Anonymous bool `json:"anonymous,omitempty"`
+	Anonymous bool     `json:"anonymous,omitempty"`
 	SID       string   `json:"sid,omitempty"`
 	Audience  []string `json:"aud,omitempty"`
 	IssuedAt  int64    `json:"iat"`

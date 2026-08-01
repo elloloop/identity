@@ -153,16 +153,16 @@ func newSweeper(repo service.Repository, purger accountPurger, intervalSec, batc
 	}
 	initSweeperMetrics()
 	return &sweeper{
-		repo:                repo,
-		purger:              purger,
-		logger:              logger,
-		interval:            time.Duration(intervalSec) * time.Second,
-		batch:               batch,
-		grace:               time.Duration(graceSec) * time.Second,
-		auditRetentionDays:  auditRetentionDays,
+		repo:                   repo,
+		purger:                 purger,
+		logger:                 logger,
+		interval:               time.Duration(intervalSec) * time.Second,
+		batch:                  batch,
+		grace:                  time.Duration(graceSec) * time.Second,
+		auditRetentionDays:     auditRetentionDays,
 		deviceRetentionDays:    deviceRetentionDays,
 		anonymousRetentionDays: anonymousRetentionDays,
-		skipLogged:          make(map[string]bool, 5),
+		skipLogged:             make(map[string]bool, 5),
 	}
 }
 
