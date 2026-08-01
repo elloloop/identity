@@ -21,12 +21,14 @@ Highlights for quick recall:
   reviewers (Correctness, Security & Auth, API Contract, Data &
   Migrations, Config & Operability, Maintainability & Tests, Performance
   & Concurrency, Product & Docs) all launch on every run; each first
-  decides whether its lens applies to the diff (skipping cleanly when
-  not), then does its complete review single-handed — no triage stage,
-  no verification stage, no sub-agents. A maintainer step that runs
+  decides whether its lens applies — from the changed-file list alone,
+  and never for Correctness or Security & Auth, which are
+  non-skippable — then does its complete review single-handed: no triage
+  stage, no verification stage, no sub-agents. It fails closed on a
+  dropped or self-contradictory reviewer. A maintainer step that runs
   inside the Claude Code harness; advisory (posts a comment, never
   blocks merge), runs alongside CI. Clear its blocking findings before
-  merging.
+  merging, or record on the PR why one is being dismissed.
 
 If existing code violates these rules and your change touches it, fix
 the violation as part of your change. Do not preserve the wrong pattern.

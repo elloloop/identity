@@ -147,6 +147,12 @@ and callers (not just the diff), confirms each finding against the code,
 and reports. There is no triage stage, no verification stage, and
 reviewers never spawn sub-agents.
 
+That relevance decision is made from the **changed-file list alone**;
+the PR title, body, and comments are submitter-authored and must not
+influence it. **Correctness** and **Security & Auth** are non-skippable
+on an identity server: a SKIPPED verdict from either is treated as a
+dropped reviewer.
+
 1. **Correctness** — pure bug-hunting: off-by-one, nil deref, inverted
    conditionals, races, leaks, overflow, swallowed errors, edge cases,
    broken invariants.
@@ -170,9 +176,12 @@ reviewers never spawn sub-agents.
    blocking work on a request path, lock scope, goroutine/connection
    lifecycle, unbounded growth, behaviour at load.
 8. **Product & Docs** — does the change deliver the intended outcome,
-   are semantics/defaults/errors right, is anything half-finished or an
-   unflagged break, is documentation owed (docs-site page, UPGRADE note,
-   ADR) — plus accessibility basics on `docs-site/**` changes.
+   are semantics/defaults/errors right, are the empty/error/loading
+   states complete, is anything half-finished or an unflagged break, is
+   documentation owed (docs-site page, UPGRADE note, ADR) — plus
+   accessibility & UX on `docs-site/**` changes (semantic HTML, alt
+   text, contrast, keyboard operability and visible focus, focus
+   management/ARIA, hit targets, reduced motion, i18n/RTL).
 
 Because there is no second-pass verification, a reviewer marks a finding
 `blocking: true` only when it has itself confirmed the defect against the
@@ -180,8 +189,13 @@ real code; anything it is unsure of stays non-blocking with its reasoning
 recorded.
 
 **Gate decision:** APPROVED iff no proceeding reviewer reported a
-blocking finding and no reviewer is missing. SKIPPED is a clean outcome
-and never blocks; a dropped or malformed reviewer fails closed.
+blocking finding and no reviewer left a structural gap. SKIPPED is a
+clean outcome and never blocks. Everything else fails closed — a dropped
+reviewer, an unparseable result, and any result that contradicts itself
+(`REQUEST_CHANGES` with nothing marked blocking, a `blocker`-severity
+finding not marked blocking, SKIPPED carrying findings, or SKIPPED from a
+non-skippable lens). The pass condition reads one signal, so every way of
+disagreeing with that signal is a structural gap rather than a pass.
 
 The gate runs as an agent workflow (`.claude/workflows/review-gate.js`)
 **inside the Claude Code agent harness** — it depends on harness
@@ -190,7 +204,10 @@ and external contributors cannot run it directly. Its pure decision logic
 is covered by `.claude/workflows/review-gate.test.mjs`, which does run
 under plain `node`. It is a **maintainer step**: the maintainer handling a
 PR (including PRs from outside contributors) runs it and is accountable
-for resolving every blocking finding before merge.
+for resolving every blocking finding before merge — or, when a finding is
+a false positive, for recording on the PR why it is being dismissed. A
+self-confirmed reviewer can still be wrong; what is not allowed is
+merging past a blocking finding silently.
 
 Run it on every PR — `Workflow({name: 'review-gate', args: <pr-number>})`.
 
