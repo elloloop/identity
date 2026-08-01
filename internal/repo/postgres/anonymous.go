@@ -6,21 +6,28 @@ import (
 )
 
 // DeleteStaleAnonymousUsers reaps anonymous users whose last activity
-// predates beforeMs. It mirrors DeleteStaleAttestedDevices — a batched,
-// oldest-first delete keyed on an activity column rather than an expiry —
-// and is backed by users_project_anonymous_last_login_idx.
+// predates beforeMs, backed by users_project_anonymous_last_login_idx.
 //
-// The is_anonymous predicate is the load-bearing part: an upgraded account
-// clears the flag, so a user who attached a credential can never be reaped
-// by this sweep no matter how long the original anonymous session sat idle.
+// The users DELETE is the DRIVING statement, and its own WHERE carries the
+// is_anonymous predicate — not a SELECT that feeds ids to a later delete.
+// That ordering is the whole safety property. With a separate select the
+// predicate applies only to the read, so an UpgradeAnonymousUser committing
+// in the gap leaves the DELETE matching on (project_id, id) alone and
+// destroying a now-permanent, credential-bearing account with every
+// cascaded child row. The gap is not theoretical: the non-FK child deletes
+// used to run inside it. Postgres' EvalPlanQual re-check does not save it
+// either, because the DELETE's own qualifiers still hold against the
+// updated tuple.
 //
-// The four userDeleteNonFKTables are cleared explicitly, exactly as
-// DeleteUser does. Their user_id has no FK to users(id) — it defaults to ”
-// so they can hold rows with no owning user — so a bare DELETE FROM users
-// leaves them behind. That is reachable: BeginPasskeyRegistration writes a
-// passkey_challenges row. Every other user-keyed table follows via ON DELETE
-// CASCADE. The whole batch runs in one transaction so a mid-sweep failure
-// cannot strip a user's rows while leaving the user, or vice versa.
+// RETURNING then drives the four userDeleteNonFKTables cleanups off the ids
+// actually deleted, so a survivor's pending rows are never stripped. Those
+// tables' user_id has no FK to users(id) — it defaults to ” so pre-account
+// flows can write them — which is why ON DELETE CASCADE does not reach
+// them and DeleteUser clears them explicitly too. Reachable here:
+// BeginPasskeyRegistration writes a passkey_challenges row.
+//
+// One transaction, so a mid-sweep failure cannot strip a user's rows while
+// leaving the user.
 func (r *pgRepository) DeleteStaleAnonymousUsers(ctx context.Context, beforeMs int64, limit int) error {
 	if limit <= 0 {
 		return fmt.Errorf("postgres: DeleteStaleAnonymousUsers: limit must be > 0, got %d", limit)
@@ -32,14 +39,21 @@ func (r *pgRepository) DeleteStaleAnonymousUsers(ctx context.Context, beforeMs i
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	const selectVictims = `
-		SELECT id FROM users
-		 WHERE project_id = $1 AND is_anonymous AND last_login_at_ms < $2
-		 ORDER BY last_login_at_ms ASC
-		 LIMIT $3`
-	rows, err := tx.Query(ctx, selectVictims, r.projectID, beforeMs, limit)
+	const deleteVictims = `
+		DELETE FROM users
+		 WHERE project_id = $1
+		   AND is_anonymous
+		   AND last_login_at_ms < $2
+		   AND id IN (
+		       SELECT id FROM users
+		        WHERE project_id = $1 AND is_anonymous AND last_login_at_ms < $2
+		        ORDER BY last_login_at_ms ASC
+		        LIMIT $3
+		   )
+		RETURNING id`
+	rows, err := tx.Query(ctx, deleteVictims, r.projectID, beforeMs, limit)
 	if err != nil {
-		return wrapPgErr("DeleteStaleAnonymousUsers(select)", err)
+		return wrapPgErr("DeleteStaleAnonymousUsers(delete)", err)
 	}
 	var ids []string
 	for rows.Next() {
@@ -64,11 +78,6 @@ func (r *pgRepository) DeleteStaleAnonymousUsers(ctx context.Context, beforeMs i
 			r.projectID, ids); err != nil {
 			return wrapPgErr("DeleteStaleAnonymousUsers("+tbl+")", err)
 		}
-	}
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM users WHERE project_id = $1 AND id = ANY($2)`,
-		r.projectID, ids); err != nil {
-		return wrapPgErr("DeleteStaleAnonymousUsers(users)", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return wrapPgErr("DeleteStaleAnonymousUsers(commit)", err)

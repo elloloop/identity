@@ -51,6 +51,15 @@ func (h *IdentityHandler) UpgradeAnonymousAccount(
 	if userID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
+	// The upgrade PROVISIONS an identified account — that is why it carries
+	// signup semantics against the access mode — so it answers to the same
+	// assurance toggle as PasswordSignup. Without this, a deployment that
+	// gates signup on App Attest / Play Integrity / Turnstile still had an
+	// assurance-free route to a normal email+password account:
+	// SignInAnonymously (no header) → upgrade (no header).
+	if err := h.requireAssurance(ctx, h.anonymousUpgradeRequiresAssurance(), req.Header()); err != nil {
+		return nil, toConnectError(err)
+	}
 
 	var (
 		res *service.LoginResult
@@ -96,6 +105,14 @@ func (h *IdentityHandler) UpgradeAnonymousAccount(
 		RefreshToken: res.RefreshToken,
 		ExpiresIn:    res.ExpiresIn,
 	}), nil
+}
+
+// anonymousUpgradeRequiresAssurance gates the upgrade on either toggle: the
+// anonymous switch (it is an anonymous-flow endpoint) or the password-signup
+// switch (it creates a password account). Either being on is enough, because
+// either operator intent is violated by an ungated upgrade.
+func (h *IdentityHandler) anonymousUpgradeRequiresAssurance() bool {
+	return h.cfg != nil && (h.cfg.AnonymousRequireAssurance || h.cfg.AssuranceEnforcePasswordSignup)
 }
 
 // anonymousRequireAssurance nil-checks cfg so requireAssurance's

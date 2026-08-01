@@ -141,28 +141,69 @@ func TestUpgradeAnonymousWithPassword_GatedByAccessMode(t *testing.T) {
 // but the upgrade RPC: the retention sweep keys on is_anonymous, so a
 // credential attached elsewhere leaves an account that can log in AND gets
 // hard-deleted after the retention window.
+// TestAnonymousAccount_CannotAttachCredentialsOutsideUpgrade covers EVERY
+// door onto the invariant, not just the one that was easiest to drive.
+//
+// is_anonymous means "holds no credential", and the retention sweep keys on
+// it — so a credential attached anywhere that leaves the flag set produces
+// an account that can log in AND gets hard-deleted with its sessions after
+// the window. Each guard is the only thing holding that, and the failure is
+// silent, so each is asserted here to refuse AND to leave the account
+// untouched. Asserting the error alone would pass even if the write landed.
 func TestAnonymousAccount_CannotAttachCredentialsOutsideUpgrade(t *testing.T) {
-	repo := newFakeRepo()
-	svc := newTestAuthService(t, repo)
-	ctx := anonCtx(true, AccessModeOpen)
-
-	res, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
-	if err != nil {
-		t.Fatalf("SignInAnonymously: %v", err)
+	doors := []struct {
+		name string
+		call func(svc *AuthService, ctx context.Context, userID string) error
+	}{
+		{"LinkIdentity", func(svc *AuthService, ctx context.Context, id string) error {
+			_, err := svc.LinkIdentity(ctx, id,
+				fakeOAuthCode(testOAuthEmail, "Fed", "", testOAuthProvider),
+				testOAuthProvider, testOAuthRedirect, "", "", "")
+			return err
+		}},
+		{"BeginPasskeyRegistration", func(svc *AuthService, ctx context.Context, id string) error {
+			_, _, err := svc.BeginPasskeyRegistration(ctx, id, "device")
+			return err
+		}},
+		{"CompletePasskeyRegistration", func(svc *AuthService, ctx context.Context, id string) error {
+			_, err := svc.CompletePasskeyRegistration(ctx, id, "challenge", `{"id":"x"}`, "device")
+			return err
+		}},
+		{"RequestPhoneVerification", func(svc *AuthService, ctx context.Context, id string) error {
+			return svc.RequestPhoneVerification(ctx, id, "+14155550123")
+		}},
+		{"VerifyPhoneCode", func(svc *AuthService, ctx context.Context, id string) error {
+			_, err := svc.VerifyPhoneCode(ctx, id, "+14155550123", "123456")
+			return err
+		}},
 	}
 
-	_, err = svc.LinkIdentity(ctx, res.User.ID, fakeOAuthCode(testOAuthEmail, "Fed", "", testOAuthProvider), testOAuthProvider, testOAuthRedirect, "", "", "")
-	if !errors.Is(err, ErrAnonymousMustUpgrade) {
-		t.Fatalf("LinkIdentity on an anonymous account = %v, want ErrAnonymousMustUpgrade", err)
-	}
+	for _, d := range doors {
+		t.Run(d.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			svc := newTestAuthService(t, repo)
+			svc.cfg.SMSEnabled = true // so the phone doors reach the guard
+			ctx := anonCtx(true, AccessModeOpen)
 
-	after, _ := repo.GetUser(ctx, res.User.ID)
-	if after == nil || !after.IsAnonymous {
-		t.Fatal("the account changed state despite the refusal")
-	}
-	ids, _ := repo.ListOAuthIdentitiesForUser(context.Background(), res.User.ID)
-	if len(ids) != 0 {
-		t.Fatalf("a refused link persisted %d identities", len(ids))
+			res, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+			if err != nil {
+				t.Fatalf("SignInAnonymously: %v", err)
+			}
+			id := res.User.ID
+
+			if err := d.call(svc, ctx, id); !errors.Is(err, ErrAnonymousMustUpgrade) {
+				t.Fatalf("%s on an anonymous account = %v, want ErrAnonymousMustUpgrade", d.name, err)
+			}
+
+			after, _ := repo.GetUser(ctx, id)
+			if after == nil || !after.IsAnonymous {
+				t.Fatalf("%s changed the account despite refusing: %#v", d.name, after)
+			}
+			ids, _ := repo.ListOAuthIdentitiesForUser(ctx, id)
+			if len(ids) != 0 {
+				t.Errorf("%s persisted %d provider identities", d.name, len(ids))
+			}
+		})
 	}
 }
 

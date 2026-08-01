@@ -7,17 +7,15 @@ import (
 )
 
 // DeleteStaleAnonymousUsers reaps anonymous users whose last activity
-// predates beforeMs, mirroring the postgres driver: a batched, oldest-first
-// delete keyed on last_login_at_ms and gated on is_anonymous, so an upgraded
-// account (which clears the flag) is never reachable by this sweep.
+// predates beforeMs, mirroring the postgres driver.
 //
-// The four userDeleteNonFKTables are cleared explicitly, exactly as
-// DeleteUser does — their user_id has no FK to users(id), so a bare
-// DELETE FROM users leaves them behind. That is reachable:
-// BeginPasskeyRegistration writes a passkey_challenges row. Every other
-// user-keyed table follows via ON DELETE CASCADE. One transaction for the
-// whole batch, so a mid-sweep failure cannot strip a user's rows while
-// leaving the user.
+// The users DELETE is the DRIVING statement and carries is_anonymous in its
+// own WHERE: selecting ids first and deleting by id later applies the
+// predicate to the read only, so an upgrade committing in the gap would be
+// hard-deleted along with its cascaded rows. RETURNING then drives the
+// userDeleteNonFKTables cleanups off the ids actually deleted, so a
+// survivor's pending rows are never stripped — those tables have no FK to
+// users(id), which is why DeleteUser clears them explicitly too.
 func (r *sqliteRepository) DeleteStaleAnonymousUsers(ctx context.Context, beforeMs int64, limit int) error {
 	if limit <= 0 {
 		return fmt.Errorf("sqlite: DeleteStaleAnonymousUsers: limit must be > 0, got %d", limit)
@@ -29,14 +27,21 @@ func (r *sqliteRepository) DeleteStaleAnonymousUsers(ctx context.Context, before
 	}
 	defer func() { _ = t.Rollback(ctx) }()
 
-	const selectVictims = `
-		SELECT id FROM users
-		 WHERE project_id = $1 AND is_anonymous AND last_login_at_ms < $2
-		 ORDER BY last_login_at_ms ASC
-		 LIMIT $3`
-	rows, err := t.Query(ctx, selectVictims, r.projectID, beforeMs, limit)
+	const deleteVictims = `
+		DELETE FROM users
+		 WHERE project_id = $1
+		   AND is_anonymous
+		   AND last_login_at_ms < $2
+		   AND id IN (
+		       SELECT id FROM users
+		        WHERE project_id = $1 AND is_anonymous AND last_login_at_ms < $2
+		        ORDER BY last_login_at_ms ASC
+		        LIMIT $3
+		   )
+		RETURNING id`
+	rows, err := t.Query(ctx, deleteVictims, r.projectID, beforeMs, limit)
 	if err != nil {
-		return wrapErr("DeleteStaleAnonymousUsers(select)", err)
+		return wrapErr("DeleteStaleAnonymousUsers(delete)", err)
 	}
 	var ids []string
 	for rows.Next() {

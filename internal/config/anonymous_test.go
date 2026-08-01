@@ -206,3 +206,29 @@ func TestLoad_ExplicitAnonymousRetentionStillFailsLoudly(t *testing.T) {
 		t.Errorf("error does not name the variable: %v", err)
 	}
 }
+
+// A set-but-EMPTY retention variable must behave exactly like an unset one.
+// envInt treats empty as unset, so if the "did the operator choose this?"
+// probe disagrees, the raise is skipped and the un-chosen default is then
+// held to the refresh-lifetime invariant — bricking a boot for a deployment
+// that never enabled anonymous sign-in. `docker compose` interpolating an
+// undefined ${VAR}, a k8s `value: ""`, and a blank env_file line all produce
+// this input.
+func TestLoad_EmptyAnonymousRetentionIsTreatedAsUnset(t *testing.T) {
+	for _, raw := range []string{"", "   "} {
+		t.Run(fmt.Sprintf("value=%q", raw), func(t *testing.T) {
+			t.Setenv("GATEWAY_JWT_SECRET", strings.Repeat("x", 32))
+			t.Setenv("GATEWAY_REFRESH_EXPIRY_SECONDS", strconv.Itoa(90*86400))
+			t.Setenv("GATEWAY_ANONYMOUS_RETENTION_DAYS", raw)
+
+			c := Load()
+			if err := c.Validate(); err != nil {
+				t.Fatalf("a set-but-empty window failed the boot: %v", err)
+			}
+			if c.AnonymousRetentionDays <= 90 {
+				t.Errorf("effective retention %dd does not outlive a 90d refresh lifetime — the raise was skipped",
+					c.AnonymousRetentionDays)
+			}
+		})
+	}
+}

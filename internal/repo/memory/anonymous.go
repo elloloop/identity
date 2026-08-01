@@ -13,8 +13,8 @@ import (
 // what makes the is_anonymous predicate meaningful here: releasing it in
 // between would race touchAnonymousActivity's write and let an account
 // upgraded in the gap be reaped anyway, destroying a permanent account with
-// a working credential. The SQL drivers get this from executing a single
-// statement; the memory driver has to hold the lock.
+// a working credential. The SQL drivers get the same property by putting the
+// predicate in the DELETE itself rather than in a preceding SELECT.
 func (r *Repo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, limit int) error {
 	if limit <= 0 {
 		return fmt.Errorf("memory: DeleteStaleAnonymousUsers: limit must be > 0, got %d", limit)

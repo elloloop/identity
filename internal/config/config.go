@@ -1103,7 +1103,14 @@ func Load() *Config {
 	// Literal, not a constant: cmd/docsgen extracts the GATEWAY_* surface by
 	// scanning for string literals, so hoisting this to a named constant
 	// silently drops the variable from the published config reference.
-	if _, explicit := os.LookupEnv("GATEWAY_ANONYMOUS_RETENTION_DAYS"); !explicit {
+	// "Explicit" must mean exactly what envInt means by "set", or the two
+	// disagree on set-but-empty: LookupEnv reports it chosen while envInt
+	// falls back to the default, so the raise is skipped AND the default is
+	// then held to the refresh-lifetime invariant — bricking a boot for a
+	// deployment that never enabled the feature. `docker compose`
+	// interpolating an undefined ${VAR}, a k8s `value: ""`, and a blank
+	// env_file line all produce exactly that input.
+	if v, ok := os.LookupEnv("GATEWAY_ANONYMOUS_RETENTION_DAYS"); !ok || strings.TrimSpace(v) == "" {
 		if refreshDays := c.RefreshExpirySeconds / secondsPerDay; c.AnonymousRetentionDays > 0 &&
 			c.AnonymousRetentionDays <= refreshDays {
 			c.AnonymousRetentionRaisedFrom = c.AnonymousRetentionDays

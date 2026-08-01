@@ -164,6 +164,43 @@ func runAnonymousConformance(t *testing.T, driver Driver) {
 		}
 	})
 
+	t.Run(driver.Name+"/RetentionSweepNeverReapsAnUpgradedAccount", func(t *testing.T) {
+		ctx := context.Background()
+		r := driver.NewRepo(t)
+
+		// Stale by activity, but upgraded before the sweep runs. The
+		// is_anonymous predicate must be evaluated by the DELETE itself, not
+		// by an earlier SELECT whose result the DELETE then trusts — with
+		// the predicate on the read only, an upgrade committing in the gap
+		// is hard-deleted along with every cascaded row.
+		upgraded := newAnon(t, ctx, r, 1000)
+		if err := r.UpdateUser(ctx, upgraded, map[string]any{
+			"email":        "promoted@example.com",
+			"is_anonymous": false,
+		}); err != nil {
+			t.Fatalf("upgrade: %v", err)
+		}
+		stillAnon := newAnon(t, ctx, r, 1000)
+
+		if err := r.DeleteStaleAnonymousUsers(ctx, 5000, 100); err != nil {
+			if errors.Is(err, service.ErrSweepNotImplemented) {
+				t.Skip("sweep not implemented for this backend")
+			}
+			t.Fatalf("sweep: %v", err)
+		}
+
+		got, err := r.GetUser(ctx, upgraded)
+		if err != nil && !errors.Is(err, service.ErrNotFound) {
+			t.Fatalf("GetUser(upgraded): %v", err)
+		}
+		if got == nil {
+			t.Fatal("the sweep destroyed an upgraded, credential-bearing account")
+		}
+		if gone, _ := r.GetUser(ctx, stillAnon); gone != nil {
+			t.Error("the still-anonymous account survived the sweep")
+		}
+	})
+
 	t.Run(driver.Name+"/RetentionSweepDrainsNonFKRows", func(t *testing.T) {
 		ctx := context.Background()
 		r := driver.NewRepo(t)
