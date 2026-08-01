@@ -162,6 +162,23 @@ func TestCORS_Preflight_AllowsProductHeader(t *testing.T) {
 	assert.Contains(t, rec.Header().Get("Access-Control-Allow-Headers"), "x-product")
 }
 
+func TestCORS_Preflight_AllowsAssuranceTokenHeader(t *testing.T) {
+	// Regression: the client-assurance token moved from a request BODY field
+	// (captcha_token, which had no preflight implications) to the
+	// X-Assurance-Token header. Without it in the allow-list, a cross-origin
+	// SPA can complete the exchange and then never attach the token — every
+	// gated auth endpoint fails CORS with no server-side signal.
+	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+	req := httptest.NewRequest(http.MethodOptions, "/identity.v1.IdentityService/PasswordLogin", nil)
+	req.Header.Set("Origin", "http://localhost:9002")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "content-type, x-assurance-token")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Contains(t, rec.Header().Get("Access-Control-Allow-Headers"), "x-assurance-token")
+}
+
 func TestCORS_Preflight_DisallowedOrigin_StillReturns204(t *testing.T) {
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
 	req := httptest.NewRequest(http.MethodOptions, "/some-path", nil)

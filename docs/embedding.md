@@ -70,7 +70,7 @@ exactly as the container does. Set one to inject your own:
 | `SMSSender`                        | built from `GATEWAY_SMS_*` (log-only when SMS disabled)  |
 | `OAuthRegistry`                    | built from the OAuth client credentials in `Config`     |
 | `IDVProvider`                      | built from `Config.IDVProvider` (may be disabled)       |
-| `CaptchaVerifier`                  | built from `Config.CaptchaProvider` (no-op when disabled)|
+| `AssuranceWebVerifier`             | built from `Config.AssuranceWebProvider`; nil (and no configured provider) means NO web verifier, so browser clients cannot obtain an assurance token |
 | `DNSResolver`                      | `net.DefaultResolver` (used by `VerifyDomain` on the postgres control plane) |
 | `Logger`                           | no-op logger                                             |
 | `MetricsRegistry`                  | `prometheus.DefaultRegisterer`                           |

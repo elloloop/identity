@@ -1,4 +1,4 @@
-package captcha
+package assurance
 
 import (
 	"context"
@@ -47,7 +47,7 @@ type TurnstileVerifier struct {
 // the HTTP client and verify URL fall back to sensible defaults.
 func NewTurnstileVerifier(cfg TurnstileConfig) (*TurnstileVerifier, error) {
 	if cfg.Secret == "" {
-		return nil, errors.New("captcha/turnstile: secret required")
+		return nil, errors.New("assurance/turnstile: secret required")
 	}
 	client := cfg.HTTPClient
 	if client == nil {
@@ -101,7 +101,7 @@ func (v *TurnstileVerifier) Verify(ctx context.Context, token, remoteip string) 
 func postSiteVerify(ctx context.Context, client *http.Client, verifyURL string, form url.Values, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, verifyURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return fmt.Errorf("captcha: build request: %w", err)
+		return fmt.Errorf("assurance: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 

@@ -110,6 +110,23 @@ func (b *grpcBridge) RedeemMagicLink(ctx context.Context, in *identitypb.RedeemM
 	return invoke(ctx, in, b.h.RedeemMagicLink)
 }
 
+// Client assurance. These MUST be bridged: enforcement reads the
+// X-Assurance-Token header, and invoke copies incoming gRPC metadata into
+// the Connect headers — so a native-gRPC host with an enforce toggle on
+// would otherwise have the gated RPCs deny forever with no way to obtain
+// a token from the same surface.
+func (b *grpcBridge) CreateAssuranceChallenge(ctx context.Context, in *identitypb.CreateAssuranceChallengeRequest) (*identitypb.CreateAssuranceChallengeResponse, error) {
+	return invoke(ctx, in, b.h.CreateAssuranceChallenge)
+}
+
+func (b *grpcBridge) IssueAssuranceToken(ctx context.Context, in *identitypb.IssueAssuranceTokenRequest) (*identitypb.IssueAssuranceTokenResponse, error) {
+	return invoke(ctx, in, b.h.IssueAssuranceToken)
+}
+
+func (b *grpcBridge) RefreshAssuranceToken(ctx context.Context, in *identitypb.RefreshAssuranceTokenRequest) (*identitypb.RefreshAssuranceTokenResponse, error) {
+	return invoke(ctx, in, b.h.RefreshAssuranceToken)
+}
+
 // ─── Session / Token ────────────────────────────────────────────────
 
 func (b *grpcBridge) GetCurrentUser(ctx context.Context, in *identitypb.GetCurrentUserRequest) (*identitypb.GetCurrentUserResponse, error) {

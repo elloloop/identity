@@ -198,7 +198,7 @@ var _ service.ControlPlaneProjectStore = (*adminControlStore)(nil)
 // the no-control-plane build.
 func startAdminServer(t *testing.T, svc *service.ControlPlaneAdminService) identityconnectgen.IdentityServiceClient {
 	t.Helper()
-	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, svc, nil, testConfig())
+	h := NewIdentityHandler(nil, nil, nil, nil, nil, nil, nil, nil, svc, testConfig())
 	mux := http.NewServeMux()
 	path, handler := identityconnectgen.NewIdentityServiceHandler(h)
 	mux.Handle(path, handler)
@@ -810,4 +810,107 @@ func TestAdminOAuthRPCs_BadSecret_Denied(t *testing.T) {
 	requireCode(t, err, connect.CodePermissionDenied)
 	_, err = client.AdminListProjectOAuthProviders(ctx, withAdminSecret(&identitypb.AdminListProjectOAuthProvidersRequest{ProjectId: "p"}, ""))
 	requireCode(t, err, connect.CodePermissionDenied)
+}
+
+// ── Per-project assurance admin RPCs through the handler ─────────────────
+
+// TestAdminRPCs_Assurance_Handler drives the assurance authoring surface
+// over the wire: the Play service-account key goes in as PLAINTEXT and must
+// never come back out or reach stored config in the clear, and a write that
+// mentions only one platform must leave the other's stored key intact.
+func TestAdminRPCs_Assurance_Handler(t *testing.T) {
+	t.Parallel()
+	svc, store, _ := newAdminControlSvc(handlerAdminSecret)
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+	const saKey = `{"client_email":"svc@x.iam.gserviceaccount.com","private_key":"pk-plaintext"}`
+
+	set, err := client.AdminSetProjectAssurance(ctx, withAdminSecret(&identitypb.AdminSetProjectAssuranceRequest{
+		ProjectId: "p",
+		Config: &identitypb.ProjectAssuranceConfig{
+			IosTeamId:                "TEAM123456",
+			IosBundleId:              "com.example.app",
+			AndroidPackageName:       "com.example.app",
+			AndroidCertSha256Digests: []string{"ZGlnZXN0"},
+			AndroidServiceAccountKey: saKey,
+		},
+	}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminSetProjectAssurance: %v", err)
+	}
+	if got := set.Msg.GetConfig(); !got.GetHasServiceAccountKey() || got.GetAndroidServiceAccountKey() != "" {
+		t.Fatalf("response not redacted: %+v", got)
+	}
+	if strings.Contains(store.configs["p"], "pk-plaintext") {
+		t.Fatalf("plaintext service-account key leaked into stored config: %s", store.configs["p"])
+	}
+
+	// Read back: the key is reported only as present.
+	got, err := client.AdminGetProjectAssurance(ctx, withAdminSecret(&identitypb.AdminGetProjectAssuranceRequest{
+		ProjectId: "p",
+	}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("AdminGetProjectAssurance: %v", err)
+	}
+	if c := got.Msg.GetConfig(); !c.GetHasServiceAccountKey() || c.GetAndroidServiceAccountKey() != "" ||
+		c.GetIosBundleId() != "com.example.app" {
+		t.Fatalf("read view wrong: %+v", c)
+	}
+
+	// An iOS-only write must not destroy the stored Android key.
+	rot, err := client.AdminSetProjectAssurance(ctx, withAdminSecret(&identitypb.AdminSetProjectAssuranceRequest{
+		ProjectId: "p",
+		Config:    &identitypb.ProjectAssuranceConfig{IosTeamId: "TEAM123456", IosBundleId: "com.example.renamed"},
+	}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("iOS-only rotate: %v", err)
+	}
+	if c := rot.Msg.GetConfig(); !c.GetHasServiceAccountKey() || c.GetAndroidPackageName() == "" {
+		t.Fatalf("iOS-only write destroyed the Android block: %+v", c)
+	}
+
+	// Explicit clear removes only the named platform.
+	cleared, err := client.AdminSetProjectAssurance(ctx, withAdminSecret(&identitypb.AdminSetProjectAssuranceRequest{
+		ProjectId: "p",
+		Config:    &identitypb.ProjectAssuranceConfig{ClearAndroid: true},
+	}, handlerAdminSecret))
+	if err != nil {
+		t.Fatalf("clear android: %v", err)
+	}
+	if c := cleared.Msg.GetConfig(); c.GetHasServiceAccountKey() || c.GetIosTeamId() == "" {
+		t.Fatalf("clear removed the wrong platform: %+v", c)
+	}
+
+	// A nil config is a no-op write, not a wipe.
+	if _, err := client.AdminSetProjectAssurance(ctx, withAdminSecret(&identitypb.AdminSetProjectAssuranceRequest{
+		ProjectId: "p",
+	}, handlerAdminSecret)); err != nil {
+		t.Fatalf("nil config: %v", err)
+	}
+}
+
+func TestAdminRPCs_Assurance_BadSecret_Denied(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newAdminControlSvc(handlerAdminSecret)
+	client := startAdminServer(t, svc)
+	ctx := context.Background()
+
+	_, err := client.AdminSetProjectAssurance(ctx, withAdminSecret(&identitypb.AdminSetProjectAssuranceRequest{ProjectId: "p"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = client.AdminGetProjectAssurance(ctx, withAdminSecret(&identitypb.AdminGetProjectAssuranceRequest{ProjectId: "p"}, "nope"))
+	requireCode(t, err, connect.CodePermissionDenied)
+}
+
+// TestAdminRPCs_Assurance_NoControlPlane_Unimplemented pins that the
+// surface reports Unimplemented on a driver with no control plane, like
+// every other control-plane admin RPC.
+func TestAdminRPCs_Assurance_NoControlPlane_Unimplemented(t *testing.T) {
+	t.Parallel()
+	client := startAdminServer(t, nil)
+	ctx := context.Background()
+
+	_, err := client.AdminSetProjectAssurance(ctx, withAdminSecret(&identitypb.AdminSetProjectAssuranceRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
+	_, err = client.AdminGetProjectAssurance(ctx, withAdminSecret(&identitypb.AdminGetProjectAssuranceRequest{ProjectId: "p"}, handlerAdminSecret))
+	requireCode(t, err, connect.CodeUnimplemented)
 }

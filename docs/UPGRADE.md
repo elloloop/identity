@@ -1,5 +1,87 @@
 # Upgrade guide
 
+## v3.x → v4.0 — CAPTCHA becomes the client-assurance layer (breaking)
+
+v4.0 replaces the inline-CAPTCHA design with the client-assurance layer
+(App Attest / Play Integrity / Turnstile / reCAPTCHA behind one short-lived
+assurance token — see
+[ADR-0012](./adr/0012-client-assurance-layer.md) and the
+[docs-site page](../docs-site/src/pages/docs/auth/assurance.astro)).
+The new surface defaults off, so a deployment that never enabled CAPTCHA
+gains no behaviour — **but read the environment section below before
+pulling the image.** Every removed `GATEWAY_CAPTCHA_*` variable must be
+DELETED from your environment, not merely set to `false`: the server
+refuses to boot while any of them is *present*, whatever its value.
+
+That check is deliberate. The rename would otherwise fail OPEN — a v3
+operator who set `GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN=true` and pulled
+v4 would boot clean with zero enforcement on six auth endpoints and no
+signal. Failing closed is the only safe direction, but it means a
+forgotten `GATEWAY_CAPTCHA_ENABLED=false` left in a compose file, a Helm
+values template, or an ECS task definition will crash-loop the v4 image.
+The error names every offending variable and its replacement.
+
+**Wire (clients):** the `captcha_token` request field is removed from
+`PasswordSignup`, `PasswordLogin`, `RequestPasswordReset`,
+`RequestEmailLoginCode`, `RequestMagicLink`, and `BeginPasskeySignup`
+(field numbers reserved). A web client now exchanges its captcha solution
+first — `IssueAssuranceToken {platform:"web", webToken:…}` — and attaches
+the returned token as the `X-Assurance-Token` header on the gated call.
+The storage migrations (postgres 0027, sqlite 0012) are ordinary additive
+migrations applied with `identity migrate`.
+
+**Environment:** rename / replace. **Unset the left-hand column** — the
+server refuses to boot while any of these is present, even set to `false`
+or the empty string:
+
+| v3.x — must be UNSET | v4.0 |
+| --- | --- |
+| `GATEWAY_CAPTCHA_ENABLED` | `GATEWAY_ASSURANCE_ENABLED` |
+| `GATEWAY_CAPTCHA_PROVIDER` | `GATEWAY_ASSURANCE_WEB_PROVIDER` |
+| `GATEWAY_CAPTCHA_TURNSTILE_SECRET` / `_SITE_KEY` | `GATEWAY_ASSURANCE_TURNSTILE_SECRET` / `_SITE_KEY` |
+| `GATEWAY_CAPTCHA_RECAPTCHA_SECRET` / `_SCORE_THRESHOLD` | `GATEWAY_ASSURANCE_RECAPTCHA_SECRET` / `_SCORE_THRESHOLD` |
+| `GATEWAY_CAPTCHA_ENFORCE_*` (6 toggles) | `GATEWAY_ASSURANCE_ENFORCE_*` (same six, same defaults) |
+
+New (all optional): `GATEWAY_ASSURANCE_IOS_TEAM_ID` / `_IOS_BUNDLE_ID` /
+`_IOS_ENV`, `GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME` /
+`_ANDROID_CERT_SHA256_DIGESTS` / `_ANDROID_SA_KEY_JSON`,
+`GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS`,
+`GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS`,
+`GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS` (default 90 — how long an
+attested device survives after its last refresh; 0 keeps them forever),
+`GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS` (default 300 — the web arm's
+own, shorter token lifetime), `GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP`;
+plus `GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY` — optional in general, but
+**required** when you enable assurance with no env-level arm (every app
+identity in per-project `config_json`), since the server otherwise
+refuses to boot; per-project app identities go
+in `config_json` `assurance`, authored with the operator RPC
+`AdminSetProjectAssurance` (it takes the Play service-account key in
+plaintext and encrypts it server-side under `GATEWAY_PROJECT_SECRETS_KEY`,
+mirroring `AdminSetProjectOAuthProvider`), and read back with
+`AdminGetProjectAssurance` — the only way to confirm an encrypted key
+survived a rotation.
+
+**Native gRPC embedders:** the three assurance RPCs are bridged onto
+`RegisterGRPC` alongside the existing ones, so a host that enables any
+`GATEWAY_ASSURANCE_ENFORCE_*` toggle can still obtain a token from the
+same surface (the v3 CAPTCHA solution used to ride inside the request
+message; it is now the `X-Assurance-Token` metadata key).
+
+**Embedders:** `Options.CaptchaVerifier` is now
+`Options.AssuranceWebVerifier`; the handler constructor no longer takes a
+verifier (it is wired into the auth service). The public `pkg/captcha`
+package is gone — it moved to `pkg/assurance` with a shape-identical
+`Verifier` interface, so a custom verifier only needs its import swapped.
+
+**Token verifiers:** `pkg/jwt.VerifyAccessToken` now rejects a token with
+no `sub` claim. Every access token this server has ever minted carries
+one, so this affects only callers that hand it non-access tokens; it is
+what keeps an assurance token (deliberately subject-less) from ever
+authenticating as a user.
+
+---
+
 ## TL;DR
 
 Upgrading from any **pre-v1.0** release to **v1.0** is a **breaking schema

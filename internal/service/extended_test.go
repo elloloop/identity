@@ -1755,6 +1755,29 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	if err := r.DeleteExpiredInvitations(ctx, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("DeleteExpiredInvitations: %v", err)
 	}
+	// Client assurance (attested devices + one-shot challenges): this test
+	// claims to cover every method, so new Repository surface belongs here.
+	if _, err := r.CreateAttestedDevice(ctx, &AttestedDeviceRecord{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreateAttestedDevice: %v", err)
+	}
+	if _, err := r.GetAttestedDeviceByKeyID(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("GetAttestedDeviceByKeyID: %v", err)
+	}
+	if err := r.UpdateAttestedDeviceCounter(ctx, "", 0, 0, 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("UpdateAttestedDeviceCounter: %v", err)
+	}
+	if err := r.DeleteStaleAttestedDevices(ctx, 0, 1); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteStaleAttestedDevices: %v", err)
+	}
+	if _, err := r.CreateAssuranceChallenge(ctx, &AssuranceChallengeRecord{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreateAssuranceChallenge: %v", err)
+	}
+	if _, err := r.ConsumeAssuranceChallenge(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ConsumeAssuranceChallenge: %v", err)
+	}
+	if err := r.DeleteExpiredAssuranceChallenges(ctx, 0, 1); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteExpiredAssuranceChallenges: %v", err)
+	}
 }
 
 func TestStubDB_AllMethodsReturnUnavailable(t *testing.T) {

@@ -492,7 +492,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_QR_LOGIN_", "QR cross-device login"},
 	{"GATEWAY_SMS_", "Phone / SMS verification"},
 	{"GATEWAY_PHONE_", "Phone / SMS verification"},
-	{"GATEWAY_CAPTCHA_", "CAPTCHA"},
+	{"GATEWAY_ASSURANCE_", "Client assurance"},
 	{"GATEWAY_AGEGATE_", "Age gating (COPPA)"},
 	{"GATEWAY_MINOR_", "Age gating (COPPA)"},
 	{"GATEWAY_DEFAULT_PRODUCT", "Age gating (COPPA)"},

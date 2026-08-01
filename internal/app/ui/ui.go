@@ -89,8 +89,8 @@ func Handler(cfg *config.Config, options OptionsSource, hostedOAuthEnabled bool)
 			HostedOAuthEnabled:    hostedOAuthEnabled,
 			CaptchaProvider:       captchaProvider,
 			CaptchaSiteKey:        siteKey,
-			CaptchaEnforceLogin:   siteKey != "" && cfg.CaptchaEnforcePasswordLogin,
-			CaptchaEnforceSignup:  siteKey != "" && cfg.CaptchaEnforcePasswordSignup,
+			CaptchaEnforceLogin:   siteKey != "" && cfg.AssuranceEnforcePasswordLogin,
+			CaptchaEnforceSignup:  siteKey != "" && cfg.AssuranceEnforcePasswordSignup,
 		}
 		b, err := json.Marshal(data)
 		if err != nil {
@@ -126,14 +126,14 @@ func Handler(cfg *config.Config, options OptionsSource, hostedOAuthEnabled bool)
 }
 
 // captchaUISiteKey returns the PUBLIC site key for the active provider, or ""
-// when CAPTCHA is disabled or no site key is configured — in which case the
+// when assurance is disabled or no site key is configured — in which case the
 // hosted auth UI (login + sign-up) renders no widget.
 func captchaUISiteKey(cfg *config.Config) string {
-	if !cfg.CaptchaEnabled {
+	if !cfg.AssuranceEnabled {
 		return ""
 	}
-	if cfg.CaptchaProvider == config.CaptchaProviderTurnstile {
-		return cfg.CaptchaTurnstileSiteKey
+	if cfg.AssuranceWebProvider == config.AssuranceWebProviderTurnstile {
+		return cfg.AssuranceTurnstileSiteKey
 	}
 	return ""
 }
@@ -144,5 +144,5 @@ func captchaUIProvider(cfg *config.Config) string {
 	if captchaUISiteKey(cfg) == "" {
 		return ""
 	}
-	return cfg.CaptchaProvider
+	return cfg.AssuranceWebProvider
 }

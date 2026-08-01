@@ -28,8 +28,8 @@ import (
 	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/observability"
 	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/audit"
-	"github.com/elloloop/identity/pkg/captcha"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/events"
 	"github.com/elloloop/identity/pkg/idv"
@@ -167,11 +167,13 @@ type Deps struct {
 	// other real provider; tests typically pass an idv.StubProvider.
 	IDVProvider idv.Provider
 
-	// CaptchaVerifier gates the unauthenticated auth endpoints. May be
-	// nil — in that case New builds one from Config (the no-op verifier
-	// when CAPTCHA is disabled). Tests inject a fake to drive pass/fail
-	// without network calls.
-	CaptchaVerifier captcha.Verifier
+	// AssuranceWebVerifier is the web (captcha) arm of the client-assurance
+	// layer, gating the unauthenticated auth endpoints. nil builds the
+	// provider named by GATEWAY_ASSURANCE_WEB_PROVIDER; when none is
+	// configured there is no web verifier at all, so browser clients cannot
+	// obtain an assurance token and only the mobile-attestation arms apply.
+	// Used only while GATEWAY_ASSURANCE_ENABLED is set.
+	AssuranceWebVerifier assurance.Verifier
 
 	// MetricsRegistry is the Prometheus registry the server records
 	// RED metrics into. May be nil — in that case the default
@@ -268,6 +270,23 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// per-user cooldown is the second layer).
 			PathPrefix: "/identity.v1.IdentityService/RequestPhoneVerification", Tag: "phone_verify",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0),
+		},
+		{
+			// Client assurance: unauthenticated by design (the caller is
+			// proving what the client IS before anyone signs in). The
+			// challenge write and, on the exchange paths, an outbound
+			// provider call + signature + audit row are all attacker-driven,
+			// so every assurance path carries a per-IP quota.
+			PathPrefix: "/identity.v1.IdentityService/CreateAssuranceChallenge", Tag: "assurance_challenge",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitAssurancePerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/IssueAssuranceToken", Tag: "assurance_issue",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitAssurancePerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/RefreshAssuranceToken", Tag: "assurance_refresh",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitAssurancePerIP, 0),
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
@@ -498,6 +517,7 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.SweeperBatchSize,
 		deps.Config.SweeperGraceSeconds,
 		deps.Config.AuditRetentionDays,
+		deps.Config.AssuranceDeviceRetentionDays,
 		logger,
 	)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
@@ -525,18 +545,14 @@ func New(deps Deps) (*Built, error) {
 		).WithMinorDataMinimizer(minorData)
 	}
 
-	captchaVerifier := deps.CaptchaVerifier
-	if captchaVerifier == nil {
-		captchaVerifier, err = buildCaptchaVerifier(deps.Config, logger)
-		if err != nil {
-			return nil, fmt.Errorf("captcha verifier: %w", err)
-		}
+	if err := wireAssurance(deps, authSvc, logger); err != nil {
+		return nil, err
 	}
 
 	domainSvc := buildDomainService(deps, logger)
 	membershipSvc := buildMembershipService(deps, repo, mailer, logger)
 	controlAdminSvc := buildControlPlaneAdminService(deps, auditLog, logger)
-	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, captchaVerifier, deps.Config)
+	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, deps.Config)
 
 	connectOpts, err := buildConnectHandlerOptions(deps.Config)
 	if err != nil {

@@ -216,7 +216,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		SMSSender:            opts.SMSSender,
 		OAuthRegistry:        opts.OAuthRegistry,
 		IDVProvider:          idvProvider,
-		CaptchaVerifier:      opts.CaptchaVerifier,
+		AssuranceWebVerifier: opts.AssuranceWebVerifier,
 		MetricsRegistry:      opts.MetricsRegistry,
 		ProjectResolver:      projectResolver,
 		TenantAutoFormer:     tenantAutoFormer,

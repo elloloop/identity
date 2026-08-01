@@ -139,7 +139,7 @@ func (h *IdentityHandler) PasswordSignup(
 	if h.cfg != nil && !h.cfg.PasswordSignupEnabled {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, service.ErrSignupDisabled)
 	}
-	if err := h.checkCaptcha(ctx, h.captchaEnforcePasswordSignup(), req.Msg.CaptchaToken, clientIP(req.Header())); err != nil {
+	if err := h.requireAssurance(ctx, h.assuranceEnforcePasswordSignup(), req.Header()); err != nil {
 		return nil, toConnectError(err)
 	}
 	result, err := h.auth.PasswordSignup(
@@ -173,7 +173,7 @@ func (h *IdentityHandler) PasswordLogin(
 	ipAddr := clientIP(req.Header())
 	userAgent := clientUserAgent(req.Header())
 
-	if err := h.checkCaptcha(ctx, h.captchaEnforcePasswordLogin(), req.Msg.CaptchaToken, ipAddr); err != nil {
+	if err := h.requireAssurance(ctx, h.assuranceEnforcePasswordLogin(), req.Header()); err != nil {
 		return nil, toConnectError(err)
 	}
 
@@ -208,7 +208,7 @@ func (h *IdentityHandler) RequestEmailLoginCode(
 	ctx context.Context,
 	req *connect.Request[identitypb.RequestEmailLoginCodeRequest],
 ) (*connect.Response[identitypb.RequestEmailLoginCodeResponse], error) {
-	if err := h.checkCaptcha(ctx, h.captchaEnforceEmailLoginCode(), req.Msg.CaptchaToken, clientIP(req.Header())); err != nil {
+	if err := h.requireAssurance(ctx, h.assuranceEnforceEmailLoginCode(), req.Header()); err != nil {
 		return nil, toConnectError(err)
 	}
 	if err := h.auth.RequestEmailLoginCode(ctx, req.Msg.Email); err != nil {
@@ -246,7 +246,7 @@ func (h *IdentityHandler) RequestMagicLink(
 	ctx context.Context,
 	req *connect.Request[identitypb.RequestMagicLinkRequest],
 ) (*connect.Response[identitypb.RequestMagicLinkResponse], error) {
-	if err := h.checkCaptcha(ctx, h.captchaEnforceMagicLink(), req.Msg.CaptchaToken, clientIP(req.Header())); err != nil {
+	if err := h.requireAssurance(ctx, h.assuranceEnforceMagicLink(), req.Header()); err != nil {
 		return nil, toConnectError(err)
 	}
 	if err := h.auth.RequestMagicLink(ctx, req.Msg.Email, req.Msg.ReturnTo); err != nil {
@@ -335,7 +335,7 @@ func (h *IdentityHandler) BeginPasskeySignup(
 	ctx context.Context,
 	req *connect.Request[identitypb.BeginPasskeySignupRequest],
 ) (*connect.Response[identitypb.BeginPasskeySignupResponse], error) {
-	if err := h.checkCaptcha(ctx, h.captchaEnforcePasskeySignup(), req.Msg.CaptchaToken, clientIP(req.Header())); err != nil {
+	if err := h.requireAssurance(ctx, h.assuranceEnforcePasskeySignup(), req.Header()); err != nil {
 		return nil, toConnectError(err)
 	}
 	optionsJSON, challengeID, err := h.auth.BeginPasskeySignup(ctx, req.Msg.Email, req.Msg.DeviceName)

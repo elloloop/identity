@@ -120,9 +120,17 @@ func (m *mockSweepRepo) DeleteExpiredInvitations(_ context.Context, b int64, l i
 	return m.sweep(b, l)
 }
 
+func (m *mockSweepRepo) DeleteExpiredAssuranceChallenges(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
+func (m *mockSweepRepo) DeleteStaleAttestedDevices(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
 func TestSweeper_DisabledWhenIntervalIsZero(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(&mockSweepRepo{}, nil, 0, 100, 30, 0, logger)
+	s := newSweeper(&mockSweepRepo{}, nil, 0, 100, 30, 0, 0, logger)
 	if s != nil {
 		t.Fatal("interval=0 must yield a nil sweeper (sweep disabled)")
 	}
@@ -130,7 +138,7 @@ func TestSweeper_DisabledWhenIntervalIsZero(t *testing.T) {
 
 func TestSweeper_DisabledWhenIntervalNegative(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(&mockSweepRepo{}, nil, -1, 100, 30, 0, logger)
+	s := newSweeper(&mockSweepRepo{}, nil, -1, 100, 30, 0, 0, logger)
 	if s != nil {
 		t.Fatal("interval<0 must yield a nil sweeper (sweep disabled)")
 	}
@@ -139,7 +147,7 @@ func TestSweeper_DisabledWhenIntervalNegative(t *testing.T) {
 func TestSweeper_RunOnceCallsEveryMethod(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
 	if s == nil {
 		t.Fatal("newSweeper returned nil with positive interval")
 	}
@@ -180,7 +188,7 @@ func TestSweeper_RunOncePurgesExpiredAccountDeletions(t *testing.T) {
 	repo := &mockSweepRepo{}
 	purger := &mockPurger{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, purger, 1, 50, 30, 0, logger)
+	s := newSweeper(repo, purger, 1, 50, 30, 0, 0, logger)
 
 	fixedNow := time.UnixMilli(1_700_000_000_000)
 	s.now = func() time.Time { return fixedNow }
@@ -203,7 +211,7 @@ func TestSweeper_RunOncePurgesExpiredAccountDeletions(t *testing.T) {
 func TestSweeper_NilPurgerSkipsAccountDeletion(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
 	// Must not panic when no purger is wired.
 	s.runOnce(context.Background())
 }
@@ -215,7 +223,7 @@ func TestSweeper_PurgeErrorIncrementsErrorCounter(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperErrors.WithLabelValues(accountDeletionLabel))
 
-	s := newSweeper(repo, purger, 1, 50, 30, 0, logger)
+	s := newSweeper(repo, purger, 1, 50, 30, 0, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues(accountDeletionLabel))
@@ -227,7 +235,7 @@ func TestSweeper_PurgeErrorIncrementsErrorCounter(t *testing.T) {
 func TestSweeper_SkipNotImplementedLogsOncePerNodeType(t *testing.T) {
 	repo := &mockSweepRepo{skip: true}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
 
 	// Run three ticks; we must only log skip once per node type.
 	for i := 0; i < 3; i++ {
@@ -248,7 +256,7 @@ func TestSweeper_SkipNotImplementedDoesNotIncrementErrors(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperErrors.WithLabelValues("webauthn_challenges"))
 
-	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues("webauthn_challenges"))
@@ -264,7 +272,7 @@ func TestSweeper_RealErrorIncrementsErrorCounter(t *testing.T) {
 
 	baseline := readCounter(sweeperErrors.WithLabelValues("password_reset_tokens"))
 
-	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues("password_reset_tokens"))
@@ -286,7 +294,7 @@ func TestSweeper_SuccessfulRunIncrementsRunsCounter(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperRuns.WithLabelValues("login_challenges"))
 
-	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperRuns.WithLabelValues("login_challenges"))
@@ -299,7 +307,7 @@ func TestSweeper_RetentionDisabledSkipsAuditSweep(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
 	// auditRetentionDays = 0 → retention disabled: the audit sweep is a no-op.
-	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
 
 	s.runOnce(context.Background())
 
@@ -311,7 +319,7 @@ func TestSweeper_RetentionDisabledSkipsAuditSweep(t *testing.T) {
 func TestSweeper_RetentionNegativeSkipsAuditSweep(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
-	s := newSweeper(repo, nil, 1, 50, 30, -5, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, -5, 0, logger)
 
 	s.runOnce(context.Background())
 
@@ -324,7 +332,7 @@ func TestSweeper_RetentionEnabledSweepsAtCutoff(t *testing.T) {
 	repo := &mockSweepRepo{}
 	logger := zaptest.NewLogger(t)
 	const retentionDays = 30
-	s := newSweeper(repo, nil, 1, 50, 30, retentionDays, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, retentionDays, 0, logger)
 
 	fixedNow := time.UnixMilli(1_700_000_000_000)
 	s.now = func() time.Time { return fixedNow }
@@ -347,7 +355,7 @@ func TestSweeper_AuditRetentionSuccessIncrementsRunsCounter(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperRuns.WithLabelValues(auditRetentionLabel))
 
-	s := newSweeper(repo, nil, 1, 50, 30, 30, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 30, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperRuns.WithLabelValues(auditRetentionLabel))
@@ -362,7 +370,7 @@ func TestSweeper_AuditRetentionErrorIncrementsErrorCounter(t *testing.T) {
 	initSweeperMetrics()
 	baseline := readCounter(sweeperErrors.WithLabelValues(auditRetentionLabel))
 
-	s := newSweeper(repo, nil, 1, 50, 30, 30, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 30, 0, logger)
 	s.runOnce(context.Background())
 
 	got := readCounter(sweeperErrors.WithLabelValues(auditRetentionLabel))
@@ -400,7 +408,7 @@ func TestSweeper_RetentionDeletesOnlyPastCutoff(t *testing.T) {
 	t.Run("enabled deletes only stale", func(t *testing.T) {
 		repo := memory.New()
 		seed(repo)
-		s := newSweeper(repo, nil, 1, 50, 30, retentionDays, logger)
+		s := newSweeper(repo, nil, 1, 50, 30, retentionDays, 0, logger)
 		s.now = func() time.Time { return fixedNow }
 
 		s.runOnce(ctx)
@@ -424,7 +432,7 @@ func TestSweeper_RetentionDeletesOnlyPastCutoff(t *testing.T) {
 	t.Run("disabled keeps everything", func(t *testing.T) {
 		repo := memory.New()
 		seed(repo)
-		s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+		s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
 		s.now = func() time.Time { return fixedNow }
 
 		s.runOnce(ctx)
@@ -446,7 +454,7 @@ func TestSweeper_StartStopCleanly(t *testing.T) {
 	// A very short interval lets the loop tick at least once before
 	// we shut it down. The test asserts the stop func returns
 	// promptly rather than races the still-running goroutine.
-	s := newSweeper(repo, nil, 1, 50, 30, 0, logger)
+	s := newSweeper(repo, nil, 1, 50, 30, 0, 0, logger)
 	stop := s.start()
 
 	// Allow a couple of ticks. We don't assert exact tick counts —
@@ -467,4 +475,119 @@ func TestSweeper_StartStopCleanly(t *testing.T) {
 
 	// Second stop() must be safe (idempotent).
 	stop()
+}
+
+// TestSweeperTargetsCoverEveryRepositorySweep is the guard the
+// assurance-challenges omission proved necessary: a DeleteExpired* method
+// can be declared on service.Repository, implemented in every driver, and
+// conformance-tested — and still never run in production if it is absent
+// from targets(). Pin the wiring by NAME so adding a Repository sweep
+// without wiring it here fails loudly.
+//
+// The invariant is specifically: every table with an expires_at_ms rides
+// the shared EXPIRY cutoff (now - grace, slack past a row's own expiry).
+// A table governed by a RETENTION window instead — audit_events,
+// attested_devices — must NOT be here: it needs its own cutoff, and
+// sharing this one would reap it against the 60s grace.
+func TestSweeperTargetsCoverEveryRepositorySweep(t *testing.T) {
+	s := &sweeper{repo: &mockSweepRepo{}}
+	names := map[string]bool{}
+	for _, tgt := range s.targets() {
+		names[tgt.name] = true
+	}
+	// One entry per DeleteExpired* method on service.Repository. Update
+	// this list in the same change that adds the Repository method.
+	want := []string{
+		"webauthn_challenges",
+		"email_verification_tokens",
+		"password_reset_tokens",
+		"email_change_tokens",
+		"login_challenges",
+		"oauth_one_time_codes",
+		"native_token_redemptions",
+		"email_login_codes",
+		"magic_link_tokens",
+		"phone_verification_codes",
+		"qr_login_sessions",
+		"user_invitations",
+		"assurance_challenges",
+	}
+	for _, w := range want {
+		if !names[w] {
+			t.Errorf("sweeper.targets() is missing %q — the table will grow unbounded", w)
+		}
+	}
+	if len(names) != len(want) {
+		t.Errorf("targets() has %d entries, want %d — update this guard alongside targets()", len(names), len(want))
+	}
+}
+
+// TestSweeper_DeviceRetentionUsesItsOwnCutoff is the regression guard for a
+// real defect: attested_devices was briefly wired into targets(), so it was
+// reaped against the shared EXPIRY cutoff (now - grace, default 60s) rather
+// than a retention window. Every device then died about a minute after its
+// last use, which breaks RefreshAssuranceToken permanently — and because
+// Apple's attestKey may be called only once per generated key, a client that
+// persists its Secure Enclave key cannot even re-attest its way out.
+//
+// Driven at PRODUCTION defaults (grace 60s, batch 500) so the test fails if
+// the two cutoffs are ever conflated again.
+func TestSweeper_DeviceRetentionUsesItsOwnCutoff(t *testing.T) {
+	const (
+		graceSeconds  = 60 // GATEWAY_SWEEPER_GRACE_SECONDS default
+		retentionDays = 90 // GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS default
+	)
+	repo := &recordingDeviceSweepRepo{}
+	s := newSweeper(repo, nil, 1, 500, graceSeconds, 0, retentionDays, zaptest.NewLogger(t))
+
+	now := time.UnixMilli(1_800_000_000_000)
+	s.now = func() time.Time { return now }
+	s.runOnce(context.Background())
+
+	if repo.deviceCalls != 1 {
+		t.Fatalf("device retention sweep ran %d times, want 1", repo.deviceCalls)
+	}
+	// The cutoff must be the RETENTION window, not now - grace.
+	wantCutoff := now.Add(-retentionDays * 24 * time.Hour).UnixMilli()
+	if repo.deviceCutoff != wantCutoff {
+		t.Fatalf("device cutoff = %d, want %d (now - %dd). A cutoff of %d (now - grace) "+
+			"would delete every device ~%ds after its last use and break refresh.",
+			repo.deviceCutoff, wantCutoff, retentionDays,
+			now.Add(-graceSeconds*time.Second).UnixMilli(), graceSeconds)
+	}
+
+	// Concretely: a device used 10 minutes ago survives; one used 100 days
+	// ago does not.
+	recent := now.Add(-10 * time.Minute).UnixMilli()
+	ancient := now.Add(-100 * 24 * time.Hour).UnixMilli()
+	if recent < repo.deviceCutoff {
+		t.Errorf("a device last used 10 minutes ago would be reaped")
+	}
+	if ancient >= repo.deviceCutoff {
+		t.Errorf("a device last used 100 days ago would survive")
+	}
+
+	t.Run("retention disabled skips the sweep entirely", func(t *testing.T) {
+		r := &recordingDeviceSweepRepo{}
+		s := newSweeper(r, nil, 1, 500, graceSeconds, 0, 0, zaptest.NewLogger(t))
+		s.now = func() time.Time { return now }
+		s.runOnce(context.Background())
+		if r.deviceCalls != 0 {
+			t.Fatalf("device sweep ran %d times with retention disabled", r.deviceCalls)
+		}
+	})
+}
+
+// recordingDeviceSweepRepo records the cutoff the device-retention sweep is
+// given, separately from the shared expiry cutoff.
+type recordingDeviceSweepRepo struct {
+	mockSweepRepo
+	deviceCalls  int
+	deviceCutoff int64
+}
+
+func (m *recordingDeviceSweepRepo) DeleteStaleAttestedDevices(_ context.Context, beforeMs int64, _ int) error {
+	m.deviceCalls++
+	m.deviceCutoff = beforeMs
+	return nil
 }

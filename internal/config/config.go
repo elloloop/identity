@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,16 +45,49 @@ const (
 	RevocationModeTTLAccessTokenCap = 900
 )
 
-// CAPTCHA provider names accepted in GATEWAY_CAPTCHA_PROVIDER. They mirror
-// the captcha.Provider* constants; config validates against these without
-// importing pkg/captcha (config has no dependencies on the service tree).
+// Web-assurance provider names accepted in GATEWAY_ASSURANCE_WEB_PROVIDER.
+// They mirror the assurance.Provider* constants; config validates against
+// these without importing pkg/assurance (config has no dependencies on the
+// service tree).
 const (
-	CaptchaProviderTurnstile   = "turnstile"
-	CaptchaProviderRecaptchaV3 = "recaptcha_v3"
+	AssuranceWebProviderTurnstile   = "turnstile"
+	AssuranceWebProviderRecaptchaV3 = "recaptcha_v3"
 
-	// DefaultCaptchaRecaptchaScoreThreshold is the reCAPTCHA v3 score below
+	// DefaultAssuranceRecaptchaScoreThreshold is the reCAPTCHA v3 score below
 	// which a response is rejected when no threshold is configured.
-	DefaultCaptchaRecaptchaScoreThreshold = 0.5
+	DefaultAssuranceRecaptchaScoreThreshold = 0.5
+
+	// MaxAssuranceTokenTTLSeconds caps the assurance-token lifetime (24h). An
+	// assurance token carries no session and cannot be revoked, so an
+	// unbounded TTL would be a permanent bearer credential.
+	MaxAssuranceTokenTTLSeconds = 86400
+
+	// MaxAssuranceChallengeTTLSeconds caps how long an attestation challenge
+	// stays redeemable (1h). A challenge is a one-shot nonce; a long window
+	// only widens the replay surface and the unreclaimed-row window.
+	MaxAssuranceChallengeTTLSeconds = 3600
+
+	// DefaultAssuranceDeviceRetentionDays is how long an attested device row
+	// is kept after its last refresh. It must be MUCH longer than the token
+	// TTL: the device row is what makes refresh (and the duplicate-key_id
+	// replay guard) work, and Apple's attestKey may be called only once per
+	// generated key, so a client that persists its Secure Enclave key cannot
+	// simply re-attest. 90 days keeps a returning user's device while still
+	// reaping devices that are genuinely gone.
+	DefaultAssuranceDeviceRetentionDays = 90
+
+	// DefaultAssuranceWebTokenTTLSeconds is the web arm's token lifetime (5
+	// minutes). It is deliberately far shorter than the mobile default: a
+	// captcha solve is a one-off human signal, and the token it buys is
+	// reusable and transferable, so a long window turns one solve into an
+	// hour of bot traffic.
+	DefaultAssuranceWebTokenTTLSeconds = 300
+
+	// MaxAssuranceDeviceRetentionDays caps the retention window at ~27
+	// years. Beyond ~106752 days the nanosecond duration used to compute the
+	// cutoff overflows int64 and INVERTS it, which would make the sweep
+	// delete live devices instead of stale ones.
+	MaxAssuranceDeviceRetentionDays = 10000
 
 	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
 	// users 12 and under (i.e. under 13) are in the protected CHILD band.
@@ -463,42 +497,90 @@ type Config struct {
 	// pattern. Tenants that need stricter onboarding flip this on.
 	IDVRequired bool
 
-	// CAPTCHA verification on unauthenticated endpoints. When disabled the
-	// no-op verifier is wired and the per-endpoint toggles are ignored; the
-	// toggles default true, so enabling CAPTCHA gates every endpoint unless one
-	// is flipped off.
+	// Web-assurance (captcha) verification, the browser arm of the client-
+	// assurance layer. When assurance is disabled the per-endpoint enforce
+	// toggles are ignored; the toggles default true, so enabling assurance
+	// gates every listed endpoint unless one is flipped off.
 
-	// CaptchaEnabled is the global on/off for CAPTCHA on unauthenticated endpoints.
-	CaptchaEnabled bool
-	// CaptchaProvider selects the pkg/captcha implementation — "turnstile" or
-	// "recaptcha_v3"; the matching secret must be set.
-	CaptchaProvider string
-	// CaptchaTurnstileSecret is the Cloudflare Turnstile secret key (provider "turnstile").
-	CaptchaTurnstileSecret string
-	// CaptchaTurnstileSiteKey is the Cloudflare Turnstile PUBLIC site key
+	// AssuranceWebProvider selects the pkg/assurance web implementation —
+	// "turnstile" or "recaptcha_v3"; the matching secret must be set. Empty
+	// disables web assurance (mobile-attestation-only deployment).
+	AssuranceWebProvider string
+	// AssuranceTurnstileSecret is the Cloudflare Turnstile secret key (provider "turnstile").
+	AssuranceTurnstileSecret string
+	// AssuranceTurnstileSiteKey is the Cloudflare Turnstile PUBLIC site key
 	// (provider "turnstile"). Safe to expose: the hosted sign-up UI needs it
 	// to render the widget, and the client passes the resulting token back.
-	CaptchaTurnstileSiteKey string
-	// CaptchaRecaptchaSecret is the reCAPTCHA v3 secret key (provider "recaptcha_v3").
-	CaptchaRecaptchaSecret string
-	// CaptchaRecaptchaScoreThreshold is the reCAPTCHA v3 score below which a
+	AssuranceTurnstileSiteKey string
+	// AssuranceRecaptchaSecret is the reCAPTCHA v3 secret key (provider "recaptcha_v3").
+	AssuranceRecaptchaSecret string
+	// AssuranceRecaptchaScoreThreshold is the reCAPTCHA v3 score below which a
 	// response is rejected; must be in [0,1].
-	CaptchaRecaptchaScoreThreshold float64
-	// CaptchaEnforcePasswordSignup gates CAPTCHA on the PasswordSignup endpoint.
-	CaptchaEnforcePasswordSignup bool
-	// CaptchaEnforcePasswordLogin gates CAPTCHA on the PasswordLogin endpoint.
-	CaptchaEnforcePasswordLogin bool
-	// CaptchaEnforcePasswordReset gates CAPTCHA on the RequestPasswordReset endpoint.
-	CaptchaEnforcePasswordReset bool
-	// CaptchaEnforceEmailLoginCode gates CAPTCHA on the RequestEmailLoginCode endpoint.
-	CaptchaEnforceEmailLoginCode bool
-	// CaptchaEnforceMagicLink gates CAPTCHA on the RequestMagicLink endpoint.
-	CaptchaEnforceMagicLink bool
-	// CaptchaEnforcePasskeySignup gates CAPTCHA on the BeginPasskeySignup endpoint.
+	AssuranceRecaptchaScoreThreshold float64
+	// AssuranceEnforcePasswordSignup requires an assurance token on the PasswordSignup endpoint.
+	AssuranceEnforcePasswordSignup bool
+	// AssuranceEnforcePasswordLogin requires an assurance token on the PasswordLogin endpoint.
+	AssuranceEnforcePasswordLogin bool
+	// AssuranceEnforcePasswordReset requires an assurance token on the RequestPasswordReset endpoint.
+	AssuranceEnforcePasswordReset bool
+	// AssuranceEnforceEmailLoginCode requires an assurance token on the RequestEmailLoginCode endpoint.
+	AssuranceEnforceEmailLoginCode bool
+	// AssuranceEnforceMagicLink requires an assurance token on the RequestMagicLink endpoint.
+	AssuranceEnforceMagicLink bool
+	// AssuranceEnforcePasskeySignup requires an assurance token on the BeginPasskeySignup endpoint.
 	// Passkey registration is spammable without it — a script can forge valid
 	// FIDO2 keypairs in software and set the UP/UV flags itself, so BeginPasskeySignup
 	// is an unmetered account-creation + email-send surface just like PasswordSignup.
-	CaptchaEnforcePasskeySignup bool
+	AssuranceEnforcePasskeySignup bool
+
+	// Client assurance (App Attest / Play Integrity / web captcha exchange).
+	// AssuranceEnabled is the global on/off for the assurance token surface:
+	// challenge issuance, evidence exchange, and refresh.
+	AssuranceEnabled bool
+	// AssuranceChallengeTTLSeconds bounds how long an issued attestation
+	// challenge stays redeemable.
+	AssuranceChallengeTTLSeconds int
+	// AssuranceTokenTTLSeconds is the minted assurance token's lifetime.
+	AssuranceTokenTTLSeconds int
+	// AssuranceIOSTeamID is the DEFAULT project's Apple Developer team id for
+	// App Attest (per-project apps configure theirs in config_json
+	// `assurance.ios`). Empty disables iOS assurance for the default project.
+	AssuranceIOSTeamID string
+	// AssuranceIOSBundleID is the DEFAULT project's App Attest bundle id; set
+	// together with AssuranceIOSTeamID (TeamID.BundleID forms the App ID).
+	AssuranceIOSBundleID string
+	// AssuranceIOSEnv selects the App Attest environment for the default
+	// project: "production" (default) or "development".
+	AssuranceIOSEnv string
+	// AssuranceAndroidPackageName is the DEFAULT project's Play Integrity
+	// Android package name (per-project apps configure theirs in config_json
+	// `assurance.android`). Empty disables Android assurance for the default
+	// project.
+	AssuranceAndroidPackageName string
+	// AssuranceAndroidCertDigests is the comma-separated allowlist of the
+	// app's signing-certificate SHA-256 digests (unpadded base64url, as Play
+	// reports them).
+	AssuranceAndroidCertDigests string
+	// AssuranceAndroidSAKeyJSON is the Google service-account key (inline
+	// JSON) used to decode Play Integrity verdicts server-side.
+	AssuranceAndroidSAKeyJSON string
+	// AssuranceWebTokenTTLSeconds is the assurance-token lifetime for the WEB
+	// arm specifically. A captcha solve buys a reusable, transferable bearer
+	// token, so the web arm wants a much shorter window than a
+	// hardware-attested one, whose device is bound to a Secure Enclave key.
+	// 0 falls back to AssuranceTokenTTLSeconds.
+	AssuranceWebTokenTTLSeconds int
+	// AssuranceDeviceRetentionDays bounds how long an attested device row is
+	// kept after its LAST USE. This is a retention window, not an expiry: a
+	// device row has no expires_at, and reaping one forces a full
+	// re-attestation. 0 (or negative) disables the sweep, keeping devices
+	// forever.
+	AssuranceDeviceRetentionDays int
+	// AssuranceAllowProjectOnly permits booting with assurance enabled and NO
+	// env-configured arm, for deployments where every app identity lives in
+	// per-project config_json. It is an explicit acknowledgement that a
+	// project without its own assurance block cannot authenticate at all.
+	AssuranceAllowProjectOnly bool
 
 	// Age-gating (COPPA). When disabled the no-op determiner is wired (everyone
 	// classifies as adult, no consent gating) and signup behaves as before.
@@ -811,6 +893,15 @@ type Config struct {
 	// RateLimitPasswordlessPerIP is the per-IP cap per window on
 	// RequestEmailLoginCode + RequestMagicLink.
 	RateLimitPasswordlessPerIP int
+	// RateLimitAssurancePerIP is the per-IP request cap per window on the
+	// client-assurance endpoints. These are unauthenticated and each
+	// IssueAssuranceToken / RefreshAssuranceToken call spends an outbound
+	// provider request (Turnstile/reCAPTCHA siteverify, Google
+	// decodeIntegrityToken), an RSA signature and an audit row, while
+	// CreateAssuranceChallenge writes a DB row — so an uncapped path lets an
+	// anonymous caller drive third-party quota, storage and outbound
+	// amplification.
+	RateLimitAssurancePerIP int
 	// RateLimitPhonePerIP is the per-IP cap per window on RequestPhoneVerification.
 	RateLimitPhonePerIP int
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
@@ -934,11 +1025,24 @@ type Config struct {
 	// enabled that is legal but inert (nothing is delivered). The secret in
 	// each entry is sensitive and never logged.
 	WebhookSubscriptions string
+
+	// removedEnvVarErr is non-nil when Load saw an environment variable
+	// removed in a breaking release. Nil for a Config built in code, which
+	// is the point — see the comment on detectRemovedEnvVars.
+	removedEnvVarErr error
 }
 
 // Load reads configuration from environment variables with GATEWAY_
 // prefix, falling back to sensible defaults for local development.
 func Load() *Config {
+	c := loadFromEnv()
+	// Stamped here so Validate stays a pure receiver check; see
+	// removedEnvVarErr.
+	c.removedEnvVarErr = detectRemovedEnvVars()
+	return c
+}
+
+func loadFromEnv() *Config {
 	return &Config{
 		GRPCPort:    envInt("GATEWAY_GRPC_PORT", 50051),
 		ConnectPort: envInt("GATEWAY_CONNECT_PORT", 80),
@@ -1030,18 +1134,29 @@ func Load() *Config {
 		IDVAzureSessionTTLSec: envInt("GATEWAY_IDV_AZURE_SESSION_TTL_SECONDS", 600),
 		IDVRequired:           envBool("GATEWAY_IDV_REQUIRED", false),
 
-		CaptchaEnabled:                 envBool("GATEWAY_CAPTCHA_ENABLED", false),
-		CaptchaProvider:                envStr("GATEWAY_CAPTCHA_PROVIDER", ""),
-		CaptchaTurnstileSecret:         envStr("GATEWAY_CAPTCHA_TURNSTILE_SECRET", ""),
-		CaptchaTurnstileSiteKey:        envStr("GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY", ""),
-		CaptchaRecaptchaSecret:         envStr("GATEWAY_CAPTCHA_RECAPTCHA_SECRET", ""),
-		CaptchaRecaptchaScoreThreshold: envFloat("GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD", DefaultCaptchaRecaptchaScoreThreshold),
-		CaptchaEnforcePasswordSignup:   envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP", true),
-		CaptchaEnforcePasswordLogin:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN", true),
-		CaptchaEnforcePasswordReset:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET", true),
-		CaptchaEnforceEmailLoginCode:   envBool("GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE", true),
-		CaptchaEnforceMagicLink:        envBool("GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK", true),
-		CaptchaEnforcePasskeySignup:    envBool("GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP", true),
+		AssuranceWebProvider:             envStr("GATEWAY_ASSURANCE_WEB_PROVIDER", ""),
+		AssuranceTurnstileSecret:         envStr("GATEWAY_ASSURANCE_TURNSTILE_SECRET", ""),
+		AssuranceTurnstileSiteKey:        envStr("GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY", ""),
+		AssuranceRecaptchaSecret:         envStr("GATEWAY_ASSURANCE_RECAPTCHA_SECRET", ""),
+		AssuranceRecaptchaScoreThreshold: envFloat("GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD", DefaultAssuranceRecaptchaScoreThreshold),
+		AssuranceEnforcePasswordSignup:   envBool("GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP", true),
+		AssuranceEnforcePasswordLogin:    envBool("GATEWAY_ASSURANCE_ENFORCE_PASSWORD_LOGIN", true),
+		AssuranceEnforcePasswordReset:    envBool("GATEWAY_ASSURANCE_ENFORCE_PASSWORD_RESET", true),
+		AssuranceEnforceEmailLoginCode:   envBool("GATEWAY_ASSURANCE_ENFORCE_EMAIL_LOGIN_CODE", true),
+		AssuranceEnforceMagicLink:        envBool("GATEWAY_ASSURANCE_ENFORCE_MAGIC_LINK", true),
+		AssuranceEnforcePasskeySignup:    envBool("GATEWAY_ASSURANCE_ENFORCE_PASSKEY_SIGNUP", true),
+		AssuranceEnabled:                 envBool("GATEWAY_ASSURANCE_ENABLED", false),
+		AssuranceChallengeTTLSeconds:     envInt("GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS", 300),
+		AssuranceTokenTTLSeconds:         envInt("GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS", 3600),
+		AssuranceIOSTeamID:               envStr("GATEWAY_ASSURANCE_IOS_TEAM_ID", ""),
+		AssuranceIOSBundleID:             envStr("GATEWAY_ASSURANCE_IOS_BUNDLE_ID", ""),
+		AssuranceIOSEnv:                  envStr("GATEWAY_ASSURANCE_IOS_ENV", "production"),
+		AssuranceAndroidPackageName:      envStr("GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME", ""),
+		AssuranceAndroidCertDigests:      envStr("GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS", ""),
+		AssuranceAndroidSAKeyJSON:        envStr("GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON", ""),
+		AssuranceWebTokenTTLSeconds:      envInt("GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS", DefaultAssuranceWebTokenTTLSeconds),
+		AssuranceDeviceRetentionDays:     envInt("GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS", DefaultAssuranceDeviceRetentionDays),
+		AssuranceAllowProjectOnly:        envBool("GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY", false),
 
 		AgeGateEnabled:     envBool("GATEWAY_AGEGATE_ENABLED", false),
 		AgeGateChildMaxAge: envInt("GATEWAY_AGEGATE_CHILD_MAX_AGE", DefaultAgeGateChildMaxAge),
@@ -1153,6 +1268,7 @@ func Load() *Config {
 		RateLimitResetPerIP:        envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
 		RateLimitVerifyPerIP:       envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
 		RateLimitPasswordlessPerIP: envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
+		RateLimitAssurancePerIP:    envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
 		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 
@@ -1417,6 +1533,33 @@ func (c *Config) JWTExpiry() time.Duration {
 	return time.Duration(c.JWTExpirySeconds) * time.Second
 }
 
+// AssuranceWebTokenTTL returns the WEB arm's token lifetime, falling back
+// to the global TTL when unset.
+func (c *Config) AssuranceWebTokenTTL() time.Duration {
+	if c.AssuranceWebTokenTTLSeconds > 0 {
+		return time.Duration(c.AssuranceWebTokenTTLSeconds) * time.Second
+	}
+	return c.AssuranceTokenTTL()
+}
+
+// AssuranceTokenTTL returns the assurance-token lifetime as a Duration.
+func (c *Config) AssuranceTokenTTL() time.Duration {
+	return time.Duration(c.AssuranceTokenTTLSeconds) * time.Second
+}
+
+// AssuranceAndroidCertDigestList splits the comma-separated digest list,
+// dropping empties.
+func (c *Config) AssuranceAndroidCertDigestList() []string {
+	parts := strings.Split(c.AssuranceAndroidCertDigests, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // RefreshExpiry returns the refresh token expiry as a time.Duration.
 func (c *Config) RefreshExpiry() time.Duration {
 	return time.Duration(c.RefreshExpirySeconds) * time.Second
@@ -1507,7 +1650,63 @@ func revocationModeFromEnv(key string, def RevocationMode) RevocationMode {
 // silent failure mode there would re-introduce the bug this
 // function prevents. Callers that synthesise a Config must invoke
 // Validate before handing it to app.New.
+// removedEnvVars maps an environment variable removed in a breaking
+// release to the replacement an operator must set instead. Load ignores
+// unknown variables by design, so a rename would otherwise take effect
+// SILENTLY — for the v4.0.0 assurance rename that means an operator who
+// pulls the new image keeps their old GATEWAY_CAPTCHA_* values, gets
+// AssuranceEnabled=false, and loses anti-automation on six auth endpoints
+// with no signal at all. Validate fails boot instead.
+var removedEnvVars = map[string]string{
+	"GATEWAY_CAPTCHA_ENABLED":                   "GATEWAY_ASSURANCE_ENABLED",
+	"GATEWAY_CAPTCHA_PROVIDER":                  "GATEWAY_ASSURANCE_WEB_PROVIDER",
+	"GATEWAY_CAPTCHA_TURNSTILE_SECRET":          "GATEWAY_ASSURANCE_TURNSTILE_SECRET",
+	"GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY":        "GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY",
+	"GATEWAY_CAPTCHA_RECAPTCHA_SECRET":          "GATEWAY_ASSURANCE_RECAPTCHA_SECRET",
+	"GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD": "GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSWORD_SIGNUP":   "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN":    "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_LOGIN",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSWORD_RESET":    "GATEWAY_ASSURANCE_ENFORCE_PASSWORD_RESET",
+	"GATEWAY_CAPTCHA_ENFORCE_EMAIL_LOGIN_CODE":  "GATEWAY_ASSURANCE_ENFORCE_EMAIL_LOGIN_CODE",
+	"GATEWAY_CAPTCHA_ENFORCE_MAGIC_LINK":        "GATEWAY_ASSURANCE_ENFORCE_MAGIC_LINK",
+	"GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP":    "GATEWAY_ASSURANCE_ENFORCE_PASSKEY_SIGNUP",
+}
+
+// removedEnvVarErr is stamped by Load when a removed variable is still
+// present in the environment, and returned by Validate.
+//
+// The check lives in Load, not Validate, because reading the process
+// environment is Load's contract and NOT Validate's: an embedding host
+// that builds a config.Config in code must be judged on the values it
+// passed, never on an ambient variable it never set. Carrying the result
+// on the struct keeps the fail-closed boot behaviour while leaving
+// Validate a pure function of its receiver (and t.Setenv-using tests
+// hermetic).
+
+// detectRemovedEnvVars reports removed variables that are still set,
+// naming its replacement. Sorted so the message is deterministic.
+func detectRemovedEnvVars() error {
+	var found []string
+	for old, replacement := range removedEnvVars {
+		if _, ok := os.LookupEnv(old); ok {
+			found = append(found, fmt.Sprintf("%s (use %s)", old, replacement))
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	sort.Strings(found)
+	return fmt.Errorf(
+		"config: %d environment variable(s) removed in v4.0.0 are still set: %s; see docs/UPGRADE.md",
+		len(found), strings.Join(found, ", "),
+	)
+}
+
 func (c *Config) Validate() error {
+	if c.removedEnvVarErr != nil {
+		return c.removedEnvVarErr
+	}
+
 	switch c.RevocationMode {
 	case "":
 		// Empty means "use default" in Load(); a directly-constructed
@@ -1535,7 +1734,7 @@ func (c *Config) Validate() error {
 		return err
 	}
 
-	if err := c.validateCaptcha(); err != nil {
+	if err := c.validateAssurance(); err != nil {
 		return err
 	}
 
@@ -1847,43 +2046,178 @@ func (c *Config) validateSMS() error {
 	return nil
 }
 
-// validateCaptcha enforces the CAPTCHA invariants: a deployment that turns
-// CAPTCHA on must name a supported provider, supply that provider's secret,
-// and (for reCAPTCHA v3) configure a score threshold within [0,1]. A
-// disabled deployment is unconstrained — the no-op verifier is wired and
-// the provider/secret fields are ignored.
-func (c *Config) validateCaptcha() error {
-	if !c.CaptchaEnabled {
+// validateAssurance enforces the client-assurance invariants: an enabled
+// deployment's configured surfaces must each be complete — a named web
+// provider needs its secret (and, for reCAPTCHA v3, a threshold within
+// [0,1]), a partially-specified default-project iOS or Android app
+// identity fails rather than silently disabling the platform. A disabled
+// deployment is unconstrained — the fields are ignored. A web provider is
+// OPTIONAL when enabled: mobile-only deployments configure no captcha,
+// and per-project deployments may configure everything in config_json.
+func (c *Config) validateAssurance() error {
+	// The retention bound is checked BEFORE the disabled-early-return: the
+	// sweeper is wired from this value regardless of AssuranceEnabled, and
+	// past MaxAssuranceDeviceRetentionDays the cutoff duration overflows
+	// int64 and inverts, turning the sweep into a deleter of live rows.
+	if c.AssuranceDeviceRetentionDays > MaxAssuranceDeviceRetentionDays {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS must be <= %d, got %d",
+			MaxAssuranceDeviceRetentionDays, c.AssuranceDeviceRetentionDays,
+		)
+	}
+
+	if !c.AssuranceEnabled {
 		return nil
 	}
 
-	switch c.CaptchaProvider {
-	case CaptchaProviderTurnstile:
-		if c.CaptchaTurnstileSecret == "" {
-			return fmt.Errorf("config: GATEWAY_CAPTCHA_ENABLED=true with provider %q requires GATEWAY_CAPTCHA_TURNSTILE_SECRET", CaptchaProviderTurnstile)
+	// Order matters: the lifetimes are bounded first, so the arm checks can
+	// compare against values already known to be sane.
+	if err := c.validateAssuranceLifetimes(); err != nil {
+		return err
+	}
+	if err := c.validateAssuranceArms(); err != nil {
+		return err
+	}
+	return c.validateAssuranceWebProvider()
+}
+
+// validateAssuranceLifetimes bounds every assurance duration. An assurance
+// token is an unrevocable bearer credential for its whole lifetime, so each
+// TTL is capped as well as floored (the same reasoning as
+// RevocationModeTTLAccessTokenCap), and the device-retention window must
+// outlive the token: a device reaped before its own token expires could
+// never refresh.
+func (c *Config) validateAssuranceLifetimes() error {
+	if c.AssuranceChallengeTTLSeconds <= 0 || c.AssuranceChallengeTTLSeconds > MaxAssuranceChallengeTTLSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS must be in (0, %d], got %d",
+			MaxAssuranceChallengeTTLSeconds, c.AssuranceChallengeTTLSeconds,
+		)
+	}
+	if c.AssuranceTokenTTLSeconds <= 0 || c.AssuranceTokenTTLSeconds > MaxAssuranceTokenTTLSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS must be in (0, %d], got %d",
+			MaxAssuranceTokenTTLSeconds, c.AssuranceTokenTTLSeconds,
+		)
+	}
+	if c.AssuranceWebTokenTTLSeconds < 0 || c.AssuranceWebTokenTTLSeconds > MaxAssuranceTokenTTLSeconds {
+		return fmt.Errorf(
+			"config: GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS must be in [0, %d] (0 = use the global TTL), got %d",
+			MaxAssuranceTokenTTLSeconds, c.AssuranceWebTokenTTLSeconds,
+		)
+	}
+	if c.AssuranceDeviceRetentionDays > 0 {
+		retentionSeconds := c.AssuranceDeviceRetentionDays * 24 * 60 * 60
+		if retentionSeconds <= c.AssuranceTokenTTLSeconds {
+			return fmt.Errorf(
+				"config: GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS=%d (%ds) must exceed GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS=%d — "+
+					"a device reaped before its own token expires can never refresh",
+				c.AssuranceDeviceRetentionDays, retentionSeconds, c.AssuranceTokenTTLSeconds,
+			)
+		}
+	}
+	return nil
+}
+
+// validateAssuranceArms enforces which attestation arms exist and that each
+// one is COMPLETE. Companion variables are checked in both directions: a
+// one-directional check lets a half-configured arm be silently inactive —
+// the operator believes it is on, the server disagrees, and nothing says so.
+func (c *Config) validateAssuranceArms() error {
+	if c.AssuranceAndroidPackageName == "" &&
+		(c.AssuranceAndroidSAKeyJSON != "" || c.AssuranceAndroidCertDigests != "") {
+		return errors.New(
+			"config: GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON / _CERT_SHA256_DIGESTS are set without " +
+				"GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME, so the Android arm is silently inactive",
+		)
+	}
+	if c.AssuranceWebProvider == "" &&
+		(c.AssuranceTurnstileSecret != "" || c.AssuranceTurnstileSiteKey != "" || c.AssuranceRecaptchaSecret != "") {
+		return errors.New(
+			"config: a web-provider secret is set without GATEWAY_ASSURANCE_WEB_PROVIDER, " +
+				"so the web arm is silently inactive (set the provider, or unset the secret)",
+		)
+	}
+	if (c.AssuranceIOSTeamID == "") != (c.AssuranceIOSBundleID == "") {
+		return errors.New("config: GATEWAY_ASSURANCE_IOS_TEAM_ID and GATEWAY_ASSURANCE_IOS_BUNDLE_ID must be set together")
+	}
+	switch c.AssuranceIOSEnv {
+	case "", "production", "development":
+	default:
+		return fmt.Errorf("config: GATEWAY_ASSURANCE_IOS_ENV must be production or development, got %q", c.AssuranceIOSEnv)
+	}
+	if c.AssuranceAndroidPackageName != "" {
+		if len(c.AssuranceAndroidCertDigestList()) == 0 {
+			return errors.New("config: GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME requires GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS")
+		}
+		if c.AssuranceAndroidSAKeyJSON == "" {
+			return errors.New("config: GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME requires GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON")
+		}
+	}
+
+	// At least one arm must be usable. Enabling assurance turns the
+	// per-endpoint enforce toggles on (all default true) while every path to
+	// OBTAIN a token reports ErrAssuranceDisabled, so an enabled deployment
+	// with nothing configured would boot cleanly and lock every user out of
+	// signup, login, reset, email-code, magic-link and passkey-signup.
+	//
+	// A per-project deployment (app identities in each project's config_json)
+	// is legitimate, but it must SAY so: GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY
+	// is the single, driver-independent acknowledgement. Exempting the
+	// control-plane drivers automatically would be unsound — the default
+	// driver IS postgres, so the invariant would never fire by default, and
+	// the WEB arm is deployment-global by design (ADR-0012), so no amount of
+	// per-project config can ever restore a missing web provider.
+	hasWeb := c.AssuranceWebProvider != ""
+	hasIOS := c.AssuranceIOSTeamID != "" && c.AssuranceIOSBundleID != ""
+	hasAndroid := c.AssuranceAndroidPackageName != ""
+	if !hasWeb && !hasIOS && !hasAndroid && !c.AssuranceAllowProjectOnly {
+		return errors.New(
+			"config: GATEWAY_ASSURANCE_ENABLED=true requires at least one configured arm — " +
+				"a web provider (GATEWAY_ASSURANCE_WEB_PROVIDER), an iOS app " +
+				"(GATEWAY_ASSURANCE_IOS_TEAM_ID + GATEWAY_ASSURANCE_IOS_BUNDLE_ID), " +
+				"or an Android app (GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME) — " +
+				"or GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY=true when every app identity " +
+				"lives in per-project config_json; otherwise the enforce toggles deny " +
+				"every auth endpoint with no way to obtain a token",
+		)
+	}
+	return nil
+}
+
+// validateAssuranceWebProvider enforces the web arm's provider/secret
+// invariants. An empty provider is valid: a mobile-attestation-only
+// deployment, which validateAssuranceArms has already confirmed has some
+// other arm (or the explicit project-only acknowledgement).
+func (c *Config) validateAssuranceWebProvider() error {
+	switch c.AssuranceWebProvider {
+	case "":
+		return nil
+	case AssuranceWebProviderTurnstile:
+		if c.AssuranceTurnstileSecret == "" {
+			return fmt.Errorf("config: GATEWAY_ASSURANCE_ENABLED=true with provider %q requires GATEWAY_ASSURANCE_TURNSTILE_SECRET", AssuranceWebProviderTurnstile)
 		}
 		// The hosted sign-up UI needs the public site key to render the widget;
 		// without it, enforcement would reject every browser sign-up.
-		if c.CaptchaTurnstileSiteKey == "" {
-			return fmt.Errorf("config: GATEWAY_CAPTCHA_ENABLED=true with provider %q requires GATEWAY_CAPTCHA_TURNSTILE_SITE_KEY", CaptchaProviderTurnstile)
+		if c.AssuranceTurnstileSiteKey == "" {
+			return fmt.Errorf("config: GATEWAY_ASSURANCE_ENABLED=true with provider %q requires GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY", AssuranceWebProviderTurnstile)
 		}
-	case CaptchaProviderRecaptchaV3:
-		if c.CaptchaRecaptchaSecret == "" {
-			return fmt.Errorf("config: GATEWAY_CAPTCHA_ENABLED=true with provider %q requires GATEWAY_CAPTCHA_RECAPTCHA_SECRET", CaptchaProviderRecaptchaV3)
+	case AssuranceWebProviderRecaptchaV3:
+		if c.AssuranceRecaptchaSecret == "" {
+			return fmt.Errorf("config: GATEWAY_ASSURANCE_ENABLED=true with provider %q requires GATEWAY_ASSURANCE_RECAPTCHA_SECRET", AssuranceWebProviderRecaptchaV3)
 		}
-		if c.CaptchaRecaptchaScoreThreshold < 0 || c.CaptchaRecaptchaScoreThreshold > 1 {
+		if c.AssuranceRecaptchaScoreThreshold < 0 || c.AssuranceRecaptchaScoreThreshold > 1 {
 			return fmt.Errorf(
-				"config: GATEWAY_CAPTCHA_RECAPTCHA_SCORE_THRESHOLD=%v must be in [0,1]",
-				c.CaptchaRecaptchaScoreThreshold,
+				"config: GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD=%v must be in [0,1]",
+				c.AssuranceRecaptchaScoreThreshold,
 			)
 		}
 	default:
 		return fmt.Errorf(
-			"config: GATEWAY_CAPTCHA_ENABLED=true requires GATEWAY_CAPTCHA_PROVIDER to be one of: %q, %q; got %q",
-			CaptchaProviderTurnstile, CaptchaProviderRecaptchaV3, c.CaptchaProvider,
+			"config: GATEWAY_ASSURANCE_ENABLED=true requires GATEWAY_ASSURANCE_WEB_PROVIDER to be one of: %q, %q; got %q",
+			AssuranceWebProviderTurnstile, AssuranceWebProviderRecaptchaV3, c.AssuranceWebProvider,
 		)
 	}
-
 	return nil
 }
 

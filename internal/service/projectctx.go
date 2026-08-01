@@ -76,6 +76,11 @@ type ProjectScope struct {
 	// before. The env default project has no config_json and therefore no
 	// product policy — gating a product requires a control-plane project.
 	Products ProjectProductsConfig
+	// Assurance is the project's client-attestation identity (which app
+	// builds' hardware attestations it accepts), parsed from config_json.
+	// Zero for a project that configures none, in which case only the
+	// default project can attest (via the env-configured app identity).
+	Assurance ProjectAssuranceConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -113,6 +118,7 @@ type ResolvedProject struct {
 	OAuth              ProjectOAuthConfig
 	Access             ProjectAccessConfig
 	Products           ProjectProductsConfig
+	Assurance          ProjectAssuranceConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

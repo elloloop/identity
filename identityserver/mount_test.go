@@ -8,14 +8,17 @@ import (
 
 	"connectrpc.com/connect"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	identityconnectgen "github.com/elloloop/identity/gen/go/identity/v1/identityv1connect"
 	"github.com/elloloop/identity/identityserver"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo/memory"
+	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 )
 
@@ -23,6 +26,14 @@ import (
 // test signer, so the mount tests run with no external datastore, file
 // signer, or OTel exporter. Workers are started and drained via t.Cleanup.
 func newTestServer(t *testing.T) *identityserver.Server {
+	t.Helper()
+	return newTestServerWith(t, nil, nil)
+}
+
+// newTestServerWith builds the mount fixture with optional config
+// mutation and option decoration, for tests that exercise a config-gated
+// surface (client assurance).
+func newTestServerWith(t *testing.T, mutate func(*config.Config), decorate func(*identityserver.Options)) *identityserver.Server {
 	t.Helper()
 
 	repo := memory.New()
@@ -50,12 +61,20 @@ func newTestServer(t *testing.T) *identityserver.Server {
 		PasswordResetExpirySeconds:    3600,
 	}
 
-	srv, err := identityserver.New(context.Background(), identityserver.Options{
+	if mutate != nil {
+		mutate(&cfg)
+	}
+	opts := identityserver.Options{
 		Config: cfg,
 		Signer: jwttest.NewSigner(t, "mount-test"),
 		Repo:   repo,
 		DB:     repo,
-	})
+	}
+	if decorate != nil {
+		decorate(&opts)
+	}
+
+	srv, err := identityserver.New(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("identityserver.New: %v", err)
 	}
@@ -155,5 +174,127 @@ func TestRegisterGRPCMount(t *testing.T) {
 	}
 	if got := cur.GetUser().GetEmail(); got != "grpc-mount@example.com" {
 		t.Fatalf("GetCurrentUser email = %q; want grpc-mount@example.com", got)
+	}
+}
+
+// stubAssuranceVerifier accepts one captcha value, standing in for
+// Turnstile on the native-gRPC surface.
+type stubAssuranceVerifier struct{}
+
+func (stubAssuranceVerifier) Name() string { return "stub" }
+func (stubAssuranceVerifier) Verify(_ context.Context, token, _ string) error {
+	if token == "ok" {
+		return nil
+	}
+	return assurance.ErrVerificationFailed
+}
+
+// TestRegisterGRPCAssuranceParity pins that the client-assurance RPCs are
+// reachable over the native gRPC surface. Enforcement reads the
+// X-Assurance-Token header, so a host whose bridge omits the exchange
+// RPCs would have every gated RPC deny forever with no way to obtain a
+// token — the v3 CAPTCHA solution used to ride inside the request message,
+// so this parity is new and load-bearing.
+func TestRegisterGRPCAssuranceParity(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServerWith(t, func(c *config.Config) {
+		c.AssuranceEnabled = true
+		c.AssuranceChallengeTTLSeconds = 300
+		c.AssuranceTokenTTLSeconds = 3600
+		c.AssuranceWebProvider = config.AssuranceWebProviderTurnstile
+		c.AssuranceTurnstileSecret = "secret"
+		c.AssuranceTurnstileSiteKey = "sitekey"
+		// A real iOS arm, so a REACHED RefreshAssuranceToken handler rejects
+		// the bogus assertion with PermissionDenied. Without it the handler
+		// would answer Unimplemented — indistinguishable from an unbridged
+		// method, which would make the parity assertion vacuous.
+		c.AssuranceIOSTeamID = "TEAM123456"
+		c.AssuranceIOSBundleID = "com.example.app"
+		c.AssuranceEnforcePasswordSignup = true
+	}, func(o *identityserver.Options) {
+		o.AssuranceWebVerifier = stubAssuranceVerifier{}
+	})
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	grpcSrv := grpc.NewServer()
+	srv.RegisterGRPC(grpcSrv)
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- grpcSrv.Serve(lis) }()
+	t.Cleanup(func() {
+		grpcSrv.GracefulStop()
+		if err := <-serveErr; err != nil {
+			t.Errorf("grpc Serve: %v", err)
+		}
+	})
+
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	client := identitypb.NewIdentityServiceClient(conn)
+	ctx := context.Background()
+
+	// Without a token the gated RPC denies.
+	if _, err := client.PasswordSignup(ctx, &identitypb.PasswordSignupRequest{
+		Email: "grpc-assured@example.com", Password: "Password-12345678a",
+	}); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("unassured signup code = %v, want PermissionDenied", status.Code(err))
+	}
+
+	// The exchange must be reachable over gRPC — this is what the missing
+	// bridge methods made impossible.
+	issued, err := client.IssueAssuranceToken(ctx, &identitypb.IssueAssuranceTokenRequest{
+		Platform: "web", WebToken: "ok",
+	})
+	if err != nil {
+		t.Fatalf("IssueAssuranceToken over *grpc.Server: %v", err)
+	}
+	if issued.GetAssuranceToken() == "" {
+		t.Fatal("no assurance token returned")
+	}
+
+	// The challenge RPC is bridged too (mobile clients start here).
+	ch, err := client.CreateAssuranceChallenge(ctx, &identitypb.CreateAssuranceChallengeRequest{
+		Platform: "ios",
+	})
+	if err != nil {
+		t.Fatalf("CreateAssuranceChallenge over *grpc.Server: %v", err)
+	}
+
+	// The refresh RPC must be bridged too: it is the only wire path to the
+	// App Attest assertion + sign-counter CAS, so an unbridged method would
+	// leave iOS clients unable to renew without a full re-attestation. This
+	// deployment configures no App Attest verifier, so Unimplemented is the
+	// expected verdict — what matters is that the call REACHES the handler
+	// rather than hitting the bridge's UnimplementedIdentityServiceServer.
+	_, err = client.RefreshAssuranceToken(ctx, &identitypb.RefreshAssuranceTokenRequest{
+		ChallengeId: ch.GetChallengeId(),
+		KeyId:       "dW5rbm93bi1rZXk",
+		Assertion:   []byte("assertion"),
+	})
+	// PermissionDenied means the handler ran and rejected the evidence.
+	// Unimplemented here would mean the bridge method is missing entirely.
+	if code := status.Code(err); code != codes.PermissionDenied {
+		t.Fatalf("RefreshAssuranceToken over *grpc.Server: code = %v, want PermissionDenied "+
+			"(Unimplemented means the bridge method is missing) (err=%v)", code, err)
+	}
+
+	// Metadata carries the token into the Connect handler, so the gated RPC
+	// now succeeds.
+	assuredCtx := metadata.NewOutgoingContext(ctx,
+		metadata.Pairs(assurance.HeaderName, issued.GetAssuranceToken()))
+	resp, err := client.PasswordSignup(assuredCtx, &identitypb.PasswordSignupRequest{
+		Email: "grpc-assured@example.com", Password: "Password-12345678a",
+	})
+	if err != nil {
+		t.Fatalf("assured signup over *grpc.Server: %v", err)
+	}
+	if resp.GetAccessToken() == "" {
+		t.Fatal("expected an access token")
 	}
 }

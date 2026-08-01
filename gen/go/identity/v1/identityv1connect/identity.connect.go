@@ -63,6 +63,15 @@ const (
 	// IdentityServiceRedeemMagicLinkProcedure is the fully-qualified name of the IdentityService's
 	// RedeemMagicLink RPC.
 	IdentityServiceRedeemMagicLinkProcedure = "/identity.v1.IdentityService/RedeemMagicLink"
+	// IdentityServiceCreateAssuranceChallengeProcedure is the fully-qualified name of the
+	// IdentityService's CreateAssuranceChallenge RPC.
+	IdentityServiceCreateAssuranceChallengeProcedure = "/identity.v1.IdentityService/CreateAssuranceChallenge"
+	// IdentityServiceIssueAssuranceTokenProcedure is the fully-qualified name of the IdentityService's
+	// IssueAssuranceToken RPC.
+	IdentityServiceIssueAssuranceTokenProcedure = "/identity.v1.IdentityService/IssueAssuranceToken"
+	// IdentityServiceRefreshAssuranceTokenProcedure is the fully-qualified name of the
+	// IdentityService's RefreshAssuranceToken RPC.
+	IdentityServiceRefreshAssuranceTokenProcedure = "/identity.v1.IdentityService/RefreshAssuranceToken"
 	// IdentityServiceRequestPhoneVerificationProcedure is the fully-qualified name of the
 	// IdentityService's RequestPhoneVerification RPC.
 	IdentityServiceRequestPhoneVerificationProcedure = "/identity.v1.IdentityService/RequestPhoneVerification"
@@ -325,6 +334,12 @@ const (
 	// IdentityServiceAdminSetProjectOAuthProviderProcedure is the fully-qualified name of the
 	// IdentityService's AdminSetProjectOAuthProvider RPC.
 	IdentityServiceAdminSetProjectOAuthProviderProcedure = "/identity.v1.IdentityService/AdminSetProjectOAuthProvider"
+	// IdentityServiceAdminSetProjectAssuranceProcedure is the fully-qualified name of the
+	// IdentityService's AdminSetProjectAssurance RPC.
+	IdentityServiceAdminSetProjectAssuranceProcedure = "/identity.v1.IdentityService/AdminSetProjectAssurance"
+	// IdentityServiceAdminGetProjectAssuranceProcedure is the fully-qualified name of the
+	// IdentityService's AdminGetProjectAssurance RPC.
+	IdentityServiceAdminGetProjectAssuranceProcedure = "/identity.v1.IdentityService/AdminGetProjectAssurance"
 	// IdentityServiceAdminDeleteProjectOAuthProviderProcedure is the fully-qualified name of the
 	// IdentityService's AdminDeleteProjectOAuthProvider RPC.
 	IdentityServiceAdminDeleteProjectOAuthProviderProcedure = "/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider"
@@ -347,6 +362,14 @@ type IdentityServiceClient interface {
 	VerifyEmailLoginCode(context.Context, *connect.Request[v1.VerifyEmailLoginCodeRequest]) (*connect.Response[v1.VerifyEmailLoginCodeResponse], error)
 	RequestMagicLink(context.Context, *connect.Request[v1.RequestMagicLinkRequest]) (*connect.Response[v1.RequestMagicLinkResponse], error)
 	RedeemMagicLink(context.Context, *connect.Request[v1.RedeemMagicLinkRequest]) (*connect.Response[v1.RedeemMagicLinkResponse], error)
+	// Client assurance — App Check-style attestation, independent of user
+	// identity. A client proves it is a genuine build on genuine hardware
+	// (iOS App Attest / Android Play Integrity) or a human-passed web
+	// client (Turnstile / reCAPTCHA), and receives a short-lived assurance
+	// token to attach as the X-Assurance-Token header on subsequent RPCs.
+	CreateAssuranceChallenge(context.Context, *connect.Request[v1.CreateAssuranceChallengeRequest]) (*connect.Response[v1.CreateAssuranceChallengeResponse], error)
+	IssueAssuranceToken(context.Context, *connect.Request[v1.IssueAssuranceTokenRequest]) (*connect.Response[v1.IssueAssuranceTokenResponse], error)
+	RefreshAssuranceToken(context.Context, *connect.Request[v1.RefreshAssuranceTokenRequest]) (*connect.Response[v1.RefreshAssuranceTokenResponse], error)
 	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *connect.Request[v1.RequestPhoneVerificationRequest]) (*connect.Response[v1.RequestPhoneVerificationResponse], error)
 	VerifyPhoneCode(context.Context, *connect.Request[v1.VerifyPhoneCodeRequest]) (*connect.Response[v1.VerifyPhoneCodeResponse], error)
@@ -508,6 +531,11 @@ type IdentityServiceClient interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error)
+	// Per-project client-assurance authoring. Takes the Play Integrity
+	// service-account key in plaintext and encrypts it server-side, so an
+	// operator never has to reimplement the at-rest encryption.
+	AdminSetProjectAssurance(context.Context, *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error)
+	AdminGetProjectAssurance(context.Context, *connect.Request[v1.AdminGetProjectAssuranceRequest]) (*connect.Response[v1.AdminGetProjectAssuranceResponse], error)
 	AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error)
 	AdminListProjectOAuthProviders(context.Context, *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error)
 }
@@ -581,6 +609,24 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceRedeemMagicLinkProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("RedeemMagicLink")),
+			connect.WithClientOptions(opts...),
+		),
+		createAssuranceChallenge: connect.NewClient[v1.CreateAssuranceChallengeRequest, v1.CreateAssuranceChallengeResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateAssuranceChallengeProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateAssuranceChallenge")),
+			connect.WithClientOptions(opts...),
+		),
+		issueAssuranceToken: connect.NewClient[v1.IssueAssuranceTokenRequest, v1.IssueAssuranceTokenResponse](
+			httpClient,
+			baseURL+IdentityServiceIssueAssuranceTokenProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("IssueAssuranceToken")),
+			connect.WithClientOptions(opts...),
+		),
+		refreshAssuranceToken: connect.NewClient[v1.RefreshAssuranceTokenRequest, v1.RefreshAssuranceTokenResponse](
+			httpClient,
+			baseURL+IdentityServiceRefreshAssuranceTokenProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RefreshAssuranceToken")),
 			connect.WithClientOptions(opts...),
 		),
 		requestPhoneVerification: connect.NewClient[v1.RequestPhoneVerificationRequest, v1.RequestPhoneVerificationResponse](
@@ -1111,6 +1157,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectOAuthProvider")),
 			connect.WithClientOptions(opts...),
 		),
+		adminSetProjectAssurance: connect.NewClient[v1.AdminSetProjectAssuranceRequest, v1.AdminSetProjectAssuranceResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminSetProjectAssuranceProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectAssurance")),
+			connect.WithClientOptions(opts...),
+		),
+		adminGetProjectAssurance: connect.NewClient[v1.AdminGetProjectAssuranceRequest, v1.AdminGetProjectAssuranceResponse](
+			httpClient,
+			baseURL+IdentityServiceAdminGetProjectAssuranceProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("AdminGetProjectAssurance")),
+			connect.WithClientOptions(opts...),
+		),
 		adminDeleteProjectOAuthProvider: connect.NewClient[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse](
 			httpClient,
 			baseURL+IdentityServiceAdminDeleteProjectOAuthProviderProcedure,
@@ -1138,6 +1196,9 @@ type identityServiceClient struct {
 	verifyEmailLoginCode            *connect.Client[v1.VerifyEmailLoginCodeRequest, v1.VerifyEmailLoginCodeResponse]
 	requestMagicLink                *connect.Client[v1.RequestMagicLinkRequest, v1.RequestMagicLinkResponse]
 	redeemMagicLink                 *connect.Client[v1.RedeemMagicLinkRequest, v1.RedeemMagicLinkResponse]
+	createAssuranceChallenge        *connect.Client[v1.CreateAssuranceChallengeRequest, v1.CreateAssuranceChallengeResponse]
+	issueAssuranceToken             *connect.Client[v1.IssueAssuranceTokenRequest, v1.IssueAssuranceTokenResponse]
+	refreshAssuranceToken           *connect.Client[v1.RefreshAssuranceTokenRequest, v1.RefreshAssuranceTokenResponse]
 	requestPhoneVerification        *connect.Client[v1.RequestPhoneVerificationRequest, v1.RequestPhoneVerificationResponse]
 	verifyPhoneCode                 *connect.Client[v1.VerifyPhoneCodeRequest, v1.VerifyPhoneCodeResponse]
 	getCurrentUser                  *connect.Client[v1.GetCurrentUserRequest, v1.GetCurrentUserResponse]
@@ -1226,6 +1287,8 @@ type identityServiceClient struct {
 	upsertProjectConfig             *connect.Client[v1.UpsertProjectConfigRequest, v1.UpsertProjectConfigResponse]
 	getProjectConfig                *connect.Client[v1.GetProjectConfigRequest, v1.GetProjectConfigResponse]
 	adminSetProjectOAuthProvider    *connect.Client[v1.AdminSetProjectOAuthProviderRequest, v1.AdminSetProjectOAuthProviderResponse]
+	adminSetProjectAssurance        *connect.Client[v1.AdminSetProjectAssuranceRequest, v1.AdminSetProjectAssuranceResponse]
+	adminGetProjectAssurance        *connect.Client[v1.AdminGetProjectAssuranceRequest, v1.AdminGetProjectAssuranceResponse]
 	adminDeleteProjectOAuthProvider *connect.Client[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse]
 	adminListProjectOAuthProviders  *connect.Client[v1.AdminListProjectOAuthProvidersRequest, v1.AdminListProjectOAuthProvidersResponse]
 }
@@ -1278,6 +1341,21 @@ func (c *identityServiceClient) RequestMagicLink(ctx context.Context, req *conne
 // RedeemMagicLink calls identity.v1.IdentityService.RedeemMagicLink.
 func (c *identityServiceClient) RedeemMagicLink(ctx context.Context, req *connect.Request[v1.RedeemMagicLinkRequest]) (*connect.Response[v1.RedeemMagicLinkResponse], error) {
 	return c.redeemMagicLink.CallUnary(ctx, req)
+}
+
+// CreateAssuranceChallenge calls identity.v1.IdentityService.CreateAssuranceChallenge.
+func (c *identityServiceClient) CreateAssuranceChallenge(ctx context.Context, req *connect.Request[v1.CreateAssuranceChallengeRequest]) (*connect.Response[v1.CreateAssuranceChallengeResponse], error) {
+	return c.createAssuranceChallenge.CallUnary(ctx, req)
+}
+
+// IssueAssuranceToken calls identity.v1.IdentityService.IssueAssuranceToken.
+func (c *identityServiceClient) IssueAssuranceToken(ctx context.Context, req *connect.Request[v1.IssueAssuranceTokenRequest]) (*connect.Response[v1.IssueAssuranceTokenResponse], error) {
+	return c.issueAssuranceToken.CallUnary(ctx, req)
+}
+
+// RefreshAssuranceToken calls identity.v1.IdentityService.RefreshAssuranceToken.
+func (c *identityServiceClient) RefreshAssuranceToken(ctx context.Context, req *connect.Request[v1.RefreshAssuranceTokenRequest]) (*connect.Response[v1.RefreshAssuranceTokenResponse], error) {
+	return c.refreshAssuranceToken.CallUnary(ctx, req)
 }
 
 // RequestPhoneVerification calls identity.v1.IdentityService.RequestPhoneVerification.
@@ -1720,6 +1798,16 @@ func (c *identityServiceClient) AdminSetProjectOAuthProvider(ctx context.Context
 	return c.adminSetProjectOAuthProvider.CallUnary(ctx, req)
 }
 
+// AdminSetProjectAssurance calls identity.v1.IdentityService.AdminSetProjectAssurance.
+func (c *identityServiceClient) AdminSetProjectAssurance(ctx context.Context, req *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error) {
+	return c.adminSetProjectAssurance.CallUnary(ctx, req)
+}
+
+// AdminGetProjectAssurance calls identity.v1.IdentityService.AdminGetProjectAssurance.
+func (c *identityServiceClient) AdminGetProjectAssurance(ctx context.Context, req *connect.Request[v1.AdminGetProjectAssuranceRequest]) (*connect.Response[v1.AdminGetProjectAssuranceResponse], error) {
+	return c.adminGetProjectAssurance.CallUnary(ctx, req)
+}
+
 // AdminDeleteProjectOAuthProvider calls
 // identity.v1.IdentityService.AdminDeleteProjectOAuthProvider.
 func (c *identityServiceClient) AdminDeleteProjectOAuthProvider(ctx context.Context, req *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error) {
@@ -1745,6 +1833,14 @@ type IdentityServiceHandler interface {
 	VerifyEmailLoginCode(context.Context, *connect.Request[v1.VerifyEmailLoginCodeRequest]) (*connect.Response[v1.VerifyEmailLoginCodeResponse], error)
 	RequestMagicLink(context.Context, *connect.Request[v1.RequestMagicLinkRequest]) (*connect.Response[v1.RequestMagicLinkResponse], error)
 	RedeemMagicLink(context.Context, *connect.Request[v1.RedeemMagicLinkRequest]) (*connect.Response[v1.RedeemMagicLinkResponse], error)
+	// Client assurance — App Check-style attestation, independent of user
+	// identity. A client proves it is a genuine build on genuine hardware
+	// (iOS App Attest / Android Play Integrity) or a human-passed web
+	// client (Turnstile / reCAPTCHA), and receives a short-lived assurance
+	// token to attach as the X-Assurance-Token header on subsequent RPCs.
+	CreateAssuranceChallenge(context.Context, *connect.Request[v1.CreateAssuranceChallengeRequest]) (*connect.Response[v1.CreateAssuranceChallengeResponse], error)
+	IssueAssuranceToken(context.Context, *connect.Request[v1.IssueAssuranceTokenRequest]) (*connect.Response[v1.IssueAssuranceTokenResponse], error)
+	RefreshAssuranceToken(context.Context, *connect.Request[v1.RefreshAssuranceTokenRequest]) (*connect.Response[v1.RefreshAssuranceTokenResponse], error)
 	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *connect.Request[v1.RequestPhoneVerificationRequest]) (*connect.Response[v1.RequestPhoneVerificationResponse], error)
 	VerifyPhoneCode(context.Context, *connect.Request[v1.VerifyPhoneCodeRequest]) (*connect.Response[v1.VerifyPhoneCodeResponse], error)
@@ -1906,6 +2002,11 @@ type IdentityServiceHandler interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error)
+	// Per-project client-assurance authoring. Takes the Play Integrity
+	// service-account key in plaintext and encrypts it server-side, so an
+	// operator never has to reimplement the at-rest encryption.
+	AdminSetProjectAssurance(context.Context, *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error)
+	AdminGetProjectAssurance(context.Context, *connect.Request[v1.AdminGetProjectAssuranceRequest]) (*connect.Response[v1.AdminGetProjectAssuranceResponse], error)
 	AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error)
 	AdminListProjectOAuthProviders(context.Context, *connect.Request[v1.AdminListProjectOAuthProvidersRequest]) (*connect.Response[v1.AdminListProjectOAuthProvidersResponse], error)
 }
@@ -1975,6 +2076,24 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceRedeemMagicLinkProcedure,
 		svc.RedeemMagicLink,
 		connect.WithSchema(identityServiceMethods.ByName("RedeemMagicLink")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceCreateAssuranceChallengeHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateAssuranceChallengeProcedure,
+		svc.CreateAssuranceChallenge,
+		connect.WithSchema(identityServiceMethods.ByName("CreateAssuranceChallenge")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceIssueAssuranceTokenHandler := connect.NewUnaryHandler(
+		IdentityServiceIssueAssuranceTokenProcedure,
+		svc.IssueAssuranceToken,
+		connect.WithSchema(identityServiceMethods.ByName("IssueAssuranceToken")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRefreshAssuranceTokenHandler := connect.NewUnaryHandler(
+		IdentityServiceRefreshAssuranceTokenProcedure,
+		svc.RefreshAssuranceToken,
+		connect.WithSchema(identityServiceMethods.ByName("RefreshAssuranceToken")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceRequestPhoneVerificationHandler := connect.NewUnaryHandler(
@@ -2505,6 +2624,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectOAuthProvider")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceAdminSetProjectAssuranceHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminSetProjectAssuranceProcedure,
+		svc.AdminSetProjectAssurance,
+		connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectAssurance")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceAdminGetProjectAssuranceHandler := connect.NewUnaryHandler(
+		IdentityServiceAdminGetProjectAssuranceProcedure,
+		svc.AdminGetProjectAssurance,
+		connect.WithSchema(identityServiceMethods.ByName("AdminGetProjectAssurance")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceAdminDeleteProjectOAuthProviderHandler := connect.NewUnaryHandler(
 		IdentityServiceAdminDeleteProjectOAuthProviderProcedure,
 		svc.AdminDeleteProjectOAuthProvider,
@@ -2539,6 +2670,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceRequestMagicLinkHandler.ServeHTTP(w, r)
 		case IdentityServiceRedeemMagicLinkProcedure:
 			identityServiceRedeemMagicLinkHandler.ServeHTTP(w, r)
+		case IdentityServiceCreateAssuranceChallengeProcedure:
+			identityServiceCreateAssuranceChallengeHandler.ServeHTTP(w, r)
+		case IdentityServiceIssueAssuranceTokenProcedure:
+			identityServiceIssueAssuranceTokenHandler.ServeHTTP(w, r)
+		case IdentityServiceRefreshAssuranceTokenProcedure:
+			identityServiceRefreshAssuranceTokenHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestPhoneVerificationProcedure:
 			identityServiceRequestPhoneVerificationHandler.ServeHTTP(w, r)
 		case IdentityServiceVerifyPhoneCodeProcedure:
@@ -2715,6 +2852,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceGetProjectConfigHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminSetProjectOAuthProviderProcedure:
 			identityServiceAdminSetProjectOAuthProviderHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminSetProjectAssuranceProcedure:
+			identityServiceAdminSetProjectAssuranceHandler.ServeHTTP(w, r)
+		case IdentityServiceAdminGetProjectAssuranceProcedure:
+			identityServiceAdminGetProjectAssuranceHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminDeleteProjectOAuthProviderProcedure:
 			identityServiceAdminDeleteProjectOAuthProviderHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminListProjectOAuthProvidersProcedure:
@@ -2766,6 +2907,18 @@ func (UnimplementedIdentityServiceHandler) RequestMagicLink(context.Context, *co
 
 func (UnimplementedIdentityServiceHandler) RedeemMagicLink(context.Context, *connect.Request[v1.RedeemMagicLinkRequest]) (*connect.Response[v1.RedeemMagicLinkResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RedeemMagicLink is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CreateAssuranceChallenge(context.Context, *connect.Request[v1.CreateAssuranceChallengeRequest]) (*connect.Response[v1.CreateAssuranceChallengeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateAssuranceChallenge is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) IssueAssuranceToken(context.Context, *connect.Request[v1.IssueAssuranceTokenRequest]) (*connect.Response[v1.IssueAssuranceTokenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.IssueAssuranceToken is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RefreshAssuranceToken(context.Context, *connect.Request[v1.RefreshAssuranceTokenRequest]) (*connect.Response[v1.RefreshAssuranceTokenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RefreshAssuranceToken is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) RequestPhoneVerification(context.Context, *connect.Request[v1.RequestPhoneVerificationRequest]) (*connect.Response[v1.RequestPhoneVerificationResponse], error) {
@@ -3118,6 +3271,14 @@ func (UnimplementedIdentityServiceHandler) GetProjectConfig(context.Context, *co
 
 func (UnimplementedIdentityServiceHandler) AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminSetProjectOAuthProvider is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminSetProjectAssurance(context.Context, *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminSetProjectAssurance is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) AdminGetProjectAssurance(context.Context, *connect.Request[v1.AdminGetProjectAssuranceRequest]) (*connect.Response[v1.AdminGetProjectAssuranceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminGetProjectAssurance is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) AdminDeleteProjectOAuthProvider(context.Context, *connect.Request[v1.AdminDeleteProjectOAuthProviderRequest]) (*connect.Response[v1.AdminDeleteProjectOAuthProviderResponse], error) {

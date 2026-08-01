@@ -267,9 +267,12 @@ func TestRFC7519_EmptySubReturnsError(t *testing.T) {
 
 	tokenStr, err := s.SignAccessToken(context.Background(), claims, 15*time.Minute)
 	if err == nil {
-		got, err := VerifyAccessToken(tokenStr, s, "", "", false)
-		require.NoError(t, err)
-		assert.Equal(t, "", got.Sub)
+		// A token without a subject must never verify as an access token:
+		// other token species (assurance tokens) share the signing keys
+		// and are distinguished by carrying no sub.
+		_, err := VerifyAccessToken(tokenStr, s, "", "", false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing sub")
 	}
 }
 

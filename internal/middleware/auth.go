@@ -27,11 +27,17 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/VerifyEmailLoginCode":  true,
 	"/identity.v1.IdentityService/RequestMagicLink":      true,
 	"/identity.v1.IdentityService/RedeemMagicLink":       true,
-	"/identity.v1.IdentityService/RefreshToken":          true,
-	"/identity.v1.IdentityService/Logout":                true,
-	"/identity.v1.IdentityService/GetCurrentUser":        true,
-	"/identity.v1.IdentityService/BeginPasskeyLogin":     true,
-	"/identity.v1.IdentityService/CompletePasskeyLogin":  true,
+	// Client assurance: a client proves what it IS (genuine app on genuine
+	// hardware, or a human-passed web client) before anyone signs in, so
+	// none of these can carry a user JWT.
+	"/identity.v1.IdentityService/CreateAssuranceChallenge": true,
+	"/identity.v1.IdentityService/IssueAssuranceToken":      true,
+	"/identity.v1.IdentityService/RefreshAssuranceToken":    true,
+	"/identity.v1.IdentityService/RefreshToken":             true,
+	"/identity.v1.IdentityService/Logout":                   true,
+	"/identity.v1.IdentityService/GetCurrentUser":           true,
+	"/identity.v1.IdentityService/BeginPasskeyLogin":        true,
+	"/identity.v1.IdentityService/CompletePasskeyLogin":     true,
 	// Passkey-first signup: the caller is anonymous — they are creating a
 	// brand-new account from a passkey and have no JWT yet.
 	"/identity.v1.IdentityService/BeginPasskeySignup":    true,
@@ -74,6 +80,8 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/AdminSetProjectOAuthProvider":    true,
 	"/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider": true,
 	"/identity.v1.IdentityService/AdminListProjectOAuthProviders":  true,
+	"/identity.v1.IdentityService/AdminSetProjectAssurance":        true,
+	"/identity.v1.IdentityService/AdminGetProjectAssurance":        true,
 	// CreateFirstPlatformAdmin is the trust-on-first-use bootstrap: a fresh
 	// deployer carries NO JWT (no operator user exists yet), so it must be
 	// JWT-exempt or the first operator could never be created. It is not

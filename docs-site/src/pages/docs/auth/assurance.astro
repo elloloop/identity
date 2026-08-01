@@ -1,0 +1,254 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Client assurance (attestation)">
+  <h1>Client assurance (attestation)</h1>
+  <p>
+    Client assurance proves what a <em>client</em> is — a genuine, unmodified
+    build of your app on genuine hardware (iOS App Attest, Android Play
+    Integrity) or a human-passed web client (Cloudflare Turnstile, Google
+    reCAPTCHA v3) — independently of whether anyone is signed in. Verified
+    evidence is exchanged for a short-lived <strong>assurance token</strong>
+    that clients attach as the <code>X-Assurance-Token</code> header. It is
+    the equivalent of Firebase App Check.
+  </p>
+  <p>
+    The token is a JWT signed by the deployment's JWKS with
+    <code>aud: "assurance"</code>, an <code>amr</code> claim naming the
+    provider that passed, the minting project, and — deliberately — no
+    subject. It can never authenticate as a user, and a user token can never
+    pass as assurance. Downstream services can require it on their own APIs
+    by validating against <code>/.well-known/jwks.json</code> and checking
+    the audience.
+  </p>
+
+  <h2>Flow</h2>
+  <ol>
+    <li>
+      <strong>iOS</strong> — <code>CreateAssuranceChallenge</code>
+      (platform <code>ios</code>) → generate a key with
+      <code>DCAppAttestService</code>, attest over the challenge string's
+      UTF-8 bytes → <code>IssueAssuranceToken</code> with the key id +
+      attestation object. The attested key is registered server-side. To
+      renew, sign a fresh challenge with the same key and call
+      <code>RefreshAssuranceToken</code> — the hardware counter provides
+      replay protection, so there is no stored refresh secret to steal.
+    </li>
+    <li>
+      <strong>Android</strong> — <code>CreateAssuranceChallenge</code>
+      (platform <code>android</code>) → request a Play Integrity token
+      passing the challenge string <em>verbatim</em> as the nonce (Play
+      echoes it back, and the server compares it as a string) →
+      <code>IssueAssuranceToken</code> with the integrity token. The verdict
+      is decoded server-side via Google (never locally). Renewal repeats the
+      same exchange.
+    </li>
+    <li>
+      <strong>Web</strong> — solve the captcha, then
+      <code>IssueAssuranceToken</code> with platform <code>web</code> and
+      the solution. No challenge round-trip; the provider runs its own.
+    </li>
+  </ol>
+
+  <h2>Enforcement</h2>
+  <p>
+    When assurance is enabled, six unauthenticated endpoints require a valid
+    assurance token, each independently switchable (all default on):
+    <code>PasswordSignup</code>, <code>PasswordLogin</code>,
+    <code>RequestPasswordReset</code>, <code>RequestEmailLoginCode</code>,
+    <code>RequestMagicLink</code>, and <code>BeginPasskeySignup</code>.
+    The token is reusable until it expires — verification is a local JWKS
+    check, no provider round-trip per request.
+  </p>
+
+  <h2>Configuration</h2>
+  <ul>
+    <li>
+      <code>GATEWAY_ASSURANCE_ENABLED</code> (default <code>false</code>) —
+      global switch for the whole surface. Off: the three RPCs return
+      Unimplemented and nothing is gated. On, the server refuses to boot
+      unless at least one arm (web provider, iOS app, or Android app) is
+      configured — otherwise the enforce toggles would deny every auth
+      endpoint with no way to obtain a token.
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_WEB_PROVIDER</code> —
+      <code>turnstile</code> or <code>recaptcha_v3</code>, with
+      <code>GATEWAY_ASSURANCE_TURNSTILE_SECRET</code> /
+      <code>GATEWAY_ASSURANCE_TURNSTILE_SITE_KEY</code> or
+      <code>GATEWAY_ASSURANCE_RECAPTCHA_SECRET</code> /
+      <code>GATEWAY_ASSURANCE_RECAPTCHA_SCORE_THRESHOLD</code>. Empty
+      disables web assurance — a mobile-attestation-only deployment. Note the
+      enforce toggles are per-endpoint, not per-platform: with no web arm
+      every browser client (including the hosted <code>/auth/</code> UI, which
+      renders no widget and never attempts the exchange) is denied on each
+      gated endpoint. Turn the relevant toggles off if browsers must still
+      reach them.
+      <br />
+      <strong>The hosted <code>/auth/</code> UI supports Turnstile only.</strong>
+      Under <code>recaptcha_v3</code> it renders no widget and never attempts
+      the exchange, so password login and signup through the hosted pages get
+      a flat <code>PermissionDenied</code> even though a web arm is configured
+      and working for your own clients. Use <code>turnstile</code> if you rely
+      on the hosted UI; <code>recaptcha_v3</code> is for deployments driving
+      the RPCs directly.
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_IOS_TEAM_ID</code> +
+      <code>GATEWAY_ASSURANCE_IOS_BUNDLE_ID</code> (+ optional
+      <code>GATEWAY_ASSURANCE_IOS_ENV</code>, <code>production</code> |
+      <code>development</code>) — the default project's App Attest app
+      identity.
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_ANDROID_PACKAGE_NAME</code> +
+      <code>GATEWAY_ASSURANCE_ANDROID_CERT_SHA256_DIGESTS</code>
+      (comma-separated, base64url) +
+      <code>GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON</code> (Google
+      service-account key) — the default project's Play Integrity identity.
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_TOKEN_TTL_SECONDS</code> (default 3600, max
+      86400) and <code>GATEWAY_ASSURANCE_CHALLENGE_TTL_SECONDS</code>
+      (default 300, max 3600). An assurance token cannot be revoked, so the
+      lifetime is capped; a web token is reusable for its whole TTL, so
+      shorten it if you want closer to per-request captcha assurance.
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS</code> (default 300; 0
+      uses the global TTL) — the web arm's own token lifetime. A captcha
+      solve buys a reusable, transferable token, so it wants a much shorter
+      window than a hardware-attested one; this knob shortens web without
+      shortening App Attest / Play Integrity.
+    </li>
+    <li>
+      <code>GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP</code> (default 20) —
+      per-IP quota per rate-limit window on all three assurance RPCs.
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY</code> (default
+      <code>false</code>) — required on <strong>every</strong> driver to boot
+      with assurance enabled and no env arm, acknowledging that only projects
+      carrying their own <code>assurance</code> block can mint a token. It is
+      only <em>useful</em> on Postgres, the sole driver with a control plane
+      to hold per-project <code>config_json</code>: on sqlite/memory every
+      request is pinned to the default project with no block to read, so
+      setting it yields a deployment where no client can ever obtain a token
+      and all six gated endpoints deny.
+    </li>
+    <li>
+      <code>GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP</code>,
+      <code>…_PASSWORD_LOGIN</code>, <code>…_PASSWORD_RESET</code>,
+      <code>…_EMAIL_LOGIN_CODE</code>, <code>…_MAGIC_LINK</code>,
+      <code>…_PASSKEY_SIGNUP</code> (all default <code>true</code>) —
+      per-endpoint gates, active only while assurance is enabled.
+    </li>
+  </ul>
+  <p>
+    Per-project app identities live in the project's <code>config_json</code>
+    under <code>assurance</code>. Author them with the operator RPC
+    <code>AdminSetProjectAssurance</code>, which takes the Play Integrity
+    service-account key in <strong>plaintext</strong> and encrypts it
+    server-side under <code>GATEWAY_PROJECT_SECRETS_KEY</code> — exactly like
+    <code>AdminSetProjectOAuthProvider</code> handles an OAuth client secret.
+    Reads never echo the key back, only whether one is stored. A project's own
+    block wins whenever the request <em>resolves</em> that project (via
+    <code>X-Project-Key</code> or a mapped auth-domain host); the zero-config
+    default-project pin carries no <code>config_json</code>, so those requests
+    always use the <code>GATEWAY_ASSURANCE_*</code> env identity.
+  </p>
+  <Code
+    lang="bash"
+    code={`# Author a project's app identity. The service-account key goes in as
+# PLAINTEXT; the server encrypts it under GATEWAY_PROJECT_SECRETS_KEY.
+# Writes MERGE per platform: a platform you omit is left untouched, so an
+# iOS-only rotation never destroys the stored Android key.
+SA_KEY=$(cat service-account.json)
+
+curl -s https://id.example.com/identity.v1.IdentityService/AdminSetProjectAssurance \\
+  -H 'Content-Type: application/json' \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -d "$(jq -n --arg sa "$SA_KEY" '{
+        projectId: "proj_123",
+        config: {
+          iosTeamId: "ABCDE12345",
+          iosBundleId: "com.example.app",
+          androidPackageName: "com.example.app",
+          androidCertSha256Digests: ["<base64url-sha256>"],
+          androidServiceAccountKey: $sa
+        }
+      }')"
+# -> {"config":{ ... ,"hasServiceAccountKey":true}}   the key is never returned
+
+# Read it back (key redacted; hasServiceAccountKey is the survival signal):
+curl -s https://id.example.com/identity.v1.IdentityService/AdminGetProjectAssurance \\
+  -H 'Content-Type: application/json' \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -d '{"projectId": "proj_123"}'
+
+# Remove a platform on purpose (never implicit):
+curl -s https://id.example.com/identity.v1.IdentityService/AdminSetProjectAssurance \\
+  -H 'Content-Type: application/json' \\
+  -H "X-Admin-Secret: $GATEWAY_ADMIN_API_SECRET" \\
+  -d '{"projectId": "proj_123", "config": {"clearAndroid": true}}'`}
+  />
+
+  <h2>Example: web exchange</h2>
+  <Code
+    lang="bash"
+    code={`# 1. Exchange a captcha solution for an assurance token
+curl -s https://id.example.com/identity.v1.IdentityService/IssueAssuranceToken \\
+  -H 'Content-Type: application/json' \\
+  -d '{"platform":"web","webToken":"<captcha-solution>"}'
+# → {"assuranceToken":"eyJ…","expiresAtMs":…}
+
+# 2. Attach it to a gated endpoint
+curl -s https://id.example.com/identity.v1.IdentityService/PasswordSignup \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Assurance-Token: eyJ…' \\
+  -d '{"email":"a@example.com","password":"…"}'`}
+  />
+
+  <h2>Retention</h2>
+  <p>
+    A verified iOS attestation stores one device row (public key + replay
+    counter). A reinstall or key regeneration produces a <em>new</em> key, so
+    those rows would otherwise accumulate forever — the sweeper reaps devices
+    whose last refresh predates the retention window, alongside expired
+    challenges. The window is
+    <code>GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS</code> (default 90; 0
+    disables the sweep and keeps devices forever) — a <em>retention</em>
+    window, deliberately independent of <code>GATEWAY_SWEEPER_GRACE_SECONDS</code>,
+    which is expiry slack for rows that carry their own expiry. It must
+    exceed the token TTL, and the server refuses to boot if it does not: a
+    device reaped before its own token expires could never refresh. Both
+    sweeps run on the existing <code>GATEWAY_SWEEPER_*</code> schedule.
+  </p>
+  <p>
+    Note that reaping a device is not free for the client: Apple's
+    <code>attestKey</code> may be called only once per generated key, so a
+    client that persists its Secure Enclave key must generate a new one to
+    re-attest, and each re-attestation mints a new device id. Keep the window
+    generous.
+  </p>
+  <p>
+    One current limitation: both sweeps run against the boot-default project,
+    so a multi-project deployment does not yet reap other projects' expired
+    challenges or stale devices. Track it if you run many projects with
+    per-project assurance.
+  </p>
+
+  <h2>What assurance is not</h2>
+  <p>
+    Attestation proves <em>genuine app on genuine hardware</em>, not
+    human-rate usage — one real device driven by automation still passes.
+    Its durable value is a stable, expensive-to-farm identifier (the
+    attested device) for downstream rate-limiting to key on. It is also
+    orthogonal to the per-project access mode: assurance authenticates the
+    client, the access mode governs which users may authenticate. See
+    <a href="https://github.com/elloloop/identity/blob/main/docs/adr/0012-client-assurance-layer.md">ADR-0012</a>
+    for the design.
+  </p>
+</DocsLayout>

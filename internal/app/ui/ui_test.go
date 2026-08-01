@@ -152,11 +152,11 @@ func TestHandler_RendersPerRequestProjectOptions(t *testing.T) {
 func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 	t.Run("enabled with turnstile site key", func(t *testing.T) {
 		h := Handler(&config.Config{
-			CaptchaEnabled:               true,
-			CaptchaProvider:              config.CaptchaProviderTurnstile,
-			CaptchaTurnstileSiteKey:      "0xSITEKEY",
-			CaptchaEnforcePasswordLogin:  true,
-			CaptchaEnforcePasswordSignup: true,
+			AssuranceEnabled:               true,
+			AssuranceWebProvider:           config.AssuranceWebProviderTurnstile,
+			AssuranceTurnstileSiteKey:      "0xSITEKEY",
+			AssuranceEnforcePasswordLogin:  true,
+			AssuranceEnforcePasswordSignup: true,
 		}, allEnabled(), false)
 		body := serveIndex(t, h, nil).Body.String()
 
@@ -174,11 +174,11 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 
 	t.Run("enforce flags mirror per-flow config", func(t *testing.T) {
 		h := Handler(&config.Config{
-			CaptchaEnabled:               true,
-			CaptchaProvider:              config.CaptchaProviderTurnstile,
-			CaptchaTurnstileSiteKey:      "0xSITEKEY",
-			CaptchaEnforcePasswordLogin:  false,
-			CaptchaEnforcePasswordSignup: true,
+			AssuranceEnabled:               true,
+			AssuranceWebProvider:           config.AssuranceWebProviderTurnstile,
+			AssuranceTurnstileSiteKey:      "0xSITEKEY",
+			AssuranceEnforcePasswordLogin:  false,
+			AssuranceEnforcePasswordSignup: true,
 		}, allEnabled(), false)
 		body := serveIndex(t, h, nil).Body.String()
 
@@ -191,11 +191,11 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 
 	t.Run("disabled injects empty captcha config", func(t *testing.T) {
 		h := Handler(&config.Config{
-			CaptchaEnabled:               false,
-			CaptchaProvider:              config.CaptchaProviderTurnstile,
-			CaptchaTurnstileSiteKey:      "0xSITEKEY",
-			CaptchaEnforcePasswordLogin:  true,
-			CaptchaEnforcePasswordSignup: true,
+			AssuranceEnabled:               false,
+			AssuranceWebProvider:           config.AssuranceWebProviderTurnstile,
+			AssuranceTurnstileSiteKey:      "0xSITEKEY",
+			AssuranceEnforcePasswordLogin:  true,
+			AssuranceEnforcePasswordSignup: true,
 		}, allEnabled(), false)
 		body := serveIndex(t, h, nil).Body.String()
 
@@ -216,11 +216,11 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 		// recaptcha_v3 has no hosted-UI widget support; the page must not
 		// advertise a provider (or enforcement) it cannot render.
 		h := Handler(&config.Config{
-			CaptchaEnabled:               true,
-			CaptchaProvider:              config.CaptchaProviderRecaptchaV3,
-			CaptchaTurnstileSiteKey:      "0xSITEKEY",
-			CaptchaEnforcePasswordLogin:  true,
-			CaptchaEnforcePasswordSignup: true,
+			AssuranceEnabled:               true,
+			AssuranceWebProvider:           config.AssuranceWebProviderRecaptchaV3,
+			AssuranceTurnstileSiteKey:      "0xSITEKEY",
+			AssuranceEnforcePasswordLogin:  true,
+			AssuranceEnforcePasswordSignup: true,
 		}, allEnabled(), false)
 		body := serveIndex(t, h, nil).Body.String()
 

@@ -1,4 +1,4 @@
-package captcha
+package assurance
 
 import (
 	"context"
@@ -41,10 +41,10 @@ type RecaptchaV3Verifier struct {
 // URL fall back to sensible defaults.
 func NewRecaptchaV3Verifier(cfg RecaptchaConfig) (*RecaptchaV3Verifier, error) {
 	if cfg.Secret == "" {
-		return nil, errors.New("captcha/recaptcha: secret required")
+		return nil, errors.New("assurance/recaptcha: secret required")
 	}
 	if cfg.ScoreThreshold < 0 || cfg.ScoreThreshold > 1 {
-		return nil, fmt.Errorf("captcha/recaptcha: score threshold %v out of range [0,1]", cfg.ScoreThreshold)
+		return nil, fmt.Errorf("assurance/recaptcha: score threshold %v out of range [0,1]", cfg.ScoreThreshold)
 	}
 	client := cfg.HTTPClient
 	if client == nil {

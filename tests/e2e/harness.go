@@ -211,6 +211,16 @@ func buildBackend(t *testing.T, cfg *config.Config) *repo.Built {
 // resources between cases.
 func StartServer(t *testing.T) *Harness {
 	t.Helper()
+	return StartServerWith(t, nil, nil)
+}
+
+// StartServerWith boots the harness with optional config mutation and
+// dependency decoration, for suites that exercise config-gated surfaces
+// (e.g. client assurance). mutate runs on the fixture config before the
+// backend boots; decorate runs on the assembled app.Deps just before
+// app.New. Either may be nil.
+func StartServerWith(t *testing.T, mutate func(*config.Config), decorate func(*app.Deps)) *Harness {
+	t.Helper()
 
 	tenantID := fmt.Sprintf("e2e-%d", time.Now().UnixNano())
 
@@ -251,6 +261,10 @@ func StartServer(t *testing.T) *Harness {
 		OAuthAllowedReturnURLs:        "http://localhost",
 	}
 
+	if mutate != nil {
+		mutate(cfg)
+	}
+
 	builtRepo := buildBackend(t, cfg)
 
 	// The project-resolution middleware binds every request to
@@ -283,7 +297,7 @@ func StartServer(t *testing.T) *Harness {
 		t.Fatalf("webauthn: %v", err)
 	}
 
-	built, err := app.New(app.Deps{
+	deps := app.Deps{
 		Config:             cfg,
 		Logger:             zap.NewNop(),
 		Signer:             signer,
@@ -297,7 +311,11 @@ func StartServer(t *testing.T) *Harness {
 		// Send synchronously so the recording mailer is readable immediately
 		// after a request (the served deployment dispatches async).
 		SynchronousEmailSend: true,
-	})
+	}
+	if decorate != nil {
+		decorate(&deps)
+	}
+	built, err := app.New(deps)
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -345,6 +363,13 @@ func requireGraphDB(t *testing.T) {
 // can match on Connect-RPC error envelopes (which carry code/message).
 func (h *Harness) rpcCall(t *testing.T, method string, req any, accessToken string) (map[string]any, int) {
 	t.Helper()
+	return h.rpcCallHeaders(t, method, req, accessToken, nil)
+}
+
+// rpcCallHeaders is rpcCall with extra request headers (e.g. the
+// X-Assurance-Token attestation header).
+func (h *Harness) rpcCallHeaders(t *testing.T, method string, req any, accessToken string, headers map[string]string) (map[string]any, int) {
+	t.Helper()
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -359,6 +384,9 @@ func (h *Harness) rpcCall(t *testing.T, method string, req any, accessToken stri
 	httpReq.Header.Set("Content-Type", "application/json")
 	if accessToken != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+accessToken)
+	}
+	for k, v := range headers {
+		httpReq.Header.Set(k, v)
 	}
 
 	resp, err := h.HTTP.Do(httpReq)

@@ -305,6 +305,81 @@ func (h *IdentityHandler) AdminSetProjectOAuthProvider(
 	}), nil
 }
 
+// AdminSetProjectAssurance writes a project's client-assurance app
+// identity, encrypting the supplied Play Integrity service-account key
+// server-side so an operator never handles the at-rest format. The
+// response redacts the key. Operator-only.
+func (h *IdentityHandler) AdminSetProjectAssurance(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminSetProjectAssuranceRequest],
+) (*connect.Response[identitypb.AdminSetProjectAssuranceResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	view, err := h.controlAdmin.AdminSetProjectAssurance(
+		ctx, adminSecret(req.Header()), req.Msg.ProjectId, assuranceInputFromProto(req.Msg.Config),
+	)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminSetProjectAssuranceResponse{
+		Config: assuranceViewToProto(view),
+	}), nil
+}
+
+// AdminGetProjectAssurance reads a project's client-assurance app identity
+// with the service-account key redacted. Operator-only.
+func (h *IdentityHandler) AdminGetProjectAssurance(
+	ctx context.Context,
+	req *connect.Request[identitypb.AdminGetProjectAssuranceRequest],
+) (*connect.Response[identitypb.AdminGetProjectAssuranceResponse], error) {
+	if h.controlAdmin == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	view, err := h.controlAdmin.GetProjectAssurance(ctx, adminSecret(req.Header()), req.Msg.ProjectId)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.AdminGetProjectAssuranceResponse{
+		Config: assuranceViewToProto(view),
+	}), nil
+}
+
+// assuranceInputFromProto maps the wire config onto the service input.
+// A nil message yields an empty input, which changes NOTHING — the write
+// merges per platform, and removal is explicit via the clear flags.
+func assuranceInputFromProto(in *identitypb.ProjectAssuranceConfig) *service.ProjectAssuranceInput {
+	if in == nil {
+		return &service.ProjectAssuranceInput{}
+	}
+	return &service.ProjectAssuranceInput{
+		IOSTeamID:                in.GetIosTeamId(),
+		IOSBundleID:              in.GetIosBundleId(),
+		IOSEnv:                   in.GetIosEnv(),
+		AndroidPackageName:       in.GetAndroidPackageName(),
+		AndroidCertSHA256Digests: in.GetAndroidCertSha256Digests(),
+		AndroidServiceAccountKey: in.GetAndroidServiceAccountKey(),
+		ClearIOS:                 in.GetClearIos(),
+		ClearAndroid:             in.GetClearAndroid(),
+	}
+}
+
+// assuranceViewToProto renders the redacted read view; the
+// service-account key is never echoed, only its presence.
+func assuranceViewToProto(v *service.ProjectAssuranceView) *identitypb.ProjectAssuranceConfig {
+	if v == nil {
+		return nil
+	}
+	return &identitypb.ProjectAssuranceConfig{
+		IosTeamId:                v.IOSTeamID,
+		IosBundleId:              v.IOSBundleID,
+		IosEnv:                   v.IOSEnv,
+		AndroidPackageName:       v.AndroidPackageName,
+		AndroidCertSha256Digests: v.AndroidCertSHA256Digests,
+		HasServiceAccountKey:     v.HasServiceAccountKey,
+	}
+}
+
 // AdminDeleteProjectOAuthProvider removes one of a project's OAuth providers.
 // Operator-only.
 func (h *IdentityHandler) AdminDeleteProjectOAuthProvider(

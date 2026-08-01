@@ -26,9 +26,15 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAccessNotAllowed),
 		errors.Is(err, service.ErrSignupByInvitationOnly),
 		errors.Is(err, service.ErrProductAgeRestricted),
-		errors.Is(err, service.ErrCaptchaRequired),
-		errors.Is(err, service.ErrCaptchaFailed):
+		errors.Is(err, service.ErrAssuranceRequired),
+		errors.Is(err, service.ErrAssuranceFailed):
 		return connect.NewError(connect.CodePermissionDenied, err)
+
+	case errors.Is(err, service.ErrAssuranceUnavailable):
+		// The evidence could not be judged (upstream provider unreachable) —
+		// retryable, and deliberately generic: the underlying error can carry
+		// provider response text and this RPC is unauthenticated.
+		return connect.NewError(connect.CodeUnavailable, err)
 
 	case errors.Is(err, service.ErrAlreadyExists),
 		errors.Is(err, service.ErrPhoneAlreadyVerified):

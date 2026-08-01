@@ -29,6 +29,9 @@ const (
 	IdentityService_VerifyEmailLoginCode_FullMethodName            = "/identity.v1.IdentityService/VerifyEmailLoginCode"
 	IdentityService_RequestMagicLink_FullMethodName                = "/identity.v1.IdentityService/RequestMagicLink"
 	IdentityService_RedeemMagicLink_FullMethodName                 = "/identity.v1.IdentityService/RedeemMagicLink"
+	IdentityService_CreateAssuranceChallenge_FullMethodName        = "/identity.v1.IdentityService/CreateAssuranceChallenge"
+	IdentityService_IssueAssuranceToken_FullMethodName             = "/identity.v1.IdentityService/IssueAssuranceToken"
+	IdentityService_RefreshAssuranceToken_FullMethodName           = "/identity.v1.IdentityService/RefreshAssuranceToken"
 	IdentityService_RequestPhoneVerification_FullMethodName        = "/identity.v1.IdentityService/RequestPhoneVerification"
 	IdentityService_VerifyPhoneCode_FullMethodName                 = "/identity.v1.IdentityService/VerifyPhoneCode"
 	IdentityService_GetCurrentUser_FullMethodName                  = "/identity.v1.IdentityService/GetCurrentUser"
@@ -117,6 +120,8 @@ const (
 	IdentityService_UpsertProjectConfig_FullMethodName             = "/identity.v1.IdentityService/UpsertProjectConfig"
 	IdentityService_GetProjectConfig_FullMethodName                = "/identity.v1.IdentityService/GetProjectConfig"
 	IdentityService_AdminSetProjectOAuthProvider_FullMethodName    = "/identity.v1.IdentityService/AdminSetProjectOAuthProvider"
+	IdentityService_AdminSetProjectAssurance_FullMethodName        = "/identity.v1.IdentityService/AdminSetProjectAssurance"
+	IdentityService_AdminGetProjectAssurance_FullMethodName        = "/identity.v1.IdentityService/AdminGetProjectAssurance"
 	IdentityService_AdminDeleteProjectOAuthProvider_FullMethodName = "/identity.v1.IdentityService/AdminDeleteProjectOAuthProvider"
 	IdentityService_AdminListProjectOAuthProviders_FullMethodName  = "/identity.v1.IdentityService/AdminListProjectOAuthProviders"
 )
@@ -137,6 +142,14 @@ type IdentityServiceClient interface {
 	VerifyEmailLoginCode(ctx context.Context, in *VerifyEmailLoginCodeRequest, opts ...grpc.CallOption) (*VerifyEmailLoginCodeResponse, error)
 	RequestMagicLink(ctx context.Context, in *RequestMagicLinkRequest, opts ...grpc.CallOption) (*RequestMagicLinkResponse, error)
 	RedeemMagicLink(ctx context.Context, in *RedeemMagicLinkRequest, opts ...grpc.CallOption) (*RedeemMagicLinkResponse, error)
+	// Client assurance — App Check-style attestation, independent of user
+	// identity. A client proves it is a genuine build on genuine hardware
+	// (iOS App Attest / Android Play Integrity) or a human-passed web
+	// client (Turnstile / reCAPTCHA), and receives a short-lived assurance
+	// token to attach as the X-Assurance-Token header on subsequent RPCs.
+	CreateAssuranceChallenge(ctx context.Context, in *CreateAssuranceChallengeRequest, opts ...grpc.CallOption) (*CreateAssuranceChallengeResponse, error)
+	IssueAssuranceToken(ctx context.Context, in *IssueAssuranceTokenRequest, opts ...grpc.CallOption) (*IssueAssuranceTokenResponse, error)
+	RefreshAssuranceToken(ctx context.Context, in *RefreshAssuranceTokenRequest, opts ...grpc.CallOption) (*RefreshAssuranceTokenResponse, error)
 	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(ctx context.Context, in *RequestPhoneVerificationRequest, opts ...grpc.CallOption) (*RequestPhoneVerificationResponse, error)
 	VerifyPhoneCode(ctx context.Context, in *VerifyPhoneCodeRequest, opts ...grpc.CallOption) (*VerifyPhoneCodeResponse, error)
@@ -298,6 +311,11 @@ type IdentityServiceClient interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(ctx context.Context, in *AdminSetProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminSetProjectOAuthProviderResponse, error)
+	// Per-project client-assurance authoring. Takes the Play Integrity
+	// service-account key in plaintext and encrypts it server-side, so an
+	// operator never has to reimplement the at-rest encryption.
+	AdminSetProjectAssurance(ctx context.Context, in *AdminSetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminSetProjectAssuranceResponse, error)
+	AdminGetProjectAssurance(ctx context.Context, in *AdminGetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminGetProjectAssuranceResponse, error)
 	AdminDeleteProjectOAuthProvider(ctx context.Context, in *AdminDeleteProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminDeleteProjectOAuthProviderResponse, error)
 	AdminListProjectOAuthProviders(ctx context.Context, in *AdminListProjectOAuthProvidersRequest, opts ...grpc.CallOption) (*AdminListProjectOAuthProvidersResponse, error)
 }
@@ -404,6 +422,36 @@ func (c *identityServiceClient) RedeemMagicLink(ctx context.Context, in *RedeemM
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RedeemMagicLinkResponse)
 	err := c.cc.Invoke(ctx, IdentityService_RedeemMagicLink_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) CreateAssuranceChallenge(ctx context.Context, in *CreateAssuranceChallengeRequest, opts ...grpc.CallOption) (*CreateAssuranceChallengeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateAssuranceChallengeResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CreateAssuranceChallenge_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) IssueAssuranceToken(ctx context.Context, in *IssueAssuranceTokenRequest, opts ...grpc.CallOption) (*IssueAssuranceTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IssueAssuranceTokenResponse)
+	err := c.cc.Invoke(ctx, IdentityService_IssueAssuranceToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RefreshAssuranceToken(ctx context.Context, in *RefreshAssuranceTokenRequest, opts ...grpc.CallOption) (*RefreshAssuranceTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefreshAssuranceTokenResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RefreshAssuranceToken_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1290,6 +1338,26 @@ func (c *identityServiceClient) AdminSetProjectOAuthProvider(ctx context.Context
 	return out, nil
 }
 
+func (c *identityServiceClient) AdminSetProjectAssurance(ctx context.Context, in *AdminSetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminSetProjectAssuranceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminSetProjectAssuranceResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminSetProjectAssurance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) AdminGetProjectAssurance(ctx context.Context, in *AdminGetProjectAssuranceRequest, opts ...grpc.CallOption) (*AdminGetProjectAssuranceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminGetProjectAssuranceResponse)
+	err := c.cc.Invoke(ctx, IdentityService_AdminGetProjectAssurance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) AdminDeleteProjectOAuthProvider(ctx context.Context, in *AdminDeleteProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminDeleteProjectOAuthProviderResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminDeleteProjectOAuthProviderResponse)
@@ -1326,6 +1394,14 @@ type IdentityServiceServer interface {
 	VerifyEmailLoginCode(context.Context, *VerifyEmailLoginCodeRequest) (*VerifyEmailLoginCodeResponse, error)
 	RequestMagicLink(context.Context, *RequestMagicLinkRequest) (*RequestMagicLinkResponse, error)
 	RedeemMagicLink(context.Context, *RedeemMagicLinkRequest) (*RedeemMagicLinkResponse, error)
+	// Client assurance — App Check-style attestation, independent of user
+	// identity. A client proves it is a genuine build on genuine hardware
+	// (iOS App Attest / Android Play Integrity) or a human-passed web
+	// client (Turnstile / reCAPTCHA), and receives a short-lived assurance
+	// token to attach as the X-Assurance-Token header on subsequent RPCs.
+	CreateAssuranceChallenge(context.Context, *CreateAssuranceChallengeRequest) (*CreateAssuranceChallengeResponse, error)
+	IssueAssuranceToken(context.Context, *IssueAssuranceTokenRequest) (*IssueAssuranceTokenResponse, error)
+	RefreshAssuranceToken(context.Context, *RefreshAssuranceTokenRequest) (*RefreshAssuranceTokenResponse, error)
 	// Phone verification (SMS OTP) — proves the authenticated caller owns a phone number
 	RequestPhoneVerification(context.Context, *RequestPhoneVerificationRequest) (*RequestPhoneVerificationResponse, error)
 	VerifyPhoneCode(context.Context, *VerifyPhoneCodeRequest) (*VerifyPhoneCodeResponse, error)
@@ -1487,6 +1563,11 @@ type IdentityServiceServer interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(context.Context, *AdminSetProjectOAuthProviderRequest) (*AdminSetProjectOAuthProviderResponse, error)
+	// Per-project client-assurance authoring. Takes the Play Integrity
+	// service-account key in plaintext and encrypts it server-side, so an
+	// operator never has to reimplement the at-rest encryption.
+	AdminSetProjectAssurance(context.Context, *AdminSetProjectAssuranceRequest) (*AdminSetProjectAssuranceResponse, error)
+	AdminGetProjectAssurance(context.Context, *AdminGetProjectAssuranceRequest) (*AdminGetProjectAssuranceResponse, error)
 	AdminDeleteProjectOAuthProvider(context.Context, *AdminDeleteProjectOAuthProviderRequest) (*AdminDeleteProjectOAuthProviderResponse, error)
 	AdminListProjectOAuthProviders(context.Context, *AdminListProjectOAuthProvidersRequest) (*AdminListProjectOAuthProvidersResponse, error)
 	mustEmbedUnimplementedIdentityServiceServer()
@@ -1528,6 +1609,15 @@ func (UnimplementedIdentityServiceServer) RequestMagicLink(context.Context, *Req
 }
 func (UnimplementedIdentityServiceServer) RedeemMagicLink(context.Context, *RedeemMagicLinkRequest) (*RedeemMagicLinkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RedeemMagicLink not implemented")
+}
+func (UnimplementedIdentityServiceServer) CreateAssuranceChallenge(context.Context, *CreateAssuranceChallengeRequest) (*CreateAssuranceChallengeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateAssuranceChallenge not implemented")
+}
+func (UnimplementedIdentityServiceServer) IssueAssuranceToken(context.Context, *IssueAssuranceTokenRequest) (*IssueAssuranceTokenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IssueAssuranceToken not implemented")
+}
+func (UnimplementedIdentityServiceServer) RefreshAssuranceToken(context.Context, *RefreshAssuranceTokenRequest) (*RefreshAssuranceTokenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RefreshAssuranceToken not implemented")
 }
 func (UnimplementedIdentityServiceServer) RequestPhoneVerification(context.Context, *RequestPhoneVerificationRequest) (*RequestPhoneVerificationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RequestPhoneVerification not implemented")
@@ -1793,6 +1883,12 @@ func (UnimplementedIdentityServiceServer) GetProjectConfig(context.Context, *Get
 func (UnimplementedIdentityServiceServer) AdminSetProjectOAuthProvider(context.Context, *AdminSetProjectOAuthProviderRequest) (*AdminSetProjectOAuthProviderResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminSetProjectOAuthProvider not implemented")
 }
+func (UnimplementedIdentityServiceServer) AdminSetProjectAssurance(context.Context, *AdminSetProjectAssuranceRequest) (*AdminSetProjectAssuranceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminSetProjectAssurance not implemented")
+}
+func (UnimplementedIdentityServiceServer) AdminGetProjectAssurance(context.Context, *AdminGetProjectAssuranceRequest) (*AdminGetProjectAssuranceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminGetProjectAssurance not implemented")
+}
 func (UnimplementedIdentityServiceServer) AdminDeleteProjectOAuthProvider(context.Context, *AdminDeleteProjectOAuthProviderRequest) (*AdminDeleteProjectOAuthProviderResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminDeleteProjectOAuthProvider not implemented")
 }
@@ -1996,6 +2092,60 @@ func _IdentityService_RedeemMagicLink_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).RedeemMagicLink(ctx, req.(*RedeemMagicLinkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_CreateAssuranceChallenge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateAssuranceChallengeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CreateAssuranceChallenge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CreateAssuranceChallenge_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CreateAssuranceChallenge(ctx, req.(*CreateAssuranceChallengeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_IssueAssuranceToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssueAssuranceTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).IssueAssuranceToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_IssueAssuranceToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).IssueAssuranceToken(ctx, req.(*IssueAssuranceTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RefreshAssuranceToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshAssuranceTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RefreshAssuranceToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RefreshAssuranceToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RefreshAssuranceToken(ctx, req.(*RefreshAssuranceTokenRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3584,6 +3734,42 @@ func _IdentityService_AdminSetProjectOAuthProvider_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_AdminSetProjectAssurance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminSetProjectAssuranceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminSetProjectAssurance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminSetProjectAssurance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminSetProjectAssurance(ctx, req.(*AdminSetProjectAssuranceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_AdminGetProjectAssurance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminGetProjectAssuranceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).AdminGetProjectAssurance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_AdminGetProjectAssurance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).AdminGetProjectAssurance(ctx, req.(*AdminGetProjectAssuranceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_AdminDeleteProjectOAuthProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminDeleteProjectOAuthProviderRequest)
 	if err := dec(in); err != nil {
@@ -3666,6 +3852,18 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RedeemMagicLink",
 			Handler:    _IdentityService_RedeemMagicLink_Handler,
+		},
+		{
+			MethodName: "CreateAssuranceChallenge",
+			Handler:    _IdentityService_CreateAssuranceChallenge_Handler,
+		},
+		{
+			MethodName: "IssueAssuranceToken",
+			Handler:    _IdentityService_IssueAssuranceToken_Handler,
+		},
+		{
+			MethodName: "RefreshAssuranceToken",
+			Handler:    _IdentityService_RefreshAssuranceToken_Handler,
 		},
 		{
 			MethodName: "RequestPhoneVerification",
@@ -4018,6 +4216,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminSetProjectOAuthProvider",
 			Handler:    _IdentityService_AdminSetProjectOAuthProvider_Handler,
+		},
+		{
+			MethodName: "AdminSetProjectAssurance",
+			Handler:    _IdentityService_AdminSetProjectAssurance_Handler,
+		},
+		{
+			MethodName: "AdminGetProjectAssurance",
+			Handler:    _IdentityService_AdminGetProjectAssurance_Handler,
 		},
 		{
 			MethodName: "AdminDeleteProjectOAuthProvider",

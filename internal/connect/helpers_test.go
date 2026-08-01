@@ -22,8 +22,8 @@ import (
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/graph"
 	"github.com/elloloop/identity/internal/service"
+	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/audit"
-	"github.com/elloloop/identity/pkg/captcha"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passkeys"
@@ -85,27 +85,29 @@ func nextID() string { return fmt.Sprintf("n-%d", nodeIDSeq.Add(1)) }
 type fakeRepo struct {
 	mu sync.Mutex
 
-	users              map[string]*service.User
-	refreshTokens      map[string]*service.RefreshTokenRecord
-	passkeyCreds       map[string]*service.PasskeyCredRecord
-	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
-	qrSessions         map[string]*service.QrLoginSessionRecord
-	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
-	nativeRedemptions  map[string]*service.NativeTokenRedemptionRecord
-	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
-	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
-	phoneVerifyCodes   map[string]*service.PhoneVerificationCodeRecord
-	totpCreds          map[string]*service.TotpCredRecord
-	recoveryCodes      map[string]*service.RecoveryCodeRecord
-	loginChallenges    map[string]*service.LoginChallengeRecord
-	invitations        map[string]*service.InvitationRecord
-	passwordResets     map[string]*service.PasswordResetToken
-	emailVerifications map[string]*service.EmailVerificationToken
-	emailChanges       map[string]*service.EmailChangeToken
-	oauthIdentities    map[string]*service.OAuthIdentity
-	idvRecords         map[string]*service.IdentityVerificationRecord
-	sessions           map[string]*service.SessionRecord
-	auditEvents        []*service.AuditEvent
+	users               map[string]*service.User
+	refreshTokens       map[string]*service.RefreshTokenRecord
+	passkeyCreds        map[string]*service.PasskeyCredRecord
+	passkeyChallenges   map[string]*service.PasskeyChallengeRecord
+	attestedDevices     map[string]*service.AttestedDeviceRecord
+	assuranceChallenges map[string]*service.AssuranceChallengeRecord
+	qrSessions          map[string]*service.QrLoginSessionRecord
+	oauthOneTimeCodes   map[string]*service.OAuthOneTimeCodeRecord
+	nativeRedemptions   map[string]*service.NativeTokenRedemptionRecord
+	emailLoginCodes     map[string]*service.EmailLoginCodeRecord
+	magicLinkTokens     map[string]*service.MagicLinkTokenRecord
+	phoneVerifyCodes    map[string]*service.PhoneVerificationCodeRecord
+	totpCreds           map[string]*service.TotpCredRecord
+	recoveryCodes       map[string]*service.RecoveryCodeRecord
+	loginChallenges     map[string]*service.LoginChallengeRecord
+	invitations         map[string]*service.InvitationRecord
+	passwordResets      map[string]*service.PasswordResetToken
+	emailVerifications  map[string]*service.EmailVerificationToken
+	emailChanges        map[string]*service.EmailChangeToken
+	oauthIdentities     map[string]*service.OAuthIdentity
+	idvRecords          map[string]*service.IdentityVerificationRecord
+	sessions            map[string]*service.SessionRecord
+	auditEvents         []*service.AuditEvent
 
 	// Optional error injections for specific calls.
 	errFindUser   error
@@ -1901,9 +1903,9 @@ func newHarnessWithOAuthRegistry(t *testing.T, registry *oauth.Registry) *testHa
 
 // newHarnessWithCaptcha builds a harness whose handler enforces CAPTCHA via
 // the supplied verifier and a config produced by mutating testConfig (so a
-// test can flip CaptchaEnabled and the per-endpoint toggles). A nil mutate
+// test can flip AssuranceEnabled and the per-endpoint toggles). A nil mutate
 // leaves the default config; a nil verifier exercises the disabled path.
-func newHarnessWithCaptcha(t *testing.T, verifier captcha.Verifier, mutate func(*config.Config)) *testHarness {
+func newHarnessWithWebAssurance(t *testing.T, verifier assurance.Verifier, mutate func(*config.Config)) *testHarness {
 	t.Helper()
 	return newHarnessWith(t, nil, verifier, mutate)
 }
@@ -1911,7 +1913,7 @@ func newHarnessWithCaptcha(t *testing.T, verifier captcha.Verifier, mutate func(
 func newHarnessWith(
 	t *testing.T,
 	registry *oauth.Registry,
-	captchaVerifier captcha.Verifier,
+	webAssurance assurance.Verifier,
 	mutate func(*config.Config),
 ) *testHarness {
 	t.Helper()
@@ -1938,12 +1940,15 @@ func newHarnessWith(
 	totpRecoveryPepper := []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH")
 
 	authSvc := service.NewAuthServiceWithOAuth(repo, cfg, kr, pkSvc, auditLog, totpKey, totpRecoveryPepper, nil, nil, zap.NewNop(), registry)
+	if webAssurance != nil {
+		authSvc.WithAssurance(service.NewAssuranceResolver(cfg.DefaultProjectID, service.AssuranceProviders{}, nil, nil), webAssurance)
+	}
 	adminSvc := service.NewAdminService(repo, db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 
-	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, nil, captchaVerifier, cfg)
+	h := NewIdentityHandler(authSvc, adminSvc, groupSvc, helpSvc, profSvc, nil, nil, nil, nil, cfg)
 
 	mux := http.NewServeMux()
 	path, handler := identityconnect.NewIdentityServiceHandler(h)
@@ -2002,4 +2007,116 @@ func connectCodeOf(err error) connect.Code {
 		return ce.Code()
 	}
 	return connect.CodeUnknown
+}
+
+// ── Assurance (attested devices + one-shot challenges) ────────────────
+
+func (r *fakeRepo) CreateAttestedDevice(_ context.Context, d *service.AttestedDeviceRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.attestedDevices == nil {
+		r.attestedDevices = make(map[string]*service.AttestedDeviceRecord)
+	}
+	for _, existing := range r.attestedDevices {
+		if existing.KeyID == d.KeyID {
+			return "", fmt.Errorf("fake: CreateAttestedDevice: %w", service.ErrAlreadyExists)
+		}
+	}
+	id := d.NodeID
+	if id == "" {
+		id = fmt.Sprintf("attdev-%d", len(r.attestedDevices)+1)
+	}
+	cp := *d
+	cp.NodeID = id
+	r.attestedDevices[id] = &cp
+	d.NodeID = id
+	return id, nil
+}
+
+func (r *fakeRepo) GetAttestedDeviceByKeyID(_ context.Context, keyID string) (*service.AttestedDeviceRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, d := range r.attestedDevices {
+		if d.KeyID == keyID {
+			cp := *d
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) UpdateAttestedDeviceCounter(_ context.Context, nodeID string, fromCount, toCount, lastUsedAtMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d, ok := r.attestedDevices[nodeID]
+	if !ok {
+		return fmt.Errorf("%w: attested device", service.ErrNotFound)
+	}
+	if d.SignCount != fromCount {
+		return service.ErrCounterStale
+	}
+	d.SignCount = toCount
+	d.LastUsedAt = lastUsedAtMs
+	return nil
+}
+
+func (r *fakeRepo) CreateAssuranceChallenge(_ context.Context, c *service.AssuranceChallengeRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.assuranceChallenges == nil {
+		r.assuranceChallenges = make(map[string]*service.AssuranceChallengeRecord)
+	}
+	id := c.NodeID
+	if id == "" {
+		id = fmt.Sprintf("assurchal-%d", len(r.assuranceChallenges)+1)
+	}
+	cp := *c
+	cp.NodeID = id
+	r.assuranceChallenges[id] = &cp
+	c.NodeID = id
+	return id, nil
+}
+
+func (r *fakeRepo) ConsumeAssuranceChallenge(_ context.Context, nodeID string) (*service.AssuranceChallengeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.assuranceChallenges[nodeID]
+	if !ok {
+		return nil, nil
+	}
+	delete(r.assuranceChallenges, nodeID)
+	cp := *c
+	return &cp, nil
+}
+
+func (r *fakeRepo) DeleteExpiredAssuranceChallenges(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.assuranceChallenges {
+		if n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.assuranceChallenges, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteStaleAttestedDevices(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, d := range r.attestedDevices {
+		if n >= limit {
+			break
+		}
+		if d.LastUsedAt < beforeMs {
+			delete(r.attestedDevices, id)
+			n++
+		}
+	}
+	return nil
 }

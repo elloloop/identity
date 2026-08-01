@@ -29,6 +29,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/agegate"
+	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/events"
@@ -295,6 +296,31 @@ type Repository interface {
 	GetPasskeyChallenge(ctx context.Context, nodeID string) (*PasskeyChallengeRecord, error)
 	CreatePasskeyChallenge(ctx context.Context, r *PasskeyChallengeRecord) (string, error)
 	DeletePasskeyChallenge(ctx context.Context, nodeID string) error
+
+	// Assurance: hardware-attested devices and their one-shot challenges.
+	// CreateAttestedDevice returns ErrAlreadyExists when the project
+	// already holds the KeyID (one hardware key, one record).
+	// GetAttestedDeviceByKeyID returns (nil, nil) when absent.
+	// UpdateAttestedDeviceCounter is a compare-and-swap: it advances
+	// SignCount from fromCount to toCount (stamping LastUsedAt) and
+	// returns ErrCounterStale when the stored count is no longer
+	// fromCount, or ErrNotFound when the device is gone — the CAS is what
+	// keeps the App Attest counter strictly increasing under concurrent
+	// assertions. ConsumeAssuranceChallenge atomically deletes and
+	// returns the challenge so a nonce can never be redeemed twice;
+	// (nil, nil) when absent or already consumed.
+	CreateAttestedDevice(ctx context.Context, r *AttestedDeviceRecord) (string, error)
+	GetAttestedDeviceByKeyID(ctx context.Context, keyID string) (*AttestedDeviceRecord, error)
+	UpdateAttestedDeviceCounter(ctx context.Context, nodeID string, fromCount, toCount, lastUsedAtMs int64) error
+	CreateAssuranceChallenge(ctx context.Context, r *AssuranceChallengeRecord) (string, error)
+	ConsumeAssuranceChallenge(ctx context.Context, nodeID string) (*AssuranceChallengeRecord, error)
+	DeleteExpiredAssuranceChallenges(ctx context.Context, beforeMs int64, limit int) error
+	// DeleteStaleAttestedDevices reaps device rows whose LastUsedAt is older
+	// than beforeMs. Attestation inserts a permanent row per key, and a
+	// reinstall or key regeneration yields a NEW key id, so without a
+	// retention sweep the table only ever grows. A reaped device simply
+	// re-attests on its next refresh.
+	DeleteStaleAttestedDevices(ctx context.Context, beforeMs int64, limit int) error
 
 	// QR login sessions
 	FindQrLoginSession(ctx context.Context, sessionID string) (*QrLoginSessionRecord, error)
@@ -981,13 +1007,6 @@ var (
 	// is distinct from ErrSignupDisabled (password signup) so the two flows
 	// can be toggled independently; both map to FailedPrecondition.
 	ErrPasskeySignupDisabled = errors.New("passkey signup is disabled for this deployment")
-	// ErrCaptchaRequired is returned when CAPTCHA is enforced on an
-	// endpoint but the request carried no captcha token. ErrCaptchaFailed
-	// is returned when the supplied token was rejected by the provider.
-	// Both map to CodePermissionDenied so a forged token and a missing one
-	// look the same to a client.
-	ErrCaptchaRequired = errors.New("captcha token required")
-	ErrCaptchaFailed   = errors.New("captcha verification failed")
 	// ErrUnimplemented signals that the requested RPC is intentionally
 	// disabled for the active repository driver (e.g. the redesign
 	// Domain/Tenant RPCs are postgres-only; memory returns this).
@@ -1073,9 +1092,15 @@ type AuthService struct {
 	// request (mirrors the verifier's precomputed audience sets). Set in
 	// WithNativeOAuth.
 	nativeProductProjects map[string]string
-	emailThrottle         *emailSendThrottle
-	signupThrottle        *emailSendThrottle
-	phoneThrottle         *emailSendThrottle
+	// assuranceResolver resolves per-project attestation verifiers and
+	// webAssurance is the deployment-global captcha verifier; both are set
+	// via WithAssurance when GATEWAY_ASSURANCE_ENABLED. nil resolver/web
+	// disables the corresponding assurance surface (ErrAssuranceDisabled).
+	assuranceResolver *AssuranceResolver
+	webAssurance      assurance.Verifier
+	emailThrottle     *emailSendThrottle
+	signupThrottle    *emailSendThrottle
+	phoneThrottle     *emailSendThrottle
 	// returnAllow validates the magic-link return_to against
 	// GATEWAY_OAUTH_ALLOWED_RETURN_URLS — the same allowlist the hosted
 	// OAuth flow uses. Parsed once at construction.
@@ -1190,6 +1215,16 @@ func (s *AuthService) WithNativeOAuth(v NativeIDTokenVerifier, projects NativeOA
 	s.nativeVerifier = v
 	s.nativeProjects = projects
 	s.nativeProductProjects = s.cfg.NativeOAuthProductProjectMap()
+	return s
+}
+
+// WithAssurance wires the client-assurance layer: the per-project
+// attestation resolver and the deployment-global web verifier. Called by
+// app wiring when GATEWAY_ASSURANCE_ENABLED; without it every assurance
+// RPC returns ErrAssuranceDisabled.
+func (s *AuthService) WithAssurance(resolver *AssuranceResolver, web assurance.Verifier) *AuthService {
+	s.assuranceResolver = resolver
+	s.webAssurance = web
 	return s
 }
 

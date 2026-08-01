@@ -735,7 +735,9 @@ func newTestConfig() *config.Config {
 // flows. All operations are mutex-protected so tests using
 // t.Parallel() are race-free.
 type MemRepo struct {
-	mu sync.Mutex
+	attestedDevices     map[string]*service.AttestedDeviceRecord
+	assuranceChallenges map[string]*service.AssuranceChallengeRecord
+	mu                  sync.Mutex
 
 	seq                int64
 	users              map[string]*service.User
@@ -2329,6 +2331,129 @@ func (r *MemRepo) CountSessionsForUser(userID string) (active, revoked int) {
 }
 
 // compile-time interface assertion
+
+// ── Client assurance (attested devices + one-shot challenges) ─────────
+//
+// The integration harness's MemRepo mirrors the memory driver's semantics:
+// key_id is unique, the counter advances only via a compare-and-swap, and a
+// challenge is consumed exactly once.
+
+func (r *MemRepo) CreateAttestedDevice(_ context.Context, d *service.AttestedDeviceRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.attestedDevices == nil {
+		r.attestedDevices = make(map[string]*service.AttestedDeviceRecord)
+	}
+	for _, existing := range r.attestedDevices {
+		if existing.KeyID == d.KeyID {
+			return "", fmt.Errorf("memrepo: CreateAttestedDevice: %w", service.ErrAlreadyExists)
+		}
+	}
+	id := d.NodeID
+	if id == "" {
+		id = fmt.Sprintf("attdev-%d", len(r.attestedDevices)+1)
+	}
+	cp := *d
+	cp.NodeID = id
+	r.attestedDevices[id] = &cp
+	d.NodeID = id
+	return id, nil
+}
+
+func (r *MemRepo) GetAttestedDeviceByKeyID(_ context.Context, keyID string) (*service.AttestedDeviceRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, d := range r.attestedDevices {
+		if d.KeyID == keyID {
+			cp := *d
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) UpdateAttestedDeviceCounter(_ context.Context, nodeID string, fromCount, toCount, lastUsedAtMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d, ok := r.attestedDevices[nodeID]
+	if !ok {
+		return fmt.Errorf("%w: attested device", service.ErrNotFound)
+	}
+	if d.SignCount != fromCount {
+		return service.ErrCounterStale
+	}
+	d.SignCount = toCount
+	d.LastUsedAt = lastUsedAtMs
+	return nil
+}
+
+func (r *MemRepo) DeleteStaleAttestedDevices(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memrepo: DeleteStaleAttestedDevices: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, d := range r.attestedDevices {
+		if n >= limit {
+			break
+		}
+		if d.LastUsedAt < beforeMs {
+			delete(r.attestedDevices, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *MemRepo) CreateAssuranceChallenge(_ context.Context, c *service.AssuranceChallengeRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.assuranceChallenges == nil {
+		r.assuranceChallenges = make(map[string]*service.AssuranceChallengeRecord)
+	}
+	id := c.NodeID
+	if id == "" {
+		id = fmt.Sprintf("assurchal-%d", len(r.assuranceChallenges)+1)
+	}
+	cp := *c
+	cp.NodeID = id
+	r.assuranceChallenges[id] = &cp
+	c.NodeID = id
+	return id, nil
+}
+
+func (r *MemRepo) ConsumeAssuranceChallenge(_ context.Context, nodeID string) (*service.AssuranceChallengeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.assuranceChallenges[nodeID]
+	if !ok {
+		return nil, nil
+	}
+	delete(r.assuranceChallenges, nodeID)
+	cp := *c
+	return &cp, nil
+}
+
+func (r *MemRepo) DeleteExpiredAssuranceChallenges(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memrepo: DeleteExpiredAssuranceChallenges: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, c := range r.assuranceChallenges {
+		if n >= limit {
+			break
+		}
+		if c.ExpiresAt < beforeMs {
+			delete(r.assuranceChallenges, id)
+			n++
+		}
+	}
+	return nil
+}
+
 var _ service.Repository = (*MemRepo)(nil)
 
 // silence unused import when graph is only referenced via the

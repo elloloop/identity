@@ -6,7 +6,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
-	"github.com/elloloop/identity/pkg/captcha"
+	"github.com/elloloop/identity/pkg/assurance"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/idv"
 	"github.com/elloloop/identity/pkg/jwt"
@@ -86,10 +86,15 @@ type Options struct {
 	// disabled, leaving the IDV RPCs Unimplemented).
 	IDVProvider idv.Provider
 
-	// CaptchaVerifier gates the unauthenticated auth endpoints. nil builds
-	// the Config.CaptchaProvider backend (the no-op verifier when CAPTCHA
-	// is disabled).
-	CaptchaVerifier captcha.Verifier
+	// AssuranceWebVerifier is the web (captcha) arm of the client-assurance
+	// layer, gating the unauthenticated auth endpoints. nil builds the
+	// backend named by GATEWAY_ASSURANCE_WEB_PROVIDER (Turnstile or
+	// reCAPTCHA v3); when no web provider is configured there is no web
+	// verifier at all, so browser clients cannot obtain an assurance token
+	// and only the mobile-attestation arms apply. Used only while
+	// GATEWAY_ASSURANCE_ENABLED is set — a disabled deployment ignores any
+	// verifier supplied here.
+	AssuranceWebVerifier assurance.Verifier
 
 	// DNSResolver is the TXT-lookup boundary VerifyDomain uses to confirm a
 	// custom domain's ownership challenge. nil defaults to net.DefaultResolver
