@@ -95,6 +95,13 @@ const DefaultAuditRetentionDays = 730
 // empty project shard id. The single source of truth for this literal.
 const DefaultProjectIDFallback = "default"
 
+// DefaultProductFallback is the product slug attributed to a request that
+// sends no X-Product header. It is the env-loader default for
+// GATEWAY_DEFAULT_PRODUCT and names the household product that shipped the
+// header first, so clients written before it existed keep resolving to the app
+// they actually are. The single source of truth for this literal.
+const DefaultProductFallback = "nesta"
+
 // Config holds all identity service configuration.
 type Config struct {
 	// Server & ports.
@@ -124,6 +131,15 @@ type Config struct {
 	// conflated. Driven by GATEWAY_DEFAULT_PROJECT_ID (default "default").
 	// Only the postgres driver has a control plane; the memory driver ignores it.
 	DefaultProjectID string
+
+	// DefaultProduct is the product slug attributed to a request that sends no
+	// X-Product header — a client that predates the header. It names one of the
+	// apps in the resolved project's `products` policy, so a legacy client is
+	// gated as the deployment's primary app rather than as no product at all.
+	// Set it to the slug an untagged client actually is. Driven by
+	// GATEWAY_DEFAULT_PRODUCT (default "nesta", the first deployment to ship
+	// the header); set it empty to leave untagged requests unrestricted.
+	DefaultProduct string
 
 	// AdminAPISecret is the shared secret that authenticates the
 	// control-plane admin RPCs (AdminCreateProject and friends), which a
@@ -932,6 +948,7 @@ func Load() *Config {
 
 		DefaultTenantID:            envStr("GATEWAY_DEFAULT_TENANT_ID", "local"),
 		DefaultProjectID:           envStr("GATEWAY_DEFAULT_PROJECT_ID", DefaultProjectIDFallback),
+		DefaultProduct:             envStr("GATEWAY_DEFAULT_PRODUCT", DefaultProductFallback),
 		AdminAPISecret:             envStr("GATEWAY_ADMIN_API_SECRET", ""),
 		DisableFirstAdminBootstrap: envBool("GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP", false),
 		ProjectSecretsKey:          envStr("GATEWAY_PROJECT_SECRETS_KEY", ""),

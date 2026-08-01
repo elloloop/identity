@@ -261,6 +261,15 @@
     "anchor": "email-and-branding"
   },
   {
+    "name": "GATEWAY_DEFAULT_PRODUCT",
+    "type": "string",
+    "default": "nesta",
+    "required": false,
+    "description": "is the product slug attributed to a request that sends no X-Product header — a client that predates the header.",
+    "category": "Age gating (COPPA)",
+    "anchor": "age-gating-coppa"
+  },
+  {
     "name": "GATEWAY_DEFAULT_PROJECT_ACCESS_MODE",
     "type": "string",
     "default": "closed",

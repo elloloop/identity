@@ -146,6 +146,22 @@ func TestCORS_Preflight_AllowsProjectKeyHeader(t *testing.T) {
 	assert.Contains(t, rec.Header().Get("Access-Control-Allow-Headers"), "x-project-key")
 }
 
+func TestCORS_Preflight_AllowsProductHeader(t *testing.T) {
+	// Regression: a browser SPA names the product it is authenticating for with
+	// x-product, which the per-product age guardrails gate on. Without it in the
+	// preflight allow-list every SPA silently falls back to the deployment
+	// default product, whatever origin allow-listing says.
+	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
+	req := httptest.NewRequest(http.MethodOptions, "/identity.v1.IdentityService/PasswordLogin", nil)
+	req.Header.Set("Origin", "http://localhost:9002")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "content-type, x-product")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Contains(t, rec.Header().Get("Access-Control-Allow-Headers"), "x-product")
+}
+
 func TestCORS_Preflight_DisallowedOrigin_StillReturns204(t *testing.T) {
 	handler := CORSMiddleware(mustParse(t, "http://localhost:9002"))(nopHandler())
 	req := httptest.NewRequest(http.MethodOptions, "/some-path", nil)

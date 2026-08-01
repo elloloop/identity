@@ -874,6 +874,13 @@ var (
 	// the denial is uniform across every email (invite-only is a project
 	// property, not a per-account signal), so it discloses no account existence.
 	ErrSignupByInvitationOnly = errors.New("this project is invitation-only; self-signup is disabled")
+	// ErrProductAgeRestricted is returned when authentication succeeded but the
+	// account's derived age band is below the minimum the requested product
+	// configures (ProjectProductsConfig). It maps to CodePermissionDenied, and
+	// its message leads with the stable `product_age_restricted` token that
+	// clients match on to show kind, child-appropriate copy instead of a raw
+	// error. The token is part of the wire contract — do not reword it.
+	ErrProductAgeRestricted = errors.New("product_age_restricted: this account is not old enough for this product")
 	// ErrProjectSecretsKeyMissing is returned when an admin write carries a
 	// plaintext provider secret to encrypt but GATEWAY_PROJECT_SECRETS_KEY is
 	// not configured, so the server cannot encrypt it for storage. It is a
@@ -1492,6 +1499,12 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// an authoritative is_minor claim when age-gating is on. No-op (false)
 	// when the gate is off or no DOB is on file.
 	s.stampAgeBand(user)
+
+	// The requested product's age guardrail, checked on the derived band the
+	// stamp above produced and before any session state is written.
+	if err := s.enforceProductAgeGate(ctx, user); err != nil {
+		return "", "", err
+	}
 
 	claims := jwt.Claims{
 		Sub:       user.ID,

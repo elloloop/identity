@@ -174,6 +174,7 @@ GATEWAY_REPO_DRIVER                 = postgres | sqlite | memory  # postgres has
 GATEWAY_DEFAULT_PROJECT_ID          = <string>   # default "default"; the seeded control-plane Project id
 GATEWAY_DEFAULT_TENANT_ID           = <string>   # the storage scope the default project maps onto
 GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS= <csv>      # serving hostnames seeded (verified) on the default project; first is primary
+GATEWAY_DEFAULT_PRODUCT             = <string>   # default "nesta"; product slug attributed to a request with no X-Product header
 GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN= <bool>     # default true; primary auth-domain (branded links) must be DNS-verified. false lets an unverified is_primary host drive links
 GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane admin RPCs; empty disables them
 GATEWAY_PUBLIC_EMAIL_DOMAINS        = <csv>      # extra public domains that never auto-form a tenant
@@ -243,6 +244,77 @@ deployments (which have no `platform_admins` table) return
 `CodeUnimplemented`. After bootstrapping the first admin, the operator
 configures `GATEWAY_ADMIN_API_SECRET` and uses the secret-gated Admin RPCs
 for everything else.
+
+### Per-product age guardrails
+
+A project owns one account pool, and one account signs into every product
+that pool serves. A product's audience rating is therefore not a property
+of the account — it is a check at that product's door. Identity enforces a
+per-product **minimum age band** at sign-in and at token refresh: the
+Google model completed, where one account authenticates everywhere but
+each product decides who it will issue a session to.
+
+**Products identify themselves per request** with the `X-Product: <slug>`
+header (`hold`, `nesta`, `account-portal`, …). A request with no header is
+a client that predates it and is attributed to `GATEWAY_DEFAULT_PRODUCT`,
+so a legacy client is gated as the app it actually is rather than escaping
+the gate. Slugs are case-insensitive.
+
+**Policy lives in the resolved project's `config_json`**, under `products`,
+written with the existing `UpsertProjectConfig` admin RPC — there is no new
+admin surface, and no deploy is needed to add a product or change a rating:
+
+```json
+{
+  "products": {
+    "hold":           { "minimum_age_band": "teen" },
+    "nesta":          {},
+    "account-portal": {}
+  }
+}
+```
+
+`minimum_age_band` is `child`, `teen`, or `adult` — the lower-cased
+`AgeBand` spellings. It **fails OPEN**, the inverse of `access.mode`: an
+absent `products` block, an absent slug, and an absent `minimum_age_band`
+all mean "no age restriction", so enabling the feature changes no existing
+deployment's behavior. What fails LOUD is a malformed policy: an
+unrecognized band string is rejected by `ParseProjectConfig`, so a typo
+fails the config write (and makes the resolver refuse the project) rather
+than quietly serving a missing guardrail as "unrestricted".
+
+**Enforcement** sits at `issueTokensWithSessionStart` — the single point
+every token pair is minted from. That covers every session-issuing path
+(password login and signup, email-code redeem, magic-link redeem, OAuth
+redeem, hosted-OAuth callback and redeem, native mobile OAuth, passkey
+login and signup, TOTP second factor, QR poll, invitation acceptance) plus
+**token refresh**, so a session issued before a product was restricted
+stops renewing once it is. The check runs strictly AFTER authentication
+succeeded, so a denial can never disclose whether an email exists.
+
+An account below the product's minimum is refused with ConnectRPC
+`permission_denied` and a message containing the stable token
+`product_age_restricted`. Clients match on that token and show kind,
+child-appropriate copy — never a raw error.
+
+**Unknown age passes.** `AGE_BAND_UNSPECIFIED` — an account with no date of
+birth on file, or any account when `GATEWAY_AGEGATE_ENABLED` is off — is
+admitted. The gate exists to stop accounts KNOWN to be too young, not to
+force birthdate collection on everyone, which would be the worse privacy
+outcome. Child accounts always have a date of birth by construction (the
+kid signup flows require one), so the gate still catches exactly the
+population it exists for.
+
+Two operational prerequisites, both easy to miss:
+
+- **`GATEWAY_AGEGATE_ENABLED` must be true.** With age-gating off no
+  account has a derived band, every account is UNSPECIFIED, and the
+  guardrail is inert.
+- **The request must resolve to a control-plane project.** The env
+  default-project pin (step 3 of project resolution) has no `config_json`
+  and therefore no product policy. Reach a real project row by sending
+  `X-Project-Key`, or by mapping the serving host onto the project with
+  `GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS`.
 
 ### Why one code path, not a mode flag
 

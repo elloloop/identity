@@ -495,6 +495,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_CAPTCHA_", "CAPTCHA"},
 	{"GATEWAY_AGEGATE_", "Age gating (COPPA)"},
 	{"GATEWAY_MINOR_", "Age gating (COPPA)"},
+	{"GATEWAY_DEFAULT_PRODUCT", "Age gating (COPPA)"},
 	{"GATEWAY_IDV_", "Identity verification"},
 	{"GATEWAY_SAML_", "SAML 2.0 IdP"},
 	{"GATEWAY_SMTP_", "Email & branding"},

@@ -74,6 +74,7 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 		LoginDefaults:      cfg.Login,
 		OAuth:              cfg.OAuth,
 		Access:             cfg.Access,
+		Products:           cfg.Products,
 	}, nil
 }
 

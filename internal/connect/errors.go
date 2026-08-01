@@ -25,6 +25,7 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrPermissionDenied),
 		errors.Is(err, service.ErrAccessNotAllowed),
 		errors.Is(err, service.ErrSignupByInvitationOnly),
+		errors.Is(err, service.ErrProductAgeRestricted),
 		errors.Is(err, service.ErrCaptchaRequired),
 		errors.Is(err, service.ErrCaptchaFailed):
 		return connect.NewError(connect.CodePermissionDenied, err)

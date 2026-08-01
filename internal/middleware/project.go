@@ -207,6 +207,7 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		LoginDefaults:      rp.LoginDefaults,
 		OAuth:              rp.OAuth,
 		Access:             rp.Access,
+		Products:           rp.Products,
 	}
 }
 

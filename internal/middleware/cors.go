@@ -134,7 +134,10 @@ func CORSMiddleware(globalOrigins []string) func(http.Handler) http.Handler {
 				// x-project-key carries the publishable project credential (ProjectKeyHeader)
 				// that routes a browser request to its control-plane project; without it in
 				// the allow-list a cross-origin SPA cannot select a non-default project.
-				w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, connect-protocol-version, connect-timeout-ms, x-user-id, cookie, x-user-agent, x-grpc-web, grpc-timeout, x-project-key")
+				// x-product (ProductHeader) names the product the request authenticates for,
+				// so a browser app is gated by its own product's guardrails rather than
+				// silently falling back to the deployment default.
+				w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, connect-protocol-version, connect-timeout-ms, x-user-id, cookie, x-user-agent, x-grpc-web, grpc-timeout, x-project-key, x-product")
 				w.Header().Set("Access-Control-Max-Age", "86400")
 				w.WriteHeader(http.StatusNoContent)
 				return

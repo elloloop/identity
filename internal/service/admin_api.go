@@ -86,6 +86,13 @@ type AdminProject struct {
 	// enforces the mode. Ignored on writes. DEFAULT-DENY: a zero value (empty or
 	// unset mode) fails closed and denies all authentication.
 	Access ProjectAccessConfig
+
+	// Products is the project's parsed config_json per-product guardrail policy,
+	// populated on the same reads as OAuth and Access so native OAuth login —
+	// which resolves its own scope from the product selector rather than from
+	// the request Host — gates on the same policy every other login path sees.
+	// Ignored on writes. FAILS OPEN: a zero value imposes no restriction.
+	Products ProjectProductsConfig
 }
 
 // AdminProjectCredential is the credential row an operator mints. Only the
