@@ -2135,7 +2135,7 @@ func (c *Config) validateAnonymous() error {
 		refresh := time.Duration(c.RefreshExpirySeconds) * time.Second
 		if retention <= refresh {
 			return fmt.Errorf(
-				"config: GATEWAY_ANONYMOUS_RETENTION_DAYS (%s) must exceed GATEWAY_REFRESH_EXPIRY (%s) — "+
+				"config: GATEWAY_ANONYMOUS_RETENTION_DAYS (%s) must exceed GATEWAY_REFRESH_EXPIRY_SECONDS (%s) — "+
 					"anonymous users would be reaped while their refresh token, their only credential, is still valid",
 				retention, refresh,
 			)

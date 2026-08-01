@@ -1,5 +1,63 @@
 # Upgrade guide
 
+## v4.0 → v4.1 — anonymous identity (additive)
+
+v4.1 adds anonymous sign-in: credential-less accounts with a stable id that
+can later gain a credential without changing it (see
+[ADR-0013](./adr/0013-anonymous-identity.md) and the
+[docs-site page](../docs-site/src/pages/docs/auth/anonymous.astro)).
+
+**Nothing changes unless you turn it on.** The feature defaults off, the
+new RPCs return `UNIMPLEMENTED` until a project enables it, the wire
+additions are additive (`User.is_anonymous` field 26; two new RPCs), and
+the `anonymous` JWT claim is emitted only for anonymous accounts, so
+tokens for identified users are byte-identical to v4.0.
+
+**Migrations** (postgres 0028, sqlite 0013), applied with
+`identity migrate`, add `users.is_anonymous` and **rebuild the per-project
+email unique index as a partial index** over non-empty addresses — every
+anonymous account carries an empty email, so a total index would make the
+second one a duplicate-key error. Uniqueness still binds, case-insensitively,
+for every user that has an address.
+
+> On a large `users` table the rebuild takes a brief SHARE lock (blocks
+> writes, allows reads) for the duration of the build. Pre-build the
+> replacement with `CREATE INDEX CONCURRENTLY` outside a transaction before
+> deploying the binary, and the migration's `IF NOT EXISTS` clauses will
+> no-op:
+>
+> ```sql
+> CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS users_project_email_partial_uidx
+>     ON users (project_id, lower(email)) WHERE email <> '';
+> CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_anonymous_last_login_idx
+>     ON users (project_id, last_login_at_ms) WHERE is_anonymous;
+> ```
+
+**To enable it**, per deployment (default project) or per project in
+`config_json`:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `GATEWAY_ANONYMOUS_ENABLED` | `false` | turns on `SignInAnonymously` |
+| `GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE` | `false` | gates it on the assurance layer; **boot fails** if set while `GATEWAY_ASSURANCE_ENABLED=false` |
+| `GATEWAY_ANONYMOUS_RETENTION_DAYS` | `30` | days of inactivity before reaping; **must exceed `GATEWAY_REFRESH_EXPIRY_SECONDS`**; `0` disables the sweep |
+
+Two things to know before enabling:
+
+1. **It is independent of `access.mode`.** A project running `mode: closed`
+   still hands out anonymous sessions. The access mode governs
+   email-identified humans; anonymous sign-in has its own switch. Control
+   anonymous traffic with assurance and rate limits.
+2. **Downstream services must check the `anonymous` claim** before granting
+   anything that assumes a verified human. An anonymous `sub` is cheap to
+   mint, and `email` is empty rather than absent-because-unverified, so code
+   that only tests "is there a sub?" will treat a farmed account as a user.
+
+**Rollback** (`0028.down` / `0013.down`) **deletes anonymous users.** They
+cannot be represented in the pre-0028 schema and hold no credential to sign
+back in with, so the deletion is the honest outcome rather than a
+half-applied rollback.
+
 ## v3.x → v4.0 — CAPTCHA becomes the client-assurance layer (breaking)
 
 v4.0 replaces the inline-CAPTCHA design with the client-assurance layer

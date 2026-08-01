@@ -5,6 +5,8 @@
   "admin_help_requested",
   "admin_help_resolved",
   "admin_reset_password",
+  "anonymous_signin",
+  "anonymous_upgraded",
   "assurance_attested",
   "identity_linked",
   "identity_unlinked",

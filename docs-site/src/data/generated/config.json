@@ -63,6 +63,33 @@
     "anchor": "http-cors-and-cookies"
   },
   {
+    "name": "GATEWAY_ANONYMOUS_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "turns anonymous sign-in on for the DEFAULT project ( ).",
+    "category": "Anonymous identity",
+    "anchor": "anonymous-identity"
+  },
+  {
+    "name": "GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "makes SignInAnonymously require a valid assurance token, exactly like the six enforce flags on the identified auth endpoints.",
+    "category": "Anonymous identity",
+    "anchor": "anonymous-identity"
+  },
+  {
+    "name": "GATEWAY_ANONYMOUS_RETENTION_DAYS",
+    "type": "integer",
+    "default": "30",
+    "required": false,
+    "description": "bounds how long an anonymous user is kept after its LAST ACTIVITY.",
+    "category": "Anonymous identity",
+    "anchor": "anonymous-identity"
+  },
+  {
     "name": "GATEWAY_APP_BASE_URL",
     "type": "string",
     "default": "http://localhost:9002",
