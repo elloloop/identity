@@ -116,6 +116,9 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 		if err != nil {
 			return nil, err
 		}
+		if u == nil {
+			return nil, ErrNotFound
+		}
 		// The anonymous session is deliberately revoked with the promotion:
 		// leaving it live would return exactly the session this gate exists
 		// to withhold, just under the previous credential.
@@ -123,6 +126,14 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 			s.logger.Warn("anonymous_upgrade_session_revoke_failed",
 				zap.String("user_id", userID), zap.Error(err))
 		}
+		// Deleting refresh tokens alone does NOT end the session. Under
+		// GATEWAY_REVOCATION_MODE=session the access token's lifetime is
+		// uncapped and it is revocable only through its Session row, so
+		// without this the caller keeps a working token against a subject
+		// that now bears the address they just claimed — exactly the
+		// session this gate exists to withhold. Every other revocation site
+		// pairs these two calls; this one had omitted it.
+		s.revokeUserSessionsIfModeSession(ctx, userID, "anonymous_upgrade_pending_verification")
 		return &LoginResult{User: u}, nil
 	}
 

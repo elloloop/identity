@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -162,5 +164,46 @@ func TestAnonymousDefaults_AreMutuallyConsistent(t *testing.T) {
 	c := Load()
 	if err := c.validateAnonymous(); err != nil {
 		t.Fatalf("stock defaults with anonymous enabled fail to boot: %v", err)
+	}
+}
+
+// TestLoad_AnonymousRetentionDefaultNeverBreaksBoot is the regression guard
+// for a real defect: the retention-vs-refresh invariant was enforced against
+// the UNSET 30-day default, so v4.1 refused to start on any v4.0 deployment
+// whose refresh lifetime was >= 30 days — with anonymous entirely off and no
+// GATEWAY_ANONYMOUS_* variable ever set. A 30/60/90-day refresh is ordinary
+// for a mobile deployment, so this bricked upgrades mid rolling-deploy over
+// a value the operator had never chosen.
+func TestLoad_AnonymousRetentionDefaultNeverBreaksBoot(t *testing.T) {
+	for _, refreshDays := range []int{7, 30, 60, 90} {
+		t.Run(fmt.Sprintf("refresh_%dd", refreshDays), func(t *testing.T) {
+			t.Setenv("GATEWAY_JWT_SECRET", strings.Repeat("x", 32))
+			t.Setenv("GATEWAY_REFRESH_EXPIRY_SECONDS", strconv.Itoa(refreshDays*86400))
+
+			c := Load()
+			if err := c.Validate(); err != nil {
+				t.Fatalf("a deployment that never enabled anonymous failed to boot: %v", err)
+			}
+			// The effective window must still outlive the refresh lifetime,
+			// so the sweep cannot reap a reachable account.
+			if c.AnonymousRetentionDays <= refreshDays {
+				t.Errorf("effective retention %dd does not outlive a %dd refresh lifetime",
+					c.AnonymousRetentionDays, refreshDays)
+			}
+		})
+	}
+}
+
+// An EXPLICIT window that cannot be honoured still fails loudly: there the
+// operator stated an intent the server would silently override.
+func TestLoad_ExplicitAnonymousRetentionStillFailsLoudly(t *testing.T) {
+	t.Setenv("GATEWAY_JWT_SECRET", strings.Repeat("x", 32))
+	t.Setenv("GATEWAY_REFRESH_EXPIRY_SECONDS", strconv.Itoa(90*86400))
+	t.Setenv("GATEWAY_ANONYMOUS_RETENTION_DAYS", "30")
+
+	if err := Load().Validate(); err == nil {
+		t.Fatal("an explicitly-set window shorter than the refresh lifetime was accepted")
+	} else if !strings.Contains(err.Error(), "GATEWAY_ANONYMOUS_RETENTION_DAYS") {
+		t.Errorf("error does not name the variable: %v", err)
 	}
 }

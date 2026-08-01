@@ -98,6 +98,10 @@ const (
 	// reaped while their refresh token is live.
 	DefaultAnonymousRetentionDays = 30
 
+	// envAnonymousRetentionDays is named because Load must distinguish
+	// "operator set this" from "this is the default"; see Load.
+	envAnonymousRetentionDays = "GATEWAY_ANONYMOUS_RETENTION_DAYS"
+
 	// MaxAnonymousRetentionDays caps the window for the same reason
 	// MaxAssuranceDeviceRetentionDays does: past ~106752 days the nanosecond
 	// cutoff duration overflows int64 and INVERTS, turning the sweep into a
@@ -1065,6 +1069,15 @@ type Config struct {
 	// each entry is sensitive and never logged.
 	WebhookSubscriptions string
 
+	// anonymousRetentionExplicit records that the operator set
+	// GATEWAY_ANONYMOUS_RETENTION_DAYS. Only an explicit value is held to
+	// the refresh-lifetime invariant; an unset one is raised instead of
+	// failing a boot the operator never asked for.
+	anonymousRetentionExplicit bool
+	// AnonymousRetentionRaisedFrom is the unset default that was raised,
+	// or 0 when no adjustment happened. Boot logs it once.
+	AnonymousRetentionRaisedFrom int
+
 	// removedEnvVarErr is non-nil when Load saw an environment variable
 	// removed in a breaking release. Nil for a Config built in code, which
 	// is the point — see the comment on detectRemovedEnvVars.
@@ -1078,6 +1091,23 @@ func Load() *Config {
 	// Stamped here so Validate stays a pure receiver check; see
 	// removedEnvVarErr.
 	c.removedEnvVarErr = detectRemovedEnvVars()
+
+	// The anonymous retention window must outlive the refresh lifetime, or
+	// the sweep reaps accounts whose only credential is still valid. That
+	// invariant must NOT be enforced against a value the operator never
+	// chose: v4.1 briefly failed to boot on any v4.0 deployment with a
+	// refresh lifetime >= the 30-day default, with anonymous entirely off
+	// and no GATEWAY_ANONYMOUS_* variable ever set. An UNSET window is
+	// therefore raised to clear the refresh lifetime; an explicitly set one
+	// still fails Validate loudly, because there the operator stated an
+	// intent the server cannot honour.
+	if _, explicit := os.LookupEnv(envAnonymousRetentionDays); explicit {
+		c.anonymousRetentionExplicit = true
+	} else if refreshDays := c.RefreshExpirySeconds / 86400; c.AnonymousRetentionDays > 0 &&
+		c.AnonymousRetentionDays <= refreshDays {
+		c.AnonymousRetentionRaisedFrom = c.AnonymousRetentionDays
+		c.AnonymousRetentionDays = refreshDays + 1
+	}
 	return c
 }
 
@@ -1196,7 +1226,7 @@ func loadFromEnv() *Config {
 		AssuranceWebTokenTTLSeconds:      envInt("GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS", DefaultAssuranceWebTokenTTLSeconds),
 		AssuranceDeviceRetentionDays:     envInt("GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS", DefaultAssuranceDeviceRetentionDays),
 		AnonymousEnabled:                 envBool("GATEWAY_ANONYMOUS_ENABLED", false),
-		AnonymousRetentionDays:           envInt("GATEWAY_ANONYMOUS_RETENTION_DAYS", DefaultAnonymousRetentionDays),
+		AnonymousRetentionDays:           envInt(envAnonymousRetentionDays, DefaultAnonymousRetentionDays),
 		AnonymousRequireAssurance:        envBool("GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE", false),
 		AssuranceAllowProjectOnly:        envBool("GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY", false),
 

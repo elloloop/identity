@@ -30,8 +30,9 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAssuranceFailed):
 		return connect.NewError(connect.CodePermissionDenied, err)
 
-	// ErrAnonymousDisabled reaches this mapper from the REFRESH path (the two
-	// anonymous handlers map it themselves). Without a case it fell through
+	// ErrAnonymousDisabled reaches this mapper from every path — the refresh
+	// path and the two anonymous handlers, which route here too rather than
+	// keeping a second mapping. Without a case it fell through
 	// to CodeInternal, so flipping the documented kill switch returned 500 to
 	// every live anonymous client — which SDKs retry, against an
 	// already-consumed refresh token — and fired the operator's 5xx alerting

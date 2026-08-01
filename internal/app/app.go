@@ -696,6 +696,17 @@ func New(deps Deps) (*Built, error) {
 	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
 	// default project denies all auth, so a fresh deployment that forgot to open
 	// it isn't silently locked out with no signal.
+	// Surface the retention adjustment Load makes when the operator never
+	// chose a window: silent is wrong (the effective value differs from the
+	// documented default), but failing the boot is worse — see Load.
+	if from := deps.Config.AnonymousRetentionRaisedFrom; from > 0 {
+		logger.Info("anonymous_retention_raised",
+			zap.Int("from_days", from),
+			zap.Int("to_days", deps.Config.AnonymousRetentionDays),
+			zap.String("reason", "the default window did not outlive GATEWAY_REFRESH_EXPIRY_SECONDS; "+
+				"anonymous users would have been reaped while their only credential was still valid"),
+			zap.String("hint", "set GATEWAY_ANONYMOUS_RETENTION_DAYS explicitly to choose the window"))
+	}
 	if defaultAccess.Mode == service.AccessModeClosed || defaultAccess.Mode == "" {
 		logger.Warn("default_project_access_closed",
 			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))

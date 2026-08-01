@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/elloloop/identity/internal/config"
 )
 
 // The fake exchanger derives the provider subject from the email in the
@@ -449,5 +451,45 @@ func TestUpgradeAnonymousWithOAuth_RefusesAnIdentityOwnedByAnother(t *testing.T)
 	after, _ := repo.GetUser(ctx, res.User.ID)
 	if after == nil || !after.IsAnonymous {
 		t.Error("a refused upgrade must leave the account anonymous")
+	}
+}
+
+// TestUpgradeAnonymousWithPassword_RevokesTheAccessSessionToo pins the half
+// of the verified-email gate that the withheld-tokens assertion cannot see.
+//
+// Deleting refresh tokens does not end a session: under
+// GATEWAY_REVOCATION_MODE=session the access token's lifetime is uncapped and
+// it is revocable only through its Session row. Without revoking that, the
+// caller keeps a working token against a subject that now bears the address
+// they just claimed — exactly the session the gate withholds.
+func TestUpgradeAnonymousWithPassword_RevokesTheAccessSessionToo(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.RevocationMode = config.RevocationModeSession
+	svc.cfg.AuthRequireVerifiedEmail = true
+	ctx := anonCtx(true, AccessModeOpen)
+
+	signIn, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+	claims := decodeAccessTokenClaims(t, svc, signIn.AccessToken)
+	if claims.SID == "" {
+		t.Fatal("revocation mode session should have minted a session id")
+	}
+
+	if _, err := svc.UpgradeAnonymousWithPassword(ctx, signIn.User.ID, AnonymousPasswordCredential{
+		Email: "claimed@example.com", Password: "Str0ng-Passw0rd!x",
+	}); err != nil {
+		t.Fatalf("UpgradeAnonymousWithPassword: %v", err)
+	}
+
+	// The pre-upgrade access token must no longer be usable.
+	sess, err := repo.GetSessionBySid(ctx, claims.SID)
+	if err != nil {
+		t.Fatalf("GetSessionBySid: %v", err)
+	}
+	if sess != nil && sess.RevokedAtMs == 0 {
+		t.Fatal("the pre-upgrade access session is still active — the withheld session remains reachable")
 	}
 }

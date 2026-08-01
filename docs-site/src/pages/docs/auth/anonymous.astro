@@ -170,12 +170,40 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
   }
 }`}
   />
+  <h3>What the response contains depends on the arm</h3>
   <p>
-    The response returns the same user id with <code>isAnonymous: false</code>,
-    plus a <strong>new token pair</strong>. The reissue is required, not a
-    convenience: your existing access token still asserts
-    <code>anonymous: true</code>, and downstream services would keep believing
-    it until it expired. Discard the old pair.
+    Both arms return the same user id with <code>isAnonymous: false</code>.
+    They differ on whether you get a session:
+  </p>
+  <ul>
+    <li>
+      <strong>OAuth</strong> — the address is provider-verified, so the
+      response carries a <strong>new token pair</strong>. The reissue is
+      required, not a convenience: your old access token still asserts
+      <code>anonymous: true</code> and downstream services would keep
+      believing it until it expired. Discard the old pair.
+    </li>
+    <li>
+      <strong>Password, with <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code>
+      on (the default)</strong> — the address is only asserted, so no session
+      is issued. <code>accessToken</code> and <code>refreshToken</code> come
+      back <strong>empty</strong>, <code>expiresIn</code> is <code>0</code>, a
+      verification email is sent, and the anonymous session is revoked. Route
+      the user to "check your email", then to a normal login. Do not discard
+      your tokens expecting replacements — there are none, and the old ones
+      have already been revoked.
+    </li>
+    <li>
+      <strong>Password, with the gate off</strong> — behaves like the OAuth
+      arm and returns a new pair.
+    </li>
+  </ul>
+  <p>
+    The gate exists so the upgrade is never more powerful than
+    <code>PasswordSignup</code>, which withholds a session on an unverified
+    address for the same reason: otherwise anyone could mint an anonymous
+    account and trade it for a live session asserting an address they do not
+    own.
   </p>
 
   <h3>Errors</h3>
@@ -220,6 +248,14 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
       <tr>
         <td><code>INVALID_ARGUMENT</code></td>
         <td>no credential set, or the password fails the strength policy</td>
+      </tr>
+      <tr>
+        <td>—</td>
+        <td>
+          <strong>Not an error:</strong> a successful password upgrade with
+          the verification gate on returns <code>OK</code> with empty tokens.
+          Branch on <code>accessToken == ""</code>, not on a status code.
+        </td>
       </tr>
     </tbody>
   </table>

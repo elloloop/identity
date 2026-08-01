@@ -57,7 +57,15 @@ Two things to know before enabling:
    upgrade path that always fails; open the project for the upgrade half to
    work. Control anonymous traffic with assurance and rate limits, not the
    access mode.
-2. **Downstream services must check the `anonymous` claim** before granting
+2. **The password upgrade returns no session by default.** With
+   `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` on (the default),
+   `UpgradeAnonymousAccount`'s password arm promotes the account, sends a
+   verification email, revokes the anonymous session, and returns **empty**
+   `accessToken`/`refreshToken` — `OK`, not an error. Clients must branch on
+   an empty token rather than discarding their pair expecting replacements.
+   The OAuth arm returns a new pair, because the provider verified the
+   address.
+3. **Downstream services must check the `anonymous` claim** before granting
    anything that assumes a verified human. An anonymous `sub` is cheap to
    mint, and `email` is empty rather than absent-because-unverified, so code
    that only tests "is there a sub?" will treat a farmed account as a user.

@@ -1098,7 +1098,16 @@ func buildSelectQuery(base string, projectID string, filter map[string]any, spec
 				continue
 			}
 			if spec.caseInsensitive {
-				fmt.Fprintf(&sb, " AND lower(%s) = lower($%d)", spec.col, idx)
+				// `col <> ''` keeps a PARTIAL index on that column usable.
+				// users_project_email_partial_uidx (0028) is predicated on
+				// `email <> ''`, and Postgres only uses a partial index when
+				// the query provably implies its predicate — a
+				// `lower(col) = lower($n)` clause against a parameter does
+				// not. Without this the admin invite/create duplicate-address
+				// check falls back to a full project scan. Semantically a
+				// no-op: an empty needle never equals a non-empty value, and
+				// callers filtering on "" want no rows either way.
+				fmt.Fprintf(&sb, " AND %s <> '' AND lower(%s) = lower($%d)", spec.col, spec.col, idx)
 			} else {
 				fmt.Fprintf(&sb, " AND %s = $%d", spec.col, idx)
 			}
