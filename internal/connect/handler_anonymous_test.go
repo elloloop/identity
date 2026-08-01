@@ -265,3 +265,42 @@ func TestUpgradeAnonymousAccount_WireNonAnonymousIsFailedPrecondition(t *testing
 		t.Fatalf("code = %v, want FailedPrecondition", connect.CodeOf(err))
 	}
 }
+
+// The OAuth arm of the upgrade oneof was never exercised over the wire —
+// only the password arm was. It is one of two credential paths on a new
+// public RPC, so the oneof dispatch itself needs pinning.
+func TestUpgradeAnonymousAccount_WireOAuthArm(t *testing.T) {
+	h := newAnonHarness(t, true, service.AccessModeOpen, nil)
+
+	signIn, err := h.client.SignInAnonymously(context.Background(),
+		connect.NewRequest(&identitypb.SignInAnonymouslyRequest{}))
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+
+	req := connect.NewRequest(&identitypb.UpgradeAnonymousAccountRequest{
+		Credential: &identitypb.UpgradeAnonymousAccountRequest_Oauth{
+			Oauth: &identitypb.OAuthCredential{
+				Provider:    "google",
+				Code:        "unused-by-this-harness",
+				RedirectUri: "https://app/cb",
+			},
+		},
+	})
+	req.Header().Set(authUserHeader, signIn.Msg.GetUser().GetId())
+
+	// The harness has no OAuth registry, so the exchange cannot succeed —
+	// what this pins is that the _Oauth arm DISPATCHES (a routing bug would
+	// surface as InvalidArgument "requires exactly one credential") and that
+	// the failure is a clean typed code rather than CodeUnknown.
+	_, err = h.client.UpgradeAnonymousAccount(context.Background(), req)
+	if err == nil {
+		t.Fatal("upgrade succeeded with no OAuth provider configured")
+	}
+	switch code := connect.CodeOf(err); code {
+	case connect.CodeInvalidArgument:
+		t.Fatalf("the OAuth arm did not dispatch — the oneof fell through to the empty-credential branch: %v", err)
+	case connect.CodeUnknown:
+		t.Fatalf("unmapped error escaped as CodeUnknown: %v", err)
+	}
+}

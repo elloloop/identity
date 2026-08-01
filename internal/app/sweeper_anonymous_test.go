@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"go.uber.org/zap/zaptest"
+
+	"github.com/elloloop/identity/internal/service"
 )
 
 // recordingAnonSweepRepo records the cutoff the anonymous-retention sweep is
@@ -100,6 +103,52 @@ func TestSweeper_AnonymousRetentionIsWiredAndUsesItsOwnCutoff(t *testing.T) {
 			if tgt.name == anonymousRetentionLabel {
 				t.Fatalf("%q is in targets() — it would be swept against the expiry cutoff", tgt.name)
 			}
+		}
+	})
+}
+
+// erroringAnonSweepRepo returns a fixed error from the anonymous sweep so
+// its failure branches are exercised: a backend that does not implement the
+// sweep must be skipped quietly (logged once), and any other error must be
+// counted and logged without aborting the surrounding cycle.
+type erroringAnonSweepRepo struct {
+	mockSweepRepo
+	err   error
+	calls int
+}
+
+func (m *erroringAnonSweepRepo) DeleteStaleAnonymousUsers(context.Context, int64, int) error {
+	m.calls++
+	return m.err
+}
+
+func TestSweeper_AnonymousRetentionErrorPaths(t *testing.T) {
+	now := time.UnixMilli(1_800_000_000_000)
+
+	t.Run("a backend without the sweep is skipped, not retried noisily", func(t *testing.T) {
+		repo := &erroringAnonSweepRepo{err: service.ErrSweepNotImplemented}
+		s := newSweeper(repo, nil, 1, 500, 60, 0, 0, 30, zaptest.NewLogger(t))
+		s.now = func() time.Time { return now }
+		s.runOnce(context.Background())
+		s.runOnce(context.Background())
+		if repo.calls != 2 {
+			t.Fatalf("sweep called %d times, want 2", repo.calls)
+		}
+		// The skip is logged once, not once per tick.
+		if !s.skipLogged[anonymousRetentionLabel] {
+			t.Error("the unimplemented sweep was not recorded as skipped")
+		}
+	})
+
+	t.Run("a real error does not abort the cycle", func(t *testing.T) {
+		repo := &erroringAnonSweepRepo{err: errors.New("connection reset")}
+		s := newSweeper(repo, nil, 1, 500, 60, 0, 0, 30, zaptest.NewLogger(t))
+		s.now = func() time.Time { return now }
+		// runOnce must return normally; a failing retention sweep is logged
+		// and counted, never fatal to the other steps on the same tick.
+		s.runOnce(context.Background())
+		if repo.calls != 1 {
+			t.Fatalf("sweep called %d times, want 1", repo.calls)
 		}
 	})
 }
