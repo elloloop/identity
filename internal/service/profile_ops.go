@@ -51,7 +51,7 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID, currentPass
 
 	pwHash := pstr(userNode.Payload, ufPasswordHash)
 	if pwHash == "" {
-		return errors.New("no password set for this account")
+		return ErrNoPasswordSet
 	}
 	if !passwords.Verify(currentPassword, pwHash) {
 		return errors.New("current password is incorrect")

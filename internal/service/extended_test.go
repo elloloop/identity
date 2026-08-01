@@ -1374,7 +1374,10 @@ func TestProfileService_ChangePassword_NoPasswordSet(t *testing.T) {
 	svc := newTestProfileService(db)
 
 	err := svc.ChangePassword(context.Background(), "user-1", "old", "NewStr0ng!Pass")
-	require.Error(t, err)
+	// The sentinel, not a plain error: it maps to FailedPrecondition, so a
+	// passkey/OAuth-only account gets an actionable "set a password first"
+	// instead of a 500 the client has to string-match.
+	require.ErrorIs(t, err, ErrNoPasswordSet)
 }
 
 func TestProfileService_ListAuditEvents_ActorNotFound(t *testing.T) {
