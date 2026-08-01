@@ -7,8 +7,19 @@ v4.0 replaces the inline-CAPTCHA design with the client-assurance layer
 assurance token — see
 [ADR-0012](./adr/0012-client-assurance-layer.md) and the
 [docs-site page](../docs-site/src/pages/docs/auth/assurance.astro)).
-Deployments that never enabled CAPTCHA are unaffected: the new surface
-defaults off and nothing else changes.
+The new surface defaults off, so a deployment that never enabled CAPTCHA
+gains no behaviour — **but read the environment section below before
+pulling the image.** Every removed `GATEWAY_CAPTCHA_*` variable must be
+DELETED from your environment, not merely set to `false`: the server
+refuses to boot while any of them is *present*, whatever its value.
+
+That check is deliberate. The rename would otherwise fail OPEN — a v3
+operator who set `GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN=true` and pulled
+v4 would boot clean with zero enforcement on six auth endpoints and no
+signal. Failing closed is the only safe direction, but it means a
+forgotten `GATEWAY_CAPTCHA_ENABLED=false` left in a compose file, a Helm
+values template, or an ECS task definition will crash-loop the v4 image.
+The error names every offending variable and its replacement.
 
 **Wire (clients):** the `captcha_token` request field is removed from
 `PasswordSignup`, `PasswordLogin`, `RequestPasswordReset`,
@@ -19,9 +30,11 @@ the returned token as the `X-Assurance-Token` header on the gated call.
 The storage migrations (postgres 0027, sqlite 0012) are ordinary additive
 migrations applied with `identity migrate`.
 
-**Environment:** rename / replace:
+**Environment:** rename / replace. **Unset the left-hand column** — the
+server refuses to boot while any of these is present, even set to `false`
+or the empty string:
 
-| v3.x | v4.0 |
+| v3.x — must be UNSET | v4.0 |
 | --- | --- |
 | `GATEWAY_CAPTCHA_ENABLED` | `GATEWAY_ASSURANCE_ENABLED` |
 | `GATEWAY_CAPTCHA_PROVIDER` | `GATEWAY_ASSURANCE_WEB_PROVIDER` |

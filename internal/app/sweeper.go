@@ -215,6 +215,14 @@ func (s *sweeper) runOnce(ctx context.Context) {
 // attestKey may be called only once per generated key — so sharing the cutoff
 // would erase the device registry roughly every tick and break refresh
 // entirely. No-op when retention is disabled (deviceRetentionDays <= 0).
+//
+// SCOPE: like every sweep here, this runs against the repo bound to the
+// boot-default project, so it reaps only that project's rows. Other
+// projects' attested_devices are not reached (0027's FORCE ROW LEVEL
+// SECURITY would refuse them anyway). That limitation is shared by all of
+// targets() and predates assurance, but it matters more here: this is the
+// first durable, never-expiring table on the list. A per-project sweep loop
+// rebinding via WithProject is the fix when a deployment needs it.
 func (s *sweeper) sweepDeviceRetention(ctx context.Context, now time.Time) {
 	if s.deviceRetentionDays <= 0 {
 		return

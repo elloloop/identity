@@ -86,6 +86,14 @@ import { Code } from "astro-expressive-code/components";
       renders no widget and never attempts the exchange) is denied on each
       gated endpoint. Turn the relevant toggles off if browsers must still
       reach them.
+      <br />
+      <strong>The hosted <code>/auth/</code> UI supports Turnstile only.</strong>
+      Under <code>recaptcha_v3</code> it renders no widget and never attempts
+      the exchange, so password login and signup through the hosted pages get
+      a flat <code>PermissionDenied</code> even though a web arm is configured
+      and working for your own clients. Use <code>turnstile</code> if you rely
+      on the hosted UI; <code>recaptcha_v3</code> is for deployments driving
+      the RPCs directly.
     </li>
     <li>
       <code>GATEWAY_ASSURANCE_IOS_TEAM_ID</code> +

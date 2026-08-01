@@ -97,14 +97,14 @@ func (r *AssuranceResolver) For(ctx context.Context) AssuranceProviders {
 		return entry.providers
 	}
 
-	// Build under the write lock and re-check: a cold start that fans out
-	// across concurrent requests would otherwise build (and, for Android,
-	// perform a Google service-account exchange) once per racer.
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if entry, ok := r.cache[scope.ProjectID]; ok && entry.hash == hash {
-		return entry.providers
-	}
+	// Build OUTSIDE the lock. The build is pure CPU — a JSON unmarshal and a
+	// PKCS#8 parse; the Google service-account exchange happens lazily
+	// inside Verify, not here — but it is still a cold-start cost, and
+	// holding the write lock across it blocks resolution for every OTHER
+	// project, cache hits included. Racing builds for the same project are
+	// wasted work, not a correctness problem: the build is deterministic in
+	// (projectID, config), so whichever result is published is the same one.
+	// Mirrors OAuthResolver.buildProject.
 	built := r.build(scope.ProjectID, scope.Assurance)
 	// The default project falls back PER PLATFORM to the env identity for an
 	// arm its block does not configure. Without this the same project
@@ -119,6 +119,16 @@ func (r *AssuranceResolver) For(ctx context.Context) AssuranceProviders {
 		if built.PlayIntegrity == nil {
 			built.PlayIntegrity = r.defaults.PlayIntegrity
 		}
+	}
+
+	// Take the write lock only to publish, and re-check: a racer may have
+	// published an entry for this same hash while we were building. Reusing
+	// theirs keeps one live verifier set per (project, config) rather than
+	// leaving callers holding two.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if entry, ok := r.cache[scope.ProjectID]; ok && entry.hash == hash {
+		return entry.providers
 	}
 	r.cache[scope.ProjectID] = assuranceCacheEntry{hash: hash, providers: built}
 	return built

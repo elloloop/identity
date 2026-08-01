@@ -245,15 +245,43 @@ func TestValidate_RemovedCaptchaEnvVarsFailBoot(t *testing.T) {
 	} {
 		t.Run(tc.envVar, func(t *testing.T) {
 			t.Setenv(tc.envVar, "true")
-			cfg := &Config{}
-			err := cfg.Validate()
+			// Through the BOOT path: Load reads the environment, Validate
+			// reports what it found. A hand-built Config is deliberately
+			// exempt — see the embedder test below.
+			err := Load().Validate()
 			if err == nil {
-				t.Fatal("Validate() = nil; want a boot failure naming the removed var")
+				t.Fatal("Load().Validate() = nil; want a boot failure naming the removed var")
 			}
 			if !strings.Contains(err.Error(), tc.envVar) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error must name both the removed var and its replacement: %v", err)
 			}
 		})
+	}
+
+	// Presence is what fails, not truthiness: a leftover
+	// GATEWAY_CAPTCHA_ENABLED=false in a compose file or Helm values
+	// template must still be caught, or the operator keeps a dead setting
+	// they believe is doing something.
+	t.Run("present but false still fails", func(t *testing.T) {
+		t.Setenv("GATEWAY_CAPTCHA_ENABLED", "false")
+		if err := Load().Validate(); err == nil {
+			t.Fatal("a removed variable set to false was accepted")
+		}
+	})
+}
+
+// TestValidate_RemovedEnvVarsDoNotAffectAnEmbeddedConfig pins the boundary
+// the check must not cross. internal/config is imported by hosts that build
+// a Config in code and never consult the environment; judging such a config
+// on an ambient variable it never passed would fail a boot for a reason its
+// author cannot see or control. Validate is therefore a pure function of
+// its receiver, and the environment is read once, in Load.
+func TestValidate_RemovedEnvVarsDoNotAffectAnEmbeddedConfig(t *testing.T) {
+	t.Setenv("GATEWAY_CAPTCHA_ENABLED", "true")
+
+	cfg := &Config{} // built in code, never through Load
+	if err := cfg.Validate(); err != nil && strings.Contains(err.Error(), "GATEWAY_CAPTCHA_ENABLED") {
+		t.Fatalf("an ambient environment variable failed a hand-built config: %v", err)
 	}
 }
 

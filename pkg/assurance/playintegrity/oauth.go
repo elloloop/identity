@@ -54,7 +54,26 @@ type tokenSource struct {
 	mu      sync.Mutex
 	token   string
 	expires time.Time
+	// inflight is non-nil while one caller is performing the exchange; it
+	// is closed when that attempt finishes (success or failure). Other
+	// callers wait on it INSTEAD of queueing on mu, so the exchange never
+	// runs under the lock — see get.
+	inflight chan struct{}
+	// lastErr / retryAt negative-cache a failed exchange. Without them a
+	// failure teaches the next caller nothing: each one in turn becomes the
+	// leader and pays the full client timeout, so during a Google outage N
+	// concurrent verifications still cost ~N × timeout even though the
+	// exchange is single-flighted. Holding the error briefly collapses that
+	// to one attempt per window.
+	lastErr error
+	retryAt time.Time
 }
+
+// failureCacheTTL is how long a failed token exchange is remembered. Short
+// enough that a brief upstream blip self-heals within one assurance-token
+// lifetime, long enough that a sustained outage costs one exchange per
+// window rather than one per request.
+const failureCacheTTL = 5 * time.Second
 
 // newTokenSource parses the service-account key file and prepares the
 // bearer-assertion signer. tokenURLOverride replaces the key file's
@@ -100,37 +119,99 @@ func newTokenSource(saJSON []byte, tokenURLOverride string, client *http.Client,
 
 // get returns a valid access token, exchanging a fresh assertion when the
 // cached one is absent or near expiry.
+//
+// The exchange runs OUTSIDE the mutex, single-flighted through ts.inflight.
+// Holding the lock across the HTTP call collapsed concurrent verifications
+// into a queue: on the happy path that is a desirable single-flight, but on
+// failure nothing is cached, so every queued waiter went on to run its own
+// full attempt and the Nth waiter paid ~N × the client timeout during a
+// Google token-endpoint outage. sync.Mutex.Lock is also not
+// context-aware, so a caller whose request had already been cancelled still
+// held its place in that queue. Waiters now block on a channel they can
+// abandon when their own context ends, and a failed exchange releases all
+// of them at once rather than serialising them.
 func (ts *tokenSource) get(ctx context.Context) (string, error) {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-	if ts.token != "" && ts.now().Add(refreshSkew).Before(ts.expires) {
-		return ts.token, nil
-	}
+	for {
+		ts.mu.Lock()
+		now := ts.now()
+		if ts.token != "" && now.Add(refreshSkew).Before(ts.expires) {
+			tok := ts.token
+			ts.mu.Unlock()
+			return tok, nil
+		}
+		if ts.lastErr != nil && now.Before(ts.retryAt) {
+			err := ts.lastErr
+			ts.mu.Unlock()
+			return "", err
+		}
+		if wait := ts.inflight; wait != nil {
+			ts.mu.Unlock()
+			select {
+			case <-wait:
+				// The leader finished; loop to read whatever it published.
+				// If it failed, this caller becomes the next leader rather
+				// than inheriting a stale error.
+				continue
+			case <-ctx.Done():
+				return "", fmt.Errorf("%w: playintegrity: token exchange: %w", assurance.ErrProviderUnavailable, ctx.Err())
+			}
+		}
+		// This caller is the leader.
+		done := make(chan struct{})
+		ts.inflight = done
+		ts.mu.Unlock()
 
+		tok, err := ts.exchange(ctx)
+
+		ts.mu.Lock()
+		ts.inflight = nil
+		if err == nil {
+			ts.token = tok.token
+			ts.expires = tok.expires
+			ts.lastErr = nil
+		} else {
+			ts.lastErr = err
+			ts.retryAt = ts.now().Add(failureCacheTTL)
+		}
+		ts.mu.Unlock()
+		close(done)
+		return tok.token, err
+	}
+}
+
+// exchangedToken is the result of one successful assertion exchange.
+type exchangedToken struct {
+	token   string
+	expires time.Time
+}
+
+// exchange performs one service-account assertion exchange. It touches no
+// shared state, so it is safe to run without the lock held.
+func (ts *tokenSource) exchange(ctx context.Context) (exchangedToken, error) {
 	assertion, err := ts.signAssertion()
 	if err != nil {
-		return "", err
+		return exchangedToken{}, err
 	}
 	form := url.Values{}
 	form.Set("grant_type", jwtBearerGrant)
 	form.Set("assertion", assertion)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", fmt.Errorf("%w: playintegrity: building token request: %w", assurance.ErrProviderUnavailable, err)
+		return exchangedToken{}, fmt.Errorf("%w: playintegrity: building token request: %w", assurance.ErrProviderUnavailable, err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := ts.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: playintegrity: token endpoint: %w", assurance.ErrProviderUnavailable, err)
+		return exchangedToken{}, fmt.Errorf("%w: playintegrity: token endpoint: %w", assurance.ErrProviderUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return "", fmt.Errorf("%w: playintegrity: reading token response: %w", assurance.ErrProviderUnavailable, err)
+		return exchangedToken{}, fmt.Errorf("%w: playintegrity: reading token response: %w", assurance.ErrProviderUnavailable, err)
 	}
 	if resp.StatusCode/100 != 2 {
-		return "", fmt.Errorf("%w: playintegrity: token endpoint HTTP %d: %s", assurance.ErrProviderUnavailable, resp.StatusCode, truncateForLog(raw))
+		return exchangedToken{}, fmt.Errorf("%w: playintegrity: token endpoint HTTP %d: %s", assurance.ErrProviderUnavailable, resp.StatusCode, truncateForLog(raw))
 	}
 	var out struct {
 		AccessToken string `json:"access_token"`
@@ -139,12 +220,13 @@ func (ts *tokenSource) get(ctx context.Context) (string, error) {
 	// A non-positive expires_in would make every cached token look already
 	// expired, so each call would re-run the exchange forever.
 	if err := json.Unmarshal(raw, &out); err != nil || out.AccessToken == "" || out.ExpiresIn <= 0 {
-		return "", fmt.Errorf("%w: playintegrity: malformed token response", assurance.ErrProviderUnavailable)
+		return exchangedToken{}, fmt.Errorf("%w: playintegrity: malformed token response", assurance.ErrProviderUnavailable)
 	}
 
-	ts.token = out.AccessToken
-	ts.expires = ts.now().Add(time.Duration(out.ExpiresIn) * time.Second)
-	return ts.token, nil
+	return exchangedToken{
+		token:   out.AccessToken,
+		expires: ts.now().Add(time.Duration(out.ExpiresIn) * time.Second),
+	}, nil
 }
 
 // signAssertion builds and RS256-signs the service-account JWT for the

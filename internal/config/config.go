@@ -1025,11 +1025,24 @@ type Config struct {
 	// enabled that is legal but inert (nothing is delivered). The secret in
 	// each entry is sensitive and never logged.
 	WebhookSubscriptions string
+
+	// removedEnvVarErr is non-nil when Load saw an environment variable
+	// removed in a breaking release. Nil for a Config built in code, which
+	// is the point — see the comment on detectRemovedEnvVars.
+	removedEnvVarErr error
 }
 
 // Load reads configuration from environment variables with GATEWAY_
 // prefix, falling back to sensible defaults for local development.
 func Load() *Config {
+	c := loadFromEnv()
+	// Stamped here so Validate stays a pure receiver check; see
+	// removedEnvVarErr.
+	c.removedEnvVarErr = detectRemovedEnvVars()
+	return c
+}
+
+func loadFromEnv() *Config {
 	return &Config{
 		GRPCPort:    envInt("GATEWAY_GRPC_PORT", 50051),
 		ConnectPort: envInt("GATEWAY_CONNECT_PORT", 80),
@@ -1659,9 +1672,20 @@ var removedEnvVars = map[string]string{
 	"GATEWAY_CAPTCHA_ENFORCE_PASSKEY_SIGNUP":    "GATEWAY_ASSURANCE_ENFORCE_PASSKEY_SIGNUP",
 }
 
-// validateRemovedEnvVars fails boot when a removed variable is still set,
+// removedEnvVarErr is stamped by Load when a removed variable is still
+// present in the environment, and returned by Validate.
+//
+// The check lives in Load, not Validate, because reading the process
+// environment is Load's contract and NOT Validate's: an embedding host
+// that builds a config.Config in code must be judged on the values it
+// passed, never on an ambient variable it never set. Carrying the result
+// on the struct keeps the fail-closed boot behaviour while leaving
+// Validate a pure function of its receiver (and t.Setenv-using tests
+// hermetic).
+
+// detectRemovedEnvVars reports removed variables that are still set,
 // naming its replacement. Sorted so the message is deterministic.
-func validateRemovedEnvVars() error {
+func detectRemovedEnvVars() error {
 	var found []string
 	for old, replacement := range removedEnvVars {
 		if _, ok := os.LookupEnv(old); ok {
@@ -1679,8 +1703,8 @@ func validateRemovedEnvVars() error {
 }
 
 func (c *Config) Validate() error {
-	if err := validateRemovedEnvVars(); err != nil {
-		return err
+	if c.removedEnvVarErr != nil {
+		return c.removedEnvVarErr
 	}
 
 	switch c.RevocationMode {

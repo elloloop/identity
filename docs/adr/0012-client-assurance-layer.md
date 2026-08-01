@@ -120,9 +120,12 @@ adopt that split.
   reinstall or key regeneration mints a NEW key id, so an attestation row
   is otherwise permanent and the table only ever grows. The sweeper reaps
   rows whose `last_used_at_ms` predates the retention window (backed by a
-  `(project_id, last_used_at_ms)` index); a reaped device simply
-  re-attests on its next refresh, which costs one round-trip and no user
-  interaction. The window is its own knob
+  `(project_id, last_used_at_ms)` index). Recovery is automatic but not
+  free: the next refresh returns `PermissionDenied`, and the client must
+  generate a NEW Secure Enclave key and run the full challenge +
+  attestation exchange, minting a new device id. No user interaction, but
+  the old device identity is gone — anything a consumer keyed on it
+  resets. The window is its own knob
   (`GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS`, default 90) with its own
   sweep step, deliberately NOT the shared expiry cutoff: that cutoff is
   slack past a row's own `expires_at_ms`, and a device row has no expiry.
