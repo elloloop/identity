@@ -368,7 +368,10 @@ func (s *AdminService) ResetUserPassword(
 	// its sessions. The account is not addressable by an admin anyway — it
 	// has no email and is excluded from the user listing.
 	if userFromNode(node).IsAnonymous {
-		return nil, fmt.Errorf("%w: anonymous accounts gain credentials through UpgradeAnonymousAccount", ErrInvalidArgument)
+		// Same sentinel as every other door, so one rule maps to one Connect
+		// code rather than this path answering InvalidArgument while its five
+		// siblings answer FailedPrecondition.
+		return nil, fmt.Errorf("%w: attaching one here would leave the account subject to the anonymous retention sweep", ErrAnonymousMustUpgrade)
 	}
 
 	now := nowMs()

@@ -624,3 +624,48 @@ func TestListUsers_ExcludesAnonymousByDefault(t *testing.T) {
 		t.Fatalf("IncludeAnonymous listed %d, want 4", len(all))
 	}
 }
+
+// TestUpgradeAnonymousUser_AutoFormsTenant pins that the promotion does what
+// every other identified-account-creation path does.
+//
+// EnsureTenantForDomain both finds-or-creates the tenant AND upserts the
+// derived membership, so skipping it is silent and permanent: an upgrade to
+// alice@acme.com that never calls it leaves alice absent from the acme.com
+// tenant once some other entry path forms it, and nothing ever reconciles.
+func TestUpgradeAnonymousUser_AutoFormsTenant(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	af := &fakeAutoFormer{}
+	svc.WithTenantAutoFormer(af)
+
+	// Anonymous enabled on an open project, so both the sign-in and the
+	// upgrade are admitted.
+	ctx := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "proj-1",
+		Access:    ProjectAccessConfig{Mode: AccessModeOpen},
+		Anonymous: ProjectAnonymousConfig{Enabled: true},
+	})
+
+	res, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+	// Creation itself must NOT auto-form: an anonymous account has no domain.
+	if len(af.calls) != 0 {
+		t.Fatalf("anonymous sign-in auto-formed a tenant: %#v", af.calls)
+	}
+
+	if _, err := svc.UpgradeAnonymousWithPassword(ctx, res.User.ID, AnonymousPasswordCredential{
+		Email: "alice@acme.com", Password: "Str0ng-Passw0rd!x",
+	}); err != nil {
+		t.Fatalf("UpgradeAnonymousWithPassword: %v", err)
+	}
+
+	if len(af.calls) != 1 {
+		t.Fatalf("upgrade made %d auto-form calls, want 1 — the promoted account never joins its domain's tenant", len(af.calls))
+	}
+	got := af.calls[0]
+	if got.project != "proj-1" || got.domain != "acme.com" || got.user != res.User.ID {
+		t.Fatalf("auto-form call = %#v, want project=proj-1 domain=acme.com user=%s", got, res.User.ID)
+	}
+}

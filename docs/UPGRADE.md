@@ -42,7 +42,7 @@ for every user that has an address.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `GATEWAY_ANONYMOUS_ENABLED` | `false` | turns on `SignInAnonymously` |
+| `GATEWAY_ANONYMOUS_ENABLED` | `false` | turns on `SignInAnonymously`. **Turning it back off is destructive — see the warning below.** |
 | `GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE` | `false` | gates it on the assurance layer; **boot fails** if set while `GATEWAY_ASSURANCE_ENABLED=false` |
 | `GATEWAY_ANONYMOUS_RETENTION_DAYS` | `30`, raised automatically to exceed `GATEWAY_REFRESH_EXPIRY_SECONDS` when left unset (logged once at boot as `anonymous_retention_raised`) | days of inactivity before reaping; an **explicitly set** window that does not exceed the refresh lifetime **fails boot**; `0` disables the sweep. Deployment-wide, and the sweep reaches the **boot-default project only** — see below |
 
@@ -69,6 +69,29 @@ Two things to know before enabling:
    anything that assumes a verified human. An anonymous `sub` is cheap to
    mint, and `email` is empty rather than absent-because-unverified, so code
    that only tests "is there a sub?" will treat a farmed account as a user.
+
+> **⚠️ Disabling anonymous sign-in destroys existing anonymous accounts.**
+>
+> `GATEWAY_ANONYMOUS_ENABLED=false` is not a pause. The moment it flips:
+>
+> 1. `RefreshToken` returns `PERMISSION_DENIED` for every existing anonymous
+>    user. A refresh token is that account's **only** credential, so those
+>    sessions are immediately unrecoverable.
+> 2. Their activity clock stops, because it only advances on a successful
+>    refresh — so every one of them goes idle *by construction*.
+> 3. The retention sweep runs **independently of the enable flag** (it is
+>    gated only on `GATEWAY_ANONYMOUS_RETENTION_DAYS`), so one retention
+>    window later — 30 days at defaults — it hard-deletes them and every
+>    cascaded row.
+>
+> The users who lose data are precisely the active ones. Before turning the
+> feature off, do one of:
+>
+> - set `GATEWAY_ANONYMOUS_RETENTION_DAYS=0` first, which disables the sweep
+>   and leaves the rows in place (they stay unreachable, but recoverable if
+>   you re-enable); or
+> - drive users through `UpgradeAnonymousAccount` while the feature is still
+>   on, so they hold a real credential before the switch flips.
 
 **The retention sweep covers the boot-default project only.** A
 control-plane deployment that enables anonymous sign-in on other projects

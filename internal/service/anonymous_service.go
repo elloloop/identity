@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
+	"github.com/elloloop/identity/pkg/events"
 )
 
 var (
@@ -180,6 +181,30 @@ func (s *AuthService) UpgradeAnonymousUser(ctx context.Context, userID string, f
 	}
 	if err := s.repo(ctx).UpdateUser(ctx, userID, upgrade); err != nil {
 		return err
+	}
+
+	// The promotion creates an identified account, so it owes what every
+	// other creation path does. Skipping these is silent both ways:
+	// EnsureTenantForDomain both finds-or-creates the tenant AND upserts the
+	// derived membership, so an upgrade to alice@acme.com that never calls
+	// it leaves alice permanently absent from the acme.com tenant once some
+	// other entry path forms it; and a deployment provisioning downstream
+	// resources on user.created never hears about accounts arriving by the
+	// dominant route in an anonymous-first flow.
+	//
+	// Re-read so both helpers see the promoted state — the caller's copy
+	// still has the pre-upgrade email.
+	promoted, err := s.repo(ctx).GetUser(ctx, userID)
+	if err != nil || promoted == nil {
+		// The write succeeded; a failed re-read must not fail the upgrade.
+		s.logger.Warn("anonymous_upgrade_postwrite_read_failed",
+			zap.String("user_id", userID), zap.Error(err))
+	} else {
+		// Both are best-effort and self-guarding: maybeAutoFormTenant no-ops
+		// without an auto-former or on a public email domain, EmitUserEvent
+		// no-ops when eventing is off.
+		s.maybeAutoFormTenant(ctx, promoted)
+		EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, promoted)
 	}
 
 	s.audit.Log(

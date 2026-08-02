@@ -305,6 +305,30 @@ GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
     attested-device sweep has the same limitation.
   </p>
 
+  <h2 id="disabling">Turning it off is destructive</h2>
+  <p>
+    <code>GATEWAY_ANONYMOUS_ENABLED=false</code> is not a pause. It refuses
+    <code>RefreshToken</code> for every <em>existing</em> anonymous user
+    immediately — and a refresh token is that account's only credential, so
+    those sessions become unrecoverable at once.
+  </p>
+  <p>
+    It then destroys them. The activity clock only advances on a successful
+    refresh, so every anonymous account goes idle by construction; and the
+    retention sweep is gated solely on
+    <code>GATEWAY_ANONYMOUS_RETENTION_DAYS</code>, not on the enable flag, so
+    one window later (30 days at defaults) it hard-deletes them and their
+    cascaded rows. The users who lose data are the active ones.
+  </p>
+  <p>
+    Before disabling, either set
+    <code>GATEWAY_ANONYMOUS_RETENTION_DAYS=0</code> first — which stops the
+    sweep and leaves the rows in place, unreachable but recoverable if you
+    re-enable — or drive users through <code>UpgradeAnonymousAccount</code>
+    while the feature is still on, so they hold a real credential before the
+    switch flips.
+  </p>
+
   <h2>Operational notes</h2>
   <ul>
     <li>
