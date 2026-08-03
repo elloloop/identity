@@ -22,6 +22,7 @@ DELETE FROM users WHERE is_anonymous;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users FORCE ROW LEVEL SECURITY;
 
+DROP INDEX IF EXISTS users_project_created_id_nonanon_idx;
 DROP INDEX IF EXISTS users_project_anonymous_last_login_idx;
 CREATE UNIQUE INDEX IF NOT EXISTS users_project_email_uidx
     ON users (project_id, lower(email));

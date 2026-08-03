@@ -15,3 +15,15 @@ DROP INDEX IF EXISTS users_project_email_uidx;
 CREATE INDEX IF NOT EXISTS users_project_anonymous_last_login_idx
     ON users (project_id, last_login_at_ms)
     WHERE is_anonymous;
+
+-- Backing index for the complement of the sweep predicate. userFilterWhere
+-- appends `NOT is_anonymous` to every ListUsers/CountUsers query, and SCIM
+-- calls CountUsers on every /Users list request to fill totalResults — so
+-- without this the predicate turns an index-only scan into a sequential scan
+-- of the project's users, and the added filter makes the planner abandon the
+-- ordered index for deep pages. Partial on the complement so it carries no
+-- anonymous rows, which makes it smaller than the total index it replaces
+-- for this access path.
+CREATE INDEX IF NOT EXISTS users_project_created_id_nonanon_idx
+    ON users (project_id, created_at_ms, id)
+    WHERE NOT is_anonymous;

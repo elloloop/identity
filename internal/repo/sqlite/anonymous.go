@@ -79,11 +79,6 @@ func (r *sqliteRepository) DeleteStaleAnonymousUsers(ctx context.Context, before
 			return wrapErr("DeleteStaleAnonymousUsers("+tbl+")", err)
 		}
 	}
-	if _, err := t.Exec(ctx,
-		"DELETE FROM users WHERE project_id = $1 AND id IN "+inClause,
-		args...); err != nil {
-		return wrapErr("DeleteStaleAnonymousUsers(users)", err)
-	}
 	if err := t.Commit(ctx); err != nil {
 		return wrapErr("DeleteStaleAnonymousUsers(commit)", err)
 	}
