@@ -555,6 +555,10 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			if b, ok := v.(bool); ok {
 				u.IsAnonymous = b
 			}
+		case "anonymous_last_seen_ms":
+			if x, ok := fieldInt64(v); ok {
+				u.AnonymousLastSeenMs = x
+			}
 		case "phone_number":
 			u.PhoneNumber, _ = v.(string)
 		case "phone_verified":

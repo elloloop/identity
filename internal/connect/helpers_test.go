@@ -254,6 +254,10 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 			if b, ok := v.(bool); ok {
 				u.IsAnonymous = b
 			}
+		case "anonymous_last_seen_ms":
+			if x, ok := v.(int64); ok {
+				u.AnonymousLastSeenMs = x
+			}
 		case "password_hash":
 			u.PasswordHash = v.(string)
 		case "status":
@@ -2148,7 +2152,7 @@ func (r *fakeRepo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, 
 		if n >= limit {
 			break
 		}
-		if u.IsAnonymous && u.LastLoginAtMs < beforeMs {
+		if u.IsAnonymous && u.AnonymousLastSeenMs < beforeMs {
 			delete(r.users, id)
 			n++
 		}

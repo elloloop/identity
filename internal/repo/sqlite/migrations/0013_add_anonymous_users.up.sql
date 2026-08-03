@@ -11,9 +11,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_project_email_partial_uidx
     WHERE email <> '';
 DROP INDEX IF EXISTS users_project_email_uidx;
 
+-- The anonymous activity clock gets its own column; see the postgres 0028
+-- comment — indexing last_login_at_ms would defeat HOT updates for every
+-- ordinary login's last-login stamp.
+ALTER TABLE users ADD COLUMN anonymous_last_seen_ms BIGINT NOT NULL DEFAULT 0;
+
 -- Backing index for the anonymous-retention sweep.
-CREATE INDEX IF NOT EXISTS users_project_anonymous_last_login_idx
-    ON users (project_id, last_login_at_ms)
+CREATE INDEX IF NOT EXISTS users_project_anonymous_last_seen_idx
+    ON users (project_id, anonymous_last_seen_ms)
     WHERE is_anonymous;
 
 -- Backing index for the complement of the sweep predicate. userFilterWhere

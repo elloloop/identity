@@ -23,9 +23,10 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users FORCE ROW LEVEL SECURITY;
 
 DROP INDEX IF EXISTS users_project_created_id_nonanon_idx;
-DROP INDEX IF EXISTS users_project_anonymous_last_login_idx;
+DROP INDEX IF EXISTS users_project_anonymous_last_seen_idx;
 CREATE UNIQUE INDEX IF NOT EXISTS users_project_email_uidx
     ON users (project_id, lower(email));
 DROP INDEX IF EXISTS users_project_email_partial_uidx;
 
+ALTER TABLE users DROP COLUMN IF EXISTS anonymous_last_seen_ms;
 ALTER TABLE users DROP COLUMN IF EXISTS is_anonymous;

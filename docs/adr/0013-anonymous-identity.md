@@ -172,7 +172,22 @@ empty rather than absent-because-unverified.
   attested-device sweep (ADR-0012) has the same limitation. A per-project
   sweep loop rebinding via `WithProject` is the fix; until it ships, such a
   deployment must reap those rows itself.
-- **Not shipped:** a per-project retention override (the sweep scope above is
+- **Age gating.** An anonymous account structurally never has a date of
+  birth, so two rules follow. The password upgrade is REFUSED on a
+  deployment with `AGEGATE_ENABLED` + `REQUIRE_DOB` — its request cannot
+  carry a DOB, and admitting it would mint an active account that is
+  permanently classified non-minor and skips the parental-consent flow
+  `PasswordSignup` enforces. And anonymous sessions fail closed at product
+  age gates: the unknown-band pass-through is an identified-account
+  concession ("children carry a DOB by construction"), which does not
+  extend to an account class that can never resolve a band — otherwise one
+  unauthenticated SignInAnonymously would satisfy every minimum_age_band.
+  Products with no configured minimum remain open to anonymous sessions.
+  (The OAuth upgrade arm inherits the same DOB-less provisioning the OAuth
+  JIT login paths already perform; parity is with each arm's identified
+  counterpart.)
+- **Not shipped:** a `date_of_birth_ms` field on the password upgrade (which
+  would let age-gated deployments admit it), a per-project retention override (the sweep scope above is
   why one would be misleading), a per-project sweep loop, anonymous-to-anonymous
   merge, passkey and phone as upgrade credentials, and a per-project cap on
   live anonymous accounts. Each is additive; none changes the shape above.

@@ -2451,8 +2451,8 @@ func (r *MemRepo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, l
 	}
 	stale := make([]victim, 0, limit)
 	for id, u := range r.users {
-		if u.IsAnonymous && u.LastLoginAtMs < beforeMs {
-			stale = append(stale, victim{id: id, lastLoginMs: u.LastLoginAtMs})
+		if u.IsAnonymous && u.AnonymousLastSeenMs < beforeMs {
+			stale = append(stale, victim{id: id, lastLoginMs: u.AnonymousLastSeenMs})
 		}
 	}
 	sort.Slice(stale, func(i, j int) bool {

@@ -6,7 +6,7 @@ import (
 )
 
 // DeleteStaleAnonymousUsers reaps anonymous users whose last activity
-// predates beforeMs, backed by users_project_anonymous_last_login_idx.
+// predates beforeMs, backed by users_project_anonymous_last_seen_idx.
 //
 // The users DELETE is the DRIVING statement, and its own WHERE carries the
 // is_anonymous predicate — not a SELECT that feeds ids to a later delete.
@@ -43,11 +43,11 @@ func (r *pgRepository) DeleteStaleAnonymousUsers(ctx context.Context, beforeMs i
 		DELETE FROM users
 		 WHERE project_id = $1
 		   AND is_anonymous
-		   AND last_login_at_ms < $2
+		   AND anonymous_last_seen_ms < $2
 		   AND id IN (
 		       SELECT id FROM users
-		        WHERE project_id = $1 AND is_anonymous AND last_login_at_ms < $2
-		        ORDER BY last_login_at_ms ASC
+		        WHERE project_id = $1 AND is_anonymous AND anonymous_last_seen_ms < $2
+		        ORDER BY anonymous_last_seen_ms ASC
 		        LIMIT $3
 		   )
 		RETURNING id`

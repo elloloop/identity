@@ -27,9 +27,9 @@ func runAnonymousConformance(t *testing.T, driver Driver) {
 	newAnon := func(t *testing.T, ctx context.Context, r service.Repository, lastLoginMs int64) string {
 		t.Helper()
 		id, err := r.CreateUser(ctx, &service.User{
-			Status:        "active",
-			IsAnonymous:   true,
-			LastLoginAtMs: lastLoginMs,
+			Status:              "active",
+			IsAnonymous:         true,
+			AnonymousLastSeenMs: lastLoginMs,
 		})
 		if err != nil {
 			t.Fatalf("CreateUser(anonymous): %v", err)
@@ -266,9 +266,9 @@ func runAnonymousConformance(t *testing.T, driver Driver) {
 			t.Fatalf("after a limit-2 sweep of 3 users, %d remain, want 1", len(remaining))
 		}
 		// Oldest-first: the survivor is the most recently active.
-		if remaining[0].LastLoginAtMs != 1002 {
-			t.Errorf("survivor LastLoginAtMs = %d, want 1002 (sweep must delete oldest first)",
-				remaining[0].LastLoginAtMs)
+		if remaining[0].AnonymousLastSeenMs != 1002 {
+			t.Errorf("survivor AnonymousLastSeenMs = %d, want 1002 (sweep must delete oldest first)",
+				remaining[0].AnonymousLastSeenMs)
 		}
 	})
 }

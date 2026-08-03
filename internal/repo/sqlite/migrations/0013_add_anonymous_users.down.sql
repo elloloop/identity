@@ -14,11 +14,12 @@ BEGIN;
 DELETE FROM users WHERE is_anonymous;
 
 DROP INDEX IF EXISTS users_project_created_id_nonanon_idx;
-DROP INDEX IF EXISTS users_project_anonymous_last_login_idx;
+DROP INDEX IF EXISTS users_project_anonymous_last_seen_idx;
 CREATE UNIQUE INDEX IF NOT EXISTS users_project_email_uidx
     ON users (project_id, lower(email));
 DROP INDEX IF EXISTS users_project_email_partial_uidx;
 
+ALTER TABLE users DROP COLUMN anonymous_last_seen_ms;
 ALTER TABLE users DROP COLUMN is_anonymous;
 
 COMMIT;

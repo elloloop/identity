@@ -114,8 +114,8 @@ func TestSignInAnonymously_CreatesCredentiallessUser(t *testing.T) {
 	}
 	// The retention sweep keys on this. Zero would make every new account
 	// instantly older than any cutoff and reap it on the next tick.
-	if u.LastLoginAtMs == 0 {
-		t.Error("LastLoginAtMs is zero — a new anonymous user would be swept immediately")
+	if u.AnonymousLastSeenMs == 0 {
+		t.Error("AnonymousLastSeenMs is zero — a new anonymous user would be swept immediately")
 	}
 
 	// The address must not resolve the account: FindUserByEmail("") is how a
@@ -404,7 +404,7 @@ func TestRefreshToken_AnonymousActivityIsStamped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SignInAnonymously: %v", err)
 	}
-	created := res.User.LastLoginAtMs
+	created := res.User.AnonymousLastSeenMs
 
 	now += int64(48 * time.Hour / time.Millisecond)
 	if _, _, _, err := svc.RefreshToken(ctx, res.RefreshToken, "1.2.3.4", "ua"); err != nil {
@@ -415,9 +415,9 @@ func TestRefreshToken_AnonymousActivityIsStamped(t *testing.T) {
 	if err != nil || after == nil {
 		t.Fatalf("GetUser = (%#v, %v)", after, err)
 	}
-	if after.LastLoginAtMs <= created {
-		t.Fatalf("LastLoginAtMs did not advance on refresh (%d -> %d): an active account would be reaped on schedule",
-			created, after.LastLoginAtMs)
+	if after.AnonymousLastSeenMs <= created {
+		t.Fatalf("AnonymousLastSeenMs did not advance on refresh (%d -> %d): an active account would be reaped on schedule",
+			created, after.AnonymousLastSeenMs)
 	}
 }
 

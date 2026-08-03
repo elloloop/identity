@@ -27,7 +27,7 @@ const userColumns = `
 	last_login_at_ms,
 	external_id,
 	deletion_scheduled_at_ms,
-	is_anonymous,
+	is_anonymous, anonymous_last_seen_ms,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed returns userColumns with every column qualified by
@@ -51,7 +51,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		failedLoginCount                                       int64
 		emailVerifiedAtMs, idvVerifiedAtMs, lastLoginAtMs      int64
 		phoneVerifiedAtMs, dateOfBirthMs                       int64
-		deletionScheduledAtMs                                  int64
+		deletionScheduledAtMs, anonymousLastSeenMs             int64
 		emailVerified, idvVerified, totpRequired               bool
 		phoneVerified, isAnonymous                             bool
 		id, email, name, role, avatar, status, recovery, phash string
@@ -69,7 +69,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		&lastLoginAtMs,
 		&externalID,
 		&deletionScheduledAtMs,
-		&isAnonymous,
+		&isAnonymous, &anonymousLastSeenMs,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -98,6 +98,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 	u.ExternalID = externalID
 	u.DeletionScheduledAtMs = deletionScheduledAtMs
 	u.IsAnonymous = isAnonymous
+	u.AnonymousLastSeenMs = anonymousLastSeenMs
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -258,7 +259,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			last_login_at_ms,
 			external_id,
 			deletion_scheduled_at_ms,
-			is_anonymous,
+			is_anonymous, anonymous_last_seen_ms,
 			created_at_ms, updated_at_ms
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
@@ -271,8 +272,8 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			$22,
 			$23,
 			$24,
-			$25,
-			$26, $27
+			$25, $26,
+			$27, $28
 		)`
 	_, err := r.pool.Exec(
 		ctx, q,
@@ -286,7 +287,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 		u.LastLoginAtMs,
 		u.ExternalID,
 		u.DeletionScheduledAtMs,
-		u.IsAnonymous,
+		u.IsAnonymous, u.AnonymousLastSeenMs,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	)
 	if err != nil {
@@ -326,6 +327,7 @@ var userFieldColumns = map[string]struct {
 	"external_id":              {"external_id", "string"},
 	"deletion_scheduled_at_ms": {"deletion_scheduled_at_ms", "int64"},
 	"is_anonymous":             {"is_anonymous", "bool"},
+	"anonymous_last_seen_ms":   {"anonymous_last_seen_ms", "int64"},
 }
 
 func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {

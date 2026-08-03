@@ -24,12 +24,19 @@ import (
 //
 //   - No scope, no product, no configured minimum → permit. The gate exists to
 //     stop accounts KNOWN to be too young; absence of policy is not suspicion.
-//   - AGE_BAND_UNSPECIFIED (an account with no date of birth on file, or a
-//     deployment with age-gating switched off) → permit. Refusing unknown ages
-//     would force every product to collect a birthdate from every adult, which
-//     is the worse privacy outcome; child accounts always have a date of birth
-//     by construction (the kid signup flows require one), so the gate still
-//     catches exactly the population it exists for.
+//   - AGE_BAND_UNSPECIFIED on an IDENTIFIED account (no date of birth on
+//     file, or a deployment with age-gating off) → permit. Refusing unknown
+//     ages would force every product to collect a birthdate from every
+//     adult, the worse privacy outcome, and the kid signup flows require a
+//     DOB — so for identified accounts the gate still catches exactly the
+//     population it exists for.
+//   - AGE_BAND_UNSPECIFIED on an ANONYMOUS account → DENY when the product
+//     sets a minimum. An anonymous account structurally never has a date of
+//     birth, so the "children carry a DOB by construction" premise does not
+//     extend to it: permitting would let one unauthenticated
+//     SignInAnonymously satisfy every minimum_age_band, including adult.
+//     A product with no configured minimum remains open to anonymous
+//     sessions, which is the anti-scraping use case this feature ships for.
 func (s *AuthService) enforceProductAgeGate(ctx context.Context, user *User) error {
 	scope := ProjectScopeFromContext(ctx)
 	if scope == nil || user == nil {
@@ -37,6 +44,17 @@ func (s *AuthService) enforceProductAgeGate(ctx context.Context, user *User) err
 	}
 	product := ProductFromContext(ctx)
 	minimum := scope.Products.minimumAgeBand(product)
+	// The unknown-band pass-through inside ageBandPermits is an
+	// identified-account concession; an anonymous account can never resolve
+	// its band, so it only passes a product that sets no minimum.
+	if user.IsAnonymous && minimumAgeBandRank[minimum] > 0 {
+		s.logger.Info("product_age_restricted",
+			zap.String("project_id", s.projectID(ctx)),
+			zap.String("product", product),
+			zap.String("minimum_age_band", minimum),
+			zap.String("age_band", "anonymous"))
+		return ErrProductAgeRestricted
+	}
 	if ageBandPermits(minimum, user.AgeBand) {
 		return nil
 	}

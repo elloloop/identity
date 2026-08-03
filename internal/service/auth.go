@@ -106,6 +106,13 @@ type User struct {
 	// any number of anonymous users inside one project, since the per-project
 	// email uniqueness index only covers non-empty addresses.
 	IsAnonymous bool
+	// AnonymousLastSeenMs is the retention sweep's activity clock, advanced
+	// on each anonymous refresh. Deliberately its OWN column rather than
+	// last_login_at_ms: indexing that column would defeat HOT updates for
+	// every ordinary login's last-login stamp (Postgres derives HOT
+	// eligibility from the union of indexed columns and ignores
+	// partial-index predicates). 0 for permanent accounts.
+	AnonymousLastSeenMs int64
 }
 
 // DefaultUserListLimit and MaxUserListLimit bound a Repository.ListUsers
@@ -338,8 +345,9 @@ type Repository interface {
 	// re-attests on its next refresh.
 	DeleteStaleAttestedDevices(ctx context.Context, beforeMs int64, limit int) error
 
-	// DeleteStaleAnonymousUsers reaps anonymous users whose LastLoginAtMs is
-	// older than beforeMs, together with the rows that cascade from them.
+	// DeleteStaleAnonymousUsers reaps anonymous users whose
+	// AnonymousLastSeenMs is older than beforeMs, together with the rows
+	// that cascade from them.
 	// An anonymous user holds no credential, so once it stops refreshing it
 	// is unreachable forever and would otherwise accumulate one permanent
 	// row per app install. Implementations MUST match on is_anonymous and

@@ -107,13 +107,14 @@ func (s *AuthService) SignInAnonymously(ctx context.Context, ipAddr, userAgent s
 		Role:        "member",
 		Status:      "active",
 		IsAnonymous: true,
-		// LastLoginAtMs is the retention sweep's activity clock, and creation
-		// is the first activity. Leaving it zero would make every new
-		// anonymous user instantly older than any cutoff and reap it on the
-		// next sweep tick.
-		LastLoginAtMs: now,
-		CreatedAt:     s.nowFunc(),
-		UpdatedAt:     s.nowFunc(),
+		// AnonymousLastSeenMs is the retention sweep's activity clock, and
+		// creation is the first activity — zero would make every new
+		// anonymous user instantly older than any cutoff. LastLoginAtMs is
+		// seeded too so admin surfaces show a sane last-login.
+		AnonymousLastSeenMs: now,
+		LastLoginAtMs:       now,
+		CreatedAt:           s.nowFunc(),
+		UpdatedAt:           s.nowFunc(),
 	}
 	id, err := s.repo(ctx).CreateUser(ctx, u)
 	if err != nil {
@@ -234,7 +235,11 @@ func (s *AuthService) touchAnonymousActivity(ctx context.Context, u *User) {
 	if u == nil || !u.IsAnonymous {
 		return
 	}
-	if err := s.repo(ctx).UpdateUser(ctx, u.ID, map[string]any{"last_login_at": s.nowMs()}); err != nil {
+	// Writes ONLY the dedicated clock column: stamping last_login_at here
+	// would be indexed-by-nothing today, but keeping the write surface to
+	// the one column the sweep index covers is what confines the non-HOT
+	// cost to anonymous refreshes.
+	if err := s.repo(ctx).UpdateUser(ctx, u.ID, map[string]any{"anonymous_last_seen_ms": s.nowMs()}); err != nil {
 		s.logger.Warn("anonymous_activity_stamp_failed",
 			zap.String("user_id", u.ID), zap.Error(err))
 	}

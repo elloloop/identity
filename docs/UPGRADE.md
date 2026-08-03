@@ -20,21 +20,27 @@ anonymous account carries an empty email, so a total index would make the
 second one a duplicate-key error. Uniqueness still binds, case-insensitively,
 for every user that has an address.
 
-> On a large `users` table the rebuild takes a brief SHARE lock (blocks
-> writes, allows reads) for the duration of the build. Pre-build the
-> replacement with `CREATE INDEX CONCURRENTLY` outside a transaction before
-> deploying the binary, and the migration's `IF NOT EXISTS` clauses will
-> no-op:
+> On a large `users` table the index builds take a SHARE lock (blocks
+> writes, allows reads) for their duration, and **two** of the three new
+> indexes build over every existing row: the partial email unique index and
+> `users_project_created_id_nonanon_idx` (its `WHERE NOT is_anonymous`
+> predicate is true for all pre-existing rows). Their predicate columns do
+> not exist pre-migration, so neither can be pre-built directly — instead,
+> pre-add the columns (metadata-only on PostgreSQL 11+, matching the
+> migration's own DDL so its `IF NOT EXISTS` clauses no-op), then pre-build
+> both heavy indexes concurrently, outside a transaction:
 >
 > ```sql
+> ALTER TABLE users ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT FALSE;
+> ALTER TABLE users ADD COLUMN IF NOT EXISTS anonymous_last_seen_ms BIGINT NOT NULL DEFAULT 0;
 > CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS users_project_email_partial_uidx
 >     ON users (project_id, lower(email)) WHERE email <> '';
+> CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_created_id_nonanon_idx
+>     ON users (project_id, created_at_ms, id) WHERE NOT is_anonymous;
 > ```
 >
-> Only that one. The sweep index (`users_project_anonymous_last_login_idx`)
-> cannot be pre-built — its `WHERE is_anonymous` predicate is parsed even
-> under `IF NOT EXISTS`, and the column does not exist until the migration
-> adds it. It needs no pre-build anyway: the predicate is false for every
+> The third index — the sweep's `users_project_anonymous_last_seen_idx` —
+> needs no pre-build: its `WHERE is_anonymous` predicate is false for every
 > pre-existing row, so it builds empty in constant time.
 
 **To enable it**, per deployment (default project) or per project in
@@ -65,7 +71,16 @@ Two things to know before enabling:
    an empty token rather than discarding their pair expecting replacements.
    The OAuth arm returns a new pair, because the provider verified the
    address.
-3. **Downstream services must check the `anonymous` claim** before granting
+3. **Age-gated (COPPA) deployments: the password upgrade is refused.** With
+   `GATEWAY_AGEGATE_ENABLED=true` and `GATEWAY_AGEGATE_REQUIRE_DOB=true`,
+   `UpgradeAnonymousAccount`'s password arm returns `INVALID_ARGUMENT` —
+   the request cannot carry a date of birth, and admitting it would mint an
+   account that skips the parental-consent flow `PasswordSignup` enforces.
+   Anonymous sessions also **fail closed at product age gates**: a product
+   with a `minimum_age_band` refuses them (their age is unknowable), while
+   products with no minimum stay open to them. Collecting a DOB on the
+   upgrade is a planned addition (ADR-0013 "Not shipped").
+4. **Downstream services must check the `anonymous` claim** before granting
    anything that assumes a verified human. An anonymous `sub` is cheap to
    mint, and `email` is empty rather than absent-because-unverified, so code
    that only tests "is there a sub?" will treat a farmed account as a user.

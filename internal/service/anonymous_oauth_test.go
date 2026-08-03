@@ -669,3 +669,41 @@ func TestUpgradeAnonymousUser_AutoFormsTenant(t *testing.T) {
 		t.Fatalf("auto-form call = %#v, want project=proj-1 domain=acme.com user=%s", got, res.User.ID)
 	}
 }
+
+// A deployment that requires a date of birth at signup must refuse the
+// password upgrade: the request cannot carry a DOB, so admitting it mints an
+// active, password-loginable account with date_of_birth_ms=0 that is
+// permanently classified non-minor and can never enter the parental-consent
+// flow — an account PasswordSignup, the control this arm mirrors, would have
+// refused outright.
+func TestUpgradeAnonymousWithPassword_RefusedWhenDOBRequired(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	enableAgeGate(t, svc, true) // requireDOB
+	ctx := anonCtx(true, AccessModeOpen)
+
+	res, err := svc.SignInAnonymously(ctx, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+
+	_, err = svc.UpgradeAnonymousWithPassword(ctx, res.User.ID, AnonymousPasswordCredential{
+		Email: "kid@example.com", Password: "Str0ng-Passw0rd!x",
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("err = %v, want ErrInvalidArgument (DOB required)", err)
+	}
+	after, _ := repo.GetUser(ctx, res.User.ID)
+	if after == nil || !after.IsAnonymous {
+		t.Fatal("a refused upgrade must leave the account anonymous and intact")
+	}
+
+	// With the gate on but DOB optional, the upgrade is admitted — the
+	// refusal is tied to the deployment demanding what the API cannot carry.
+	svc.cfg.AgeGateRequireDOB = false
+	if _, err := svc.UpgradeAnonymousWithPassword(ctx, res.User.ID, AnonymousPasswordCredential{
+		Email: "kid@example.com", Password: "Str0ng-Passw0rd!x",
+	}); err != nil {
+		t.Fatalf("gate-on-but-DOB-optional refused the upgrade: %v", err)
+	}
+}

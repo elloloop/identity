@@ -46,6 +46,16 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 	if !s.cfg.PasswordSignupEnabled {
 		return nil, ErrSignupDisabled
 	}
+	// Signup semantics include the age gate. PasswordSignup refuses a
+	// missing date of birth when the deployment demands one; this arm's
+	// request cannot carry a DOB at all, so on such a deployment it must
+	// refuse rather than mint an active, password-loginable account with
+	// date_of_birth_ms=0 that is permanently classified non-minor and can
+	// never enter the parental-consent flow. Collecting a DOB on the
+	// upgrade is a compatible future addition (ADR-0013 "Not shipped").
+	if s.ageGate.Enabled() && s.cfg.AgeGateRequireDOB {
+		return nil, fmt.Errorf("%w: this deployment requires a date of birth at signup; the anonymous upgrade cannot collect one", ErrInvalidArgument)
+	}
 	email := strings.TrimSpace(strings.ToLower(cred.Email))
 	if err := validateEmailFormat(email); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
