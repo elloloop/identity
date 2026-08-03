@@ -101,6 +101,48 @@ func TestBuildRateLimits_FirstAdminBootstrapLimited(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, codes[2], "bootstrap req 3 over quota")
 }
 
+// TestBuildRateLimits_IDVBeginLimited asserts the identity-verification
+// begin RPC carries a per-IP quota and returns 429 once exceeded. Every
+// admitted call opens a paid provider session, so without the quota the
+// spend is caller-driven — the service-level anonymous refusal bounds who
+// can call it, this bounds how hard.
+func TestBuildRateLimits_IDVBeginLimited(t *testing.T) {
+	const path = "/identity.v1.IdentityService/BeginIdentityVerification"
+	cfg := &config.Config{
+		RateLimitWindowSeconds: 60,
+		RateLimitIDVPerIP:      2,
+		// Other quotas non-zero so unrelated paths stay enabled.
+		RateLimitSignupPerIP:       10,
+		RateLimitLoginPerIP:        30,
+		RateLimitResetPerIP:        5,
+		RateLimitVerifyPerIP:       20,
+		RateLimitPasswordlessPerIP: 5,
+		RateLimitPhonePerIP:        5,
+	}
+	limits := buildRateLimits(cfg)
+
+	byPath := map[string]middleware.PathLimit{}
+	for _, l := range limits {
+		byPath[l.PathPrefix] = l
+	}
+	require.Contains(t, byPath, path, "IDV begin path must have a rate limit")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	codes := make([]int, 3)
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, "9.9.9.9")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		codes[i] = w.Code
+	}
+	assert.Equal(t, http.StatusOK, codes[0], "IDV begin req 1")
+	assert.Equal(t, http.StatusOK, codes[1], "IDV begin req 2")
+	assert.Equal(t, http.StatusTooManyRequests, codes[2], "IDV begin req 3 over quota")
+}
+
 // TestBuildRateLimits_AssurancePathsLimited asserts the three
 // client-assurance endpoints carry a per-IP quota. They are JWT-exempt, and
 // the exchange paths each spend an outbound provider request (Turnstile /

@@ -80,7 +80,8 @@ func (s *IdentityVerificationService) repo(ctx context.Context) Repository {
 // provider to mint a client session token, and persists a PENDING
 // record so subsequent status polls have something to read.
 //
-// Returns ErrNotFound when userID does not resolve to a user.
+// Returns ErrNotFound when userID does not resolve to a user, and
+// ErrAnonymousMustUpgrade when it resolves to an anonymous one.
 func (s *IdentityVerificationService) BeginIdentityVerification(
 	ctx context.Context,
 	userID string,
@@ -94,6 +95,19 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 	}
 	if user == nil {
 		return nil, ErrNotFound
+	}
+	// The one-door invariant refuseAnonymousCredentialAttach enforces on the
+	// credential surfaces extends here: an anonymous access token carries a
+	// sub and role:member like any other, but the account it names can still
+	// be hard-deleted by the retention sweep — which would orphan the
+	// verification — and each BeginVerification is a PAID provider call an
+	// unauthenticated caller could otherwise drive by chaining
+	// SignInAnonymously. The minor-data check below is blind to the account
+	// class too: no date of birth means BandUnknown, which passes.
+	if user.IsAnonymous {
+		return nil, fmt.Errorf(
+			"%w: identity verification is refused while the account can still be "+
+				"hard-deleted by the anonymous retention sweep", ErrAnonymousMustUpgrade)
 	}
 	// COPPA data-minimization: never collect identity documents from a
 	// CHILD-band account when minimization is enabled. No provider session

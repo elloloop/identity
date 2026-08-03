@@ -1,0 +1,360 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Anonymous identity">
+  <h1>Anonymous identity</h1>
+  <p>
+    Anonymous sign-in creates a <em>real</em> account that holds no credential
+    of any kind — no email, no password, no provider identity, no passkey. It
+    has a stable id, so a client can own data before asking anyone to sign up,
+    and it can later gain a credential <strong>without changing that id</strong>.
+    It is the equivalent of Firebase Anonymous Authentication.
+  </p>
+  <p>
+    An anonymous account is reachable only through its refresh token. There is
+    no credential to recover with, so <strong>losing the refresh token loses
+    the account</strong>. Persist it as durably as you would a session.
+  </p>
+
+  <h2>How it differs from client assurance</h2>
+  <p>
+    <a href={`${import.meta.env.BASE_URL}/docs/auth/assurance`}>Client
+    assurance</a> answers <em>"is this a genuine app on genuine hardware?"</em>
+    and carries no subject at all. Anonymous identity answers <em>"who is
+    this?"</em> with an account that really exists. They compose: assurance
+    gates who may call, anonymous identity decides who they are. Use assurance
+    to keep anonymous account creation from being farmed.
+  </p>
+
+  <h2>Enabling it</h2>
+  <p>
+    Off by default. For the default project:
+  </p>
+  <Code
+    lang="bash"
+    code={`GATEWAY_ANONYMOUS_ENABLED=true
+
+# Strongly recommended: require a valid assurance token to mint an account.
+# Needs GATEWAY_ASSURANCE_ENABLED=true, or the server refuses to boot.
+GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE=true
+
+# Days of inactivity before an anonymous account is reaped (default 30,
+# raised automatically to exceed GATEWAY_REFRESH_EXPIRY_SECONDS when left
+# unset — see Retention). 0 disables the sweep.
+GATEWAY_ANONYMOUS_RETENTION_DAYS=30`}
+  />
+  <p>
+    Any other project enables it in its own <code>config_json</code>:
+  </p>
+  <Code
+    lang="json"
+    code={`{
+  "anonymous": {
+    "enabled": true
+  }
+}`}
+  />
+  <p>
+    <code>enabled</code> is the only key. Retention is
+    <strong>deployment-wide</strong> — there is no per-project override,
+    because the sweeper runs against the boot-default project (see
+    <a href="#retention">Retention</a>).
+  </p>
+
+  <h2 id="access-mode">Sign-in is independent of the access mode</h2>
+  <p>
+    <code>access.mode</code> (<code>open</code> / <code>allowlist</code> /
+    <code>invite</code> / <code>closed</code>) governs which
+    <strong>email-identified humans</strong> may sign up, log in, and accept
+    invitations. Anonymous sign-in is a different question and has its own
+    switch. A project running <code>mode: closed</code> — admitting no new
+    identified users at all — still hands out anonymous sessions when
+    <code>anonymous.enabled</code> is true.
+  </p>
+  <p>
+    This matches Firebase, where anonymous auth is its own provider toggle and
+    does not fire the blocking functions that gate identified sign-ups. It is
+    not a hole in default-DENY: the anonymous switch is itself default-off, and
+    a wide-open <code>mode: open</code> project does not get anonymous sign-in
+    either. Control anonymous traffic with assurance and rate limits, not with
+    the access mode.
+  </p>
+  <p>
+    <strong>Upgrading is not independent of it.</strong>
+    <code>UpgradeAnonymousAccount</code> is enforced with <em>signup</em>
+    semantics, because attaching a credential is what provisions an
+    email-identified account in the project's namespace. Under
+    <code>invite</code>, <code>closed</code>, or an off-list
+    <code>allowlist</code> it returns <code>PERMISSION_DENIED</code>, and the
+    account stays anonymous.
+  </p>
+  <p>
+    This matters at the default: <code>GATEWAY_DEFAULT_PROJECT_ACCESS_MODE</code>
+    defaults to <code>closed</code>. Enabling only the
+    <code>GATEWAY_ANONYMOUS_*</code> variables above gives you working
+    anonymous sign-in and an upgrade path that <em>always</em> fails. Open the
+    project (<code>mode: open</code>, or allowlist/invite as appropriate) for
+    the upgrade half to work at all.
+  </p>
+
+  <h2>Signing in</h2>
+  <p>
+    <code>SignInAnonymously</code> takes no arguments and needs no
+    authentication. Every call mints a <strong>new</strong> account — there is
+    nothing to authenticate against, so the server cannot recognise a returning
+    client. Call it once, persist the refresh token, and use
+    <code>RefreshToken</code> from then on.
+  </p>
+  <Code
+    lang="bash"
+    code={`curl -X POST https://auth.example.com/identity.v1.IdentityService/SignInAnonymously \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Assurance-Token: <token>' \\
+  -d '{}'`}
+  />
+  <Code
+    lang="json"
+    code={`{
+  "user": { "id": "usr_2f9c...", "isAnonymous": true, "email": "" },
+  "accessToken": "eyJhbGciOi...",
+  "refreshToken": "rt_9a41...",
+  "expiresIn": 3600
+}`}
+  />
+
+  <h3>The <code>anonymous</code> claim</h3>
+  <p>
+    Access tokens for anonymous accounts carry <code>"anonymous": true</code>.
+    It is emitted only when true, so tokens for identified users are unchanged.
+  </p>
+  <p>
+    Downstream services <strong>must</strong> check it before granting anything
+    that assumes a verified human. An anonymous <code>sub</code> is cheap to
+    mint, and <code>email</code> is empty rather than
+    absent-because-unverified — code that only tests "is there a sub?" will
+    treat a freshly farmed account as a user.
+  </p>
+
+  <h2>Upgrading to a permanent account</h2>
+  <p>
+    <code>UpgradeAnonymousAccount</code> attaches a credential to the
+    <strong>calling</strong> account and preserves its id. Everything written
+    against that id — rows in your own database, uploaded files, purchases —
+    stays attached to the same subject, so there is no data migration.
+  </p>
+  <p>
+    It requires an authenticated anonymous caller. The account is taken from
+    the access token; there is no <code>user_id</code> field, so one account
+    can never upgrade another.
+  </p>
+  <Code
+    lang="bash"
+    code={`curl -X POST https://auth.example.com/identity.v1.IdentityService/UpgradeAnonymousAccount \\
+  -H 'Content-Type: application/json' \\
+  -H 'Authorization: Bearer <anonymous access token>' \\
+  -d '{"password": {"email": "user@example.com", "password": "...", "name": "Ada"}}'`}
+  />
+  <p>
+    Or with a federated credential — the server performs the provider code
+    exchange itself, so the client never asserts the identity:
+  </p>
+  <Code
+    lang="json"
+    code={`{
+  "oauth": {
+    "provider": "google",
+    "code": "4/0Ab...",
+    "redirectUri": "https://app.example.com/callback",
+    "codeVerifier": "..."
+  }
+}`}
+  />
+  <h3>What the response contains depends on the arm</h3>
+  <p>
+    Both arms return the same user id with <code>isAnonymous: false</code>.
+    They differ on whether you get a session:
+  </p>
+  <ul>
+    <li>
+      <strong>OAuth</strong> — the address is provider-verified, so the
+      response carries a <strong>new token pair</strong>. The reissue is
+      required, not a convenience: your old access token still asserts
+      <code>anonymous: true</code> and downstream services would keep
+      believing it until it expired. Discard the old pair.
+    </li>
+    <li>
+      <strong>Password, with <code>GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL</code>
+      on (the default)</strong> — the address is only asserted, so no session
+      is issued. <code>accessToken</code> and <code>refreshToken</code> come
+      back <strong>empty</strong>, <code>expiresIn</code> is <code>0</code>, a
+      verification email is sent, and the anonymous session is revoked. Route
+      the user to "check your email", then to a normal login. Do not discard
+      your tokens expecting replacements — there are none, and the old ones
+      have already been revoked.
+    </li>
+    <li>
+      <strong>Password, with the gate off</strong> — behaves like the OAuth
+      arm and returns a new pair.
+    </li>
+  </ul>
+  <p>
+    The gate exists so the upgrade is never more powerful than
+    <code>PasswordSignup</code>, which withholds a session on an unverified
+    address for the same reason: otherwise anyone could mint an anonymous
+    account and trade it for a live session asserting an address they do not
+    own.
+  </p>
+
+  <h3>Errors</h3>
+  <table>
+    <thead>
+      <tr><th>Code</th><th>When</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>UNIMPLEMENTED</code></td>
+        <td>anonymous sign-in is not enabled for the project</td>
+      </tr>
+      <tr>
+        <td><code>PERMISSION_DENIED</code></td>
+        <td>assurance is required and the token is missing or invalid</td>
+      </tr>
+      <tr>
+        <td><code>UNAUTHENTICATED</code></td>
+        <td>upgrade called without an access token</td>
+      </tr>
+      <tr>
+        <td><code>FAILED_PRECONDITION</code></td>
+        <td>the calling account is not anonymous (it already has a credential)</td>
+      </tr>
+      <tr>
+        <td><code>ALREADY_EXISTS</code></td>
+        <td>
+          the email or provider identity already belongs to another account.
+          The two accounts are <strong>not</strong> merged — which one should
+          survive is your application's decision, not the server's. Sign the
+          user into the existing account and migrate what you need.
+        </td>
+      </tr>
+      <tr>
+        <td><code>PERMISSION_DENIED</code></td>
+        <td>
+          the project's access mode forbids provisioning this account —
+          <code>closed</code> (the default), <code>invite</code>, or an
+          off-list <code>allowlist</code>. The account remains anonymous.
+        </td>
+      </tr>
+      <tr>
+        <td><code>INVALID_ARGUMENT</code></td>
+        <td>no credential set, or the password fails the strength policy</td>
+      </tr>
+      <tr>
+        <td>—</td>
+        <td>
+          <strong>Not an error:</strong> a successful password upgrade with
+          the verification gate on returns <code>OK</code> with empty tokens.
+          Branch on <code>accessToken == ""</code>, not on a status code.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 id="retention">Retention</h2>
+  <p>
+    Anonymous accounts are reaped after
+    <code>GATEWAY_ANONYMOUS_RETENTION_DAYS</code> of inactivity (default 30),
+    measured from the <strong>last token refresh</strong>, not from creation.
+    An account that keeps refreshing is never reaped. Their rows cascade, so
+    the account's tokens and sessions go with it.
+  </p>
+  <p>
+    Upgrading takes an account out of the sweep's reach permanently: the sweep
+    matches on the anonymous flag, which the upgrade clears.
+  </p>
+  <p>
+    The window must exceed <code>GATEWAY_REFRESH_EXPIRY_SECONDS</code>: reaping
+    an account while its refresh token is still valid would destroy a session
+    the client still holds and cannot re-establish. What happens when it does
+    not depends on whether you set it:
+  </p>
+  <ul>
+    <li>
+      <strong>Set explicitly</strong> — the server <strong>refuses to
+      boot</strong>, naming both variables. You asked for a window it cannot
+      honour.
+    </li>
+    <li>
+      <strong>Left unset</strong> — the default (30) is <strong>raised</strong>
+      to one day past your refresh lifetime, and the adjustment is logged once
+      at boot as <code>anonymous_retention_raised</code>. A deployment that
+      never enabled anonymous sign-in must not fail to start over a value it
+      never chose, so with a 60-day refresh lifetime the effective window is
+      61 days, not 30. Set the variable explicitly if you need a specific
+      number — for a privacy statement, say.
+    </li>
+  </ul>
+  <p>
+    <strong>The sweep covers the boot-default project only.</strong> It runs
+    against the repository bound at startup, so anonymous users in other
+    control-plane projects are <em>not</em> reaped. A deployment that enables
+    anonymous sign-in on non-default projects must reap those rows itself
+    until a per-project sweep ships — otherwise the table grows by one
+    permanent row per app install, from an unauthenticated endpoint. The
+    attested-device sweep has the same limitation.
+  </p>
+
+  <h2 id="disabling">Turning it off is destructive</h2>
+  <p>
+    <code>GATEWAY_ANONYMOUS_ENABLED=false</code> is not a pause. It refuses
+    <code>RefreshToken</code> for every <em>existing</em> anonymous user
+    immediately — and a refresh token is that account's only credential, so
+    those sessions become unrecoverable at once.
+  </p>
+  <p>
+    It then destroys them. The activity clock only advances on a successful
+    refresh, so every anonymous account goes idle by construction; and the
+    retention sweep is gated solely on
+    <code>GATEWAY_ANONYMOUS_RETENTION_DAYS</code>, not on the enable flag, so
+    one window later (30 days at defaults) it hard-deletes them and their
+    cascaded rows. The users who lose data are the active ones.
+  </p>
+  <p>
+    Before disabling, either set
+    <code>GATEWAY_ANONYMOUS_RETENTION_DAYS=0</code> first — which stops the
+    sweep and leaves the rows in place, unreachable but recoverable if you
+    re-enable — or drive users through <code>UpgradeAnonymousAccount</code>
+    while the feature is still on, so they hold a real credential before the
+    switch flips.
+  </p>
+
+  <h2>Operational notes</h2>
+  <ul>
+    <li>
+      <strong>Rate limits.</strong> <code>SignInAnonymously</code> shares the
+      per-IP signup budget (<code>GATEWAY_RATE_LIMIT_SIGNUP_PER_IP</code>),
+      because that is what it is — account creation. Enabling anonymous
+      sign-in without assurance or a meaningful quota gives the internet an
+      unbounded row-insert primitive.
+    </li>
+    <li>
+      <strong>Audit.</strong> Creation logs <code>anonymous_signin</code> and
+      the upgrade logs <code>anonymous_upgraded</code>, both with the account
+      id as actor. Since the id is preserved, the pair is the account's whole
+      origin story.
+    </li>
+    <li>
+      <strong>Schema.</strong> Migration 0028 (Postgres) / 0013 (SQLite) adds
+      the flag and rebuilds the per-project email unique index as a partial
+      index over non-empty addresses, so any number of anonymous users coexist
+      while uniqueness still binds for everyone who has an address. On a large
+      <code>users</code> table, pre-build the replacement with
+      <code>CREATE INDEX CONCURRENTLY</code> before deploying.
+    </li>
+  </ul>
+
+  <p>
+    Design rationale and rejected alternatives: <code>docs/adr/0013-anonymous-identity.md</code>.
+  </p>
+</DocsLayout>

@@ -89,6 +89,26 @@ const (
 	// delete live devices instead of stale ones.
 	MaxAssuranceDeviceRetentionDays = 10000
 
+	// DefaultAnonymousRetentionDays is how long an anonymous user is kept
+	// after its last activity. 30 days matches Firebase's anonymous
+	// auto-cleanup window. An anonymous account holds no credential, so once
+	// it stops refreshing it is unreachable forever — retention only decides
+	// how long the unreachable row lingers. It must comfortably exceed the
+	// refresh-token lifetime, or a user who is still able to come back gets
+	// reaped while their refresh token is live.
+	DefaultAnonymousRetentionDays = 30
+
+	// secondsPerDay converts the refresh lifetime to whole days so the
+	// raise in Load and the invariant in validateAnonymous derive the
+	// boundary from one constant.
+	secondsPerDay = 86400
+
+	// MaxAnonymousRetentionDays caps the window for the same reason
+	// MaxAssuranceDeviceRetentionDays does: past ~106752 days the nanosecond
+	// cutoff duration overflows int64 and INVERTS, turning the sweep into a
+	// deleter of live accounts.
+	MaxAnonymousRetentionDays = 10000
+
 	// DefaultAgeGateChildMaxAge is the conventional COPPA child boundary:
 	// users 12 and under (i.e. under 13) are in the protected CHILD band.
 	DefaultAgeGateChildMaxAge = 12
@@ -582,6 +602,34 @@ type Config struct {
 	// project without its own assurance block cannot authenticate at all.
 	AssuranceAllowProjectOnly bool
 
+	// AnonymousEnabled turns anonymous sign-in on for the DEFAULT project
+	// (GATEWAY_ANONYMOUS_ENABLED). Other projects enable it in their own
+	// config_json. Default OFF: the capability never appears without an
+	// explicit decision.
+	//
+	// It is deliberately independent of the access mode. `access.mode`
+	// governs which EMAIL-IDENTIFIED humans may sign up and log in; a
+	// deployment may run mode=closed and still hand out anonymous sessions,
+	// because the two answer different questions (Firebase behaves the same
+	// way). Gate anonymous traffic with the assurance layer, not the access
+	// mode.
+	AnonymousEnabled bool
+	// AnonymousRetentionDays bounds how long an anonymous user is kept after
+	// its LAST ACTIVITY; when left unset it is raised automatically to outlive
+	// the refresh-token lifetime, and the adjustment is logged once at boot
+	// as anonymous_retention_raised. Like the device window this is
+	// retention, not expiry. 0 (or negative) disables the sweep, keeping
+	// anonymous users forever. Deployment-wide: there is no per-project
+	// override, because the sweeper runs against the repository bound at
+	// boot. An EXPLICITLY set window that does not exceed the refresh
+	// lifetime fails boot instead of being raised.
+	AnonymousRetentionDays int
+	// AnonymousRequireAssurance makes SignInAnonymously require a valid
+	// assurance token, exactly like the six enforce flags on the identified
+	// auth endpoints. It is the intended anti-abuse control for anonymous
+	// sign-in: without it, anonymous accounts are free to mint in bulk.
+	AnonymousRequireAssurance bool
+
 	// Age-gating (COPPA). When disabled the no-op determiner is wired (everyone
 	// classifies as adult, no consent gating) and signup behaves as before.
 
@@ -904,6 +952,9 @@ type Config struct {
 	RateLimitAssurancePerIP int
 	// RateLimitPhonePerIP is the per-IP cap per window on RequestPhoneVerification.
 	RateLimitPhonePerIP int
+	// RateLimitIDVPerIP is the per-IP cap per window on BeginIdentityVerification,
+	// where every admitted call opens a paid provider session.
+	RateLimitIDVPerIP int
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
 	RateLimitBootstrapPerIP int
 
@@ -1026,6 +1077,10 @@ type Config struct {
 	// each entry is sensitive and never logged.
 	WebhookSubscriptions string
 
+	// AnonymousRetentionRaisedFrom is the unset default that was raised,
+	// or 0 when no adjustment happened. Boot logs it once.
+	AnonymousRetentionRaisedFrom int
+
 	// removedEnvVarErr is non-nil when Load saw an environment variable
 	// removed in a breaking release. Nil for a Config built in code, which
 	// is the point — see the comment on detectRemovedEnvVars.
@@ -1039,6 +1094,32 @@ func Load() *Config {
 	// Stamped here so Validate stays a pure receiver check; see
 	// removedEnvVarErr.
 	c.removedEnvVarErr = detectRemovedEnvVars()
+
+	// The anonymous retention window must outlive the refresh lifetime, or
+	// the sweep reaps accounts whose only credential is still valid. That
+	// invariant is NOT enforced against a value the operator never chose: a
+	// deployment with a long refresh lifetime and anonymous entirely off
+	// would otherwise fail to boot over the default. An UNSET window is
+	// raised to clear the refresh lifetime; an explicitly set one fails
+	// Validate loudly, because there the operator stated an intent the
+	// server cannot honour.
+	// Literal, not a constant: cmd/docsgen extracts the GATEWAY_* surface by
+	// scanning for string literals, so hoisting this to a named constant
+	// silently drops the variable from the published config reference.
+	// "Explicit" must mean exactly what envInt means by "set", or the two
+	// disagree on set-but-empty: LookupEnv reports it chosen while envInt
+	// falls back to the default, so the raise is skipped AND the default is
+	// then held to the refresh-lifetime invariant — bricking a boot for a
+	// deployment that never enabled the feature. `docker compose`
+	// interpolating an undefined ${VAR}, a k8s `value: ""`, and a blank
+	// env_file line all produce exactly that input.
+	if v, ok := os.LookupEnv("GATEWAY_ANONYMOUS_RETENTION_DAYS"); !ok || strings.TrimSpace(v) == "" {
+		if refreshDays := c.RefreshExpirySeconds / secondsPerDay; c.AnonymousRetentionDays > 0 &&
+			c.AnonymousRetentionDays <= refreshDays {
+			c.AnonymousRetentionRaisedFrom = c.AnonymousRetentionDays
+			c.AnonymousRetentionDays = refreshDays + 1
+		}
+	}
 	return c
 }
 
@@ -1156,6 +1237,9 @@ func loadFromEnv() *Config {
 		AssuranceAndroidSAKeyJSON:        envStr("GATEWAY_ASSURANCE_ANDROID_SA_KEY_JSON", ""),
 		AssuranceWebTokenTTLSeconds:      envInt("GATEWAY_ASSURANCE_WEB_TOKEN_TTL_SECONDS", DefaultAssuranceWebTokenTTLSeconds),
 		AssuranceDeviceRetentionDays:     envInt("GATEWAY_ASSURANCE_DEVICE_RETENTION_DAYS", DefaultAssuranceDeviceRetentionDays),
+		AnonymousEnabled:                 envBool("GATEWAY_ANONYMOUS_ENABLED", false),
+		AnonymousRetentionDays:           envInt("GATEWAY_ANONYMOUS_RETENTION_DAYS", DefaultAnonymousRetentionDays),
+		AnonymousRequireAssurance:        envBool("GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE", false),
 		AssuranceAllowProjectOnly:        envBool("GATEWAY_ASSURANCE_ALLOW_PROJECT_ONLY", false),
 
 		AgeGateEnabled:     envBool("GATEWAY_AGEGATE_ENABLED", false),
@@ -1270,6 +1354,7 @@ func loadFromEnv() *Config {
 		RateLimitPasswordlessPerIP: envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
 		RateLimitAssurancePerIP:    envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
+		RateLimitIDVPerIP:          envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
 		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 
 		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
@@ -1734,6 +1819,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateAnonymous(); err != nil {
+		return err
+	}
 	if err := c.validateAssurance(); err != nil {
 		return err
 	}
@@ -2043,6 +2131,63 @@ func (c *Config) validateSMS() error {
 			SMSProviderTwilio, SMSProviderSNS, SMSProviderAzure, c.SMSProvider,
 		)
 	}
+	return nil
+}
+
+// validateAnonymous bounds the anonymous retention window and rejects the
+// one combination that cannot be honoured: requiring an assurance token for
+// anonymous sign-in while the assurance layer is off, which would deny 100%
+// of anonymous sign-ins with no way to obtain a token.
+//
+// Like the device window, the retention bound is checked regardless of
+// AnonymousEnabled — the sweeper is wired from the value either way, and past
+// the cap the cutoff duration overflows int64 and INVERTS, turning the sweep
+// into a deleter of live accounts.
+func (c *Config) validateAnonymous() error {
+	if c.AnonymousRetentionDays > MaxAnonymousRetentionDays {
+		return fmt.Errorf(
+			"config: GATEWAY_ANONYMOUS_RETENTION_DAYS must be <= %d, got %d",
+			MaxAnonymousRetentionDays, c.AnonymousRetentionDays,
+		)
+	}
+	// Unconditional, and deliberately so: a per-project config_json can
+	// enable anonymous sign-in on a deployment whose environment leaves it
+	// off. requireAssurance short-circuits to ALLOWED whenever
+	// AssuranceEnabled is false, whatever the per-endpoint flag says — so
+	// REQUIRE_ASSURANCE=true with ASSURANCE_ENABLED=false does not deny, it
+	// silently permits. A per-project config_json can still switch anonymous
+	// ON, and that project then serves the unauthenticated, row-minting
+	// SignInAnonymously with ZERO enforcement while the operator's
+	// environment says the opposite. Treating the pair as "inert while
+	// anonymous is off" was exactly the fail-OPEN the assurance validator
+	// refuses to permit for its own arms.
+	if c.AnonymousRequireAssurance && !c.AssuranceEnabled {
+		return errors.New(
+			"config: GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE=true requires GATEWAY_ASSURANCE_ENABLED=true — " +
+				"assurance enforcement short-circuits to ALLOW when the layer is off, so anonymous " +
+				"sign-in would be served unenforced (including for a project that enables it in " +
+				"config_json) while this setting claims otherwise",
+		)
+	}
+	// Unconditional for the same reason as the check above, and because the
+	// sweeper is wired from this value whether or not the env enables the
+	// feature.
+	// An anonymous session survives only as long as its refresh token: that
+	// token is the account's ONLY credential. Reaping the user before the
+	// token expires destroys a session the client still believes in and
+	// cannot re-establish under the same id.
+	if c.AnonymousRetentionDays > 0 {
+		retention := time.Duration(c.AnonymousRetentionDays) * 24 * time.Hour
+		refresh := time.Duration(c.RefreshExpirySeconds) * time.Second
+		if retention <= refresh {
+			return fmt.Errorf(
+				"config: GATEWAY_ANONYMOUS_RETENTION_DAYS (%s) must exceed GATEWAY_REFRESH_EXPIRY_SECONDS (%s) — "+
+					"anonymous users would be reaped while their refresh token, their only credential, is still valid",
+				retention, refresh,
+			)
+		}
+	}
+
 	return nil
 }
 

@@ -362,6 +362,17 @@ func (s *AdminService) ResetUserPassword(
 	if node == nil {
 		return nil, errors.New("user not found")
 	}
+	// The sixth door onto the same invariant: attaching a password here
+	// would leave is_anonymous set, so the account becomes password-loginable
+	// AND stays matched by the retention sweep, which hard-deletes it with
+	// its sessions. The account is not addressable by an admin anyway — it
+	// has no email and is excluded from the user listing.
+	if userFromNode(node).IsAnonymous {
+		// Same sentinel as every other door, so one rule maps to one Connect
+		// code rather than this path answering InvalidArgument while its five
+		// siblings answer FailedPrecondition.
+		return nil, fmt.Errorf("%w: attaching one here would leave the account subject to the anonymous retention sweep", ErrAnonymousMustUpgrade)
+	}
 
 	now := nowMs()
 	res := &ResetPasswordResult{}

@@ -27,6 +27,7 @@ const userColumns = `
 	last_login_at_ms,
 	external_id,
 	deletion_scheduled_at_ms,
+	is_anonymous, anonymous_last_seen_ms,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed returns userColumns with every column qualified by
@@ -50,9 +51,9 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		failedLoginCount                                       int64
 		emailVerifiedAtMs, idvVerifiedAtMs, lastLoginAtMs      int64
 		phoneVerifiedAtMs, dateOfBirthMs                       int64
-		deletionScheduledAtMs                                  int64
+		deletionScheduledAtMs, anonymousLastSeenMs             int64
 		emailVerified, idvVerified, totpRequired               bool
-		phoneVerified                                          bool
+		phoneVerified, isAnonymous                             bool
 		id, email, name, role, avatar, status, recovery, phash string
 		phoneNumber                                            string
 		externalID                                             string
@@ -68,6 +69,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		&lastLoginAtMs,
 		&externalID,
 		&deletionScheduledAtMs,
+		&isAnonymous, &anonymousLastSeenMs,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -95,6 +97,8 @@ func scanUser(row pgx.Row) (*service.User, error) {
 	u.LastLoginAtMs = lastLoginAtMs
 	u.ExternalID = externalID
 	u.DeletionScheduledAtMs = deletionScheduledAtMs
+	u.IsAnonymous = isAnonymous
+	u.AnonymousLastSeenMs = anonymousLastSeenMs
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -106,7 +110,7 @@ func (r *pgRepository) FindUserByEmail(ctx context.Context, email string) (*serv
 	}
 	const q = `SELECT ` + userColumns + `
 		FROM users
-		WHERE project_id = $1 AND lower(email) = lower($2)
+		WHERE project_id = $1 AND email <> '' AND lower(email) = lower($2)
 		LIMIT 1`
 	row := r.pool.QueryRow(ctx, q, r.projectID, email)
 	u, err := scanUser(row)
@@ -201,11 +205,19 @@ func (r *pgRepository) userFilterWhere(filter service.UserListFilter) (where []s
 	args = []any{r.projectID}
 	if filter.Email != "" {
 		args = append(args, filter.Email)
-		where = append(where, fmt.Sprintf("lower(email) = lower($%d)", len(args)))
+		// email <> '' keeps the partial unique index (0028/0013) usable;
+		// without it the planner cannot prove the index covers this filter.
+		where = append(where, fmt.Sprintf("email <> '' AND lower(email) = lower($%d)", len(args)))
 	}
 	if filter.ExternalID != "" {
 		args = append(args, filter.ExternalID)
 		where = append(where, fmt.Sprintf("external_id = $%d", len(args)))
+	}
+	if !filter.IncludeAnonymous {
+		// Anonymous accounts have no email, so every consumer that presents
+		// users by address would render them blank. Excluded here rather
+		// than by the caller so ListUsers and CountUsers agree.
+		where = append(where, "NOT is_anonymous")
 	}
 	return where, args
 }
@@ -247,6 +259,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			last_login_at_ms,
 			external_id,
 			deletion_scheduled_at_ms,
+			is_anonymous, anonymous_last_seen_ms,
 			created_at_ms, updated_at_ms
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
@@ -259,7 +272,8 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 			$22,
 			$23,
 			$24,
-			$25, $26
+			$25, $26,
+			$27, $28
 		)`
 	_, err := r.pool.Exec(
 		ctx, q,
@@ -273,6 +287,7 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 		u.LastLoginAtMs,
 		u.ExternalID,
 		u.DeletionScheduledAtMs,
+		u.IsAnonymous, u.AnonymousLastSeenMs,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	)
 	if err != nil {
@@ -311,6 +326,8 @@ var userFieldColumns = map[string]struct {
 	"date_of_birth_ms":         {"date_of_birth_ms", "int64"},
 	"external_id":              {"external_id", "string"},
 	"deletion_scheduled_at_ms": {"deletion_scheduled_at_ms", "int64"},
+	"is_anonymous":             {"is_anonymous", "bool"},
+	"anonymous_last_seen_ms":   {"anonymous_last_seen_ms", "int64"},
 }
 
 func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {

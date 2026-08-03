@@ -334,6 +334,12 @@ const (
 	// IdentityServiceAdminSetProjectOAuthProviderProcedure is the fully-qualified name of the
 	// IdentityService's AdminSetProjectOAuthProvider RPC.
 	IdentityServiceAdminSetProjectOAuthProviderProcedure = "/identity.v1.IdentityService/AdminSetProjectOAuthProvider"
+	// IdentityServiceSignInAnonymouslyProcedure is the fully-qualified name of the IdentityService's
+	// SignInAnonymously RPC.
+	IdentityServiceSignInAnonymouslyProcedure = "/identity.v1.IdentityService/SignInAnonymously"
+	// IdentityServiceUpgradeAnonymousAccountProcedure is the fully-qualified name of the
+	// IdentityService's UpgradeAnonymousAccount RPC.
+	IdentityServiceUpgradeAnonymousAccountProcedure = "/identity.v1.IdentityService/UpgradeAnonymousAccount"
 	// IdentityServiceAdminSetProjectAssuranceProcedure is the fully-qualified name of the
 	// IdentityService's AdminSetProjectAssurance RPC.
 	IdentityServiceAdminSetProjectAssuranceProcedure = "/identity.v1.IdentityService/AdminSetProjectAssurance"
@@ -531,6 +537,17 @@ type IdentityServiceClient interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error)
+	// SignInAnonymously creates a credential-less account and returns it with
+	// a token pair. Every call mints a NEW user; the refresh token is the
+	// account's only means of return. Per-project switch, default off, and
+	// independent of the access mode.
+	SignInAnonymously(context.Context, *connect.Request[v1.SignInAnonymouslyRequest]) (*connect.Response[v1.SignInAnonymouslyResponse], error)
+	// UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+	// anonymous account in place, preserving its id. Requires an
+	// authenticated anonymous caller; exactly one credential must be set.
+	// Gated by the project access mode with signup semantics, so it returns
+	// PERMISSION_DENIED on a closed/invite/off-list project.
+	UpgradeAnonymousAccount(context.Context, *connect.Request[v1.UpgradeAnonymousAccountRequest]) (*connect.Response[v1.UpgradeAnonymousAccountResponse], error)
 	// Per-project client-assurance authoring. Takes the Play Integrity
 	// service-account key in plaintext and encrypts it server-side, so an
 	// operator never has to reimplement the at-rest encryption.
@@ -1157,6 +1174,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectOAuthProvider")),
 			connect.WithClientOptions(opts...),
 		),
+		signInAnonymously: connect.NewClient[v1.SignInAnonymouslyRequest, v1.SignInAnonymouslyResponse](
+			httpClient,
+			baseURL+IdentityServiceSignInAnonymouslyProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SignInAnonymously")),
+			connect.WithClientOptions(opts...),
+		),
+		upgradeAnonymousAccount: connect.NewClient[v1.UpgradeAnonymousAccountRequest, v1.UpgradeAnonymousAccountResponse](
+			httpClient,
+			baseURL+IdentityServiceUpgradeAnonymousAccountProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UpgradeAnonymousAccount")),
+			connect.WithClientOptions(opts...),
+		),
 		adminSetProjectAssurance: connect.NewClient[v1.AdminSetProjectAssuranceRequest, v1.AdminSetProjectAssuranceResponse](
 			httpClient,
 			baseURL+IdentityServiceAdminSetProjectAssuranceProcedure,
@@ -1287,6 +1316,8 @@ type identityServiceClient struct {
 	upsertProjectConfig             *connect.Client[v1.UpsertProjectConfigRequest, v1.UpsertProjectConfigResponse]
 	getProjectConfig                *connect.Client[v1.GetProjectConfigRequest, v1.GetProjectConfigResponse]
 	adminSetProjectOAuthProvider    *connect.Client[v1.AdminSetProjectOAuthProviderRequest, v1.AdminSetProjectOAuthProviderResponse]
+	signInAnonymously               *connect.Client[v1.SignInAnonymouslyRequest, v1.SignInAnonymouslyResponse]
+	upgradeAnonymousAccount         *connect.Client[v1.UpgradeAnonymousAccountRequest, v1.UpgradeAnonymousAccountResponse]
 	adminSetProjectAssurance        *connect.Client[v1.AdminSetProjectAssuranceRequest, v1.AdminSetProjectAssuranceResponse]
 	adminGetProjectAssurance        *connect.Client[v1.AdminGetProjectAssuranceRequest, v1.AdminGetProjectAssuranceResponse]
 	adminDeleteProjectOAuthProvider *connect.Client[v1.AdminDeleteProjectOAuthProviderRequest, v1.AdminDeleteProjectOAuthProviderResponse]
@@ -1798,6 +1829,16 @@ func (c *identityServiceClient) AdminSetProjectOAuthProvider(ctx context.Context
 	return c.adminSetProjectOAuthProvider.CallUnary(ctx, req)
 }
 
+// SignInAnonymously calls identity.v1.IdentityService.SignInAnonymously.
+func (c *identityServiceClient) SignInAnonymously(ctx context.Context, req *connect.Request[v1.SignInAnonymouslyRequest]) (*connect.Response[v1.SignInAnonymouslyResponse], error) {
+	return c.signInAnonymously.CallUnary(ctx, req)
+}
+
+// UpgradeAnonymousAccount calls identity.v1.IdentityService.UpgradeAnonymousAccount.
+func (c *identityServiceClient) UpgradeAnonymousAccount(ctx context.Context, req *connect.Request[v1.UpgradeAnonymousAccountRequest]) (*connect.Response[v1.UpgradeAnonymousAccountResponse], error) {
+	return c.upgradeAnonymousAccount.CallUnary(ctx, req)
+}
+
 // AdminSetProjectAssurance calls identity.v1.IdentityService.AdminSetProjectAssurance.
 func (c *identityServiceClient) AdminSetProjectAssurance(ctx context.Context, req *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error) {
 	return c.adminSetProjectAssurance.CallUnary(ctx, req)
@@ -2002,6 +2043,17 @@ type IdentityServiceHandler interface {
 	// redacted. Operator-only, like the other Admin* RPCs, and UNIMPLEMENTED on a
 	// build with no control plane.
 	AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error)
+	// SignInAnonymously creates a credential-less account and returns it with
+	// a token pair. Every call mints a NEW user; the refresh token is the
+	// account's only means of return. Per-project switch, default off, and
+	// independent of the access mode.
+	SignInAnonymously(context.Context, *connect.Request[v1.SignInAnonymouslyRequest]) (*connect.Response[v1.SignInAnonymouslyResponse], error)
+	// UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+	// anonymous account in place, preserving its id. Requires an
+	// authenticated anonymous caller; exactly one credential must be set.
+	// Gated by the project access mode with signup semantics, so it returns
+	// PERMISSION_DENIED on a closed/invite/off-list project.
+	UpgradeAnonymousAccount(context.Context, *connect.Request[v1.UpgradeAnonymousAccountRequest]) (*connect.Response[v1.UpgradeAnonymousAccountResponse], error)
 	// Per-project client-assurance authoring. Takes the Play Integrity
 	// service-account key in plaintext and encrypts it server-side, so an
 	// operator never has to reimplement the at-rest encryption.
@@ -2624,6 +2676,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("AdminSetProjectOAuthProvider")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceSignInAnonymouslyHandler := connect.NewUnaryHandler(
+		IdentityServiceSignInAnonymouslyProcedure,
+		svc.SignInAnonymously,
+		connect.WithSchema(identityServiceMethods.ByName("SignInAnonymously")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceUpgradeAnonymousAccountHandler := connect.NewUnaryHandler(
+		IdentityServiceUpgradeAnonymousAccountProcedure,
+		svc.UpgradeAnonymousAccount,
+		connect.WithSchema(identityServiceMethods.ByName("UpgradeAnonymousAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceAdminSetProjectAssuranceHandler := connect.NewUnaryHandler(
 		IdentityServiceAdminSetProjectAssuranceProcedure,
 		svc.AdminSetProjectAssurance,
@@ -2852,6 +2916,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceGetProjectConfigHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminSetProjectOAuthProviderProcedure:
 			identityServiceAdminSetProjectOAuthProviderHandler.ServeHTTP(w, r)
+		case IdentityServiceSignInAnonymouslyProcedure:
+			identityServiceSignInAnonymouslyHandler.ServeHTTP(w, r)
+		case IdentityServiceUpgradeAnonymousAccountProcedure:
+			identityServiceUpgradeAnonymousAccountHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminSetProjectAssuranceProcedure:
 			identityServiceAdminSetProjectAssuranceHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminGetProjectAssuranceProcedure:
@@ -3271,6 +3339,14 @@ func (UnimplementedIdentityServiceHandler) GetProjectConfig(context.Context, *co
 
 func (UnimplementedIdentityServiceHandler) AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.AdminSetProjectOAuthProvider is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) SignInAnonymously(context.Context, *connect.Request[v1.SignInAnonymouslyRequest]) (*connect.Response[v1.SignInAnonymouslyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SignInAnonymously is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UpgradeAnonymousAccount(context.Context, *connect.Request[v1.UpgradeAnonymousAccountRequest]) (*connect.Response[v1.UpgradeAnonymousAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UpgradeAnonymousAccount is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) AdminSetProjectAssurance(context.Context, *connect.Request[v1.AdminSetProjectAssuranceRequest]) (*connect.Response[v1.AdminSetProjectAssuranceResponse], error) {

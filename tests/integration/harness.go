@@ -811,6 +811,13 @@ func (r *MemRepo) CountRefreshTokensForUser(userID string) int {
 // ── Users ─────────────────────────────────────────────────────────
 
 func (r *MemRepo) FindUserByEmail(_ context.Context, email string) (*service.User, error) {
+	// The empty address matches nobody, mirroring every production driver's
+	// early return. Without this an anonymous user (Email == "") is
+	// resolvable by a lookup for "" — the inverse of what the conformance
+	// suite pins.
+	if email == "" {
+		return nil, nil
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, u := range r.users {
@@ -842,6 +849,12 @@ func (r *MemRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
+		// accounts have no email, so a surface presenting users by address
+		// must not receive them unless it opts in.
+		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
 		cp := *u
@@ -877,6 +890,12 @@ func (r *MemRepo) CountUsers(_ context.Context, filter service.UserListFilter) (
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
+		// accounts have no email, so a surface presenting users by address
+		// must not receive them unless it opts in.
+		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
 		n++
@@ -930,8 +949,10 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
 		// Case-insensitive + ErrAlreadyExists-wrapped, matching the production
-		// memory driver and the cross-driver conformance contract.
-		if strings.EqualFold(existing.Email, u.Email) {
+		// memory driver and the cross-driver conformance contract. The
+		// uniqueness index is PARTIAL (WHERE email <> '') since 0028/0013, so
+		// users without an address — every anonymous user — never collide.
+		if u.Email != "" && strings.EqualFold(existing.Email, u.Email) {
 			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
 		}
 		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
@@ -977,6 +998,14 @@ func (r *MemRepo) DeleteUser(_ context.Context, userID string) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.deleteUserRowsLocked(userID)
+	return nil
+}
+
+// deleteUserRowsLocked drains the user and every user-owned row. The caller
+// must hold r.mu. Shared with DeleteStaleAnonymousUsers so the sweep
+// cascades exactly like the SQL drivers' foreign keys do.
+func (r *MemRepo) deleteUserRowsLocked(userID string) {
 	for id, t := range r.refreshTokens {
 		if t.UserID == userID {
 			delete(r.refreshTokens, id)
@@ -1058,7 +1087,6 @@ func (r *MemRepo) DeleteUser(_ context.Context, userID string) error {
 		}
 	}
 	delete(r.users, userID)
-	return nil
 }
 
 func (r *MemRepo) IncrementFailedLoginCount(_ context.Context, userID string) (int32, error) {
@@ -2402,6 +2430,44 @@ func (r *MemRepo) DeleteStaleAttestedDevices(_ context.Context, beforeMs int64, 
 			delete(r.attestedDevices, id)
 			n++
 		}
+	}
+	return nil
+}
+
+func (r *MemRepo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memrepo: DeleteStaleAnonymousUsers: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Oldest-first, matching the contract all three production drivers
+	// implement — iterating the map directly would delete an arbitrary
+	// subset once the batch limit bites, so a harness-backed test could
+	// observe a different survivor than production produces.
+	type victim struct {
+		id          string
+		lastLoginMs int64
+	}
+	stale := make([]victim, 0, limit)
+	for id, u := range r.users {
+		if u.IsAnonymous && u.AnonymousLastSeenMs < beforeMs {
+			stale = append(stale, victim{id: id, lastLoginMs: u.AnonymousLastSeenMs})
+		}
+	}
+	sort.Slice(stale, func(i, j int) bool {
+		if stale[i].lastLoginMs != stale[j].lastLoginMs {
+			return stale[i].lastLoginMs < stale[j].lastLoginMs
+		}
+		return stale[i].id < stale[j].id
+	})
+	if len(stale) > limit {
+		stale = stale[:limit]
+	}
+	for _, v := range stale {
+		// Drain the user-owned rows too: the SQL drivers get this from FK
+		// cascades, so dropping only the users entry would leave orphans.
+		r.deleteUserRowsLocked(v.id)
 	}
 	return nil
 }

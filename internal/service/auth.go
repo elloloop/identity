@@ -97,6 +97,22 @@ type User struct {
 	IsMinor    bool
 	AgeBand    string // "CHILD" | "TEEN" | "ADULT" | "" (unknown)
 	ExternalID string // IdP-owned stable identifier (SCIM externalId); unique per tenant when set
+	// IsAnonymous marks a user created by SignInAnonymously: a real account
+	// with a stable id but no credential of any kind (no email, no password,
+	// no provider identity, no passkey). It is reachable only through its
+	// refresh token. Upgrading the account attaches a credential and clears
+	// this flag WITHOUT changing ID, so data the client wrote against the id
+	// survives. Email is always "" while this is true — that is what keeps
+	// any number of anonymous users inside one project, since the per-project
+	// email uniqueness index only covers non-empty addresses.
+	IsAnonymous bool
+	// AnonymousLastSeenMs is the retention sweep's activity clock, advanced
+	// on each anonymous refresh. Deliberately its OWN column rather than
+	// last_login_at_ms: indexing that column would defeat HOT updates for
+	// every ordinary login's last-login stamp (Postgres derives HOT
+	// eligibility from the union of indexed columns and ignores
+	// partial-index predicates). 0 for permanent accounts.
+	AnonymousLastSeenMs int64
 }
 
 // DefaultUserListLimit and MaxUserListLimit bound a Repository.ListUsers
@@ -117,6 +133,13 @@ type UserListFilter struct {
 	ExternalID string // exact external_id match when non-empty
 	Offset     int    // skip this many matching rows (cursor)
 	Limit      int    // max rows to return; <=0 → driver default
+	// IncludeAnonymous admits credential-less accounts. It defaults FALSE
+	// because an anonymous user has no email, and every consumer of this
+	// filter presents users by one: SCIM makes userName REQUIRED and unique
+	// (RFC 7643 §4.1.1), so exporting them yields N resources all carrying
+	// an empty userName. Excluded in the DRIVER, not the caller, so a
+	// paginated count matches the rows returned.
+	IncludeAnonymous bool
 }
 
 // PasskeyInfo holds display-safe passkey credential metadata.
@@ -321,6 +344,16 @@ type Repository interface {
 	// retention sweep the table only ever grows. A reaped device simply
 	// re-attests on its next refresh.
 	DeleteStaleAttestedDevices(ctx context.Context, beforeMs int64, limit int) error
+
+	// DeleteStaleAnonymousUsers reaps anonymous users whose
+	// AnonymousLastSeenMs is older than beforeMs, together with the rows
+	// that cascade from them.
+	// An anonymous user holds no credential, so once it stops refreshing it
+	// is unreachable forever and would otherwise accumulate one permanent
+	// row per app install. Implementations MUST match on is_anonymous and
+	// must never touch a user that has been upgraded to a permanent account
+	// (which clears the flag, see UpgradeAnonymousUser).
+	DeleteStaleAnonymousUsers(ctx context.Context, beforeMs int64, limit int) error
 
 	// QR login sessions
 	FindQrLoginSession(ctx context.Context, sessionID string) (*QrLoginSessionRecord, error)
@@ -1550,6 +1583,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		Project:   s.projectID(ctx),
 		AvatarURL: user.AvatarURL,
 		IsMinor:   user.IsMinor,
+		Anonymous: user.IsAnonymous,
 	}
 	if s.cfg.JWTAudience != "" {
 		claims.Audience = []string{s.cfg.JWTAudience}
@@ -1923,6 +1957,30 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", err
 	}
 
+	// Every check that can refuse an ANONYMOUS account runs BEFORE the token
+	// is consumed. A refresh token is an anonymous account's ONLY credential,
+	// so consuming it and then refusing burns it: undoing the refusal's cause
+	// does not restore the session, and the retry an SDK makes on the error
+	// lands on replay detection, leaving the account permanently
+	// unreachable — and hard-deleted once the retention window elapses. Every
+	// other check on this path guards an account that has some other way back
+	// in.
+	if timeoutUser.IsAnonymous {
+		if !s.anonymousEnabled(ctx) {
+			return nil, "", "", ErrAnonymousRefreshDisabled
+		}
+		// The product age gate denies anonymous accounts outright when the
+		// requested product sets a minimum band, and that is reachable
+		// mid-session: a product can gain a minimum_age_band between
+		// sign-in and the next rotation, or the refresh can carry a
+		// different X-Product than the sign-in did. The gate still runs
+		// inside issueTokensWithSessionStart; this early pass exists only
+		// so the refusal is non-destructive.
+		if err := s.enforceProductAgeGate(ctx, timeoutUser); err != nil {
+			return nil, "", "", err
+		}
+	}
+
 	// Rotation. ConsumeRefreshTokenByHash is the serialization point: it
 	// only succeeds when the row's consumed_at is currently 0, so two
 	// concurrent rotations of the same token resolve to exactly one
@@ -1952,7 +2010,22 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// token until it expires. Login context, so invite mode keeps admitting an
 	// already-provisioned user. user.Email is the DB-persisted (canonical) account
 	// email; wrap once (idempotent, self-heals a legacy non-canonical row).
-	if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+	//
+	// Anonymous users are exempt, and must be. The access mode governs which
+	// EMAIL-IDENTIFIED humans may authenticate; an anonymous account has no
+	// email, so it would be judged as the empty address and DENIED under
+	// every mode except `open` — silently killing anonymous sessions on any
+	// allowlist/invite/closed project. That inverts the deliberate
+	// orthogonality of the two switches (see ProjectAnonymousConfig): a
+	// closed project may still run anonymous sessions. Anonymous traffic is
+	// governed by the project's anonymous switch, re-checked here so that
+	// turning the feature OFF does stop refreshes.
+	if user.IsAnonymous {
+		// The kill switch was already checked above, before the token was
+		// consumed. Refresh is an anonymous account's only recurring sign of
+		// life; stamping it here is what keeps an active one out of the sweep.
+		s.touchAnonymousActivity(ctx, user)
+	} else if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
 		return nil, "", "", err
 	}
 

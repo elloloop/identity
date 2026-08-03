@@ -30,6 +30,16 @@ func (s *AuthService) LinkIdentity(
 	if strings.TrimSpace(userID) == "" {
 		return nil, fmt.Errorf("%w: missing user ID", ErrUnauthenticated)
 	}
+	// An anonymous caller must not gain a permanent credential here. The
+	// retention sweep keys on is_anonymous, so a link that leaves the flag
+	// set produces an account with a working provider login that the sweep
+	// hard-deletes after the retention window — silently, cascading its
+	// sessions. UpgradeAnonymousAccount is the one door that attaches a
+	// credential AND clears the flag AND applies the project access mode;
+	// everything else refuses, so there is exactly one path to guard.
+	if err := s.refuseAnonymousCredentialAttach(ctx, userID); err != nil {
+		return nil, err
+	}
 	provider = strings.ToLower(strings.TrimSpace(provider))
 
 	identity, err := s.verifyOAuthExchange(ctx, OAuthLoginParams{

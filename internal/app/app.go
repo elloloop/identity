@@ -272,6 +272,15 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0),
 		},
 		{
+			// IDV session begin: authenticated, but every admitted call opens
+			// a PAID provider session (e.g. an Azure Face liveness session)
+			// plus a verification row, so cost scales with request volume the
+			// same way SMS does on the phone path — a tight per-IP quota
+			// bounds what one source can spend.
+			PathPrefix: "/identity.v1.IdentityService/BeginIdentityVerification", Tag: "idv_begin",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitIDVPerIP, 0),
+		},
+		{
 			// Client assurance: unauthenticated by design (the caller is
 			// proving what the client IS before anyone signs in). The
 			// challenge write and, on the exchange paths, an outbound
@@ -287,6 +296,24 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		{
 			PathPrefix: "/identity.v1.IdentityService/RefreshAssuranceToken", Tag: "assurance_refresh",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitAssurancePerIP, 0),
+		},
+		{
+			// Anonymous sign-in creates a real user row per call, from an
+			// unauthenticated caller: without a quota it is an unbounded
+			// row-insert primitive. Shares the signup budget because that is
+			// what it is — account creation.
+			PathPrefix: "/identity.v1.IdentityService/SignInAnonymously", Tag: "anonymous_signin",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
+			// The upgrade probes whether an address is already registered
+			// and says so plainly (unlike PasswordSignup's decoy), so
+			// without a quota it is an email-enumeration oracle that walks
+			// straight around the anti-enumeration work signup invests in.
+			// A failed probe does not consume the anonymous account, so one
+			// account can drive the whole walk.
+			PathPrefix: "/identity.v1.IdentityService/UpgradeAnonymousAccount", Tag: "anonymous_upgrade",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
@@ -518,6 +545,7 @@ func New(deps Deps) (*Built, error) {
 		deps.Config.SweeperGraceSeconds,
 		deps.Config.AuditRetentionDays,
 		deps.Config.AssuranceDeviceRetentionDays,
+		deps.Config.AnonymousRetentionDays,
 		logger,
 	)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
@@ -677,13 +705,34 @@ func New(deps Deps) (*Built, error) {
 	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
 	// default project denies all auth, so a fresh deployment that forgot to open
 	// it isn't silently locked out with no signal.
+	// Surface the retention adjustment Load makes when the operator never
+	// chose a window: silent is wrong (the effective value differs from the
+	// documented default), but failing the boot is worse — see Load.
+	if from := deps.Config.AnonymousRetentionRaisedFrom; from > 0 {
+		logger.Info("anonymous_retention_raised",
+			zap.Int("from_days", from),
+			zap.Int("to_days", deps.Config.AnonymousRetentionDays),
+			zap.String("reason", "the default window did not outlive GATEWAY_REFRESH_EXPIRY_SECONDS; "+
+				"anonymous users would have been reaped while their only credential was still valid"),
+			zap.String("hint", "set GATEWAY_ANONYMOUS_RETENTION_DAYS explicitly to choose the window"))
+	}
 	if defaultAccess.Mode == service.AccessModeClosed || defaultAccess.Mode == "" {
 		logger.Warn("default_project_access_closed",
 			zap.String("hint", "default project denies all authentication; set GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open (or allowlist/invite) to admit users"))
 	}
 	chain = middleware.NewProjectResolver(
-		deps.Config.DefaultProjectID, deps.Config.DefaultTenantID,
-		deps.Config.DefaultPrimaryAuthDomain(), defaultAccess,
+		middleware.DefaultProject{
+			ProjectID:         deps.Config.DefaultProjectID,
+			StorageScopeID:    deps.Config.DefaultTenantID,
+			PrimaryAuthDomain: deps.Config.DefaultPrimaryAuthDomain(),
+			Access:            defaultAccess,
+			// The default project has no config_json, so its anonymous
+			// policy comes from GATEWAY_ANONYMOUS_* — in the same shape a
+			// control-plane project parses out of its own config, so the
+			// resolver stamps one type either way. Deliberately NOT derived
+			// from the access mode: the two gate different things.
+			Anonymous: service.ProjectAnonymousConfig{Enabled: deps.Config.AnonymousEnabled},
+		},
 		service.NewCachingProjectResolver(
 			deps.ProjectResolver,
 			deps.Config.ProjectResolutionCacheTTL(),

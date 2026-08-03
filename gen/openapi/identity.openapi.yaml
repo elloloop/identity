@@ -3272,6 +3272,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.SetUserQuotaResponse'
+  /identity.v1.IdentityService/SignInAnonymously:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: SignInAnonymously
+      description: |-
+        SignInAnonymously creates a credential-less account and returns it with
+         a token pair. Every call mints a NEW user; the refresh token is the
+         account's only means of return. Per-project switch, default off, and
+         independent of the access mode.
+      operationId: identity.v1.IdentityService.SignInAnonymously
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.SignInAnonymouslyRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.SignInAnonymouslyResponse'
   /identity.v1.IdentityService/SignOutEverywhere:
     post:
       tags:
@@ -3448,6 +3488,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.UpdateUserResponse'
+  /identity.v1.IdentityService/UpgradeAnonymousAccount:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: UpgradeAnonymousAccount
+      description: |-
+        UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+         anonymous account in place, preserving its id. Requires an
+         authenticated anonymous caller; exactly one credential must be set.
+         Gated by the project access mode with signup semantics, so it returns
+         PERMISSION_DENIED on a closed/invite/off-list project.
+      operationId: identity.v1.IdentityService.UpgradeAnonymousAccount
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.UpgradeAnonymousAccountRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.UpgradeAnonymousAccountResponse'
   /identity.v1.IdentityService/UpsertLoginPolicy:
     post:
       tags:
@@ -5977,6 +6058,34 @@ components:
       description: |-
         NativeOAuthLoginResponse mirrors OAuthLoginResponse: the backend-issued
          token pair plus the resolved user.
+    identity.v1.OAuthCredential:
+      type: object
+      properties:
+        provider:
+          type: string
+          title: provider
+          description: '"google" | "microsoft" | "apple" | "github" | "oidc"'
+        code:
+          type: string
+          title: code
+        redirectUri:
+          type: string
+          title: redirect_uri
+        codeVerifier:
+          type: string
+          title: code_verifier
+        state:
+          type: string
+          title: state
+        stateToken:
+          type: string
+          title: state_token
+      title: OAuthCredential
+      additionalProperties: false
+      description: |-
+        OAuthCredential upgrades the account to a federated login. The server
+         performs the provider code exchange itself — the client never asserts
+         the identity — exactly as OAuthLogin and LinkIdentity do.
     identity.v1.OAuthLoginRequest:
       type: object
       properties:
@@ -6050,6 +6159,24 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: PasskeyCredentialInfo
       additionalProperties: false
+    identity.v1.PasswordCredential:
+      type: object
+      properties:
+        email:
+          type: string
+          title: email
+        password:
+          type: string
+          title: password
+        name:
+          type: string
+          title: name
+          description: optional display name
+      title: PasswordCredential
+      additionalProperties: false
+      description: |-
+        PasswordCredential upgrades the account to an email + password login.
+         The email must be unclaimed within the project.
     identity.v1.PasswordLoginRequest:
       type: object
       properties:
@@ -6838,6 +6965,50 @@ components:
       type: object
       title: SetUserQuotaResponse
       additionalProperties: false
+    identity.v1.SignInAnonymouslyRequest:
+      type: object
+      title: SignInAnonymouslyRequest
+      additionalProperties: false
+      description: |-
+        SignInAnonymously creates a brand-new account with NO credential and
+         returns it with a token pair. Every call mints a NEW user: there is
+         nothing to authenticate against, so a returning client is recognised
+         only by the refresh token it persisted. Lose that token and the account
+         is unreachable forever.
+
+         Availability is a per-project switch (`anonymous.enabled` in the project
+         config, GATEWAY_ANONYMOUS_ENABLED for the default project), default OFF.
+         SIGN-IN is INDEPENDENT of the project access mode: a project running
+         mode=closed — admitting no new identified users — may still hand out
+         anonymous sessions, because the access mode governs which
+         email-identified humans may sign up and log in, a different question.
+         Gate anonymous traffic with the assurance layer
+         (GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE) rather than the access mode.
+         UpgradeAnonymousAccount is NOT independent of it — see that RPC.
+
+         Anonymous users are reaped after GATEWAY_ANONYMOUS_RETENTION_DAYS of
+         inactivity (default 30, measured from the last token refresh).
+    identity.v1.SignInAnonymouslyResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          description: is_anonymous is true; email is empty
+          $ref: '#/components/schemas/identity.v1.User'
+        accessToken:
+          type: string
+          title: access_token
+        refreshToken:
+          type: string
+          title: refresh_token
+          description: the account's ONLY means of return — persist it
+        expiresIn:
+          type: integer
+          title: expires_in
+          format: int32
+          description: access token lifetime in seconds
+      title: SignInAnonymouslyResponse
+      additionalProperties: false
     identity.v1.SignOutEverywhereRequest:
       type: object
       properties:
@@ -7022,6 +7193,73 @@ components:
           title: user
           $ref: '#/components/schemas/identity.v1.User'
       title: UpdateUserResponse
+      additionalProperties: false
+    identity.v1.UpgradeAnonymousAccountRequest:
+      type: object
+      oneOf:
+        - type: object
+          properties:
+            oauth:
+              title: oauth
+              $ref: '#/components/schemas/identity.v1.OAuthCredential'
+          title: oauth
+          required:
+            - oauth
+        - type: object
+          properties:
+            password:
+              title: password
+              $ref: '#/components/schemas/identity.v1.PasswordCredential'
+          title: password
+          required:
+            - password
+      title: UpgradeAnonymousAccountRequest
+      additionalProperties: false
+      description: |-
+        UpgradeAnonymousAccount attaches a permanent credential to the CALLING
+         anonymous account, in place, PRESERVING ITS ID — the server half of
+         Firebase's linkWithCredential. Everything written against the anonymous
+         id stays attached to the same subject, so no data migration is needed.
+
+         Requires an authenticated anonymous caller (the access token identifies
+         the account; there is no user_id field, so one account can never upgrade
+         another). Exactly one credential must be set.
+
+         Enforced with SIGNUP semantics against the project access mode, because
+         attaching a credential provisions an email-identified account in the
+         project's namespace. Under mode=closed (the DEFAULT), invite, or an
+         off-list allowlist this returns PERMISSION_DENIED and the account stays
+         anonymous — so a project must be open for the upgrade half to work.
+
+         When GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL is on (the default), the password
+         arm promotes the account and returns NO tokens, mirroring PasswordSignup;
+         the client drives "check your email".
+
+         Errors: PERMISSION_DENIED when the access mode forbids provisioning;
+         FAILED_PRECONDITION when the caller is not anonymous (a second upgrade
+         would silently rebind an identified account); ALREADY_EXISTS when the
+         credential already belongs to someone else — matching
+         linkWithCredential's credential-already-in-use, and deliberately NOT
+         merging the two accounts; UNAVAILABLE when local auth is disabled.
+    identity.v1.UpgradeAnonymousAccountResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          description: same id as before; is_anonymous now false
+          $ref: '#/components/schemas/identity.v1.User'
+        accessToken:
+          type: string
+          title: access_token
+          description: reissued so the anonymous claim is dropped
+        refreshToken:
+          type: string
+          title: refresh_token
+        expiresIn:
+          type: integer
+          title: expires_in
+          format: int32
+      title: UpgradeAnonymousAccountResponse
       additionalProperties: false
     identity.v1.UpsertLoginPolicyRequest:
       type: object
@@ -7213,6 +7451,14 @@ components:
           type: string
           title: external_id
           description: IdP-owned stable identifier (SCIM externalId); unique per project when set
+        isAnonymous:
+          type: boolean
+          title: is_anonymous
+          description: |-
+            is_anonymous marks an account created by SignInAnonymously: a real
+             user with a stable id but NO credential of any kind. It has no email,
+             and is reachable only through its refresh token. Clears permanently on
+             UpgradeAnonymousAccount, which preserves the id.
       title: User
       additionalProperties: false
     identity.v1.UserStatus:

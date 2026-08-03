@@ -73,6 +73,13 @@ type ProjectConfig struct {
 	// field). Orthogonal to Access: assurance authenticates the CLIENT, the
 	// access mode governs which USERS may authenticate.
 	Assurance ProjectAssuranceConfig `json:"assurance"`
+
+	// Anonymous holds the project's anonymous-sign-in policy: whether the
+	// project hands out credential-less sessions at all. Default OFF. Its
+	// only key is `enabled` — retention is deployment-wide. Sign-in is
+	// orthogonal to Access; the UPGRADE is not (signup semantics). See
+	// ProjectAnonymousConfig.
+	Anonymous ProjectAnonymousConfig `json:"anonymous"`
 }
 
 // ProjectOAuthConfig is a project's per-provider hosted-flow OAuth
@@ -276,6 +283,9 @@ func (c ProjectConfig) Validate() error {
 		return err
 	}
 	if err := c.Assurance.validate(); err != nil {
+		return err
+	}
+	if err := c.Anonymous.validate(); err != nil {
 		return err
 	}
 	return nil

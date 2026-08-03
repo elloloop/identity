@@ -205,6 +205,12 @@ func (r *Repo) CountPasskeyChallenges() int {
 // ── Users ─────────────────────────────────────────────────────────
 
 func (r *Repo) FindUserByEmail(_ context.Context, email string) (*service.User, error) {
+	// An empty address matches nobody, mirroring the SQL drivers' early
+	// return. Without this an anonymous user (Email == "") would be
+	// resolvable by a lookup for the empty string.
+	if email == "" {
+		return nil, nil
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, u := range r.users {
@@ -247,6 +253,12 @@ func (r *Repo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*s
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		// Anonymous accounts have no email, so consumers that present users
+		// by address would render them blank. Mirrors the SQL drivers'
+		// NOT is_anonymous predicate.
+		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
 		cp := *u
@@ -323,6 +335,9 @@ func (r *Repo) CountUsers(_ context.Context, filter service.UserListFilter) (int
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
 			continue
 		}
+		if !filter.IncludeAnonymous && u.IsAnonymous {
+			continue
+		}
 		n++
 	}
 	return n, nil
@@ -334,8 +349,10 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 	for _, existing := range r.users {
 		// Case-insensitive, mirroring the SQL drivers' lower(email) unique
 		// index: every backend signals a duplicate identically (the SCIM
-		// server maps this sentinel to HTTP 409 Conflict).
-		if strings.EqualFold(existing.Email, u.Email) {
+		// server maps this sentinel to HTTP 409 Conflict). The index is
+		// PARTIAL (WHERE email <> ''), so users without an address — every
+		// anonymous user — do not collide with each other.
+		if u.Email != "" && strings.EqualFold(existing.Email, u.Email) {
 			return "", fmt.Errorf("user %q: %w", u.Email, service.ErrAlreadyExists)
 		}
 		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
@@ -403,6 +420,14 @@ func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.deleteUserLocked(userID)
+	return nil
+}
+
+// deleteUserLocked drains a user and every user-owned row. The caller must
+// hold r.mu — it exists so a sweep can select and delete under ONE lock
+// rather than snapshotting ids and deleting after releasing it.
+func (r *Repo) deleteUserLocked(userID string) {
 	deleteByUser(r.refreshTokens, userID, func(t *service.RefreshTokenRecord) string { return t.UserID })
 	deleteByUser(r.sessions, userID, func(s *service.SessionRecord) string { return s.UserID })
 	deleteByUser(r.passkeyCreds, userID, func(c *service.PasskeyCredRecord) string { return c.UserID })
@@ -420,7 +445,6 @@ func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 	deleteByUser(r.idvRecords, userID, func(rec *service.IdentityVerificationRecord) string { return rec.UserID })
 	deleteByUser(r.phoneVerifyCodes, userID, func(c *service.PhoneVerificationCodeRecord) string { return c.UserID })
 	delete(r.users, userID)
-	return nil
 }
 
 // deleteByUser removes every entry of m whose record's user id (read via
@@ -527,6 +551,14 @@ func applyUserFields(u *service.User, fields map[string]any) {
 			}
 		case "external_id":
 			u.ExternalID, _ = v.(string)
+		case "is_anonymous":
+			if b, ok := v.(bool); ok {
+				u.IsAnonymous = b
+			}
+		case "anonymous_last_seen_ms":
+			if x, ok := fieldInt64(v); ok {
+				u.AnonymousLastSeenMs = x
+			}
 		case "phone_number":
 			u.PhoneNumber, _ = v.(string)
 		case "phone_verified":

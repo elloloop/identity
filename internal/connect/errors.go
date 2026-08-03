@@ -30,6 +30,23 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAssuranceFailed):
 		return connect.NewError(connect.CodePermissionDenied, err)
 
+	// Unimplemented: the capability is absent from this deployment, not
+	// refused for this caller. Mapped here rather than in the handlers so
+	// one sentinel yields one code on every path — without a case it falls
+	// through to CodeInternal, and a deliberate config change would return
+	// 500s that SDKs retry and operators alert on.
+	case errors.Is(err, service.ErrAnonymousDisabled):
+		return connect.NewError(connect.CodeUnimplemented, err)
+
+	// PermissionDenied, not Unimplemented: this arrives on RefreshToken,
+	// which IS implemented. The caller is refused, the RPC is not absent.
+	case errors.Is(err, service.ErrAnonymousRefreshDisabled):
+		return connect.NewError(connect.CodePermissionDenied, err)
+
+	case errors.Is(err, service.ErrNotAnonymous),
+		errors.Is(err, service.ErrAnonymousMustUpgrade):
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+
 	case errors.Is(err, service.ErrAssuranceUnavailable):
 		// The evidence could not be judged (upstream provider unreachable) —
 		// retryable, and deliberately generic: the underlying error can carry

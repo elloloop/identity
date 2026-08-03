@@ -141,9 +141,12 @@ type fakeRepo struct {
 	consumeChallengeErr    error
 	createChallengeErr     error
 	findUserByEmailErr     error
-	createPasskeyCredErr   error
-	getUserErr             error
-	getTotpCredentialErr   error
+	// updateUserErr, when set, fails every UpdateUser. Drives the
+	// partial-write path of the two-write anonymous OAuth upgrade.
+	updateUserErr        error
+	createPasskeyCredErr error
+	getUserErr           error
+	getTotpCredentialErr error
 
 	users               map[string]*User
 	refreshTokens       map[string]*RefreshTokenRecord
@@ -203,6 +206,12 @@ func (r *fakeRepo) FindUserByEmail(_ context.Context, email string) (*User, erro
 	if r.findUserByEmailErr != nil {
 		return nil, r.findUserByEmailErr
 	}
+	// The empty address matches nobody, mirroring every real driver's early
+	// return. Without it an anonymous user (Email == "") is resolvable by a
+	// lookup for "".
+	if email == "" {
+		return nil, nil
+	}
 	for _, u := range r.users {
 		if u.Email == email {
 			cp := *u
@@ -235,6 +244,12 @@ func (r *fakeRepo) ListUsers(_ context.Context, filter UserListFilter) ([]*User,
 			continue
 		}
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
+			continue
+		}
+		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
+		// accounts have no email, so a surface presenting users by address
+		// must not receive them unless it opts in.
+		if !filter.IncludeAnonymous && u.IsAnonymous {
 			continue
 		}
 		cp := *u
@@ -283,6 +298,12 @@ func (r *fakeRepo) CountUsers(_ context.Context, filter UserListFilter) (int, er
 		if filter.ExternalID != "" && u.ExternalID != filter.ExternalID {
 			continue
 		}
+		// Mirrors the drivers' NOT is_anonymous predicate: credential-less
+		// accounts have no email, so a surface presenting users by address
+		// must not receive them unless it opts in.
+		if !filter.IncludeAnonymous && u.IsAnonymous {
+			continue
+		}
 		n++
 	}
 	return n, nil
@@ -295,8 +316,10 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.users {
-		if existing.Email == u.Email {
-			return "", fmt.Errorf("user with email %s already exists", u.Email)
+		// Mirrors the drivers' PARTIAL unique index (WHERE email <> ''):
+		// users without an address — every anonymous user — never collide.
+		if u.Email != "" && existing.Email == u.Email {
+			return "", fmt.Errorf("%w: user with email %s already exists", ErrAlreadyExists, u.Email)
 		}
 	}
 	id := u.ID
@@ -312,6 +335,9 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *User) (string, error) {
 func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[string]any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.updateUserErr != nil {
+		return r.updateUserErr
+	}
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
@@ -373,6 +399,14 @@ func applyUserFields(u *User, fields map[string]any) {
 			u.Email = v.(string)
 		case "avatar_url":
 			u.AvatarURL = v.(string)
+		case "is_anonymous":
+			if b, ok := v.(bool); ok {
+				u.IsAnonymous = b
+			}
+		case "anonymous_last_seen_ms":
+			if x, ok := v.(int64); ok {
+				u.AnonymousLastSeenMs = x
+			}
 		case "password_hash":
 			u.PasswordHash = v.(string)
 		case "status":
@@ -1992,6 +2026,25 @@ func (r *fakeRepo) DeleteStaleAttestedDevices(_ context.Context, beforeMs int64,
 		}
 		if d.LastUsedAt < beforeMs {
 			delete(r.attestedDevices, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteStaleAnonymousUsers(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("fakerepo: DeleteStaleAnonymousUsers: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, u := range r.users {
+		if n >= limit {
+			break
+		}
+		if u.IsAnonymous && u.AnonymousLastSeenMs < beforeMs {
+			delete(r.users, id)
 			n++
 		}
 	}

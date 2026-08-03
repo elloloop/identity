@@ -82,6 +82,17 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID, phon
 	if userID == "" {
 		return fmt.Errorf("%w: missing user id", ErrUnauthenticated)
 	}
+	// Refuse BEFORE the send, not just at redemption. This is the call that
+	// costs money, and phone is not a shipped upgrade credential, so every
+	// message an anonymous caller triggers is guaranteed waste. It also
+	// restores the abuse control: phoneThrottle is keyed on user id, and a
+	// fresh user id costs one unauthenticated SignInAnonymously — so
+	// guarding only VerifyPhoneCode leaves the per-user cooldown collapsed
+	// and nothing but the per-IP limit between an attacker and a victim's
+	// number.
+	if err := s.refuseAnonymousCredentialAttach(ctx, userID); err != nil {
+		return err
+	}
 	phone, ok := normalizePhone(phoneNumber)
 	if !ok {
 		return fmt.Errorf("%w: phone number must be E.164 (e.g. +14155550123)", ErrInvalidArgument)
@@ -159,6 +170,11 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID, phoneNumber, 
 	}
 	if userID == "" {
 		return nil, fmt.Errorf("%w: missing user id", ErrUnauthenticated)
+	}
+	// A verified phone is a permanent credential (it backs SMS login); an
+	// anonymous caller must go through UpgradeAnonymousAccount instead.
+	if err := s.refuseAnonymousCredentialAttach(ctx, userID); err != nil {
+		return nil, err
 	}
 	phone, ok := normalizePhone(phoneNumber)
 	if !ok || strings.TrimSpace(code) == "" {

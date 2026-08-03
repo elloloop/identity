@@ -35,38 +35,45 @@ const ProjectKeyHeader = "X-Project-Key"
 // scope rather than being rejected, so non-project deployments are
 // untouched.
 type ProjectResolver struct {
-	defaultProjectID      string
-	defaultScopeID        string
-	defaultPrimaryAuthDom string
-	defaultAccess         service.ProjectAccessConfig
-	resolver              service.ProjectResolver
-	logger                *zap.Logger
+	def      DefaultProject
+	resolver service.ProjectResolver
+	logger   *zap.Logger
 }
 
-// NewProjectResolver builds the middleware. defaultProjectID /
-// defaultScopeID are the default project's id and storage scope (the
-// configured GATEWAY_DEFAULT_PROJECT_ID / GATEWAY_DEFAULT_TENANT_ID);
-// defaultPrimaryAuthDomain is the default project's primary serving
-// hostname (the first GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS entry), carried
-// on the default-pin scope so branded links work zero-config without a
-// per-request lookup. resolver may be nil (drivers without a control
-// plane). When there is nothing to do — no resolver and no default project
-// — the returned middleware is a no-op pass-through.
-func NewProjectResolver(defaultProjectID, defaultScopeID, defaultPrimaryAuthDomain string, defaultAccess service.ProjectAccessConfig, resolver service.ProjectResolver, logger *zap.Logger) func(http.Handler) http.Handler {
+// DefaultProject describes the env-configured default project — the one
+// every request pins to when no control-plane project resolves. Its fields
+// are stamped onto the pin scope, because that project has no config_json
+// to parse them out of. Grouped into a struct rather than passed
+// positionally: they are all answers to the same question, and each new
+// per-project policy would otherwise add another bare parameter.
+type DefaultProject struct {
+	// ProjectID and StorageScopeID are GATEWAY_DEFAULT_PROJECT_ID and
+	// GATEWAY_DEFAULT_TENANT_ID. An empty ProjectID means no default
+	// project is configured at all.
+	ProjectID      string
+	StorageScopeID string
+	// PrimaryAuthDomain is the first GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS
+	// entry, carried so branded links work zero-config without a
+	// per-request lookup.
+	PrimaryAuthDomain string
+	// Access is GATEWAY_DEFAULT_PROJECT_ACCESS_MODE (+ allowlist).
+	Access service.ProjectAccessConfig
+	// Anonymous is the GATEWAY_ANONYMOUS_* policy.
+	Anonymous service.ProjectAnonymousConfig
+}
+
+// NewProjectResolver builds the middleware. def describes the default
+// project every unresolved request pins to; resolver may be nil (drivers
+// without a control plane). When there is nothing to do — no resolver and
+// no default project — the returned middleware is a no-op pass-through.
+func NewProjectResolver(def DefaultProject, resolver service.ProjectResolver, logger *zap.Logger) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	if resolver == nil && defaultProjectID == "" {
+	if resolver == nil && def.ProjectID == "" {
 		return func(next http.Handler) http.Handler { return next }
 	}
-	pr := &ProjectResolver{
-		defaultProjectID:      defaultProjectID,
-		defaultScopeID:        defaultScopeID,
-		defaultPrimaryAuthDom: defaultPrimaryAuthDomain,
-		defaultAccess:         defaultAccess,
-		resolver:              resolver,
-		logger:                logger,
-	}
+	pr := &ProjectResolver{def: def, resolver: resolver, logger: logger}
 	return pr.middleware
 }
 
@@ -136,19 +143,23 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 
 	// 3. Default-project pin (zero-config). When no default is configured
 	// and nothing resolved, pass through unscoped.
-	if pr.defaultProjectID == "" {
+	if pr.def.ProjectID == "" {
 		return nil, true
 	}
 	return &service.ProjectScope{
-		ProjectID:         pr.defaultProjectID,
-		StorageScopeID:    pr.defaultScopeID,
-		PrimaryAuthDomain: pr.defaultPrimaryAuthDom,
-		// The env-configured default project has no config_json, so its access
-		// mode is carried here (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE, default
-		// "closed"). Stamping it onto the pin means the access guard sees a mode
-		// on every default-project request — deny-by-default until an operator
-		// sets mode=open/allowlist/invite.
-		Access: pr.defaultAccess,
+		ProjectID:         pr.def.ProjectID,
+		StorageScopeID:    pr.def.StorageScopeID,
+		PrimaryAuthDomain: pr.def.PrimaryAuthDomain,
+		// The env-configured default project has no config_json, so its
+		// policy is carried here. Access is
+		// GATEWAY_DEFAULT_PROJECT_ACCESS_MODE (default "closed"): stamping it
+		// onto the pin means the access guard sees a mode on every
+		// default-project request — deny-by-default until an operator sets
+		// mode=open/allowlist/invite. Anonymous is likewise off until
+		// GATEWAY_ANONYMOUS_ENABLED says otherwise, and is deliberately NOT
+		// derived from Access — the two gate different things.
+		Access:    pr.def.Access,
+		Anonymous: pr.def.Anonymous,
 	}, true
 }
 
@@ -209,6 +220,7 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		Access:             rp.Access,
 		Products:           rp.Products,
 		Assurance:          rp.Assurance,
+		Anonymous:          rp.Anonymous,
 	}
 }
 

@@ -45,6 +45,7 @@ func productScope(t *testing.T, configJSON, product string) context.Context {
 		ProjectID: "tinykite",
 		Access:    cfg.Access,
 		Products:  cfg.Products,
+		Anonymous: cfg.Anonymous,
 	})
 	return WithProduct(ctx, product)
 }
@@ -579,4 +580,28 @@ func scopeFromJSON(t *testing.T, configJSON string) *ProjectScope {
 	cfg, err := ParseProjectConfig(configJSON)
 	require.NoError(t, err)
 	return &ProjectScope{ProjectID: "tinykite", Access: cfg.Access, Products: cfg.Products}
+}
+
+// An anonymous account structurally never resolves an age band, so the
+// unknown-band pass-through — an identified-account concession justified by
+// "children carry a DOB by construction" — must not extend to it. Otherwise
+// one unauthenticated SignInAnonymously satisfies every minimum_age_band,
+// including adult.
+func TestEnforceProductAgeGate_AnonymousFailsClosed(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newProductAgeSvc(t)
+	anon := &User{ID: "anon-1", IsAnonymous: true}
+
+	// A product with a configured minimum denies an anonymous session.
+	err := svc.enforceProductAgeGate(productScope(t, adultMinimumJSON, restrictedProduct), anon)
+	require.ErrorIs(t, err, ErrProductAgeRestricted)
+
+	// A product with NO minimum stays open to anonymous sessions — the
+	// anti-scraping use case this feature exists for.
+	require.NoError(t, svc.enforceProductAgeGate(productScope(t, adultMinimumJSON, "unrestricted-product"), anon))
+
+	// An identified account with the same unknown band still passes: the
+	// concession is for accounts that COULD have a DOB on file.
+	identified := &User{ID: "u-1", Email: "adult@example.com"}
+	require.NoError(t, svc.enforceProductAgeGate(productScope(t, adultMinimumJSON, restrictedProduct), identified))
 }

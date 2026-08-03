@@ -1,5 +1,136 @@
 # Upgrade guide
 
+## v4.0 → v4.1 — anonymous identity (additive)
+
+v4.1 adds anonymous sign-in: credential-less accounts with a stable id that
+can later gain a credential without changing it (see
+[ADR-0013](./adr/0013-anonymous-identity.md) and the
+[docs-site page](../docs-site/src/pages/docs/auth/anonymous.astro)).
+
+**Nothing changes unless you turn it on.** The feature defaults off, the
+new RPCs return `UNIMPLEMENTED` until a project enables it, the wire
+additions are additive (`User.is_anonymous` field 26; two new RPCs), and
+the `anonymous` JWT claim is emitted only for anonymous accounts, so
+tokens for identified users are byte-identical to v4.0.
+
+**Migrations** (postgres 0028, sqlite 0013), applied with
+`identity migrate`, add `users.is_anonymous` and **rebuild the per-project
+email unique index as a partial index** over non-empty addresses — every
+anonymous account carries an empty email, so a total index would make the
+second one a duplicate-key error. Uniqueness still binds, case-insensitively,
+for every user that has an address.
+
+> On a large `users` table the index builds take a SHARE lock (blocks
+> writes, allows reads) for their duration, and **two** of the three new
+> indexes build over every existing row: the partial email unique index and
+> `users_project_created_id_nonanon_idx` (its `WHERE NOT is_anonymous`
+> predicate is true for all pre-existing rows). Their predicate columns do
+> not exist pre-migration, so neither can be pre-built directly — instead,
+> pre-add the columns (metadata-only on PostgreSQL 11+, matching the
+> migration's own DDL so its `IF NOT EXISTS` clauses no-op), then pre-build
+> both heavy indexes concurrently, outside a transaction:
+>
+> ```sql
+> ALTER TABLE users ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT FALSE;
+> ALTER TABLE users ADD COLUMN IF NOT EXISTS anonymous_last_seen_ms BIGINT NOT NULL DEFAULT 0;
+> CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS users_project_email_partial_uidx
+>     ON users (project_id, lower(email)) WHERE email <> '';
+> CREATE INDEX CONCURRENTLY IF NOT EXISTS users_project_created_id_nonanon_idx
+>     ON users (project_id, created_at_ms, id) WHERE NOT is_anonymous;
+> ```
+>
+> The third index — the sweep's `users_project_anonymous_last_seen_idx` —
+> needs no pre-build: its `WHERE is_anonymous` predicate is false for every
+> pre-existing row, so it builds empty in constant time.
+
+**To enable it**, per deployment (default project) or per project in
+`config_json`:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `GATEWAY_ANONYMOUS_ENABLED` | `false` | turns on `SignInAnonymously`. **Turning it back off is destructive — see the warning below.** |
+| `GATEWAY_ANONYMOUS_REQUIRE_ASSURANCE` | `false` | gates it on the assurance layer; **boot fails** if set while `GATEWAY_ASSURANCE_ENABLED=false` |
+| `GATEWAY_ANONYMOUS_RETENTION_DAYS` | `30`, raised automatically to exceed `GATEWAY_REFRESH_EXPIRY_SECONDS` when left unset (logged once at boot as `anonymous_retention_raised`) | days of inactivity before reaping; an **explicitly set** window that does not exceed the refresh lifetime **fails boot**; `0` disables the sweep. Deployment-wide, and the sweep reaches the **boot-default project only** — see below |
+
+Two things to know before enabling:
+
+1. **Sign-in is independent of `access.mode`; upgrading is not.** A project
+   running `mode: closed` still hands out anonymous sessions — but
+   `UpgradeAnonymousAccount` is enforced with signup semantics and returns
+   `PERMISSION_DENIED` under `closed` (the default),
+   `invite`, or an off-list `allowlist`. Setting only the
+   `GATEWAY_ANONYMOUS_*` variables therefore gives you working sign-in and an
+   upgrade path that always fails; open the project for the upgrade half to
+   work. Control anonymous traffic with assurance and rate limits, not the
+   access mode.
+2. **The password upgrade returns no session by default.** With
+   `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` on (the default),
+   `UpgradeAnonymousAccount`'s password arm promotes the account, sends a
+   verification email, revokes the anonymous session, and returns **empty**
+   `accessToken`/`refreshToken` — `OK`, not an error. Clients must branch on
+   an empty token rather than discarding their pair expecting replacements.
+   The OAuth arm returns a new pair, because the provider verified the
+   address.
+3. **Age-gated (COPPA) deployments: the password upgrade is refused.** With
+   `GATEWAY_AGEGATE_ENABLED=true` and `GATEWAY_AGEGATE_REQUIRE_DOB=true`,
+   `UpgradeAnonymousAccount`'s password arm returns `INVALID_ARGUMENT` —
+   the request cannot carry a date of birth, and admitting it would mint an
+   account that skips the parental-consent flow `PasswordSignup` enforces.
+   Anonymous sessions also **fail closed at product age gates**: a product
+   with a `minimum_age_band` refuses them (their age is unknowable), while
+   products with no minimum stay open to them. On the refresh path that
+   refusal is evaluated **before** the presented refresh token is consumed,
+   so a product that gains a minimum mid-session refuses future rotations
+   without burning the account's only credential — removing the minimum
+   restores the sessions. Collecting a DOB on the
+   upgrade is a planned addition (ADR-0013 "Not shipped").
+4. **Downstream services must check the `anonymous` claim** before granting
+   anything that assumes a verified human. An anonymous `sub` is cheap to
+   mint, and `email` is empty rather than absent-because-unverified, so code
+   that only tests "is there a sub?" will treat a farmed account as a user.
+
+> **⚠️ Disabling anonymous sign-in destroys existing anonymous accounts.**
+>
+> `GATEWAY_ANONYMOUS_ENABLED=false` is not a pause. The moment it flips:
+>
+> 1. `RefreshToken` returns `PERMISSION_DENIED` for every existing anonymous
+>    user. A refresh token is that account's **only** credential, so those
+>    sessions are immediately unrecoverable.
+> 2. Their activity clock stops, because it only advances on a successful
+>    refresh — so every one of them goes idle *by construction*.
+> 3. The retention sweep runs **independently of the enable flag** (it is
+>    gated only on `GATEWAY_ANONYMOUS_RETENTION_DAYS`), so one retention
+>    window later — 30 days at defaults — it hard-deletes them and every
+>    cascaded row.
+>
+> The users who lose data are precisely the active ones. Before turning the
+> feature off, do one of:
+>
+> - set `GATEWAY_ANONYMOUS_RETENTION_DAYS=0` first, which disables the sweep
+>   and leaves the rows in place (they stay unreachable, but recoverable if
+>   you re-enable); or
+> - drive users through `UpgradeAnonymousAccount` while the feature is still
+>   on, so they hold a real credential before the switch flips.
+
+**The retention sweep covers the boot-default project only.** A
+control-plane deployment that enables anonymous sign-in on other projects
+must reap those rows itself; otherwise they accumulate indefinitely from an
+unauthenticated endpoint.
+
+**Rollback** (`0028.down` / `0013.down`) **deletes anonymous users.** They
+cannot be represented in the pre-0028 schema and hold no credential to sign
+back in with, so the deletion is the honest outcome rather than a
+half-applied rollback.
+
+**Identity verification is hardened alongside this feature, whether or not
+anonymous sign-in is enabled.** `BeginIdentityVerification` now refuses
+anonymous callers (`FAILED_PRECONDITION` — every admitted call opens a paid
+provider session against an account the retention sweep can still delete)
+and carries a per-IP quota, `GATEWAY_RATE_LIMIT_IDV_PER_IP` (default `5`
+per rate-limit window). Deployments that legitimately begin more than five
+verifications per IP per window — e.g. behind a shared corporate NAT —
+should raise it.
+
 ## v3.x → v4.0 — CAPTCHA becomes the client-assurance layer (breaking)
 
 v4.0 replaces the inline-CAPTCHA design with the client-assurance layer

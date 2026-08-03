@@ -109,6 +109,15 @@ const (
 	EventUserReactivated   EventType = "user_reactivated"
 	EventUserDeleted       EventType = "user_deleted"
 
+	// EventAnonymousSignIn records the creation of a credential-less
+	// account. EventAnonymousUpgraded records that account gaining a
+	// credential and becoming permanent — the id is unchanged across the
+	// pair, so the two entries together are the account's whole origin
+	// story. Both carry the user id as actor; neither carries an email,
+	// because an anonymous account has none.
+	EventAnonymousSignIn   EventType = "anonymous_signin"
+	EventAnonymousUpgraded EventType = "anonymous_upgraded"
+
 	// EventAccountDeletionRequested records an authenticated user scheduling
 	// self-service deletion of their OWN account (GDPR Art 17). The account
 	// enters PENDING_DELETION and is purged after the grace window elapses.
@@ -181,6 +190,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventUserDeactivated:               {},
 	EventUserReactivated:               {},
 	EventUserDeleted:                   {},
+	EventAnonymousSignIn:               {},
+	EventAnonymousUpgraded:             {},
 	EventAccountDeletionRequested:      {},
 	EventAccountDeletionCancelled:      {},
 	EventAdminResetPassword:            {},

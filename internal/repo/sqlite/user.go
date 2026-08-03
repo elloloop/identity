@@ -26,6 +26,7 @@ const userColumns = `
 	last_login_at_ms,
 	external_id,
 	deletion_scheduled_at_ms,
+	is_anonymous, anonymous_last_seen_ms,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed qualifies every column with the given table alias so
@@ -46,9 +47,9 @@ func scanUser(s scanner) (*service.User, error) {
 		failedLoginCount                                       int64
 		emailVerifiedAtMs, idvVerifiedAtMs, lastLoginAtMs      int64
 		phoneVerifiedAtMs, dateOfBirthMs                       int64
-		deletionScheduledAtMs                                  int64
+		deletionScheduledAtMs, anonymousLastSeenMs             int64
 		emailVerified, idvVerified, totpRequired               int64
-		phoneVerified                                          int64
+		phoneVerified, isAnonymous                             int64
 		id, email, name, role, avatar, status, recovery, phash string
 		phoneNumber                                            string
 		externalID                                             string
@@ -64,6 +65,7 @@ func scanUser(s scanner) (*service.User, error) {
 		&lastLoginAtMs,
 		&externalID,
 		&deletionScheduledAtMs,
+		&isAnonymous, &anonymousLastSeenMs,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -91,6 +93,8 @@ func scanUser(s scanner) (*service.User, error) {
 	u.LastLoginAtMs = lastLoginAtMs
 	u.ExternalID = externalID
 	u.DeletionScheduledAtMs = deletionScheduledAtMs
+	u.IsAnonymous = isAnonymous != 0
+	u.AnonymousLastSeenMs = anonymousLastSeenMs
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -102,7 +106,7 @@ func (r *sqliteRepository) FindUserByEmail(ctx context.Context, email string) (*
 	}
 	const q = `SELECT ` + userColumns + `
 		FROM users
-		WHERE project_id = $1 AND lower(email) = lower($2)
+		WHERE project_id = $1 AND email <> '' AND lower(email) = lower($2)
 		LIMIT 1`
 	u, err := scanUser(r.db.QueryRow(ctx, q, r.projectID, email))
 	if noRows(err) {
@@ -196,11 +200,19 @@ func (r *sqliteRepository) userFilterWhere(filter service.UserListFilter) (where
 	args = []any{r.projectID}
 	if filter.Email != "" {
 		args = append(args, filter.Email)
-		where = append(where, fmt.Sprintf("lower(email) = lower($%d)", len(args)))
+		// email <> '' keeps the partial unique index (0028/0013) usable;
+		// without it the planner cannot prove the index covers this filter.
+		where = append(where, fmt.Sprintf("email <> '' AND lower(email) = lower($%d)", len(args)))
 	}
 	if filter.ExternalID != "" {
 		args = append(args, filter.ExternalID)
 		where = append(where, fmt.Sprintf("external_id = $%d", len(args)))
+	}
+	if !filter.IncludeAnonymous {
+		// Anonymous accounts have no email, so every consumer that presents
+		// users by address would render them blank. Excluded here rather
+		// than by the caller so ListUsers and CountUsers agree.
+		where = append(where, "NOT is_anonymous")
 	}
 	return where, args
 }
@@ -240,6 +252,7 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 			last_login_at_ms,
 			external_id,
 			deletion_scheduled_at_ms,
+			is_anonymous, anonymous_last_seen_ms,
 			created_at_ms, updated_at_ms
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
@@ -252,7 +265,8 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 			$22,
 			$23,
 			$24,
-			$25, $26
+			$25, $26,
+			$27, $28
 		)`
 	_, err := r.db.Exec(
 		ctx, q,
@@ -266,6 +280,7 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, u *service.User) (str
 		u.LastLoginAtMs,
 		u.ExternalID,
 		u.DeletionScheduledAtMs,
+		u.IsAnonymous, u.AnonymousLastSeenMs,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
 	)
 	if err != nil {
@@ -304,6 +319,8 @@ var userFieldColumns = map[string]struct {
 	"date_of_birth_ms":         {"date_of_birth_ms", "int64"},
 	"external_id":              {"external_id", "string"},
 	"deletion_scheduled_at_ms": {"deletion_scheduled_at_ms", "int64"},
+	"is_anonymous":             {"is_anonymous", "bool"},
+	"anonymous_last_seen_ms":   {"anonymous_last_seen_ms", "int64"},
 }
 
 func (r *sqliteRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {

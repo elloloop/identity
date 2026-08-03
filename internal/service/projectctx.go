@@ -81,6 +81,12 @@ type ProjectScope struct {
 	// Zero for a project that configures none, in which case only the
 	// default project can attest (via the env-configured app identity).
 	Assurance ProjectAssuranceConfig
+
+	// Anonymous is the project's anonymous-sign-in policy, parsed from
+	// config_json — or, for the env default project, assembled from
+	// GATEWAY_ANONYMOUS_* and stamped on by the project-resolution
+	// middleware. Zero (disabled) for a project that configures none.
+	Anonymous ProjectAnonymousConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -119,6 +125,7 @@ type ResolvedProject struct {
 	Access             ProjectAccessConfig
 	Products           ProjectProductsConfig
 	Assurance          ProjectAssuranceConfig
+	Anonymous          ProjectAnonymousConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

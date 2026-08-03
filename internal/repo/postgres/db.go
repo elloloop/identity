@@ -46,6 +46,7 @@ const (
 	dbUfLastLoginAt      = "17"
 	dbUfEmailVerified    = "18"
 	dbUfEmailVerifiedAt  = "19"
+	dbUfIsAnonymous      = "20"
 )
 
 const (
@@ -685,7 +686,10 @@ func (r *pgRepository) getUserNode(ctx context.Context, userID string) (*graph.N
 }
 
 func (r *pgRepository) queryUserNodes(ctx context.Context, filter map[string]any) ([]*graph.Node, error) {
-	query, args := buildSelectQuery(`SELECT `+userColumns+` FROM users WHERE project_id = $1`, r.projectID, filter, userQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
+	// NOT is_anonymous, matching Repository.ListUsers' filter: this is the
+	// admin/graph listing path, and a credential-less account has no email
+	// to present. Both user-listing surfaces answer to one rule.
+	query, args := buildSelectQuery(`SELECT `+userColumns+` FROM users WHERE project_id = $1 AND NOT is_anonymous`, r.projectID, filter, userQueryFields, ` ORDER BY created_at_ms ASC, id ASC`)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, wrapPgErr("QueryNodes(users)", err)
@@ -951,6 +955,7 @@ func userNodeFromRecord(u *service.User) *graph.Node {
 			dbUfUpdatedAt:        u.UpdatedAt.UnixMilli(),
 			dbUfPasswordHash:     u.PasswordHash,
 			dbUfTOTPRequired:     u.TotpRequired,
+			dbUfIsAnonymous:      u.IsAnonymous,
 			dbUfFailedLoginCount: int64(u.FailedLoginCount),
 			dbUfLockedUntil:      u.LockedUntil,
 			dbUfStatus:           u.Status,
@@ -1098,7 +1103,16 @@ func buildSelectQuery(base string, projectID string, filter map[string]any, spec
 				continue
 			}
 			if spec.caseInsensitive {
-				fmt.Fprintf(&sb, " AND lower(%s) = lower($%d)", spec.col, idx)
+				// `col <> ''` keeps a PARTIAL index on that column usable.
+				// users_project_email_partial_uidx (0028) is predicated on
+				// `email <> ''`, and Postgres only uses a partial index when
+				// the query provably implies its predicate — a
+				// `lower(col) = lower($n)` clause against a parameter does
+				// not. Without this the admin invite/create duplicate-address
+				// check falls back to a full project scan. Semantically a
+				// no-op: an empty needle never equals a non-empty value, and
+				// callers filtering on "" want no rows either way.
+				fmt.Fprintf(&sb, " AND %s <> '' AND lower(%s) = lower($%d)", spec.col, spec.col, idx)
 			} else {
 				fmt.Fprintf(&sb, " AND %s = $%d", spec.col, idx)
 			}

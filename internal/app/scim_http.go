@@ -244,24 +244,40 @@ func (s *repoSCIMStore) CreateUser(ctx context.Context, u scim.User) (scim.User,
 	return toSCIMUser(su), nil
 }
 
-func (s *repoSCIMStore) GetUser(ctx context.Context, id string) (scim.User, error) {
+// loadSCIMAddressable resolves the user behind a SCIM id, or ErrNotFound.
+//
+// Anonymous accounts are deliberately absent from this surface. They hold no
+// email, and RFC 7643 §4.1.1 makes userName REQUIRED and unique — so
+// exporting one yields a resource with an empty userName, and the list
+// filter excludes them for that reason. Every by-id method resolves through
+// here so the store answers consistently: a write that "repaired" a blank
+// userName would give the account a real address while is_anonymous stayed
+// true, making it email-loginable AND still matched by the retention sweep,
+// which hard-deletes it with its sessions. UpgradeAnonymousAccount is the
+// one path that attaches an identity and clears the flag together.
+func (s *repoSCIMStore) loadSCIMAddressable(ctx context.Context, id string) (*service.User, error) {
 	u, err := s.repo.GetUser(ctx, id)
 	if err != nil {
-		return scim.User{}, mapStoreErr(err)
+		return nil, mapStoreErr(err)
 	}
-	if u == nil {
-		return scim.User{}, scim.ErrNotFound
+	if u == nil || u.IsAnonymous {
+		return nil, scim.ErrNotFound
+	}
+	return u, nil
+}
+
+func (s *repoSCIMStore) GetUser(ctx context.Context, id string) (scim.User, error) {
+	u, err := s.loadSCIMAddressable(ctx, id)
+	if err != nil {
+		return scim.User{}, err
 	}
 	return toSCIMUser(u), nil
 }
 
 func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User) (scim.User, error) {
-	existing, err := s.repo.GetUser(ctx, id)
+	existing, err := s.loadSCIMAddressable(ctx, id)
 	if err != nil {
-		return scim.User{}, mapStoreErr(err)
-	}
-	if existing == nil {
-		return scim.User{}, scim.ErrNotFound
+		return scim.User{}, err
 	}
 	status := statusActive
 	if !u.Active {
@@ -321,12 +337,9 @@ func (s *repoSCIMStore) revokeUserAccess(ctx context.Context, id string) error {
 // givenName (or familyName) preserves the other half. Setting active false
 // revokes sessions + refresh tokens, exactly like the PUT deactivation path.
 func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.UserPatch) (scim.User, error) {
-	existing, err := s.repo.GetUser(ctx, id)
+	existing, err := s.loadSCIMAddressable(ctx, id)
 	if err != nil {
-		return scim.User{}, mapStoreErr(err)
-	}
-	if existing == nil {
-		return scim.User{}, scim.ErrNotFound
+		return scim.User{}, err
 	}
 
 	fields := map[string]any{}
@@ -390,12 +403,9 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 }
 
 func (s *repoSCIMStore) DeleteUser(ctx context.Context, id string) error {
-	existing, err := s.repo.GetUser(ctx, id)
+	existing, err := s.loadSCIMAddressable(ctx, id)
 	if err != nil {
-		return mapStoreErr(err)
-	}
-	if existing == nil {
-		return scim.ErrNotFound
+		return err
 	}
 	if err := s.repo.DeleteUser(ctx, id); err != nil {
 		return mapStoreErr(err)

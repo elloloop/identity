@@ -650,3 +650,31 @@ func TestAdminService_DeactivateUser_RevokeSessionsError(t *testing.T) {
 		t.Fatalf("expected deactivate revoke-sessions error, got %v", err)
 	}
 }
+
+// TestAdminService_ResetUserPassword_RefusesAnonymous covers the sixth door
+// onto the credential invariant.
+//
+// Attaching a password here would leave is_anonymous set, so the account
+// becomes password-loginable AND stays matched by the retention sweep, which
+// hard-deletes it with its sessions after the window. The account is not
+// addressable by an admin anyway — it has no email and the user listing
+// excludes it. The refusal uses the same sentinel as the five service-layer
+// doors, so one rule yields one Connect code.
+func TestAdminService_ResetUserPassword_RefusesAnonymous(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	db.addUser("anon-1", "", "", "member", "active")
+	db.nodes["anon-1"].Payload[ufIsAnonymous] = true
+	svc := newTestAdminService(db)
+
+	before := db.nodes["anon-1"].Payload[ufPasswordHash]
+
+	_, err := svc.ResetUserPassword(context.Background(), "admin-1", "anon-1", true)
+	if !errors.Is(err, ErrAnonymousMustUpgrade) {
+		t.Fatalf("ResetUserPassword on an anonymous account = %v, want ErrAnonymousMustUpgrade", err)
+	}
+	// Asserting the error alone would pass even if the write landed.
+	if got := db.nodes["anon-1"].Payload[ufPasswordHash]; got != before {
+		t.Fatalf("a refused reset still wrote a password hash: %v", got)
+	}
+}
