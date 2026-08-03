@@ -1332,6 +1332,15 @@
     "anchor": "rate-limiting"
   },
   {
+    "name": "GATEWAY_RATE_LIMIT_IDV_PER_IP",
+    "type": "integer",
+    "default": "5",
+    "required": false,
+    "description": "is the per-IP cap per window on BeginIdentityVerification, where every admitted call opens a paid provider session.",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
+  },
+  {
     "name": "GATEWAY_RATE_LIMIT_LOGIN_PER_IP",
     "type": "integer",
     "default": "30",

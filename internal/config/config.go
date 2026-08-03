@@ -952,6 +952,9 @@ type Config struct {
 	RateLimitAssurancePerIP int
 	// RateLimitPhonePerIP is the per-IP cap per window on RequestPhoneVerification.
 	RateLimitPhonePerIP int
+	// RateLimitIDVPerIP is the per-IP cap per window on BeginIdentityVerification,
+	// where every admitted call opens a paid provider session.
+	RateLimitIDVPerIP int
 	// RateLimitBootstrapPerIP is the per-IP cap per window on CreateFirstPlatformAdmin.
 	RateLimitBootstrapPerIP int
 
@@ -1351,6 +1354,7 @@ func loadFromEnv() *Config {
 		RateLimitPasswordlessPerIP: envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
 		RateLimitAssurancePerIP:    envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
 		RateLimitPhonePerIP:        envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
+		RateLimitIDVPerIP:          envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
 		RateLimitBootstrapPerIP:    envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
 
 		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),

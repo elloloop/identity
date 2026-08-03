@@ -45,6 +45,7 @@ func productScope(t *testing.T, configJSON, product string) context.Context {
 		ProjectID: "tinykite",
 		Access:    cfg.Access,
 		Products:  cfg.Products,
+		Anonymous: cfg.Anonymous,
 	})
 	return WithProduct(ctx, product)
 }

@@ -272,6 +272,15 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0),
 		},
 		{
+			// IDV session begin: authenticated, but every admitted call opens
+			// a PAID provider session (e.g. an Azure Face liveness session)
+			// plus a verification row, so cost scales with request volume the
+			// same way SMS does on the phone path — a tight per-IP quota
+			// bounds what one source can spend.
+			PathPrefix: "/identity.v1.IdentityService/BeginIdentityVerification", Tag: "idv_begin",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitIDVPerIP, 0),
+		},
+		{
 			// Client assurance: unauthenticated by design (the caller is
 			// proving what the client IS before anyone signs in). The
 			// challenge write and, on the exchange paths, an outbound

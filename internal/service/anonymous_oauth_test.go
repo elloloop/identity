@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/pkg/idv"
 )
 
 // The fake exchanger derives the provider subject from the email in the
@@ -153,27 +154,36 @@ func TestUpgradeAnonymousWithPassword_GatedByAccessMode(t *testing.T) {
 func TestAnonymousAccount_CannotAttachCredentialsOutsideUpgrade(t *testing.T) {
 	doors := []struct {
 		name string
-		call func(svc *AuthService, ctx context.Context, userID string) error
+		call func(repo *fakeRepo, svc *AuthService, ctx context.Context, userID string) error
 	}{
-		{"LinkIdentity", func(svc *AuthService, ctx context.Context, id string) error {
+		{"LinkIdentity", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
 			_, err := svc.LinkIdentity(ctx, id,
 				fakeOAuthCode(testOAuthEmail, "Fed", "", testOAuthProvider),
 				testOAuthProvider, testOAuthRedirect, "", "", "")
 			return err
 		}},
-		{"BeginPasskeyRegistration", func(svc *AuthService, ctx context.Context, id string) error {
+		{"BeginPasskeyRegistration", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
 			_, _, err := svc.BeginPasskeyRegistration(ctx, id, "device")
 			return err
 		}},
-		{"CompletePasskeyRegistration", func(svc *AuthService, ctx context.Context, id string) error {
+		{"CompletePasskeyRegistration", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
 			_, err := svc.CompletePasskeyRegistration(ctx, id, "challenge", `{"id":"x"}`, "device")
 			return err
 		}},
-		{"RequestPhoneVerification", func(svc *AuthService, ctx context.Context, id string) error {
+		{"RequestPhoneVerification", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
 			return svc.RequestPhoneVerification(ctx, id, "+14155550123")
 		}},
-		{"VerifyPhoneCode", func(svc *AuthService, ctx context.Context, id string) error {
+		{"VerifyPhoneCode", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
 			_, err := svc.VerifyPhoneCode(ctx, id, "+14155550123", "123456")
+			return err
+		}},
+		// Not a credential in the storage sense, but the same invariant: a
+		// verified identity pinned to an account the sweep can still
+		// hard-delete, minted by a PAID provider call an unauthenticated
+		// caller can reach by chaining SignInAnonymously.
+		{"BeginIdentityVerification", func(repo *fakeRepo, _ *AuthService, ctx context.Context, id string) error {
+			idvSvc := NewIdentityVerificationService(repo, idv.NewStubProvider(), "proj-anon", nil)
+			_, err := idvSvc.BeginIdentityVerification(ctx, id)
 			return err
 		}},
 	}
@@ -191,7 +201,7 @@ func TestAnonymousAccount_CannotAttachCredentialsOutsideUpgrade(t *testing.T) {
 			}
 			id := res.User.ID
 
-			if err := d.call(svc, ctx, id); !errors.Is(err, ErrAnonymousMustUpgrade) {
+			if err := d.call(repo, svc, ctx, id); !errors.Is(err, ErrAnonymousMustUpgrade) {
 				t.Fatalf("%s on an anonymous account = %v, want ErrAnonymousMustUpgrade", d.name, err)
 			}
 
@@ -202,6 +212,9 @@ func TestAnonymousAccount_CannotAttachCredentialsOutsideUpgrade(t *testing.T) {
 			ids, _ := repo.ListOAuthIdentitiesForUser(ctx, id)
 			if len(ids) != 0 {
 				t.Errorf("%s persisted %d provider identities", d.name, len(ids))
+			}
+			if rec, _ := repo.GetLatestIdentityVerificationForUser(ctx, id); rec != nil {
+				t.Errorf("%s persisted an identity verification record", d.name)
 			}
 		})
 	}

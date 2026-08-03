@@ -1957,15 +1957,28 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		return nil, "", "", err
 	}
 
-	// The anonymous kill switch is checked BEFORE the token is consumed. A
-	// refresh token is an anonymous account's ONLY credential, so consuming
-	// it and then refusing burns it: re-enabling the feature does not
-	// restore the session, and the retry an SDK makes on the error lands on
-	// replay detection, leaving the account permanently unreachable — and
-	// hard-deleted once the retention window elapses. Every other check on
-	// this path guards an account that has some other way back in.
-	if timeoutUser.IsAnonymous && !s.anonymousEnabled(ctx) {
-		return nil, "", "", ErrAnonymousRefreshDisabled
+	// Every check that can refuse an ANONYMOUS account runs BEFORE the token
+	// is consumed. A refresh token is an anonymous account's ONLY credential,
+	// so consuming it and then refusing burns it: undoing the refusal's cause
+	// does not restore the session, and the retry an SDK makes on the error
+	// lands on replay detection, leaving the account permanently
+	// unreachable — and hard-deleted once the retention window elapses. Every
+	// other check on this path guards an account that has some other way back
+	// in.
+	if timeoutUser.IsAnonymous {
+		if !s.anonymousEnabled(ctx) {
+			return nil, "", "", ErrAnonymousRefreshDisabled
+		}
+		// The product age gate denies anonymous accounts outright when the
+		// requested product sets a minimum band, and that is reachable
+		// mid-session: a product can gain a minimum_age_band between
+		// sign-in and the next rotation, or the refresh can carry a
+		// different X-Product than the sign-in did. The gate still runs
+		// inside issueTokensWithSessionStart; this early pass exists only
+		// so the refusal is non-destructive.
+		if err := s.enforceProductAgeGate(ctx, timeoutUser); err != nil {
+			return nil, "", "", err
+		}
 	}
 
 	// Rotation. ConsumeRefreshTokenByHash is the serialization point: it

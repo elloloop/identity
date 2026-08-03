@@ -94,7 +94,11 @@ own exchange and link rather than calling `LinkIdentity`, so that every
 refusal — not anonymous, access mode, address taken, identity claimed —
 precedes any mutation; `LinkIdentity` itself refuses anonymous callers, so
 the upgrade is the single door through which an anonymous account gains a
-credential. The token pair is reissued,
+credential. Passkey registration, phone verification, the admin password
+reset, and `BeginIdentityVerification` refuse for the same reason — the
+last is not a credential but a paid provider call that would pin a verified
+identity to an account the retention sweep can still hard-delete. The token
+pair is reissued,
 because the caller's existing access token still asserts `anonymous: true` and
 every downstream service would keep believing it until it expired.
 
@@ -183,6 +187,10 @@ empty rather than absent-because-unverified.
   extend to an account class that can never resolve a band — otherwise one
   unauthenticated SignInAnonymously would satisfy every minimum_age_band.
   Products with no configured minimum remain open to anonymous sessions.
+  On the refresh path the denial is evaluated BEFORE the presented token is
+  consumed — like the kill switch, and for the same reason: that token is
+  the account's only credential, so a post-consume refusal would destroy
+  the account rather than merely refuse the product.
   (The OAuth upgrade arm inherits the same DOB-less provisioning the OAuth
   JIT login paths already perform; parity is with each arm's identified
   counterpart.)

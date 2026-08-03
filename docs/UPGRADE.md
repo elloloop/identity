@@ -78,7 +78,11 @@ Two things to know before enabling:
    account that skips the parental-consent flow `PasswordSignup` enforces.
    Anonymous sessions also **fail closed at product age gates**: a product
    with a `minimum_age_band` refuses them (their age is unknowable), while
-   products with no minimum stay open to them. Collecting a DOB on the
+   products with no minimum stay open to them. On the refresh path that
+   refusal is evaluated **before** the presented refresh token is consumed,
+   so a product that gains a minimum mid-session refuses future rotations
+   without burning the account's only credential — removing the minimum
+   restores the sessions. Collecting a DOB on the
    upgrade is a planned addition (ADR-0013 "Not shipped").
 4. **Downstream services must check the `anonymous` claim** before granting
    anything that assumes a verified human. An anonymous `sub` is cheap to
@@ -117,6 +121,15 @@ unauthenticated endpoint.
 cannot be represented in the pre-0028 schema and hold no credential to sign
 back in with, so the deletion is the honest outcome rather than a
 half-applied rollback.
+
+**Identity verification is hardened alongside this feature, whether or not
+anonymous sign-in is enabled.** `BeginIdentityVerification` now refuses
+anonymous callers (`FAILED_PRECONDITION` — every admitted call opens a paid
+provider session against an account the retention sweep can still delete)
+and carries a per-IP quota, `GATEWAY_RATE_LIMIT_IDV_PER_IP` (default `5`
+per rate-limit window). Deployments that legitimately begin more than five
+verifications per IP per window — e.g. behind a shared corporate NAT —
+should raise it.
 
 ## v3.x → v4.0 — CAPTCHA becomes the client-assurance layer (breaking)
 

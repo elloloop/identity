@@ -366,6 +366,44 @@ func TestRefreshToken_AnonymousStopsWhenTheFeatureIsDisabled(t *testing.T) {
 	}
 }
 
+// A refusal from the product age gate must not consume the token either. The
+// gate's anonymous deny arm (see enforceProductAgeGate) is reachable
+// mid-session — a product can gain a minimum_age_band between sign-in and the
+// next rotation, or the refresh can carry a different X-Product than the
+// sign-in did — and a post-consume denial burns the account's only
+// credential exactly the way the disabled-feature refusal above would.
+func TestRefreshToken_AnonymousAgeGateRefusalDoesNotBurnTheToken(t *testing.T) {
+	const anonOpenJSON = `{"access":{"mode":"open"},"anonymous":{"enabled":true}}`
+	const anonTeenMinimumJSON = `{"access":{"mode":"open"},"anonymous":{"enabled":true},` +
+		`"products":{"hold":{"minimum_age_band":"teen"}}}`
+
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	open := productScope(t, anonOpenJSON, restrictedProduct)
+
+	res, err := svc.SignInAnonymously(open, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("SignInAnonymously: %v", err)
+	}
+
+	gated := productScope(t, anonTeenMinimumJSON, restrictedProduct)
+	_, _, _, err = svc.RefreshToken(gated, res.RefreshToken, "1.2.3.4", "ua")
+	if !errors.Is(err, ErrProductAgeRestricted) {
+		t.Fatalf("refresh under a product minimum err = %v, want ErrProductAgeRestricted", err)
+	}
+
+	// The refusal must NOT have consumed the token: removing the minimum (or
+	// fixing the product header) must restore the session, not find it burned
+	// and the next attempt tripping replay detection.
+	user, access, refresh, err := svc.RefreshToken(open, res.RefreshToken, "1.2.3.4", "ua")
+	if err != nil {
+		t.Fatalf("the refusal burned the token: removing the minimum did not restore the session: %v", err)
+	}
+	if user.ID != res.User.ID || access == "" || refresh == "" {
+		t.Fatalf("recovery returned %#v / empty tokens", user)
+	}
+}
+
 // A permanent user must keep being judged by the access mode — the exemption
 // above is for anonymous accounts only, not a hole in the access guard.
 func TestRefreshToken_PermanentUserStillGatedByAccessMode(t *testing.T) {

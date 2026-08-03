@@ -261,6 +261,11 @@ func (s *AuthService) touchAnonymousActivity(ctx context.Context, u *User) {
 //
 // A lookup failure refuses too: guessing "probably not anonymous" is the
 // direction that loses data.
+//
+// BeginIdentityVerification enforces the same refusal inside its own service
+// (it cannot reach this helper): not a credential, but a paid provider call
+// that would pin a verified identity to an account the sweep can still
+// hard-delete.
 func (s *AuthService) refuseAnonymousCredentialAttach(ctx context.Context, userID string) error {
 	u, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
