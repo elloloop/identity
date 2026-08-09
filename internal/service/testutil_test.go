@@ -147,9 +147,9 @@ type fakeRepo struct {
 	createPasskeyCredErr error
 	// SSO-session error injectors, for the repo-failure paths of
 	// EstablishSSOSession / the fast path.
-	createSSOSessionErr error
-	findSSOSessionErr   error
-	touchSSOSessionErr  error
+	createSSOSessionErr  error
+	findSSOSessionErr    error
+	touchSSOSessionErr   error
 	getUserErr           error
 	getTotpCredentialErr error
 

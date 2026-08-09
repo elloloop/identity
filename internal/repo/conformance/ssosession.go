@@ -22,6 +22,8 @@ import (
 //   - revocation is idempotent and preserves the first timestamp;
 //   - deleting a user takes their SSO sessions with them.
 func runSSOSessionConformance(t *testing.T, driver Driver) {
+	t.Helper()
+
 	t.Run("SSOSession_CRUD", func(t *testing.T) {
 		ctx := context.Background()
 		r := driver.NewRepo(t)
