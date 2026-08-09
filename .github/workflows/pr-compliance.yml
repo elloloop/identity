@@ -27,6 +27,7 @@ jobs:
       - name: Check title and body conventions
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           fail=0
@@ -49,7 +50,8 @@ jobs:
             err "The '## Summary' section is empty. Describe what changes and why."
           fi
 
-          if ! grep -qE '^- \[[xX]\]' <<<"$body"; then
+          testplan=$(awk '/^## Test plan/{f=1;next} /^## /{f=0} f' <<<"$stripped")
+          if ! grep -qE '^- \[[xX]\]' <<<"$testplan"; then
             err "Tick at least one checkbox under '## Test plan'. Tests are part of the change (AGENTS.md §7)."
           fi
 
