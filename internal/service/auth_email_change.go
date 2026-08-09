@@ -223,15 +223,13 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
 
-	// Revoke all active sessions — credential change must force re-auth
-	// on every device per OAuth 2.1 §4.13. In mode=session we also
-	// revoke the Session rows so the in-flight access tokens stop
-	// working immediately.
-	if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, user.ID); err != nil {
+	// Revoke every derived session — a credential change must force re-auth
+	// on every device per OAuth 2.1 §4.13, and an SSO session minted from
+	// the old credential must die with it.
+	if err := revokeDerivedSessionsForUser(ctx, s.repo(ctx), user.ID, now); err != nil {
 		s.logger.Warn("email_change_session_revoke_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
-	s.revokeUserSessionsIfModeSession(ctx, user.ID, "email_change")
 
 	s.audit.Log(
 		ctx, audit.EventPasswordChanged,

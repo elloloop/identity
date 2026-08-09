@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -25,23 +26,34 @@ const msPerDay int64 = 24 * 60 * 60 * 1000
 // principal, distinct from any end-user or admin.
 const accountDeletionSweeperActor = "system:account-deletion-sweeper"
 
-// revokeAllUserSessions immediately invalidates a user's access by deleting
-// their refresh tokens and revoking their active sessions, so a status change
-// (admin deactivation, self-service deletion request, hard delete) takes effect
-// at once rather than at the next token's natural expiry. Callers pass the same
-// nowMs used for the surrounding mutation so the revocation timestamp matches.
+// revokeDerivedSessionsForUser immediately invalidates every session derived
+// from the user's credentials — refresh tokens, mode=session access rows,
+// AND SSO sessions — so a credential kill (admin deactivation, password
+// reset, email change, planted-credential clearing, account deletion,
+// refresh-replay detection) takes effect at once rather than at the next
+// token's natural expiry. The SSO session is a derived credential like any
+// other: it must die with the login it was minted from, or a leftover
+// continue-as cookie would keep signing the user in.
 //
-// It is the one implementation of the "cut off access now" step, shared by
-// AdminService.DeactivateUser, the delete cascade, and
-// ProfileService.DeleteMyAccount, so the three never drift.
-func revokeAllUserSessions(ctx context.Context, repo Repository, userID string, nowMs int64) error {
+// All three stores are always attempted — a kill path must not leave one
+// store live because another failed — and the errors are joined. Callers
+// pass the same nowMs used for the surrounding mutation so the revocation
+// timestamp matches. Strict callers (the delete cascades, admin
+// deactivation) propagate the error; credential-change callers warn-log it
+// (the credential is already changed, so failing the RPC would strand the
+// user more than a leaked session would).
+func revokeDerivedSessionsForUser(ctx context.Context, repo Repository, userID string, nowMs int64) error {
+	var errs []error
 	if err := repo.DeleteRefreshTokensForUser(ctx, userID); err != nil {
-		return fmt.Errorf("revoke refresh tokens: %w", err)
+		errs = append(errs, fmt.Errorf("revoke refresh tokens: %w", err))
 	}
 	if err := repo.RevokeSessionsForUser(ctx, userID, nowMs); err != nil {
-		return fmt.Errorf("revoke sessions: %w", err)
+		errs = append(errs, fmt.Errorf("revoke sessions: %w", err))
 	}
-	return nil
+	if err := repo.RevokeSSOSessionsForUser(ctx, userID); err != nil {
+		errs = append(errs, fmt.Errorf("revoke sso sessions: %w", err))
+	}
+	return errors.Join(errs...)
 }
 
 // WithAccountDeletionGraceDays wires the self-service deletion grace window and
@@ -111,7 +123,7 @@ func (s *ProfileService) DeleteMyAccount(ctx context.Context, actorID, reason st
 		return 0, fmt.Errorf("schedule account deletion: %w", err)
 	}
 
-	if err := revokeAllUserSessions(ctx, repo, actorID, now); err != nil {
+	if err := revokeDerivedSessionsForUser(ctx, repo, actorID, now); err != nil {
 		return 0, fmt.Errorf("schedule account deletion: %w", err)
 	}
 
@@ -234,7 +246,7 @@ func (s *AdminService) PurgeExpiredPendingDeletions(ctx context.Context, cutoffM
 // access token dies immediately.
 func (s *AdminService) purgeUser(ctx context.Context, auditActorID string, u *User) error {
 	now := nowMs()
-	if err := revokeAllUserSessions(ctx, s.repo(ctx), u.ID, now); err != nil {
+	if err := revokeDerivedSessionsForUser(ctx, s.repo(ctx), u.ID, now); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
 	// Group membership is a graph MEMBER_OF edge, not a Repository record, so

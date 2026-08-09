@@ -746,6 +746,7 @@ type MemRepo struct {
 	passkeyChallenges  map[string]*service.PasskeyChallengeRecord
 	qrSessions         map[string]*service.QrLoginSessionRecord
 	oauthOneTimeCodes  map[string]*service.OAuthOneTimeCodeRecord
+	ssoSessions        map[string]*service.SSOSessionRecord
 	nativeRedemptions  map[string]*service.NativeTokenRedemptionRecord
 	emailLoginCodes    map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens    map[string]*service.MagicLinkTokenRecord
@@ -772,6 +773,7 @@ func NewMemRepo() *MemRepo {
 		passkeyChallenges:  make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*service.QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*service.OAuthOneTimeCodeRecord),
+		ssoSessions:        make(map[string]*service.SSOSessionRecord),
 		nativeRedemptions:  make(map[string]*service.NativeTokenRedemptionRecord),
 		emailLoginCodes:    make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*service.MagicLinkTokenRecord),
@@ -1034,6 +1036,11 @@ func (r *MemRepo) deleteUserRowsLocked(userID string) {
 	for id, c := range r.oauthOneTimeCodes {
 		if c.UserID == userID {
 			delete(r.oauthOneTimeCodes, id)
+		}
+	}
+	for id, s := range r.ssoSessions {
+		if s.UserID == userID {
+			delete(r.ssoSessions, id)
 		}
 	}
 	for id, c := range r.totpCreds {
@@ -1431,6 +1438,39 @@ func (r *MemRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, at
 		return &cp, nil
 	}
 	return nil, service.ErrOAuthCodeInvalid
+}
+
+func (r *MemRepo) CreateSSOSession(_ context.Context, rec *service.SSOSessionRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.ssoSessions[id] = &cp
+	return id, nil
+}
+
+func (r *MemRepo) GetSSOSessionByHash(_ context.Context, tokenHash string) (*service.SSOSessionRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.ssoSessions {
+		if s.TokenHash == tokenHash {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemRepo) RevokeSSOSessionsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, s := range r.ssoSessions {
+		if s.UserID == userID {
+			delete(r.ssoSessions, id)
+		}
+	}
+	return nil
 }
 
 func (r *MemRepo) RecordNativeTokenRedemption(_ context.Context, rec *service.NativeTokenRedemptionRecord) (string, error) {
@@ -2195,6 +2235,22 @@ func (r *MemRepo) DeleteExpiredNativeTokenRedemptions(_ context.Context, beforeM
 		}
 		if e.ExpiresAt < beforeMs {
 			delete(r.nativeRedemptions, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *MemRepo) DeleteExpiredSSOSessions(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, s := range r.ssoSessions {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if s.ExpiresAt < beforeMs {
+			delete(r.ssoSessions, id)
 			n++
 		}
 	}

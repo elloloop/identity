@@ -45,6 +45,22 @@ const (
 	RevocationModeTTLAccessTokenCap = 900
 )
 
+// Continue-as UX modes accepted in GATEWAY_SSO_CONTINUE_MODE.
+const (
+	// SSOContinueModeSilent validates the SSO session and immediately
+	// redirects with the product's one-time code. The default.
+	SSOContinueModeSilent = "silent"
+
+	// SSOContinueModeOneTap renders a confirmation page first; the code is
+	// minted only on the confirming POST.
+	SSOContinueModeOneTap = "one_tap"
+
+	// DefaultSSOSessionTTLSeconds is the fallback SSO session lifetime
+	// (8 hours): one working day of continue-as before the user
+	// re-authenticates at the auth origin.
+	DefaultSSOSessionTTLSeconds = 8 * 60 * 60
+)
+
 // Web-assurance provider names accepted in GATEWAY_ASSURANCE_WEB_PROVIDER.
 // They mirror the assurance.Provider* constants; config validates against
 // these without importing pkg/assurance (config has no dependencies on the
@@ -463,6 +479,41 @@ type Config struct {
 	// different account. Set empty to disable (provider default). Driven by
 	// GATEWAY_OAUTH_PROMPT.
 	OAuthPrompt string
+
+	// SSOEnabled turns on cross-product SSO: a successful authentication at
+	// the auth origin (the hosted OAuth callback) additionally mints a
+	// server-side SSO session — opaque token, SHA-256 hashed at rest — and
+	// sets it as a `__Host-`-prefixed httpOnly Secure cookie on the auth
+	// origin only. Products in the same project then offer a continue-as
+	// fast path (GET /sso/continue?return_to=...) that re-runs every
+	// authorization gate (return-URL allowlist, account status, project
+	// access mode, the original login policy, product age gate) and ends at
+	// the existing single-use ?code= redeem, so each product mints its OWN
+	// token pair — pairs are never shared across products, and sessions
+	// never bridge projects. Sessions die with every credential-kill path
+	// (password reset, email change, planted-credential clearing, account
+	// deletion, refresh-replay detection) and with SignOutEverywhere;
+	// per-product Logout leaves them alive.
+	//
+	// Enabling requires GATEWAY_OAUTH_ALLOWED_RETURN_URLS (the same
+	// allowlist continue-as validates return_to against) and fails closed
+	// at boot otherwise. Default false — a disabled deployment registers no
+	// /sso routes and mints no session. Driven by GATEWAY_SSO_ENABLED.
+	SSOEnabled bool
+
+	// SSOSessionTTLSeconds is the SSO session's absolute lifetime in
+	// seconds (no sliding renewal: the session dies at TTL from the
+	// original authentication and the user re-authenticates). Must be > 0
+	// when SSO is enabled. Default 28800 (8 hours). Driven by
+	// GATEWAY_SSO_SESSION_TTL_SECONDS.
+	SSOSessionTTLSeconds int
+
+	// SSOContinueMode selects the continue-as UX: "silent" (default)
+	// validates the SSO session and immediately 302-redirects with the
+	// one-time code; "one_tap" first renders a confirmation page and mints
+	// the code only on the confirming POST. Any other value fails closed
+	// at boot. Driven by GATEWAY_SSO_CONTINUE_MODE.
+	SSOContinueMode string
 
 	// NativeOAuthEnabled is the kill-switch for NativeOAuthLogin (verifying
 	// Google/Apple/Microsoft ID tokens from mobile SDKs). It defaults true when
@@ -1198,6 +1249,10 @@ func loadFromEnv() *Config {
 		OAuthHubSharing:        envBool("GATEWAY_OAUTH_HUB_SHARING", false),
 		OAuthPrompt:            envStrRaw("GATEWAY_OAUTH_PROMPT", "select_account"),
 
+		SSOEnabled:           envBool("GATEWAY_SSO_ENABLED", false),
+		SSOSessionTTLSeconds: envInt("GATEWAY_SSO_SESSION_TTL_SECONDS", DefaultSSOSessionTTLSeconds),
+		SSOContinueMode:      envStr("GATEWAY_SSO_CONTINUE_MODE", SSOContinueModeSilent),
+
 		NativeOAuthGoogleAudiences:    envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),
 		NativeOAuthAppleAudiences:     envStr("GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES", ""),
 		NativeOAuthMicrosoftAudiences: envStr("GATEWAY_NATIVE_OAUTH_MICROSOFT_AUDIENCES", ""),
@@ -1845,6 +1900,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateSSO(); err != nil {
+		return err
+	}
+
 	if err := c.validateNativeOAuth(); err != nil {
 		return err
 	}
@@ -1964,6 +2023,39 @@ func (c *Config) validateOIDC() error {
 	}
 	if strings.TrimSpace(c.OIDCClientID) == "" || strings.TrimSpace(c.OIDCClientSecret) == "" {
 		return errors.New("config: GATEWAY_OAUTH_OIDC_ENABLED=true requires GATEWAY_OAUTH_OIDC_CLIENT_ID and GATEWAY_OAUTH_OIDC_CLIENT_SECRET")
+	}
+	return nil
+}
+
+// validateSSO enforces the cross-product SSO invariants. The mode knob is
+// normalized/validated even when SSO is off so a directly-constructed Config
+// (e.g. in tests) behaves like a Load()-ed one; the harder checks run only
+// when the feature is on, since a disabled deployment registers no /sso
+// routes. Failing closed at boot beats serving a continue-as endpoint whose
+// return_to allowlist is empty (every request would 400) or whose sessions
+// never expire.
+func (c *Config) validateSSO() error {
+	if c.SSOContinueMode == "" {
+		c.SSOContinueMode = SSOContinueModeSilent
+	}
+	switch c.SSOContinueMode {
+	case SSOContinueModeSilent, SSOContinueModeOneTap:
+	default:
+		return fmt.Errorf("config: invalid GATEWAY_SSO_CONTINUE_MODE %q (must be one of: %s, %s)",
+			c.SSOContinueMode, SSOContinueModeSilent, SSOContinueModeOneTap)
+	}
+	if !c.SSOEnabled {
+		return nil
+	}
+	if strings.TrimSpace(c.OAuthAllowedReturnURLs) == "" {
+		return errors.New(
+			"config: GATEWAY_SSO_ENABLED=true requires GATEWAY_OAUTH_ALLOWED_RETURN_URLS to be set " +
+				"(the allowlist /sso/continue validates return_to against)",
+		)
+	}
+	if c.SSOSessionTTLSeconds <= 0 {
+		return fmt.Errorf("config: GATEWAY_SSO_SESSION_TTL_SECONDS=%d must be > 0 when GATEWAY_SSO_ENABLED=true",
+			c.SSOSessionTTLSeconds)
 	}
 	return nil
 }

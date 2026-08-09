@@ -53,6 +53,7 @@ type Repo struct {
 	passkeyChallenges   map[string]*service.PasskeyChallengeRecord
 	qrSessions          map[string]*service.QrLoginSessionRecord
 	oauthOneTimeCodes   map[string]*service.OAuthOneTimeCodeRecord
+	ssoSessions         map[string]*service.SSOSessionRecord
 	nativeRedemptions   map[string]*service.NativeTokenRedemptionRecord
 	emailLoginCodes     map[string]*service.EmailLoginCodeRecord
 	magicLinkTokens     map[string]*service.MagicLinkTokenRecord
@@ -107,6 +108,7 @@ func newStore() *Repo {
 		passkeyChallenges:   make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:          make(map[string]*service.QrLoginSessionRecord),
 		oauthOneTimeCodes:   make(map[string]*service.OAuthOneTimeCodeRecord),
+		ssoSessions:         make(map[string]*service.SSOSessionRecord),
 		nativeRedemptions:   make(map[string]*service.NativeTokenRedemptionRecord),
 		emailLoginCodes:     make(map[string]*service.EmailLoginCodeRecord),
 		magicLinkTokens:     make(map[string]*service.MagicLinkTokenRecord),
@@ -434,6 +436,7 @@ func (r *Repo) deleteUserLocked(userID string) {
 	deleteByUser(r.passkeyChallenges, userID, func(c *service.PasskeyChallengeRecord) string { return c.UserID })
 	deleteByUser(r.qrSessions, userID, func(s *service.QrLoginSessionRecord) string { return s.UserID })
 	deleteByUser(r.oauthOneTimeCodes, userID, func(c *service.OAuthOneTimeCodeRecord) string { return c.UserID })
+	deleteByUser(r.ssoSessions, userID, func(s *service.SSOSessionRecord) string { return s.UserID })
 	deleteByUser(r.totpCreds, userID, func(c *service.TotpCredRecord) string { return c.UserID })
 	deleteByUser(r.recoveryCodes, userID, func(c *service.RecoveryCodeRecord) string { return c.UserID })
 	deleteByUser(r.loginChallenges, userID, func(c *service.LoginChallengeRecord) string { return c.UserID })
@@ -846,6 +849,45 @@ func (r *Repo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, atMs 
 		return &cp, nil
 	}
 	return nil, service.ErrOAuthCodeInvalid
+}
+
+// ── SSO Sessions ────────────────────────────────────────────────────
+
+func (r *Repo) CreateSSOSession(_ context.Context, rec *service.SSOSessionRecord) (string, error) {
+	if rec == nil {
+		return "", errors.New("memory: CreateSSOSession: nil record")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := r.nextID()
+	rec.NodeID = id
+	cp := *rec
+	r.ssoSessions[id] = &cp
+	return id, nil
+}
+
+// GetSSOSessionByHash returns the session bound to tokenHash, or
+// (nil, nil) when it names no live session. Expiry is the caller's
+// check — the store returns the row as-is.
+func (r *Repo) GetSSOSessionByHash(_ context.Context, tokenHash string) (*service.SSOSessionRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.ssoSessions {
+		if s.TokenHash == tokenHash {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+// RevokeSSOSessionsForUser hard-deletes every session the user holds.
+// Idempotent: a user with none is a no-op.
+func (r *Repo) RevokeSSOSessionsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	deleteByUser(r.ssoSessions, userID, func(s *service.SSOSessionRecord) string { return s.UserID })
+	return nil
 }
 
 // RecordNativeTokenRedemption records a redeemed native ID token's replay
@@ -1684,6 +1726,25 @@ func (r *Repo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs int64,
 		}
 		if c.ExpiresAt < beforeMs {
 			delete(r.oauthOneTimeCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *Repo) DeleteExpiredSSOSessions(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("memory: DeleteExpiredSSOSessions: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, s := range r.ssoSessions {
+		if n >= limit {
+			break
+		}
+		if s.ExpiresAt < beforeMs {
+			delete(r.ssoSessions, id)
 			n++
 		}
 	}
