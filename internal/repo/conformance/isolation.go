@@ -154,57 +154,5 @@ func runProjectIsolationConformance(t *testing.T, driver Driver) {
 		if stillB.ID != uidB || stillB.PasswordHash != "hash-B" {
 			t.Fatalf("delete in A corrupted B's row: got id=%q hash=%q, want id=%q hash=hash-B", stillB.ID, stillB.PasswordHash, uidB)
 		}
-
-		// SSO must never bridge projects (ADR-0014). One deployment runs the
-		// consumer product pool and the separate, allowlisted admin project on
-		// the same auth origin, which means ONE browser holds ONE SSO cookie
-		// that both sign-in surfaces will present to their own project. Signing
-		// into a consumer app must not hand anybody a fast path into the admin
-		// project's door; the admin re-authenticates, deliberately.
-		//
-		// The property is structural rather than a check someone could forget:
-		// every SSO lookup is project-scoped, so B simply never finds A's row.
-		// This pins that, because "the query has a project_id predicate" is
-		// exactly the kind of thing a later refactor drops silently.
-		ssoUserB, err := b.CreateUser(ctx, &service.User{
-			Email: "sso-isolation@example.com", Status: "active", Role: "member",
-		})
-		if err != nil {
-			t.Fatalf("CreateUser for SSO isolation in B: %v", err)
-		}
-		const sharedCookieHash = "conf-sso-shared-cookie-hash"
-		if _, err := b.CreateSSOSession(ctx, &service.SSOSessionRecord{
-			TokenHash: sharedCookieHash, UserID: ssoUserB, LoginMethod: "oauth",
-			CreatedAtMs: 100, LastUsedAtMs: 100, ExpiresAtMs: 9_000_000_000_000,
-		}); err != nil {
-			t.Fatalf("CreateSSOSession in B: %v", err)
-		}
-
-		// The same cookie value, presented to project A, is not a session.
-		leaked, err := a.FindSSOSessionByHash(ctx, sharedCookieHash)
-		if err != nil {
-			t.Fatalf("FindSSOSessionByHash in A: %v", err)
-		}
-		if leaked != nil {
-			t.Fatalf("cross-project SSO leak: A resolved B's session: %+v", leaked)
-		}
-
-		// Nor can A revoke or roll B's session by holding the cookie value.
-		if err := a.RevokeSSOSession(ctx, sharedCookieHash, 500); err != nil {
-			t.Fatalf("RevokeSSOSession in A: %v", err)
-		}
-		if err := a.TouchSSOSession(ctx, sharedCookieHash, 600, 1_000); err != nil {
-			t.Fatalf("TouchSSOSession in A: %v", err)
-		}
-		intact, err := b.FindSSOSessionByHash(ctx, sharedCookieHash)
-		if err != nil || intact == nil {
-			t.Fatalf("B's session must survive A's writes: %v %#v", err, intact)
-		}
-		if intact.RevokedAtMs != 0 {
-			t.Fatalf("project A revoked project B's SSO session: %+v", intact)
-		}
-		if intact.ExpiresAtMs != 9_000_000_000_000 {
-			t.Fatalf("project A rolled project B's SSO session window: %+v", intact)
-		}
 	})
 }

@@ -400,10 +400,10 @@ var userDeleteNonFKTables = []string{
 // DeleteUser physically removes the user and cascades all user-owned
 // rows inside one transaction. The four non-FK tables are deleted
 // explicitly; the DELETE FROM users then triggers ON DELETE CASCADE for
-// refresh_tokens, sessions, sso_sessions, password_reset_tokens,
-// email_change_tokens, oauth_identities, passkeys, totp_secrets,
-// recovery_codes, login_challenges, oauth_one_time_codes,
-// identity_verifications, phone_verification_codes, and group_memberships.
+// refresh_tokens, sessions, password_reset_tokens, email_change_tokens,
+// oauth_identities, passkeys, totp_secrets, recovery_codes,
+// login_challenges, oauth_one_time_codes, identity_verifications,
+// phone_verification_codes, and group_memberships.
 // audit_events has no FK to users and is retained for accountability.
 // The email-keyed email_login_codes / magic_link_tokens are out of scope
 // (no user_id).

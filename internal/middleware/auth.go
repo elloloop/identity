@@ -109,22 +109,11 @@ const hostedOAuthPrefix = "/oauth/"
 // authUIPrefix is the path prefix for the embedded UI static files.
 const authUIPrefix = "/auth/"
 
-// ssoPrefix is the path prefix for the browser SSO endpoints (GET
-// /sso/session). Unauthenticated by design and for the same reason as the
-// hosted OAuth routes: the caller is a sign-in page asking whether the
-// browser already has a session, so it has no JWT to present — that is the
-// question. The endpoint's own access control is the cookie plus the
-// GATEWAY_SSO_HUB_ORIGINS CORS allowlist, not a bearer token.
-const ssoPrefix = "/sso/"
-
 // isAuthExempt reports whether path bypasses JWT enforcement: either an
 // exact-match entry in AuthExemptPaths or any path under the hosted
-// OAuth, auth UI, or SSO prefixes.
+// OAuth prefix or the auth UI prefix.
 func isAuthExempt(path string) bool {
-	return AuthExemptPaths[path] ||
-		strings.HasPrefix(path, hostedOAuthPrefix) ||
-		strings.HasPrefix(path, authUIPrefix) ||
-		strings.HasPrefix(path, ssoPrefix)
+	return AuthExemptPaths[path] || strings.HasPrefix(path, hostedOAuthPrefix) || strings.HasPrefix(path, authUIPrefix)
 }
 
 // AuthMiddleware verifies JWT Bearer tokens on non-exempt paths and injects the

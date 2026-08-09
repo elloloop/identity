@@ -31,8 +31,6 @@
   "qr_login_approved",
   "qr_login_rejected",
   "session_revoked",
-  "sso_session_continued",
-  "sso_session_started",
   "totp_disabled",
   "totp_enabled",
   "totp_verified",

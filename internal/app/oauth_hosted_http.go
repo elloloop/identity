@@ -31,11 +31,6 @@ type hostedOAuthHandler struct {
 	auth      *service.AuthService
 	allowlist service.ReturnAllowlist
 	logger    *zap.Logger
-	// ssoCookieMaxAge is the browser-side lifetime of the SSO cookie, in
-	// seconds. It mirrors the server-side session TTL so the two lapse
-	// together — a cookie outliving its row would send the browser through a
-	// pointless fast-path attempt on every sign-in.
-	ssoCookieMaxAge int
 }
 
 const (
@@ -173,14 +168,6 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 		maxAge = -1
 	}
 	http.SetCookie(w, hostedOAuthCSRFCookie(provider, remainingCSRFTokens, maxAge))
-	// The SSO cookie is set here and nowhere else on this path: the service
-	// returns a value only when THIS callback completed an authentication on
-	// an SSO-enabled deployment, so a failed exchange (which returned above)
-	// and a login still owing a second factor both leave the browser without
-	// one.
-	if result.SSOCookieValue != "" {
-		http.SetCookie(w, newSSOSessionCookie(result.SSOCookieValue, h.ssoCookieMaxAge))
-	}
 	// #nosec G710 -- result.ReturnTo is recovered from the signed,
 	// tamper-proof hosted state token whose return_to was validated
 	// against the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist at /start

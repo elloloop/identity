@@ -52,7 +52,6 @@ type Repo struct {
 	assuranceChallenges map[string]*service.AssuranceChallengeRecord
 	passkeyChallenges   map[string]*service.PasskeyChallengeRecord
 	qrSessions          map[string]*service.QrLoginSessionRecord
-	ssoSessions         map[string]*service.SSOSessionRecord
 	oauthOneTimeCodes   map[string]*service.OAuthOneTimeCodeRecord
 	nativeRedemptions   map[string]*service.NativeTokenRedemptionRecord
 	emailLoginCodes     map[string]*service.EmailLoginCodeRecord
@@ -107,7 +106,6 @@ func newStore() *Repo {
 		assuranceChallenges: make(map[string]*service.AssuranceChallengeRecord),
 		passkeyChallenges:   make(map[string]*service.PasskeyChallengeRecord),
 		qrSessions:          make(map[string]*service.QrLoginSessionRecord),
-		ssoSessions:         make(map[string]*service.SSOSessionRecord),
 		oauthOneTimeCodes:   make(map[string]*service.OAuthOneTimeCodeRecord),
 		nativeRedemptions:   make(map[string]*service.NativeTokenRedemptionRecord),
 		emailLoginCodes:     make(map[string]*service.EmailLoginCodeRecord),
@@ -435,7 +433,6 @@ func (r *Repo) deleteUserLocked(userID string) {
 	deleteByUser(r.passkeyCreds, userID, func(c *service.PasskeyCredRecord) string { return c.UserID })
 	deleteByUser(r.passkeyChallenges, userID, func(c *service.PasskeyChallengeRecord) string { return c.UserID })
 	deleteByUser(r.qrSessions, userID, func(s *service.QrLoginSessionRecord) string { return s.UserID })
-	deleteByUser(r.ssoSessions, userID, func(s *service.SSOSessionRecord) string { return s.UserID })
 	deleteByUser(r.oauthOneTimeCodes, userID, func(c *service.OAuthOneTimeCodeRecord) string { return c.UserID })
 	deleteByUser(r.totpCreds, userID, func(c *service.TotpCredRecord) string { return c.UserID })
 	deleteByUser(r.recoveryCodes, userID, func(c *service.RecoveryCodeRecord) string { return c.UserID })
@@ -811,94 +808,6 @@ func (r *Repo) ConsumeQrLoginSession(_ context.Context, nodeID string, atMs int6
 	}
 	s.Status = "consumed"
 	s.UpdatedAt = atMs
-	return nil
-}
-
-// ── SSO Sessions ──────────────────────────────────────────────────
-
-func (r *Repo) CreateSSOSession(_ context.Context, rec *service.SSOSessionRecord) (string, error) {
-	if rec == nil {
-		return "", errors.New("memory: CreateSSOSession: nil session")
-	}
-	if rec.TokenHash == "" {
-		return "", fmt.Errorf("%w: missing token_hash", service.ErrInvalidArgument)
-	}
-	if rec.UserID == "" {
-		return "", fmt.Errorf("%w: missing user_id", service.ErrInvalidArgument)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, s := range r.ssoSessions {
-		if s.TokenHash == rec.TokenHash {
-			return "", fmt.Errorf("%w: sso session token", service.ErrAlreadyExists)
-		}
-	}
-	if rec.CreatedAtMs == 0 {
-		rec.CreatedAtMs = time.Now().UnixMilli()
-	}
-	if rec.LastUsedAtMs == 0 {
-		rec.LastUsedAtMs = rec.CreatedAtMs
-	}
-	id := r.nextID()
-	rec.NodeID = id
-	cp := *rec
-	r.ssoSessions[id] = &cp
-	return id, nil
-}
-
-// FindSSOSessionByHash returns expired and revoked rows too — the caller
-// decides what an inactive session means.
-func (r *Repo) FindSSOSessionByHash(_ context.Context, tokenHash string) (*service.SSOSessionRecord, error) {
-	if tokenHash == "" {
-		return nil, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, s := range r.ssoSessions {
-		if s.TokenHash == tokenHash {
-			cp := *s
-			return &cp, nil
-		}
-	}
-	return nil, nil
-}
-
-// TouchSSOSession refuses to resurrect a revoked row, so a concurrent
-// "sign out everywhere" wins against a continue-as that raced it.
-func (r *Repo) TouchSSOSession(_ context.Context, tokenHash string, lastUsedAtMs, expiresAtMs int64) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, s := range r.ssoSessions {
-		if s.TokenHash == tokenHash && s.RevokedAtMs == 0 {
-			s.LastUsedAtMs = lastUsedAtMs
-			s.ExpiresAtMs = expiresAtMs
-		}
-	}
-	return nil
-}
-
-func (r *Repo) RevokeSSOSession(_ context.Context, tokenHash string, atMs int64) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, s := range r.ssoSessions {
-		if s.TokenHash == tokenHash && s.RevokedAtMs == 0 {
-			s.RevokedAtMs = atMs
-		}
-	}
-	return nil
-}
-
-func (r *Repo) RevokeSSOSessionsForUser(_ context.Context, userID string, atMs int64) error {
-	if userID == "" {
-		return nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, s := range r.ssoSessions {
-		if s.UserID == userID && s.RevokedAtMs == 0 {
-			s.RevokedAtMs = atMs
-		}
-	}
 	return nil
 }
 
@@ -1870,25 +1779,6 @@ func (r *Repo) DeleteExpiredQrLoginSessions(_ context.Context, beforeMs int64, l
 		}
 		if s.ExpiresAt < beforeMs {
 			delete(r.qrSessions, id)
-			n++
-		}
-	}
-	return nil
-}
-
-func (r *Repo) DeleteExpiredSSOSessions(_ context.Context, beforeMs int64, limit int) error {
-	if limit <= 0 {
-		return fmt.Errorf("memory: DeleteExpiredSSOSessions: limit must be > 0, got %d", limit)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	n := 0
-	for id, s := range r.ssoSessions {
-		if n >= limit {
-			break
-		}
-		if s.ExpiresAtMs < beforeMs {
-			delete(r.ssoSessions, id)
 			n++
 		}
 	}

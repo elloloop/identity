@@ -154,7 +154,7 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 		// calls are required — otherwise the caller keeps a working token
 		// against a subject that now bears the address they just claimed,
 		// exactly the session this gate exists to withhold.
-		s.revokeDerivedSessionsForUser(ctx, userID, "anonymous_upgrade_pending_verification")
+		s.revokeUserSessionsIfModeSession(ctx, userID, "anonymous_upgrade_pending_verification")
 		return &LoginResult{User: u}, nil
 	}
 

@@ -1058,7 +1058,7 @@ func (s *AuthService) markEmailVerifiedViaExternalProof(ctx context.Context, use
 			s.logger.Warn("email_verified_external_revoke_failed",
 				zap.String("user_id", user.ID), zap.String("method", method), zap.Error(err))
 		}
-		s.revokeDerivedSessionsForUser(ctx, user.ID, "external_email_verification")
+		s.revokeUserSessionsIfModeSession(ctx, user.ID, "external_email_verification")
 		s.logger.Info("email_verified_external_credentials_cleared",
 			zap.String("user_id", user.ID),
 			zap.String("method", method),

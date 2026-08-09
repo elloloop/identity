@@ -359,7 +359,6 @@ func (s *sweeper) targets() []nodeTypeSweeper {
 		{"qr_login_sessions", s.repo.DeleteExpiredQrLoginSessions},
 		{"user_invitations", s.repo.DeleteExpiredInvitations},
 		{"assurance_challenges", s.repo.DeleteExpiredAssuranceChallenges},
-		{"sso_sessions", s.repo.DeleteExpiredSSOSessions},
 	}
 }
 

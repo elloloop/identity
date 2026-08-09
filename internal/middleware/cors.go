@@ -111,18 +111,6 @@ func CORSMiddleware(globalOrigins []string) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// The SSO endpoints carry their own, deliberately narrower CORS
-			// contract (GATEWAY_SSO_HUB_ORIGINS, not GATEWAY_ALLOWED_ORIGINS):
-			// introspection discloses which account a browser is signed in as,
-			// so it goes to the sign-in surface only, never to every origin
-			// permitted to call the RPC API. Two middlewares writing the same
-			// headers would make the wider list win, so this one steps aside
-			// entirely and lets the handler own the decision.
-			if strings.HasPrefix(r.URL.Path, ssoPrefix) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
 			origin := r.Header.Get("Origin")
 			if origin == "" {
 				if r.Method == http.MethodOptions {

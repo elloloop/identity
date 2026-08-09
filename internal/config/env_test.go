@@ -63,10 +63,9 @@ func TestEnvTest_AllDefaults(t *testing.T) {
 		{"LoginLockoutSeconds", cfg.LoginLockoutSeconds, 900},
 		{"DefaultEmailDomain", cfg.DefaultEmailDomain, "glassa.work"},
 		{"AllowedOrigins", cfg.AllowedOrigins, "http://localhost:9002,http://localhost:3000"},
-		{"SSOEnabled", cfg.SSOEnabled, false},
-		{"SSOSessionTTLSeconds", cfg.SSOSessionTTLSeconds, DefaultSSOSessionTTLSeconds},
-		{"SSOContinueMode", cfg.SSOContinueMode, SSOContinueModeTap},
-		{"SSOHubOrigins", cfg.SSOHubOrigins, ""},
+		{"CookieDomain", cfg.CookieDomain, ""},
+		{"CookieSecure", cfg.CookieSecure, false},
+		{"CookieSameSite", cfg.CookieSameSite, "Lax"},
 		{"AuthAllowLocal", cfg.AuthAllowLocal, true},
 		{"AuthRequireVerifiedEmail", cfg.AuthRequireVerifiedEmail, true},
 		{"SMTPHost", cfg.SMTPHost, ""},
@@ -156,25 +155,21 @@ func TestEnvTest_OverrideAuthRequireVerifiedEmail(t *testing.T) {
 	}
 }
 
-func TestEnvTest_OverrideSSOEnabled(t *testing.T) {
+func TestEnvTest_OverrideCookieSecure(t *testing.T) {
 	clearGatewayEnv(t)
-	t.Setenv("GATEWAY_SSO_ENABLED", "true")
+	t.Setenv("GATEWAY_COOKIE_SECURE", "true")
 	cfg := Load()
-	if !cfg.SSOEnabled {
-		t.Errorf("SSOEnabled: got false, want true")
+	if !cfg.CookieSecure {
+		t.Errorf("CookieSecure: got false, want true")
 	}
 }
 
-func TestEnvTest_OverrideSSOContinueMode(t *testing.T) {
+func TestEnvTest_OverrideCookieSameSite(t *testing.T) {
 	clearGatewayEnv(t)
-	t.Setenv("GATEWAY_SSO_CONTINUE_MODE", SSOContinueModeSilent)
-	t.Setenv("GATEWAY_SSO_SESSION_TTL_SECONDS", "3600")
+	t.Setenv("GATEWAY_COOKIE_SAMESITE", "None")
 	cfg := Load()
-	if cfg.SSOContinueMode != SSOContinueModeSilent {
-		t.Errorf("SSOContinueMode: got %q, want %q", cfg.SSOContinueMode, SSOContinueModeSilent)
-	}
-	if cfg.SSOSessionTTLSeconds != 3600 {
-		t.Errorf("SSOSessionTTLSeconds: got %d, want 3600", cfg.SSOSessionTTLSeconds)
+	if cfg.CookieSameSite != "None" {
+		t.Errorf("CookieSameSite: got %q, want None", cfg.CookieSameSite)
 	}
 }
 
@@ -268,10 +263,10 @@ func TestEnvTest_BoolVariants_True(t *testing.T) {
 	for _, v := range []string{"true", "1", "yes", "TRUE", "True", "YES", "Yes"} {
 		t.Run("true="+v, func(t *testing.T) {
 			clearGatewayEnv(t)
-			t.Setenv("GATEWAY_SSO_ENABLED", v)
+			t.Setenv("GATEWAY_COOKIE_SECURE", v)
 			cfg := Load()
-			if !cfg.SSOEnabled {
-				t.Errorf("SSOEnabled with %q: got false, want true", v)
+			if !cfg.CookieSecure {
+				t.Errorf("CookieSecure with %q: got false, want true", v)
 			}
 		})
 	}

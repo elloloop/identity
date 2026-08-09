@@ -351,6 +351,33 @@
     "anchor": "server-and-ports"
   },
   {
+    "name": "GATEWAY_COOKIE_DOMAIN",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the Domain attribute set on auth cookies (empty = host-only).",
+    "category": "HTTP, CORS \u0026 cookies",
+    "anchor": "http-cors-and-cookies"
+  },
+  {
+    "name": "GATEWAY_COOKIE_SAMESITE",
+    "type": "string",
+    "default": "Lax",
+    "required": false,
+    "description": "is the SameSite attribute on auth cookies — \"Lax\", \"Strict\", or \"None\".",
+    "category": "HTTP, CORS \u0026 cookies",
+    "anchor": "http-cors-and-cookies"
+  },
+  {
+    "name": "GATEWAY_COOKIE_SECURE",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "sets the Secure attribute on auth cookies; enable in prod (HTTPS-only).",
+    "category": "HTTP, CORS \u0026 cookies",
+    "anchor": "http-cors-and-cookies"
+  },
+  {
     "name": "GATEWAY_DEFAULT_EMAIL_DOMAIN",
     "type": "string",
     "default": "glassa.work",
@@ -1690,42 +1717,6 @@
     "description": "is the SQLite database file path, or \":memory:\" for an ephemeral in-process database; required when RepoDriver is \"sqlite\".",
     "category": "Datastore",
     "anchor": "datastore"
-  },
-  {
-    "name": "GATEWAY_SSO_CONTINUE_MODE",
-    "type": "string",
-    "default": "tap",
-    "required": false,
-    "description": "selects what a valid SSO session buys the user: SSOContinueModeTap offers a \"Continue as \u003cemail\u003e\" card that names the account before anything is minted, SSOContinueModeSilent forwards without an interstitial.",
-    "category": "Other",
-    "anchor": "other"
-  },
-  {
-    "name": "GATEWAY_SSO_ENABLED",
-    "type": "boolean",
-    "default": "false",
-    "required": false,
-    "description": "turns on browser single sign-on at the auth origin (ADR-0014): a successful hosted authentication sets a host-locked `__Host-sso_session` cookie, and a later product asking for a session can be served from it without a second provider round trip.",
-    "category": "Other",
-    "anchor": "other"
-  },
-  {
-    "name": "GATEWAY_SSO_HUB_ORIGINS",
-    "type": "string",
-    "default": "",
-    "required": false,
-    "description": "is the comma-separated allowlist of web origins that may call GET /sso/session with credentials to render their own \"Continue as\" card (the sign-in hub is a separate origin from the auth API).",
-    "category": "Other",
-    "anchor": "other"
-  },
-  {
-    "name": "GATEWAY_SSO_SESSION_TTL_SECONDS",
-    "type": "integer",
-    "default": "7776000",
-    "required": false,
-    "description": "is the SSO session's ROLLING lifetime: each successful use re-anchors expiry at now + TTL, so an actively used browser stays signed in and an abandoned one lapses on schedule.",
-    "category": "Other",
-    "anchor": "other"
   },
   {
     "name": "GATEWAY_SWEEPER_BATCH_SIZE",

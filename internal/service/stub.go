@@ -410,30 +410,6 @@ func (StubRepository) RevokeSessionsForUser(context.Context, string, int64) erro
 	return ErrServiceUnavailable
 }
 
-func (StubRepository) CreateSSOSession(context.Context, *SSOSessionRecord) (string, error) {
-	return "", ErrServiceUnavailable
-}
-
-func (StubRepository) FindSSOSessionByHash(context.Context, string) (*SSOSessionRecord, error) {
-	return nil, ErrServiceUnavailable
-}
-
-func (StubRepository) TouchSSOSession(context.Context, string, int64, int64) error {
-	return ErrServiceUnavailable
-}
-
-func (StubRepository) RevokeSSOSession(context.Context, string, int64) error {
-	return ErrServiceUnavailable
-}
-
-func (StubRepository) RevokeSSOSessionsForUser(context.Context, string, int64) error {
-	return ErrServiceUnavailable
-}
-
-func (StubRepository) DeleteExpiredSSOSessions(context.Context, int64, int) error {
-	return ErrServiceUnavailable
-}
-
 // ── StubDB ────────────────────────────────────────────────────────────
 
 // StubDB implements DB (and audit.NodeWriter) but returns

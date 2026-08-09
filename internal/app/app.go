@@ -320,17 +320,6 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
 		{
-			// The SSO fast path: unauthenticated (JWT-exempt), and each success
-			// does two DB writes (a one-time code INSERT, an sso_sessions UPDATE)
-			// plus an audit row. Before SSO the only way to mint a one-time code
-			// was /oauth/callback, self-limited by a single-use provider code;
-			// /oauth/continue makes it repeatable at HTTP speed, outrunning the
-			// sweeper's drain budget for oauth_one_time_codes without a quota.
-			// Bound by the login budget — it is a session-minting login.
-			PathPrefix: "/oauth/continue", Tag: "sso_continue",
-			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
-		},
-		{
 			// Native mobile sign-in (Google/Apple ID-token verification) is a
 			// login surface, bound by the same per-IP login quota as OAuthLogin.
 			PathPrefix: "/identity.v1.IdentityService/NativeOAuthLogin", Tag: "native_oauth",
@@ -616,31 +605,7 @@ func New(deps Deps) (*Built, error) {
 		logger.Info("oauth_hosted_flow_disabled",
 			zap.String("hint", "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"))
 	}
-	(&hostedOAuthHandler{
-		auth:            authSvc,
-		allowlist:       returnAllow,
-		logger:          logger,
-		ssoCookieMaxAge: deps.Config.SSOSessionTTLSeconds,
-	}).register(mux)
-
-	// Browser single sign-on (ADR-0014). Off unless GATEWAY_SSO_ENABLED;
-	// /oauth/continue additionally needs the return allowlist and
-	// /sso/session needs at least one hub origin, so a partially configured
-	// deployment serves only the endpoints it can serve correctly.
-	(&ssoHandler{
-		auth:         authSvc,
-		allowlist:    returnAllow,
-		hubOrigins:   deps.Config.SSOHubOriginList(),
-		enabled:      deps.Config.SSOEnabled,
-		cookieMaxAge: deps.Config.SSOSessionTTLSeconds,
-		logger:       logger,
-	}).register(mux)
-	if deps.Config.SSOEnabled {
-		logger.Info("sso_enabled",
-			zap.Int("session_ttl_seconds", deps.Config.SSOSessionTTLSeconds),
-			zap.String("continue_mode", deps.Config.SSOContinueMode),
-			zap.Strings("hub_origins", deps.Config.SSOHubOriginList()))
-	}
+	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 
 	// Inbound SCIM 2.0 provisioning (#260). Registered only when
 	// GATEWAY_SCIM_ENABLED is true (and Validate has confirmed a bearer token

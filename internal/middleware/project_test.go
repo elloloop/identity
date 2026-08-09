@@ -254,37 +254,6 @@ func TestProjectResolver_OAuthRoute_ResolvesByQueryParam(t *testing.T) {
 	assert.Equal(t, "proj-q", cap.scope.ProjectID)
 }
 
-// A project_key query parameter on an /sso/ route resolves its project, so a
-// NON-default project's SSO session is introspectable — without this the SSO
-// endpoints resolve by host to the default project and a non-default session
-// is invisible (and the project-non-bridging guarantee is satisfied for the
-// wrong reason).
-func TestProjectResolver_SSORoute_ResolvesByQueryParam(t *testing.T) {
-	resolver := &fakeProjectResolver{
-		byKey: map[string]*service.ResolvedProject{"pk_admin": {ID: "proj-admin", StorageScopeID: "scope-admin"}},
-	}
-	rec, cap := serve(t, resolver, defProjectID, defScopeID, func(r *http.Request) {
-		r.URL.Path = "/sso/session"
-		r.URL.RawQuery = "project_key=pk_admin"
-	})
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.NotNil(t, cap.scope)
-	assert.Equal(t, "proj-admin", cap.scope.ProjectID)
-}
-
-// With no key, an /sso/ route resolves to the default project (the consumer
-// hub case), NOT to some other project.
-func TestProjectResolver_SSORoute_NoKeyPinsDefault(t *testing.T) {
-	rec, cap := serve(t, &fakeProjectResolver{}, defProjectID, defScopeID, func(r *http.Request) {
-		r.URL.Path = "/sso/session"
-	})
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.NotNil(t, cap.scope)
-	assert.Equal(t, defProjectID, cap.scope.ProjectID)
-}
-
 // The plaintext project-key prefix of a composite OAuth state resolves its
 // project on the callback route.
 func TestProjectResolver_OAuthRoute_ResolvesByStatePrefix(t *testing.T) {

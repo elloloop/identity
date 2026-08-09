@@ -1317,18 +1317,13 @@ func TestProfileService_RevokeAllSessions_UserNotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
-// A password-less account (OAuth / email-code — the population that actually
-// gets an SSO session) can sign out everywhere WITHOUT a password: the
-// authenticated call is the confirmation. Requiring a password it never had
-// would make the feature unreachable for exactly those users.
 func TestProfileService_RevokeAllSessions_NoPasswordSet(t *testing.T) {
 	db := newFakeDB()
 	db.addUser("user-1", "x@test.com", "X", "member", "active")
 	svc := newTestProfileService(db)
 
-	count, err := svc.RevokeAllSessions(context.Background(), "user-1", "")
-	require.NoError(t, err)
-	require.Equal(t, 0, count)
+	_, err := svc.RevokeAllSessions(context.Background(), "user-1", "anything")
+	require.Error(t, err)
 }
 
 func TestProfileService_ListMyPasskeys_EmptyUserID(t *testing.T) {
