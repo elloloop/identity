@@ -1,0 +1,63 @@
+name: PR Compliance
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: pr-compliance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  compliance:
+    name: PR Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # Bots (dependabot) follow their own conventions; drafts are still being
+    # written. Everyone else gets a failing check, which blocks the merge.
+    if: >-
+      github.event.pull_request.draft == false &&
+      !contains(fromJSON('["dependabot[bot]","renovate[bot]","github-actions[bot]"]'), github.actor)
+    steps:
+      - name: Check title and body conventions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          fail=0
+          err() { echo "::error::$1"; fail=1; }
+
+          title=$(gh pr view "$PR_NUMBER" --json title --jq .title)
+          body=$(gh pr view "$PR_NUMBER" --json body --jq .body)
+
+          # The PR title becomes the squash-merge commit message on main.
+          if ! grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|deps)(\([a-z0-9._/-]+\))?!?: .+' <<<"$title"; then
+            err "PR title must be a conventional commit, e.g. 'fix(auth): reject expired tokens'. Got: $title"
+          fi
+
+          # Template guidance lives in HTML comments; strip it so it doesn't
+          # count as content.
+          stripped=$(perl -0777 -pe 's/<!--.*?-->//gs' <<<"$body")
+
+          summary=$(awk '/^## Summary/{f=1;next} /^## /{f=0} f' <<<"$stripped" | grep -vE '^[[:space:]]*(Closes|Fixes|Resolves) #' || true)
+          if ! grep -q '[^[:space:]]' <<<"$summary"; then
+            err "The '## Summary' section is empty. Describe what changes and why."
+          fi
+
+          if ! grep -qE '^- \[[xX]\]' <<<"$body"; then
+            err "Tick at least one checkbox under '## Test plan'. Tests are part of the change (AGENTS.md §7)."
+          fi
+
+          if grep -qEi '^[[:space:]]*(closes|fixes|resolves)[[:space:]]+#[[:space:]]*$' <<<"$body"; then
+            err "'Closes #' has no issue number. Fill it in or delete the line."
+          fi
+
+          if [ "$fail" -eq 0 ]; then
+            echo "PR title and body conventions OK."
+          fi
+          exit "$fail"

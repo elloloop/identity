@@ -1,0 +1,55 @@
+name: Stale
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    name: Mark and close inactive issues and PRs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # General inactivity sweep. Any comment removes the stale label.
+      # needs-info issues are exempt here — the closer below handles them.
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          days-before-issue-stale: 30
+          days-before-issue-close: 7
+          days-before-pr-stale: 45
+          days-before-pr-close: 14
+          stale-issue-label: stale
+          stale-pr-label: stale
+          exempt-issue-labels: needs-info,launch-blocking,pinned,security
+          exempt-pr-labels: dependencies,pinned,security
+          exempt-draft-pr: true
+          stale-issue-message: >
+            This issue has been quiet for 30 days and is marked stale.
+            Comment to keep it open; otherwise it closes in 7 days.
+          stale-pr-message: >
+            This pull request has been quiet for 45 days and is marked stale.
+            Push an update or comment to keep it open; otherwise it closes in 14 days.
+          close-issue-message: >
+            Closing for inactivity. Comment and this can be reopened.
+          close-pr-message: >
+            Closing for inactivity. Reopen, or open a fresh PR when ready.
+
+      # needs-info loop: once a maintainer asks for details, the reporter has
+      # 14 days. A response removes the label (needs-info-response.yml) and
+      # takes the issue out of this sweep; silence marks + closes it.
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          days-before-issue-stale: 14
+          days-before-issue-close: 0
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          any-of-issue-labels: needs-info
+          stale-issue-label: stale
+          close-issue-message: >
+            Closing: the requested information was not provided within 14 days.
+            Open a fresh issue with the details if this is still a problem.
