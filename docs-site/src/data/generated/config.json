@@ -795,7 +795,7 @@
     "name": "GATEWAY_OAUTH_ALLOWED_RETURN_URLS",
     "type": "string",
     "default": "",
-    "required": false,
+    "required": true,
     "description": "is the comma-separated allowlist of app URLs the hosted OAuth flow may redirect back to (the `return_to` param of GET /oauth/start/{provider}).",
     "category": "OAuth",
     "anchor": "oauth"
@@ -1717,6 +1717,33 @@
     "description": "is the SQLite database file path, or \":memory:\" for an ephemeral in-process database; required when RepoDriver is \"sqlite\".",
     "category": "Datastore",
     "anchor": "datastore"
+  },
+  {
+    "name": "GATEWAY_SSO_CONTINUE_MODE",
+    "type": "string",
+    "default": "silent",
+    "required": false,
+    "description": "selects the continue-as UX: \"silent\" validates the SSO session and immediately 302-redirects with the one-time code; \"one_tap\" first renders a confirmation page and mints the code only on the confirming POST.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_SSO_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "turns on cross-product SSO: a successful authentication at the auth origin (the hosted OAuth callback) additionally mints a server-side SSO session — opaque token, SHA-256 hashed at rest — and sets it as a `__Host-`-prefixed httpOnly Secure cookie on the auth origin only.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_SSO_SESSION_TTL_SECONDS",
+    "type": "integer",
+    "default": "28800",
+    "required": false,
+    "description": "is the SSO session's absolute lifetime in seconds (no sliding renewal: the session dies at TTL from the original authentication and the user re-authenticates).",
+    "category": "Other",
+    "anchor": "other"
   },
   {
     "name": "GATEWAY_SWEEPER_BATCH_SIZE",
