@@ -143,18 +143,17 @@ func (s *AuthService) UpgradeAnonymousWithPassword(
 		}
 		// The anonymous session is deliberately revoked with the promotion:
 		// leaving it live would return exactly the session this gate exists
-		// to withhold, just under the previous credential.
-		if err := s.repo(ctx).DeleteRefreshTokensForUser(ctx, userID); err != nil {
+		// to withhold, just under the previous credential. Refresh tokens
+		// alone do NOT end the session: under
+		// GATEWAY_REVOCATION_MODE=session the access token's lifetime is
+		// uncapped and it is revocable only through its Session row, and an
+		// SSO session would keep offering continue-as — the shared helper
+		// kills all three stores, or the caller keeps a working credential
+		// against a subject that now bears the address they just claimed.
+		if err := revokeDerivedSessionsForUser(ctx, s.repo(ctx), userID, s.nowMs()); err != nil {
 			s.logger.Warn("anonymous_upgrade_session_revoke_failed",
 				zap.String("user_id", userID), zap.Error(err))
 		}
-		// Deleting refresh tokens alone does NOT end the session. Under
-		// GATEWAY_REVOCATION_MODE=session the access token's lifetime is
-		// uncapped and it is revocable only through its Session row, so both
-		// calls are required — otherwise the caller keeps a working token
-		// against a subject that now bears the address they just claimed,
-		// exactly the session this gate exists to withhold.
-		s.revokeUserSessionsIfModeSession(ctx, userID, "anonymous_upgrade_pending_verification")
 		return &LoginResult{User: u}, nil
 	}
 

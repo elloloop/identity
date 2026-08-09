@@ -1322,8 +1322,11 @@ func TestProfileService_RevokeAllSessions_NoPasswordSet(t *testing.T) {
 	db.addUser("user-1", "x@test.com", "X", "member", "active")
 	svc := newTestProfileService(db)
 
-	_, err := svc.RevokeAllSessions(context.Background(), "user-1", "anything")
-	require.Error(t, err)
+	// An OAuth-only account has no password to confirm with; the caller's
+	// valid access token is the confirmation, so sign-out-everywhere must
+	// proceed without one.
+	_, err := svc.RevokeAllSessions(context.Background(), "user-1", "")
+	require.NoError(t, err)
 }
 
 func TestProfileService_ListMyPasskeys_EmptyUserID(t *testing.T) {

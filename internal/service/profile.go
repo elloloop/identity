@@ -216,13 +216,13 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 	return nil
 }
 
-// RevokeAllSessions revokes every session for the user. Requires
-// password confirmation.
+// RevokeAllSessions revokes every session for the user, across every
+// session store (refresh tokens and SSO sessions). Requires password
+// confirmation — except for an account with no password credential
+// (OAuth-only): there is no password to confirm with, so the valid access
+// token the caller already presented is the confirmation. Refusing would
+// lock a password-less account out of sign-out-everywhere entirely.
 func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password string) (int, error) {
-	if password == "" {
-		return 0, errors.New("password confirmation required")
-	}
-
 	userNode, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(userID), typeUser, userID)
 	if err != nil {
 		return 0, fmt.Errorf("fetch user: %w", err)
@@ -230,9 +230,13 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 	if userNode == nil {
 		return 0, errors.New("user not found")
 	}
-	pwHash := pstr(userNode.Payload, ufPasswordHash)
-	if pwHash == "" || !passwords.Verify(password, pwHash) {
-		return 0, errors.New("invalid password")
+	if pwHash := pstr(userNode.Payload, ufPasswordHash); pwHash != "" {
+		if password == "" {
+			return 0, errors.New("password confirmation required")
+		}
+		if !passwords.Verify(password, pwHash) {
+			return 0, errors.New("invalid password")
+		}
 	}
 
 	count, err := s.revokeAllUserSessions(ctx, userID)
@@ -257,6 +261,10 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 // ChangePassword (credential change forces re-auth everywhere). The
 // caller is responsible for any access-control/audit concerns; this
 // helper only performs the revocation.
+//
+// SSO sessions live in the data-plane Repository, not the graph store, so
+// they are revoked through it separately — sign-out-everywhere must kill
+// ALL session stores, or a leftover continue-as cookie would survive it.
 func (s *ProfileService) revokeAllUserSessions(ctx context.Context, userID string) (int, error) {
 	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), tenantAdminActor, typeRefreshToken,
 		map[string]any{rfUserID: userID})
@@ -272,6 +280,19 @@ func (s *ProfileService) revokeAllUserSessions(ctx context.Context, userID strin
 			continue
 		}
 		count++
+	}
+
+	if repo := s.repo(ctx); repo != nil {
+		if err := repo.RevokeSSOSessionsForUser(ctx, userID); err != nil {
+			s.logger.Warn("revoke_sso_sessions_failed", zap.String("user_id", userID), zap.Error(err))
+		} else {
+			s.audit.Log(
+				ctx, audit.EventSessionRevoked,
+				audit.WithActor(userID), audit.WithTarget(userID),
+				audit.WithSuccess(true),
+				audit.WithDetails(map[string]any{"store": "sso_sessions", "scope": "all"}),
+			)
+		}
 	}
 	return count, nil
 }

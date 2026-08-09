@@ -283,7 +283,7 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 		return fmt.Errorf("deactivate user: %w", err)
 	}
 
-	if err := revokeAllUserSessions(ctx, s.repo(ctx), targetUserID, now); err != nil {
+	if err := revokeDerivedSessionsForUser(ctx, s.repo(ctx), targetUserID, now); err != nil {
 		return fmt.Errorf("deactivate user: %w", err)
 	}
 

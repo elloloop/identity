@@ -1944,20 +1944,18 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	if record.ConsumedAtMs > 0 {
 		// Refresh-token reuse detection (OAuth 2.1 §4.13): the row exists
 		// but has already been rotated. Treat as a stolen token and
-		// revoke ALL refresh tokens for that user — even the legitimate
-		// user will be forced to re-authenticate.
+		// revoke ALL derived sessions for that user — refresh tokens, the
+		// mode=session access rows (without which an attacker who
+		// triggered the replay still holds a live JWT until its natural
+		// expiry; the bug the two-mode contract exists to fix, see
+		// docs/IDENTITY.md decision log §6), and SSO sessions. Even the
+		// legitimate user will be forced to re-authenticate.
 		userID := record.UserID
 		s.logger.Warn("refresh_token_replay_detected", zap.String("user_id", userID))
-		if delErr := s.repo(ctx).DeleteRefreshTokensForUser(ctx, userID); delErr != nil {
+		if err := revokeDerivedSessionsForUser(ctx, s.repo(ctx), userID, s.nowMs()); err != nil {
 			s.logger.Warn("refresh_token_replay_revoke_failed",
-				zap.String("user_id", userID), zap.Error(delErr))
+				zap.String("user_id", userID), zap.Error(err))
 		}
-		// In mode=session the existing replay-detection path also
-		// kills the access tokens — without this step, an attacker
-		// who triggered the replay still holds a live JWT until its
-		// natural expiry (the bug the two-mode contract exists to
-		// fix; see docs/IDENTITY.md decision log §6).
-		s.revokeUserSessionsIfModeSession(ctx, userID, "refresh_token_replay")
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
