@@ -1,0 +1,46 @@
+name: Labeler
+
+on:
+  # pull_request_target runs with the base repo's token so fork PRs get
+  # labeled too. It never checks out PR code, so this is safe.
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    name: Apply path and size labels
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+        with:
+          sync-labels: true
+
+      - name: Apply size label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ADDITIONS: ${{ github.event.pull_request.additions }}
+          DELETIONS: ${{ github.event.pull_request.deletions }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          total=$((ADDITIONS + DELETIONS))
+          if   [ "$total" -lt 10 ];   then size=XS
+          elif [ "$total" -lt 100 ];  then size=S
+          elif [ "$total" -lt 300 ];  then size=M
+          elif [ "$total" -lt 1000 ]; then size=L
+          else                             size=XL
+          fi
+          gh pr edit "$PR_NUMBER" \
+            --remove-label size/XS --remove-label size/S --remove-label size/M \
+            --remove-label size/L --remove-label size/XL 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --add-label "size/$size"
+          echo "PR size: $size ($total changed lines)"

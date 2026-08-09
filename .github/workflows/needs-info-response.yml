@@ -1,0 +1,27 @@
+name: Needs-info response
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  unlabel:
+    name: Remove needs-info when the author responds
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # The label gates the auto-close sweep in stale.yml; a reply from the
+    # issue/PR author means the ball is back in the maintainer's court.
+    if: >-
+      github.event.comment.user.login == github.event.issue.user.login &&
+      contains(github.event.issue.labels.*.name, 'needs-info')
+    steps:
+      - name: Remove needs-info label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: gh issue edit "$ISSUE_NUMBER" --remove-label needs-info

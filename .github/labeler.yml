@@ -1,0 +1,39 @@
+# Path-based labels applied by .github/workflows/labeler.yml.
+# Config format for actions/labeler v5+; see
+# https://github.com/actions/labeler#match-object
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - docs-site/**
+          - '**/*.md'
+
+proto:
+  - changed-files:
+      - any-glob-to-any-file:
+          - proto/**
+          - gen/**
+          - buf*.yaml
+
+storage:
+  - changed-files:
+      - any-glob-to-any-file:
+          - internal/repo/**
+
+auth:
+  - changed-files:
+      - any-glob-to-any-file:
+          - internal/service/auth*.go
+          - internal/service/admin*.go
+          - internal/middleware/**
+          - pkg/oauth/**
+          - pkg/passkeys/**
+          - pkg/jwt/**
+          - pkg/passwords/**
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+          - scripts/**

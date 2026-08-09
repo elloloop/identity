@@ -54,6 +54,11 @@ updates:
       actions:
         patterns:
           - "*"
+        # Major action bumps get deliberate review (AGENTS.md §10); keeping
+        # them out of the group also keeps them out of auto-merge.
+        update-types:
+          - minor
+          - patch
 
   # Docker base image — keep server image base current.
   - package-ecosystem: docker

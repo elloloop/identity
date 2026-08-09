@@ -21,6 +21,7 @@ Closes #
 How did you verify this works? Be specific.
 For bug fixes: include a regression test in the diff and reference it here.
 For features: list the tests you added (unit / integration / realpostgres).
+If none apply (docs/CI-only changes): leave the boxes unticked and write N/A with a reason.
 -->
 
 - [ ] Added or updated unit tests
