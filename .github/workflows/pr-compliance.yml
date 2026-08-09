@@ -51,8 +51,8 @@ jobs:
           fi
 
           testplan=$(awk '/^## Test plan/{f=1;next} /^## /{f=0} f' <<<"$stripped")
-          if ! grep -qE '^- \[[xX]\]' <<<"$testplan"; then
-            err "Tick at least one checkbox under '## Test plan'. Tests are part of the change (AGENTS.md §7)."
+          if ! grep -qE '^- \[[xX]\]' <<<"$testplan" && ! grep -qiE '(^|[^a-z])n/?a([^a-z]|$)' <<<"$testplan"; then
+            err "Tick at least one checkbox under '## Test plan', or write N/A with a reason. Tests are part of the change (AGENTS.md §7)."
           fi
 
           if grep -qEi '^[[:space:]]*(closes|fixes|resolves)[[:space:]]+#[[:space:]]*$' <<<"$body"; then
