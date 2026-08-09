@@ -153,6 +153,11 @@ func ssoCookieFromJar(t *testing.T, h *Harness, client *http.Client) *http.Cooki
 // product (nesta web) get its own session with no provider round trip.
 func TestE2E_SSO_SecondProductSkipsTheProvider(t *testing.T) {
 	t.Parallel()
+	// signOutEverywhere below reaches ProfileService.RevokeAllSessions →
+	// s.db.QueryNodes, the graph read path only the postgres driver implements;
+	// on memory/sqlite the RPC 500s. Self-skip there, like the other
+	// sign-out-everywhere e2e case.
+	requireGraphDB(t)
 	const userEmail = "sso-e2e@example.com"
 	h := startSSOServer(t, userEmail)
 	browser := browserClient(t, h)

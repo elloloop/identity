@@ -37,7 +37,11 @@ type ssoHandler struct {
 	allowlist  service.ReturnAllowlist
 	hubOrigins []string
 	enabled    bool
-	logger     *zap.Logger
+	// cookieMaxAge is the browser-side lifetime re-stamped on every successful
+	// continue, so the cookie's expiry ROLLS with the server row's rather than
+	// dropping at establish + TTL regardless of activity.
+	cookieMaxAge int
+	logger       *zap.Logger
 }
 
 // register wires the SSO routes. Each is registered only when the thing it
@@ -167,6 +171,11 @@ func (h *ssoHandler) handleContinue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-stamp the cookie so its browser-side expiry rolls forward with the
+	// server row ContinueSSOSession just touched. Without this the cookie would
+	// still drop at establish + TTL no matter how actively the browser is used,
+	// making the "rolling" lifetime a hard cap in practice.
+	http.SetCookie(w, newSSOSessionCookie(cookie.Value, h.cookieMaxAge))
 	// #nosec G710 -- returnTo passed the GATEWAY_OAUTH_ALLOWED_RETURN_URLS
 	// allowlist above; it is not raw request input.
 	http.Redirect(w, r, appendQueryParam(result.ReturnTo, "code", result.Code), http.StatusFound)
@@ -223,7 +232,12 @@ func (h *ssoHandler) handleSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		// X-Project-Key lets a hub for a NON-default project name it on the
+		// introspection request (the resolver reads it via the /sso/ query-param
+		// path too; the header is the cross-origin channel). Without it here the
+		// browser blocks the preflight and a non-default project's session can
+		// never be introspected. Content-Type is retained for a JSON-typed GET.
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Project-Key")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}

@@ -207,6 +207,17 @@ func TestSSOHTTP_ContinueRedirectsWithFreshCode(t *testing.T) {
 	if loc.Query().Get("code") == "" {
 		t.Fatal("continue redirect carried no one-time code")
 	}
+
+	// The cookie is re-stamped so its browser-side expiry rolls with the server
+	// row; otherwise an active browser's cookie would still drop at establish +
+	// TTL regardless of use.
+	rolled := findCookie(rr.Result().Cookies(), ssoSessionCookieName)
+	if rolled == nil || rolled.MaxAge != 3600 {
+		t.Fatalf("continue must re-stamp the cookie with a fresh MaxAge, got %#v", rolled)
+	}
+	if rolled.Value != cookie.Value {
+		t.Fatalf("the re-stamped cookie must keep the same value, got %q", rolled.Value)
+	}
 }
 
 // return_to is allowlisted before anything else happens, exactly as at

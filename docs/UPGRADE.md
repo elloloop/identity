@@ -14,9 +14,16 @@ exactly as in v4.1.
 
 **Migrations** (postgres 0029, sqlite 0014), applied with
 `identity migrate`, add the `sso_sessions` table. It is a new, initially
-empty table with its own indexes and (on postgres) the usual RLS triad, so
-the migration takes no lock on existing data and is safe to run ahead of
-the deploy.
+empty table, so no data is scanned or rewritten.
+
+> One lock to know about: `sso_sessions` declares foreign keys to `users`
+> and `projects`, and since PostgreSQL 9.5 adding a foreign key takes a
+> `SHARE ROW EXCLUSIVE` lock on the REFERENCED tables — it briefly blocks
+> INSERT/UPDATE/DELETE (but not SELECT) on `users` and `projects`, and the
+> DDL itself queues behind any in-flight write transaction on them. Because
+> the new table is empty there is no validation scan, so in the normal case
+> this is milliseconds; on a busy deployment, set a `lock_timeout` and run
+> it in a quiet window rather than assuming it is free.
 
 **One behaviour change that lands whether or not you enable SSO:**
 `RevokeAllSessions` / `SignOutEverywhere` and `ChangePassword` now also

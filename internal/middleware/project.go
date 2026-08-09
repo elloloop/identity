@@ -110,6 +110,16 @@ func (pr *ProjectResolver) resolve(w http.ResponseWriter, r *http.Request) (*ser
 			}
 		case strings.HasPrefix(r.URL.Path, authUIPathPrefix):
 			key = r.URL.Query().Get(ProjectKeyParam)
+		case strings.HasPrefix(r.URL.Path, ssoPathPrefix):
+			// The browser SSO endpoints (/sso/session, /sso/logout) are reached
+			// by the sign-in hub, which cannot set the header on a cross-origin
+			// fetch without a preflight — so a non-default project passes its
+			// key in the query, exactly as the hosted auth UI does. Without
+			// this an SSO session established in project B would be invisible to
+			// /sso/session (it resolves by host to the default project), and the
+			// project-non-bridging guarantee would be trivially satisfied for the
+			// wrong reason.
+			key = r.URL.Query().Get(ProjectKeyParam)
 		}
 	}
 	if key != "" && pr.resolver != nil {
@@ -180,6 +190,10 @@ const (
 	// central hub. These are the only routes a key arrives without the header.
 	oauthPathPrefix  = "/oauth/"
 	authUIPathPrefix = "/auth/"
+	// ssoPathPrefix scopes query-only project-key extraction to the browser
+	// SSO endpoints (/sso/session, /sso/logout), which the sign-in hub reaches
+	// cross-origin and cannot header without a preflight.
+	ssoPathPrefix = "/sso/"
 )
 
 // oauthProjectKey extracts the project key a hosted OAuth request carries in

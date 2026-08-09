@@ -83,16 +83,24 @@ cross-check `CompleteHostedOAuth` already performs on `claims.ProjectID`.
 **Rolling lifetime.** `expires_at_ms` is re-anchored at `now + TTL` on each
 successful use (`GATEWAY_SSO_SESSION_TTL_SECONDS`, default 90 days). There
 is deliberately no second "absolute cap" knob: one lifetime setting, and an
-abandoned session dies on schedule.
+abandoned session dies on schedule. The rolling applies to BOTH sides — the
+server row's `expires_at_ms` and the browser cookie's `Max-Age` are both
+re-stamped on each `/oauth/continue`, so an active browser genuinely stays
+signed in rather than the cookie silently dropping at establish + TTL.
 
 ### 3. The fast path re-mints; it never re-uses
 
-When `/oauth/start` (or the hosted sign-in page) sees a valid SSO session it
-renders **"Continue as \<email\>"** with **"Use a different account"** beside
-it. Continuing does *not* produce tokens directly. It ends exactly where
-`CompleteHostedOAuth` ends: by minting the existing single-use `?code=` and
-redirecting to `return_to`. The product redeems it with the unchanged
-`RedeemOAuthCode` RPC, which mints the pair.
+The sign-in surface — the operator's separate-origin hub (e.g.
+`accounts.tinykite.co`), NOT `/oauth/start` — asks `GET /sso/session` whether
+this browser has a session and, if so, renders **"Continue as \<email\>"** with
+**"Use a different account"** beside it. `/oauth/start` itself is untouched by
+this design and always bounces to the provider; the hub is the client that
+implements the card, so this is a client change, not free for a bare
+deployment. Continuing navigates to `GET /oauth/continue`, which does *not*
+produce tokens directly. It ends exactly where `CompleteHostedOAuth` ends: by
+minting the existing single-use `?code=` and redirecting to `return_to`. The
+product redeems it with the unchanged `RedeemOAuthCode` RPC, which mints the
+pair.
 
 That is the load-bearing structural choice in this ADR. Because the fast
 path terminates at the one-time code, **every property of token issuance is
@@ -134,8 +142,16 @@ turned 2FA on.
 | Surface | Effect |
 |---|---|
 | `Logout` (per product) | That product's refresh token, and its access session under `mode=session`. **The SSO session is untouched.** Unchanged behaviour for every existing caller. |
-| `RevokeAllSessions` / `SignOutEverywhere` | Every refresh token and session for the user **and every SSO session for the user**, and the cookie is cleared on the response when the call arrives with one. |
-| `ChangePassword` | Already revoked every session; now revokes SSO sessions too, via the same shared helper. |
+| `RevokeAllSessions` / `SignOutEverywhere` (RPC) | Every refresh token and session for the user **and every SSO session for the user**. Called cross-origin with credentials omitted, so it can only REVOKE the row — the row being revoked makes any surviving cookie introspect as signed-out. It cannot see or delete the `__Host-` cookie itself; that is `GET /sso/logout`'s job (next row). |
+| `GET /sso/logout` (browser) | The same-origin counterpart: a top-level navigation carries the cookie, so it revokes that session AND deletes the cookie, then redirects to an allowlisted `return_to`. This is the surface that gives `EndSSOSession` a caller and actually clears the cookie. |
+| `ChangePassword`, and every other credential-kill path (password reset, email change, replay detection, account deletion) | Revoke the user's SSO sessions too, via the shared `revokeDerivedSessionsForUser` / `revokeAllUserSessions` helpers — a voided credential must not leave a live fast path. |
+
+**`SignOutEverywhere` works for password-less accounts.** SSO sessions exist
+only for accounts that completed a hosted OAuth round trip, and those often
+have no password. So the RPC requires a password only when the account HAS
+one; otherwise the authenticated call is the confirmation. Requiring a
+password the account never set would make the one control that ends a
+shared-browser session unreachable for exactly the users who need it.
 
 Per-product sign-out leaving SSO alive is the deliberate, familiar model:
 signing out of one app is not signing out of the account, and exactly one
@@ -165,9 +181,13 @@ single-user can set `silent`.
 
 ## Consequences
 
-- **Positive.** Products get SSO with no client change: any surface that
-  already redirects to `/oauth/start` benefits, including native apps whose
-  hub round trip runs in the system browser's (non-ephemeral) cookie jar.
+- **Positive, with one client change.** The sign-in HUB implements the card
+  (`GET /sso/session` + a link to `/oauth/continue`) — that is the one piece
+  of new client code. Everything BEHIND the hub is free: any product that
+  already redirects users to the hub benefits with no change of its own,
+  including native apps whose hub round trip runs in the system browser's
+  (non-ephemeral) cookie jar. `/oauth/start` is untouched and gains no SSO
+  branch; a deployment with no separate hub sees no card.
 - **Positive.** No new token-minting path. The blast radius of this feature
   stops at "which code path decides to mint a one-time code"; everything
   downstream of the code is the pre-existing, already-tested flow.
