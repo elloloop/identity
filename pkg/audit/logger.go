@@ -128,6 +128,17 @@ const (
 	EventAccountDeletionCancelled EventType = "account_deletion_cancelled"
 	EventAdminResetPassword       EventType = "admin_reset_password"
 	EventOAuthLogin               EventType = "oauth_login"
+
+	// EventSSOSessionStarted records a browser establishing a single
+	// sign-on session at the auth origin (ADR-0014); its details carry the
+	// login method that established it. EventSSOSessionContinued records
+	// that session being spent to sign into a product without a provider
+	// round trip. The pair is what makes an SSO deployment auditable: one
+	// "started" and every product entry it went on to authorize, so a user
+	// reviewing their history sees the sign-ins they never typed a password
+	// for rather than an unexplained gap.
+	EventSSOSessionStarted   EventType = "sso_session_started"
+	EventSSOSessionContinued EventType = "sso_session_continued"
 	EventQrLoginApproved          EventType = "qr_login_approved"
 	EventQrLoginRejected          EventType = "qr_login_rejected"
 	EventAdminHelpRequested       EventType = "admin_help_requested"

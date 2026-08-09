@@ -1058,6 +1058,19 @@ var (
 	// to CodeUnauthenticated so replays and expiries look identical to a
 	// brute-force attacker.
 	ErrOAuthCodeInvalid = errors.New("oauth one-time code is invalid or already used")
+	// ErrSSOSessionInvalid is returned when a browser presents no SSO
+	// cookie, or one that is unknown, expired, revoked, or belongs to a
+	// different project. All of those mean the same thing to the caller —
+	// no fast path, take the full sign-in flow — and they are deliberately
+	// indistinguishable so the endpoint cannot be used to probe which
+	// cookie values exist.
+	ErrSSOSessionInvalid = errors.New("sso session is invalid or expired")
+	// ErrSSOSecondFactorRequired is returned when a valid SSO session
+	// belongs to an account that still owes a second factor. A
+	// challenge/response cannot be completed inside a redirect handler, and
+	// a months-old cookie must not stand in for the factor, so the caller
+	// falls back to the full sign-in flow.
+	ErrSSOSecondFactorRequired = errors.New("sso session requires a second factor")
 	// ErrEmailLoginCodeInvalid is returned when a passwordless OTP is
 	// missing, expired, already consumed, the wrong code, or has exhausted
 	// its attempt budget. The Connect handler maps it to
