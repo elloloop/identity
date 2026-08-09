@@ -605,7 +605,26 @@ func New(deps Deps) (*Built, error) {
 		logger.Info("oauth_hosted_flow_disabled",
 			zap.String("hint", "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"))
 	}
-	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
+	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger, ssoSessionTTL: deps.Config.SSOSessionTTLSeconds}).register(mux)
+
+	// Cross-product SSO continue-as. Registered only when
+	// GATEWAY_SSO_ENABLED is true (Validate has confirmed the return
+	// allowlist is non-empty in that posture); a default-off deployment
+	// registers no route, so /sso/continue 404s.
+	if deps.Config.SSOEnabled {
+		logger.Info("sso_continue_enabled", zap.String("continue_mode", deps.Config.SSOContinueMode))
+	} else {
+		logger.Info("sso_continue_disabled",
+			zap.String("hint", "set GATEWAY_SSO_ENABLED=true to enable GET /sso/continue"))
+	}
+	(&ssoHandler{
+		auth:         authSvc,
+		allowlist:    returnAllow,
+		logger:       logger,
+		enabled:      deps.Config.SSOEnabled,
+		continueMode: deps.Config.SSOContinueMode,
+		sessionTTL:   deps.Config.SSOSessionTTLSeconds,
+	}).register(mux)
 
 	// Inbound SCIM 2.0 provisioning (#260). Registered only when
 	// GATEWAY_SCIM_ENABLED is true (and Validate has confirmed a bearer token

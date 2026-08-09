@@ -508,6 +508,7 @@ func TestSweeperTargetsCoverEveryRepositorySweep(t *testing.T) {
 		"email_change_tokens",
 		"login_challenges",
 		"oauth_one_time_codes",
+		"sso_sessions",
 		"native_token_redemptions",
 		"email_login_codes",
 		"magic_link_tokens",

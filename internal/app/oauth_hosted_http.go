@@ -31,6 +31,9 @@ type hostedOAuthHandler struct {
 	auth      *service.AuthService
 	allowlist service.ReturnAllowlist
 	logger    *zap.Logger
+	// ssoSessionTTL is the SSO cookie's MaxAge in seconds, used only when
+	// the callback result carries an SSO session token (SSO enabled).
+	ssoSessionTTL int
 }
 
 const (
@@ -168,6 +171,11 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 		maxAge = -1
 	}
 	http.SetCookie(w, hostedOAuthCSRFCookie(provider, remainingCSRFTokens, maxAge))
+	// With SSO on, the completed login also establishes the auth origin's
+	// cross-product SSO session cookie (continue-as fast path).
+	if result.SSOSession != "" {
+		http.SetCookie(w, ssoSessionCookie(result.SSOSession, h.ssoSessionTTL))
+	}
 	// #nosec G710 -- result.ReturnTo is recovered from the signed,
 	// tamper-proof hosted state token whose return_to was validated
 	// against the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist at /start

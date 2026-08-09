@@ -106,14 +106,22 @@ var AuthExemptPaths = map[string]bool{
 // than per-exact-path (the {provider} segment varies).
 const hostedOAuthPrefix = "/oauth/"
 
+// ssoPathPrefix is the path prefix for the browser-facing cross-product
+// continue-as route (GET/POST /sso/continue). Unauthenticated by design,
+// like the hosted OAuth routes — the SSO cookie is the credential.
+const ssoPathPrefix = "/sso/"
+
 // authUIPrefix is the path prefix for the embedded UI static files.
 const authUIPrefix = "/auth/"
 
 // isAuthExempt reports whether path bypasses JWT enforcement: either an
 // exact-match entry in AuthExemptPaths or any path under the hosted
-// OAuth prefix or the auth UI prefix.
+// OAuth prefix, the SSO prefix, or the auth UI prefix.
 func isAuthExempt(path string) bool {
-	return AuthExemptPaths[path] || strings.HasPrefix(path, hostedOAuthPrefix) || strings.HasPrefix(path, authUIPrefix)
+	return AuthExemptPaths[path] ||
+		strings.HasPrefix(path, hostedOAuthPrefix) ||
+		strings.HasPrefix(path, ssoPathPrefix) ||
+		strings.HasPrefix(path, authUIPrefix)
 }
 
 // AuthMiddleware verifies JWT Bearer tokens on non-exempt paths and injects the
