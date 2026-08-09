@@ -96,6 +96,10 @@ func (m *mockSweepRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, b int6
 	return m.sweep(b, l)
 }
 
+func (m *mockSweepRepo) DeleteExpiredSSOSessions(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
 func (m *mockSweepRepo) DeleteExpiredNativeTokenRedemptions(_ context.Context, b int64, l int) error {
 	return m.sweep(b, l)
 }

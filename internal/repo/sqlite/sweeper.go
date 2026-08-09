@@ -59,6 +59,10 @@ func (r *sqliteRepository) DeleteExpiredOAuthOneTimeCodes(ctx context.Context, b
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredOAuthOneTimeCodes", "oauth_one_time_codes", beforeMs, limit)
 }
 
+func (r *sqliteRepository) DeleteExpiredSSOSessions(ctx context.Context, beforeMs int64, limit int) error {
+	return r.deleteExpiredBatch(ctx, "DeleteExpiredSSOSessions", "sso_sessions", beforeMs, limit)
+}
+
 func (r *sqliteRepository) DeleteExpiredNativeTokenRedemptions(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredNativeTokenRedemptions", "native_token_redemptions", beforeMs, limit)
 }

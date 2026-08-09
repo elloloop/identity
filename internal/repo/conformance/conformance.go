@@ -958,6 +958,99 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("SSOSession_CreateGetByHash", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "sso-get@example.com")
+			id, err := r.CreateSSOSession(ctx, &service.SSOSessionRecord{
+				TokenHash: "sso-hash-1", UserID: userID, ProjectID: "proj",
+				LoginMethod: "oauth", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if id == "" {
+				t.Fatal("CreateSSOSession did not return a node id")
+			}
+			rec, err := r.GetSSOSessionByHash(ctx, "sso-hash-1")
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if rec == nil || rec.UserID != userID || rec.LoginMethod != "oauth" {
+				t.Fatalf("Get returned wrong record: %#v", rec)
+			}
+			// Expiry is the caller's check: the store returns the row as-is.
+			if rec.ExpiresAt != 9_000_000_000_000 {
+				t.Fatalf("ExpiresAt = %d", rec.ExpiresAt)
+			}
+			// A hash that names no session is a clean miss, not an error.
+			if rec, err := r.GetSSOSessionByHash(ctx, "sso-missing"); err != nil || rec != nil {
+				t.Fatalf("Get missing: want (nil, nil), got (%#v, %v)", rec, err)
+			}
+		})
+
+		t.Run("SSOSession_RevokeForUser_IsScopedAndIdempotent", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "sso-revoke@example.com")
+			keepUID := createTestUser(t, r, "sso-keep@example.com")
+			for _, rec := range []*service.SSOSessionRecord{
+				{TokenHash: "sso-r1", UserID: userID, ProjectID: "proj", LoginMethod: "oauth", ExpiresAt: 9_000_000_000_000, CreatedAt: 100},
+				{TokenHash: "sso-r2", UserID: userID, ProjectID: "proj", LoginMethod: "oauth", ExpiresAt: 9_000_000_000_000, CreatedAt: 100},
+				{TokenHash: "sso-keep", UserID: keepUID, ProjectID: "proj", LoginMethod: "oauth", ExpiresAt: 9_000_000_000_000, CreatedAt: 100},
+			} {
+				if _, err := r.CreateSSOSession(ctx, rec); err != nil {
+					t.Fatalf("Create %s: %v", rec.TokenHash, err)
+				}
+			}
+			if err := r.RevokeSSOSessionsForUser(ctx, userID); err != nil {
+				t.Fatalf("Revoke: %v", err)
+			}
+			for _, hash := range []string{"sso-r1", "sso-r2"} {
+				if rec, err := r.GetSSOSessionByHash(ctx, hash); err != nil || rec != nil {
+					t.Fatalf("%s survived revoke: (%#v, %v)", hash, rec, err)
+				}
+			}
+			if rec, err := r.GetSSOSessionByHash(ctx, "sso-keep"); err != nil || rec == nil {
+				t.Fatalf("other user's session must survive: (%#v, %v)", rec, err)
+			}
+			// Idempotent: a user with no sessions is a no-op.
+			if err := r.RevokeSSOSessionsForUser(ctx, userID); err != nil {
+				t.Fatalf("re-Revoke: %v", err)
+			}
+			if err := r.RevokeSSOSessionsForUser(ctx, "no-such-user"); err != nil {
+				t.Fatalf("Revoke unknown user: %v", err)
+			}
+		})
+
+		t.Run("SSOSession_DeleteExpired", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "sso-sweep@example.com")
+			if _, err := r.CreateSSOSession(ctx, &service.SSOSessionRecord{
+				TokenHash: "sso-old", UserID: userID, ProjectID: "proj", LoginMethod: "oauth", ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create old: %v", err)
+			}
+			if _, err := r.CreateSSOSession(ctx, &service.SSOSessionRecord{
+				TokenHash: "sso-fresh", UserID: userID, ProjectID: "proj", LoginMethod: "oauth", ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create fresh: %v", err)
+			}
+			if err := r.DeleteExpiredSSOSessions(ctx, 5_000, 100); err != nil {
+				t.Fatalf("DeleteExpired: %v", err)
+			}
+			if rec, err := r.GetSSOSessionByHash(ctx, "sso-old"); err != nil || rec != nil {
+				t.Fatalf("expired session survived: (%#v, %v)", rec, err)
+			}
+			if rec, err := r.GetSSOSessionByHash(ctx, "sso-fresh"); err != nil || rec == nil {
+				t.Fatalf("fresh session swept: (%#v, %v)", rec, err)
+			}
+			if err := r.DeleteExpiredSSOSessions(ctx, 5_000, 0); err == nil {
+				t.Fatal("DeleteExpired with limit 0: want error, got nil")
+			}
+		})
+
 		t.Run("NativeTokenRedemption_SingleUse_AndReplay", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)
@@ -2103,6 +2196,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{CodeHash: "del-otc", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
 				t.Fatalf("CreateOAuthOneTimeCode: %v", err)
 			}
+			if _, err := r.CreateSSOSession(ctx, &service.SSOSessionRecord{TokenHash: "del-sso", UserID: uid, ProjectID: "proj", LoginMethod: "oauth", ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
+				t.Fatalf("CreateSSOSession: %v", err)
+			}
 
 			// Second user with its own rows to prove scope isolation.
 			keepUID := createTestUser(t, r, "keep@example.com")
@@ -2173,6 +2269,9 @@ func RunConformance(t *testing.T, driver Driver) {
 			// row outlived the drain (it is unconsumed and unexpired at t=200).
 			if rec, _ := r.ConsumeOAuthOneTimeCode(ctx, "del-otc", 200); rec != nil {
 				t.Fatalf("oauth one-time code survived: rec=%#v", rec)
+			}
+			if rec, err := r.GetSSOSessionByHash(ctx, "del-sso"); err != nil || rec != nil {
+				t.Fatalf("sso session survived: err=%v rec=%#v", err, rec)
 			}
 
 			// Second user's rows survive.

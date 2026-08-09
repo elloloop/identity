@@ -156,6 +156,7 @@ type fakeRepo struct {
 	assuranceChallenges map[string]*AssuranceChallengeRecord
 	qrSessions          map[string]*QrLoginSessionRecord
 	oauthOneTimeCodes   map[string]*OAuthOneTimeCodeRecord
+	ssoSessions         map[string]*SSOSessionRecord
 	nativeRedemptions   map[string]*NativeTokenRedemptionRecord
 	emailLoginCodes     map[string]*EmailLoginCodeRecord
 	magicLinkTokens     map[string]*MagicLinkTokenRecord
@@ -181,6 +182,7 @@ func newFakeRepo() *fakeRepo {
 		passkeyChallenges:  make(map[string]*PasskeyChallengeRecord),
 		qrSessions:         make(map[string]*QrLoginSessionRecord),
 		oauthOneTimeCodes:  make(map[string]*OAuthOneTimeCodeRecord),
+		ssoSessions:        make(map[string]*SSOSessionRecord),
 		nativeRedemptions:  make(map[string]*NativeTokenRedemptionRecord),
 		emailLoginCodes:    make(map[string]*EmailLoginCodeRecord),
 		magicLinkTokens:    make(map[string]*MagicLinkTokenRecord),
@@ -552,6 +554,11 @@ func (r *fakeRepo) DeleteUser(_ context.Context, userID string) error {
 			delete(r.oauthOneTimeCodes, id)
 		}
 	}
+	for id, s := range r.ssoSessions {
+		if s.UserID == userID {
+			delete(r.ssoSessions, id)
+		}
+	}
 	for id, c := range r.totpCreds {
 		if c.UserID == userID {
 			delete(r.totpCreds, id)
@@ -805,6 +812,39 @@ func (r *fakeRepo) ConsumeOAuthOneTimeCode(_ context.Context, codeHash string, a
 		return &cp, nil
 	}
 	return nil, ErrOAuthCodeInvalid
+}
+
+func (r *fakeRepo) CreateSSOSession(_ context.Context, rec *SSOSessionRecord) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := nextNodeID()
+	rec.NodeID = id
+	cp := *rec
+	r.ssoSessions[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) GetSSOSessionByHash(_ context.Context, tokenHash string) (*SSOSessionRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.ssoSessions {
+		if s.TokenHash == tokenHash {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) RevokeSSOSessionsForUser(_ context.Context, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, s := range r.ssoSessions {
+		if s.UserID == userID {
+			delete(r.ssoSessions, id)
+		}
+	}
+	return nil
 }
 
 func (r *fakeRepo) RecordNativeTokenRedemption(_ context.Context, rec *NativeTokenRedemptionRecord) (string, error) {
@@ -1749,6 +1789,22 @@ func (r *fakeRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs in
 		}
 		if c.ExpiresAt < beforeMs {
 			delete(r.oauthOneTimeCodes, id)
+			n++
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteExpiredSSOSessions(_ context.Context, beforeMs int64, limit int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, s := range r.ssoSessions {
+		if limit > 0 && n >= limit {
+			break
+		}
+		if s.ExpiresAt < beforeMs {
+			delete(r.ssoSessions, id)
 			n++
 		}
 	}

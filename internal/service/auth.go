@@ -200,9 +200,10 @@ type Repository interface {
 	UpdateUser(ctx context.Context, userID string, fields map[string]any) error
 	// DeleteUser physically removes the user and every user_id-keyed
 	// record, synchronously, on every driver. This covers the durable
-	// identity/auth material — sessions, refresh tokens, oauth identities,
-	// passkey credentials, totp credentials, recovery codes, identity
-	// verifications, and phone verification codes — and, as of #168, the
+	// identity/auth material — sessions, refresh tokens, sso sessions,
+	// oauth identities, passkey credentials, totp credentials, recovery
+	// codes, identity verifications, and phone verification codes — and,
+	// as of #168, the
 	// short-lived tokens too: password-reset, email-verification/change,
 	// passkey and login challenges, qr sessions, oauth one-time codes, and
 	// invitations.
@@ -384,6 +385,22 @@ type Repository interface {
 	// concurrent redeems of the same code wins.
 	CreateOAuthOneTimeCode(ctx context.Context, r *OAuthOneTimeCodeRecord) (string, error)
 	ConsumeOAuthOneTimeCode(ctx context.Context, codeHash string, atMs int64) (*OAuthOneTimeCodeRecord, error)
+
+	// SSO sessions (cross-product continue-as).
+	//
+	// CreateSSOSession stores the token-hash → user binding written when an
+	// authentication completes at the auth origin. GetSSOSessionByHash is
+	// the read the continue-as fast path makes on every request: it returns
+	// (nil, nil) when the hash names no live session; the caller owns the
+	// expiry check against its own clock. RevokeSSOSessionsForUser hard-
+	// deletes every session the user holds — revocation IS deletion, so a
+	// revoked cookie can never be resurrected — and is idempotent (a user
+	// with no sessions is a no-op returning nil). It fires from every
+	// credential-kill path (see revokeDerivedSessionsForUser) and from
+	// SignOutEverywhere.
+	CreateSSOSession(ctx context.Context, r *SSOSessionRecord) (string, error)
+	GetSSOSessionByHash(ctx context.Context, tokenHash string) (*SSOSessionRecord, error)
+	RevokeSSOSessionsForUser(ctx context.Context, userID string) error
 
 	// Native ID-token replay cache (bearer-token single-use).
 	//
@@ -587,6 +604,7 @@ type Repository interface {
 	DeleteExpiredEmailChangeTokens(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredLoginChallenges(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredOAuthOneTimeCodes(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredSSOSessions(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredNativeTokenRedemptions(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredEmailLoginCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredMagicLinkTokens(ctx context.Context, beforeMs int64, limit int) error
@@ -719,6 +737,28 @@ type OAuthOneTimeCodeRecord struct {
 	ExpiresAt  int64 // epoch ms
 	CreatedAt  int64 // epoch ms
 	ConsumedAt int64 // epoch ms; 0 = unconsumed
+}
+
+// SSOSessionRecord is the server-side record behind the auth origin's
+// cross-product SSO cookie. One authentication at the auth origin writes
+// it; every subsequent continue-as request at a product in the same
+// project validates it before minting that product's own one-time code.
+// Only the SHA-256 hash of the opaque cookie token is persisted — the
+// plaintext lives solely in the browser's __Host- cookie. ProjectID pins
+// the session to the project it was minted under: the continue-as gate
+// compares it against the request scope so a session can never light up
+// a different project's sign-in. LoginMethod is the ORIGINAL login method
+// (e.g. "oauth"), re-checked against the tenant login policy on every
+// continue-as so a cookie cannot launder a login a tightened policy would
+// now refuse. Revocation is hard deletion (RevokeSSOSessionsForUser).
+type SSOSessionRecord struct {
+	NodeID      string
+	TokenHash   string
+	UserID      string
+	ProjectID   string
+	LoginMethod string
+	ExpiresAt   int64 // epoch ms
+	CreatedAt   int64 // epoch ms
 }
 
 // NativeTokenRedemptionRecord is the replay-cache row that makes a native ID

@@ -150,6 +150,18 @@ func (StubRepository) ConsumeOAuthOneTimeCode(context.Context, string, int64) (*
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) CreateSSOSession(context.Context, *SSOSessionRecord) (string, error) {
+	return "", ErrServiceUnavailable
+}
+
+func (StubRepository) GetSSOSessionByHash(context.Context, string) (*SSOSessionRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) RevokeSSOSessionsForUser(context.Context, string) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) RecordNativeTokenRedemption(context.Context, *NativeTokenRedemptionRecord) (string, error) {
 	return "", ErrServiceUnavailable
 }
@@ -367,6 +379,10 @@ func (StubRepository) DeleteExpiredLoginChallenges(context.Context, int64, int) 
 }
 
 func (StubRepository) DeleteExpiredOAuthOneTimeCodes(context.Context, int64, int) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteExpiredSSOSessions(context.Context, int64, int) error {
 	return ErrServiceUnavailable
 }
 
