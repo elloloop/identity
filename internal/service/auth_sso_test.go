@@ -168,7 +168,7 @@ func TestSSO_InactiveSessionsFallBackCleanly(t *testing.T) {
 		require.NoError(t, repo.TouchSSOSession(ctx, hash, 1, svc.nowMs()-1))
 
 		_, err := svc.ContinueSSOSession(ctx, cb.SSOCookieValue, "https://app.test/finish", "ip", "ua")
-		assert.True(t, errors.Is(err, ErrSSOSessionInvalid), "got %v", err)
+		assert.True(t, errors.Is(err, ErrSSOSessionExpired), "an expired row is clearable: got %v", err)
 	})
 
 	t.Run("revoked", func(t *testing.T) {
@@ -176,7 +176,7 @@ func TestSSO_InactiveSessionsFallBackCleanly(t *testing.T) {
 		require.NoError(t, svc.EndSSOSession(ctx, cb.SSOCookieValue))
 
 		_, err := svc.ContinueSSOSession(ctx, cb.SSOCookieValue, "https://app.test/finish", "ip", "ua")
-		assert.True(t, errors.Is(err, ErrSSOSessionInvalid), "got %v", err)
+		assert.True(t, errors.Is(err, ErrSSOSessionExpired), "a revoked row is clearable: got %v", err)
 	})
 
 	t.Run("unknown", func(t *testing.T) {
@@ -320,7 +320,9 @@ func TestSSO_Introspect(t *testing.T) {
 
 	require.NoError(t, svc.EndSSOSession(ctx, cb.SSOCookieValue))
 	_, err = svc.IntrospectSSOSession(ctx, cb.SSOCookieValue)
-	assert.True(t, errors.Is(err, ErrSSOSessionInvalid), "got %v", err)
+	// A revoked row that IS found in this project surfaces as expired; the HTTP
+	// layer maps both sentinels to the same "not signed in" answer.
+	assert.True(t, errors.Is(err, ErrSSOSessionExpired), "got %v", err)
 }
 
 // The session outlives a per-product logout. That is the approved model:

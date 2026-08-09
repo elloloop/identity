@@ -52,9 +52,53 @@ func (h *ssoHandler) register(mux *http.ServeMux) {
 	if h.allowlist.Enabled() {
 		mux.HandleFunc("/oauth/continue", h.handleContinue)
 	}
+	// /sso/logout needs neither the return allowlist nor the hub origins: it is
+	// a top-level navigation that ends THIS browser's shared session and clears
+	// its cookie, and it only redirects onward when handed an allowlisted
+	// return_to. Available whenever SSO is on.
+	mux.HandleFunc("/sso/logout", h.handleLogout)
 	if len(h.hubOrigins) > 0 {
 		mux.HandleFunc("/sso/session", h.handleSession)
 	}
+}
+
+// handleLogout ends the browser's shared SSO session and clears its cookie.
+//
+// This is the same-origin counterpart the RPC cannot be: SignOutEverywhere is
+// called cross-origin with credentials omitted, so it can revoke the row but
+// can neither see nor clear the __Host- cookie. A top-level navigation here
+// carries the cookie (SameSite=Lax), so the revoke reaches the right session
+// and the Set-Cookie actually deletes it. It backs the hub's product-initiated
+// "sign out of TinyKite everywhere on this browser" action.
+//
+// A state-changing GET is safe for the same reason /oauth/continue is: a
+// cross-site subresource (an <img> from another page) does not send a
+// SameSite=Lax cookie, so only a real top-level navigation can trigger it, and
+// the worst outcome is a self-inflicted sign-out.
+func (h *ssoHandler) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if cookie, err := r.Cookie(ssoSessionCookieName); err == nil {
+		if endErr := h.auth.EndSSOSession(r.Context(), cookie.Value); endErr != nil {
+			h.logger.Warn("sso_logout_failed", zap.Error(endErr))
+			http.Error(w, "could not sign out", http.StatusInternalServerError)
+			return
+		}
+	}
+	// Always clear the cookie, even when there was none to revoke, so the
+	// browser is left in a clean signed-out state.
+	http.SetCookie(w, clearSSOSessionCookie())
+
+	returnTo := r.URL.Query().Get("return_to")
+	if returnTo != "" && h.allowlist.Enabled() && h.allowlist.Allows(returnTo) {
+		// #nosec G710 -- returnTo passed the return allowlist.
+		http.Redirect(w, r, returnTo, http.StatusFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleContinue spends a valid SSO cookie on a fresh session for the
@@ -92,10 +136,18 @@ func (h *ssoHandler) handleContinue(w http.ResponseWriter, r *http.Request) {
 		r.Context(), cookie.Value, returnTo, clientIPFromRequest(r), r.UserAgent(),
 	)
 	if err != nil {
-		// An unusable cookie is cleared on the way out: leaving it in place
-		// would make every later visit repeat this failed round trip.
-		if errors.Is(err, service.ErrSSOSessionInvalid) {
+		// Clear the cookie ONLY when the row was found in this project and is
+		// dead (ErrSSOSessionExpired): that cookie is genuinely spent. A plain
+		// ErrSSOSessionInvalid can mean the request resolved to a different
+		// project than the one that established the session — one browser holds
+		// one cookie, and deleting it here would sign the user out of the
+		// project where it IS live. So that case falls back without clearing.
+		if errors.Is(err, service.ErrSSOSessionExpired) {
 			http.SetCookie(w, clearSSOSessionCookie())
+			h.fallback(w, r, "expired_session")
+			return
+		}
+		if errors.Is(err, service.ErrSSOSessionInvalid) {
 			h.fallback(w, r, "invalid_session")
 			return
 		}
@@ -193,8 +245,9 @@ func (h *ssoHandler) handleSession(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case viewErr == nil:
 			resp = ssoSessionResponse{Authenticated: true, Email: view.Email, ContinueMode: view.ContinueMode}
-		case errors.Is(viewErr, service.ErrSSOSessionInvalid):
-			// Indistinguishable from "no cookie" on purpose.
+		case errors.Is(viewErr, service.ErrSSOSessionInvalid), errors.Is(viewErr, service.ErrSSOSessionExpired):
+			// Both are "not signed in" to the client — indistinguishable from
+			// "no cookie" on purpose, so introspection is no existence oracle.
 		default:
 			h.logger.Warn("sso_session_introspect_failed", zap.Error(viewErr))
 			http.Error(w, "internal error", http.StatusInternalServerError)

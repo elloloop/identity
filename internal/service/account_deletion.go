@@ -34,12 +34,23 @@ const accountDeletionSweeperActor = "system:account-deletion-sweeper"
 // It is the one implementation of the "cut off access now" step, shared by
 // AdminService.DeactivateUser, the delete cascade, and
 // ProfileService.DeleteMyAccount, so the three never drift.
+//
+// The SSO revocation is load-bearing for DeleteMyAccount specifically:
+// checkAccountStatus deliberately lets a PENDING_DELETION account authenticate,
+// so a surviving __Host-sso_session would let the browser mint a fresh session
+// with no credential and, via cancelPendingDeletionOnLogin, silently UN-schedule
+// the erasure. DeactivateUser is refused at continue time by checkAccountStatus
+// and the hard-delete cascade drops sso_sessions by FK, so those two are belt-
+// and-braces, but routing them through here keeps the "never drift" promise.
 func revokeAllUserSessions(ctx context.Context, repo Repository, userID string, nowMs int64) error {
 	if err := repo.DeleteRefreshTokensForUser(ctx, userID); err != nil {
 		return fmt.Errorf("revoke refresh tokens: %w", err)
 	}
 	if err := repo.RevokeSessionsForUser(ctx, userID, nowMs); err != nil {
 		return fmt.Errorf("revoke sessions: %w", err)
+	}
+	if err := repo.RevokeSSOSessionsForUser(ctx, userID, nowMs); err != nil {
+		return fmt.Errorf("revoke sso sessions: %w", err)
 	}
 	return nil
 }

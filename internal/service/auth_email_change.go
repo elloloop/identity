@@ -231,7 +231,7 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 		s.logger.Warn("email_change_session_revoke_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
-	s.revokeUserSessionsIfModeSession(ctx, user.ID, "email_change")
+	s.revokeDerivedSessionsForUser(ctx, user.ID, "email_change")
 
 	s.audit.Log(
 		ctx, audit.EventPasswordChanged,

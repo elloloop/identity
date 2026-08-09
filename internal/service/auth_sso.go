@@ -192,11 +192,15 @@ func (s *AuthService) EndSSOSession(ctx context.Context, rawCookie string) error
 }
 
 // activeSSOSession resolves a raw cookie value to a usable session row.
-// Disabled deployments, absent cookies, unknown hashes, expired rows, revoked
-// rows, and rows belonging to another project all collapse to
-// ErrSSOSessionInvalid: the caller's behaviour is identical for all of them,
-// and distinguishing them to the client would turn the endpoint into an oracle
-// for which cookie values exist.
+//
+// It splits the failure into two internal sentinels that a CLIENT can never
+// tell apart (both drive the same fallback), but which decide whether the
+// cookie is safe to delete:
+//   - ErrSSOSessionInvalid — disabled deployment, absent cookie, or NO row in
+//     the resolved project. The cookie may be live in another project, so it
+//     must not be cleared.
+//   - ErrSSOSessionExpired — a row IS present in this project but is expired or
+//     revoked. This cookie is spent and may be cleared.
 func (s *AuthService) activeSSOSession(ctx context.Context, rawCookie string) (*SSOSessionRecord, error) {
 	if !s.cfg.SSOEnabled {
 		return nil, ErrSSOSessionInvalid
@@ -208,8 +212,11 @@ func (s *AuthService) activeSSOSession(ctx context.Context, rawCookie string) (*
 	if err != nil {
 		return nil, err
 	}
-	if !rec.Active(s.nowMs()) {
+	if rec == nil {
 		return nil, ErrSSOSessionInvalid
+	}
+	if !rec.Active(s.nowMs()) {
+		return nil, ErrSSOSessionExpired
 	}
 	return rec, nil
 }

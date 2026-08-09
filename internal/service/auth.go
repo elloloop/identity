@@ -1059,12 +1059,20 @@ var (
 	// brute-force attacker.
 	ErrOAuthCodeInvalid = errors.New("oauth one-time code is invalid or already used")
 	// ErrSSOSessionInvalid is returned when a browser presents no SSO
-	// cookie, or one that is unknown, expired, revoked, or belongs to a
-	// different project. All of those mean the same thing to the caller —
-	// no fast path, take the full sign-in flow — and they are deliberately
-	// indistinguishable so the endpoint cannot be used to probe which
-	// cookie values exist.
-	ErrSSOSessionInvalid = errors.New("sso session is invalid or expired")
+	// cookie, or one that is unknown in the resolved project. To a CLIENT it
+	// is indistinguishable from ErrSSOSessionExpired — both mean "no fast
+	// path, take the full sign-in flow" — so the endpoint cannot be probed
+	// for which cookie values exist. The two are split only for the internal
+	// cookie-clear decision (see ErrSSOSessionExpired).
+	ErrSSOSessionInvalid = errors.New("sso session is invalid")
+	// ErrSSOSessionExpired is returned when a row for the presented cookie IS
+	// found in the resolved project but is expired or revoked. It is separated
+	// from ErrSSOSessionInvalid for exactly one reason: only here is it safe to
+	// clear the cookie. A cookie value maps to at most one project's row (the
+	// token_hash unique index is per project), so "not found here" means the
+	// cookie may still be live in ANOTHER project and must NOT be deleted,
+	// whereas "found here but dead" means this cookie is genuinely spent.
+	ErrSSOSessionExpired = errors.New("sso session is expired")
 	// ErrSSOSecondFactorRequired is returned when a valid SSO session
 	// belongs to an account that still owes a second factor. A
 	// challenge/response cannot be completed inside a redirect handler, and
@@ -1765,6 +1773,32 @@ func (s *AuthService) revokeUserSessionsIfModeSession(ctx context.Context, userI
 	}
 }
 
+// revokeDerivedSessionsForUser ends everything a now-voided credential could
+// still be riding. It is the companion to DeleteRefreshTokensForUser: every
+// site that deletes a user's refresh tokens because a credential changed or was
+// compromised (password reset, email change, planted-credential clearing,
+// refresh-token replay) MUST call this too, or the invalidation is not
+// "everywhere" the way those sites' comments claim.
+//
+// Two things outlive the refresh tokens otherwise:
+//   - the mode=session access sessions (handled as before, only in that mode);
+//   - the browser SSO session (ADR-0014), which is the dangerous one — it is a
+//     90-day ROLLING fast path to fresh product token pairs, and none of the
+//     gates ContinueSSOSession re-runs (account status, project access, login
+//     policy) change on a password reset, so a planted cookie keeps minting
+//     until this revokes it.
+//
+// Best-effort and non-fatal for the same reason revokeUserSessionsIfModeSession
+// is: the refresh tokens are already gone, so a failed revoke widens a window
+// rather than opening a bypass. It is logged, not propagated.
+func (s *AuthService) revokeDerivedSessionsForUser(ctx context.Context, userID, reason string) {
+	s.revokeUserSessionsIfModeSession(ctx, userID, reason)
+	if err := s.repo(ctx).RevokeSSOSessionsForUser(ctx, userID, s.nowMs()); err != nil {
+		s.logger.Warn("sso_session_revoke_for_user_failed",
+			zap.String("user_id", userID), zap.String("reason", reason), zap.Error(err))
+	}
+}
+
 // revokeSessionIfModeSession revokes exactly the access session identified by
 // sid when the deployment runs mode=session, leaving the user's other sessions
 // untouched. It is paired with every path that invalidates a single refresh
@@ -1991,7 +2025,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		// who triggered the replay still holds a live JWT until its
 		// natural expiry (the bug the two-mode contract exists to
 		// fix; see docs/IDENTITY.md decision log §6).
-		s.revokeUserSessionsIfModeSession(ctx, userID, "refresh_token_replay")
+		s.revokeDerivedSessionsForUser(ctx, userID, "refresh_token_replay")
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),

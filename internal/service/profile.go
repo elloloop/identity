@@ -216,13 +216,25 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 	return nil
 }
 
-// RevokeAllSessions revokes every session for the user. Requires
-// password confirmation.
+// RevokeAllSessions revokes every session for the caller — refresh tokens,
+// mode=session access sessions, and browser SSO sessions.
+//
+// Re-authentication is required, but the SHAPE of it depends on the account:
+//
+//   - An account WITH a password must confirm it. This action ends every
+//     session on every device, so a bare access token should not be enough to
+//     trigger it; the password is the second factor.
+//   - An account with NO password — an OAuth or email-code account, which is
+//     precisely the population that gets an SSO session — has no password to
+//     offer. Demanding one would make "sign out everywhere" permanently
+//     unreachable for exactly the users who need it (ADR-0014 promises it as
+//     THE way to end a shared-browser session). For them the authenticated
+//     call itself is the confirmation.
+//
+// The caller is always already authenticated (the handler injects the user id
+// from a verified token), so this never runs unauthenticated; the password,
+// when present, is a step-up, not the primary gate.
 func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password string) (int, error) {
-	if password == "" {
-		return 0, errors.New("password confirmation required")
-	}
-
 	userNode, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(userID), typeUser, userID)
 	if err != nil {
 		return 0, fmt.Errorf("fetch user: %w", err)
@@ -230,9 +242,10 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 	if userNode == nil {
 		return 0, errors.New("user not found")
 	}
-	pwHash := pstr(userNode.Payload, ufPasswordHash)
-	if pwHash == "" || !passwords.Verify(password, pwHash) {
-		return 0, errors.New("invalid password")
+	if pwHash := pstr(userNode.Payload, ufPasswordHash); pwHash != "" {
+		if password == "" || !passwords.Verify(password, pwHash) {
+			return 0, errors.New("invalid password")
+		}
 	}
 
 	count, err := s.revokeAllUserSessions(ctx, userID)

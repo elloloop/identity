@@ -275,7 +275,11 @@ func TestSSOHTTP_ContinueFallsBackToHub(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown cookie is cleared", func(t *testing.T) {
+	t.Run("unknown cookie is NOT cleared — it may be live in another project", func(t *testing.T) {
+		// One browser holds one cookie, and it belongs to exactly one project.
+		// A request that resolves to a different project finds no row; deleting
+		// the cookie here would sign the user out of the project where it IS
+		// live. So an unknown cookie falls back without being cleared.
 		req := httptest.NewRequest(http.MethodGet,
 			"/oauth/continue?return_to="+url.QueryEscape("https://app.test/finish")+
 				"&fallback_to="+url.QueryEscape("https://hub.test/signin"), nil)
@@ -286,11 +290,109 @@ func TestSSOHTTP_ContinueFallsBackToHub(t *testing.T) {
 		if rr.Code != http.StatusFound {
 			t.Fatalf("status = %d, want 302", rr.Code)
 		}
-		cleared := findCookie(rr.Result().Cookies(), ssoSessionCookieName)
-		if cleared == nil || cleared.MaxAge >= 0 {
-			t.Fatalf("an unusable cookie must be cleared, got %#v", cleared)
+		if cleared := findCookie(rr.Result().Cookies(), ssoSessionCookieName); cleared != nil {
+			t.Fatalf("an unknown cookie must NOT be cleared, got %#v", cleared)
 		}
 	})
+}
+
+// /sso/logout ends the browser's shared session and clears the cookie — the
+// same-origin action the cross-origin RPC cannot perform.
+func TestSSOHTTP_Logout(t *testing.T) {
+	const hub = "https://hub.test"
+	h := newSSOTestHandler(t, ssoTestOptions{
+		allowlist: "https://app.test/,https://hub.test/", hubOrigins: hub, ssoEnabled: true,
+	})
+	cookie := signInThroughHostedFlow(t, h, "https://app.test/finish")
+	if cookie == nil {
+		t.Fatal("no SSO cookie established")
+	}
+
+	// Introspection sees the session before logout.
+	pre := httptest.NewRequest(http.MethodGet, "/sso/session", nil)
+	pre.Header.Set("Origin", hub)
+	pre.AddCookie(cookie)
+	preRR := httptest.NewRecorder()
+	h.ServeHTTP(preRR, pre)
+	if !strings.Contains(preRR.Body.String(), `"authenticated":true`) {
+		t.Fatalf("expected authenticated before logout, got %q", preRR.Body.String())
+	}
+
+	// Log out with a return_to → 302 back to the hub, cookie cleared.
+	req := httptest.NewRequest(http.MethodGet,
+		"/sso/logout?return_to="+url.QueryEscape("https://hub.test/goodbye"), nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", rr.Code)
+	}
+	if rr.Header().Get("Location") != "https://hub.test/goodbye" {
+		t.Fatalf("redirected to %q", rr.Header().Get("Location"))
+	}
+	cleared := findCookie(rr.Result().Cookies(), ssoSessionCookieName)
+	if cleared == nil || cleared.MaxAge >= 0 {
+		t.Fatalf("logout must clear the cookie, got %#v", cleared)
+	}
+
+	// The session is now dead: introspection reports signed-out.
+	post := httptest.NewRequest(http.MethodGet, "/sso/session", nil)
+	post.Header.Set("Origin", hub)
+	post.AddCookie(cookie)
+	postRR := httptest.NewRecorder()
+	h.ServeHTTP(postRR, post)
+	if !strings.Contains(postRR.Body.String(), `"authenticated":false`) {
+		t.Fatalf("expected signed-out after logout, got %q", postRR.Body.String())
+	}
+}
+
+// With no return_to, logout is a 204 that still clears the cookie, and it is
+// safe to call with no cookie at all.
+func TestSSOHTTP_LogoutNoReturnToAndNoCookie(t *testing.T) {
+	h := newSSOTestHandler(t, ssoTestOptions{allowlist: "https://app.test/", ssoEnabled: true})
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sso/logout", nil))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 with no cookie", rr.Code)
+	}
+	if findCookie(rr.Result().Cookies(), ssoSessionCookieName) == nil {
+		t.Fatal("logout should clear the cookie even when none was sent")
+	}
+}
+
+// A cookie whose session IS found in this project but has been revoked is
+// genuinely spent, so THAT one is cleared on the fallback.
+func TestSSOHTTP_ContinueClearsAnExpiredCookie(t *testing.T) {
+	h := newSSOTestHandler(t, ssoTestOptions{
+		allowlist: "https://app.test/,https://hub.test/", ssoEnabled: true,
+	})
+	cookie := signInThroughHostedFlow(t, h, "https://app.test/finish")
+	if cookie == nil {
+		t.Fatal("no SSO cookie established")
+	}
+
+	// Sign out everywhere-style revoke by ending the session through the hub
+	// logout route, then attempt to continue with the now-dead cookie.
+	endReq := httptest.NewRequest(http.MethodGet, "/sso/logout", nil)
+	endReq.AddCookie(cookie)
+	h.ServeHTTP(httptest.NewRecorder(), endReq)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/oauth/continue?return_to="+url.QueryEscape("https://app.test/finish")+
+			"&fallback_to="+url.QueryEscape("https://hub.test/signin"), nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", rr.Code)
+	}
+	cleared := findCookie(rr.Result().Cookies(), ssoSessionCookieName)
+	if cleared == nil || cleared.MaxAge >= 0 {
+		t.Fatalf("a found-but-dead cookie must be cleared, got %#v", cleared)
+	}
 }
 
 func TestSSOHTTP_ContinueRejectsNonGET(t *testing.T) {

@@ -226,7 +226,7 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 		s.logger.Warn("password_reset_session_revoke_failed",
 			zap.String("user_id", user.ID), zap.Error(err))
 	}
-	s.revokeUserSessionsIfModeSession(ctx, user.ID, "password_reset")
+	s.revokeDerivedSessionsForUser(ctx, user.ID, "password_reset")
 
 	s.audit.Log(
 		ctx, audit.EventPasswordReset,
