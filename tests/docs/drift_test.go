@@ -56,6 +56,14 @@ var allowedGatewayTokens = map[string]string{
 	"GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES_BY_PRODUCT": "removed; migrate to per-project config_json native_audiences (docs/UPGRADE.md)",
 	"GATEWAY_NATIVE_OAUTH_APPLE_AUDIENCES_BY_PRODUCT":  "removed; migrate to per-project config_json native_audiences (docs/UPGRADE.md)",
 
+	// Removed in v4.2 (SSO, ADR-0014): three cookie knobs no code path had
+	// ever read. GATEWAY_COOKIE_DOMAIN in particular was a footgun — its only
+	// effect would have been to defeat the SSO cookie's host-locking — so the
+	// upgrade guide names all three so operators delete them.
+	"GATEWAY_COOKIE_DOMAIN":   "removed in v4.2; never read by any code path (docs/UPGRADE.md)",
+	"GATEWAY_COOKIE_SECURE":   "removed in v4.2; never read by any code path (docs/UPGRADE.md)",
+	"GATEWAY_COOKIE_SAMESITE": "removed in v4.2; never read by any code path (docs/UPGRADE.md)",
+
 	// Removed in v4.0 (client-assurance layer, ADR-0012): the inline-CAPTCHA
 	// env surface, renamed to GATEWAY_ASSURANCE_*; the upgrade guide's
 	// rename table names the old vars so operators know what to replace.

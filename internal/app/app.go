@@ -605,7 +605,30 @@ func New(deps Deps) (*Built, error) {
 		logger.Info("oauth_hosted_flow_disabled",
 			zap.String("hint", "set GATEWAY_OAUTH_ALLOWED_RETURN_URLS to enable GET /oauth/start + /oauth/callback"))
 	}
-	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
+	(&hostedOAuthHandler{
+		auth:            authSvc,
+		allowlist:       returnAllow,
+		logger:          logger,
+		ssoCookieMaxAge: deps.Config.SSOSessionTTLSeconds,
+	}).register(mux)
+
+	// Browser single sign-on (ADR-0014). Off unless GATEWAY_SSO_ENABLED;
+	// /oauth/continue additionally needs the return allowlist and
+	// /sso/session needs at least one hub origin, so a partially configured
+	// deployment serves only the endpoints it can serve correctly.
+	(&ssoHandler{
+		auth:       authSvc,
+		allowlist:  returnAllow,
+		hubOrigins: deps.Config.SSOHubOriginList(),
+		enabled:    deps.Config.SSOEnabled,
+		logger:     logger,
+	}).register(mux)
+	if deps.Config.SSOEnabled {
+		logger.Info("sso_enabled",
+			zap.Int("session_ttl_seconds", deps.Config.SSOSessionTTLSeconds),
+			zap.String("continue_mode", deps.Config.SSOContinueMode),
+			zap.Strings("hub_origins", deps.Config.SSOHubOriginList()))
+	}
 
 	// Inbound SCIM 2.0 provisioning (#260). Registered only when
 	// GATEWAY_SCIM_ENABLED is true (and Validate has confirmed a bearer token
