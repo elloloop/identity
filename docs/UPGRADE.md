@@ -1,5 +1,25 @@
 # Upgrade guide
 
+## v4.1 → v4.2 — product-agnostic defaults (one behavior change)
+
+v4.2 removes every consumer-specific value that had accreted in the repo:
+product names, project slugs, domains, and operator addresses are deploy-time
+`GATEWAY_*` config, never server literals.
+
+**One behavior change.** The default for `GATEWAY_DEFAULT_PRODUCT` — the
+product slug attributed to a request with no `X-Product` header — changes
+from a consumer-specific slug to `"default"`. If you never set the variable,
+your untagged (legacy-header) clients were previously stamped with that old
+slug; after upgrade they are stamped `"default"`, which matches no entry in
+your project's `products` policy. Because an absent slug imposes no age
+restriction, **legacy clients would silently stop receiving age-gate
+enforcement**.
+
+**Action required before rollout** if you rely on the default (i.e. you have
+never set `GATEWAY_DEFAULT_PRODUCT`): set it explicitly to your primary app's
+slug — the same slug your `config_json` `products` block keys on. If you
+already set the variable, nothing changes.
+
 ## v4.0 → v4.1 — anonymous identity (additive)
 
 v4.1 adds anonymous sign-in: credential-less accounts with a stable id that

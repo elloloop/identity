@@ -48,6 +48,7 @@ var neutralExts = map[string]bool{
 	".go": true, ".md": true, ".yaml": true, ".yml": true, ".json": true,
 	".proto": true, ".toml": true, ".ts": true, ".tsx": true, ".js": true,
 	".mjs": true, ".sh": true, ".sql": true, ".py": true, ".astro": true,
+	".html": true, ".txt": true,
 }
 
 // neutralSkipDirs are directory names skipped anywhere in the walk:
