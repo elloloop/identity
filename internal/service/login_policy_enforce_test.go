@@ -191,8 +191,8 @@ func withProjectLoginDefaults(projectID, allowedMethods string, require2FA bool)
 // tenant LoginPolicy (SSO/2FA bypass) and the access allowlist.
 func TestEmailDomain_SplitsOnLastAt(t *testing.T) {
 	cases := map[string]string{
-		"alice@cursive.ai":        "cursive.ai",
-		`"a@b"@cursive.ai`:        "cursive.ai", // quoted local part with '@'
+		"alice@example.com":       "example.com",
+		`"a@b"@example.com`:       "example.com", // quoted local part with '@'
 		"no-at-symbol":            "",
 		"trailing@":               "",
 		"a@b@example.com":         "example.com",

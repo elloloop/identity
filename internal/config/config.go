@@ -151,10 +151,9 @@ const DefaultProjectIDFallback = "default"
 
 // DefaultProductFallback is the product slug attributed to a request that
 // sends no X-Product header. It is the env-loader default for
-// GATEWAY_DEFAULT_PRODUCT and names the household product that shipped the
-// header first, so clients written before it existed keep resolving to the app
-// they actually are. The single source of truth for this literal.
-const DefaultProductFallback = "nesta"
+// GATEWAY_DEFAULT_PRODUCT and the single source of truth for this literal.
+// Deployments should set GATEWAY_DEFAULT_PRODUCT to their primary app's slug.
+const DefaultProductFallback = "default"
 
 // Config holds all identity service configuration.
 type Config struct {
@@ -191,8 +190,8 @@ type Config struct {
 	// apps in the resolved project's `products` policy, so a legacy client is
 	// gated as the deployment's primary app rather than as no product at all.
 	// Set it to the slug an untagged client actually is. Driven by
-	// GATEWAY_DEFAULT_PRODUCT (default "nesta", the first deployment to ship
-	// the header); set it empty to leave untagged requests unrestricted.
+	// GATEWAY_DEFAULT_PRODUCT (default "default"); set it empty to leave
+	// untagged requests unrestricted.
 	DefaultProduct string
 
 	// AdminAPISecret is the shared secret that authenticates the
@@ -253,7 +252,7 @@ type Config struct {
 	// `access` block: one of "open", "allowlist", "invite", or "closed" (see
 	// service.AccessMode*). It DEFAULTS to "closed" (deny-all) so a deployment
 	// that upgrades and sets nothing fails closed; a consumer product with open
-	// self-signup (e.g. Nesta) sets GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open.
+	// self-signup sets GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=open.
 	// The project-resolution middleware stamps this onto the default-project
 	// scope so the access guard sees a mode on every request. Driven by
 	// GATEWAY_DEFAULT_PROJECT_ACCESS_MODE.

@@ -34,20 +34,20 @@ func TestProductResolver_Resolution(t *testing.T) {
 		header         string
 		want           string
 	}{
-		{"header_wins", "nesta", "hold", "hold"},
+		{"header_wins", "product-a", "product-b", "product-b"},
 		// A client that predates the header is the deployment's primary app,
 		// not "no product" — otherwise every legacy client escapes its
 		// product's guardrails.
-		{"absent_header_falls_back_to_default", "nesta", "", "nesta"},
-		{"blank_header_falls_back_to_default", "nesta", "   ", "nesta"},
+		{"absent_header_falls_back_to_default", "product-a", "", "product-a"},
+		{"blank_header_falls_back_to_default", "product-a", "   ", "product-a"},
 		// Slugs are case-insensitive identifiers, normalized on both sides of
-		// the lookup so config authored as "Hold" matches a header of "HOLD".
-		{"header_normalized", "nesta", "  HoLd  ", "hold"},
-		{"default_normalized", " Nesta ", "", "nesta"},
+		// the lookup so config authored as "Product-B" matches a header of "PRODUCT-B".
+		{"header_normalized", "product-a", "  Product-B  ", "product-b"},
+		{"default_normalized", " Product-A ", "", "product-a"},
 		// No header and no configured default leaves the request unrestricted:
 		// "" matches no configured product.
 		{"no_default_no_header", "", "", ""},
-		{"no_default_with_header", "", "hold", "hold"},
+		{"no_default_with_header", "", "product-b", "product-b"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -58,7 +58,7 @@ func TestProductResolver_Resolution(t *testing.T) {
 
 func TestProductResolver_PassesRequestThrough(t *testing.T) {
 	t.Parallel()
-	handler := NewProductResolver("nesta")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := NewProductResolver("product-a")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 	rec := httptest.NewRecorder()

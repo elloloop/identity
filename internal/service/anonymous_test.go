@@ -375,7 +375,7 @@ func TestRefreshToken_AnonymousStopsWhenTheFeatureIsDisabled(t *testing.T) {
 func TestRefreshToken_AnonymousAgeGateRefusalDoesNotBurnTheToken(t *testing.T) {
 	const anonOpenJSON = `{"access":{"mode":"open"},"anonymous":{"enabled":true}}`
 	const anonTeenMinimumJSON = `{"access":{"mode":"open"},"anonymous":{"enabled":true},` +
-		`"products":{"hold":{"minimum_age_band":"teen"}}}`
+		`"products":{"product-b":{"minimum_age_band":"teen"}}}`
 
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)

@@ -176,7 +176,7 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	t.Setenv("GATEWAY_REPO_DRIVER", "memory")
 	t.Setenv("GATEWAY_DEFAULT_TENANT_ID", "prod-tenant")
 	t.Setenv("GATEWAY_DEFAULT_PROJECT_ID", "prod-project")
-	t.Setenv("GATEWAY_DEFAULT_PRODUCT", "hold")
+	t.Setenv("GATEWAY_DEFAULT_PRODUCT", "product-b")
 	t.Setenv("GATEWAY_ADMIN_API_SECRET", "operator-secret")
 	t.Setenv("GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP", "true")
 	t.Setenv("GATEWAY_JWT_EXPIRY_SECONDS", "1800")
@@ -207,8 +207,8 @@ func TestLoad_OverrideFromEnv(t *testing.T) {
 	if cfg.DefaultProjectID != "prod-project" {
 		t.Errorf("DefaultProjectID: want prod-project, got %q", cfg.DefaultProjectID)
 	}
-	if cfg.DefaultProduct != "hold" {
-		t.Errorf("DefaultProduct: want hold, got %q", cfg.DefaultProduct)
+	if cfg.DefaultProduct != "product-b" {
+		t.Errorf("DefaultProduct: want product-b, got %q", cfg.DefaultProduct)
 	}
 	if cfg.AdminAPISecret != "operator-secret" {
 		t.Errorf("AdminAPISecret: want operator-secret, got %q", cfg.AdminAPISecret)
