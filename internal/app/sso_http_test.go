@@ -142,7 +142,13 @@ func TestSSOHTTP_ContinueWithForgedCookieRedirectsToLogin(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet,
 		"/sso/continue?return_to="+url.QueryEscape("https://app.test/finish"), nil)
-	req.AddCookie(&http.Cookie{Name: ssoSessionCookieName, Value: "forged"})
+	req.AddCookie(&http.Cookie{ // #nosec G124 -- test fixture; attributes are irrelevant for a forged value.
+		Name:     ssoSessionCookieName,
+		Value:    "forged",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 	h.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusFound {

@@ -41,14 +41,14 @@ func ssoScope(projectID string) context.Context {
 
 // mintSSO mints a real SSO session via the service so the test's cookie
 // token matches what production stores (hash of the plaintext).
-func mintSSO(t *testing.T, svc *AuthService, ctx context.Context, userID string) string {
+func mintSSO(ctx context.Context, t *testing.T, svc *AuthService, userID string) string {
 	t.Helper()
 	raw, err := svc.mintSSOSession(ctx, userID, LoginMethodOAuth)
 	require.NoError(t, err)
 	return raw
 }
 
-func ssoSessionAlive(t *testing.T, svc *AuthService, ctx context.Context, raw string) bool {
+func ssoSessionAlive(ctx context.Context, t *testing.T, svc *AuthService, raw string) bool {
 	t.Helper()
 	rec, err := svc.repo(ctx).GetSSOSessionByHash(ctx, sha256Hex(raw))
 	require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestContinueWithSSO_HappyPathMintsRedeemableCode(t *testing.T) {
 	svc, repo := newSSOTestService(t)
 	user := seedUser(repo, "alice@example.com", "", "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	res, err := svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.NoError(t, err)
@@ -91,7 +91,7 @@ func TestContinueWithSSO_DisabledByDefault(t *testing.T) {
 	svc.returnAllow = ParseReturnAllowlist(ssoTestAllowlist)
 	user := seedUser(repo, "alice@example.com", "", "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	_, err := svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrSSODisabled)
@@ -107,7 +107,7 @@ func TestRedeemOAuthCode_SSOOnlyDeployment(t *testing.T) {
 	svc.returnAllow = ParseReturnAllowlist(ssoTestAllowlist)
 	user := seedUser(repo, "alice@example.com", "", "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	res, err := svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestContinueWithSSO_RejectsUnknownAndExpiredSessions(t *testing.T) {
 	require.ErrorIs(t, err, ErrSSOSessionInvalid)
 
 	// A real but expired session is rejected identically.
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 	now = now.Add(2 * time.Minute)
 	_, err = svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrSSOSessionInvalid)
@@ -143,7 +143,7 @@ func TestContinueWithSSO_NeverBridgesProjects(t *testing.T) {
 
 	// The session is minted under a NON-default project; a request scoped
 	// to any other project must not light up.
-	raw := mintSSO(t, svc, ssoScope("proj-other"), user.ID)
+	raw := mintSSO(ssoScope("proj-other"), t, svc, user.ID)
 
 	_, err := svc.ContinueWithSSO(ssoScope("project-a"), raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrSSOSessionInvalid, "a session in one project must not mint codes in another")
@@ -157,7 +157,7 @@ func TestContinueWithSSO_ReRunsAccountStatusGate(t *testing.T) {
 	svc, repo := newSSOTestService(t)
 	user := seedUser(repo, "alice@example.com", "", "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	// The account is suspended AFTER the SSO session was established.
 	repo.mu.Lock()
@@ -172,7 +172,7 @@ func TestContinueWithSSO_ReRunsProjectAccessGate(t *testing.T) {
 	svc, repo := newSSOTestService(t)
 	user := seedUser(repo, "alice@example.com", "", "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	// The project moved to allowlist mode and alice is not on the list.
 	restricted := WithProjectScope(context.Background(), &ProjectScope{
@@ -194,7 +194,7 @@ func TestContinueWithSSO_ReRunsOriginalLoginPolicy(t *testing.T) {
 	svc.WithLoginGovernance(withAllowedMethods(LoginMethodPassword))
 	user := seedUser(repo, "alice@acme.com", "", "active")
 	ctx := ssoScope("proj-1")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	_, err := svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrPermissionDenied)
@@ -204,7 +204,7 @@ func TestContinueWithSSO_SecondFactorRequiredFallsBackToFullLogin(t *testing.T) 
 	svc, repo := newSSOTestService(t)
 	user := seedUser(repo, "alice@example.com", "", "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	// TOTP was enrolled (or policy tightened) after the session was
 	// established: the cookie must not bypass the second factor.
@@ -229,7 +229,7 @@ func TestContinueWithSSO_ReRunsProductAgeGate(t *testing.T) {
 	// product-b requires ADULT: continue-as into it must be refused even
 	// though the SSO session itself is valid.
 	ctx := productScope(t, adultMinimumJSON, "product-b")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 	_, err := svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrProductAgeRestricted)
 }
@@ -238,7 +238,7 @@ func TestContinueWithSSO_ReturnToMustBeAllowlisted(t *testing.T) {
 	svc, repo := newSSOTestService(t)
 	user := seedUser(repo, "alice@example.com", "", "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	_, err := svc.ContinueWithSSO(ctx, raw, "https://evil.example.com/steal", "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrInvalidArgument)
@@ -254,12 +254,12 @@ func TestSSOSessionDiesWithPasswordResetConfirm(t *testing.T) {
 	pwHash, _ := passwords.Hash("OldStr0ng!Pass")
 	user := seedUser(repo, "alice@example.com", pwHash, "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	token := requestAndExtractResetToken(t, svc, rec, "alice@example.com")
 	require.NoError(t, svc.ConfirmPasswordReset(context.Background(), token, "NewStr0ng!Pass"))
 
-	require.False(t, ssoSessionAlive(t, svc, ctx, raw),
+	require.False(t, ssoSessionAlive(ctx, t, svc, raw),
 		"an SSO session must not survive a password reset")
 	// Attacker-repro: the leftover cookie can no longer continue-as.
 	_, err := svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
@@ -273,13 +273,13 @@ func TestSSOSessionDiesWithEmailChangeConfirm(t *testing.T) {
 	svc.returnAllow = ParseReturnAllowlist(ssoTestAllowlist)
 	user := seedUserWithPassword(t, repo, "alice@example.com", "Str0ng!Pass1")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	tok := requestAndExtractChangeToken(t, svc, repo, rec, user.ID, "alice2@example.com", "Str0ng!Pass1")
 	_, err := svc.ConfirmEmailChange(context.Background(), tok)
 	require.NoError(t, err)
 
-	require.False(t, ssoSessionAlive(t, svc, ctx, raw),
+	require.False(t, ssoSessionAlive(ctx, t, svc, raw),
 		"an SSO session must not survive an email change")
 	_, err = svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrSSOSessionInvalid)
@@ -296,14 +296,14 @@ func TestSSOSessionDiesWithPlantedCredentialClearing(t *testing.T) {
 	victim := seedUser(repo, "victim@example.com", "hash", "active")
 	victim.EmailVerified = false
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, victim.ID)
+	raw := mintSSO(ctx, t, svc, victim.ID)
 
 	require.NoError(t, svc.RequestEmailLoginCode(context.Background(), "victim@example.com"))
 	code := extractCodeFromEmail(t, rec.Sent()[0].Text)
 	_, err := svc.VerifyEmailLoginCode(context.Background(), "victim@example.com", code, "1.1.1.1", "agent")
 	require.NoError(t, err)
 
-	require.False(t, ssoSessionAlive(t, svc, ctx, raw),
+	require.False(t, ssoSessionAlive(ctx, t, svc, raw),
 		"an SSO session must not survive planted-credential clearing")
 	_, err = svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrSSOSessionInvalid)
@@ -318,12 +318,12 @@ func TestSSOSessionDiesWithAccountDeletionRequest(t *testing.T) {
 	psvc := newTestProfileServiceForDeletion(repo, newRecordingAuditWriter())
 	user := seedUser(repo, "alice@example.com", "hash", "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	_, err := psvc.DeleteMyAccount(context.Background(), user.ID, "no longer needed")
 	require.NoError(t, err)
 
-	require.False(t, ssoSessionAlive(t, svc, ctx, raw),
+	require.False(t, ssoSessionAlive(ctx, t, svc, raw),
 		"an SSO session must not survive a deletion request")
 	// Attacker-repro: the deletion must not be silently cancellable from a
 	// leftover cookie — the cookie is dead before continue-as could log
@@ -341,7 +341,7 @@ func TestSSOSessionDiesWithAdminDeleteAndPurge(t *testing.T) {
 		svc.cfg.SSOSessionTTLSeconds = 3600
 		user := seedUser(repo, "alice@example.com", "hash", status)
 		ctx := ssoScope("project-a")
-		raw := mintSSO(t, svc, ctx, user.ID)
+		raw := mintSSO(ctx, t, svc, user.ID)
 		return svc, repo, user, ctx, raw
 	}
 
@@ -352,7 +352,7 @@ func TestSSOSessionDiesWithAdminDeleteAndPurge(t *testing.T) {
 		admin := newTestAdminServiceWithRepo(db, repo)
 
 		require.NoError(t, admin.DeleteUser(context.Background(), "admin-1", user.ID))
-		require.False(t, ssoSessionAlive(t, svc, ctx, raw),
+		require.False(t, ssoSessionAlive(ctx, t, svc, raw),
 			"an SSO session must not survive an admin delete")
 	})
 
@@ -364,7 +364,7 @@ func TestSSOSessionDiesWithAdminDeleteAndPurge(t *testing.T) {
 		purged, err := admin.PurgeExpiredPendingDeletions(context.Background(), 500, 100)
 		require.NoError(t, err)
 		require.Equal(t, 1, purged)
-		require.False(t, ssoSessionAlive(t, svc, ctx, raw),
+		require.False(t, ssoSessionAlive(ctx, t, svc, raw),
 			"an SSO session must not survive the deletion-sweeper purge")
 	})
 }
@@ -373,7 +373,7 @@ func TestSSOSessionDiesWithRefreshReplayDetection(t *testing.T) {
 	svc, repo := newSSOTestService(t)
 	user := seedUser(repo, "alice@example.com", "", "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	rawRefresh, hash := generateRefreshToken()
 	_, err := repo.CreateRefreshToken(context.Background(), &RefreshTokenRecord{
@@ -389,7 +389,7 @@ func TestSSOSessionDiesWithRefreshReplayDetection(t *testing.T) {
 	_, _, _, err = svc.RefreshToken(context.Background(), rawRefresh, "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrUnauthenticated)
 
-	require.False(t, ssoSessionAlive(t, svc, ctx, raw),
+	require.False(t, ssoSessionAlive(ctx, t, svc, raw),
 		"an SSO session must not survive refresh-replay detection")
 	_, err = svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.ErrorIs(t, err, ErrSSOSessionInvalid)
@@ -399,7 +399,7 @@ func TestSSOSessionSurvivesPerProductLogout(t *testing.T) {
 	svc, repo := newSSOTestService(t)
 	user := seedUser(repo, "alice@example.com", "", "active")
 	ctx := ssoScope("project-a")
-	raw := mintSSO(t, svc, ctx, user.ID)
+	raw := mintSSO(ctx, t, svc, user.ID)
 
 	// The user logs out of ONE product (its own refresh token dies)…
 	rawRefresh, hash := generateRefreshToken()
@@ -411,7 +411,7 @@ func TestSSOSessionSurvivesPerProductLogout(t *testing.T) {
 
 	// …but the SSO session is untouched: continue-as into another product
 	// still works.
-	require.True(t, ssoSessionAlive(t, svc, ctx, raw))
+	require.True(t, ssoSessionAlive(ctx, t, svc, raw))
 	_, err = svc.ContinueWithSSO(ctx, raw, ssoTestReturnTo, "1.2.3.4", "agent")
 	require.NoError(t, err)
 }
@@ -428,17 +428,17 @@ func TestSignOutEverywhereKillsSSO(t *testing.T) {
 		pwHash, _ := passwords.Hash("Str0ng!Pass1")
 		db.addUserWithPassword("u1", "alice@example.com", "Alice", "member", "active", pwHash)
 		ctx := ssoScope("project-a")
-		raw := mintSSO(t, asvc, ctx, "u1")
+		raw := mintSSO(ctx, t, asvc, "u1")
 		psvc := newTestProfileServiceWithRepo(repo, db)
 
 		// Wrong password: nothing is revoked.
 		_, err := psvc.RevokeAllSessions(context.Background(), "u1", "wrong")
 		require.Error(t, err)
-		require.True(t, ssoSessionAlive(t, asvc, ctx, raw))
+		require.True(t, ssoSessionAlive(ctx, t, asvc, raw))
 
 		_, err = psvc.RevokeAllSessions(context.Background(), "u1", "Str0ng!Pass1")
 		require.NoError(t, err)
-		require.False(t, ssoSessionAlive(t, asvc, ctx, raw),
+		require.False(t, ssoSessionAlive(ctx, t, asvc, raw),
 			"SignOutEverywhere must revoke SSO sessions")
 	})
 
@@ -449,7 +449,7 @@ func TestSignOutEverywhereKillsSSO(t *testing.T) {
 		// caller's valid access token is the confirmation.
 		db.addUser("u2", "bob@example.com", "Bob", "member", "active")
 		ctx := ssoScope("project-a")
-		raw := mintSSO(t, asvc, ctx, "u2")
+		raw := mintSSO(ctx, t, asvc, "u2")
 
 		writer := newRecordingAuditWriter()
 		psvc := NewProfileService(repo, db, "test-tenant",
@@ -457,7 +457,7 @@ func TestSignOutEverywhereKillsSSO(t *testing.T) {
 
 		_, err := psvc.RevokeAllSessions(context.Background(), "u2", "")
 		require.NoError(t, err)
-		require.False(t, ssoSessionAlive(t, asvc, ctx, raw),
+		require.False(t, ssoSessionAlive(ctx, t, asvc, raw),
 			"SignOutEverywhere by a password-less account must revoke SSO sessions")
 
 		// The SSO revocation is auditable as its own session-revoked event.
