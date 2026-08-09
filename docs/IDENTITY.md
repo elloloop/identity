@@ -174,7 +174,7 @@ GATEWAY_REPO_DRIVER                 = postgres | sqlite | memory  # postgres has
 GATEWAY_DEFAULT_PROJECT_ID          = <string>   # default "default"; the seeded control-plane Project id
 GATEWAY_DEFAULT_TENANT_ID           = <string>   # the storage scope the default project maps onto
 GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS= <csv>      # serving hostnames seeded (verified) on the default project; first is primary
-GATEWAY_DEFAULT_PRODUCT             = <string>   # default "nesta"; product slug attributed to a request with no X-Product header
+GATEWAY_DEFAULT_PRODUCT             = <string>   # default "default"; product slug attributed to a request with no X-Product header
 GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN= <bool>     # default true; primary auth-domain (branded links) must be DNS-verified. false lets an unverified is_primary host drive links
 GATEWAY_ADMIN_API_SECRET            = <secret>   # authenticates control-plane admin RPCs; empty disables them
 GATEWAY_PUBLIC_EMAIL_DOMAINS        = <csv>      # extra public domains that never auto-form a tenant
@@ -255,7 +255,7 @@ Google model completed, where one account authenticates everywhere but
 each product decides who it will issue a session to.
 
 **Products identify themselves per request** with the `X-Product: <slug>`
-header (`hold`, `nesta`, `account-portal`, …). A request with no header is
+header (e.g. `product-a`, `product-b`). A request with no header is
 a client that predates it and is attributed to `GATEWAY_DEFAULT_PRODUCT`,
 so a legacy client is gated as the app it actually is rather than escaping
 the gate. Slugs are case-insensitive.
@@ -267,9 +267,9 @@ admin surface, and no deploy is needed to add a product or change a rating:
 ```json
 {
   "products": {
-    "hold":           { "minimum_age_band": "teen" },
-    "nesta":          {},
-    "account-portal": {}
+    "product-a": { "minimum_age_band": "teen" },
+    "product-b": {},
+    "product-c": {}
   }
 }
 ```

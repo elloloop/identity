@@ -537,7 +537,7 @@ type ProjectLoginConfig struct {
 const (
 	// AccessModeOpen permits everyone — signup and login are unrestricted.
 	// This reproduces the pre-access-control behavior; a consumer product
-	// (e.g. Nesta) that wants open self-signup sets this explicitly.
+	// that wants open self-signup sets this explicitly.
 	AccessModeOpen = "open"
 	// AccessModeAllowlist permits only a user whose canonical email is in
 	// AllowedEmails OR whose domain is in AllowedDomains — for BOTH signup and
@@ -799,8 +799,8 @@ func (p ProjectProductsConfig) minimumAgeBand(slug string) string {
 }
 
 // normalizeProductSlug trims and lower-cases a slug or band string so config
-// authored as "Hold" / " TEEN " matches a header sent as "hold" / a band
-// constant. Shared by slugs and bands because both are case-insensitive
+// authored as "Product-B" / " TEEN " matches a header sent as "product-b" / a
+// band constant. Shared by slugs and bands because both are case-insensitive
 // identifiers with the same normalization rule.
 func normalizeProductSlug(raw string) string {
 	return strings.TrimSpace(strings.ToLower(raw))

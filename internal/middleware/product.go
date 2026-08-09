@@ -8,7 +8,7 @@ import (
 )
 
 // ProductHeader carries the slug of the product a request is authenticating
-// FOR ("hold", "nesta", "account-portal", …). One account signs into every
+// FOR (e.g. "product-a", "product-b"). One account signs into every
 // product in its project's pool, so the product is a per-request property, not
 // a property of the project or the credential — it travels on the header.
 const ProductHeader = "X-Product"
@@ -38,8 +38,8 @@ func NewProductResolver(defaultProduct string) func(http.Handler) http.Handler {
 	}
 }
 
-// normalizeProduct trims and lower-cases a slug so a client sending "Hold" or
-// " hold " matches a policy authored as "hold". It mirrors the normalization
+// normalizeProduct trims and lower-cases a slug so a client sending
+// "Product-B" or " product-b " matches a policy authored as "product-b". It mirrors the normalization
 // ParseProjectConfig applies to the configured slugs, so both sides of the
 // lookup are normalized exactly once.
 func normalizeProduct(raw string) string {

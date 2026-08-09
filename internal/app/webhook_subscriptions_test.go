@@ -115,7 +115,7 @@ func TestWebhookSubscriptionID_StableAndProjectScoped(t *testing.T) {
 // TestSeededSubscriptionDeliversSignedUserDeleted is the end-to-end proof:
 // a subscription declared in config, seeded into the outbox, receives a
 // signed user.deleted webhook whose body verifies against the configured
-// secret — the exact path a downstream consumer (the Nesta relay) relies on.
+// secret — the exact path a downstream relay consumer relies on.
 func TestSeededSubscriptionDeliversSignedUserDeleted(t *testing.T) {
 	const secret = "relay-shared-secret"
 

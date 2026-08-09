@@ -25,14 +25,13 @@ func (b *blockingTransport) Send(context.Context, email.Message) error {
 	return nil
 }
 
-// glossAccessJSON is the config_json an operator sets to restrict a project
-// (e.g. the future admin-gloss project) to an explicit two-email membership. It
-// is the exact shape the PR body documents.
-const glossAccessJSON = `{"access":{"mode":"allowlist","allowed_emails":["arun88m@gmail.com","sowjanya@tinykite.co"]}}`
+// allowlistAccessJSON is the config_json an operator sets to restrict a
+// project to an explicit two-email membership.
+const allowlistAccessJSON = `{"access":{"mode":"allowlist","allowed_emails":["alice@example.com","bob@example.com"]}}`
 
 // gmailAllowlistJSON lists a +tagged gmail address to prove canonicalization at
 // match time (a login as the dotted/untagged form is admitted).
-const gmailAllowlistJSON = `{"access":{"mode":"allowlist","allowed_emails":["alice.smith+work@gmail.com"],"allowed_domains":["cursive.ai"]}}`
+const gmailAllowlistJSON = `{"access":{"mode":"allowlist","allowed_emails":["alice.smith+work@gmail.com"],"allowed_domains":["example.com"]}}`
 
 const accessTestPassword = "S3cure!Passw0rd"
 
@@ -43,7 +42,7 @@ func accessScope(t *testing.T, configJSON string) context.Context {
 	t.Helper()
 	cfg, err := ParseProjectConfig(configJSON)
 	require.NoError(t, err)
-	return WithProjectScope(context.Background(), &ProjectScope{ProjectID: "admin-gloss", Access: cfg.Access})
+	return WithProjectScope(context.Background(), &ProjectScope{ProjectID: "project-a", Access: cfg.Access})
 }
 
 // unconfiguredScope is a resolved project with NO access block — mode "". Under
@@ -97,7 +96,7 @@ func TestProjectAccessConfig_Permits(t *testing.T) {
 	a := ProjectAccessConfig{
 		Mode:           AccessModeAllowlist,
 		AllowedEmails:  []string{"alicesmith@gmail.com"},
-		AllowedDomains: []string{"cursive.ai"},
+		AllowedDomains: []string{"example.com"},
 	}
 	for _, tc := range []struct {
 		name  string
@@ -105,7 +104,7 @@ func TestProjectAccessConfig_Permits(t *testing.T) {
 		want  bool
 	}{
 		{"email_match", "alicesmith@gmail.com", true},
-		{"domain_match", "arun@cursive.ai", true},
+		{"domain_match", "alice@example.com", true},
 		{"no_match_gmail", "bob@gmail.com", false},
 		{"no_match_domain", "x@other.com", false},
 		{"no_at", "garbage", false},
@@ -119,9 +118,9 @@ func TestProjectAccessConfig_Permits(t *testing.T) {
 // accessPermits is the whole mode matrix (mode × signup/login) in one table.
 func TestAccessPermits_Matrix(t *testing.T) {
 	t.Parallel()
-	const listed = "arun@cursive.ai"
+	const listed = "alice@example.com"
 	const unlisted = "outsider@other.com"
-	allow := ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedDomains: []string{"cursive.ai"}}
+	allow := ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedDomains: []string{"example.com"}}
 
 	for _, tc := range []struct {
 		name       string
@@ -162,10 +161,10 @@ func TestParseProjectConfig_Access_Modes(t *testing.T) {
 
 	// allowlist canonicalizes emails (gmail dot/+tag) and domains (case + fold).
 	cfg, err := ParseProjectConfig(`{"access":{"mode":"allowlist",` +
-		`"allowed_emails":["Alice.Smith+work@GMAIL.com"],"allowed_domains":["Cursive.AI","Googlemail.com"]}}`)
+		`"allowed_emails":["Alice.Smith+work@GMAIL.com"],"allowed_domains":["Example.COM","Googlemail.com"]}}`)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"alicesmith@gmail.com"}, cfg.Access.AllowedEmails)
-	assert.Equal(t, []string{"cursive.ai", "gmail.com"}, cfg.Access.AllowedDomains)
+	assert.Equal(t, []string{"example.com", "gmail.com"}, cfg.Access.AllowedDomains)
 }
 
 func TestParseProjectConfig_Access_OmittedIsUnsetMode(t *testing.T) {
@@ -203,9 +202,9 @@ func TestNewProjectAccessConfig(t *testing.T) {
 		require.NoError(t, err, "mode %q", mode)
 		assert.Equal(t, mode, a.Mode)
 	}
-	a, err := NewProjectAccessConfig(AccessModeAllowlist, []string{"OP@Cursive.AI"}, nil)
+	a, err := NewProjectAccessConfig(AccessModeAllowlist, []string{"OP@Example.COM"}, nil)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"op@cursive.ai"}, a.AllowedEmails)
+	assert.Equal(t, []string{"op@example.com"}, a.AllowedEmails)
 
 	_, err = NewProjectAccessConfig(AccessModeAllowlist, nil, nil)
 	require.Error(t, err, "allowlist without entries must fail")
@@ -284,10 +283,10 @@ func TestProjectAccess_Allowlist_Password(t *testing.T) {
 	ctx := accessScope(t, gmailAllowlistJSON)
 
 	// Allowed by domain: signup + login succeed.
-	res, err := svc.PasswordSignup(ctx, "arun@cursive.ai", accessTestPassword, "Arun", "", 0)
+	res, err := svc.PasswordSignup(ctx, "alice@example.com", accessTestPassword, "Alice", "", 0)
 	require.NoError(t, err)
 	require.NotEmpty(t, res.AccessToken)
-	login, err := svc.PasswordLogin(ctx, "arun@cursive.ai", accessTestPassword, "1.2.3.4", "agent")
+	login, err := svc.PasswordLogin(ctx, "alice@example.com", accessTestPassword, "1.2.3.4", "agent")
 	require.NoError(t, err)
 	require.NotEmpty(t, login.AccessToken)
 
@@ -322,7 +321,7 @@ func TestProjectAccess_Allowlist_OAuth_JITAndFastPath(t *testing.T) {
 
 	// Listed JIT succeeds.
 	_, err = svc.OAuthLogin(ctx, OAuthLoginParams{
-		Code: fakeOAuthCode("arun@cursive.ai", "Arun", "", "google"), Provider: "google", RedirectURI: "https://app/cb",
+		Code: fakeOAuthCode("alice@example.com", "Alice", "", "google"), Provider: "google", RedirectURI: "https://app/cb",
 	})
 	require.NoError(t, err)
 
@@ -340,9 +339,9 @@ func TestProjectAccess_Allowlist_Passwordless(t *testing.T) {
 	ctx := accessScope(t, gmailAllowlistJSON)
 
 	// On-list: the OTP is sent and redemption logs in.
-	require.NoError(t, svc.RequestEmailLoginCode(ctx, "arun@cursive.ai"))
+	require.NoError(t, svc.RequestEmailLoginCode(ctx, "alice@example.com"))
 	require.Len(t, rec.Sent(), 1)
-	res, err := svc.VerifyEmailLoginCode(ctx, "arun@cursive.ai", extractCodeFromEmail(t, rec.Sent()[0].Text), "1.2.3.4", "a")
+	res, err := svc.VerifyEmailLoginCode(ctx, "alice@example.com", extractCodeFromEmail(t, rec.Sent()[0].Text), "1.2.3.4", "a")
 	require.NoError(t, err)
 	require.NotEmpty(t, res.AccessToken)
 
@@ -381,7 +380,7 @@ func TestProjectAccess_Allowlist_Passkey(t *testing.T) {
 		_, err = svc.CompletePasskeySignup(context.Background(), challengeID, pkRegCredentialJSON(t), pkVectorEmail, otp, "Key", "1.2.3.4", "a")
 		require.NoError(t, err)
 
-		ctx := accessScope(t, `{"access":{"mode":"allowlist","allowed_domains":["cursive.ai"]}}`)
+		ctx := accessScope(t, `{"access":{"mode":"allowlist","allowed_domains":["example.com"]}}`)
 		_, loginChallengeID, err := svc.BeginPasskeyLogin(ctx, pkVectorEmail)
 		require.NoError(t, err)
 		setFakeChallengeValue(repo, loginChallengeID, pkB64URL(t, pkLoginChallengeHex))
@@ -482,9 +481,9 @@ func TestProjectAccess_Invite_AcceptInvitationThenLogin(t *testing.T) {
 
 func TestProjectAccess_AcceptInvitation_AllowlistGatesInvitee(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
-	ctx := accessScope(t, gmailAllowlistJSON) // allows the cursive.ai domain
+	ctx := accessScope(t, gmailAllowlistJSON) // allows the example.com domain
 
-	onList := seedInvitedUser(t, repo, "member@cursive.ai")
+	onList := seedInvitedUser(t, repo, "member@example.com")
 	res, err := svc.AcceptInvitation(ctx, onList, accessTestPassword, "Member", "", "")
 	require.NoError(t, err, "an on-list invitee may accept")
 	require.NotEmpty(t, res.AccessToken)
@@ -494,7 +493,7 @@ func TestProjectAccess_AcceptInvitation_AllowlistGatesInvitee(t *testing.T) {
 	require.ErrorIs(t, err, ErrAccessNotAllowed, "an admin cannot invite someone the allowlist excludes")
 }
 
-// ── Env-configured default project (Nesta): mode governs deny/permit ─────
+// ── Env-configured default project: mode governs deny/permit ────────────
 
 func TestProjectAccess_EnvDefaultProject_ModeGovernsDenyOrPermit(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
@@ -513,14 +512,14 @@ func TestProjectAccess_EnvDefaultProject_ModeGovernsDenyOrPermit(t *testing.T) {
 	require.ErrorIs(t, svc.enforceProjectAccessLogin(build(AccessModeClosed), canonicalize("x@y.com")), ErrAccessNotAllowed)
 }
 
-// ── The documented admin-gloss config parses to the intended allowlist ───
+// ── The documented allowlist config parses to the intended membership ────
 
-func TestProjectAccess_AdminGlossDocumentedConfig(t *testing.T) {
+func TestProjectAccess_AllowlistDocumentedConfig(t *testing.T) {
 	t.Parallel()
-	cfg, err := ParseProjectConfig(glossAccessJSON)
+	cfg, err := ParseProjectConfig(allowlistAccessJSON)
 	require.NoError(t, err)
 	assert.Equal(t, AccessModeAllowlist, cfg.Access.Mode)
-	assert.Equal(t, []string{"arun88m@gmail.com", "sowjanya@tinykite.co"}, cfg.Access.AllowedEmails)
+	assert.Equal(t, []string{"alice@example.com", "bob@example.com"}, cfg.Access.AllowedEmails)
 }
 
 // ── Blocker 1: request-phase email dispatch is gated by access mode ──────
@@ -539,7 +538,7 @@ func TestProjectAccess_RequestEmailLoginCode_SendGatedByMode(t *testing.T) {
 	}{
 		{"open_sends", `{"access":{"mode":"open"}}`, "x@any.com", false, true},
 		{"closed_never_sends", `{"access":{"mode":"closed"}}`, "x@any.com", false, false},
-		{"allowlist_onlist_sends", gmailAllowlistJSON, "arun@cursive.ai", false, true},
+		{"allowlist_onlist_sends", gmailAllowlistJSON, "alice@example.com", false, true},
 		{"allowlist_offlist_dropped", gmailAllowlistJSON, "outsider@other.com", false, false},
 		{"invite_no_user_dropped", `{"access":{"mode":"invite"}}`, "newbie@x.com", false, false},
 		{"invite_existing_user_sends", `{"access":{"mode":"invite"}}`, "member@x.com", true, true},
@@ -591,7 +590,7 @@ func TestProjectAccess_BeginPasskeySignup_FailFastByMode(t *testing.T) {
 		{"allowlist_onlist_permits", `{"access":{"mode":"allowlist","allowed_domains":["example.org"]}}`, nil},
 		{"closed_denies", `{"access":{"mode":"closed"}}`, ErrAccessNotAllowed},
 		{"invite_denies", `{"access":{"mode":"invite"}}`, ErrSignupByInvitationOnly},
-		{"allowlist_offlist_denies", `{"access":{"mode":"allowlist","allowed_domains":["cursive.ai"]}}`, ErrAccessNotAllowed},
+		{"allowlist_offlist_denies", `{"access":{"mode":"allowlist","allowed_domains":["example.com"]}}`, ErrAccessNotAllowed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, _, rec := newPasskeyVectorSvc(t)
@@ -690,7 +689,7 @@ func TestProjectAccess_RequestEmailLoginCode_AsyncDoesNotBlock(t *testing.T) {
 // no password-guessing oracle for disallowed addresses).
 func TestProjectAccess_PasswordLogin_OffListDeniedBeforeLookup(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
-	ctx := accessScope(t, gmailAllowlistJSON) // permits cursive.ai only
+	ctx := accessScope(t, gmailAllowlistJSON) // permits example.com only
 	repo.findUserByEmailErr = errors.New("FindUserByEmail must not be reached for an off-list login")
 
 	_, err := svc.PasswordLogin(ctx, "outsider@other.com", "any-Passw0rd!", "1.2.3.4", "a")
@@ -716,7 +715,7 @@ const (
 	nonCanonLogin       = "aLiCe.SMITH+news@gmail.com"
 	nonCanonCanonical   = "alicesmith@gmail.com"
 	// Canonicalizes to bobjones@gmail.com — NOT on the list (gmail.com is not an
-	// allowed domain; only cursive.ai is), so every variant is denied.
+	// allowed domain; only example.com is), so every variant is denied.
 	nonCanonOffList          = "Bob.Jones+x@GMAIL.com"
 	nonCanonOffListCanonical = "bobjones@gmail.com"
 )

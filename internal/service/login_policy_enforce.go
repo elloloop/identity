@@ -43,7 +43,7 @@ func (s *AuthService) enforceSessionTimeout(ctx context.Context, email string, n
 
 // emailDomain returns the domain part of an email. It splits on the LAST '@'
 // so it computes exactly the same domain as canonicalizeEmail — a quoted local
-// part may itself contain '@' (e.g. "a@b"@cursive.ai), and splitting on the
+// part may itself contain '@' (e.g. "a@b"@example.com), and splitting on the
 // first '@' would yield a bogus domain that mis-resolves the tenant LoginPolicy
 // and the access allowlist. Returns "" when the address has no '@'.
 func emailDomain(email string) string {

@@ -17,8 +17,8 @@ import (
 // one the same config leaves unrestricted, so every case also proves the policy
 // is scoped to the slug rather than applied project-wide.
 const (
-	restrictedProduct   = "hold"
-	unrestrictedProduct = "nesta"
+	restrictedProduct   = "product-b"
+	unrestrictedProduct = "product-a"
 )
 
 // The three policies an operator can be in for a product, as config_json. Every
@@ -27,8 +27,8 @@ const (
 // the age gate, so access is held open throughout.
 const (
 	noProductPolicyJSON = `{"access":{"mode":"open"}}`
-	teenMinimumJSON     = `{"access":{"mode":"open"},"products":{"hold":{"minimum_age_band":"teen"},"nesta":{}}}`
-	adultMinimumJSON    = `{"access":{"mode":"open"},"products":{"hold":{"minimum_age_band":"adult"},"nesta":{}}}`
+	teenMinimumJSON     = `{"access":{"mode":"open"},"products":{"product-b":{"minimum_age_band":"teen"},"product-a":{}}}`
+	adultMinimumJSON    = `{"access":{"mode":"open"},"products":{"product-b":{"minimum_age_band":"adult"},"product-a":{}}}`
 )
 
 const productAgePassword = "S3cure!Passw0rd"
@@ -42,7 +42,7 @@ func productScope(t *testing.T, configJSON, product string) context.Context {
 	cfg, err := ParseProjectConfig(configJSON)
 	require.NoError(t, err)
 	ctx := WithProjectScope(context.Background(), &ProjectScope{
-		ProjectID: "tinykite",
+		ProjectID: "project-a",
 		Access:    cfg.Access,
 		Products:  cfg.Products,
 		Anonymous: cfg.Anonymous,
@@ -128,16 +128,16 @@ func TestEnforceProductAgeGate_NoScopeOrNoUser_Permits(t *testing.T) {
 
 func TestParseProjectConfig_Products_Bands(t *testing.T) {
 	t.Parallel()
-	cfg, err := ParseProjectConfig(`{"products":{"hold":{"minimum_age_band":"teen"},` +
-		`"account-portal":{},"Nesta":{"minimum_age_band":"  ADULT "}}}`)
+	cfg, err := ParseProjectConfig(`{"products":{"product-b":{"minimum_age_band":"teen"},` +
+		`"product-c":{},"Product-A":{"minimum_age_band":"  ADULT "}}}`)
 	require.NoError(t, err)
-	assert.Equal(t, MinimumAgeBandTeen, cfg.Products.minimumAgeBand("hold"))
-	assert.Equal(t, "", cfg.Products.minimumAgeBand("account-portal"))
+	assert.Equal(t, MinimumAgeBandTeen, cfg.Products.minimumAgeBand("product-b"))
+	assert.Equal(t, "", cfg.Products.minimumAgeBand("product-c"))
 	// Slugs and bands are canonicalized at parse time, so a mixed-case config
 	// matches the lower-cased slug the middleware stamps.
-	assert.Equal(t, MinimumAgeBandAdult, cfg.Products.minimumAgeBand("nesta"))
+	assert.Equal(t, MinimumAgeBandAdult, cfg.Products.minimumAgeBand("product-a"))
 	// An unconfigured product imposes nothing.
-	assert.Equal(t, "", cfg.Products.minimumAgeBand("gloss"))
+	assert.Equal(t, "", cfg.Products.minimumAgeBand("product-d"))
 }
 
 func TestParseProjectConfig_Products_OmittedIsNoPolicy(t *testing.T) {
@@ -154,10 +154,10 @@ func TestParseProjectConfig_Products_OmittedIsNoPolicy(t *testing.T) {
 func TestParseProjectConfig_Products_Validation(t *testing.T) {
 	t.Parallel()
 	for name, blob := range map[string]string{
-		"unrecognized_band": `{"products":{"hold":{"minimum_age_band":"grown-up"}}}`,
-		"typo_band":         `{"products":{"hold":{"minimum_age_band":"chid"}}}`,
-		"proto_enum_band":   `{"products":{"hold":{"minimum_age_band":"AGE_BAND_TEEN"}}}`,
-		"numeric_band":      `{"products":{"hold":{"minimum_age_band":"18"}}}`,
+		"unrecognized_band": `{"products":{"product-b":{"minimum_age_band":"grown-up"}}}`,
+		"typo_band":         `{"products":{"product-b":{"minimum_age_band":"chid"}}}`,
+		"proto_enum_band":   `{"products":{"product-b":{"minimum_age_band":"AGE_BAND_TEEN"}}}`,
+		"numeric_band":      `{"products":{"product-b":{"minimum_age_band":"18"}}}`,
 		"blank_slug":        `{"products":{"  ":{"minimum_age_band":"teen"}}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -171,9 +171,9 @@ func TestParseProjectConfig_Products_Validation(t *testing.T) {
 func TestParseProjectConfig_Products_AcceptsEveryBand(t *testing.T) {
 	t.Parallel()
 	for _, band := range []string{MinimumAgeBandChild, MinimumAgeBandTeen, MinimumAgeBandAdult} {
-		cfg, err := ParseProjectConfig(`{"products":{"hold":{"minimum_age_band":"` + band + `"}}}`)
+		cfg, err := ParseProjectConfig(`{"products":{"product-b":{"minimum_age_band":"` + band + `"}}}`)
 		require.NoError(t, err, "band %q", band)
-		assert.Equal(t, band, cfg.Products.minimumAgeBand("hold"))
+		assert.Equal(t, band, cfg.Products.minimumAgeBand("product-b"))
 	}
 }
 
@@ -389,7 +389,7 @@ func TestProductAgeGate_UnrestrictedProductAdmitsChild(t *testing.T) {
 // A request with NO X-Product header is stamped with the deployment default by
 // the middleware, so it is gated as that product rather than escaping the gate.
 func TestProductAgeGate_DefaultProductWhenHeaderAbsent(t *testing.T) {
-	const defaultProductJSON = `{"access":{"mode":"open"},"products":{"nesta":{"minimum_age_band":"adult"}}}`
+	const defaultProductJSON = `{"access":{"mode":"open"},"products":{"product-a":{"minimum_age_band":"adult"}}}`
 
 	svc, repo, _ := newProductAgeSvc(t)
 	seedUserAged(t, repo, "child@example.com", dobAgeMs(8))
@@ -579,7 +579,7 @@ func scopeFromJSON(t *testing.T, configJSON string) *ProjectScope {
 	t.Helper()
 	cfg, err := ParseProjectConfig(configJSON)
 	require.NoError(t, err)
-	return &ProjectScope{ProjectID: "tinykite", Access: cfg.Access, Products: cfg.Products}
+	return &ProjectScope{ProjectID: "project-a", Access: cfg.Access, Products: cfg.Products}
 }
 
 // An anonymous account structurally never resolves an age band, so the

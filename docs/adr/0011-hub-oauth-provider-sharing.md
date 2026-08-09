@@ -25,7 +25,7 @@ directly. Downstream deployers asked for exactly this: route hosted OAuth for
 any project through the central hub (`/oauth/start` on the default project's
 host, carrying a `project_key` parameter), reusing the hub's single client id
 and single registered redirect URI, while identity mints the user and session
-in the routed project (tinykite-co/monorepo#329).
+in the routed project.
 
 Strict isolation is still the right default: on a deployment whose projects
 belong to **different** operators, a shared client would show one operator's
