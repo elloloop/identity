@@ -86,3 +86,7 @@ func (r *pgRepository) DeleteExpiredQrLoginSessions(ctx context.Context, beforeM
 func (r *pgRepository) DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredInvitations", "user_invitations", beforeMs, limit)
 }
+
+func (r *pgRepository) DeleteExpiredSSOSessions(ctx context.Context, beforeMs int64, limit int) error {
+	return r.deleteExpiredBatch(ctx, "DeleteExpiredSSOSessions", "sso_sessions", beforeMs, limit)
+}

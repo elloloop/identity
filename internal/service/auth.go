@@ -278,6 +278,26 @@ type Repository interface {
 	RevokeSession(ctx context.Context, sid string, atMs int64) error
 	RevokeSessionsForUser(ctx context.Context, userID string, atMs int64) error
 
+	// SSO sessions (browser single sign-on at the auth origin).
+	//
+	// A row records that THIS BROWSER authenticated, so a second product
+	// asking for a session can be served without another provider round
+	// trip. It is not a credential for any product: nothing here mints or
+	// holds a token pair — see ADR-0014.
+	//
+	// FindSSOSessionByHash returns the row for a cookie value's SHA-256
+	// hash, or nil when there is none. It returns rows that are expired or
+	// revoked as well, so the caller can distinguish "no session" from
+	// "session ended" and, on the fast path, treat both alike without a
+	// second query. TouchSSOSession re-anchors a row's rolling expiry.
+	// RevokeSSOSessionsForUser is what "sign out everywhere" reaches.
+	// All are idempotent and never error on a miss.
+	CreateSSOSession(ctx context.Context, s *SSOSessionRecord) (string, error)
+	FindSSOSessionByHash(ctx context.Context, tokenHash string) (*SSOSessionRecord, error)
+	TouchSSOSession(ctx context.Context, tokenHash string, lastUsedAtMs, expiresAtMs int64) error
+	RevokeSSOSession(ctx context.Context, tokenHash string, atMs int64) error
+	RevokeSSOSessionsForUser(ctx context.Context, userID string, atMs int64) error
+
 	// Refresh tokens
 	FindRefreshTokenByHash(ctx context.Context, hash string) (*RefreshTokenRecord, error)
 	// FindRefreshTokenByHashIncludingConsumed returns the row even when
@@ -593,6 +613,7 @@ type Repository interface {
 	DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredQrLoginSessions(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredSSOSessions(ctx context.Context, beforeMs int64, limit int) error
 }
 
 // ErrSweepNotImplemented is the soft-skip sentinel a Repository may
@@ -621,6 +642,46 @@ type SessionRecord struct {
 	UserID      string
 	CreatedAtMs int64 // epoch ms
 	RevokedAtMs int64 // epoch ms; 0 = active
+}
+
+// SSOSessionRecord represents a browser's single-sign-on session at the
+// auth origin: the durable record that this browser completed an
+// authentication, which lets a later product be served a fresh session
+// without repeating the provider round trip (ADR-0014).
+//
+// It is deliberately NOT a credential. It carries no token material, it
+// is never sent to a product origin, and possessing it grants nothing on
+// its own — the fast path re-runs the account, access, and policy checks
+// a cold sign-in runs before anything is minted.
+type SSOSessionRecord struct {
+	NodeID string
+	// TokenHash is the SHA-256 of the opaque cookie value. The raw value
+	// exists only in the browser, exactly as for refresh tokens and
+	// one-time codes: a database disclosure yields nothing replayable.
+	TokenHash string
+	UserID    string
+	// LoginMethod is the method that ESTABLISHED this session (password,
+	// oauth, passkey…). The fast path replays the tenant's login policy
+	// against it rather than against a synthetic "sso" method, so a
+	// cookie cannot launder a weak login into a stronger one.
+	LoginMethod  string
+	IPAddress    string
+	UserAgent    string
+	CreatedAtMs  int64 // epoch ms
+	LastUsedAtMs int64 // epoch ms
+	// ExpiresAtMs is rolling: each successful use re-anchors it at
+	// now + GATEWAY_SSO_SESSION_TTL_SECONDS, so an actively used browser
+	// stays signed in and an abandoned one lapses on schedule.
+	ExpiresAtMs int64 // epoch ms
+	RevokedAtMs int64 // epoch ms; 0 = active
+}
+
+// Active reports whether the session may still be used at nowMs: not
+// revoked and not expired. Callers treat a nil record and an inactive
+// one identically — both mean "no fast path" — but the split keeps the
+// reason available for audit.
+func (s *SSOSessionRecord) Active(nowMs int64) bool {
+	return s != nil && s.RevokedAtMs == 0 && s.ExpiresAtMs > nowMs
 }
 
 // RefreshTokenRecord represents a stored refresh token.

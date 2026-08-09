@@ -825,15 +825,6 @@ type Config struct {
 	// AllowedOrigins is the comma-separated list of CORS allowed origins.
 	AllowedOrigins string
 
-	// Cookie settings.
-
-	// CookieDomain is the Domain attribute set on auth cookies (empty = host-only).
-	CookieDomain string
-	// CookieSecure sets the Secure attribute on auth cookies; enable in prod (HTTPS-only).
-	CookieSecure bool
-	// CookieSameSite is the SameSite attribute on auth cookies — "Lax", "Strict", or "None".
-	CookieSameSite string
-
 	// AuthAllowLocal enables local username/password auth; set false to require
 	// OAuth (intended for development).
 	AuthAllowLocal bool
@@ -1306,10 +1297,6 @@ func loadFromEnv() *Config {
 		PublicEmailDomains: envStr("GATEWAY_PUBLIC_EMAIL_DOMAINS", ""),
 
 		AllowedOrigins: envStr("GATEWAY_ALLOWED_ORIGINS", "http://localhost:9002,http://localhost:3000"),
-
-		CookieDomain:   envStr("GATEWAY_COOKIE_DOMAIN", ""),
-		CookieSecure:   envBool("GATEWAY_COOKIE_SECURE", false),
-		CookieSameSite: envStr("GATEWAY_COOKIE_SAMESITE", "Lax"),
 
 		AuthAllowLocal:           envBool("GATEWAY_AUTH_ALLOW_LOCAL", true),
 		AuthRequireVerifiedEmail: envBool("GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL", true),
