@@ -128,6 +128,11 @@ type HostedOAuthCallbackResult struct {
 	ReturnTo  string
 	Code      string
 	CSRFToken string
+	// SSOCookieValue is the opaque value for the browser's SSO session
+	// cookie, set only when this callback COMPLETED an authentication on a
+	// deployment with SSO enabled. Empty means "set no cookie": SSO off, or
+	// a login that has not finished (a second factor still outstanding).
+	SSOCookieValue string
 }
 
 // CompleteHostedOAuth runs the hosted callback: it verifies the signed
@@ -199,7 +204,23 @@ func (s *AuthService) CompleteHostedOAuth(
 		return nil, err
 	}
 
-	return &HostedOAuthCallbackResult{ReturnTo: claims.ReturnTo, Code: otc, CSRFToken: claims.CSRFToken}, nil
+	// Establish the browser's SSO session only on a COMPLETED authentication.
+	// A login still owing a second factor has not proven anything a later
+	// product may rely on, so it leaves no cookie behind.
+	var ssoCookie string
+	if !result.TotpRequired {
+		ssoCookie, err = s.EstablishSSOSession(ctx, result.User.ID, LoginMethodOAuth, ipAddr, userAgent)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &HostedOAuthCallbackResult{
+		ReturnTo:       claims.ReturnTo,
+		Code:           otc,
+		CSRFToken:      claims.CSRFToken,
+		SSOCookieValue: ssoCookie,
+	}, nil
 }
 
 // mintOAuthOneTimeCode generates an opaque code, stores its hash bound

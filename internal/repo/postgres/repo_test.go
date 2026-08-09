@@ -197,6 +197,7 @@ func truncateAll(ctx context.Context, dsn string) error {
 			email_verification_tokens,
 			password_reset_tokens,
 			sessions,
+			sso_sessions,
 			refresh_tokens,
 			tenant_invitations,
 			tenant_memberships,

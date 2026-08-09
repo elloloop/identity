@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -115,6 +116,18 @@ const (
 	// DefaultAgeGateAdultAge is the age at or above which a user is an adult;
 	// below it (and above child-max) they are a TEEN minor.
 	DefaultAgeGateAdultAge = 18
+
+	// DefaultSSOSessionTTLSeconds is the rolling lifetime of a browser SSO
+	// session: 90 days, re-anchored on each use.
+	DefaultSSOSessionTTLSeconds = 90 * 24 * 60 * 60
+)
+
+// Continue-as behaviour for GATEWAY_SSO_CONTINUE_MODE (ADR-0014).
+const (
+	// SSOContinueModeTap shows a card naming the account before minting.
+	SSOContinueModeTap = "tap"
+	// SSOContinueModeSilent forwards a valid session with no interstitial.
+	SSOContinueModeSilent = "silent"
 )
 
 // DefaultPostgresConnTimeoutMs is the default per-acquire Postgres connection
@@ -454,6 +467,49 @@ type Config struct {
 	// by GATEWAY_OAUTH_HUB_SHARING; defaults false (strict ADR-0010
 	// isolation).
 	OAuthHubSharing bool
+
+	// SSOEnabled turns on browser single sign-on at the auth origin
+	// (ADR-0014): a successful hosted authentication sets a host-locked
+	// `__Host-sso_session` cookie, and a later product asking for a session
+	// can be served from it without a second provider round trip.
+	//
+	// Off by default. A server operators run for their own deployments must
+	// not silently start setting a new long-lived cookie on upgrade, and the
+	// feature is only useful where several products share one auth origin.
+	// Driven by GATEWAY_SSO_ENABLED.
+	SSOEnabled bool
+
+	// SSOSessionTTLSeconds is the SSO session's ROLLING lifetime: each
+	// successful use re-anchors expiry at now + TTL, so an actively used
+	// browser stays signed in and an abandoned one lapses on schedule.
+	// There is deliberately no second "absolute cap" knob — one lifetime
+	// setting, and it is the one an operator reasons about. Driven by
+	// GATEWAY_SSO_SESSION_TTL_SECONDS; defaults to 90 days.
+	SSOSessionTTLSeconds int
+
+	// SSOContinueMode selects what a valid SSO session buys the user:
+	// SSOContinueModeTap (default) offers a "Continue as <email>" card that
+	// names the account before anything is minted, SSOContinueModeSilent
+	// forwards without an interstitial.
+	//
+	// Tap is the default because the failure mode is asymmetric: silent SSO
+	// on a shared or family device signs a second person in as the first,
+	// invisibly, and no product downstream can tell that happened. A
+	// deployment whose devices are all single-user can set silent.
+	// Driven by GATEWAY_SSO_CONTINUE_MODE.
+	SSOContinueMode string
+
+	// SSOHubOrigins is the comma-separated allowlist of web origins that may
+	// call GET /sso/session with credentials to render their own
+	// "Continue as" card (the sign-in hub is a separate origin from the auth
+	// API). Each entry is an exact scheme://host[:port].
+	//
+	// This is deliberately its own narrow list rather than a reuse of
+	// GATEWAY_ALLOWED_ORIGINS: introspection reveals which account a browser
+	// is signed in as, so it goes to the sign-in surface only, not to every
+	// origin permitted to call the RPC API. Empty (the default) disables the
+	// endpoint entirely. Driven by GATEWAY_SSO_HUB_ORIGINS.
+	SSOHubOrigins string
 
 	// OAuthPrompt is the OAuth `prompt` parameter forwarded to providers that
 	// support it (Google, Microsoft) on the hosted authorization request.
@@ -825,15 +881,6 @@ type Config struct {
 	// AllowedOrigins is the comma-separated list of CORS allowed origins.
 	AllowedOrigins string
 
-	// Cookie settings.
-
-	// CookieDomain is the Domain attribute set on auth cookies (empty = host-only).
-	CookieDomain string
-	// CookieSecure sets the Secure attribute on auth cookies; enable in prod (HTTPS-only).
-	CookieSecure bool
-	// CookieSameSite is the SameSite attribute on auth cookies — "Lax", "Strict", or "None".
-	CookieSameSite string
-
 	// AuthAllowLocal enables local username/password auth; set false to require
 	// OAuth (intended for development).
 	AuthAllowLocal bool
@@ -1197,6 +1244,11 @@ func loadFromEnv() *Config {
 
 		OAuthAllowedReturnURLs: envStr("GATEWAY_OAUTH_ALLOWED_RETURN_URLS", ""),
 		OAuthHubSharing:        envBool("GATEWAY_OAUTH_HUB_SHARING", false),
+
+		SSOEnabled:           envBool("GATEWAY_SSO_ENABLED", false),
+		SSOSessionTTLSeconds: envInt("GATEWAY_SSO_SESSION_TTL_SECONDS", DefaultSSOSessionTTLSeconds),
+		SSOContinueMode:      envStr("GATEWAY_SSO_CONTINUE_MODE", SSOContinueModeTap),
+		SSOHubOrigins:        envStr("GATEWAY_SSO_HUB_ORIGINS", ""),
 		OAuthPrompt:            envStrRaw("GATEWAY_OAUTH_PROMPT", "select_account"),
 
 		NativeOAuthGoogleAudiences:    envStr("GATEWAY_NATIVE_OAUTH_GOOGLE_AUDIENCES", ""),
@@ -1306,10 +1358,6 @@ func loadFromEnv() *Config {
 		PublicEmailDomains: envStr("GATEWAY_PUBLIC_EMAIL_DOMAINS", ""),
 
 		AllowedOrigins: envStr("GATEWAY_ALLOWED_ORIGINS", "http://localhost:9002,http://localhost:3000"),
-
-		CookieDomain:   envStr("GATEWAY_COOKIE_DOMAIN", ""),
-		CookieSecure:   envBool("GATEWAY_COOKIE_SECURE", false),
-		CookieSameSite: envStr("GATEWAY_COOKIE_SAMESITE", "Lax"),
 
 		AuthAllowLocal:           envBool("GATEWAY_AUTH_ALLOW_LOCAL", true),
 		AuthRequireVerifiedEmail: envBool("GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL", true),
@@ -1858,6 +1906,70 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.validateSSO(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateSSO fails the boot on an SSO configuration that would behave
+// surprisingly rather than obviously: a non-positive rolling TTL (which
+// would expire every session the instant it is created) or an unrecognized
+// continue mode (which must not silently fall back to the more permissive
+// of the two). Disabled deployments are never rejected for their SSO
+// settings, matching validateAgeGate.
+func (c *Config) validateSSO() error {
+	if !c.SSOEnabled {
+		return nil
+	}
+	if c.SSOSessionTTLSeconds <= 0 {
+		return fmt.Errorf(
+			"config: GATEWAY_SSO_SESSION_TTL_SECONDS=%d must be > 0 when GATEWAY_SSO_ENABLED is set",
+			c.SSOSessionTTLSeconds,
+		)
+	}
+	switch c.SSOContinueMode {
+	case SSOContinueModeTap, SSOContinueModeSilent:
+	default:
+		return fmt.Errorf(
+			"config: GATEWAY_SSO_CONTINUE_MODE=%q must be %q or %q",
+			c.SSOContinueMode, SSOContinueModeTap, SSOContinueModeSilent,
+		)
+	}
+	for _, origin := range c.SSOHubOriginList() {
+		if err := validateExactOrigin(origin); err != nil {
+			return fmt.Errorf("config: GATEWAY_SSO_HUB_ORIGINS: %w", err)
+		}
+	}
+	return nil
+}
+
+// SSOHubOriginList returns the trimmed, non-empty entries of
+// GATEWAY_SSO_HUB_ORIGINS. Empty config yields nil, which disables the
+// credentialed introspection endpoint.
+func (c *Config) SSOHubOriginList() []string {
+	return splitTrimCSV(c.SSOHubOrigins)
+}
+
+// validateExactOrigin rejects anything that is not a bare
+// scheme://host[:port] — no path, no query, no wildcard. The value gates a
+// credentialed cross-origin read of who a browser is signed in as, so a
+// sloppy entry must fail the boot rather than widen the reader set.
+func validateExactOrigin(origin string) error {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return fmt.Errorf("%q is not a valid origin: %w", origin, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%q must use http or https", origin)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("%q has no host", origin)
+	}
+	if u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return fmt.Errorf("%q must be a bare origin (scheme://host[:port])", origin)
+	}
 	return nil
 }
 

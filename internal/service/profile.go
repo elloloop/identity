@@ -216,13 +216,25 @@ func (s *ProfileService) RevokeSession(ctx context.Context, userID, sessionID st
 	return nil
 }
 
-// RevokeAllSessions revokes every session for the user. Requires
-// password confirmation.
+// RevokeAllSessions revokes every session for the caller — refresh tokens,
+// mode=session access sessions, and browser SSO sessions.
+//
+// Re-authentication is required, but the SHAPE of it depends on the account:
+//
+//   - An account WITH a password must confirm it. This action ends every
+//     session on every device, so a bare access token should not be enough to
+//     trigger it; the password is the second factor.
+//   - An account with NO password — an OAuth or email-code account, which is
+//     precisely the population that gets an SSO session — has no password to
+//     offer. Demanding one would make "sign out everywhere" permanently
+//     unreachable for exactly the users who need it (ADR-0014 promises it as
+//     THE way to end a shared-browser session). For them the authenticated
+//     call itself is the confirmation.
+//
+// The caller is always already authenticated (the handler injects the user id
+// from a verified token), so this never runs unauthenticated; the password,
+// when present, is a step-up, not the primary gate.
 func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password string) (int, error) {
-	if password == "" {
-		return 0, errors.New("password confirmation required")
-	}
-
 	userNode, err := s.db(ctx).GetNode(ctx, s.projectID(ctx), actorStr(userID), typeUser, userID)
 	if err != nil {
 		return 0, fmt.Errorf("fetch user: %w", err)
@@ -230,9 +242,10 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 	if userNode == nil {
 		return 0, errors.New("user not found")
 	}
-	pwHash := pstr(userNode.Payload, ufPasswordHash)
-	if pwHash == "" || !passwords.Verify(password, pwHash) {
-		return 0, errors.New("invalid password")
+	if pwHash := pstr(userNode.Payload, ufPasswordHash); pwHash != "" {
+		if password == "" || !passwords.Verify(password, pwHash) {
+			return 0, errors.New("invalid password")
+		}
 	}
 
 	count, err := s.revokeAllUserSessions(ctx, userID)
@@ -249,14 +262,27 @@ func (s *ProfileService) RevokeAllSessions(ctx context.Context, userID, password
 	return count, nil
 }
 
-// revokeAllUserSessions deletes every refresh-token (session) node owned
-// by userID via the graph DB — the same store ListMySessions/RevokeSession
-// read and write — and returns the number revoked. Best-effort per
-// session: a failed delete is logged and skipped so one bad row does not
-// strand the rest. Shared by RevokeAllSessions (explicit sign-out) and
-// ChangePassword (credential change forces re-auth everywhere). The
-// caller is responsible for any access-control/audit concerns; this
-// helper only performs the revocation.
+// revokeAllUserSessions ends everything userID is signed in with, and
+// returns the number of device sessions revoked. Shared by
+// RevokeAllSessions / SignOutEverywhere (explicit sign-out) and
+// ChangePassword (a credential change forces re-auth everywhere). The
+// caller owns access control and audit; this helper only revokes.
+//
+// Three stores, because "signed in" is three things:
+//
+//   - the refresh-token nodes behind ListMySessions/RevokeSession, deleted
+//     per row and best-effort so one bad row does not strand the rest;
+//   - the access-token sessions under GATEWAY_REVOCATION_MODE=session,
+//     which otherwise stay valid until natural JWT expiry — deleting the
+//     refresh token alone never stopped the access token, so "sign out
+//     everywhere" did not mean what it said on those deployments;
+//   - the browser's SSO sessions (ADR-0014), which must go too or the very
+//     next visit to a product would silently mint a new session from a
+//     cookie the user just asked to be signed out of.
+//
+// The last two are counted separately from the returned device count: the
+// number the user is shown is the device list they recognise, not an
+// internal row tally.
 func (s *ProfileService) revokeAllUserSessions(ctx context.Context, userID string) (int, error) {
 	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), tenantAdminActor, typeRefreshToken,
 		map[string]any{rfUserID: userID})
@@ -273,7 +299,31 @@ func (s *ProfileService) revokeAllUserSessions(ctx context.Context, userID strin
 		}
 		count++
 	}
+
+	s.revokeAccessAndSSOSessions(ctx, userID)
 	return count, nil
+}
+
+// revokeAccessAndSSOSessions kills the access-token sessions and the SSO
+// sessions for userID. Failures are logged rather than propagated: the
+// refresh tokens are already gone, so the caller's sign-out has taken
+// effect; surfacing an error here would make a partial success look like a
+// total failure and invite the user to believe they are still signed in
+// everywhere.
+func (s *ProfileService) revokeAccessAndSSOSessions(ctx context.Context, userID string) {
+	repo := s.repo(ctx)
+	if repo == nil {
+		return
+	}
+	now := nowMs()
+	if err := repo.RevokeSessionsForUser(ctx, userID, now); err != nil {
+		s.logger.Warn("revoke_access_sessions_failed",
+			zap.String("user_id", userID), zap.Error(err))
+	}
+	if err := repo.RevokeSSOSessionsForUser(ctx, userID, now); err != nil {
+		s.logger.Warn("revoke_sso_sessions_failed",
+			zap.String("user_id", userID), zap.Error(err))
+	}
 }
 
 // ListMyPasskeys returns all passkey credentials for the user.

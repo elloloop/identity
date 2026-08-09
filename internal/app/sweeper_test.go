@@ -124,6 +124,10 @@ func (m *mockSweepRepo) DeleteExpiredAssuranceChallenges(_ context.Context, b in
 	return m.sweep(b, l)
 }
 
+func (m *mockSweepRepo) DeleteExpiredSSOSessions(_ context.Context, b int64, l int) error {
+	return m.sweep(b, l)
+}
+
 func (m *mockSweepRepo) DeleteStaleAttestedDevices(_ context.Context, b int64, l int) error {
 	return m.sweep(b, l)
 }
@@ -511,6 +515,7 @@ func TestSweeperTargetsCoverEveryRepositorySweep(t *testing.T) {
 		"qr_login_sessions",
 		"user_invitations",
 		"assurance_challenges",
+		"sso_sessions",
 	}
 	for _, w := range want {
 		if !names[w] {

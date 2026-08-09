@@ -145,6 +145,11 @@ type fakeRepo struct {
 	// partial-write path of the two-write anonymous OAuth upgrade.
 	updateUserErr        error
 	createPasskeyCredErr error
+	// SSO-session error injectors, for the repo-failure paths of
+	// EstablishSSOSession / the fast path.
+	createSSOSessionErr  error
+	findSSOSessionErr    error
+	touchSSOSessionErr   error
 	getUserErr           error
 	getTotpCredentialErr error
 
@@ -170,6 +175,7 @@ type fakeRepo struct {
 	oauthIdentities     map[string]*OAuthIdentity
 	idvRecords          map[string]*IdentityVerificationRecord
 	sessions            map[string]*SessionRecord
+	ssoSessions         map[string]*SSOSessionRecord
 	auditEvents         []*AuditEvent
 }
 
@@ -195,6 +201,7 @@ func newFakeRepo() *fakeRepo {
 		oauthIdentities:    make(map[string]*OAuthIdentity),
 		idvRecords:         make(map[string]*IdentityVerificationRecord),
 		sessions:           make(map[string]*SessionRecord),
+		ssoSessions:        make(map[string]*SSOSessionRecord),
 	}
 }
 
@@ -1903,6 +1910,104 @@ func (r *fakeRepo) RevokeSessionsForUser(_ context.Context, userID string, atMs 
 	for _, s := range r.sessions {
 		if s.UserID == userID && s.RevokedAtMs == 0 {
 			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+// ── SSO sessions ─────────────────────────────────────────────────────
+
+func (r *fakeRepo) CreateSSOSession(_ context.Context, s *SSOSessionRecord) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("%w: nil sso session", ErrInvalidArgument)
+	}
+	if s.TokenHash == "" {
+		return "", fmt.Errorf("%w: missing token_hash", ErrInvalidArgument)
+	}
+	if s.UserID == "" {
+		return "", fmt.Errorf("%w: missing user_id", ErrInvalidArgument)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.createSSOSessionErr != nil {
+		return "", r.createSSOSessionErr
+	}
+	if r.ssoSessions == nil {
+		r.ssoSessions = make(map[string]*SSOSessionRecord)
+	}
+	for _, existing := range r.ssoSessions {
+		if existing.TokenHash == s.TokenHash {
+			return "", fmt.Errorf("%w: sso session token", ErrAlreadyExists)
+		}
+	}
+	id := nextNodeID()
+	s.NodeID = id
+	cp := *s
+	r.ssoSessions[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) FindSSOSessionByHash(_ context.Context, tokenHash string) (*SSOSessionRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.findSSOSessionErr != nil {
+		return nil, r.findSSOSessionErr
+	}
+	for _, s := range r.ssoSessions {
+		if s.TokenHash == tokenHash {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) TouchSSOSession(_ context.Context, tokenHash string, lastUsedAtMs, expiresAtMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.touchSSOSessionErr != nil {
+		return r.touchSSOSessionErr
+	}
+	for _, s := range r.ssoSessions {
+		if s.TokenHash == tokenHash && s.RevokedAtMs == 0 {
+			s.LastUsedAtMs = lastUsedAtMs
+			s.ExpiresAtMs = expiresAtMs
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) RevokeSSOSession(_ context.Context, tokenHash string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.ssoSessions {
+		if s.TokenHash == tokenHash && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) RevokeSSOSessionsForUser(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.ssoSessions {
+		if s.UserID == userID && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteExpiredSSOSessions(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("fake: DeleteExpiredSSOSessions: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, s := range r.ssoSessions {
+		if s.ExpiresAtMs < beforeMs {
+			delete(r.ssoSessions, id)
 		}
 	}
 	return nil

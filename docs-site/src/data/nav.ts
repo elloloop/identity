@@ -56,6 +56,7 @@ export const sidebarSections: NavSection[] = [
       { label: "Identity Verification (KYC)", href: `${BASE}/docs/auth/identity-verification` },
       { label: "Client Assurance (Attestation)", href: `${BASE}/docs/auth/assurance` },
       { label: "Anonymous Identity", href: `${BASE}/docs/auth/anonymous` },
+      { label: "Single Sign-On", href: `${BASE}/docs/auth/sso` },
     ],
   },
   {

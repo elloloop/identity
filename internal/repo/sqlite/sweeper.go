@@ -82,3 +82,7 @@ func (r *sqliteRepository) DeleteExpiredQrLoginSessions(ctx context.Context, bef
 func (r *sqliteRepository) DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error {
 	return r.deleteExpiredBatch(ctx, "DeleteExpiredInvitations", "user_invitations", beforeMs, limit)
 }
+
+func (r *sqliteRepository) DeleteExpiredSSOSessions(ctx context.Context, beforeMs int64, limit int) error {
+	return r.deleteExpiredBatch(ctx, "DeleteExpiredSSOSessions", "sso_sessions", beforeMs, limit)
+}

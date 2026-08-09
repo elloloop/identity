@@ -1,0 +1,190 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Single sign-on">
+  <h1>Single sign-on</h1>
+  <p>
+    When one deployment serves several products, a user who signed into one of
+    them should not be sent through the whole provider dance again to open the
+    next. SSO gives identity a memory of <em>this browser already
+    authenticated</em>, so a second product can be served immediately.
+  </p>
+  <p>
+    <strong>SSO shares an authentication, never a token pair.</strong> Each
+    product still receives its own access + refresh pair, minted fresh, with
+    its own rotation lineage. Nothing is handed between products — which is
+    what keeps a compromise of the weakest product from becoming a compromise
+    of all of them.
+  </p>
+
+  <h2>How it works</h2>
+  <ol>
+    <li>
+      A user completes a hosted sign-in at <code>/oauth/callback/{"{provider}"}</code>.
+      Alongside the usual one-time code, identity sets
+      <code>__Host-sso_session</code> — an opaque, <code>HttpOnly</code>,
+      <code>Secure</code>, <code>SameSite=Lax</code> cookie locked to the auth
+      origin. Only its SHA-256 is stored; the cookie is never sent to a product
+      origin.
+    </li>
+    <li>
+      Your sign-in page asks <code>GET /sso/session</code> who the browser
+      belongs to, and renders <strong>"Continue as &lt;email&gt;"</strong> next
+      to <strong>"Use a different account"</strong>.
+    </li>
+    <li>
+      Choosing continue navigates to <code>/oauth/continue</code>, which mints
+      the same single-use <code>?code=</code> a completed provider round trip
+      produces and redirects to <code>return_to</code>. Your app redeems it
+      with the unchanged <code>RedeemOAuthCode</code> RPC.
+    </li>
+  </ol>
+  <p>
+    Because the fast path ends at the one-time code, every property of token
+    issuance is inherited rather than re-implemented: per-product pairs,
+    rotation, session records, and product age gating all happen on the normal
+    redeem path.
+  </p>
+
+  <h2>Skipping the provider skips nothing else</h2>
+  <p>
+    Having authenticated is not authorization to enter a given product. Before
+    a code is minted, <code>/oauth/continue</code> re-runs the checks a cold
+    sign-in runs: the <code>return_to</code> allowlist, account status
+    (lockout, deactivation, identity verification), the project's access mode,
+    and the tenant's login policy — the last replayed against the login method
+    that <em>established</em> the session, so a cookie can never launder a weak
+    login into a stronger one.
+  </p>
+  <p>
+    Accounts owing a second factor get no fast path. A challenge cannot be
+    completed inside a redirect, and a months-old cookie must not stand in for
+    the factor; those users take the full sign-in flow.
+  </p>
+  <p>
+    Sessions are scoped to their project. A session established in one project
+    is invisible to another, so a consumer sign-in can never fast-path into a
+    separate, allowlisted admin project.
+  </p>
+
+  <h2>Sign-out</h2>
+  <table>
+    <thead>
+      <tr><th>Call</th><th>Effect</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>Logout</code></td>
+        <td>
+          That product's tokens only. <strong>The SSO session is
+          untouched</strong> — signing out of one app is not signing out of the
+          account, and the next product still offers Continue as.
+        </td>
+      </tr>
+      <tr>
+        <td><code>SignOutEverywhere</code> / <code>RevokeAllSessions</code> (RPC)</td>
+        <td>
+          Every refresh token, every access session, <strong>and every SSO
+          session</strong> for the user. Called cross-origin with credentials
+          omitted, so it revokes the row (making any surviving cookie
+          introspect as signed-out) but cannot delete the cookie itself.
+          <strong>It works for password-less accounts</strong> — the ones that
+          actually have an SSO session: a password is required only when the
+          account has one, otherwise the authenticated call is the confirmation.
+        </td>
+      </tr>
+      <tr>
+        <td><code>GET /sso/logout</code> (browser)</td>
+        <td>
+          The same-origin counterpart: a top-level navigation carries the
+          cookie, so it revokes that session <strong>and clears the
+          cookie</strong>, then redirects to an allowlisted <code>return_to</code>.
+          This is what a "sign out of TinyKite on this browser" button links to.
+        </td>
+      </tr>
+      <tr>
+        <td><code>ChangePassword</code>, password reset, email change, replay detection, account deletion</td>
+        <td>Every credential-kill path revokes the user's SSO sessions too — a voided credential must not leave a live fast path.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Configuration</h2>
+  <p>
+    SSO is <strong>off by default</strong>. Enabling it also requires
+    <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>, which
+    <code>/oauth/continue</code> validates exactly as <code>/oauth/start</code>
+    does.
+  </p>
+  <Code
+    lang="bash"
+    code={`GATEWAY_SSO_ENABLED=true
+
+# Rolling lifetime — re-anchored on every use. Default 90 days.
+GATEWAY_SSO_SESSION_TTL_SECONDS=7776000
+
+# tap (default) shows a card naming the account before minting.
+# silent forwards with no interstitial.
+GATEWAY_SSO_CONTINUE_MODE=tap
+
+# Exact origins of your sign-in page, allowed to read GET /sso/session
+# with credentials. Empty (default) leaves that endpoint unregistered.
+GATEWAY_SSO_HUB_ORIGINS=https://accounts.example.com`}
+  />
+
+  <h3>Why <code>tap</code> is the default</h3>
+  <p>
+    The failure modes are not symmetric. Silent SSO on a shared or family
+    device signs a second person in as the first, invisibly, and no product
+    downstream can tell it happened. One tap costs a fraction of a second and
+    puts the account on screen before anything is minted. Set
+    <code>silent</code> only where every device has exactly one user.
+  </p>
+
+  <h2>Reading the session from your sign-in page</h2>
+  <p>
+    <code>GET /sso/session</code> answers identically for "no cookie" and "dead
+    cookie", and returns no account data in the negative case. It must be
+    called with credentials, from an origin on
+    <code>GATEWAY_SSO_HUB_ORIGINS</code>.
+  </p>
+  <Code
+    lang="js"
+    code={`const res = await fetch("https://auth.example.com/sso/session", {
+  credentials: "include",
+});
+const { authenticated, email, continueMode } = await res.json();
+
+if (authenticated) {
+  const target =
+    "https://auth.example.com/oauth/continue" +
+    "?return_to=" + encodeURIComponent(RETURN_TO) +
+    "&fallback_to=" + encodeURIComponent(SIGN_IN_URL);
+
+  if (continueMode === "silent") {
+    window.location.assign(target);   // no interstitial
+  } else {
+    showContinueAsCard(email, target); // one visible tap
+  }
+}`}
+  />
+  <p>
+    Pass <code>fallback_to</code> (allowlisted like <code>return_to</code>) so
+    a session that lapsed between the card and the tap returns the user to your
+    sign-in page with <code>?session=expired</code> instead of an error. A real
+    denial — a refused age gate, an off-allowlist account, a deactivated
+    user — answers <code>403</code> rather than bouncing back, so the browser
+    cannot loop against a door that will keep saying no.
+  </p>
+
+  <h2>Native apps</h2>
+  <p>
+    Apps that route sign-in through the system browser
+    (<code>ASWebAuthenticationSession</code>, Chrome Custom Tabs) get SSO with
+    no code change, because the cookie lands in the shared browser jar. An app
+    that requests an <em>ephemeral</em> session opts itself out — on iOS that
+    is <code>prefersEphemeralWebBrowserSession = true</code>.
+  </p>
+</DocsLayout>
