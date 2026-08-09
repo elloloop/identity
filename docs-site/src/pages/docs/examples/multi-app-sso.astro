@@ -101,10 +101,21 @@ func Authenticate(r *http.Request) (string, string, error) {
   <h2>Logout everywhere</h2>
   <p>
     A user pressing "sign out everywhere" calls
-    <code>SignOutEverywhere</code> on Identity, which revokes every
-    refresh token. Existing access tokens stay valid until
-    <code>exp</code> — typically 15 minutes. If your threat model needs
-    instant kill, lower <code>GATEWAY_JWT_EXPIRY_SECONDS</code>.
+    <code>SignOutEverywhere</code> on Identity, which revokes every refresh
+    token, every <code>mode=session</code> access session, and — when the
+    <a href={`${import.meta.env.BASE_URL}/docs/auth/sso`}>single sign-on</a>
+    feature is on — every browser SSO session for the user. Under
+    <code>mode=ttl</code> (the default) an already-issued access token still
+    stays valid until its <code>exp</code>; if your threat model needs an
+    instant kill there, run <code>GATEWAY_REVOCATION_MODE=session</code> or
+    lower <code>GATEWAY_JWT_EXPIRY_SECONDS</code>.
+  </p>
+  <p class="note">
+    This page predates cross-origin browser SSO. If several of your apps sign
+    in through one hosted auth origin, read
+    <a href={`${import.meta.env.BASE_URL}/docs/auth/sso`}>Single sign-on</a> —
+    it adds "continue as &lt;email&gt;" without ever sharing a token pair, and
+    it is what "sign out everywhere" now also has to end.
   </p>
 
   <h2>Per-service authorization</h2>

@@ -278,6 +278,26 @@ type Repository interface {
 	RevokeSession(ctx context.Context, sid string, atMs int64) error
 	RevokeSessionsForUser(ctx context.Context, userID string, atMs int64) error
 
+	// SSO sessions (browser single sign-on at the auth origin).
+	//
+	// A row records that THIS BROWSER authenticated, so a second product
+	// asking for a session can be served without another provider round
+	// trip. It is not a credential for any product: nothing here mints or
+	// holds a token pair — see ADR-0014.
+	//
+	// FindSSOSessionByHash returns the row for a cookie value's SHA-256
+	// hash, or nil when there is none. It returns rows that are expired or
+	// revoked as well, so the caller can distinguish "no session" from
+	// "session ended" and, on the fast path, treat both alike without a
+	// second query. TouchSSOSession re-anchors a row's rolling expiry.
+	// RevokeSSOSessionsForUser is what "sign out everywhere" reaches.
+	// All are idempotent and never error on a miss.
+	CreateSSOSession(ctx context.Context, s *SSOSessionRecord) (string, error)
+	FindSSOSessionByHash(ctx context.Context, tokenHash string) (*SSOSessionRecord, error)
+	TouchSSOSession(ctx context.Context, tokenHash string, lastUsedAtMs, expiresAtMs int64) error
+	RevokeSSOSession(ctx context.Context, tokenHash string, atMs int64) error
+	RevokeSSOSessionsForUser(ctx context.Context, userID string, atMs int64) error
+
 	// Refresh tokens
 	FindRefreshTokenByHash(ctx context.Context, hash string) (*RefreshTokenRecord, error)
 	// FindRefreshTokenByHashIncludingConsumed returns the row even when
@@ -593,6 +613,7 @@ type Repository interface {
 	DeleteExpiredPhoneVerificationCodes(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredQrLoginSessions(ctx context.Context, beforeMs int64, limit int) error
 	DeleteExpiredInvitations(ctx context.Context, beforeMs int64, limit int) error
+	DeleteExpiredSSOSessions(ctx context.Context, beforeMs int64, limit int) error
 }
 
 // ErrSweepNotImplemented is the soft-skip sentinel a Repository may
@@ -621,6 +642,46 @@ type SessionRecord struct {
 	UserID      string
 	CreatedAtMs int64 // epoch ms
 	RevokedAtMs int64 // epoch ms; 0 = active
+}
+
+// SSOSessionRecord represents a browser's single-sign-on session at the
+// auth origin: the durable record that this browser completed an
+// authentication, which lets a later product be served a fresh session
+// without repeating the provider round trip (ADR-0014).
+//
+// It is deliberately NOT a credential. It carries no token material, it
+// is never sent to a product origin, and possessing it grants nothing on
+// its own — the fast path re-runs the account, access, and policy checks
+// a cold sign-in runs before anything is minted.
+type SSOSessionRecord struct {
+	NodeID string
+	// TokenHash is the SHA-256 of the opaque cookie value. The raw value
+	// exists only in the browser, exactly as for refresh tokens and
+	// one-time codes: a database disclosure yields nothing replayable.
+	TokenHash string
+	UserID    string
+	// LoginMethod is the method that ESTABLISHED this session (password,
+	// oauth, passkey…). The fast path replays the tenant's login policy
+	// against it rather than against a synthetic "sso" method, so a
+	// cookie cannot launder a weak login into a stronger one.
+	LoginMethod  string
+	IPAddress    string
+	UserAgent    string
+	CreatedAtMs  int64 // epoch ms
+	LastUsedAtMs int64 // epoch ms
+	// ExpiresAtMs is rolling: each successful use re-anchors it at
+	// now + GATEWAY_SSO_SESSION_TTL_SECONDS, so an actively used browser
+	// stays signed in and an abandoned one lapses on schedule.
+	ExpiresAtMs int64 // epoch ms
+	RevokedAtMs int64 // epoch ms; 0 = active
+}
+
+// Active reports whether the session may still be used at nowMs: not
+// revoked and not expired. Callers treat a nil record and an inactive
+// one identically — both mean "no fast path" — but the split keeps the
+// reason available for audit.
+func (s *SSOSessionRecord) Active(nowMs int64) bool {
+	return s != nil && s.RevokedAtMs == 0 && s.ExpiresAtMs > nowMs
 }
 
 // RefreshTokenRecord represents a stored refresh token.
@@ -997,6 +1058,27 @@ var (
 	// to CodeUnauthenticated so replays and expiries look identical to a
 	// brute-force attacker.
 	ErrOAuthCodeInvalid = errors.New("oauth one-time code is invalid or already used")
+	// ErrSSOSessionInvalid is returned when a browser presents no SSO
+	// cookie, or one that is unknown in the resolved project. To a CLIENT it
+	// is indistinguishable from ErrSSOSessionExpired — both mean "no fast
+	// path, take the full sign-in flow" — so the endpoint cannot be probed
+	// for which cookie values exist. The two are split only for the internal
+	// cookie-clear decision (see ErrSSOSessionExpired).
+	ErrSSOSessionInvalid = errors.New("sso session is invalid")
+	// ErrSSOSessionExpired is returned when a row for the presented cookie IS
+	// found in the resolved project but is expired or revoked. It is separated
+	// from ErrSSOSessionInvalid for exactly one reason: only here is it safe to
+	// clear the cookie. A cookie value maps to at most one project's row (the
+	// token_hash unique index is per project), so "not found here" means the
+	// cookie may still be live in ANOTHER project and must NOT be deleted,
+	// whereas "found here but dead" means this cookie is genuinely spent.
+	ErrSSOSessionExpired = errors.New("sso session is expired")
+	// ErrSSOSecondFactorRequired is returned when a valid SSO session
+	// belongs to an account that still owes a second factor. A
+	// challenge/response cannot be completed inside a redirect handler, and
+	// a months-old cookie must not stand in for the factor, so the caller
+	// falls back to the full sign-in flow.
+	ErrSSOSecondFactorRequired = errors.New("sso session requires a second factor")
 	// ErrEmailLoginCodeInvalid is returned when a passwordless OTP is
 	// missing, expired, already consumed, the wrong code, or has exhausted
 	// its attempt budget. The Connect handler maps it to
@@ -1691,6 +1773,32 @@ func (s *AuthService) revokeUserSessionsIfModeSession(ctx context.Context, userI
 	}
 }
 
+// revokeDerivedSessionsForUser ends everything a now-voided credential could
+// still be riding. It is the companion to DeleteRefreshTokensForUser: every
+// site that deletes a user's refresh tokens because a credential changed or was
+// compromised (password reset, email change, planted-credential clearing,
+// refresh-token replay) MUST call this too, or the invalidation is not
+// "everywhere" the way those sites' comments claim.
+//
+// Two things outlive the refresh tokens otherwise:
+//   - the mode=session access sessions (handled as before, only in that mode);
+//   - the browser SSO session (ADR-0014), which is the dangerous one — it is a
+//     90-day ROLLING fast path to fresh product token pairs, and none of the
+//     gates ContinueSSOSession re-runs (account status, project access, login
+//     policy) change on a password reset, so a planted cookie keeps minting
+//     until this revokes it.
+//
+// Best-effort and non-fatal for the same reason revokeUserSessionsIfModeSession
+// is: the refresh tokens are already gone, so a failed revoke widens a window
+// rather than opening a bypass. It is logged, not propagated.
+func (s *AuthService) revokeDerivedSessionsForUser(ctx context.Context, userID, reason string) {
+	s.revokeUserSessionsIfModeSession(ctx, userID, reason)
+	if err := s.repo(ctx).RevokeSSOSessionsForUser(ctx, userID, s.nowMs()); err != nil {
+		s.logger.Warn("sso_session_revoke_for_user_failed",
+			zap.String("user_id", userID), zap.String("reason", reason), zap.Error(err))
+	}
+}
+
 // revokeSessionIfModeSession revokes exactly the access session identified by
 // sid when the deployment runs mode=session, leaving the user's other sessions
 // untouched. It is paired with every path that invalidates a single refresh
@@ -1917,7 +2025,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		// who triggered the replay still holds a live JWT until its
 		// natural expiry (the bug the two-mode contract exists to
 		// fix; see docs/IDENTITY.md decision log §6).
-		s.revokeUserSessionsIfModeSession(ctx, userID, "refresh_token_replay")
+		s.revokeDerivedSessionsForUser(ctx, userID, "refresh_token_replay")
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),

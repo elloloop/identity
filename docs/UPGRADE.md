@@ -1,5 +1,59 @@
 # Upgrade guide
 
+## v4.1 → v4.2 — browser single sign-on (additive, off by default)
+
+v4.2 adds SSO at the auth origin: one authentication can serve several
+products, each still getting its own independently-rotating token pair (see
+[ADR-0014](./adr/0014-sso-session-at-the-auth-origin.md)).
+
+**Nothing changes unless you turn it on.** `GATEWAY_SSO_ENABLED` defaults
+false; while it is off no cookie is set, `/oauth/continue` and
+`/sso/session` are not registered (they 404), and every existing flow —
+`/oauth/start`, `/oauth/callback`, `RedeemOAuthCode`, `Logout` — behaves
+exactly as in v4.1.
+
+**Migrations** (postgres 0029, sqlite 0014), applied with
+`identity migrate`, add the `sso_sessions` table. It is a new, initially
+empty table, so no data is scanned or rewritten.
+
+> One lock to know about: `sso_sessions` declares foreign keys to `users`
+> and `projects`, and since PostgreSQL 9.5 adding a foreign key takes a
+> `SHARE ROW EXCLUSIVE` lock on the REFERENCED tables — it briefly blocks
+> INSERT/UPDATE/DELETE (but not SELECT) on `users` and `projects`, and the
+> DDL itself queues behind any in-flight write transaction on them. Because
+> the new table is empty there is no validation scan, so in the normal case
+> this is milliseconds; on a busy deployment, set a `lock_timeout` and run
+> it in a quiet window rather than assuming it is free.
+
+**One behaviour change that lands whether or not you enable SSO:**
+`RevokeAllSessions` / `SignOutEverywhere` and `ChangePassword` now also
+revoke the `mode=session` access sessions for the user. Previously they
+deleted only the refresh tokens, so on `GATEWAY_REVOCATION_MODE=session`
+deployments an already-issued access token kept working until its natural
+expiry — "sign out everywhere" did not fully sign the user out. If you run
+`mode=session` and something depended on that grace period, it is gone.
+
+**To enable:**
+
+| Env var | Notes |
+|---|---|
+| `GATEWAY_SSO_ENABLED` | `true` to turn it on. |
+| `GATEWAY_SSO_SESSION_TTL_SECONDS` | Rolling lifetime, re-anchored on each use. Defaults to 90 days. |
+| `GATEWAY_SSO_CONTINUE_MODE` | `tap` (default) shows a "Continue as <email>" card before minting; `silent` forwards without one. Prefer `tap` on shared or family devices. |
+| `GATEWAY_SSO_HUB_ORIGINS` | Exact origins of your sign-in surface, allowed to read `GET /sso/session` with credentials. Empty (default) leaves that endpoint unregistered. |
+
+`/oauth/continue` also requires `GATEWAY_OAUTH_ALLOWED_RETURN_URLS`, which
+it checks exactly as `/oauth/start` does.
+
+**Removed env vars — delete them from your deployment:**
+`GATEWAY_COOKIE_DOMAIN`, `GATEWAY_COOKIE_SECURE`, `GATEWAY_COOKIE_SAMESITE`.
+No code path had ever read them, so removing them changes no behaviour;
+they are named here so operators can clean them out of manifests that set
+them believing they did something. `GATEWAY_COOKIE_DOMAIN` is the reason
+they were deleted rather than adopted: under ADR-0014 its only possible
+effect would be to widen the SSO cookie past the auth origin, which is
+precisely what the design forbids.
+
 ## v4.0 → v4.1 — anonymous identity (additive)
 
 v4.1 adds anonymous sign-in: credential-less accounts with a stable id that

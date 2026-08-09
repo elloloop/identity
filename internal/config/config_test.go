@@ -90,8 +90,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.PasskeyRPID != "localhost" {
 		t.Errorf("PasskeyRPID: want localhost, got %q", cfg.PasskeyRPID)
 	}
-	if cfg.CookieSameSite != "Lax" {
-		t.Errorf("CookieSameSite: want Lax, got %q", cfg.CookieSameSite)
+	if cfg.SSOContinueMode != SSOContinueModeTap {
+		t.Errorf("SSOContinueMode: want %q, got %q", SSOContinueModeTap, cfg.SSOContinueMode)
 	}
 	if cfg.PostgresMaxConns != 25 {
 		t.Errorf("PostgresMaxConns: want 25, got %d", cfg.PostgresMaxConns)

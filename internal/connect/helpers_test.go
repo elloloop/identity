@@ -92,6 +92,7 @@ type fakeRepo struct {
 	attestedDevices     map[string]*service.AttestedDeviceRecord
 	assuranceChallenges map[string]*service.AssuranceChallengeRecord
 	qrSessions          map[string]*service.QrLoginSessionRecord
+	ssoSessions         map[string]*service.SSOSessionRecord
 	oauthOneTimeCodes   map[string]*service.OAuthOneTimeCodeRecord
 	nativeRedemptions   map[string]*service.NativeTokenRedemptionRecord
 	emailLoginCodes     map[string]*service.EmailLoginCodeRecord
@@ -1575,6 +1576,87 @@ func (r *fakeRepo) RevokeSessionsForUser(_ context.Context, userID string, atMs 
 	for _, s := range r.sessions {
 		if s.UserID == userID && s.RevokedAtMs == 0 {
 			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) CreateSSOSession(_ context.Context, s *service.SSOSessionRecord) (string, error) {
+	if s == nil || s.TokenHash == "" || s.UserID == "" {
+		return "", fmt.Errorf("%w: invalid sso session", service.ErrInvalidArgument)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ssoSessions == nil {
+		r.ssoSessions = make(map[string]*service.SSOSessionRecord)
+	}
+	for _, existing := range r.ssoSessions {
+		if existing.TokenHash == s.TokenHash {
+			return "", fmt.Errorf("%w: sso session token", service.ErrAlreadyExists)
+		}
+	}
+	id := nextID()
+	s.NodeID = id
+	cp := *s
+	r.ssoSessions[id] = &cp
+	return id, nil
+}
+
+func (r *fakeRepo) FindSSOSessionByHash(_ context.Context, tokenHash string) (*service.SSOSessionRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.ssoSessions {
+		if s.TokenHash == tokenHash {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeRepo) TouchSSOSession(_ context.Context, tokenHash string, lastUsedAtMs, expiresAtMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.ssoSessions {
+		if s.TokenHash == tokenHash && s.RevokedAtMs == 0 {
+			s.LastUsedAtMs = lastUsedAtMs
+			s.ExpiresAtMs = expiresAtMs
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) RevokeSSOSession(_ context.Context, tokenHash string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.ssoSessions {
+		if s.TokenHash == tokenHash && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) RevokeSSOSessionsForUser(_ context.Context, userID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.ssoSessions {
+		if s.UserID == userID && s.RevokedAtMs == 0 {
+			s.RevokedAtMs = atMs
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) DeleteExpiredSSOSessions(_ context.Context, beforeMs int64, limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("fake: DeleteExpiredSSOSessions: limit must be > 0, got %d", limit)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, s := range r.ssoSessions {
+		if s.ExpiresAtMs < beforeMs {
+			delete(r.ssoSessions, id)
 		}
 	}
 	return nil
