@@ -8,6 +8,11 @@ import (
 
 const consentPolicyVersion = "children-privacy-notice-v1"
 
+// errConsentInjected is a sentinel injected into the fake repository so a test
+// can assert (via errors.Is) that the service propagated a repository failure
+// unchanged through its fmt.Errorf("...: %w", err) wrappers.
+var errConsentInjected = errors.New("injected consent repo error")
+
 // adultFactors selects which strong verified factors a seeded consenting adult
 // carries.
 type adultFactors struct {
@@ -368,6 +373,261 @@ func TestRevokeParentalConsent_Lifecycle(t *testing.T) {
 		_, err := svc.RevokeParentalConsent(ctx, adult.ID, child.ID, "")
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+// TestDecodeConsentFactors covers the parser's edge cases directly: an empty
+// string decodes to no factors, and empty tokens between commas are dropped
+// rather than becoming blank factors.
+func TestDecodeConsentFactors(t *testing.T) {
+	if got := DecodeConsentFactors(""); got != nil {
+		t.Fatalf("DecodeConsentFactors(%q) = %v, want nil", "", got)
+	}
+
+	got := DecodeConsentFactors("verified_phone,,passkey")
+	want := []ParentalConsentFactor{ParentalConsentFactorVerifiedPhone, ParentalConsentFactorPasskey}
+	if len(got) != len(want) {
+		t.Fatalf("DecodeConsentFactors dropped-empty-token result = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("factor[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestGrantParentalConsent_ArgumentGuards pins the early argument guards that
+// reject before any repository access: a caller with no session, a blank child
+// id, and a consenting adult whose account does not exist.
+func TestGrantParentalConsent_ArgumentGuards(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty consenting user id is unauthenticated", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		_, err := svc.GrantParentalConsent(ctx, "", "child", consentPolicyVersion, strongPW, "", "")
+		if !errors.Is(err, ErrUnauthenticated) {
+			t.Fatalf("err = %v, want ErrUnauthenticated", err)
+		}
+	})
+
+	t.Run("blank child user id is invalid", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		_, err := svc.GrantParentalConsent(ctx, "adult", "   ", consentPolicyVersion, strongPW, "", "")
+		if !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("consenting user not found", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		child := seedChildPendingConsent(repo, "child@example.com")
+		_, err := svc.GrantParentalConsent(ctx, "ghost-adult", child.ID, consentPolicyVersion, strongPW, "", "")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+// TestGrantParentalConsent_RepoErrorsPropagate proves every repository failure
+// on the grant path surfaces to the caller (wrapped, so errors.Is still finds
+// the injected sentinel) and never leaves the child activated.
+func TestGrantParentalConsent_RepoErrorsPropagate(t *testing.T) {
+	ctx := context.Background()
+	pwHash := hashPW(t, strongPW)
+
+	t.Run("fetch consenting user fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.getUserErr = errConsentInjected
+		svc := newTestAuthService(t, repo)
+		_, err := svc.GrantParentalConsent(ctx, "adult", "child", consentPolicyVersion, strongPW, "", "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
+		}
+	})
+
+	t.Run("verified-factor check fails when listing passkeys errors", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.listPasskeyCredsErr = errConsentInjected
+		svc := newTestAuthService(t, repo)
+		// No phone/idv factor, so the check must consult passkeys and fail there.
+		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{})
+		child := seedChildPendingConsent(repo, "child@example.com")
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
+		}
+	})
+
+	t.Run("fetch child user fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
+		child := seedChildPendingConsent(repo, "child@example.com")
+		// Fail only the child fetch so the adult fetch and factor check pass.
+		repo.getUserErrByID = map[string]error{child.ID: errConsentInjected}
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
+		}
+	})
+
+	t.Run("existing-consent lookup fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
+		child := seedChildPendingConsent(repo, "child@example.com")
+		repo.getActiveConsentErr = errConsentInjected
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
+		}
+	})
+
+	t.Run("recording the consent fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
+		child := seedChildPendingConsent(repo, "child@example.com")
+		repo.createConsentErr = errConsentInjected
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
+		}
+		got, _ := repo.GetUser(ctx, child.ID)
+		if got.Status != StatusPendingParentalConsent {
+			t.Fatalf("child status = %q, want gated (record write failed before the flip)", got.Status)
+		}
+	})
+
+	t.Run("activating the child fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
+		child := seedChildPendingConsent(repo, "child@example.com")
+		repo.updateUserErr = errConsentInjected
+		_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
+		}
+	})
+}
+
+// TestGrantParentalConsent_ResumeActivationError covers the resume path's own
+// failure mode: a half-applied prior grant is found, but re-asserting the
+// status flip fails.
+func TestGrantParentalConsent_ResumeActivationError(t *testing.T) {
+	ctx := context.Background()
+	pwHash := hashPW(t, strongPW)
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
+	child := seedChildPendingConsent(repo, "child@example.com")
+	if err := repo.CreateParentalConsent(ctx, &ParentalConsentRecord{
+		ConsentID: "pconsent_pre", ChildUserID: child.ID, ConsentingUserID: adult.ID,
+		PolicyVersion: consentPolicyVersion, Factors: "verified_phone", SteppedUp: true, GrantedAt: 1,
+	}); err != nil {
+		t.Fatalf("seed consent: %v", err)
+	}
+	repo.updateUserErr = errConsentInjected
+
+	_, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+	if !errors.Is(err, errConsentInjected) {
+		t.Fatalf("err = %v, want injected error", err)
+	}
+}
+
+// TestRevokeParentalConsent_GuardsAndRepoErrors pins the revoke path's argument
+// guards and its repository-failure propagation. Each repo error is injected
+// after a real grant so the failure lands on exactly the revoke-time call.
+func TestRevokeParentalConsent_GuardsAndRepoErrors(t *testing.T) {
+	ctx := context.Background()
+	pwHash := hashPW(t, strongPW)
+
+	t.Run("empty actor id is unauthenticated", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		_, err := svc.RevokeParentalConsent(ctx, "", "child", "")
+		if !errors.Is(err, ErrUnauthenticated) {
+			t.Fatalf("err = %v, want ErrUnauthenticated", err)
+		}
+	})
+
+	t.Run("blank child id is invalid", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		_, err := svc.RevokeParentalConsent(ctx, "actor", "   ", "")
+		if !errors.Is(err, ErrInvalidArgument) {
+			t.Fatalf("err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("fetch active consent fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		repo.getActiveConsentErr = errConsentInjected
+		_, err := svc.RevokeParentalConsent(ctx, "actor", "child", "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
+		}
+	})
+
+	// grantOne seeds a consenting adult + gated child, grants consent, and
+	// returns the pair so a revoke-time repo error can be injected afterwards.
+	grantOne := func(t *testing.T, repo *fakeRepo, svc *AuthService) (adultID, childID string) {
+		t.Helper()
+		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
+		child := seedChildPendingConsent(repo, "child@example.com")
+		if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", ""); err != nil {
+			t.Fatalf("grant: %v", err)
+		}
+		return adult.ID, child.ID
+	}
+
+	t.Run("fetch child user fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		adultID, childID := grantOne(t, repo, svc)
+		repo.getUserErr = errConsentInjected
+		_, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
+		}
+	})
+
+	t.Run("re-gating the child fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		adultID, childID := grantOne(t, repo, svc)
+		repo.updateUserErr = errConsentInjected
+		_, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
+		}
+	})
+
+	t.Run("revoking child sessions fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		adultID, childID := grantOne(t, repo, svc)
+		repo.deleteRefreshTokensErr = errConsentInjected
+		_, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
+		}
+	})
+
+	t.Run("marking the record revoked fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		adultID, childID := grantOne(t, repo, svc)
+		repo.markConsentRevokedErr = errConsentInjected
+		_, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want injected error", err)
 		}
 	})
 }

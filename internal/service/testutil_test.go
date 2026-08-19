@@ -148,6 +148,18 @@ type fakeRepo struct {
 	getUserErr           error
 	getTotpCredentialErr error
 
+	// Parental-consent error injections. Each, when non-nil, makes the
+	// corresponding repository call fail so a test can exercise the
+	// service's error-propagation branch. Default nil (success).
+	listPasskeyCredsErr    error // ListPasskeyCredentials fails
+	getActiveConsentErr    error // GetActiveParentalConsentForChild fails
+	createConsentErr       error // CreateParentalConsent fails
+	markConsentRevokedErr  error // MarkParentalConsentRevoked fails
+	deleteRefreshTokensErr error // DeleteRefreshTokensForUser fails
+	// getUserErrByID makes GetUser return the mapped error for that user id
+	// only, so a test can fail the child fetch while the adult fetch succeeds.
+	getUserErrByID map[string]error
+
 	users               map[string]*User
 	refreshTokens       map[string]*RefreshTokenRecord
 	passkeyCreds        map[string]*PasskeyCredRecord
@@ -228,6 +240,9 @@ func (r *fakeRepo) GetUser(_ context.Context, userID string) (*User, error) {
 	defer r.mu.Unlock()
 	if r.getUserErr != nil {
 		return nil, r.getUserErr
+	}
+	if e, ok := r.getUserErrByID[userID]; ok && e != nil {
+		return nil, e
 	}
 	u, ok := r.users[userID]
 	if !ok {
@@ -507,6 +522,9 @@ func (r *fakeRepo) DeleteRefreshToken(_ context.Context, nodeID string) error {
 func (r *fakeRepo) DeleteRefreshTokensForUser(_ context.Context, userID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.deleteRefreshTokensErr != nil {
+		return r.deleteRefreshTokensErr
+	}
 	for id, t := range r.refreshTokens {
 		if t.UserID == userID {
 			delete(r.refreshTokens, id)
@@ -626,6 +644,9 @@ func (r *fakeRepo) ConsumeRefreshTokenByHash(_ context.Context, hash string, atM
 func (r *fakeRepo) ListPasskeyCredentials(_ context.Context, userID string) ([]*PasskeyCredRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.listPasskeyCredsErr != nil {
+		return nil, r.listPasskeyCredsErr
+	}
 	var out []*PasskeyCredRecord
 	for _, c := range r.passkeyCreds {
 		if c.UserID == userID {
@@ -1664,6 +1685,9 @@ func (r *fakeRepo) UpdateIdentityVerificationStatus(_ context.Context, verificat
 func (r *fakeRepo) CreateParentalConsent(_ context.Context, rec *ParentalConsentRecord) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.createConsentErr != nil {
+		return r.createConsentErr
+	}
 	if rec.ConsentID == "" {
 		return errors.New("parental consent: missing consent id")
 	}
@@ -1678,6 +1702,9 @@ func (r *fakeRepo) CreateParentalConsent(_ context.Context, rec *ParentalConsent
 func (r *fakeRepo) GetActiveParentalConsentForChild(_ context.Context, childUserID string) (*ParentalConsentRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getActiveConsentErr != nil {
+		return nil, r.getActiveConsentErr
+	}
 	var latest *ParentalConsentRecord
 	for _, rec := range r.parentalConsents {
 		if rec.ChildUserID != childUserID || rec.RevokedAt != 0 {
@@ -1697,6 +1724,9 @@ func (r *fakeRepo) GetActiveParentalConsentForChild(_ context.Context, childUser
 func (r *fakeRepo) MarkParentalConsentRevoked(_ context.Context, consentID, revokedByUserID string, atMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.markConsentRevokedErr != nil {
+		return r.markConsentRevokedErr
+	}
 	rec, ok := r.parentalConsents[consentID]
 	if !ok {
 		return fmt.Errorf("parental consent: %s not found", consentID)

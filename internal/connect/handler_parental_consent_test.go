@@ -193,3 +193,67 @@ func TestHandler_RevokeParentalConsent(t *testing.T) {
 		}
 	})
 }
+
+// TestHandler_RevokeParentalConsent_RequiresAuthenticatedSession proves revoke,
+// like grant, refuses a caller with no verified session: the acting identity is
+// the session, never the request body.
+func TestHandler_RevokeParentalConsent_RequiresAuthenticatedSession(t *testing.T) {
+	h := newHarness(t)
+	child := seedConsentChild(t, h, "child@example.com")
+
+	// No authedReq: the request carries no authenticated caller.
+	req := connect.NewRequest(&identitypb.RevokeParentalConsentRequest{ChildUserId: child})
+	_, err := h.client.RevokeParentalConsent(context.Background(), req)
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("code = %v, want Unauthenticated", connect.CodeOf(err))
+	}
+}
+
+// TestConsentRecordToProto_Nil confirms the mapper is nil-safe: a nil record
+// (a defensive contract the callers rely on) maps to a nil proto rather than
+// panicking.
+func TestConsentRecordToProto_Nil(t *testing.T) {
+	if got := consentRecordToProto(nil); got != nil {
+		t.Fatalf("consentRecordToProto(nil) = %v, want nil", got)
+	}
+}
+
+// TestConsentFactorsToProto covers the factor-set mapper's two ends: an empty
+// stored factor string maps to no proto factors, and a populated one maps each
+// token to its enum.
+func TestConsentFactorsToProto(t *testing.T) {
+	if got := consentFactorsToProto(""); got != nil {
+		t.Fatalf("consentFactorsToProto(%q) = %v, want nil", "", got)
+	}
+
+	got := consentFactorsToProto("identity_verification,passkey,verified_phone")
+	want := []identitypb.ParentalConsentVerificationFactor{
+		identitypb.ParentalConsentVerificationFactor_PARENTAL_CONSENT_VERIFICATION_FACTOR_IDENTITY_VERIFICATION,
+		identitypb.ParentalConsentVerificationFactor_PARENTAL_CONSENT_VERIFICATION_FACTOR_PASSKEY,
+		identitypb.ParentalConsentVerificationFactor_PARENTAL_CONSENT_VERIFICATION_FACTOR_VERIFIED_PHONE,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("consentFactorsToProto = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("factor[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestConsentFactorToProto maps every strong factor to its proto enum, and an
+// unrecognised factor to UNSPECIFIED rather than an arbitrary value.
+func TestConsentFactorToProto(t *testing.T) {
+	cases := map[service.ParentalConsentFactor]identitypb.ParentalConsentVerificationFactor{
+		service.ParentalConsentFactorVerifiedPhone:         identitypb.ParentalConsentVerificationFactor_PARENTAL_CONSENT_VERIFICATION_FACTOR_VERIFIED_PHONE,
+		service.ParentalConsentFactorPasskey:               identitypb.ParentalConsentVerificationFactor_PARENTAL_CONSENT_VERIFICATION_FACTOR_PASSKEY,
+		service.ParentalConsentFactorIdentityVerification:  identitypb.ParentalConsentVerificationFactor_PARENTAL_CONSENT_VERIFICATION_FACTOR_IDENTITY_VERIFICATION,
+		service.ParentalConsentFactor("not-a-real-factor"): identitypb.ParentalConsentVerificationFactor_PARENTAL_CONSENT_VERIFICATION_FACTOR_UNSPECIFIED,
+	}
+	for factor, want := range cases {
+		if got := consentFactorToProto(factor); got != want {
+			t.Fatalf("consentFactorToProto(%q) = %v, want %v", factor, got, want)
+		}
+	}
+}
