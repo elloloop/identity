@@ -50,6 +50,8 @@ const (
 	IdentityService_ConfirmEmailChange_FullMethodName              = "/identity.v1.IdentityService/ConfirmEmailChange"
 	IdentityService_BeginIdentityVerification_FullMethodName       = "/identity.v1.IdentityService/BeginIdentityVerification"
 	IdentityService_GetIdentityVerificationStatus_FullMethodName   = "/identity.v1.IdentityService/GetIdentityVerificationStatus"
+	IdentityService_GrantParentalConsent_FullMethodName            = "/identity.v1.IdentityService/GrantParentalConsent"
+	IdentityService_RevokeParentalConsent_FullMethodName           = "/identity.v1.IdentityService/RevokeParentalConsent"
 	IdentityService_RequestAdminHelp_FullMethodName                = "/identity.v1.IdentityService/RequestAdminHelp"
 	IdentityService_ListHelpRequests_FullMethodName                = "/identity.v1.IdentityService/ListHelpRequests"
 	IdentityService_ResolveHelpRequest_FullMethodName              = "/identity.v1.IdentityService/ResolveHelpRequest"
@@ -183,6 +185,14 @@ type IdentityServiceClient interface {
 	// Identity Verification (document + selfie via pluggable provider)
 	BeginIdentityVerification(ctx context.Context, in *BeginIdentityVerificationRequest, opts ...grpc.CallOption) (*BeginIdentityVerificationResponse, error)
 	GetIdentityVerificationStatus(ctx context.Context, in *GetIdentityVerificationStatusRequest, opts ...grpc.CallOption) (*GetIdentityVerificationStatusResponse, error)
+	// Verifiable Parental Consent — grant/withdraw a recorded, revocable
+	// parental consent for a child-band account, moving it in/out of
+	// USER_STATUS_PENDING_PARENTAL_CONSENT. Both server-side checks in
+	// GrantParentalConsent (a strong verified factor on the consenting adult's
+	// account AND a step-up re-authentication at the moment of consent) are
+	// mandatory; a client cannot bypass them.
+	GrantParentalConsent(ctx context.Context, in *GrantParentalConsentRequest, opts ...grpc.CallOption) (*GrantParentalConsentResponse, error)
+	RevokeParentalConsent(ctx context.Context, in *RevokeParentalConsentRequest, opts ...grpc.CallOption) (*RevokeParentalConsentResponse, error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(ctx context.Context, in *RequestAdminHelpRequest, opts ...grpc.CallOption) (*RequestAdminHelpResponse, error)
 	ListHelpRequests(ctx context.Context, in *ListHelpRequestsRequest, opts ...grpc.CallOption) (*ListHelpRequestsResponse, error)
@@ -645,6 +655,26 @@ func (c *identityServiceClient) GetIdentityVerificationStatus(ctx context.Contex
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetIdentityVerificationStatusResponse)
 	err := c.cc.Invoke(ctx, IdentityService_GetIdentityVerificationStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) GrantParentalConsent(ctx context.Context, in *GrantParentalConsentRequest, opts ...grpc.CallOption) (*GrantParentalConsentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GrantParentalConsentResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GrantParentalConsent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RevokeParentalConsent(ctx context.Context, in *RevokeParentalConsentRequest, opts ...grpc.CallOption) (*RevokeParentalConsentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeParentalConsentResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RevokeParentalConsent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1466,6 +1496,14 @@ type IdentityServiceServer interface {
 	// Identity Verification (document + selfie via pluggable provider)
 	BeginIdentityVerification(context.Context, *BeginIdentityVerificationRequest) (*BeginIdentityVerificationResponse, error)
 	GetIdentityVerificationStatus(context.Context, *GetIdentityVerificationStatusRequest) (*GetIdentityVerificationStatusResponse, error)
+	// Verifiable Parental Consent — grant/withdraw a recorded, revocable
+	// parental consent for a child-band account, moving it in/out of
+	// USER_STATUS_PENDING_PARENTAL_CONSENT. Both server-side checks in
+	// GrantParentalConsent (a strong verified factor on the consenting adult's
+	// account AND a step-up re-authentication at the moment of consent) are
+	// mandatory; a client cannot bypass them.
+	GrantParentalConsent(context.Context, *GrantParentalConsentRequest) (*GrantParentalConsentResponse, error)
+	RevokeParentalConsent(context.Context, *RevokeParentalConsentRequest) (*RevokeParentalConsentResponse, error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *RequestAdminHelpRequest) (*RequestAdminHelpResponse, error)
 	ListHelpRequests(context.Context, *ListHelpRequestsRequest) (*ListHelpRequestsResponse, error)
@@ -1716,6 +1754,12 @@ func (UnimplementedIdentityServiceServer) BeginIdentityVerification(context.Cont
 }
 func (UnimplementedIdentityServiceServer) GetIdentityVerificationStatus(context.Context, *GetIdentityVerificationStatusRequest) (*GetIdentityVerificationStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetIdentityVerificationStatus not implemented")
+}
+func (UnimplementedIdentityServiceServer) GrantParentalConsent(context.Context, *GrantParentalConsentRequest) (*GrantParentalConsentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GrantParentalConsent not implemented")
+}
+func (UnimplementedIdentityServiceServer) RevokeParentalConsent(context.Context, *RevokeParentalConsentRequest) (*RevokeParentalConsentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokeParentalConsent not implemented")
 }
 func (UnimplementedIdentityServiceServer) RequestAdminHelp(context.Context, *RequestAdminHelpRequest) (*RequestAdminHelpResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RequestAdminHelp not implemented")
@@ -2520,6 +2564,42 @@ func _IdentityService_GetIdentityVerificationStatus_Handler(srv interface{}, ctx
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).GetIdentityVerificationStatus(ctx, req.(*GetIdentityVerificationStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_GrantParentalConsent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GrantParentalConsentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GrantParentalConsent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GrantParentalConsent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GrantParentalConsent(ctx, req.(*GrantParentalConsentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RevokeParentalConsent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeParentalConsentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RevokeParentalConsent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RevokeParentalConsent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RevokeParentalConsent(ctx, req.(*RevokeParentalConsentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4022,6 +4102,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetIdentityVerificationStatus",
 			Handler:    _IdentityService_GetIdentityVerificationStatus_Handler,
+		},
+		{
+			MethodName: "GrantParentalConsent",
+			Handler:    _IdentityService_GrantParentalConsent_Handler,
+		},
+		{
+			MethodName: "RevokeParentalConsent",
+			Handler:    _IdentityService_RevokeParentalConsent_Handler,
 		},
 		{
 			MethodName: "RequestAdminHelp",

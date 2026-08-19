@@ -169,6 +169,7 @@ type fakeRepo struct {
 	emailChanges        map[string]*EmailChangeToken
 	oauthIdentities     map[string]*OAuthIdentity
 	idvRecords          map[string]*IdentityVerificationRecord
+	parentalConsents    map[string]*ParentalConsentRecord
 	sessions            map[string]*SessionRecord
 	auditEvents         []*AuditEvent
 }
@@ -194,6 +195,7 @@ func newFakeRepo() *fakeRepo {
 		emailChanges:       make(map[string]*EmailChangeToken),
 		oauthIdentities:    make(map[string]*OAuthIdentity),
 		idvRecords:         make(map[string]*IdentityVerificationRecord),
+		parentalConsents:   make(map[string]*ParentalConsentRecord),
 		sessions:           make(map[string]*SessionRecord),
 	}
 }
@@ -1656,6 +1658,51 @@ func (r *fakeRepo) UpdateIdentityVerificationStatus(_ context.Context, verificat
 	rec.RejectionReason = rejectionReason
 	rec.CompletedAt = completedAtMs
 	rec.UpdatedAt = updatedAtMs
+	return nil
+}
+
+func (r *fakeRepo) CreateParentalConsent(_ context.Context, rec *ParentalConsentRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if rec.ConsentID == "" {
+		return errors.New("parental consent: missing consent id")
+	}
+	if _, ok := r.parentalConsents[rec.ConsentID]; ok {
+		return fmt.Errorf("parental consent: %s already exists", rec.ConsentID)
+	}
+	cp := *rec
+	r.parentalConsents[rec.ConsentID] = &cp
+	return nil
+}
+
+func (r *fakeRepo) GetActiveParentalConsentForChild(_ context.Context, childUserID string) (*ParentalConsentRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var latest *ParentalConsentRecord
+	for _, rec := range r.parentalConsents {
+		if rec.ChildUserID != childUserID || rec.RevokedAt != 0 {
+			continue
+		}
+		if latest == nil || rec.GrantedAt > latest.GrantedAt {
+			latest = rec
+		}
+	}
+	if latest == nil {
+		return nil, nil
+	}
+	cp := *latest
+	return &cp, nil
+}
+
+func (r *fakeRepo) MarkParentalConsentRevoked(_ context.Context, consentID, revokedByUserID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.parentalConsents[consentID]
+	if !ok {
+		return fmt.Errorf("parental consent: %s not found", consentID)
+	}
+	rec.RevokedAt = atMs
+	rec.RevokedByUserID = revokedByUserID
 	return nil
 }
 

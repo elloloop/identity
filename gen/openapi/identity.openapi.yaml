@@ -1748,6 +1748,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.GetUserResponse'
+  /identity.v1.IdentityService/GrantParentalConsent:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GrantParentalConsent
+      description: |-
+        Verifiable Parental Consent — grant/withdraw a recorded, revocable
+         parental consent for a child-band account, moving it in/out of
+         USER_STATUS_PENDING_PARENTAL_CONSENT. Both server-side checks in
+         GrantParentalConsent (a strong verified factor on the consenting adult's
+         account AND a step-up re-authentication at the moment of consent) are
+         mandatory; a client cannot bypass them.
+      operationId: identity.v1.IdentityService.GrantParentalConsent
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GrantParentalConsentRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GrantParentalConsentResponse'
   /identity.v1.IdentityService/InitiateQrLogin:
     post:
       tags:
@@ -3127,6 +3169,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RevokeAllSessionsResponse'
+  /identity.v1.IdentityService/RevokeParentalConsent:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RevokeParentalConsent
+      operationId: identity.v1.IdentityService.RevokeParentalConsent
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RevokeParentalConsentRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RevokeParentalConsentResponse'
   /identity.v1.IdentityService/RevokeSession:
     post:
       tags:
@@ -4784,6 +4861,75 @@ components:
       type: object
       title: ConfirmPasswordResetResponse
       additionalProperties: false
+    identity.v1.ConsentRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          title: id
+          description: id is the stable identifier for this consent record.
+        childUserId:
+          type: string
+          title: child_user_id
+          description: child_user_id is the child-band account consent was granted for.
+        consentingUserId:
+          type: string
+          title: consenting_user_id
+          description: |-
+            consenting_user_id is the adult who granted consent. It is derived
+             server-side from the caller's authenticated session, never from a
+             client-supplied field, so it cannot be spoofed by a modified client.
+        policyVersion:
+          type: string
+          title: policy_version
+          description: |-
+            policy_version identifies the direct-notice / privacy policy the adult
+             was shown before consenting (COPPA direct-notice; UK Children's Code
+             Standard 4). A consent record with no notice version is not auditable.
+        grantedAt:
+          title: granted_at
+          description: granted_at is the instant consent was recorded.
+          $ref: '#/components/schemas/google.protobuf.Timestamp'
+        verificationFactors:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.ParentalConsentVerificationFactor'
+          title: verification_factors
+          description: |-
+            verification_factors are the strong verified factors present on the
+             consenting adult's account at the moment of consent. Always >= 1.
+        steppedUp:
+          type: boolean
+          title: stepped_up
+          description: |-
+            stepped_up is always true for a persisted grant: the consenting adult
+             re-authenticated at the moment of consent. Recorded explicitly so the
+             artifact is self-describing.
+        consentIp:
+          type: string
+          title: consent_ip
+          description: |-
+            consent_ip / consent_user_agent capture where the consenting action came
+             from, for the audit trail.
+        consentUserAgent:
+          type: string
+          title: consent_user_agent
+        revokedAt:
+          title: revoked_at
+          description: |-
+            revoked_at is set when consent is withdrawn; unset while the consent is
+             active. revoked_by_user_id records who withdrew it.
+          $ref: '#/components/schemas/google.protobuf.Timestamp'
+        revokedByUserId:
+          type: string
+          title: revoked_by_user_id
+      title: ConsentRecord
+      additionalProperties: false
+      description: |-
+        ConsentRecord is the auditable, revocable artifact proving a specific adult
+         granted parental consent for a specific child account. It is retained as a
+         compliance/audit record and survives deletion of either referenced user,
+         matching the audit-trail retention posture.
     identity.v1.CreateAssuranceChallengeRequest:
       type: object
       properties:
@@ -5317,6 +5463,45 @@ components:
           title: user
           $ref: '#/components/schemas/identity.v1.User'
       title: GetUserResponse
+      additionalProperties: false
+    identity.v1.GrantParentalConsentRequest:
+      type: object
+      properties:
+        childUserId:
+          type: string
+          title: child_user_id
+          description: |-
+            child_user_id is the child-band account (currently in
+             USER_STATUS_PENDING_PARENTAL_CONSENT) consent is granted for.
+        policyVersion:
+          type: string
+          title: policy_version
+          description: |-
+            policy_version identifies the notice the consenting adult was shown.
+             Required.
+        stepUpPassword:
+          type: string
+          title: step_up_password
+          description: |-
+            step_up_password re-authenticates the consenting adult at the moment of
+             consent. The adult's identity is taken from the authenticated session,
+             never from this request; requiring the password here proves the live
+             actor is the account owner, not merely the holder of a valid session
+             token (closing the "spoofable consent" risk). The account must have a
+             password set.
+      title: GrantParentalConsentRequest
+      additionalProperties: false
+    identity.v1.GrantParentalConsentResponse:
+      type: object
+      properties:
+        record:
+          title: record
+          $ref: '#/components/schemas/identity.v1.ConsentRecord'
+        childStatus:
+          title: child_status
+          description: child_status is the child account's resulting status (ACTIVE on success).
+          $ref: '#/components/schemas/identity.v1.UserStatus'
+      title: GrantParentalConsentResponse
       additionalProperties: false
     identity.v1.Group:
       type: object
@@ -6142,6 +6327,22 @@ components:
           description: Access token lifetime in seconds
       title: OAuthLoginResponse
       additionalProperties: false
+    identity.v1.ParentalConsentVerificationFactor:
+      type: string
+      title: ParentalConsentVerificationFactor
+      enum:
+        - PARENTAL_CONSENT_VERIFICATION_FACTOR_UNSPECIFIED
+        - PARENTAL_CONSENT_VERIFICATION_FACTOR_VERIFIED_PHONE
+        - PARENTAL_CONSENT_VERIFICATION_FACTOR_PASSKEY
+        - PARENTAL_CONSENT_VERIFICATION_FACTOR_IDENTITY_VERIFICATION
+      description: |-
+        ParentalConsentVerificationFactor is a strong, server-verified factor the
+         consenting adult held on their OWN account at the instant consent was
+         granted. GrantParentalConsent requires at least one; the set present is
+         snapshotted onto the ConsentRecord so an auditor can later see how the
+         adult's identity was assured. A verified email is deliberately NOT on this
+         list — an email address is the ordinary login identifier and is not a
+         factor strong enough to prove guardianship on someone else's behalf.
     identity.v1.PasskeyCredentialInfo:
       type: object
       properties:
@@ -6876,6 +7077,34 @@ components:
           title: revoked_count
           format: int32
       title: RevokeAllSessionsResponse
+      additionalProperties: false
+    identity.v1.RevokeParentalConsentRequest:
+      type: object
+      properties:
+        childUserId:
+          type: string
+          title: child_user_id
+          description: child_user_id is the child-band account whose consent is withdrawn.
+        reason:
+          type: string
+          title: reason
+          description: reason is optional free text, retained for the audit trail only.
+      title: RevokeParentalConsentRequest
+      additionalProperties: false
+    identity.v1.RevokeParentalConsentResponse:
+      type: object
+      properties:
+        record:
+          title: record
+          description: record is the now-revoked consent record.
+          $ref: '#/components/schemas/identity.v1.ConsentRecord'
+        childStatus:
+          title: child_status
+          description: |-
+            child_status is the child account's resulting status
+             (PENDING_PARENTAL_CONSENT after a successful revoke).
+          $ref: '#/components/schemas/identity.v1.UserStatus'
+      title: RevokeParentalConsentResponse
       additionalProperties: false
     identity.v1.RevokeSessionRequest:
       type: object

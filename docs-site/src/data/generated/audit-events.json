@@ -17,6 +17,8 @@
   "login_success",
   "logout",
   "oauth_login",
+  "parental_consent_granted",
+  "parental_consent_revoked",
   "passkey_added",
   "passkey_removed",
   "passkey_used",
