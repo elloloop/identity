@@ -44,14 +44,36 @@ func TestConformance(t *testing.T) {
 	if dsn == "" {
 		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping postgres conformance")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// truncateAll is a single one-shot at suite start, so a bounded context is
+	// fine here. The per-repo construction below must NOT share this context:
+	// a deadline is an absolute wall-clock instant, and the conformance suite
+	// makes dozens of NewRepo calls in sequence. Threading one suite-wide
+	// deadline through every New() means later subtests inherit a context that
+	// has already elapsed — under the slow merged `-race` coverage job the suite
+	// runs longer than any fixed budget, so every construction past the deadline
+	// fails its pool ping with "ping: context deadline exceeded". Each
+	// construction gets its own fresh context (via constructCtx) instead,
+	// matching the sqlite/memory conformance drivers that build under an
+	// unbounded context.
+	truncateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	require.NoError(t, truncateAll(ctx, dsn))
+	require.NoError(t, truncateAll(truncateCtx, dsn))
+
+	// constructCtx returns a fresh per-call context for one repo construction
+	// (pool ping + migrate + project seed), scoped to the calling subtest so it
+	// never inherits an already-elapsed suite-wide deadline.
+	constructCtx := func(t *testing.T) context.Context {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		t.Cleanup(cancel)
+		return ctx
+	}
 
 	conformance.RunConformance(t, conformance.Driver{
 		Name: "postgres",
 		NewRepo: func(t *testing.T) service.Repository {
 			t.Helper()
+			ctx := constructCtx(t)
 			// Each repo binds to a fresh project (its storage shard). The
 			// project_id → projects(id) FK (migration 0015) requires the row
 			// to exist before any data-plane write, so seed it here — in
@@ -75,7 +97,7 @@ func TestConformance(t *testing.T) {
 		BindProject: func(t *testing.T, base service.Repository, projectID string) service.Repository {
 			t.Helper()
 			pg := base.(*pgRepository)
-			seedProject(ctx, t, pg, projectID)
+			seedProject(constructCtx(t), t, pg, projectID)
 			return pg.WithProject(projectID)
 		},
 	})
