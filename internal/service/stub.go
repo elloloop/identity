@@ -302,6 +302,18 @@ func (StubRepository) UpdateIdentityVerificationStatus(context.Context, string, 
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) CreateParentalConsent(context.Context, *ParentalConsentRecord) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) GetActiveParentalConsentForChild(context.Context, string) (*ParentalConsentRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) MarkParentalConsentRevoked(context.Context, string, string, int64) error {
+	return ErrServiceUnavailable
+}
+
 func (StubRepository) CreateEmailChangeToken(context.Context, *EmailChangeToken) error {
 	return ErrServiceUnavailable
 }

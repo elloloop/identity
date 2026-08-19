@@ -64,7 +64,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrEmailLoginCodeInvalid),
 		errors.Is(err, service.ErrMagicLinkInvalid),
 		errors.Is(err, service.ErrPhoneCodeInvalid),
-		errors.Is(err, service.ErrNativeTokenReplayed):
+		errors.Is(err, service.ErrNativeTokenReplayed),
+		errors.Is(err, service.ErrParentalConsentStepUpFailed):
 		return connect.NewError(connect.CodeUnauthenticated, err)
 
 	case errors.Is(err, service.ErrInvalidArgument),
@@ -100,6 +101,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrPasskeySignupDisabled),
 		errors.Is(err, service.ErrNativeOAuthDisabled),
 		errors.Is(err, service.ErrParentalConsentRequired),
+		errors.Is(err, service.ErrParentalConsentFactorMissing),
+		errors.Is(err, service.ErrParentalConsentNotPending),
 		errors.Is(err, service.ErrIDVRequired),
 		errors.Is(err, service.ErrEmailVerificationRequired),
 		errors.Is(err, service.ErrAccountDeletionNotAllowed),

@@ -167,6 +167,19 @@ const (
 	// only; secret material is never logged.
 	EventProjectOAuthProviderSet     EventType = "project_oauth_provider_set"
 	EventProjectOAuthProviderRemoved EventType = "project_oauth_provider_removed"
+
+	// EventParentalConsentGranted records an adult granting verifiable
+	// parental consent for a child-band account, moving it out of
+	// PENDING_PARENTAL_CONSENT. The actor is the consenting adult and the
+	// target is the child; the details carry the policy version and the set
+	// of strong verified factors present on the adult's account at the moment
+	// of consent — the auditable proof that consent was verifiable, not merely
+	// implied. A failed attempt (missing step-up re-auth or no verified
+	// factor) is logged with success=false so a spoofing attempt is visible.
+	// EventParentalConsentRevoked records the consent being withdrawn, which
+	// re-gates the child account.
+	EventParentalConsentGranted EventType = "parental_consent_granted"
+	EventParentalConsentRevoked EventType = "parental_consent_revoked"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -210,6 +223,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventProjectConfigUpdated:          {},
 	EventProjectOAuthProviderSet:       {},
 	EventProjectOAuthProviderRemoved:   {},
+	EventParentalConsentGranted:        {},
+	EventParentalConsentRevoked:        {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

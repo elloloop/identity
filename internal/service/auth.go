@@ -514,6 +514,23 @@ type Repository interface {
 	GetLatestIdentityVerificationForUser(ctx context.Context, userID string) (*IdentityVerificationRecord, error)
 	UpdateIdentityVerificationStatus(ctx context.Context, verificationID, status, rejectionReason string, completedAtMs, updatedAtMs int64) error
 
+	// Parental-consent records (Verifiable Parental Consent — COPPA/DPDP/UK
+	// Children's Code). The record is the auditable, revocable artifact proving
+	// an adult consented for a child account.
+	//
+	// CreateParentalConsent persists a new record; the caller mints ConsentID.
+	// GetActiveParentalConsentForChild returns the latest record for a child
+	// whose RevokedAt == 0 (nil when none — no error), ordered by GrantedAt
+	// descending; it backs both the double-grant guard and the revoke lookup.
+	// MarkParentalConsentRevoked stamps RevokedAt/RevokedBy on the record.
+	//
+	// Like audit_events, these records carry NO users foreign key and are NOT
+	// removed by DeleteUser: the proof of consent must survive deletion of the
+	// child or the adult it references, to defend a later regulatory inquiry.
+	CreateParentalConsent(ctx context.Context, r *ParentalConsentRecord) error
+	GetActiveParentalConsentForChild(ctx context.Context, childUserID string) (*ParentalConsentRecord, error)
+	MarkParentalConsentRevoked(ctx context.Context, consentID, revokedByUserID string, atMs int64) error
+
 	// Email-change tokens (primary email rotation, double-opt-in)
 	CreateEmailChangeToken(ctx context.Context, t *EmailChangeToken) error
 	FindEmailChangeTokenByHash(ctx context.Context, tokenHash string) (*EmailChangeToken, error)

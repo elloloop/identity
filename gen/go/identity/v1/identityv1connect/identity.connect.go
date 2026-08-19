@@ -125,6 +125,12 @@ const (
 	// IdentityServiceGetIdentityVerificationStatusProcedure is the fully-qualified name of the
 	// IdentityService's GetIdentityVerificationStatus RPC.
 	IdentityServiceGetIdentityVerificationStatusProcedure = "/identity.v1.IdentityService/GetIdentityVerificationStatus"
+	// IdentityServiceGrantParentalConsentProcedure is the fully-qualified name of the IdentityService's
+	// GrantParentalConsent RPC.
+	IdentityServiceGrantParentalConsentProcedure = "/identity.v1.IdentityService/GrantParentalConsent"
+	// IdentityServiceRevokeParentalConsentProcedure is the fully-qualified name of the
+	// IdentityService's RevokeParentalConsent RPC.
+	IdentityServiceRevokeParentalConsentProcedure = "/identity.v1.IdentityService/RevokeParentalConsent"
 	// IdentityServiceRequestAdminHelpProcedure is the fully-qualified name of the IdentityService's
 	// RequestAdminHelp RPC.
 	IdentityServiceRequestAdminHelpProcedure = "/identity.v1.IdentityService/RequestAdminHelp"
@@ -407,6 +413,14 @@ type IdentityServiceClient interface {
 	// Identity Verification (document + selfie via pluggable provider)
 	BeginIdentityVerification(context.Context, *connect.Request[v1.BeginIdentityVerificationRequest]) (*connect.Response[v1.BeginIdentityVerificationResponse], error)
 	GetIdentityVerificationStatus(context.Context, *connect.Request[v1.GetIdentityVerificationStatusRequest]) (*connect.Response[v1.GetIdentityVerificationStatusResponse], error)
+	// Verifiable Parental Consent — grant/withdraw a recorded, revocable
+	// parental consent for a child-band account, moving it in/out of
+	// USER_STATUS_PENDING_PARENTAL_CONSENT. Both server-side checks in
+	// GrantParentalConsent (a strong verified factor on the consenting adult's
+	// account AND a step-up re-authentication at the moment of consent) are
+	// mandatory; a client cannot bypass them.
+	GrantParentalConsent(context.Context, *connect.Request[v1.GrantParentalConsentRequest]) (*connect.Response[v1.GrantParentalConsentResponse], error)
+	RevokeParentalConsent(context.Context, *connect.Request[v1.RevokeParentalConsentRequest]) (*connect.Response[v1.RevokeParentalConsentResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[v1.RequestAdminHelpRequest]) (*connect.Response[v1.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[v1.ListHelpRequestsRequest]) (*connect.Response[v1.ListHelpRequestsResponse], error)
@@ -752,6 +766,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceGetIdentityVerificationStatusProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("GetIdentityVerificationStatus")),
+			connect.WithClientOptions(opts...),
+		),
+		grantParentalConsent: connect.NewClient[v1.GrantParentalConsentRequest, v1.GrantParentalConsentResponse](
+			httpClient,
+			baseURL+IdentityServiceGrantParentalConsentProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GrantParentalConsent")),
+			connect.WithClientOptions(opts...),
+		),
+		revokeParentalConsent: connect.NewClient[v1.RevokeParentalConsentRequest, v1.RevokeParentalConsentResponse](
+			httpClient,
+			baseURL+IdentityServiceRevokeParentalConsentProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RevokeParentalConsent")),
 			connect.WithClientOptions(opts...),
 		),
 		requestAdminHelp: connect.NewClient[v1.RequestAdminHelpRequest, v1.RequestAdminHelpResponse](
@@ -1246,6 +1272,8 @@ type identityServiceClient struct {
 	confirmEmailChange              *connect.Client[v1.ConfirmEmailChangeRequest, v1.ConfirmEmailChangeResponse]
 	beginIdentityVerification       *connect.Client[v1.BeginIdentityVerificationRequest, v1.BeginIdentityVerificationResponse]
 	getIdentityVerificationStatus   *connect.Client[v1.GetIdentityVerificationStatusRequest, v1.GetIdentityVerificationStatusResponse]
+	grantParentalConsent            *connect.Client[v1.GrantParentalConsentRequest, v1.GrantParentalConsentResponse]
+	revokeParentalConsent           *connect.Client[v1.RevokeParentalConsentRequest, v1.RevokeParentalConsentResponse]
 	requestAdminHelp                *connect.Client[v1.RequestAdminHelpRequest, v1.RequestAdminHelpResponse]
 	listHelpRequests                *connect.Client[v1.ListHelpRequestsRequest, v1.ListHelpRequestsResponse]
 	resolveHelpRequest              *connect.Client[v1.ResolveHelpRequestRequest, v1.ResolveHelpRequestResponse]
@@ -1477,6 +1505,16 @@ func (c *identityServiceClient) BeginIdentityVerification(ctx context.Context, r
 // GetIdentityVerificationStatus calls identity.v1.IdentityService.GetIdentityVerificationStatus.
 func (c *identityServiceClient) GetIdentityVerificationStatus(ctx context.Context, req *connect.Request[v1.GetIdentityVerificationStatusRequest]) (*connect.Response[v1.GetIdentityVerificationStatusResponse], error) {
 	return c.getIdentityVerificationStatus.CallUnary(ctx, req)
+}
+
+// GrantParentalConsent calls identity.v1.IdentityService.GrantParentalConsent.
+func (c *identityServiceClient) GrantParentalConsent(ctx context.Context, req *connect.Request[v1.GrantParentalConsentRequest]) (*connect.Response[v1.GrantParentalConsentResponse], error) {
+	return c.grantParentalConsent.CallUnary(ctx, req)
+}
+
+// RevokeParentalConsent calls identity.v1.IdentityService.RevokeParentalConsent.
+func (c *identityServiceClient) RevokeParentalConsent(ctx context.Context, req *connect.Request[v1.RevokeParentalConsentRequest]) (*connect.Response[v1.RevokeParentalConsentResponse], error) {
+	return c.revokeParentalConsent.CallUnary(ctx, req)
 }
 
 // RequestAdminHelp calls identity.v1.IdentityService.RequestAdminHelp.
@@ -1913,6 +1951,14 @@ type IdentityServiceHandler interface {
 	// Identity Verification (document + selfie via pluggable provider)
 	BeginIdentityVerification(context.Context, *connect.Request[v1.BeginIdentityVerificationRequest]) (*connect.Response[v1.BeginIdentityVerificationResponse], error)
 	GetIdentityVerificationStatus(context.Context, *connect.Request[v1.GetIdentityVerificationStatusRequest]) (*connect.Response[v1.GetIdentityVerificationStatusResponse], error)
+	// Verifiable Parental Consent — grant/withdraw a recorded, revocable
+	// parental consent for a child-band account, moving it in/out of
+	// USER_STATUS_PENDING_PARENTAL_CONSENT. Both server-side checks in
+	// GrantParentalConsent (a strong verified factor on the consenting adult's
+	// account AND a step-up re-authentication at the moment of consent) are
+	// mandatory; a client cannot bypass them.
+	GrantParentalConsent(context.Context, *connect.Request[v1.GrantParentalConsentRequest]) (*connect.Response[v1.GrantParentalConsentResponse], error)
+	RevokeParentalConsent(context.Context, *connect.Request[v1.RevokeParentalConsentRequest]) (*connect.Response[v1.RevokeParentalConsentResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[v1.RequestAdminHelpRequest]) (*connect.Response[v1.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[v1.ListHelpRequestsRequest]) (*connect.Response[v1.ListHelpRequestsResponse], error)
@@ -2254,6 +2300,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceGetIdentityVerificationStatusProcedure,
 		svc.GetIdentityVerificationStatus,
 		connect.WithSchema(identityServiceMethods.ByName("GetIdentityVerificationStatus")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGrantParentalConsentHandler := connect.NewUnaryHandler(
+		IdentityServiceGrantParentalConsentProcedure,
+		svc.GrantParentalConsent,
+		connect.WithSchema(identityServiceMethods.ByName("GrantParentalConsent")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRevokeParentalConsentHandler := connect.NewUnaryHandler(
+		IdentityServiceRevokeParentalConsentProcedure,
+		svc.RevokeParentalConsent,
+		connect.WithSchema(identityServiceMethods.ByName("RevokeParentalConsent")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceRequestAdminHelpHandler := connect.NewUnaryHandler(
@@ -2776,6 +2834,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceBeginIdentityVerificationHandler.ServeHTTP(w, r)
 		case IdentityServiceGetIdentityVerificationStatusProcedure:
 			identityServiceGetIdentityVerificationStatusHandler.ServeHTTP(w, r)
+		case IdentityServiceGrantParentalConsentProcedure:
+			identityServiceGrantParentalConsentHandler.ServeHTTP(w, r)
+		case IdentityServiceRevokeParentalConsentProcedure:
+			identityServiceRevokeParentalConsentHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestAdminHelpProcedure:
 			identityServiceRequestAdminHelpHandler.ServeHTTP(w, r)
 		case IdentityServiceListHelpRequestsProcedure:
@@ -3059,6 +3121,14 @@ func (UnimplementedIdentityServiceHandler) BeginIdentityVerification(context.Con
 
 func (UnimplementedIdentityServiceHandler) GetIdentityVerificationStatus(context.Context, *connect.Request[v1.GetIdentityVerificationStatusRequest]) (*connect.Response[v1.GetIdentityVerificationStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetIdentityVerificationStatus is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GrantParentalConsent(context.Context, *connect.Request[v1.GrantParentalConsentRequest]) (*connect.Response[v1.GrantParentalConsentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GrantParentalConsent is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RevokeParentalConsent(context.Context, *connect.Request[v1.RevokeParentalConsentRequest]) (*connect.Response[v1.RevokeParentalConsentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RevokeParentalConsent is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) RequestAdminHelp(context.Context, *connect.Request[v1.RequestAdminHelpRequest]) (*connect.Response[v1.RequestAdminHelpResponse], error) {

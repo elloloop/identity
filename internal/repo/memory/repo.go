@@ -66,6 +66,7 @@ type Repo struct {
 	emailChanges        map[string]*service.EmailChangeToken
 	oauthIdentities     map[string]*service.OAuthIdentity
 	idvRecords          map[string]*service.IdentityVerificationRecord
+	parentalConsents    map[string]*service.ParentalConsentRecord
 	sessions            map[string]*service.SessionRecord
 	auditEvents         map[string]*service.AuditEvent
 }
@@ -120,6 +121,7 @@ func newStore() *Repo {
 		emailChanges:        make(map[string]*service.EmailChangeToken),
 		oauthIdentities:     make(map[string]*service.OAuthIdentity),
 		idvRecords:          make(map[string]*service.IdentityVerificationRecord),
+		parentalConsents:    make(map[string]*service.ParentalConsentRecord),
 		sessions:            make(map[string]*service.SessionRecord),
 		auditEvents:         make(map[string]*service.AuditEvent),
 	}
@@ -1565,6 +1567,54 @@ func (r *Repo) UpdateIdentityVerificationStatus(_ context.Context, verificationI
 	rec.RejectionReason = rejectionReason
 	rec.CompletedAt = completedAtMs
 	rec.UpdatedAt = updatedAtMs
+	return nil
+}
+
+// ── Parental consent ──────────────────────────────────────────────
+
+func (r *Repo) CreateParentalConsent(_ context.Context, rec *service.ParentalConsentRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if rec.ConsentID == "" {
+		return errors.New("parental consent: missing consent id")
+	}
+	if _, exists := r.parentalConsents[rec.ConsentID]; exists {
+		return fmt.Errorf("parental consent %s already exists", rec.ConsentID)
+	}
+	rec.ProjectID = r.projectID
+	cp := *rec
+	r.parentalConsents[rec.ConsentID] = &cp
+	return nil
+}
+
+func (r *Repo) GetActiveParentalConsentForChild(_ context.Context, childUserID string) (*service.ParentalConsentRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var latest *service.ParentalConsentRecord
+	for _, rec := range r.parentalConsents {
+		if rec.ChildUserID != childUserID || rec.RevokedAt != 0 {
+			continue
+		}
+		if latest == nil || rec.GrantedAt > latest.GrantedAt {
+			latest = rec
+		}
+	}
+	if latest == nil {
+		return nil, nil
+	}
+	cp := *latest
+	return &cp, nil
+}
+
+func (r *Repo) MarkParentalConsentRevoked(_ context.Context, consentID, revokedByUserID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.parentalConsents[consentID]
+	if !ok {
+		return fmt.Errorf("parental consent %s not found", consentID)
+	}
+	rec.RevokedAt = atMs
+	rec.RevokedByUserID = revokedByUserID
 	return nil
 }
 
