@@ -6,7 +6,7 @@
 # Run:
 #   docker run -p 80:80 -p 9090:9090 -e GATEWAY_POSTGRES_DSN=postgres://... identity
 
-FROM --platform=$BUILDPLATFORM golang:1.26.6-alpine3.23 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine3.23 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
