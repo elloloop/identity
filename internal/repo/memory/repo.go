@@ -553,79 +553,80 @@ func fieldInt64(v any) (int64, bool) {
 	return 0, false
 }
 
+// The three field tables below map a Repository UpdateUser field name to the
+// User field it writes, one table per underlying type. The SQL drivers key
+// the same field names to columns (userFieldColumns); keeping the memory
+// driver's mapping a table too means a new user field is one line per driver
+// rather than another switch arm, and holds applyUserFields flat.
+//
+// A value of the wrong type is SKIPPED, not written as the zero value —
+// matching what the SQL drivers do (nullableString and friends return
+// ok=false and the field is left out of the UPDATE).
+var (
+	userStringFields = map[string]func(*service.User) *string{
+		"name":           func(u *service.User) *string { return &u.Name },
+		"email":          func(u *service.User) *string { return &u.Email },
+		"avatar_url":     func(u *service.User) *string { return &u.AvatarURL },
+		"password_hash":  func(u *service.User) *string { return &u.PasswordHash },
+		"status":         func(u *service.User) *string { return &u.Status },
+		"recovery_email": func(u *service.User) *string { return &u.RecoveryEmail },
+		"external_id":    func(u *service.User) *string { return &u.ExternalID },
+		"phone_number":   func(u *service.User) *string { return &u.PhoneNumber },
+		"market":         func(u *service.User) *string { return &u.Market },
+		"username":       func(u *service.User) *string { return &u.Username },
+	}
+
+	userBoolFields = map[string]func(*service.User) *bool{
+		"totp_required":  func(u *service.User) *bool { return &u.TotpRequired },
+		"email_verified": func(u *service.User) *bool { return &u.EmailVerified },
+		"is_anonymous":   func(u *service.User) *bool { return &u.IsAnonymous },
+		"phone_verified": func(u *service.User) *bool { return &u.PhoneVerified },
+	}
+
+	userInt64Fields = map[string]func(*service.User) *int64{
+		"locked_until":             func(u *service.User) *int64 { return &u.LockedUntil },
+		"last_login_at":            func(u *service.User) *int64 { return &u.LastLoginAtMs },
+		"email_verified_at":        func(u *service.User) *int64 { return &u.EmailVerifiedAt },
+		"anonymous_last_seen_ms":   func(u *service.User) *int64 { return &u.AnonymousLastSeenMs },
+		"phone_verified_at":        func(u *service.User) *int64 { return &u.PhoneVerifiedAt },
+		"date_of_birth_ms":         func(u *service.User) *int64 { return &u.DateOfBirthMs },
+		"deletion_scheduled_at_ms": func(u *service.User) *int64 { return &u.DeletionScheduledAtMs },
+	}
+)
+
+// applyUserFields writes a Repository UpdateUser patch onto a stored user.
+// An unknown field name is ignored, exactly as the SQL drivers ignore one
+// that names no column.
 func applyUserFields(u *service.User, fields map[string]any) {
 	for k, v := range fields {
+		if field, ok := userStringFields[k]; ok {
+			if s, ok := v.(string); ok {
+				*field(u) = s
+			}
+			continue
+		}
+		if field, ok := userBoolFields[k]; ok {
+			if b, ok := v.(bool); ok {
+				*field(u) = b
+			}
+			continue
+		}
+		if field, ok := userInt64Fields[k]; ok {
+			if x, ok := fieldInt64(v); ok {
+				*field(u) = x
+			}
+			continue
+		}
+		// The two fields whose stored form is not the wire form.
 		switch k {
-		case "name":
-			u.Name, _ = v.(string)
-		case "email":
-			u.Email, _ = v.(string)
-		case "avatar_url":
-			u.AvatarURL, _ = v.(string)
-		case "password_hash":
-			u.PasswordHash, _ = v.(string)
-		case "status":
-			u.Status, _ = v.(string)
-		case "totp_required":
-			u.TotpRequired, _ = v.(bool)
 		case "failed_login_count":
 			if x, ok := fieldInt64(v); ok {
 				u.FailedLoginCount = int(x)
-			}
-		case "locked_until":
-			if x, ok := fieldInt64(v); ok {
-				u.LockedUntil = x
 			}
 		case "updated_at":
 			if x, ok := fieldInt64(v); ok {
 				u.UpdatedAt = time.UnixMilli(x)
 			}
-		case "last_login_at":
-			if x, ok := fieldInt64(v); ok {
-				u.LastLoginAtMs = x
-			}
-		case "recovery_email":
-			u.RecoveryEmail, _ = v.(string)
-		case "email_verified":
-			if b, ok := v.(bool); ok {
-				u.EmailVerified = b
-			}
-		case "email_verified_at":
-			if x, ok := fieldInt64(v); ok {
-				u.EmailVerifiedAt = x
-			}
-		case "external_id":
-			u.ExternalID, _ = v.(string)
-		case "is_anonymous":
-			if b, ok := v.(bool); ok {
-				u.IsAnonymous = b
-			}
-		case "anonymous_last_seen_ms":
-			if x, ok := fieldInt64(v); ok {
-				u.AnonymousLastSeenMs = x
-			}
-		case "phone_number":
-			u.PhoneNumber, _ = v.(string)
-		case "phone_verified":
-			if b, ok := v.(bool); ok {
-				u.PhoneVerified = b
-			}
-		case "phone_verified_at":
-			if x, ok := fieldInt64(v); ok {
-				u.PhoneVerifiedAt = x
-			}
-		case "date_of_birth_ms":
-			if x, ok := fieldInt64(v); ok {
-				u.DateOfBirthMs = x
-			}
-		case "deletion_scheduled_at_ms":
-			if x, ok := fieldInt64(v); ok {
-				u.DeletionScheduledAtMs = x
-			}
-		case "market":
-			u.Market, _ = v.(string)
-		case "username":
-			u.Username, _ = v.(string)
 		}
 	}
 }
