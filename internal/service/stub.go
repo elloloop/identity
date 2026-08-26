@@ -314,6 +314,10 @@ func (StubRepository) GetActiveParentalConsentForChild(context.Context, string) 
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) SetDateOfBirthOnce(context.Context, string, int64, string, int64) (bool, error) {
+	return false, ErrServiceUnavailable
+}
+
 func (StubRepository) ListActiveParentalConsentsForChild(context.Context, string) ([]*ParentalConsentRecord, error) {
 	return nil, ErrServiceUnavailable
 }

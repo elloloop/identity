@@ -346,7 +346,8 @@ func productAgeIssuingPaths() []productAgePath {
 			// so the refresh is the FIRST place the policy under test applies.
 			login, err := svc.PasswordLogin(
 				WithProjectScope(ctx, scopeFromJSON(t, noProductPolicyJSON)),
-				"user@example.com", productAgePassword, "1.2.3.4", "agent")
+				"user@example.com", productAgePassword, "1.2.3.4", "agent",
+			)
 			require.NoError(t, err)
 			_, _, _, err = svc.RefreshToken(ctx, login.RefreshToken, "1.2.3.4", "agent")
 			return err

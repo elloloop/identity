@@ -692,10 +692,10 @@ func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
 	require.ErrorIs(t, err, errConsentInjected)
 	repo.getUserErr = nil
 
-	repo.updateUserErr = errConsentInjected
+	repo.setDOBOnceErr = errConsentInjected
 	_, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
 	require.ErrorIs(t, err, errConsentInjected)
-	repo.updateUserErr = nil
+	repo.setDOBOnceErr = nil
 
 	// A ticket for an account that no longer exists refuses without a panic.
 	ghostTicket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: "no-such-user"})
@@ -707,4 +707,38 @@ func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
 	done, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, done.AccessToken)
+}
+
+// TestSubmitDateOfBirth_IsSetOnce pins the compare-and-set: the completion
+// ticket is reusable within its TTL, so two submissions can both read a
+// dob-less account. Exactly one may win — otherwise an adult-band submission
+// could mint a session while a concurrent child-band one gates the account,
+// producing a valid non-minor session on a consent-gated child.
+func TestSubmitDateOfBirth_IsSetOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+
+	res, err := svc.PasswordSignup(ctx, "race@example.com", strongPW, "R", "", 0, "")
+	require.NoError(t, err)
+	enableAgeGate(t, svc, true)
+
+	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: res.User.ID})
+	require.NoError(t, err)
+
+	// The child-band submission lands first and gates the account.
+	gated, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(8), "", "")
+	require.NoError(t, err)
+	require.Empty(t, gated.AccessToken, "a child-band completion issues no tokens")
+
+	// The adult-band submission replaying the SAME ticket must not overwrite
+	// the stored date, and must not mint a session.
+	second, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+	require.ErrorIs(t, err, ErrDOBAlreadySet)
+	require.Nil(t, second)
+
+	stored, err := repo.GetUser(ctx, res.User.ID)
+	require.NoError(t, err)
+	require.Equal(t, dobAgeMs(8), stored.DateOfBirthMs, "the losing submission must not overwrite the date")
+	require.Equal(t, StatusPendingParentalConsent, stored.Status, "the account must stay gated")
 }

@@ -16,7 +16,7 @@ func redactEmail(s string) string { return email.Redact(s) }
 // logged as-is.
 func redactIdentifier(s string) string {
 	if strings.Contains(s, "@") {
-		return redactEmail(s)
+		return email.Redact(s)
 	}
 	return s
 }

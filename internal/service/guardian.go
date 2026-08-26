@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 )
 
@@ -36,11 +37,47 @@ type GuardianEdge struct {
 	CreatedAtMs int64
 }
 
+// summarizeManagedAccount returns the SAFE projection of an account for a
+// listing: identity and classification only. The full record — email,
+// recovery email, phone, date of birth, login state — is reachable only
+// through GetManagedChildProfile, which demands a step-up re-auth.
+//
+// The listings answer "who do I manage / who manages this child", a question
+// a session alone may answer. Reading the account itself is a separate
+// question with a higher bar, and returning the whole record here would have
+// handed a stolen session every child's PII without one.
+func (s *AuthService) summarizeManagedAccount(ctx context.Context, u *User) *User {
+	summary := &User{
+		ID:        u.ID,
+		Username:  u.Username,
+		Name:      u.Name,
+		AvatarURL: u.AvatarURL,
+		Role:      u.Role,
+		Status:    u.Status,
+		Market:    u.Market,
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
+	}
+	// Band and is_minor are the point of the listing (a parent needs to see
+	// which of their children are still managed), so they are derived from
+	// the real DOB — without carrying the DOB itself.
+	dec := s.determinerForUser(ctx, u).Determine(u.DateOfBirthMs, s.nowFunc())
+	summary.AgeBand = string(dec.Band)
+	summary.IsMinor = dec.IsMinor
+	return summary
+}
+
 // ListManagedChildren returns the child accounts guardianUserID holds a
-// guardian edge to, with each child's age band stamped via
-// determinerForUser. An edge whose child account has been deleted is
-// skipped (the FK cascade should already have removed it; the skip keeps a
-// stale row from erroring the listing).
+// guardian edge to, as SUMMARIES (see summarizeManagedAccount) rather than
+// full records.
+//
+// An account that has aged past the adult threshold is omitted: the edge
+// survives as consent history but confers nothing, and
+// authorizeGuardianAction already refuses every operation on it — a listing
+// that kept showing it would be the one place a former guardian could still
+// read an adult's account. An edge whose child has been deleted is skipped
+// too (the FK cascade should have removed it; the skip keeps a stale row
+// from erroring the listing).
 func (s *AuthService) ListManagedChildren(ctx context.Context, guardianUserID string) ([]*User, error) {
 	if guardianUserID == "" {
 		return nil, ErrUnauthenticated
@@ -59,8 +96,11 @@ func (s *AuthService) ListManagedChildren(ctx context.Context, guardianUserID st
 		if child == nil {
 			continue
 		}
-		s.stampAgeBand(ctx, child)
-		children = append(children, child)
+		summary := s.summarizeManagedAccount(ctx, child)
+		if summary.AgeBand == string(agegate.BandAdult) {
+			continue
+		}
+		children = append(children, summary)
 	}
 	return children, nil
 }
@@ -104,8 +144,10 @@ func (s *AuthService) GetGuardians(ctx context.Context, callerUserID, childUserI
 		if guardian == nil {
 			continue
 		}
-		s.stampAgeBand(ctx, guardian)
-		guardians = append(guardians, guardian)
+		// Summaries here too: this listing hands one guardian the records of
+		// their CO-guardians, who have not consented to sharing their contact
+		// details with each other.
+		guardians = append(guardians, s.summarizeManagedAccount(ctx, guardian))
 	}
 	return guardians, nil
 }

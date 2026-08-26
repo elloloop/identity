@@ -175,6 +175,55 @@ func RunConformance(t *testing.T, driver Driver) {
 	}
 
 	t.Run(driver.Name, func(t *testing.T) {
+		t.Run("SetDateOfBirthOnce_IsCompareAndSet", func(t *testing.T) {
+			// The DOB completion ticket is reusable within its TTL, so two
+			// submissions can both read date_of_birth_ms = 0. Exactly one
+			// must win, and the loser must not overwrite — otherwise an
+			// adult-band submission can mint a session on an account a
+			// concurrent child-band submission just gated.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			id := createTestUser(t, r, "dob-once@example.com")
+
+			won, err := r.SetDateOfBirthOnce(ctx, id, 111, "", 1_000)
+			if err != nil || !won {
+				t.Fatalf("first SetDateOfBirthOnce: won=%v err=%v, want true nil", won, err)
+			}
+			won, err = r.SetDateOfBirthOnce(ctx, id, 222, service.StatusPendingParentalConsent, 2_000)
+			if err != nil || won {
+				t.Fatalf("second SetDateOfBirthOnce: won=%v err=%v, want false nil", won, err)
+			}
+			got, err := r.GetUser(ctx, id)
+			if err != nil || got == nil {
+				t.Fatalf("GetUser: %#v %v", got, err)
+			}
+			if got.DateOfBirthMs != 111 {
+				t.Fatalf("date_of_birth_ms = %d, want 111 (the loser must not overwrite)", got.DateOfBirthMs)
+			}
+			if got.Status == service.StatusPendingParentalConsent {
+				t.Fatal("the losing call must not apply its status either")
+			}
+
+			// The status rides the same statement when supplied.
+			gated := createTestUser(t, r, "dob-once-gated@example.com")
+			if won, err := r.SetDateOfBirthOnce(ctx, gated, 333, service.StatusPendingParentalConsent, 3_000); err != nil || !won {
+				t.Fatalf("gated SetDateOfBirthOnce: won=%v err=%v", won, err)
+			}
+			got, err = r.GetUser(ctx, gated)
+			if err != nil || got == nil {
+				t.Fatalf("GetUser gated: %#v %v", got, err)
+			}
+			if got.DateOfBirthMs != 333 || got.Status != service.StatusPendingParentalConsent {
+				t.Fatalf("gated account = dob %d status %q, want 333 / %s",
+					got.DateOfBirthMs, got.Status, service.StatusPendingParentalConsent)
+			}
+
+			// An unknown account is a clean miss, not an error.
+			if won, err := r.SetDateOfBirthOnce(ctx, "no-such-user", 444, "", 4_000); err != nil || won {
+				t.Fatalf("unknown user: won=%v err=%v, want false nil", won, err)
+			}
+		})
+
 		t.Run("UserCRUD", func(t *testing.T) {
 			ctx := context.Background()
 			r := driver.NewRepo(t)

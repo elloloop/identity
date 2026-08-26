@@ -274,7 +274,8 @@ func (s *AuthService) refuseAnonymousCredentialAttach(ctx context.Context, userI
 	if u != nil && u.IsAnonymous {
 		return fmt.Errorf(
 			"%w: attaching one here would leave the account subject to the anonymous "+
-				"retention sweep despite holding a working credential", ErrAnonymousMustUpgrade)
+				"retention sweep despite holding a working credential", ErrAnonymousMustUpgrade,
+		)
 	}
 	return nil
 }

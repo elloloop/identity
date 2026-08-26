@@ -267,6 +267,23 @@ func (s *AuthService) CreateManagedChildAccount(
 		// record says WHICH jurisdiction's thresholds it proves consent against.
 		Market: s.resolvedMarketFor(ctx, child),
 	}
+	// The enrolment ticket is minted BEFORE the commit. Its subject is the
+	// child id, so the id is generated here rather than by the driver: if
+	// signing failed after the commit, the account would exist with no
+	// password and no ticket, a retry would answer ALREADY_EXISTS, and there
+	// is no RPC to mint a replacement — an unreachable account. Failing
+	// before the write leaves nothing behind and the retry simply works.
+	credential := "password"
+	var ticket string
+	if req.PasskeyEnrolment {
+		credential = "passkey_enrolment" // #nosec G101 -- an audit-detail label naming the credential shape.
+		child.ID = "usr_" + randomToken(16)
+		ticket, err = s.mintPurposeTicket(ctx, child.ID, tokenPurposePasskeyEnrolment, passkeyEnrolmentTicketTTL)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if err := repo.CreateManagedChildAccount(ctx, child, edge, consent); err != nil {
 		if errors.Is(err, ErrAlreadyExists) {
 			s.auditManagedChildFailure(ctx, callerUserID, "duplicate_username", ip, userAgent)
@@ -275,18 +292,6 @@ func (s *AuthService) CreateManagedChildAccount(
 		return nil, fmt.Errorf("creating managed child account: %w", err)
 	}
 	s.stampAgeBand(ctx, child)
-
-	// 7. Passkey enrolment: the child's device redeems the ticket through the
-	// passkey registration ceremony within the ticket's TTL.
-	credential := "password"
-	var ticket string
-	if req.PasskeyEnrolment {
-		credential = "passkey_enrolment" // #nosec G101 -- an audit-detail label naming the credential shape.
-		ticket, err = s.mintPurposeTicket(ctx, child.ID, tokenPurposePasskeyEnrolment, passkeyEnrolmentTicketTTL)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	s.audit.Log(
 		ctx, audit.EventManagedChildAccountCreated,

@@ -185,12 +185,23 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	gate := s.determinerForUser(ctx, user)
 	dec := gate.Determine(dobMs, s.nowFunc())
 	now := s.nowMs()
-	updates := map[string]any{"date_of_birth_ms": dobMs, "updated_at": now}
+	regate := ""
 	if gate.Enabled() && dec.Band == agegate.BandChild {
-		updates["status"] = StatusPendingParentalConsent
+		regate = StatusPendingParentalConsent
 	}
-	if err := s.repo(ctx).UpdateUser(ctx, user.ID, updates); err != nil {
+	// SET-ONCE. The ticket is reusable within its TTL, so two calls can both
+	// pass the read above; an unconditional write would let an adult-band
+	// submission mint a session while a concurrent child-band one gates the
+	// account — a valid non-minor session on a consent-gated child. The
+	// compare-and-set picks exactly one winner, and only the winner gets
+	// past here to issue tokens. The loser is told the date is already set,
+	// which it now is.
+	won, err := s.repo(ctx).SetDateOfBirthOnce(ctx, user.ID, dobMs, regate, now)
+	if err != nil {
 		return nil, fmt.Errorf("storing date of birth: %w", err)
+	}
+	if !won {
+		return nil, ErrDOBAlreadySet
 	}
 	user.DateOfBirthMs = dobMs
 	user.UpdatedAt = msToTime(now)

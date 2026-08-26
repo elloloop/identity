@@ -182,6 +182,7 @@ type fakeRepo struct {
 	getGuardianEdgeErr    error // GetGuardianEdge fails
 	listGuardianEdgesErr  error // ListGuardiansOfChild / ListChildrenOfGuardian fail
 	findUserByUsernameErr error // FindUserByUsername fails
+	setDOBOnceErr         error // SetDateOfBirthOnce fails
 	// createManagedChildErr makes CreateManagedChildAccount fail before any
 	// mutation, exercising the atomicity contract from the caller's side.
 	createManagedChildErr error
@@ -1774,6 +1775,26 @@ func (r *fakeRepo) CreateParentalConsent(_ context.Context, rec *ParentalConsent
 
 // ListActiveParentalConsentsForChild mirrors the drivers: every non-revoked
 // consent for the child, newest grant first.
+// SetDateOfBirthOnce mirrors the drivers' compare-and-set: the write lands
+// only while the account still has no date of birth.
+func (r *fakeRepo) SetDateOfBirthOnce(_ context.Context, userID string, dobMs int64, status string, nowMs int64) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.setDOBOnceErr != nil {
+		return false, r.setDOBOnceErr
+	}
+	u, ok := r.users[userID]
+	if !ok || u.DateOfBirthMs != 0 {
+		return false, nil
+	}
+	u.DateOfBirthMs = dobMs
+	if status != "" {
+		u.Status = status
+	}
+	u.UpdatedAt = time.UnixMilli(nowMs)
+	return true, nil
+}
+
 func (r *fakeRepo) ListActiveParentalConsentsForChild(_ context.Context, childUserID string) ([]*ParentalConsentRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

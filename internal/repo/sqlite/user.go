@@ -437,6 +437,28 @@ var userDeleteNonFKTables = []string{
 	"user_invitations",
 }
 
+// SetDateOfBirthOnce sets the date of birth only while the row still has none,
+// applying the optional status in the same statement. Reports whether this
+// call was the one that set it.
+func (r *sqliteRepository) SetDateOfBirthOnce(
+	ctx context.Context, userID string, dobMs int64, status string, nowMs int64,
+) (bool, error) {
+	if userID == "" {
+		return false, errors.New("sqlite: SetDateOfBirthOnce: missing user id")
+	}
+	const q = `
+		UPDATE users
+		   SET date_of_birth_ms = $3,
+		       status          = CASE WHEN $4 = '' THEN status ELSE $4 END,
+		       updated_at_ms   = $5
+		 WHERE project_id = $1 AND id = $2 AND date_of_birth_ms = 0`
+	res, err := r.db.Exec(ctx, q, r.projectID, userID, dobMs, status, nowMs)
+	if err != nil {
+		return false, wrapErr("SetDateOfBirthOnce", err)
+	}
+	return res.RowsAffected() > 0, nil
+}
+
 func (r *sqliteRepository) DeleteUser(ctx context.Context, userID string) error {
 	if userID == "" {
 		return nil

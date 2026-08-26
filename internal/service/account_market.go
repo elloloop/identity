@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
@@ -94,7 +95,19 @@ func (s *AuthService) SetAccountMarket(ctx context.Context, userID, market strin
 	}
 
 	s.stampAgeBand(ctx, u)
-	if u.AgeBand != string(agegate.BandChild) || !isActiveConsentingAccount(u.Status) {
+	if u.AgeBand != string(agegate.BandChild) {
+		return u, nil
+	}
+	// A child-band account that is ALREADY gated may be mid-recovery from a
+	// failed earlier attempt: the status landed and the session cut did not.
+	// Re-run the (idempotent) revocation rather than returning early on an
+	// account whose old tokens still work.
+	if !isActiveConsentingAccount(u.Status) {
+		if strings.EqualFold(u.Status, StatusPendingParentalConsent) {
+			if err := revokeAllUserSessions(ctx, repo, userID, now); err != nil {
+				return nil, fmt.Errorf("revoke sessions: %w", err)
+			}
+		}
 		return u, nil
 	}
 	// The account newly classifies as CHILD. An already-consented child keeps

@@ -309,6 +309,14 @@ func (s *AuthService) DeactivateManagedChildAccount(
 	}
 	switch strings.ToLower(strings.TrimSpace(child.Status)) {
 	case StatusDeactivated:
+		// Already deactivated — but the status write and the session cut are
+		// separate statements, so a first attempt can have stored the status
+		// and then failed to revoke. Re-run the revocation (it is idempotent)
+		// rather than reporting success on a child whose old token still
+		// works: session-mode auth reads the session row, not the status.
+		if err := revokeAllUserSessions(ctx, s.repo(ctx), child.ID, s.nowMs()); err != nil {
+			return fmt.Errorf("deactivate managed child account: %w", err)
+		}
 		s.auditGuardianAction(ctx, guardianOpDeactivate, guardianUserID, child.ID, true, ip, userAgent,
 			map[string]any{"reason": reason, "unchanged": true})
 		return nil

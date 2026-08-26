@@ -116,6 +116,25 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		return nil, nil, err
 	}
 
+	// On the managed-child enrolment path the ticket stood in for a session,
+	// and up to its TTL may have passed since it was minted. Re-check the
+	// account status BEFORE the credential is persisted, not only before the
+	// session is issued: a guardian who deactivates a child mid-ceremony must
+	// not end up with a permanent passkey attached to that account, ready to
+	// authenticate the moment it is reactivated.
+	if issueSession {
+		enrolmentUser, statusErr := s.repo(ctx).GetUser(ctx, userID)
+		if statusErr != nil {
+			return nil, nil, statusErr
+		}
+		if enrolmentUser == nil {
+			return nil, nil, fmt.Errorf("%w: user not found", ErrNotFound)
+		}
+		if statusErr := s.checkAccountStatus(ctx, enrolmentUser, ipAddr, userAgent); statusErr != nil {
+			return nil, nil, statusErr
+		}
+	}
+
 	challenge, err := s.repo(ctx).GetPasskeyChallenge(ctx, challengeID)
 	if err != nil {
 		return nil, nil, err
@@ -189,11 +208,11 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 	}
 
 	// Managed-child enrolment path: the ticket took the place of a session,
-	// so completion issues the account's first one. The account status gate
-	// runs first — a child deactivated between ticket mint and redemption must
-	// not gain a session. Token issuance goes through the normal chokepoint
-	// (issueTokens), so the product age gate and the required-DOB gate apply
-	// here exactly as on any login.
+	// so completion issues the account's first one. The status was already
+	// checked before the credential was written (above); re-read it here so
+	// the session is issued from the committed row rather than a stale copy.
+	// Token issuance goes through the normal chokepoint (issueTokens), so the
+	// product age gate and the required-DOB gate apply exactly as on a login.
 	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, nil, err

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -327,5 +328,30 @@ func TestMinorDataMinimizer_UsesJurisdictionThresholds(t *testing.T) {
 	// And a US account of the same age is still a teen under that project.
 	if m.BlocksChildFor(ctx, &User{DateOfBirthMs: dobAgeMs(15), Market: "US"}) {
 		t.Fatal("US ceiling is 12: a 15-year-old is a teen, not minimized")
+	}
+}
+
+// TestRedactIdentifier pins both branches of the login-identifier redaction:
+// an email names an inbox and must be masked in logs, while a managed child's
+// username names no inbox and is logged as-is (it is the only handle an
+// operator has to correlate a child's login attempts).
+func TestRedactIdentifier(t *testing.T) {
+	t.Parallel()
+
+	got := redactIdentifier("alice@example.com")
+	if got == "alice@example.com" || !strings.Contains(got, "@") {
+		t.Fatalf("redactIdentifier(email) = %q, want a masked address", got)
+	}
+	if strings.Contains(got, "alice") {
+		t.Fatalf("redactIdentifier(email) = %q, must not leak the local part in full", got)
+	}
+
+	for _, username := range []string{"kid.one", "kid-two", "kid_3"} {
+		if got := redactIdentifier(username); got != username {
+			t.Fatalf("redactIdentifier(%q) = %q, want it unchanged (no inbox to protect)", username, got)
+		}
+	}
+	if got := redactIdentifier(""); got != "" {
+		t.Fatalf("redactIdentifier(\"\") = %q, want empty", got)
 	}
 }

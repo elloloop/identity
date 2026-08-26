@@ -561,6 +561,18 @@ type Repository interface {
 	// yet marked revoked — a question the single-record lookup above cannot
 	// answer. Empty slice, not an error, when there are none.
 	ListActiveParentalConsentsForChild(ctx context.Context, childUserID string) ([]*ParentalConsentRecord, error)
+
+	// SetDateOfBirthOnce stores a date of birth ONLY while the account still
+	// has none, and reports whether this caller was the one that set it. It
+	// is a compare-and-set because the completion ticket is reusable within
+	// its TTL: two concurrent SubmitDateOfBirth calls can both read
+	// date_of_birth_ms = 0, and an unconditional write lets the adult-band
+	// one mint a session while the child-band one gates the account. Exactly
+	// one caller wins, and only the winner issues tokens.
+	//
+	// status, when non-empty, is applied in the same statement (the child
+	// band's re-gate) so the band and the status can never disagree.
+	SetDateOfBirthOnce(ctx context.Context, userID string, dobMs int64, status string, nowMs int64) (bool, error)
 	MarkParentalConsentRevoked(ctx context.Context, consentID, revokedByUserID string, atMs int64) error
 
 	// Guardian edges: the authorization

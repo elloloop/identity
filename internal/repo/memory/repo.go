@@ -451,6 +451,28 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 // audit store has no in-memory equivalent so nothing to retain. The
 // phone-verification codes are user-keyed and durable, so they are
 // drained here like the other user-owned types.
+// SetDateOfBirthOnce sets the date of birth only while the account still has
+// none, under the same lock hold the SQL drivers get from a single UPDATE.
+func (r *Repo) SetDateOfBirthOnce(
+	_ context.Context, userID string, dobMs int64, status string, nowMs int64,
+) (bool, error) {
+	if userID == "" {
+		return false, errors.New("memory: SetDateOfBirthOnce: missing user id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok || u.DateOfBirthMs != 0 {
+		return false, nil
+	}
+	u.DateOfBirthMs = dobMs
+	if status != "" {
+		u.Status = status
+	}
+	u.UpdatedAt = time.UnixMilli(nowMs)
+	return true, nil
+}
+
 func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 	if userID == "" {
 		return nil

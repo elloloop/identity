@@ -506,7 +506,9 @@ func TestDeleteManagedChildAccount_RunsTheSharedCascade(t *testing.T) {
 	if u, _ := f.repo.GetUser(ctx, f.child.ID); u != nil {
 		t.Fatal("the child account must be erased")
 	}
-	// The compliance artifact survives the erasure, per #448's retention posture.
+	// The consent record is compliance evidence, not account data: it must
+	// outlive the erasure so a regulator can still see that consent was
+	// given and that the account was then erased.
 	if rec, err := f.repo.GetActiveParentalConsentForChild(ctx, f.child.ID); err != nil || rec == nil {
 		t.Fatalf("consent record must survive deletion: %v %#v", err, rec)
 	}
