@@ -406,6 +406,15 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	}
 
 	identifier := strings.TrimSpace(strings.ToLower(email))
+	// An absent identifier is a malformed request, not a failed lookup: it
+	// names no account of either kind, so refusing it with InvalidArgument
+	// (as the password check above does) creates no enumeration oracle. Every
+	// NON-empty identifier falls through to the uniform refusal below,
+	// whether it is an unknown email, an unknown username, or syntactically
+	// neither.
+	if identifier == "" {
+		return nil, fmt.Errorf("%w: email or username is required", ErrInvalidArgument)
+	}
 	var user *User
 	var err error
 	// identifierKey names the identifier kind in audit details (the audit
