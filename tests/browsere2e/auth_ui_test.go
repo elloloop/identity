@@ -18,6 +18,12 @@ import (
 // already covered by startServer's own context).
 const browserTimeout = 90 * time.Second
 
+// browserWSURLTimeout bounds how long chromedp waits for Chrome to report its
+// DevTools websocket URL. chromedp's 20s default is the cold-start budget on
+// an idle machine; CI runners routinely need more right after a container
+// boot. Kept well under browserTimeout so it cannot mask a hung browser.
+const browserWSURLTimeout = 60 * time.Second
+
 // selectors for the auth UI (internal/app/ui/static/index.html).
 const (
 	selEmail   = `#email`
@@ -61,6 +67,15 @@ func newBrowser(t *testing.T) context.Context {
 			// renderer init can stall. (DefaultExecAllocatorOptions already sets
 			// --disable-dev-shm-usage and headless.)
 			chromedp.DisableGPU,
+			// chromedp waits 20s by default for Chrome to print its DevTools
+			// websocket URL, and on a GitHub runner still settling from the
+			// postgres container boot the cold start can exceed that — the
+			// process is fine, it is just slow to get there. The failure mode
+			// is "websocket url timeout reached" from the FIRST test in the
+			// file, which is the one that pays the cold start. The whole test
+			// is still bounded by browserTimeout below, so a genuinely stuck
+			// browser fails a few seconds later instead of hanging.
+			chromedp.WSURLReadTimeout(browserWSURLTimeout),
 		)...,
 	)
 	t.Cleanup(allocCancel)
