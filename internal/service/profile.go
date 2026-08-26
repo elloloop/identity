@@ -128,7 +128,7 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userID, name, avatar
 	// refuses to collect/persist for a CHILD-band account. Silently drop it
 	// (the rest of the update still applies) when minimization is active.
 	// Adults/teens and minimization-off deployments are unaffected.
-	minimizeChild := s.minorData.BlocksChild(user.DateOfBirthMs)
+	minimizeChild := s.minorData.BlocksChildFor(ctx, user)
 
 	patch := map[string]any{"updated_at": nowMs()}
 	if n := strings.TrimSpace(name); n != "" {

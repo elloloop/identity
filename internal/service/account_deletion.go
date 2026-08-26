@@ -226,6 +226,16 @@ func (s *AdminService) PurgeExpiredPendingDeletions(ctx context.Context, cutoffM
 	return purged, nil
 }
 
+// PurgeAccount runs the hard-delete erasure cascade for an already-authorized
+// account, recording actorUserID as the acting principal. It is the
+// AccountPurger seam the AuthService's guardian-initiated child-account
+// deletion calls, so that path runs the SAME cascade as the admin DeleteUser
+// RPC and the account-deletion sweeper rather than a second copy of it. The
+// caller owns authorization; this method performs none.
+func (s *AdminService) PurgeAccount(ctx context.Context, actorUserID string, u *User) error {
+	return s.purgeUser(ctx, actorUserID, u)
+}
+
 // purgeUser runs the hard-delete cascade for a single already-resolved user and
 // records auditActorID as the acting principal. It is the shared core of the
 // admin DeleteUser RPC and the account-deletion sweeper: neither reimplements
@@ -254,7 +264,7 @@ func (s *AdminService) purgeUser(ctx context.Context, auditActorID string, u *Us
 	// act on and must keep firing on delete; user.deleted is the distinct
 	// permanent-erasure signal a downstream consumer uses to tear down
 	// data that must survive a reversible deactivation but not a real deletion.
-	u.Status = "deactivated"
+	u.Status = StatusDeactivated
 	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeactivated, u)
 	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeleted, u)
 	return nil

@@ -121,19 +121,39 @@ HTTP-only and does not run over native gRPC. Identity's handlers read the
 authenticated user id from the `x-authenticated-user-id` metadata key (the
 bridge copies incoming gRPC metadata into the Connect request headers).
 Supply a server interceptor that verifies the bearer token and sets that
-metadata:
+metadata. Two rules it must follow, both of them load-bearing:
+
+1. **Verify with `jwt.VerifyAccessToken`.** It refuses tokens carrying a
+   `purpose` claim — the short-lived tickets identity hands to
+   *unauthenticated* callers to complete an interrupted flow (a required-DOB
+   submission, a managed child's passkey enrolment). Those are signed with
+   the same key and the same audience as a session token; only that claim
+   separates them. A verifier that ignores it turns a ticket into a full
+   session for every RPC on this surface.
+2. **Strip the identity metadata a client sent.** The bridge copies incoming
+   metadata verbatim, and `AppendToIncomingContext` puts your value *after*
+   any the client supplied — so a client-set `x-authenticated-user-id` would
+   win. Delete the three identity keys before appending your own.
 
 ```go
-func authInterceptor(verify func(string) (string, error)) grpc.UnaryServerInterceptor {
+func authInterceptor(kp jwt.KeyProvider, tenant, audience string, requireAud bool) grpc.UnaryServerInterceptor {
     return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
         md, _ := metadata.FromIncomingContext(ctx)
+        md = md.Copy()
+        // Never trust these from the wire — identity's handlers read them
+        // as the verified caller.
+        md.Delete("x-authenticated-user-id")
+        md.Delete("x-authenticated-tenant-id")
+        md.Delete("x-authenticated-project-id")
         if toks := md.Get("authorization"); len(toks) > 0 {
-            userID, err := verify(strings.TrimPrefix(toks[0], "Bearer "))
+            // VerifyAccessToken rejects a purpose-bearing ticket for us.
+            claims, err := jwt.VerifyAccessToken(
+                strings.TrimPrefix(toks[0], "Bearer "), kp, tenant, audience, requireAud)
             if err == nil {
-                ctx = metadata.AppendToIncomingContext(ctx, "x-authenticated-user-id", userID)
+                md.Set("x-authenticated-user-id", claims.Sub)
             }
         }
-        return handler(ctx, req)
+        return handler(metadata.NewIncomingContext(ctx, md), req)
     }
 }
 ```

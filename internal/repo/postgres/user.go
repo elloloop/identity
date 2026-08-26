@@ -28,6 +28,7 @@ const userColumns = `
 	external_id,
 	deletion_scheduled_at_ms,
 	is_anonymous, anonymous_last_seen_ms,
+	market, username,
 	created_at_ms, updated_at_ms`
 
 // userColumnsPrefixed returns userColumns with every column qualified by
@@ -57,6 +58,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		id, email, name, role, avatar, status, recovery, phash string
 		phoneNumber                                            string
 		externalID                                             string
+		market, username                                       string
 	)
 	if err := row.Scan(
 		&id, &email, &name, &role, &avatar, &status, &recovery,
@@ -70,6 +72,7 @@ func scanUser(row pgx.Row) (*service.User, error) {
 		&externalID,
 		&deletionScheduledAtMs,
 		&isAnonymous, &anonymousLastSeenMs,
+		&market, &username,
 		&createdAtMs, &updatedAtMs,
 	); err != nil {
 		return nil, err
@@ -99,6 +102,8 @@ func scanUser(row pgx.Row) (*service.User, error) {
 	u.DeletionScheduledAtMs = deletionScheduledAtMs
 	u.IsAnonymous = isAnonymous
 	u.AnonymousLastSeenMs = anonymousLastSeenMs
+	u.Market = market
+	u.Username = username
 	u.CreatedAt = time.UnixMilli(createdAtMs)
 	u.UpdatedAt = time.UnixMilli(updatedAtMs)
 	return &u, nil
@@ -137,6 +142,28 @@ func (r *pgRepository) GetUser(ctx context.Context, userID string) (*service.Use
 	}
 	if err != nil {
 		return nil, wrapPgErr("GetUser", err)
+	}
+	return u, nil
+}
+
+// FindUserByUsername resolves a managed child account by its project-unique
+// username. The username <> ” predicate keeps the partial unique index
+// (0032) usable, mirroring the email lookup.
+func (r *pgRepository) FindUserByUsername(ctx context.Context, username string) (*service.User, error) {
+	if username == "" {
+		return nil, nil
+	}
+	const q = `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND username <> '' AND username = $2
+		LIMIT 1`
+	row := r.pool.QueryRow(ctx, q, r.projectID, username)
+	u, err := scanUser(row)
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapPgErr("FindUserByUsername", err)
 	}
 	return u, nil
 }
@@ -222,62 +249,45 @@ func (r *pgRepository) userFilterWhere(filter service.UserListFilter) (where []s
 	return where, args
 }
 
-func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string, error) {
-	if u == nil {
-		return "", errors.New("postgres: CreateUser: nil user")
-	}
-	now := nowMs()
-	if u.CreatedAt.IsZero() {
-		u.CreatedAt = time.UnixMilli(now)
-	}
-	if u.UpdatedAt.IsZero() {
-		u.UpdatedAt = u.CreatedAt
-	}
-	id := u.ID
-	if id == "" {
-		id = newID()
-	}
+// insertUserQuery is the canonical users INSERT, shared by CreateUser and the
+// transactional CreateManagedChildAccount so the two never drift on column
+// order.
+const insertUserQuery = `
+	INSERT INTO users (
+		id, project_id, email, name, role, avatar_url, status,
+		recovery_email, password_hash, quota_bytes, totp_required,
+		failed_login_count, locked_until_ms,
+		email_verified, email_verified_at_ms,
+		idv_verified, idv_verified_at_ms,
+		phone_number, phone_verified, phone_verified_at_ms,
+		date_of_birth_ms,
+		last_login_at_ms,
+		external_id,
+		deletion_scheduled_at_ms,
+		is_anonymous, anonymous_last_seen_ms,
+		market, username,
+		created_at_ms, updated_at_ms
+	) VALUES (
+		$1, $2, $3, $4, $5, $6, $7,
+		$8, $9, $10, $11,
+		$12, $13,
+		$14, $15,
+		$16, $17,
+		$18, $19, $20,
+		$21,
+		$22,
+		$23,
+		$24,
+		$25, $26,
+		$27, $28,
+		$29, $30
+	)`
 
-	role := u.Role
-	if role == "" {
-		role = "member"
-	}
-	status := u.Status
-	if status == "" {
-		status = "active"
-	}
-
-	const q = `
-		INSERT INTO users (
-			id, project_id, email, name, role, avatar_url, status,
-			recovery_email, password_hash, quota_bytes, totp_required,
-			failed_login_count, locked_until_ms,
-			email_verified, email_verified_at_ms,
-			idv_verified, idv_verified_at_ms,
-			phone_number, phone_verified, phone_verified_at_ms,
-			date_of_birth_ms,
-			last_login_at_ms,
-			external_id,
-			deletion_scheduled_at_ms,
-			is_anonymous, anonymous_last_seen_ms,
-			created_at_ms, updated_at_ms
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7,
-			$8, $9, $10, $11,
-			$12, $13,
-			$14, $15,
-			$16, $17,
-			$18, $19, $20,
-			$21,
-			$22,
-			$23,
-			$24,
-			$25, $26,
-			$27, $28
-		)`
-	_, err := r.pool.Exec(
-		ctx, q,
-		id, r.projectID, u.Email, u.Name, role, u.AvatarURL, status,
+// insertUserArgs renders the bind args for insertUserQuery in column order.
+// projectID is the shard; id/role/status carry the caller-defaulted values.
+func insertUserArgs(projectID, id, role, status string, u *service.User) []any {
+	return []any{
+		id, projectID, u.Email, u.Name, role, u.AvatarURL, status,
 		u.RecoveryEmail, u.PasswordHash, u.QuotaBytes, u.TotpRequired,
 		int64(u.FailedLoginCount), u.LockedUntil,
 		u.EmailVerified, u.EmailVerifiedAt,
@@ -288,8 +298,44 @@ func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string,
 		u.ExternalID,
 		u.DeletionScheduledAtMs,
 		u.IsAnonymous, u.AnonymousLastSeenMs,
+		u.Market, u.Username,
 		u.CreatedAt.UnixMilli(), u.UpdatedAt.UnixMilli(),
-	)
+	}
+}
+
+// defaultNewUserFields fills the zero-value fields of a user about to be
+// inserted (timestamps, id, role, status), shared by CreateUser and
+// CreateManagedChildAccount.
+func defaultNewUserFields(u *service.User) (id, role, status string) {
+	now := nowMs()
+	if u.CreatedAt.IsZero() {
+		u.CreatedAt = time.UnixMilli(now)
+	}
+	if u.UpdatedAt.IsZero() {
+		u.UpdatedAt = u.CreatedAt
+	}
+	id = u.ID
+	if id == "" {
+		id = newID()
+	}
+	role = u.Role
+	if role == "" {
+		role = "member"
+	}
+	status = u.Status
+	if status == "" {
+		status = "active"
+	}
+	return id, role, status
+}
+
+func (r *pgRepository) CreateUser(ctx context.Context, u *service.User) (string, error) {
+	if u == nil {
+		return "", errors.New("postgres: CreateUser: nil user")
+	}
+	id, role, status := defaultNewUserFields(u)
+
+	_, err := r.pool.Exec(ctx, insertUserQuery, insertUserArgs(r.projectID, id, role, status, u)...)
 	if err != nil {
 		return "", wrapPgErr("CreateUser", err)
 	}
@@ -328,6 +374,8 @@ var userFieldColumns = map[string]struct {
 	"deletion_scheduled_at_ms": {"deletion_scheduled_at_ms", "int64"},
 	"is_anonymous":             {"is_anonymous", "bool"},
 	"anonymous_last_seen_ms":   {"anonymous_last_seen_ms", "int64"},
+	"market":                   {"market", "string"},
+	"username":                 {"username", "string"},
 }
 
 func (r *pgRepository) UpdateUser(ctx context.Context, userID string, fields map[string]any) error {
@@ -410,6 +458,28 @@ var userDeleteNonFKTables = []string{
 //
 // It is idempotent: deleting a non-existent user touches zero rows and
 // returns nil.
+// SetDateOfBirthOnce sets the date of birth only while the row still has none,
+// applying the optional status in the same statement. Reports whether this
+// call was the one that set it.
+func (r *pgRepository) SetDateOfBirthOnce(
+	ctx context.Context, userID string, dobMs int64, status string, nowMs int64,
+) (bool, error) {
+	if userID == "" {
+		return false, errors.New("postgres: SetDateOfBirthOnce: missing user id")
+	}
+	const q = `
+		UPDATE users
+		   SET date_of_birth_ms = $3,
+		       status          = CASE WHEN $4 = '' THEN status ELSE $4 END,
+		       updated_at_ms   = $5
+		 WHERE project_id = $1 AND id = $2 AND date_of_birth_ms = 0`
+	tag, err := r.pool.Exec(ctx, q, r.projectID, userID, dobMs, status, nowMs)
+	if err != nil {
+		return false, wrapPgErr("SetDateOfBirthOnce", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func (r *pgRepository) DeleteUser(ctx context.Context, userID string) error {
 	if userID == "" {
 		return nil

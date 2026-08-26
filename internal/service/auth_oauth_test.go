@@ -207,7 +207,8 @@ func TestOAuthLogin_StateMismatchRejected(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.OAuthLogin(
-		context.Background(), OAuthLoginParams{Code: fakeOAuthCode("state-mismatch@example.com", "Mismatch", "", "google"), Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: begin.State + "-wrong", StateToken: begin.StateToken, AppleUserPayload: "", IPAddr: "", UserAgent: ""})
+		context.Background(), OAuthLoginParams{Code: fakeOAuthCode("state-mismatch@example.com", "Mismatch", "", "google"), Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: begin.State + "-wrong", StateToken: begin.StateToken, AppleUserPayload: "", IPAddr: "", UserAgent: ""},
+	)
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnauthenticated))
@@ -224,7 +225,8 @@ func TestOAuthLogin_StateTokenAllowsCallbackWithoutExplicitVerifier(t *testing.T
 	begin, err := svc.BeginOAuthLogin(context.Background(), "google", "https://app/cb")
 	require.NoError(t, err)
 	res, err := svc.OAuthLogin(
-		context.Background(), OAuthLoginParams{Code: fakeOAuthCode("state-token@example.com", "State Token", "", "google"), Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: begin.State, StateToken: begin.StateToken, AppleUserPayload: "", IPAddr: "", UserAgent: ""})
+		context.Background(), OAuthLoginParams{Code: fakeOAuthCode("state-token@example.com", "State Token", "", "google"), Provider: "google", RedirectURI: "https://app/cb", CodeVerifier: "", State: begin.State, StateToken: begin.StateToken, AppleUserPayload: "", IPAddr: "", UserAgent: ""},
+	)
 
 	require.NoError(t, err)
 	require.NotNil(t, res)

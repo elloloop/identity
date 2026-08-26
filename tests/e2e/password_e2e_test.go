@@ -162,7 +162,12 @@ func TestE2E_PasswordLogin_AcceptanceMatrix(t *testing.T) {
 		{name: "reject_empty_password", loginEmail: registeredEmail, loginPassword: "", registerFirst: true, wantStatus: 400},
 		{name: "reject_missing_user", loginEmail: "ghost@example.com", loginPassword: goodPassword, registerFirst: false, wantStatus: 401},
 		{name: "reject_empty_email", loginEmail: "", loginPassword: goodPassword, registerFirst: false, wantStatus: 400},
-		{name: "reject_malformed_email", loginEmail: "nodomain", loginPassword: goodPassword, registerFirst: false, wantStatus: 400},
+		// An identifier with no "@" is a managed-child username candidate, not
+		// a malformed email: it gets the same uniform 401 an unknown email
+		// gets, so the endpoint discloses neither which identifier form was
+		// tried nor whether the account exists.
+		{name: "reject_unknown_username_identifier", loginEmail: "nodomain", loginPassword: goodPassword, registerFirst: false, wantStatus: 401},
+		{name: "reject_malformed_email", loginEmail: "nodomain@", loginPassword: goodPassword, registerFirst: false, wantStatus: 400},
 	}
 
 	for _, tc := range matrix {

@@ -5,6 +5,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -69,7 +70,8 @@ func toConnectError(err error) *connect.Error {
 		return connect.NewError(connect.CodeUnauthenticated, err)
 
 	case errors.Is(err, service.ErrInvalidArgument),
-		errors.Is(err, service.ErrWeakPassword):
+		errors.Is(err, service.ErrWeakPassword),
+		errors.Is(err, service.ErrManagedChildNotMinor):
 		return connect.NewError(connect.CodeInvalidArgument, err)
 
 	case errors.Is(err, service.ErrAccountLocked):
@@ -103,9 +105,11 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrParentalConsentRequired),
 		errors.Is(err, service.ErrParentalConsentFactorMissing),
 		errors.Is(err, service.ErrParentalConsentNotPending),
+		errors.Is(err, service.ErrGuardianRightsExpired),
 		errors.Is(err, service.ErrIDVRequired),
 		errors.Is(err, service.ErrEmailVerificationRequired),
 		errors.Is(err, service.ErrAccountDeletionNotAllowed),
+		errors.Is(err, service.ErrDOBAlreadySet),
 		errors.Is(err, service.ErrMinorDataMinimized):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
@@ -123,6 +127,22 @@ func toConnectError(err error) *connect.Error {
 
 	case errors.Is(err, service.ErrQrLoginNotPending):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
+
+	case errors.Is(err, service.ErrDOBRequired):
+		// FailedPrecondition — like ErrTotpRequired, the client must do
+		// something else first (submit a date of birth via SubmitDateOfBirth).
+		// The completion ticket rides along as an error detail so the client
+		// can complete the step without a session.
+		cerr := connect.NewError(connect.CodeFailedPrecondition, err)
+		var dobErr *service.DOBRequiredError
+		if errors.As(err, &dobErr) && dobErr.Ticket != "" {
+			if detail, detErr := connect.NewErrorDetail(&identitypb.DOBRequiredDetails{
+				CompletionToken: dobErr.Ticket,
+			}); detErr == nil {
+				cerr.AddDetail(detail)
+			}
+		}
+		return cerr
 
 	case errors.Is(err, service.ErrProjectConfigConflict):
 		// A per-project config_json write lost its optimistic-concurrency

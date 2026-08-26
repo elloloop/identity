@@ -230,12 +230,32 @@ func (b *Built) Stop() {
 // per-IP fixed-window limiters from config. The window falls back to one
 // minute when unset. Extracted from New so the wiring (which path gets
 // which quota) is unit-testable without standing up the whole app.
+// guardianManagementPaths are the parental account-management RPCs. Every
+// one of them verifies a step-up password (a bcrypt) before it does anything,
+// the read-only profile view included, so a guardian holding a session can
+// drive real CPU cost per call. They share ONE per-IP budget: the limiter key
+// is tag+IP, so listing them under a single tag caps the surface as a whole
+// rather than seven times over.
+var guardianManagementPaths = []string{
+	"/identity.v1.IdentityService/GetManagedChildProfile",
+	"/identity.v1.IdentityService/SetManagedChildPassword",
+	"/identity.v1.IdentityService/SetManagedChildUsername",
+	"/identity.v1.IdentityService/RevokeManagedChildSessions",
+	"/identity.v1.IdentityService/DeactivateManagedChildAccount",
+	"/identity.v1.IdentityService/ReactivateManagedChildAccount",
+	"/identity.v1.IdentityService/DeleteManagedChildAccount",
+}
+
 func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	window := time.Duration(cfg.RateLimitWindowSeconds) * time.Second
 	if window <= 0 {
 		window = time.Minute
 	}
-	return []middleware.PathLimit{
+	// One limiter instance shared by every guardian-management path, so the
+	// budget is the surface's, not each RPC's. The login budget is the right
+	// analogue: the cost driver is the same password verification.
+	guardianLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0)
+	limits := []middleware.PathLimit{
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
@@ -316,6 +336,43 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
+			// Parent-creates-child is account creation by an authenticated
+			// adult: every admitted call hashes a password (bcrypt) on top of
+			// the step-up verify the refused calls also pay, then writes a
+			// user + edge + consent row. Without a quota that is the same
+			// unbounded row-insert primitive SignInAnonymously would be, one
+			// authentication further in. Shares the signup budget because
+			// that is what it is.
+			PathPrefix: "/identity.v1.IdentityService/CreateManagedChildAccount", Tag: "managed_child_create",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
+			// The completion half of a login: unauthenticated (it carries a
+			// purpose ticket, not a session) and it mints a token pair, so it
+			// is bound by the same per-IP budget as the login paths.
+			PathPrefix: "/identity.v1.IdentityService/SubmitDateOfBirth", Tag: "dob_completion",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			// Passkey registration is session-less when it carries a
+			// managed-child enrolment ticket, and completing one mints the
+			// child's first token pair — a login by any other name.
+			PathPrefix: "/identity.v1.IdentityService/BeginPasskeyRegistration", Tag: "passkey_register",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			PathPrefix: "/identity.v1.IdentityService/CompletePasskeyRegistration", Tag: "passkey_register",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
+			// Consent grant re-authenticates the adult with a step-up
+			// password, so a caller holding a stolen session can drive
+			// unbounded password guesses against it. Same budget, same
+			// reason, as the guardian-management surface below.
+			PathPrefix: "/identity.v1.IdentityService/GrantParentalConsent", Tag: "consent_grant",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		{
 			PathPrefix: "/identity.v1.IdentityService/BeginOAuthLogin", Tag: "oauth_begin",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
 		},
@@ -350,6 +407,12 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitBootstrapPerIP, 0),
 		},
 	}
+	for _, path := range guardianManagementPaths {
+		limits = append(limits, middleware.PathLimit{
+			PathPrefix: path, Tag: "guardian_manage", Limiter: guardianLimiter,
+		})
+	}
+	return limits
 }
 
 // New assembles the identity service from injected dependencies. It
@@ -534,6 +597,9 @@ func New(deps Deps) (*Built, error) {
 	}
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher)
+	// Guardian-initiated erasure of a managed child account runs the admin
+	// service's hard-delete cascade rather than a second copy of it.
+	authSvc = authSvc.WithAccountPurger(adminSvc)
 
 	// Now that the account purger (adminSvc) exists, build the sweeper. It runs
 	// the ephemeral-row GC AND the account-deletion purge on the same tick.

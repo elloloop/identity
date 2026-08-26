@@ -123,6 +123,86 @@ func TestParseProjectConfig_EmptyBlocksValid(t *testing.T) {
 	assert.Empty(t, cfg.Passkey.RPID)
 }
 
+func TestParseProjectConfig_Jurisdictions(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"jurisdictions":{
+		"default":" in ",
+		"thresholds":{
+			"in":{"child_max_age":17,"adult_age":18},
+			" Us ":{"child_max_age":12,"adult_age":18}
+		}
+	}}`)
+	require.NoError(t, err)
+	// Codes are canonicalized at parse time: trimmed, upper-cased.
+	assert.Equal(t, "IN", cfg.Jurisdictions.Default)
+	assert.Equal(t,
+		map[string]JurisdictionThresholds{
+			"IN": {ChildMaxAge: 17, AdultAge: 18},
+			"US": {ChildMaxAge: 12, AdultAge: 18},
+		},
+		cfg.Jurisdictions.Thresholds)
+	// Lookups normalize too, so a stored lower-case market still resolves.
+	th, ok := cfg.Jurisdictions.thresholdFor("us")
+	require.True(t, ok)
+	assert.Equal(t, JurisdictionThresholds{ChildMaxAge: 12, AdultAge: 18}, th)
+	_, ok = cfg.Jurisdictions.thresholdFor("BR")
+	assert.False(t, ok)
+}
+
+func TestParseProjectConfig_Jurisdictions_OmittedIsUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"access":{"mode":"open"}}`)
+	require.NoError(t, err)
+	assert.False(t, cfg.Jurisdictions.configured())
+	assert.Empty(t, cfg.Jurisdictions.Default)
+}
+
+func TestParseProjectConfig_Jurisdictions_MalformedRejected(t *testing.T) {
+	t.Parallel()
+
+	// A malformed jurisdictions block fails the whole parse — the project
+	// resolver then refuses the project rather than classify children under
+	// thresholds the operator never intended.
+	for name, blob := range map[string]string{
+		"child_max below adult":      `{"jurisdictions":{"thresholds":{"IN":{"child_max_age":18,"adult_age":18}}}}`,
+		"child_max above adult":      `{"jurisdictions":{"thresholds":{"IN":{"child_max_age":21,"adult_age":18}}}}`,
+		"negative child_max":         `{"jurisdictions":{"thresholds":{"IN":{"child_max_age":-1,"adult_age":18}}}}`,
+		"default not configured":     `{"jurisdictions":{"default":"FR","thresholds":{"IN":{"child_max_age":17,"adult_age":18}}}}`,
+		"default without thresholds": `{"jurisdictions":{"default":"IN"}}`,
+		"blank code":                 `{"jurisdictions":{"thresholds":{"  ":{"child_max_age":12,"adult_age":18}}}}`,
+		"non-object thresholds":      `{"jurisdictions":{"thresholds":["IN"]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseProjectConfig(blob)
+			require.Error(t, err, "expected %s to be rejected", name)
+		})
+	}
+}
+
+func TestProjectJurisdictionsConfig_Strictest(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"jurisdictions":{"thresholds":{
+		"US":{"child_max_age":12,"adult_age":18},
+		"IN":{"child_max_age":17,"adult_age":18},
+		"BR":{"child_max_age":17,"adult_age":21}
+	}}}`)
+	require.NoError(t, err)
+	// The result is a SYNTHETIC worst case, not one of the three entries: the
+	// highest child ceiling (IN/BR's 17) and the highest adult age (BR's 21)
+	// are taken independently, because they protect against different things.
+	// Picking a single real entry would be strictly more permissive on one
+	// boundary — IN admits 18-year-olds as adults, BR does not.
+	th, ok := cfg.Jurisdictions.strictest()
+	require.True(t, ok)
+	assert.Equal(t, JurisdictionThresholds{ChildMaxAge: 17, AdultAge: 21}, th)
+
+	_, ok = ProjectJurisdictionsConfig{}.strictest()
+	assert.False(t, ok)
+}
+
 func TestParseProjectConfig_OAuth_Present(t *testing.T) {
 	t.Parallel()
 

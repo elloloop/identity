@@ -51,6 +51,9 @@ const (
 	// IdentityServicePasswordLoginProcedure is the fully-qualified name of the IdentityService's
 	// PasswordLogin RPC.
 	IdentityServicePasswordLoginProcedure = "/identity.v1.IdentityService/PasswordLogin"
+	// IdentityServiceSubmitDateOfBirthProcedure is the fully-qualified name of the IdentityService's
+	// SubmitDateOfBirth RPC.
+	IdentityServiceSubmitDateOfBirthProcedure = "/identity.v1.IdentityService/SubmitDateOfBirth"
 	// IdentityServiceRequestEmailLoginCodeProcedure is the fully-qualified name of the
 	// IdentityService's RequestEmailLoginCode RPC.
 	IdentityServiceRequestEmailLoginCodeProcedure = "/identity.v1.IdentityService/RequestEmailLoginCode"
@@ -89,6 +92,9 @@ const (
 	// IdentityServiceUpdateProfileProcedure is the fully-qualified name of the IdentityService's
 	// UpdateProfile RPC.
 	IdentityServiceUpdateProfileProcedure = "/identity.v1.IdentityService/UpdateProfile"
+	// IdentityServiceSetAccountMarketProcedure is the fully-qualified name of the IdentityService's
+	// SetAccountMarket RPC.
+	IdentityServiceSetAccountMarketProcedure = "/identity.v1.IdentityService/SetAccountMarket"
 	// IdentityServiceDeleteMyAccountProcedure is the fully-qualified name of the IdentityService's
 	// DeleteMyAccount RPC.
 	IdentityServiceDeleteMyAccountProcedure = "/identity.v1.IdentityService/DeleteMyAccount"
@@ -131,6 +137,36 @@ const (
 	// IdentityServiceRevokeParentalConsentProcedure is the fully-qualified name of the
 	// IdentityService's RevokeParentalConsent RPC.
 	IdentityServiceRevokeParentalConsentProcedure = "/identity.v1.IdentityService/RevokeParentalConsent"
+	// IdentityServiceListManagedChildrenProcedure is the fully-qualified name of the IdentityService's
+	// ListManagedChildren RPC.
+	IdentityServiceListManagedChildrenProcedure = "/identity.v1.IdentityService/ListManagedChildren"
+	// IdentityServiceGetGuardiansProcedure is the fully-qualified name of the IdentityService's
+	// GetGuardians RPC.
+	IdentityServiceGetGuardiansProcedure = "/identity.v1.IdentityService/GetGuardians"
+	// IdentityServiceCreateManagedChildAccountProcedure is the fully-qualified name of the
+	// IdentityService's CreateManagedChildAccount RPC.
+	IdentityServiceCreateManagedChildAccountProcedure = "/identity.v1.IdentityService/CreateManagedChildAccount"
+	// IdentityServiceGetManagedChildProfileProcedure is the fully-qualified name of the
+	// IdentityService's GetManagedChildProfile RPC.
+	IdentityServiceGetManagedChildProfileProcedure = "/identity.v1.IdentityService/GetManagedChildProfile"
+	// IdentityServiceSetManagedChildPasswordProcedure is the fully-qualified name of the
+	// IdentityService's SetManagedChildPassword RPC.
+	IdentityServiceSetManagedChildPasswordProcedure = "/identity.v1.IdentityService/SetManagedChildPassword"
+	// IdentityServiceSetManagedChildUsernameProcedure is the fully-qualified name of the
+	// IdentityService's SetManagedChildUsername RPC.
+	IdentityServiceSetManagedChildUsernameProcedure = "/identity.v1.IdentityService/SetManagedChildUsername"
+	// IdentityServiceRevokeManagedChildSessionsProcedure is the fully-qualified name of the
+	// IdentityService's RevokeManagedChildSessions RPC.
+	IdentityServiceRevokeManagedChildSessionsProcedure = "/identity.v1.IdentityService/RevokeManagedChildSessions"
+	// IdentityServiceDeactivateManagedChildAccountProcedure is the fully-qualified name of the
+	// IdentityService's DeactivateManagedChildAccount RPC.
+	IdentityServiceDeactivateManagedChildAccountProcedure = "/identity.v1.IdentityService/DeactivateManagedChildAccount"
+	// IdentityServiceReactivateManagedChildAccountProcedure is the fully-qualified name of the
+	// IdentityService's ReactivateManagedChildAccount RPC.
+	IdentityServiceReactivateManagedChildAccountProcedure = "/identity.v1.IdentityService/ReactivateManagedChildAccount"
+	// IdentityServiceDeleteManagedChildAccountProcedure is the fully-qualified name of the
+	// IdentityService's DeleteManagedChildAccount RPC.
+	IdentityServiceDeleteManagedChildAccountProcedure = "/identity.v1.IdentityService/DeleteManagedChildAccount"
 	// IdentityServiceRequestAdminHelpProcedure is the fully-qualified name of the IdentityService's
 	// RequestAdminHelp RPC.
 	IdentityServiceRequestAdminHelpProcedure = "/identity.v1.IdentityService/RequestAdminHelp"
@@ -369,6 +405,11 @@ type IdentityServiceClient interface {
 	RedeemOAuthCode(context.Context, *connect.Request[v1.RedeemOAuthCodeRequest]) (*connect.Response[v1.RedeemOAuthCodeResponse], error)
 	PasswordSignup(context.Context, *connect.Request[v1.PasswordSignupRequest]) (*connect.Response[v1.PasswordSignupResponse], error)
 	PasswordLogin(context.Context, *connect.Request[v1.PasswordLoginRequest]) (*connect.Response[v1.PasswordLoginResponse], error)
+	// Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
+	// RPC that accepts the completion ticket carried by the dob_required
+	// error detail. Unauthenticated — the caller holds a ticket, not a
+	// session.
+	SubmitDateOfBirth(context.Context, *connect.Request[v1.SubmitDateOfBirthRequest]) (*connect.Response[v1.SubmitDateOfBirthResponse], error)
 	// Passwordless email login (OTP code + magic link)
 	RequestEmailLoginCode(context.Context, *connect.Request[v1.RequestEmailLoginCodeRequest]) (*connect.Response[v1.RequestEmailLoginCodeResponse], error)
 	VerifyEmailLoginCode(context.Context, *connect.Request[v1.VerifyEmailLoginCodeRequest]) (*connect.Response[v1.VerifyEmailLoginCodeResponse], error)
@@ -391,6 +432,10 @@ type IdentityServiceClient interface {
 	Logout(context.Context, *connect.Request[v1.LogoutRequest]) (*connect.Response[v1.LogoutResponse], error)
 	// Self-service profile
 	UpdateProfile(context.Context, *connect.Request[v1.UpdateProfileRequest]) (*connect.Response[v1.UpdateProfileResponse], error)
+	// Self-service account market (jurisdiction) change. Audited; re-derives
+	// the caller's age band under the new market's thresholds and re-gates the
+	// account to PENDING_PARENTAL_CONSENT when it newly classifies as CHILD.
+	SetAccountMarket(context.Context, *connect.Request[v1.SetAccountMarketRequest]) (*connect.Response[v1.SetAccountMarketResponse], error)
 	// Self-service account deletion (GDPR Art 17). The caller schedules
 	// deletion of their OWN account (grace-period soft delete); a login during
 	// the window, or an explicit cancel, restores it.
@@ -421,6 +466,35 @@ type IdentityServiceClient interface {
 	// mandatory; a client cannot bypass them.
 	GrantParentalConsent(context.Context, *connect.Request[v1.GrantParentalConsentRequest]) (*connect.Response[v1.GrantParentalConsentResponse], error)
 	RevokeParentalConsent(context.Context, *connect.Request[v1.RevokeParentalConsentRequest]) (*connect.Response[v1.RevokeParentalConsentResponse], error)
+	// Guardian edges — the account-graph facts recording which adult accounts
+	// manage which child accounts. ListManagedChildren is self-only (the
+	// guardian is always the session user); GetGuardians is callable by a
+	// guardian of the child or a project admin, and answers identically whether
+	// or not the child exists (no existence disclosure).
+	ListManagedChildren(context.Context, *connect.Request[v1.ListManagedChildrenRequest]) (*connect.Response[v1.ListManagedChildrenResponse], error)
+	GetGuardians(context.Context, *connect.Request[v1.GetGuardiansRequest]) (*connect.Response[v1.GetGuardiansResponse], error)
+	// Managed child accounts — the parent-creates-child flow. An authenticated
+	// adult creates a minor's account (born USER_STATUS_ACTIVE under the
+	// caller's guardianship, consent recorded atomically in the same call),
+	// identified by a parent-chosen username, with either a parent-chosen
+	// password or a passkey-enrolment ticket as the child's credential. The
+	// calling adult is the session user; the project access mode does not gate
+	// this (it is not self-signup).
+	CreateManagedChildAccount(context.Context, *connect.Request[v1.CreateManagedChildAccountRequest]) (*connect.Response[v1.CreateManagedChildAccountResponse], error)
+	// Parental account management — the guardian-authorized surface over a
+	// child account (view, credentials, sessions, lifecycle). Every RPC is
+	// gated on the same two checks at one chokepoint: an active guardianOf
+	// edge from the session user to the child, AND a step-up password
+	// re-entry. A caller without an edge gets the same PERMISSION_DENIED
+	// whether or not the child exists; a target that has aged past the adult
+	// threshold is refused (an adult's account is their own).
+	GetManagedChildProfile(context.Context, *connect.Request[v1.GetManagedChildProfileRequest]) (*connect.Response[v1.GetManagedChildProfileResponse], error)
+	SetManagedChildPassword(context.Context, *connect.Request[v1.SetManagedChildPasswordRequest]) (*connect.Response[v1.SetManagedChildPasswordResponse], error)
+	SetManagedChildUsername(context.Context, *connect.Request[v1.SetManagedChildUsernameRequest]) (*connect.Response[v1.SetManagedChildUsernameResponse], error)
+	RevokeManagedChildSessions(context.Context, *connect.Request[v1.RevokeManagedChildSessionsRequest]) (*connect.Response[v1.RevokeManagedChildSessionsResponse], error)
+	DeactivateManagedChildAccount(context.Context, *connect.Request[v1.DeactivateManagedChildAccountRequest]) (*connect.Response[v1.DeactivateManagedChildAccountResponse], error)
+	ReactivateManagedChildAccount(context.Context, *connect.Request[v1.ReactivateManagedChildAccountRequest]) (*connect.Response[v1.ReactivateManagedChildAccountResponse], error)
+	DeleteManagedChildAccount(context.Context, *connect.Request[v1.DeleteManagedChildAccountRequest]) (*connect.Response[v1.DeleteManagedChildAccountResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[v1.RequestAdminHelpRequest]) (*connect.Response[v1.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[v1.ListHelpRequestsRequest]) (*connect.Response[v1.ListHelpRequestsResponse], error)
@@ -618,6 +692,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("PasswordLogin")),
 			connect.WithClientOptions(opts...),
 		),
+		submitDateOfBirth: connect.NewClient[v1.SubmitDateOfBirthRequest, v1.SubmitDateOfBirthResponse](
+			httpClient,
+			baseURL+IdentityServiceSubmitDateOfBirthProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SubmitDateOfBirth")),
+			connect.WithClientOptions(opts...),
+		),
 		requestEmailLoginCode: connect.NewClient[v1.RequestEmailLoginCodeRequest, v1.RequestEmailLoginCodeResponse](
 			httpClient,
 			baseURL+IdentityServiceRequestEmailLoginCodeProcedure,
@@ -694,6 +774,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceUpdateProfileProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("UpdateProfile")),
+			connect.WithClientOptions(opts...),
+		),
+		setAccountMarket: connect.NewClient[v1.SetAccountMarketRequest, v1.SetAccountMarketResponse](
+			httpClient,
+			baseURL+IdentityServiceSetAccountMarketProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SetAccountMarket")),
 			connect.WithClientOptions(opts...),
 		),
 		deleteMyAccount: connect.NewClient[v1.DeleteMyAccountRequest, v1.DeleteMyAccountResponse](
@@ -778,6 +864,66 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+IdentityServiceRevokeParentalConsentProcedure,
 			connect.WithSchema(identityServiceMethods.ByName("RevokeParentalConsent")),
+			connect.WithClientOptions(opts...),
+		),
+		listManagedChildren: connect.NewClient[v1.ListManagedChildrenRequest, v1.ListManagedChildrenResponse](
+			httpClient,
+			baseURL+IdentityServiceListManagedChildrenProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListManagedChildren")),
+			connect.WithClientOptions(opts...),
+		),
+		getGuardians: connect.NewClient[v1.GetGuardiansRequest, v1.GetGuardiansResponse](
+			httpClient,
+			baseURL+IdentityServiceGetGuardiansProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetGuardians")),
+			connect.WithClientOptions(opts...),
+		),
+		createManagedChildAccount: connect.NewClient[v1.CreateManagedChildAccountRequest, v1.CreateManagedChildAccountResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateManagedChildAccountProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateManagedChildAccount")),
+			connect.WithClientOptions(opts...),
+		),
+		getManagedChildProfile: connect.NewClient[v1.GetManagedChildProfileRequest, v1.GetManagedChildProfileResponse](
+			httpClient,
+			baseURL+IdentityServiceGetManagedChildProfileProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetManagedChildProfile")),
+			connect.WithClientOptions(opts...),
+		),
+		setManagedChildPassword: connect.NewClient[v1.SetManagedChildPasswordRequest, v1.SetManagedChildPasswordResponse](
+			httpClient,
+			baseURL+IdentityServiceSetManagedChildPasswordProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SetManagedChildPassword")),
+			connect.WithClientOptions(opts...),
+		),
+		setManagedChildUsername: connect.NewClient[v1.SetManagedChildUsernameRequest, v1.SetManagedChildUsernameResponse](
+			httpClient,
+			baseURL+IdentityServiceSetManagedChildUsernameProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SetManagedChildUsername")),
+			connect.WithClientOptions(opts...),
+		),
+		revokeManagedChildSessions: connect.NewClient[v1.RevokeManagedChildSessionsRequest, v1.RevokeManagedChildSessionsResponse](
+			httpClient,
+			baseURL+IdentityServiceRevokeManagedChildSessionsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RevokeManagedChildSessions")),
+			connect.WithClientOptions(opts...),
+		),
+		deactivateManagedChildAccount: connect.NewClient[v1.DeactivateManagedChildAccountRequest, v1.DeactivateManagedChildAccountResponse](
+			httpClient,
+			baseURL+IdentityServiceDeactivateManagedChildAccountProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("DeactivateManagedChildAccount")),
+			connect.WithClientOptions(opts...),
+		),
+		reactivateManagedChildAccount: connect.NewClient[v1.ReactivateManagedChildAccountRequest, v1.ReactivateManagedChildAccountResponse](
+			httpClient,
+			baseURL+IdentityServiceReactivateManagedChildAccountProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ReactivateManagedChildAccount")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteManagedChildAccount: connect.NewClient[v1.DeleteManagedChildAccountRequest, v1.DeleteManagedChildAccountResponse](
+			httpClient,
+			baseURL+IdentityServiceDeleteManagedChildAccountProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("DeleteManagedChildAccount")),
 			connect.WithClientOptions(opts...),
 		),
 		requestAdminHelp: connect.NewClient[v1.RequestAdminHelpRequest, v1.RequestAdminHelpResponse](
@@ -1247,6 +1393,7 @@ type identityServiceClient struct {
 	redeemOAuthCode                 *connect.Client[v1.RedeemOAuthCodeRequest, v1.RedeemOAuthCodeResponse]
 	passwordSignup                  *connect.Client[v1.PasswordSignupRequest, v1.PasswordSignupResponse]
 	passwordLogin                   *connect.Client[v1.PasswordLoginRequest, v1.PasswordLoginResponse]
+	submitDateOfBirth               *connect.Client[v1.SubmitDateOfBirthRequest, v1.SubmitDateOfBirthResponse]
 	requestEmailLoginCode           *connect.Client[v1.RequestEmailLoginCodeRequest, v1.RequestEmailLoginCodeResponse]
 	verifyEmailLoginCode            *connect.Client[v1.VerifyEmailLoginCodeRequest, v1.VerifyEmailLoginCodeResponse]
 	requestMagicLink                *connect.Client[v1.RequestMagicLinkRequest, v1.RequestMagicLinkResponse]
@@ -1260,6 +1407,7 @@ type identityServiceClient struct {
 	refreshToken                    *connect.Client[v1.RefreshTokenRequest, v1.RefreshTokenResponse]
 	logout                          *connect.Client[v1.LogoutRequest, v1.LogoutResponse]
 	updateProfile                   *connect.Client[v1.UpdateProfileRequest, v1.UpdateProfileResponse]
+	setAccountMarket                *connect.Client[v1.SetAccountMarketRequest, v1.SetAccountMarketResponse]
 	deleteMyAccount                 *connect.Client[v1.DeleteMyAccountRequest, v1.DeleteMyAccountResponse]
 	cancelAccountDeletion           *connect.Client[v1.CancelAccountDeletionRequest, v1.CancelAccountDeletionResponse]
 	exportMyData                    *connect.Client[v1.ExportMyDataRequest, v1.ExportMyDataResponse]
@@ -1274,6 +1422,16 @@ type identityServiceClient struct {
 	getIdentityVerificationStatus   *connect.Client[v1.GetIdentityVerificationStatusRequest, v1.GetIdentityVerificationStatusResponse]
 	grantParentalConsent            *connect.Client[v1.GrantParentalConsentRequest, v1.GrantParentalConsentResponse]
 	revokeParentalConsent           *connect.Client[v1.RevokeParentalConsentRequest, v1.RevokeParentalConsentResponse]
+	listManagedChildren             *connect.Client[v1.ListManagedChildrenRequest, v1.ListManagedChildrenResponse]
+	getGuardians                    *connect.Client[v1.GetGuardiansRequest, v1.GetGuardiansResponse]
+	createManagedChildAccount       *connect.Client[v1.CreateManagedChildAccountRequest, v1.CreateManagedChildAccountResponse]
+	getManagedChildProfile          *connect.Client[v1.GetManagedChildProfileRequest, v1.GetManagedChildProfileResponse]
+	setManagedChildPassword         *connect.Client[v1.SetManagedChildPasswordRequest, v1.SetManagedChildPasswordResponse]
+	setManagedChildUsername         *connect.Client[v1.SetManagedChildUsernameRequest, v1.SetManagedChildUsernameResponse]
+	revokeManagedChildSessions      *connect.Client[v1.RevokeManagedChildSessionsRequest, v1.RevokeManagedChildSessionsResponse]
+	deactivateManagedChildAccount   *connect.Client[v1.DeactivateManagedChildAccountRequest, v1.DeactivateManagedChildAccountResponse]
+	reactivateManagedChildAccount   *connect.Client[v1.ReactivateManagedChildAccountRequest, v1.ReactivateManagedChildAccountResponse]
+	deleteManagedChildAccount       *connect.Client[v1.DeleteManagedChildAccountRequest, v1.DeleteManagedChildAccountResponse]
 	requestAdminHelp                *connect.Client[v1.RequestAdminHelpRequest, v1.RequestAdminHelpResponse]
 	listHelpRequests                *connect.Client[v1.ListHelpRequestsRequest, v1.ListHelpRequestsResponse]
 	resolveHelpRequest              *connect.Client[v1.ResolveHelpRequestRequest, v1.ResolveHelpRequestResponse]
@@ -1382,6 +1540,11 @@ func (c *identityServiceClient) PasswordLogin(ctx context.Context, req *connect.
 	return c.passwordLogin.CallUnary(ctx, req)
 }
 
+// SubmitDateOfBirth calls identity.v1.IdentityService.SubmitDateOfBirth.
+func (c *identityServiceClient) SubmitDateOfBirth(ctx context.Context, req *connect.Request[v1.SubmitDateOfBirthRequest]) (*connect.Response[v1.SubmitDateOfBirthResponse], error) {
+	return c.submitDateOfBirth.CallUnary(ctx, req)
+}
+
 // RequestEmailLoginCode calls identity.v1.IdentityService.RequestEmailLoginCode.
 func (c *identityServiceClient) RequestEmailLoginCode(ctx context.Context, req *connect.Request[v1.RequestEmailLoginCodeRequest]) (*connect.Response[v1.RequestEmailLoginCodeResponse], error) {
 	return c.requestEmailLoginCode.CallUnary(ctx, req)
@@ -1445,6 +1608,11 @@ func (c *identityServiceClient) Logout(ctx context.Context, req *connect.Request
 // UpdateProfile calls identity.v1.IdentityService.UpdateProfile.
 func (c *identityServiceClient) UpdateProfile(ctx context.Context, req *connect.Request[v1.UpdateProfileRequest]) (*connect.Response[v1.UpdateProfileResponse], error) {
 	return c.updateProfile.CallUnary(ctx, req)
+}
+
+// SetAccountMarket calls identity.v1.IdentityService.SetAccountMarket.
+func (c *identityServiceClient) SetAccountMarket(ctx context.Context, req *connect.Request[v1.SetAccountMarketRequest]) (*connect.Response[v1.SetAccountMarketResponse], error) {
+	return c.setAccountMarket.CallUnary(ctx, req)
 }
 
 // DeleteMyAccount calls identity.v1.IdentityService.DeleteMyAccount.
@@ -1515,6 +1683,56 @@ func (c *identityServiceClient) GrantParentalConsent(ctx context.Context, req *c
 // RevokeParentalConsent calls identity.v1.IdentityService.RevokeParentalConsent.
 func (c *identityServiceClient) RevokeParentalConsent(ctx context.Context, req *connect.Request[v1.RevokeParentalConsentRequest]) (*connect.Response[v1.RevokeParentalConsentResponse], error) {
 	return c.revokeParentalConsent.CallUnary(ctx, req)
+}
+
+// ListManagedChildren calls identity.v1.IdentityService.ListManagedChildren.
+func (c *identityServiceClient) ListManagedChildren(ctx context.Context, req *connect.Request[v1.ListManagedChildrenRequest]) (*connect.Response[v1.ListManagedChildrenResponse], error) {
+	return c.listManagedChildren.CallUnary(ctx, req)
+}
+
+// GetGuardians calls identity.v1.IdentityService.GetGuardians.
+func (c *identityServiceClient) GetGuardians(ctx context.Context, req *connect.Request[v1.GetGuardiansRequest]) (*connect.Response[v1.GetGuardiansResponse], error) {
+	return c.getGuardians.CallUnary(ctx, req)
+}
+
+// CreateManagedChildAccount calls identity.v1.IdentityService.CreateManagedChildAccount.
+func (c *identityServiceClient) CreateManagedChildAccount(ctx context.Context, req *connect.Request[v1.CreateManagedChildAccountRequest]) (*connect.Response[v1.CreateManagedChildAccountResponse], error) {
+	return c.createManagedChildAccount.CallUnary(ctx, req)
+}
+
+// GetManagedChildProfile calls identity.v1.IdentityService.GetManagedChildProfile.
+func (c *identityServiceClient) GetManagedChildProfile(ctx context.Context, req *connect.Request[v1.GetManagedChildProfileRequest]) (*connect.Response[v1.GetManagedChildProfileResponse], error) {
+	return c.getManagedChildProfile.CallUnary(ctx, req)
+}
+
+// SetManagedChildPassword calls identity.v1.IdentityService.SetManagedChildPassword.
+func (c *identityServiceClient) SetManagedChildPassword(ctx context.Context, req *connect.Request[v1.SetManagedChildPasswordRequest]) (*connect.Response[v1.SetManagedChildPasswordResponse], error) {
+	return c.setManagedChildPassword.CallUnary(ctx, req)
+}
+
+// SetManagedChildUsername calls identity.v1.IdentityService.SetManagedChildUsername.
+func (c *identityServiceClient) SetManagedChildUsername(ctx context.Context, req *connect.Request[v1.SetManagedChildUsernameRequest]) (*connect.Response[v1.SetManagedChildUsernameResponse], error) {
+	return c.setManagedChildUsername.CallUnary(ctx, req)
+}
+
+// RevokeManagedChildSessions calls identity.v1.IdentityService.RevokeManagedChildSessions.
+func (c *identityServiceClient) RevokeManagedChildSessions(ctx context.Context, req *connect.Request[v1.RevokeManagedChildSessionsRequest]) (*connect.Response[v1.RevokeManagedChildSessionsResponse], error) {
+	return c.revokeManagedChildSessions.CallUnary(ctx, req)
+}
+
+// DeactivateManagedChildAccount calls identity.v1.IdentityService.DeactivateManagedChildAccount.
+func (c *identityServiceClient) DeactivateManagedChildAccount(ctx context.Context, req *connect.Request[v1.DeactivateManagedChildAccountRequest]) (*connect.Response[v1.DeactivateManagedChildAccountResponse], error) {
+	return c.deactivateManagedChildAccount.CallUnary(ctx, req)
+}
+
+// ReactivateManagedChildAccount calls identity.v1.IdentityService.ReactivateManagedChildAccount.
+func (c *identityServiceClient) ReactivateManagedChildAccount(ctx context.Context, req *connect.Request[v1.ReactivateManagedChildAccountRequest]) (*connect.Response[v1.ReactivateManagedChildAccountResponse], error) {
+	return c.reactivateManagedChildAccount.CallUnary(ctx, req)
+}
+
+// DeleteManagedChildAccount calls identity.v1.IdentityService.DeleteManagedChildAccount.
+func (c *identityServiceClient) DeleteManagedChildAccount(ctx context.Context, req *connect.Request[v1.DeleteManagedChildAccountRequest]) (*connect.Response[v1.DeleteManagedChildAccountResponse], error) {
+	return c.deleteManagedChildAccount.CallUnary(ctx, req)
 }
 
 // RequestAdminHelp calls identity.v1.IdentityService.RequestAdminHelp.
@@ -1907,6 +2125,11 @@ type IdentityServiceHandler interface {
 	RedeemOAuthCode(context.Context, *connect.Request[v1.RedeemOAuthCodeRequest]) (*connect.Response[v1.RedeemOAuthCodeResponse], error)
 	PasswordSignup(context.Context, *connect.Request[v1.PasswordSignupRequest]) (*connect.Response[v1.PasswordSignupResponse], error)
 	PasswordLogin(context.Context, *connect.Request[v1.PasswordLoginRequest]) (*connect.Response[v1.PasswordLoginResponse], error)
+	// Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
+	// RPC that accepts the completion ticket carried by the dob_required
+	// error detail. Unauthenticated — the caller holds a ticket, not a
+	// session.
+	SubmitDateOfBirth(context.Context, *connect.Request[v1.SubmitDateOfBirthRequest]) (*connect.Response[v1.SubmitDateOfBirthResponse], error)
 	// Passwordless email login (OTP code + magic link)
 	RequestEmailLoginCode(context.Context, *connect.Request[v1.RequestEmailLoginCodeRequest]) (*connect.Response[v1.RequestEmailLoginCodeResponse], error)
 	VerifyEmailLoginCode(context.Context, *connect.Request[v1.VerifyEmailLoginCodeRequest]) (*connect.Response[v1.VerifyEmailLoginCodeResponse], error)
@@ -1929,6 +2152,10 @@ type IdentityServiceHandler interface {
 	Logout(context.Context, *connect.Request[v1.LogoutRequest]) (*connect.Response[v1.LogoutResponse], error)
 	// Self-service profile
 	UpdateProfile(context.Context, *connect.Request[v1.UpdateProfileRequest]) (*connect.Response[v1.UpdateProfileResponse], error)
+	// Self-service account market (jurisdiction) change. Audited; re-derives
+	// the caller's age band under the new market's thresholds and re-gates the
+	// account to PENDING_PARENTAL_CONSENT when it newly classifies as CHILD.
+	SetAccountMarket(context.Context, *connect.Request[v1.SetAccountMarketRequest]) (*connect.Response[v1.SetAccountMarketResponse], error)
 	// Self-service account deletion (GDPR Art 17). The caller schedules
 	// deletion of their OWN account (grace-period soft delete); a login during
 	// the window, or an explicit cancel, restores it.
@@ -1959,6 +2186,35 @@ type IdentityServiceHandler interface {
 	// mandatory; a client cannot bypass them.
 	GrantParentalConsent(context.Context, *connect.Request[v1.GrantParentalConsentRequest]) (*connect.Response[v1.GrantParentalConsentResponse], error)
 	RevokeParentalConsent(context.Context, *connect.Request[v1.RevokeParentalConsentRequest]) (*connect.Response[v1.RevokeParentalConsentResponse], error)
+	// Guardian edges — the account-graph facts recording which adult accounts
+	// manage which child accounts. ListManagedChildren is self-only (the
+	// guardian is always the session user); GetGuardians is callable by a
+	// guardian of the child or a project admin, and answers identically whether
+	// or not the child exists (no existence disclosure).
+	ListManagedChildren(context.Context, *connect.Request[v1.ListManagedChildrenRequest]) (*connect.Response[v1.ListManagedChildrenResponse], error)
+	GetGuardians(context.Context, *connect.Request[v1.GetGuardiansRequest]) (*connect.Response[v1.GetGuardiansResponse], error)
+	// Managed child accounts — the parent-creates-child flow. An authenticated
+	// adult creates a minor's account (born USER_STATUS_ACTIVE under the
+	// caller's guardianship, consent recorded atomically in the same call),
+	// identified by a parent-chosen username, with either a parent-chosen
+	// password or a passkey-enrolment ticket as the child's credential. The
+	// calling adult is the session user; the project access mode does not gate
+	// this (it is not self-signup).
+	CreateManagedChildAccount(context.Context, *connect.Request[v1.CreateManagedChildAccountRequest]) (*connect.Response[v1.CreateManagedChildAccountResponse], error)
+	// Parental account management — the guardian-authorized surface over a
+	// child account (view, credentials, sessions, lifecycle). Every RPC is
+	// gated on the same two checks at one chokepoint: an active guardianOf
+	// edge from the session user to the child, AND a step-up password
+	// re-entry. A caller without an edge gets the same PERMISSION_DENIED
+	// whether or not the child exists; a target that has aged past the adult
+	// threshold is refused (an adult's account is their own).
+	GetManagedChildProfile(context.Context, *connect.Request[v1.GetManagedChildProfileRequest]) (*connect.Response[v1.GetManagedChildProfileResponse], error)
+	SetManagedChildPassword(context.Context, *connect.Request[v1.SetManagedChildPasswordRequest]) (*connect.Response[v1.SetManagedChildPasswordResponse], error)
+	SetManagedChildUsername(context.Context, *connect.Request[v1.SetManagedChildUsernameRequest]) (*connect.Response[v1.SetManagedChildUsernameResponse], error)
+	RevokeManagedChildSessions(context.Context, *connect.Request[v1.RevokeManagedChildSessionsRequest]) (*connect.Response[v1.RevokeManagedChildSessionsResponse], error)
+	DeactivateManagedChildAccount(context.Context, *connect.Request[v1.DeactivateManagedChildAccountRequest]) (*connect.Response[v1.DeactivateManagedChildAccountResponse], error)
+	ReactivateManagedChildAccount(context.Context, *connect.Request[v1.ReactivateManagedChildAccountRequest]) (*connect.Response[v1.ReactivateManagedChildAccountResponse], error)
+	DeleteManagedChildAccount(context.Context, *connect.Request[v1.DeleteManagedChildAccountRequest]) (*connect.Response[v1.DeleteManagedChildAccountResponse], error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *connect.Request[v1.RequestAdminHelpRequest]) (*connect.Response[v1.RequestAdminHelpResponse], error)
 	ListHelpRequests(context.Context, *connect.Request[v1.ListHelpRequestsRequest]) (*connect.Response[v1.ListHelpRequestsResponse], error)
@@ -2152,6 +2408,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("PasswordLogin")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceSubmitDateOfBirthHandler := connect.NewUnaryHandler(
+		IdentityServiceSubmitDateOfBirthProcedure,
+		svc.SubmitDateOfBirth,
+		connect.WithSchema(identityServiceMethods.ByName("SubmitDateOfBirth")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceRequestEmailLoginCodeHandler := connect.NewUnaryHandler(
 		IdentityServiceRequestEmailLoginCodeProcedure,
 		svc.RequestEmailLoginCode,
@@ -2228,6 +2490,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceUpdateProfileProcedure,
 		svc.UpdateProfile,
 		connect.WithSchema(identityServiceMethods.ByName("UpdateProfile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceSetAccountMarketHandler := connect.NewUnaryHandler(
+		IdentityServiceSetAccountMarketProcedure,
+		svc.SetAccountMarket,
+		connect.WithSchema(identityServiceMethods.ByName("SetAccountMarket")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceDeleteMyAccountHandler := connect.NewUnaryHandler(
@@ -2312,6 +2580,66 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		IdentityServiceRevokeParentalConsentProcedure,
 		svc.RevokeParentalConsent,
 		connect.WithSchema(identityServiceMethods.ByName("RevokeParentalConsent")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListManagedChildrenHandler := connect.NewUnaryHandler(
+		IdentityServiceListManagedChildrenProcedure,
+		svc.ListManagedChildren,
+		connect.WithSchema(identityServiceMethods.ByName("ListManagedChildren")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGetGuardiansHandler := connect.NewUnaryHandler(
+		IdentityServiceGetGuardiansProcedure,
+		svc.GetGuardians,
+		connect.WithSchema(identityServiceMethods.ByName("GetGuardians")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceCreateManagedChildAccountHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateManagedChildAccountProcedure,
+		svc.CreateManagedChildAccount,
+		connect.WithSchema(identityServiceMethods.ByName("CreateManagedChildAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGetManagedChildProfileHandler := connect.NewUnaryHandler(
+		IdentityServiceGetManagedChildProfileProcedure,
+		svc.GetManagedChildProfile,
+		connect.WithSchema(identityServiceMethods.ByName("GetManagedChildProfile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceSetManagedChildPasswordHandler := connect.NewUnaryHandler(
+		IdentityServiceSetManagedChildPasswordProcedure,
+		svc.SetManagedChildPassword,
+		connect.WithSchema(identityServiceMethods.ByName("SetManagedChildPassword")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceSetManagedChildUsernameHandler := connect.NewUnaryHandler(
+		IdentityServiceSetManagedChildUsernameProcedure,
+		svc.SetManagedChildUsername,
+		connect.WithSchema(identityServiceMethods.ByName("SetManagedChildUsername")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceRevokeManagedChildSessionsHandler := connect.NewUnaryHandler(
+		IdentityServiceRevokeManagedChildSessionsProcedure,
+		svc.RevokeManagedChildSessions,
+		connect.WithSchema(identityServiceMethods.ByName("RevokeManagedChildSessions")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceDeactivateManagedChildAccountHandler := connect.NewUnaryHandler(
+		IdentityServiceDeactivateManagedChildAccountProcedure,
+		svc.DeactivateManagedChildAccount,
+		connect.WithSchema(identityServiceMethods.ByName("DeactivateManagedChildAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceReactivateManagedChildAccountHandler := connect.NewUnaryHandler(
+		IdentityServiceReactivateManagedChildAccountProcedure,
+		svc.ReactivateManagedChildAccount,
+		connect.WithSchema(identityServiceMethods.ByName("ReactivateManagedChildAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceDeleteManagedChildAccountHandler := connect.NewUnaryHandler(
+		IdentityServiceDeleteManagedChildAccountProcedure,
+		svc.DeleteManagedChildAccount,
+		connect.WithSchema(identityServiceMethods.ByName("DeleteManagedChildAccount")),
 		connect.WithHandlerOptions(opts...),
 	)
 	identityServiceRequestAdminHelpHandler := connect.NewUnaryHandler(
@@ -2784,6 +3112,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServicePasswordSignupHandler.ServeHTTP(w, r)
 		case IdentityServicePasswordLoginProcedure:
 			identityServicePasswordLoginHandler.ServeHTTP(w, r)
+		case IdentityServiceSubmitDateOfBirthProcedure:
+			identityServiceSubmitDateOfBirthHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestEmailLoginCodeProcedure:
 			identityServiceRequestEmailLoginCodeHandler.ServeHTTP(w, r)
 		case IdentityServiceVerifyEmailLoginCodeProcedure:
@@ -2810,6 +3140,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceLogoutHandler.ServeHTTP(w, r)
 		case IdentityServiceUpdateProfileProcedure:
 			identityServiceUpdateProfileHandler.ServeHTTP(w, r)
+		case IdentityServiceSetAccountMarketProcedure:
+			identityServiceSetAccountMarketHandler.ServeHTTP(w, r)
 		case IdentityServiceDeleteMyAccountProcedure:
 			identityServiceDeleteMyAccountHandler.ServeHTTP(w, r)
 		case IdentityServiceCancelAccountDeletionProcedure:
@@ -2838,6 +3170,26 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceGrantParentalConsentHandler.ServeHTTP(w, r)
 		case IdentityServiceRevokeParentalConsentProcedure:
 			identityServiceRevokeParentalConsentHandler.ServeHTTP(w, r)
+		case IdentityServiceListManagedChildrenProcedure:
+			identityServiceListManagedChildrenHandler.ServeHTTP(w, r)
+		case IdentityServiceGetGuardiansProcedure:
+			identityServiceGetGuardiansHandler.ServeHTTP(w, r)
+		case IdentityServiceCreateManagedChildAccountProcedure:
+			identityServiceCreateManagedChildAccountHandler.ServeHTTP(w, r)
+		case IdentityServiceGetManagedChildProfileProcedure:
+			identityServiceGetManagedChildProfileHandler.ServeHTTP(w, r)
+		case IdentityServiceSetManagedChildPasswordProcedure:
+			identityServiceSetManagedChildPasswordHandler.ServeHTTP(w, r)
+		case IdentityServiceSetManagedChildUsernameProcedure:
+			identityServiceSetManagedChildUsernameHandler.ServeHTTP(w, r)
+		case IdentityServiceRevokeManagedChildSessionsProcedure:
+			identityServiceRevokeManagedChildSessionsHandler.ServeHTTP(w, r)
+		case IdentityServiceDeactivateManagedChildAccountProcedure:
+			identityServiceDeactivateManagedChildAccountHandler.ServeHTTP(w, r)
+		case IdentityServiceReactivateManagedChildAccountProcedure:
+			identityServiceReactivateManagedChildAccountHandler.ServeHTTP(w, r)
+		case IdentityServiceDeleteManagedChildAccountProcedure:
+			identityServiceDeleteManagedChildAccountHandler.ServeHTTP(w, r)
 		case IdentityServiceRequestAdminHelpProcedure:
 			identityServiceRequestAdminHelpHandler.ServeHTTP(w, r)
 		case IdentityServiceListHelpRequestsProcedure:
@@ -3023,6 +3375,10 @@ func (UnimplementedIdentityServiceHandler) PasswordLogin(context.Context, *conne
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.PasswordLogin is not implemented"))
 }
 
+func (UnimplementedIdentityServiceHandler) SubmitDateOfBirth(context.Context, *connect.Request[v1.SubmitDateOfBirthRequest]) (*connect.Response[v1.SubmitDateOfBirthResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SubmitDateOfBirth is not implemented"))
+}
+
 func (UnimplementedIdentityServiceHandler) RequestEmailLoginCode(context.Context, *connect.Request[v1.RequestEmailLoginCodeRequest]) (*connect.Response[v1.RequestEmailLoginCodeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RequestEmailLoginCode is not implemented"))
 }
@@ -3073,6 +3429,10 @@ func (UnimplementedIdentityServiceHandler) Logout(context.Context, *connect.Requ
 
 func (UnimplementedIdentityServiceHandler) UpdateProfile(context.Context, *connect.Request[v1.UpdateProfileRequest]) (*connect.Response[v1.UpdateProfileResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UpdateProfile is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) SetAccountMarket(context.Context, *connect.Request[v1.SetAccountMarketRequest]) (*connect.Response[v1.SetAccountMarketResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SetAccountMarket is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) DeleteMyAccount(context.Context, *connect.Request[v1.DeleteMyAccountRequest]) (*connect.Response[v1.DeleteMyAccountResponse], error) {
@@ -3129,6 +3489,46 @@ func (UnimplementedIdentityServiceHandler) GrantParentalConsent(context.Context,
 
 func (UnimplementedIdentityServiceHandler) RevokeParentalConsent(context.Context, *connect.Request[v1.RevokeParentalConsentRequest]) (*connect.Response[v1.RevokeParentalConsentResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RevokeParentalConsent is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListManagedChildren(context.Context, *connect.Request[v1.ListManagedChildrenRequest]) (*connect.Response[v1.ListManagedChildrenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListManagedChildren is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetGuardians(context.Context, *connect.Request[v1.GetGuardiansRequest]) (*connect.Response[v1.GetGuardiansResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetGuardians is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CreateManagedChildAccount(context.Context, *connect.Request[v1.CreateManagedChildAccountRequest]) (*connect.Response[v1.CreateManagedChildAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateManagedChildAccount is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetManagedChildProfile(context.Context, *connect.Request[v1.GetManagedChildProfileRequest]) (*connect.Response[v1.GetManagedChildProfileResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetManagedChildProfile is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) SetManagedChildPassword(context.Context, *connect.Request[v1.SetManagedChildPasswordRequest]) (*connect.Response[v1.SetManagedChildPasswordResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SetManagedChildPassword is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) SetManagedChildUsername(context.Context, *connect.Request[v1.SetManagedChildUsernameRequest]) (*connect.Response[v1.SetManagedChildUsernameResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SetManagedChildUsername is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RevokeManagedChildSessions(context.Context, *connect.Request[v1.RevokeManagedChildSessionsRequest]) (*connect.Response[v1.RevokeManagedChildSessionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RevokeManagedChildSessions is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) DeactivateManagedChildAccount(context.Context, *connect.Request[v1.DeactivateManagedChildAccountRequest]) (*connect.Response[v1.DeactivateManagedChildAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DeactivateManagedChildAccount is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ReactivateManagedChildAccount(context.Context, *connect.Request[v1.ReactivateManagedChildAccountRequest]) (*connect.Response[v1.ReactivateManagedChildAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ReactivateManagedChildAccount is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) DeleteManagedChildAccount(context.Context, *connect.Request[v1.DeleteManagedChildAccountRequest]) (*connect.Response[v1.DeleteManagedChildAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.DeleteManagedChildAccount is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) RequestAdminHelp(context.Context, *connect.Request[v1.RequestAdminHelpRequest]) (*connect.Response[v1.RequestAdminHelpResponse], error) {

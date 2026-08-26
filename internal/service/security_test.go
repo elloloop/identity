@@ -183,7 +183,7 @@ func TestSecurity_RefreshTokenRotation_OldTokenInvalidated(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "rot@example.com", strongPW, "", "", 0)
+	result, err := svc.PasswordSignup(context.Background(), "rot@example.com", strongPW, "", "", 0, "")
 	require.NoError(t, err)
 	oldRefresh := result.RefreshToken
 

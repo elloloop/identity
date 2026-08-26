@@ -28,7 +28,7 @@ func TestPasswordSignup_EmptyPasswordFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", "", "", "", 0)
+	_, err := svc.PasswordSignup(context.Background(), "alice@example.com", "", "", "", 0, "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -37,7 +37,7 @@ func TestPasswordSignup_DefaultDisplayNameFromEmail(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "rosa@example.com", strongPW, "", "rec@example.com", 0)
+	result, err := svc.PasswordSignup(context.Background(), "rosa@example.com", strongPW, "", "rec@example.com", 0, "")
 	require.NoError(t, err)
 	assert.Equal(t, "rosa", result.User.Name)
 }
@@ -58,9 +58,24 @@ func TestPasswordLogin_InvalidEmailFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.PasswordLogin(context.Background(), "notanemail", strongPW, "", "")
+	_, err := svc.PasswordLogin(context.Background(), "not-an-email@", strongPW, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
+}
+
+func TestPasswordLogin_BareIdentifierTreatedAsUsername(t *testing.T) {
+	// An identifier without '@' is a managed-child USERNAME candidate. An
+	// unknown one — or a syntactically impossible one — gets the same uniform
+	// invalid-credentials refusal as an unknown email, never a format error:
+	// the response must not vary with whether an account exists.
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+
+	for _, identifier := range []string{"nosuchuser", "!!bad!!"} {
+		_, err := svc.PasswordLogin(context.Background(), identifier, strongPW, "", "")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrUnauthenticated), "identifier %q: %v", identifier, err)
+	}
 }
 
 func TestPasswordLogin_EmptyPasswordFails(t *testing.T) {
@@ -243,7 +258,7 @@ func TestRefreshToken_UserDeletedFails(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	result, err := svc.PasswordSignup(context.Background(), "deleted@example.com", strongPW, "", "", 0)
+	result, err := svc.PasswordSignup(context.Background(), "deleted@example.com", strongPW, "", "", 0, "")
 	require.NoError(t, err)
 
 	// Delete the user node directly while the refresh token still exists.
@@ -314,7 +329,7 @@ func TestCompletePasskeyRegistration_MissingArgs(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", "", "", "Device")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", "", "", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -323,7 +338,7 @@ func TestCompletePasskeyRegistration_ChallengeNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", "no-such-challenge", "{}", "Device")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", "no-such-challenge", "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -343,7 +358,7 @@ func TestCompletePasskeyRegistration_WrongChallengeType(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, "{}", "Device")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -363,7 +378,7 @@ func TestCompletePasskeyRegistration_WrongUser(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, err := svc.CompletePasskeyRegistration(context.Background(), "user-2", id, "{}", "Device")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-2", id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrPermissionDenied))
 }
@@ -383,7 +398,7 @@ func TestCompletePasskeyRegistration_ExpiredChallenge(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, "{}", "Device")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTokenExpired))
 }
@@ -404,7 +419,7 @@ func TestCompletePasskeyRegistration_VerifyFails(t *testing.T) {
 	repo.mu.Unlock()
 
 	// Bogus credential JSON — verification will fail.
-	_, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, `{"id":"x"}`, "Device")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", id, `{"id":"x"}`, "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -1565,6 +1580,43 @@ func TestCheckAccountStatus_Branches(t *testing.T) {
 func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	r := StubRepository{}
 	ctx := context.Background()
+
+	// The managed-minor surface. A stub method that silently returned nil
+	// would let a no-persistence deployment appear to create child accounts
+	// and guardian edges.
+	if _, err := r.FindUserByUsername(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("FindUserByUsername: %v", err)
+	}
+	if _, err := r.ListActiveParentalConsentsForChild(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ListActiveParentalConsentsForChild: %v", err)
+	}
+	if err := r.UpsertGuardianEdge(ctx, &GuardianEdge{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("UpsertGuardianEdge: %v", err)
+	}
+	if err := r.DeleteGuardianEdge(ctx, "", ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteGuardianEdge: %v", err)
+	}
+	if _, err := r.GetGuardianEdge(ctx, "", ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("GetGuardianEdge: %v", err)
+	}
+	if _, err := r.ListGuardiansOfChild(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ListGuardiansOfChild: %v", err)
+	}
+	if _, err := r.ListChildrenOfGuardian(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ListChildrenOfGuardian: %v", err)
+	}
+	if err := r.CreateManagedChildAccount(ctx, &User{}, &GuardianEdge{}, &ParentalConsentRecord{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreateManagedChildAccount: %v", err)
+	}
+	if err := r.CreateParentalConsent(ctx, &ParentalConsentRecord{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreateParentalConsent: %v", err)
+	}
+	if _, err := r.GetActiveParentalConsentForChild(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("GetActiveParentalConsentForChild: %v", err)
+	}
+	if err := r.MarkParentalConsentRevoked(ctx, "", "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("MarkParentalConsentRevoked: %v", err)
+	}
 
 	if _, err := r.FindUserByEmail(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("FindUserByEmail: %v", err)

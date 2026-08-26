@@ -1,5 +1,228 @@
 # Upgrade guide
 
+## Unreleased — required-DOB completion step (behavior change if `GATEWAY_AGEGATE_REQUIRE_DOB` is already on)
+
+Extends what `GATEWAY_AGEGATE_REQUIRE_DOB` covers. Previously it bound only
+`PasswordSignup`; every other session-issuing path (OAuth, hosted-OAuth
+redeem, native mobile OAuth, passwordless code and magic link, passkey
+signup and login, TOTP second factor, QR poll, invitation acceptance, token
+refresh) created or activated accounts with `date_of_birth_ms = 0` —
+adult-classified by default, a complete child-protection bypass. With the
+flag on, those paths now refuse token issuance for a dob-less account at
+the shared chokepoint and return `FAILED_PRECONDITION` with the stable
+`dob_required` message token and a `DOBRequiredDetails` error detail
+carrying a 10-minute **completion ticket**. The client submits the date of
+birth with the new unauthenticated `SubmitDateOfBirth` RPC; a TEEN/ADULT
+result completes the sign-in with tokens, a CHILD-band result lands in
+`USER_STATUS_PENDING_PARENTAL_CONSENT` with none.
+
+**Wire additions are additive**: the `SubmitDateOfBirth` RPC, its
+request/response messages, and the `DOBRequiredDetails` error-detail
+message. Access tokens gain an optional `purpose` claim (absent on every
+existing token).
+
+**If you verify identity's JWTs yourself, you must reject purpose tokens.**
+A completion ticket is signed with the same key, carries the same `aud`, and
+is handed to an *unauthenticated* caller inside an error detail — the only
+thing separating it from a session token is the `purpose` claim. Inside
+identity the rule is enforced in the shared verifier (`jwt.VerifyAccessToken`
+refuses any token with a non-empty `purpose`; the redeeming flow uses
+`jwt.VerifyPurposeToken`), so the HTTP middleware, the native-gRPC surface,
+and anything else on that path are covered. **Outside** identity — an
+embedding host's own gRPC interceptor, an API gateway, or a downstream
+resource server validating through the published JWKS — you own the check:
+reject any token whose `purpose` claim is set. See `docs/embedding.md`.
+
+**Boot-time invariant.** `GATEWAY_AGEGATE_REQUIRE_DOB=true` now requires
+`GATEWAY_AGEGATE_ENABLED=true` and the server refuses to boot otherwise.
+Enforcement short-circuits when the gate is off, so the pair used to boot
+clean and enforce nothing while claiming the opposite.
+
+**Nothing changes unless you enable the flag.** With
+`GATEWAY_AGEGATE_REQUIRE_DOB` unset, every path behaves exactly as before.
+
+Two operator-visible consequences of turning it on:
+
+- **Pre-existing accounts without a DOB hit the completion step at their
+  next login or refresh.** `RefreshToken` included — a long-lived session
+  stops rotating until the user submits a date of birth. That is the flag
+  working; brief client teams on the `dob_required` handling before
+  enabling. The refusal is deliberately non-destructive: the presented
+  refresh token is NOT consumed, so a client that retries it gets the same
+  refusal rather than tripping replay detection (which would sign the user
+  out on every device).
+- **Anonymous sessions are unaffected** (they never carry a DOB; the
+  product `minimum_age_band` gate remains their age guardrail), and
+  admin-created accounts (`CreateUser`) simply meet the step at first
+  sign-in, since creation mints no tokens.
+
+## Unreleased — guardian edges (additive)
+
+Adds the guardian edge: the authorization fact that one account
+(`guardian_user_id`) manages another (`child_user_id`), stored in a new
+project-scoped `guardian_edges` table.
+
+**Wire additions are additive** — two new RPCs: `ListManagedChildren`
+(self-only: the guardian is always the session user; the request carries no
+user id field) and `GetGuardians` (callable by a guardian of the child or a
+project admin, with an account-agnostic `PERMISSION_DENIED` for everyone
+else). Two new audit events: `guardian_edge_created` (on consent grant) and
+`guardian_edge_removed` (on consent revocation).
+
+**Migrations** (postgres 0031, sqlite 0016), applied with
+`identity migrate`, create the `guardian_edges` table and **backfill one edge
+per active parental consent whose adult and child both still exist**, with the
+consent's grant instant as the edge's creation time. Existing active consents
+gain edges automatically; revoked consents and consents referencing a deleted
+account are deliberately skipped (the consent record outlives account
+deletion; the edge must not).
+
+**Size the migration window.** On PostgreSQL the backfill has to suspend row-
+level security on `users` and `parental_consents` (the migrate connection sets
+no `app.current_project_id`, so a forced RLS read would silently backfill zero
+rows). Those `ALTER TABLE` statements take `ACCESS EXCLUSIVE`, and the pgx
+driver runs the migration in one transaction — so reads and writes of `users`
+block for the length of the backfill. Migration 0032 then builds the username
+unique index non-concurrently, blocking writes again. Both are brief on a
+small `users`/`parental_consents` table and worth scheduling on a large one.
+
+One behavior note: `RevokeParentalConsent` now also removes the revoking
+adult's guardian edge, and the child is re-gated to
+`PENDING_PARENTAL_CONSENT` only when **no active consent remains** for it.
+Under the current single-active-consent model that is exactly the previous
+behavior; the rule is structured for concurrent multi-guardian consent.
+
+## Unreleased — parent-creates-child managed accounts (additive)
+
+Adds `CreateManagedChildAccount`: one authenticated call from an adult
+creates a working child account, born `USER_STATUS_ACTIVE` under the
+caller's guardianship (it never passes through
+`USER_STATUS_PENDING_PARENTAL_CONSENT`), with the guardian edge and a
+`ConsentRecord` committed in the same transaction. The consent bar is
+`GrantParentalConsent`'s, unchanged: a strong verified factor on the adult's
+account **and** a step-up password re-entry, with the guardian derived from
+the session.
+
+**Wire additions are additive**: the `CreateManagedChildAccount` RPC and its
+messages, `User.username` (field 28), and the
+`managed_child_account_created` audit event. The child is identified by a
+parent-chosen username rather than an email; the credential is either a
+parent-set password or a passkey **enrolment ticket** the child's device
+redeems through `BeginPasskeyRegistration` / `CompletePasskeyRegistration`
+within 15 minutes (those two RPCs now accept an `enrolment_token` for a
+session-less child device; presenting both a session and a ticket is
+`INVALID_ARGUMENT`).
+
+**Migrations** (postgres 0032, sqlite 0017), applied with `identity migrate`,
+add `username TEXT NOT NULL DEFAULT ''` to `users` plus a **partial** unique
+index on `(project_id, username) WHERE username <> ''`, so existing
+email-identified accounts (all of which have an empty username) are
+unaffected.
+
+Two things to know before enabling the flow:
+
+- **The project access mode does not gate it.** This is not self-signup: an
+  active adult in the project may create children under `invite` and
+  `closed` as well as `open`. A minor caller, an inactive caller, or a date
+  of birth that classifies as ADULT is rejected.
+- **Username-identified accounts sign in with `PasswordLogin`** using the
+  username in place of the email. If your client validates that the login
+  identifier looks like an email address, relax it before rolling out child
+  accounts.
+- **`PasswordLogin`'s response code changed for identifiers with no `@`,
+  unconditionally.** Such a value is now a username candidate, so an unknown
+  one gets the uniform `UNAUTHENTICATED` invalid-credentials refusal instead
+  of the old `INVALID_ARGUMENT` "malformed email" — the same answer an unknown
+  email gets, so the endpoint discloses neither which identifier form was
+  tried nor whether the account exists. An *empty* identifier is still
+  `INVALID_ARGUMENT`, and a malformed address that does contain `@` still
+  fails email validation. A client branching on `INVALID_ARGUMENT` to render
+  a "not a valid email" hint must move that check client-side.
+- **The verified-email gate does not apply to accounts with no email.**
+  `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` (default on) is scoped to accounts
+  that actually have an address; a managed child has none to verify, so the
+  parent-set password works on a stock deployment.
+- **A parent needs a password.** Step-up re-authentication is a password
+  re-entry, so an adult who signed up through OAuth or passkey-only and has
+  no password set cannot create or manage a child account. Inherited from
+  the `GrantParentalConsent` bar (#448) and unchanged here; if your product
+  onboards parents through social login only, give them a password before
+  rolling out managed children.
+
+## Unreleased — parental account management (additive)
+
+Adds the guardian-authorized management surface over a child account:
+`GetManagedChildProfile`, `SetManagedChildPassword`,
+`SetManagedChildUsername`, `RevokeManagedChildSessions`,
+`DeactivateManagedChildAccount`, `ReactivateManagedChildAccount`, and
+`DeleteManagedChildAccount`. Parents can now run their child's account
+without the child's credentials and without an admin credential — a
+requirement under COPPA, the UK Children's Code, and India's DPDP Rules 2025.
+
+**Wire additions are additive**: seven RPCs and their request/response
+messages, plus seven audit events (`guardian_child_profile_viewed`,
+`guardian_child_password_set`, `guardian_child_username_changed`,
+`guardian_child_sessions_revoked`, `guardian_child_deactivated`,
+`guardian_child_reactivated`, `guardian_child_deleted`). No migrations, no
+new configuration.
+
+Every one of the RPCs is gated on **both** an active guardian edge from the
+session user to the child **and** a `step_up_password` re-entry on the call
+itself — holding a valid session is never enough. A caller without an edge
+receives an account-agnostic `PERMISSION_DENIED` that does not disclose
+whether the child account exists.
+
+Three behaviors worth briefing client teams on:
+
+- **Rights lapse when the child ages out.** A guardian edge to a user who has
+  passed the adult threshold that applies to them stops conferring management
+  rights (`FAILED_PRECONDITION`, evaluated per call, so it takes effect on the
+  birthday). The now-adult account's own sessions are deliberately left
+  running. With age-gating off no band can be derived and the edge alone
+  authorizes, so gate-off deployments see no change.
+- **Revoking consent ends management immediately.** `RevokeParentalConsent`
+  deletes the edge, and the next management call from that adult is refused —
+  no cached authorization, no grace period.
+- **Deletion is immediate and irreversible.** `DeleteManagedChildAccount`
+  runs the same hard-delete cascade as the admin `DeleteUser` RPC (not the
+  30-day self-service grace window). The `ConsentRecord` and the audit trail
+  survive the erasure, per the retention posture consent records already had.
+
+**One response-shape fix ships with this.**
+`RevokeParentalConsentResponse.child_status` previously always reported
+`USER_STATUS_PENDING_PARENTAL_CONSENT`. It now reports the status the child
+account was actually left in — which differs only when another guardian's
+consent remains active, in which case the child correctly stays
+`USER_STATUS_ACTIVE`.
+
+## Unreleased — per-jurisdiction age thresholds (additive)
+
+Adds per-market age thresholds: a project's `config_json` gains a
+`jurisdictions` block (`default` + `thresholds`, each entry a
+`child_max_age`/`adult_age` pair), and accounts gain a **market** that
+selects which pair their age band derives from (resolution: stored market →
+project default → strictest configured ceiling → the env
+`GATEWAY_AGEGATE_*` pair).
+
+**Nothing changes unless you configure it.** A project with no
+`jurisdictions` block classifies exactly as before. The wire additions are
+additive (`User.market` field 27, `ConsentRecord.market` field 12,
+`PasswordSignupRequest.market` field 6, and the new authenticated
+self-service `SetAccountMarket` RPC, audited as `account_market_changed`),
+and `buf breaking` stays clean against the previous release.
+
+**Migrations** (postgres 0030, sqlite 0015), applied with
+`identity migrate`, add `market TEXT NOT NULL DEFAULT ''` to both `users`
+and `parental_consents`. Both are metadata-only on PostgreSQL (constant
+default, no table rewrite); existing rows read as "no market on file" and
+keep their current classification.
+
+One behavior note: when a project DOES configure `jurisdictions`,
+`SetAccountMarket` (and signup with a `market`) rejects a code the project
+has not declared, and an account whose new market moves it into the child
+band without active parental consent is re-gated to
+`PENDING_PARENTAL_CONSENT` with its sessions revoked immediately.
+
 ## v4.1 → v4.2 — product-agnostic defaults (one behavior change)
 
 v4.2 removes every consumer-specific value that had accreted in the repo:

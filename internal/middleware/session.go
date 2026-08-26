@@ -384,6 +384,9 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
 				return
 			}
+			// A purpose token never authenticates a request:
+			// jwtpkg.VerifyAccessToken refuses one, so it lands in the branch
+			// above and is indistinguishable from a bad token.
 			if claims.SID != "" {
 				state, lookupErr := cache.Lookup(r.Context(), claims.SID)
 				if lookupErr != nil {

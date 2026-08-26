@@ -149,6 +149,7 @@ func (h *IdentityHandler) PasswordSignup(
 		"", // name — not in proto; service derives from email
 		req.Msg.RecoveryEmail,
 		req.Msg.DateOfBirthMs,
+		req.Msg.Market,
 	)
 	if err != nil {
 		return nil, toConnectError(err)
@@ -195,6 +196,30 @@ func (h *IdentityHandler) PasswordLogin(
 		ExpiresIn:        result.ExpiresIn,
 		TotpRequired:     result.TotpRequired,
 		LoginChallengeId: result.LoginChallengeID,
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// SubmitDateOfBirth completes the required-DOB step: the caller holds the
+// completion ticket carried by the dob_required error detail, not a
+// session. A CHILD-band result returns the user in
+// USER_STATUS_PENDING_PARENTAL_CONSENT with no tokens.
+func (h *IdentityHandler) SubmitDateOfBirth(
+	ctx context.Context,
+	req *connect.Request[identitypb.SubmitDateOfBirthRequest],
+) (*connect.Response[identitypb.SubmitDateOfBirthResponse], error) {
+	ipAddr := clientIP(req.Header())
+	userAgent := clientUserAgent(req.Header())
+
+	result, err := h.auth.SubmitDateOfBirth(ctx, req.Msg.CompletionToken, req.Msg.DateOfBirthMs, ipAddr, userAgent)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	resp := &identitypb.SubmitDateOfBirthResponse{
+		User:         userToProto(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
 	}
 	return connect.NewResponse(resp), nil
 }

@@ -221,6 +221,7 @@ func scopeFromResolved(rp *service.ResolvedProject) *service.ProjectScope {
 		Products:           rp.Products,
 		Assurance:          rp.Assurance,
 		Anonymous:          rp.Anonymous,
+		Jurisdictions:      rp.Jurisdictions,
 	}
 }
 

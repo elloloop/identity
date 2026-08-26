@@ -62,6 +62,7 @@ export const sidebarSections: NavSection[] = [
     title: "Users & Groups",
     items: [
       { label: "User Management", href: `${BASE}/docs/users/management` },
+      { label: "Managed Minor Accounts", href: `${BASE}/docs/users/managed-minors` },
     ],
   },
   {

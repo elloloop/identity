@@ -107,13 +107,14 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 	if user.IsAnonymous {
 		return nil, fmt.Errorf(
 			"%w: identity verification is refused while the account can still be "+
-				"hard-deleted by the anonymous retention sweep", ErrAnonymousMustUpgrade)
+				"hard-deleted by the anonymous retention sweep", ErrAnonymousMustUpgrade,
+		)
 	}
 	// COPPA data-minimization: never collect identity documents from a
 	// CHILD-band account when minimization is enabled. No provider session
 	// is created. Adults/teens and minimization-off deployments are
 	// unaffected.
-	if s.minorData.BlocksChild(user.DateOfBirthMs) {
+	if s.minorData.BlocksChildFor(ctx, user) {
 		s.logger.Info("idv_begin_blocked_minor", zap.String("user_id", userID))
 		return nil, ErrMinorDataMinimized
 	}

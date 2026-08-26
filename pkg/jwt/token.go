@@ -47,8 +47,15 @@ type Claims struct {
 	Anonymous bool     `json:"anonymous,omitempty"`
 	SID       string   `json:"sid,omitempty"`
 	Audience  []string `json:"aud,omitempty"`
-	IssuedAt  int64    `json:"iat"`
-	ExpiresAt int64    `json:"exp"`
+	// Purpose marks a token as a single-purpose bearer credential rather
+	// than a session access token (e.g. "dob_completion" for the
+	// required-DOB completion ticket). Empty on every normal access token.
+	// Verifiers that authenticate requests MUST reject or ignore any token
+	// whose purpose is non-empty — it is proof of one interrupted flow,
+	// not of a session.
+	Purpose   string `json:"purpose,omitempty"`
+	IssuedAt  int64  `json:"iat"`
+	ExpiresAt int64  `json:"exp"`
 }
 
 // ClaimsMap converts the access-token claims plus standard iat/exp into
@@ -79,6 +86,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if c.SID != "" {
 		m["sid"] = c.SID
+	}
+	if c.Purpose != "" {
+		m["purpose"] = c.Purpose
 	}
 	if len(c.Audience) > 0 {
 		m["aud"] = c.Audience
@@ -113,7 +123,50 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 // the underlying lestrrat-go jwt library treats an absent exp as
 // "no expiration", which would otherwise produce unbounded-lifetime
 // tokens.
+//
+// A token carrying a non-empty `purpose` claim is REFUSED here: a purpose
+// token is proof of one interrupted flow, never of a session. The rule lives
+// in the shared verifier rather than in each caller so it holds on every
+// transport — the HTTP middlewares, a native-gRPC host's own interceptor
+// (see docs/embedding.md), and any downstream service verifying identity's
+// tokens through the published JWKS. Use VerifyPurposeToken to verify a
+// ticket on the one flow that redeems it.
 func VerifyAccessToken(tokenStr string, kp KeyProvider, expectedTenant, expectedAudience string, requireAudience bool) (*Claims, error) {
+	claims, err := verifyToken(tokenStr, kp, expectedTenant, expectedAudience, requireAudience)
+	if err != nil {
+		return nil, err
+	}
+	if claims.Purpose != "" {
+		return nil, fmt.Errorf("token has purpose=%q and authenticates no request", claims.Purpose)
+	}
+	return claims, nil
+}
+
+// VerifyPurposeToken verifies a single-purpose bearer ticket and requires its
+// `purpose` claim to equal wantPurpose. It is the only way to get a
+// purpose-bearing token past verification, so the flow that redeems a ticket
+// names the purpose it expects and cannot be handed a ticket minted for a
+// different one.
+func VerifyPurposeToken(
+	tokenStr string, kp KeyProvider, expectedTenant, expectedAudience string, requireAudience bool, wantPurpose string,
+) (*Claims, error) {
+	if wantPurpose == "" {
+		return nil, errors.New("VerifyPurposeToken: wantPurpose is required")
+	}
+	claims, err := verifyToken(tokenStr, kp, expectedTenant, expectedAudience, requireAudience)
+	if err != nil {
+		return nil, err
+	}
+	if claims.Purpose != wantPurpose {
+		return nil, fmt.Errorf("token purpose=%q, want %q", claims.Purpose, wantPurpose)
+	}
+	return claims, nil
+}
+
+// verifyToken is the shared signature/claims verification both entry points
+// run. It is deliberately unexported: everything outside this file goes
+// through one of the two, so no caller can skip the purpose decision.
+func verifyToken(tokenStr string, kp KeyProvider, expectedTenant, expectedAudience string, requireAudience bool) (*Claims, error) {
 	tokenBytes := []byte(tokenStr)
 
 	kid, err := extractKID(tokenBytes)
@@ -192,6 +245,9 @@ func VerifyAccessToken(tokenStr string, kp KeyProvider, expectedTenant, expected
 	}
 	if v, ok := tok.Get("sid"); ok {
 		claims.SID, _ = v.(string)
+	}
+	if v, ok := tok.Get("purpose"); ok {
+		claims.Purpose, _ = v.(string)
 	}
 	if v, ok := tok.Get("is_minor"); ok {
 		claims.IsMinor, _ = v.(bool)

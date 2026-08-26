@@ -180,6 +180,47 @@ const (
 	// re-gates the child account.
 	EventParentalConsentGranted EventType = "parental_consent_granted"
 	EventParentalConsentRevoked EventType = "parental_consent_revoked"
+
+	// EventGuardianEdgeCreated / EventGuardianEdgeRemoved record the account
+	// graph gaining / losing a guardianOf edge (guardian_user_id manages
+	// child_user_id). Edges track consent: creation rides the consent grant,
+	// removal the consent revocation. The actor is the consenting/revoking
+	// adult and the target is the child.
+	EventGuardianEdgeCreated EventType = "guardian_edge_created"
+	EventGuardianEdgeRemoved EventType = "guardian_edge_removed"
+
+	// EventAccountMarketChanged records an account's jurisdiction/market code
+	// being set or changed via SetAccountMarket. The details carry the old and
+	// new market, so a re-gating of the account (a change that moves it into
+	// the CHILD band under a stricter jurisdiction) is traceable to the change
+	// that caused it. Actor and target are the account owner.
+	EventAccountMarketChanged EventType = "account_market_changed"
+
+	// EventManagedChildAccountCreated records an authenticated adult creating
+	// a managed child account (the parent-creates-child flow): the child
+	// account, the guardian edge, and the parental-consent record commit
+	// atomically, so this one event — actor the guardian, target the child —
+	// attests all three. The details carry the username, market, derived age
+	// band, and which credential shape the account was born with (password |
+	// passkey_enrolment). A refused attempt (failed step-up re-auth, no
+	// verified factor, non-minor or unknown age band, duplicate username) is
+	// logged with success=false and a `step` detail naming the failing check,
+	// so a spoofing or probing attempt is visible.
+	EventManagedChildAccountCreated EventType = "managed_child_account_created"
+
+	// Guardian-authorized management of a child account (the parental
+	// management surface): one event type per operation, actor the acting
+	// guardian and target the child. Every one of them is emitted on refusal
+	// too, with success=false and a `step` detail naming which of the two
+	// mandatory checks failed (`not_guardian`, `step_up`, `aged_out`, ...),
+	// so probing a child account is as visible in the trail as managing one.
+	EventGuardianChildProfileViewed   EventType = "guardian_child_profile_viewed"
+	EventGuardianChildPasswordSet     EventType = "guardian_child_password_set"
+	EventGuardianChildUsernameChanged EventType = "guardian_child_username_changed"
+	EventGuardianChildSessionsRevoked EventType = "guardian_child_sessions_revoked"
+	EventGuardianChildDeactivated     EventType = "guardian_child_deactivated"
+	EventGuardianChildReactivated     EventType = "guardian_child_reactivated"
+	EventGuardianChildDeleted         EventType = "guardian_child_deleted"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -225,6 +266,17 @@ var validEventTypes = map[EventType]struct{}{
 	EventProjectOAuthProviderRemoved:   {},
 	EventParentalConsentGranted:        {},
 	EventParentalConsentRevoked:        {},
+	EventGuardianEdgeCreated:           {},
+	EventGuardianEdgeRemoved:           {},
+	EventAccountMarketChanged:          {},
+	EventManagedChildAccountCreated:    {},
+	EventGuardianChildProfileViewed:    {},
+	EventGuardianChildPasswordSet:      {},
+	EventGuardianChildUsernameChanged:  {},
+	EventGuardianChildSessionsRevoked:  {},
+	EventGuardianChildDeactivated:      {},
+	EventGuardianChildReactivated:      {},
+	EventGuardianChildDeleted:          {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

@@ -80,6 +80,11 @@ type ParentalConsentRecord struct {
 	ConsentIP        string
 	ConsentUserAgent string
 	GrantedAt        int64 // epoch ms
+	// Market is the jurisdiction/market code the child's classification
+	// resolved under at grant time (the child's stored market, else the
+	// project's configured default, else ""). Snapshotted so the record says
+	// WHICH jurisdiction's thresholds it proves consent against.
+	Market string
 	// RevokedAt is 0 while the consent is active; the epoch-ms instant it was
 	// withdrawn otherwise. RevokedByUserID records who withdrew it.
 	RevokedAt       int64
@@ -273,9 +278,20 @@ func (s *AuthService) GrantParentalConsent(
 		ConsentIP:        ip,
 		ConsentUserAgent: userAgent,
 		GrantedAt:        now,
+		// Snapshot the market the child's classification resolved under (its
+		// stored market, else the project's configured default) so the record
+		// proves consent against a NAMED jurisdiction's thresholds.
+		Market: s.resolvedMarketFor(ctx, child),
 	}
 	if err := repo.CreateParentalConsent(ctx, rec); err != nil {
 		return nil, fmt.Errorf("record parental consent: %w", err)
+	}
+
+	// The guardian edge is written with the consent record, before the status
+	// flip, so an active child always has both the consent record AND the
+	// edge that authorizes the adult to manage it.
+	if err := s.upsertGuardianEdge(ctx, consentingUserID, childUserID, ip, userAgent); err != nil {
+		return nil, err
 	}
 
 	if err := repo.UpdateUser(ctx, childUserID, map[string]any{
@@ -306,6 +322,11 @@ func (s *AuthService) finishConsentActivation(
 	ctx context.Context, rec *ParentalConsentRecord, ip, userAgent string,
 ) (*ParentalConsentRecord, error) {
 	now := s.nowMs()
+	// The prior attempt may have failed between the consent record and the
+	// edge write; the upsert is idempotent, so re-assert it here.
+	if err := s.upsertGuardianEdge(ctx, rec.ConsentingUserID, rec.ChildUserID, ip, userAgent); err != nil {
+		return nil, err
+	}
 	if err := s.repo(ctx).UpdateUser(ctx, rec.ChildUserID, map[string]any{
 		"status":     StatusActive,
 		"updated_at": now,
@@ -334,62 +355,117 @@ func (s *AuthService) auditConsentFailure(ctx context.Context, actorID, childID,
 }
 
 // RevokeParentalConsent withdraws a previously-granted parental consent,
-// re-gating the child account (active -> pending_parental_consent) and cutting
-// off its access immediately. Consent must be revocable (all three regimes
-// require a right to withdraw).
+// removes the revoking adult's guardian edge to the child, and — when no
+// other active consent remains for the child — re-gates the child account
+// (active -> pending_parental_consent) and cuts off its access immediately.
+// Consent must be revocable (all three regimes require a right to withdraw).
 //
 // actorUserID is the authenticated caller (from the verified session). Only the
 // adult who granted the consent may revoke it: the identity service models no
 // household, so the recorded consenter is the authority. reason is optional
 // free text retained for the audit trail.
+//
+// It returns the revoked record AND the child account's resulting status: a
+// child left under another guardian's active consent stays StatusActive,
+// while a child whose LAST consent was withdrawn is re-gated to
+// StatusPendingParentalConsent. The caller must report the returned status
+// rather than assuming the re-gate happened.
 func (s *AuthService) RevokeParentalConsent(
 	ctx context.Context, actorUserID, childUserID, reason string,
-) (*ParentalConsentRecord, error) {
+) (*ParentalConsentRecord, string, error) {
 	if actorUserID == "" {
-		return nil, ErrUnauthenticated
+		return nil, "", ErrUnauthenticated
 	}
 	childUserID = strings.TrimSpace(childUserID)
 	if childUserID == "" {
-		return nil, fmt.Errorf("%w: child_user_id is required", ErrInvalidArgument)
+		return nil, "", fmt.Errorf("%w: child_user_id is required", ErrInvalidArgument)
 	}
 
 	repo := s.repo(ctx)
 	active, err := repo.GetActiveParentalConsentForChild(ctx, childUserID)
 	if err != nil {
-		return nil, fmt.Errorf("fetch active consent: %w", err)
+		return nil, "", fmt.Errorf("fetch active consent: %w", err)
 	}
 	if active == nil {
-		return nil, fmt.Errorf("%w: no active parental consent for this child", ErrNotFound)
+		return nil, "", fmt.Errorf("%w: no active parental consent for this child", ErrNotFound)
 	}
 	if active.ConsentingUserID != actorUserID {
-		return nil, fmt.Errorf("%w: only the consenting adult may revoke this consent", ErrPermissionDenied)
+		return nil, "", fmt.Errorf("%w: only the consenting adult may revoke this consent", ErrPermissionDenied)
 	}
 
 	now := s.nowMs()
 
-	// Re-gate the child BEFORE marking the record revoked so the invariant
-	// "an active child always has an active consent record" holds through any
-	// mid-operation failure. A failed record-revoke after re-gating leaves the
-	// child gated (safe) and the record still active; a retry re-gates
-	// idempotently and re-attempts the revoke.
+	// ORDERING — fail CLOSED. Every step below is a separate statement, so a
+	// transient storage failure can land between any two of them, and the
+	// direction the operation half-completes in matters more here than
+	// anywhere else in the service: withdrawal of consent must never leave a
+	// child MORE reachable than before.
+	//
+	// So the access-removing steps run FIRST (re-gate + session cut, then the
+	// edge deletion), and the consent record is marked revoked LAST. A
+	// failure part-way leaves the child gated behind a consent still recorded
+	// as active — visible, safe, and RETRYABLE: the record is still the
+	// "active" one GetActiveParentalConsentForChild returns, so calling
+	// RevokeParentalConsent again re-enters here and finishes the job. The
+	// reverse order is not retryable at all: once the record is marked
+	// revoked, a retry finds no active consent (ErrNotFound) and a re-grant
+	// is refused (the child is not pending), stranding an ACTIVE child with
+	// live sessions and no consent on file.
+	//
+	// Last-guardian rule: the child is re-gated only when no OTHER active
+	// consent remains for it. Under today's single-active-consent model
+	// (grant requires a gated child) that is every revoke; once multiple
+	// guardians can hold consent concurrently, revoking one leaves the child
+	// active under the other.
+	// The record being revoked is still marked active at this point (that
+	// write comes last), so the question is "does any OTHER active record
+	// remain?" — which needs the full list, not the single latest record.
+	activeRecords, err := repo.ListActiveParentalConsentsForChild(ctx, childUserID)
+	if err != nil {
+		return nil, "", fmt.Errorf("check remaining consent: %w", err)
+	}
+	otherConsentRemains := false
+	for _, rec := range activeRecords {
+		if rec.ConsentID != active.ConsentID {
+			otherConsentRemains = true
+			break
+		}
+	}
 	child, err := repo.GetUser(ctx, childUserID)
 	if err != nil {
-		return nil, fmt.Errorf("fetch child user: %w", err)
+		return nil, "", fmt.Errorf("fetch child user: %w", err)
 	}
-	if child != nil && strings.ToLower(child.Status) == StatusActive {
+	childStatus := ""
+	if child != nil {
+		childStatus = child.Status
+	}
+	if !otherConsentRemains && child != nil && strings.ToLower(child.Status) == StatusActive {
 		if err := repo.UpdateUser(ctx, childUserID, map[string]any{
 			"status":     StatusPendingParentalConsent,
 			"updated_at": now,
 		}); err != nil {
-			return nil, fmt.Errorf("re-gate child account: %w", err)
+			return nil, "", fmt.Errorf("re-gate child account: %w", err)
 		}
 		if err := revokeAllUserSessions(ctx, repo, childUserID, now); err != nil {
-			return nil, fmt.Errorf("revoke child sessions: %w", err)
+			return nil, "", fmt.Errorf("revoke child sessions: %w", err)
 		}
+		childStatus = StatusPendingParentalConsent
 	}
 
+	// The guardian edge tracks the consent: revoking removes the
+	// (actor -> child) authorization fact.
+	if err := repo.DeleteGuardianEdge(ctx, actorUserID, childUserID); err != nil {
+		return nil, "", fmt.Errorf("remove guardian edge: %w", err)
+	}
+	s.audit.Log(
+		ctx, audit.EventGuardianEdgeRemoved,
+		audit.WithActor(actorUserID), audit.WithTarget(childUserID), audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"consent_id": active.ConsentID}),
+	)
+
+	// Last: the record itself. Until this lands the operation is retryable.
 	if err := repo.MarkParentalConsentRevoked(ctx, active.ConsentID, actorUserID, now); err != nil {
-		return nil, fmt.Errorf("revoke parental consent: %w", err)
+		return nil, "", fmt.Errorf("revoke parental consent: %w", err)
 	}
 	active.RevokedAt = now
 	active.RevokedByUserID = actorUserID
@@ -397,7 +473,11 @@ func (s *AuthService) RevokeParentalConsent(
 	s.audit.Log(
 		ctx, audit.EventParentalConsentRevoked,
 		audit.WithActor(actorUserID), audit.WithTarget(childUserID), audit.WithSuccess(true),
-		audit.WithDetails(map[string]any{"consent_id": active.ConsentID, "reason": reason}),
+		audit.WithDetails(map[string]any{
+			"consent_id":   active.ConsentID,
+			"reason":       reason,
+			"child_status": childStatus,
+		}),
 	)
-	return active, nil
+	return active, childStatus, nil
 }

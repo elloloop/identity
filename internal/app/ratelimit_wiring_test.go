@@ -193,3 +193,83 @@ func TestBuildRateLimits_AssurancePathsLimited(t *testing.T) {
 		assert.Equal(t, http.StatusTooManyRequests, codes[2], "%s must 429 past the quota", p)
 	}
 }
+
+// TestBuildRateLimits_ManagedMinorPathsLimited asserts the endpoints the
+// managed-minor epic added are metered. Two distinct hazards: every one of
+// them verifies a step-up password (a bcrypt) before it can refuse, so an
+// unmetered path is an unthrottled password-guessing oracle against a stolen
+// session; and CreateManagedChildAccount additionally inserts a user row per
+// admitted call, the same unbounded row-insert primitive SignInAnonymously is
+// quota'd for.
+func TestBuildRateLimits_ManagedMinorPathsLimited(t *testing.T) {
+	cfg := &config.Config{
+		RateLimitWindowSeconds: 60,
+		RateLimitSignupPerIP:   2,
+		RateLimitLoginPerIP:    2,
+		// Other quotas non-zero so unrelated paths stay enabled.
+		RateLimitResetPerIP:        5,
+		RateLimitVerifyPerIP:       20,
+		RateLimitPasswordlessPerIP: 5,
+		RateLimitPhonePerIP:        5,
+		RateLimitBootstrapPerIP:    5,
+	}
+	limits := buildRateLimits(cfg)
+
+	byPath := map[string]middleware.PathLimit{}
+	for _, l := range limits {
+		byPath[l.PathPrefix] = l
+	}
+	metered := []string{
+		"/identity.v1.IdentityService/CreateManagedChildAccount",
+		"/identity.v1.IdentityService/SubmitDateOfBirth",
+		"/identity.v1.IdentityService/BeginPasskeyRegistration",
+		"/identity.v1.IdentityService/CompletePasskeyRegistration",
+		"/identity.v1.IdentityService/GrantParentalConsent",
+	}
+	metered = append(metered, guardianManagementPaths...)
+	for _, p := range metered {
+		require.Contains(t, byPath, p, "path %s must carry a rate limit", p)
+	}
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	// Account creation is metered on its own budget.
+	assertQuotaExhausts(t, handler, "/identity.v1.IdentityService/CreateManagedChildAccount", "7.7.7.7", 2)
+
+	// The seven guardian-management RPCs share ONE budget: two calls to
+	// different RPCs exhaust it, and the third is refused whichever RPC it
+	// hits. That is the point of the shared tag — the surface is capped as a
+	// whole, not seven times over.
+	shared := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	codes := make([]int, 0, 3)
+	for _, p := range guardianManagementPaths[:3] {
+		req := httptest.NewRequest(http.MethodPost, p, nil)
+		req.Header.Set(middleware.ClientIPHeader, "8.8.8.8")
+		w := httptest.NewRecorder()
+		shared.ServeHTTP(w, req)
+		codes = append(codes, w.Code)
+	}
+	assert.Equal(t, []int{http.StatusOK, http.StatusOK, http.StatusTooManyRequests}, codes,
+		"the guardian-management surface shares one per-IP budget")
+}
+
+// assertQuotaExhausts drives quota+1 requests at path from one IP and asserts
+// the last is refused.
+func assertQuotaExhausts(t *testing.T, handler http.Handler, path, ip string, quota int) {
+	t.Helper()
+	for i := 0; i < quota; i++ {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, ip)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "%s request %d must be admitted", path, i+1)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	req.Header.Set(middleware.ClientIPHeader, ip)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusTooManyRequests, w.Code, "%s must refuse over quota", path)
+}

@@ -67,6 +67,7 @@ type Repo struct {
 	oauthIdentities     map[string]*service.OAuthIdentity
 	idvRecords          map[string]*service.IdentityVerificationRecord
 	parentalConsents    map[string]*service.ParentalConsentRecord
+	guardianEdges       map[string]*service.GuardianEdge
 	sessions            map[string]*service.SessionRecord
 	auditEvents         map[string]*service.AuditEvent
 }
@@ -122,6 +123,7 @@ func newStore() *Repo {
 		oauthIdentities:     make(map[string]*service.OAuthIdentity),
 		idvRecords:          make(map[string]*service.IdentityVerificationRecord),
 		parentalConsents:    make(map[string]*service.ParentalConsentRecord),
+		guardianEdges:       make(map[string]*service.GuardianEdge),
 		sessions:            make(map[string]*service.SessionRecord),
 		auditEvents:         make(map[string]*service.AuditEvent),
 	}
@@ -217,6 +219,24 @@ func (r *Repo) FindUserByEmail(_ context.Context, email string) (*service.User, 
 	defer r.mu.Unlock()
 	for _, u := range r.users {
 		if u.Email == email {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+// FindUserByUsername resolves a managed child account by its project-unique
+// username, mirroring the SQL drivers' partial-index lookup (empty matches
+// nobody).
+func (r *Repo) FindUserByUsername(_ context.Context, username string) (*service.User, error) {
+	if username == "" {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, u := range r.users {
+		if u.Username != "" && u.Username == username {
 			cp := *u
 			return &cp, nil
 		}
@@ -360,6 +380,11 @@ func (r *Repo) CreateUser(_ context.Context, u *service.User) (string, error) {
 		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
 			return "", fmt.Errorf("external_id %q: %w", u.ExternalID, service.ErrAlreadyExists)
 		}
+		// Mirrors the SQL drivers' partial unique index on
+		// (project_id, username) WHERE username <> ''.
+		if u.Username != "" && existing.Username == u.Username {
+			return "", fmt.Errorf("username %q: %w", u.Username, service.ErrAlreadyExists)
+		}
 	}
 	// Honour a caller-provided id (matching the postgres/sqlite drivers).
 	// Passkey-first signup mints the user id during the Begin step and binds
@@ -405,6 +430,16 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 			}
 		}
 	}
+	// Same for the (project_id, username) partial unique index.
+	if v, ok := fields["username"]; ok {
+		if username, _ := v.(string); username != "" {
+			for id, other := range r.users {
+				if id != userID && other.Username == username {
+					return fmt.Errorf("username %q: %w", username, service.ErrAlreadyExists)
+				}
+			}
+		}
+	}
 	applyUserFields(u, fields)
 	return nil
 }
@@ -416,6 +451,28 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 // audit store has no in-memory equivalent so nothing to retain. The
 // phone-verification codes are user-keyed and durable, so they are
 // drained here like the other user-owned types.
+// SetDateOfBirthOnce sets the date of birth only while the account still has
+// none, under the same lock hold the SQL drivers get from a single UPDATE.
+func (r *Repo) SetDateOfBirthOnce(
+	_ context.Context, userID string, dobMs int64, status string, nowMs int64,
+) (bool, error) {
+	if userID == "" {
+		return false, errors.New("memory: SetDateOfBirthOnce: missing user id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.users[userID]
+	if !ok || u.DateOfBirthMs != 0 {
+		return false, nil
+	}
+	u.DateOfBirthMs = dobMs
+	if status != "" {
+		u.Status = status
+	}
+	u.UpdatedAt = time.UnixMilli(nowMs)
+	return true, nil
+}
+
 func (r *Repo) DeleteUser(_ context.Context, userID string) error {
 	if userID == "" {
 		return nil
@@ -446,6 +503,14 @@ func (r *Repo) deleteUserLocked(userID string) {
 	deleteByUser(r.oauthIdentities, userID, func(o *service.OAuthIdentity) string { return o.UserID })
 	deleteByUser(r.idvRecords, userID, func(rec *service.IdentityVerificationRecord) string { return rec.UserID })
 	deleteByUser(r.phoneVerifyCodes, userID, func(c *service.PhoneVerificationCodeRecord) string { return c.UserID })
+	// Guardian edges are live authorization state, so — matching the SQL
+	// drivers' ON DELETE CASCADE on both user FK columns — they drain when
+	// the user is deleted as guardian OR as child.
+	for key, e := range r.guardianEdges {
+		if e.GuardianUserID == userID || e.ChildUserID == userID {
+			delete(r.guardianEdges, key)
+		}
+	}
 	delete(r.users, userID)
 }
 
@@ -510,74 +575,79 @@ func fieldInt64(v any) (int64, bool) {
 	return 0, false
 }
 
+// The three field tables below map a Repository UpdateUser field name to the
+// User field it writes, one table per underlying type. The SQL drivers key
+// the same field names to columns (userFieldColumns); keeping the memory
+// driver's mapping a table too means a new user field is one line per driver
+// rather than another switch arm, and holds applyUserFields flat.
+//
+// A value of the wrong type is SKIPPED, not written as the zero value —
+// matching what the SQL drivers do (nullableString and friends return
+// ok=false and the field is left out of the UPDATE).
+var (
+	userStringFields = map[string]func(*service.User) *string{
+		"name":           func(u *service.User) *string { return &u.Name },
+		"email":          func(u *service.User) *string { return &u.Email },
+		"avatar_url":     func(u *service.User) *string { return &u.AvatarURL },
+		"password_hash":  func(u *service.User) *string { return &u.PasswordHash },
+		"status":         func(u *service.User) *string { return &u.Status },
+		"recovery_email": func(u *service.User) *string { return &u.RecoveryEmail },
+		"external_id":    func(u *service.User) *string { return &u.ExternalID },
+		"phone_number":   func(u *service.User) *string { return &u.PhoneNumber },
+		"market":         func(u *service.User) *string { return &u.Market },
+		"username":       func(u *service.User) *string { return &u.Username },
+	}
+
+	userBoolFields = map[string]func(*service.User) *bool{
+		"totp_required":  func(u *service.User) *bool { return &u.TotpRequired },
+		"email_verified": func(u *service.User) *bool { return &u.EmailVerified },
+		"is_anonymous":   func(u *service.User) *bool { return &u.IsAnonymous },
+		"phone_verified": func(u *service.User) *bool { return &u.PhoneVerified },
+	}
+
+	userInt64Fields = map[string]func(*service.User) *int64{
+		"locked_until":             func(u *service.User) *int64 { return &u.LockedUntil },
+		"last_login_at":            func(u *service.User) *int64 { return &u.LastLoginAtMs },
+		"email_verified_at":        func(u *service.User) *int64 { return &u.EmailVerifiedAt },
+		"anonymous_last_seen_ms":   func(u *service.User) *int64 { return &u.AnonymousLastSeenMs },
+		"phone_verified_at":        func(u *service.User) *int64 { return &u.PhoneVerifiedAt },
+		"date_of_birth_ms":         func(u *service.User) *int64 { return &u.DateOfBirthMs },
+		"deletion_scheduled_at_ms": func(u *service.User) *int64 { return &u.DeletionScheduledAtMs },
+	}
+)
+
+// applyUserFields writes a Repository UpdateUser patch onto a stored user.
+// An unknown field name is ignored, exactly as the SQL drivers ignore one
+// that names no column.
 func applyUserFields(u *service.User, fields map[string]any) {
 	for k, v := range fields {
+		if field, ok := userStringFields[k]; ok {
+			if s, ok := v.(string); ok {
+				*field(u) = s
+			}
+			continue
+		}
+		if field, ok := userBoolFields[k]; ok {
+			if b, ok := v.(bool); ok {
+				*field(u) = b
+			}
+			continue
+		}
+		if field, ok := userInt64Fields[k]; ok {
+			if x, ok := fieldInt64(v); ok {
+				*field(u) = x
+			}
+			continue
+		}
+		// The two fields whose stored form is not the wire form.
 		switch k {
-		case "name":
-			u.Name, _ = v.(string)
-		case "email":
-			u.Email, _ = v.(string)
-		case "avatar_url":
-			u.AvatarURL, _ = v.(string)
-		case "password_hash":
-			u.PasswordHash, _ = v.(string)
-		case "status":
-			u.Status, _ = v.(string)
-		case "totp_required":
-			u.TotpRequired, _ = v.(bool)
 		case "failed_login_count":
 			if x, ok := fieldInt64(v); ok {
 				u.FailedLoginCount = int(x)
 			}
-		case "locked_until":
-			if x, ok := fieldInt64(v); ok {
-				u.LockedUntil = x
-			}
 		case "updated_at":
 			if x, ok := fieldInt64(v); ok {
 				u.UpdatedAt = time.UnixMilli(x)
-			}
-		case "last_login_at":
-			if x, ok := fieldInt64(v); ok {
-				u.LastLoginAtMs = x
-			}
-		case "recovery_email":
-			u.RecoveryEmail, _ = v.(string)
-		case "email_verified":
-			if b, ok := v.(bool); ok {
-				u.EmailVerified = b
-			}
-		case "email_verified_at":
-			if x, ok := fieldInt64(v); ok {
-				u.EmailVerifiedAt = x
-			}
-		case "external_id":
-			u.ExternalID, _ = v.(string)
-		case "is_anonymous":
-			if b, ok := v.(bool); ok {
-				u.IsAnonymous = b
-			}
-		case "anonymous_last_seen_ms":
-			if x, ok := fieldInt64(v); ok {
-				u.AnonymousLastSeenMs = x
-			}
-		case "phone_number":
-			u.PhoneNumber, _ = v.(string)
-		case "phone_verified":
-			if b, ok := v.(bool); ok {
-				u.PhoneVerified = b
-			}
-		case "phone_verified_at":
-			if x, ok := fieldInt64(v); ok {
-				u.PhoneVerifiedAt = x
-			}
-		case "date_of_birth_ms":
-			if x, ok := fieldInt64(v); ok {
-				u.DateOfBirthMs = x
-			}
-		case "deletion_scheduled_at_ms":
-			if x, ok := fieldInt64(v); ok {
-				u.DeletionScheduledAtMs = x
 			}
 		}
 	}
@@ -1606,6 +1676,28 @@ func (r *Repo) GetActiveParentalConsentForChild(_ context.Context, childUserID s
 	return &cp, nil
 }
 
+// ListActiveParentalConsentsForChild returns every non-revoked consent for the
+// child, newest grant first (ties broken by id, matching the SQL drivers).
+func (r *Repo) ListActiveParentalConsentsForChild(_ context.Context, childUserID string) ([]*service.ParentalConsentRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*service.ParentalConsentRecord, 0, 2)
+	for _, rec := range r.parentalConsents {
+		if rec.ChildUserID != childUserID || rec.RevokedAt != 0 {
+			continue
+		}
+		cp := *rec
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].GrantedAt != out[j].GrantedAt {
+			return out[i].GrantedAt > out[j].GrantedAt
+		}
+		return out[i].ConsentID < out[j].ConsentID
+	})
+	return out, nil
+}
+
 func (r *Repo) MarkParentalConsentRevoked(_ context.Context, consentID, revokedByUserID string, atMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1616,6 +1708,149 @@ func (r *Repo) MarkParentalConsentRevoked(_ context.Context, consentID, revokedB
 	rec.RevokedAt = atMs
 	rec.RevokedByUserID = revokedByUserID
 	return nil
+}
+
+// ── Guardian edges ──────────────────────────────────────────────────
+
+// CreateManagedChildAccount persists the three artifacts of the
+// parent-creates-child flow — the child user row, the (guardian -> child)
+// edge, and the parental-consent record — under ONE lock hold, the memory
+// driver's equivalent of the SQL drivers' single transaction: a failure at
+// any step (a duplicate username) leaves NONE of the three behind.
+func (r *Repo) CreateManagedChildAccount(_ context.Context, u *service.User, edge *service.GuardianEdge, consent *service.ParentalConsentRecord) error {
+	if u == nil || edge == nil || consent == nil {
+		return errors.New("memory: CreateManagedChildAccount: nil user, edge, or consent")
+	}
+	if edge.GuardianUserID == "" {
+		return errors.New("memory: CreateManagedChildAccount: missing guardian user id")
+	}
+	if consent.ConsentID == "" {
+		return errors.New("memory: CreateManagedChildAccount: missing consent id")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Mirror the SQL drivers' partial unique index on (project_id, username)
+	// WHERE username <> '' — checked BEFORE any mutation so a duplicate leaves
+	// the store untouched, identically to a rolled-back transaction.
+	if u.Username != "" {
+		for _, existing := range r.users {
+			if existing.Username == u.Username {
+				return fmt.Errorf("username %q: %w", u.Username, service.ErrAlreadyExists)
+			}
+		}
+	}
+	// The SQL drivers enforce these two inside the same transaction, via
+	// users_project_email_partial_uidx and the parental_consents primary key,
+	// so a colliding email or a reused consent id is ErrAlreadyExists there.
+	// Checking them here keeps the drivers identical — and stops a reused
+	// consent id from overwriting a retained compliance artifact in place.
+	if u.Email != "" {
+		for _, existing := range r.users {
+			if strings.EqualFold(existing.Email, u.Email) {
+				return fmt.Errorf("email %q: %w", u.Email, service.ErrAlreadyExists)
+			}
+		}
+	}
+	if _, clash := r.parentalConsents[consent.ConsentID]; clash {
+		return fmt.Errorf("consent %q: %w", consent.ConsentID, service.ErrAlreadyExists)
+	}
+	// Honour a caller-provided id, matching CreateUser.
+	id := u.ID
+	if id == "" {
+		id = r.nextID()
+	} else if _, clash := r.users[id]; clash {
+		return fmt.Errorf("user id %q: %w", id, service.ErrAlreadyExists)
+	}
+	u.ID = id
+	cp := *u
+	r.users[id] = &cp
+
+	edge.ProjectID = r.projectID
+	edge.ChildUserID = id
+	ecp := *edge
+	r.guardianEdges[guardianEdgeKey(edge.GuardianUserID, id)] = &ecp
+
+	consent.ProjectID = r.projectID
+	consent.ChildUserID = id
+	ccp := *consent
+	r.parentalConsents[consent.ConsentID] = &ccp
+	return nil
+}
+
+// guardianEdgeKey keys the guardianEdges map on the (guardian, child) pair;
+// the NUL separator cannot appear in a user id.
+func guardianEdgeKey(guardianUserID, childUserID string) string {
+	return guardianUserID + "\x00" + childUserID
+}
+
+func (r *Repo) UpsertGuardianEdge(_ context.Context, e *service.GuardianEdge) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e.GuardianUserID == "" || e.ChildUserID == "" {
+		return errors.New("guardian edge: missing guardian or child user id")
+	}
+	key := guardianEdgeKey(e.GuardianUserID, e.ChildUserID)
+	if _, exists := r.guardianEdges[key]; exists {
+		// Idempotent re-upsert: preserve the original created_at_ms.
+		return nil
+	}
+	e.ProjectID = r.projectID
+	cp := *e
+	r.guardianEdges[key] = &cp
+	return nil
+}
+
+func (r *Repo) DeleteGuardianEdge(_ context.Context, guardianUserID, childUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.guardianEdges, guardianEdgeKey(guardianUserID, childUserID))
+	return nil
+}
+
+func (r *Repo) GetGuardianEdge(_ context.Context, guardianUserID, childUserID string) (*service.GuardianEdge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.guardianEdges[guardianEdgeKey(guardianUserID, childUserID)]
+	if !ok {
+		return nil, nil
+	}
+	cp := *e
+	return &cp, nil
+}
+
+func (r *Repo) ListGuardiansOfChild(_ context.Context, childUserID string) ([]*service.GuardianEdge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.GuardianEdge
+	for _, e := range r.guardianEdges {
+		if e.ChildUserID != childUserID {
+			continue
+		}
+		cp := *e
+		out = append(out, &cp)
+	}
+	// Stable ordering identical to the SQL drivers (ORDER BY
+	// guardian_user_id): the listing reaches clients through GetGuardians,
+	// so map-iteration order would make the same call answer differently
+	// every time on this driver alone.
+	sort.Slice(out, func(i, j int) bool { return out[i].GuardianUserID < out[j].GuardianUserID })
+	return out, nil
+}
+
+func (r *Repo) ListChildrenOfGuardian(_ context.Context, guardianUserID string) ([]*service.GuardianEdge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.GuardianEdge
+	for _, e := range r.guardianEdges {
+		if e.GuardianUserID != guardianUserID {
+			continue
+		}
+		cp := *e
+		out = append(out, &cp)
+	}
+	// Stable ordering identical to the SQL drivers (ORDER BY child_user_id).
+	sort.Slice(out, func(i, j int) bool { return out[i].ChildUserID < out[j].ChildUserID })
+	return out, nil
 }
 
 // ── Sweepers ──────────────────────────────────────────────────────

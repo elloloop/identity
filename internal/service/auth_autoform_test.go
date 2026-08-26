@@ -43,7 +43,7 @@ func TestPasswordSignup_AutoFormsTenant_ForCompanyDomain(t *testing.T) {
 	af := &fakeAutoFormer{}
 	svc.WithTenantAutoFormer(af)
 
-	res, err := svc.PasswordSignup(withProject("proj-1"), "alice@acme.com", "Str0ng!Pass1", "Alice", "", 0)
+	res, err := svc.PasswordSignup(withProject("proj-1"), "alice@acme.com", "Str0ng!Pass1", "Alice", "", 0, "")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 
@@ -59,7 +59,7 @@ func TestPasswordSignup_SkipsAutoForm_ForPublicDomain(t *testing.T) {
 	af := &fakeAutoFormer{}
 	svc.WithTenantAutoFormer(af)
 
-	_, err := svc.PasswordSignup(withProject("proj-1"), "bob@gmail.com", "Str0ng!Pass1", "Bob", "", 0)
+	_, err := svc.PasswordSignup(withProject("proj-1"), "bob@gmail.com", "Str0ng!Pass1", "Bob", "", 0, "")
 	require.NoError(t, err)
 	require.Empty(t, af.calls, "a public email domain must not auto-form a tenant")
 }
@@ -71,7 +71,7 @@ func TestPasswordSignup_SkipsAutoForm_WhenNoProject(t *testing.T) {
 	svc.WithTenantAutoFormer(af)
 	// cfg.DefaultProjectID is empty in the test config and no scope is set.
 
-	_, err := svc.PasswordSignup(context.Background(), "dana@acme.com", "Str0ng!Pass1", "Dana", "", 0)
+	_, err := svc.PasswordSignup(context.Background(), "dana@acme.com", "Str0ng!Pass1", "Dana", "", 0, "")
 	require.NoError(t, err)
 	require.Empty(t, af.calls, "no resolved project → no auto-formation")
 }
@@ -83,7 +83,7 @@ func TestPasswordSignup_AutoFormError_DoesNotFailSignup(t *testing.T) {
 	af := &fakeAutoFormer{err: errors.New("boom")}
 	svc.WithTenantAutoFormer(af)
 
-	res, err := svc.PasswordSignup(withProject("proj-1"), "carol@acme.com", "Str0ng!Pass1", "Carol", "", 0)
+	res, err := svc.PasswordSignup(withProject("proj-1"), "carol@acme.com", "Str0ng!Pass1", "Carol", "", 0, "")
 	require.NoError(t, err, "auto-form failure must not fail signup")
 	require.NotNil(t, res)
 	require.Len(t, af.calls, 1)
@@ -94,7 +94,7 @@ func TestPasswordSignup_NoAutoFormer_NoOp(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	// autoFormer left nil.
 
-	res, err := svc.PasswordSignup(withProject("proj-1"), "erin@acme.com", "Str0ng!Pass1", "Erin", "", 0)
+	res, err := svc.PasswordSignup(withProject("proj-1"), "erin@acme.com", "Str0ng!Pass1", "Erin", "", 0, "")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 }

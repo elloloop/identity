@@ -58,6 +58,10 @@ const (
 	// purge once the grace window elapses; a successful interactive login
 	// during the window cancels it and restores StatusActive.
 	StatusPendingDeletion = "pending_deletion"
+	// StatusDeactivated is a suspended account: it exists, cannot be issued
+	// tokens, and is reversible by whoever suspended it (an admin via
+	// ReactivateUser, a guardian via ReactivateManagedChildAccount).
+	StatusDeactivated = "deactivated"
 )
 
 // User represents a user in the identity system.
@@ -85,6 +89,21 @@ type User struct {
 	PhoneVerified    bool
 	PhoneVerifiedAt  int64 // epoch ms; 0 = never verified
 	DateOfBirthMs    int64 // epoch ms of date of birth; 0 = unknown (persisted)
+	// Market is the jurisdiction/market code (e.g. "IN", "US") the account
+	// belongs to, captured at account creation or set via SetAccountMarket
+	// (persisted, canonicalized to the trimmed upper-case form). When the
+	// project configures per-jurisdiction thresholds it selects the boundary
+	// pair the age band derives from; empty means the project default or the
+	// deployment-wide env thresholds apply.
+	Market string
+	// Username is the parent-chosen, project-unique handle identifying a
+	// managed child account (children often have no email). Lowercase
+	// alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase
+	// before storage; unique within the project when non-empty (the SQL
+	// drivers' partial unique index), and usable as the PasswordLogin
+	// identifier. Empty on every account not created via
+	// CreateManagedChildAccount.
+	Username string
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service
 	// deletion. Set when the owner requests deletion; cleared on cancel or a
@@ -195,6 +214,11 @@ type PollQrResult struct {
 type Repository interface {
 	// Users
 	FindUserByEmail(ctx context.Context, email string) (*User, error)
+	// FindUserByUsername resolves a managed child account by its
+	// project-unique username (empty username matches nobody). It backs
+	// username-identified PasswordLogin and the create-time uniqueness
+	// pre-check.
+	FindUserByUsername(ctx context.Context, username string) (*User, error)
 	GetUser(ctx context.Context, userID string) (*User, error)
 	CreateUser(ctx context.Context, u *User) (string, error) // returns node ID
 	UpdateUser(ctx context.Context, userID string, fields map[string]any) error
@@ -529,7 +553,52 @@ type Repository interface {
 	// child or the adult it references, to defend a later regulatory inquiry.
 	CreateParentalConsent(ctx context.Context, r *ParentalConsentRecord) error
 	GetActiveParentalConsentForChild(ctx context.Context, childUserID string) (*ParentalConsentRecord, error)
+	// ListActiveParentalConsentsForChild returns EVERY non-revoked consent
+	// record for a child, newest grant first. Only one can be active today
+	// (a grant requires a gated child, and a gated child has no active
+	// consent), but the last-guardian rule in RevokeParentalConsent has to
+	// ask "does another guardian still consent?" about a record it has not
+	// yet marked revoked — a question the single-record lookup above cannot
+	// answer. Empty slice, not an error, when there are none.
+	ListActiveParentalConsentsForChild(ctx context.Context, childUserID string) ([]*ParentalConsentRecord, error)
+
+	// SetDateOfBirthOnce stores a date of birth ONLY while the account still
+	// has none, and reports whether this caller was the one that set it. It
+	// is a compare-and-set because the completion ticket is reusable within
+	// its TTL: two concurrent SubmitDateOfBirth calls can both read
+	// date_of_birth_ms = 0, and an unconditional write lets the adult-band
+	// one mint a session while the child-band one gates the account. Exactly
+	// one caller wins, and only the winner issues tokens.
+	//
+	// status, when non-empty, is applied in the same statement (the child
+	// band's re-gate) so the band and the status can never disagree.
+	SetDateOfBirthOnce(ctx context.Context, userID string, dobMs int64, status string, nowMs int64) (bool, error)
 	MarkParentalConsentRevoked(ctx context.Context, consentID, revokedByUserID string, atMs int64) error
+
+	// Guardian edges: the authorization
+	// fact that guardian_user_id manages child_user_id. Unlike consent
+	// records, edges are live authorization state — they carry users foreign
+	// keys and are removed by DeleteUser of either side.
+	//
+	// UpsertGuardianEdge is idempotent on (guardian, child): re-adding an
+	// existing edge is a no-op that preserves the original CreatedAtMs.
+	// DeleteGuardianEdge removes the edge if present (absent is not an
+	// error). GetGuardianEdge returns (nil, nil) when no edge exists.
+	UpsertGuardianEdge(ctx context.Context, e *GuardianEdge) error
+	DeleteGuardianEdge(ctx context.Context, guardianUserID, childUserID string) error
+	GetGuardianEdge(ctx context.Context, guardianUserID, childUserID string) (*GuardianEdge, error)
+	ListGuardiansOfChild(ctx context.Context, childUserID string) ([]*GuardianEdge, error)
+	ListChildrenOfGuardian(ctx context.Context, guardianUserID string) ([]*GuardianEdge, error)
+
+	// CreateManagedChildAccount atomically persists the three artifacts of
+	// the parent-creates-child flow: the child user row, the (guardian ->
+	// child) edge, and the parental-consent record. The implementation binds
+	// edge.ChildUserID and consent.ChildUserID to the inserted user's id, so
+	// callers leave them unset. ALL THREE commit or NONE do — a partial state
+	// (an account without its edge, an edge without its consent record) must
+	// never be observable. A username that already exists in the project
+	// returns ErrAlreadyExists with nothing committed (see conformance).
+	CreateManagedChildAccount(ctx context.Context, u *User, edge *GuardianEdge, consent *ParentalConsentRecord) error
 
 	// Email-change tokens (primary email rotation, double-opt-in)
 	CreateEmailChangeToken(ctx context.Context, t *EmailChangeToken) error
@@ -957,6 +1026,19 @@ var (
 	// clients match on to show kind, child-appropriate copy instead of a raw
 	// error. The token is part of the wire contract — do not reword it.
 	ErrProductAgeRestricted = errors.New("product_age_restricted: this account is not old enough for this product")
+	// ErrDOBRequired is returned when GATEWAY_AGEGATE_REQUIRE_DOB is on and
+	// authentication succeeded for an account with no date of birth on file:
+	// no session is minted until the client completes the DOB step through
+	// SubmitDateOfBirth. It maps to CodeFailedPrecondition, and its message
+	// leads with the stable `dob_required` token clients match on to show the
+	// completion UI. The token is part of the wire contract — do not reword
+	// it. The returned error is a *DOBRequiredError carrying the completion
+	// ticket the client submits with the date of birth.
+	ErrDOBRequired = errors.New("dob_required: date of birth required before sign-in can complete")
+	// ErrDOBAlreadySet is returned by SubmitDateOfBirth when the account
+	// already has a date of birth: the completion step sets it exactly once
+	// and is not a DOB-change channel.
+	ErrDOBAlreadySet = errors.New("date of birth is already set for this account")
 	// ErrProjectSecretsKeyMissing is returned when an admin write carries a
 	// plaintext provider secret to encrypt but GATEWAY_PROJECT_SECRETS_KEY is
 	// not configured, so the server cannot encrypt it for storage. It is a
@@ -1215,6 +1297,31 @@ type AuthService struct {
 	// cache them. Projects with no override share the global s.passkeys.
 	passkeyRPCache   map[string]*passkeys.WebAuthnService
 	passkeyRPCacheMu sync.RWMutex
+
+	// purger runs the hard-delete erasure cascade for one account. It is the
+	// AdminService (the owner of the cascade the admin DeleteUser RPC and the
+	// account-deletion sweeper already share), injected rather than
+	// reimplemented so guardian-initiated erasure of a child account cannot
+	// drift from it. nil disables DeleteManagedChildAccount
+	// (ErrServiceUnavailable) — the same shape every other optional
+	// dependency takes.
+	purger AccountPurger
+}
+
+// AccountPurger runs the hard-delete erasure cascade for a single, already
+// authorized account: session and refresh-token revocation, graph-edge
+// cleanup, the Repository delete, and the audit + lifecycle events that go
+// with it. *AdminService implements it; the caller owns authorization.
+type AccountPurger interface {
+	PurgeAccount(ctx context.Context, actorUserID string, u *User) error
+}
+
+// WithAccountPurger wires the account-erasure cascade (the AdminService) and
+// returns the service for chaining. app.New calls it once at construction,
+// after the AdminService exists.
+func (s *AuthService) WithAccountPurger(p AccountPurger) *AuthService {
+	s.purger = p
+	return s
 }
 
 // WithEventPublisher wires the optional user-lifecycle event publisher and
@@ -1439,18 +1546,20 @@ func BuildAgeGate(cfg *config.Config, logger *zap.Logger) agegate.Determiner {
 }
 
 // stampAgeBand derives IsMinor / AgeBand for a user from their stored date of
-// birth and the active age-gate, mutating the user in place. It is a no-op
-// (leaves the zero-values) when age-gating is disabled or no DOB is on file.
-func (s *AuthService) stampAgeBand(u *User) {
+// birth and the age-gate determiner their market resolves to (see
+// determinerForUser), mutating the user in place. It is a no-op (leaves the
+// zero-values) when age-gating is disabled or no DOB is on file.
+func (s *AuthService) stampAgeBand(ctx context.Context, u *User) {
 	if u == nil {
 		return
 	}
 	u.IsMinor = false
 	u.AgeBand = ""
-	if !s.ageGate.Enabled() {
+	gate := s.determinerForUser(ctx, u)
+	if !gate.Enabled() {
 		return
 	}
-	dec := s.ageGate.Determine(u.DateOfBirthMs, s.nowFunc())
+	dec := gate.Determine(u.DateOfBirthMs, s.nowFunc())
 	u.IsMinor = dec.IsMinor
 	u.AgeBand = string(dec.Band)
 }
@@ -1583,11 +1692,19 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// Stamp the derived minor flag from the stored DOB so the token carries
 	// an authoritative is_minor claim when age-gating is on. No-op (false)
 	// when the gate is off or no DOB is on file.
-	s.stampAgeBand(user)
+	s.stampAgeBand(ctx, user)
 
 	// The requested product's age guardrail, checked on the derived band the
 	// stamp above produced and before any session state is written.
 	if err := s.enforceProductAgeGate(ctx, user); err != nil {
+		return "", "", err
+	}
+
+	// The required-DOB completion gate, checked before any session state is
+	// written. Like the product gate it lives here, at the chokepoint, so
+	// every session-issuing path — initial login, refresh, and any path
+	// added later — is covered by construction.
+	if err := s.enforceDOBRequired(ctx, user, ipAddr, userAgent); err != nil {
 		return "", "", err
 	}
 
@@ -1996,6 +2113,20 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		if err := s.enforceProductAgeGate(ctx, timeoutUser); err != nil {
 			return nil, "", "", err
 		}
+	}
+
+	// Same reasoning for the required-DOB gate, and it applies to EVERY
+	// account, not only anonymous ones. Enabling GATEWAY_AGEGATE_REQUIRE_DOB
+	// makes every pre-existing dob-less session fail its next rotation; if
+	// that refusal came after the consume, the token would be burnt, and the
+	// retry an SDK makes on a failed rotation would land on replay detection
+	// — which deletes every refresh token the user has and signs them out on
+	// all their devices. The gate still runs inside
+	// issueTokensWithSessionStart (so nothing is bypassed); this early pass
+	// exists only so the refusal is non-destructive and the client can
+	// complete the step and rotate normally.
+	if err := s.enforceDOBRequired(ctx, timeoutUser, ipAddr, userAgent); err != nil {
+		return nil, "", "", err
 	}
 
 	// Rotation. ConsumeRefreshTokenByHash is the serialization point: it

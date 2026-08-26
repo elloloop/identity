@@ -202,7 +202,7 @@ func TestPasswordlessLinksToExistingPasswordAccount(t *testing.T) {
 	svc, repo, rec := passwordlessSvc(t)
 	ctx := context.Background()
 
-	signup, err := svc.PasswordSignup(ctx, "shared@test.com", "Str0ng!Passw0rd", "Shared", "", 0)
+	signup, err := svc.PasswordSignup(ctx, "shared@test.com", "Str0ng!Passw0rd", "Shared", "", 0, "")
 	require.NoError(t, err)
 	passwordUserID := signup.User.ID
 	require.NotEmpty(t, passwordUserID)
@@ -238,7 +238,7 @@ func TestPasswordlessLinksToExistingPasswordAccount(t *testing.T) {
 func TestPasswordThenPasswordlessSameUser(t *testing.T) {
 	svc, _, rec := passwordlessSvc(t)
 	ctx := context.Background()
-	signup, err := svc.PasswordSignup(ctx, "x@test.com", "Str0ng!Passw0rd", "X", "", 0)
+	signup, err := svc.PasswordSignup(ctx, "x@test.com", "Str0ng!Passw0rd", "X", "", 0, "")
 	require.NoError(t, err)
 	rec.Reset()
 	require.NoError(t, svc.RequestEmailLoginCode(ctx, "x@test.com"))

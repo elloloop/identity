@@ -21,6 +21,10 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/RedeemOAuthCode": true,
 	"/identity.v1.IdentityService/PasswordLogin":   true,
 	"/identity.v1.IdentityService/PasswordSignup":  true,
+	// Required-DOB completion: the caller holds the short-lived completion
+	// ticket from the dob_required error detail, not a session JWT — no
+	// session exists until the DOB is submitted.
+	"/identity.v1.IdentityService/SubmitDateOfBirth": true,
 	// Passwordless email login: the caller is anonymous, proving control
 	// of an inbox via an OTP code or a magic-link token rather than a JWT.
 	"/identity.v1.IdentityService/RequestEmailLoginCode": true,
@@ -42,6 +46,15 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/GetCurrentUser":       true,
 	"/identity.v1.IdentityService/BeginPasskeyLogin":    true,
 	"/identity.v1.IdentityService/CompletePasskeyLogin": true,
+	// Passkey registration is exempt so a managed child's device can run the
+	// ceremony with NO session, presenting its enrolment ticket in the request
+	// body. The pair is NOT unauthenticated: the Connect handler requires the
+	// session-injected identity header (set here when a session token is
+	// present) or a verified `passkey_enrolment` ticket, and refuses both
+	// absent. A purpose JWT presented as a Bearer token still never
+	// authenticates — the purpose check below rejects it.
+	"/identity.v1.IdentityService/BeginPasskeyRegistration":    true,
+	"/identity.v1.IdentityService/CompletePasskeyRegistration": true,
 	// Passkey-first signup: the caller is anonymous — they are creating a
 	// brand-new account from a passkey and have no JWT yet.
 	"/identity.v1.IdentityService/BeginPasskeySignup":    true,
@@ -165,6 +178,12 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience stri
 				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
 				return
 			}
+
+			// A purpose token (a dob_completion or passkey_enrolment ticket)
+			// never authenticates a request; jwtpkg.VerifyAccessToken refuses
+			// one, so it lands in the branch above and is indistinguishable
+			// from a bad token. The rule lives in the verifier so it holds on
+			// every transport, not only this middleware.
 
 			setAuthHeaders(r, claims)
 			next.ServeHTTP(w, r)

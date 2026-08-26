@@ -77,6 +77,7 @@ func (s *ProjectStore) resolved(ctx context.Context, p *Project) (*service.Resol
 		Products:           cfg.Products,
 		Assurance:          cfg.Assurance,
 		Anonymous:          cfg.Anonymous,
+		Jurisdictions:      cfg.Jurisdictions,
 	}, nil
 }
 

@@ -1,11 +1,13 @@
 package connect
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
 
+	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -77,6 +79,36 @@ func TestToConnectErrorProjectConfigConflict(t *testing.T) {
 	}
 }
 
+// TestToConnectErrorGuardianRightsExpired proves that a guardian acting on a
+// managed account that has aged past the adult threshold maps to
+// FailedPrecondition: the caller and the target both exist and the edge is
+// real — the account has simply outgrown guardianship. PermissionDenied would
+// conflate it with "you are not a guardian", which is a different answer and
+// a different client remedy.
+func TestToConnectErrorGuardianRightsExpired(t *testing.T) {
+	err := toConnectError(service.ErrGuardianRightsExpired)
+	if err == nil {
+		t.Fatal("toConnectError(ErrGuardianRightsExpired) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", got)
+	}
+}
+
+// TestToConnectErrorManagedChildNotMinor proves an adult-band date of birth
+// supplied to CreateManagedChildAccount maps to InvalidArgument: the request
+// itself is wrong (that RPC creates minor accounts only), not a precondition
+// the client can clear by doing something else first.
+func TestToConnectErrorManagedChildNotMinor(t *testing.T) {
+	err := toConnectError(service.ErrManagedChildNotMinor)
+	if err == nil {
+		t.Fatal("toConnectError(ErrManagedChildNotMinor) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", got)
+	}
+}
+
 // TestToConnectErrorMinorDataMinimized proves COPPA data-minimization rejection
 // maps to FailedPrecondition: the account may not collect this PII, a "do
 // something else" precondition rather than an auth or argument failure.
@@ -105,5 +137,63 @@ func TestToConnectErrorProductAgeRestricted(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "product_age_restricted") {
 		t.Fatalf("message = %q, want it to contain product_age_restricted", err.Error())
+	}
+}
+
+// TestToConnectErrorDOBRequired pins the wire contract of the required-DOB
+// completion step: the refusal is failed_precondition, the message leads with
+// the stable `dob_required` token, and the completion ticket rides in an error
+// detail the client can round-trip back into a typed DOBRequiredDetails. All
+// three are the contract — clients match the token to show the DOB prompt and
+// submit the ticket to SubmitDateOfBirth without a session.
+func TestToConnectErrorDOBRequired(t *testing.T) {
+	err := toConnectError(&service.DOBRequiredError{Ticket: "ticket-abc"})
+	if err == nil {
+		t.Fatal("toConnectError(DOBRequiredError) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", got)
+	}
+	if !strings.Contains(err.Error(), "dob_required") {
+		t.Fatalf("message = %q, want it to contain dob_required", err.Error())
+	}
+
+	var cerr *connect.Error
+	if !errors.As(err, &cerr) {
+		t.Fatal("error is not a *connect.Error")
+	}
+	if len(cerr.Details()) != 1 {
+		t.Fatalf("details = %d, want exactly 1 (the completion ticket)", len(cerr.Details()))
+	}
+	msg, derr := cerr.Details()[0].Value()
+	if derr != nil {
+		t.Fatalf("detail Value: %v", derr)
+	}
+	details, ok := msg.(*identitypb.DOBRequiredDetails)
+	if !ok {
+		t.Fatalf("detail type = %T, want *DOBRequiredDetails", msg)
+	}
+	if details.CompletionToken != "ticket-abc" {
+		t.Fatalf("completion_token = %q, want ticket-abc", details.CompletionToken)
+	}
+
+	// The sentinel alone (no typed ticket) still maps correctly, just with
+	// no detail attached.
+	plain := toConnectError(service.ErrDOBRequired)
+	if got := connect.CodeOf(plain); got != connect.CodeFailedPrecondition {
+		t.Fatalf("sentinel-only code = %v, want FailedPrecondition", got)
+	}
+}
+
+// TestToConnectErrorDOBAlreadySet proves a repeat SubmitDateOfBirth maps to
+// FailedPrecondition: the account state, not the request arguments, is what
+// refuses the call.
+func TestToConnectErrorDOBAlreadySet(t *testing.T) {
+	err := toConnectError(service.ErrDOBAlreadySet)
+	if err == nil {
+		t.Fatal("toConnectError(ErrDOBAlreadySet) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", got)
 	}
 }

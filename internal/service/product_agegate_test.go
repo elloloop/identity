@@ -346,7 +346,8 @@ func productAgeIssuingPaths() []productAgePath {
 			// so the refresh is the FIRST place the policy under test applies.
 			login, err := svc.PasswordLogin(
 				WithProjectScope(ctx, scopeFromJSON(t, noProductPolicyJSON)),
-				"user@example.com", productAgePassword, "1.2.3.4", "agent")
+				"user@example.com", productAgePassword, "1.2.3.4", "agent",
+			)
 			require.NoError(t, err)
 			_, _, _, err = svc.RefreshToken(ctx, login.RefreshToken, "1.2.3.4", "agent")
 			return err
@@ -435,14 +436,14 @@ func TestProductAgeGate_PasswordSignup(t *testing.T) {
 	t.Run("teen_refused_by_adult_minimum", func(t *testing.T) {
 		svc, _, _ := newProductAgeSvc(t)
 		ctx := productScope(t, adultMinimumJSON, restrictedProduct)
-		_, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", dobAgeMs(15))
+		_, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", dobAgeMs(15), "")
 		require.ErrorIs(t, err, ErrProductAgeRestricted)
 	})
 
 	t.Run("teen_admitted_by_teen_minimum", func(t *testing.T) {
 		svc, _, _ := newProductAgeSvc(t)
 		ctx := productScope(t, teenMinimumJSON, restrictedProduct)
-		res, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", dobAgeMs(15))
+		res, err := svc.PasswordSignup(ctx, "teen@example.com", productAgePassword, "Teen", "", dobAgeMs(15), "")
 		require.NoError(t, err)
 		assert.NotEmpty(t, res.AccessToken)
 	})
@@ -450,7 +451,7 @@ func TestProductAgeGate_PasswordSignup(t *testing.T) {
 	t.Run("child_parked_for_consent_before_the_gate", func(t *testing.T) {
 		svc, _, _ := newProductAgeSvc(t)
 		ctx := productScope(t, adultMinimumJSON, restrictedProduct)
-		res, err := svc.PasswordSignup(ctx, "kid@example.com", productAgePassword, "Kid", "", dobAgeMs(8))
+		res, err := svc.PasswordSignup(ctx, "kid@example.com", productAgePassword, "Kid", "", dobAgeMs(8), "")
 		require.NoError(t, err)
 		assert.Empty(t, res.AccessToken, "a child signup issues no session to gate")
 		assert.Equal(t, StatusPendingParentalConsent, res.User.Status)

@@ -21,8 +21,18 @@ const (
 )
 
 // ── Graph edge type IDs ─────────────────────────────
+// Edge type ids are never reused: even if an edge type is retired, its id
+// stays reserved so historical edges can never be misread as a new type.
 
-const edgeMemberOf = 101
+const (
+	edgeMemberOf = 101
+	// 102 is RESERVED for a guardian edge. Guardianship is stored
+	// relationally in guardian_edges (its own table, with users foreign keys
+	// and an RLS policy) rather than as a graph edge, so no code writes 102
+	// today — the id is held back so a later move into the graph cannot
+	// collide with it, and so a reader of this block is not left wondering
+	// whether guardian edges live here.
+)
 
 // ── User field IDs (type_id 1) ─────────────────────────────────────
 

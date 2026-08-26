@@ -40,7 +40,8 @@ func TestBeginOAuthLogin_PerProjectIsolation(t *testing.T) {
 	// Default project → env provider.
 	defRes, err := svc.BeginOAuthLogin(
 		WithProjectScope(context.Background(), &ProjectScope{ProjectID: "default"}),
-		"google", "https://app/cb")
+		"google", "https://app/cb",
+	)
 	if err != nil {
 		t.Fatalf("default project BeginOAuthLogin: %v", err)
 	}
@@ -60,7 +61,8 @@ func TestBeginOAuthLogin_PerProjectIsolation(t *testing.T) {
 	// A non-default project without a google config cannot use google.
 	_, err = svc.BeginOAuthLogin(
 		WithProjectScope(context.Background(), &ProjectScope{ProjectID: "proj-3"}),
-		"google", "https://app/cb")
+		"google", "https://app/cb",
+	)
 	if !errors.Is(err, ErrOAuthDisabled) {
 		t.Errorf("non-default project without google must be disabled, got %v", err)
 	}
@@ -145,7 +147,8 @@ func TestOAuthLogin_PerProjectGitHub_EndToEnd(t *testing.T) {
 	// A non-default project without a github block cannot begin github login.
 	if _, err := svc.BeginOAuthLogin(
 		WithProjectScope(context.Background(), &ProjectScope{ProjectID: "no-gh"}),
-		"github", "https://app/cb"); !errors.Is(err, ErrOAuthDisabled) {
+		"github", "https://app/cb",
+	); !errors.Is(err, ErrOAuthDisabled) {
 		t.Errorf("non-default project without github must be disabled, got %v", err)
 	}
 }

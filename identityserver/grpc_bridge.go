@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/protoadapt"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	identityconnect "github.com/elloloop/identity/internal/connect"
@@ -59,7 +60,9 @@ func invoke[Req, Resp any](
 // connect.Code and grpc/codes.Code share the same integer values
 // (defined off the same RPC spec), so connect.CodeOf maps directly onto
 // the gRPC code. The connect.Error message (which strips the code prefix
-// connect.Error.Error() adds) is preserved as the status message.
+// connect.Error.Error() adds) is preserved as the status message, and any
+// error details (e.g. the dob_required completion ticket) are carried
+// across so native-gRPC clients get the same wire contract.
 func toGRPCError(err error) error {
 	if err == nil {
 		return nil
@@ -67,7 +70,17 @@ func toGRPCError(err error) error {
 	code := codes.Code(connect.CodeOf(err))
 	var cerr *connect.Error
 	if errors.As(err, &cerr) {
-		return status.Error(code, cerr.Message())
+		st := status.New(code, cerr.Message())
+		for _, d := range cerr.Details() {
+			msg, dErr := d.Value()
+			if dErr != nil {
+				continue
+			}
+			if withDetails, wErr := st.WithDetails(protoadapt.MessageV1Of(msg)); wErr == nil {
+				st = withDetails
+			}
+		}
+		return st.Err()
 	}
 	return status.Error(code, err.Error())
 }
@@ -92,6 +105,10 @@ func (b *grpcBridge) PasswordSignup(ctx context.Context, in *identitypb.Password
 
 func (b *grpcBridge) PasswordLogin(ctx context.Context, in *identitypb.PasswordLoginRequest) (*identitypb.PasswordLoginResponse, error) {
 	return invoke(ctx, in, b.h.PasswordLogin)
+}
+
+func (b *grpcBridge) SubmitDateOfBirth(ctx context.Context, in *identitypb.SubmitDateOfBirthRequest) (*identitypb.SubmitDateOfBirthResponse, error) {
+	return invoke(ctx, in, b.h.SubmitDateOfBirth)
 }
 
 func (b *grpcBridge) RequestEmailLoginCode(ctx context.Context, in *identitypb.RequestEmailLoginCodeRequest) (*identitypb.RequestEmailLoginCodeResponse, error) {
@@ -153,6 +170,60 @@ func (b *grpcBridge) Logout(ctx context.Context, in *identitypb.LogoutRequest) (
 
 func (b *grpcBridge) UpdateProfile(ctx context.Context, in *identitypb.UpdateProfileRequest) (*identitypb.UpdateProfileResponse, error) {
 	return invoke(ctx, in, b.h.UpdateProfile)
+}
+
+func (b *grpcBridge) SetAccountMarket(ctx context.Context, in *identitypb.SetAccountMarketRequest) (*identitypb.SetAccountMarketResponse, error) {
+	return invoke(ctx, in, b.h.SetAccountMarket)
+}
+
+// ─── Parental consent / guardian edges ──────────────────────────────
+
+func (b *grpcBridge) GrantParentalConsent(ctx context.Context, in *identitypb.GrantParentalConsentRequest) (*identitypb.GrantParentalConsentResponse, error) {
+	return invoke(ctx, in, b.h.GrantParentalConsent)
+}
+
+func (b *grpcBridge) RevokeParentalConsent(ctx context.Context, in *identitypb.RevokeParentalConsentRequest) (*identitypb.RevokeParentalConsentResponse, error) {
+	return invoke(ctx, in, b.h.RevokeParentalConsent)
+}
+
+func (b *grpcBridge) ListManagedChildren(ctx context.Context, in *identitypb.ListManagedChildrenRequest) (*identitypb.ListManagedChildrenResponse, error) {
+	return invoke(ctx, in, b.h.ListManagedChildren)
+}
+
+func (b *grpcBridge) GetGuardians(ctx context.Context, in *identitypb.GetGuardiansRequest) (*identitypb.GetGuardiansResponse, error) {
+	return invoke(ctx, in, b.h.GetGuardians)
+}
+
+func (b *grpcBridge) CreateManagedChildAccount(ctx context.Context, in *identitypb.CreateManagedChildAccountRequest) (*identitypb.CreateManagedChildAccountResponse, error) {
+	return invoke(ctx, in, b.h.CreateManagedChildAccount)
+}
+
+func (b *grpcBridge) GetManagedChildProfile(ctx context.Context, in *identitypb.GetManagedChildProfileRequest) (*identitypb.GetManagedChildProfileResponse, error) {
+	return invoke(ctx, in, b.h.GetManagedChildProfile)
+}
+
+func (b *grpcBridge) SetManagedChildPassword(ctx context.Context, in *identitypb.SetManagedChildPasswordRequest) (*identitypb.SetManagedChildPasswordResponse, error) {
+	return invoke(ctx, in, b.h.SetManagedChildPassword)
+}
+
+func (b *grpcBridge) SetManagedChildUsername(ctx context.Context, in *identitypb.SetManagedChildUsernameRequest) (*identitypb.SetManagedChildUsernameResponse, error) {
+	return invoke(ctx, in, b.h.SetManagedChildUsername)
+}
+
+func (b *grpcBridge) RevokeManagedChildSessions(ctx context.Context, in *identitypb.RevokeManagedChildSessionsRequest) (*identitypb.RevokeManagedChildSessionsResponse, error) {
+	return invoke(ctx, in, b.h.RevokeManagedChildSessions)
+}
+
+func (b *grpcBridge) DeactivateManagedChildAccount(ctx context.Context, in *identitypb.DeactivateManagedChildAccountRequest) (*identitypb.DeactivateManagedChildAccountResponse, error) {
+	return invoke(ctx, in, b.h.DeactivateManagedChildAccount)
+}
+
+func (b *grpcBridge) ReactivateManagedChildAccount(ctx context.Context, in *identitypb.ReactivateManagedChildAccountRequest) (*identitypb.ReactivateManagedChildAccountResponse, error) {
+	return invoke(ctx, in, b.h.ReactivateManagedChildAccount)
+}
+
+func (b *grpcBridge) DeleteManagedChildAccount(ctx context.Context, in *identitypb.DeleteManagedChildAccountRequest) (*identitypb.DeleteManagedChildAccountResponse, error) {
+	return invoke(ctx, in, b.h.DeleteManagedChildAccount)
 }
 
 func (b *grpcBridge) ChangePassword(ctx context.Context, in *identitypb.ChangePasswordRequest) (*identitypb.ChangePasswordResponse, error) {
