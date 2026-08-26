@@ -64,6 +64,90 @@ adult's guardian edge, and the child is re-gated to
 Under the current single-active-consent model that is exactly the previous
 behavior; the rule is structured for concurrent multi-guardian consent.
 
+## Unreleased — parent-creates-child managed accounts (additive)
+
+Adds `CreateManagedChildAccount`: one authenticated call from an adult
+creates a working child account, born `USER_STATUS_ACTIVE` under the
+caller's guardianship (it never passes through
+`USER_STATUS_PENDING_PARENTAL_CONSENT`), with the guardian edge and a
+`ConsentRecord` committed in the same transaction. The consent bar is
+`GrantParentalConsent`'s, unchanged: a strong verified factor on the adult's
+account **and** a step-up password re-entry, with the guardian derived from
+the session.
+
+**Wire additions are additive**: the `CreateManagedChildAccount` RPC and its
+messages, `User.username` (field 28), and the
+`managed_child_account_created` audit event. The child is identified by a
+parent-chosen username rather than an email; the credential is either a
+parent-set password or a passkey **enrolment ticket** the child's device
+redeems through `BeginPasskeyRegistration` / `CompletePasskeyRegistration`
+within 15 minutes (those two RPCs now accept an `enrolment_token` for a
+session-less child device; presenting both a session and a ticket is
+`INVALID_ARGUMENT`).
+
+**Migrations** (postgres 0032, sqlite 0017), applied with `identity migrate`,
+add `username TEXT NOT NULL DEFAULT ''` to `users` plus a **partial** unique
+index on `(project_id, username) WHERE username <> ''`, so existing
+email-identified accounts (all of which have an empty username) are
+unaffected.
+
+Two things to know before enabling the flow:
+
+- **The project access mode does not gate it.** This is not self-signup: an
+  active adult in the project may create children under `invite` and
+  `closed` as well as `open`. A minor caller, an inactive caller, or a date
+  of birth that classifies as ADULT is rejected.
+- **Username-identified accounts sign in with `PasswordLogin`** using the
+  username in place of the email. If your client validates that the login
+  identifier looks like an email address, relax it before rolling out child
+  accounts.
+
+## Unreleased — parental account management (additive)
+
+Adds the guardian-authorized management surface over a child account:
+`GetManagedChildProfile`, `SetManagedChildPassword`,
+`SetManagedChildUsername`, `RevokeManagedChildSessions`,
+`DeactivateManagedChildAccount`, `ReactivateManagedChildAccount`, and
+`DeleteManagedChildAccount`. Parents can now run their child's account
+without the child's credentials and without an admin credential — a
+requirement under COPPA, the UK Children's Code, and India's DPDP Rules 2025.
+
+**Wire additions are additive**: seven RPCs and their request/response
+messages, plus seven audit events (`guardian_child_profile_viewed`,
+`guardian_child_password_set`, `guardian_child_username_changed`,
+`guardian_child_sessions_revoked`, `guardian_child_deactivated`,
+`guardian_child_reactivated`, `guardian_child_deleted`). No migrations, no
+new configuration.
+
+Every one of the RPCs is gated on **both** an active guardian edge from the
+session user to the child **and** a `step_up_password` re-entry on the call
+itself — holding a valid session is never enough. A caller without an edge
+receives an account-agnostic `PERMISSION_DENIED` that does not disclose
+whether the child account exists.
+
+Three behaviors worth briefing client teams on:
+
+- **Rights lapse when the child ages out.** A guardian edge to a user who has
+  passed the adult threshold that applies to them stops conferring management
+  rights (`FAILED_PRECONDITION`, evaluated per call, so it takes effect on the
+  birthday). The now-adult account's own sessions are deliberately left
+  running. With age-gating off no band can be derived and the edge alone
+  authorizes, so gate-off deployments see no change.
+- **Revoking consent ends management immediately.** `RevokeParentalConsent`
+  deletes the edge, and the next management call from that adult is refused —
+  no cached authorization, no grace period.
+- **Deletion is immediate and irreversible.** `DeleteManagedChildAccount`
+  runs the same hard-delete cascade as the admin `DeleteUser` RPC (not the
+  30-day self-service grace window). The `ConsentRecord` and the audit trail
+  survive the erasure, per the retention posture consent records already had.
+
+**One response-shape fix ships with this.**
+`RevokeParentalConsentResponse.child_status` previously always reported
+`USER_STATUS_PENDING_PARENTAL_CONSENT`. It now reports the status the child
+account was actually left in — which differs only when another guardian's
+consent remains active, in which case the child correctly stays
+`USER_STATUS_ACTIVE`.
+
 ## Unreleased — per-jurisdiction age thresholds (additive)
 
 Adds per-market age thresholds: a project's `config_json` gains a

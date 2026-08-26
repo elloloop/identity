@@ -442,8 +442,8 @@ Edges enter the graph from three sources:
 2. **Consent grant**: `GrantParentalConsent` upserts the edge in the same
    write sequence as the consent record, before the child's status flips to
    active (audited as `guardian_edge_created`).
-3. **Managed-account creation** (later work): product flows that create a
-   child account under an existing guardian will write the edge directly.
+3. **Managed-account creation**: `CreateManagedChildAccount` writes the edge
+   in the same atomic write as the child account and its consent record.
 
 `RevokeParentalConsent` removes the revoking adult's edge (audited as
 `guardian_edge_removed`) and applies the **last-guardian rule**: the child is
@@ -459,6 +459,91 @@ child's guardians and is callable by a guardian of the child or a project
 admin; any other caller receives the identical `PERMISSION_DENIED` whether or
 not the child account exists, so the surface discloses nothing about account
 existence.
+
+### Parent-creates-child accounts
+
+Children never self-sign-up. An authenticated adult calls
+`CreateManagedChildAccount` and the child's account exists, working, in one
+call. The account is **born `ACTIVE` under guardianship** — it never passes
+through `PENDING_PARENTAL_CONSENT`, because that state exists for a child who
+signed up with no consenting adult present, and here one is present and
+authenticated.
+
+The child is identified within the project by a **parent-chosen username**
+(lowercase alphanumerics plus `_`/`-`/`.`, 3–32 characters, unique per
+project) — children below the ceiling frequently have no email address of
+their own. The credential is either a parent-chosen password or a passkey
+**enrolment ticket** the child's own device redeems through the WebAuthn
+registration ceremony within 15 minutes.
+
+Consent is implicit in the act of creation and explicit in the record: the
+call writes a `ConsentRecord` with `policy_version` and `stepped_up` on
+exactly the terms `GrantParentalConsent` sets — a strong verified factor on
+the adult's account **and** a step-up password re-entry, with
+`consenting_user_id` derived from the session and never from the body. One
+regulator-facing evidence format, two ways of arriving at it.
+
+The child account, the guardian edge and the consent record commit in a
+**single repository transaction**: no partial state (an account without an
+edge, an edge without a record) is reachable on failure at any step. The
+supplied date of birth must classify as a minor under the thresholds the
+child's market resolves to — an adult-band DOB is rejected, because this is
+not a route to creating adult accounts on someone else's behalf.
+
+This is **not self-signup**, so the per-project access mode
+(`open | allowlist | invite | closed`) does not gate it. The guard is the
+*calling adult's* standing — an active, authenticated, non-minor account in
+the project — so a parent can create children under `invite` and `closed`
+alike. Creation is audited as `managed_child_account_created` on success and
+on every refusal, with a `step` detail naming the failing check.
+
+### Parental account management
+
+Once the account exists the parent owns its day-to-day operation, without the
+child's credentials and without an admin credential:
+
+| RPC | What it does |
+|---|---|
+| `GetManagedChildProfile` | Reads the stored child record (deliberately little — minor data-minimization suppresses optional PII at every write path) |
+| `SetManagedChildPassword` | Sets the password directly; no email round-trip, and the child's sessions are cut |
+| `SetManagedChildUsername` | Renames the handle, with the same format and uniqueness rules creation enforces |
+| `RevokeManagedChildSessions` | Invalidates every session and refresh token immediately (the lost-tablet case) |
+| `DeactivateManagedChildAccount` | Suspends the account and cuts access; reversible by the same guardian |
+| `ReactivateManagedChildAccount` | Returns a guardian-deactivated account to `ACTIVE`; refuses to move an account out of `PENDING_PARENTAL_CONSENT`, so it can never bypass the consent gate |
+| `DeleteManagedChildAccount` | Runs the same hard-delete erasure cascade as the admin `DeleteUser` RPC; the consent record and audit trail survive by design |
+
+Every one of them passes through **one guard**, so an operation added later is
+gated by construction. The guard requires both:
+
+1. an **active guardian edge** from the caller to the child — the caller is
+   the session user, never a request field. `RevokeParentalConsent` deletes
+   the edge, so revocation takes effect on the very next call: no cached
+   authorization, no grace period; and
+2. a **step-up re-authentication** at the moment of action — the same bar
+   consent sets, for the same reason: a stolen session token must not be
+   enough to take over a child's account.
+
+A caller with no edge is refused with an account-agnostic `PERMISSION_DENIED`,
+identical whether or not the child account exists, so the surface is not an
+enumeration oracle over children.
+
+**Scope and ageing out.** These RPCs act on accounts in the minor bands only.
+A guardian edge to a user who has passed the adult threshold that applies to
+them stops conferring management rights (`FAILED_PRECONDITION`) — an adult's
+account is their own. The band is re-derived on every call, so rights lapse on
+the birthday itself; the now-adult account's own live sessions are
+deliberately left untouched, because ageing out is not a security event for
+the account holder. Only a *definitive* adult band refuses: with the age gate
+off, or with no date of birth on file, no band can be derived and the edge
+alone authorizes — the pre-gate behaviour, unchanged.
+
+Each operation emits its own audit event naming the acting guardian
+(`guardian_child_profile_viewed`, `guardian_child_password_set`,
+`guardian_child_username_changed`, `guardian_child_sessions_revoked`,
+`guardian_child_deactivated`, `guardian_child_reactivated`,
+`guardian_child_deleted`), on success **and** on refusal — a refusal carries
+`success=false` and a `step` detail naming which check failed, so probing a
+child account is as visible in the trail as managing one.
 
 ### Why one code path, not a mode flag
 

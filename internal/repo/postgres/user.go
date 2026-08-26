@@ -147,7 +147,7 @@ func (r *pgRepository) GetUser(ctx context.Context, userID string) (*service.Use
 }
 
 // FindUserByUsername resolves a managed child account by its project-unique
-// username. The username <> '' predicate keeps the partial unique index
+// username. The username <> ” predicate keeps the partial unique index
 // (0032) usable, mirroring the email lookup.
 func (r *pgRepository) FindUserByUsername(ctx context.Context, username string) (*service.User, error) {
 	if username == "" {

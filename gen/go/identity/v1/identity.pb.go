@@ -6129,6 +6129,691 @@ func (x *CreateManagedChildAccountResponse) GetEnrolmentToken() string {
 	return ""
 }
 
+type GetManagedChildProfileRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// child_user_id is the managed child account to read.
+	ChildUserId string `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
+	// step_up_password re-authenticates the CALLING GUARDIAN (verified against
+	// the guardian's stored password hash). Required on every call.
+	StepUpPassword string `protobuf:"bytes,2,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetManagedChildProfileRequest) Reset() {
+	*x = GetManagedChildProfileRequest{}
+	mi := &file_identity_v1_identity_proto_msgTypes[99]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetManagedChildProfileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetManagedChildProfileRequest) ProtoMessage() {}
+
+func (x *GetManagedChildProfileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[99]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetManagedChildProfileRequest.ProtoReflect.Descriptor instead.
+func (*GetManagedChildProfileRequest) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{99}
+}
+
+func (x *GetManagedChildProfileRequest) GetChildUserId() string {
+	if x != nil {
+		return x.ChildUserId
+	}
+	return ""
+}
+
+func (x *GetManagedChildProfileRequest) GetStepUpPassword() string {
+	if x != nil {
+		return x.StepUpPassword
+	}
+	return ""
+}
+
+type GetManagedChildProfileResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// child is the stored account, subject to the deployment's minor
+	// data-minimization rules — a COPPA-protected child's record deliberately
+	// holds very little, and this RPC adds nothing to it.
+	Child         *User `protobuf:"bytes,1,opt,name=child,proto3" json:"child,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetManagedChildProfileResponse) Reset() {
+	*x = GetManagedChildProfileResponse{}
+	mi := &file_identity_v1_identity_proto_msgTypes[100]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetManagedChildProfileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetManagedChildProfileResponse) ProtoMessage() {}
+
+func (x *GetManagedChildProfileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[100]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetManagedChildProfileResponse.ProtoReflect.Descriptor instead.
+func (*GetManagedChildProfileResponse) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{100}
+}
+
+func (x *GetManagedChildProfileResponse) GetChild() *User {
+	if x != nil {
+		return x.Child
+	}
+	return nil
+}
+
+type SetManagedChildPasswordRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ChildUserId string                 `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
+	// new_password is validated against the same password policy the
+	// self-service paths enforce for the resolved project.
+	NewPassword    string `protobuf:"bytes,2,opt,name=new_password,json=newPassword,proto3" json:"new_password,omitempty"`
+	StepUpPassword string `protobuf:"bytes,3,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SetManagedChildPasswordRequest) Reset() {
+	*x = SetManagedChildPasswordRequest{}
+	mi := &file_identity_v1_identity_proto_msgTypes[101]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetManagedChildPasswordRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetManagedChildPasswordRequest) ProtoMessage() {}
+
+func (x *SetManagedChildPasswordRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[101]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetManagedChildPasswordRequest.ProtoReflect.Descriptor instead.
+func (*SetManagedChildPasswordRequest) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{101}
+}
+
+func (x *SetManagedChildPasswordRequest) GetChildUserId() string {
+	if x != nil {
+		return x.ChildUserId
+	}
+	return ""
+}
+
+func (x *SetManagedChildPasswordRequest) GetNewPassword() string {
+	if x != nil {
+		return x.NewPassword
+	}
+	return ""
+}
+
+func (x *SetManagedChildPasswordRequest) GetStepUpPassword() string {
+	if x != nil {
+		return x.StepUpPassword
+	}
+	return ""
+}
+
+// Setting the password revokes the child's sessions and refresh tokens, so a
+// device the parent is locking out cannot keep using an old token.
+type SetManagedChildPasswordResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetManagedChildPasswordResponse) Reset() {
+	*x = SetManagedChildPasswordResponse{}
+	mi := &file_identity_v1_identity_proto_msgTypes[102]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetManagedChildPasswordResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetManagedChildPasswordResponse) ProtoMessage() {}
+
+func (x *SetManagedChildPasswordResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[102]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetManagedChildPasswordResponse.ProtoReflect.Descriptor instead.
+func (*SetManagedChildPasswordResponse) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{102}
+}
+
+type SetManagedChildUsernameRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ChildUserId string                 `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
+	// username is the new project-unique handle, validated exactly as
+	// CreateManagedChildAccount validates it (lowercase alphanumerics plus
+	// `_`/`-`/`.`, 3..32 chars, normalized to lowercase). A duplicate within
+	// the project is ALREADY_EXISTS.
+	Username       string `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	StepUpPassword string `protobuf:"bytes,3,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SetManagedChildUsernameRequest) Reset() {
+	*x = SetManagedChildUsernameRequest{}
+	mi := &file_identity_v1_identity_proto_msgTypes[103]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetManagedChildUsernameRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetManagedChildUsernameRequest) ProtoMessage() {}
+
+func (x *SetManagedChildUsernameRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[103]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetManagedChildUsernameRequest.ProtoReflect.Descriptor instead.
+func (*SetManagedChildUsernameRequest) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{103}
+}
+
+func (x *SetManagedChildUsernameRequest) GetChildUserId() string {
+	if x != nil {
+		return x.ChildUserId
+	}
+	return ""
+}
+
+func (x *SetManagedChildUsernameRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *SetManagedChildUsernameRequest) GetStepUpPassword() string {
+	if x != nil {
+		return x.StepUpPassword
+	}
+	return ""
+}
+
+type SetManagedChildUsernameResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// child is the updated account, carrying the normalized username.
+	Child         *User `protobuf:"bytes,1,opt,name=child,proto3" json:"child,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetManagedChildUsernameResponse) Reset() {
+	*x = SetManagedChildUsernameResponse{}
+	mi := &file_identity_v1_identity_proto_msgTypes[104]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetManagedChildUsernameResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetManagedChildUsernameResponse) ProtoMessage() {}
+
+func (x *SetManagedChildUsernameResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[104]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetManagedChildUsernameResponse.ProtoReflect.Descriptor instead.
+func (*SetManagedChildUsernameResponse) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{104}
+}
+
+func (x *SetManagedChildUsernameResponse) GetChild() *User {
+	if x != nil {
+		return x.Child
+	}
+	return nil
+}
+
+type RevokeManagedChildSessionsRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ChildUserId    string                 `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
+	StepUpPassword string                 `protobuf:"bytes,2,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *RevokeManagedChildSessionsRequest) Reset() {
+	*x = RevokeManagedChildSessionsRequest{}
+	mi := &file_identity_v1_identity_proto_msgTypes[105]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeManagedChildSessionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeManagedChildSessionsRequest) ProtoMessage() {}
+
+func (x *RevokeManagedChildSessionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[105]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeManagedChildSessionsRequest.ProtoReflect.Descriptor instead.
+func (*RevokeManagedChildSessionsRequest) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{105}
+}
+
+func (x *RevokeManagedChildSessionsRequest) GetChildUserId() string {
+	if x != nil {
+		return x.ChildUserId
+	}
+	return ""
+}
+
+func (x *RevokeManagedChildSessionsRequest) GetStepUpPassword() string {
+	if x != nil {
+		return x.StepUpPassword
+	}
+	return ""
+}
+
+// Every session and refresh token of the child is invalidated
+// unconditionally: a revoked session cannot refresh.
+type RevokeManagedChildSessionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeManagedChildSessionsResponse) Reset() {
+	*x = RevokeManagedChildSessionsResponse{}
+	mi := &file_identity_v1_identity_proto_msgTypes[106]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeManagedChildSessionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeManagedChildSessionsResponse) ProtoMessage() {}
+
+func (x *RevokeManagedChildSessionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[106]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeManagedChildSessionsResponse.ProtoReflect.Descriptor instead.
+func (*RevokeManagedChildSessionsResponse) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{106}
+}
+
+type DeactivateManagedChildAccountRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ChildUserId string                 `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
+	// reason is optional free text retained on the audit event.
+	Reason         string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	StepUpPassword string `protobuf:"bytes,3,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DeactivateManagedChildAccountRequest) Reset() {
+	*x = DeactivateManagedChildAccountRequest{}
+	mi := &file_identity_v1_identity_proto_msgTypes[107]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeactivateManagedChildAccountRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeactivateManagedChildAccountRequest) ProtoMessage() {}
+
+func (x *DeactivateManagedChildAccountRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[107]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeactivateManagedChildAccountRequest.ProtoReflect.Descriptor instead.
+func (*DeactivateManagedChildAccountRequest) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{107}
+}
+
+func (x *DeactivateManagedChildAccountRequest) GetChildUserId() string {
+	if x != nil {
+		return x.ChildUserId
+	}
+	return ""
+}
+
+func (x *DeactivateManagedChildAccountRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *DeactivateManagedChildAccountRequest) GetStepUpPassword() string {
+	if x != nil {
+		return x.StepUpPassword
+	}
+	return ""
+}
+
+// Deactivation is reversible by the same guardian via
+// ReactivateManagedChildAccount, and cuts the child's sessions immediately.
+type DeactivateManagedChildAccountResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeactivateManagedChildAccountResponse) Reset() {
+	*x = DeactivateManagedChildAccountResponse{}
+	mi := &file_identity_v1_identity_proto_msgTypes[108]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeactivateManagedChildAccountResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeactivateManagedChildAccountResponse) ProtoMessage() {}
+
+func (x *DeactivateManagedChildAccountResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[108]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeactivateManagedChildAccountResponse.ProtoReflect.Descriptor instead.
+func (*DeactivateManagedChildAccountResponse) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{108}
+}
+
+type ReactivateManagedChildAccountRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ChildUserId    string                 `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
+	StepUpPassword string                 `protobuf:"bytes,2,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ReactivateManagedChildAccountRequest) Reset() {
+	*x = ReactivateManagedChildAccountRequest{}
+	mi := &file_identity_v1_identity_proto_msgTypes[109]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReactivateManagedChildAccountRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReactivateManagedChildAccountRequest) ProtoMessage() {}
+
+func (x *ReactivateManagedChildAccountRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[109]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReactivateManagedChildAccountRequest.ProtoReflect.Descriptor instead.
+func (*ReactivateManagedChildAccountRequest) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{109}
+}
+
+func (x *ReactivateManagedChildAccountRequest) GetChildUserId() string {
+	if x != nil {
+		return x.ChildUserId
+	}
+	return ""
+}
+
+func (x *ReactivateManagedChildAccountRequest) GetStepUpPassword() string {
+	if x != nil {
+		return x.StepUpPassword
+	}
+	return ""
+}
+
+// Reactivation moves a deactivated child account back to
+// USER_STATUS_ACTIVE. It refuses to move an account out of
+// USER_STATUS_PENDING_PARENTAL_CONSENT — the only valid exit from that state
+// is GrantParentalConsent, so reactivation cannot bypass the consent gate.
+type ReactivateManagedChildAccountResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReactivateManagedChildAccountResponse) Reset() {
+	*x = ReactivateManagedChildAccountResponse{}
+	mi := &file_identity_v1_identity_proto_msgTypes[110]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReactivateManagedChildAccountResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReactivateManagedChildAccountResponse) ProtoMessage() {}
+
+func (x *ReactivateManagedChildAccountResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[110]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReactivateManagedChildAccountResponse.ProtoReflect.Descriptor instead.
+func (*ReactivateManagedChildAccountResponse) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{110}
+}
+
+type DeleteManagedChildAccountRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ChildUserId    string                 `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
+	StepUpPassword string                 `protobuf:"bytes,2,opt,name=step_up_password,json=stepUpPassword,proto3" json:"step_up_password,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DeleteManagedChildAccountRequest) Reset() {
+	*x = DeleteManagedChildAccountRequest{}
+	mi := &file_identity_v1_identity_proto_msgTypes[111]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteManagedChildAccountRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteManagedChildAccountRequest) ProtoMessage() {}
+
+func (x *DeleteManagedChildAccountRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[111]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteManagedChildAccountRequest.ProtoReflect.Descriptor instead.
+func (*DeleteManagedChildAccountRequest) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{111}
+}
+
+func (x *DeleteManagedChildAccountRequest) GetChildUserId() string {
+	if x != nil {
+		return x.ChildUserId
+	}
+	return ""
+}
+
+func (x *DeleteManagedChildAccountRequest) GetStepUpPassword() string {
+	if x != nil {
+		return x.StepUpPassword
+	}
+	return ""
+}
+
+// Deletion runs the same hard-delete erasure cascade as the admin DeleteUser
+// RPC: sessions and refresh tokens are revoked first, then the account and
+// its owned records are erased. The ConsentRecord and the audit trail
+// deliberately survive — they are the compliance evidence that the consent,
+// and this erasure, happened.
+type DeleteManagedChildAccountResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteManagedChildAccountResponse) Reset() {
+	*x = DeleteManagedChildAccountResponse{}
+	mi := &file_identity_v1_identity_proto_msgTypes[112]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteManagedChildAccountResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteManagedChildAccountResponse) ProtoMessage() {}
+
+func (x *DeleteManagedChildAccountResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_v1_identity_proto_msgTypes[112]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteManagedChildAccountResponse.ProtoReflect.Descriptor instead.
+func (*DeleteManagedChildAccountResponse) Descriptor() ([]byte, []int) {
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{112}
+}
+
 type AdminHelpRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -6147,7 +6832,7 @@ type AdminHelpRequest struct {
 
 func (x *AdminHelpRequest) Reset() {
 	*x = AdminHelpRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[99]
+	mi := &file_identity_v1_identity_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6159,7 +6844,7 @@ func (x *AdminHelpRequest) String() string {
 func (*AdminHelpRequest) ProtoMessage() {}
 
 func (x *AdminHelpRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[99]
+	mi := &file_identity_v1_identity_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6172,7 +6857,7 @@ func (x *AdminHelpRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminHelpRequest.ProtoReflect.Descriptor instead.
 func (*AdminHelpRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{99}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{113}
 }
 
 func (x *AdminHelpRequest) GetId() string {
@@ -6255,7 +6940,7 @@ type RequestAdminHelpRequest struct {
 
 func (x *RequestAdminHelpRequest) Reset() {
 	*x = RequestAdminHelpRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[100]
+	mi := &file_identity_v1_identity_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6267,7 +6952,7 @@ func (x *RequestAdminHelpRequest) String() string {
 func (*RequestAdminHelpRequest) ProtoMessage() {}
 
 func (x *RequestAdminHelpRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[100]
+	mi := &file_identity_v1_identity_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6280,7 +6965,7 @@ func (x *RequestAdminHelpRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestAdminHelpRequest.ProtoReflect.Descriptor instead.
 func (*RequestAdminHelpRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{100}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *RequestAdminHelpRequest) GetEmail() string {
@@ -6305,7 +6990,7 @@ type RequestAdminHelpResponse struct {
 
 func (x *RequestAdminHelpResponse) Reset() {
 	*x = RequestAdminHelpResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[101]
+	mi := &file_identity_v1_identity_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6317,7 +7002,7 @@ func (x *RequestAdminHelpResponse) String() string {
 func (*RequestAdminHelpResponse) ProtoMessage() {}
 
 func (x *RequestAdminHelpResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[101]
+	mi := &file_identity_v1_identity_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6330,7 +7015,7 @@ func (x *RequestAdminHelpResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestAdminHelpResponse.ProtoReflect.Descriptor instead.
 func (*RequestAdminHelpResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{101}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{115}
 }
 
 type ListHelpRequestsRequest struct {
@@ -6344,7 +7029,7 @@ type ListHelpRequestsRequest struct {
 
 func (x *ListHelpRequestsRequest) Reset() {
 	*x = ListHelpRequestsRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[102]
+	mi := &file_identity_v1_identity_proto_msgTypes[116]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6356,7 +7041,7 @@ func (x *ListHelpRequestsRequest) String() string {
 func (*ListHelpRequestsRequest) ProtoMessage() {}
 
 func (x *ListHelpRequestsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[102]
+	mi := &file_identity_v1_identity_proto_msgTypes[116]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6369,7 +7054,7 @@ func (x *ListHelpRequestsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListHelpRequestsRequest.ProtoReflect.Descriptor instead.
 func (*ListHelpRequestsRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{102}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{116}
 }
 
 func (x *ListHelpRequestsRequest) GetStatusFilter() HelpRequestStatus {
@@ -6404,7 +7089,7 @@ type ListHelpRequestsResponse struct {
 
 func (x *ListHelpRequestsResponse) Reset() {
 	*x = ListHelpRequestsResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[103]
+	mi := &file_identity_v1_identity_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6416,7 +7101,7 @@ func (x *ListHelpRequestsResponse) String() string {
 func (*ListHelpRequestsResponse) ProtoMessage() {}
 
 func (x *ListHelpRequestsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[103]
+	mi := &file_identity_v1_identity_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6429,7 +7114,7 @@ func (x *ListHelpRequestsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListHelpRequestsResponse.ProtoReflect.Descriptor instead.
 func (*ListHelpRequestsResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{103}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{117}
 }
 
 func (x *ListHelpRequestsResponse) GetRequests() []*AdminHelpRequest {
@@ -6464,7 +7149,7 @@ type ResolveHelpRequestRequest struct {
 
 func (x *ResolveHelpRequestRequest) Reset() {
 	*x = ResolveHelpRequestRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[104]
+	mi := &file_identity_v1_identity_proto_msgTypes[118]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6476,7 +7161,7 @@ func (x *ResolveHelpRequestRequest) String() string {
 func (*ResolveHelpRequestRequest) ProtoMessage() {}
 
 func (x *ResolveHelpRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[104]
+	mi := &file_identity_v1_identity_proto_msgTypes[118]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6489,7 +7174,7 @@ func (x *ResolveHelpRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveHelpRequestRequest.ProtoReflect.Descriptor instead.
 func (*ResolveHelpRequestRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{104}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{118}
 }
 
 func (x *ResolveHelpRequestRequest) GetRequestId() string {
@@ -6522,7 +7207,7 @@ type ResolveHelpRequestResponse struct {
 
 func (x *ResolveHelpRequestResponse) Reset() {
 	*x = ResolveHelpRequestResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[105]
+	mi := &file_identity_v1_identity_proto_msgTypes[119]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6534,7 +7219,7 @@ func (x *ResolveHelpRequestResponse) String() string {
 func (*ResolveHelpRequestResponse) ProtoMessage() {}
 
 func (x *ResolveHelpRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[105]
+	mi := &file_identity_v1_identity_proto_msgTypes[119]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6547,7 +7232,7 @@ func (x *ResolveHelpRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveHelpRequestResponse.ProtoReflect.Descriptor instead.
 func (*ResolveHelpRequestResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{105}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{119}
 }
 
 func (x *ResolveHelpRequestResponse) GetRequest() *AdminHelpRequest {
@@ -6569,7 +7254,7 @@ type PasskeyCredentialInfo struct {
 
 func (x *PasskeyCredentialInfo) Reset() {
 	*x = PasskeyCredentialInfo{}
-	mi := &file_identity_v1_identity_proto_msgTypes[106]
+	mi := &file_identity_v1_identity_proto_msgTypes[120]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6581,7 +7266,7 @@ func (x *PasskeyCredentialInfo) String() string {
 func (*PasskeyCredentialInfo) ProtoMessage() {}
 
 func (x *PasskeyCredentialInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[106]
+	mi := &file_identity_v1_identity_proto_msgTypes[120]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6594,7 +7279,7 @@ func (x *PasskeyCredentialInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PasskeyCredentialInfo.ProtoReflect.Descriptor instead.
 func (*PasskeyCredentialInfo) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{106}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{120}
 }
 
 func (x *PasskeyCredentialInfo) GetCredentialId() string {
@@ -6644,7 +7329,7 @@ type BeginPasskeyRegistrationRequest struct {
 
 func (x *BeginPasskeyRegistrationRequest) Reset() {
 	*x = BeginPasskeyRegistrationRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[107]
+	mi := &file_identity_v1_identity_proto_msgTypes[121]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6656,7 +7341,7 @@ func (x *BeginPasskeyRegistrationRequest) String() string {
 func (*BeginPasskeyRegistrationRequest) ProtoMessage() {}
 
 func (x *BeginPasskeyRegistrationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[107]
+	mi := &file_identity_v1_identity_proto_msgTypes[121]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6669,7 +7354,7 @@ func (x *BeginPasskeyRegistrationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BeginPasskeyRegistrationRequest.ProtoReflect.Descriptor instead.
 func (*BeginPasskeyRegistrationRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{107}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{121}
 }
 
 func (x *BeginPasskeyRegistrationRequest) GetDeviceName() string {
@@ -6697,7 +7382,7 @@ type BeginPasskeyRegistrationResponse struct {
 
 func (x *BeginPasskeyRegistrationResponse) Reset() {
 	*x = BeginPasskeyRegistrationResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[108]
+	mi := &file_identity_v1_identity_proto_msgTypes[122]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6709,7 +7394,7 @@ func (x *BeginPasskeyRegistrationResponse) String() string {
 func (*BeginPasskeyRegistrationResponse) ProtoMessage() {}
 
 func (x *BeginPasskeyRegistrationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[108]
+	mi := &file_identity_v1_identity_proto_msgTypes[122]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6722,7 +7407,7 @@ func (x *BeginPasskeyRegistrationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BeginPasskeyRegistrationResponse.ProtoReflect.Descriptor instead.
 func (*BeginPasskeyRegistrationResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{108}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{122}
 }
 
 func (x *BeginPasskeyRegistrationResponse) GetOptionsJson() string {
@@ -6755,7 +7440,7 @@ type CompletePasskeyRegistrationRequest struct {
 
 func (x *CompletePasskeyRegistrationRequest) Reset() {
 	*x = CompletePasskeyRegistrationRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[109]
+	mi := &file_identity_v1_identity_proto_msgTypes[123]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6767,7 +7452,7 @@ func (x *CompletePasskeyRegistrationRequest) String() string {
 func (*CompletePasskeyRegistrationRequest) ProtoMessage() {}
 
 func (x *CompletePasskeyRegistrationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[109]
+	mi := &file_identity_v1_identity_proto_msgTypes[123]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6780,7 +7465,7 @@ func (x *CompletePasskeyRegistrationRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use CompletePasskeyRegistrationRequest.ProtoReflect.Descriptor instead.
 func (*CompletePasskeyRegistrationRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{109}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{123}
 }
 
 func (x *CompletePasskeyRegistrationRequest) GetChallengeId() string {
@@ -6827,7 +7512,7 @@ type CompletePasskeyRegistrationResponse struct {
 
 func (x *CompletePasskeyRegistrationResponse) Reset() {
 	*x = CompletePasskeyRegistrationResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[110]
+	mi := &file_identity_v1_identity_proto_msgTypes[124]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6839,7 +7524,7 @@ func (x *CompletePasskeyRegistrationResponse) String() string {
 func (*CompletePasskeyRegistrationResponse) ProtoMessage() {}
 
 func (x *CompletePasskeyRegistrationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[110]
+	mi := &file_identity_v1_identity_proto_msgTypes[124]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6852,7 +7537,7 @@ func (x *CompletePasskeyRegistrationResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use CompletePasskeyRegistrationResponse.ProtoReflect.Descriptor instead.
 func (*CompletePasskeyRegistrationResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{110}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{124}
 }
 
 func (x *CompletePasskeyRegistrationResponse) GetCredential() *PasskeyCredentialInfo {
@@ -6893,7 +7578,7 @@ type BeginPasskeyLoginRequest struct {
 
 func (x *BeginPasskeyLoginRequest) Reset() {
 	*x = BeginPasskeyLoginRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[111]
+	mi := &file_identity_v1_identity_proto_msgTypes[125]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6905,7 +7590,7 @@ func (x *BeginPasskeyLoginRequest) String() string {
 func (*BeginPasskeyLoginRequest) ProtoMessage() {}
 
 func (x *BeginPasskeyLoginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[111]
+	mi := &file_identity_v1_identity_proto_msgTypes[125]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6918,7 +7603,7 @@ func (x *BeginPasskeyLoginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BeginPasskeyLoginRequest.ProtoReflect.Descriptor instead.
 func (*BeginPasskeyLoginRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{111}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{125}
 }
 
 func (x *BeginPasskeyLoginRequest) GetEmail() string {
@@ -6938,7 +7623,7 @@ type BeginPasskeyLoginResponse struct {
 
 func (x *BeginPasskeyLoginResponse) Reset() {
 	*x = BeginPasskeyLoginResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[112]
+	mi := &file_identity_v1_identity_proto_msgTypes[126]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6950,7 +7635,7 @@ func (x *BeginPasskeyLoginResponse) String() string {
 func (*BeginPasskeyLoginResponse) ProtoMessage() {}
 
 func (x *BeginPasskeyLoginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[112]
+	mi := &file_identity_v1_identity_proto_msgTypes[126]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6963,7 +7648,7 @@ func (x *BeginPasskeyLoginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BeginPasskeyLoginResponse.ProtoReflect.Descriptor instead.
 func (*BeginPasskeyLoginResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{112}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{126}
 }
 
 func (x *BeginPasskeyLoginResponse) GetOptionsJson() string {
@@ -6990,7 +7675,7 @@ type CompletePasskeyLoginRequest struct {
 
 func (x *CompletePasskeyLoginRequest) Reset() {
 	*x = CompletePasskeyLoginRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[113]
+	mi := &file_identity_v1_identity_proto_msgTypes[127]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7002,7 +7687,7 @@ func (x *CompletePasskeyLoginRequest) String() string {
 func (*CompletePasskeyLoginRequest) ProtoMessage() {}
 
 func (x *CompletePasskeyLoginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[113]
+	mi := &file_identity_v1_identity_proto_msgTypes[127]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7015,7 +7700,7 @@ func (x *CompletePasskeyLoginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompletePasskeyLoginRequest.ProtoReflect.Descriptor instead.
 func (*CompletePasskeyLoginRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{113}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{127}
 }
 
 func (x *CompletePasskeyLoginRequest) GetChallengeId() string {
@@ -7044,7 +7729,7 @@ type CompletePasskeyLoginResponse struct {
 
 func (x *CompletePasskeyLoginResponse) Reset() {
 	*x = CompletePasskeyLoginResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[114]
+	mi := &file_identity_v1_identity_proto_msgTypes[128]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7056,7 +7741,7 @@ func (x *CompletePasskeyLoginResponse) String() string {
 func (*CompletePasskeyLoginResponse) ProtoMessage() {}
 
 func (x *CompletePasskeyLoginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[114]
+	mi := &file_identity_v1_identity_proto_msgTypes[128]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7069,7 +7754,7 @@ func (x *CompletePasskeyLoginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompletePasskeyLoginResponse.ProtoReflect.Descriptor instead.
 func (*CompletePasskeyLoginResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{114}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{128}
 }
 
 func (x *CompletePasskeyLoginResponse) GetUser() *User {
@@ -7117,7 +7802,7 @@ type BeginPasskeySignupRequest struct {
 
 func (x *BeginPasskeySignupRequest) Reset() {
 	*x = BeginPasskeySignupRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[115]
+	mi := &file_identity_v1_identity_proto_msgTypes[129]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7129,7 +7814,7 @@ func (x *BeginPasskeySignupRequest) String() string {
 func (*BeginPasskeySignupRequest) ProtoMessage() {}
 
 func (x *BeginPasskeySignupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[115]
+	mi := &file_identity_v1_identity_proto_msgTypes[129]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7142,7 +7827,7 @@ func (x *BeginPasskeySignupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BeginPasskeySignupRequest.ProtoReflect.Descriptor instead.
 func (*BeginPasskeySignupRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{115}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{129}
 }
 
 func (x *BeginPasskeySignupRequest) GetEmail() string {
@@ -7170,7 +7855,7 @@ type BeginPasskeySignupResponse struct {
 
 func (x *BeginPasskeySignupResponse) Reset() {
 	*x = BeginPasskeySignupResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[116]
+	mi := &file_identity_v1_identity_proto_msgTypes[130]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7182,7 +7867,7 @@ func (x *BeginPasskeySignupResponse) String() string {
 func (*BeginPasskeySignupResponse) ProtoMessage() {}
 
 func (x *BeginPasskeySignupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[116]
+	mi := &file_identity_v1_identity_proto_msgTypes[130]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7195,7 +7880,7 @@ func (x *BeginPasskeySignupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BeginPasskeySignupResponse.ProtoReflect.Descriptor instead.
 func (*BeginPasskeySignupResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{116}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{130}
 }
 
 func (x *BeginPasskeySignupResponse) GetOptionsJson() string {
@@ -7229,7 +7914,7 @@ type CompletePasskeySignupRequest struct {
 
 func (x *CompletePasskeySignupRequest) Reset() {
 	*x = CompletePasskeySignupRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[117]
+	mi := &file_identity_v1_identity_proto_msgTypes[131]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7241,7 +7926,7 @@ func (x *CompletePasskeySignupRequest) String() string {
 func (*CompletePasskeySignupRequest) ProtoMessage() {}
 
 func (x *CompletePasskeySignupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[117]
+	mi := &file_identity_v1_identity_proto_msgTypes[131]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7254,7 +7939,7 @@ func (x *CompletePasskeySignupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompletePasskeySignupRequest.ProtoReflect.Descriptor instead.
 func (*CompletePasskeySignupRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{117}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{131}
 }
 
 func (x *CompletePasskeySignupRequest) GetChallengeId() string {
@@ -7304,7 +7989,7 @@ type CompletePasskeySignupResponse struct {
 
 func (x *CompletePasskeySignupResponse) Reset() {
 	*x = CompletePasskeySignupResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[118]
+	mi := &file_identity_v1_identity_proto_msgTypes[132]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7316,7 +8001,7 @@ func (x *CompletePasskeySignupResponse) String() string {
 func (*CompletePasskeySignupResponse) ProtoMessage() {}
 
 func (x *CompletePasskeySignupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[118]
+	mi := &file_identity_v1_identity_proto_msgTypes[132]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7329,7 +8014,7 @@ func (x *CompletePasskeySignupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompletePasskeySignupResponse.ProtoReflect.Descriptor instead.
 func (*CompletePasskeySignupResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{118}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{132}
 }
 
 func (x *CompletePasskeySignupResponse) GetUser() *User {
@@ -7369,7 +8054,7 @@ type ListPasskeysRequest struct {
 
 func (x *ListPasskeysRequest) Reset() {
 	*x = ListPasskeysRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[119]
+	mi := &file_identity_v1_identity_proto_msgTypes[133]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7381,7 +8066,7 @@ func (x *ListPasskeysRequest) String() string {
 func (*ListPasskeysRequest) ProtoMessage() {}
 
 func (x *ListPasskeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[119]
+	mi := &file_identity_v1_identity_proto_msgTypes[133]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7394,7 +8079,7 @@ func (x *ListPasskeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPasskeysRequest.ProtoReflect.Descriptor instead.
 func (*ListPasskeysRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{119}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{133}
 }
 
 type ListPasskeysResponse struct {
@@ -7406,7 +8091,7 @@ type ListPasskeysResponse struct {
 
 func (x *ListPasskeysResponse) Reset() {
 	*x = ListPasskeysResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[120]
+	mi := &file_identity_v1_identity_proto_msgTypes[134]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7418,7 +8103,7 @@ func (x *ListPasskeysResponse) String() string {
 func (*ListPasskeysResponse) ProtoMessage() {}
 
 func (x *ListPasskeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[120]
+	mi := &file_identity_v1_identity_proto_msgTypes[134]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7431,7 +8116,7 @@ func (x *ListPasskeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPasskeysResponse.ProtoReflect.Descriptor instead.
 func (*ListPasskeysResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{120}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{134}
 }
 
 func (x *ListPasskeysResponse) GetCredentials() []*PasskeyCredentialInfo {
@@ -7450,7 +8135,7 @@ type DeletePasskeyRequest struct {
 
 func (x *DeletePasskeyRequest) Reset() {
 	*x = DeletePasskeyRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[121]
+	mi := &file_identity_v1_identity_proto_msgTypes[135]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7462,7 +8147,7 @@ func (x *DeletePasskeyRequest) String() string {
 func (*DeletePasskeyRequest) ProtoMessage() {}
 
 func (x *DeletePasskeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[121]
+	mi := &file_identity_v1_identity_proto_msgTypes[135]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7475,7 +8160,7 @@ func (x *DeletePasskeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePasskeyRequest.ProtoReflect.Descriptor instead.
 func (*DeletePasskeyRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{121}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{135}
 }
 
 func (x *DeletePasskeyRequest) GetCredentialId() string {
@@ -7493,7 +8178,7 @@ type DeletePasskeyResponse struct {
 
 func (x *DeletePasskeyResponse) Reset() {
 	*x = DeletePasskeyResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[122]
+	mi := &file_identity_v1_identity_proto_msgTypes[136]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7505,7 +8190,7 @@ func (x *DeletePasskeyResponse) String() string {
 func (*DeletePasskeyResponse) ProtoMessage() {}
 
 func (x *DeletePasskeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[122]
+	mi := &file_identity_v1_identity_proto_msgTypes[136]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7518,7 +8203,7 @@ func (x *DeletePasskeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePasskeyResponse.ProtoReflect.Descriptor instead.
 func (*DeletePasskeyResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{122}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{136}
 }
 
 // Step 1: New device (unauthenticated) initiates a QR login.
@@ -7532,7 +8217,7 @@ type InitiateQrLoginRequest struct {
 
 func (x *InitiateQrLoginRequest) Reset() {
 	*x = InitiateQrLoginRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[123]
+	mi := &file_identity_v1_identity_proto_msgTypes[137]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7544,7 +8229,7 @@ func (x *InitiateQrLoginRequest) String() string {
 func (*InitiateQrLoginRequest) ProtoMessage() {}
 
 func (x *InitiateQrLoginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[123]
+	mi := &file_identity_v1_identity_proto_msgTypes[137]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7557,7 +8242,7 @@ func (x *InitiateQrLoginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitiateQrLoginRequest.ProtoReflect.Descriptor instead.
 func (*InitiateQrLoginRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{123}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{137}
 }
 
 func (x *InitiateQrLoginRequest) GetDeviceInfo() string {
@@ -7589,7 +8274,7 @@ type InitiateQrLoginResponse struct {
 
 func (x *InitiateQrLoginResponse) Reset() {
 	*x = InitiateQrLoginResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[124]
+	mi := &file_identity_v1_identity_proto_msgTypes[138]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7601,7 +8286,7 @@ func (x *InitiateQrLoginResponse) String() string {
 func (*InitiateQrLoginResponse) ProtoMessage() {}
 
 func (x *InitiateQrLoginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[124]
+	mi := &file_identity_v1_identity_proto_msgTypes[138]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7614,7 +8299,7 @@ func (x *InitiateQrLoginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitiateQrLoginResponse.ProtoReflect.Descriptor instead.
 func (*InitiateQrLoginResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{124}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{138}
 }
 
 func (x *InitiateQrLoginResponse) GetSessionId() string {
@@ -7655,7 +8340,7 @@ type GetQrLoginSessionRequest struct {
 
 func (x *GetQrLoginSessionRequest) Reset() {
 	*x = GetQrLoginSessionRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[125]
+	mi := &file_identity_v1_identity_proto_msgTypes[139]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7667,7 +8352,7 @@ func (x *GetQrLoginSessionRequest) String() string {
 func (*GetQrLoginSessionRequest) ProtoMessage() {}
 
 func (x *GetQrLoginSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[125]
+	mi := &file_identity_v1_identity_proto_msgTypes[139]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7680,7 +8365,7 @@ func (x *GetQrLoginSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetQrLoginSessionRequest.ProtoReflect.Descriptor instead.
 func (*GetQrLoginSessionRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{125}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{139}
 }
 
 func (x *GetQrLoginSessionRequest) GetSessionId() string {
@@ -7702,7 +8387,7 @@ type GetQrLoginSessionResponse struct {
 
 func (x *GetQrLoginSessionResponse) Reset() {
 	*x = GetQrLoginSessionResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[126]
+	mi := &file_identity_v1_identity_proto_msgTypes[140]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7714,7 +8399,7 @@ func (x *GetQrLoginSessionResponse) String() string {
 func (*GetQrLoginSessionResponse) ProtoMessage() {}
 
 func (x *GetQrLoginSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[126]
+	mi := &file_identity_v1_identity_proto_msgTypes[140]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7727,7 +8412,7 @@ func (x *GetQrLoginSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetQrLoginSessionResponse.ProtoReflect.Descriptor instead.
 func (*GetQrLoginSessionResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{126}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{140}
 }
 
 func (x *GetQrLoginSessionResponse) GetStatus() QrLoginStatus {
@@ -7769,7 +8454,7 @@ type ApproveQrLoginRequest struct {
 
 func (x *ApproveQrLoginRequest) Reset() {
 	*x = ApproveQrLoginRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[127]
+	mi := &file_identity_v1_identity_proto_msgTypes[141]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7781,7 +8466,7 @@ func (x *ApproveQrLoginRequest) String() string {
 func (*ApproveQrLoginRequest) ProtoMessage() {}
 
 func (x *ApproveQrLoginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[127]
+	mi := &file_identity_v1_identity_proto_msgTypes[141]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7794,7 +8479,7 @@ func (x *ApproveQrLoginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveQrLoginRequest.ProtoReflect.Descriptor instead.
 func (*ApproveQrLoginRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{127}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{141}
 }
 
 func (x *ApproveQrLoginRequest) GetSessionId() string {
@@ -7820,7 +8505,7 @@ type ApproveQrLoginResponse struct {
 
 func (x *ApproveQrLoginResponse) Reset() {
 	*x = ApproveQrLoginResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[128]
+	mi := &file_identity_v1_identity_proto_msgTypes[142]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7832,7 +8517,7 @@ func (x *ApproveQrLoginResponse) String() string {
 func (*ApproveQrLoginResponse) ProtoMessage() {}
 
 func (x *ApproveQrLoginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[128]
+	mi := &file_identity_v1_identity_proto_msgTypes[142]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7845,7 +8530,7 @@ func (x *ApproveQrLoginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveQrLoginResponse.ProtoReflect.Descriptor instead.
 func (*ApproveQrLoginResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{128}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{142}
 }
 
 func (x *ApproveQrLoginResponse) GetStatus() QrLoginStatus {
@@ -7867,7 +8552,7 @@ type PollQrLoginRequest struct {
 
 func (x *PollQrLoginRequest) Reset() {
 	*x = PollQrLoginRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[129]
+	mi := &file_identity_v1_identity_proto_msgTypes[143]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7879,7 +8564,7 @@ func (x *PollQrLoginRequest) String() string {
 func (*PollQrLoginRequest) ProtoMessage() {}
 
 func (x *PollQrLoginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[129]
+	mi := &file_identity_v1_identity_proto_msgTypes[143]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7892,7 +8577,7 @@ func (x *PollQrLoginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PollQrLoginRequest.ProtoReflect.Descriptor instead.
 func (*PollQrLoginRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{129}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{143}
 }
 
 func (x *PollQrLoginRequest) GetSessionId() string {
@@ -7923,7 +8608,7 @@ type PollQrLoginResponse struct {
 
 func (x *PollQrLoginResponse) Reset() {
 	*x = PollQrLoginResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[130]
+	mi := &file_identity_v1_identity_proto_msgTypes[144]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7935,7 +8620,7 @@ func (x *PollQrLoginResponse) String() string {
 func (*PollQrLoginResponse) ProtoMessage() {}
 
 func (x *PollQrLoginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[130]
+	mi := &file_identity_v1_identity_proto_msgTypes[144]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7948,7 +8633,7 @@ func (x *PollQrLoginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PollQrLoginResponse.ProtoReflect.Descriptor instead.
 func (*PollQrLoginResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{130}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{144}
 }
 
 func (x *PollQrLoginResponse) GetStatus() QrLoginStatus {
@@ -7994,7 +8679,7 @@ type BeginTotpSetupRequest struct {
 
 func (x *BeginTotpSetupRequest) Reset() {
 	*x = BeginTotpSetupRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[131]
+	mi := &file_identity_v1_identity_proto_msgTypes[145]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8006,7 +8691,7 @@ func (x *BeginTotpSetupRequest) String() string {
 func (*BeginTotpSetupRequest) ProtoMessage() {}
 
 func (x *BeginTotpSetupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[131]
+	mi := &file_identity_v1_identity_proto_msgTypes[145]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8019,7 +8704,7 @@ func (x *BeginTotpSetupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BeginTotpSetupRequest.ProtoReflect.Descriptor instead.
 func (*BeginTotpSetupRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{131}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{145}
 }
 
 type BeginTotpSetupResponse struct {
@@ -8033,7 +8718,7 @@ type BeginTotpSetupResponse struct {
 
 func (x *BeginTotpSetupResponse) Reset() {
 	*x = BeginTotpSetupResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[132]
+	mi := &file_identity_v1_identity_proto_msgTypes[146]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8045,7 +8730,7 @@ func (x *BeginTotpSetupResponse) String() string {
 func (*BeginTotpSetupResponse) ProtoMessage() {}
 
 func (x *BeginTotpSetupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[132]
+	mi := &file_identity_v1_identity_proto_msgTypes[146]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8058,7 +8743,7 @@ func (x *BeginTotpSetupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BeginTotpSetupResponse.ProtoReflect.Descriptor instead.
 func (*BeginTotpSetupResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{132}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{146}
 }
 
 func (x *BeginTotpSetupResponse) GetSecret() string {
@@ -8091,7 +8776,7 @@ type VerifyTotpSetupRequest struct {
 
 func (x *VerifyTotpSetupRequest) Reset() {
 	*x = VerifyTotpSetupRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[133]
+	mi := &file_identity_v1_identity_proto_msgTypes[147]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8103,7 +8788,7 @@ func (x *VerifyTotpSetupRequest) String() string {
 func (*VerifyTotpSetupRequest) ProtoMessage() {}
 
 func (x *VerifyTotpSetupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[133]
+	mi := &file_identity_v1_identity_proto_msgTypes[147]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8116,7 +8801,7 @@ func (x *VerifyTotpSetupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyTotpSetupRequest.ProtoReflect.Descriptor instead.
 func (*VerifyTotpSetupRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{133}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{147}
 }
 
 func (x *VerifyTotpSetupRequest) GetCode() string {
@@ -8135,7 +8820,7 @@ type VerifyTotpSetupResponse struct {
 
 func (x *VerifyTotpSetupResponse) Reset() {
 	*x = VerifyTotpSetupResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[134]
+	mi := &file_identity_v1_identity_proto_msgTypes[148]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8147,7 +8832,7 @@ func (x *VerifyTotpSetupResponse) String() string {
 func (*VerifyTotpSetupResponse) ProtoMessage() {}
 
 func (x *VerifyTotpSetupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[134]
+	mi := &file_identity_v1_identity_proto_msgTypes[148]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8160,7 +8845,7 @@ func (x *VerifyTotpSetupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyTotpSetupResponse.ProtoReflect.Descriptor instead.
 func (*VerifyTotpSetupResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{134}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{148}
 }
 
 func (x *VerifyTotpSetupResponse) GetVerified() bool {
@@ -8179,7 +8864,7 @@ type DisableTotpRequest struct {
 
 func (x *DisableTotpRequest) Reset() {
 	*x = DisableTotpRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[135]
+	mi := &file_identity_v1_identity_proto_msgTypes[149]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8191,7 +8876,7 @@ func (x *DisableTotpRequest) String() string {
 func (*DisableTotpRequest) ProtoMessage() {}
 
 func (x *DisableTotpRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[135]
+	mi := &file_identity_v1_identity_proto_msgTypes[149]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8204,7 +8889,7 @@ func (x *DisableTotpRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisableTotpRequest.ProtoReflect.Descriptor instead.
 func (*DisableTotpRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{135}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{149}
 }
 
 func (x *DisableTotpRequest) GetPassword() string {
@@ -8222,7 +8907,7 @@ type DisableTotpResponse struct {
 
 func (x *DisableTotpResponse) Reset() {
 	*x = DisableTotpResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[136]
+	mi := &file_identity_v1_identity_proto_msgTypes[150]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8234,7 +8919,7 @@ func (x *DisableTotpResponse) String() string {
 func (*DisableTotpResponse) ProtoMessage() {}
 
 func (x *DisableTotpResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[136]
+	mi := &file_identity_v1_identity_proto_msgTypes[150]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8247,7 +8932,7 @@ func (x *DisableTotpResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisableTotpResponse.ProtoReflect.Descriptor instead.
 func (*DisableTotpResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{136}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{150}
 }
 
 type VerifyTotpRequest struct {
@@ -8260,7 +8945,7 @@ type VerifyTotpRequest struct {
 
 func (x *VerifyTotpRequest) Reset() {
 	*x = VerifyTotpRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[137]
+	mi := &file_identity_v1_identity_proto_msgTypes[151]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8272,7 +8957,7 @@ func (x *VerifyTotpRequest) String() string {
 func (*VerifyTotpRequest) ProtoMessage() {}
 
 func (x *VerifyTotpRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[137]
+	mi := &file_identity_v1_identity_proto_msgTypes[151]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8285,7 +8970,7 @@ func (x *VerifyTotpRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyTotpRequest.ProtoReflect.Descriptor instead.
 func (*VerifyTotpRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{137}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{151}
 }
 
 func (x *VerifyTotpRequest) GetLoginChallengeId() string {
@@ -8314,7 +8999,7 @@ type VerifyTotpResponse struct {
 
 func (x *VerifyTotpResponse) Reset() {
 	*x = VerifyTotpResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[138]
+	mi := &file_identity_v1_identity_proto_msgTypes[152]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8326,7 +9011,7 @@ func (x *VerifyTotpResponse) String() string {
 func (*VerifyTotpResponse) ProtoMessage() {}
 
 func (x *VerifyTotpResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[138]
+	mi := &file_identity_v1_identity_proto_msgTypes[152]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8339,7 +9024,7 @@ func (x *VerifyTotpResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyTotpResponse.ProtoReflect.Descriptor instead.
 func (*VerifyTotpResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{138}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{152}
 }
 
 func (x *VerifyTotpResponse) GetUser() *User {
@@ -8379,7 +9064,7 @@ type RegenerateRecoveryCodesRequest struct {
 
 func (x *RegenerateRecoveryCodesRequest) Reset() {
 	*x = RegenerateRecoveryCodesRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[139]
+	mi := &file_identity_v1_identity_proto_msgTypes[153]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8391,7 +9076,7 @@ func (x *RegenerateRecoveryCodesRequest) String() string {
 func (*RegenerateRecoveryCodesRequest) ProtoMessage() {}
 
 func (x *RegenerateRecoveryCodesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[139]
+	mi := &file_identity_v1_identity_proto_msgTypes[153]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8404,7 +9089,7 @@ func (x *RegenerateRecoveryCodesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegenerateRecoveryCodesRequest.ProtoReflect.Descriptor instead.
 func (*RegenerateRecoveryCodesRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{139}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{153}
 }
 
 func (x *RegenerateRecoveryCodesRequest) GetPassword() string {
@@ -8423,7 +9108,7 @@ type RegenerateRecoveryCodesResponse struct {
 
 func (x *RegenerateRecoveryCodesResponse) Reset() {
 	*x = RegenerateRecoveryCodesResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[140]
+	mi := &file_identity_v1_identity_proto_msgTypes[154]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8435,7 +9120,7 @@ func (x *RegenerateRecoveryCodesResponse) String() string {
 func (*RegenerateRecoveryCodesResponse) ProtoMessage() {}
 
 func (x *RegenerateRecoveryCodesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[140]
+	mi := &file_identity_v1_identity_proto_msgTypes[154]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8448,7 +9133,7 @@ func (x *RegenerateRecoveryCodesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegenerateRecoveryCodesResponse.ProtoReflect.Descriptor instead.
 func (*RegenerateRecoveryCodesResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{140}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{154}
 }
 
 func (x *RegenerateRecoveryCodesResponse) GetRecoveryCodes() []string {
@@ -8474,7 +9159,7 @@ type Session struct {
 
 func (x *Session) Reset() {
 	*x = Session{}
-	mi := &file_identity_v1_identity_proto_msgTypes[141]
+	mi := &file_identity_v1_identity_proto_msgTypes[155]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8486,7 +9171,7 @@ func (x *Session) String() string {
 func (*Session) ProtoMessage() {}
 
 func (x *Session) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[141]
+	mi := &file_identity_v1_identity_proto_msgTypes[155]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8499,7 +9184,7 @@ func (x *Session) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Session.ProtoReflect.Descriptor instead.
 func (*Session) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{141}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{155}
 }
 
 func (x *Session) GetSessionId() string {
@@ -8566,7 +9251,7 @@ type ListMySessionsRequest struct {
 
 func (x *ListMySessionsRequest) Reset() {
 	*x = ListMySessionsRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[142]
+	mi := &file_identity_v1_identity_proto_msgTypes[156]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8578,7 +9263,7 @@ func (x *ListMySessionsRequest) String() string {
 func (*ListMySessionsRequest) ProtoMessage() {}
 
 func (x *ListMySessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[142]
+	mi := &file_identity_v1_identity_proto_msgTypes[156]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8591,7 +9276,7 @@ func (x *ListMySessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMySessionsRequest.ProtoReflect.Descriptor instead.
 func (*ListMySessionsRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{142}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{156}
 }
 
 type ListMySessionsResponse struct {
@@ -8603,7 +9288,7 @@ type ListMySessionsResponse struct {
 
 func (x *ListMySessionsResponse) Reset() {
 	*x = ListMySessionsResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[143]
+	mi := &file_identity_v1_identity_proto_msgTypes[157]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8615,7 +9300,7 @@ func (x *ListMySessionsResponse) String() string {
 func (*ListMySessionsResponse) ProtoMessage() {}
 
 func (x *ListMySessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[143]
+	mi := &file_identity_v1_identity_proto_msgTypes[157]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8628,7 +9313,7 @@ func (x *ListMySessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMySessionsResponse.ProtoReflect.Descriptor instead.
 func (*ListMySessionsResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{143}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{157}
 }
 
 func (x *ListMySessionsResponse) GetSessions() []*Session {
@@ -8647,7 +9332,7 @@ type RevokeSessionRequest struct {
 
 func (x *RevokeSessionRequest) Reset() {
 	*x = RevokeSessionRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[144]
+	mi := &file_identity_v1_identity_proto_msgTypes[158]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8659,7 +9344,7 @@ func (x *RevokeSessionRequest) String() string {
 func (*RevokeSessionRequest) ProtoMessage() {}
 
 func (x *RevokeSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[144]
+	mi := &file_identity_v1_identity_proto_msgTypes[158]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8672,7 +9357,7 @@ func (x *RevokeSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeSessionRequest.ProtoReflect.Descriptor instead.
 func (*RevokeSessionRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{144}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{158}
 }
 
 func (x *RevokeSessionRequest) GetSessionId() string {
@@ -8690,7 +9375,7 @@ type RevokeSessionResponse struct {
 
 func (x *RevokeSessionResponse) Reset() {
 	*x = RevokeSessionResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[145]
+	mi := &file_identity_v1_identity_proto_msgTypes[159]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8702,7 +9387,7 @@ func (x *RevokeSessionResponse) String() string {
 func (*RevokeSessionResponse) ProtoMessage() {}
 
 func (x *RevokeSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[145]
+	mi := &file_identity_v1_identity_proto_msgTypes[159]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8715,7 +9400,7 @@ func (x *RevokeSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeSessionResponse.ProtoReflect.Descriptor instead.
 func (*RevokeSessionResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{145}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{159}
 }
 
 type RevokeAllSessionsRequest struct {
@@ -8727,7 +9412,7 @@ type RevokeAllSessionsRequest struct {
 
 func (x *RevokeAllSessionsRequest) Reset() {
 	*x = RevokeAllSessionsRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[146]
+	mi := &file_identity_v1_identity_proto_msgTypes[160]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8739,7 +9424,7 @@ func (x *RevokeAllSessionsRequest) String() string {
 func (*RevokeAllSessionsRequest) ProtoMessage() {}
 
 func (x *RevokeAllSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[146]
+	mi := &file_identity_v1_identity_proto_msgTypes[160]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8752,7 +9437,7 @@ func (x *RevokeAllSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAllSessionsRequest.ProtoReflect.Descriptor instead.
 func (*RevokeAllSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{146}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{160}
 }
 
 func (x *RevokeAllSessionsRequest) GetPassword() string {
@@ -8771,7 +9456,7 @@ type RevokeAllSessionsResponse struct {
 
 func (x *RevokeAllSessionsResponse) Reset() {
 	*x = RevokeAllSessionsResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[147]
+	mi := &file_identity_v1_identity_proto_msgTypes[161]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8783,7 +9468,7 @@ func (x *RevokeAllSessionsResponse) String() string {
 func (*RevokeAllSessionsResponse) ProtoMessage() {}
 
 func (x *RevokeAllSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[147]
+	mi := &file_identity_v1_identity_proto_msgTypes[161]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8796,7 +9481,7 @@ func (x *RevokeAllSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAllSessionsResponse.ProtoReflect.Descriptor instead.
 func (*RevokeAllSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{147}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{161}
 }
 
 func (x *RevokeAllSessionsResponse) GetRevokedCount() int32 {
@@ -8815,7 +9500,7 @@ type SignOutEverywhereRequest struct {
 
 func (x *SignOutEverywhereRequest) Reset() {
 	*x = SignOutEverywhereRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[148]
+	mi := &file_identity_v1_identity_proto_msgTypes[162]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8827,7 +9512,7 @@ func (x *SignOutEverywhereRequest) String() string {
 func (*SignOutEverywhereRequest) ProtoMessage() {}
 
 func (x *SignOutEverywhereRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[148]
+	mi := &file_identity_v1_identity_proto_msgTypes[162]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8840,7 +9525,7 @@ func (x *SignOutEverywhereRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignOutEverywhereRequest.ProtoReflect.Descriptor instead.
 func (*SignOutEverywhereRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{148}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{162}
 }
 
 func (x *SignOutEverywhereRequest) GetPassword() string {
@@ -8859,7 +9544,7 @@ type SignOutEverywhereResponse struct {
 
 func (x *SignOutEverywhereResponse) Reset() {
 	*x = SignOutEverywhereResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[149]
+	mi := &file_identity_v1_identity_proto_msgTypes[163]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8871,7 +9556,7 @@ func (x *SignOutEverywhereResponse) String() string {
 func (*SignOutEverywhereResponse) ProtoMessage() {}
 
 func (x *SignOutEverywhereResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[149]
+	mi := &file_identity_v1_identity_proto_msgTypes[163]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8884,7 +9569,7 @@ func (x *SignOutEverywhereResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignOutEverywhereResponse.ProtoReflect.Descriptor instead.
 func (*SignOutEverywhereResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{149}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{163}
 }
 
 func (x *SignOutEverywhereResponse) GetRevokedCount() int32 {
@@ -8911,7 +9596,7 @@ type AuditEvent struct {
 
 func (x *AuditEvent) Reset() {
 	*x = AuditEvent{}
-	mi := &file_identity_v1_identity_proto_msgTypes[150]
+	mi := &file_identity_v1_identity_proto_msgTypes[164]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8923,7 +9608,7 @@ func (x *AuditEvent) String() string {
 func (*AuditEvent) ProtoMessage() {}
 
 func (x *AuditEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[150]
+	mi := &file_identity_v1_identity_proto_msgTypes[164]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8936,7 +9621,7 @@ func (x *AuditEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuditEvent.ProtoReflect.Descriptor instead.
 func (*AuditEvent) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{150}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{164}
 }
 
 func (x *AuditEvent) GetId() string {
@@ -9017,7 +9702,7 @@ type ListAuditEventsRequest struct {
 
 func (x *ListAuditEventsRequest) Reset() {
 	*x = ListAuditEventsRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[151]
+	mi := &file_identity_v1_identity_proto_msgTypes[165]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9029,7 +9714,7 @@ func (x *ListAuditEventsRequest) String() string {
 func (*ListAuditEventsRequest) ProtoMessage() {}
 
 func (x *ListAuditEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[151]
+	mi := &file_identity_v1_identity_proto_msgTypes[165]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9042,7 +9727,7 @@ func (x *ListAuditEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAuditEventsRequest.ProtoReflect.Descriptor instead.
 func (*ListAuditEventsRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{151}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{165}
 }
 
 func (x *ListAuditEventsRequest) GetActorUserId() string {
@@ -9104,7 +9789,7 @@ type ListAuditEventsResponse struct {
 
 func (x *ListAuditEventsResponse) Reset() {
 	*x = ListAuditEventsResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[152]
+	mi := &file_identity_v1_identity_proto_msgTypes[166]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9116,7 +9801,7 @@ func (x *ListAuditEventsResponse) String() string {
 func (*ListAuditEventsResponse) ProtoMessage() {}
 
 func (x *ListAuditEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[152]
+	mi := &file_identity_v1_identity_proto_msgTypes[166]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9129,7 +9814,7 @@ func (x *ListAuditEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAuditEventsResponse.ProtoReflect.Descriptor instead.
 func (*ListAuditEventsResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{152}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{166}
 }
 
 func (x *ListAuditEventsResponse) GetEvents() []*AuditEvent {
@@ -9162,7 +9847,7 @@ type InviteUserRequest struct {
 
 func (x *InviteUserRequest) Reset() {
 	*x = InviteUserRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[153]
+	mi := &file_identity_v1_identity_proto_msgTypes[167]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9174,7 +9859,7 @@ func (x *InviteUserRequest) String() string {
 func (*InviteUserRequest) ProtoMessage() {}
 
 func (x *InviteUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[153]
+	mi := &file_identity_v1_identity_proto_msgTypes[167]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9187,7 +9872,7 @@ func (x *InviteUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteUserRequest.ProtoReflect.Descriptor instead.
 func (*InviteUserRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{153}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{167}
 }
 
 func (x *InviteUserRequest) GetEmail() string {
@@ -9244,7 +9929,7 @@ type InviteUserResponse struct {
 
 func (x *InviteUserResponse) Reset() {
 	*x = InviteUserResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[154]
+	mi := &file_identity_v1_identity_proto_msgTypes[168]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9256,7 +9941,7 @@ func (x *InviteUserResponse) String() string {
 func (*InviteUserResponse) ProtoMessage() {}
 
 func (x *InviteUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[154]
+	mi := &file_identity_v1_identity_proto_msgTypes[168]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9269,7 +9954,7 @@ func (x *InviteUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteUserResponse.ProtoReflect.Descriptor instead.
 func (*InviteUserResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{154}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{168}
 }
 
 func (x *InviteUserResponse) GetUser() *User {
@@ -9311,7 +9996,7 @@ type AcceptInvitationRequest struct {
 
 func (x *AcceptInvitationRequest) Reset() {
 	*x = AcceptInvitationRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[155]
+	mi := &file_identity_v1_identity_proto_msgTypes[169]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9323,7 +10008,7 @@ func (x *AcceptInvitationRequest) String() string {
 func (*AcceptInvitationRequest) ProtoMessage() {}
 
 func (x *AcceptInvitationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[155]
+	mi := &file_identity_v1_identity_proto_msgTypes[169]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9336,7 +10021,7 @@ func (x *AcceptInvitationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptInvitationRequest.ProtoReflect.Descriptor instead.
 func (*AcceptInvitationRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{155}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{169}
 }
 
 func (x *AcceptInvitationRequest) GetInvitationToken() string {
@@ -9372,7 +10057,7 @@ type AcceptInvitationResponse struct {
 
 func (x *AcceptInvitationResponse) Reset() {
 	*x = AcceptInvitationResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[156]
+	mi := &file_identity_v1_identity_proto_msgTypes[170]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9384,7 +10069,7 @@ func (x *AcceptInvitationResponse) String() string {
 func (*AcceptInvitationResponse) ProtoMessage() {}
 
 func (x *AcceptInvitationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[156]
+	mi := &file_identity_v1_identity_proto_msgTypes[170]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9397,7 +10082,7 @@ func (x *AcceptInvitationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptInvitationResponse.ProtoReflect.Descriptor instead.
 func (*AcceptInvitationResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{156}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{170}
 }
 
 func (x *AcceptInvitationResponse) GetUser() *User {
@@ -9438,7 +10123,7 @@ type DeactivateUserRequest struct {
 
 func (x *DeactivateUserRequest) Reset() {
 	*x = DeactivateUserRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[157]
+	mi := &file_identity_v1_identity_proto_msgTypes[171]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9450,7 +10135,7 @@ func (x *DeactivateUserRequest) String() string {
 func (*DeactivateUserRequest) ProtoMessage() {}
 
 func (x *DeactivateUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[157]
+	mi := &file_identity_v1_identity_proto_msgTypes[171]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9463,7 +10148,7 @@ func (x *DeactivateUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeactivateUserRequest.ProtoReflect.Descriptor instead.
 func (*DeactivateUserRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{157}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{171}
 }
 
 func (x *DeactivateUserRequest) GetUserId() string {
@@ -9488,7 +10173,7 @@ type DeactivateUserResponse struct {
 
 func (x *DeactivateUserResponse) Reset() {
 	*x = DeactivateUserResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[158]
+	mi := &file_identity_v1_identity_proto_msgTypes[172]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9500,7 +10185,7 @@ func (x *DeactivateUserResponse) String() string {
 func (*DeactivateUserResponse) ProtoMessage() {}
 
 func (x *DeactivateUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[158]
+	mi := &file_identity_v1_identity_proto_msgTypes[172]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9513,7 +10198,7 @@ func (x *DeactivateUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeactivateUserResponse.ProtoReflect.Descriptor instead.
 func (*DeactivateUserResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{158}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{172}
 }
 
 type ReactivateUserRequest struct {
@@ -9525,7 +10210,7 @@ type ReactivateUserRequest struct {
 
 func (x *ReactivateUserRequest) Reset() {
 	*x = ReactivateUserRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[159]
+	mi := &file_identity_v1_identity_proto_msgTypes[173]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9537,7 +10222,7 @@ func (x *ReactivateUserRequest) String() string {
 func (*ReactivateUserRequest) ProtoMessage() {}
 
 func (x *ReactivateUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[159]
+	mi := &file_identity_v1_identity_proto_msgTypes[173]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9550,7 +10235,7 @@ func (x *ReactivateUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReactivateUserRequest.ProtoReflect.Descriptor instead.
 func (*ReactivateUserRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{159}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{173}
 }
 
 func (x *ReactivateUserRequest) GetUserId() string {
@@ -9568,7 +10253,7 @@ type ReactivateUserResponse struct {
 
 func (x *ReactivateUserResponse) Reset() {
 	*x = ReactivateUserResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[160]
+	mi := &file_identity_v1_identity_proto_msgTypes[174]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9580,7 +10265,7 @@ func (x *ReactivateUserResponse) String() string {
 func (*ReactivateUserResponse) ProtoMessage() {}
 
 func (x *ReactivateUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[160]
+	mi := &file_identity_v1_identity_proto_msgTypes[174]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9593,7 +10278,7 @@ func (x *ReactivateUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReactivateUserResponse.ProtoReflect.Descriptor instead.
 func (*ReactivateUserResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{160}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{174}
 }
 
 type ResetUserPasswordRequest struct {
@@ -9608,7 +10293,7 @@ type ResetUserPasswordRequest struct {
 
 func (x *ResetUserPasswordRequest) Reset() {
 	*x = ResetUserPasswordRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[161]
+	mi := &file_identity_v1_identity_proto_msgTypes[175]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9620,7 +10305,7 @@ func (x *ResetUserPasswordRequest) String() string {
 func (*ResetUserPasswordRequest) ProtoMessage() {}
 
 func (x *ResetUserPasswordRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[161]
+	mi := &file_identity_v1_identity_proto_msgTypes[175]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9633,7 +10318,7 @@ func (x *ResetUserPasswordRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetUserPasswordRequest.ProtoReflect.Descriptor instead.
 func (*ResetUserPasswordRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{161}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{175}
 }
 
 func (x *ResetUserPasswordRequest) GetUserId() string {
@@ -9660,7 +10345,7 @@ type ResetUserPasswordResponse struct {
 
 func (x *ResetUserPasswordResponse) Reset() {
 	*x = ResetUserPasswordResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[162]
+	mi := &file_identity_v1_identity_proto_msgTypes[176]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9672,7 +10357,7 @@ func (x *ResetUserPasswordResponse) String() string {
 func (*ResetUserPasswordResponse) ProtoMessage() {}
 
 func (x *ResetUserPasswordResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[162]
+	mi := &file_identity_v1_identity_proto_msgTypes[176]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9685,7 +10370,7 @@ func (x *ResetUserPasswordResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetUserPasswordResponse.ProtoReflect.Descriptor instead.
 func (*ResetUserPasswordResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{162}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{176}
 }
 
 func (x *ResetUserPasswordResponse) GetTemporaryPassword() string {
@@ -9712,7 +10397,7 @@ type SetUserQuotaRequest struct {
 
 func (x *SetUserQuotaRequest) Reset() {
 	*x = SetUserQuotaRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[163]
+	mi := &file_identity_v1_identity_proto_msgTypes[177]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9724,7 +10409,7 @@ func (x *SetUserQuotaRequest) String() string {
 func (*SetUserQuotaRequest) ProtoMessage() {}
 
 func (x *SetUserQuotaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[163]
+	mi := &file_identity_v1_identity_proto_msgTypes[177]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9737,7 +10422,7 @@ func (x *SetUserQuotaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetUserQuotaRequest.ProtoReflect.Descriptor instead.
 func (*SetUserQuotaRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{163}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{177}
 }
 
 func (x *SetUserQuotaRequest) GetUserId() string {
@@ -9762,7 +10447,7 @@ type SetUserQuotaResponse struct {
 
 func (x *SetUserQuotaResponse) Reset() {
 	*x = SetUserQuotaResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[164]
+	mi := &file_identity_v1_identity_proto_msgTypes[178]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9774,7 +10459,7 @@ func (x *SetUserQuotaResponse) String() string {
 func (*SetUserQuotaResponse) ProtoMessage() {}
 
 func (x *SetUserQuotaResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[164]
+	mi := &file_identity_v1_identity_proto_msgTypes[178]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9787,7 +10472,7 @@ func (x *SetUserQuotaResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetUserQuotaResponse.ProtoReflect.Descriptor instead.
 func (*SetUserQuotaResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{164}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{178}
 }
 
 // Domain is an email domain bound to a Tenant within the caller's
@@ -9809,7 +10494,7 @@ type Domain struct {
 
 func (x *Domain) Reset() {
 	*x = Domain{}
-	mi := &file_identity_v1_identity_proto_msgTypes[165]
+	mi := &file_identity_v1_identity_proto_msgTypes[179]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9821,7 +10506,7 @@ func (x *Domain) String() string {
 func (*Domain) ProtoMessage() {}
 
 func (x *Domain) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[165]
+	mi := &file_identity_v1_identity_proto_msgTypes[179]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9834,7 +10519,7 @@ func (x *Domain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Domain.ProtoReflect.Descriptor instead.
 func (*Domain) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{165}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{179}
 }
 
 func (x *Domain) GetId() string {
@@ -9904,7 +10589,7 @@ type CreateDomainRequest struct {
 
 func (x *CreateDomainRequest) Reset() {
 	*x = CreateDomainRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[166]
+	mi := &file_identity_v1_identity_proto_msgTypes[180]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9916,7 +10601,7 @@ func (x *CreateDomainRequest) String() string {
 func (*CreateDomainRequest) ProtoMessage() {}
 
 func (x *CreateDomainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[166]
+	mi := &file_identity_v1_identity_proto_msgTypes[180]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9929,7 +10614,7 @@ func (x *CreateDomainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateDomainRequest.ProtoReflect.Descriptor instead.
 func (*CreateDomainRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{166}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{180}
 }
 
 func (x *CreateDomainRequest) GetTenantId() string {
@@ -9967,7 +10652,7 @@ type CreateDomainResponse struct {
 
 func (x *CreateDomainResponse) Reset() {
 	*x = CreateDomainResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[167]
+	mi := &file_identity_v1_identity_proto_msgTypes[181]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9979,7 +10664,7 @@ func (x *CreateDomainResponse) String() string {
 func (*CreateDomainResponse) ProtoMessage() {}
 
 func (x *CreateDomainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[167]
+	mi := &file_identity_v1_identity_proto_msgTypes[181]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9992,7 +10677,7 @@ func (x *CreateDomainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateDomainResponse.ProtoReflect.Descriptor instead.
 func (*CreateDomainResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{167}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{181}
 }
 
 func (x *CreateDomainResponse) GetDomain() *Domain {
@@ -10025,7 +10710,7 @@ type VerifyDomainRequest struct {
 
 func (x *VerifyDomainRequest) Reset() {
 	*x = VerifyDomainRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[168]
+	mi := &file_identity_v1_identity_proto_msgTypes[182]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10037,7 +10722,7 @@ func (x *VerifyDomainRequest) String() string {
 func (*VerifyDomainRequest) ProtoMessage() {}
 
 func (x *VerifyDomainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[168]
+	mi := &file_identity_v1_identity_proto_msgTypes[182]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10050,7 +10735,7 @@ func (x *VerifyDomainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyDomainRequest.ProtoReflect.Descriptor instead.
 func (*VerifyDomainRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{168}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{182}
 }
 
 func (x *VerifyDomainRequest) GetDomainId() string {
@@ -10069,7 +10754,7 @@ type VerifyDomainResponse struct {
 
 func (x *VerifyDomainResponse) Reset() {
 	*x = VerifyDomainResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[169]
+	mi := &file_identity_v1_identity_proto_msgTypes[183]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10081,7 +10766,7 @@ func (x *VerifyDomainResponse) String() string {
 func (*VerifyDomainResponse) ProtoMessage() {}
 
 func (x *VerifyDomainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[169]
+	mi := &file_identity_v1_identity_proto_msgTypes[183]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10094,7 +10779,7 @@ func (x *VerifyDomainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyDomainResponse.ProtoReflect.Descriptor instead.
 func (*VerifyDomainResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{169}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{183}
 }
 
 func (x *VerifyDomainResponse) GetDomain() *Domain {
@@ -10113,7 +10798,7 @@ type ListTenantDomainsRequest struct {
 
 func (x *ListTenantDomainsRequest) Reset() {
 	*x = ListTenantDomainsRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[170]
+	mi := &file_identity_v1_identity_proto_msgTypes[184]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10125,7 +10810,7 @@ func (x *ListTenantDomainsRequest) String() string {
 func (*ListTenantDomainsRequest) ProtoMessage() {}
 
 func (x *ListTenantDomainsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[170]
+	mi := &file_identity_v1_identity_proto_msgTypes[184]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10138,7 +10823,7 @@ func (x *ListTenantDomainsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTenantDomainsRequest.ProtoReflect.Descriptor instead.
 func (*ListTenantDomainsRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{170}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{184}
 }
 
 func (x *ListTenantDomainsRequest) GetTenantId() string {
@@ -10157,7 +10842,7 @@ type ListTenantDomainsResponse struct {
 
 func (x *ListTenantDomainsResponse) Reset() {
 	*x = ListTenantDomainsResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[171]
+	mi := &file_identity_v1_identity_proto_msgTypes[185]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10169,7 +10854,7 @@ func (x *ListTenantDomainsResponse) String() string {
 func (*ListTenantDomainsResponse) ProtoMessage() {}
 
 func (x *ListTenantDomainsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[171]
+	mi := &file_identity_v1_identity_proto_msgTypes[185]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10182,7 +10867,7 @@ func (x *ListTenantDomainsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTenantDomainsResponse.ProtoReflect.Descriptor instead.
 func (*ListTenantDomainsResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{171}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{185}
 }
 
 func (x *ListTenantDomainsResponse) GetDomains() []*Domain {
@@ -10210,7 +10895,7 @@ type TenantMembership struct {
 
 func (x *TenantMembership) Reset() {
 	*x = TenantMembership{}
-	mi := &file_identity_v1_identity_proto_msgTypes[172]
+	mi := &file_identity_v1_identity_proto_msgTypes[186]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10222,7 +10907,7 @@ func (x *TenantMembership) String() string {
 func (*TenantMembership) ProtoMessage() {}
 
 func (x *TenantMembership) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[172]
+	mi := &file_identity_v1_identity_proto_msgTypes[186]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10235,7 +10920,7 @@ func (x *TenantMembership) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantMembership.ProtoReflect.Descriptor instead.
 func (*TenantMembership) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{172}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{186}
 }
 
 func (x *TenantMembership) GetId() string {
@@ -10314,7 +10999,7 @@ type TenantInvitation struct {
 
 func (x *TenantInvitation) Reset() {
 	*x = TenantInvitation{}
-	mi := &file_identity_v1_identity_proto_msgTypes[173]
+	mi := &file_identity_v1_identity_proto_msgTypes[187]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10326,7 +11011,7 @@ func (x *TenantInvitation) String() string {
 func (*TenantInvitation) ProtoMessage() {}
 
 func (x *TenantInvitation) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[173]
+	mi := &file_identity_v1_identity_proto_msgTypes[187]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10339,7 +11024,7 @@ func (x *TenantInvitation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantInvitation.ProtoReflect.Descriptor instead.
 func (*TenantInvitation) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{173}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{187}
 }
 
 func (x *TenantInvitation) GetId() string {
@@ -10416,7 +11101,7 @@ type CreateTenantInvitationRequest struct {
 
 func (x *CreateTenantInvitationRequest) Reset() {
 	*x = CreateTenantInvitationRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[174]
+	mi := &file_identity_v1_identity_proto_msgTypes[188]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10428,7 +11113,7 @@ func (x *CreateTenantInvitationRequest) String() string {
 func (*CreateTenantInvitationRequest) ProtoMessage() {}
 
 func (x *CreateTenantInvitationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[174]
+	mi := &file_identity_v1_identity_proto_msgTypes[188]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10441,7 +11126,7 @@ func (x *CreateTenantInvitationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTenantInvitationRequest.ProtoReflect.Descriptor instead.
 func (*CreateTenantInvitationRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{174}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{188}
 }
 
 func (x *CreateTenantInvitationRequest) GetTenantId() string {
@@ -10479,7 +11164,7 @@ type CreateTenantInvitationResponse struct {
 
 func (x *CreateTenantInvitationResponse) Reset() {
 	*x = CreateTenantInvitationResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[175]
+	mi := &file_identity_v1_identity_proto_msgTypes[189]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10491,7 +11176,7 @@ func (x *CreateTenantInvitationResponse) String() string {
 func (*CreateTenantInvitationResponse) ProtoMessage() {}
 
 func (x *CreateTenantInvitationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[175]
+	mi := &file_identity_v1_identity_proto_msgTypes[189]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10504,7 +11189,7 @@ func (x *CreateTenantInvitationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTenantInvitationResponse.ProtoReflect.Descriptor instead.
 func (*CreateTenantInvitationResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{175}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{189}
 }
 
 func (x *CreateTenantInvitationResponse) GetInvitation() *TenantInvitation {
@@ -10530,7 +11215,7 @@ type AcceptTenantInvitationRequest struct {
 
 func (x *AcceptTenantInvitationRequest) Reset() {
 	*x = AcceptTenantInvitationRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[176]
+	mi := &file_identity_v1_identity_proto_msgTypes[190]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10542,7 +11227,7 @@ func (x *AcceptTenantInvitationRequest) String() string {
 func (*AcceptTenantInvitationRequest) ProtoMessage() {}
 
 func (x *AcceptTenantInvitationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[176]
+	mi := &file_identity_v1_identity_proto_msgTypes[190]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10555,7 +11240,7 @@ func (x *AcceptTenantInvitationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptTenantInvitationRequest.ProtoReflect.Descriptor instead.
 func (*AcceptTenantInvitationRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{176}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{190}
 }
 
 func (x *AcceptTenantInvitationRequest) GetToken() string {
@@ -10574,7 +11259,7 @@ type AcceptTenantInvitationResponse struct {
 
 func (x *AcceptTenantInvitationResponse) Reset() {
 	*x = AcceptTenantInvitationResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[177]
+	mi := &file_identity_v1_identity_proto_msgTypes[191]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10586,7 +11271,7 @@ func (x *AcceptTenantInvitationResponse) String() string {
 func (*AcceptTenantInvitationResponse) ProtoMessage() {}
 
 func (x *AcceptTenantInvitationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[177]
+	mi := &file_identity_v1_identity_proto_msgTypes[191]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10599,7 +11284,7 @@ func (x *AcceptTenantInvitationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptTenantInvitationResponse.ProtoReflect.Descriptor instead.
 func (*AcceptTenantInvitationResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{177}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{191}
 }
 
 func (x *AcceptTenantInvitationResponse) GetMembership() *TenantMembership {
@@ -10618,7 +11303,7 @@ type ListTenantInvitationsRequest struct {
 
 func (x *ListTenantInvitationsRequest) Reset() {
 	*x = ListTenantInvitationsRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[178]
+	mi := &file_identity_v1_identity_proto_msgTypes[192]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10630,7 +11315,7 @@ func (x *ListTenantInvitationsRequest) String() string {
 func (*ListTenantInvitationsRequest) ProtoMessage() {}
 
 func (x *ListTenantInvitationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[178]
+	mi := &file_identity_v1_identity_proto_msgTypes[192]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10643,7 +11328,7 @@ func (x *ListTenantInvitationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTenantInvitationsRequest.ProtoReflect.Descriptor instead.
 func (*ListTenantInvitationsRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{178}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{192}
 }
 
 func (x *ListTenantInvitationsRequest) GetTenantId() string {
@@ -10662,7 +11347,7 @@ type ListTenantInvitationsResponse struct {
 
 func (x *ListTenantInvitationsResponse) Reset() {
 	*x = ListTenantInvitationsResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[179]
+	mi := &file_identity_v1_identity_proto_msgTypes[193]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10674,7 +11359,7 @@ func (x *ListTenantInvitationsResponse) String() string {
 func (*ListTenantInvitationsResponse) ProtoMessage() {}
 
 func (x *ListTenantInvitationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[179]
+	mi := &file_identity_v1_identity_proto_msgTypes[193]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10687,7 +11372,7 @@ func (x *ListTenantInvitationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTenantInvitationsResponse.ProtoReflect.Descriptor instead.
 func (*ListTenantInvitationsResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{179}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{193}
 }
 
 func (x *ListTenantInvitationsResponse) GetInvitations() []*TenantInvitation {
@@ -10706,7 +11391,7 @@ type ListTenantMembersRequest struct {
 
 func (x *ListTenantMembersRequest) Reset() {
 	*x = ListTenantMembersRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[180]
+	mi := &file_identity_v1_identity_proto_msgTypes[194]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10718,7 +11403,7 @@ func (x *ListTenantMembersRequest) String() string {
 func (*ListTenantMembersRequest) ProtoMessage() {}
 
 func (x *ListTenantMembersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[180]
+	mi := &file_identity_v1_identity_proto_msgTypes[194]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10731,7 +11416,7 @@ func (x *ListTenantMembersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTenantMembersRequest.ProtoReflect.Descriptor instead.
 func (*ListTenantMembersRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{180}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{194}
 }
 
 func (x *ListTenantMembersRequest) GetTenantId() string {
@@ -10750,7 +11435,7 @@ type ListTenantMembersResponse struct {
 
 func (x *ListTenantMembersResponse) Reset() {
 	*x = ListTenantMembersResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[181]
+	mi := &file_identity_v1_identity_proto_msgTypes[195]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10762,7 +11447,7 @@ func (x *ListTenantMembersResponse) String() string {
 func (*ListTenantMembersResponse) ProtoMessage() {}
 
 func (x *ListTenantMembersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[181]
+	mi := &file_identity_v1_identity_proto_msgTypes[195]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10775,7 +11460,7 @@ func (x *ListTenantMembersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTenantMembersResponse.ProtoReflect.Descriptor instead.
 func (*ListTenantMembersResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{181}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{195}
 }
 
 func (x *ListTenantMembersResponse) GetMembers() []*TenantMembership {
@@ -10795,7 +11480,7 @@ type RemoveTenantMemberRequest struct {
 
 func (x *RemoveTenantMemberRequest) Reset() {
 	*x = RemoveTenantMemberRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[182]
+	mi := &file_identity_v1_identity_proto_msgTypes[196]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10807,7 +11492,7 @@ func (x *RemoveTenantMemberRequest) String() string {
 func (*RemoveTenantMemberRequest) ProtoMessage() {}
 
 func (x *RemoveTenantMemberRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[182]
+	mi := &file_identity_v1_identity_proto_msgTypes[196]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10820,7 +11505,7 @@ func (x *RemoveTenantMemberRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveTenantMemberRequest.ProtoReflect.Descriptor instead.
 func (*RemoveTenantMemberRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{182}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{196}
 }
 
 func (x *RemoveTenantMemberRequest) GetTenantId() string {
@@ -10845,7 +11530,7 @@ type RemoveTenantMemberResponse struct {
 
 func (x *RemoveTenantMemberResponse) Reset() {
 	*x = RemoveTenantMemberResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[183]
+	mi := &file_identity_v1_identity_proto_msgTypes[197]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10857,7 +11542,7 @@ func (x *RemoveTenantMemberResponse) String() string {
 func (*RemoveTenantMemberResponse) ProtoMessage() {}
 
 func (x *RemoveTenantMemberResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[183]
+	mi := &file_identity_v1_identity_proto_msgTypes[197]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10870,7 +11555,7 @@ func (x *RemoveTenantMemberResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveTenantMemberResponse.ProtoReflect.Descriptor instead.
 func (*RemoveTenantMemberResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{183}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{197}
 }
 
 type AdminCreateProjectRequest struct {
@@ -10886,7 +11571,7 @@ type AdminCreateProjectRequest struct {
 
 func (x *AdminCreateProjectRequest) Reset() {
 	*x = AdminCreateProjectRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[184]
+	mi := &file_identity_v1_identity_proto_msgTypes[198]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10898,7 +11583,7 @@ func (x *AdminCreateProjectRequest) String() string {
 func (*AdminCreateProjectRequest) ProtoMessage() {}
 
 func (x *AdminCreateProjectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[184]
+	mi := &file_identity_v1_identity_proto_msgTypes[198]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10911,7 +11596,7 @@ func (x *AdminCreateProjectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminCreateProjectRequest.ProtoReflect.Descriptor instead.
 func (*AdminCreateProjectRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{184}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{198}
 }
 
 func (x *AdminCreateProjectRequest) GetName() string {
@@ -10937,7 +11622,7 @@ type AdminCreateProjectResponse struct {
 
 func (x *AdminCreateProjectResponse) Reset() {
 	*x = AdminCreateProjectResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[185]
+	mi := &file_identity_v1_identity_proto_msgTypes[199]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10949,7 +11634,7 @@ func (x *AdminCreateProjectResponse) String() string {
 func (*AdminCreateProjectResponse) ProtoMessage() {}
 
 func (x *AdminCreateProjectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[185]
+	mi := &file_identity_v1_identity_proto_msgTypes[199]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10962,7 +11647,7 @@ func (x *AdminCreateProjectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminCreateProjectResponse.ProtoReflect.Descriptor instead.
 func (*AdminCreateProjectResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{185}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{199}
 }
 
 func (x *AdminCreateProjectResponse) GetProjectId() string {
@@ -10984,7 +11669,7 @@ type AdminCreateProjectCredentialRequest struct {
 
 func (x *AdminCreateProjectCredentialRequest) Reset() {
 	*x = AdminCreateProjectCredentialRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[186]
+	mi := &file_identity_v1_identity_proto_msgTypes[200]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10996,7 +11681,7 @@ func (x *AdminCreateProjectCredentialRequest) String() string {
 func (*AdminCreateProjectCredentialRequest) ProtoMessage() {}
 
 func (x *AdminCreateProjectCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[186]
+	mi := &file_identity_v1_identity_proto_msgTypes[200]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11009,7 +11694,7 @@ func (x *AdminCreateProjectCredentialRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use AdminCreateProjectCredentialRequest.ProtoReflect.Descriptor instead.
 func (*AdminCreateProjectCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{186}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{200}
 }
 
 func (x *AdminCreateProjectCredentialRequest) GetProjectId() string {
@@ -11041,7 +11726,7 @@ type AdminCreateProjectCredentialResponse struct {
 
 func (x *AdminCreateProjectCredentialResponse) Reset() {
 	*x = AdminCreateProjectCredentialResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[187]
+	mi := &file_identity_v1_identity_proto_msgTypes[201]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11053,7 +11738,7 @@ func (x *AdminCreateProjectCredentialResponse) String() string {
 func (*AdminCreateProjectCredentialResponse) ProtoMessage() {}
 
 func (x *AdminCreateProjectCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[187]
+	mi := &file_identity_v1_identity_proto_msgTypes[201]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11066,7 +11751,7 @@ func (x *AdminCreateProjectCredentialResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use AdminCreateProjectCredentialResponse.ProtoReflect.Descriptor instead.
 func (*AdminCreateProjectCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{187}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{201}
 }
 
 func (x *AdminCreateProjectCredentialResponse) GetCredentialId() string {
@@ -11103,7 +11788,7 @@ type AdminAddProjectAuthDomainRequest struct {
 
 func (x *AdminAddProjectAuthDomainRequest) Reset() {
 	*x = AdminAddProjectAuthDomainRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[188]
+	mi := &file_identity_v1_identity_proto_msgTypes[202]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11115,7 +11800,7 @@ func (x *AdminAddProjectAuthDomainRequest) String() string {
 func (*AdminAddProjectAuthDomainRequest) ProtoMessage() {}
 
 func (x *AdminAddProjectAuthDomainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[188]
+	mi := &file_identity_v1_identity_proto_msgTypes[202]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11128,7 +11813,7 @@ func (x *AdminAddProjectAuthDomainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminAddProjectAuthDomainRequest.ProtoReflect.Descriptor instead.
 func (*AdminAddProjectAuthDomainRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{188}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{202}
 }
 
 func (x *AdminAddProjectAuthDomainRequest) GetProjectId() string {
@@ -11160,7 +11845,7 @@ type AdminAddProjectAuthDomainResponse struct {
 
 func (x *AdminAddProjectAuthDomainResponse) Reset() {
 	*x = AdminAddProjectAuthDomainResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[189]
+	mi := &file_identity_v1_identity_proto_msgTypes[203]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11172,7 +11857,7 @@ func (x *AdminAddProjectAuthDomainResponse) String() string {
 func (*AdminAddProjectAuthDomainResponse) ProtoMessage() {}
 
 func (x *AdminAddProjectAuthDomainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[189]
+	mi := &file_identity_v1_identity_proto_msgTypes[203]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11185,7 +11870,7 @@ func (x *AdminAddProjectAuthDomainResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use AdminAddProjectAuthDomainResponse.ProtoReflect.Descriptor instead.
 func (*AdminAddProjectAuthDomainResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{189}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{203}
 }
 
 // ProjectAuthDomain is a project's serving hostname as returned by the
@@ -11205,7 +11890,7 @@ type ProjectAuthDomain struct {
 
 func (x *ProjectAuthDomain) Reset() {
 	*x = ProjectAuthDomain{}
-	mi := &file_identity_v1_identity_proto_msgTypes[190]
+	mi := &file_identity_v1_identity_proto_msgTypes[204]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11217,7 +11902,7 @@ func (x *ProjectAuthDomain) String() string {
 func (*ProjectAuthDomain) ProtoMessage() {}
 
 func (x *ProjectAuthDomain) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[190]
+	mi := &file_identity_v1_identity_proto_msgTypes[204]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11230,7 +11915,7 @@ func (x *ProjectAuthDomain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectAuthDomain.ProtoReflect.Descriptor instead.
 func (*ProjectAuthDomain) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{190}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{204}
 }
 
 func (x *ProjectAuthDomain) GetHostname() string {
@@ -11270,7 +11955,7 @@ type AddProjectAuthDomainRequest struct {
 
 func (x *AddProjectAuthDomainRequest) Reset() {
 	*x = AddProjectAuthDomainRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[191]
+	mi := &file_identity_v1_identity_proto_msgTypes[205]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11282,7 +11967,7 @@ func (x *AddProjectAuthDomainRequest) String() string {
 func (*AddProjectAuthDomainRequest) ProtoMessage() {}
 
 func (x *AddProjectAuthDomainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[191]
+	mi := &file_identity_v1_identity_proto_msgTypes[205]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11295,7 +11980,7 @@ func (x *AddProjectAuthDomainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddProjectAuthDomainRequest.ProtoReflect.Descriptor instead.
 func (*AddProjectAuthDomainRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{191}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{205}
 }
 
 func (x *AddProjectAuthDomainRequest) GetProjectId() string {
@@ -11334,7 +12019,7 @@ type AddProjectAuthDomainResponse struct {
 
 func (x *AddProjectAuthDomainResponse) Reset() {
 	*x = AddProjectAuthDomainResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[192]
+	mi := &file_identity_v1_identity_proto_msgTypes[206]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11346,7 +12031,7 @@ func (x *AddProjectAuthDomainResponse) String() string {
 func (*AddProjectAuthDomainResponse) ProtoMessage() {}
 
 func (x *AddProjectAuthDomainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[192]
+	mi := &file_identity_v1_identity_proto_msgTypes[206]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11359,7 +12044,7 @@ func (x *AddProjectAuthDomainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddProjectAuthDomainResponse.ProtoReflect.Descriptor instead.
 func (*AddProjectAuthDomainResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{192}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{206}
 }
 
 func (x *AddProjectAuthDomainResponse) GetDomain() *ProjectAuthDomain {
@@ -11393,7 +12078,7 @@ type VerifyProjectAuthDomainRequest struct {
 
 func (x *VerifyProjectAuthDomainRequest) Reset() {
 	*x = VerifyProjectAuthDomainRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[193]
+	mi := &file_identity_v1_identity_proto_msgTypes[207]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11405,7 +12090,7 @@ func (x *VerifyProjectAuthDomainRequest) String() string {
 func (*VerifyProjectAuthDomainRequest) ProtoMessage() {}
 
 func (x *VerifyProjectAuthDomainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[193]
+	mi := &file_identity_v1_identity_proto_msgTypes[207]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11418,7 +12103,7 @@ func (x *VerifyProjectAuthDomainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyProjectAuthDomainRequest.ProtoReflect.Descriptor instead.
 func (*VerifyProjectAuthDomainRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{193}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{207}
 }
 
 func (x *VerifyProjectAuthDomainRequest) GetProjectId() string {
@@ -11444,7 +12129,7 @@ type VerifyProjectAuthDomainResponse struct {
 
 func (x *VerifyProjectAuthDomainResponse) Reset() {
 	*x = VerifyProjectAuthDomainResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[194]
+	mi := &file_identity_v1_identity_proto_msgTypes[208]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11456,7 +12141,7 @@ func (x *VerifyProjectAuthDomainResponse) String() string {
 func (*VerifyProjectAuthDomainResponse) ProtoMessage() {}
 
 func (x *VerifyProjectAuthDomainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[194]
+	mi := &file_identity_v1_identity_proto_msgTypes[208]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11469,7 +12154,7 @@ func (x *VerifyProjectAuthDomainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyProjectAuthDomainResponse.ProtoReflect.Descriptor instead.
 func (*VerifyProjectAuthDomainResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{194}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{208}
 }
 
 func (x *VerifyProjectAuthDomainResponse) GetDomain() *ProjectAuthDomain {
@@ -11488,7 +12173,7 @@ type ListProjectAuthDomainsRequest struct {
 
 func (x *ListProjectAuthDomainsRequest) Reset() {
 	*x = ListProjectAuthDomainsRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[195]
+	mi := &file_identity_v1_identity_proto_msgTypes[209]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11500,7 +12185,7 @@ func (x *ListProjectAuthDomainsRequest) String() string {
 func (*ListProjectAuthDomainsRequest) ProtoMessage() {}
 
 func (x *ListProjectAuthDomainsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[195]
+	mi := &file_identity_v1_identity_proto_msgTypes[209]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11513,7 +12198,7 @@ func (x *ListProjectAuthDomainsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProjectAuthDomainsRequest.ProtoReflect.Descriptor instead.
 func (*ListProjectAuthDomainsRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{195}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{209}
 }
 
 func (x *ListProjectAuthDomainsRequest) GetProjectId() string {
@@ -11532,7 +12217,7 @@ type ListProjectAuthDomainsResponse struct {
 
 func (x *ListProjectAuthDomainsResponse) Reset() {
 	*x = ListProjectAuthDomainsResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[196]
+	mi := &file_identity_v1_identity_proto_msgTypes[210]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11544,7 +12229,7 @@ func (x *ListProjectAuthDomainsResponse) String() string {
 func (*ListProjectAuthDomainsResponse) ProtoMessage() {}
 
 func (x *ListProjectAuthDomainsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[196]
+	mi := &file_identity_v1_identity_proto_msgTypes[210]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11557,7 +12242,7 @@ func (x *ListProjectAuthDomainsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProjectAuthDomainsResponse.ProtoReflect.Descriptor instead.
 func (*ListProjectAuthDomainsResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{196}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{210}
 }
 
 func (x *ListProjectAuthDomainsResponse) GetDomains() []*ProjectAuthDomain {
@@ -11577,7 +12262,7 @@ type SetPrimaryAuthDomainRequest struct {
 
 func (x *SetPrimaryAuthDomainRequest) Reset() {
 	*x = SetPrimaryAuthDomainRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[197]
+	mi := &file_identity_v1_identity_proto_msgTypes[211]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11589,7 +12274,7 @@ func (x *SetPrimaryAuthDomainRequest) String() string {
 func (*SetPrimaryAuthDomainRequest) ProtoMessage() {}
 
 func (x *SetPrimaryAuthDomainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[197]
+	mi := &file_identity_v1_identity_proto_msgTypes[211]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11602,7 +12287,7 @@ func (x *SetPrimaryAuthDomainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPrimaryAuthDomainRequest.ProtoReflect.Descriptor instead.
 func (*SetPrimaryAuthDomainRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{197}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{211}
 }
 
 func (x *SetPrimaryAuthDomainRequest) GetProjectId() string {
@@ -11628,7 +12313,7 @@ type SetPrimaryAuthDomainResponse struct {
 
 func (x *SetPrimaryAuthDomainResponse) Reset() {
 	*x = SetPrimaryAuthDomainResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[198]
+	mi := &file_identity_v1_identity_proto_msgTypes[212]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11640,7 +12325,7 @@ func (x *SetPrimaryAuthDomainResponse) String() string {
 func (*SetPrimaryAuthDomainResponse) ProtoMessage() {}
 
 func (x *SetPrimaryAuthDomainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[198]
+	mi := &file_identity_v1_identity_proto_msgTypes[212]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11653,7 +12338,7 @@ func (x *SetPrimaryAuthDomainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPrimaryAuthDomainResponse.ProtoReflect.Descriptor instead.
 func (*SetPrimaryAuthDomainResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{198}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{212}
 }
 
 func (x *SetPrimaryAuthDomainResponse) GetDomain() *ProjectAuthDomain {
@@ -11674,7 +12359,7 @@ type AdminCreateTenantRequest struct {
 
 func (x *AdminCreateTenantRequest) Reset() {
 	*x = AdminCreateTenantRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[199]
+	mi := &file_identity_v1_identity_proto_msgTypes[213]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11686,7 +12371,7 @@ func (x *AdminCreateTenantRequest) String() string {
 func (*AdminCreateTenantRequest) ProtoMessage() {}
 
 func (x *AdminCreateTenantRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[199]
+	mi := &file_identity_v1_identity_proto_msgTypes[213]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11699,7 +12384,7 @@ func (x *AdminCreateTenantRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminCreateTenantRequest.ProtoReflect.Descriptor instead.
 func (*AdminCreateTenantRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{199}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{213}
 }
 
 func (x *AdminCreateTenantRequest) GetProjectId() string {
@@ -11732,7 +12417,7 @@ type AdminCreateTenantResponse struct {
 
 func (x *AdminCreateTenantResponse) Reset() {
 	*x = AdminCreateTenantResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[200]
+	mi := &file_identity_v1_identity_proto_msgTypes[214]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11744,7 +12429,7 @@ func (x *AdminCreateTenantResponse) String() string {
 func (*AdminCreateTenantResponse) ProtoMessage() {}
 
 func (x *AdminCreateTenantResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[200]
+	mi := &file_identity_v1_identity_proto_msgTypes[214]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11757,7 +12442,7 @@ func (x *AdminCreateTenantResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminCreateTenantResponse.ProtoReflect.Descriptor instead.
 func (*AdminCreateTenantResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{200}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{214}
 }
 
 func (x *AdminCreateTenantResponse) GetTenantId() string {
@@ -11780,7 +12465,7 @@ type AdminAddTenantAdminRequest struct {
 
 func (x *AdminAddTenantAdminRequest) Reset() {
 	*x = AdminAddTenantAdminRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[201]
+	mi := &file_identity_v1_identity_proto_msgTypes[215]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11792,7 +12477,7 @@ func (x *AdminAddTenantAdminRequest) String() string {
 func (*AdminAddTenantAdminRequest) ProtoMessage() {}
 
 func (x *AdminAddTenantAdminRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[201]
+	mi := &file_identity_v1_identity_proto_msgTypes[215]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11805,7 +12490,7 @@ func (x *AdminAddTenantAdminRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminAddTenantAdminRequest.ProtoReflect.Descriptor instead.
 func (*AdminAddTenantAdminRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{201}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{215}
 }
 
 func (x *AdminAddTenantAdminRequest) GetProjectId() string {
@@ -11845,7 +12530,7 @@ type AdminAddTenantAdminResponse struct {
 
 func (x *AdminAddTenantAdminResponse) Reset() {
 	*x = AdminAddTenantAdminResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[202]
+	mi := &file_identity_v1_identity_proto_msgTypes[216]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11857,7 +12542,7 @@ func (x *AdminAddTenantAdminResponse) String() string {
 func (*AdminAddTenantAdminResponse) ProtoMessage() {}
 
 func (x *AdminAddTenantAdminResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[202]
+	mi := &file_identity_v1_identity_proto_msgTypes[216]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11870,7 +12555,7 @@ func (x *AdminAddTenantAdminResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminAddTenantAdminResponse.ProtoReflect.Descriptor instead.
 func (*AdminAddTenantAdminResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{202}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{216}
 }
 
 func (x *AdminAddTenantAdminResponse) GetMembership() *TenantMembership {
@@ -11916,7 +12601,7 @@ type CreateFirstPlatformAdminRequest struct {
 
 func (x *CreateFirstPlatformAdminRequest) Reset() {
 	*x = CreateFirstPlatformAdminRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[203]
+	mi := &file_identity_v1_identity_proto_msgTypes[217]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11928,7 +12613,7 @@ func (x *CreateFirstPlatformAdminRequest) String() string {
 func (*CreateFirstPlatformAdminRequest) ProtoMessage() {}
 
 func (x *CreateFirstPlatformAdminRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[203]
+	mi := &file_identity_v1_identity_proto_msgTypes[217]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11941,7 +12626,7 @@ func (x *CreateFirstPlatformAdminRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateFirstPlatformAdminRequest.ProtoReflect.Descriptor instead.
 func (*CreateFirstPlatformAdminRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{203}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{217}
 }
 
 func (x *CreateFirstPlatformAdminRequest) GetEmail() string {
@@ -11972,7 +12657,7 @@ type CreateFirstPlatformAdminResponse struct {
 
 func (x *CreateFirstPlatformAdminResponse) Reset() {
 	*x = CreateFirstPlatformAdminResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[204]
+	mi := &file_identity_v1_identity_proto_msgTypes[218]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11984,7 +12669,7 @@ func (x *CreateFirstPlatformAdminResponse) String() string {
 func (*CreateFirstPlatformAdminResponse) ProtoMessage() {}
 
 func (x *CreateFirstPlatformAdminResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[204]
+	mi := &file_identity_v1_identity_proto_msgTypes[218]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11997,7 +12682,7 @@ func (x *CreateFirstPlatformAdminResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateFirstPlatformAdminResponse.ProtoReflect.Descriptor instead.
 func (*CreateFirstPlatformAdminResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{204}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{218}
 }
 
 func (x *CreateFirstPlatformAdminResponse) GetAdminId() string {
@@ -12055,7 +12740,7 @@ type LoginPolicy struct {
 
 func (x *LoginPolicy) Reset() {
 	*x = LoginPolicy{}
-	mi := &file_identity_v1_identity_proto_msgTypes[205]
+	mi := &file_identity_v1_identity_proto_msgTypes[219]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12067,7 +12752,7 @@ func (x *LoginPolicy) String() string {
 func (*LoginPolicy) ProtoMessage() {}
 
 func (x *LoginPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[205]
+	mi := &file_identity_v1_identity_proto_msgTypes[219]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12080,7 +12765,7 @@ func (x *LoginPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoginPolicy.ProtoReflect.Descriptor instead.
 func (*LoginPolicy) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{205}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{219}
 }
 
 func (x *LoginPolicy) GetProjectId() string {
@@ -12181,7 +12866,7 @@ type UpsertLoginPolicyRequest struct {
 
 func (x *UpsertLoginPolicyRequest) Reset() {
 	*x = UpsertLoginPolicyRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[206]
+	mi := &file_identity_v1_identity_proto_msgTypes[220]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12193,7 +12878,7 @@ func (x *UpsertLoginPolicyRequest) String() string {
 func (*UpsertLoginPolicyRequest) ProtoMessage() {}
 
 func (x *UpsertLoginPolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[206]
+	mi := &file_identity_v1_identity_proto_msgTypes[220]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12206,7 +12891,7 @@ func (x *UpsertLoginPolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertLoginPolicyRequest.ProtoReflect.Descriptor instead.
 func (*UpsertLoginPolicyRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{206}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{220}
 }
 
 func (x *UpsertLoginPolicyRequest) GetProjectId() string {
@@ -12281,7 +12966,7 @@ type UpsertLoginPolicyResponse struct {
 
 func (x *UpsertLoginPolicyResponse) Reset() {
 	*x = UpsertLoginPolicyResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[207]
+	mi := &file_identity_v1_identity_proto_msgTypes[221]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12293,7 +12978,7 @@ func (x *UpsertLoginPolicyResponse) String() string {
 func (*UpsertLoginPolicyResponse) ProtoMessage() {}
 
 func (x *UpsertLoginPolicyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[207]
+	mi := &file_identity_v1_identity_proto_msgTypes[221]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12306,7 +12991,7 @@ func (x *UpsertLoginPolicyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertLoginPolicyResponse.ProtoReflect.Descriptor instead.
 func (*UpsertLoginPolicyResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{207}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{221}
 }
 
 func (x *UpsertLoginPolicyResponse) GetPolicy() *LoginPolicy {
@@ -12326,7 +13011,7 @@ type GetLoginPolicyRequest struct {
 
 func (x *GetLoginPolicyRequest) Reset() {
 	*x = GetLoginPolicyRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[208]
+	mi := &file_identity_v1_identity_proto_msgTypes[222]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12338,7 +13023,7 @@ func (x *GetLoginPolicyRequest) String() string {
 func (*GetLoginPolicyRequest) ProtoMessage() {}
 
 func (x *GetLoginPolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[208]
+	mi := &file_identity_v1_identity_proto_msgTypes[222]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12351,7 +13036,7 @@ func (x *GetLoginPolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLoginPolicyRequest.ProtoReflect.Descriptor instead.
 func (*GetLoginPolicyRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{208}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{222}
 }
 
 func (x *GetLoginPolicyRequest) GetProjectId() string {
@@ -12379,7 +13064,7 @@ type GetLoginPolicyResponse struct {
 
 func (x *GetLoginPolicyResponse) Reset() {
 	*x = GetLoginPolicyResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[209]
+	mi := &file_identity_v1_identity_proto_msgTypes[223]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12391,7 +13076,7 @@ func (x *GetLoginPolicyResponse) String() string {
 func (*GetLoginPolicyResponse) ProtoMessage() {}
 
 func (x *GetLoginPolicyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[209]
+	mi := &file_identity_v1_identity_proto_msgTypes[223]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12404,7 +13089,7 @@ func (x *GetLoginPolicyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLoginPolicyResponse.ProtoReflect.Descriptor instead.
 func (*GetLoginPolicyResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{209}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{223}
 }
 
 func (x *GetLoginPolicyResponse) GetPolicy() *LoginPolicy {
@@ -12424,7 +13109,7 @@ type DeleteLoginPolicyRequest struct {
 
 func (x *DeleteLoginPolicyRequest) Reset() {
 	*x = DeleteLoginPolicyRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[210]
+	mi := &file_identity_v1_identity_proto_msgTypes[224]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12436,7 +13121,7 @@ func (x *DeleteLoginPolicyRequest) String() string {
 func (*DeleteLoginPolicyRequest) ProtoMessage() {}
 
 func (x *DeleteLoginPolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[210]
+	mi := &file_identity_v1_identity_proto_msgTypes[224]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12449,7 +13134,7 @@ func (x *DeleteLoginPolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteLoginPolicyRequest.ProtoReflect.Descriptor instead.
 func (*DeleteLoginPolicyRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{210}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{224}
 }
 
 func (x *DeleteLoginPolicyRequest) GetProjectId() string {
@@ -12474,7 +13159,7 @@ type DeleteLoginPolicyResponse struct {
 
 func (x *DeleteLoginPolicyResponse) Reset() {
 	*x = DeleteLoginPolicyResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[211]
+	mi := &file_identity_v1_identity_proto_msgTypes[225]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12486,7 +13171,7 @@ func (x *DeleteLoginPolicyResponse) String() string {
 func (*DeleteLoginPolicyResponse) ProtoMessage() {}
 
 func (x *DeleteLoginPolicyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[211]
+	mi := &file_identity_v1_identity_proto_msgTypes[225]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12499,7 +13184,7 @@ func (x *DeleteLoginPolicyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteLoginPolicyResponse.ProtoReflect.Descriptor instead.
 func (*DeleteLoginPolicyResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{211}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{225}
 }
 
 type UpsertProjectConfigRequest struct {
@@ -12516,7 +13201,7 @@ type UpsertProjectConfigRequest struct {
 
 func (x *UpsertProjectConfigRequest) Reset() {
 	*x = UpsertProjectConfigRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[212]
+	mi := &file_identity_v1_identity_proto_msgTypes[226]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12528,7 +13213,7 @@ func (x *UpsertProjectConfigRequest) String() string {
 func (*UpsertProjectConfigRequest) ProtoMessage() {}
 
 func (x *UpsertProjectConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[212]
+	mi := &file_identity_v1_identity_proto_msgTypes[226]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12541,7 +13226,7 @@ func (x *UpsertProjectConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertProjectConfigRequest.ProtoReflect.Descriptor instead.
 func (*UpsertProjectConfigRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{212}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{226}
 }
 
 func (x *UpsertProjectConfigRequest) GetProjectId() string {
@@ -12567,7 +13252,7 @@ type UpsertProjectConfigResponse struct {
 
 func (x *UpsertProjectConfigResponse) Reset() {
 	*x = UpsertProjectConfigResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[213]
+	mi := &file_identity_v1_identity_proto_msgTypes[227]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12579,7 +13264,7 @@ func (x *UpsertProjectConfigResponse) String() string {
 func (*UpsertProjectConfigResponse) ProtoMessage() {}
 
 func (x *UpsertProjectConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[213]
+	mi := &file_identity_v1_identity_proto_msgTypes[227]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12592,7 +13277,7 @@ func (x *UpsertProjectConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertProjectConfigResponse.ProtoReflect.Descriptor instead.
 func (*UpsertProjectConfigResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{213}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{227}
 }
 
 func (x *UpsertProjectConfigResponse) GetConfigJson() string {
@@ -12611,7 +13296,7 @@ type GetProjectConfigRequest struct {
 
 func (x *GetProjectConfigRequest) Reset() {
 	*x = GetProjectConfigRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[214]
+	mi := &file_identity_v1_identity_proto_msgTypes[228]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12623,7 +13308,7 @@ func (x *GetProjectConfigRequest) String() string {
 func (*GetProjectConfigRequest) ProtoMessage() {}
 
 func (x *GetProjectConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[214]
+	mi := &file_identity_v1_identity_proto_msgTypes[228]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12636,7 +13321,7 @@ func (x *GetProjectConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProjectConfigRequest.ProtoReflect.Descriptor instead.
 func (*GetProjectConfigRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{214}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{228}
 }
 
 func (x *GetProjectConfigRequest) GetProjectId() string {
@@ -12656,7 +13341,7 @@ type GetProjectConfigResponse struct {
 
 func (x *GetProjectConfigResponse) Reset() {
 	*x = GetProjectConfigResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[215]
+	mi := &file_identity_v1_identity_proto_msgTypes[229]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12668,7 +13353,7 @@ func (x *GetProjectConfigResponse) String() string {
 func (*GetProjectConfigResponse) ProtoMessage() {}
 
 func (x *GetProjectConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[215]
+	mi := &file_identity_v1_identity_proto_msgTypes[229]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12681,7 +13366,7 @@ func (x *GetProjectConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProjectConfigResponse.ProtoReflect.Descriptor instead.
 func (*GetProjectConfigResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{215}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{229}
 }
 
 func (x *GetProjectConfigResponse) GetConfigJson() string {
@@ -12763,7 +13448,7 @@ type ProjectOAuthProviderConfig struct {
 
 func (x *ProjectOAuthProviderConfig) Reset() {
 	*x = ProjectOAuthProviderConfig{}
-	mi := &file_identity_v1_identity_proto_msgTypes[216]
+	mi := &file_identity_v1_identity_proto_msgTypes[230]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12775,7 +13460,7 @@ func (x *ProjectOAuthProviderConfig) String() string {
 func (*ProjectOAuthProviderConfig) ProtoMessage() {}
 
 func (x *ProjectOAuthProviderConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[216]
+	mi := &file_identity_v1_identity_proto_msgTypes[230]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12788,7 +13473,7 @@ func (x *ProjectOAuthProviderConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectOAuthProviderConfig.ProtoReflect.Descriptor instead.
 func (*ProjectOAuthProviderConfig) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{216}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{230}
 }
 
 func (x *ProjectOAuthProviderConfig) GetProvider() string {
@@ -12965,7 +13650,7 @@ type AdminSetProjectOAuthProviderRequest struct {
 
 func (x *AdminSetProjectOAuthProviderRequest) Reset() {
 	*x = AdminSetProjectOAuthProviderRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[217]
+	mi := &file_identity_v1_identity_proto_msgTypes[231]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12977,7 +13662,7 @@ func (x *AdminSetProjectOAuthProviderRequest) String() string {
 func (*AdminSetProjectOAuthProviderRequest) ProtoMessage() {}
 
 func (x *AdminSetProjectOAuthProviderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[217]
+	mi := &file_identity_v1_identity_proto_msgTypes[231]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12990,7 +13675,7 @@ func (x *AdminSetProjectOAuthProviderRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use AdminSetProjectOAuthProviderRequest.ProtoReflect.Descriptor instead.
 func (*AdminSetProjectOAuthProviderRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{217}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{231}
 }
 
 func (x *AdminSetProjectOAuthProviderRequest) GetProjectId() string {
@@ -13018,7 +13703,7 @@ type AdminSetProjectOAuthProviderResponse struct {
 
 func (x *AdminSetProjectOAuthProviderResponse) Reset() {
 	*x = AdminSetProjectOAuthProviderResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[218]
+	mi := &file_identity_v1_identity_proto_msgTypes[232]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13030,7 +13715,7 @@ func (x *AdminSetProjectOAuthProviderResponse) String() string {
 func (*AdminSetProjectOAuthProviderResponse) ProtoMessage() {}
 
 func (x *AdminSetProjectOAuthProviderResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[218]
+	mi := &file_identity_v1_identity_proto_msgTypes[232]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13043,7 +13728,7 @@ func (x *AdminSetProjectOAuthProviderResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use AdminSetProjectOAuthProviderResponse.ProtoReflect.Descriptor instead.
 func (*AdminSetProjectOAuthProviderResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{218}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{232}
 }
 
 func (x *AdminSetProjectOAuthProviderResponse) GetConfig() *ProjectOAuthProviderConfig {
@@ -13075,7 +13760,7 @@ type AdminSetProjectAssuranceRequest struct {
 
 func (x *AdminSetProjectAssuranceRequest) Reset() {
 	*x = AdminSetProjectAssuranceRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[219]
+	mi := &file_identity_v1_identity_proto_msgTypes[233]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13087,7 +13772,7 @@ func (x *AdminSetProjectAssuranceRequest) String() string {
 func (*AdminSetProjectAssuranceRequest) ProtoMessage() {}
 
 func (x *AdminSetProjectAssuranceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[219]
+	mi := &file_identity_v1_identity_proto_msgTypes[233]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13100,7 +13785,7 @@ func (x *AdminSetProjectAssuranceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminSetProjectAssuranceRequest.ProtoReflect.Descriptor instead.
 func (*AdminSetProjectAssuranceRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{219}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{233}
 }
 
 func (x *AdminSetProjectAssuranceRequest) GetProjectId() string {
@@ -13128,7 +13813,7 @@ type AdminSetProjectAssuranceResponse struct {
 
 func (x *AdminSetProjectAssuranceResponse) Reset() {
 	*x = AdminSetProjectAssuranceResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[220]
+	mi := &file_identity_v1_identity_proto_msgTypes[234]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13140,7 +13825,7 @@ func (x *AdminSetProjectAssuranceResponse) String() string {
 func (*AdminSetProjectAssuranceResponse) ProtoMessage() {}
 
 func (x *AdminSetProjectAssuranceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[220]
+	mi := &file_identity_v1_identity_proto_msgTypes[234]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13153,7 +13838,7 @@ func (x *AdminSetProjectAssuranceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminSetProjectAssuranceResponse.ProtoReflect.Descriptor instead.
 func (*AdminSetProjectAssuranceResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{220}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{234}
 }
 
 func (x *AdminSetProjectAssuranceResponse) GetConfig() *ProjectAssuranceConfig {
@@ -13191,7 +13876,7 @@ type ProjectAssuranceConfig struct {
 
 func (x *ProjectAssuranceConfig) Reset() {
 	*x = ProjectAssuranceConfig{}
-	mi := &file_identity_v1_identity_proto_msgTypes[221]
+	mi := &file_identity_v1_identity_proto_msgTypes[235]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13203,7 +13888,7 @@ func (x *ProjectAssuranceConfig) String() string {
 func (*ProjectAssuranceConfig) ProtoMessage() {}
 
 func (x *ProjectAssuranceConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[221]
+	mi := &file_identity_v1_identity_proto_msgTypes[235]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13216,7 +13901,7 @@ func (x *ProjectAssuranceConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectAssuranceConfig.ProtoReflect.Descriptor instead.
 func (*ProjectAssuranceConfig) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{221}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{235}
 }
 
 func (x *ProjectAssuranceConfig) GetIosTeamId() string {
@@ -13294,7 +13979,7 @@ type AdminGetProjectAssuranceRequest struct {
 
 func (x *AdminGetProjectAssuranceRequest) Reset() {
 	*x = AdminGetProjectAssuranceRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[222]
+	mi := &file_identity_v1_identity_proto_msgTypes[236]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13306,7 +13991,7 @@ func (x *AdminGetProjectAssuranceRequest) String() string {
 func (*AdminGetProjectAssuranceRequest) ProtoMessage() {}
 
 func (x *AdminGetProjectAssuranceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[222]
+	mi := &file_identity_v1_identity_proto_msgTypes[236]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13319,7 +14004,7 @@ func (x *AdminGetProjectAssuranceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminGetProjectAssuranceRequest.ProtoReflect.Descriptor instead.
 func (*AdminGetProjectAssuranceRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{222}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{236}
 }
 
 func (x *AdminGetProjectAssuranceRequest) GetProjectId() string {
@@ -13338,7 +14023,7 @@ type AdminGetProjectAssuranceResponse struct {
 
 func (x *AdminGetProjectAssuranceResponse) Reset() {
 	*x = AdminGetProjectAssuranceResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[223]
+	mi := &file_identity_v1_identity_proto_msgTypes[237]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13350,7 +14035,7 @@ func (x *AdminGetProjectAssuranceResponse) String() string {
 func (*AdminGetProjectAssuranceResponse) ProtoMessage() {}
 
 func (x *AdminGetProjectAssuranceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[223]
+	mi := &file_identity_v1_identity_proto_msgTypes[237]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13363,7 +14048,7 @@ func (x *AdminGetProjectAssuranceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminGetProjectAssuranceResponse.ProtoReflect.Descriptor instead.
 func (*AdminGetProjectAssuranceResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{223}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{237}
 }
 
 func (x *AdminGetProjectAssuranceResponse) GetConfig() *ProjectAssuranceConfig {
@@ -13385,7 +14070,7 @@ type AdminDeleteProjectOAuthProviderRequest struct {
 
 func (x *AdminDeleteProjectOAuthProviderRequest) Reset() {
 	*x = AdminDeleteProjectOAuthProviderRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[224]
+	mi := &file_identity_v1_identity_proto_msgTypes[238]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13397,7 +14082,7 @@ func (x *AdminDeleteProjectOAuthProviderRequest) String() string {
 func (*AdminDeleteProjectOAuthProviderRequest) ProtoMessage() {}
 
 func (x *AdminDeleteProjectOAuthProviderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[224]
+	mi := &file_identity_v1_identity_proto_msgTypes[238]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13410,7 +14095,7 @@ func (x *AdminDeleteProjectOAuthProviderRequest) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use AdminDeleteProjectOAuthProviderRequest.ProtoReflect.Descriptor instead.
 func (*AdminDeleteProjectOAuthProviderRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{224}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{238}
 }
 
 func (x *AdminDeleteProjectOAuthProviderRequest) GetProjectId() string {
@@ -13435,7 +14120,7 @@ type AdminDeleteProjectOAuthProviderResponse struct {
 
 func (x *AdminDeleteProjectOAuthProviderResponse) Reset() {
 	*x = AdminDeleteProjectOAuthProviderResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[225]
+	mi := &file_identity_v1_identity_proto_msgTypes[239]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13447,7 +14132,7 @@ func (x *AdminDeleteProjectOAuthProviderResponse) String() string {
 func (*AdminDeleteProjectOAuthProviderResponse) ProtoMessage() {}
 
 func (x *AdminDeleteProjectOAuthProviderResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[225]
+	mi := &file_identity_v1_identity_proto_msgTypes[239]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13460,7 +14145,7 @@ func (x *AdminDeleteProjectOAuthProviderResponse) ProtoReflect() protoreflect.Me
 
 // Deprecated: Use AdminDeleteProjectOAuthProviderResponse.ProtoReflect.Descriptor instead.
 func (*AdminDeleteProjectOAuthProviderResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{225}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{239}
 }
 
 type AdminListProjectOAuthProvidersRequest struct {
@@ -13472,7 +14157,7 @@ type AdminListProjectOAuthProvidersRequest struct {
 
 func (x *AdminListProjectOAuthProvidersRequest) Reset() {
 	*x = AdminListProjectOAuthProvidersRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[226]
+	mi := &file_identity_v1_identity_proto_msgTypes[240]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13484,7 +14169,7 @@ func (x *AdminListProjectOAuthProvidersRequest) String() string {
 func (*AdminListProjectOAuthProvidersRequest) ProtoMessage() {}
 
 func (x *AdminListProjectOAuthProvidersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[226]
+	mi := &file_identity_v1_identity_proto_msgTypes[240]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13497,7 +14182,7 @@ func (x *AdminListProjectOAuthProvidersRequest) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use AdminListProjectOAuthProvidersRequest.ProtoReflect.Descriptor instead.
 func (*AdminListProjectOAuthProvidersRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{226}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{240}
 }
 
 func (x *AdminListProjectOAuthProvidersRequest) GetProjectId() string {
@@ -13518,7 +14203,7 @@ type AdminListProjectOAuthProvidersResponse struct {
 
 func (x *AdminListProjectOAuthProvidersResponse) Reset() {
 	*x = AdminListProjectOAuthProvidersResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[227]
+	mi := &file_identity_v1_identity_proto_msgTypes[241]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13530,7 +14215,7 @@ func (x *AdminListProjectOAuthProvidersResponse) String() string {
 func (*AdminListProjectOAuthProvidersResponse) ProtoMessage() {}
 
 func (x *AdminListProjectOAuthProvidersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[227]
+	mi := &file_identity_v1_identity_proto_msgTypes[241]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13543,7 +14228,7 @@ func (x *AdminListProjectOAuthProvidersResponse) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use AdminListProjectOAuthProvidersResponse.ProtoReflect.Descriptor instead.
 func (*AdminListProjectOAuthProvidersResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{227}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{241}
 }
 
 func (x *AdminListProjectOAuthProvidersResponse) GetProviders() []*ProjectOAuthProviderConfig {
@@ -13565,7 +14250,7 @@ type CreateAssuranceChallengeRequest struct {
 
 func (x *CreateAssuranceChallengeRequest) Reset() {
 	*x = CreateAssuranceChallengeRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[228]
+	mi := &file_identity_v1_identity_proto_msgTypes[242]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13577,7 +14262,7 @@ func (x *CreateAssuranceChallengeRequest) String() string {
 func (*CreateAssuranceChallengeRequest) ProtoMessage() {}
 
 func (x *CreateAssuranceChallengeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[228]
+	mi := &file_identity_v1_identity_proto_msgTypes[242]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13590,7 +14275,7 @@ func (x *CreateAssuranceChallengeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAssuranceChallengeRequest.ProtoReflect.Descriptor instead.
 func (*CreateAssuranceChallengeRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{228}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{242}
 }
 
 func (x *CreateAssuranceChallengeRequest) GetPlatform() string {
@@ -13615,7 +14300,7 @@ type CreateAssuranceChallengeResponse struct {
 
 func (x *CreateAssuranceChallengeResponse) Reset() {
 	*x = CreateAssuranceChallengeResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[229]
+	mi := &file_identity_v1_identity_proto_msgTypes[243]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13627,7 +14312,7 @@ func (x *CreateAssuranceChallengeResponse) String() string {
 func (*CreateAssuranceChallengeResponse) ProtoMessage() {}
 
 func (x *CreateAssuranceChallengeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[229]
+	mi := &file_identity_v1_identity_proto_msgTypes[243]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13640,7 +14325,7 @@ func (x *CreateAssuranceChallengeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAssuranceChallengeResponse.ProtoReflect.Descriptor instead.
 func (*CreateAssuranceChallengeResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{229}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{243}
 }
 
 func (x *CreateAssuranceChallengeResponse) GetChallengeId() string {
@@ -13683,7 +14368,7 @@ type IssueAssuranceTokenRequest struct {
 
 func (x *IssueAssuranceTokenRequest) Reset() {
 	*x = IssueAssuranceTokenRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[230]
+	mi := &file_identity_v1_identity_proto_msgTypes[244]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13695,7 +14380,7 @@ func (x *IssueAssuranceTokenRequest) String() string {
 func (*IssueAssuranceTokenRequest) ProtoMessage() {}
 
 func (x *IssueAssuranceTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[230]
+	mi := &file_identity_v1_identity_proto_msgTypes[244]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13708,7 +14393,7 @@ func (x *IssueAssuranceTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueAssuranceTokenRequest.ProtoReflect.Descriptor instead.
 func (*IssueAssuranceTokenRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{230}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{244}
 }
 
 func (x *IssueAssuranceTokenRequest) GetPlatform() string {
@@ -13766,7 +14451,7 @@ type IssueAssuranceTokenResponse struct {
 
 func (x *IssueAssuranceTokenResponse) Reset() {
 	*x = IssueAssuranceTokenResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[231]
+	mi := &file_identity_v1_identity_proto_msgTypes[245]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13778,7 +14463,7 @@ func (x *IssueAssuranceTokenResponse) String() string {
 func (*IssueAssuranceTokenResponse) ProtoMessage() {}
 
 func (x *IssueAssuranceTokenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[231]
+	mi := &file_identity_v1_identity_proto_msgTypes[245]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13791,7 +14476,7 @@ func (x *IssueAssuranceTokenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueAssuranceTokenResponse.ProtoReflect.Descriptor instead.
 func (*IssueAssuranceTokenResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{231}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{245}
 }
 
 func (x *IssueAssuranceTokenResponse) GetAssuranceToken() string {
@@ -13823,7 +14508,7 @@ type RefreshAssuranceTokenRequest struct {
 
 func (x *RefreshAssuranceTokenRequest) Reset() {
 	*x = RefreshAssuranceTokenRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[232]
+	mi := &file_identity_v1_identity_proto_msgTypes[246]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13835,7 +14520,7 @@ func (x *RefreshAssuranceTokenRequest) String() string {
 func (*RefreshAssuranceTokenRequest) ProtoMessage() {}
 
 func (x *RefreshAssuranceTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[232]
+	mi := &file_identity_v1_identity_proto_msgTypes[246]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13848,7 +14533,7 @@ func (x *RefreshAssuranceTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshAssuranceTokenRequest.ProtoReflect.Descriptor instead.
 func (*RefreshAssuranceTokenRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{232}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{246}
 }
 
 func (x *RefreshAssuranceTokenRequest) GetChallengeId() string {
@@ -13882,7 +14567,7 @@ type RefreshAssuranceTokenResponse struct {
 
 func (x *RefreshAssuranceTokenResponse) Reset() {
 	*x = RefreshAssuranceTokenResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[233]
+	mi := &file_identity_v1_identity_proto_msgTypes[247]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13894,7 +14579,7 @@ func (x *RefreshAssuranceTokenResponse) String() string {
 func (*RefreshAssuranceTokenResponse) ProtoMessage() {}
 
 func (x *RefreshAssuranceTokenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[233]
+	mi := &file_identity_v1_identity_proto_msgTypes[247]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13907,7 +14592,7 @@ func (x *RefreshAssuranceTokenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshAssuranceTokenResponse.ProtoReflect.Descriptor instead.
 func (*RefreshAssuranceTokenResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{233}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{247}
 }
 
 func (x *RefreshAssuranceTokenResponse) GetAssuranceToken() string {
@@ -13950,7 +14635,7 @@ type SignInAnonymouslyRequest struct {
 
 func (x *SignInAnonymouslyRequest) Reset() {
 	*x = SignInAnonymouslyRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[234]
+	mi := &file_identity_v1_identity_proto_msgTypes[248]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13962,7 +14647,7 @@ func (x *SignInAnonymouslyRequest) String() string {
 func (*SignInAnonymouslyRequest) ProtoMessage() {}
 
 func (x *SignInAnonymouslyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[234]
+	mi := &file_identity_v1_identity_proto_msgTypes[248]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13975,7 +14660,7 @@ func (x *SignInAnonymouslyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignInAnonymouslyRequest.ProtoReflect.Descriptor instead.
 func (*SignInAnonymouslyRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{234}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{248}
 }
 
 type SignInAnonymouslyResponse struct {
@@ -13990,7 +14675,7 @@ type SignInAnonymouslyResponse struct {
 
 func (x *SignInAnonymouslyResponse) Reset() {
 	*x = SignInAnonymouslyResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[235]
+	mi := &file_identity_v1_identity_proto_msgTypes[249]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14002,7 +14687,7 @@ func (x *SignInAnonymouslyResponse) String() string {
 func (*SignInAnonymouslyResponse) ProtoMessage() {}
 
 func (x *SignInAnonymouslyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[235]
+	mi := &file_identity_v1_identity_proto_msgTypes[249]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14015,7 +14700,7 @@ func (x *SignInAnonymouslyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignInAnonymouslyResponse.ProtoReflect.Descriptor instead.
 func (*SignInAnonymouslyResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{235}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{249}
 }
 
 func (x *SignInAnonymouslyResponse) GetUser() *User {
@@ -14084,7 +14769,7 @@ type UpgradeAnonymousAccountRequest struct {
 
 func (x *UpgradeAnonymousAccountRequest) Reset() {
 	*x = UpgradeAnonymousAccountRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[236]
+	mi := &file_identity_v1_identity_proto_msgTypes[250]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14096,7 +14781,7 @@ func (x *UpgradeAnonymousAccountRequest) String() string {
 func (*UpgradeAnonymousAccountRequest) ProtoMessage() {}
 
 func (x *UpgradeAnonymousAccountRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[236]
+	mi := &file_identity_v1_identity_proto_msgTypes[250]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14109,7 +14794,7 @@ func (x *UpgradeAnonymousAccountRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpgradeAnonymousAccountRequest.ProtoReflect.Descriptor instead.
 func (*UpgradeAnonymousAccountRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{236}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{250}
 }
 
 func (x *UpgradeAnonymousAccountRequest) GetCredential() isUpgradeAnonymousAccountRequest_Credential {
@@ -14166,7 +14851,7 @@ type PasswordCredential struct {
 
 func (x *PasswordCredential) Reset() {
 	*x = PasswordCredential{}
-	mi := &file_identity_v1_identity_proto_msgTypes[237]
+	mi := &file_identity_v1_identity_proto_msgTypes[251]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14178,7 +14863,7 @@ func (x *PasswordCredential) String() string {
 func (*PasswordCredential) ProtoMessage() {}
 
 func (x *PasswordCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[237]
+	mi := &file_identity_v1_identity_proto_msgTypes[251]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14191,7 +14876,7 @@ func (x *PasswordCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PasswordCredential.ProtoReflect.Descriptor instead.
 func (*PasswordCredential) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{237}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{251}
 }
 
 func (x *PasswordCredential) GetEmail() string {
@@ -14232,7 +14917,7 @@ type OAuthCredential struct {
 
 func (x *OAuthCredential) Reset() {
 	*x = OAuthCredential{}
-	mi := &file_identity_v1_identity_proto_msgTypes[238]
+	mi := &file_identity_v1_identity_proto_msgTypes[252]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14244,7 +14929,7 @@ func (x *OAuthCredential) String() string {
 func (*OAuthCredential) ProtoMessage() {}
 
 func (x *OAuthCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[238]
+	mi := &file_identity_v1_identity_proto_msgTypes[252]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14257,7 +14942,7 @@ func (x *OAuthCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OAuthCredential.ProtoReflect.Descriptor instead.
 func (*OAuthCredential) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{238}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{252}
 }
 
 func (x *OAuthCredential) GetProvider() string {
@@ -14314,7 +14999,7 @@ type UpgradeAnonymousAccountResponse struct {
 
 func (x *UpgradeAnonymousAccountResponse) Reset() {
 	*x = UpgradeAnonymousAccountResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[239]
+	mi := &file_identity_v1_identity_proto_msgTypes[253]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14326,7 +15011,7 @@ func (x *UpgradeAnonymousAccountResponse) String() string {
 func (*UpgradeAnonymousAccountResponse) ProtoMessage() {}
 
 func (x *UpgradeAnonymousAccountResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[239]
+	mi := &file_identity_v1_identity_proto_msgTypes[253]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14339,7 +15024,7 @@ func (x *UpgradeAnonymousAccountResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpgradeAnonymousAccountResponse.ProtoReflect.Descriptor instead.
 func (*UpgradeAnonymousAccountResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{239}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{253}
 }
 
 func (x *UpgradeAnonymousAccountResponse) GetUser() *User {
@@ -14383,7 +15068,7 @@ type LinkedIdentity struct {
 
 func (x *LinkedIdentity) Reset() {
 	*x = LinkedIdentity{}
-	mi := &file_identity_v1_identity_proto_msgTypes[240]
+	mi := &file_identity_v1_identity_proto_msgTypes[254]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14395,7 +15080,7 @@ func (x *LinkedIdentity) String() string {
 func (*LinkedIdentity) ProtoMessage() {}
 
 func (x *LinkedIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[240]
+	mi := &file_identity_v1_identity_proto_msgTypes[254]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14408,7 +15093,7 @@ func (x *LinkedIdentity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkedIdentity.ProtoReflect.Descriptor instead.
 func (*LinkedIdentity) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{240}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{254}
 }
 
 func (x *LinkedIdentity) GetProvider() string {
@@ -14447,7 +15132,7 @@ type ListLinkedIdentitiesRequest struct {
 
 func (x *ListLinkedIdentitiesRequest) Reset() {
 	*x = ListLinkedIdentitiesRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[241]
+	mi := &file_identity_v1_identity_proto_msgTypes[255]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14459,7 +15144,7 @@ func (x *ListLinkedIdentitiesRequest) String() string {
 func (*ListLinkedIdentitiesRequest) ProtoMessage() {}
 
 func (x *ListLinkedIdentitiesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[241]
+	mi := &file_identity_v1_identity_proto_msgTypes[255]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14472,7 +15157,7 @@ func (x *ListLinkedIdentitiesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListLinkedIdentitiesRequest.ProtoReflect.Descriptor instead.
 func (*ListLinkedIdentitiesRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{241}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{255}
 }
 
 type ListLinkedIdentitiesResponse struct {
@@ -14484,7 +15169,7 @@ type ListLinkedIdentitiesResponse struct {
 
 func (x *ListLinkedIdentitiesResponse) Reset() {
 	*x = ListLinkedIdentitiesResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[242]
+	mi := &file_identity_v1_identity_proto_msgTypes[256]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14496,7 +15181,7 @@ func (x *ListLinkedIdentitiesResponse) String() string {
 func (*ListLinkedIdentitiesResponse) ProtoMessage() {}
 
 func (x *ListLinkedIdentitiesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[242]
+	mi := &file_identity_v1_identity_proto_msgTypes[256]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14509,7 +15194,7 @@ func (x *ListLinkedIdentitiesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListLinkedIdentitiesResponse.ProtoReflect.Descriptor instead.
 func (*ListLinkedIdentitiesResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{242}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{256}
 }
 
 func (x *ListLinkedIdentitiesResponse) GetIdentities() []*LinkedIdentity {
@@ -14539,7 +15224,7 @@ type LinkIdentityRequest struct {
 
 func (x *LinkIdentityRequest) Reset() {
 	*x = LinkIdentityRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[243]
+	mi := &file_identity_v1_identity_proto_msgTypes[257]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14551,7 +15236,7 @@ func (x *LinkIdentityRequest) String() string {
 func (*LinkIdentityRequest) ProtoMessage() {}
 
 func (x *LinkIdentityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[243]
+	mi := &file_identity_v1_identity_proto_msgTypes[257]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14564,7 +15249,7 @@ func (x *LinkIdentityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkIdentityRequest.ProtoReflect.Descriptor instead.
 func (*LinkIdentityRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{243}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{257}
 }
 
 func (x *LinkIdentityRequest) GetCode() string {
@@ -14618,7 +15303,7 @@ type LinkIdentityResponse struct {
 
 func (x *LinkIdentityResponse) Reset() {
 	*x = LinkIdentityResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[244]
+	mi := &file_identity_v1_identity_proto_msgTypes[258]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14630,7 +15315,7 @@ func (x *LinkIdentityResponse) String() string {
 func (*LinkIdentityResponse) ProtoMessage() {}
 
 func (x *LinkIdentityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[244]
+	mi := &file_identity_v1_identity_proto_msgTypes[258]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14643,7 +15328,7 @@ func (x *LinkIdentityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkIdentityResponse.ProtoReflect.Descriptor instead.
 func (*LinkIdentityResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{244}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{258}
 }
 
 func (x *LinkIdentityResponse) GetIdentity() *LinkedIdentity {
@@ -14668,7 +15353,7 @@ type UnlinkIdentityRequest struct {
 
 func (x *UnlinkIdentityRequest) Reset() {
 	*x = UnlinkIdentityRequest{}
-	mi := &file_identity_v1_identity_proto_msgTypes[245]
+	mi := &file_identity_v1_identity_proto_msgTypes[259]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14680,7 +15365,7 @@ func (x *UnlinkIdentityRequest) String() string {
 func (*UnlinkIdentityRequest) ProtoMessage() {}
 
 func (x *UnlinkIdentityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[245]
+	mi := &file_identity_v1_identity_proto_msgTypes[259]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14693,7 +15378,7 @@ func (x *UnlinkIdentityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlinkIdentityRequest.ProtoReflect.Descriptor instead.
 func (*UnlinkIdentityRequest) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{245}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{259}
 }
 
 func (x *UnlinkIdentityRequest) GetProvider() string {
@@ -14718,7 +15403,7 @@ type UnlinkIdentityResponse struct {
 
 func (x *UnlinkIdentityResponse) Reset() {
 	*x = UnlinkIdentityResponse{}
-	mi := &file_identity_v1_identity_proto_msgTypes[246]
+	mi := &file_identity_v1_identity_proto_msgTypes[260]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14730,7 +15415,7 @@ func (x *UnlinkIdentityResponse) String() string {
 func (*UnlinkIdentityResponse) ProtoMessage() {}
 
 func (x *UnlinkIdentityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_identity_v1_identity_proto_msgTypes[246]
+	mi := &file_identity_v1_identity_proto_msgTypes[260]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14743,7 +15428,7 @@ func (x *UnlinkIdentityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlinkIdentityResponse.ProtoReflect.Descriptor instead.
 func (*UnlinkIdentityResponse) Descriptor() ([]byte, []int) {
-	return file_identity_v1_identity_proto_rawDescGZIP(), []int{246}
+	return file_identity_v1_identity_proto_rawDescGZIP(), []int{260}
 }
 
 var File_identity_v1_identity_proto protoreflect.FileDescriptor
@@ -15134,7 +15819,40 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"!CreateManagedChildAccountResponse\x12'\n" +
 	"\x05child\x18\x01 \x01(\v2\x11.identity.v1.UserR\x05child\x124\n" +
 	"\aconsent\x18\x02 \x01(\v2\x1a.identity.v1.ConsentRecordR\aconsent\x12'\n" +
-	"\x0fenrolment_token\x18\x03 \x01(\tR\x0eenrolmentToken\"\x88\x03\n" +
+	"\x0fenrolment_token\x18\x03 \x01(\tR\x0eenrolmentToken\"m\n" +
+	"\x1dGetManagedChildProfileRequest\x12\"\n" +
+	"\rchild_user_id\x18\x01 \x01(\tR\vchildUserId\x12(\n" +
+	"\x10step_up_password\x18\x02 \x01(\tR\x0estepUpPassword\"I\n" +
+	"\x1eGetManagedChildProfileResponse\x12'\n" +
+	"\x05child\x18\x01 \x01(\v2\x11.identity.v1.UserR\x05child\"\x91\x01\n" +
+	"\x1eSetManagedChildPasswordRequest\x12\"\n" +
+	"\rchild_user_id\x18\x01 \x01(\tR\vchildUserId\x12!\n" +
+	"\fnew_password\x18\x02 \x01(\tR\vnewPassword\x12(\n" +
+	"\x10step_up_password\x18\x03 \x01(\tR\x0estepUpPassword\"!\n" +
+	"\x1fSetManagedChildPasswordResponse\"\x8a\x01\n" +
+	"\x1eSetManagedChildUsernameRequest\x12\"\n" +
+	"\rchild_user_id\x18\x01 \x01(\tR\vchildUserId\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12(\n" +
+	"\x10step_up_password\x18\x03 \x01(\tR\x0estepUpPassword\"J\n" +
+	"\x1fSetManagedChildUsernameResponse\x12'\n" +
+	"\x05child\x18\x01 \x01(\v2\x11.identity.v1.UserR\x05child\"q\n" +
+	"!RevokeManagedChildSessionsRequest\x12\"\n" +
+	"\rchild_user_id\x18\x01 \x01(\tR\vchildUserId\x12(\n" +
+	"\x10step_up_password\x18\x02 \x01(\tR\x0estepUpPassword\"$\n" +
+	"\"RevokeManagedChildSessionsResponse\"\x8c\x01\n" +
+	"$DeactivateManagedChildAccountRequest\x12\"\n" +
+	"\rchild_user_id\x18\x01 \x01(\tR\vchildUserId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x12(\n" +
+	"\x10step_up_password\x18\x03 \x01(\tR\x0estepUpPassword\"'\n" +
+	"%DeactivateManagedChildAccountResponse\"t\n" +
+	"$ReactivateManagedChildAccountRequest\x12\"\n" +
+	"\rchild_user_id\x18\x01 \x01(\tR\vchildUserId\x12(\n" +
+	"\x10step_up_password\x18\x02 \x01(\tR\x0estepUpPassword\"'\n" +
+	"%ReactivateManagedChildAccountResponse\"p\n" +
+	" DeleteManagedChildAccountRequest\x12\"\n" +
+	"\rchild_user_id\x18\x01 \x01(\tR\vchildUserId\x12(\n" +
+	"\x10step_up_password\x18\x02 \x01(\tR\x0estepUpPassword\"#\n" +
+	"!DeleteManagedChildAccountResponse\"\x88\x03\n" +
 	"\x10AdminHelpRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x16\n" +
@@ -15797,7 +16515,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x18QR_LOGIN_STATUS_APPROVED\x10\x02\x12\x1c\n" +
 	"\x18QR_LOGIN_STATUS_REJECTED\x10\x03\x12\x1b\n" +
 	"\x17QR_LOGIN_STATUS_EXPIRED\x10\x04\x12\x1c\n" +
-	"\x18QR_LOGIN_STATUS_CONSUMED\x10\x052\xbaY\n" +
+	"\x18QR_LOGIN_STATUS_CONSUMED\x10\x052\xa6`\n" +
 	"\x0fIdentityService\x12\\\n" +
 	"\x0fBeginOAuthLogin\x12#.identity.v1.BeginOAuthLoginRequest\x1a$.identity.v1.BeginOAuthLoginResponse\x12M\n" +
 	"\n" +
@@ -15837,7 +16555,14 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x15RevokeParentalConsent\x12).identity.v1.RevokeParentalConsentRequest\x1a*.identity.v1.RevokeParentalConsentResponse\x12h\n" +
 	"\x13ListManagedChildren\x12'.identity.v1.ListManagedChildrenRequest\x1a(.identity.v1.ListManagedChildrenResponse\x12S\n" +
 	"\fGetGuardians\x12 .identity.v1.GetGuardiansRequest\x1a!.identity.v1.GetGuardiansResponse\x12z\n" +
-	"\x19CreateManagedChildAccount\x12-.identity.v1.CreateManagedChildAccountRequest\x1a..identity.v1.CreateManagedChildAccountResponse\x12_\n" +
+	"\x19CreateManagedChildAccount\x12-.identity.v1.CreateManagedChildAccountRequest\x1a..identity.v1.CreateManagedChildAccountResponse\x12q\n" +
+	"\x16GetManagedChildProfile\x12*.identity.v1.GetManagedChildProfileRequest\x1a+.identity.v1.GetManagedChildProfileResponse\x12t\n" +
+	"\x17SetManagedChildPassword\x12+.identity.v1.SetManagedChildPasswordRequest\x1a,.identity.v1.SetManagedChildPasswordResponse\x12t\n" +
+	"\x17SetManagedChildUsername\x12+.identity.v1.SetManagedChildUsernameRequest\x1a,.identity.v1.SetManagedChildUsernameResponse\x12}\n" +
+	"\x1aRevokeManagedChildSessions\x12..identity.v1.RevokeManagedChildSessionsRequest\x1a/.identity.v1.RevokeManagedChildSessionsResponse\x12\x86\x01\n" +
+	"\x1dDeactivateManagedChildAccount\x121.identity.v1.DeactivateManagedChildAccountRequest\x1a2.identity.v1.DeactivateManagedChildAccountResponse\x12\x86\x01\n" +
+	"\x1dReactivateManagedChildAccount\x121.identity.v1.ReactivateManagedChildAccountRequest\x1a2.identity.v1.ReactivateManagedChildAccountResponse\x12z\n" +
+	"\x19DeleteManagedChildAccount\x12-.identity.v1.DeleteManagedChildAccountRequest\x1a..identity.v1.DeleteManagedChildAccountResponse\x12_\n" +
 	"\x10RequestAdminHelp\x12$.identity.v1.RequestAdminHelpRequest\x1a%.identity.v1.RequestAdminHelpResponse\x12_\n" +
 	"\x10ListHelpRequests\x12$.identity.v1.ListHelpRequestsRequest\x1a%.identity.v1.ListHelpRequestsResponse\x12e\n" +
 	"\x12ResolveHelpRequest\x12&.identity.v1.ResolveHelpRequestRequest\x1a'.identity.v1.ResolveHelpRequestResponse\x12w\n" +
@@ -15934,7 +16659,7 @@ func file_identity_v1_identity_proto_rawDescGZIP() []byte {
 }
 
 var file_identity_v1_identity_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_identity_v1_identity_proto_msgTypes = make([]protoimpl.MessageInfo, 247)
+var file_identity_v1_identity_proto_msgTypes = make([]protoimpl.MessageInfo, 261)
 var file_identity_v1_identity_proto_goTypes = []any{
 	(UserStatus)(0),                                 // 0: identity.v1.UserStatus
 	(AgeBand)(0),                                    // 1: identity.v1.AgeBand
@@ -16041,159 +16766,173 @@ var file_identity_v1_identity_proto_goTypes = []any{
 	(*GetGuardiansResponse)(nil),                    // 102: identity.v1.GetGuardiansResponse
 	(*CreateManagedChildAccountRequest)(nil),        // 103: identity.v1.CreateManagedChildAccountRequest
 	(*CreateManagedChildAccountResponse)(nil),       // 104: identity.v1.CreateManagedChildAccountResponse
-	(*AdminHelpRequest)(nil),                        // 105: identity.v1.AdminHelpRequest
-	(*RequestAdminHelpRequest)(nil),                 // 106: identity.v1.RequestAdminHelpRequest
-	(*RequestAdminHelpResponse)(nil),                // 107: identity.v1.RequestAdminHelpResponse
-	(*ListHelpRequestsRequest)(nil),                 // 108: identity.v1.ListHelpRequestsRequest
-	(*ListHelpRequestsResponse)(nil),                // 109: identity.v1.ListHelpRequestsResponse
-	(*ResolveHelpRequestRequest)(nil),               // 110: identity.v1.ResolveHelpRequestRequest
-	(*ResolveHelpRequestResponse)(nil),              // 111: identity.v1.ResolveHelpRequestResponse
-	(*PasskeyCredentialInfo)(nil),                   // 112: identity.v1.PasskeyCredentialInfo
-	(*BeginPasskeyRegistrationRequest)(nil),         // 113: identity.v1.BeginPasskeyRegistrationRequest
-	(*BeginPasskeyRegistrationResponse)(nil),        // 114: identity.v1.BeginPasskeyRegistrationResponse
-	(*CompletePasskeyRegistrationRequest)(nil),      // 115: identity.v1.CompletePasskeyRegistrationRequest
-	(*CompletePasskeyRegistrationResponse)(nil),     // 116: identity.v1.CompletePasskeyRegistrationResponse
-	(*BeginPasskeyLoginRequest)(nil),                // 117: identity.v1.BeginPasskeyLoginRequest
-	(*BeginPasskeyLoginResponse)(nil),               // 118: identity.v1.BeginPasskeyLoginResponse
-	(*CompletePasskeyLoginRequest)(nil),             // 119: identity.v1.CompletePasskeyLoginRequest
-	(*CompletePasskeyLoginResponse)(nil),            // 120: identity.v1.CompletePasskeyLoginResponse
-	(*BeginPasskeySignupRequest)(nil),               // 121: identity.v1.BeginPasskeySignupRequest
-	(*BeginPasskeySignupResponse)(nil),              // 122: identity.v1.BeginPasskeySignupResponse
-	(*CompletePasskeySignupRequest)(nil),            // 123: identity.v1.CompletePasskeySignupRequest
-	(*CompletePasskeySignupResponse)(nil),           // 124: identity.v1.CompletePasskeySignupResponse
-	(*ListPasskeysRequest)(nil),                     // 125: identity.v1.ListPasskeysRequest
-	(*ListPasskeysResponse)(nil),                    // 126: identity.v1.ListPasskeysResponse
-	(*DeletePasskeyRequest)(nil),                    // 127: identity.v1.DeletePasskeyRequest
-	(*DeletePasskeyResponse)(nil),                   // 128: identity.v1.DeletePasskeyResponse
-	(*InitiateQrLoginRequest)(nil),                  // 129: identity.v1.InitiateQrLoginRequest
-	(*InitiateQrLoginResponse)(nil),                 // 130: identity.v1.InitiateQrLoginResponse
-	(*GetQrLoginSessionRequest)(nil),                // 131: identity.v1.GetQrLoginSessionRequest
-	(*GetQrLoginSessionResponse)(nil),               // 132: identity.v1.GetQrLoginSessionResponse
-	(*ApproveQrLoginRequest)(nil),                   // 133: identity.v1.ApproveQrLoginRequest
-	(*ApproveQrLoginResponse)(nil),                  // 134: identity.v1.ApproveQrLoginResponse
-	(*PollQrLoginRequest)(nil),                      // 135: identity.v1.PollQrLoginRequest
-	(*PollQrLoginResponse)(nil),                     // 136: identity.v1.PollQrLoginResponse
-	(*BeginTotpSetupRequest)(nil),                   // 137: identity.v1.BeginTotpSetupRequest
-	(*BeginTotpSetupResponse)(nil),                  // 138: identity.v1.BeginTotpSetupResponse
-	(*VerifyTotpSetupRequest)(nil),                  // 139: identity.v1.VerifyTotpSetupRequest
-	(*VerifyTotpSetupResponse)(nil),                 // 140: identity.v1.VerifyTotpSetupResponse
-	(*DisableTotpRequest)(nil),                      // 141: identity.v1.DisableTotpRequest
-	(*DisableTotpResponse)(nil),                     // 142: identity.v1.DisableTotpResponse
-	(*VerifyTotpRequest)(nil),                       // 143: identity.v1.VerifyTotpRequest
-	(*VerifyTotpResponse)(nil),                      // 144: identity.v1.VerifyTotpResponse
-	(*RegenerateRecoveryCodesRequest)(nil),          // 145: identity.v1.RegenerateRecoveryCodesRequest
-	(*RegenerateRecoveryCodesResponse)(nil),         // 146: identity.v1.RegenerateRecoveryCodesResponse
-	(*Session)(nil),                                 // 147: identity.v1.Session
-	(*ListMySessionsRequest)(nil),                   // 148: identity.v1.ListMySessionsRequest
-	(*ListMySessionsResponse)(nil),                  // 149: identity.v1.ListMySessionsResponse
-	(*RevokeSessionRequest)(nil),                    // 150: identity.v1.RevokeSessionRequest
-	(*RevokeSessionResponse)(nil),                   // 151: identity.v1.RevokeSessionResponse
-	(*RevokeAllSessionsRequest)(nil),                // 152: identity.v1.RevokeAllSessionsRequest
-	(*RevokeAllSessionsResponse)(nil),               // 153: identity.v1.RevokeAllSessionsResponse
-	(*SignOutEverywhereRequest)(nil),                // 154: identity.v1.SignOutEverywhereRequest
-	(*SignOutEverywhereResponse)(nil),               // 155: identity.v1.SignOutEverywhereResponse
-	(*AuditEvent)(nil),                              // 156: identity.v1.AuditEvent
-	(*ListAuditEventsRequest)(nil),                  // 157: identity.v1.ListAuditEventsRequest
-	(*ListAuditEventsResponse)(nil),                 // 158: identity.v1.ListAuditEventsResponse
-	(*InviteUserRequest)(nil),                       // 159: identity.v1.InviteUserRequest
-	(*InviteUserResponse)(nil),                      // 160: identity.v1.InviteUserResponse
-	(*AcceptInvitationRequest)(nil),                 // 161: identity.v1.AcceptInvitationRequest
-	(*AcceptInvitationResponse)(nil),                // 162: identity.v1.AcceptInvitationResponse
-	(*DeactivateUserRequest)(nil),                   // 163: identity.v1.DeactivateUserRequest
-	(*DeactivateUserResponse)(nil),                  // 164: identity.v1.DeactivateUserResponse
-	(*ReactivateUserRequest)(nil),                   // 165: identity.v1.ReactivateUserRequest
-	(*ReactivateUserResponse)(nil),                  // 166: identity.v1.ReactivateUserResponse
-	(*ResetUserPasswordRequest)(nil),                // 167: identity.v1.ResetUserPasswordRequest
-	(*ResetUserPasswordResponse)(nil),               // 168: identity.v1.ResetUserPasswordResponse
-	(*SetUserQuotaRequest)(nil),                     // 169: identity.v1.SetUserQuotaRequest
-	(*SetUserQuotaResponse)(nil),                    // 170: identity.v1.SetUserQuotaResponse
-	(*Domain)(nil),                                  // 171: identity.v1.Domain
-	(*CreateDomainRequest)(nil),                     // 172: identity.v1.CreateDomainRequest
-	(*CreateDomainResponse)(nil),                    // 173: identity.v1.CreateDomainResponse
-	(*VerifyDomainRequest)(nil),                     // 174: identity.v1.VerifyDomainRequest
-	(*VerifyDomainResponse)(nil),                    // 175: identity.v1.VerifyDomainResponse
-	(*ListTenantDomainsRequest)(nil),                // 176: identity.v1.ListTenantDomainsRequest
-	(*ListTenantDomainsResponse)(nil),               // 177: identity.v1.ListTenantDomainsResponse
-	(*TenantMembership)(nil),                        // 178: identity.v1.TenantMembership
-	(*TenantInvitation)(nil),                        // 179: identity.v1.TenantInvitation
-	(*CreateTenantInvitationRequest)(nil),           // 180: identity.v1.CreateTenantInvitationRequest
-	(*CreateTenantInvitationResponse)(nil),          // 181: identity.v1.CreateTenantInvitationResponse
-	(*AcceptTenantInvitationRequest)(nil),           // 182: identity.v1.AcceptTenantInvitationRequest
-	(*AcceptTenantInvitationResponse)(nil),          // 183: identity.v1.AcceptTenantInvitationResponse
-	(*ListTenantInvitationsRequest)(nil),            // 184: identity.v1.ListTenantInvitationsRequest
-	(*ListTenantInvitationsResponse)(nil),           // 185: identity.v1.ListTenantInvitationsResponse
-	(*ListTenantMembersRequest)(nil),                // 186: identity.v1.ListTenantMembersRequest
-	(*ListTenantMembersResponse)(nil),               // 187: identity.v1.ListTenantMembersResponse
-	(*RemoveTenantMemberRequest)(nil),               // 188: identity.v1.RemoveTenantMemberRequest
-	(*RemoveTenantMemberResponse)(nil),              // 189: identity.v1.RemoveTenantMemberResponse
-	(*AdminCreateProjectRequest)(nil),               // 190: identity.v1.AdminCreateProjectRequest
-	(*AdminCreateProjectResponse)(nil),              // 191: identity.v1.AdminCreateProjectResponse
-	(*AdminCreateProjectCredentialRequest)(nil),     // 192: identity.v1.AdminCreateProjectCredentialRequest
-	(*AdminCreateProjectCredentialResponse)(nil),    // 193: identity.v1.AdminCreateProjectCredentialResponse
-	(*AdminAddProjectAuthDomainRequest)(nil),        // 194: identity.v1.AdminAddProjectAuthDomainRequest
-	(*AdminAddProjectAuthDomainResponse)(nil),       // 195: identity.v1.AdminAddProjectAuthDomainResponse
-	(*ProjectAuthDomain)(nil),                       // 196: identity.v1.ProjectAuthDomain
-	(*AddProjectAuthDomainRequest)(nil),             // 197: identity.v1.AddProjectAuthDomainRequest
-	(*AddProjectAuthDomainResponse)(nil),            // 198: identity.v1.AddProjectAuthDomainResponse
-	(*VerifyProjectAuthDomainRequest)(nil),          // 199: identity.v1.VerifyProjectAuthDomainRequest
-	(*VerifyProjectAuthDomainResponse)(nil),         // 200: identity.v1.VerifyProjectAuthDomainResponse
-	(*ListProjectAuthDomainsRequest)(nil),           // 201: identity.v1.ListProjectAuthDomainsRequest
-	(*ListProjectAuthDomainsResponse)(nil),          // 202: identity.v1.ListProjectAuthDomainsResponse
-	(*SetPrimaryAuthDomainRequest)(nil),             // 203: identity.v1.SetPrimaryAuthDomainRequest
-	(*SetPrimaryAuthDomainResponse)(nil),            // 204: identity.v1.SetPrimaryAuthDomainResponse
-	(*AdminCreateTenantRequest)(nil),                // 205: identity.v1.AdminCreateTenantRequest
-	(*AdminCreateTenantResponse)(nil),               // 206: identity.v1.AdminCreateTenantResponse
-	(*AdminAddTenantAdminRequest)(nil),              // 207: identity.v1.AdminAddTenantAdminRequest
-	(*AdminAddTenantAdminResponse)(nil),             // 208: identity.v1.AdminAddTenantAdminResponse
-	(*CreateFirstPlatformAdminRequest)(nil),         // 209: identity.v1.CreateFirstPlatformAdminRequest
-	(*CreateFirstPlatformAdminResponse)(nil),        // 210: identity.v1.CreateFirstPlatformAdminResponse
-	(*LoginPolicy)(nil),                             // 211: identity.v1.LoginPolicy
-	(*UpsertLoginPolicyRequest)(nil),                // 212: identity.v1.UpsertLoginPolicyRequest
-	(*UpsertLoginPolicyResponse)(nil),               // 213: identity.v1.UpsertLoginPolicyResponse
-	(*GetLoginPolicyRequest)(nil),                   // 214: identity.v1.GetLoginPolicyRequest
-	(*GetLoginPolicyResponse)(nil),                  // 215: identity.v1.GetLoginPolicyResponse
-	(*DeleteLoginPolicyRequest)(nil),                // 216: identity.v1.DeleteLoginPolicyRequest
-	(*DeleteLoginPolicyResponse)(nil),               // 217: identity.v1.DeleteLoginPolicyResponse
-	(*UpsertProjectConfigRequest)(nil),              // 218: identity.v1.UpsertProjectConfigRequest
-	(*UpsertProjectConfigResponse)(nil),             // 219: identity.v1.UpsertProjectConfigResponse
-	(*GetProjectConfigRequest)(nil),                 // 220: identity.v1.GetProjectConfigRequest
-	(*GetProjectConfigResponse)(nil),                // 221: identity.v1.GetProjectConfigResponse
-	(*ProjectOAuthProviderConfig)(nil),              // 222: identity.v1.ProjectOAuthProviderConfig
-	(*AdminSetProjectOAuthProviderRequest)(nil),     // 223: identity.v1.AdminSetProjectOAuthProviderRequest
-	(*AdminSetProjectOAuthProviderResponse)(nil),    // 224: identity.v1.AdminSetProjectOAuthProviderResponse
-	(*AdminSetProjectAssuranceRequest)(nil),         // 225: identity.v1.AdminSetProjectAssuranceRequest
-	(*AdminSetProjectAssuranceResponse)(nil),        // 226: identity.v1.AdminSetProjectAssuranceResponse
-	(*ProjectAssuranceConfig)(nil),                  // 227: identity.v1.ProjectAssuranceConfig
-	(*AdminGetProjectAssuranceRequest)(nil),         // 228: identity.v1.AdminGetProjectAssuranceRequest
-	(*AdminGetProjectAssuranceResponse)(nil),        // 229: identity.v1.AdminGetProjectAssuranceResponse
-	(*AdminDeleteProjectOAuthProviderRequest)(nil),  // 230: identity.v1.AdminDeleteProjectOAuthProviderRequest
-	(*AdminDeleteProjectOAuthProviderResponse)(nil), // 231: identity.v1.AdminDeleteProjectOAuthProviderResponse
-	(*AdminListProjectOAuthProvidersRequest)(nil),   // 232: identity.v1.AdminListProjectOAuthProvidersRequest
-	(*AdminListProjectOAuthProvidersResponse)(nil),  // 233: identity.v1.AdminListProjectOAuthProvidersResponse
-	(*CreateAssuranceChallengeRequest)(nil),         // 234: identity.v1.CreateAssuranceChallengeRequest
-	(*CreateAssuranceChallengeResponse)(nil),        // 235: identity.v1.CreateAssuranceChallengeResponse
-	(*IssueAssuranceTokenRequest)(nil),              // 236: identity.v1.IssueAssuranceTokenRequest
-	(*IssueAssuranceTokenResponse)(nil),             // 237: identity.v1.IssueAssuranceTokenResponse
-	(*RefreshAssuranceTokenRequest)(nil),            // 238: identity.v1.RefreshAssuranceTokenRequest
-	(*RefreshAssuranceTokenResponse)(nil),           // 239: identity.v1.RefreshAssuranceTokenResponse
-	(*SignInAnonymouslyRequest)(nil),                // 240: identity.v1.SignInAnonymouslyRequest
-	(*SignInAnonymouslyResponse)(nil),               // 241: identity.v1.SignInAnonymouslyResponse
-	(*UpgradeAnonymousAccountRequest)(nil),          // 242: identity.v1.UpgradeAnonymousAccountRequest
-	(*PasswordCredential)(nil),                      // 243: identity.v1.PasswordCredential
-	(*OAuthCredential)(nil),                         // 244: identity.v1.OAuthCredential
-	(*UpgradeAnonymousAccountResponse)(nil),         // 245: identity.v1.UpgradeAnonymousAccountResponse
-	(*LinkedIdentity)(nil),                          // 246: identity.v1.LinkedIdentity
-	(*ListLinkedIdentitiesRequest)(nil),             // 247: identity.v1.ListLinkedIdentitiesRequest
-	(*ListLinkedIdentitiesResponse)(nil),            // 248: identity.v1.ListLinkedIdentitiesResponse
-	(*LinkIdentityRequest)(nil),                     // 249: identity.v1.LinkIdentityRequest
-	(*LinkIdentityResponse)(nil),                    // 250: identity.v1.LinkIdentityResponse
-	(*UnlinkIdentityRequest)(nil),                   // 251: identity.v1.UnlinkIdentityRequest
-	(*UnlinkIdentityResponse)(nil),                  // 252: identity.v1.UnlinkIdentityResponse
-	(*timestamppb.Timestamp)(nil),                   // 253: google.protobuf.Timestamp
+	(*GetManagedChildProfileRequest)(nil),           // 105: identity.v1.GetManagedChildProfileRequest
+	(*GetManagedChildProfileResponse)(nil),          // 106: identity.v1.GetManagedChildProfileResponse
+	(*SetManagedChildPasswordRequest)(nil),          // 107: identity.v1.SetManagedChildPasswordRequest
+	(*SetManagedChildPasswordResponse)(nil),         // 108: identity.v1.SetManagedChildPasswordResponse
+	(*SetManagedChildUsernameRequest)(nil),          // 109: identity.v1.SetManagedChildUsernameRequest
+	(*SetManagedChildUsernameResponse)(nil),         // 110: identity.v1.SetManagedChildUsernameResponse
+	(*RevokeManagedChildSessionsRequest)(nil),       // 111: identity.v1.RevokeManagedChildSessionsRequest
+	(*RevokeManagedChildSessionsResponse)(nil),      // 112: identity.v1.RevokeManagedChildSessionsResponse
+	(*DeactivateManagedChildAccountRequest)(nil),    // 113: identity.v1.DeactivateManagedChildAccountRequest
+	(*DeactivateManagedChildAccountResponse)(nil),   // 114: identity.v1.DeactivateManagedChildAccountResponse
+	(*ReactivateManagedChildAccountRequest)(nil),    // 115: identity.v1.ReactivateManagedChildAccountRequest
+	(*ReactivateManagedChildAccountResponse)(nil),   // 116: identity.v1.ReactivateManagedChildAccountResponse
+	(*DeleteManagedChildAccountRequest)(nil),        // 117: identity.v1.DeleteManagedChildAccountRequest
+	(*DeleteManagedChildAccountResponse)(nil),       // 118: identity.v1.DeleteManagedChildAccountResponse
+	(*AdminHelpRequest)(nil),                        // 119: identity.v1.AdminHelpRequest
+	(*RequestAdminHelpRequest)(nil),                 // 120: identity.v1.RequestAdminHelpRequest
+	(*RequestAdminHelpResponse)(nil),                // 121: identity.v1.RequestAdminHelpResponse
+	(*ListHelpRequestsRequest)(nil),                 // 122: identity.v1.ListHelpRequestsRequest
+	(*ListHelpRequestsResponse)(nil),                // 123: identity.v1.ListHelpRequestsResponse
+	(*ResolveHelpRequestRequest)(nil),               // 124: identity.v1.ResolveHelpRequestRequest
+	(*ResolveHelpRequestResponse)(nil),              // 125: identity.v1.ResolveHelpRequestResponse
+	(*PasskeyCredentialInfo)(nil),                   // 126: identity.v1.PasskeyCredentialInfo
+	(*BeginPasskeyRegistrationRequest)(nil),         // 127: identity.v1.BeginPasskeyRegistrationRequest
+	(*BeginPasskeyRegistrationResponse)(nil),        // 128: identity.v1.BeginPasskeyRegistrationResponse
+	(*CompletePasskeyRegistrationRequest)(nil),      // 129: identity.v1.CompletePasskeyRegistrationRequest
+	(*CompletePasskeyRegistrationResponse)(nil),     // 130: identity.v1.CompletePasskeyRegistrationResponse
+	(*BeginPasskeyLoginRequest)(nil),                // 131: identity.v1.BeginPasskeyLoginRequest
+	(*BeginPasskeyLoginResponse)(nil),               // 132: identity.v1.BeginPasskeyLoginResponse
+	(*CompletePasskeyLoginRequest)(nil),             // 133: identity.v1.CompletePasskeyLoginRequest
+	(*CompletePasskeyLoginResponse)(nil),            // 134: identity.v1.CompletePasskeyLoginResponse
+	(*BeginPasskeySignupRequest)(nil),               // 135: identity.v1.BeginPasskeySignupRequest
+	(*BeginPasskeySignupResponse)(nil),              // 136: identity.v1.BeginPasskeySignupResponse
+	(*CompletePasskeySignupRequest)(nil),            // 137: identity.v1.CompletePasskeySignupRequest
+	(*CompletePasskeySignupResponse)(nil),           // 138: identity.v1.CompletePasskeySignupResponse
+	(*ListPasskeysRequest)(nil),                     // 139: identity.v1.ListPasskeysRequest
+	(*ListPasskeysResponse)(nil),                    // 140: identity.v1.ListPasskeysResponse
+	(*DeletePasskeyRequest)(nil),                    // 141: identity.v1.DeletePasskeyRequest
+	(*DeletePasskeyResponse)(nil),                   // 142: identity.v1.DeletePasskeyResponse
+	(*InitiateQrLoginRequest)(nil),                  // 143: identity.v1.InitiateQrLoginRequest
+	(*InitiateQrLoginResponse)(nil),                 // 144: identity.v1.InitiateQrLoginResponse
+	(*GetQrLoginSessionRequest)(nil),                // 145: identity.v1.GetQrLoginSessionRequest
+	(*GetQrLoginSessionResponse)(nil),               // 146: identity.v1.GetQrLoginSessionResponse
+	(*ApproveQrLoginRequest)(nil),                   // 147: identity.v1.ApproveQrLoginRequest
+	(*ApproveQrLoginResponse)(nil),                  // 148: identity.v1.ApproveQrLoginResponse
+	(*PollQrLoginRequest)(nil),                      // 149: identity.v1.PollQrLoginRequest
+	(*PollQrLoginResponse)(nil),                     // 150: identity.v1.PollQrLoginResponse
+	(*BeginTotpSetupRequest)(nil),                   // 151: identity.v1.BeginTotpSetupRequest
+	(*BeginTotpSetupResponse)(nil),                  // 152: identity.v1.BeginTotpSetupResponse
+	(*VerifyTotpSetupRequest)(nil),                  // 153: identity.v1.VerifyTotpSetupRequest
+	(*VerifyTotpSetupResponse)(nil),                 // 154: identity.v1.VerifyTotpSetupResponse
+	(*DisableTotpRequest)(nil),                      // 155: identity.v1.DisableTotpRequest
+	(*DisableTotpResponse)(nil),                     // 156: identity.v1.DisableTotpResponse
+	(*VerifyTotpRequest)(nil),                       // 157: identity.v1.VerifyTotpRequest
+	(*VerifyTotpResponse)(nil),                      // 158: identity.v1.VerifyTotpResponse
+	(*RegenerateRecoveryCodesRequest)(nil),          // 159: identity.v1.RegenerateRecoveryCodesRequest
+	(*RegenerateRecoveryCodesResponse)(nil),         // 160: identity.v1.RegenerateRecoveryCodesResponse
+	(*Session)(nil),                                 // 161: identity.v1.Session
+	(*ListMySessionsRequest)(nil),                   // 162: identity.v1.ListMySessionsRequest
+	(*ListMySessionsResponse)(nil),                  // 163: identity.v1.ListMySessionsResponse
+	(*RevokeSessionRequest)(nil),                    // 164: identity.v1.RevokeSessionRequest
+	(*RevokeSessionResponse)(nil),                   // 165: identity.v1.RevokeSessionResponse
+	(*RevokeAllSessionsRequest)(nil),                // 166: identity.v1.RevokeAllSessionsRequest
+	(*RevokeAllSessionsResponse)(nil),               // 167: identity.v1.RevokeAllSessionsResponse
+	(*SignOutEverywhereRequest)(nil),                // 168: identity.v1.SignOutEverywhereRequest
+	(*SignOutEverywhereResponse)(nil),               // 169: identity.v1.SignOutEverywhereResponse
+	(*AuditEvent)(nil),                              // 170: identity.v1.AuditEvent
+	(*ListAuditEventsRequest)(nil),                  // 171: identity.v1.ListAuditEventsRequest
+	(*ListAuditEventsResponse)(nil),                 // 172: identity.v1.ListAuditEventsResponse
+	(*InviteUserRequest)(nil),                       // 173: identity.v1.InviteUserRequest
+	(*InviteUserResponse)(nil),                      // 174: identity.v1.InviteUserResponse
+	(*AcceptInvitationRequest)(nil),                 // 175: identity.v1.AcceptInvitationRequest
+	(*AcceptInvitationResponse)(nil),                // 176: identity.v1.AcceptInvitationResponse
+	(*DeactivateUserRequest)(nil),                   // 177: identity.v1.DeactivateUserRequest
+	(*DeactivateUserResponse)(nil),                  // 178: identity.v1.DeactivateUserResponse
+	(*ReactivateUserRequest)(nil),                   // 179: identity.v1.ReactivateUserRequest
+	(*ReactivateUserResponse)(nil),                  // 180: identity.v1.ReactivateUserResponse
+	(*ResetUserPasswordRequest)(nil),                // 181: identity.v1.ResetUserPasswordRequest
+	(*ResetUserPasswordResponse)(nil),               // 182: identity.v1.ResetUserPasswordResponse
+	(*SetUserQuotaRequest)(nil),                     // 183: identity.v1.SetUserQuotaRequest
+	(*SetUserQuotaResponse)(nil),                    // 184: identity.v1.SetUserQuotaResponse
+	(*Domain)(nil),                                  // 185: identity.v1.Domain
+	(*CreateDomainRequest)(nil),                     // 186: identity.v1.CreateDomainRequest
+	(*CreateDomainResponse)(nil),                    // 187: identity.v1.CreateDomainResponse
+	(*VerifyDomainRequest)(nil),                     // 188: identity.v1.VerifyDomainRequest
+	(*VerifyDomainResponse)(nil),                    // 189: identity.v1.VerifyDomainResponse
+	(*ListTenantDomainsRequest)(nil),                // 190: identity.v1.ListTenantDomainsRequest
+	(*ListTenantDomainsResponse)(nil),               // 191: identity.v1.ListTenantDomainsResponse
+	(*TenantMembership)(nil),                        // 192: identity.v1.TenantMembership
+	(*TenantInvitation)(nil),                        // 193: identity.v1.TenantInvitation
+	(*CreateTenantInvitationRequest)(nil),           // 194: identity.v1.CreateTenantInvitationRequest
+	(*CreateTenantInvitationResponse)(nil),          // 195: identity.v1.CreateTenantInvitationResponse
+	(*AcceptTenantInvitationRequest)(nil),           // 196: identity.v1.AcceptTenantInvitationRequest
+	(*AcceptTenantInvitationResponse)(nil),          // 197: identity.v1.AcceptTenantInvitationResponse
+	(*ListTenantInvitationsRequest)(nil),            // 198: identity.v1.ListTenantInvitationsRequest
+	(*ListTenantInvitationsResponse)(nil),           // 199: identity.v1.ListTenantInvitationsResponse
+	(*ListTenantMembersRequest)(nil),                // 200: identity.v1.ListTenantMembersRequest
+	(*ListTenantMembersResponse)(nil),               // 201: identity.v1.ListTenantMembersResponse
+	(*RemoveTenantMemberRequest)(nil),               // 202: identity.v1.RemoveTenantMemberRequest
+	(*RemoveTenantMemberResponse)(nil),              // 203: identity.v1.RemoveTenantMemberResponse
+	(*AdminCreateProjectRequest)(nil),               // 204: identity.v1.AdminCreateProjectRequest
+	(*AdminCreateProjectResponse)(nil),              // 205: identity.v1.AdminCreateProjectResponse
+	(*AdminCreateProjectCredentialRequest)(nil),     // 206: identity.v1.AdminCreateProjectCredentialRequest
+	(*AdminCreateProjectCredentialResponse)(nil),    // 207: identity.v1.AdminCreateProjectCredentialResponse
+	(*AdminAddProjectAuthDomainRequest)(nil),        // 208: identity.v1.AdminAddProjectAuthDomainRequest
+	(*AdminAddProjectAuthDomainResponse)(nil),       // 209: identity.v1.AdminAddProjectAuthDomainResponse
+	(*ProjectAuthDomain)(nil),                       // 210: identity.v1.ProjectAuthDomain
+	(*AddProjectAuthDomainRequest)(nil),             // 211: identity.v1.AddProjectAuthDomainRequest
+	(*AddProjectAuthDomainResponse)(nil),            // 212: identity.v1.AddProjectAuthDomainResponse
+	(*VerifyProjectAuthDomainRequest)(nil),          // 213: identity.v1.VerifyProjectAuthDomainRequest
+	(*VerifyProjectAuthDomainResponse)(nil),         // 214: identity.v1.VerifyProjectAuthDomainResponse
+	(*ListProjectAuthDomainsRequest)(nil),           // 215: identity.v1.ListProjectAuthDomainsRequest
+	(*ListProjectAuthDomainsResponse)(nil),          // 216: identity.v1.ListProjectAuthDomainsResponse
+	(*SetPrimaryAuthDomainRequest)(nil),             // 217: identity.v1.SetPrimaryAuthDomainRequest
+	(*SetPrimaryAuthDomainResponse)(nil),            // 218: identity.v1.SetPrimaryAuthDomainResponse
+	(*AdminCreateTenantRequest)(nil),                // 219: identity.v1.AdminCreateTenantRequest
+	(*AdminCreateTenantResponse)(nil),               // 220: identity.v1.AdminCreateTenantResponse
+	(*AdminAddTenantAdminRequest)(nil),              // 221: identity.v1.AdminAddTenantAdminRequest
+	(*AdminAddTenantAdminResponse)(nil),             // 222: identity.v1.AdminAddTenantAdminResponse
+	(*CreateFirstPlatformAdminRequest)(nil),         // 223: identity.v1.CreateFirstPlatformAdminRequest
+	(*CreateFirstPlatformAdminResponse)(nil),        // 224: identity.v1.CreateFirstPlatformAdminResponse
+	(*LoginPolicy)(nil),                             // 225: identity.v1.LoginPolicy
+	(*UpsertLoginPolicyRequest)(nil),                // 226: identity.v1.UpsertLoginPolicyRequest
+	(*UpsertLoginPolicyResponse)(nil),               // 227: identity.v1.UpsertLoginPolicyResponse
+	(*GetLoginPolicyRequest)(nil),                   // 228: identity.v1.GetLoginPolicyRequest
+	(*GetLoginPolicyResponse)(nil),                  // 229: identity.v1.GetLoginPolicyResponse
+	(*DeleteLoginPolicyRequest)(nil),                // 230: identity.v1.DeleteLoginPolicyRequest
+	(*DeleteLoginPolicyResponse)(nil),               // 231: identity.v1.DeleteLoginPolicyResponse
+	(*UpsertProjectConfigRequest)(nil),              // 232: identity.v1.UpsertProjectConfigRequest
+	(*UpsertProjectConfigResponse)(nil),             // 233: identity.v1.UpsertProjectConfigResponse
+	(*GetProjectConfigRequest)(nil),                 // 234: identity.v1.GetProjectConfigRequest
+	(*GetProjectConfigResponse)(nil),                // 235: identity.v1.GetProjectConfigResponse
+	(*ProjectOAuthProviderConfig)(nil),              // 236: identity.v1.ProjectOAuthProviderConfig
+	(*AdminSetProjectOAuthProviderRequest)(nil),     // 237: identity.v1.AdminSetProjectOAuthProviderRequest
+	(*AdminSetProjectOAuthProviderResponse)(nil),    // 238: identity.v1.AdminSetProjectOAuthProviderResponse
+	(*AdminSetProjectAssuranceRequest)(nil),         // 239: identity.v1.AdminSetProjectAssuranceRequest
+	(*AdminSetProjectAssuranceResponse)(nil),        // 240: identity.v1.AdminSetProjectAssuranceResponse
+	(*ProjectAssuranceConfig)(nil),                  // 241: identity.v1.ProjectAssuranceConfig
+	(*AdminGetProjectAssuranceRequest)(nil),         // 242: identity.v1.AdminGetProjectAssuranceRequest
+	(*AdminGetProjectAssuranceResponse)(nil),        // 243: identity.v1.AdminGetProjectAssuranceResponse
+	(*AdminDeleteProjectOAuthProviderRequest)(nil),  // 244: identity.v1.AdminDeleteProjectOAuthProviderRequest
+	(*AdminDeleteProjectOAuthProviderResponse)(nil), // 245: identity.v1.AdminDeleteProjectOAuthProviderResponse
+	(*AdminListProjectOAuthProvidersRequest)(nil),   // 246: identity.v1.AdminListProjectOAuthProvidersRequest
+	(*AdminListProjectOAuthProvidersResponse)(nil),  // 247: identity.v1.AdminListProjectOAuthProvidersResponse
+	(*CreateAssuranceChallengeRequest)(nil),         // 248: identity.v1.CreateAssuranceChallengeRequest
+	(*CreateAssuranceChallengeResponse)(nil),        // 249: identity.v1.CreateAssuranceChallengeResponse
+	(*IssueAssuranceTokenRequest)(nil),              // 250: identity.v1.IssueAssuranceTokenRequest
+	(*IssueAssuranceTokenResponse)(nil),             // 251: identity.v1.IssueAssuranceTokenResponse
+	(*RefreshAssuranceTokenRequest)(nil),            // 252: identity.v1.RefreshAssuranceTokenRequest
+	(*RefreshAssuranceTokenResponse)(nil),           // 253: identity.v1.RefreshAssuranceTokenResponse
+	(*SignInAnonymouslyRequest)(nil),                // 254: identity.v1.SignInAnonymouslyRequest
+	(*SignInAnonymouslyResponse)(nil),               // 255: identity.v1.SignInAnonymouslyResponse
+	(*UpgradeAnonymousAccountRequest)(nil),          // 256: identity.v1.UpgradeAnonymousAccountRequest
+	(*PasswordCredential)(nil),                      // 257: identity.v1.PasswordCredential
+	(*OAuthCredential)(nil),                         // 258: identity.v1.OAuthCredential
+	(*UpgradeAnonymousAccountResponse)(nil),         // 259: identity.v1.UpgradeAnonymousAccountResponse
+	(*LinkedIdentity)(nil),                          // 260: identity.v1.LinkedIdentity
+	(*ListLinkedIdentitiesRequest)(nil),             // 261: identity.v1.ListLinkedIdentitiesRequest
+	(*ListLinkedIdentitiesResponse)(nil),            // 262: identity.v1.ListLinkedIdentitiesResponse
+	(*LinkIdentityRequest)(nil),                     // 263: identity.v1.LinkIdentityRequest
+	(*LinkIdentityResponse)(nil),                    // 264: identity.v1.LinkIdentityResponse
+	(*UnlinkIdentityRequest)(nil),                   // 265: identity.v1.UnlinkIdentityRequest
+	(*UnlinkIdentityResponse)(nil),                  // 266: identity.v1.UnlinkIdentityResponse
+	(*timestamppb.Timestamp)(nil),                   // 267: google.protobuf.Timestamp
 }
 var file_identity_v1_identity_proto_depIdxs = []int32{
-	253, // 0: identity.v1.User.created_at:type_name -> google.protobuf.Timestamp
-	253, // 1: identity.v1.User.updated_at:type_name -> google.protobuf.Timestamp
+	267, // 0: identity.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	267, // 1: identity.v1.User.updated_at:type_name -> google.protobuf.Timestamp
 	0,   // 2: identity.v1.User.status:type_name -> identity.v1.UserStatus
 	1,   // 3: identity.v1.User.age_band:type_name -> identity.v1.AgeBand
 	6,   // 4: identity.v1.CreateUserResponse.user:type_name -> identity.v1.User
@@ -16201,8 +16940,8 @@ var file_identity_v1_identity_proto_depIdxs = []int32{
 	6,   // 6: identity.v1.UpdateUserResponse.user:type_name -> identity.v1.User
 	0,   // 7: identity.v1.ListUsersRequest.status_filter:type_name -> identity.v1.UserStatus
 	6,   // 8: identity.v1.ListUsersResponse.users:type_name -> identity.v1.User
-	253, // 9: identity.v1.Group.created_at:type_name -> google.protobuf.Timestamp
-	253, // 10: identity.v1.Group.updated_at:type_name -> google.protobuf.Timestamp
+	267, // 9: identity.v1.Group.created_at:type_name -> google.protobuf.Timestamp
+	267, // 10: identity.v1.Group.updated_at:type_name -> google.protobuf.Timestamp
 	17,  // 11: identity.v1.CreateGroupResponse.group:type_name -> identity.v1.Group
 	17,  // 12: identity.v1.UpdateGroupResponse.group:type_name -> identity.v1.Group
 	17,  // 13: identity.v1.ListGroupsResponse.groups:type_name -> identity.v1.Group
@@ -16221,21 +16960,21 @@ var file_identity_v1_identity_proto_depIdxs = []int32{
 	6,   // 26: identity.v1.UpdateProfileResponse.user:type_name -> identity.v1.User
 	0,   // 27: identity.v1.CancelAccountDeletionResponse.status:type_name -> identity.v1.UserStatus
 	6,   // 28: identity.v1.ExportMyDataResponse.user:type_name -> identity.v1.User
-	147, // 29: identity.v1.ExportMyDataResponse.sessions:type_name -> identity.v1.Session
-	112, // 30: identity.v1.ExportMyDataResponse.passkeys:type_name -> identity.v1.PasskeyCredentialInfo
-	246, // 31: identity.v1.ExportMyDataResponse.linked_identities:type_name -> identity.v1.LinkedIdentity
-	156, // 32: identity.v1.ExportMyDataResponse.audit_events:type_name -> identity.v1.AuditEvent
+	161, // 29: identity.v1.ExportMyDataResponse.sessions:type_name -> identity.v1.Session
+	126, // 30: identity.v1.ExportMyDataResponse.passkeys:type_name -> identity.v1.PasskeyCredentialInfo
+	260, // 31: identity.v1.ExportMyDataResponse.linked_identities:type_name -> identity.v1.LinkedIdentity
+	170, // 32: identity.v1.ExportMyDataResponse.audit_events:type_name -> identity.v1.AuditEvent
 	6,   // 33: identity.v1.VerifyEmailResponse.user:type_name -> identity.v1.User
 	6,   // 34: identity.v1.ConfirmEmailChangeResponse.user:type_name -> identity.v1.User
 	2,   // 35: identity.v1.IdentityVerification.status:type_name -> identity.v1.IdentityVerificationStatus
-	253, // 36: identity.v1.IdentityVerification.created_at:type_name -> google.protobuf.Timestamp
-	253, // 37: identity.v1.IdentityVerification.updated_at:type_name -> google.protobuf.Timestamp
-	253, // 38: identity.v1.IdentityVerification.completed_at:type_name -> google.protobuf.Timestamp
-	253, // 39: identity.v1.BeginIdentityVerificationResponse.expires_at:type_name -> google.protobuf.Timestamp
+	267, // 36: identity.v1.IdentityVerification.created_at:type_name -> google.protobuf.Timestamp
+	267, // 37: identity.v1.IdentityVerification.updated_at:type_name -> google.protobuf.Timestamp
+	267, // 38: identity.v1.IdentityVerification.completed_at:type_name -> google.protobuf.Timestamp
+	267, // 39: identity.v1.BeginIdentityVerificationResponse.expires_at:type_name -> google.protobuf.Timestamp
 	87,  // 40: identity.v1.GetIdentityVerificationStatusResponse.verification:type_name -> identity.v1.IdentityVerification
-	253, // 41: identity.v1.ConsentRecord.granted_at:type_name -> google.protobuf.Timestamp
+	267, // 41: identity.v1.ConsentRecord.granted_at:type_name -> google.protobuf.Timestamp
 	3,   // 42: identity.v1.ConsentRecord.verification_factors:type_name -> identity.v1.ParentalConsentVerificationFactor
-	253, // 43: identity.v1.ConsentRecord.revoked_at:type_name -> google.protobuf.Timestamp
+	267, // 43: identity.v1.ConsentRecord.revoked_at:type_name -> google.protobuf.Timestamp
 	6,   // 44: identity.v1.SetAccountMarketResponse.user:type_name -> identity.v1.User
 	92,  // 45: identity.v1.GrantParentalConsentResponse.record:type_name -> identity.v1.ConsentRecord
 	0,   // 46: identity.v1.GrantParentalConsentResponse.child_status:type_name -> identity.v1.UserStatus
@@ -16245,299 +16984,315 @@ var file_identity_v1_identity_proto_depIdxs = []int32{
 	6,   // 50: identity.v1.GetGuardiansResponse.guardians:type_name -> identity.v1.User
 	6,   // 51: identity.v1.CreateManagedChildAccountResponse.child:type_name -> identity.v1.User
 	92,  // 52: identity.v1.CreateManagedChildAccountResponse.consent:type_name -> identity.v1.ConsentRecord
-	4,   // 53: identity.v1.AdminHelpRequest.status:type_name -> identity.v1.HelpRequestStatus
-	253, // 54: identity.v1.AdminHelpRequest.resolved_at:type_name -> google.protobuf.Timestamp
-	253, // 55: identity.v1.AdminHelpRequest.created_at:type_name -> google.protobuf.Timestamp
-	4,   // 56: identity.v1.ListHelpRequestsRequest.status_filter:type_name -> identity.v1.HelpRequestStatus
-	105, // 57: identity.v1.ListHelpRequestsResponse.requests:type_name -> identity.v1.AdminHelpRequest
-	105, // 58: identity.v1.ResolveHelpRequestResponse.request:type_name -> identity.v1.AdminHelpRequest
-	253, // 59: identity.v1.PasskeyCredentialInfo.created_at:type_name -> google.protobuf.Timestamp
-	253, // 60: identity.v1.PasskeyCredentialInfo.last_used_at:type_name -> google.protobuf.Timestamp
-	112, // 61: identity.v1.CompletePasskeyRegistrationResponse.credential:type_name -> identity.v1.PasskeyCredentialInfo
-	6,   // 62: identity.v1.CompletePasskeyLoginResponse.user:type_name -> identity.v1.User
-	6,   // 63: identity.v1.CompletePasskeySignupResponse.user:type_name -> identity.v1.User
-	112, // 64: identity.v1.ListPasskeysResponse.credentials:type_name -> identity.v1.PasskeyCredentialInfo
-	5,   // 65: identity.v1.GetQrLoginSessionResponse.status:type_name -> identity.v1.QrLoginStatus
-	253, // 66: identity.v1.GetQrLoginSessionResponse.expires_at:type_name -> google.protobuf.Timestamp
-	5,   // 67: identity.v1.ApproveQrLoginResponse.status:type_name -> identity.v1.QrLoginStatus
-	5,   // 68: identity.v1.PollQrLoginResponse.status:type_name -> identity.v1.QrLoginStatus
-	6,   // 69: identity.v1.PollQrLoginResponse.user:type_name -> identity.v1.User
-	6,   // 70: identity.v1.VerifyTotpResponse.user:type_name -> identity.v1.User
-	253, // 71: identity.v1.Session.created_at:type_name -> google.protobuf.Timestamp
-	253, // 72: identity.v1.Session.last_used_at:type_name -> google.protobuf.Timestamp
-	253, // 73: identity.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
-	147, // 74: identity.v1.ListMySessionsResponse.sessions:type_name -> identity.v1.Session
-	253, // 75: identity.v1.AuditEvent.created_at:type_name -> google.protobuf.Timestamp
-	156, // 76: identity.v1.ListAuditEventsResponse.events:type_name -> identity.v1.AuditEvent
-	6,   // 77: identity.v1.InviteUserResponse.user:type_name -> identity.v1.User
-	6,   // 78: identity.v1.AcceptInvitationResponse.user:type_name -> identity.v1.User
-	253, // 79: identity.v1.Domain.verified_at:type_name -> google.protobuf.Timestamp
-	253, // 80: identity.v1.Domain.created_at:type_name -> google.protobuf.Timestamp
-	253, // 81: identity.v1.Domain.updated_at:type_name -> google.protobuf.Timestamp
-	171, // 82: identity.v1.CreateDomainResponse.domain:type_name -> identity.v1.Domain
-	171, // 83: identity.v1.VerifyDomainResponse.domain:type_name -> identity.v1.Domain
-	171, // 84: identity.v1.ListTenantDomainsResponse.domains:type_name -> identity.v1.Domain
-	253, // 85: identity.v1.TenantMembership.created_at:type_name -> google.protobuf.Timestamp
-	253, // 86: identity.v1.TenantMembership.updated_at:type_name -> google.protobuf.Timestamp
-	253, // 87: identity.v1.TenantInvitation.expires_at:type_name -> google.protobuf.Timestamp
-	253, // 88: identity.v1.TenantInvitation.accepted_at:type_name -> google.protobuf.Timestamp
-	253, // 89: identity.v1.TenantInvitation.created_at:type_name -> google.protobuf.Timestamp
-	179, // 90: identity.v1.CreateTenantInvitationResponse.invitation:type_name -> identity.v1.TenantInvitation
-	178, // 91: identity.v1.AcceptTenantInvitationResponse.membership:type_name -> identity.v1.TenantMembership
-	179, // 92: identity.v1.ListTenantInvitationsResponse.invitations:type_name -> identity.v1.TenantInvitation
-	178, // 93: identity.v1.ListTenantMembersResponse.members:type_name -> identity.v1.TenantMembership
-	196, // 94: identity.v1.AddProjectAuthDomainResponse.domain:type_name -> identity.v1.ProjectAuthDomain
-	196, // 95: identity.v1.VerifyProjectAuthDomainResponse.domain:type_name -> identity.v1.ProjectAuthDomain
-	196, // 96: identity.v1.ListProjectAuthDomainsResponse.domains:type_name -> identity.v1.ProjectAuthDomain
-	196, // 97: identity.v1.SetPrimaryAuthDomainResponse.domain:type_name -> identity.v1.ProjectAuthDomain
-	178, // 98: identity.v1.AdminAddTenantAdminResponse.membership:type_name -> identity.v1.TenantMembership
-	211, // 99: identity.v1.UpsertLoginPolicyResponse.policy:type_name -> identity.v1.LoginPolicy
-	211, // 100: identity.v1.GetLoginPolicyResponse.policy:type_name -> identity.v1.LoginPolicy
-	222, // 101: identity.v1.AdminSetProjectOAuthProviderRequest.config:type_name -> identity.v1.ProjectOAuthProviderConfig
-	222, // 102: identity.v1.AdminSetProjectOAuthProviderResponse.config:type_name -> identity.v1.ProjectOAuthProviderConfig
-	227, // 103: identity.v1.AdminSetProjectAssuranceRequest.config:type_name -> identity.v1.ProjectAssuranceConfig
-	227, // 104: identity.v1.AdminSetProjectAssuranceResponse.config:type_name -> identity.v1.ProjectAssuranceConfig
-	227, // 105: identity.v1.AdminGetProjectAssuranceResponse.config:type_name -> identity.v1.ProjectAssuranceConfig
-	222, // 106: identity.v1.AdminListProjectOAuthProvidersResponse.providers:type_name -> identity.v1.ProjectOAuthProviderConfig
-	6,   // 107: identity.v1.SignInAnonymouslyResponse.user:type_name -> identity.v1.User
-	243, // 108: identity.v1.UpgradeAnonymousAccountRequest.password:type_name -> identity.v1.PasswordCredential
-	244, // 109: identity.v1.UpgradeAnonymousAccountRequest.oauth:type_name -> identity.v1.OAuthCredential
-	6,   // 110: identity.v1.UpgradeAnonymousAccountResponse.user:type_name -> identity.v1.User
-	246, // 111: identity.v1.ListLinkedIdentitiesResponse.identities:type_name -> identity.v1.LinkedIdentity
-	246, // 112: identity.v1.LinkIdentityResponse.identity:type_name -> identity.v1.LinkedIdentity
-	32,  // 113: identity.v1.IdentityService.BeginOAuthLogin:input_type -> identity.v1.BeginOAuthLoginRequest
-	34,  // 114: identity.v1.IdentityService.OAuthLogin:input_type -> identity.v1.OAuthLoginRequest
-	36,  // 115: identity.v1.IdentityService.NativeOAuthLogin:input_type -> identity.v1.NativeOAuthLoginRequest
-	38,  // 116: identity.v1.IdentityService.RedeemOAuthCode:input_type -> identity.v1.RedeemOAuthCodeRequest
-	40,  // 117: identity.v1.IdentityService.PasswordSignup:input_type -> identity.v1.PasswordSignupRequest
-	42,  // 118: identity.v1.IdentityService.PasswordLogin:input_type -> identity.v1.PasswordLoginRequest
-	45,  // 119: identity.v1.IdentityService.SubmitDateOfBirth:input_type -> identity.v1.SubmitDateOfBirthRequest
-	47,  // 120: identity.v1.IdentityService.RequestEmailLoginCode:input_type -> identity.v1.RequestEmailLoginCodeRequest
-	49,  // 121: identity.v1.IdentityService.VerifyEmailLoginCode:input_type -> identity.v1.VerifyEmailLoginCodeRequest
-	51,  // 122: identity.v1.IdentityService.RequestMagicLink:input_type -> identity.v1.RequestMagicLinkRequest
-	53,  // 123: identity.v1.IdentityService.RedeemMagicLink:input_type -> identity.v1.RedeemMagicLinkRequest
-	234, // 124: identity.v1.IdentityService.CreateAssuranceChallenge:input_type -> identity.v1.CreateAssuranceChallengeRequest
-	236, // 125: identity.v1.IdentityService.IssueAssuranceToken:input_type -> identity.v1.IssueAssuranceTokenRequest
-	238, // 126: identity.v1.IdentityService.RefreshAssuranceToken:input_type -> identity.v1.RefreshAssuranceTokenRequest
-	55,  // 127: identity.v1.IdentityService.RequestPhoneVerification:input_type -> identity.v1.RequestPhoneVerificationRequest
-	57,  // 128: identity.v1.IdentityService.VerifyPhoneCode:input_type -> identity.v1.VerifyPhoneCodeRequest
-	59,  // 129: identity.v1.IdentityService.GetCurrentUser:input_type -> identity.v1.GetCurrentUserRequest
-	61,  // 130: identity.v1.IdentityService.RefreshToken:input_type -> identity.v1.RefreshTokenRequest
-	63,  // 131: identity.v1.IdentityService.Logout:input_type -> identity.v1.LogoutRequest
-	65,  // 132: identity.v1.IdentityService.UpdateProfile:input_type -> identity.v1.UpdateProfileRequest
-	93,  // 133: identity.v1.IdentityService.SetAccountMarket:input_type -> identity.v1.SetAccountMarketRequest
-	69,  // 134: identity.v1.IdentityService.DeleteMyAccount:input_type -> identity.v1.DeleteMyAccountRequest
-	71,  // 135: identity.v1.IdentityService.CancelAccountDeletion:input_type -> identity.v1.CancelAccountDeletionRequest
-	73,  // 136: identity.v1.IdentityService.ExportMyData:input_type -> identity.v1.ExportMyDataRequest
-	67,  // 137: identity.v1.IdentityService.ChangePassword:input_type -> identity.v1.ChangePasswordRequest
-	75,  // 138: identity.v1.IdentityService.RequestPasswordReset:input_type -> identity.v1.RequestPasswordResetRequest
-	77,  // 139: identity.v1.IdentityService.ConfirmPasswordReset:input_type -> identity.v1.ConfirmPasswordResetRequest
-	79,  // 140: identity.v1.IdentityService.SendEmailVerification:input_type -> identity.v1.SendEmailVerificationRequest
-	81,  // 141: identity.v1.IdentityService.VerifyEmail:input_type -> identity.v1.VerifyEmailRequest
-	83,  // 142: identity.v1.IdentityService.RequestEmailChange:input_type -> identity.v1.RequestEmailChangeRequest
-	85,  // 143: identity.v1.IdentityService.ConfirmEmailChange:input_type -> identity.v1.ConfirmEmailChangeRequest
-	88,  // 144: identity.v1.IdentityService.BeginIdentityVerification:input_type -> identity.v1.BeginIdentityVerificationRequest
-	90,  // 145: identity.v1.IdentityService.GetIdentityVerificationStatus:input_type -> identity.v1.GetIdentityVerificationStatusRequest
-	95,  // 146: identity.v1.IdentityService.GrantParentalConsent:input_type -> identity.v1.GrantParentalConsentRequest
-	97,  // 147: identity.v1.IdentityService.RevokeParentalConsent:input_type -> identity.v1.RevokeParentalConsentRequest
-	99,  // 148: identity.v1.IdentityService.ListManagedChildren:input_type -> identity.v1.ListManagedChildrenRequest
-	101, // 149: identity.v1.IdentityService.GetGuardians:input_type -> identity.v1.GetGuardiansRequest
-	103, // 150: identity.v1.IdentityService.CreateManagedChildAccount:input_type -> identity.v1.CreateManagedChildAccountRequest
-	106, // 151: identity.v1.IdentityService.RequestAdminHelp:input_type -> identity.v1.RequestAdminHelpRequest
-	108, // 152: identity.v1.IdentityService.ListHelpRequests:input_type -> identity.v1.ListHelpRequestsRequest
-	110, // 153: identity.v1.IdentityService.ResolveHelpRequest:input_type -> identity.v1.ResolveHelpRequestRequest
-	113, // 154: identity.v1.IdentityService.BeginPasskeyRegistration:input_type -> identity.v1.BeginPasskeyRegistrationRequest
-	115, // 155: identity.v1.IdentityService.CompletePasskeyRegistration:input_type -> identity.v1.CompletePasskeyRegistrationRequest
-	121, // 156: identity.v1.IdentityService.BeginPasskeySignup:input_type -> identity.v1.BeginPasskeySignupRequest
-	123, // 157: identity.v1.IdentityService.CompletePasskeySignup:input_type -> identity.v1.CompletePasskeySignupRequest
-	117, // 158: identity.v1.IdentityService.BeginPasskeyLogin:input_type -> identity.v1.BeginPasskeyLoginRequest
-	119, // 159: identity.v1.IdentityService.CompletePasskeyLogin:input_type -> identity.v1.CompletePasskeyLoginRequest
-	125, // 160: identity.v1.IdentityService.ListPasskeys:input_type -> identity.v1.ListPasskeysRequest
-	127, // 161: identity.v1.IdentityService.DeletePasskey:input_type -> identity.v1.DeletePasskeyRequest
-	129, // 162: identity.v1.IdentityService.InitiateQrLogin:input_type -> identity.v1.InitiateQrLoginRequest
-	131, // 163: identity.v1.IdentityService.GetQrLoginSession:input_type -> identity.v1.GetQrLoginSessionRequest
-	133, // 164: identity.v1.IdentityService.ApproveQrLogin:input_type -> identity.v1.ApproveQrLoginRequest
-	135, // 165: identity.v1.IdentityService.PollQrLogin:input_type -> identity.v1.PollQrLoginRequest
-	137, // 166: identity.v1.IdentityService.BeginTotpSetup:input_type -> identity.v1.BeginTotpSetupRequest
-	139, // 167: identity.v1.IdentityService.VerifyTotpSetup:input_type -> identity.v1.VerifyTotpSetupRequest
-	141, // 168: identity.v1.IdentityService.DisableTotp:input_type -> identity.v1.DisableTotpRequest
-	143, // 169: identity.v1.IdentityService.VerifyTotp:input_type -> identity.v1.VerifyTotpRequest
-	145, // 170: identity.v1.IdentityService.RegenerateRecoveryCodes:input_type -> identity.v1.RegenerateRecoveryCodesRequest
-	148, // 171: identity.v1.IdentityService.ListMySessions:input_type -> identity.v1.ListMySessionsRequest
-	150, // 172: identity.v1.IdentityService.RevokeSession:input_type -> identity.v1.RevokeSessionRequest
-	152, // 173: identity.v1.IdentityService.RevokeAllSessions:input_type -> identity.v1.RevokeAllSessionsRequest
-	154, // 174: identity.v1.IdentityService.SignOutEverywhere:input_type -> identity.v1.SignOutEverywhereRequest
-	157, // 175: identity.v1.IdentityService.ListAuditEvents:input_type -> identity.v1.ListAuditEventsRequest
-	7,   // 176: identity.v1.IdentityService.CreateUser:input_type -> identity.v1.CreateUserRequest
-	9,   // 177: identity.v1.IdentityService.GetUser:input_type -> identity.v1.GetUserRequest
-	11,  // 178: identity.v1.IdentityService.UpdateUser:input_type -> identity.v1.UpdateUserRequest
-	13,  // 179: identity.v1.IdentityService.DeleteUser:input_type -> identity.v1.DeleteUserRequest
-	15,  // 180: identity.v1.IdentityService.ListUsers:input_type -> identity.v1.ListUsersRequest
-	18,  // 181: identity.v1.IdentityService.CreateGroup:input_type -> identity.v1.CreateGroupRequest
-	20,  // 182: identity.v1.IdentityService.UpdateGroup:input_type -> identity.v1.UpdateGroupRequest
-	22,  // 183: identity.v1.IdentityService.DeleteGroup:input_type -> identity.v1.DeleteGroupRequest
-	24,  // 184: identity.v1.IdentityService.ListGroups:input_type -> identity.v1.ListGroupsRequest
-	26,  // 185: identity.v1.IdentityService.AddGroupMember:input_type -> identity.v1.AddGroupMemberRequest
-	28,  // 186: identity.v1.IdentityService.RemoveGroupMember:input_type -> identity.v1.RemoveGroupMemberRequest
-	30,  // 187: identity.v1.IdentityService.ListGroupMembers:input_type -> identity.v1.ListGroupMembersRequest
-	172, // 188: identity.v1.IdentityService.CreateDomain:input_type -> identity.v1.CreateDomainRequest
-	174, // 189: identity.v1.IdentityService.VerifyDomain:input_type -> identity.v1.VerifyDomainRequest
-	176, // 190: identity.v1.IdentityService.ListTenantDomains:input_type -> identity.v1.ListTenantDomainsRequest
-	180, // 191: identity.v1.IdentityService.CreateTenantInvitation:input_type -> identity.v1.CreateTenantInvitationRequest
-	182, // 192: identity.v1.IdentityService.AcceptTenantInvitation:input_type -> identity.v1.AcceptTenantInvitationRequest
-	184, // 193: identity.v1.IdentityService.ListTenantInvitations:input_type -> identity.v1.ListTenantInvitationsRequest
-	186, // 194: identity.v1.IdentityService.ListTenantMembers:input_type -> identity.v1.ListTenantMembersRequest
-	188, // 195: identity.v1.IdentityService.RemoveTenantMember:input_type -> identity.v1.RemoveTenantMemberRequest
-	159, // 196: identity.v1.IdentityService.InviteUser:input_type -> identity.v1.InviteUserRequest
-	161, // 197: identity.v1.IdentityService.AcceptInvitation:input_type -> identity.v1.AcceptInvitationRequest
-	163, // 198: identity.v1.IdentityService.DeactivateUser:input_type -> identity.v1.DeactivateUserRequest
-	165, // 199: identity.v1.IdentityService.ReactivateUser:input_type -> identity.v1.ReactivateUserRequest
-	167, // 200: identity.v1.IdentityService.ResetUserPassword:input_type -> identity.v1.ResetUserPasswordRequest
-	169, // 201: identity.v1.IdentityService.SetUserQuota:input_type -> identity.v1.SetUserQuotaRequest
-	190, // 202: identity.v1.IdentityService.AdminCreateProject:input_type -> identity.v1.AdminCreateProjectRequest
-	192, // 203: identity.v1.IdentityService.AdminCreateProjectCredential:input_type -> identity.v1.AdminCreateProjectCredentialRequest
-	194, // 204: identity.v1.IdentityService.AdminAddProjectAuthDomain:input_type -> identity.v1.AdminAddProjectAuthDomainRequest
-	197, // 205: identity.v1.IdentityService.AddProjectAuthDomain:input_type -> identity.v1.AddProjectAuthDomainRequest
-	199, // 206: identity.v1.IdentityService.VerifyProjectAuthDomain:input_type -> identity.v1.VerifyProjectAuthDomainRequest
-	201, // 207: identity.v1.IdentityService.ListProjectAuthDomains:input_type -> identity.v1.ListProjectAuthDomainsRequest
-	203, // 208: identity.v1.IdentityService.SetPrimaryAuthDomain:input_type -> identity.v1.SetPrimaryAuthDomainRequest
-	205, // 209: identity.v1.IdentityService.AdminCreateTenant:input_type -> identity.v1.AdminCreateTenantRequest
-	207, // 210: identity.v1.IdentityService.AdminAddTenantAdmin:input_type -> identity.v1.AdminAddTenantAdminRequest
-	209, // 211: identity.v1.IdentityService.CreateFirstPlatformAdmin:input_type -> identity.v1.CreateFirstPlatformAdminRequest
-	247, // 212: identity.v1.IdentityService.ListLinkedIdentities:input_type -> identity.v1.ListLinkedIdentitiesRequest
-	249, // 213: identity.v1.IdentityService.LinkIdentity:input_type -> identity.v1.LinkIdentityRequest
-	251, // 214: identity.v1.IdentityService.UnlinkIdentity:input_type -> identity.v1.UnlinkIdentityRequest
-	212, // 215: identity.v1.IdentityService.UpsertLoginPolicy:input_type -> identity.v1.UpsertLoginPolicyRequest
-	214, // 216: identity.v1.IdentityService.GetLoginPolicy:input_type -> identity.v1.GetLoginPolicyRequest
-	216, // 217: identity.v1.IdentityService.DeleteLoginPolicy:input_type -> identity.v1.DeleteLoginPolicyRequest
-	218, // 218: identity.v1.IdentityService.UpsertProjectConfig:input_type -> identity.v1.UpsertProjectConfigRequest
-	220, // 219: identity.v1.IdentityService.GetProjectConfig:input_type -> identity.v1.GetProjectConfigRequest
-	223, // 220: identity.v1.IdentityService.AdminSetProjectOAuthProvider:input_type -> identity.v1.AdminSetProjectOAuthProviderRequest
-	240, // 221: identity.v1.IdentityService.SignInAnonymously:input_type -> identity.v1.SignInAnonymouslyRequest
-	242, // 222: identity.v1.IdentityService.UpgradeAnonymousAccount:input_type -> identity.v1.UpgradeAnonymousAccountRequest
-	225, // 223: identity.v1.IdentityService.AdminSetProjectAssurance:input_type -> identity.v1.AdminSetProjectAssuranceRequest
-	228, // 224: identity.v1.IdentityService.AdminGetProjectAssurance:input_type -> identity.v1.AdminGetProjectAssuranceRequest
-	230, // 225: identity.v1.IdentityService.AdminDeleteProjectOAuthProvider:input_type -> identity.v1.AdminDeleteProjectOAuthProviderRequest
-	232, // 226: identity.v1.IdentityService.AdminListProjectOAuthProviders:input_type -> identity.v1.AdminListProjectOAuthProvidersRequest
-	33,  // 227: identity.v1.IdentityService.BeginOAuthLogin:output_type -> identity.v1.BeginOAuthLoginResponse
-	35,  // 228: identity.v1.IdentityService.OAuthLogin:output_type -> identity.v1.OAuthLoginResponse
-	37,  // 229: identity.v1.IdentityService.NativeOAuthLogin:output_type -> identity.v1.NativeOAuthLoginResponse
-	39,  // 230: identity.v1.IdentityService.RedeemOAuthCode:output_type -> identity.v1.RedeemOAuthCodeResponse
-	41,  // 231: identity.v1.IdentityService.PasswordSignup:output_type -> identity.v1.PasswordSignupResponse
-	43,  // 232: identity.v1.IdentityService.PasswordLogin:output_type -> identity.v1.PasswordLoginResponse
-	46,  // 233: identity.v1.IdentityService.SubmitDateOfBirth:output_type -> identity.v1.SubmitDateOfBirthResponse
-	48,  // 234: identity.v1.IdentityService.RequestEmailLoginCode:output_type -> identity.v1.RequestEmailLoginCodeResponse
-	50,  // 235: identity.v1.IdentityService.VerifyEmailLoginCode:output_type -> identity.v1.VerifyEmailLoginCodeResponse
-	52,  // 236: identity.v1.IdentityService.RequestMagicLink:output_type -> identity.v1.RequestMagicLinkResponse
-	54,  // 237: identity.v1.IdentityService.RedeemMagicLink:output_type -> identity.v1.RedeemMagicLinkResponse
-	235, // 238: identity.v1.IdentityService.CreateAssuranceChallenge:output_type -> identity.v1.CreateAssuranceChallengeResponse
-	237, // 239: identity.v1.IdentityService.IssueAssuranceToken:output_type -> identity.v1.IssueAssuranceTokenResponse
-	239, // 240: identity.v1.IdentityService.RefreshAssuranceToken:output_type -> identity.v1.RefreshAssuranceTokenResponse
-	56,  // 241: identity.v1.IdentityService.RequestPhoneVerification:output_type -> identity.v1.RequestPhoneVerificationResponse
-	58,  // 242: identity.v1.IdentityService.VerifyPhoneCode:output_type -> identity.v1.VerifyPhoneCodeResponse
-	60,  // 243: identity.v1.IdentityService.GetCurrentUser:output_type -> identity.v1.GetCurrentUserResponse
-	62,  // 244: identity.v1.IdentityService.RefreshToken:output_type -> identity.v1.RefreshTokenResponse
-	64,  // 245: identity.v1.IdentityService.Logout:output_type -> identity.v1.LogoutResponse
-	66,  // 246: identity.v1.IdentityService.UpdateProfile:output_type -> identity.v1.UpdateProfileResponse
-	94,  // 247: identity.v1.IdentityService.SetAccountMarket:output_type -> identity.v1.SetAccountMarketResponse
-	70,  // 248: identity.v1.IdentityService.DeleteMyAccount:output_type -> identity.v1.DeleteMyAccountResponse
-	72,  // 249: identity.v1.IdentityService.CancelAccountDeletion:output_type -> identity.v1.CancelAccountDeletionResponse
-	74,  // 250: identity.v1.IdentityService.ExportMyData:output_type -> identity.v1.ExportMyDataResponse
-	68,  // 251: identity.v1.IdentityService.ChangePassword:output_type -> identity.v1.ChangePasswordResponse
-	76,  // 252: identity.v1.IdentityService.RequestPasswordReset:output_type -> identity.v1.RequestPasswordResetResponse
-	78,  // 253: identity.v1.IdentityService.ConfirmPasswordReset:output_type -> identity.v1.ConfirmPasswordResetResponse
-	80,  // 254: identity.v1.IdentityService.SendEmailVerification:output_type -> identity.v1.SendEmailVerificationResponse
-	82,  // 255: identity.v1.IdentityService.VerifyEmail:output_type -> identity.v1.VerifyEmailResponse
-	84,  // 256: identity.v1.IdentityService.RequestEmailChange:output_type -> identity.v1.RequestEmailChangeResponse
-	86,  // 257: identity.v1.IdentityService.ConfirmEmailChange:output_type -> identity.v1.ConfirmEmailChangeResponse
-	89,  // 258: identity.v1.IdentityService.BeginIdentityVerification:output_type -> identity.v1.BeginIdentityVerificationResponse
-	91,  // 259: identity.v1.IdentityService.GetIdentityVerificationStatus:output_type -> identity.v1.GetIdentityVerificationStatusResponse
-	96,  // 260: identity.v1.IdentityService.GrantParentalConsent:output_type -> identity.v1.GrantParentalConsentResponse
-	98,  // 261: identity.v1.IdentityService.RevokeParentalConsent:output_type -> identity.v1.RevokeParentalConsentResponse
-	100, // 262: identity.v1.IdentityService.ListManagedChildren:output_type -> identity.v1.ListManagedChildrenResponse
-	102, // 263: identity.v1.IdentityService.GetGuardians:output_type -> identity.v1.GetGuardiansResponse
-	104, // 264: identity.v1.IdentityService.CreateManagedChildAccount:output_type -> identity.v1.CreateManagedChildAccountResponse
-	107, // 265: identity.v1.IdentityService.RequestAdminHelp:output_type -> identity.v1.RequestAdminHelpResponse
-	109, // 266: identity.v1.IdentityService.ListHelpRequests:output_type -> identity.v1.ListHelpRequestsResponse
-	111, // 267: identity.v1.IdentityService.ResolveHelpRequest:output_type -> identity.v1.ResolveHelpRequestResponse
-	114, // 268: identity.v1.IdentityService.BeginPasskeyRegistration:output_type -> identity.v1.BeginPasskeyRegistrationResponse
-	116, // 269: identity.v1.IdentityService.CompletePasskeyRegistration:output_type -> identity.v1.CompletePasskeyRegistrationResponse
-	122, // 270: identity.v1.IdentityService.BeginPasskeySignup:output_type -> identity.v1.BeginPasskeySignupResponse
-	124, // 271: identity.v1.IdentityService.CompletePasskeySignup:output_type -> identity.v1.CompletePasskeySignupResponse
-	118, // 272: identity.v1.IdentityService.BeginPasskeyLogin:output_type -> identity.v1.BeginPasskeyLoginResponse
-	120, // 273: identity.v1.IdentityService.CompletePasskeyLogin:output_type -> identity.v1.CompletePasskeyLoginResponse
-	126, // 274: identity.v1.IdentityService.ListPasskeys:output_type -> identity.v1.ListPasskeysResponse
-	128, // 275: identity.v1.IdentityService.DeletePasskey:output_type -> identity.v1.DeletePasskeyResponse
-	130, // 276: identity.v1.IdentityService.InitiateQrLogin:output_type -> identity.v1.InitiateQrLoginResponse
-	132, // 277: identity.v1.IdentityService.GetQrLoginSession:output_type -> identity.v1.GetQrLoginSessionResponse
-	134, // 278: identity.v1.IdentityService.ApproveQrLogin:output_type -> identity.v1.ApproveQrLoginResponse
-	136, // 279: identity.v1.IdentityService.PollQrLogin:output_type -> identity.v1.PollQrLoginResponse
-	138, // 280: identity.v1.IdentityService.BeginTotpSetup:output_type -> identity.v1.BeginTotpSetupResponse
-	140, // 281: identity.v1.IdentityService.VerifyTotpSetup:output_type -> identity.v1.VerifyTotpSetupResponse
-	142, // 282: identity.v1.IdentityService.DisableTotp:output_type -> identity.v1.DisableTotpResponse
-	144, // 283: identity.v1.IdentityService.VerifyTotp:output_type -> identity.v1.VerifyTotpResponse
-	146, // 284: identity.v1.IdentityService.RegenerateRecoveryCodes:output_type -> identity.v1.RegenerateRecoveryCodesResponse
-	149, // 285: identity.v1.IdentityService.ListMySessions:output_type -> identity.v1.ListMySessionsResponse
-	151, // 286: identity.v1.IdentityService.RevokeSession:output_type -> identity.v1.RevokeSessionResponse
-	153, // 287: identity.v1.IdentityService.RevokeAllSessions:output_type -> identity.v1.RevokeAllSessionsResponse
-	155, // 288: identity.v1.IdentityService.SignOutEverywhere:output_type -> identity.v1.SignOutEverywhereResponse
-	158, // 289: identity.v1.IdentityService.ListAuditEvents:output_type -> identity.v1.ListAuditEventsResponse
-	8,   // 290: identity.v1.IdentityService.CreateUser:output_type -> identity.v1.CreateUserResponse
-	10,  // 291: identity.v1.IdentityService.GetUser:output_type -> identity.v1.GetUserResponse
-	12,  // 292: identity.v1.IdentityService.UpdateUser:output_type -> identity.v1.UpdateUserResponse
-	14,  // 293: identity.v1.IdentityService.DeleteUser:output_type -> identity.v1.DeleteUserResponse
-	16,  // 294: identity.v1.IdentityService.ListUsers:output_type -> identity.v1.ListUsersResponse
-	19,  // 295: identity.v1.IdentityService.CreateGroup:output_type -> identity.v1.CreateGroupResponse
-	21,  // 296: identity.v1.IdentityService.UpdateGroup:output_type -> identity.v1.UpdateGroupResponse
-	23,  // 297: identity.v1.IdentityService.DeleteGroup:output_type -> identity.v1.DeleteGroupResponse
-	25,  // 298: identity.v1.IdentityService.ListGroups:output_type -> identity.v1.ListGroupsResponse
-	27,  // 299: identity.v1.IdentityService.AddGroupMember:output_type -> identity.v1.AddGroupMemberResponse
-	29,  // 300: identity.v1.IdentityService.RemoveGroupMember:output_type -> identity.v1.RemoveGroupMemberResponse
-	31,  // 301: identity.v1.IdentityService.ListGroupMembers:output_type -> identity.v1.ListGroupMembersResponse
-	173, // 302: identity.v1.IdentityService.CreateDomain:output_type -> identity.v1.CreateDomainResponse
-	175, // 303: identity.v1.IdentityService.VerifyDomain:output_type -> identity.v1.VerifyDomainResponse
-	177, // 304: identity.v1.IdentityService.ListTenantDomains:output_type -> identity.v1.ListTenantDomainsResponse
-	181, // 305: identity.v1.IdentityService.CreateTenantInvitation:output_type -> identity.v1.CreateTenantInvitationResponse
-	183, // 306: identity.v1.IdentityService.AcceptTenantInvitation:output_type -> identity.v1.AcceptTenantInvitationResponse
-	185, // 307: identity.v1.IdentityService.ListTenantInvitations:output_type -> identity.v1.ListTenantInvitationsResponse
-	187, // 308: identity.v1.IdentityService.ListTenantMembers:output_type -> identity.v1.ListTenantMembersResponse
-	189, // 309: identity.v1.IdentityService.RemoveTenantMember:output_type -> identity.v1.RemoveTenantMemberResponse
-	160, // 310: identity.v1.IdentityService.InviteUser:output_type -> identity.v1.InviteUserResponse
-	162, // 311: identity.v1.IdentityService.AcceptInvitation:output_type -> identity.v1.AcceptInvitationResponse
-	164, // 312: identity.v1.IdentityService.DeactivateUser:output_type -> identity.v1.DeactivateUserResponse
-	166, // 313: identity.v1.IdentityService.ReactivateUser:output_type -> identity.v1.ReactivateUserResponse
-	168, // 314: identity.v1.IdentityService.ResetUserPassword:output_type -> identity.v1.ResetUserPasswordResponse
-	170, // 315: identity.v1.IdentityService.SetUserQuota:output_type -> identity.v1.SetUserQuotaResponse
-	191, // 316: identity.v1.IdentityService.AdminCreateProject:output_type -> identity.v1.AdminCreateProjectResponse
-	193, // 317: identity.v1.IdentityService.AdminCreateProjectCredential:output_type -> identity.v1.AdminCreateProjectCredentialResponse
-	195, // 318: identity.v1.IdentityService.AdminAddProjectAuthDomain:output_type -> identity.v1.AdminAddProjectAuthDomainResponse
-	198, // 319: identity.v1.IdentityService.AddProjectAuthDomain:output_type -> identity.v1.AddProjectAuthDomainResponse
-	200, // 320: identity.v1.IdentityService.VerifyProjectAuthDomain:output_type -> identity.v1.VerifyProjectAuthDomainResponse
-	202, // 321: identity.v1.IdentityService.ListProjectAuthDomains:output_type -> identity.v1.ListProjectAuthDomainsResponse
-	204, // 322: identity.v1.IdentityService.SetPrimaryAuthDomain:output_type -> identity.v1.SetPrimaryAuthDomainResponse
-	206, // 323: identity.v1.IdentityService.AdminCreateTenant:output_type -> identity.v1.AdminCreateTenantResponse
-	208, // 324: identity.v1.IdentityService.AdminAddTenantAdmin:output_type -> identity.v1.AdminAddTenantAdminResponse
-	210, // 325: identity.v1.IdentityService.CreateFirstPlatformAdmin:output_type -> identity.v1.CreateFirstPlatformAdminResponse
-	248, // 326: identity.v1.IdentityService.ListLinkedIdentities:output_type -> identity.v1.ListLinkedIdentitiesResponse
-	250, // 327: identity.v1.IdentityService.LinkIdentity:output_type -> identity.v1.LinkIdentityResponse
-	252, // 328: identity.v1.IdentityService.UnlinkIdentity:output_type -> identity.v1.UnlinkIdentityResponse
-	213, // 329: identity.v1.IdentityService.UpsertLoginPolicy:output_type -> identity.v1.UpsertLoginPolicyResponse
-	215, // 330: identity.v1.IdentityService.GetLoginPolicy:output_type -> identity.v1.GetLoginPolicyResponse
-	217, // 331: identity.v1.IdentityService.DeleteLoginPolicy:output_type -> identity.v1.DeleteLoginPolicyResponse
-	219, // 332: identity.v1.IdentityService.UpsertProjectConfig:output_type -> identity.v1.UpsertProjectConfigResponse
-	221, // 333: identity.v1.IdentityService.GetProjectConfig:output_type -> identity.v1.GetProjectConfigResponse
-	224, // 334: identity.v1.IdentityService.AdminSetProjectOAuthProvider:output_type -> identity.v1.AdminSetProjectOAuthProviderResponse
-	241, // 335: identity.v1.IdentityService.SignInAnonymously:output_type -> identity.v1.SignInAnonymouslyResponse
-	245, // 336: identity.v1.IdentityService.UpgradeAnonymousAccount:output_type -> identity.v1.UpgradeAnonymousAccountResponse
-	226, // 337: identity.v1.IdentityService.AdminSetProjectAssurance:output_type -> identity.v1.AdminSetProjectAssuranceResponse
-	229, // 338: identity.v1.IdentityService.AdminGetProjectAssurance:output_type -> identity.v1.AdminGetProjectAssuranceResponse
-	231, // 339: identity.v1.IdentityService.AdminDeleteProjectOAuthProvider:output_type -> identity.v1.AdminDeleteProjectOAuthProviderResponse
-	233, // 340: identity.v1.IdentityService.AdminListProjectOAuthProviders:output_type -> identity.v1.AdminListProjectOAuthProvidersResponse
-	227, // [227:341] is the sub-list for method output_type
-	113, // [113:227] is the sub-list for method input_type
-	113, // [113:113] is the sub-list for extension type_name
-	113, // [113:113] is the sub-list for extension extendee
-	0,   // [0:113] is the sub-list for field type_name
+	6,   // 53: identity.v1.GetManagedChildProfileResponse.child:type_name -> identity.v1.User
+	6,   // 54: identity.v1.SetManagedChildUsernameResponse.child:type_name -> identity.v1.User
+	4,   // 55: identity.v1.AdminHelpRequest.status:type_name -> identity.v1.HelpRequestStatus
+	267, // 56: identity.v1.AdminHelpRequest.resolved_at:type_name -> google.protobuf.Timestamp
+	267, // 57: identity.v1.AdminHelpRequest.created_at:type_name -> google.protobuf.Timestamp
+	4,   // 58: identity.v1.ListHelpRequestsRequest.status_filter:type_name -> identity.v1.HelpRequestStatus
+	119, // 59: identity.v1.ListHelpRequestsResponse.requests:type_name -> identity.v1.AdminHelpRequest
+	119, // 60: identity.v1.ResolveHelpRequestResponse.request:type_name -> identity.v1.AdminHelpRequest
+	267, // 61: identity.v1.PasskeyCredentialInfo.created_at:type_name -> google.protobuf.Timestamp
+	267, // 62: identity.v1.PasskeyCredentialInfo.last_used_at:type_name -> google.protobuf.Timestamp
+	126, // 63: identity.v1.CompletePasskeyRegistrationResponse.credential:type_name -> identity.v1.PasskeyCredentialInfo
+	6,   // 64: identity.v1.CompletePasskeyLoginResponse.user:type_name -> identity.v1.User
+	6,   // 65: identity.v1.CompletePasskeySignupResponse.user:type_name -> identity.v1.User
+	126, // 66: identity.v1.ListPasskeysResponse.credentials:type_name -> identity.v1.PasskeyCredentialInfo
+	5,   // 67: identity.v1.GetQrLoginSessionResponse.status:type_name -> identity.v1.QrLoginStatus
+	267, // 68: identity.v1.GetQrLoginSessionResponse.expires_at:type_name -> google.protobuf.Timestamp
+	5,   // 69: identity.v1.ApproveQrLoginResponse.status:type_name -> identity.v1.QrLoginStatus
+	5,   // 70: identity.v1.PollQrLoginResponse.status:type_name -> identity.v1.QrLoginStatus
+	6,   // 71: identity.v1.PollQrLoginResponse.user:type_name -> identity.v1.User
+	6,   // 72: identity.v1.VerifyTotpResponse.user:type_name -> identity.v1.User
+	267, // 73: identity.v1.Session.created_at:type_name -> google.protobuf.Timestamp
+	267, // 74: identity.v1.Session.last_used_at:type_name -> google.protobuf.Timestamp
+	267, // 75: identity.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
+	161, // 76: identity.v1.ListMySessionsResponse.sessions:type_name -> identity.v1.Session
+	267, // 77: identity.v1.AuditEvent.created_at:type_name -> google.protobuf.Timestamp
+	170, // 78: identity.v1.ListAuditEventsResponse.events:type_name -> identity.v1.AuditEvent
+	6,   // 79: identity.v1.InviteUserResponse.user:type_name -> identity.v1.User
+	6,   // 80: identity.v1.AcceptInvitationResponse.user:type_name -> identity.v1.User
+	267, // 81: identity.v1.Domain.verified_at:type_name -> google.protobuf.Timestamp
+	267, // 82: identity.v1.Domain.created_at:type_name -> google.protobuf.Timestamp
+	267, // 83: identity.v1.Domain.updated_at:type_name -> google.protobuf.Timestamp
+	185, // 84: identity.v1.CreateDomainResponse.domain:type_name -> identity.v1.Domain
+	185, // 85: identity.v1.VerifyDomainResponse.domain:type_name -> identity.v1.Domain
+	185, // 86: identity.v1.ListTenantDomainsResponse.domains:type_name -> identity.v1.Domain
+	267, // 87: identity.v1.TenantMembership.created_at:type_name -> google.protobuf.Timestamp
+	267, // 88: identity.v1.TenantMembership.updated_at:type_name -> google.protobuf.Timestamp
+	267, // 89: identity.v1.TenantInvitation.expires_at:type_name -> google.protobuf.Timestamp
+	267, // 90: identity.v1.TenantInvitation.accepted_at:type_name -> google.protobuf.Timestamp
+	267, // 91: identity.v1.TenantInvitation.created_at:type_name -> google.protobuf.Timestamp
+	193, // 92: identity.v1.CreateTenantInvitationResponse.invitation:type_name -> identity.v1.TenantInvitation
+	192, // 93: identity.v1.AcceptTenantInvitationResponse.membership:type_name -> identity.v1.TenantMembership
+	193, // 94: identity.v1.ListTenantInvitationsResponse.invitations:type_name -> identity.v1.TenantInvitation
+	192, // 95: identity.v1.ListTenantMembersResponse.members:type_name -> identity.v1.TenantMembership
+	210, // 96: identity.v1.AddProjectAuthDomainResponse.domain:type_name -> identity.v1.ProjectAuthDomain
+	210, // 97: identity.v1.VerifyProjectAuthDomainResponse.domain:type_name -> identity.v1.ProjectAuthDomain
+	210, // 98: identity.v1.ListProjectAuthDomainsResponse.domains:type_name -> identity.v1.ProjectAuthDomain
+	210, // 99: identity.v1.SetPrimaryAuthDomainResponse.domain:type_name -> identity.v1.ProjectAuthDomain
+	192, // 100: identity.v1.AdminAddTenantAdminResponse.membership:type_name -> identity.v1.TenantMembership
+	225, // 101: identity.v1.UpsertLoginPolicyResponse.policy:type_name -> identity.v1.LoginPolicy
+	225, // 102: identity.v1.GetLoginPolicyResponse.policy:type_name -> identity.v1.LoginPolicy
+	236, // 103: identity.v1.AdminSetProjectOAuthProviderRequest.config:type_name -> identity.v1.ProjectOAuthProviderConfig
+	236, // 104: identity.v1.AdminSetProjectOAuthProviderResponse.config:type_name -> identity.v1.ProjectOAuthProviderConfig
+	241, // 105: identity.v1.AdminSetProjectAssuranceRequest.config:type_name -> identity.v1.ProjectAssuranceConfig
+	241, // 106: identity.v1.AdminSetProjectAssuranceResponse.config:type_name -> identity.v1.ProjectAssuranceConfig
+	241, // 107: identity.v1.AdminGetProjectAssuranceResponse.config:type_name -> identity.v1.ProjectAssuranceConfig
+	236, // 108: identity.v1.AdminListProjectOAuthProvidersResponse.providers:type_name -> identity.v1.ProjectOAuthProviderConfig
+	6,   // 109: identity.v1.SignInAnonymouslyResponse.user:type_name -> identity.v1.User
+	257, // 110: identity.v1.UpgradeAnonymousAccountRequest.password:type_name -> identity.v1.PasswordCredential
+	258, // 111: identity.v1.UpgradeAnonymousAccountRequest.oauth:type_name -> identity.v1.OAuthCredential
+	6,   // 112: identity.v1.UpgradeAnonymousAccountResponse.user:type_name -> identity.v1.User
+	260, // 113: identity.v1.ListLinkedIdentitiesResponse.identities:type_name -> identity.v1.LinkedIdentity
+	260, // 114: identity.v1.LinkIdentityResponse.identity:type_name -> identity.v1.LinkedIdentity
+	32,  // 115: identity.v1.IdentityService.BeginOAuthLogin:input_type -> identity.v1.BeginOAuthLoginRequest
+	34,  // 116: identity.v1.IdentityService.OAuthLogin:input_type -> identity.v1.OAuthLoginRequest
+	36,  // 117: identity.v1.IdentityService.NativeOAuthLogin:input_type -> identity.v1.NativeOAuthLoginRequest
+	38,  // 118: identity.v1.IdentityService.RedeemOAuthCode:input_type -> identity.v1.RedeemOAuthCodeRequest
+	40,  // 119: identity.v1.IdentityService.PasswordSignup:input_type -> identity.v1.PasswordSignupRequest
+	42,  // 120: identity.v1.IdentityService.PasswordLogin:input_type -> identity.v1.PasswordLoginRequest
+	45,  // 121: identity.v1.IdentityService.SubmitDateOfBirth:input_type -> identity.v1.SubmitDateOfBirthRequest
+	47,  // 122: identity.v1.IdentityService.RequestEmailLoginCode:input_type -> identity.v1.RequestEmailLoginCodeRequest
+	49,  // 123: identity.v1.IdentityService.VerifyEmailLoginCode:input_type -> identity.v1.VerifyEmailLoginCodeRequest
+	51,  // 124: identity.v1.IdentityService.RequestMagicLink:input_type -> identity.v1.RequestMagicLinkRequest
+	53,  // 125: identity.v1.IdentityService.RedeemMagicLink:input_type -> identity.v1.RedeemMagicLinkRequest
+	248, // 126: identity.v1.IdentityService.CreateAssuranceChallenge:input_type -> identity.v1.CreateAssuranceChallengeRequest
+	250, // 127: identity.v1.IdentityService.IssueAssuranceToken:input_type -> identity.v1.IssueAssuranceTokenRequest
+	252, // 128: identity.v1.IdentityService.RefreshAssuranceToken:input_type -> identity.v1.RefreshAssuranceTokenRequest
+	55,  // 129: identity.v1.IdentityService.RequestPhoneVerification:input_type -> identity.v1.RequestPhoneVerificationRequest
+	57,  // 130: identity.v1.IdentityService.VerifyPhoneCode:input_type -> identity.v1.VerifyPhoneCodeRequest
+	59,  // 131: identity.v1.IdentityService.GetCurrentUser:input_type -> identity.v1.GetCurrentUserRequest
+	61,  // 132: identity.v1.IdentityService.RefreshToken:input_type -> identity.v1.RefreshTokenRequest
+	63,  // 133: identity.v1.IdentityService.Logout:input_type -> identity.v1.LogoutRequest
+	65,  // 134: identity.v1.IdentityService.UpdateProfile:input_type -> identity.v1.UpdateProfileRequest
+	93,  // 135: identity.v1.IdentityService.SetAccountMarket:input_type -> identity.v1.SetAccountMarketRequest
+	69,  // 136: identity.v1.IdentityService.DeleteMyAccount:input_type -> identity.v1.DeleteMyAccountRequest
+	71,  // 137: identity.v1.IdentityService.CancelAccountDeletion:input_type -> identity.v1.CancelAccountDeletionRequest
+	73,  // 138: identity.v1.IdentityService.ExportMyData:input_type -> identity.v1.ExportMyDataRequest
+	67,  // 139: identity.v1.IdentityService.ChangePassword:input_type -> identity.v1.ChangePasswordRequest
+	75,  // 140: identity.v1.IdentityService.RequestPasswordReset:input_type -> identity.v1.RequestPasswordResetRequest
+	77,  // 141: identity.v1.IdentityService.ConfirmPasswordReset:input_type -> identity.v1.ConfirmPasswordResetRequest
+	79,  // 142: identity.v1.IdentityService.SendEmailVerification:input_type -> identity.v1.SendEmailVerificationRequest
+	81,  // 143: identity.v1.IdentityService.VerifyEmail:input_type -> identity.v1.VerifyEmailRequest
+	83,  // 144: identity.v1.IdentityService.RequestEmailChange:input_type -> identity.v1.RequestEmailChangeRequest
+	85,  // 145: identity.v1.IdentityService.ConfirmEmailChange:input_type -> identity.v1.ConfirmEmailChangeRequest
+	88,  // 146: identity.v1.IdentityService.BeginIdentityVerification:input_type -> identity.v1.BeginIdentityVerificationRequest
+	90,  // 147: identity.v1.IdentityService.GetIdentityVerificationStatus:input_type -> identity.v1.GetIdentityVerificationStatusRequest
+	95,  // 148: identity.v1.IdentityService.GrantParentalConsent:input_type -> identity.v1.GrantParentalConsentRequest
+	97,  // 149: identity.v1.IdentityService.RevokeParentalConsent:input_type -> identity.v1.RevokeParentalConsentRequest
+	99,  // 150: identity.v1.IdentityService.ListManagedChildren:input_type -> identity.v1.ListManagedChildrenRequest
+	101, // 151: identity.v1.IdentityService.GetGuardians:input_type -> identity.v1.GetGuardiansRequest
+	103, // 152: identity.v1.IdentityService.CreateManagedChildAccount:input_type -> identity.v1.CreateManagedChildAccountRequest
+	105, // 153: identity.v1.IdentityService.GetManagedChildProfile:input_type -> identity.v1.GetManagedChildProfileRequest
+	107, // 154: identity.v1.IdentityService.SetManagedChildPassword:input_type -> identity.v1.SetManagedChildPasswordRequest
+	109, // 155: identity.v1.IdentityService.SetManagedChildUsername:input_type -> identity.v1.SetManagedChildUsernameRequest
+	111, // 156: identity.v1.IdentityService.RevokeManagedChildSessions:input_type -> identity.v1.RevokeManagedChildSessionsRequest
+	113, // 157: identity.v1.IdentityService.DeactivateManagedChildAccount:input_type -> identity.v1.DeactivateManagedChildAccountRequest
+	115, // 158: identity.v1.IdentityService.ReactivateManagedChildAccount:input_type -> identity.v1.ReactivateManagedChildAccountRequest
+	117, // 159: identity.v1.IdentityService.DeleteManagedChildAccount:input_type -> identity.v1.DeleteManagedChildAccountRequest
+	120, // 160: identity.v1.IdentityService.RequestAdminHelp:input_type -> identity.v1.RequestAdminHelpRequest
+	122, // 161: identity.v1.IdentityService.ListHelpRequests:input_type -> identity.v1.ListHelpRequestsRequest
+	124, // 162: identity.v1.IdentityService.ResolveHelpRequest:input_type -> identity.v1.ResolveHelpRequestRequest
+	127, // 163: identity.v1.IdentityService.BeginPasskeyRegistration:input_type -> identity.v1.BeginPasskeyRegistrationRequest
+	129, // 164: identity.v1.IdentityService.CompletePasskeyRegistration:input_type -> identity.v1.CompletePasskeyRegistrationRequest
+	135, // 165: identity.v1.IdentityService.BeginPasskeySignup:input_type -> identity.v1.BeginPasskeySignupRequest
+	137, // 166: identity.v1.IdentityService.CompletePasskeySignup:input_type -> identity.v1.CompletePasskeySignupRequest
+	131, // 167: identity.v1.IdentityService.BeginPasskeyLogin:input_type -> identity.v1.BeginPasskeyLoginRequest
+	133, // 168: identity.v1.IdentityService.CompletePasskeyLogin:input_type -> identity.v1.CompletePasskeyLoginRequest
+	139, // 169: identity.v1.IdentityService.ListPasskeys:input_type -> identity.v1.ListPasskeysRequest
+	141, // 170: identity.v1.IdentityService.DeletePasskey:input_type -> identity.v1.DeletePasskeyRequest
+	143, // 171: identity.v1.IdentityService.InitiateQrLogin:input_type -> identity.v1.InitiateQrLoginRequest
+	145, // 172: identity.v1.IdentityService.GetQrLoginSession:input_type -> identity.v1.GetQrLoginSessionRequest
+	147, // 173: identity.v1.IdentityService.ApproveQrLogin:input_type -> identity.v1.ApproveQrLoginRequest
+	149, // 174: identity.v1.IdentityService.PollQrLogin:input_type -> identity.v1.PollQrLoginRequest
+	151, // 175: identity.v1.IdentityService.BeginTotpSetup:input_type -> identity.v1.BeginTotpSetupRequest
+	153, // 176: identity.v1.IdentityService.VerifyTotpSetup:input_type -> identity.v1.VerifyTotpSetupRequest
+	155, // 177: identity.v1.IdentityService.DisableTotp:input_type -> identity.v1.DisableTotpRequest
+	157, // 178: identity.v1.IdentityService.VerifyTotp:input_type -> identity.v1.VerifyTotpRequest
+	159, // 179: identity.v1.IdentityService.RegenerateRecoveryCodes:input_type -> identity.v1.RegenerateRecoveryCodesRequest
+	162, // 180: identity.v1.IdentityService.ListMySessions:input_type -> identity.v1.ListMySessionsRequest
+	164, // 181: identity.v1.IdentityService.RevokeSession:input_type -> identity.v1.RevokeSessionRequest
+	166, // 182: identity.v1.IdentityService.RevokeAllSessions:input_type -> identity.v1.RevokeAllSessionsRequest
+	168, // 183: identity.v1.IdentityService.SignOutEverywhere:input_type -> identity.v1.SignOutEverywhereRequest
+	171, // 184: identity.v1.IdentityService.ListAuditEvents:input_type -> identity.v1.ListAuditEventsRequest
+	7,   // 185: identity.v1.IdentityService.CreateUser:input_type -> identity.v1.CreateUserRequest
+	9,   // 186: identity.v1.IdentityService.GetUser:input_type -> identity.v1.GetUserRequest
+	11,  // 187: identity.v1.IdentityService.UpdateUser:input_type -> identity.v1.UpdateUserRequest
+	13,  // 188: identity.v1.IdentityService.DeleteUser:input_type -> identity.v1.DeleteUserRequest
+	15,  // 189: identity.v1.IdentityService.ListUsers:input_type -> identity.v1.ListUsersRequest
+	18,  // 190: identity.v1.IdentityService.CreateGroup:input_type -> identity.v1.CreateGroupRequest
+	20,  // 191: identity.v1.IdentityService.UpdateGroup:input_type -> identity.v1.UpdateGroupRequest
+	22,  // 192: identity.v1.IdentityService.DeleteGroup:input_type -> identity.v1.DeleteGroupRequest
+	24,  // 193: identity.v1.IdentityService.ListGroups:input_type -> identity.v1.ListGroupsRequest
+	26,  // 194: identity.v1.IdentityService.AddGroupMember:input_type -> identity.v1.AddGroupMemberRequest
+	28,  // 195: identity.v1.IdentityService.RemoveGroupMember:input_type -> identity.v1.RemoveGroupMemberRequest
+	30,  // 196: identity.v1.IdentityService.ListGroupMembers:input_type -> identity.v1.ListGroupMembersRequest
+	186, // 197: identity.v1.IdentityService.CreateDomain:input_type -> identity.v1.CreateDomainRequest
+	188, // 198: identity.v1.IdentityService.VerifyDomain:input_type -> identity.v1.VerifyDomainRequest
+	190, // 199: identity.v1.IdentityService.ListTenantDomains:input_type -> identity.v1.ListTenantDomainsRequest
+	194, // 200: identity.v1.IdentityService.CreateTenantInvitation:input_type -> identity.v1.CreateTenantInvitationRequest
+	196, // 201: identity.v1.IdentityService.AcceptTenantInvitation:input_type -> identity.v1.AcceptTenantInvitationRequest
+	198, // 202: identity.v1.IdentityService.ListTenantInvitations:input_type -> identity.v1.ListTenantInvitationsRequest
+	200, // 203: identity.v1.IdentityService.ListTenantMembers:input_type -> identity.v1.ListTenantMembersRequest
+	202, // 204: identity.v1.IdentityService.RemoveTenantMember:input_type -> identity.v1.RemoveTenantMemberRequest
+	173, // 205: identity.v1.IdentityService.InviteUser:input_type -> identity.v1.InviteUserRequest
+	175, // 206: identity.v1.IdentityService.AcceptInvitation:input_type -> identity.v1.AcceptInvitationRequest
+	177, // 207: identity.v1.IdentityService.DeactivateUser:input_type -> identity.v1.DeactivateUserRequest
+	179, // 208: identity.v1.IdentityService.ReactivateUser:input_type -> identity.v1.ReactivateUserRequest
+	181, // 209: identity.v1.IdentityService.ResetUserPassword:input_type -> identity.v1.ResetUserPasswordRequest
+	183, // 210: identity.v1.IdentityService.SetUserQuota:input_type -> identity.v1.SetUserQuotaRequest
+	204, // 211: identity.v1.IdentityService.AdminCreateProject:input_type -> identity.v1.AdminCreateProjectRequest
+	206, // 212: identity.v1.IdentityService.AdminCreateProjectCredential:input_type -> identity.v1.AdminCreateProjectCredentialRequest
+	208, // 213: identity.v1.IdentityService.AdminAddProjectAuthDomain:input_type -> identity.v1.AdminAddProjectAuthDomainRequest
+	211, // 214: identity.v1.IdentityService.AddProjectAuthDomain:input_type -> identity.v1.AddProjectAuthDomainRequest
+	213, // 215: identity.v1.IdentityService.VerifyProjectAuthDomain:input_type -> identity.v1.VerifyProjectAuthDomainRequest
+	215, // 216: identity.v1.IdentityService.ListProjectAuthDomains:input_type -> identity.v1.ListProjectAuthDomainsRequest
+	217, // 217: identity.v1.IdentityService.SetPrimaryAuthDomain:input_type -> identity.v1.SetPrimaryAuthDomainRequest
+	219, // 218: identity.v1.IdentityService.AdminCreateTenant:input_type -> identity.v1.AdminCreateTenantRequest
+	221, // 219: identity.v1.IdentityService.AdminAddTenantAdmin:input_type -> identity.v1.AdminAddTenantAdminRequest
+	223, // 220: identity.v1.IdentityService.CreateFirstPlatformAdmin:input_type -> identity.v1.CreateFirstPlatformAdminRequest
+	261, // 221: identity.v1.IdentityService.ListLinkedIdentities:input_type -> identity.v1.ListLinkedIdentitiesRequest
+	263, // 222: identity.v1.IdentityService.LinkIdentity:input_type -> identity.v1.LinkIdentityRequest
+	265, // 223: identity.v1.IdentityService.UnlinkIdentity:input_type -> identity.v1.UnlinkIdentityRequest
+	226, // 224: identity.v1.IdentityService.UpsertLoginPolicy:input_type -> identity.v1.UpsertLoginPolicyRequest
+	228, // 225: identity.v1.IdentityService.GetLoginPolicy:input_type -> identity.v1.GetLoginPolicyRequest
+	230, // 226: identity.v1.IdentityService.DeleteLoginPolicy:input_type -> identity.v1.DeleteLoginPolicyRequest
+	232, // 227: identity.v1.IdentityService.UpsertProjectConfig:input_type -> identity.v1.UpsertProjectConfigRequest
+	234, // 228: identity.v1.IdentityService.GetProjectConfig:input_type -> identity.v1.GetProjectConfigRequest
+	237, // 229: identity.v1.IdentityService.AdminSetProjectOAuthProvider:input_type -> identity.v1.AdminSetProjectOAuthProviderRequest
+	254, // 230: identity.v1.IdentityService.SignInAnonymously:input_type -> identity.v1.SignInAnonymouslyRequest
+	256, // 231: identity.v1.IdentityService.UpgradeAnonymousAccount:input_type -> identity.v1.UpgradeAnonymousAccountRequest
+	239, // 232: identity.v1.IdentityService.AdminSetProjectAssurance:input_type -> identity.v1.AdminSetProjectAssuranceRequest
+	242, // 233: identity.v1.IdentityService.AdminGetProjectAssurance:input_type -> identity.v1.AdminGetProjectAssuranceRequest
+	244, // 234: identity.v1.IdentityService.AdminDeleteProjectOAuthProvider:input_type -> identity.v1.AdminDeleteProjectOAuthProviderRequest
+	246, // 235: identity.v1.IdentityService.AdminListProjectOAuthProviders:input_type -> identity.v1.AdminListProjectOAuthProvidersRequest
+	33,  // 236: identity.v1.IdentityService.BeginOAuthLogin:output_type -> identity.v1.BeginOAuthLoginResponse
+	35,  // 237: identity.v1.IdentityService.OAuthLogin:output_type -> identity.v1.OAuthLoginResponse
+	37,  // 238: identity.v1.IdentityService.NativeOAuthLogin:output_type -> identity.v1.NativeOAuthLoginResponse
+	39,  // 239: identity.v1.IdentityService.RedeemOAuthCode:output_type -> identity.v1.RedeemOAuthCodeResponse
+	41,  // 240: identity.v1.IdentityService.PasswordSignup:output_type -> identity.v1.PasswordSignupResponse
+	43,  // 241: identity.v1.IdentityService.PasswordLogin:output_type -> identity.v1.PasswordLoginResponse
+	46,  // 242: identity.v1.IdentityService.SubmitDateOfBirth:output_type -> identity.v1.SubmitDateOfBirthResponse
+	48,  // 243: identity.v1.IdentityService.RequestEmailLoginCode:output_type -> identity.v1.RequestEmailLoginCodeResponse
+	50,  // 244: identity.v1.IdentityService.VerifyEmailLoginCode:output_type -> identity.v1.VerifyEmailLoginCodeResponse
+	52,  // 245: identity.v1.IdentityService.RequestMagicLink:output_type -> identity.v1.RequestMagicLinkResponse
+	54,  // 246: identity.v1.IdentityService.RedeemMagicLink:output_type -> identity.v1.RedeemMagicLinkResponse
+	249, // 247: identity.v1.IdentityService.CreateAssuranceChallenge:output_type -> identity.v1.CreateAssuranceChallengeResponse
+	251, // 248: identity.v1.IdentityService.IssueAssuranceToken:output_type -> identity.v1.IssueAssuranceTokenResponse
+	253, // 249: identity.v1.IdentityService.RefreshAssuranceToken:output_type -> identity.v1.RefreshAssuranceTokenResponse
+	56,  // 250: identity.v1.IdentityService.RequestPhoneVerification:output_type -> identity.v1.RequestPhoneVerificationResponse
+	58,  // 251: identity.v1.IdentityService.VerifyPhoneCode:output_type -> identity.v1.VerifyPhoneCodeResponse
+	60,  // 252: identity.v1.IdentityService.GetCurrentUser:output_type -> identity.v1.GetCurrentUserResponse
+	62,  // 253: identity.v1.IdentityService.RefreshToken:output_type -> identity.v1.RefreshTokenResponse
+	64,  // 254: identity.v1.IdentityService.Logout:output_type -> identity.v1.LogoutResponse
+	66,  // 255: identity.v1.IdentityService.UpdateProfile:output_type -> identity.v1.UpdateProfileResponse
+	94,  // 256: identity.v1.IdentityService.SetAccountMarket:output_type -> identity.v1.SetAccountMarketResponse
+	70,  // 257: identity.v1.IdentityService.DeleteMyAccount:output_type -> identity.v1.DeleteMyAccountResponse
+	72,  // 258: identity.v1.IdentityService.CancelAccountDeletion:output_type -> identity.v1.CancelAccountDeletionResponse
+	74,  // 259: identity.v1.IdentityService.ExportMyData:output_type -> identity.v1.ExportMyDataResponse
+	68,  // 260: identity.v1.IdentityService.ChangePassword:output_type -> identity.v1.ChangePasswordResponse
+	76,  // 261: identity.v1.IdentityService.RequestPasswordReset:output_type -> identity.v1.RequestPasswordResetResponse
+	78,  // 262: identity.v1.IdentityService.ConfirmPasswordReset:output_type -> identity.v1.ConfirmPasswordResetResponse
+	80,  // 263: identity.v1.IdentityService.SendEmailVerification:output_type -> identity.v1.SendEmailVerificationResponse
+	82,  // 264: identity.v1.IdentityService.VerifyEmail:output_type -> identity.v1.VerifyEmailResponse
+	84,  // 265: identity.v1.IdentityService.RequestEmailChange:output_type -> identity.v1.RequestEmailChangeResponse
+	86,  // 266: identity.v1.IdentityService.ConfirmEmailChange:output_type -> identity.v1.ConfirmEmailChangeResponse
+	89,  // 267: identity.v1.IdentityService.BeginIdentityVerification:output_type -> identity.v1.BeginIdentityVerificationResponse
+	91,  // 268: identity.v1.IdentityService.GetIdentityVerificationStatus:output_type -> identity.v1.GetIdentityVerificationStatusResponse
+	96,  // 269: identity.v1.IdentityService.GrantParentalConsent:output_type -> identity.v1.GrantParentalConsentResponse
+	98,  // 270: identity.v1.IdentityService.RevokeParentalConsent:output_type -> identity.v1.RevokeParentalConsentResponse
+	100, // 271: identity.v1.IdentityService.ListManagedChildren:output_type -> identity.v1.ListManagedChildrenResponse
+	102, // 272: identity.v1.IdentityService.GetGuardians:output_type -> identity.v1.GetGuardiansResponse
+	104, // 273: identity.v1.IdentityService.CreateManagedChildAccount:output_type -> identity.v1.CreateManagedChildAccountResponse
+	106, // 274: identity.v1.IdentityService.GetManagedChildProfile:output_type -> identity.v1.GetManagedChildProfileResponse
+	108, // 275: identity.v1.IdentityService.SetManagedChildPassword:output_type -> identity.v1.SetManagedChildPasswordResponse
+	110, // 276: identity.v1.IdentityService.SetManagedChildUsername:output_type -> identity.v1.SetManagedChildUsernameResponse
+	112, // 277: identity.v1.IdentityService.RevokeManagedChildSessions:output_type -> identity.v1.RevokeManagedChildSessionsResponse
+	114, // 278: identity.v1.IdentityService.DeactivateManagedChildAccount:output_type -> identity.v1.DeactivateManagedChildAccountResponse
+	116, // 279: identity.v1.IdentityService.ReactivateManagedChildAccount:output_type -> identity.v1.ReactivateManagedChildAccountResponse
+	118, // 280: identity.v1.IdentityService.DeleteManagedChildAccount:output_type -> identity.v1.DeleteManagedChildAccountResponse
+	121, // 281: identity.v1.IdentityService.RequestAdminHelp:output_type -> identity.v1.RequestAdminHelpResponse
+	123, // 282: identity.v1.IdentityService.ListHelpRequests:output_type -> identity.v1.ListHelpRequestsResponse
+	125, // 283: identity.v1.IdentityService.ResolveHelpRequest:output_type -> identity.v1.ResolveHelpRequestResponse
+	128, // 284: identity.v1.IdentityService.BeginPasskeyRegistration:output_type -> identity.v1.BeginPasskeyRegistrationResponse
+	130, // 285: identity.v1.IdentityService.CompletePasskeyRegistration:output_type -> identity.v1.CompletePasskeyRegistrationResponse
+	136, // 286: identity.v1.IdentityService.BeginPasskeySignup:output_type -> identity.v1.BeginPasskeySignupResponse
+	138, // 287: identity.v1.IdentityService.CompletePasskeySignup:output_type -> identity.v1.CompletePasskeySignupResponse
+	132, // 288: identity.v1.IdentityService.BeginPasskeyLogin:output_type -> identity.v1.BeginPasskeyLoginResponse
+	134, // 289: identity.v1.IdentityService.CompletePasskeyLogin:output_type -> identity.v1.CompletePasskeyLoginResponse
+	140, // 290: identity.v1.IdentityService.ListPasskeys:output_type -> identity.v1.ListPasskeysResponse
+	142, // 291: identity.v1.IdentityService.DeletePasskey:output_type -> identity.v1.DeletePasskeyResponse
+	144, // 292: identity.v1.IdentityService.InitiateQrLogin:output_type -> identity.v1.InitiateQrLoginResponse
+	146, // 293: identity.v1.IdentityService.GetQrLoginSession:output_type -> identity.v1.GetQrLoginSessionResponse
+	148, // 294: identity.v1.IdentityService.ApproveQrLogin:output_type -> identity.v1.ApproveQrLoginResponse
+	150, // 295: identity.v1.IdentityService.PollQrLogin:output_type -> identity.v1.PollQrLoginResponse
+	152, // 296: identity.v1.IdentityService.BeginTotpSetup:output_type -> identity.v1.BeginTotpSetupResponse
+	154, // 297: identity.v1.IdentityService.VerifyTotpSetup:output_type -> identity.v1.VerifyTotpSetupResponse
+	156, // 298: identity.v1.IdentityService.DisableTotp:output_type -> identity.v1.DisableTotpResponse
+	158, // 299: identity.v1.IdentityService.VerifyTotp:output_type -> identity.v1.VerifyTotpResponse
+	160, // 300: identity.v1.IdentityService.RegenerateRecoveryCodes:output_type -> identity.v1.RegenerateRecoveryCodesResponse
+	163, // 301: identity.v1.IdentityService.ListMySessions:output_type -> identity.v1.ListMySessionsResponse
+	165, // 302: identity.v1.IdentityService.RevokeSession:output_type -> identity.v1.RevokeSessionResponse
+	167, // 303: identity.v1.IdentityService.RevokeAllSessions:output_type -> identity.v1.RevokeAllSessionsResponse
+	169, // 304: identity.v1.IdentityService.SignOutEverywhere:output_type -> identity.v1.SignOutEverywhereResponse
+	172, // 305: identity.v1.IdentityService.ListAuditEvents:output_type -> identity.v1.ListAuditEventsResponse
+	8,   // 306: identity.v1.IdentityService.CreateUser:output_type -> identity.v1.CreateUserResponse
+	10,  // 307: identity.v1.IdentityService.GetUser:output_type -> identity.v1.GetUserResponse
+	12,  // 308: identity.v1.IdentityService.UpdateUser:output_type -> identity.v1.UpdateUserResponse
+	14,  // 309: identity.v1.IdentityService.DeleteUser:output_type -> identity.v1.DeleteUserResponse
+	16,  // 310: identity.v1.IdentityService.ListUsers:output_type -> identity.v1.ListUsersResponse
+	19,  // 311: identity.v1.IdentityService.CreateGroup:output_type -> identity.v1.CreateGroupResponse
+	21,  // 312: identity.v1.IdentityService.UpdateGroup:output_type -> identity.v1.UpdateGroupResponse
+	23,  // 313: identity.v1.IdentityService.DeleteGroup:output_type -> identity.v1.DeleteGroupResponse
+	25,  // 314: identity.v1.IdentityService.ListGroups:output_type -> identity.v1.ListGroupsResponse
+	27,  // 315: identity.v1.IdentityService.AddGroupMember:output_type -> identity.v1.AddGroupMemberResponse
+	29,  // 316: identity.v1.IdentityService.RemoveGroupMember:output_type -> identity.v1.RemoveGroupMemberResponse
+	31,  // 317: identity.v1.IdentityService.ListGroupMembers:output_type -> identity.v1.ListGroupMembersResponse
+	187, // 318: identity.v1.IdentityService.CreateDomain:output_type -> identity.v1.CreateDomainResponse
+	189, // 319: identity.v1.IdentityService.VerifyDomain:output_type -> identity.v1.VerifyDomainResponse
+	191, // 320: identity.v1.IdentityService.ListTenantDomains:output_type -> identity.v1.ListTenantDomainsResponse
+	195, // 321: identity.v1.IdentityService.CreateTenantInvitation:output_type -> identity.v1.CreateTenantInvitationResponse
+	197, // 322: identity.v1.IdentityService.AcceptTenantInvitation:output_type -> identity.v1.AcceptTenantInvitationResponse
+	199, // 323: identity.v1.IdentityService.ListTenantInvitations:output_type -> identity.v1.ListTenantInvitationsResponse
+	201, // 324: identity.v1.IdentityService.ListTenantMembers:output_type -> identity.v1.ListTenantMembersResponse
+	203, // 325: identity.v1.IdentityService.RemoveTenantMember:output_type -> identity.v1.RemoveTenantMemberResponse
+	174, // 326: identity.v1.IdentityService.InviteUser:output_type -> identity.v1.InviteUserResponse
+	176, // 327: identity.v1.IdentityService.AcceptInvitation:output_type -> identity.v1.AcceptInvitationResponse
+	178, // 328: identity.v1.IdentityService.DeactivateUser:output_type -> identity.v1.DeactivateUserResponse
+	180, // 329: identity.v1.IdentityService.ReactivateUser:output_type -> identity.v1.ReactivateUserResponse
+	182, // 330: identity.v1.IdentityService.ResetUserPassword:output_type -> identity.v1.ResetUserPasswordResponse
+	184, // 331: identity.v1.IdentityService.SetUserQuota:output_type -> identity.v1.SetUserQuotaResponse
+	205, // 332: identity.v1.IdentityService.AdminCreateProject:output_type -> identity.v1.AdminCreateProjectResponse
+	207, // 333: identity.v1.IdentityService.AdminCreateProjectCredential:output_type -> identity.v1.AdminCreateProjectCredentialResponse
+	209, // 334: identity.v1.IdentityService.AdminAddProjectAuthDomain:output_type -> identity.v1.AdminAddProjectAuthDomainResponse
+	212, // 335: identity.v1.IdentityService.AddProjectAuthDomain:output_type -> identity.v1.AddProjectAuthDomainResponse
+	214, // 336: identity.v1.IdentityService.VerifyProjectAuthDomain:output_type -> identity.v1.VerifyProjectAuthDomainResponse
+	216, // 337: identity.v1.IdentityService.ListProjectAuthDomains:output_type -> identity.v1.ListProjectAuthDomainsResponse
+	218, // 338: identity.v1.IdentityService.SetPrimaryAuthDomain:output_type -> identity.v1.SetPrimaryAuthDomainResponse
+	220, // 339: identity.v1.IdentityService.AdminCreateTenant:output_type -> identity.v1.AdminCreateTenantResponse
+	222, // 340: identity.v1.IdentityService.AdminAddTenantAdmin:output_type -> identity.v1.AdminAddTenantAdminResponse
+	224, // 341: identity.v1.IdentityService.CreateFirstPlatformAdmin:output_type -> identity.v1.CreateFirstPlatformAdminResponse
+	262, // 342: identity.v1.IdentityService.ListLinkedIdentities:output_type -> identity.v1.ListLinkedIdentitiesResponse
+	264, // 343: identity.v1.IdentityService.LinkIdentity:output_type -> identity.v1.LinkIdentityResponse
+	266, // 344: identity.v1.IdentityService.UnlinkIdentity:output_type -> identity.v1.UnlinkIdentityResponse
+	227, // 345: identity.v1.IdentityService.UpsertLoginPolicy:output_type -> identity.v1.UpsertLoginPolicyResponse
+	229, // 346: identity.v1.IdentityService.GetLoginPolicy:output_type -> identity.v1.GetLoginPolicyResponse
+	231, // 347: identity.v1.IdentityService.DeleteLoginPolicy:output_type -> identity.v1.DeleteLoginPolicyResponse
+	233, // 348: identity.v1.IdentityService.UpsertProjectConfig:output_type -> identity.v1.UpsertProjectConfigResponse
+	235, // 349: identity.v1.IdentityService.GetProjectConfig:output_type -> identity.v1.GetProjectConfigResponse
+	238, // 350: identity.v1.IdentityService.AdminSetProjectOAuthProvider:output_type -> identity.v1.AdminSetProjectOAuthProviderResponse
+	255, // 351: identity.v1.IdentityService.SignInAnonymously:output_type -> identity.v1.SignInAnonymouslyResponse
+	259, // 352: identity.v1.IdentityService.UpgradeAnonymousAccount:output_type -> identity.v1.UpgradeAnonymousAccountResponse
+	240, // 353: identity.v1.IdentityService.AdminSetProjectAssurance:output_type -> identity.v1.AdminSetProjectAssuranceResponse
+	243, // 354: identity.v1.IdentityService.AdminGetProjectAssurance:output_type -> identity.v1.AdminGetProjectAssuranceResponse
+	245, // 355: identity.v1.IdentityService.AdminDeleteProjectOAuthProvider:output_type -> identity.v1.AdminDeleteProjectOAuthProviderResponse
+	247, // 356: identity.v1.IdentityService.AdminListProjectOAuthProviders:output_type -> identity.v1.AdminListProjectOAuthProvidersResponse
+	236, // [236:357] is the sub-list for method output_type
+	115, // [115:236] is the sub-list for method input_type
+	115, // [115:115] is the sub-list for extension type_name
+	115, // [115:115] is the sub-list for extension extendee
+	0,   // [0:115] is the sub-list for field type_name
 }
 
 func init() { file_identity_v1_identity_proto_init() }
@@ -16545,7 +17300,7 @@ func file_identity_v1_identity_proto_init() {
 	if File_identity_v1_identity_proto != nil {
 		return
 	}
-	file_identity_v1_identity_proto_msgTypes[236].OneofWrappers = []any{
+	file_identity_v1_identity_proto_msgTypes[250].OneofWrappers = []any{
 		(*UpgradeAnonymousAccountRequest_Password)(nil),
 		(*UpgradeAnonymousAccountRequest_Oauth)(nil),
 	}
@@ -16555,7 +17310,7 @@ func file_identity_v1_identity_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_identity_v1_identity_proto_rawDesc), len(file_identity_v1_identity_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   247,
+			NumMessages:   261,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

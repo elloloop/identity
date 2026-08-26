@@ -933,6 +933,123 @@ message CreateManagedChildAccountResponse {
   string enrolment_token = 3;
 }
 
+// ─── Parental account management ──────────────────────────────────────
+// The guardian-authorized management surface over a child account: the
+// day-to-day operations a parent owns once they have created (or consented
+// for) a child's account, none of which should require the child's own
+// credentials or an admin credential.
+//
+// EVERY RPC in this block is gated on the SAME two server-side checks,
+// applied at one chokepoint so an operation added later is gated by
+// construction:
+//
+//  1. an active guardianOf edge from the authenticated caller to the target
+//     child — the caller is always the session user, never a request field;
+//  2. a step-up password re-entry at the moment of action — a stolen session
+//     token must not be enough to take over a child's account.
+//
+// A caller holding no edge receives PERMISSION_DENIED with an
+// account-agnostic message, identical whether or not the child account
+// exists, so the surface is not an enumeration oracle over children.
+//
+// SCOPE. These RPCs act on accounts in the minor bands only. A guardian edge
+// to a user who has aged past the project's adult threshold stops conferring
+// management rights (FAILED_PRECONDITION) — an adult's account is their own.
+// The transition is evaluated per call, so it takes effect on the birthday
+// with no cached authorization; the (now adult) account's own live sessions
+// are deliberately left untouched, because ageing out is not a security
+// event for the account holder. When the age gate is off no band can be
+// derived, and the edge alone authorizes — unchanged pre-gate behaviour.
+//
+// REVOCATION. RevokeParentalConsent deletes the revoking adult's edge, so
+// every RPC here refuses for that caller on the very next call: no grace
+// period, no cached authorization.
+
+message GetManagedChildProfileRequest {
+  // child_user_id is the managed child account to read.
+  string child_user_id = 1;
+  // step_up_password re-authenticates the CALLING GUARDIAN (verified against
+  // the guardian's stored password hash). Required on every call.
+  string step_up_password = 2;
+}
+
+message GetManagedChildProfileResponse {
+  // child is the stored account, subject to the deployment's minor
+  // data-minimization rules — a COPPA-protected child's record deliberately
+  // holds very little, and this RPC adds nothing to it.
+  User child = 1;
+}
+
+message SetManagedChildPasswordRequest {
+  string child_user_id = 1;
+  // new_password is validated against the same password policy the
+  // self-service paths enforce for the resolved project.
+  string new_password = 2;
+  string step_up_password = 3;
+}
+
+// Setting the password revokes the child's sessions and refresh tokens, so a
+// device the parent is locking out cannot keep using an old token.
+message SetManagedChildPasswordResponse {}
+
+message SetManagedChildUsernameRequest {
+  string child_user_id = 1;
+  // username is the new project-unique handle, validated exactly as
+  // CreateManagedChildAccount validates it (lowercase alphanumerics plus
+  // `_`/`-`/`.`, 3..32 chars, normalized to lowercase). A duplicate within
+  // the project is ALREADY_EXISTS.
+  string username = 2;
+  string step_up_password = 3;
+}
+
+message SetManagedChildUsernameResponse {
+  // child is the updated account, carrying the normalized username.
+  User child = 1;
+}
+
+message RevokeManagedChildSessionsRequest {
+  string child_user_id = 1;
+  string step_up_password = 2;
+}
+
+// Every session and refresh token of the child is invalidated
+// unconditionally: a revoked session cannot refresh.
+message RevokeManagedChildSessionsResponse {}
+
+message DeactivateManagedChildAccountRequest {
+  string child_user_id = 1;
+  // reason is optional free text retained on the audit event.
+  string reason = 2;
+  string step_up_password = 3;
+}
+
+// Deactivation is reversible by the same guardian via
+// ReactivateManagedChildAccount, and cuts the child's sessions immediately.
+message DeactivateManagedChildAccountResponse {}
+
+message ReactivateManagedChildAccountRequest {
+  string child_user_id = 1;
+  string step_up_password = 2;
+}
+
+// Reactivation moves a deactivated child account back to
+// USER_STATUS_ACTIVE. It refuses to move an account out of
+// USER_STATUS_PENDING_PARENTAL_CONSENT — the only valid exit from that state
+// is GrantParentalConsent, so reactivation cannot bypass the consent gate.
+message ReactivateManagedChildAccountResponse {}
+
+message DeleteManagedChildAccountRequest {
+  string child_user_id = 1;
+  string step_up_password = 2;
+}
+
+// Deletion runs the same hard-delete erasure cascade as the admin DeleteUser
+// RPC: sessions and refresh tokens are revoked first, then the account and
+// its owned records are erased. The ConsentRecord and the audit trail
+// deliberately survive — they are the compliance evidence that the consent,
+// and this erasure, happened.
+message DeleteManagedChildAccountResponse {}
+
 // ─── Admin Help Flow ────────────────────────────────────────────────
 // Replaces the self-serve ForgotPassword flow. End users who can't log in
 // raise a ticket; admins resolve it via the dashboard.
@@ -2219,6 +2336,21 @@ service IdentityService {
   // calling adult is the session user; the project access mode does not gate
   // this (it is not self-signup).
   rpc CreateManagedChildAccount(CreateManagedChildAccountRequest) returns (CreateManagedChildAccountResponse);
+
+  // Parental account management — the guardian-authorized surface over a
+  // child account (view, credentials, sessions, lifecycle). Every RPC is
+  // gated on the same two checks at one chokepoint: an active guardianOf
+  // edge from the session user to the child, AND a step-up password
+  // re-entry. A caller without an edge gets the same PERMISSION_DENIED
+  // whether or not the child exists; a target that has aged past the adult
+  // threshold is refused (an adult's account is their own).
+  rpc GetManagedChildProfile(GetManagedChildProfileRequest) returns (GetManagedChildProfileResponse);
+  rpc SetManagedChildPassword(SetManagedChildPasswordRequest) returns (SetManagedChildPasswordResponse);
+  rpc SetManagedChildUsername(SetManagedChildUsernameRequest) returns (SetManagedChildUsernameResponse);
+  rpc RevokeManagedChildSessions(RevokeManagedChildSessionsRequest) returns (RevokeManagedChildSessionsResponse);
+  rpc DeactivateManagedChildAccount(DeactivateManagedChildAccountRequest) returns (DeactivateManagedChildAccountResponse);
+  rpc ReactivateManagedChildAccount(ReactivateManagedChildAccountRequest) returns (ReactivateManagedChildAccountResponse);
+  rpc DeleteManagedChildAccount(DeleteManagedChildAccountRequest) returns (DeleteManagedChildAccountResponse);
 
   // Admin help (replaces self-serve ForgotPassword)
   rpc RequestAdminHelp(RequestAdminHelpRequest) returns (RequestAdminHelpResponse);

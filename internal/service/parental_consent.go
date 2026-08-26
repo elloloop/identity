@@ -364,27 +364,33 @@ func (s *AuthService) auditConsentFailure(ctx context.Context, actorID, childID,
 // adult who granted the consent may revoke it: the identity service models no
 // household, so the recorded consenter is the authority. reason is optional
 // free text retained for the audit trail.
+//
+// It returns the revoked record AND the child account's resulting status: a
+// child left under another guardian's active consent stays StatusActive,
+// while a child whose LAST consent was withdrawn is re-gated to
+// StatusPendingParentalConsent. The caller must report the returned status
+// rather than assuming the re-gate happened.
 func (s *AuthService) RevokeParentalConsent(
 	ctx context.Context, actorUserID, childUserID, reason string,
-) (*ParentalConsentRecord, error) {
+) (*ParentalConsentRecord, string, error) {
 	if actorUserID == "" {
-		return nil, ErrUnauthenticated
+		return nil, "", ErrUnauthenticated
 	}
 	childUserID = strings.TrimSpace(childUserID)
 	if childUserID == "" {
-		return nil, fmt.Errorf("%w: child_user_id is required", ErrInvalidArgument)
+		return nil, "", fmt.Errorf("%w: child_user_id is required", ErrInvalidArgument)
 	}
 
 	repo := s.repo(ctx)
 	active, err := repo.GetActiveParentalConsentForChild(ctx, childUserID)
 	if err != nil {
-		return nil, fmt.Errorf("fetch active consent: %w", err)
+		return nil, "", fmt.Errorf("fetch active consent: %w", err)
 	}
 	if active == nil {
-		return nil, fmt.Errorf("%w: no active parental consent for this child", ErrNotFound)
+		return nil, "", fmt.Errorf("%w: no active parental consent for this child", ErrNotFound)
 	}
 	if active.ConsentingUserID != actorUserID {
-		return nil, fmt.Errorf("%w: only the consenting adult may revoke this consent", ErrPermissionDenied)
+		return nil, "", fmt.Errorf("%w: only the consenting adult may revoke this consent", ErrPermissionDenied)
 	}
 
 	now := s.nowMs()
@@ -396,7 +402,7 @@ func (s *AuthService) RevokeParentalConsent(
 	// still-active child is rejected as not-pending) rather than gated behind
 	// a consent that was never recorded as revoked.
 	if err := repo.MarkParentalConsentRevoked(ctx, active.ConsentID, actorUserID, now); err != nil {
-		return nil, fmt.Errorf("revoke parental consent: %w", err)
+		return nil, "", fmt.Errorf("revoke parental consent: %w", err)
 	}
 	active.RevokedAt = now
 	active.RevokedByUserID = actorUserID
@@ -404,7 +410,7 @@ func (s *AuthService) RevokeParentalConsent(
 	// The guardian edge tracks the consent: revoking removes the
 	// (actor -> child) authorization fact.
 	if err := repo.DeleteGuardianEdge(ctx, actorUserID, childUserID); err != nil {
-		return nil, fmt.Errorf("remove guardian edge: %w", err)
+		return nil, "", fmt.Errorf("remove guardian edge: %w", err)
 	}
 	s.audit.Log(
 		ctx, audit.EventGuardianEdgeRemoved,
@@ -420,30 +426,39 @@ func (s *AuthService) RevokeParentalConsent(
 	// other.
 	remaining, err := repo.GetActiveParentalConsentForChild(ctx, childUserID)
 	if err != nil {
-		return nil, fmt.Errorf("check remaining consent: %w", err)
+		return nil, "", fmt.Errorf("check remaining consent: %w", err)
+	}
+	child, err := repo.GetUser(ctx, childUserID)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetch child user: %w", err)
+	}
+	childStatus := ""
+	if child != nil {
+		childStatus = child.Status
 	}
 	if remaining == nil {
-		child, err := repo.GetUser(ctx, childUserID)
-		if err != nil {
-			return nil, fmt.Errorf("fetch child user: %w", err)
-		}
 		if child != nil && strings.ToLower(child.Status) == StatusActive {
 			if err := repo.UpdateUser(ctx, childUserID, map[string]any{
 				"status":     StatusPendingParentalConsent,
 				"updated_at": now,
 			}); err != nil {
-				return nil, fmt.Errorf("re-gate child account: %w", err)
+				return nil, "", fmt.Errorf("re-gate child account: %w", err)
 			}
 			if err := revokeAllUserSessions(ctx, repo, childUserID, now); err != nil {
-				return nil, fmt.Errorf("revoke child sessions: %w", err)
+				return nil, "", fmt.Errorf("revoke child sessions: %w", err)
 			}
+			childStatus = StatusPendingParentalConsent
 		}
 	}
 
 	s.audit.Log(
 		ctx, audit.EventParentalConsentRevoked,
 		audit.WithActor(actorUserID), audit.WithTarget(childUserID), audit.WithSuccess(true),
-		audit.WithDetails(map[string]any{"consent_id": active.ConsentID, "reason": reason}),
+		audit.WithDetails(map[string]any{
+			"consent_id":   active.ConsentID,
+			"reason":       reason,
+			"child_status": childStatus,
+		}),
 	)
-	return active, nil
+	return active, childStatus, nil
 }

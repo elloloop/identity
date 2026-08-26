@@ -59,14 +59,17 @@ func (h *IdentityHandler) RevokeParentalConsent(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	rec, err := h.auth.RevokeParentalConsent(ctx, actorUserID, req.Msg.GetChildUserId(), req.Msg.GetReason())
+	rec, childStatus, err := h.auth.RevokeParentalConsent(ctx, actorUserID, req.Msg.GetChildUserId(), req.Msg.GetReason())
 	if err != nil {
 		return nil, toConnectError(err)
 	}
 
+	// The child is re-gated only when the LAST active consent was withdrawn;
+	// under another guardian's consent it stays active. Report what the
+	// service actually left behind rather than assuming the re-gate.
 	return connect.NewResponse(&identitypb.RevokeParentalConsentResponse{
 		Record:      consentRecordToProto(rec),
-		ChildStatus: userStatusToProto(service.StatusPendingParentalConsent),
+		ChildStatus: userStatusToProto(childStatus),
 	}), nil
 }
 

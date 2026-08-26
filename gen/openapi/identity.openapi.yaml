@@ -1292,6 +1292,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.CreateUserResponse'
+  /identity.v1.IdentityService/DeactivateManagedChildAccount:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: DeactivateManagedChildAccount
+      operationId: identity.v1.IdentityService.DeactivateManagedChildAccount
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.DeactivateManagedChildAccountRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.DeactivateManagedChildAccountResponse'
   /identity.v1.IdentityService/DeactivateUser:
     post:
       tags:
@@ -1397,6 +1432,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.DeleteLoginPolicyResponse'
+  /identity.v1.IdentityService/DeleteManagedChildAccount:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: DeleteManagedChildAccount
+      operationId: identity.v1.IdentityService.DeleteManagedChildAccount
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.DeleteManagedChildAccountRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.DeleteManagedChildAccountResponse'
   /identity.v1.IdentityService/DeleteMyAccount:
     post:
       tags:
@@ -1721,6 +1791,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.GetLoginPolicyResponse'
+  /identity.v1.IdentityService/GetManagedChildProfile:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetManagedChildProfile
+      description: |-
+        Parental account management — the guardian-authorized surface over a
+         child account (view, credentials, sessions, lifecycle). Every RPC is
+         gated on the same two checks at one chokepoint: an active guardianOf
+         edge from the session user to the child, AND a step-up password
+         re-entry. A caller without an edge gets the same PERMISSION_DENIED
+         whether or not the child exists; a target that has aged past the adult
+         threshold is refused (an adult's account is their own).
+      operationId: identity.v1.IdentityService.GetManagedChildProfile
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetManagedChildProfileRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetManagedChildProfileResponse'
   /identity.v1.IdentityService/GetProjectConfig:
     post:
       tags:
@@ -2689,6 +2802,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.PollQrLoginResponse'
+  /identity.v1.IdentityService/ReactivateManagedChildAccount:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ReactivateManagedChildAccount
+      operationId: identity.v1.IdentityService.ReactivateManagedChildAccount
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ReactivateManagedChildAccountRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ReactivateManagedChildAccountResponse'
   /identity.v1.IdentityService/ReactivateUser:
     post:
       tags:
@@ -3288,6 +3436,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RevokeAllSessionsResponse'
+  /identity.v1.IdentityService/RevokeManagedChildSessions:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RevokeManagedChildSessions
+      operationId: identity.v1.IdentityService.RevokeManagedChildSessions
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RevokeManagedChildSessionsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RevokeManagedChildSessionsResponse'
   /identity.v1.IdentityService/RevokeParentalConsent:
     post:
       tags:
@@ -3433,6 +3616,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.SetAccountMarketResponse'
+  /identity.v1.IdentityService/SetManagedChildPassword:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: SetManagedChildPassword
+      operationId: identity.v1.IdentityService.SetManagedChildPassword
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.SetManagedChildPasswordRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.SetManagedChildPasswordResponse'
+  /identity.v1.IdentityService/SetManagedChildUsername:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: SetManagedChildUsername
+      operationId: identity.v1.IdentityService.SetManagedChildUsername
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.SetManagedChildUsernameRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.SetManagedChildUsernameResponse'
   /identity.v1.IdentityService/SetPrimaryAuthDomain:
     post:
       tags:
@@ -5486,6 +5739,28 @@ components:
         DOBRequiredDetails is the error detail attached to the `dob_required`
          refusal returned by any session-issuing RPC when
          GATEWAY_AGEGATE_REQUIRE_DOB is on and the account has no date of birth.
+    identity.v1.DeactivateManagedChildAccountRequest:
+      type: object
+      properties:
+        childUserId:
+          type: string
+          title: child_user_id
+        reason:
+          type: string
+          title: reason
+          description: reason is optional free text retained on the audit event.
+        stepUpPassword:
+          type: string
+          title: step_up_password
+      title: DeactivateManagedChildAccountRequest
+      additionalProperties: false
+    identity.v1.DeactivateManagedChildAccountResponse:
+      type: object
+      title: DeactivateManagedChildAccountResponse
+      additionalProperties: false
+      description: |-
+        Deactivation is reversible by the same guardian via
+         ReactivateManagedChildAccount, and cuts the child's sessions immediately.
     identity.v1.DeactivateUserRequest:
       type: object
       properties:
@@ -5531,6 +5806,27 @@ components:
       type: object
       title: DeleteLoginPolicyResponse
       additionalProperties: false
+    identity.v1.DeleteManagedChildAccountRequest:
+      type: object
+      properties:
+        childUserId:
+          type: string
+          title: child_user_id
+        stepUpPassword:
+          type: string
+          title: step_up_password
+      title: DeleteManagedChildAccountRequest
+      additionalProperties: false
+    identity.v1.DeleteManagedChildAccountResponse:
+      type: object
+      title: DeleteManagedChildAccountResponse
+      additionalProperties: false
+      description: |-
+        Deletion runs the same hard-delete erasure cascade as the admin DeleteUser
+         RPC: sessions and refresh tokens are revoked first, then the account and
+         its owned records are erased. The ConsentRecord and the audit trail
+         deliberately survive — they are the compliance evidence that the consent,
+         and this erasure, happened.
     identity.v1.DeleteMyAccountRequest:
       type: object
       properties:
@@ -5770,6 +6066,33 @@ components:
              login path then imposes no restriction.
           $ref: '#/components/schemas/identity.v1.LoginPolicy'
       title: GetLoginPolicyResponse
+      additionalProperties: false
+    identity.v1.GetManagedChildProfileRequest:
+      type: object
+      properties:
+        childUserId:
+          type: string
+          title: child_user_id
+          description: child_user_id is the managed child account to read.
+        stepUpPassword:
+          type: string
+          title: step_up_password
+          description: |-
+            step_up_password re-authenticates the CALLING GUARDIAN (verified against
+             the guardian's stored password hash). Required on every call.
+      title: GetManagedChildProfileRequest
+      additionalProperties: false
+    identity.v1.GetManagedChildProfileResponse:
+      type: object
+      properties:
+        child:
+          title: child
+          description: |-
+            child is the stored account, subject to the deployment's minor
+             data-minimization rules — a COPPA-protected child's record deliberately
+             holds very little, and this RPC adds nothing to it.
+          $ref: '#/components/schemas/identity.v1.User'
+      title: GetManagedChildProfileResponse
       additionalProperties: false
     identity.v1.GetProjectConfigRequest:
       type: object
@@ -7122,6 +7445,26 @@ components:
         - QR_LOGIN_STATUS_REJECTED
         - QR_LOGIN_STATUS_EXPIRED
         - QR_LOGIN_STATUS_CONSUMED
+    identity.v1.ReactivateManagedChildAccountRequest:
+      type: object
+      properties:
+        childUserId:
+          type: string
+          title: child_user_id
+        stepUpPassword:
+          type: string
+          title: step_up_password
+      title: ReactivateManagedChildAccountRequest
+      additionalProperties: false
+    identity.v1.ReactivateManagedChildAccountResponse:
+      type: object
+      title: ReactivateManagedChildAccountResponse
+      additionalProperties: false
+      description: |-
+        Reactivation moves a deactivated child account back to
+         USER_STATUS_ACTIVE. It refuses to move an account out of
+         USER_STATUS_PENDING_PARENTAL_CONSENT — the only valid exit from that state
+         is GrantParentalConsent, so reactivation cannot bypass the consent gate.
     identity.v1.ReactivateUserRequest:
       type: object
       properties:
@@ -7483,6 +7826,24 @@ components:
           format: int32
       title: RevokeAllSessionsResponse
       additionalProperties: false
+    identity.v1.RevokeManagedChildSessionsRequest:
+      type: object
+      properties:
+        childUserId:
+          type: string
+          title: child_user_id
+        stepUpPassword:
+          type: string
+          title: step_up_password
+      title: RevokeManagedChildSessionsRequest
+      additionalProperties: false
+    identity.v1.RevokeManagedChildSessionsResponse:
+      type: object
+      title: RevokeManagedChildSessionsResponse
+      additionalProperties: false
+      description: |-
+        Every session and refresh token of the child is invalidated
+         unconditionally: a revoked session cannot refresh.
     identity.v1.RevokeParentalConsentRequest:
       type: object
       properties:
@@ -7584,6 +7945,58 @@ components:
              band and (possibly re-gated) status.
           $ref: '#/components/schemas/identity.v1.User'
       title: SetAccountMarketResponse
+      additionalProperties: false
+    identity.v1.SetManagedChildPasswordRequest:
+      type: object
+      properties:
+        childUserId:
+          type: string
+          title: child_user_id
+        newPassword:
+          type: string
+          title: new_password
+          description: |-
+            new_password is validated against the same password policy the
+             self-service paths enforce for the resolved project.
+        stepUpPassword:
+          type: string
+          title: step_up_password
+      title: SetManagedChildPasswordRequest
+      additionalProperties: false
+    identity.v1.SetManagedChildPasswordResponse:
+      type: object
+      title: SetManagedChildPasswordResponse
+      additionalProperties: false
+      description: |-
+        Setting the password revokes the child's sessions and refresh tokens, so a
+         device the parent is locking out cannot keep using an old token.
+    identity.v1.SetManagedChildUsernameRequest:
+      type: object
+      properties:
+        childUserId:
+          type: string
+          title: child_user_id
+        username:
+          type: string
+          title: username
+          description: |-
+            username is the new project-unique handle, validated exactly as
+             CreateManagedChildAccount validates it (lowercase alphanumerics plus
+             `_`/`-`/`.`, 3..32 chars, normalized to lowercase). A duplicate within
+             the project is ALREADY_EXISTS.
+        stepUpPassword:
+          type: string
+          title: step_up_password
+      title: SetManagedChildUsernameRequest
+      additionalProperties: false
+    identity.v1.SetManagedChildUsernameResponse:
+      type: object
+      properties:
+        child:
+          title: child
+          description: child is the updated account, carrying the normalized username.
+          $ref: '#/components/schemas/identity.v1.User'
+      title: SetManagedChildUsernameResponse
       additionalProperties: false
     identity.v1.SetPrimaryAuthDomainRequest:
       type: object

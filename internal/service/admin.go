@@ -277,7 +277,7 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 	now := nowMs()
 	op := graph.Operation{
 		Type: graph.OpUpdateNode, TypeID: typeUser, NodeID: targetUserID,
-		Patch: map[string]any{ufStatus: "deactivated", ufDeactivatedAt: now, ufUpdatedAt: now},
+		Patch: map[string]any{ufStatus: StatusDeactivated, ufDeactivatedAt: now, ufUpdatedAt: now},
 	}
 	if _, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), actorStr(actorID), []graph.Operation{op}); err != nil {
 		return fmt.Errorf("deactivate user: %w", err)
@@ -297,7 +297,7 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 	// Best-effort: emit a user.deactivated lifecycle event so downstream
 	// SaaS can deprovision. No-op when eventing is disabled.
 	deactivated := userFromNode(node)
-	deactivated.Status = "deactivated"
+	deactivated.Status = StatusDeactivated
 	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.cfg.DefaultTenantID, events.EventUserDeactivated, deactivated)
 
 	return nil

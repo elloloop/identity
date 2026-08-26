@@ -207,6 +207,20 @@ const (
 	// logged with success=false and a `step` detail naming the failing check,
 	// so a spoofing or probing attempt is visible.
 	EventManagedChildAccountCreated EventType = "managed_child_account_created"
+
+	// Guardian-authorized management of a child account (the parental
+	// management surface): one event type per operation, actor the acting
+	// guardian and target the child. Every one of them is emitted on refusal
+	// too, with success=false and a `step` detail naming which of the two
+	// mandatory checks failed (`not_guardian`, `step_up`, `aged_out`, ...),
+	// so probing a child account is as visible in the trail as managing one.
+	EventGuardianChildProfileViewed   EventType = "guardian_child_profile_viewed"
+	EventGuardianChildPasswordSet     EventType = "guardian_child_password_set"
+	EventGuardianChildUsernameChanged EventType = "guardian_child_username_changed"
+	EventGuardianChildSessionsRevoked EventType = "guardian_child_sessions_revoked"
+	EventGuardianChildDeactivated     EventType = "guardian_child_deactivated"
+	EventGuardianChildReactivated     EventType = "guardian_child_reactivated"
+	EventGuardianChildDeleted         EventType = "guardian_child_deleted"
 )
 
 // validEventTypes is the canonical set of known event type strings.
@@ -256,6 +270,13 @@ var validEventTypes = map[EventType]struct{}{
 	EventGuardianEdgeRemoved:           {},
 	EventAccountMarketChanged:          {},
 	EventManagedChildAccountCreated:    {},
+	EventGuardianChildProfileViewed:    {},
+	EventGuardianChildPasswordSet:      {},
+	EventGuardianChildUsernameChanged:  {},
+	EventGuardianChildSessionsRevoked:  {},
+	EventGuardianChildDeactivated:      {},
+	EventGuardianChildReactivated:      {},
+	EventGuardianChildDeleted:          {},
 }
 
 // eventConfig holds the optional parameters for a single audit log call.

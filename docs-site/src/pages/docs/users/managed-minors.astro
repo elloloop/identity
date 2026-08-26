@@ -1,0 +1,274 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Managed minor accounts">
+  <h1>Managed minor accounts</h1>
+  <p>
+    A children's product needs more than an age band and a consent record: it
+    needs to know <em>who a child belongs to</em>. Identity models that as a
+    <strong>guardian edge</strong> in the account graph, and builds three things
+    on it — a parent-creates-child signup, a guardian-authorized management
+    surface over the child's account, and consent artifacts that satisfy COPPA,
+    the UK Children's Code, and India's DPDP Rules 2025.
+  </p>
+  <p>
+    The model is deliberate: <strong>children never self-sign-up</strong>. A
+    parent creates their own adult account, then creates and runs each child's
+    account from it.
+  </p>
+
+  <h2>Guardian edges</h2>
+  <p>
+    A guardian edge is a directed <code>guardian_user_id → child_user_id</code>
+    fact (graph edge type <code>guardianOf</code> = 102). A child may have more
+    than one guardian and an adult may guard many children;
+    <code>(guardian, child)</code> is unique, so re-adding an edge is
+    idempotent. Edges are project-scoped and carry the same row-level
+    isolation as every other data-plane row.
+  </p>
+  <p>
+    The edge is <em>live authorization state</em> and is deliberately distinct
+    from the <code>ConsentRecord</code>, which is an audit artifact: the record
+    survives deletion of either account, while the edge carries
+    <code>users</code> foreign keys with <code>ON DELETE CASCADE</code> and dies
+    with the accounts it references.
+  </p>
+  <p>Edges enter the graph from three places:</p>
+  <ul>
+    <li>
+      <strong>Migration backfill</strong> — one edge per active consent whose
+      adult and child both still exist, so consent already granted needs no
+      re-collection.
+    </li>
+    <li>
+      <strong><code>GrantParentalConsent</code></strong> — writes the edge in
+      the same sequence as the consent record, before the child is activated.
+    </li>
+    <li>
+      <strong><code>CreateManagedChildAccount</code></strong> — writes the edge
+      atomically with the account and the record.
+    </li>
+  </ul>
+  <p>
+    <code>guardian_user_id</code> always comes from the authenticated session,
+    never from the request body. Two RPCs read the edge set:
+    <code>ListManagedChildren</code> (self-only — the request carries no user id
+    field at all) and <code>GetGuardians</code> (a guardian of that child, or a
+    project admin).
+  </p>
+
+  <h2>Creating a child account</h2>
+  <p>
+    <code>CreateManagedChildAccount</code> turns one authenticated call from an
+    adult into a working child account. The account is
+    <strong>born <code>USER_STATUS_ACTIVE</code></strong> under the caller's
+    guardianship — it never passes through
+    <code>USER_STATUS_PENDING_PARENTAL_CONSENT</code>, because that state exists
+    for a child who signed up with no consenting adult present, and here one is
+    present and authenticated.
+  </p>
+  <Code
+    lang="bash"
+    code={`curl -X POST https://identity.example.com/identity.v1.IdentityService/CreateManagedChildAccount \\
+  -H "Authorization: Bearer $PARENT_ACCESS_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "username": "kid.one",
+    "display_name": "Kid One",
+    "date_of_birth_ms": 1420070400000,
+    "password": "the-parent-chosen-password",
+    "policy_version": "children-privacy-notice-v1",
+    "step_up_password": "the-parents-own-password"
+  }'`}
+  />
+  <p>
+    The child is identified by a <strong>parent-chosen username</strong>
+    (lowercase letters, digits, <code>_</code>, <code>-</code>, <code>.</code>;
+    3–32 characters; unique within the project) because children below the
+    ceiling frequently have no email address. That username is the login
+    identifier: <code>PasswordLogin</code> accepts it in the <code>email</code>
+    field whenever the value contains no <code>@</code>.
+  </p>
+  <p>
+    Instead of <code>password</code> a caller may set
+    <code>passkey_enrolment: true</code>. The response then carries an
+    <code>enrolment_token</code> — a 15-minute ticket the child's own device
+    presents to <code>BeginPasskeyRegistration</code> and
+    <code>CompletePasskeyRegistration</code> to enrol a passkey without a
+    session. The ticket authenticates nothing else; presenting both a session
+    and a ticket is <code>INVALID_ARGUMENT</code>.
+  </p>
+
+  <h3>What the call requires</h3>
+  <ul>
+    <li>
+      <strong>A strong verified factor</strong> on the adult's account —
+      verified phone, a registered passkey, or an approved identity
+      verification.
+    </li>
+    <li>
+      <strong>A step-up re-authentication</strong>: <code>step_up_password</code>
+      is checked against the adult's stored hash on the call itself.
+    </li>
+    <li>
+      <strong>A minor date of birth.</strong> A DOB that classifies as ADULT
+      under the thresholds the child's market resolves to is rejected — this is
+      not a route to creating adult accounts on someone else's behalf.
+    </li>
+  </ul>
+  <p>
+    The account, the guardian edge, and the <code>ConsentRecord</code> (carrying
+    <code>policy_version</code>, the verification factors, and
+    <code>stepped_up</code>) commit in a single transaction: no partial state is
+    reachable. The evidence is indistinguishable from a
+    <code>GrantParentalConsent</code> grant, which is the point — one format for
+    regulators, two ways of arriving at it.
+  </p>
+  <p>
+    This is <strong>not self-signup</strong>, so the project's access mode
+    (<code>open</code>, <code>allowlist</code>, <code>invite</code>,
+    <code>closed</code>) does not gate it. The guard is the calling adult's own
+    standing in the project, so parents can create children under
+    <code>invite</code> and <code>closed</code> too.
+  </p>
+
+  <h2>Managing the account</h2>
+  <p>
+    Seven RPCs cover what a parent actually does. None of them needs the child's
+    credentials, and none needs an admin credential.
+  </p>
+  <table>
+    <thead>
+      <tr><th>RPC</th><th>Effect</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>GetManagedChildProfile</code></td>
+        <td>Reads the stored child record — deliberately little, since minor data-minimization suppresses optional PII at every write path</td>
+      </tr>
+      <tr>
+        <td><code>SetManagedChildPassword</code></td>
+        <td>Sets the password directly (no email round-trip) and cuts the child's sessions</td>
+      </tr>
+      <tr>
+        <td><code>SetManagedChildUsername</code></td>
+        <td>Renames the handle, with the format and uniqueness rules creation enforces</td>
+      </tr>
+      <tr>
+        <td><code>RevokeManagedChildSessions</code></td>
+        <td>Invalidates every session and refresh token immediately — the lost-tablet case</td>
+      </tr>
+      <tr>
+        <td><code>DeactivateManagedChildAccount</code></td>
+        <td>Suspends the account and cuts access; reversible by the same guardian</td>
+      </tr>
+      <tr>
+        <td><code>ReactivateManagedChildAccount</code></td>
+        <td>Returns a deactivated account to active; refuses to move one out of <code>PENDING_PARENTAL_CONSENT</code></td>
+      </tr>
+      <tr>
+        <td><code>DeleteManagedChildAccount</code></td>
+        <td>Runs the same hard-delete erasure cascade as the admin <code>DeleteUser</code> RPC</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    Every one of them passes through <strong>one guard</strong>, so an operation
+    added later is gated by construction. It requires both an active guardian
+    edge from the session user to the child <em>and</em> a
+    <code>step_up_password</code> re-entry on the call — a stolen session token
+    must not be enough to take over a child's account.
+  </p>
+  <Code
+    lang="bash"
+    code={`curl -X POST https://identity.example.com/identity.v1.IdentityService/SetManagedChildPassword \\
+  -H "Authorization: Bearer $PARENT_ACCESS_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "child_user_id": "usr_...",
+    "new_password": "the-new-child-password",
+    "step_up_password": "the-parents-own-password"
+  }'`}
+  />
+  <p>
+    A caller holding no edge receives an account-agnostic
+    <code>PERMISSION_DENIED</code>, identical whether or not the child account
+    exists, so the surface cannot be used to enumerate children.
+  </p>
+
+  <h3>Rights end when they should</h3>
+  <ul>
+    <li>
+      <strong>Revoking consent ends management at once.</strong>
+      <code>RevokeParentalConsent</code> deletes the edge, and the next call
+      from that adult is refused. No grace period, no cached authorization.
+    </li>
+    <li>
+      <strong>Ageing out ends management too.</strong> A guardian edge to a user
+      who has passed the adult threshold that applies to them stops conferring
+      rights (<code>FAILED_PRECONDITION</code>) — an adult's account is their
+      own. The band is re-derived on every call, so it takes effect on the
+      birthday. The now-adult account's own live sessions are deliberately left
+      running; ageing out is not a security event for the account holder.
+    </li>
+    <li>
+      <strong>With age-gating off nothing changes.</strong> No band can be
+      derived, so the edge alone authorizes — the behaviour a pre-gate
+      deployment already had.
+    </li>
+    <li>
+      <strong>Deletion is immediate.</strong> It is the admin erasure cascade,
+      not the 30-day self-service grace window. The <code>ConsentRecord</code>
+      and the audit trail survive, per the retention posture consent records
+      already carry.
+    </li>
+  </ul>
+
+  <h3>Audit trail</h3>
+  <p>
+    Each operation emits its own event naming the acting guardian —
+    <code>guardian_child_profile_viewed</code>,
+    <code>guardian_child_password_set</code>,
+    <code>guardian_child_username_changed</code>,
+    <code>guardian_child_sessions_revoked</code>,
+    <code>guardian_child_deactivated</code>,
+    <code>guardian_child_reactivated</code>,
+    <code>guardian_child_deleted</code> — on success <strong>and</strong> on
+    refusal. A refusal carries <code>success=false</code> and a
+    <code>step</code> detail naming the check that failed, so probing a child
+    account is as visible in the trail as managing one. Account creation is
+    audited as <code>managed_child_account_created</code>, and edges as
+    <code>guardian_edge_created</code> / <code>guardian_edge_removed</code>.
+  </p>
+
+  <h2>Age thresholds are per jurisdiction</h2>
+  <p>
+    The child ceiling is not a constant. A project's <code>config_json</code>
+    can carry a <code>jurisdictions</code> block, and an account's
+    <code>market</code> selects which threshold pair classifies it — resolved in
+    order: the account's stored market, the project's default jurisdiction, the
+    strictest configured ceiling, then the deployment-wide
+    <code>GATEWAY_AGEGATE_*</code> pair.
+  </p>
+  <Code
+    lang="json"
+    code={`{
+  "jurisdictions": {
+    "default": "IN",
+    "thresholds": {
+      "IN": { "child_max_age": 17, "adult_age": 18 },
+      "US": { "child_max_age": 12, "adult_age": 18 },
+      "GB": { "child_max_age": 12, "adult_age": 18 }
+    }
+  }
+}`}
+  />
+  <p>
+    An unresolvable market falls back to the strictest configured ceiling — it
+    never drifts an account toward a more permissive regime. A granted
+    <code>ConsentRecord</code> snapshots the market it resolved under, so the
+    artifact says which jurisdiction's thresholds it proves consent against.
+  </p>
+</DocsLayout>

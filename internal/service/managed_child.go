@@ -269,7 +269,7 @@ func (s *AuthService) CreateManagedChildAccount(
 	credential := "password"
 	var ticket string
 	if req.PasskeyEnrolment {
-		credential = "passkey_enrolment"
+		credential = "passkey_enrolment" // #nosec G101 -- an audit-detail label naming the credential shape.
 		ticket, err = s.mintPurposeTicket(ctx, child.ID, tokenPurposePasskeyEnrolment, passkeyEnrolmentTicketTTL)
 		if err != nil {
 			return nil, err

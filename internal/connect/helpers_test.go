@@ -1494,10 +1494,16 @@ func (r *fakeRepo) CreateManagedChildAccount(_ context.Context, u *service.User,
 	cp := *u
 	r.users[id] = &cp
 
+	if r.guardianEdges == nil {
+		r.guardianEdges = make(map[string]*service.GuardianEdge)
+	}
 	edge.ChildUserID = id
 	ecp := *edge
 	r.guardianEdges[edge.GuardianUserID+"\x00"+id] = &ecp
 
+	if r.parentalConsents == nil {
+		r.parentalConsents = make(map[string]*service.ParentalConsentRecord)
+	}
 	consent.ChildUserID = id
 	ccp := *consent
 	r.parentalConsents[consent.ConsentID] = &ccp
@@ -2137,6 +2143,9 @@ func newHarnessWith(
 		authSvc.WithAssurance(service.NewAssuranceResolver(cfg.DefaultProjectID, service.AssuranceProviders{}, nil, nil), webAssurance)
 	}
 	adminSvc := service.NewAdminService(repo, db, cfg.DefaultTenantID, auditLog, cfg, nil, zap.NewNop())
+	// Mirror app.New: guardian-initiated erasure runs the admin service's
+	// hard-delete cascade, so the handler tests exercise the wired path.
+	authSvc = authSvc.WithAccountPurger(adminSvc)
 	groupSvc := service.NewGroupService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	helpSvc := service.NewHelpService(db, cfg.DefaultTenantID, auditLog, zap.NewNop())
 	profSvc := service.NewProfileService(repo, db, cfg.DefaultTenantID, auditLog, zap.NewNop())

@@ -316,7 +316,7 @@ func TestRevokeParentalConsent_Lifecycle(t *testing.T) {
 			t.Fatalf("seed child token: %v", err)
 		}
 
-		rec, err := svc.RevokeParentalConsent(ctx, adult.ID, child.ID, "changed my mind")
+		rec, _, err := svc.RevokeParentalConsent(ctx, adult.ID, child.ID, "changed my mind")
 		if err != nil {
 			t.Fatalf("RevokeParentalConsent: %v", err)
 		}
@@ -351,7 +351,7 @@ func TestRevokeParentalConsent_Lifecycle(t *testing.T) {
 			t.Fatalf("grant: %v", err)
 		}
 
-		_, err := svc.RevokeParentalConsent(ctx, other.ID, child.ID, "")
+		_, _, err := svc.RevokeParentalConsent(ctx, other.ID, child.ID, "")
 		if !errors.Is(err, ErrPermissionDenied) {
 			t.Fatalf("err = %v, want ErrPermissionDenied", err)
 		}
@@ -370,7 +370,7 @@ func TestRevokeParentalConsent_Lifecycle(t *testing.T) {
 		svc := newTestAuthService(t, repo)
 		adult := seedConsentingAdult(t, repo, "adult@example.com", pwHash, adultFactors{phoneVerified: true})
 		child := seedChildPendingConsent(repo, "child@example.com")
-		_, err := svc.RevokeParentalConsent(ctx, adult.ID, child.ID, "")
+		_, _, err := svc.RevokeParentalConsent(ctx, adult.ID, child.ID, "")
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("err = %v, want ErrNotFound", err)
 		}
@@ -550,7 +550,7 @@ func TestRevokeParentalConsent_GuardsAndRepoErrors(t *testing.T) {
 	t.Run("empty actor id is unauthenticated", func(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
-		_, err := svc.RevokeParentalConsent(ctx, "", "child", "")
+		_, _, err := svc.RevokeParentalConsent(ctx, "", "child", "")
 		if !errors.Is(err, ErrUnauthenticated) {
 			t.Fatalf("err = %v, want ErrUnauthenticated", err)
 		}
@@ -559,7 +559,7 @@ func TestRevokeParentalConsent_GuardsAndRepoErrors(t *testing.T) {
 	t.Run("blank child id is invalid", func(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
-		_, err := svc.RevokeParentalConsent(ctx, "actor", "   ", "")
+		_, _, err := svc.RevokeParentalConsent(ctx, "actor", "   ", "")
 		if !errors.Is(err, ErrInvalidArgument) {
 			t.Fatalf("err = %v, want ErrInvalidArgument", err)
 		}
@@ -569,7 +569,7 @@ func TestRevokeParentalConsent_GuardsAndRepoErrors(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
 		repo.getActiveConsentErr = errConsentInjected
-		_, err := svc.RevokeParentalConsent(ctx, "actor", "child", "")
+		_, _, err := svc.RevokeParentalConsent(ctx, "actor", "child", "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}
@@ -592,7 +592,7 @@ func TestRevokeParentalConsent_GuardsAndRepoErrors(t *testing.T) {
 		svc := newTestAuthService(t, repo)
 		adultID, childID := grantOne(t, repo, svc)
 		repo.getUserErr = errConsentInjected
-		_, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
+		_, _, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}
@@ -603,7 +603,7 @@ func TestRevokeParentalConsent_GuardsAndRepoErrors(t *testing.T) {
 		svc := newTestAuthService(t, repo)
 		adultID, childID := grantOne(t, repo, svc)
 		repo.updateUserErr = errConsentInjected
-		_, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
+		_, _, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}
@@ -614,7 +614,7 @@ func TestRevokeParentalConsent_GuardsAndRepoErrors(t *testing.T) {
 		svc := newTestAuthService(t, repo)
 		adultID, childID := grantOne(t, repo, svc)
 		repo.deleteRefreshTokensErr = errConsentInjected
-		_, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
+		_, _, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}
@@ -625,7 +625,7 @@ func TestRevokeParentalConsent_GuardsAndRepoErrors(t *testing.T) {
 		svc := newTestAuthService(t, repo)
 		adultID, childID := grantOne(t, repo, svc)
 		repo.markConsentRevokedErr = errConsentInjected
-		_, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
+		_, _, err := svc.RevokeParentalConsent(ctx, adultID, childID, "")
 		if !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want injected error", err)
 		}

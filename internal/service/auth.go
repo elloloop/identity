@@ -58,6 +58,10 @@ const (
 	// purge once the grace window elapses; a successful interactive login
 	// during the window cancels it and restores StatusActive.
 	StatusPendingDeletion = "pending_deletion"
+	// StatusDeactivated is a suspended account: it exists, cannot be issued
+	// tokens, and is reversible by whoever suspended it (an admin via
+	// ReactivateUser, a guardian via ReactivateManagedChildAccount).
+	StatusDeactivated = "deactivated"
 )
 
 // User represents a user in the identity system.
@@ -1273,6 +1277,31 @@ type AuthService struct {
 	// cache them. Projects with no override share the global s.passkeys.
 	passkeyRPCache   map[string]*passkeys.WebAuthnService
 	passkeyRPCacheMu sync.RWMutex
+
+	// purger runs the hard-delete erasure cascade for one account. It is the
+	// AdminService (the owner of the cascade the admin DeleteUser RPC and the
+	// account-deletion sweeper already share), injected rather than
+	// reimplemented so guardian-initiated erasure of a child account cannot
+	// drift from it. nil disables DeleteManagedChildAccount
+	// (ErrServiceUnavailable) — the same shape every other optional
+	// dependency takes.
+	purger AccountPurger
+}
+
+// AccountPurger runs the hard-delete erasure cascade for a single, already
+// authorized account: session and refresh-token revocation, graph-edge
+// cleanup, the Repository delete, and the audit + lifecycle events that go
+// with it. *AdminService implements it; the caller owns authorization.
+type AccountPurger interface {
+	PurgeAccount(ctx context.Context, actorUserID string, u *User) error
+}
+
+// WithAccountPurger wires the account-erasure cascade (the AdminService) and
+// returns the service for chaining. app.New calls it once at construction,
+// after the AdminService exists.
+func (s *AuthService) WithAccountPurger(p AccountPurger) *AuthService {
+	s.purger = p
+	return s
 }
 
 // WithEventPublisher wires the optional user-lifecycle event publisher and

@@ -141,7 +141,7 @@ func (r *sqliteRepository) GetUser(ctx context.Context, userID string) (*service
 }
 
 // FindUserByUsername resolves a managed child account by its project-unique
-// username. The username <> '' predicate keeps the partial unique index
+// username. The username <> ” predicate keeps the partial unique index
 // (0017) usable, mirroring the email lookup. Mirrors the postgres driver.
 func (r *sqliteRepository) FindUserByUsername(ctx context.Context, username string) (*service.User, error) {
 	if username == "" {

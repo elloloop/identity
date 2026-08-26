@@ -198,6 +198,34 @@ func (b *grpcBridge) CreateManagedChildAccount(ctx context.Context, in *identity
 	return invoke(ctx, in, b.h.CreateManagedChildAccount)
 }
 
+func (b *grpcBridge) GetManagedChildProfile(ctx context.Context, in *identitypb.GetManagedChildProfileRequest) (*identitypb.GetManagedChildProfileResponse, error) {
+	return invoke(ctx, in, b.h.GetManagedChildProfile)
+}
+
+func (b *grpcBridge) SetManagedChildPassword(ctx context.Context, in *identitypb.SetManagedChildPasswordRequest) (*identitypb.SetManagedChildPasswordResponse, error) {
+	return invoke(ctx, in, b.h.SetManagedChildPassword)
+}
+
+func (b *grpcBridge) SetManagedChildUsername(ctx context.Context, in *identitypb.SetManagedChildUsernameRequest) (*identitypb.SetManagedChildUsernameResponse, error) {
+	return invoke(ctx, in, b.h.SetManagedChildUsername)
+}
+
+func (b *grpcBridge) RevokeManagedChildSessions(ctx context.Context, in *identitypb.RevokeManagedChildSessionsRequest) (*identitypb.RevokeManagedChildSessionsResponse, error) {
+	return invoke(ctx, in, b.h.RevokeManagedChildSessions)
+}
+
+func (b *grpcBridge) DeactivateManagedChildAccount(ctx context.Context, in *identitypb.DeactivateManagedChildAccountRequest) (*identitypb.DeactivateManagedChildAccountResponse, error) {
+	return invoke(ctx, in, b.h.DeactivateManagedChildAccount)
+}
+
+func (b *grpcBridge) ReactivateManagedChildAccount(ctx context.Context, in *identitypb.ReactivateManagedChildAccountRequest) (*identitypb.ReactivateManagedChildAccountResponse, error) {
+	return invoke(ctx, in, b.h.ReactivateManagedChildAccount)
+}
+
+func (b *grpcBridge) DeleteManagedChildAccount(ctx context.Context, in *identitypb.DeleteManagedChildAccountRequest) (*identitypb.DeleteManagedChildAccountResponse, error) {
+	return invoke(ctx, in, b.h.DeleteManagedChildAccount)
+}
+
 func (b *grpcBridge) ChangePassword(ctx context.Context, in *identitypb.ChangePasswordRequest) (*identitypb.ChangePasswordResponse, error) {
 	return invoke(ctx, in, b.h.ChangePassword)
 }

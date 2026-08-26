@@ -10,9 +10,9 @@ import (
 
 // seedGuardianEdge inserts a (guardian -> child) edge directly into the fake
 // repository, bypassing the consent flow.
-func seedGuardianEdge(t *testing.T, repo *fakeRepo, guardianUserID, childUserID string) {
+func seedGuardianEdge(ctx context.Context, t *testing.T, repo *fakeRepo, guardianUserID, childUserID string) {
 	t.Helper()
-	if err := repo.UpsertGuardianEdge(context.Background(), &GuardianEdge{
+	if err := repo.UpsertGuardianEdge(ctx, &GuardianEdge{
 		GuardianUserID: guardianUserID, ChildUserID: childUserID, CreatedAtMs: 1,
 	}); err != nil {
 		t.Fatalf("seed guardian edge: %v", err)
@@ -39,9 +39,9 @@ func TestListManagedChildren(t *testing.T) {
 	ghost := seedChildPendingConsent(repo, "ghost@example.com")
 	stranger := seedConsentingAdult(t, repo, "stranger@example.com", "", adultFactors{})
 
-	seedGuardianEdge(t, repo, guardian.ID, child1.ID)
-	seedGuardianEdge(t, repo, guardian.ID, child2.ID)
-	seedGuardianEdge(t, repo, guardian.ID, ghost.ID)
+	seedGuardianEdge(ctx, t, repo, guardian.ID, child1.ID)
+	seedGuardianEdge(ctx, t, repo, guardian.ID, child2.ID)
+	seedGuardianEdge(ctx, t, repo, guardian.ID, ghost.ID)
 	if err := repo.DeleteUser(ctx, ghost.ID); err != nil {
 		t.Fatalf("DeleteUser: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestGetGuardians_Authorization(t *testing.T) {
 	guardian := seedConsentingAdult(t, repo, "guardian@example.com", "", adultFactors{})
 	other := seedConsentingAdult(t, repo, "other@example.com", "", adultFactors{})
 	child := seedChildPendingConsent(repo, "child@example.com")
-	seedGuardianEdge(t, repo, guardian.ID, child.ID)
+	seedGuardianEdge(ctx, t, repo, guardian.ID, child.ID)
 
 	// A guardian of the child may list.
 	guardians, err := svc.GetGuardians(ctx, guardian.ID, child.ID, false)
@@ -159,7 +159,7 @@ func TestRevokeParentalConsent_DeletesGuardianEdge(t *testing.T) {
 		t.Fatalf("grant: %v", err)
 	}
 
-	if _, err := svc.RevokeParentalConsent(ctx, adult.ID, child.ID, "changed my mind"); err != nil {
+	if _, _, err := svc.RevokeParentalConsent(ctx, adult.ID, child.ID, "changed my mind"); err != nil {
 		t.Fatalf("RevokeParentalConsent: %v", err)
 	}
 
@@ -203,10 +203,10 @@ func TestRevokeParentalConsent_LastGuardianRule(t *testing.T) {
 		if err := repo.CreateParentalConsent(ctx, rec); err != nil {
 			t.Fatalf("seed consent %s: %v", rec.ConsentID, err)
 		}
-		seedGuardianEdge(t, repo, rec.ConsentingUserID, child.ID)
+		seedGuardianEdge(ctx, t, repo, rec.ConsentingUserID, child.ID)
 	}
 
-	if _, err := svc.RevokeParentalConsent(ctx, g1.ID, child.ID, ""); err != nil {
+	if _, _, err := svc.RevokeParentalConsent(ctx, g1.ID, child.ID, ""); err != nil {
 		t.Fatalf("revoke as g1: %v", err)
 	}
 	// g1's edge is gone, g2's remains, and the child is STILL ACTIVE.
@@ -224,7 +224,7 @@ func TestRevokeParentalConsent_LastGuardianRule(t *testing.T) {
 		t.Fatalf("child status after non-last revoke = %q, want %q", got.Status, StatusActive)
 	}
 
-	if _, err := svc.RevokeParentalConsent(ctx, g2.ID, child.ID, ""); err != nil {
+	if _, _, err := svc.RevokeParentalConsent(ctx, g2.ID, child.ID, ""); err != nil {
 		t.Fatalf("revoke as g2: %v", err)
 	}
 	got, err = repo.GetUser(ctx, child.ID)

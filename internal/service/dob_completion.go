@@ -21,7 +21,7 @@ const tokenPurposeDOBCompletion = "dob_completion"
 // CreateManagedChildAccount). Its only use is the passkey registration
 // ceremony (Begin/CompletePasskeyRegistration) for the ticket's subject; like
 // every purpose token it never authenticates a request.
-const tokenPurposePasskeyEnrolment = "passkey_enrolment"
+const tokenPurposePasskeyEnrolment = "passkey_enrolment" // #nosec G101 -- a claim value naming the ticket's purpose, not a credential.
 
 // dobCompletionTicketTTL bounds the completion step: long enough for a
 // user to type a date, short enough that a leaked ticket is useless

@@ -105,6 +105,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrParentalConsentRequired),
 		errors.Is(err, service.ErrParentalConsentFactorMissing),
 		errors.Is(err, service.ErrParentalConsentNotPending),
+		errors.Is(err, service.ErrGuardianRightsExpired),
 		errors.Is(err, service.ErrIDVRequired),
 		errors.Is(err, service.ErrEmailVerificationRequired),
 		errors.Is(err, service.ErrAccountDeletionNotAllowed),

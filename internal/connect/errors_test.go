@@ -79,6 +79,36 @@ func TestToConnectErrorProjectConfigConflict(t *testing.T) {
 	}
 }
 
+// TestToConnectErrorGuardianRightsExpired proves that a guardian acting on a
+// managed account that has aged past the adult threshold maps to
+// FailedPrecondition: the caller and the target both exist and the edge is
+// real — the account has simply outgrown guardianship. PermissionDenied would
+// conflate it with "you are not a guardian", which is a different answer and
+// a different client remedy.
+func TestToConnectErrorGuardianRightsExpired(t *testing.T) {
+	err := toConnectError(service.ErrGuardianRightsExpired)
+	if err == nil {
+		t.Fatal("toConnectError(ErrGuardianRightsExpired) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeFailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", got)
+	}
+}
+
+// TestToConnectErrorManagedChildNotMinor proves an adult-band date of birth
+// supplied to CreateManagedChildAccount maps to InvalidArgument: the request
+// itself is wrong (that RPC creates minor accounts only), not a precondition
+// the client can clear by doing something else first.
+func TestToConnectErrorManagedChildNotMinor(t *testing.T) {
+	err := toConnectError(service.ErrManagedChildNotMinor)
+	if err == nil {
+		t.Fatal("toConnectError(ErrManagedChildNotMinor) = nil, want error")
+	}
+	if got := connect.CodeOf(err); got != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", got)
+	}
+}
+
 // TestToConnectErrorMinorDataMinimized proves COPPA data-minimization rejection
 // maps to FailedPrecondition: the account may not collect this PII, a "do
 // something else" precondition rather than an auth or argument failure.

@@ -57,6 +57,13 @@ const (
 	IdentityService_ListManagedChildren_FullMethodName             = "/identity.v1.IdentityService/ListManagedChildren"
 	IdentityService_GetGuardians_FullMethodName                    = "/identity.v1.IdentityService/GetGuardians"
 	IdentityService_CreateManagedChildAccount_FullMethodName       = "/identity.v1.IdentityService/CreateManagedChildAccount"
+	IdentityService_GetManagedChildProfile_FullMethodName          = "/identity.v1.IdentityService/GetManagedChildProfile"
+	IdentityService_SetManagedChildPassword_FullMethodName         = "/identity.v1.IdentityService/SetManagedChildPassword"
+	IdentityService_SetManagedChildUsername_FullMethodName         = "/identity.v1.IdentityService/SetManagedChildUsername"
+	IdentityService_RevokeManagedChildSessions_FullMethodName      = "/identity.v1.IdentityService/RevokeManagedChildSessions"
+	IdentityService_DeactivateManagedChildAccount_FullMethodName   = "/identity.v1.IdentityService/DeactivateManagedChildAccount"
+	IdentityService_ReactivateManagedChildAccount_FullMethodName   = "/identity.v1.IdentityService/ReactivateManagedChildAccount"
+	IdentityService_DeleteManagedChildAccount_FullMethodName       = "/identity.v1.IdentityService/DeleteManagedChildAccount"
 	IdentityService_RequestAdminHelp_FullMethodName                = "/identity.v1.IdentityService/RequestAdminHelp"
 	IdentityService_ListHelpRequests_FullMethodName                = "/identity.v1.IdentityService/ListHelpRequests"
 	IdentityService_ResolveHelpRequest_FullMethodName              = "/identity.v1.IdentityService/ResolveHelpRequest"
@@ -222,6 +229,20 @@ type IdentityServiceClient interface {
 	// calling adult is the session user; the project access mode does not gate
 	// this (it is not self-signup).
 	CreateManagedChildAccount(ctx context.Context, in *CreateManagedChildAccountRequest, opts ...grpc.CallOption) (*CreateManagedChildAccountResponse, error)
+	// Parental account management — the guardian-authorized surface over a
+	// child account (view, credentials, sessions, lifecycle). Every RPC is
+	// gated on the same two checks at one chokepoint: an active guardianOf
+	// edge from the session user to the child, AND a step-up password
+	// re-entry. A caller without an edge gets the same PERMISSION_DENIED
+	// whether or not the child exists; a target that has aged past the adult
+	// threshold is refused (an adult's account is their own).
+	GetManagedChildProfile(ctx context.Context, in *GetManagedChildProfileRequest, opts ...grpc.CallOption) (*GetManagedChildProfileResponse, error)
+	SetManagedChildPassword(ctx context.Context, in *SetManagedChildPasswordRequest, opts ...grpc.CallOption) (*SetManagedChildPasswordResponse, error)
+	SetManagedChildUsername(ctx context.Context, in *SetManagedChildUsernameRequest, opts ...grpc.CallOption) (*SetManagedChildUsernameResponse, error)
+	RevokeManagedChildSessions(ctx context.Context, in *RevokeManagedChildSessionsRequest, opts ...grpc.CallOption) (*RevokeManagedChildSessionsResponse, error)
+	DeactivateManagedChildAccount(ctx context.Context, in *DeactivateManagedChildAccountRequest, opts ...grpc.CallOption) (*DeactivateManagedChildAccountResponse, error)
+	ReactivateManagedChildAccount(ctx context.Context, in *ReactivateManagedChildAccountRequest, opts ...grpc.CallOption) (*ReactivateManagedChildAccountResponse, error)
+	DeleteManagedChildAccount(ctx context.Context, in *DeleteManagedChildAccountRequest, opts ...grpc.CallOption) (*DeleteManagedChildAccountResponse, error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(ctx context.Context, in *RequestAdminHelpRequest, opts ...grpc.CallOption) (*RequestAdminHelpResponse, error)
 	ListHelpRequests(ctx context.Context, in *ListHelpRequestsRequest, opts ...grpc.CallOption) (*ListHelpRequestsResponse, error)
@@ -754,6 +775,76 @@ func (c *identityServiceClient) CreateManagedChildAccount(ctx context.Context, i
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateManagedChildAccountResponse)
 	err := c.cc.Invoke(ctx, IdentityService_CreateManagedChildAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) GetManagedChildProfile(ctx context.Context, in *GetManagedChildProfileRequest, opts ...grpc.CallOption) (*GetManagedChildProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetManagedChildProfileResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GetManagedChildProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) SetManagedChildPassword(ctx context.Context, in *SetManagedChildPasswordRequest, opts ...grpc.CallOption) (*SetManagedChildPasswordResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetManagedChildPasswordResponse)
+	err := c.cc.Invoke(ctx, IdentityService_SetManagedChildPassword_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) SetManagedChildUsername(ctx context.Context, in *SetManagedChildUsernameRequest, opts ...grpc.CallOption) (*SetManagedChildUsernameResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetManagedChildUsernameResponse)
+	err := c.cc.Invoke(ctx, IdentityService_SetManagedChildUsername_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) RevokeManagedChildSessions(ctx context.Context, in *RevokeManagedChildSessionsRequest, opts ...grpc.CallOption) (*RevokeManagedChildSessionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeManagedChildSessionsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RevokeManagedChildSessions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) DeactivateManagedChildAccount(ctx context.Context, in *DeactivateManagedChildAccountRequest, opts ...grpc.CallOption) (*DeactivateManagedChildAccountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeactivateManagedChildAccountResponse)
+	err := c.cc.Invoke(ctx, IdentityService_DeactivateManagedChildAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ReactivateManagedChildAccount(ctx context.Context, in *ReactivateManagedChildAccountRequest, opts ...grpc.CallOption) (*ReactivateManagedChildAccountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReactivateManagedChildAccountResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ReactivateManagedChildAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) DeleteManagedChildAccount(ctx context.Context, in *DeleteManagedChildAccountRequest, opts ...grpc.CallOption) (*DeleteManagedChildAccountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteManagedChildAccountResponse)
+	err := c.cc.Invoke(ctx, IdentityService_DeleteManagedChildAccount_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1607,6 +1698,20 @@ type IdentityServiceServer interface {
 	// calling adult is the session user; the project access mode does not gate
 	// this (it is not self-signup).
 	CreateManagedChildAccount(context.Context, *CreateManagedChildAccountRequest) (*CreateManagedChildAccountResponse, error)
+	// Parental account management — the guardian-authorized surface over a
+	// child account (view, credentials, sessions, lifecycle). Every RPC is
+	// gated on the same two checks at one chokepoint: an active guardianOf
+	// edge from the session user to the child, AND a step-up password
+	// re-entry. A caller without an edge gets the same PERMISSION_DENIED
+	// whether or not the child exists; a target that has aged past the adult
+	// threshold is refused (an adult's account is their own).
+	GetManagedChildProfile(context.Context, *GetManagedChildProfileRequest) (*GetManagedChildProfileResponse, error)
+	SetManagedChildPassword(context.Context, *SetManagedChildPasswordRequest) (*SetManagedChildPasswordResponse, error)
+	SetManagedChildUsername(context.Context, *SetManagedChildUsernameRequest) (*SetManagedChildUsernameResponse, error)
+	RevokeManagedChildSessions(context.Context, *RevokeManagedChildSessionsRequest) (*RevokeManagedChildSessionsResponse, error)
+	DeactivateManagedChildAccount(context.Context, *DeactivateManagedChildAccountRequest) (*DeactivateManagedChildAccountResponse, error)
+	ReactivateManagedChildAccount(context.Context, *ReactivateManagedChildAccountRequest) (*ReactivateManagedChildAccountResponse, error)
+	DeleteManagedChildAccount(context.Context, *DeleteManagedChildAccountRequest) (*DeleteManagedChildAccountResponse, error)
 	// Admin help (replaces self-serve ForgotPassword)
 	RequestAdminHelp(context.Context, *RequestAdminHelpRequest) (*RequestAdminHelpResponse, error)
 	ListHelpRequests(context.Context, *ListHelpRequestsRequest) (*ListHelpRequestsResponse, error)
@@ -1878,6 +1983,27 @@ func (UnimplementedIdentityServiceServer) GetGuardians(context.Context, *GetGuar
 }
 func (UnimplementedIdentityServiceServer) CreateManagedChildAccount(context.Context, *CreateManagedChildAccountRequest) (*CreateManagedChildAccountResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateManagedChildAccount not implemented")
+}
+func (UnimplementedIdentityServiceServer) GetManagedChildProfile(context.Context, *GetManagedChildProfileRequest) (*GetManagedChildProfileResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetManagedChildProfile not implemented")
+}
+func (UnimplementedIdentityServiceServer) SetManagedChildPassword(context.Context, *SetManagedChildPasswordRequest) (*SetManagedChildPasswordResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetManagedChildPassword not implemented")
+}
+func (UnimplementedIdentityServiceServer) SetManagedChildUsername(context.Context, *SetManagedChildUsernameRequest) (*SetManagedChildUsernameResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetManagedChildUsername not implemented")
+}
+func (UnimplementedIdentityServiceServer) RevokeManagedChildSessions(context.Context, *RevokeManagedChildSessionsRequest) (*RevokeManagedChildSessionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokeManagedChildSessions not implemented")
+}
+func (UnimplementedIdentityServiceServer) DeactivateManagedChildAccount(context.Context, *DeactivateManagedChildAccountRequest) (*DeactivateManagedChildAccountResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeactivateManagedChildAccount not implemented")
+}
+func (UnimplementedIdentityServiceServer) ReactivateManagedChildAccount(context.Context, *ReactivateManagedChildAccountRequest) (*ReactivateManagedChildAccountResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReactivateManagedChildAccount not implemented")
+}
+func (UnimplementedIdentityServiceServer) DeleteManagedChildAccount(context.Context, *DeleteManagedChildAccountRequest) (*DeleteManagedChildAccountResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteManagedChildAccount not implemented")
 }
 func (UnimplementedIdentityServiceServer) RequestAdminHelp(context.Context, *RequestAdminHelpRequest) (*RequestAdminHelpResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RequestAdminHelp not implemented")
@@ -2808,6 +2934,132 @@ func _IdentityService_CreateManagedChildAccount_Handler(srv interface{}, ctx con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).CreateManagedChildAccount(ctx, req.(*CreateManagedChildAccountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_GetManagedChildProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetManagedChildProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GetManagedChildProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GetManagedChildProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GetManagedChildProfile(ctx, req.(*GetManagedChildProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_SetManagedChildPassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetManagedChildPasswordRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).SetManagedChildPassword(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_SetManagedChildPassword_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).SetManagedChildPassword(ctx, req.(*SetManagedChildPasswordRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_SetManagedChildUsername_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetManagedChildUsernameRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).SetManagedChildUsername(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_SetManagedChildUsername_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).SetManagedChildUsername(ctx, req.(*SetManagedChildUsernameRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_RevokeManagedChildSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeManagedChildSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RevokeManagedChildSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RevokeManagedChildSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RevokeManagedChildSessions(ctx, req.(*RevokeManagedChildSessionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_DeactivateManagedChildAccount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeactivateManagedChildAccountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).DeactivateManagedChildAccount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_DeactivateManagedChildAccount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).DeactivateManagedChildAccount(ctx, req.(*DeactivateManagedChildAccountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ReactivateManagedChildAccount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReactivateManagedChildAccountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ReactivateManagedChildAccount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ReactivateManagedChildAccount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ReactivateManagedChildAccount(ctx, req.(*ReactivateManagedChildAccountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_DeleteManagedChildAccount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteManagedChildAccountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).DeleteManagedChildAccount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_DeleteManagedChildAccount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).DeleteManagedChildAccount(ctx, req.(*DeleteManagedChildAccountRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4338,6 +4590,34 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateManagedChildAccount",
 			Handler:    _IdentityService_CreateManagedChildAccount_Handler,
+		},
+		{
+			MethodName: "GetManagedChildProfile",
+			Handler:    _IdentityService_GetManagedChildProfile_Handler,
+		},
+		{
+			MethodName: "SetManagedChildPassword",
+			Handler:    _IdentityService_SetManagedChildPassword_Handler,
+		},
+		{
+			MethodName: "SetManagedChildUsername",
+			Handler:    _IdentityService_SetManagedChildUsername_Handler,
+		},
+		{
+			MethodName: "RevokeManagedChildSessions",
+			Handler:    _IdentityService_RevokeManagedChildSessions_Handler,
+		},
+		{
+			MethodName: "DeactivateManagedChildAccount",
+			Handler:    _IdentityService_DeactivateManagedChildAccount_Handler,
+		},
+		{
+			MethodName: "ReactivateManagedChildAccount",
+			Handler:    _IdentityService_ReactivateManagedChildAccount_Handler,
+		},
+		{
+			MethodName: "DeleteManagedChildAccount",
+			Handler:    _IdentityService_DeleteManagedChildAccount_Handler,
 		},
 		{
 			MethodName: "RequestAdminHelp",
