@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"time"
 
 	"github.com/elloloop/identity/pkg/agegate"
@@ -49,12 +50,19 @@ func NewMinorDataMinimizer(enabled bool, determiner agegate.Determiner, now func
 // Enabled reports whether data-minimization is active for this deployment.
 func (m MinorDataMinimizer) Enabled() bool { return m.enabled }
 
-// BlocksChild reports whether the account identified by dobMs is a
-// COPPA-protected child whose optional PII must not be collected/persisted.
+// BlocksChildFor reports whether u is a COPPA-protected child under the
+// thresholds that apply to it on THIS request — the account's market, the
+// project's configured jurisdictions, then the deployment-wide pair. It is
+// the entry point every call site should use: classifying with the
+// deployment-wide thresholds alone would leave an account the project calls
+// a child un-minimized under a stricter jurisdiction, i.e. two definitions of
+// "child" inside one service.
+//
 // Always false when minimization is disabled.
-func (m MinorDataMinimizer) BlocksChild(dobMs int64) bool {
-	if !m.enabled {
+func (m MinorDataMinimizer) BlocksChildFor(ctx context.Context, u *User) bool {
+	if !m.enabled || u == nil {
 		return false
 	}
-	return m.determiner.Determine(dobMs, m.now()).Band == agegate.BandChild
+	return determinerForUserWith(ctx, m.determiner, nil, u).
+		Determine(u.DateOfBirthMs, m.now()).Band == agegate.BandChild
 }

@@ -2,9 +2,9 @@ syntax = "proto3";
 
 package identity.v1;
 
-option go_package = "github.com/elloloop/identity/gen/go/identity/v1;identityv1";
-
 import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/elloloop/identity/gen/go/identity/v1;identityv1";
 
 // ─── User ────────────────────────────────────────────────────────────
 
@@ -32,9 +32,9 @@ enum UserStatus {
 // (UNSPECIFIED) means age is unknown or age-gating is off.
 enum AgeBand {
   AGE_BAND_UNSPECIFIED = 0;
-  AGE_BAND_CHILD = 1;   // at/below the configured child-max age (COPPA-protected)
-  AGE_BAND_TEEN = 2;    // minor, above child-max but below adult age
-  AGE_BAND_ADULT = 3;   // at/above the adult age
+  AGE_BAND_CHILD = 1; // at/below the configured child-max age (COPPA-protected)
+  AGE_BAND_TEEN = 2; // minor, above child-max but below adult age
+  AGE_BAND_ADULT = 3; // at/above the adult age
 }
 
 message User {
@@ -42,27 +42,27 @@ message User {
   string email = 2;
   string name = 3;
   string avatar_url = 4;
-  string role = 5;                      // "admin", "member", "guest"
+  string role = 5; // "admin", "member", "guest"
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
-  bool totp_required = 8;               // true if the user has enrolled a TOTP credential
+  bool totp_required = 8; // true if the user has enrolled a TOTP credential
   UserStatus status = 9;
   string recovery_email = 10;
   int64 quota_bytes = 11;
   int64 last_login_at_ms = 12;
   bool email_verified = 13;
   int64 email_verified_at = 14;
-  int32 failed_login_count = 15;          // # of consecutive failed PasswordLogin attempts
-  int64 locked_until = 16;                // epoch ms; 0 = not locked, future = locked until
-  bool idv_verified = 17;                 // Latest identity verification has reached APPROVED status.
-  int64 idv_verified_at = 18;             // epoch ms; 0 = never verified
-  string phone_number = 19;               // E.164 phone number the user has verified ownership of
-  bool phone_verified = 20;               // true once an SMS OTP for phone_number was confirmed
-  int64 phone_verified_at = 21;           // epoch ms; 0 = never verified
-  int64 date_of_birth_ms = 22;            // epoch ms of date of birth; 0 = unknown
-  bool is_minor = 23;                     // derived: true when age < adult age (age-gating on)
-  AgeBand age_band = 24;                  // derived age band; UNSPECIFIED when unknown / gate off
-  string external_id = 25;                 // IdP-owned stable identifier (SCIM externalId); unique per project when set
+  int32 failed_login_count = 15; // # of consecutive failed PasswordLogin attempts
+  int64 locked_until = 16; // epoch ms; 0 = not locked, future = locked until
+  bool idv_verified = 17; // Latest identity verification has reached APPROVED status.
+  int64 idv_verified_at = 18; // epoch ms; 0 = never verified
+  string phone_number = 19; // E.164 phone number the user has verified ownership of
+  bool phone_verified = 20; // true once an SMS OTP for phone_number was confirmed
+  int64 phone_verified_at = 21; // epoch ms; 0 = never verified
+  int64 date_of_birth_ms = 22; // epoch ms of date of birth; 0 = unknown
+  bool is_minor = 23; // derived: true when age < adult age (age-gating on)
+  AgeBand age_band = 24; // derived age band; UNSPECIFIED when unknown / gate off
+  string external_id = 25; // IdP-owned stable identifier (SCIM externalId); unique per project when set
   // is_anonymous marks an account created by SignInAnonymously: a real
   // user with a stable id but NO credential of any kind. It has no email,
   // and is reachable only through its refresh token. Clears permanently on
@@ -131,8 +131,8 @@ message ListUsersRequest {
   string tenant_id = 1;
   string cursor = 2;
   int32 limit = 3;
-  UserStatus status_filter = 4;     // USER_STATUS_UNSPECIFIED = no filter
-  string search = 5;                // optional substring match on email/name
+  UserStatus status_filter = 4; // USER_STATUS_UNSPECIFIED = no filter
+  string search = 5; // optional substring match on email/name
 }
 
 message ListUsersResponse {
@@ -157,7 +157,7 @@ message CreateGroupRequest {
   string name = 1;
   string description = 2;
   string tenant_id = 3;
-  string created_by = 4;                // user_id of creator
+  string created_by = 4; // user_id of creator
 }
 
 message CreateGroupResponse {
@@ -186,7 +186,7 @@ message ListGroupsRequest {
   string tenant_id = 1;
   string cursor = 2;
   int32 limit = 3;
-  string name_filter = 4;           // optional substring match on group name
+  string name_filter = 4; // optional substring match on group name
 }
 
 message ListGroupsResponse {
@@ -225,35 +225,35 @@ message ListGroupMembersResponse {
 
 message BeginOAuthLoginRequest {
   string redirect_uri = 1;
-  string provider     = 2;  // "google", "microsoft", "github", or "apple"
-  string tenant       = 3;  // Microsoft tenant ID (optional)
+  string provider = 2; // "google", "microsoft", "github", or "apple"
+  string tenant = 3; // Microsoft tenant ID (optional)
 }
 
 message BeginOAuthLoginResponse {
   string authorization_url = 1;
-  string state             = 2;
-  string state_token       = 3;
-  string code_verifier     = 4;
-  int32 expires_in         = 5;
+  string state = 2;
+  string state_token = 3;
+  string code_verifier = 4;
+  int32 expires_in = 5;
 }
 
 message OAuthLoginRequest {
-  string code          = 1;
-  string redirect_uri  = 2;
-  string provider      = 3;  // "google", "microsoft", "github", or "apple"
-  string code_verifier = 4;  // PKCE (optional)
-  string tenant        = 5;  // Microsoft tenant ID (optional)
-  string state         = 6;  // authorization callback state (required for server-owned flow)
-  string state_token   = 7;  // opaque token minted by BeginOAuthLogin
+  string code = 1;
+  string redirect_uri = 2;
+  string provider = 3; // "google", "microsoft", "github", or "apple"
+  string code_verifier = 4; // PKCE (optional)
+  string tenant = 5; // Microsoft tenant ID (optional)
+  string state = 6; // authorization callback state (required for server-owned flow)
+  string state_token = 7; // opaque token minted by BeginOAuthLogin
   string apple_user_payload = 8; // one-time user payload from Apple's form_post callback
 }
 
 message OAuthLoginResponse {
-  User user             = 1;
-  string access_token   = 2;  // Backend-issued JWT
-  reserved 3;                  // was id_token (removed)
-  string refresh_token  = 4;  // For token rotation (send in RefreshToken RPC body)
-  int32 expires_in      = 5;  // Access token lifetime in seconds
+  User user = 1;
+  string access_token = 2; // Backend-issued JWT
+  reserved 3; // was id_token (removed)
+  string refresh_token = 4; // For token rotation (send in RefreshToken RPC body)
+  int32 expires_in = 5; // Access token lifetime in seconds
 }
 
 // NativeOAuthLoginRequest carries a native mobile-SDK ID token for
@@ -299,10 +299,10 @@ message NativeOAuthLoginRequest {
 // NativeOAuthLoginResponse mirrors OAuthLoginResponse: the backend-issued
 // token pair plus the resolved user.
 message NativeOAuthLoginResponse {
-  User user            = 1;
-  string access_token  = 2;  // Backend-issued JWT
-  string refresh_token = 3;  // For token rotation (send in RefreshToken RPC body)
-  int32 expires_in     = 4;  // Access token lifetime in seconds
+  User user = 1;
+  string access_token = 2; // Backend-issued JWT
+  string refresh_token = 3; // For token rotation (send in RefreshToken RPC body)
+  int32 expires_in = 4; // Access token lifetime in seconds
 }
 
 // RedeemOAuthCode exchanges the single-use one-time code handed to the
@@ -310,21 +310,22 @@ message NativeOAuthLoginResponse {
 // 302 return_to?code=<otc>) for a backend-issued token pair. The code
 // is single-use and short-lived; a replay returns CodeUnauthenticated.
 message RedeemOAuthCodeRequest {
-  string code = 1;  // opaque one-time code from the hosted callback redirect
+  string code = 1; // opaque one-time code from the hosted callback redirect
 }
 
 message RedeemOAuthCodeResponse {
-  User user            = 1;
-  string access_token  = 2;  // Backend-issued JWT
-  string refresh_token = 3;  // For token rotation (send in RefreshToken RPC body)
-  int32 expires_in     = 4;  // Access token lifetime in seconds
+  User user = 1;
+  string access_token = 2; // Backend-issued JWT
+  string refresh_token = 3; // For token rotation (send in RefreshToken RPC body)
+  int32 expires_in = 4; // Access token lifetime in seconds
 }
 
 message PasswordSignupRequest {
-  string email    = 1;
+  string email = 1;
   string password = 2;
-  string recovery_email = 3;  // Optional: secondary contact address. Note: password reset links are sent to the account's PRIMARY verified email, not this address.
-  reserved 4; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
+  string recovery_email = 3; // Optional: secondary contact address. Note: password reset links are sent to the account's PRIMARY verified email, not this address.
+  reserved 4;
+  reserved "captcha_token"; // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
   int64 date_of_birth_ms = 5; // Optional; epoch ms of date of birth. Required at signup when GATEWAY_AGEGATE_REQUIRE_DOB.
   // market is the jurisdiction/market code (e.g. "IN", "US") the account is
   // created under. Optional; when the project configures per-jurisdiction age
@@ -334,11 +335,11 @@ message PasswordSignupRequest {
 }
 
 message PasswordSignupResponse {
-  string id_token      = 1;  // deprecated, kept for backward compat
-  User user            = 2;
-  string access_token  = 3;
+  string id_token = 1; // deprecated, kept for backward compat
+  User user = 2;
+  string access_token = 3;
   string refresh_token = 4;
-  int32 expires_in     = 5;
+  int32 expires_in = 5;
 }
 
 message PasswordLoginRequest {
@@ -347,19 +348,20 @@ message PasswordLoginRequest {
   // this project (see User.username). The response is identical whether the
   // identifier matched by email, by username, or not at all, so the endpoint
   // discloses neither which form matched nor whether the account exists.
-  string email    = 1;
+  string email = 1;
   string password = 2;
-  reserved 3; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
+  reserved 3;
+  reserved "captcha_token"; // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
 }
 
 message PasswordLoginResponse {
-  string id_token = 1;       // Legacy local format (deprecated)
-  User user       = 2;
-  string access_token  = 3;  // Backend-issued JWT (empty when totp_required=true)
-  string refresh_token = 4;  // For token rotation (empty when totp_required=true)
-  int32 expires_in     = 5;  // Access token lifetime in seconds
-  bool totp_required      = 6;  // true when the user has TOTP enabled; client must call VerifyTotp
-  string login_challenge_id = 7;  // id of the pending LoginChallenge; pass to VerifyTotp
+  string id_token = 1; // Legacy local format (deprecated)
+  User user = 2;
+  string access_token = 3; // Backend-issued JWT (empty when totp_required=true)
+  string refresh_token = 4; // For token rotation (empty when totp_required=true)
+  int32 expires_in = 5; // Access token lifetime in seconds
+  bool totp_required = 6; // true when the user has TOTP enabled; client must call VerifyTotp
+  string login_challenge_id = 7; // id of the pending LoginChallenge; pass to VerifyTotp
 }
 
 // ─── Required-DOB completion ──────────────────────────────────────────
@@ -397,15 +399,15 @@ message DOBRequiredDetails {
 // guardian flow, not alone). The DOB can be set exactly once: an account
 // that already has one is CodeFailedPrecondition.
 message SubmitDateOfBirthRequest {
-  string completion_token  = 1;  // from the dob_required error detail
-  int64 date_of_birth_ms   = 2;  // epoch ms; must be a plausible past date
+  string completion_token = 1; // from the dob_required error detail
+  int64 date_of_birth_ms = 2; // epoch ms; must be a plausible past date
 }
 
 message SubmitDateOfBirthResponse {
-  User user            = 1;
-  string access_token  = 2;  // empty when user.status is USER_STATUS_PENDING_PARENTAL_CONSENT
-  string refresh_token = 3;  // empty likewise
-  int32 expires_in     = 4;  // Access token lifetime in seconds
+  User user = 1;
+  string access_token = 2; // empty when user.status is USER_STATUS_PENDING_PARENTAL_CONSENT
+  string refresh_token = 3; // empty likewise
+  int32 expires_in = 4; // Access token lifetime in seconds
 }
 
 // ─── Passwordless Email Login (OTP code + magic link) ────────────────
@@ -421,7 +423,8 @@ message SubmitDateOfBirthResponse {
 // already has an account (and whether or not auto-create is enabled).
 message RequestEmailLoginCodeRequest {
   string email = 1;
-  reserved 2; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
+  reserved 2;
+  reserved "captcha_token"; // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
 }
 
 message RequestEmailLoginCodeResponse {
@@ -433,14 +436,14 @@ message RequestEmailLoginCodeResponse {
 // per-code attempt counter; exceeding the cap invalidates the code.
 message VerifyEmailLoginCodeRequest {
   string email = 1;
-  string code  = 2;
+  string code = 2;
 }
 
 message VerifyEmailLoginCodeResponse {
-  User user            = 1;
-  string access_token  = 2;
+  User user = 1;
+  string access_token = 2;
   string refresh_token = 3;
-  int32 expires_in     = 4;
+  int32 expires_in = 4;
 }
 
 // RequestMagicLink emails a clickable single-use link. return_to is
@@ -448,9 +451,10 @@ message VerifyEmailLoginCodeResponse {
 // (shared with the hosted OAuth flow). Anti-enumeration: identical
 // response regardless of account existence.
 message RequestMagicLinkRequest {
-  string email     = 1;
-  string return_to = 2;  // app URL to return to; must match the allowlist
-  reserved 3; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
+  string email = 1;
+  string return_to = 2; // app URL to return to; must match the allowlist
+  reserved 3;
+  reserved "captcha_token"; // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
 }
 
 message RequestMagicLinkResponse {
@@ -466,11 +470,11 @@ message RedeemMagicLinkRequest {
 }
 
 message RedeemMagicLinkResponse {
-  User user            = 1;
-  string access_token  = 2;
+  User user = 1;
+  string access_token = 2;
   string refresh_token = 3;
-  int32 expires_in     = 4;
-  string return_to     = 5;  // allowlist-validated app URL bound at request time
+  int32 expires_in = 4;
+  string return_to = 5; // allowlist-validated app URL bound at request time
 }
 
 // ─── Phone verification (SMS OTP) ───────────────────────────────────
@@ -482,7 +486,7 @@ message RedeemMagicLinkResponse {
 // phone verified. Both require auth.
 
 message RequestPhoneVerificationRequest {
-  string phone_number = 1;  // E.164 number to verify (e.g. "+14155550123")
+  string phone_number = 1; // E.164 number to verify (e.g. "+14155550123")
 }
 
 message RequestPhoneVerificationResponse {
@@ -490,12 +494,12 @@ message RequestPhoneVerificationResponse {
 }
 
 message VerifyPhoneCodeRequest {
-  string phone_number = 1;  // must match the number the code was sent to
-  string code         = 2;  // the 6-digit OTP from the SMS
+  string phone_number = 1; // must match the number the code was sent to
+  string code = 2; // the 6-digit OTP from the SMS
 }
 
 message VerifyPhoneCodeResponse {
-  User user = 1;  // the updated user with phone_verified=true
+  User user = 1; // the updated user with phone_verified=true
 }
 
 // ─── Session / Token Auth ───────────────────────────────────────────
@@ -538,7 +542,7 @@ message UpdateProfileResponse {
 
 message ChangePasswordRequest {
   string current_password = 1;
-  string new_password     = 2;
+  string new_password = 2;
 }
 
 message ChangePasswordResponse {}
@@ -613,7 +617,8 @@ message ExportMyDataResponse {
 // request silently succeeds (no enumeration).
 message RequestPasswordResetRequest {
   string email = 1;
-  reserved 2; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
+  reserved 2;
+  reserved "captcha_token"; // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
 }
 
 message RequestPasswordResetResponse {
@@ -669,8 +674,8 @@ message ConfirmEmailChangeResponse {
 
 enum IdentityVerificationStatus {
   IDENTITY_VERIFICATION_STATUS_UNSPECIFIED = 0;
-  IDENTITY_VERIFICATION_STATUS_PENDING = 1;     // Session created, client has not submitted yet
-  IDENTITY_VERIFICATION_STATUS_IN_REVIEW = 2;   // Submitted, awaiting provider verdict
+  IDENTITY_VERIFICATION_STATUS_PENDING = 1; // Session created, client has not submitted yet
+  IDENTITY_VERIFICATION_STATUS_IN_REVIEW = 2; // Submitted, awaiting provider verdict
   IDENTITY_VERIFICATION_STATUS_APPROVED = 3;
   IDENTITY_VERIFICATION_STATUS_REJECTED = 4;
   IDENTITY_VERIFICATION_STATUS_EXPIRED = 5;
@@ -680,21 +685,21 @@ message IdentityVerification {
   string id = 1;
   string user_id = 2;
   string tenant_id = 3;
-  string provider = 4;                              // "azure", "stub", ...
-  string provider_session_id = 5;                   // Provider's check/session ID
+  string provider = 4; // "azure", "stub", ...
+  string provider_session_id = 5; // Provider's check/session ID
   IdentityVerificationStatus status = 6;
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
   google.protobuf.Timestamp completed_at = 9;
-  string rejection_reason = 10;                     // Empty unless status = REJECTED
+  string rejection_reason = 10; // Empty unless status = REJECTED
 }
 
 message BeginIdentityVerificationRequest {}
 
 message BeginIdentityVerificationResponse {
   string verification_id = 1;
-  string provider = 2;                              // Tells the client which SDK to load
-  string session_token = 3;                         // Provider-specific; passed to client SDK
+  string provider = 2; // Tells the client which SDK to load
+  string session_token = 3; // Provider-specific; passed to client SDK
   google.protobuf.Timestamp expires_at = 4;
 }
 
@@ -795,7 +800,6 @@ message SetAccountMarketResponse {
   // band and (possibly re-gated) status.
   User user = 1;
 }
-
 
 message GrantParentalConsentRequest {
   // child_user_id is the child-band account (currently in
@@ -1076,7 +1080,7 @@ message AdminHelpRequest {
 
 message RequestAdminHelpRequest {
   string email = 1;
-  string reason = 2;  // Optional — what the user is having trouble with
+  string reason = 2; // Optional — what the user is having trouble with
 }
 
 message RequestAdminHelpResponse {
@@ -1084,7 +1088,7 @@ message RequestAdminHelpResponse {
 }
 
 message ListHelpRequestsRequest {
-  HelpRequestStatus status_filter = 1;  // 0 = all
+  HelpRequestStatus status_filter = 1; // 0 = all
   string cursor = 2;
   int32 limit = 3;
 }
@@ -1097,7 +1101,7 @@ message ListHelpRequestsResponse {
 
 message ResolveHelpRequestRequest {
   string request_id = 1;
-  bool reject = 2;         // false = resolve, true = reject
+  bool reject = 2; // false = resolve, true = reject
   string resolution_notes = 3;
 }
 
@@ -1158,7 +1162,7 @@ message CompletePasskeyRegistrationResponse {
 
 // Authentication (no session required)
 message BeginPasskeyLoginRequest {
-  string email = 1;  // optional — if empty, allows discoverable credentials (resident keys)
+  string email = 1; // optional — if empty, allows discoverable credentials (resident keys)
 }
 
 message BeginPasskeyLoginResponse {
@@ -1188,7 +1192,8 @@ message CompletePasskeyLoginResponse {
 message BeginPasskeySignupRequest {
   string email = 1;
   string device_name = 2;
-  reserved 3; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
+  reserved 3;
+  reserved "captcha_token"; // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
 }
 
 message BeginPasskeySignupResponse {
@@ -1233,23 +1238,23 @@ message DeletePasskeyResponse {}
 
 enum QrLoginStatus {
   QR_LOGIN_STATUS_UNSPECIFIED = 0;
-  QR_LOGIN_STATUS_PENDING     = 1;
-  QR_LOGIN_STATUS_APPROVED    = 2;
-  QR_LOGIN_STATUS_REJECTED    = 3;
-  QR_LOGIN_STATUS_EXPIRED     = 4;
-  QR_LOGIN_STATUS_CONSUMED    = 5;
+  QR_LOGIN_STATUS_PENDING = 1;
+  QR_LOGIN_STATUS_APPROVED = 2;
+  QR_LOGIN_STATUS_REJECTED = 3;
+  QR_LOGIN_STATUS_EXPIRED = 4;
+  QR_LOGIN_STATUS_CONSUMED = 5;
 }
 
 // Step 1: New device (unauthenticated) initiates a QR login.
 message InitiateQrLoginRequest {
-  string device_info = 1;  // e.g. "Pixel 8 Pro"
-  string user_agent  = 2;
+  string device_info = 1; // e.g. "Pixel 8 Pro"
+  string user_agent = 2;
 }
 
 message InitiateQrLoginResponse {
-  string session_id = 1;  // opaque token for polling
-  string qr_url     = 2;  // URL to encode in the QR code
-  int32  expires_in = 3;  // seconds until session expires
+  string session_id = 1; // opaque token for polling
+  string qr_url = 2; // URL to encode in the QR code
+  int32 expires_in = 3; // seconds until session expires
   // Returned only to the initiating device. Must be presented on every
   // PollQrLogin call. NEVER embedded in qr_url, so an attacker who only
   // sees the scanned QR code cannot poll for the issued tokens.
@@ -1262,16 +1267,16 @@ message GetQrLoginSessionRequest {
 }
 
 message GetQrLoginSessionResponse {
-  QrLoginStatus status                 = 1;
-  string new_device_info               = 2;
-  string new_device_ip                 = 3;
+  QrLoginStatus status = 1;
+  string new_device_info = 2;
+  string new_device_ip = 3;
   google.protobuf.Timestamp expires_at = 4;
 }
 
 // Step 2b: Authenticated device approves (or rejects) the new device.
 message ApproveQrLoginRequest {
   string session_id = 1;
-  bool   approve    = 2;
+  bool approve = 2;
 }
 
 message ApproveQrLoginResponse {
@@ -1280,7 +1285,7 @@ message ApproveQrLoginResponse {
 
 // Step 3: New device polls for completion.
 message PollQrLoginRequest {
-  string session_id  = 1;
+  string session_id = 1;
   // Returned by InitiateQrLogin only to the initiator. Required.
   string poll_secret = 2;
 }
@@ -1288,10 +1293,10 @@ message PollQrLoginRequest {
 message PollQrLoginResponse {
   QrLoginStatus status = 1;
   // Populated only when status == QR_LOGIN_STATUS_APPROVED.
-  User   user          = 2;
-  string access_token  = 3;
+  User user = 2;
+  string access_token = 3;
   string refresh_token = 4;
-  int32  expires_in    = 5;
+  int32 expires_in = 5;
 }
 
 // ─── 2FA TOTP ────────────────────────────────────────────────────────
@@ -1299,9 +1304,9 @@ message PollQrLoginResponse {
 message BeginTotpSetupRequest {}
 
 message BeginTotpSetupResponse {
-  string secret = 1;                    // Base32 (shown to user once)
-  string qr_code_uri = 2;               // otpauth://totp/Glassa:user@example.com?secret=...&issuer=Glassa
-  repeated string recovery_codes = 3;   // 10 one-time recovery codes (shown once)
+  string secret = 1; // Base32 (shown to user once)
+  string qr_code_uri = 2; // otpauth://totp/Glassa:user@example.com?secret=...&issuer=Glassa
+  repeated string recovery_codes = 3; // 10 one-time recovery codes (shown once)
 }
 
 message VerifyTotpSetupRequest {
@@ -1313,14 +1318,14 @@ message VerifyTotpSetupResponse {
 }
 
 message DisableTotpRequest {
-  string password = 1;                  // Require password confirmation to disable
+  string password = 1; // Require password confirmation to disable
 }
 
 message DisableTotpResponse {}
 
 message VerifyTotpRequest {
-  string login_challenge_id = 1;        // From a pending login
-  string code = 2;                      // TOTP code OR recovery code
+  string login_challenge_id = 1; // From a pending login
+  string code = 2; // TOTP code OR recovery code
 }
 
 message VerifyTotpResponse {
@@ -1341,14 +1346,14 @@ message RegenerateRecoveryCodesResponse {
 // ─── Session Management ─────────────────────────────────────────────
 
 message Session {
-  string session_id = 1;                // refresh token node id (NOT the raw token)
+  string session_id = 1; // refresh token node id (NOT the raw token)
   string device_name = 2;
   string ip_address = 3;
   string user_agent = 4;
   google.protobuf.Timestamp created_at = 5;
   google.protobuf.Timestamp last_used_at = 6;
   google.protobuf.Timestamp expires_at = 7;
-  bool current = 8;                     // is this the session making the request
+  bool current = 8; // is this the session making the request
 }
 
 message ListMySessionsRequest {}
@@ -1364,7 +1369,7 @@ message RevokeSessionRequest {
 message RevokeSessionResponse {}
 
 message RevokeAllSessionsRequest {
-  string password = 1;                  // Require password to revoke all
+  string password = 1; // Require password to revoke all
 }
 
 message RevokeAllSessionsResponse {
@@ -1372,7 +1377,7 @@ message RevokeAllSessionsResponse {
 }
 
 message SignOutEverywhereRequest {
-  string password = 1;                  // Require password confirmation
+  string password = 1; // Require password confirmation
 }
 
 message SignOutEverywhereResponse {
@@ -1383,24 +1388,24 @@ message SignOutEverywhereResponse {
 
 message AuditEvent {
   string id = 1;
-  string event_type = 2;                // see AuditEventType enum values in schema.yaml
+  string event_type = 2; // see AuditEventType enum values in schema.yaml
   string actor_user_id = 3;
   string target_user_id = 4;
   string ip_address = 5;
   string user_agent = 6;
   bool success = 7;
-  string details = 8;                   // JSON blob for event-specific data
+  string details = 8; // JSON blob for event-specific data
   google.protobuf.Timestamp created_at = 9;
 }
 
 message ListAuditEventsRequest {
-  string actor_user_id = 1;             // optional filter
-  string target_user_id = 2;            // optional filter
-  string event_type = 3;                // optional filter
-  int64 start_time_ms = 4;              // optional: events >= this ms epoch
-  int64 end_time_ms = 5;                // optional: events <= this ms epoch
-  int32 limit = 6;                      // default 50, max 500
-  string cursor = 7;                    // opaque pagination cursor (offset-based)
+  string actor_user_id = 1; // optional filter
+  string target_user_id = 2; // optional filter
+  string event_type = 3; // optional filter
+  int64 start_time_ms = 4; // optional: events >= this ms epoch
+  int64 end_time_ms = 5; // optional: events <= this ms epoch
+  int32 limit = 6; // default 50, max 500
+  string cursor = 7; // opaque pagination cursor (offset-based)
 }
 
 message ListAuditEventsResponse {
@@ -1415,7 +1420,7 @@ message ListAuditEventsResponse {
 message InviteUserRequest {
   string email = 1;
   string name = 2;
-  string role = 3;                   // "admin", "member", "guest"
+  string role = 3; // "admin", "member", "guest"
   string recovery_email = 4;
   int64 quota_bytes = 5;
   // If false: create a pending invitation; the user completes signup via AcceptInvitation.
@@ -1425,9 +1430,9 @@ message InviteUserRequest {
 
 message InviteUserResponse {
   User user = 1;
-  string invitation_token = 2;       // One-time setup token (shown to admin once, emailed in prod)
-  string setup_url = 3;              // Full URL with token embedded
-  string temporary_password = 4;     // Only set when create_immediately = true
+  string invitation_token = 2; // One-time setup token (shown to admin once, emailed in prod)
+  string setup_url = 3; // Full URL with token embedded
+  string temporary_password = 4; // Only set when create_immediately = true
 }
 
 message AcceptInvitationRequest {
@@ -1464,8 +1469,8 @@ message ResetUserPasswordRequest {
 }
 
 message ResetUserPasswordResponse {
-  string temporary_password = 1;     // Only set when generate_temp_password = true
-  string reset_token = 2;            // Only set when generate_temp_password = false
+  string temporary_password = 1; // Only set when generate_temp_password = true
+  string reset_token = 2; // Only set when generate_temp_password = false
 }
 
 message SetUserQuotaRequest {
@@ -1484,8 +1489,8 @@ message Domain {
   string id = 1;
   string tenant_id = 2;
   string domain = 3;
-  string verification_method = 4;      // "dns_txt" | "email"
-  string status = 5;                   // "pending" | "verified" | "failed"
+  string verification_method = 4; // "dns_txt" | "email"
+  string status = 5; // "pending" | "verified" | "failed"
   google.protobuf.Timestamp verified_at = 6;
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
@@ -1494,7 +1499,7 @@ message Domain {
 message CreateDomainRequest {
   string tenant_id = 1;
   string domain = 2;
-  string verification_method = 3;      // "dns_txt" | "email"
+  string verification_method = 3; // "dns_txt" | "email"
 }
 
 message CreateDomainResponse {
@@ -1502,8 +1507,8 @@ message CreateDomainResponse {
   // The DNS TXT challenge the caller must publish before VerifyDomain
   // succeeds. Populated for verification_method = "dns_txt"; empty for
   // "email" (which verifies by an out-of-band confirmation link).
-  string dns_txt_name = 2;             // host the TXT record is published on
-  string dns_txt_value = 3;            // exact TXT value to publish
+  string dns_txt_name = 2; // host the TXT record is published on
+  string dns_txt_value = 3; // exact TXT value to publish
 }
 
 message VerifyDomainRequest {
@@ -1528,9 +1533,9 @@ message TenantMembership {
   string id = 1;
   string tenant_id = 2;
   string user_id = 3;
-  string source = 4;                   // "domain" | "invited" | "added"
-  string role = 5;                     // "member" | "admin" | "owner"
-  string status = 6;                   // "active" | "pending" | "inactive"
+  string source = 4; // "domain" | "invited" | "added"
+  string role = 5; // "member" | "admin" | "owner"
+  string status = 6; // "active" | "pending" | "inactive"
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
 }
@@ -1543,8 +1548,8 @@ message TenantInvitation {
   string tenant_id = 2;
   string email = 3;
   string invited_by = 4;
-  string role = 5;                     // "member" | "admin" | "owner"
-  string status = 6;                   // "pending" | "accepted" | "revoked" | "expired"
+  string role = 5; // "member" | "admin" | "owner"
+  string status = 6; // "pending" | "accepted" | "revoked" | "expired"
   google.protobuf.Timestamp expires_at = 7;
   google.protobuf.Timestamp accepted_at = 8;
   google.protobuf.Timestamp created_at = 9;
@@ -1553,7 +1558,7 @@ message TenantInvitation {
 message CreateTenantInvitationRequest {
   string tenant_id = 1;
   string email = 2;
-  string role = 3;                     // "member" (default) | "admin" | "owner"
+  string role = 3; // "member" (default) | "admin" | "owner"
 }
 
 message CreateTenantInvitationResponse {
@@ -1984,9 +1989,9 @@ message AdminSetProjectAssuranceResponse {
 message ProjectAssuranceConfig {
   // iOS App Attest: team id + bundle id form the App ID; env is
   // "production" (default) or "development".
-  string ios_team_id   = 1;
+  string ios_team_id = 1;
   string ios_bundle_id = 2;
-  string ios_env       = 3;
+  string ios_env = 3;
 
   // Android Play Integrity.
   string android_package_name = 4;
@@ -2000,7 +2005,7 @@ message ProjectAssuranceConfig {
   // Explicit removal. Setting a clear flag deletes that platform's stored
   // block (including, for Android, the encrypted service-account key).
   // Omitting a platform LEAVES IT UNCHANGED — deletion is never implicit.
-  bool clear_ios     = 8;
+  bool clear_ios = 8;
   bool clear_android = 9;
 }
 
@@ -2042,7 +2047,7 @@ message AdminListProjectOAuthProvidersResponse {
 // assertion must be bound to. Web evidence needs no challenge (the
 // captcha provider runs its own).
 message CreateAssuranceChallengeRequest {
-  string platform = 1;  // "ios" | "android"
+  string platform = 1; // "ios" | "android"
 }
 
 message CreateAssuranceChallengeResponse {
@@ -2051,19 +2056,19 @@ message CreateAssuranceChallengeResponse {
   // the App Attest clientData; Android passes the STRING verbatim as the
   // Play Integrity nonce (Play echoes it back and the server compares it
   // as a string).
-  string challenge     = 2;
-  int64  expires_at_ms = 3;
+  string challenge = 2;
+  int64 expires_at_ms = 3;
 }
 
 // IssueAssuranceToken exchanges verified platform evidence for an
 // assurance token. Exactly the fields for `platform` are consulted.
 message IssueAssuranceTokenRequest {
-  string platform     = 1;  // "ios" | "android" | "web"
-  string challenge_id = 2;  // ios + android
+  string platform = 1; // "ios" | "android" | "web"
+  string challenge_id = 2; // ios + android
 
   // iOS: DCAppAttestService.attestKey output.
-  string key_id             = 3;  // standard-base64 key identifier
-  bytes  attestation_object = 4;  // raw CBOR attestation object
+  string key_id = 3; // standard-base64 key identifier
+  bytes attestation_object = 4; // raw CBOR attestation object
 
   // Android: Play Integrity API token (server-side decoded via Google).
   string integrity_token = 5;
@@ -2077,7 +2082,7 @@ message IssueAssuranceTokenResponse {
   // aud="assurance" and NO subject — it asserts the client, never a user.
   // Attach it as the X-Assurance-Token header.
   string assurance_token = 1;
-  int64  expires_at_ms   = 2;
+  int64 expires_at_ms = 2;
 }
 
 // RefreshAssuranceToken renews an assurance token without a full
@@ -2086,13 +2091,13 @@ message IssueAssuranceTokenResponse {
 // re-run IssueAssuranceToken (Play Integrity has no persistent key).
 message RefreshAssuranceTokenRequest {
   string challenge_id = 1;
-  string key_id       = 2;
-  bytes  assertion    = 3;  // raw CBOR assertion object
+  string key_id = 2;
+  bytes assertion = 3; // raw CBOR assertion object
 }
 
 message RefreshAssuranceTokenResponse {
   string assurance_token = 1;
-  int64  expires_at_ms   = 2;
+  int64 expires_at_ms = 2;
 }
 
 // ── Anonymous identity ─────────────────────────────────────────────────────
@@ -2118,10 +2123,10 @@ message RefreshAssuranceTokenResponse {
 message SignInAnonymouslyRequest {}
 
 message SignInAnonymouslyResponse {
-  User   user          = 1;  // is_anonymous is true; email is empty
-  string access_token  = 2;
-  string refresh_token = 3;  // the account's ONLY means of return — persist it
-  int32  expires_in    = 4;  // access token lifetime in seconds
+  User user = 1; // is_anonymous is true; email is empty
+  string access_token = 2;
+  string refresh_token = 3; // the account's ONLY means of return — persist it
+  int32 expires_in = 4; // access token lifetime in seconds
 }
 
 // UpgradeAnonymousAccount attaches a permanent credential to the CALLING
@@ -2152,35 +2157,35 @@ message SignInAnonymouslyResponse {
 message UpgradeAnonymousAccountRequest {
   oneof credential {
     PasswordCredential password = 1;
-    OAuthCredential    oauth    = 2;
+    OAuthCredential oauth = 2;
   }
 }
 
 // PasswordCredential upgrades the account to an email + password login.
 // The email must be unclaimed within the project.
 message PasswordCredential {
-  string email    = 1;
+  string email = 1;
   string password = 2;
-  string name     = 3;  // optional display name
+  string name = 3; // optional display name
 }
 
 // OAuthCredential upgrades the account to a federated login. The server
 // performs the provider code exchange itself — the client never asserts
 // the identity — exactly as OAuthLogin and LinkIdentity do.
 message OAuthCredential {
-  string provider      = 1;  // "google" | "microsoft" | "apple" | "github" | "oidc"
-  string code          = 2;
-  string redirect_uri  = 3;
+  string provider = 1; // "google" | "microsoft" | "apple" | "github" | "oidc"
+  string code = 2;
+  string redirect_uri = 3;
   string code_verifier = 4;
-  string state         = 5;
-  string state_token   = 6;
+  string state = 5;
+  string state_token = 6;
 }
 
 message UpgradeAnonymousAccountResponse {
-  User   user          = 1;  // same id as before; is_anonymous now false
-  string access_token  = 2;  // reissued so the anonymous claim is dropped
+  User user = 1; // same id as before; is_anonymous now false
+  string access_token = 2; // reissued so the anonymous claim is dropped
   string refresh_token = 3;
-  int32  expires_in    = 4;
+  int32 expires_in = 4;
 }
 
 // ── Linked identities (self-service connected accounts) ────────────────────
@@ -2194,10 +2199,10 @@ message UpgradeAnonymousAccountResponse {
 
 // LinkedIdentity is one connected provider identity for the authenticated user.
 message LinkedIdentity {
-  string provider            = 1;  // "google", "microsoft", "github", "apple", ...
-  string provider_user_id    = 2;  // stable provider subject
-  string email_at_link_time  = 3;  // email the provider asserted when linked
-  int64  linked_at           = 4;  // epoch ms the link was created
+  string provider = 1; // "google", "microsoft", "github", "apple", ...
+  string provider_user_id = 2; // stable provider subject
+  string email_at_link_time = 3; // email the provider asserted when linked
+  int64 linked_at = 4; // epoch ms the link was created
 }
 
 message ListLinkedIdentitiesRequest {}
@@ -2213,12 +2218,12 @@ message ListLinkedIdentitiesResponse {
 // caller's user id. If that provider identity is already linked to a
 // different user the call fails (CodeAlreadyExists).
 message LinkIdentityRequest {
-  string code          = 1;  // authorization code from the provider callback
-  string redirect_uri  = 2;
-  string provider      = 3;  // "google", "microsoft", "github", "apple", ...
-  string code_verifier = 4;  // PKCE (optional)
-  string state         = 5;  // authorization callback state
-  string state_token   = 6;  // opaque token minted by BeginOAuthLogin
+  string code = 1; // authorization code from the provider callback
+  string redirect_uri = 2;
+  string provider = 3; // "google", "microsoft", "github", "apple", ...
+  string code_verifier = 4; // PKCE (optional)
+  string state = 5; // authorization callback state
+  string state_token = 6; // opaque token minted by BeginOAuthLogin
 }
 
 message LinkIdentityResponse {
@@ -2231,7 +2236,7 @@ message LinkIdentityResponse {
 // the final linked provider cannot be removed, so the account can never be
 // locked out of its own sign-in.
 message UnlinkIdentityRequest {
-  string provider         = 1;
+  string provider = 1;
   string provider_user_id = 2;
 }
 

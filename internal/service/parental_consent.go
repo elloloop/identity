@@ -395,17 +395,62 @@ func (s *AuthService) RevokeParentalConsent(
 
 	now := s.nowMs()
 
-	// The consent-record write comes before the status flip so the invariant
-	// "an active child always has an active consent record" holds through any
-	// mid-operation failure: a failed re-gate after the revoke leaves the
-	// child active without consent (visible, and the next grant attempt on the
-	// still-active child is rejected as not-pending) rather than gated behind
-	// a consent that was never recorded as revoked.
-	if err := repo.MarkParentalConsentRevoked(ctx, active.ConsentID, actorUserID, now); err != nil {
-		return nil, "", fmt.Errorf("revoke parental consent: %w", err)
+	// ORDERING — fail CLOSED. Every step below is a separate statement, so a
+	// transient storage failure can land between any two of them, and the
+	// direction the operation half-completes in matters more here than
+	// anywhere else in the service: withdrawal of consent must never leave a
+	// child MORE reachable than before.
+	//
+	// So the access-removing steps run FIRST (re-gate + session cut, then the
+	// edge deletion), and the consent record is marked revoked LAST. A
+	// failure part-way leaves the child gated behind a consent still recorded
+	// as active — visible, safe, and RETRYABLE: the record is still the
+	// "active" one GetActiveParentalConsentForChild returns, so calling
+	// RevokeParentalConsent again re-enters here and finishes the job. The
+	// reverse order is not retryable at all: once the record is marked
+	// revoked, a retry finds no active consent (ErrNotFound) and a re-grant
+	// is refused (the child is not pending), stranding an ACTIVE child with
+	// live sessions and no consent on file.
+	//
+	// Last-guardian rule: the child is re-gated only when no OTHER active
+	// consent remains for it. Under today's single-active-consent model
+	// (grant requires a gated child) that is every revoke; once multiple
+	// guardians can hold consent concurrently, revoking one leaves the child
+	// active under the other.
+	// The record being revoked is still marked active at this point (that
+	// write comes last), so the question is "does any OTHER active record
+	// remain?" — which needs the full list, not the single latest record.
+	activeRecords, err := repo.ListActiveParentalConsentsForChild(ctx, childUserID)
+	if err != nil {
+		return nil, "", fmt.Errorf("check remaining consent: %w", err)
 	}
-	active.RevokedAt = now
-	active.RevokedByUserID = actorUserID
+	otherConsentRemains := false
+	for _, rec := range activeRecords {
+		if rec.ConsentID != active.ConsentID {
+			otherConsentRemains = true
+			break
+		}
+	}
+	child, err := repo.GetUser(ctx, childUserID)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetch child user: %w", err)
+	}
+	childStatus := ""
+	if child != nil {
+		childStatus = child.Status
+	}
+	if !otherConsentRemains && child != nil && strings.ToLower(child.Status) == StatusActive {
+		if err := repo.UpdateUser(ctx, childUserID, map[string]any{
+			"status":     StatusPendingParentalConsent,
+			"updated_at": now,
+		}); err != nil {
+			return nil, "", fmt.Errorf("re-gate child account: %w", err)
+		}
+		if err := revokeAllUserSessions(ctx, repo, childUserID, now); err != nil {
+			return nil, "", fmt.Errorf("revoke child sessions: %w", err)
+		}
+		childStatus = StatusPendingParentalConsent
+	}
 
 	// The guardian edge tracks the consent: revoking removes the
 	// (actor -> child) authorization fact.
@@ -418,38 +463,12 @@ func (s *AuthService) RevokeParentalConsent(
 		audit.WithDetails(map[string]any{"consent_id": active.ConsentID}),
 	)
 
-	// Last-guardian rule: the child is re-gated (and its sessions cut off)
-	// only when NO active consent remains for it. Under today's
-	// single-active-consent model (grant requires a gated child) this is
-	// exactly the historical behaviour; once multiple guardians can hold
-	// consent concurrently, revoking one leaves the child active under the
-	// other.
-	remaining, err := repo.GetActiveParentalConsentForChild(ctx, childUserID)
-	if err != nil {
-		return nil, "", fmt.Errorf("check remaining consent: %w", err)
+	// Last: the record itself. Until this lands the operation is retryable.
+	if err := repo.MarkParentalConsentRevoked(ctx, active.ConsentID, actorUserID, now); err != nil {
+		return nil, "", fmt.Errorf("revoke parental consent: %w", err)
 	}
-	child, err := repo.GetUser(ctx, childUserID)
-	if err != nil {
-		return nil, "", fmt.Errorf("fetch child user: %w", err)
-	}
-	childStatus := ""
-	if child != nil {
-		childStatus = child.Status
-	}
-	if remaining == nil {
-		if child != nil && strings.ToLower(child.Status) == StatusActive {
-			if err := repo.UpdateUser(ctx, childUserID, map[string]any{
-				"status":     StatusPendingParentalConsent,
-				"updated_at": now,
-			}); err != nil {
-				return nil, "", fmt.Errorf("re-gate child account: %w", err)
-			}
-			if err := revokeAllUserSessions(ctx, repo, childUserID, now); err != nil {
-				return nil, "", fmt.Errorf("revoke child sessions: %w", err)
-			}
-			childStatus = StatusPendingParentalConsent
-		}
-	}
+	active.RevokedAt = now
+	active.RevokedByUserID = actorUserID
 
 	s.audit.Log(
 		ctx, audit.EventParentalConsentRevoked,

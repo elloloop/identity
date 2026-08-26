@@ -166,7 +166,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	// account. The recovery-email flow is a non-essential PII collection the
 	// server declines to perform for a minor; the account row is still created
 	// (in pending_parental_consent) so the parental-consent flow can proceed.
-	if s.minorData.BlocksChild(dateOfBirthMs) && recEmail != "" {
+	if s.minorData.BlocksChildFor(ctx, &User{DateOfBirthMs: dateOfBirthMs, Market: market}) && recEmail != "" {
 		s.logger.Info("signup_recovery_email_dropped_minor", zap.String("user_id_email", redactEmail(email)))
 		recEmail = ""
 	}
@@ -561,7 +561,14 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	// authenticate — this closes the pre-hijacking vector where an attacker
 	// plants a password on an unverified address and waits for the real owner
 	// to verify it via OAuth/passwordless.
-	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && !user.EmailVerified {
+	//
+	// An account with NO email is out of the gate's scope entirely: a managed
+	// child is identified by a username and structurally has no address to
+	// verify, so gating it would make the parent-set password permanently
+	// unusable (the flag defaults ON) — and there is no pre-hijacking vector
+	// to close, because there is no address for an attacker to plant a
+	// password against or for an owner to later verify.
+	if s.cfg != nil && s.cfg.AuthRequireVerifiedEmail && user.Email != "" && !user.EmailVerified {
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),

@@ -553,9 +553,17 @@ type Repository interface {
 	// child or the adult it references, to defend a later regulatory inquiry.
 	CreateParentalConsent(ctx context.Context, r *ParentalConsentRecord) error
 	GetActiveParentalConsentForChild(ctx context.Context, childUserID string) (*ParentalConsentRecord, error)
+	// ListActiveParentalConsentsForChild returns EVERY non-revoked consent
+	// record for a child, newest grant first. Only one can be active today
+	// (a grant requires a gated child, and a gated child has no active
+	// consent), but the last-guardian rule in RevokeParentalConsent has to
+	// ask "does another guardian still consent?" about a record it has not
+	// yet marked revoked — a question the single-record lookup above cannot
+	// answer. Empty slice, not an error, when there are none.
+	ListActiveParentalConsentsForChild(ctx context.Context, childUserID string) ([]*ParentalConsentRecord, error)
 	MarkParentalConsentRevoked(ctx context.Context, consentID, revokedByUserID string, atMs int64) error
 
-	// Guardian edges (graph edge type guardianOf = 102): the authorization
+	// Guardian edges: the authorization
 	// fact that guardian_user_id manages child_user_id. Unlike consent
 	// records, edges are live authorization state — they carry users foreign
 	// keys and are removed by DeleteUser of either side.
@@ -2093,6 +2101,20 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 		if err := s.enforceProductAgeGate(ctx, timeoutUser); err != nil {
 			return nil, "", "", err
 		}
+	}
+
+	// Same reasoning for the required-DOB gate, and it applies to EVERY
+	// account, not only anonymous ones. Enabling GATEWAY_AGEGATE_REQUIRE_DOB
+	// makes every pre-existing dob-less session fail its next rotation; if
+	// that refusal came after the consume, the token would be burnt, and the
+	// retry an SDK makes on a failed rotation would land on replay detection
+	// — which deletes every refresh token the user has and signs them out on
+	// all their devices. The gate still runs inside
+	// issueTokensWithSessionStart (so nothing is bypassed); this early pass
+	// exists only so the refusal is non-destructive and the client can
+	// complete the step and rotate normally.
+	if err := s.enforceDOBRequired(ctx, timeoutUser, ipAddr, userAgent); err != nil {
+		return nil, "", "", err
 	}
 
 	// Rotation. ConsumeRefreshTokenByHash is the serialization point: it

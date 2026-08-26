@@ -39,6 +39,22 @@ func TestValidate_AgeGate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			// Fail closed: every DOB enforcement site short-circuits on the
+			// gate, so this pair would boot clean and enforce nothing while
+			// the operator believes every session is age-known.
+			name: "require DOB without the gate is refused",
+			mutate: func(c *Config) {
+				*c = Config{AgeGateEnabled: false, AgeGateRequireDOB: true}
+			},
+			wantErr: true,
+		},
+		{
+			name: "require DOB with the gate on is fine",
+			mutate: func(c *Config) {
+				*c = Config{AgeGateEnabled: true, AgeGateRequireDOB: true, AgeGateChildMaxAge: 12, AgeGateAdultAge: 18}
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

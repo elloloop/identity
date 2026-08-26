@@ -47,12 +47,13 @@ func TestCreateManagedChildAccountRequest_CarriesNoCallerIdentity(t *testing.T) 
 // guardian and the consent record's consenting_user_id come from the verified
 // session header, not from anything the client can influence.
 func TestHandler_CreateManagedChildAccount_CallerIsServerDerived(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
-	adult := seedConsentAdult(t, h, "adult@example.com", true)
-	other := seedConsentAdult(t, h, "other@example.com", true)
+	adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+	other := seedConsentAdult(ctx, t, h, "other@example.com", true)
 
 	req := authedReq(withClientHeaders(connect.NewRequest(managedChildRequest("kid.one"))), adult)
-	res, err := h.client.CreateManagedChildAccount(context.Background(), req)
+	res, err := h.client.CreateManagedChildAccount(ctx, req)
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestHandler_CreateManagedChildAccount_CallerIsServerDerived(t *testing.T) {
 
 	// The edge is the caller's, not the other adult's: only the creator can
 	// list the child.
-	listed, err := h.client.ListManagedChildren(context.Background(),
+	listed, err := h.client.ListManagedChildren(ctx,
 		authedReq(connect.NewRequest(&identitypb.ListManagedChildrenRequest{}), other))
 	if err != nil {
 		t.Fatalf("ListManagedChildren (other): %v", err)
@@ -84,9 +85,10 @@ func TestHandler_CreateManagedChildAccount_CallerIsServerDerived(t *testing.T) {
 }
 
 func TestHandler_CreateManagedChildAccount_Unauthenticated(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
 
-	_, err := h.client.CreateManagedChildAccount(context.Background(),
+	_, err := h.client.CreateManagedChildAccount(ctx,
 		connect.NewRequest(managedChildRequest("kid.one")))
 	if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
 		t.Fatalf("code = %v, want Unauthenticated", got)
@@ -96,13 +98,14 @@ func TestHandler_CreateManagedChildAccount_Unauthenticated(t *testing.T) {
 // TestHandler_CreateManagedChildAccount_StepUpAndFactorMapping pins that both
 // mandatory service-side checks surface as distinct, correct Connect codes.
 func TestHandler_CreateManagedChildAccount_StepUpAndFactorMapping(t *testing.T) {
+	ctx := context.Background()
 	t.Run("wrong step-up password", func(t *testing.T) {
 		h := newHarness(t)
-		adult := seedConsentAdult(t, h, "adult@example.com", true)
+		adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
 		msg := managedChildRequest("kid.one")
 		msg.StepUpPassword = "not-the-password"
 
-		_, err := h.client.CreateManagedChildAccount(context.Background(),
+		_, err := h.client.CreateManagedChildAccount(ctx,
 			authedReq(connect.NewRequest(msg), adult))
 		if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
 			t.Fatalf("code = %v, want Unauthenticated", got)
@@ -111,9 +114,9 @@ func TestHandler_CreateManagedChildAccount_StepUpAndFactorMapping(t *testing.T) 
 
 	t.Run("no strong verified factor", func(t *testing.T) {
 		h := newHarness(t)
-		adult := seedConsentAdult(t, h, "adult@example.com", false)
+		adult := seedConsentAdult(ctx, t, h, "adult@example.com", false)
 
-		_, err := h.client.CreateManagedChildAccount(context.Background(),
+		_, err := h.client.CreateManagedChildAccount(ctx,
 			authedReq(connect.NewRequest(managedChildRequest("kid.one")), adult))
 		if got := connectCodeOf(err); got != connect.CodeFailedPrecondition {
 			t.Fatalf("code = %v, want FailedPrecondition", got)
@@ -122,13 +125,13 @@ func TestHandler_CreateManagedChildAccount_StepUpAndFactorMapping(t *testing.T) 
 
 	t.Run("duplicate username", func(t *testing.T) {
 		h := newHarness(t)
-		adult := seedConsentAdult(t, h, "adult@example.com", true)
-		if _, err := h.client.CreateManagedChildAccount(context.Background(),
+		adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+		if _, err := h.client.CreateManagedChildAccount(ctx,
 			authedReq(connect.NewRequest(managedChildRequest("kid.one")), adult)); err != nil {
 			t.Fatalf("first create: %v", err)
 		}
 
-		_, err := h.client.CreateManagedChildAccount(context.Background(),
+		_, err := h.client.CreateManagedChildAccount(ctx,
 			authedReq(connect.NewRequest(managedChildRequest("kid.one")), adult))
 		if got := connectCodeOf(err); got != connect.CodeAlreadyExists {
 			t.Fatalf("code = %v, want AlreadyExists", got)
@@ -140,16 +143,17 @@ func TestHandler_CreateManagedChildAccount_StepUpAndFactorMapping(t *testing.T) 
 // born-active invariant across the wire: the account the RPC returns is
 // ACTIVE and the stored row agrees.
 func TestHandler_CreateManagedChildAccount_NeverPendingConsent(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
-	adult := seedConsentAdult(t, h, "adult@example.com", true)
+	adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
 
-	res, err := h.client.CreateManagedChildAccount(context.Background(),
+	res, err := h.client.CreateManagedChildAccount(ctx,
 		authedReq(connect.NewRequest(managedChildRequest("kid.one")), adult))
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)
 	}
 
-	stored, err := h.repo.GetUser(context.Background(), res.Msg.GetChild().GetId())
+	stored, err := h.repo.GetUser(ctx, res.Msg.GetChild().GetId())
 	if err != nil || stored == nil {
 		t.Fatalf("stored child: %v %#v", err, stored)
 	}

@@ -1654,6 +1654,28 @@ func (r *Repo) GetActiveParentalConsentForChild(_ context.Context, childUserID s
 	return &cp, nil
 }
 
+// ListActiveParentalConsentsForChild returns every non-revoked consent for the
+// child, newest grant first (ties broken by id, matching the SQL drivers).
+func (r *Repo) ListActiveParentalConsentsForChild(_ context.Context, childUserID string) ([]*service.ParentalConsentRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*service.ParentalConsentRecord, 0, 2)
+	for _, rec := range r.parentalConsents {
+		if rec.ChildUserID != childUserID || rec.RevokedAt != 0 {
+			continue
+		}
+		cp := *rec
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].GrantedAt != out[j].GrantedAt {
+			return out[i].GrantedAt > out[j].GrantedAt
+		}
+		return out[i].ConsentID < out[j].ConsentID
+	})
+	return out, nil
+}
+
 func (r *Repo) MarkParentalConsentRevoked(_ context.Context, consentID, revokedByUserID string, atMs int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1694,6 +1716,21 @@ func (r *Repo) CreateManagedChildAccount(_ context.Context, u *service.User, edg
 				return fmt.Errorf("username %q: %w", u.Username, service.ErrAlreadyExists)
 			}
 		}
+	}
+	// The SQL drivers enforce these two inside the same transaction, via
+	// users_project_email_partial_uidx and the parental_consents primary key,
+	// so a colliding email or a reused consent id is ErrAlreadyExists there.
+	// Checking them here keeps the drivers identical — and stops a reused
+	// consent id from overwriting a retained compliance artifact in place.
+	if u.Email != "" {
+		for _, existing := range r.users {
+			if strings.EqualFold(existing.Email, u.Email) {
+				return fmt.Errorf("email %q: %w", u.Email, service.ErrAlreadyExists)
+			}
+		}
+	}
+	if _, clash := r.parentalConsents[consent.ConsentID]; clash {
+		return fmt.Errorf("consent %q: %w", consent.ConsentID, service.ErrAlreadyExists)
 	}
 	// Honour a caller-provided id, matching CreateUser.
 	id := u.ID
@@ -1770,6 +1807,11 @@ func (r *Repo) ListGuardiansOfChild(_ context.Context, childUserID string) ([]*s
 		cp := *e
 		out = append(out, &cp)
 	}
+	// Stable ordering identical to the SQL drivers (ORDER BY
+	// guardian_user_id): the listing reaches clients through GetGuardians,
+	// so map-iteration order would make the same call answer differently
+	// every time on this driver alone.
+	sort.Slice(out, func(i, j int) bool { return out[i].GuardianUserID < out[j].GuardianUserID })
 	return out, nil
 }
 
@@ -1784,6 +1826,8 @@ func (r *Repo) ListChildrenOfGuardian(_ context.Context, guardianUserID string) 
 		cp := *e
 		out = append(out, &cp)
 	}
+	// Stable ordering identical to the SQL drivers (ORDER BY child_user_id).
+	sort.Slice(out, func(i, j int) bool { return out[i].ChildUserID < out[j].ChildUserID })
 	return out, nil
 }
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -152,4 +153,86 @@ func TestSetAccountMarket_GateDisabled_StoresOnly(t *testing.T) {
 	assert.Equal(t, StatusActive, u.Status)
 	assert.Empty(t, u.AgeBand)
 	assert.Equal(t, 1, writer.countByEventTypeAndDetail("account_market_changed", "new_market", "IN"))
+}
+
+// TestSetAccountMarket_RefusedUnderGuardianship pins the escape route shut: a
+// managed account cannot re-declare its own jurisdiction. The market feeds
+// the age band and the band is what ends guardianship, so a self-declared
+// market would let the managed party unilaterally strip its guardian's
+// authority by naming a jurisdiction whose adult age it has already passed.
+func TestSetAccountMarket_RefusedUnderGuardianship(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	enableAgeGate(t, svc, false)
+	// IN keeps a 15-year-old in the CHILD band; US would make the same
+	// account an ADULT, ending guardianship.
+	ctx := jurisdictionScope(t, `{"access":{"mode":"open"},"jurisdictions":{"default":"IN","thresholds":{`+
+		`"IN":{"child_max_age":17,"adult_age":18},`+
+		`"US":{"child_max_age":12,"adult_age":13}}}}`)
+
+	guardian := seedConsentingAdult(t, repo, "parent@example.com", hashPW(t, strongPW), adultFactors{phoneVerified: true})
+	child := seedUser(repo, "", hashPW(t, strongPW), StatusActive)
+	repo.mu.Lock()
+	child.DateOfBirthMs = dobAgeMs(15)
+	child.Market = "IN"
+	repo.mu.Unlock()
+	seedGuardianEdge(ctx, t, repo, guardian.ID, child.ID)
+
+	_, err := svc.SetAccountMarket(ctx, child.ID, "US")
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("err = %v, want ErrPermissionDenied", err)
+	}
+	stored, _ := repo.GetUser(ctx, child.ID)
+	if stored.Market != "IN" {
+		t.Fatalf("market = %q, want the guardian-set IN to survive the refusal", stored.Market)
+	}
+	// The guardian still holds management rights.
+	if _, _, gErr := svc.authorizeGuardianAction(
+		ctx, guardianOpViewProfile, guardian.ID, child.ID, strongPW, "", "",
+	); gErr != nil {
+		t.Fatalf("guardian rights must survive the attempt: %v", gErr)
+	}
+
+	// An account with no guardian is unaffected: self-service still works.
+	adult := seedConsentingAdult(t, repo, "solo@example.com", hashPW(t, strongPW), adultFactors{})
+	if _, err := svc.SetAccountMarket(ctx, adult.ID, "US"); err != nil {
+		t.Fatalf("an unmanaged account may set its own market: %v", err)
+	}
+}
+
+// TestSetAccountMarket_ErrorPaths covers the refusals and storage failures the
+// happy-path tests do not reach.
+func TestSetAccountMarket_ErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	enableAgeGate(t, svc, false)
+	user := seedConsentingAdult(t, repo, "solo@example.com", hashPW(t, strongPW), adultFactors{})
+
+	if _, err := svc.SetAccountMarket(ctx, "", "IN"); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("empty caller: err = %v, want ErrUnauthenticated", err)
+	}
+	if _, err := svc.SetAccountMarket(ctx, user.ID, "  "); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("empty market: err = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := svc.SetAccountMarket(ctx, "no-such-user", "IN"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown user: err = %v, want ErrNotFound", err)
+	}
+
+	repo.getUserErr = errConsentInjected
+	if _, err := svc.SetAccountMarket(ctx, user.ID, "IN"); !errors.Is(err, errConsentInjected) {
+		t.Fatalf("user lookup failure: err = %v, want the injected failure", err)
+	}
+	repo.getUserErr = nil
+
+	repo.listGuardianEdgesErr = errConsentInjected
+	if _, err := svc.SetAccountMarket(ctx, user.ID, "IN"); !errors.Is(err, errConsentInjected) {
+		t.Fatalf("guardian check failure: err = %v, want the injected failure", err)
+	}
+	repo.listGuardianEdgesErr = nil
+
+	repo.updateUserErr = errConsentInjected
+	if _, err := svc.SetAccountMarket(ctx, user.ID, "IN"); !errors.Is(err, errConsentInjected) {
+		t.Fatalf("store failure: err = %v, want the injected failure", err)
+	}
 }

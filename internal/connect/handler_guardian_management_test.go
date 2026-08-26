@@ -14,9 +14,9 @@ import (
 // seedManagedChildViaRPC drives the real parent-creates-child RPC so the
 // guardian edge, the consent record and the child account exist exactly as
 // production creates them, and returns the child's user id.
-func seedManagedChildViaRPC(t *testing.T, h *testHarness, adultID, username string) string {
+func seedManagedChildViaRPC(ctx context.Context, t *testing.T, h *testHarness, adultID, username string) string {
 	t.Helper()
-	res, err := h.client.CreateManagedChildAccount(context.Background(),
+	res, err := h.client.CreateManagedChildAccount(ctx,
 		authedReq(connect.NewRequest(managedChildRequest(username)), adultID))
 	if err != nil {
 		t.Fatalf("CreateManagedChildAccount: %v", err)
@@ -121,12 +121,13 @@ func TestManagementRequests_CarryNoCallerIdentity(t *testing.T) {
 // with no guardian edge, and callers who fail step-up are all refused, with
 // the codes the wire contract promises.
 func TestHandler_ManagementSurface_Guard(t *testing.T) {
+	ctx := context.Background()
 	for _, op := range managementCalls() {
 		t.Run(op.name, func(t *testing.T) {
 			t.Run("unauthenticated", func(t *testing.T) {
 				h := newHarness(t)
-				adult := seedConsentAdult(t, h, "adult@example.com", true)
-				child := seedManagedChildViaRPC(t, h, adult, "kid.one")
+				adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+				child := seedManagedChildViaRPC(ctx, t, h, adult, "kid.one")
 				// No session header at all.
 				err := op.call(h, "", child, consentTestPassword)
 				if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
@@ -136,9 +137,9 @@ func TestHandler_ManagementSurface_Guard(t *testing.T) {
 
 			t.Run("not a guardian", func(t *testing.T) {
 				h := newHarness(t)
-				adult := seedConsentAdult(t, h, "adult@example.com", true)
-				stranger := seedConsentAdult(t, h, "stranger@example.com", true)
-				child := seedManagedChildViaRPC(t, h, adult, "kid.one")
+				adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+				stranger := seedConsentAdult(ctx, t, h, "stranger@example.com", true)
+				child := seedManagedChildViaRPC(ctx, t, h, adult, "kid.one")
 
 				err := op.call(h, stranger, child, consentTestPassword)
 				if got := connectCodeOf(err); got != connect.CodePermissionDenied {
@@ -148,8 +149,8 @@ func TestHandler_ManagementSurface_Guard(t *testing.T) {
 
 			t.Run("step-up fails", func(t *testing.T) {
 				h := newHarness(t)
-				adult := seedConsentAdult(t, h, "adult@example.com", true)
-				child := seedManagedChildViaRPC(t, h, adult, "kid.one")
+				adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+				child := seedManagedChildViaRPC(ctx, t, h, adult, "kid.one")
 
 				err := op.call(h, adult, child, "not-the-password")
 				if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
@@ -163,13 +164,14 @@ func TestHandler_ManagementSurface_Guard(t *testing.T) {
 // TestHandler_ManagementDenial_DisclosesNothing pins that a caller with no
 // edge cannot tell a real child account from an invented id.
 func TestHandler_ManagementDenial_DisclosesNothing(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
-	adult := seedConsentAdult(t, h, "adult@example.com", true)
-	stranger := seedConsentAdult(t, h, "stranger@example.com", true)
-	child := seedManagedChildViaRPC(t, h, adult, "kid.one")
+	adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+	stranger := seedConsentAdult(ctx, t, h, "stranger@example.com", true)
+	child := seedManagedChildViaRPC(ctx, t, h, adult, "kid.one")
 
 	call := func(childID string) error {
-		_, err := h.client.GetManagedChildProfile(context.Background(), authedReq(connect.NewRequest(
+		_, err := h.client.GetManagedChildProfile(ctx, authedReq(connect.NewRequest(
 			&identitypb.GetManagedChildProfileRequest{ChildUserId: childID, StepUpPassword: consentTestPassword},
 		), stranger))
 		return err
@@ -188,8 +190,8 @@ func TestHandler_ManagementDenial_DisclosesNothing(t *testing.T) {
 func TestHandler_ManagementSurface_HappyPath(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t)
-	adult := seedConsentAdult(t, h, "adult@example.com", true)
-	child := seedManagedChildViaRPC(t, h, adult, "kid.one")
+	adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+	child := seedManagedChildViaRPC(ctx, t, h, adult, "kid.one")
 
 	// View.
 	view, err := h.client.GetManagedChildProfile(ctx, authedReq(connect.NewRequest(
@@ -263,4 +265,60 @@ func TestHandler_ManagementSurface_HappyPath(t *testing.T) {
 	if rec, err := h.repo.GetActiveParentalConsentForChild(ctx, child); err != nil || rec == nil {
 		t.Fatalf("the consent record must survive the erasure: %v %#v", err, rec)
 	}
+}
+
+// TestHandler_ManagementSurface_ErrorCodes pins the Connect codes the wire
+// contract promises for the refusals a client has to branch on, so a mapping
+// regression is caught at the boundary rather than by a client.
+func TestHandler_ManagementSurface_ErrorCodes(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+	child := seedManagedChildViaRPC(ctx, t, h, adult, "kid.one")
+
+	t.Run("missing child id is InvalidArgument", func(t *testing.T) {
+		_, err := h.client.GetManagedChildProfile(ctx, authedReq(connect.NewRequest(
+			&identitypb.GetManagedChildProfileRequest{ChildUserId: "  ", StepUpPassword: consentTestPassword},
+		), adult))
+		if got := connectCodeOf(err); got != connect.CodeInvalidArgument {
+			t.Fatalf("code = %v, want InvalidArgument", got)
+		}
+	})
+
+	t.Run("weak new password is InvalidArgument", func(t *testing.T) {
+		_, err := h.client.SetManagedChildPassword(ctx, authedReq(connect.NewRequest(
+			&identitypb.SetManagedChildPasswordRequest{
+				ChildUserId: child, NewPassword: "short", StepUpPassword: consentTestPassword,
+			},
+		), adult))
+		if got := connectCodeOf(err); got != connect.CodeInvalidArgument {
+			t.Fatalf("code = %v, want InvalidArgument", got)
+		}
+	})
+
+	t.Run("taken username is AlreadyExists", func(t *testing.T) {
+		other := seedManagedChildViaRPC(ctx, t, h, adult, "kid.two")
+		_ = other
+		_, err := h.client.SetManagedChildUsername(ctx, authedReq(connect.NewRequest(
+			&identitypb.SetManagedChildUsernameRequest{
+				ChildUserId: child, Username: "kid.two", StepUpPassword: consentTestPassword,
+			},
+		), adult))
+		if got := connectCodeOf(err); got != connect.CodeAlreadyExists {
+			t.Fatalf("code = %v, want AlreadyExists", got)
+		}
+	})
+
+	t.Run("reactivating an account awaiting consent is FailedPrecondition", func(t *testing.T) {
+		gated := seedManagedChildViaRPC(ctx, t, h, adult, "kid.three")
+		if err := h.repo.UpdateUser(ctx, gated, map[string]any{"status": service.StatusPendingParentalConsent}); err != nil {
+			t.Fatalf("gate the child: %v", err)
+		}
+		_, err := h.client.ReactivateManagedChildAccount(ctx, authedReq(connect.NewRequest(
+			&identitypb.ReactivateManagedChildAccountRequest{ChildUserId: gated, StepUpPassword: consentTestPassword},
+		), adult))
+		if got := connectCodeOf(err); got != connect.CodeFailedPrecondition {
+			t.Fatalf("code = %v, want FailedPrecondition", got)
+		}
+	})
 }

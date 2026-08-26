@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
@@ -12,6 +11,14 @@ import (
 // SetAccountMarket changes the jurisdiction/market code the CALLER's own
 // account classifies under, audits the change, and re-evaluates the account's
 // age band immediately under the new market's thresholds.
+//
+// It is SELF-SERVICE, so it is refused for an account under guardianship. A
+// managed account's market decides which jurisdiction's child ceiling
+// classifies it, and the band decides whether its guardian still holds
+// management rights — so a self-declared market would let the managed party
+// unilaterally revoke the manager's authority by naming a jurisdiction whose
+// adult age it has already passed. The jurisdiction of a managed account is
+// a guardian's fact to state, not the account holder's.
 //
 // Re-gating rule: when the change moves the account INTO the child band and
 // no active parental consent is on file, the account is set to
@@ -47,6 +54,23 @@ func (s *AuthService) SetAccountMarket(ctx context.Context, userID, market strin
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
+	// An account someone else manages cannot re-declare its own jurisdiction:
+	// the market feeds the band, and the band is what ends guardianship.
+	guardians, err := repo.ListGuardiansOfChild(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check guardians: %w", err)
+	}
+	if len(guardians) > 0 {
+		s.audit.Log(
+			ctx, audit.EventAccountMarketChanged,
+			audit.WithActor(userID), audit.WithTarget(userID), audit.WithSuccess(false),
+			audit.WithDetails(map[string]any{"step": "under_guardianship", "new_market": market}),
+		)
+		return nil, fmt.Errorf(
+			"%w: an account under guardianship cannot change its own market", ErrPermissionDenied,
+		)
+	}
+
 	old := u.Market
 	now := s.nowMs()
 	if err := repo.UpdateUser(ctx, userID, map[string]any{
@@ -70,7 +94,7 @@ func (s *AuthService) SetAccountMarket(ctx context.Context, userID, market strin
 	}
 
 	s.stampAgeBand(ctx, u)
-	if u.AgeBand != string(agegate.BandChild) || !strings.EqualFold(u.Status, StatusActive) {
+	if u.AgeBand != string(agegate.BandChild) || !isActiveConsentingAccount(u.Status) {
 		return u, nil
 	}
 	// The account newly classifies as CHILD. An already-consented child keeps

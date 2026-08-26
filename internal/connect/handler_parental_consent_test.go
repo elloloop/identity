@@ -16,13 +16,13 @@ const (
 	consentTestPolicy   = "children-privacy-notice-v1"
 )
 
-func seedConsentAdult(t *testing.T, h *testHarness, email string, phoneVerified bool) string {
+func seedConsentAdult(ctx context.Context, t *testing.T, h *testHarness, email string, phoneVerified bool) string {
 	t.Helper()
 	hash, err := passwords.Hash(consentTestPassword)
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
-	id, err := h.repo.CreateUser(context.Background(), &service.User{
+	id, err := h.repo.CreateUser(ctx, &service.User{
 		Email: email, Status: "active", Role: "member",
 		PasswordHash: hash, PhoneVerified: phoneVerified,
 	})
@@ -32,9 +32,9 @@ func seedConsentAdult(t *testing.T, h *testHarness, email string, phoneVerified 
 	return id
 }
 
-func seedConsentChild(t *testing.T, h *testHarness, email string) string {
+func seedConsentChild(ctx context.Context, t *testing.T, h *testHarness, email string) string {
 	t.Helper()
-	id, err := h.repo.CreateUser(context.Background(), &service.User{
+	id, err := h.repo.CreateUser(ctx, &service.User{
 		Email: email, Status: service.StatusPendingParentalConsent, Role: "member",
 	})
 	if err != nil {
@@ -47,9 +47,10 @@ func seedConsentChild(t *testing.T, h *testHarness, email string) string {
 // confirms the consenting adult's identity is taken from the authenticated
 // session and stamped onto the returned record.
 func TestHandler_GrantParentalConsent_HappyPath(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
-	adult := seedConsentAdult(t, h, "adult@example.com", true)
-	child := seedConsentChild(t, h, "child@example.com")
+	adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+	child := seedConsentChild(ctx, t, h, "child@example.com")
 
 	req := connect.NewRequest(&identitypb.GrantParentalConsentRequest{
 		ChildUserId:    child,
@@ -58,7 +59,7 @@ func TestHandler_GrantParentalConsent_HappyPath(t *testing.T) {
 	})
 	authedReq(req, adult)
 
-	res, err := h.client.GrantParentalConsent(context.Background(), req)
+	res, err := h.client.GrantParentalConsent(ctx, req)
 	if err != nil {
 		t.Fatalf("GrantParentalConsent: %v", err)
 	}
@@ -84,8 +85,9 @@ func TestHandler_GrantParentalConsent_HappyPath(t *testing.T) {
 // with no verified session (no X-Authenticated-User-Id) cannot consent — the
 // consenting identity is never taken from the request body.
 func TestHandler_GrantParentalConsent_RequiresAuthenticatedSession(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
-	child := seedConsentChild(t, h, "child@example.com")
+	child := seedConsentChild(ctx, t, h, "child@example.com")
 
 	// No authedReq: the request carries no authenticated caller.
 	req := connect.NewRequest(&identitypb.GrantParentalConsentRequest{
@@ -93,7 +95,7 @@ func TestHandler_GrantParentalConsent_RequiresAuthenticatedSession(t *testing.T)
 		PolicyVersion:  consentTestPolicy,
 		StepUpPassword: consentTestPassword,
 	})
-	_, err := h.client.GrantParentalConsent(context.Background(), req)
+	_, err := h.client.GrantParentalConsent(ctx, req)
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Fatalf("code = %v, want Unauthenticated", connect.CodeOf(err))
 	}
@@ -105,10 +107,11 @@ func TestHandler_GrantParentalConsent_RequiresAuthenticatedSession(t *testing.T)
 // rejected — neither can assert another (verified) adult's identity, because
 // the caller is fixed by the session, not the payload.
 func TestHandler_GrantParentalConsent_ModifiedClientCannotBypass(t *testing.T) {
+	ctx := context.Background()
 	t.Run("actor without a verified factor is refused", func(t *testing.T) {
 		h := newHarness(t)
-		impostor := seedConsentAdult(t, h, "impostor@example.com", false) // no verified factor
-		child := seedConsentChild(t, h, "child@example.com")
+		impostor := seedConsentAdult(ctx, t, h, "impostor@example.com", false) // no verified factor
+		child := seedConsentChild(ctx, t, h, "child@example.com")
 
 		req := connect.NewRequest(&identitypb.GrantParentalConsentRequest{
 			ChildUserId:    child,
@@ -117,11 +120,11 @@ func TestHandler_GrantParentalConsent_ModifiedClientCannotBypass(t *testing.T) {
 		})
 		authedReq(req, impostor)
 
-		_, err := h.client.GrantParentalConsent(context.Background(), req)
+		_, err := h.client.GrantParentalConsent(ctx, req)
 		if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 			t.Fatalf("code = %v, want FailedPrecondition", connect.CodeOf(err))
 		}
-		got, _ := h.repo.GetUser(context.Background(), child)
+		got, _ := h.repo.GetUser(ctx, child)
 		if got.Status != service.StatusPendingParentalConsent {
 			t.Fatalf("child must stay gated, status = %q", got.Status)
 		}
@@ -129,8 +132,8 @@ func TestHandler_GrantParentalConsent_ModifiedClientCannotBypass(t *testing.T) {
 
 	t.Run("wrong step-up password is refused", func(t *testing.T) {
 		h := newHarness(t)
-		adult := seedConsentAdult(t, h, "adult@example.com", true)
-		child := seedConsentChild(t, h, "child@example.com")
+		adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+		child := seedConsentChild(ctx, t, h, "child@example.com")
 
 		req := connect.NewRequest(&identitypb.GrantParentalConsentRequest{
 			ChildUserId:    child,
@@ -139,7 +142,7 @@ func TestHandler_GrantParentalConsent_ModifiedClientCannotBypass(t *testing.T) {
 		})
 		authedReq(req, adult)
 
-		_, err := h.client.GrantParentalConsent(context.Background(), req)
+		_, err := h.client.GrantParentalConsent(ctx, req)
 		if connect.CodeOf(err) != connect.CodeUnauthenticated {
 			t.Fatalf("code = %v, want Unauthenticated", connect.CodeOf(err))
 		}
@@ -147,26 +150,27 @@ func TestHandler_GrantParentalConsent_ModifiedClientCannotBypass(t *testing.T) {
 }
 
 func TestHandler_RevokeParentalConsent(t *testing.T) {
+	ctx := context.Background()
 	grant := func(t *testing.T, h *testHarness, adult, child string) {
 		t.Helper()
 		req := connect.NewRequest(&identitypb.GrantParentalConsentRequest{
 			ChildUserId: child, PolicyVersion: consentTestPolicy, StepUpPassword: consentTestPassword,
 		})
 		authedReq(req, adult)
-		if _, err := h.client.GrantParentalConsent(context.Background(), req); err != nil {
+		if _, err := h.client.GrantParentalConsent(ctx, req); err != nil {
 			t.Fatalf("grant: %v", err)
 		}
 	}
 
 	t.Run("consenter revokes and child is re-gated", func(t *testing.T) {
 		h := newHarness(t)
-		adult := seedConsentAdult(t, h, "adult@example.com", true)
-		child := seedConsentChild(t, h, "child@example.com")
+		adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+		child := seedConsentChild(ctx, t, h, "child@example.com")
 		grant(t, h, adult, child)
 
 		req := connect.NewRequest(&identitypb.RevokeParentalConsentRequest{ChildUserId: child, Reason: "withdrawn"})
 		authedReq(req, adult)
-		res, err := h.client.RevokeParentalConsent(context.Background(), req)
+		res, err := h.client.RevokeParentalConsent(ctx, req)
 		if err != nil {
 			t.Fatalf("RevokeParentalConsent: %v", err)
 		}
@@ -180,14 +184,14 @@ func TestHandler_RevokeParentalConsent(t *testing.T) {
 
 	t.Run("a different authenticated user cannot revoke", func(t *testing.T) {
 		h := newHarness(t)
-		adult := seedConsentAdult(t, h, "adult@example.com", true)
-		other := seedConsentAdult(t, h, "other@example.com", true)
-		child := seedConsentChild(t, h, "child@example.com")
+		adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+		other := seedConsentAdult(ctx, t, h, "other@example.com", true)
+		child := seedConsentChild(ctx, t, h, "child@example.com")
 		grant(t, h, adult, child)
 
 		req := connect.NewRequest(&identitypb.RevokeParentalConsentRequest{ChildUserId: child})
 		authedReq(req, other)
-		_, err := h.client.RevokeParentalConsent(context.Background(), req)
+		_, err := h.client.RevokeParentalConsent(ctx, req)
 		if connect.CodeOf(err) != connect.CodePermissionDenied {
 			t.Fatalf("code = %v, want PermissionDenied", connect.CodeOf(err))
 		}
@@ -198,12 +202,13 @@ func TestHandler_RevokeParentalConsent(t *testing.T) {
 // like grant, refuses a caller with no verified session: the acting identity is
 // the session, never the request body.
 func TestHandler_RevokeParentalConsent_RequiresAuthenticatedSession(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
-	child := seedConsentChild(t, h, "child@example.com")
+	child := seedConsentChild(ctx, t, h, "child@example.com")
 
 	// No authedReq: the request carries no authenticated caller.
 	req := connect.NewRequest(&identitypb.RevokeParentalConsentRequest{ChildUserId: child})
-	_, err := h.client.RevokeParentalConsent(context.Background(), req)
+	_, err := h.client.RevokeParentalConsent(ctx, req)
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Fatalf("code = %v, want Unauthenticated", connect.CodeOf(err))
 	}

@@ -7,6 +7,6 @@
 -- posture), so the default '' rows never collide.
 ALTER TABLE users
     ADD COLUMN username TEXT NOT NULL DEFAULT '';
-CREATE UNIQUE INDEX users_project_username_idx
+CREATE UNIQUE INDEX users_project_username_uidx
     ON users (project_id, username)
     WHERE username <> '';

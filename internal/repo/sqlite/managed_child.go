@@ -43,19 +43,8 @@ func (r *sqliteRepository) CreateManagedChildAccount(ctx context.Context, u *ser
 		return wrapErr("CreateManagedChildAccount(edge)", err)
 	}
 
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO parental_consents (
-			id, project_id, child_user_id, consenting_user_id,
-			policy_version, factors, stepped_up,
-			consent_ip, consent_user_agent,
-			granted_at_ms, revoked_at_ms, revoked_by_user_id,
-			market
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-		consent.ConsentID, r.projectID, id, consent.ConsentingUserID,
-		consent.PolicyVersion, consent.Factors, consent.SteppedUp,
-		consent.ConsentIP, consent.ConsentUserAgent,
-		consent.GrantedAt, consent.RevokedAt, consent.RevokedByUserID,
-		consent.Market); err != nil {
+	if _, err := tx.Exec(ctx, insertParentalConsentQuery,
+		insertParentalConsentArgs(r.projectID, id, consent)...); err != nil {
 		return wrapErr("CreateManagedChildAccount(consent)", err)
 	}
 

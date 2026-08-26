@@ -8,10 +8,12 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 )
 
-// ── Guardian edges (graph edge type guardianOf = 102) ───────────────────
+// ── Guardian edges ──────────────────────────────────────────────────────
 //
-// A guardian edge is the account-graph authorization fact that one account
-// (the guardian) manages another (the child). Edges are created when
+// A guardian edge is the authorization fact that one account (the guardian)
+// manages another (the child). It is stored relationally in guardian_edges
+// (edge type id 102 is reserved in graphtypes.go against a later move into
+// the graph, but nothing writes a graph edge today). Edges are created when
 // verifiable parental consent is granted (GrantParentalConsent upserts the
 // edge in the same write sequence as the consent record) and backfilled by
 // migration for consents granted before the edge model existed; they are
@@ -109,8 +111,9 @@ func (s *AuthService) GetGuardians(ctx context.Context, callerUserID, childUserI
 }
 
 // upsertGuardianEdge records the (consenting adult -> child) edge and audits
-// it. Called from the consent grant path in the same write sequence as the
-// consent record, before the child's status flip to active.
+// it. It is idempotent, and it must run BEFORE the child's status flip to
+// active: an active child always has both the consent record and the edge
+// that authorizes managing it.
 func (s *AuthService) upsertGuardianEdge(ctx context.Context, guardianUserID, childUserID, ip, userAgent string) error {
 	if err := s.repo(ctx).UpsertGuardianEdge(ctx, &GuardianEdge{
 		GuardianUserID: guardianUserID,

@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Unreleased — required-DOB completion step (additive, flag-scoped)
+## Unreleased — required-DOB completion step (behavior change if `GATEWAY_AGEGATE_REQUIRE_DOB` is already on)
 
 Extends what `GATEWAY_AGEGATE_REQUIRE_DOB` covers. Previously it bound only
 `PasswordSignup`; every other session-issuing path (OAuth, hosted-OAuth
@@ -19,8 +19,24 @@ result completes the sign-in with tokens, a CHILD-band result lands in
 **Wire additions are additive**: the `SubmitDateOfBirth` RPC, its
 request/response messages, and the `DOBRequiredDetails` error-detail
 message. Access tokens gain an optional `purpose` claim (absent on every
-existing token); the auth middlewares refuse to authenticate any request
-presenting a purpose-bearing token.
+existing token).
+
+**If you verify identity's JWTs yourself, you must reject purpose tokens.**
+A completion ticket is signed with the same key, carries the same `aud`, and
+is handed to an *unauthenticated* caller inside an error detail — the only
+thing separating it from a session token is the `purpose` claim. Inside
+identity the rule is enforced in the shared verifier (`jwt.VerifyAccessToken`
+refuses any token with a non-empty `purpose`; the redeeming flow uses
+`jwt.VerifyPurposeToken`), so the HTTP middleware, the native-gRPC surface,
+and anything else on that path are covered. **Outside** identity — an
+embedding host's own gRPC interceptor, an API gateway, or a downstream
+resource server validating through the published JWKS — you own the check:
+reject any token whose `purpose` claim is set. See `docs/embedding.md`.
+
+**Boot-time invariant.** `GATEWAY_AGEGATE_REQUIRE_DOB=true` now requires
+`GATEWAY_AGEGATE_ENABLED=true` and the server refuses to boot otherwise.
+Enforcement short-circuits when the gate is off, so the pair used to boot
+clean and enforce nothing while claiming the opposite.
 
 **Nothing changes unless you enable the flag.** With
 `GATEWAY_AGEGATE_REQUIRE_DOB` unset, every path behaves exactly as before.
@@ -31,7 +47,10 @@ Two operator-visible consequences of turning it on:
   next login or refresh.** `RefreshToken` included — a long-lived session
   stops rotating until the user submits a date of birth. That is the flag
   working; brief client teams on the `dob_required` handling before
-  enabling.
+  enabling. The refusal is deliberately non-destructive: the presented
+  refresh token is NOT consumed, so a client that retries it gets the same
+  refusal rather than tripping replay detection (which would sign the user
+  out on every device).
 - **Anonymous sessions are unaffected** (they never carry a DOB; the
   product `minimum_age_band` gate remains their age guardrail), and
   admin-created accounts (`CreateUser`) simply meet the step at first
@@ -39,9 +58,9 @@ Two operator-visible consequences of turning it on:
 
 ## Unreleased — guardian edges (additive)
 
-Adds the guardian edge to the account graph: the authorization fact that one
-account (`guardian_user_id`) manages another (`child_user_id`), graph edge
-type `guardianOf` = 102.
+Adds the guardian edge: the authorization fact that one account
+(`guardian_user_id`) manages another (`child_user_id`), stored in a new
+project-scoped `guardian_edges` table.
 
 **Wire additions are additive** — two new RPCs: `ListManagedChildren`
 (self-only: the guardian is always the session user; the request carries no
@@ -53,10 +72,19 @@ else). Two new audit events: `guardian_edge_created` (on consent grant) and
 **Migrations** (postgres 0031, sqlite 0016), applied with
 `identity migrate`, create the `guardian_edges` table and **backfill one edge
 per active parental consent whose adult and child both still exist**, with the
-consent's grant instant as the edge's creation time. Operators need no action:
-existing active consents gain edges automatically, revoked consents and
-consents referencing a deleted account are deliberately skipped (the consent
-record outlives account deletion; the edge must not).
+consent's grant instant as the edge's creation time. Existing active consents
+gain edges automatically; revoked consents and consents referencing a deleted
+account are deliberately skipped (the consent record outlives account
+deletion; the edge must not).
+
+**Size the migration window.** On PostgreSQL the backfill has to suspend row-
+level security on `users` and `parental_consents` (the migrate connection sets
+no `app.current_project_id`, so a forced RLS read would silently backfill zero
+rows). Those `ALTER TABLE` statements take `ACCESS EXCLUSIVE`, and the pgx
+driver runs the migration in one transaction — so reads and writes of `users`
+block for the length of the backfill. Migration 0032 then builds the username
+unique index non-concurrently, blocking writes again. Both are brief on a
+small `users`/`parental_consents` table and worth scheduling on a large one.
 
 One behavior note: `RevokeParentalConsent` now also removes the revoking
 adult's guardian edge, and the child is re-gated to
@@ -101,6 +129,25 @@ Two things to know before enabling the flow:
   username in place of the email. If your client validates that the login
   identifier looks like an email address, relax it before rolling out child
   accounts.
+- **`PasswordLogin`'s response code changed for identifiers with no `@`,
+  unconditionally.** Such a value is now a username candidate, so an unknown
+  one gets the uniform `UNAUTHENTICATED` invalid-credentials refusal instead
+  of the old `INVALID_ARGUMENT` "malformed email" — the same answer an unknown
+  email gets, so the endpoint discloses neither which identifier form was
+  tried nor whether the account exists. An *empty* identifier is still
+  `INVALID_ARGUMENT`, and a malformed address that does contain `@` still
+  fails email validation. A client branching on `INVALID_ARGUMENT` to render
+  a "not a valid email" hint must move that check client-side.
+- **The verified-email gate does not apply to accounts with no email.**
+  `GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL` (default on) is scoped to accounts
+  that actually have an address; a managed child has none to verify, so the
+  parent-set password works on a stock deployment.
+- **A parent needs a password.** Step-up re-authentication is a password
+  re-entry, so an adult who signed up through OAuth or passkey-only and has
+  no password set cannot create or manage a child account. Inherited from
+  the `GrantParentalConsent` bar (#448) and unchanged here; if your product
+  onboards parents through social login only, give them a password before
+  rolling out managed children.
 
 ## Unreleased — parental account management (additive)
 

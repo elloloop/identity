@@ -179,6 +179,9 @@ type fakeRepo struct {
 	// Guardian-edge error injections, same purpose as the consent ones above.
 	upsertGuardianEdgeErr error // UpsertGuardianEdge fails
 	deleteGuardianEdgeErr error // DeleteGuardianEdge fails
+	getGuardianEdgeErr    error // GetGuardianEdge fails
+	listGuardianEdgesErr  error // ListGuardiansOfChild / ListChildrenOfGuardian fail
+	findUserByUsernameErr error // FindUserByUsername fails
 	// createManagedChildErr makes CreateManagedChildAccount fail before any
 	// mutation, exercising the atomicity contract from the caller's side.
 	createManagedChildErr error
@@ -268,6 +271,9 @@ func (r *fakeRepo) FindUserByEmail(_ context.Context, email string) (*User, erro
 func (r *fakeRepo) FindUserByUsername(_ context.Context, username string) (*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.findUserByUsernameErr != nil {
+		return nil, r.findUserByUsernameErr
+	}
 	if username == "" {
 		return nil, nil
 	}
@@ -1766,6 +1772,31 @@ func (r *fakeRepo) CreateParentalConsent(_ context.Context, rec *ParentalConsent
 	return nil
 }
 
+// ListActiveParentalConsentsForChild mirrors the drivers: every non-revoked
+// consent for the child, newest grant first.
+func (r *fakeRepo) ListActiveParentalConsentsForChild(_ context.Context, childUserID string) ([]*ParentalConsentRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.getActiveConsentErr != nil {
+		return nil, r.getActiveConsentErr
+	}
+	out := make([]*ParentalConsentRecord, 0, 2)
+	for _, rec := range r.parentalConsents {
+		if rec.ChildUserID != childUserID || rec.RevokedAt != 0 {
+			continue
+		}
+		cp := *rec
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].GrantedAt != out[j].GrantedAt {
+			return out[i].GrantedAt > out[j].GrantedAt
+		}
+		return out[i].ConsentID < out[j].ConsentID
+	})
+	return out, nil
+}
+
 func (r *fakeRepo) GetActiveParentalConsentForChild(_ context.Context, childUserID string) (*ParentalConsentRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1831,6 +1862,9 @@ func (r *fakeRepo) DeleteGuardianEdge(_ context.Context, guardianUserID, childUs
 func (r *fakeRepo) GetGuardianEdge(_ context.Context, guardianUserID, childUserID string) (*GuardianEdge, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.getGuardianEdgeErr != nil {
+		return nil, r.getGuardianEdgeErr
+	}
 	e, ok := r.guardianEdges[guardianUserID+"\x00"+childUserID]
 	if !ok {
 		return nil, nil
@@ -1842,6 +1876,9 @@ func (r *fakeRepo) GetGuardianEdge(_ context.Context, guardianUserID, childUserI
 func (r *fakeRepo) ListGuardiansOfChild(_ context.Context, childUserID string) ([]*GuardianEdge, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.listGuardianEdgesErr != nil {
+		return nil, r.listGuardianEdgesErr
+	}
 	var out []*GuardianEdge
 	for _, e := range r.guardianEdges {
 		if e.ChildUserID != childUserID {
@@ -1850,12 +1887,17 @@ func (r *fakeRepo) ListGuardiansOfChild(_ context.Context, childUserID string) (
 		cp := *e
 		out = append(out, &cp)
 	}
+	// Ordered like the drivers (ORDER BY guardian_user_id).
+	sort.Slice(out, func(i, j int) bool { return out[i].GuardianUserID < out[j].GuardianUserID })
 	return out, nil
 }
 
 func (r *fakeRepo) ListChildrenOfGuardian(_ context.Context, guardianUserID string) ([]*GuardianEdge, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.listGuardianEdgesErr != nil {
+		return nil, r.listGuardianEdgesErr
+	}
 	var out []*GuardianEdge
 	for _, e := range r.guardianEdges {
 		if e.GuardianUserID != guardianUserID {
@@ -1864,6 +1906,8 @@ func (r *fakeRepo) ListChildrenOfGuardian(_ context.Context, guardianUserID stri
 		cp := *e
 		out = append(out, &cp)
 	}
+	// Ordered like the drivers (ORDER BY child_user_id).
+	sort.Slice(out, func(i, j int) bool { return out[i].ChildUserID < out[j].ChildUserID })
 	return out, nil
 }
 

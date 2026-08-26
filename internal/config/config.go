@@ -2064,6 +2064,20 @@ func (c *Config) validateWebhooks() error {
 // is unconstrained — the no-op determiner is wired and the thresholds are
 // ignored.
 func (c *Config) validateAgeGate() error {
+	// REQUIRE_DOB is meaningless without the gate: every enforcement site
+	// short-circuits on ageGate.Enabled(), so the pair "require a date of
+	// birth, but do not age-gate" boots clean and enforces NOTHING while the
+	// operator believes every session is age-known — the child-protection
+	// bypass the requirement exists to close stays wide open. Same fail-open
+	// shape, and the same refusal, as ANONYMOUS_REQUIRE_ASSURANCE without
+	// ASSURANCE_ENABLED below.
+	if c.AgeGateRequireDOB && !c.AgeGateEnabled {
+		return errors.New(
+			"config: GATEWAY_AGEGATE_REQUIRE_DOB=true requires GATEWAY_AGEGATE_ENABLED=true — " +
+				"date-of-birth enforcement short-circuits to ALLOW when the age gate is off, so " +
+				"accounts would keep signing in with no date of birth while this setting claims otherwise",
+		)
+	}
 	if !c.AgeGateEnabled {
 		return nil
 	}

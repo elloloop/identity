@@ -44,8 +44,13 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID, devi
 		}
 	}
 
+	// The WebAuthn user entity labels the credential in the platform's passkey
+	// manager. A managed child has no email and may have no display name, so
+	// fall back to its project-unique username — otherwise the credential is
+	// stored unlabelled and the child cannot tell it apart from any other.
+	entityName := coalesce(user.Email, user.Username)
 	optionsJSON, challengeB64, err := s.passkeysFor(ctx).BeginRegistration(
-		userID, user.Email, coalesce(user.Name, user.Email), existingIDs,
+		userID, entityName, coalesce(user.Name, entityName), existingIDs,
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("building registration options: %w", err)

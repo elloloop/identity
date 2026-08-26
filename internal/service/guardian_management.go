@@ -43,22 +43,24 @@ import (
 // account is their own. Mapped to CodeFailedPrecondition.
 var ErrGuardianRightsExpired = errors.New("the managed account has reached the adult age band; guardian management rights no longer apply")
 
-// guardianOperation names one guardian-authorized management operation: the
-// audit event it emits (on success AND on refusal) and the short step name
-// recorded on the audit event of a refusal.
+// guardianOperation is one guardian-authorized management operation, named by
+// the audit event it emits on success AND on refusal. The refusal detail says
+// which check failed; the event type already says which operation it was.
 type guardianOperation struct {
-	name  string
 	event audit.EventType
 }
 
 var (
-	guardianOpViewProfile     = guardianOperation{"view_profile", audit.EventGuardianChildProfileViewed}
-	guardianOpSetPassword     = guardianOperation{"set_password", audit.EventGuardianChildPasswordSet}
-	guardianOpSetUsername     = guardianOperation{"set_username", audit.EventGuardianChildUsernameChanged}
-	guardianOpRevokeSessions  = guardianOperation{"revoke_sessions", audit.EventGuardianChildSessionsRevoked}
-	guardianOpDeactivate      = guardianOperation{"deactivate", audit.EventGuardianChildDeactivated}
-	guardianOpReactivate      = guardianOperation{"reactivate", audit.EventGuardianChildReactivated}
-	guardianOpDeleteChild     = guardianOperation{"delete", audit.EventGuardianChildDeleted}
+	guardianOpViewProfile    = guardianOperation{audit.EventGuardianChildProfileViewed}
+	guardianOpSetPassword    = guardianOperation{audit.EventGuardianChildPasswordSet}
+	guardianOpSetUsername    = guardianOperation{audit.EventGuardianChildUsernameChanged}
+	guardianOpRevokeSessions = guardianOperation{audit.EventGuardianChildSessionsRevoked}
+	guardianOpDeactivate     = guardianOperation{audit.EventGuardianChildDeactivated}
+	guardianOpReactivate     = guardianOperation{audit.EventGuardianChildReactivated}
+	guardianOpDeleteChild    = guardianOperation{audit.EventGuardianChildDeleted}
+
+	// guardianRefusalNotAllowed is the ONE message every non-guardian refusal
+	// carries, whether the child exists or not.
 	guardianRefusalNotAllowed = "caller is not a guardian of this account"
 )
 
@@ -203,6 +205,13 @@ func (s *AuthService) SetManagedChildPassword(
 	if err := repo.UpdateUser(ctx, child.ID, map[string]any{
 		"password_hash": hash,
 		"updated_at":    now,
+		// Clear the lockout with the credential, exactly as the self-service
+		// ResetPassword does: whoever tripped it is usually the person the
+		// new password is for, and this is the ONLY recovery path an
+		// email-less managed child has — leaving the lockout would keep the
+		// account unusable behind a password that is already correct.
+		"failed_login_count": 0,
+		"locked_until":       int64(0),
 	}); err != nil {
 		return fmt.Errorf("set managed child password: %w", err)
 	}

@@ -8,7 +8,7 @@ import { Code } from "astro-expressive-code/components";
   <p>
     A children's product needs more than an age band and a consent record: it
     needs to know <em>who a child belongs to</em>. Identity models that as a
-    <strong>guardian edge</strong> in the account graph, and builds three things
+    <strong>guardian edge</strong> between two accounts, and builds three things
     on it — a parent-creates-child signup, a guardian-authorized management
     surface over the child's account, and consent artifacts that satisfy COPPA,
     the UK Children's Code, and India's DPDP Rules 2025.
@@ -22,7 +22,7 @@ import { Code } from "astro-expressive-code/components";
   <h2>Guardian edges</h2>
   <p>
     A guardian edge is a directed <code>guardian_user_id → child_user_id</code>
-    fact (graph edge type <code>guardianOf</code> = 102). A child may have more
+    fact, stored in its own project-scoped table. A child may have more
     than one guardian and an adult may guard many children;
     <code>(guardian, child)</code> is unique, so re-adding an edge is
     idempotent. Edges are project-scoped and carry the same row-level
@@ -35,7 +35,7 @@ import { Code } from "astro-expressive-code/components";
     <code>users</code> foreign keys with <code>ON DELETE CASCADE</code> and dies
     with the accounts it references.
   </p>
-  <p>Edges enter the graph from three places:</p>
+  <p>Edges are created in three places:</p>
   <ul>
     <li>
       <strong>Migration backfill</strong> — one edge per active consent whose
@@ -139,14 +139,15 @@ import { Code } from "astro-expressive-code/components";
     Seven RPCs cover what a parent actually does. None of them needs the child's
     credentials, and none needs an admin credential.
   </p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Guardian management RPCs">
   <table>
     <thead>
-      <tr><th>RPC</th><th>Effect</th></tr>
+      <tr><th scope="col">RPC</th><th scope="col">Effect</th></tr>
     </thead>
     <tbody>
       <tr>
         <td><code>GetManagedChildProfile</code></td>
-        <td>Reads the stored child record — deliberately little, since minor data-minimization suppresses optional PII at every write path</td>
+        <td>Reads the stored child record — deliberately little, since minor data-minimization suppresses optional PII on the paths that collect it</td>
       </tr>
       <tr>
         <td><code>SetManagedChildPassword</code></td>
@@ -174,6 +175,7 @@ import { Code } from "astro-expressive-code/components";
       </tr>
     </tbody>
   </table>
+  </div>
   <p>
     Every one of them passes through <strong>one guard</strong>, so an operation
     added later is gated by construction. It requires both an active guardian

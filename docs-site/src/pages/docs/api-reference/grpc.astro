@@ -67,8 +67,8 @@ import { Code } from "astro-expressive-code/components";
   <h2>Passkey</h2>
   <table>
     <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
-    <tr><td><code>BeginPasskeyRegistration</code></td><td>bearer</td><td>Start enrollment (returns options + challenge)</td></tr>
-    <tr><td><code>CompletePasskeyRegistration</code></td><td>bearer</td><td>Persist the credential</td></tr>
+    <tr><td><code>BeginPasskeyRegistration</code></td><td>bearer or enrolment ticket</td><td>Start enrollment (returns options + challenge)</td></tr>
+    <tr><td><code>CompletePasskeyRegistration</code></td><td>bearer or enrolment ticket</td><td>Persist the credential; a ticket redemption also issues the managed child&rsquo;s first tokens</td></tr>
     <tr><td><code>BeginPasskeyLogin</code></td><td>none</td><td>Start authentication ceremony</td></tr>
     <tr><td><code>CompletePasskeyLogin</code></td><td>none</td><td>Verify assertion, issue tokens</td></tr>
     <tr><td><code>ListPasskeys</code></td><td>bearer</td><td>List the caller's passkeys</td></tr>

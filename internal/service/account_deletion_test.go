@@ -242,3 +242,35 @@ func TestPurgeExpiredPendingDeletions_PurgesOnlyDue(t *testing.T) {
 		t.Fatalf("purged account's refresh token must be gone, got %#v", rec)
 	}
 }
+
+// TestPurgeAccount_IsTheSharedCascade pins the AccountPurger seam: the
+// exported entry point the guardian-initiated child erasure calls runs the
+// SAME cascade the admin DeleteUser RPC and the deletion sweeper run, so the
+// three can never drift into three different definitions of "erased".
+func TestPurgeAccount_IsTheSharedCascade(t *testing.T) {
+	ctx := context.Background()
+	db := newFakeDB()
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	admin := newTestAdminServiceWithAudit(db, repo, writer)
+
+	target := seedRevocableUser(t, repo, "purge@example.com", StatusActive)
+
+	if err := admin.PurgeAccount(ctx, "guardian-1", target); err != nil {
+		t.Fatalf("PurgeAccount: %v", err)
+	}
+	if u, _ := repo.GetUser(ctx, target.ID); u != nil {
+		t.Fatal("the account must be erased")
+	}
+	// Sessions and refresh tokens die with it — the cascade, not just the row.
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	for _, rt := range repo.refreshTokens {
+		if rt.UserID == target.ID {
+			t.Fatal("refresh tokens must be deleted by the cascade")
+		}
+	}
+	if n := writer.countByEventTypeActorTarget(string(audit.EventUserDeleted), "guardian-1", target.ID); n != 1 {
+		t.Fatalf("audit events = %d, want 1 naming the acting principal", n)
+	}
+}

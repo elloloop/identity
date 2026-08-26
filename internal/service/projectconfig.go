@@ -872,19 +872,34 @@ func (j ProjectJurisdictionsConfig) thresholdFor(code string) (JurisdictionThres
 	return t, ok
 }
 
-// strictest returns the most protective configured ceiling: the entry with
-// the highest child_max_age, tie-broken by the lowest adult_age. It is the
-// classification for an account whose market resolves to nothing configured —
-// an unresolvable market must never drift an account toward a more permissive
-// regime than the strictest one the project declared.
+// strictest returns the most protective thresholds this block can express: a
+// SYNTHETIC worst case, not one of the configured jurisdictions. The highest
+// child ceiling and the highest adult age are taken independently, because
+// they protect against different things — a high child_max_age widens who
+// counts as a COPPA-protected child, a high adult_age narrows who escapes
+// minor status — and no single configured pair is guaranteed to be the
+// maximum of both.
+//
+// It backs two fallbacks, and both must fail CLOSED: an account whose market
+// resolves to nothing configured, and the unreachable case of a stored pair
+// that cannot build a determiner. Picking a real entry (as an
+// earliest-wins tie-break would) can be strictly more permissive on one
+// boundary than another entry, which is the drift these fallbacks exist to
+// prevent.
 func (j ProjectJurisdictionsConfig) strictest() (JurisdictionThresholds, bool) {
 	var best JurisdictionThresholds
 	found := false
 	for _, t := range j.Thresholds {
-		if !found || t.ChildMaxAge > best.ChildMaxAge ||
-			(t.ChildMaxAge == best.ChildMaxAge && t.AdultAge < best.AdultAge) {
+		if !found {
 			best = t
 			found = true
+			continue
+		}
+		if t.ChildMaxAge > best.ChildMaxAge {
+			best.ChildMaxAge = t.ChildMaxAge
+		}
+		if t.AdultAge > best.AdultAge {
+			best.AdultAge = t.AdultAge
 		}
 	}
 	return best, found

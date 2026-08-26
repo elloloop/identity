@@ -28,12 +28,23 @@ import (
 // Nothing is cached across requests: the project config arrives on the
 // request scope the resolution middleware already parsed.
 func (s *AuthService) determinerForUser(ctx context.Context, u *User) agegate.Determiner {
-	if !s.ageGate.Enabled() {
-		return s.ageGate
+	return determinerForUserWith(ctx, s.ageGate, s.logger, u)
+}
+
+// determinerForUserWith is determinerForUser with the deployment-wide
+// determiner passed in, so every holder of one — the AuthService, and the
+// MinorDataMinimizer shared by the profile/phone/IDV paths — resolves the
+// SAME per-jurisdiction band. Two definitions of "child" in one service is
+// exactly the drift #462 set out to remove.
+func determinerForUserWith(
+	ctx context.Context, base agegate.Determiner, logger *zap.Logger, u *User,
+) agegate.Determiner {
+	if base == nil || !base.Enabled() {
+		return base
 	}
 	scope := ProjectScopeFromContext(ctx)
 	if scope == nil || !scope.Jurisdictions.configured() {
-		return s.ageGate
+		return base
 	}
 	t := resolveJurisdictionThresholds(scope.Jurisdictions, u)
 	d, err := agegate.NewThreshold(t.ChildMaxAge, t.AdultAge)
@@ -41,14 +52,17 @@ func (s *AuthService) determinerForUser(ctx context.Context, u *User) agegate.De
 		// Unreachable for config parsed through ParseProjectConfig (it rejects
 		// a pair violating 0 <= child_max < adult), but never fail open: fall
 		// back to the strictest configured ceiling, then the env thresholds.
-		s.logger.Warn("jurisdiction_thresholds_invalid_falling_back",
+		if logger == nil {
+			logger = zap.NewNop()
+		}
+		logger.Warn("jurisdiction_thresholds_invalid_falling_back",
 			zap.Int("child_max_age", t.ChildMaxAge), zap.Int("adult_age", t.AdultAge), zap.Error(err))
 		if strict, ok := scope.Jurisdictions.strictest(); ok {
 			if sd, serr := agegate.NewThreshold(strict.ChildMaxAge, strict.AdultAge); serr == nil {
 				return sd
 			}
 		}
-		return s.ageGate
+		return base
 	}
 	return d
 }

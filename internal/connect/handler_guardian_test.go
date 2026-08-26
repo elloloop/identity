@@ -40,14 +40,15 @@ func TestListManagedChildrenRequest_CarriesNoUserID(t *testing.T) {
 }
 
 func TestHandler_ListManagedChildren(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
-	adult := seedConsentAdult(t, h, "adult@example.com", true)
-	child1 := seedConsentChild(t, h, "child1@example.com")
-	child2 := seedConsentChild(t, h, "child2@example.com")
+	adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+	child1 := seedConsentChild(ctx, t, h, "child1@example.com")
+	child2 := seedConsentChild(ctx, t, h, "child2@example.com")
 
 	// No edges yet: empty list.
 	req := authedReq(connect.NewRequest(&identitypb.ListManagedChildrenRequest{}), adult)
-	res, err := h.client.ListManagedChildren(context.Background(), req)
+	res, err := h.client.ListManagedChildren(ctx, req)
 	if err != nil {
 		t.Fatalf("ListManagedChildren (empty): %v", err)
 	}
@@ -59,7 +60,7 @@ func TestHandler_ListManagedChildren(t *testing.T) {
 	grantConsentViaRPC(t, h, adult, child1)
 	grantConsentViaRPC(t, h, adult, child2)
 
-	res, err = h.client.ListManagedChildren(context.Background(), authedReq(connect.NewRequest(&identitypb.ListManagedChildrenRequest{}), adult))
+	res, err = h.client.ListManagedChildren(ctx, authedReq(connect.NewRequest(&identitypb.ListManagedChildrenRequest{}), adult))
 	if err != nil {
 		t.Fatalf("ListManagedChildren: %v", err)
 	}
@@ -72,8 +73,8 @@ func TestHandler_ListManagedChildren(t *testing.T) {
 	}
 
 	// Another account sees none of them.
-	stranger := seedConsentAdult(t, h, "stranger@example.com", true)
-	res, err = h.client.ListManagedChildren(context.Background(), authedReq(connect.NewRequest(&identitypb.ListManagedChildrenRequest{}), stranger))
+	stranger := seedConsentAdult(ctx, t, h, "stranger@example.com", true)
+	res, err = h.client.ListManagedChildren(ctx, authedReq(connect.NewRequest(&identitypb.ListManagedChildrenRequest{}), stranger))
 	if err != nil {
 		t.Fatalf("ListManagedChildren (stranger): %v", err)
 	}
@@ -83,17 +84,19 @@ func TestHandler_ListManagedChildren(t *testing.T) {
 }
 
 func TestHandler_ListManagedChildren_RequiresAuth(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
-	_, err := h.client.ListManagedChildren(context.Background(), connect.NewRequest(&identitypb.ListManagedChildrenRequest{}))
+	_, err := h.client.ListManagedChildren(ctx, connect.NewRequest(&identitypb.ListManagedChildrenRequest{}))
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Fatalf("code = %v, want Unauthenticated", connect.CodeOf(err))
 	}
 }
 
 func TestHandler_GetGuardians(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
-	adult := seedConsentAdult(t, h, "adult@example.com", true)
-	child := seedConsentChild(t, h, "child@example.com")
+	adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+	child := seedConsentChild(ctx, t, h, "child@example.com")
 	grantConsentViaRPC(t, h, adult, child)
 
 	// The guardian may list.
@@ -127,10 +130,11 @@ func TestHandler_GetGuardians(t *testing.T) {
 // denial: a non-guardian non-admin gets the identical PERMISSION_DENIED for
 // an existing and a nonexistent child.
 func TestHandler_GetGuardians_NoExistenceDisclosure(t *testing.T) {
+	ctx := context.Background()
 	h := newHarness(t)
-	adult := seedConsentAdult(t, h, "adult@example.com", true)
-	stranger := seedConsentAdult(t, h, "stranger@example.com", true)
-	child := seedConsentChild(t, h, "child@example.com")
+	adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+	stranger := seedConsentAdult(ctx, t, h, "stranger@example.com", true)
+	child := seedConsentChild(ctx, t, h, "child@example.com")
 	grantConsentViaRPC(t, h, adult, child)
 
 	_, errExisting := h.client.GetGuardians(context.Background(),
@@ -151,5 +155,22 @@ func TestHandler_GetGuardians_RequiresAuth(t *testing.T) {
 	_, err := h.client.GetGuardians(context.Background(), connect.NewRequest(&identitypb.GetGuardiansRequest{ChildUserId: "c"}))
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Fatalf("code = %v, want Unauthenticated", connect.CodeOf(err))
+	}
+}
+
+// TestHandler_GuardianEdgeRPCs_Unauthenticated pins that both edge-reading
+// RPCs refuse a request with no verified session, before any service call.
+func TestHandler_GuardianEdgeRPCs_Unauthenticated(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	_, err := h.client.ListManagedChildren(ctx, connect.NewRequest(&identitypb.ListManagedChildrenRequest{}))
+	if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("ListManagedChildren: code = %v, want Unauthenticated", got)
+	}
+
+	_, err = h.client.GetGuardians(ctx, connect.NewRequest(&identitypb.GetGuardiansRequest{ChildUserId: "kid"}))
+	if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("GetGuardians: code = %v, want Unauthenticated", got)
 	}
 }

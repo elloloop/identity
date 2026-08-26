@@ -86,19 +86,31 @@ func runGuardianEdgeConformance(t *testing.T, driver Driver) {
 				}
 			}
 
+			// Both listings are ORDERED, not merely complete: they reach
+			// clients verbatim through GetGuardians / ListManagedChildren, so
+			// a driver returning them in storage-iteration order would answer
+			// the same call differently every time.
 			guardians, err := r.ListGuardiansOfChild(ctx, c1)
 			if err != nil {
 				t.Fatalf("ListGuardiansOfChild: %v", err)
 			}
-			if len(guardians) != 2 {
-				t.Fatalf("child c1 has %d guardians, want 2", len(guardians))
+			wantGuardians := sortedPair(g1, g2)
+			if len(guardians) != 2 ||
+				guardians[0].GuardianUserID != wantGuardians[0] ||
+				guardians[1].GuardianUserID != wantGuardians[1] {
+				t.Fatalf("child c1 guardians = %s, want %v in guardian_user_id order",
+					guardianIDs(guardians), wantGuardians)
 			}
 			children, err := r.ListChildrenOfGuardian(ctx, g1)
 			if err != nil {
 				t.Fatalf("ListChildrenOfGuardian: %v", err)
 			}
-			if len(children) != 2 {
-				t.Fatalf("guardian g1 manages %d children, want 2", len(children))
+			wantChildren := sortedPair(c1, c2)
+			if len(children) != 2 ||
+				children[0].ChildUserID != wantChildren[0] ||
+				children[1].ChildUserID != wantChildren[1] {
+				t.Fatalf("guardian g1 children = %s, want %v in child_user_id order",
+					childIDs(children), wantChildren)
 			}
 			children, err = r.ListChildrenOfGuardian(ctx, g2)
 			if err != nil {
@@ -171,4 +183,30 @@ func runGuardianEdgeConformance(t *testing.T, driver Driver) {
 			}
 		})
 	})
+}
+
+// sortedPair returns the two ids in the ascending order both drivers' ORDER BY
+// produces, so the ordering assertions do not depend on which id the fixture
+// happened to mint first.
+func sortedPair(a, b string) []string {
+	if a <= b {
+		return []string{a, b}
+	}
+	return []string{b, a}
+}
+
+func guardianIDs(edges []*service.GuardianEdge) []string {
+	out := make([]string, 0, len(edges))
+	for _, e := range edges {
+		out = append(out, e.GuardianUserID)
+	}
+	return out
+}
+
+func childIDs(edges []*service.GuardianEdge) []string {
+	out := make([]string, 0, len(edges))
+	for _, e := range edges {
+		out = append(out, e.ChildUserID)
+	}
+	return out
 }

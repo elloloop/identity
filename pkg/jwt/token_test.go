@@ -53,9 +53,23 @@ func TestCreateAndVerify_PurposeClaim(t *testing.T) {
 		Sub: "user-1", Tenant: "t", Purpose: "dob_completion",
 	}, 10*time.Minute)
 	require.NoError(t, err)
-	gotPurpose, err := VerifyAccessToken(purposeTok, s, "", "", false)
+
+	// The access-token verifier REFUSES a purpose token. This is the whole
+	// point of the claim: a ticket is proof of one interrupted flow, and it
+	// must not authenticate a request on ANY transport — identity's own
+	// middleware, an embedding host's gRPC interceptor, or a downstream
+	// service verifying through the published JWKS.
+	_, err = VerifyAccessToken(purposeTok, s, "", "", false)
+	require.Error(t, err, "a purpose token must never verify as an access token")
+
+	// The redeeming flow names the purpose it expects...
+	gotPurpose, err := VerifyPurposeToken(purposeTok, s, "", "", false, "dob_completion")
 	require.NoError(t, err)
 	assert.Equal(t, "dob_completion", gotPurpose.Purpose)
+
+	// ...and a ticket minted for a different purpose does not pass it.
+	_, err = VerifyPurposeToken(purposeTok, s, "", "", false, "passkey_enrolment")
+	require.Error(t, err, "a ticket must not satisfy a different purpose")
 
 	plainTok, err := s.SignAccessToken(context.Background(), Claims{
 		Sub: "user-2", Tenant: "t",
@@ -64,6 +78,13 @@ func TestCreateAndVerify_PurposeClaim(t *testing.T) {
 	gotPlain, err := VerifyAccessToken(plainTok, s, "", "", false)
 	require.NoError(t, err)
 	assert.Empty(t, gotPlain.Purpose, "normal access token verifies with Purpose empty")
+
+	// A plain access token is not a ticket either — the two directions are
+	// both closed.
+	_, err = VerifyPurposeToken(plainTok, s, "", "", false, "dob_completion")
+	require.Error(t, err, "a session token must not pass as a purpose ticket")
+	_, err = VerifyPurposeToken(plainTok, s, "", "", false, "")
+	require.Error(t, err, "an empty wantPurpose is a programming error, not a wildcard")
 }
 
 // A minor's token carries is_minor=true and round-trips. A token without

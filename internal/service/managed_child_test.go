@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -441,6 +442,11 @@ func TestCreateManagedChildAccount_MarketValidation(t *testing.T) {
 func TestManagedChild_UsernameLogin_EndToEnd(t *testing.T) {
 	f := newManagedChildFixture(t, true)
 	ctx := context.Background()
+	// The PRODUCTION default (GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL defaults
+	// true). A managed child structurally has no address to verify, so a gate
+	// that fired on it would make the parent-set password permanently
+	// unusable on every stock deployment.
+	f.svc.cfg.AuthRequireVerifiedEmail = true
 
 	res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
 	if err != nil {
@@ -546,4 +552,96 @@ func TestValidateUsernameFormat(t *testing.T) {
 	if got := normalizeUsername("  Kid.One "); got != "kid.one" {
 		t.Errorf("normalizeUsername = %q, want kid.one", got)
 	}
+}
+
+// TestCreateManagedChildAccount_RepoFailuresAndBranches covers the storage
+// failures and the two branches the happy-path tests do not reach: the
+// racing-unique-index arm, and the data-minimization drop on the create path.
+func TestCreateManagedChildAccount_RepoFailuresAndBranches(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("caller lookup fails", func(t *testing.T) {
+		f := newManagedChildFixture(t, true)
+		f.repo.getUserErr = errConsentInjected
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("factor lookup fails", func(t *testing.T) {
+		f := newManagedChildFixture(t, true)
+		f.repo.listPasskeyCredsErr = errConsentInjected
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("username pre-check fails", func(t *testing.T) {
+		f := newManagedChildFixture(t, true)
+		f.repo.findUserByUsernameErr = errConsentInjected
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("transaction fails", func(t *testing.T) {
+		f := newManagedChildFixture(t, true)
+		f.repo.createManagedChildErr = errConsentInjected
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", ""); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("a racing create loses the unique index", func(t *testing.T) {
+		f := newManagedChildFixture(t, true)
+		// The pre-check passes and the transaction then hits the index — the
+		// arm a concurrent create takes. It must answer exactly as the
+		// pre-check does, disclosing nothing extra.
+		f.repo.createManagedChildErr = fmt.Errorf("unique index: %w", ErrAlreadyExists)
+		_, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
+		if !errors.Is(err, ErrAlreadyExists) {
+			t.Fatalf("err = %v, want ErrAlreadyExists", err)
+		}
+		if n := f.writer.countByEventTypeAndDetail(
+			string(audit.EventManagedChildAccountCreated), "step", "duplicate_username",
+		); n != 1 {
+			t.Fatalf("duplicate_username refusals = %d, want 1", n)
+		}
+	})
+
+	t.Run("data minimization drops the avatar", func(t *testing.T) {
+		f := newManagedChildFixture(t, true)
+		f.svc.minorData = NewMinorDataMinimizer(true, f.svc.ageGate, f.svc.nowFunc)
+		req := f.req()
+		req.AvatarURL = "https://example.org/kid.png"
+
+		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+		if err != nil {
+			t.Fatalf("CreateManagedChildAccount: %v", err)
+		}
+		if res.Child.AvatarURL != "" {
+			t.Fatalf("avatar = %q, want it dropped for a minimized child", res.Child.AvatarURL)
+		}
+		stored, _ := f.repo.GetUser(ctx, res.Child.ID)
+		if stored.AvatarURL != "" {
+			t.Fatalf("stored avatar = %q, want none persisted", stored.AvatarURL)
+		}
+	})
+
+	t.Run("a teen keeps their avatar", func(t *testing.T) {
+		f := newManagedChildFixture(t, true)
+		f.svc.minorData = NewMinorDataMinimizer(true, f.svc.ageGate, f.svc.nowFunc)
+		req := f.req()
+		req.Username = "kid.teen"
+		req.DateOfBirthMs = dobAgeMs(15) // TEEN: minimization covers CHILD only
+		req.AvatarURL = "https://example.org/teen.png"
+
+		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+		if err != nil {
+			t.Fatalf("CreateManagedChildAccount: %v", err)
+		}
+		if res.Child.AvatarURL != req.AvatarURL {
+			t.Fatalf("avatar = %q, want it kept for a teen", res.Child.AvatarURL)
+		}
+	})
 }

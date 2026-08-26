@@ -426,9 +426,9 @@ artifact says WHICH jurisdiction's thresholds it proves consent against.
 
 ### Guardian edges (the account graph)
 
-A **guardian edge** (`guardian_user_id → child_user_id`, graph edge type
-`guardianOf` = 102) is the account-graph authorization fact that one account
-manages another. It is deliberately distinct from the parental-consent
+A **guardian edge** (`guardian_user_id → child_user_id`) is the
+authorization fact that one account manages another. It is stored
+relationally, in its own `guardian_edges` table. It is deliberately distinct from the parental-consent
 **record**: the record is an audit/compliance artifact that survives account
 deletion, while the edge is live authorization state — it carries `users`
 foreign keys with `ON DELETE CASCADE`, so it dies with either account it

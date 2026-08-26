@@ -23,7 +23,13 @@ func requireDOBRefusal(t *testing.T, svc *AuthService, err error) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrDOBRequired)
 	assert.Contains(t, err.Error(), "dob_required", "the stable wire token must lead the message")
-	claims, vErr := jwt.VerifyAccessToken(dobTicketFrom(t, err), svc.signer, "", "", false)
+	ticket := dobTicketFrom(t, err)
+	// The ticket must NOT verify as an access token — it is a purpose
+	// credential, and the shared verifier is what makes that true on every
+	// transport, not just in identity's own middleware.
+	_, accessErr := jwt.VerifyAccessToken(ticket, svc.signer, "", "", false)
+	require.Error(t, accessErr, "a completion ticket must never authenticate a request")
+	claims, vErr := jwt.VerifyPurposeToken(ticket, svc.signer, "", "", false, tokenPurposeDOBCompletion)
 	require.NoError(t, vErr, "the completion ticket must verify against the service signer")
 	assert.Equal(t, tokenPurposeDOBCompletion, claims.Purpose)
 	assert.NotEmpty(t, claims.Sub)
@@ -344,6 +350,20 @@ func TestDOBRequired_RefreshToken(t *testing.T) {
 
 	_, _, _, err = svc.RefreshToken(context.Background(), res.RefreshToken, "1.2.3.4", "agent")
 	requireDOBRefusal(t, svc, err)
+
+	// The refusal must be NON-DESTRUCTIVE: the presented refresh token is
+	// still unconsumed. If it were burnt, the retry an SDK makes on a failed
+	// rotation would land on replay detection, which deletes every refresh
+	// token the user has and signs them out on all their devices — a mass
+	// logout triggered by turning a flag on.
+	stored, err := repo.FindRefreshTokenByHash(context.Background(), sha256Hex(res.RefreshToken))
+	require.NoError(t, err)
+	require.NotNil(t, stored, "the refusal must leave the refresh token usable")
+	require.Zero(t, stored.ConsumedAtMs, "the refusal must not consume the refresh token")
+
+	// A second attempt gets the same refusal, not a replay-detection wipe.
+	_, _, _, err = svc.RefreshToken(context.Background(), res.RefreshToken, "1.2.3.4", "agent")
+	requireDOBRefusal(t, svc, err)
 }
 
 // The anonymous exemption ends the moment the account is promoted: the
@@ -633,4 +653,58 @@ func TestDOBRequired_FlagOff_PreExistingAccountUnaffected(t *testing.T) {
 
 	_, _, _, err = svc.RefreshToken(ctx, res.RefreshToken, "1.2.3.4", "agent")
 	require.NoError(t, err)
+}
+
+// TestDOBCompletion_TicketAndSubmitErrorPaths covers the refusals the happy
+// path does not reach: a ticket that fails verification, an out-of-range date,
+// and the storage failures on the submit path.
+func TestDOBCompletion_TicketAndSubmitErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+
+	// Sign up BEFORE the flag so the account is dob-less, then turn the gate
+	// on — the pre-flag account the completion step exists for.
+	res, err := svc.PasswordSignup(ctx, "dob@example.com", strongPW, "D", "", 0, "")
+	require.NoError(t, err)
+	user := res.User
+	enableAgeGate(t, svc, true)
+
+	// A garbage ticket is refused, and so is a well-formed ACCESS token: the
+	// submit path takes purpose tickets only.
+	for _, ticket := range []string{"", "not-a-jwt", res.AccessToken} {
+		_, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+		require.ErrorIs(t, err, ErrUnauthenticated, "ticket %q must be refused", ticket)
+	}
+
+	ticket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: user.ID})
+	require.NoError(t, err)
+
+	// A valid ticket with an out-of-range date is InvalidArgument.
+	for _, dob := range []int64{0, svc.nowFunc().Add(48 * time.Hour).UnixMilli()} {
+		_, err := svc.SubmitDateOfBirth(ctx, ticket, dob, "", "")
+		require.ErrorIs(t, err, ErrInvalidArgument, "dob %d must be refused", dob)
+	}
+
+	// Storage failures propagate rather than becoming a denial.
+	repo.getUserErr = errConsentInjected
+	_, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+	require.ErrorIs(t, err, errConsentInjected)
+	repo.getUserErr = nil
+
+	repo.updateUserErr = errConsentInjected
+	_, err = svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+	require.ErrorIs(t, err, errConsentInjected)
+	repo.updateUserErr = nil
+
+	// A ticket for an account that no longer exists refuses without a panic.
+	ghostTicket, err := svc.mintDOBCompletionTicket(ctx, &User{ID: "no-such-user"})
+	require.NoError(t, err)
+	_, err = svc.SubmitDateOfBirth(ctx, ghostTicket, dobAgeMs(30), "", "")
+	require.Error(t, err)
+
+	// And the real submission completes the sign-in.
+	done, err := svc.SubmitDateOfBirth(ctx, ticket, dobAgeMs(30), "", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, done.AccessToken)
 }

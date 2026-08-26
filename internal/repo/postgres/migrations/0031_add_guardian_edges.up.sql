@@ -1,6 +1,6 @@
 -- 0031_add_guardian_edges.up.sql
 --
--- Guardian edges (graph edge type guardianOf = 102): the authorization fact
+-- Guardian edges: the authorization fact
 -- that guardian_user_id manages child_user_id. Unlike parental_consents —
 -- an audit/compliance artifact that deliberately survives user deletion — an
 -- edge is live authorization state and dies with either account it

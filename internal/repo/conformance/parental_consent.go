@@ -103,6 +103,46 @@ func runParentalConsentConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		t.Run("ListActive_ReturnsEveryNonRevoked_NewestFirst", func(t *testing.T) {
+			// RevokeParentalConsent's last-guardian rule asks "does another
+			// guardian still consent?" about a record it has NOT yet marked
+			// revoked, so it needs every active record, not just the latest.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			child := createTestUser(t, r, "pc-list-child@example.com")
+			a1 := createTestUser(t, r, "pc-list-a1@example.com")
+			a2 := createTestUser(t, r, "pc-list-a2@example.com")
+
+			seed := []*service.ParentalConsentRecord{
+				{ConsentID: "pcl-revoked", ChildUserID: child, ConsentingUserID: a1, GrantedAt: 100, RevokedAt: 150},
+				{ConsentID: "pcl-older", ChildUserID: child, ConsentingUserID: a2, GrantedAt: 300},
+				{ConsentID: "pcl-newer", ChildUserID: child, ConsentingUserID: a1, GrantedAt: 900},
+			}
+			for _, rec := range seed {
+				if err := r.CreateParentalConsent(ctx, rec); err != nil {
+					t.Fatalf("seed %s: %v", rec.ConsentID, err)
+				}
+			}
+
+			got, err := r.ListActiveParentalConsentsForChild(ctx, child)
+			if err != nil {
+				t.Fatalf("ListActive: %v", err)
+			}
+			if len(got) != 2 || got[0].ConsentID != "pcl-newer" || got[1].ConsentID != "pcl-older" {
+				ids := make([]string, 0, len(got))
+				for _, rec := range got {
+					ids = append(ids, rec.ConsentID)
+				}
+				t.Fatalf("ListActive = %v, want [pcl-newer pcl-older] (revoked excluded, newest first)", ids)
+			}
+
+			// A child with nothing on file gets an empty result, not an error.
+			none, err := r.ListActiveParentalConsentsForChild(ctx, "no-such-child")
+			if err != nil || len(none) != 0 {
+				t.Fatalf("ListActive(unknown child) = %#v %v, want empty and nil", none, err)
+			}
+		})
+
 		t.Run("SurvivesChildDeletion", func(t *testing.T) {
 			// The consent artifact is an audit/compliance record: it must
 			// outlive deletion of the child it references, exactly like

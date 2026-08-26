@@ -113,7 +113,7 @@ func (s *IdentityVerificationService) BeginIdentityVerification(
 	// CHILD-band account when minimization is enabled. No provider session
 	// is created. Adults/teens and minimization-off deployments are
 	// unaffected.
-	if s.minorData.BlocksChild(user.DateOfBirthMs) {
+	if s.minorData.BlocksChildFor(ctx, user) {
 		s.logger.Info("idv_begin_blocked_minor", zap.String("user_id", userID))
 		return nil, ErrMinorDataMinimized
 	}

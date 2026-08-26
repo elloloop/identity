@@ -235,3 +235,127 @@ func TestRevokeParentalConsent_LastGuardianRule(t *testing.T) {
 		t.Fatalf("child status after last-guardian revoke = %q, want %q", got.Status, StatusPendingParentalConsent)
 	}
 }
+
+// TestRevokeParentalConsent_FailsClosed pins the ordering that matters most in
+// this feature: consent withdrawal removes ACCESS first and marks the record
+// revoked last, so a storage failure part-way leaves the child gated behind a
+// still-active record — safe, and retryable, because the record the retry
+// looks up is still there. The reverse order strands an ACTIVE child with
+// live sessions and no consent on file, unreachable by any later call.
+func TestRevokeParentalConsent_FailsClosed(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+
+	adult := seedConsentingAdult(t, repo, "parent@example.com", hashPW(t, strongPW), adultFactors{phoneVerified: true})
+	child := seedUser(repo, "child@example.com", "", StatusActive)
+	rec := &ParentalConsentRecord{
+		ConsentID: "pc-fc", ChildUserID: child.ID, ConsentingUserID: adult.ID, GrantedAt: 100,
+	}
+	if err := repo.CreateParentalConsent(ctx, rec); err != nil {
+		t.Fatalf("seed consent: %v", err)
+	}
+	seedGuardianEdge(ctx, t, repo, adult.ID, child.ID)
+
+	// The LAST write fails. Everything protective has already landed.
+	repo.markConsentRevokedErr = errConsentInjected
+	if _, _, err := svc.RevokeParentalConsent(ctx, adult.ID, child.ID, ""); !errors.Is(err, errConsentInjected) {
+		t.Fatalf("err = %v, want the injected failure", err)
+	}
+
+	// Access is gone: the child is re-gated, its sessions cut, the edge dropped.
+	got, _ := repo.GetUser(ctx, child.ID)
+	if got.Status != StatusPendingParentalConsent {
+		t.Fatalf("child status = %q, want the child gated despite the failure", got.Status)
+	}
+	if edge, _ := repo.GetGuardianEdge(ctx, adult.ID, child.ID); edge != nil {
+		t.Fatal("the guardian edge must be gone before the record write is attempted")
+	}
+	// And the operation is RETRYABLE: the record is still the active one.
+	if active, _ := repo.GetActiveParentalConsentForChild(ctx, child.ID); active == nil {
+		t.Fatal("the consent record must remain active so a retry can finish the job")
+	}
+
+	repo.markConsentRevokedErr = nil
+	revoked, status, err := svc.RevokeParentalConsent(ctx, adult.ID, child.ID, "")
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if revoked.RevokedAt == 0 || status != StatusPendingParentalConsent {
+		t.Fatalf("retry left revoked_at=%d status=%q", revoked.RevokedAt, status)
+	}
+}
+
+// TestGuardianListings_RepoFailuresAndGhostRows covers the two listing
+// surfaces' storage-failure paths and the skip that keeps a stale edge from
+// erroring a whole listing.
+func TestGuardianListings_RepoFailuresAndGhostRows(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("list children fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		repo.listGuardianEdgesErr = errConsentInjected
+		if _, err := svc.ListManagedChildren(ctx, "guardian-1"); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("fetching a listed child fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		guardian := seedConsentingAdult(t, repo, "g@example.com", "", adultFactors{})
+		child := seedChildPendingConsent(repo, "c@example.com")
+		seedGuardianEdge(ctx, t, repo, guardian.ID, child.ID)
+		repo.getUserErrByID = map[string]error{child.ID: errConsentInjected}
+		if _, err := svc.ListManagedChildren(ctx, guardian.ID); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("guardian listing skips a deleted guardian and propagates failures", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		g1 := seedConsentingAdult(t, repo, "g1@example.com", "", adultFactors{})
+		ghost := seedConsentingAdult(t, repo, "ghost@example.com", "", adultFactors{})
+		child := seedChildPendingConsent(repo, "c@example.com")
+		seedGuardianEdge(ctx, t, repo, g1.ID, child.ID)
+		seedGuardianEdge(ctx, t, repo, ghost.ID, child.ID)
+		// Drop the ghost's account but leave its edge behind (the FK cascade
+		// does this for real; a stale row must not error the listing).
+		repo.mu.Lock()
+		delete(repo.users, ghost.ID)
+		repo.mu.Unlock()
+
+		guardians, err := svc.GetGuardians(ctx, g1.ID, child.ID, false)
+		if err != nil {
+			t.Fatalf("GetGuardians: %v", err)
+		}
+		if len(guardians) != 1 || guardians[0].ID != g1.ID {
+			t.Fatalf("guardians = %#v, want only the surviving guardian", guardians)
+		}
+
+		repo.listGuardianEdgesErr = errConsentInjected
+		if _, err := svc.GetGuardians(ctx, g1.ID, child.ID, true); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("admin listing: err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("edge check fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		repo.getGuardianEdgeErr = errConsentInjected
+		if _, err := svc.GetGuardians(ctx, "caller", "child", false); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("edge write fails", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		repo.upsertGuardianEdgeErr = errConsentInjected
+		if err := svc.upsertGuardianEdge(ctx, "g", "c", "", ""); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+}

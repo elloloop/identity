@@ -301,3 +301,39 @@ func TestGrantParentalConsent_RecordsResolvedMarket(t *testing.T) {
 		assert.Empty(t, rec.Market)
 	})
 }
+
+// TestDeterminerForUser_InvalidThresholdsFallBackStrictest covers the
+// never-fail-open branch: a thresholds pair that cannot build a determiner
+// (unreachable through ParseProjectConfig, which rejects it — so this builds
+// the scope by hand) must fall back to the STRICTEST configured ceiling, not
+// to the looser deployment default.
+func TestDeterminerForUser_InvalidThresholdsFallBackStrictest(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	enableAgeGate(t, svc, false) // env ceiling: child_max 12, adult 18
+
+	// "XX" is invalid (adult <= child_max); "IN" is a valid, stricter pair.
+	// The synthetic worst case across the two — child_max 17, adult 18 — is
+	// what the fallback must land on.
+	scope := &ProjectScope{
+		ProjectID: "project-a",
+		Jurisdictions: ProjectJurisdictionsConfig{
+			Default: "XX",
+			Thresholds: map[string]JurisdictionThresholds{
+				"XX": {ChildMaxAge: 5, AdultAge: 3},
+				"IN": {ChildMaxAge: 17, AdultAge: 18},
+			},
+		},
+	}
+	ctx := WithProjectScope(context.Background(), scope)
+
+	d := svc.determinerForUser(ctx, &User{Market: "XX"})
+	require.True(t, d.Enabled())
+	// Under the strictest VALID pair (IN: child_max 17) a 15-year-old is a
+	// child. Under the env pair (12) they would be a teen — the fail-open
+	// this branch exists to prevent.
+	if got := d.Determine(dobAgeMs(15), ageGateNow).Band; got != agegate.BandChild {
+		t.Fatalf("band = %v, want CHILD via the strictest configured ceiling", got)
+	}
+}

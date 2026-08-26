@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/elloloop/identity/pkg/agegate"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -48,9 +50,8 @@ func normalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
 }
 
-// validateUsernameFormat enforces the username shape. Implemented once here
-// and reused by every write path (CreateManagedChildAccount today, the
-// change-username RPC later).
+// validateUsernameFormat enforces the username shape. One rule, one
+// implementation: every write path that accepts a username validates here.
 func validateUsernameFormat(username string) error {
 	if len(username) < usernameMinLen || len(username) > usernameMaxLen {
 		return fmt.Errorf("%w: username must be %d-%d characters", ErrInvalidArgument, usernameMinLen, usernameMaxLen)
@@ -225,10 +226,21 @@ func (s *AuthService) CreateManagedChildAccount(
 	// 6. Atomically create the child (born ACTIVE under guardianship — never
 	// pending_parental_consent), the guardian edge, and the consent record.
 	now := s.nowMs()
+	// COPPA data-minimization applies to THIS write too. An avatar is
+	// non-essential PII the server declines to persist for a child, and the
+	// parent creating the account is not an exemption — otherwise this path
+	// would store what UpdateProfile refuses to store for the same account a
+	// second later, and the minimization control would be bypassable by
+	// choosing the other door.
+	avatarURL := strings.TrimSpace(req.AvatarURL)
+	if avatarURL != "" && s.minorData.BlocksChildFor(ctx, &User{DateOfBirthMs: req.DateOfBirthMs, Market: market}) {
+		s.logger.Info("managed_child_avatar_dropped_minor", zap.String("username", username))
+		avatarURL = ""
+	}
 	child := &User{
 		Username:      username,
 		Name:          strings.TrimSpace(req.DisplayName),
-		AvatarURL:     strings.TrimSpace(req.AvatarURL),
+		AvatarURL:     avatarURL,
 		Role:          "member",
 		Status:        StatusActive,
 		PasswordHash:  passwordHash,

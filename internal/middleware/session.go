@@ -352,7 +352,7 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 				// a revoked session would still get the "I'm signed in"
 				// view on endpoints like GetCurrentUser.
 				if token := extractBearerToken(r); token != "" {
-					if claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience); err == nil && claims.Purpose == "" {
+					if claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience); err == nil {
 						if claims.SID != "" {
 							state, lookupErr := cache.Lookup(r.Context(), claims.SID)
 							if lookupErr == nil && state == SessionStateActive {
@@ -384,15 +384,9 @@ func SessionAuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudien
 				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
 				return
 			}
-			// A purpose token (e.g. a dob_completion ticket) is a
-			// single-purpose bearer credential, never a session: it must not
-			// authenticate any RPC. Presenting one is indistinguishable from
-			// presenting a bad token.
-			if claims.Purpose != "" {
-				w.Header().Set("Content-Type", "application/json")
-				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
-				return
-			}
+			// A purpose token never authenticates a request:
+			// jwtpkg.VerifyAccessToken refuses one, so it lands in the branch
+			// above and is indistinguishable from a bad token.
 			if claims.SID != "" {
 				state, lookupErr := cache.Lookup(r.Context(), claims.SID)
 				if lookupErr != nil {

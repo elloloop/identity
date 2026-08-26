@@ -37,15 +37,27 @@ import { Code } from "astro-expressive-code/components";
     / WebAuthn section of the configuration reference</a>.
   </p>
 
-  <h2>Two distinct flows</h2>
+  <h2>Three distinct flows</h2>
   <p>
-    There are two passkey enrolment paths, and they are not the same RPC:
+    There are three passkey enrolment paths, and they are not the same RPC:
   </p>
   <ul>
     <li>
       <strong>Add a passkey</strong> (<code>BeginPasskeyRegistration</code> /
       <code>CompletePasskeyRegistration</code>) — adds a passkey to an account
       the caller is <em>already signed in to</em>. Requires a bearer token.
+    </li>
+    <li>
+      <strong>Managed-child enrolment</strong> (the same
+      <code>BeginPasskeyRegistration</code> /
+      <code>CompletePasskeyRegistration</code> pair, carrying an
+      <code>enrolment_token</code> in the request <em>body</em> instead of a
+      bearer header) — enrols a passkey on a child's own device for an account
+      a parent created. The 15-minute ticket comes from
+      <a href={`${import.meta.env.BASE_URL}/docs/users/managed-minors`}>CreateManagedChildAccount</a>;
+      a session and a ticket are mutually exclusive, and completing the
+      ceremony with a ticket issues the child's first
+      <code>access_token</code> / <code>refresh_token</code> pair.
     </li>
     <li>
       <strong>Passkey-first signup</strong> (<code>BeginPasskeySignup</code> /

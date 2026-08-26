@@ -190,11 +190,14 @@ func TestProjectJurisdictionsConfig_Strictest(t *testing.T) {
 		"BR":{"child_max_age":17,"adult_age":21}
 	}}}`)
 	require.NoError(t, err)
-	// Highest child_max_age wins; the tie between IN and BR breaks toward the
-	// LOWEST adult_age, the more protective of the two equal ceilings.
+	// The result is a SYNTHETIC worst case, not one of the three entries: the
+	// highest child ceiling (IN/BR's 17) and the highest adult age (BR's 21)
+	// are taken independently, because they protect against different things.
+	// Picking a single real entry would be strictly more permissive on one
+	// boundary — IN admits 18-year-olds as adults, BR does not.
 	th, ok := cfg.Jurisdictions.strictest()
 	require.True(t, ok)
-	assert.Equal(t, JurisdictionThresholds{ChildMaxAge: 17, AdultAge: 18}, th)
+	assert.Equal(t, JurisdictionThresholds{ChildMaxAge: 17, AdultAge: 21}, th)
 
 	_, ok = ProjectJurisdictionsConfig{}.strictest()
 	assert.False(t, ok)

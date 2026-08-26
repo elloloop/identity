@@ -566,3 +566,128 @@ func TestGuardianManagement_InactiveGuardianRefused(t *testing.T) {
 		t.Fatalf("err = %v, want ErrAccountNotActive", err)
 	}
 }
+
+// ── Repository failures propagate, and nothing half-applies ────────────
+
+// TestGuardianManagement_RepoFailuresPropagate walks each storage read the
+// guard depends on and asserts the injected failure reaches the caller
+// unchanged rather than being swallowed into a denial — a storage outage must
+// not look like "you are not a guardian", which would send a parent chasing a
+// permissions problem that does not exist.
+func TestGuardianManagement_RepoFailuresPropagate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("edge lookup fails", func(t *testing.T) {
+		f := newGuardianFixture(ctx, t)
+		f.repo.getGuardianEdgeErr = errConsentInjected
+		_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+		if errors.Is(err, ErrPermissionDenied) {
+			t.Fatal("a storage failure must not be reported as a permission denial")
+		}
+	})
+
+	t.Run("guardian lookup fails", func(t *testing.T) {
+		f := newGuardianFixture(ctx, t)
+		f.repo.getUserErrByID = map[string]error{f.guardian.ID: errConsentInjected}
+		_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("child lookup fails", func(t *testing.T) {
+		f := newGuardianFixture(ctx, t)
+		f.repo.getUserErrByID = map[string]error{f.child.ID: errConsentInjected}
+		_, err := f.svc.GetManagedChildProfile(ctx, f.guardian.ID, f.child.ID, strongPW, "", "")
+		if !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("write fails", func(t *testing.T) {
+		f := newGuardianFixture(ctx, t)
+		f.repo.updateUserErr = errConsentInjected
+		if err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, f.child.ID, "An0ther!Str0ng", strongPW, "", ""); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("set password: err = %v, want the injected failure", err)
+		}
+		if err := f.svc.DeactivateManagedChildAccount(ctx, f.guardian.ID, f.child.ID, "", strongPW, "", ""); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("deactivate: err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("session revocation fails", func(t *testing.T) {
+		f := newGuardianFixture(ctx, t)
+		f.repo.deleteRefreshTokensErr = errConsentInjected
+		if err := f.svc.RevokeManagedChildSessions(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("username lookup fails", func(t *testing.T) {
+		f := newGuardianFixture(ctx, t)
+		f.repo.findUserByEmailErr = nil
+		f.repo.getUserErr = nil
+		f.repo.updateUserErr = errConsentInjected
+		if _, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, f.child.ID, "kid.renamed", strongPW, "", ""); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+
+	t.Run("erasure fails", func(t *testing.T) {
+		f := newGuardianFixture(ctx, t)
+		f.purger.err = errConsentInjected
+		if err := f.svc.DeleteManagedChildAccount(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); !errors.Is(err, errConsentInjected) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+}
+
+// TestGuardianManagement_ReactivateIdempotentAndRefusals covers the states an
+// already-active or otherwise-ineligible account lands in.
+func TestGuardianManagement_ReactivateIdempotentAndRefusals(t *testing.T) {
+	ctx := context.Background()
+
+	// Already active: a no-op success, not an error.
+	f := newGuardianFixture(ctx, t)
+	if err := f.svc.ReactivateManagedChildAccount(ctx, f.guardian.ID, f.child.ID, strongPW, "", ""); err != nil {
+		t.Fatalf("reactivating an active account must be a no-op: %v", err)
+	}
+
+	// Pending deletion is another state machine's; refuse rather than
+	// overwrite it.
+	f2 := newGuardianFixture(ctx, t)
+	if err := f2.repo.UpdateUser(ctx, f2.child.ID, map[string]any{"status": StatusPendingDeletion}); err != nil {
+		t.Fatalf("seed status: %v", err)
+	}
+	if err := f2.svc.ReactivateManagedChildAccount(ctx, f2.guardian.ID, f2.child.ID, strongPW, "", ""); !errors.Is(err, ErrAccountNotActive) {
+		t.Fatalf("err = %v, want ErrAccountNotActive", err)
+	}
+}
+
+// TestSetManagedChildPassword_ClearsLockout pins that the guardian path is a
+// real recovery route: a child locked out by failed attempts can sign in with
+// the new password immediately, without waiting out the lockout window. It is
+// the ONLY recovery path an email-less child has.
+func TestSetManagedChildPassword_ClearsLockout(t *testing.T) {
+	ctx := context.Background()
+	f := newGuardianFixture(ctx, t)
+	if err := f.repo.UpdateUser(ctx, f.child.ID, map[string]any{
+		"failed_login_count": 5,
+		"locked_until":       f.svc.nowMs() + 900_000,
+	}); err != nil {
+		t.Fatalf("seed lockout: %v", err)
+	}
+
+	const newPW = "An0ther!Str0ng"
+	if err := f.svc.SetManagedChildPassword(ctx, f.guardian.ID, f.child.ID, newPW, strongPW, "", ""); err != nil {
+		t.Fatalf("SetManagedChildPassword: %v", err)
+	}
+	stored, _ := f.repo.GetUser(ctx, f.child.ID)
+	if stored.LockedUntil != 0 || stored.FailedLoginCount != 0 {
+		t.Fatalf("lockout survived the reset: locked_until=%d failed=%d",
+			stored.LockedUntil, stored.FailedLoginCount)
+	}
+}

@@ -1581,6 +1581,43 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	r := StubRepository{}
 	ctx := context.Background()
 
+	// The managed-minor surface. A stub method that silently returned nil
+	// would let a no-persistence deployment appear to create child accounts
+	// and guardian edges.
+	if _, err := r.FindUserByUsername(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("FindUserByUsername: %v", err)
+	}
+	if _, err := r.ListActiveParentalConsentsForChild(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ListActiveParentalConsentsForChild: %v", err)
+	}
+	if err := r.UpsertGuardianEdge(ctx, &GuardianEdge{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("UpsertGuardianEdge: %v", err)
+	}
+	if err := r.DeleteGuardianEdge(ctx, "", ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("DeleteGuardianEdge: %v", err)
+	}
+	if _, err := r.GetGuardianEdge(ctx, "", ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("GetGuardianEdge: %v", err)
+	}
+	if _, err := r.ListGuardiansOfChild(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ListGuardiansOfChild: %v", err)
+	}
+	if _, err := r.ListChildrenOfGuardian(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("ListChildrenOfGuardian: %v", err)
+	}
+	if err := r.CreateManagedChildAccount(ctx, &User{}, &GuardianEdge{}, &ParentalConsentRecord{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreateManagedChildAccount: %v", err)
+	}
+	if err := r.CreateParentalConsent(ctx, &ParentalConsentRecord{}); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("CreateParentalConsent: %v", err)
+	}
+	if _, err := r.GetActiveParentalConsentForChild(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("GetActiveParentalConsentForChild: %v", err)
+	}
+	if err := r.MarkParentalConsentRevoked(ctx, "", "", 0); !errors.Is(err, ErrServiceUnavailable) {
+		t.Errorf("MarkParentalConsentRevoked: %v", err)
+	}
+
 	if _, err := r.FindUserByEmail(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("FindUserByEmail: %v", err)
 	}

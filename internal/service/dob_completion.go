@@ -110,8 +110,8 @@ func (s *AuthService) mintPurposeTicket(ctx context.Context, userID, purpose str
 // ErrUnauthenticated so the refusal discloses nothing about which check
 // failed.
 func (s *AuthService) verifyPurposeTicket(ctx context.Context, ticket, purpose string) (*jwt.Claims, error) {
-	claims, err := jwt.VerifyAccessToken(ticket, s.signer, s.tenantID(ctx), s.cfg.JWTAudience, s.cfg.JWTRequireAudience)
-	if err != nil || claims.Purpose != purpose {
+	claims, err := jwt.VerifyPurposeToken(ticket, s.signer, s.tenantID(ctx), s.cfg.JWTAudience, s.cfg.JWTRequireAudience, purpose)
+	if err != nil {
 		return nil, fmt.Errorf("%w: invalid or expired %s ticket", ErrUnauthenticated, purpose)
 	}
 	if claims.Project != s.projectID(ctx) {
