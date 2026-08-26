@@ -161,3 +161,77 @@ func TestHandler_CreateManagedChildAccount_NeverPendingConsent(t *testing.T) {
 		t.Fatalf("stored status = %q, want %q", stored.Status, service.StatusActive)
 	}
 }
+
+// TestHandler_PasskeyEnrolmentTicket_ResolvesTheCaller covers the second
+// credential shape: the child's own device carries an enrolment ticket in the
+// request BODY instead of a session header. The ticket and a session are
+// mutually exclusive — presenting both would leave ambiguous which account the
+// credential lands on — and a bare ticket must not authenticate anything else.
+func TestHandler_PasskeyEnrolmentTicket_ResolvesTheCaller(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	adult := seedConsentAdult(ctx, t, h, "adult@example.com", true)
+
+	msg := managedChildRequest("kid.one")
+	msg.Password = ""
+	msg.PasskeyEnrolment = true
+	created, err := h.client.CreateManagedChildAccount(ctx, authedReq(connect.NewRequest(msg), adult))
+	if err != nil {
+		t.Fatalf("CreateManagedChildAccount: %v", err)
+	}
+	ticket := created.Msg.GetEnrolmentToken()
+	if ticket == "" {
+		t.Fatal("the passkey arm must mint an enrolment ticket")
+	}
+
+	t.Run("ticket alone reaches the child account", func(t *testing.T) {
+		// The ceremony gets as far as the service, which means the handler
+		// resolved the ticket's subject as the caller: a credential-less
+		// refusal would have come back Unauthenticated instead.
+		_, err := h.client.BeginPasskeyRegistration(ctx, connect.NewRequest(
+			&identitypb.BeginPasskeyRegistrationRequest{EnrolmentToken: ticket},
+		))
+		if got := connectCodeOf(err); got == connect.CodeUnauthenticated {
+			t.Fatalf("a valid ticket must resolve the caller, got %v", got)
+		}
+	})
+
+	t.Run("session and ticket together are ambiguous", func(t *testing.T) {
+		_, err := h.client.BeginPasskeyRegistration(ctx, authedReq(connect.NewRequest(
+			&identitypb.BeginPasskeyRegistrationRequest{EnrolmentToken: ticket},
+		), adult))
+		if got := connectCodeOf(err); got != connect.CodeInvalidArgument {
+			t.Fatalf("code = %v, want InvalidArgument", got)
+		}
+		_, err = h.client.CompletePasskeyRegistration(ctx, authedReq(connect.NewRequest(
+			&identitypb.CompletePasskeyRegistrationRequest{EnrolmentToken: ticket},
+		), adult))
+		if got := connectCodeOf(err); got != connect.CodeInvalidArgument {
+			t.Fatalf("complete: code = %v, want InvalidArgument", got)
+		}
+	})
+
+	t.Run("neither session nor ticket is refused", func(t *testing.T) {
+		_, err := h.client.BeginPasskeyRegistration(ctx, connect.NewRequest(
+			&identitypb.BeginPasskeyRegistrationRequest{},
+		))
+		if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
+			t.Fatalf("code = %v, want Unauthenticated", got)
+		}
+		_, err = h.client.CompletePasskeyRegistration(ctx, connect.NewRequest(
+			&identitypb.CompletePasskeyRegistrationRequest{},
+		))
+		if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
+			t.Fatalf("complete: code = %v, want Unauthenticated", got)
+		}
+	})
+
+	t.Run("a garbage ticket is refused", func(t *testing.T) {
+		_, err := h.client.BeginPasskeyRegistration(ctx, connect.NewRequest(
+			&identitypb.BeginPasskeyRegistrationRequest{EnrolmentToken: "not-a-ticket"},
+		))
+		if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
+			t.Fatalf("code = %v, want Unauthenticated", got)
+		}
+	})
+}
