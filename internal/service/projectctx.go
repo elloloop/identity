@@ -87,6 +87,12 @@ type ProjectScope struct {
 	// GATEWAY_ANONYMOUS_* and stamped on by the project-resolution
 	// middleware. Zero (disabled) for a project that configures none.
 	Anonymous ProjectAnonymousConfig
+
+	// Jurisdictions is the project's per-market age-threshold policy, parsed
+	// from config_json. Zero for a project that configures none, in which
+	// case the deployment-wide GATEWAY_AGEGATE_* pair classifies every
+	// account, exactly as before.
+	Jurisdictions ProjectJurisdictionsConfig
 }
 
 type projectScopeCtxKey struct{}
@@ -126,6 +132,7 @@ type ResolvedProject struct {
 	Products           ProjectProductsConfig
 	Assurance          ProjectAssuranceConfig
 	Anonymous          ProjectAnonymousConfig
+	Jurisdictions      ProjectJurisdictionsConfig
 }
 
 // ProjectResolver resolves a request's project from the credentials it

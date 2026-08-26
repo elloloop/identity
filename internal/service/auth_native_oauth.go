@@ -281,7 +281,7 @@ func (s *AuthService) resolveNativeProject(ctx context.Context, product string) 
 		if p == nil {
 			return nil, fmt.Errorf("%w: unknown product %q", ErrInvalidArgument, product)
 		}
-		return &ProjectScope{ProjectID: p.ID, StorageScopeID: p.StorageScopeID, OAuth: p.OAuth, Access: p.Access, Products: p.Products}, nil
+		return &ProjectScope{ProjectID: p.ID, StorageScopeID: p.StorageScopeID, OAuth: p.OAuth, Access: p.Access, Products: p.Products, Jurisdictions: p.Jurisdictions}, nil
 	}
 
 	// No control plane: only the default project exists. Its native audiences

@@ -43,6 +43,29 @@ func TestCreateAndVerify(t *testing.T) {
 	assert.True(t, got.ExpiresAt > got.IssuedAt)
 }
 
+// A purpose token (e.g. a dob_completion ticket) round-trips its purpose
+// claim. A token without the claim verifies with Purpose="" — the claim is
+// omitted, not forced — so existing access tokens are byte-identical.
+func TestCreateAndVerify_PurposeClaim(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+
+	purposeTok, err := s.SignAccessToken(context.Background(), Claims{
+		Sub: "user-1", Tenant: "t", Purpose: "dob_completion",
+	}, 10*time.Minute)
+	require.NoError(t, err)
+	gotPurpose, err := VerifyAccessToken(purposeTok, s, "", "", false)
+	require.NoError(t, err)
+	assert.Equal(t, "dob_completion", gotPurpose.Purpose)
+
+	plainTok, err := s.SignAccessToken(context.Background(), Claims{
+		Sub: "user-2", Tenant: "t",
+	}, 15*time.Minute)
+	require.NoError(t, err)
+	gotPlain, err := VerifyAccessToken(plainTok, s, "", "", false)
+	require.NoError(t, err)
+	assert.Empty(t, gotPlain.Purpose, "normal access token verifies with Purpose empty")
+}
+
 // A minor's token carries is_minor=true and round-trips. A token without
 // the claim verifies with IsMinor=false (the claim is omitted, not forced).
 func TestCreateAndVerify_IsMinorClaim(t *testing.T) {

@@ -85,6 +85,21 @@ type User struct {
 	PhoneVerified    bool
 	PhoneVerifiedAt  int64 // epoch ms; 0 = never verified
 	DateOfBirthMs    int64 // epoch ms of date of birth; 0 = unknown (persisted)
+	// Market is the jurisdiction/market code (e.g. "IN", "US") the account
+	// belongs to, captured at account creation or set via SetAccountMarket
+	// (persisted, canonicalized to the trimmed upper-case form). When the
+	// project configures per-jurisdiction thresholds it selects the boundary
+	// pair the age band derives from; empty means the project default or the
+	// deployment-wide env thresholds apply.
+	Market string
+	// Username is the parent-chosen, project-unique handle identifying a
+	// managed child account (children often have no email). Lowercase
+	// alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase
+	// before storage; unique within the project when non-empty (the SQL
+	// drivers' partial unique index), and usable as the PasswordLogin
+	// identifier. Empty on every account not created via
+	// CreateManagedChildAccount.
+	Username string
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service
 	// deletion. Set when the owner requests deletion; cleared on cancel or a
@@ -195,6 +210,11 @@ type PollQrResult struct {
 type Repository interface {
 	// Users
 	FindUserByEmail(ctx context.Context, email string) (*User, error)
+	// FindUserByUsername resolves a managed child account by its
+	// project-unique username (empty username matches nobody). It backs
+	// username-identified PasswordLogin and the create-time uniqueness
+	// pre-check.
+	FindUserByUsername(ctx context.Context, username string) (*User, error)
 	GetUser(ctx context.Context, userID string) (*User, error)
 	CreateUser(ctx context.Context, u *User) (string, error) // returns node ID
 	UpdateUser(ctx context.Context, userID string, fields map[string]any) error
@@ -530,6 +550,31 @@ type Repository interface {
 	CreateParentalConsent(ctx context.Context, r *ParentalConsentRecord) error
 	GetActiveParentalConsentForChild(ctx context.Context, childUserID string) (*ParentalConsentRecord, error)
 	MarkParentalConsentRevoked(ctx context.Context, consentID, revokedByUserID string, atMs int64) error
+
+	// Guardian edges (graph edge type guardianOf = 102): the authorization
+	// fact that guardian_user_id manages child_user_id. Unlike consent
+	// records, edges are live authorization state — they carry users foreign
+	// keys and are removed by DeleteUser of either side.
+	//
+	// UpsertGuardianEdge is idempotent on (guardian, child): re-adding an
+	// existing edge is a no-op that preserves the original CreatedAtMs.
+	// DeleteGuardianEdge removes the edge if present (absent is not an
+	// error). GetGuardianEdge returns (nil, nil) when no edge exists.
+	UpsertGuardianEdge(ctx context.Context, e *GuardianEdge) error
+	DeleteGuardianEdge(ctx context.Context, guardianUserID, childUserID string) error
+	GetGuardianEdge(ctx context.Context, guardianUserID, childUserID string) (*GuardianEdge, error)
+	ListGuardiansOfChild(ctx context.Context, childUserID string) ([]*GuardianEdge, error)
+	ListChildrenOfGuardian(ctx context.Context, guardianUserID string) ([]*GuardianEdge, error)
+
+	// CreateManagedChildAccount atomically persists the three artifacts of
+	// the parent-creates-child flow: the child user row, the (guardian ->
+	// child) edge, and the parental-consent record. The implementation binds
+	// edge.ChildUserID and consent.ChildUserID to the inserted user's id, so
+	// callers leave them unset. ALL THREE commit or NONE do — a partial state
+	// (an account without its edge, an edge without its consent record) must
+	// never be observable. A username that already exists in the project
+	// returns ErrAlreadyExists with nothing committed (see conformance).
+	CreateManagedChildAccount(ctx context.Context, u *User, edge *GuardianEdge, consent *ParentalConsentRecord) error
 
 	// Email-change tokens (primary email rotation, double-opt-in)
 	CreateEmailChangeToken(ctx context.Context, t *EmailChangeToken) error
@@ -957,6 +1002,19 @@ var (
 	// clients match on to show kind, child-appropriate copy instead of a raw
 	// error. The token is part of the wire contract — do not reword it.
 	ErrProductAgeRestricted = errors.New("product_age_restricted: this account is not old enough for this product")
+	// ErrDOBRequired is returned when GATEWAY_AGEGATE_REQUIRE_DOB is on and
+	// authentication succeeded for an account with no date of birth on file:
+	// no session is minted until the client completes the DOB step through
+	// SubmitDateOfBirth. It maps to CodeFailedPrecondition, and its message
+	// leads with the stable `dob_required` token clients match on to show the
+	// completion UI. The token is part of the wire contract — do not reword
+	// it. The returned error is a *DOBRequiredError carrying the completion
+	// ticket the client submits with the date of birth.
+	ErrDOBRequired = errors.New("dob_required: date of birth required before sign-in can complete")
+	// ErrDOBAlreadySet is returned by SubmitDateOfBirth when the account
+	// already has a date of birth: the completion step sets it exactly once
+	// and is not a DOB-change channel.
+	ErrDOBAlreadySet = errors.New("date of birth is already set for this account")
 	// ErrProjectSecretsKeyMissing is returned when an admin write carries a
 	// plaintext provider secret to encrypt but GATEWAY_PROJECT_SECRETS_KEY is
 	// not configured, so the server cannot encrypt it for storage. It is a
@@ -1439,18 +1497,20 @@ func BuildAgeGate(cfg *config.Config, logger *zap.Logger) agegate.Determiner {
 }
 
 // stampAgeBand derives IsMinor / AgeBand for a user from their stored date of
-// birth and the active age-gate, mutating the user in place. It is a no-op
-// (leaves the zero-values) when age-gating is disabled or no DOB is on file.
-func (s *AuthService) stampAgeBand(u *User) {
+// birth and the age-gate determiner their market resolves to (see
+// determinerForUser), mutating the user in place. It is a no-op (leaves the
+// zero-values) when age-gating is disabled or no DOB is on file.
+func (s *AuthService) stampAgeBand(ctx context.Context, u *User) {
 	if u == nil {
 		return
 	}
 	u.IsMinor = false
 	u.AgeBand = ""
-	if !s.ageGate.Enabled() {
+	gate := s.determinerForUser(ctx, u)
+	if !gate.Enabled() {
 		return
 	}
-	dec := s.ageGate.Determine(u.DateOfBirthMs, s.nowFunc())
+	dec := gate.Determine(u.DateOfBirthMs, s.nowFunc())
 	u.IsMinor = dec.IsMinor
 	u.AgeBand = string(dec.Band)
 }
@@ -1583,11 +1643,19 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	// Stamp the derived minor flag from the stored DOB so the token carries
 	// an authoritative is_minor claim when age-gating is on. No-op (false)
 	// when the gate is off or no DOB is on file.
-	s.stampAgeBand(user)
+	s.stampAgeBand(ctx, user)
 
 	// The requested product's age guardrail, checked on the derived band the
 	// stamp above produced and before any session state is written.
 	if err := s.enforceProductAgeGate(ctx, user); err != nil {
+		return "", "", err
+	}
+
+	// The required-DOB completion gate, checked before any session state is
+	// written. Like the product gate it lives here, at the chokepoint, so
+	// every session-issuing path — initial login, refresh, and any path
+	// added later — is covered by construction.
+	if err := s.enforceDOBRequired(ctx, user, ipAddr, userAgent); err != nil {
 		return "", "", err
 	}
 

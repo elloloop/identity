@@ -21,8 +21,13 @@ const (
 )
 
 // ── Graph edge type IDs ─────────────────────────────
+// Edge type ids are never reused: even if an edge type is retired, its id
+// stays reserved so historical edges can never be misread as a new type.
 
-const edgeMemberOf = 101
+const (
+	edgeMemberOf   = 101
+	edgeGuardianOf = 102
+)
 
 // ── User field IDs (type_id 1) ─────────────────────────────────────
 

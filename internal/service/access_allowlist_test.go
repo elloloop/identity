@@ -252,7 +252,7 @@ func TestProjectAccess_Unconfigured_DeniesSignupAndLogin(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	ctx := unconfiguredScope()
 
-	_, err := svc.PasswordSignup(ctx, "someone@random-domain.com", accessTestPassword, "S", "", 0)
+	_, err := svc.PasswordSignup(ctx, "someone@random-domain.com", accessTestPassword, "S", "", 0, "")
 	require.ErrorIs(t, err, ErrAccessNotAllowed, "unconfigured project must deny signup (default-DENY)")
 
 	// A pre-existing user (seeded with no scope) also cannot log in.
@@ -267,7 +267,7 @@ func TestProjectAccess_Open_PermitsSignupAndLogin(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	ctx := accessScope(t, `{"access":{"mode":"open"}}`)
 
-	res, err := svc.PasswordSignup(ctx, "anyone@random-domain.com", accessTestPassword, "Any", "", 0)
+	res, err := svc.PasswordSignup(ctx, "anyone@random-domain.com", accessTestPassword, "Any", "", 0, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, res.AccessToken)
 
@@ -283,7 +283,7 @@ func TestProjectAccess_Allowlist_Password(t *testing.T) {
 	ctx := accessScope(t, gmailAllowlistJSON)
 
 	// Allowed by domain: signup + login succeed.
-	res, err := svc.PasswordSignup(ctx, "alice@example.com", accessTestPassword, "Alice", "", 0)
+	res, err := svc.PasswordSignup(ctx, "alice@example.com", accessTestPassword, "Alice", "", 0, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, res.AccessToken)
 	login, err := svc.PasswordLogin(ctx, "alice@example.com", accessTestPassword, "1.2.3.4", "agent")
@@ -291,11 +291,11 @@ func TestProjectAccess_Allowlist_Password(t *testing.T) {
 	require.NotEmpty(t, login.AccessToken)
 
 	// gmail canonicalization: the dotted variant of the listed address is allowed.
-	_, err = svc.PasswordSignup(ctx, "Alice.Smith@GMAIL.com", accessTestPassword, "Alice", "", 0)
+	_, err = svc.PasswordSignup(ctx, "Alice.Smith@GMAIL.com", accessTestPassword, "Alice", "", 0, "")
 	require.NoError(t, err)
 
 	// Off-list: signup denied, no account created.
-	_, err = svc.PasswordSignup(ctx, "outsider@other.com", accessTestPassword, "Out", "", 0)
+	_, err = svc.PasswordSignup(ctx, "outsider@other.com", accessTestPassword, "Out", "", 0, "")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 	got, _ := repo.FindUserByEmail(context.Background(), "outsider@other.com")
 	assert.Nil(t, got)
@@ -395,7 +395,7 @@ func TestProjectAccess_Closed_DeniesAll(t *testing.T) {
 	svc, repo, _ := newAuthSvcWithMailer(t)
 	ctx := accessScope(t, `{"access":{"mode":"closed"}}`)
 
-	_, err := svc.PasswordSignup(ctx, "a@b.com", accessTestPassword, "A", "", 0)
+	_, err := svc.PasswordSignup(ctx, "a@b.com", accessTestPassword, "A", "", 0, "")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 
 	seedUser(repo, "existing@b.com", hashPW(t, accessTestPassword), "active")
@@ -414,7 +414,7 @@ func TestProjectAccess_Invite_SelfSignupDeniedAllMethods(t *testing.T) {
 
 	t.Run("password", func(t *testing.T) {
 		svc, _, _ := newAuthSvcWithMailer(t)
-		_, err := svc.PasswordSignup(accessScope(t, ctxJSON), "new@x.com", accessTestPassword, "N", "", 0)
+		_, err := svc.PasswordSignup(accessScope(t, ctxJSON), "new@x.com", accessTestPassword, "N", "", 0, "")
 		require.ErrorIs(t, err, ErrSignupByInvitationOnly)
 	})
 
@@ -637,7 +637,7 @@ func TestProjectAccess_RefreshToken_RevalidatesMode(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	open := accessScope(t, `{"access":{"mode":"open"}}`)
 
-	reg, err := svc.PasswordSignup(open, "user@ex.com", accessTestPassword, "U", "", 0)
+	reg, err := svc.PasswordSignup(open, "user@ex.com", accessTestPassword, "U", "", 0, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, reg.RefreshToken)
 
@@ -726,7 +726,7 @@ func TestProjectAccess_NonCanonical_PasswordSignupAndLogin(t *testing.T) {
 
 	// A dotted/+tagged/mixed-case signup is admitted and stored ONCE under the
 	// canonical key — never under the non-canonical form the client typed.
-	res, err := svc.PasswordSignup(ctx, nonCanonSignup, accessTestPassword, "Alice", "", 0)
+	res, err := svc.PasswordSignup(ctx, nonCanonSignup, accessTestPassword, "Alice", "", 0, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, res.AccessToken)
 
@@ -742,7 +742,7 @@ func TestProjectAccess_NonCanonical_PasswordSignupAndLogin(t *testing.T) {
 	require.Equal(t, u.ID, login.User.ID)
 
 	// An off-list variant is denied at signup, nothing created.
-	_, err = svc.PasswordSignup(ctx, nonCanonOffList, accessTestPassword, "Bob", "", 0)
+	_, err = svc.PasswordSignup(ctx, nonCanonOffList, accessTestPassword, "Bob", "", 0, "")
 	require.ErrorIs(t, err, ErrAccessNotAllowed)
 	got, _ := repo.FindUserByEmail(context.Background(), nonCanonOffListCanonical)
 	assert.Nil(t, got)
@@ -867,7 +867,7 @@ func TestProjectAccess_NonCanonical_RefreshTokenRevalidates(t *testing.T) {
 
 	// Sign up (non-canonical → canonical account), then refresh: the login-context
 	// gate wraps the canonical user.Email and still admits under the allowlist.
-	reg, err := svc.PasswordSignup(ctx, nonCanonSignup, accessTestPassword, "Alice", "", 0)
+	reg, err := svc.PasswordSignup(ctx, nonCanonSignup, accessTestPassword, "Alice", "", 0, "")
 	require.NoError(t, err)
 	_, at, rt, err := svc.RefreshToken(ctx, reg.RefreshToken, "1.2.3.4", "a")
 	require.NoError(t, err)

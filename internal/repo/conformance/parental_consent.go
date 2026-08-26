@@ -38,6 +38,7 @@ func runParentalConsentConformance(t *testing.T, driver Driver) {
 				ConsentIP:        "203.0.113.7",
 				ConsentUserAgent: "agent/2.0",
 				GrantedAt:        1000,
+				Market:           "IN",
 			}
 			if err := r.CreateParentalConsent(ctx, rec); err != nil {
 				t.Fatalf("CreateParentalConsent: %v", err)
@@ -55,6 +56,12 @@ func runParentalConsentConformance(t *testing.T, driver Driver) {
 			}
 			if got.ConsentIP != "203.0.113.7" || got.ConsentUserAgent != "agent/2.0" || got.GrantedAt != 1000 {
 				t.Fatalf("value round-trip mismatch: %#v", got)
+			}
+			// The granted-under market snapshot must round-trip exactly; a
+			// record that loses it cannot say which jurisdiction's thresholds
+			// it proves consent against.
+			if got.Market != "IN" {
+				t.Fatalf("market round-trip mismatch: %#v", got)
 			}
 			if got.RevokedAt != 0 || got.RevokedByUserID != "" {
 				t.Fatalf("fresh record must be un-revoked: %#v", got)

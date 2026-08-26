@@ -139,6 +139,53 @@ func runRoundTripConformance(t *testing.T, driver Driver) {
 			}
 		})
 
+		// Market must default to "" when omitted at create and round-trip
+		// exactly through both create and update, identically on every driver.
+		// It is the persistence half of per-jurisdiction age thresholds; the
+		// band derivation from it lives in the service layer, not the store.
+		t.Run("User_Market", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+
+			// Omitted at create → "" (no market on file).
+			idDefault := createTestUser(t, r, "rt-market-default@example.com")
+			gotDefault, err := r.GetUser(ctx, idDefault)
+			if err != nil || gotDefault == nil {
+				t.Fatalf("GetUser(default): %v %#v", err, gotDefault)
+			}
+			if gotDefault.Market != "" {
+				t.Errorf("default Market = %q, want \"\"", gotDefault.Market)
+			}
+
+			// Set at create → reads back exactly.
+			idCreate, err := r.CreateUser(ctx, &service.User{
+				Email: "rt-market-create@example.com", Status: "active", Role: "member",
+				Name: "market", Market: "IN",
+			})
+			if err != nil {
+				t.Fatalf("CreateUser(market): %v", err)
+			}
+			gotCreate, err := r.GetUser(ctx, idCreate)
+			if err != nil || gotCreate == nil {
+				t.Fatalf("GetUser(create): %v %#v", err, gotCreate)
+			}
+			if gotCreate.Market != "IN" {
+				t.Errorf("create Market = %q, want %q", gotCreate.Market, "IN")
+			}
+
+			// Updated → reads back the new value.
+			if err := r.UpdateUser(ctx, idCreate, map[string]any{"market": "US"}); err != nil {
+				t.Fatalf("UpdateUser(market): %v", err)
+			}
+			gotUpdate, err := r.GetUser(ctx, idCreate)
+			if err != nil || gotUpdate == nil {
+				t.Fatalf("GetUser(update): %v %#v", err, gotUpdate)
+			}
+			if gotUpdate.Market != "US" {
+				t.Errorf("update Market = %q, want %q", gotUpdate.Market, "US")
+			}
+		})
+
 		// Int64 fidelity: timestamps and counters must survive the full
 		// signed-64-bit range without truncation or float coercion.
 		t.Run("Int64_Fidelity", func(t *testing.T) {

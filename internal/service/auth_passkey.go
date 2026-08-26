@@ -74,34 +74,59 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID, devi
 
 // ── CompletePasskeyRegistration ────────────────────────────────────────
 
+// VerifyPasskeyEnrolmentTicket verifies a managed-child passkey-enrolment
+// ticket (purpose `passkey_enrolment`, minted by CreateManagedChildAccount)
+// and returns the child account id the ceremony enrols. The Connect layer
+// calls it to resolve the account a session-less ceremony runs for; the
+// ticket rides in the request BODY because a purpose JWT is never a session
+// credential (the auth middleware refuses to authenticate one).
+//
+// The ticket is single-purpose but NOT single-use within its TTL: enrolling
+// passkeys on two of the child's devices inside the window is legitimate.
+func (s *AuthService) VerifyPasskeyEnrolmentTicket(ctx context.Context, ticket string) (string, error) {
+	if ticket == "" {
+		return "", fmt.Errorf("%w: enrolment ticket is required", ErrInvalidArgument)
+	}
+	claims, err := s.verifyPurposeTicket(ctx, ticket, tokenPurposePasskeyEnrolment)
+	if err != nil {
+		return "", err
+	}
+	return claims.Sub, nil
+}
+
 // CompletePasskeyRegistration verifies the attestation response and stores the
-// new credential. Returns (credentialInfo, error).
-func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, challengeID, credentialJSON, deviceName string) (*PasskeyInfo, error) {
+// new credential. When issueSession is true — the managed-child enrolment
+// path, where the ceremony redeemed an enrolment ticket and the child has no
+// session yet — it also issues the account's first token pair through the
+// normal issuance chokepoint; the returned LoginResult is nil otherwise and
+// the response shape is exactly what a session-authenticated completion
+// returns today.
+func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, challengeID, credentialJSON, deviceName string, issueSession bool, ipAddr, userAgent string) (*PasskeyInfo, *LoginResult, error) {
 	if challengeID == "" || credentialJSON == "" {
-		return nil, fmt.Errorf("%w: challenge_id and credential_json are required", ErrInvalidArgument)
+		return nil, nil, fmt.Errorf("%w: challenge_id and credential_json are required", ErrInvalidArgument)
 	}
 	// A passkey is a permanent credential; an anonymous caller must go
 	// through UpgradeAnonymousAccount so the flag is cleared with it.
 	if err := s.refuseAnonymousCredentialAttach(ctx, userID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	challenge, err := s.repo(ctx).GetPasskeyChallenge(ctx, challengeID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if challenge == nil {
-		return nil, fmt.Errorf("%w: challenge not found or already consumed", ErrNotFound)
+		return nil, nil, fmt.Errorf("%w: challenge not found or already consumed", ErrNotFound)
 	}
 	if challenge.ChallengeType != "registration" {
-		return nil, fmt.Errorf("%w: challenge is not a registration challenge", ErrInvalidArgument)
+		return nil, nil, fmt.Errorf("%w: challenge is not a registration challenge", ErrInvalidArgument)
 	}
 	if challenge.UserID != userID {
-		return nil, fmt.Errorf("%w: challenge does not belong to this user", ErrPermissionDenied)
+		return nil, nil, fmt.Errorf("%w: challenge does not belong to this user", ErrPermissionDenied)
 	}
 	if challenge.ExpiresAt < s.nowMs() {
 		_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)
-		return nil, fmt.Errorf("%w: challenge expired", ErrTokenExpired)
+		return nil, nil, fmt.Errorf("%w: challenge expired", ErrTokenExpired)
 	}
 
 	result, err := s.passkeysFor(ctx).CompleteRegistration(credentialJSON, challenge.Challenge)
@@ -110,7 +135,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 			"passkey_registration_verify_failed",
 			zap.String("user_id", userID), zap.Error(err),
 		)
-		return nil, fmt.Errorf("%w: attestation verification failed", ErrInvalidArgument)
+		return nil, nil, fmt.Errorf("%w: attestation verification failed", ErrInvalidArgument)
 	}
 
 	now := s.nowMs()
@@ -128,7 +153,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		LastUsedAt:     now,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("storing credential: %w", err)
+		return nil, nil, fmt.Errorf("storing credential: %w", err)
 	}
 
 	// Single-use challenge -- delete it.
@@ -148,11 +173,47 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID, c
 		audit.WithDetails(map[string]any{"credential_id": result.CredentialID}),
 	)
 
-	return &PasskeyInfo{
+	info := &PasskeyInfo{
 		CredentialID: result.CredentialID,
 		DeviceName:   deviceName,
 		CreatedAt:    msToTime(now),
 		LastUsedAt:   msToTime(now),
+	}
+	if !issueSession {
+		return info, nil, nil
+	}
+
+	// Managed-child enrolment path: the ticket took the place of a session,
+	// so completion issues the account's first one. The account status gate
+	// runs first — a child deactivated between ticket mint and redemption must
+	// not gain a session. Token issuance goes through the normal chokepoint
+	// (issueTokens), so the product age gate and the required-DOB gate apply
+	// here exactly as on any login.
+	user, err := s.repo(ctx).GetUser(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if user == nil {
+		return nil, nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return nil, nil, err
+	}
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.audit.Log(
+		ctx, audit.EventLoginSuccess,
+		audit.WithActor(userID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+		audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"method": "passkey_enrolment"}),
+	)
+	return info, &LoginResult{
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
 	}, nil
 }
 

@@ -14,6 +14,7 @@ func scanParentalConsent(s scanner) (*service.ParentalConsentRecord, error) {
 		&rec.PolicyVersion, &rec.Factors, &rec.SteppedUp,
 		&rec.ConsentIP, &rec.ConsentUserAgent,
 		&rec.GrantedAt, &rec.RevokedAt, &rec.RevokedByUserID,
+		&rec.Market,
 	); err != nil {
 		return nil, err
 	}
@@ -32,14 +33,16 @@ func (r *sqliteRepository) CreateParentalConsent(ctx context.Context, rec *servi
 			id, project_id, child_user_id, consenting_user_id,
 			policy_version, factors, stepped_up,
 			consent_ip, consent_user_agent,
-			granted_at_ms, revoked_at_ms, revoked_by_user_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+			granted_at_ms, revoked_at_ms, revoked_by_user_id,
+			market
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	_, err := r.db.Exec(
 		ctx, q,
 		rec.ConsentID, r.projectID, rec.ChildUserID, rec.ConsentingUserID,
 		rec.PolicyVersion, rec.Factors, rec.SteppedUp,
 		rec.ConsentIP, rec.ConsentUserAgent,
 		rec.GrantedAt, rec.RevokedAt, rec.RevokedByUserID,
+		rec.Market,
 	)
 	if err != nil {
 		return wrapErr("CreateParentalConsent", err)
@@ -56,7 +59,8 @@ func (r *sqliteRepository) GetActiveParentalConsentForChild(ctx context.Context,
 		SELECT id, project_id, child_user_id, consenting_user_id,
 		       policy_version, factors, stepped_up,
 		       consent_ip, consent_user_agent,
-		       granted_at_ms, revoked_at_ms, revoked_by_user_id
+		       granted_at_ms, revoked_at_ms, revoked_by_user_id,
+		       market
 		  FROM parental_consents
 		 WHERE project_id = $1 AND child_user_id = $2 AND revoked_at_ms = 0
 		 ORDER BY granted_at_ms DESC

@@ -303,7 +303,58 @@ admitted. The gate exists to stop accounts KNOWN to be too young, not to
 force birthdate collection on everyone, which would be the worse privacy
 outcome. Child accounts always have a date of birth by construction (the
 kid signup flows require one), so the gate still catches exactly the
-population it exists for.
+population it exists for. When a deployment must close even that gap —
+"we must know everyone's age" — that is `GATEWAY_AGEGATE_REQUIRE_DOB`,
+below.
+
+### Required date of birth (the completion step)
+
+`GATEWAY_AGEGATE_REQUIRE_DOB` (with `GATEWAY_AGEGATE_ENABLED`) makes a date
+of birth a precondition of holding a session, on **every** session-issuing
+path — not just password signup. Without it, only `PasswordSignup` collects
+a DOB; OAuth, passwordless, passkey, TOTP, QR, and invitation flows create
+or activate accounts with `date_of_birth_ms = 0`, which classifies as
+`AGE_BAND_UNSPECIFIED` → `is_minor = false` — an adult-classified account
+of unknown age, and a complete child-protection bypass.
+
+Enforcement sits at the same chokepoint as the product guardrail,
+`issueTokensWithSessionStart`. When the flag is on and authentication
+succeeds for an account with no DOB on file, **no session is minted**. The
+RPC fails with `failed_precondition`, a message leading with the stable
+token `dob_required`, and an error detail (`DOBRequiredDetails`) carrying a
+**completion ticket** — a 10-minute JWT with a `purpose` claim, which
+authenticates no other RPC. The client collects the date of birth and calls
+`SubmitDateOfBirth(completion_token, date_of_birth_ms)`, the only RPC that
+accepts the ticket. The DOB is validated (not missing, not future, not
+implausibly old), stored, run through the normal jurisdiction-aware band
+derivation, and only then is a session issued. A CHILD-band result lands in
+`USER_STATUS_PENDING_PARENTAL_CONSENT` with no tokens — the correct dead
+end on a self-signup path, where a child was never supposed to arrive
+unaccompanied. The DOB can be set exactly once through this RPC; an account
+that already has one gets `FAILED_PRECONDITION`.
+
+Three deliberate consequences:
+
+- **Pre-existing accounts are caught at their next login or refresh.** An
+  account created before the flag was enabled has no DOB, so its next token
+  issuance — including a routine `RefreshToken` — returns `dob_required`.
+  That is the flag working, not an outage; document it to client teams
+  before enabling.
+- **Admin-created accounts (`CreateUser`) need no DOB field.** The RPC
+  mints no tokens, so nothing is bypassed at creation; the account meets
+  the completion step at its first sign-in like any pre-flag account.
+- **Anonymous accounts are exempt.** They structurally carry no DOB — their
+  age guardrail is the product `minimum_age_band` door — and a CHILD-band
+  result would strand an email-less account in `PENDING_PARENTAL_CONSENT`
+  with no channel to reach a parent. Promoting an anonymous account to an
+  identified one ends the exemption: the OAuth upgrade arm re-issues
+  through the chokepoint and hits the completion step, and the password arm
+  is refused outright (it cannot collect a DOB).
+
+Both the refusal and the completion are audit-logged (a `login_failure`
+with `reason: dob_required`, and a `login_success` with
+`method: dob_completion` plus the derived `age_band`). With the flag off,
+behaviour on every path is byte-identical to before.
 
 Two operational prerequisites, both easy to miss:
 
@@ -315,6 +366,99 @@ Two operational prerequisites, both easy to miss:
   and therefore no product policy. Reach a real project row by sending
   `X-Project-Key`, or by mapping the serving host onto the project with
   `GATEWAY_DEFAULT_PROJECT_AUTH_DOMAINS`.
+
+### Per-jurisdiction age thresholds
+
+The child-protection ceiling is jurisdiction-specific — COPPA's under-13 in
+the US, the DPDP Act's under-18 in India — so one deployment-wide
+`GATEWAY_AGEGATE_CHILD_MAX_AGE` cannot classify a cross-market account pool
+correctly. A project declares per-market thresholds in `config_json` under
+`jurisdictions`, and each account carries a **market** (`users.market`,
+`User.market`) captured at signup (`PasswordSignupRequest.market`) or changed
+later via the authenticated `SetAccountMarket` RPC:
+
+```json
+{
+  "jurisdictions": {
+    "default": "IN",
+    "thresholds": {
+      "IN": { "child_max_age": 17, "adult_age": 18 },
+      "US": { "child_max_age": 12, "adult_age": 18 }
+    }
+  }
+}
+```
+
+Codes are case-insensitive (canonicalized trimmed, upper-cased). The block
+**fails CLOSED at author time**, like `access`: a threshold pair violating
+`0 <= child_max_age < adult_age`, a `default` naming no configured threshold,
+or a blank code is rejected by `ParseProjectConfig`, so a malformed policy
+refuses the project rather than classifying children under a typo.
+
+**Resolution order** for the thresholds an account's band derives from
+(server-side signals only, never IP-derived):
+
+1. the account's stored `market`, when it names a configured threshold;
+2. the project's `jurisdictions.default`;
+3. the **strictest configured ceiling** (highest `child_max_age`, tie-broken
+   by lowest `adult_age`) when the project configures thresholds but neither
+   of the above resolves — an unresolvable market never drifts an account
+   toward a more permissive regime;
+4. the deployment-wide `GATEWAY_AGEGATE_*` pair when the project configures
+   no `jurisdictions` block at all — the pre-existing behaviour, unchanged.
+
+The classification feeds every place the env pair used to: signup gating
+(child band lands in `PENDING_PARENTAL_CONSENT`), the `is_minor`/`age_band`
+stamps at token issue, and the per-product `minimum_age_band` door — the
+jurisdiction decides the band, the product decides whether that band may
+enter; the two are evaluated independently.
+
+`SetAccountMarket` is audited (`account_market_changed`, with the old and new
+market in the details) and re-derives the band immediately. An account the
+change moves INTO the child band with no active parental consent is re-gated
+to `PENDING_PARENTAL_CONSENT` and its sessions are revoked at once. The
+reverse is deliberately NOT symmetric: moving out of the child band never
+reactivates an account — guardian-granted rights come from guardian edges
+checked at guard time, not from the band. With age-gating off the market is
+stored and audited but has no status effect. A granted `ConsentRecord`
+snapshots the market the child's classification resolved under, so the
+artifact says WHICH jurisdiction's thresholds it proves consent against.
+
+### Guardian edges (the account graph)
+
+A **guardian edge** (`guardian_user_id → child_user_id`, graph edge type
+`guardianOf` = 102) is the account-graph authorization fact that one account
+manages another. It is deliberately distinct from the parental-consent
+**record**: the record is an audit/compliance artifact that survives account
+deletion, while the edge is live authorization state — it carries `users`
+foreign keys with `ON DELETE CASCADE`, so it dies with either account it
+references.
+
+Edges enter the graph from three sources:
+
+1. **Migration backfill** (postgres 0031 / sqlite 0016): one edge per active
+   (non-revoked) consent whose adult and child both still exist, with the
+   consent's `granted_at_ms` as the edge's creation instant.
+2. **Consent grant**: `GrantParentalConsent` upserts the edge in the same
+   write sequence as the consent record, before the child's status flips to
+   active (audited as `guardian_edge_created`).
+3. **Managed-account creation** (later work): product flows that create a
+   child account under an existing guardian will write the edge directly.
+
+`RevokeParentalConsent` removes the revoking adult's edge (audited as
+`guardian_edge_removed`) and applies the **last-guardian rule**: the child is
+re-gated to `PENDING_PARENTAL_CONSENT` (sessions revoked) only when no active
+consent remains for it afterwards — under today's single-active-consent model
+that is every revoke; once multiple guardians can hold consent concurrently,
+revoking one leaves the child active under the other.
+
+Two RPCs read the edge set. `ListManagedChildren` is self-only: the request
+carries no user id field, so the guardian is always the session user and a
+client cannot steer the query at another account. `GetGuardians` lists a
+child's guardians and is callable by a guardian of the child or a project
+admin; any other caller receives the identical `PERMISSION_DENIED` whether or
+not the child account exists, so the surface discloses nothing about account
+existence.
 
 ### Why one code path, not a mode flag
 

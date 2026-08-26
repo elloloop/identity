@@ -80,6 +80,13 @@ type ProjectConfig struct {
 	// orthogonal to Access; the UPGRADE is not (signup semantics). See
 	// ProjectAnonymousConfig.
 	Anonymous ProjectAnonymousConfig `json:"anonymous"`
+
+	// Jurisdictions holds the project's per-market age thresholds, keyed by
+	// jurisdiction/market code (e.g. "IN", "US"). When configured, an
+	// account's band derives from the thresholds of its resolved market
+	// rather than the deployment-wide GATEWAY_AGEGATE_* pair. See
+	// ProjectJurisdictionsConfig.
+	Jurisdictions ProjectJurisdictionsConfig `json:"jurisdictions"`
 }
 
 // ProjectOAuthConfig is a project's per-provider hosted-flow OAuth
@@ -286,6 +293,9 @@ func (c ProjectConfig) Validate() error {
 		return err
 	}
 	if err := c.Anonymous.validate(); err != nil {
+		return err
+	}
+	if err := c.Jurisdictions.validate(); err != nil {
 		return err
 	}
 	return nil
@@ -806,6 +816,129 @@ func normalizeProductSlug(raw string) string {
 	return strings.TrimSpace(strings.ToLower(raw))
 }
 
+// JurisdictionThresholds is one market's age-gate boundary pair: an account
+// whose age is <= ChildMaxAge classifies CHILD, >= AdultAge classifies ADULT,
+// and between the two TEEN — the same semantics as the deployment-wide
+// GATEWAY_AGEGATE_CHILD_MAX_AGE / GATEWAY_AGEGATE_ADULT_AGE pair it overrides
+// for accounts resolved to this jurisdiction.
+type JurisdictionThresholds struct {
+	ChildMaxAge int `json:"child_max_age"`
+	AdultAge    int `json:"adult_age"`
+}
+
+// ProjectJurisdictionsConfig maps a jurisdiction/market code (e.g. "IN",
+// "US") to the age thresholds that jurisdiction's law implies. It exists
+// because the child-protection ceiling is jurisdiction-specific — COPPA's
+// under-13 in the US, the DPDP Act's under-18 in India — so a single
+// deployment-wide pair cannot classify one account pool correctly across
+// markets.
+//
+// Fail direction — FAIL CLOSED at author time. A malformed block (a threshold
+// pair violating 0 <= child_max_age < adult_age, a default naming no
+// configured threshold, a blank code) is rejected by ParseProjectConfig,
+// which makes the project resolver refuse the project rather than classify
+// children under thresholds the operator never intended. At classification
+// time an account whose market cannot be resolved (unset, or naming no
+// configured threshold) falls to the STRICTEST configured ceiling, never to
+// the most permissive.
+type ProjectJurisdictionsConfig struct {
+	// Default names the threshold key applied to accounts with no stored
+	// market. When set it must be a key of Thresholds.
+	Default string `json:"default"`
+	// Thresholds maps a jurisdiction code to its boundary pair. Codes are
+	// canonicalized (trimmed, upper-cased) at parse time.
+	Thresholds map[string]JurisdictionThresholds `json:"thresholds"`
+}
+
+// normalizeJurisdictionCode canonicalizes a jurisdiction/market code so
+// config authored as " in " matches an account stored as "IN". Codes are
+// case-insensitive identifiers; upper-case is the stored form.
+func normalizeJurisdictionCode(raw string) string {
+	return strings.ToUpper(strings.TrimSpace(raw))
+}
+
+// configured reports whether the project declares any per-jurisdiction
+// thresholds at all. An unconfigured block means the deployment-wide env
+// thresholds apply, unchanged.
+func (j ProjectJurisdictionsConfig) configured() bool {
+	return len(j.Thresholds) > 0
+}
+
+// thresholdFor returns the thresholds configured for code, which may arrive
+// in any casing/whitespace form (it is normalized here so the classification
+// path never compares a raw stored market against canonical keys).
+func (j ProjectJurisdictionsConfig) thresholdFor(code string) (JurisdictionThresholds, bool) {
+	t, ok := j.Thresholds[normalizeJurisdictionCode(code)]
+	return t, ok
+}
+
+// strictest returns the most protective configured ceiling: the entry with
+// the highest child_max_age, tie-broken by the lowest adult_age. It is the
+// classification for an account whose market resolves to nothing configured —
+// an unresolvable market must never drift an account toward a more permissive
+// regime than the strictest one the project declared.
+func (j ProjectJurisdictionsConfig) strictest() (JurisdictionThresholds, bool) {
+	var best JurisdictionThresholds
+	found := false
+	for _, t := range j.Thresholds {
+		if !found || t.ChildMaxAge > best.ChildMaxAge ||
+			(t.ChildMaxAge == best.ChildMaxAge && t.AdultAge < best.AdultAge) {
+			best = t
+			found = true
+		}
+	}
+	return best, found
+}
+
+// validate rejects a malformed jurisdictions block so the whole config parse
+// fails (and with it project resolution) rather than classifying children
+// under a typo'd or half-written policy. A wholly absent block is valid (the
+// deployment-wide env thresholds apply); a present block must be complete:
+// every entry satisfies the same invariant config.validateAgeGate enforces,
+// and a default must name a configured threshold.
+func (j ProjectJurisdictionsConfig) validate() error {
+	seen := make(map[string]struct{}, len(j.Thresholds))
+	for code, t := range j.Thresholds {
+		norm := normalizeJurisdictionCode(code)
+		if norm == "" {
+			return errors.New("jurisdictions.thresholds: jurisdiction codes must not be empty")
+		}
+		if _, dup := seen[norm]; dup {
+			return fmt.Errorf("jurisdictions.thresholds: %q duplicates another entry after normalization", code)
+		}
+		seen[norm] = struct{}{}
+		if t.ChildMaxAge < 0 {
+			return fmt.Errorf("jurisdictions.thresholds.%s.child_max_age=%d must be >= 0", code, t.ChildMaxAge)
+		}
+		if t.AdultAge <= t.ChildMaxAge {
+			return fmt.Errorf("jurisdictions.thresholds.%s.adult_age=%d must be greater than child_max_age=%d",
+				code, t.AdultAge, t.ChildMaxAge)
+		}
+	}
+	// The default is compared against NORMALIZED keys: validation runs before
+	// canonicalization, so the raw map may still carry " in "-style keys.
+	if d := normalizeJurisdictionCode(j.Default); d != "" {
+		if _, ok := seen[d]; !ok {
+			return fmt.Errorf("jurisdictions.default %q must name a key of jurisdictions.thresholds", j.Default)
+		}
+	}
+	return nil
+}
+
+// canonicalized returns a copy whose default and threshold keys are
+// normalized to the canonical code form, applied once at parse time so no
+// lookup has to re-normalize config on the auth path.
+func (j ProjectJurisdictionsConfig) canonicalized() ProjectJurisdictionsConfig {
+	out := ProjectJurisdictionsConfig{Default: normalizeJurisdictionCode(j.Default)}
+	if len(j.Thresholds) > 0 {
+		out.Thresholds = make(map[string]JurisdictionThresholds, len(j.Thresholds))
+		for code, t := range j.Thresholds {
+			out.Thresholds[normalizeJurisdictionCode(code)] = t
+		}
+	}
+	return out
+}
+
 // ProjectCORSConfig is the per-project CORS policy. AllowedOrigins is layered
 // on top of the global GATEWAY_ALLOWED_ORIGINS floor: a browser origin is
 // accepted when it is in either set. Each entry must be a bare scheme+host(+port)
@@ -840,5 +973,8 @@ func ParseProjectConfig(configJSON string) (ProjectConfig, error) {
 	// Same reason for the product slugs and their minimum bands: the guard
 	// compares against the slug an X-Product header carried, normalized once here.
 	cfg.Products = cfg.Products.canonicalized()
+	// And for jurisdiction codes: a stored market and the config keys it is
+	// looked up against must share one canonical form.
+	cfg.Jurisdictions = cfg.Jurisdictions.canonicalized()
 	return cfg, nil
 }

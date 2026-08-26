@@ -86,6 +86,7 @@ func consentRecordToProto(rec *service.ParentalConsentRecord) *identitypb.Consen
 		ConsentUserAgent:    rec.ConsentUserAgent,
 		RevokedAt:           msToTimestamp(rec.RevokedAt),
 		RevokedByUserId:     rec.RevokedByUserID,
+		Market:              rec.Market,
 	}
 }
 

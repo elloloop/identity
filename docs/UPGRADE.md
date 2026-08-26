@@ -1,5 +1,97 @@
 # Upgrade guide
 
+## Unreleased — required-DOB completion step (additive, flag-scoped)
+
+Extends what `GATEWAY_AGEGATE_REQUIRE_DOB` covers. Previously it bound only
+`PasswordSignup`; every other session-issuing path (OAuth, hosted-OAuth
+redeem, native mobile OAuth, passwordless code and magic link, passkey
+signup and login, TOTP second factor, QR poll, invitation acceptance, token
+refresh) created or activated accounts with `date_of_birth_ms = 0` —
+adult-classified by default, a complete child-protection bypass. With the
+flag on, those paths now refuse token issuance for a dob-less account at
+the shared chokepoint and return `FAILED_PRECONDITION` with the stable
+`dob_required` message token and a `DOBRequiredDetails` error detail
+carrying a 10-minute **completion ticket**. The client submits the date of
+birth with the new unauthenticated `SubmitDateOfBirth` RPC; a TEEN/ADULT
+result completes the sign-in with tokens, a CHILD-band result lands in
+`USER_STATUS_PENDING_PARENTAL_CONSENT` with none.
+
+**Wire additions are additive**: the `SubmitDateOfBirth` RPC, its
+request/response messages, and the `DOBRequiredDetails` error-detail
+message. Access tokens gain an optional `purpose` claim (absent on every
+existing token); the auth middlewares refuse to authenticate any request
+presenting a purpose-bearing token.
+
+**Nothing changes unless you enable the flag.** With
+`GATEWAY_AGEGATE_REQUIRE_DOB` unset, every path behaves exactly as before.
+
+Two operator-visible consequences of turning it on:
+
+- **Pre-existing accounts without a DOB hit the completion step at their
+  next login or refresh.** `RefreshToken` included — a long-lived session
+  stops rotating until the user submits a date of birth. That is the flag
+  working; brief client teams on the `dob_required` handling before
+  enabling.
+- **Anonymous sessions are unaffected** (they never carry a DOB; the
+  product `minimum_age_band` gate remains their age guardrail), and
+  admin-created accounts (`CreateUser`) simply meet the step at first
+  sign-in, since creation mints no tokens.
+
+## Unreleased — guardian edges (additive)
+
+Adds the guardian edge to the account graph: the authorization fact that one
+account (`guardian_user_id`) manages another (`child_user_id`), graph edge
+type `guardianOf` = 102.
+
+**Wire additions are additive** — two new RPCs: `ListManagedChildren`
+(self-only: the guardian is always the session user; the request carries no
+user id field) and `GetGuardians` (callable by a guardian of the child or a
+project admin, with an account-agnostic `PERMISSION_DENIED` for everyone
+else). Two new audit events: `guardian_edge_created` (on consent grant) and
+`guardian_edge_removed` (on consent revocation).
+
+**Migrations** (postgres 0031, sqlite 0016), applied with
+`identity migrate`, create the `guardian_edges` table and **backfill one edge
+per active parental consent whose adult and child both still exist**, with the
+consent's grant instant as the edge's creation time. Operators need no action:
+existing active consents gain edges automatically, revoked consents and
+consents referencing a deleted account are deliberately skipped (the consent
+record outlives account deletion; the edge must not).
+
+One behavior note: `RevokeParentalConsent` now also removes the revoking
+adult's guardian edge, and the child is re-gated to
+`PENDING_PARENTAL_CONSENT` only when **no active consent remains** for it.
+Under the current single-active-consent model that is exactly the previous
+behavior; the rule is structured for concurrent multi-guardian consent.
+
+## Unreleased — per-jurisdiction age thresholds (additive)
+
+Adds per-market age thresholds: a project's `config_json` gains a
+`jurisdictions` block (`default` + `thresholds`, each entry a
+`child_max_age`/`adult_age` pair), and accounts gain a **market** that
+selects which pair their age band derives from (resolution: stored market →
+project default → strictest configured ceiling → the env
+`GATEWAY_AGEGATE_*` pair).
+
+**Nothing changes unless you configure it.** A project with no
+`jurisdictions` block classifies exactly as before. The wire additions are
+additive (`User.market` field 27, `ConsentRecord.market` field 12,
+`PasswordSignupRequest.market` field 6, and the new authenticated
+self-service `SetAccountMarket` RPC, audited as `account_market_changed`),
+and `buf breaking` stays clean against the previous release.
+
+**Migrations** (postgres 0030, sqlite 0015), applied with
+`identity migrate`, add `market TEXT NOT NULL DEFAULT ''` to both `users`
+and `parental_consents`. Both are metadata-only on PostgreSQL (constant
+default, no table rewrite); existing rows read as "no market on file" and
+keep their current classification.
+
+One behavior note: when a project DOES configure `jurisdictions`,
+`SetAccountMarket` (and signup with a `market`) rejects a code the project
+has not declared, and an account whose new market moves it into the child
+band without active parental consent is re-gated to
+`PENDING_PARENTAL_CONSENT` with its sessions revoked immediately.
+
 ## v4.1 → v4.2 — product-agnostic defaults (one behavior change)
 
 v4.2 removes every consumer-specific value that had accreted in the repo:

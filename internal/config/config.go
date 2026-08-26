@@ -640,8 +640,14 @@ type Config struct {
 	// AgeGateAdultAge is the age at or above which a user is an adult; between it
 	// and AgeGateChildMaxAge a user is a TEEN minor (default 18).
 	AgeGateAdultAge int
-	// AgeGateRequireDOB rejects a signup that omits a date of birth
-	// (INVALID_ARGUMENT) instead of treating it as adult.
+	// AgeGateRequireDOB requires every account to carry a date of birth
+	// before it can hold a session. PasswordSignup still rejects a dob-less
+	// request outright (INVALID_ARGUMENT); every other session-issuing path
+	// (OAuth, passwordless, passkey, TOTP, QR, invitation, refresh) refuses
+	// at token issuance with a `dob_required` error carrying a completion
+	// ticket, and the client submits the DOB via SubmitDateOfBirth. Accounts
+	// created before the flag was enabled hit the same step at their next
+	// login or refresh.
 	AgeGateRequireDOB bool
 
 	// MinorDataMinimization gates COPPA-style data-minimization for accounts

@@ -21,6 +21,10 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/RedeemOAuthCode": true,
 	"/identity.v1.IdentityService/PasswordLogin":   true,
 	"/identity.v1.IdentityService/PasswordSignup":  true,
+	// Required-DOB completion: the caller holds the short-lived completion
+	// ticket from the dob_required error detail, not a session JWT — no
+	// session exists until the DOB is submitted.
+	"/identity.v1.IdentityService/SubmitDateOfBirth": true,
 	// Passwordless email login: the caller is anonymous, proving control
 	// of an inbox via an OTP code or a magic-link token rather than a JWT.
 	"/identity.v1.IdentityService/RequestEmailLoginCode": true,
@@ -42,6 +46,15 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/GetCurrentUser":       true,
 	"/identity.v1.IdentityService/BeginPasskeyLogin":    true,
 	"/identity.v1.IdentityService/CompletePasskeyLogin": true,
+	// Passkey registration is exempt so a managed child's device can run the
+	// ceremony with NO session, presenting its enrolment ticket in the request
+	// body. The pair is NOT unauthenticated: the Connect handler requires the
+	// session-injected identity header (set here when a session token is
+	// present) or a verified `passkey_enrolment` ticket, and refuses both
+	// absent. A purpose JWT presented as a Bearer token still never
+	// authenticates — the purpose check below rejects it.
+	"/identity.v1.IdentityService/BeginPasskeyRegistration":    true,
+	"/identity.v1.IdentityService/CompletePasskeyRegistration": true,
 	// Passkey-first signup: the caller is anonymous — they are creating a
 	// brand-new account from a passkey and have no JWT yet.
 	"/identity.v1.IdentityService/BeginPasskeySignup":    true,
@@ -143,7 +156,7 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience stri
 			if isAuthExempt(path) {
 				// Still try to parse auth if present (for GetCurrentUser).
 				if token := extractBearerToken(r); token != "" {
-					if claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience); err == nil {
+					if claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience); err == nil && claims.Purpose == "" {
 						setAuthHeaders(r, claims)
 					}
 				}
@@ -161,6 +174,16 @@ func AuthMiddleware(kp jwtpkg.KeyProvider, expectedTenant, expectedAudience stri
 
 			claims, err := jwtpkg.VerifyAccessToken(token, kp, expectedTenant, expectedAudience, requireAudience)
 			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
+				return
+			}
+
+			// A purpose token (e.g. a dob_completion ticket) is a
+			// single-purpose bearer credential, never a session: it must not
+			// authenticate any RPC. Presenting one is indistinguishable from
+			// presenting a bad token.
+			if claims.Purpose != "" {
 				w.Header().Set("Content-Type", "application/json")
 				http.Error(w, `{"code":"unauthenticated","message":"Invalid or expired access token"}`, http.StatusUnauthorized)
 				return

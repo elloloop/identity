@@ -16,6 +16,7 @@ func scanParentalConsent(row pgx.Row) (*service.ParentalConsentRecord, error) {
 		&r.PolicyVersion, &r.Factors, &r.SteppedUp,
 		&r.ConsentIP, &r.ConsentUserAgent,
 		&r.GrantedAt, &r.RevokedAt, &r.RevokedByUserID,
+		&r.Market,
 	); err != nil {
 		return nil, err
 	}
@@ -34,14 +35,16 @@ func (r *pgRepository) CreateParentalConsent(ctx context.Context, rec *service.P
 			id, project_id, child_user_id, consenting_user_id,
 			policy_version, factors, stepped_up,
 			consent_ip, consent_user_agent,
-			granted_at_ms, revoked_at_ms, revoked_by_user_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+			granted_at_ms, revoked_at_ms, revoked_by_user_id,
+			market
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	_, err := r.pool.Exec(
 		ctx, q,
 		rec.ConsentID, r.projectID, rec.ChildUserID, rec.ConsentingUserID,
 		rec.PolicyVersion, rec.Factors, rec.SteppedUp,
 		rec.ConsentIP, rec.ConsentUserAgent,
 		rec.GrantedAt, rec.RevokedAt, rec.RevokedByUserID,
+		rec.Market,
 	)
 	if err != nil {
 		return wrapPgErr("CreateParentalConsent", err)
@@ -58,7 +61,8 @@ func (r *pgRepository) GetActiveParentalConsentForChild(ctx context.Context, chi
 		SELECT id, project_id, child_user_id, consenting_user_id,
 		       policy_version, factors, stepped_up,
 		       consent_ip, consent_user_agent,
-		       granted_at_ms, revoked_at_ms, revoked_by_user_id
+		       granted_at_ms, revoked_at_ms, revoked_by_user_id,
+		       market
 		  FROM parental_consents
 		 WHERE project_id = $1 AND child_user_id = $2 AND revoked_at_ms = 0
 		 ORDER BY granted_at_ms DESC

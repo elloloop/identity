@@ -47,8 +47,15 @@ type Claims struct {
 	Anonymous bool     `json:"anonymous,omitempty"`
 	SID       string   `json:"sid,omitempty"`
 	Audience  []string `json:"aud,omitempty"`
-	IssuedAt  int64    `json:"iat"`
-	ExpiresAt int64    `json:"exp"`
+	// Purpose marks a token as a single-purpose bearer credential rather
+	// than a session access token (e.g. "dob_completion" for the
+	// required-DOB completion ticket). Empty on every normal access token.
+	// Verifiers that authenticate requests MUST reject or ignore any token
+	// whose purpose is non-empty — it is proof of one interrupted flow,
+	// not of a session.
+	Purpose   string `json:"purpose,omitempty"`
+	IssuedAt  int64  `json:"iat"`
+	ExpiresAt int64  `json:"exp"`
 }
 
 // ClaimsMap converts the access-token claims plus standard iat/exp into
@@ -79,6 +86,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if c.SID != "" {
 		m["sid"] = c.SID
+	}
+	if c.Purpose != "" {
+		m["purpose"] = c.Purpose
 	}
 	if len(c.Audience) > 0 {
 		m["aud"] = c.Audience
@@ -192,6 +202,9 @@ func VerifyAccessToken(tokenStr string, kp KeyProvider, expectedTenant, expected
 	}
 	if v, ok := tok.Get("sid"); ok {
 		claims.SID, _ = v.(string)
+	}
+	if v, ok := tok.Get("purpose"); ok {
+		claims.Purpose, _ = v.(string)
 	}
 	if v, ok := tok.Get("is_minor"); ok {
 		claims.IsMinor, _ = v.(bool)

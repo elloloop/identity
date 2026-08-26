@@ -191,7 +191,7 @@ func TestPasswordSignup_Minor_RecoveryEmailDropped(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableMinorData(t, svc)
 
-	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "guardian@example.com", dobAgeMs(8))
+	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "guardian@example.com", dobAgeMs(8), "")
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestPasswordSignup_MinimizationOff_ChildRecoveryEmailKept(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableAgeGate(t, svc, false) // gate on, minimization off
 
-	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "guardian@example.com", dobAgeMs(8))
+	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "guardian@example.com", dobAgeMs(8), "")
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestPasswordSignup_Minor_AdultRecoveryEmailKept(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableMinorData(t, svc)
 
-	res, err := svc.PasswordSignup(context.Background(), "adult@example.com", strongPW, "Adult", "alt@example.com", dobAgeMs(30))
+	res, err := svc.PasswordSignup(context.Background(), "adult@example.com", strongPW, "Adult", "alt@example.com", dobAgeMs(30), "")
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}

@@ -79,7 +79,10 @@ func fallbackDisplayName(email, preferred string) string {
 // ── PasswordSignup ─────────────────────────────────────────────────────
 
 // PasswordSignup creates a new user with email + password and issues tokens.
-func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name, recoveryEmail string, dateOfBirthMs int64) (*LoginResult, error) {
+// market is the optional jurisdiction/market code the account is created
+// under; it is canonicalized (trimmed, upper-cased) and, when the resolved
+// project configures per-jurisdiction thresholds, must name one of them.
+func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name, recoveryEmail string, dateOfBirthMs int64, market string) (*LoginResult, error) {
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
 	}
@@ -88,6 +91,10 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	}
 	if s.ageGate.Enabled() && s.cfg.AgeGateRequireDOB && dateOfBirthMs <= 0 {
 		return nil, fmt.Errorf("%w: date of birth is required", ErrInvalidArgument)
+	}
+	market = normalizeJurisdictionCode(market)
+	if err := s.validateAccountMarket(ctx, market); err != nil {
+		return nil, err
 	}
 	email = strings.TrimSpace(strings.ToLower(email))
 	if err := validateEmailFormat(email); err != nil {
@@ -141,13 +148,17 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 	now := s.nowMs()
 	recEmail := strings.TrimSpace(strings.ToLower(recoveryEmail))
 
-	// Derive the age band from the supplied DOB. A child-band account under
-	// age-gating is created in PENDING_PARENTAL_CONSENT and is not issued
-	// tokens until verifiable parental consent is granted; every other band
-	// (and a disabled gate) creates an active account exactly as before.
-	ageDec := s.ageGate.Determine(dateOfBirthMs, s.nowFunc())
+	// Derive the age band from the supplied DOB under the thresholds the
+	// account's market resolves to (per-jurisdiction when the project
+	// configures them, else the deployment-wide env pair). A child-band
+	// account under age-gating is created in PENDING_PARENTAL_CONSENT and is
+	// not issued tokens until verifiable parental consent is granted; every
+	// other band (and a disabled gate) creates an active account exactly as
+	// before.
+	gate := s.determinerForUser(ctx, &User{Market: market})
+	ageDec := gate.Determine(dateOfBirthMs, s.nowFunc())
 	status := "active"
-	if s.ageGate.Enabled() && ageDec.Band == agegate.BandChild {
+	if gate.Enabled() && ageDec.Band == agegate.BandChild {
 		status = StatusPendingParentalConsent
 	}
 
@@ -168,6 +179,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		PasswordHash:  pwHash,
 		RecoveryEmail: recEmail,
 		DateOfBirthMs: dateOfBirthMs,
+		Market:        market,
 		CreatedAt:     msToTime(now),
 		UpdatedAt:     msToTime(now),
 	})
@@ -186,10 +198,11 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		Role:          "member",
 		Status:        status,
 		DateOfBirthMs: dateOfBirthMs,
+		Market:        market,
 		CreatedAt:     msToTime(now),
 		UpdatedAt:     msToTime(now),
 	}
-	s.stampAgeBand(user)
+	s.stampAgeBand(ctx, user)
 	s.logger.Info("local_signup_success", zap.String("email", redactEmail(email)), zap.String("user_id", userID))
 
 	// A child-band account pending parental consent exists but cannot be
@@ -376,55 +389,86 @@ func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User
 
 // ── PasswordLogin ──────────────────────────────────────────────────────
 
-// PasswordLogin authenticates a user with email + password.
+// PasswordLogin authenticates a user with identifier + password. The
+// identifier is an email address, OR — when it contains no '@' — the username
+// of a managed child account within the project. The two lookups share one
+// failure surface: unknown identifier, wrong password, and (on the username
+// path) a syntactically impossible username all return the identical generic
+// invalid-credentials refusal, so the endpoint discloses neither which form
+// matched nor whether the account exists.
 // If TOTP is enabled, returns TotpRequired=true with a LoginChallengeID.
 func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr, userAgent string) (*LoginResult, error) {
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
 	}
-	email = strings.TrimSpace(strings.ToLower(email))
-	if err := validateEmailFormat(email); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
-	}
-	// Canonicalize the lookup key so alice.smith@gmail.com and
-	// alicesmith@gmail.com both resolve to the one User row stored
-	// under the canonical form. PasswordSignup writes the canonical
-	// form, so lookup must use the same. Canonicalized ONCE here and reused for
-	// both the access gate (cemail) and the DB lookup (email).
-	cemail := canonicalize(email)
-	email = string(cemail)
-
-	// Enforce the project access mode (login context) BEFORE the user lookup and
-	// bcrypt: the check is DB-free (email + config), so failing fast on a
-	// closed/off-list project avoids a bcrypt CPU-DoS on disallowed addresses and
-	// keeps the denial identical regardless of password correctness (no
-	// password-guessing oracle). It reveals only allowlist membership — a project
-	// property, not account existence — matching PasswordSignup's fail-fast.
-	if err := s.enforceProjectAccessLogin(ctx, cemail); err != nil {
-		return nil, err
-	}
-
 	if password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidArgument)
 	}
 
-	user, err := s.repo(ctx).FindUserByEmail(ctx, email)
-	if err != nil {
-		return nil, err
+	identifier := strings.TrimSpace(strings.ToLower(email))
+	var user *User
+	var err error
+	// identifierKey names the identifier kind in audit details (the audit
+	// trail is internal — it may distinguish what the client response must
+	// not).
+	identifierKey := "email"
+	if strings.Contains(identifier, "@") {
+		email = identifier
+		if err := validateEmailFormat(email); err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+		}
+		// Canonicalize the lookup key so alice.smith@gmail.com and
+		// alicesmith@gmail.com both resolve to the one User row stored
+		// under the canonical form. PasswordSignup writes the canonical
+		// form, so lookup must use the same. Canonicalized ONCE here and reused for
+		// both the access gate (cemail) and the DB lookup (email).
+		cemail := canonicalize(email)
+		email = string(cemail)
+
+		// Enforce the project access mode (login context) BEFORE the user lookup and
+		// bcrypt: the check is DB-free (email + config), so failing fast on a
+		// closed/off-list project avoids a bcrypt CPU-DoS on disallowed addresses and
+		// keeps the denial identical regardless of password correctness (no
+		// password-guessing oracle). It reveals only allowlist membership — a project
+		// property, not account existence — matching PasswordSignup's fail-fast.
+		if err := s.enforceProjectAccessLogin(ctx, cemail); err != nil {
+			return nil, err
+		}
+		user, err = s.repo(ctx).FindUserByEmail(ctx, email)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Managed-child username login. The email-keyed project access gate is
+		// skipped deliberately: a managed child has no email to gate on, and
+		// the membership question was settled at creation by the guardian's
+		// standing (CreateManagedChildAccount succeeds under invite/closed).
+		identifierKey = "username"
+		username := normalizeUsername(identifier)
+		if validateUsernameFormat(username) == nil {
+			user, err = s.repo(ctx).FindUserByUsername(ctx, username)
+			if err != nil {
+				return nil, err
+			}
+		}
+		// A syntactically impossible username matches no account; fall through
+		// with user == nil to the uniform refusal.
+		identifier = username
 	}
+
 	if user == nil {
 		// Run a dummy bcrypt verification so the response time for an
-		// unknown email is comparable to the wrong-password path. This
-		// closes the email-enumeration timing oracle (the bcrypt cost
-		// dominates wall time; without this, the no-user path returns in
-		// microseconds while the wrong-password path takes ~250ms).
+		// unknown identifier is comparable to the wrong-password path. This
+		// closes the enumeration timing oracle (the bcrypt cost dominates
+		// wall time; without this, the no-user path returns in microseconds
+		// while the wrong-password path takes ~250ms).
 		_ = passwords.Verify(password, getDummyPasswordHash())
 		s.logger.Info("local_login_failed", zap.String("reason", "user_not_found"))
 		s.audit.Log(
 			ctx, audit.EventLoginFailure,
 			audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
 			audit.WithSuccess(false),
-			audit.WithDetails(map[string]any{"reason": "user_not_found", "email": email}),
+			audit.WithDetails(map[string]any{"reason": "user_not_found", identifierKey: identifier}),
 		)
 		return nil, fmt.Errorf("%w: invalid email or password", ErrUnauthenticated)
 	}
@@ -528,7 +572,10 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	// Credentials are proven; consult the tenant's LoginPolicy. This runs
 	// only after authentication so a denial never reveals account existence,
 	// and before tokens are issued so a disallowed method yields no session.
-	decision, err := s.enforceLoginPolicy(ctx, email, LoginMethodPassword)
+	// The policy resolves from the account's STORED email — for a username-
+	// identified managed child that is "" (no governed tenant), so the project
+	// default applies, matching the passkey login path.
+	decision, err := s.enforceLoginPolicy(ctx, user.Email, LoginMethodPassword)
 	if err != nil {
 		return nil, err
 	}
@@ -544,7 +591,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 	}
 
 	s.updateLastLogin(ctx, user.ID)
-	s.logger.Info("local_login_success", zap.String("email", redactEmail(email)), zap.String("user_id", user.ID))
+	s.logger.Info("local_login_success", zap.String(identifierKey, redactIdentifier(identifier)), zap.String("user_id", user.ID))
 	s.audit.Log(
 		ctx, audit.EventLoginSuccess,
 		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),

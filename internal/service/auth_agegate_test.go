@@ -35,7 +35,7 @@ func TestPasswordSignup_AgeGateOff_DOBIgnored_AdultActive(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 	// Age-gate disabled by default: even a child DOB signs up active with tokens.
-	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "", dobAgeMs(8))
+	res, err := svc.PasswordSignup(context.Background(), "kid@example.com", strongPW, "Kid", "", dobAgeMs(8), "")
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestPasswordSignup_AgeGateOn_Adult_ActiveWithTokens(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableAgeGate(t, svc, false)
 
-	res, err := svc.PasswordSignup(context.Background(), "adult@example.com", strongPW, "Adult", "", dobAgeMs(30))
+	res, err := svc.PasswordSignup(context.Background(), "adult@example.com", strongPW, "Adult", "", dobAgeMs(30), "")
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestPasswordSignup_AgeGateOn_Child_PendingNoTokens(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableAgeGate(t, svc, false)
 
-	res, err := svc.PasswordSignup(context.Background(), "child@example.com", strongPW, "Child", "", dobAgeMs(8))
+	res, err := svc.PasswordSignup(context.Background(), "child@example.com", strongPW, "Child", "", dobAgeMs(8), "")
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestPasswordSignup_AgeGateOn_Teen_ActiveWithTokens(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableAgeGate(t, svc, false)
 
-	res, err := svc.PasswordSignup(context.Background(), "teen@example.com", strongPW, "Teen", "", dobAgeMs(15))
+	res, err := svc.PasswordSignup(context.Background(), "teen@example.com", strongPW, "Teen", "", dobAgeMs(15), "")
 	if err != nil {
 		t.Fatalf("PasswordSignup: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestPasswordSignup_AgeGateOn_RequireDOB_MissingRejected(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	enableAgeGate(t, svc, true)
 
-	_, err := svc.PasswordSignup(context.Background(), "nodob@example.com", strongPW, "NoDOB", "", 0)
+	_, err := svc.PasswordSignup(context.Background(), "nodob@example.com", strongPW, "NoDOB", "", 0, "")
 	if err == nil {
 		t.Fatal("expected error when DOB required but omitted")
 	}

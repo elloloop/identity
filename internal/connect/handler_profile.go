@@ -2,6 +2,8 @@ package connect
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 
 	"connectrpc.com/connect"
 
@@ -168,15 +170,36 @@ func (h *IdentityHandler) RequestPasswordReset(
 // while registration ceremony methods (BeginPasskeyRegistration,
 // CompletePasskeyRegistration) live on AuthService.
 
+// resolvePasskeyRegistrationCaller resolves the account a registration
+// ceremony runs for: the session user, or — when the request carries an
+// enrolment ticket — the ticket's subject (a managed child account). The two
+// are mutually exclusive: presenting both would leave ambiguous which account
+// the credential lands on. The ticket is verified against the
+// `passkey_enrolment` purpose and this request's project by the service.
+func (h *IdentityHandler) resolvePasskeyRegistrationCaller(ctx context.Context, header http.Header, enrolmentToken string) (string, error) {
+	sessionUserID := authenticatedUserID(header)
+	if enrolmentToken == "" {
+		if sessionUserID == "" {
+			return "", service.ErrUnauthenticated
+		}
+		return sessionUserID, nil
+	}
+	if sessionUserID != "" {
+		return "", fmt.Errorf("%w: enrolment_token must not be combined with an authenticated session", service.ErrInvalidArgument)
+	}
+	return h.auth.VerifyPasskeyEnrolmentTicket(ctx, enrolmentToken)
+}
+
 // BeginPasskeyRegistration generates PublicKeyCredentialCreationOptions for
-// navigator.credentials.create().
+// navigator.credentials.create(). Authenticated by the caller's session, or —
+// for a managed child's bootstrap — by an enrolment ticket in the body.
 func (h *IdentityHandler) BeginPasskeyRegistration(
 	ctx context.Context,
 	req *connect.Request[identitypb.BeginPasskeyRegistrationRequest],
 ) (*connect.Response[identitypb.BeginPasskeyRegistrationResponse], error) {
-	userID := authenticatedUserID(req.Header())
-	if userID == "" {
-		return nil, toConnectError(service.ErrUnauthenticated)
+	userID, err := h.resolvePasskeyRegistrationCaller(ctx, req.Header(), req.Msg.GetEnrolmentToken())
+	if err != nil {
+		return nil, toConnectError(err)
 	}
 
 	optionsJSON, challengeID, err := h.auth.BeginPasskeyRegistration(
@@ -194,18 +217,21 @@ func (h *IdentityHandler) BeginPasskeyRegistration(
 }
 
 // CompletePasskeyRegistration verifies the attestation and stores the new
-// passkey credential.
+// passkey credential. When the ceremony redeemed an enrolment ticket, the
+// response additionally carries the child account's first session.
 func (h *IdentityHandler) CompletePasskeyRegistration(
 	ctx context.Context,
 	req *connect.Request[identitypb.CompletePasskeyRegistrationRequest],
 ) (*connect.Response[identitypb.CompletePasskeyRegistrationResponse], error) {
-	userID := authenticatedUserID(req.Header())
-	if userID == "" {
-		return nil, toConnectError(service.ErrUnauthenticated)
+	enrolment := req.Msg.GetEnrolmentToken() != ""
+	userID, err := h.resolvePasskeyRegistrationCaller(ctx, req.Header(), req.Msg.GetEnrolmentToken())
+	if err != nil {
+		return nil, toConnectError(err)
 	}
 
-	credential, err := h.auth.CompletePasskeyRegistration(
+	credential, session, err := h.auth.CompletePasskeyRegistration(
 		ctx, userID, req.Msg.ChallengeId, req.Msg.CredentialJson, req.Msg.DeviceName,
+		enrolment, clientIP(req.Header()), clientUserAgent(req.Header()),
 	)
 	if err != nil {
 		return nil, toConnectError(err)
@@ -213,6 +239,11 @@ func (h *IdentityHandler) CompletePasskeyRegistration(
 
 	resp := &identitypb.CompletePasskeyRegistrationResponse{
 		Credential: passkeyToProto(credential),
+	}
+	if session != nil {
+		resp.AccessToken = session.AccessToken
+		resp.RefreshToken = session.RefreshToken
+		resp.ExpiresIn = session.ExpiresIn
 	}
 	return connect.NewResponse(resp), nil
 }

@@ -107,6 +107,7 @@ type fakeRepo struct {
 	oauthIdentities     map[string]*service.OAuthIdentity
 	idvRecords          map[string]*service.IdentityVerificationRecord
 	parentalConsents    map[string]*service.ParentalConsentRecord
+	guardianEdges       map[string]*service.GuardianEdge
 	sessions            map[string]*service.SessionRecord
 	auditEvents         []*service.AuditEvent
 
@@ -170,6 +171,23 @@ func (r *fakeRepo) GetUser(_ context.Context, userID string) (*service.User, err
 	return &cp, nil
 }
 
+// FindUserByUsername mirrors the drivers' partial-index username lookup:
+// an empty username matches nobody.
+func (r *fakeRepo) FindUserByUsername(_ context.Context, username string) (*service.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if username == "" {
+		return nil, nil
+	}
+	for _, u := range r.users {
+		if u.Username != "" && u.Username == username {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
 func (r *fakeRepo) ListUsers(_ context.Context, filter service.UserListFilter) ([]*service.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -222,8 +240,13 @@ func (r *fakeRepo) CreateUser(_ context.Context, u *service.User) (string, error
 		return "", r.errCreateUser
 	}
 	for _, e := range r.users {
-		if e.Email == u.Email {
+		// Mirrors the drivers' PARTIAL unique index (WHERE email <> ''):
+		// email-less accounts — every managed child — never collide.
+		if u.Email != "" && e.Email == u.Email {
 			return "", fmt.Errorf("user with email %s already exists", u.Email)
+		}
+		if u.Username != "" && e.Username == u.Username {
+			return "", fmt.Errorf("%w: username %s already exists", service.ErrAlreadyExists, u.Username)
 		}
 	}
 	id := u.ID
@@ -289,6 +312,10 @@ func (r *fakeRepo) UpdateUser(_ context.Context, userID string, fields map[strin
 			}
 		case "recovery_email":
 			u.RecoveryEmail = v.(string)
+		case "market":
+			u.Market = v.(string)
+		case "username":
+			u.Username = v.(string)
 		case "deletion_scheduled_at_ms":
 			switch x := v.(type) {
 			case int64:
@@ -491,6 +518,11 @@ func (r *fakeRepo) DeleteUser(_ context.Context, userID string) error {
 	for id, rec := range r.idvRecords {
 		if rec.UserID == userID {
 			delete(r.idvRecords, id)
+		}
+	}
+	for key, e := range r.guardianEdges {
+		if e.GuardianUserID == userID || e.ChildUserID == userID {
+			delete(r.guardianEdges, key)
 		}
 	}
 	delete(r.users, userID)
@@ -1377,6 +1409,98 @@ func (r *fakeRepo) MarkParentalConsentRevoked(_ context.Context, consentID, revo
 	}
 	rec.RevokedAt = atMs
 	rec.RevokedByUserID = revokedByUserID
+	return nil
+}
+
+func (r *fakeRepo) UpsertGuardianEdge(_ context.Context, e *service.GuardianEdge) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.guardianEdges == nil {
+		r.guardianEdges = make(map[string]*service.GuardianEdge)
+	}
+	key := e.GuardianUserID + "\x00" + e.ChildUserID
+	if _, ok := r.guardianEdges[key]; ok {
+		return nil // idempotent re-upsert preserves created_at_ms
+	}
+	cp := *e
+	r.guardianEdges[key] = &cp
+	return nil
+}
+
+func (r *fakeRepo) DeleteGuardianEdge(_ context.Context, guardianUserID, childUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.guardianEdges, guardianUserID+"\x00"+childUserID)
+	return nil
+}
+
+func (r *fakeRepo) GetGuardianEdge(_ context.Context, guardianUserID, childUserID string) (*service.GuardianEdge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.guardianEdges[guardianUserID+"\x00"+childUserID]
+	if !ok {
+		return nil, nil
+	}
+	cp := *e
+	return &cp, nil
+}
+
+func (r *fakeRepo) ListGuardiansOfChild(_ context.Context, childUserID string) ([]*service.GuardianEdge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.GuardianEdge
+	for _, e := range r.guardianEdges {
+		if e.ChildUserID != childUserID {
+			continue
+		}
+		cp := *e
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (r *fakeRepo) ListChildrenOfGuardian(_ context.Context, guardianUserID string) ([]*service.GuardianEdge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.GuardianEdge
+	for _, e := range r.guardianEdges {
+		if e.GuardianUserID != guardianUserID {
+			continue
+		}
+		cp := *e
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+// CreateManagedChildAccount mirrors the drivers' single-transaction
+// semantics under one lock hold: a duplicate username fails BEFORE any
+// mutation, so no partial (account, edge, consent) state is reachable.
+func (r *fakeRepo) CreateManagedChildAccount(_ context.Context, u *service.User, edge *service.GuardianEdge, consent *service.ParentalConsentRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if u.Username != "" {
+		for _, existing := range r.users {
+			if existing.Username == u.Username {
+				return fmt.Errorf("%w: username %s already exists", service.ErrAlreadyExists, u.Username)
+			}
+		}
+	}
+	id := u.ID
+	if id == "" {
+		id = nextID()
+	}
+	u.ID = id
+	cp := *u
+	r.users[id] = &cp
+
+	edge.ChildUserID = id
+	ecp := *edge
+	r.guardianEdges[edge.GuardianUserID+"\x00"+id] = &ecp
+
+	consent.ChildUserID = id
+	ccp := *consent
+	r.parentalConsents[consent.ConsentID] = &ccp
 	return nil
 }
 

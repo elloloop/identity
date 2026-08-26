@@ -93,6 +93,12 @@ type AdminProject struct {
 	// the request Host — gates on the same policy every other login path sees.
 	// Ignored on writes. FAILS OPEN: a zero value imposes no restriction.
 	Products ProjectProductsConfig
+
+	// Jurisdictions is the project's parsed config_json per-market
+	// age-threshold policy, populated on the same reads as Products for the
+	// same reason. Ignored on writes; a zero value leaves the deployment-wide
+	// env thresholds in force.
+	Jurisdictions ProjectJurisdictionsConfig
 }
 
 // AdminProjectCredential is the credential row an operator mints. Only the

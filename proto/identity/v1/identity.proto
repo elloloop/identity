@@ -68,6 +68,20 @@ message User {
   // and is reachable only through its refresh token. Clears permanently on
   // UpgradeAnonymousAccount, which preserves the id.
   bool is_anonymous = 26;
+  // market is the jurisdiction/market code (e.g. "IN", "US") captured at
+  // account creation or set via SetAccountMarket. When the project configures
+  // per-jurisdiction age thresholds (config_json `jurisdictions`), it selects
+  // the threshold pair this account's age band derives from. Empty means "no
+  // market on file" — the project default or the deployment-wide thresholds
+  // apply.
+  string market = 27;
+  // username is the parent-chosen, project-unique handle identifying a
+  // managed child account (children often have no email). Lowercase
+  // alphanumerics plus `_`/`-`/`.`, 3..32 chars, normalized to lowercase at
+  // write time. Empty on every account not created via
+  // CreateManagedChildAccount. Unique within the project when non-empty, and
+  // usable as the PasswordLogin identifier.
+  string username = 28;
 }
 
 message CreateUserRequest {
@@ -312,6 +326,11 @@ message PasswordSignupRequest {
   string recovery_email = 3;  // Optional: secondary contact address. Note: password reset links are sent to the account's PRIMARY verified email, not this address.
   reserved 4; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
   int64 date_of_birth_ms = 5; // Optional; epoch ms of date of birth. Required at signup when GATEWAY_AGEGATE_REQUIRE_DOB.
+  // market is the jurisdiction/market code (e.g. "IN", "US") the account is
+  // created under. Optional; when the project configures per-jurisdiction age
+  // thresholds it must name one of them. Canonicalized (trimmed, upper-cased)
+  // before storage.
+  string market = 6;
 }
 
 message PasswordSignupResponse {
@@ -323,6 +342,11 @@ message PasswordSignupResponse {
 }
 
 message PasswordLoginRequest {
+  // email is the login identifier: the account's email address, OR — when the
+  // value contains no `@` — the username of a managed child account within
+  // this project (see User.username). The response is identical whether the
+  // identifier matched by email, by username, or not at all, so the endpoint
+  // discloses neither which form matched nor whether the account exists.
   string email    = 1;
   string password = 2;
   reserved 3; reserved "captcha_token";  // Replaced by the X-Assurance-Token header (see IssueAssuranceToken)
@@ -336,6 +360,52 @@ message PasswordLoginResponse {
   int32 expires_in     = 5;  // Access token lifetime in seconds
   bool totp_required      = 6;  // true when the user has TOTP enabled; client must call VerifyTotp
   string login_challenge_id = 7;  // id of the pending LoginChallenge; pass to VerifyTotp
+}
+
+// ─── Required-DOB completion ──────────────────────────────────────────
+// When GATEWAY_AGEGATE_REQUIRE_DOB is on, every session-issuing path
+// refuses to mint tokens for an account with no date of birth
+// (date_of_birth_ms = 0) and instead fails with CodeFailedPrecondition,
+// the stable `dob_required` token in the message, and a
+// DOBRequiredDetails error detail carrying a short-lived completion
+// ticket. The client submits the date of birth through SubmitDateOfBirth,
+// which is the only RPC that accepts the ticket. This applies to accounts
+// created before the flag was enabled too: they hit the same step at
+// their next login or refresh.
+//
+// CreateUser (admin-created accounts) needs no DOB field: it mints no
+// tokens, so nothing is bypassed at creation — the created account meets
+// the completion step at its first sign-in like any pre-flag account.
+
+// DOBRequiredDetails is the error detail attached to the `dob_required`
+// refusal returned by any session-issuing RPC when
+// GATEWAY_AGEGATE_REQUIRE_DOB is on and the account has no date of birth.
+message DOBRequiredDetails {
+  // A short-lived (10 minute) bearer ticket whose only use is one
+  // SubmitDateOfBirth call for the account it was minted for. It is NOT
+  // an access token: it carries a `purpose` claim and authenticates no
+  // other RPC.
+  string completion_token = 1;
+}
+
+// SubmitDateOfBirth completes the required-DOB step: it verifies the
+// completion ticket, stores the date of birth on the ticket's account,
+// derives the age band under the account's jurisdiction, and only then
+// issues a session. A CHILD-band result lands in
+// USER_STATUS_PENDING_PARENTAL_CONSENT and is issued no tokens (the
+// correct dead end on a self-signup path — a child arrives through the
+// guardian flow, not alone). The DOB can be set exactly once: an account
+// that already has one is CodeFailedPrecondition.
+message SubmitDateOfBirthRequest {
+  string completion_token  = 1;  // from the dob_required error detail
+  int64 date_of_birth_ms   = 2;  // epoch ms; must be a plausible past date
+}
+
+message SubmitDateOfBirthResponse {
+  User user            = 1;
+  string access_token  = 2;  // empty when user.status is USER_STATUS_PENDING_PARENTAL_CONSENT
+  string refresh_token = 3;  // empty likewise
+  int32 expires_in     = 4;  // Access token lifetime in seconds
 }
 
 // ─── Passwordless Email Login (OTP code + magic link) ────────────────
@@ -698,7 +768,34 @@ message ConsentRecord {
   // active. revoked_by_user_id records who withdrew it.
   google.protobuf.Timestamp revoked_at = 10;
   string revoked_by_user_id = 11;
+  // market is the jurisdiction/market code the child's age band resolved
+  // under at grant time (the child's stored market, or the project's
+  // configured default). Recorded so an auditor can see WHICH jurisdiction's
+  // thresholds the consented classification derived from.
+  string market = 12;
 }
+
+// ─── Account market ─────────────────────────────────────────────────────
+// SetAccountMarket is the authenticated self-service RPC for changing the
+// jurisdiction/market code an account's age band derives from. The change is
+// audited (account_market_changed) and re-evaluates the band immediately: an
+// account that newly classifies as CHILD under the new market's thresholds is
+// re-gated to USER_STATUS_PENDING_PARENTAL_CONSENT and its sessions are
+// revoked.
+
+message SetAccountMarketRequest {
+  // market is the jurisdiction/market code (e.g. "IN", "US") to store on the
+  // caller's account. When the project configures per-jurisdiction age
+  // thresholds it must name one of them.
+  string market = 1;
+}
+
+message SetAccountMarketResponse {
+  // user is the caller's account after the change, with the re-derived age
+  // band and (possibly re-gated) status.
+  User user = 1;
+}
+
 
 message GrantParentalConsentRequest {
   // child_user_id is the child-band account (currently in
@@ -735,6 +832,105 @@ message RevokeParentalConsentResponse {
   // child_status is the child account's resulting status
   // (PENDING_PARENTAL_CONSENT after a successful revoke).
   UserStatus child_status = 2;
+}
+
+// ─── Guardian edges ─────────────────────────────────────────────────
+// A guardian edge (guardian_user_id -> child_user_id) is the account-graph
+// authorization fact that one account manages another. Edges are created
+// when verifiable parental consent is granted (and backfilled for consents
+// granted before the edge model existed) and removed when that consent is
+// revoked; unlike the consent record — an audit artifact retained after
+// account deletion — an edge dies with either account it references.
+
+// ListManagedChildren lists the child accounts the authenticated caller
+// holds a guardian edge to. The guardian is always the session user: the
+// request deliberately carries no user id field, so a client cannot steer
+// the query at another account.
+message ListManagedChildrenRequest {}
+
+message ListManagedChildrenResponse {
+  // children are the managed child accounts, with their age band derived
+  // under the jurisdiction thresholds each resolves to.
+  repeated User children = 1;
+}
+
+// GetGuardians lists the guardians of a child account. Callers must be a
+// guardian of that child or a project admin; any other caller receives the
+// same PERMISSION_DENIED whether or not the child account exists, so the
+// surface discloses nothing about account existence.
+message GetGuardiansRequest {
+  // child_user_id is the child account whose guardians are listed.
+  string child_user_id = 1;
+}
+
+message GetGuardiansResponse {
+  repeated User guardians = 1;
+}
+
+// ─── Managed child accounts ───────────────────────────────────────────
+// CreateManagedChildAccount is the parent-creates-child flow: an
+// authenticated adult creates a minor's account directly — born
+// USER_STATUS_ACTIVE under the adult's guardianship, never passing through
+// USER_STATUS_PENDING_PARENTAL_CONSENT, because the consent evidence is
+// captured in the SAME call (the ConsentRecord returned here is equivalent
+// to a GrantParentalConsent grant). The child is identified within the
+// project by a parent-chosen username (children often have no email) and
+// signs in with it via PasswordLogin or a bootstrapped passkey.
+//
+// The calling adult is always the session user — the request deliberately
+// carries no caller identity field. Both consent checks from
+// GrantParentalConsent apply here unchanged: a strong verified factor on the
+// adult's account AND a step-up password re-entry.
+//
+// This is NOT self-signup: the project access mode (open/allowlist/invite/
+// closed) does not gate it. An active authenticated adult in the project may
+// create children in it under any mode.
+
+message CreateManagedChildAccountRequest {
+  // username is the child account's project-unique handle: lowercase
+  // alphanumerics plus `_`/`-`/`.`, 3..32 chars (normalized to lowercase).
+  // A duplicate within the project is CodeAlreadyExists.
+  string username = 1;
+  // display_name is the child's display name (optional).
+  string display_name = 2;
+  // date_of_birth_ms is required on every call, age gate on or off: a managed
+  // child account without a date of birth is never valid. Future or
+  // implausibly old values are rejected; a DOB classifying as ADULT is
+  // rejected (this RPC creates minor accounts only).
+  int64 date_of_birth_ms = 3;
+  // market is the jurisdiction/market code the child classifies under.
+  // Optional; when the project configures per-jurisdiction age thresholds it
+  // must name one of them.
+  string market = 4;
+  // avatar_url is the child's avatar (optional).
+  string avatar_url = 5;
+  // password is the parent-chosen password credential for the child. Exactly
+  // one of password / passkey_enrolment must be set.
+  string password = 6;
+  // passkey_enrolment bootstraps a passkey on the child's device instead of a
+  // password: the response carries an enrolment ticket the child's device
+  // redeems through BeginPasskeyRegistration / CompletePasskeyRegistration
+  // within 15 minutes.
+  bool passkey_enrolment = 7;
+  // policy_version identifies the direct-notice/privacy policy the adult was
+  // shown before consenting, exactly as in GrantParentalConsent. Required.
+  string policy_version = 8;
+  // step_up_password re-authenticates the CALLING ADULT at the moment of
+  // creation (verified against the adult's stored password hash), exactly as
+  // in GrantParentalConsent.
+  string step_up_password = 9;
+}
+
+message CreateManagedChildAccountResponse {
+  // child is the created account: USER_STATUS_ACTIVE, no email, username set.
+  User child = 1;
+  // consent is the parental-consent record written atomically with the
+  // account and the guardian edge — the consent-equivalence artifact.
+  ConsentRecord consent = 2;
+  // enrolment_token is set only when passkey_enrolment was requested: the
+  // 15-minute ticket the child's device presents to
+  // BeginPasskeyRegistration / CompletePasskeyRegistration.
+  string enrolment_token = 3;
 }
 
 // ─── Admin Help Flow ────────────────────────────────────────────────
@@ -801,9 +997,18 @@ message PasskeyCredentialInfo {
   google.protobuf.Timestamp last_used_at = 4;
 }
 
-// Registration (requires authenticated session)
+// Registration (requires an authenticated session, OR a passkey-enrolment
+// ticket minted by CreateManagedChildAccount for a passwordless child account)
 message BeginPasskeyRegistrationRequest {
   string device_name = 1;
+  // enrolment_token redeems a managed-child passkey-enrolment ticket (JWT
+  // purpose `passkey_enrolment`, 15-minute TTL). When set, the ceremony
+  // authenticates as the ticket's subject — the child account — INSTEAD of a
+  // session; the ticket rides in the body because a purpose JWT is never a
+  // session credential. The ticket is single-purpose but NOT single-use:
+  // enrolling passkeys on two of the child's devices within the window is
+  // legitimate. Mutually exclusive with an authenticated session.
+  string enrolment_token = 2;
 }
 
 message BeginPasskeyRegistrationResponse {
@@ -817,10 +1022,21 @@ message CompletePasskeyRegistrationRequest {
   // JSON string of the PublicKeyCredential returned by navigator.credentials.create
   string credential_json = 2;
   string device_name = 3;
+  // enrolment_token is the same ticket presented at Begin. Completing with it
+  // creates the credential AND issues the child account's first session (see
+  // CompletePasskeyRegistrationResponse.access_token).
+  string enrolment_token = 4;
 }
 
 message CompletePasskeyRegistrationResponse {
   PasskeyCredentialInfo credential = 1;
+  // access_token / refresh_token / expires_in carry the child account's first
+  // session, set ONLY when the ceremony redeemed an enrolment ticket (the
+  // child has no session yet — that is what the ticket bootstraps). A normal
+  // session-authenticated completion leaves all three empty.
+  string access_token = 2;
+  string refresh_token = 3;
+  int32 expires_in = 4;
 }
 
 // Authentication (no session required)
@@ -1912,6 +2128,11 @@ service IdentityService {
   rpc RedeemOAuthCode(RedeemOAuthCodeRequest) returns (RedeemOAuthCodeResponse);
   rpc PasswordSignup(PasswordSignupRequest) returns (PasswordSignupResponse);
   rpc PasswordLogin(PasswordLoginRequest) returns (PasswordLoginResponse);
+  // Required-DOB completion step (GATEWAY_AGEGATE_REQUIRE_DOB): the only
+  // RPC that accepts the completion ticket carried by the dob_required
+  // error detail. Unauthenticated — the caller holds a ticket, not a
+  // session.
+  rpc SubmitDateOfBirth(SubmitDateOfBirthRequest) returns (SubmitDateOfBirthResponse);
 
   // Passwordless email login (OTP code + magic link)
   rpc RequestEmailLoginCode(RequestEmailLoginCodeRequest) returns (RequestEmailLoginCodeResponse);
@@ -1939,6 +2160,11 @@ service IdentityService {
 
   // Self-service profile
   rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+
+  // Self-service account market (jurisdiction) change. Audited; re-derives
+  // the caller's age band under the new market's thresholds and re-gates the
+  // account to PENDING_PARENTAL_CONSENT when it newly classifies as CHILD.
+  rpc SetAccountMarket(SetAccountMarketRequest) returns (SetAccountMarketResponse);
 
   // Self-service account deletion (GDPR Art 17). The caller schedules
   // deletion of their OWN account (grace-period soft delete); a login during
@@ -1976,6 +2202,23 @@ service IdentityService {
   // mandatory; a client cannot bypass them.
   rpc GrantParentalConsent(GrantParentalConsentRequest) returns (GrantParentalConsentResponse);
   rpc RevokeParentalConsent(RevokeParentalConsentRequest) returns (RevokeParentalConsentResponse);
+
+  // Guardian edges — the account-graph facts recording which adult accounts
+  // manage which child accounts. ListManagedChildren is self-only (the
+  // guardian is always the session user); GetGuardians is callable by a
+  // guardian of the child or a project admin, and answers identically whether
+  // or not the child exists (no existence disclosure).
+  rpc ListManagedChildren(ListManagedChildrenRequest) returns (ListManagedChildrenResponse);
+  rpc GetGuardians(GetGuardiansRequest) returns (GetGuardiansResponse);
+
+  // Managed child accounts — the parent-creates-child flow. An authenticated
+  // adult creates a minor's account (born USER_STATUS_ACTIVE under the
+  // caller's guardianship, consent recorded atomically in the same call),
+  // identified by a parent-chosen username, with either a parent-chosen
+  // password or a passkey-enrolment ticket as the child's credential. The
+  // calling adult is the session user; the project access mode does not gate
+  // this (it is not self-signup).
+  rpc CreateManagedChildAccount(CreateManagedChildAccountRequest) returns (CreateManagedChildAccountResponse);
 
   // Admin help (replaces self-serve ForgotPassword)
   rpc RequestAdminHelp(RequestAdminHelpRequest) returns (RequestAdminHelpResponse);

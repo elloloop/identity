@@ -760,6 +760,7 @@ type MemRepo struct {
 	oauthIdentities    map[string]*service.OAuthIdentity
 	idvRecords         map[string]*service.IdentityVerificationRecord
 	parentalConsents   map[string]*service.ParentalConsentRecord
+	guardianEdges      map[string]*service.GuardianEdge
 	sessions           map[string]*service.SessionRecord
 	auditEvents        []*service.AuditEvent
 }
@@ -787,6 +788,7 @@ func NewMemRepo() *MemRepo {
 		oauthIdentities:    make(map[string]*service.OAuthIdentity),
 		idvRecords:         make(map[string]*service.IdentityVerificationRecord),
 		parentalConsents:   make(map[string]*service.ParentalConsentRecord),
+		guardianEdges:      make(map[string]*service.GuardianEdge),
 		sessions:           make(map[string]*service.SessionRecord),
 	}
 }
@@ -824,6 +826,23 @@ func (r *MemRepo) FindUserByEmail(_ context.Context, email string) (*service.Use
 	defer r.mu.Unlock()
 	for _, u := range r.users {
 		if u.Email == email {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+// FindUserByUsername mirrors the production drivers' partial-index username
+// lookup: an empty username matches nobody.
+func (r *MemRepo) FindUserByUsername(_ context.Context, username string) (*service.User, error) {
+	if username == "" {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, u := range r.users {
+		if u.Username != "" && u.Username == username {
 			cp := *u
 			return &cp, nil
 		}
@@ -1086,6 +1105,11 @@ func (r *MemRepo) deleteUserRowsLocked(userID string) {
 	for id, c := range r.phoneVerifyCodes {
 		if c.UserID == userID {
 			delete(r.phoneVerifyCodes, id)
+		}
+	}
+	for key, e := range r.guardianEdges {
+		if e.GuardianUserID == userID || e.ChildUserID == userID {
+			delete(r.guardianEdges, key)
 		}
 	}
 	delete(r.users, userID)
@@ -2133,6 +2157,96 @@ func (r *MemRepo) MarkParentalConsentRevoked(_ context.Context, consentID, revok
 	}
 	rec.RevokedAt = atMs
 	rec.RevokedByUserID = revokedByUserID
+	return nil
+}
+
+func (r *MemRepo) UpsertGuardianEdge(_ context.Context, e *service.GuardianEdge) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := e.GuardianUserID + "\x00" + e.ChildUserID
+	if _, ok := r.guardianEdges[key]; ok {
+		return nil // idempotent re-upsert preserves created_at_ms
+	}
+	cp := *e
+	r.guardianEdges[key] = &cp
+	return nil
+}
+
+func (r *MemRepo) DeleteGuardianEdge(_ context.Context, guardianUserID, childUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.guardianEdges, guardianUserID+"\x00"+childUserID)
+	return nil
+}
+
+func (r *MemRepo) GetGuardianEdge(_ context.Context, guardianUserID, childUserID string) (*service.GuardianEdge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.guardianEdges[guardianUserID+"\x00"+childUserID]
+	if !ok {
+		return nil, nil
+	}
+	cp := *e
+	return &cp, nil
+}
+
+func (r *MemRepo) ListGuardiansOfChild(_ context.Context, childUserID string) ([]*service.GuardianEdge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.GuardianEdge
+	for _, e := range r.guardianEdges {
+		if e.ChildUserID != childUserID {
+			continue
+		}
+		cp := *e
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+func (r *MemRepo) ListChildrenOfGuardian(_ context.Context, guardianUserID string) ([]*service.GuardianEdge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*service.GuardianEdge
+	for _, e := range r.guardianEdges {
+		if e.GuardianUserID != guardianUserID {
+			continue
+		}
+		cp := *e
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+// CreateManagedChildAccount mirrors the production drivers' single-
+// transaction semantics under one lock hold: a duplicate username fails
+// BEFORE any mutation, so no partial (account, edge, consent) state is
+// reachable.
+func (r *MemRepo) CreateManagedChildAccount(_ context.Context, u *service.User, edge *service.GuardianEdge, consent *service.ParentalConsentRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if u.Username != "" {
+		for _, existing := range r.users {
+			if existing.Username == u.Username {
+				return fmt.Errorf("username %q: %w", u.Username, service.ErrAlreadyExists)
+			}
+		}
+	}
+	id := u.ID
+	if id == "" {
+		id = r.nextID()
+	}
+	u.ID = id
+	cp := *u
+	r.users[id] = &cp
+
+	edge.ChildUserID = id
+	ecp := *edge
+	r.guardianEdges[edge.GuardianUserID+"\x00"+id] = &ecp
+
+	consent.ChildUserID = id
+	ccp := *consent
+	r.parentalConsents[consent.ConsentID] = &ccp
 	return nil
 }
 

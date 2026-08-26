@@ -30,6 +30,10 @@ func (StubRepository) FindUserByEmail(context.Context, string) (*User, error) {
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) FindUserByUsername(context.Context, string) (*User, error) {
+	return nil, ErrServiceUnavailable
+}
+
 func (StubRepository) GetUser(context.Context, string) (*User, error) {
 	return nil, ErrServiceUnavailable
 }
@@ -311,6 +315,30 @@ func (StubRepository) GetActiveParentalConsentForChild(context.Context, string) 
 }
 
 func (StubRepository) MarkParentalConsentRevoked(context.Context, string, string, int64) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) UpsertGuardianEdge(context.Context, *GuardianEdge) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) DeleteGuardianEdge(context.Context, string, string) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) GetGuardianEdge(context.Context, string, string) (*GuardianEdge, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) ListGuardiansOfChild(context.Context, string) ([]*GuardianEdge, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) ListChildrenOfGuardian(context.Context, string) ([]*GuardianEdge, error) {
+	return nil, ErrServiceUnavailable
+}
+
+func (StubRepository) CreateManagedChildAccount(context.Context, *User, *GuardianEdge, *ParentalConsentRecord) error {
 	return ErrServiceUnavailable
 }
 
