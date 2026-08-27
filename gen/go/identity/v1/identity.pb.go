@@ -5759,7 +5759,12 @@ func (x *RevokeParentalConsentResponse) GetChildStatus() UserStatus {
 // request deliberately carries no user id field, so a client cannot steer
 // the query at another account.
 type ListManagedChildrenRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// limit caps the page. Default 50, maximum 200 — the listing is bounded so
+	// one guardian with many children cannot produce an unbounded response.
+	Limit int32 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	// cursor is the opaque offset-based cursor from a previous response.
+	Cursor        string `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5794,11 +5799,31 @@ func (*ListManagedChildrenRequest) Descriptor() ([]byte, []int) {
 	return file_identity_v1_identity_proto_rawDescGZIP(), []int{93}
 }
 
+func (x *ListManagedChildrenRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListManagedChildrenRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
 type ListManagedChildrenResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// children are the managed child accounts, with their age band derived
-	// under the jurisdiction thresholds each resolves to.
-	Children      []*User `protobuf:"bytes,1,rep,name=children,proto3" json:"children,omitempty"`
+	// children are the managed child accounts as SUMMARIES: identity and
+	// classification only (id, username, display name, avatar, role, status,
+	// market, age band, is_minor). Contact details and date of birth are
+	// reachable only through GetManagedChildProfile, which requires a step-up
+	// re-authentication. An account that has aged past the adult threshold is
+	// omitted — the edge survives as consent history but confers nothing.
+	Children []*User `protobuf:"bytes,1,rep,name=children,proto3" json:"children,omitempty"`
+	// next_cursor is empty on the last page.
+	NextCursor    string `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5840,6 +5865,13 @@ func (x *ListManagedChildrenResponse) GetChildren() []*User {
 	return nil
 }
 
+func (x *ListManagedChildrenResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
 // GetGuardians lists the guardians of a child account. Callers must be a
 // guardian of that child or a project admin; any other caller receives the
 // same PERMISSION_DENIED whether or not the child account exists, so the
@@ -5847,7 +5879,11 @@ func (x *ListManagedChildrenResponse) GetChildren() []*User {
 type GetGuardiansRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// child_user_id is the child account whose guardians are listed.
-	ChildUserId   string `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
+	ChildUserId string `protobuf:"bytes,1,opt,name=child_user_id,json=childUserId,proto3" json:"child_user_id,omitempty"`
+	// limit caps the page. Default 50, maximum 200.
+	Limit int32 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	// cursor is the opaque offset-based cursor from a previous response.
+	Cursor        string `protobuf:"bytes,3,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5889,9 +5925,28 @@ func (x *GetGuardiansRequest) GetChildUserId() string {
 	return ""
 }
 
+func (x *GetGuardiansRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *GetGuardiansRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
 type GetGuardiansResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Guardians     []*User                `protobuf:"bytes,1,rep,name=guardians,proto3" json:"guardians,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// guardians are SUMMARIES, on the same terms as ListManagedChildren: this
+	// listing hands one guardian the records of their CO-guardians, who have
+	// not agreed to share contact details with each other.
+	Guardians []*User `protobuf:"bytes,1,rep,name=guardians,proto3" json:"guardians,omitempty"`
+	// next_cursor is empty on the last page.
+	NextCursor    string `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5931,6 +5986,13 @@ func (x *GetGuardiansResponse) GetGuardians() []*User {
 		return x.Guardians
 	}
 	return nil
+}
+
+func (x *GetGuardiansResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
 }
 
 type CreateManagedChildAccountRequest struct {
@@ -15798,14 +15860,22 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x8f\x01\n" +
 	"\x1dRevokeParentalConsentResponse\x122\n" +
 	"\x06record\x18\x01 \x01(\v2\x1a.identity.v1.ConsentRecordR\x06record\x12:\n" +
-	"\fchild_status\x18\x02 \x01(\x0e2\x17.identity.v1.UserStatusR\vchildStatus\"\x1c\n" +
-	"\x1aListManagedChildrenRequest\"L\n" +
+	"\fchild_status\x18\x02 \x01(\x0e2\x17.identity.v1.UserStatusR\vchildStatus\"J\n" +
+	"\x1aListManagedChildrenRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\"m\n" +
 	"\x1bListManagedChildrenResponse\x12-\n" +
-	"\bchildren\x18\x01 \x03(\v2\x11.identity.v1.UserR\bchildren\"9\n" +
+	"\bchildren\x18\x01 \x03(\v2\x11.identity.v1.UserR\bchildren\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"g\n" +
 	"\x13GetGuardiansRequest\x12\"\n" +
-	"\rchild_user_id\x18\x01 \x01(\tR\vchildUserId\"G\n" +
+	"\rchild_user_id\x18\x01 \x01(\tR\vchildUserId\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x03 \x01(\tR\x06cursor\"h\n" +
 	"\x14GetGuardiansResponse\x12/\n" +
-	"\tguardians\x18\x01 \x03(\v2\x11.identity.v1.UserR\tguardians\"\xdb\x02\n" +
+	"\tguardians\x18\x01 \x03(\v2\x11.identity.v1.UserR\tguardians\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"\xdb\x02\n" +
 	" CreateManagedChildAccountRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12'\n" +

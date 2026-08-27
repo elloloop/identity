@@ -453,6 +453,30 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 // drained here like the other user-owned types.
 // SetDateOfBirthOnce sets the date of birth only while the account still has
 // none, under the same lock hold the SQL drivers get from a single UPDATE.
+// GetUsersByIDs fetches many users at once, ordered by id like the SQL
+// drivers. Unknown ids are absent rather than an error.
+func (r *Repo) GetUsersByIDs(_ context.Context, ids []string) ([]*service.User, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*service.User, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if u, ok := r.users[id]; ok {
+			cp := *u
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 func (r *Repo) SetDateOfBirthOnce(
 	_ context.Context, userID string, dobMs int64, status string, nowMs int64,
 ) (bool, error) {

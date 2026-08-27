@@ -53,6 +53,7 @@ package conformance
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -175,6 +176,46 @@ func RunConformance(t *testing.T, driver Driver) {
 	}
 
 	t.Run(driver.Name, func(t *testing.T) {
+		t.Run("GetUsersByIDs_BatchFetch", func(t *testing.T) {
+			// The guardian listings hydrate a page of edges through this in
+			// ONE query instead of one GetUser per edge, so every driver has
+			// to agree on ordering and on what an unknown id does.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			a := createTestUser(t, r, "batch-a@example.com")
+			b := createTestUser(t, r, "batch-b@example.com")
+			c := createTestUser(t, r, "batch-c@example.com")
+
+			got, err := r.GetUsersByIDs(ctx, []string{c, a, "no-such-user", b})
+			if err != nil {
+				t.Fatalf("GetUsersByIDs: %v", err)
+			}
+			// Unknown ids are absent, not an error, and the result is
+			// ordered by id regardless of the order asked for.
+			want := []string{a, b, c}
+			sort.Strings(want)
+			if len(got) != 3 {
+				t.Fatalf("got %d users, want 3 (unknown id must be skipped)", len(got))
+			}
+			for i, u := range got {
+				if u.ID != want[i] {
+					ids := make([]string, 0, len(got))
+					for _, g := range got {
+						ids = append(ids, g.ID)
+					}
+					t.Fatalf("GetUsersByIDs = %v, want %v (ordered by id)", ids, want)
+				}
+			}
+
+			// Empty and all-unknown inputs are clean empties.
+			if got, err := r.GetUsersByIDs(ctx, nil); err != nil || len(got) != 0 {
+				t.Fatalf("GetUsersByIDs(nil) = %#v %v, want empty and nil", got, err)
+			}
+			if got, err := r.GetUsersByIDs(ctx, []string{"nope-1", "nope-2"}); err != nil || len(got) != 0 {
+				t.Fatalf("GetUsersByIDs(unknown) = %#v %v, want empty and nil", got, err)
+			}
+		})
+
 		t.Run("SetDateOfBirthOnce_IsCompareAndSet", func(t *testing.T) {
 			// The DOB completion ticket is reusable within its TTL, so two
 			// submissions can both read date_of_birth_ms = 0. Exactly one

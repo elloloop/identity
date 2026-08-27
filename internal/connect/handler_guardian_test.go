@@ -26,16 +26,21 @@ func grantConsentViaRPC(t *testing.T, h *testHarness, adultID, childID string) {
 }
 
 // TestListManagedChildrenRequest_CarriesNoUserID pins the API contract that
-// the guardian is always the session user: the request message must never
-// grow a field a client could use to steer the query at another account.
+// the guardian is always the session user: the request must never grow a
+// field a client could use to steer the query at another account.
+//
+// Pagination fields are fine and deliberately allowed — they bound the
+// response, they do not choose whose children it describes. The guard is on
+// identity-bearing fields, so it keeps holding as the message grows.
 func TestListManagedChildrenRequest_CarriesNoUserID(t *testing.T) {
 	md := (&identitypb.ListManagedChildrenRequest{}).ProtoReflect().Descriptor()
-	if md.Fields().Len() != 0 {
-		var names []string
-		for i := 0; i < md.Fields().Len(); i++ {
-			names = append(names, string(md.Fields().Get(i).Name()))
+	allowed := map[string]bool{"limit": true, "cursor": true}
+	for i := 0; i < md.Fields().Len(); i++ {
+		name := string(md.Fields().Get(i).Name())
+		if !allowed[name] {
+			t.Fatalf("ListManagedChildrenRequest grew field %q — the guardian must stay "+
+				"the session user, and any new field needs review against that", name)
 		}
-		t.Fatalf("ListManagedChildrenRequest must have no fields, got %v", names)
 	}
 }
 

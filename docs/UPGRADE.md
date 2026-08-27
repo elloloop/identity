@@ -1,5 +1,29 @@
 # Upgrade guide
 
+## Unreleased — guardian listings are paged and return summaries (additive)
+
+`ListManagedChildren` and `GetGuardians` gain `limit` (default 50, max 200)
+and an opaque `cursor`, and their responses gain `next_cursor`. Both fields
+are additive; a client that ignores them gets the first 50 rather than
+everything, which is the point — neither listing was bounded before.
+
+**Both listings now return summaries, not full records.** They carry id,
+username, display name, avatar, role, status, market, age band and is_minor.
+Email, recovery email, phone number, date of birth and login state are
+reachable only through `GetManagedChildProfile`, which requires a step-up
+re-authentication — the same bar that already applied to reading one child.
+`GetGuardians` is trimmed for the same reason in the other direction: it hands
+one guardian the records of their co-guardians.
+
+`ListManagedChildren` additionally **omits accounts that have aged past the
+adult threshold**. The guardian edge survives as consent history, but every
+management RPC already refuses such an account, and a listing that kept
+showing it was the one place a former guardian could still read an adult's
+account.
+
+If your client renders a child's email or phone from the listing, switch it to
+`GetManagedChildProfile` (and collect the step-up password) before upgrading.
+
 ## Unreleased — required-DOB completion step (behavior change if `GATEWAY_AGEGATE_REQUIRE_DOB` is already on)
 
 Extends what `GATEWAY_AGEGATE_REQUIRE_DOB` covers. Previously it bound only

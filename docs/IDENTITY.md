@@ -452,9 +452,14 @@ consent remains for it afterwards — under today's single-active-consent model
 that is every revoke; once multiple guardians can hold consent concurrently,
 revoking one leaves the child active under the other.
 
-Two RPCs read the edge set. `ListManagedChildren` is self-only: the request
-carries no user id field, so the guardian is always the session user and a
-client cannot steer the query at another account. `GetGuardians` lists a
+Two RPCs read the edge set, both paged (`limit` default 50 / max 200, plus an
+opaque `cursor`) and both returning SUMMARIES — id, username, display name,
+avatar, role, status, market, age band — never contact details or date of
+birth, which need `GetManagedChildProfile` and its step-up.
+`ListManagedChildren` is self-only: the request carries no user id field, so
+the guardian is always the session user and a client cannot steer the query at
+another account; it also omits accounts that have aged past the adult
+threshold. `GetGuardians` lists a
 child's guardians and is callable by a guardian of the child or a project
 admin; any other caller receives the identical `PERMISSION_DENIED` whether or
 not the child account exists, so the surface discloses nothing about account

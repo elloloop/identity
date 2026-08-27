@@ -562,6 +562,13 @@ type Repository interface {
 	// answer. Empty slice, not an error, when there are none.
 	ListActiveParentalConsentsForChild(ctx context.Context, childUserID string) ([]*ParentalConsentRecord, error)
 
+	// GetUsersByIDs fetches many accounts in ONE query, ordered by id so
+	// every driver answers identically. Ids that name no account are simply
+	// absent from the result (not an error), so a stale reference — an edge
+	// whose account was deleted — does not fail the whole read. It exists
+	// because the guardian listings otherwise issue one GetUser per edge.
+	GetUsersByIDs(ctx context.Context, ids []string) ([]*User, error)
+
 	// SetDateOfBirthOnce stores a date of birth ONLY while the account still
 	// has none, and reports whether this caller was the one that set it. It
 	// is a compare-and-set because the completion ticket is reusable within

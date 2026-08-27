@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/elloloop/identity/pkg/audit"
@@ -46,7 +47,7 @@ func TestListManagedChildren(t *testing.T) {
 		t.Fatalf("DeleteUser: %v", err)
 	}
 
-	children, err := svc.ListManagedChildren(ctx, guardian.ID)
+	children, _, err := svc.ListManagedChildren(ctx, guardian.ID, 0, "")
 	if err != nil {
 		t.Fatalf("ListManagedChildren: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestListManagedChildren(t *testing.T) {
 		t.Fatalf("children = %#v, want {%s, %s} (deleted child skipped)", got, child1.ID, child2.ID)
 	}
 
-	children, err = svc.ListManagedChildren(ctx, stranger.ID)
+	children, _, err = svc.ListManagedChildren(ctx, stranger.ID, 0, "")
 	if err != nil {
 		t.Fatalf("ListManagedChildren (no edges): %v", err)
 	}
@@ -63,7 +64,7 @@ func TestListManagedChildren(t *testing.T) {
 		t.Fatalf("stranger must manage no children, got %d", len(children))
 	}
 
-	if _, err := svc.ListManagedChildren(ctx, ""); !errors.Is(err, ErrUnauthenticated) {
+	if _, _, err := svc.ListManagedChildren(ctx, "", 0, ""); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("empty guardian id: err = %v, want ErrUnauthenticated", err)
 	}
 }
@@ -79,7 +80,7 @@ func TestGetGuardians_Authorization(t *testing.T) {
 	seedGuardianEdge(ctx, t, repo, guardian.ID, child.ID)
 
 	// A guardian of the child may list.
-	guardians, err := svc.GetGuardians(ctx, guardian.ID, child.ID, false)
+	guardians, _, err := svc.GetGuardians(ctx, guardian.ID, child.ID, false, 0, "")
 	if err != nil {
 		t.Fatalf("GetGuardians (guardian): %v", err)
 	}
@@ -88,7 +89,7 @@ func TestGetGuardians_Authorization(t *testing.T) {
 	}
 
 	// A project admin may list without holding an edge.
-	guardians, err = svc.GetGuardians(ctx, other.ID, child.ID, true)
+	guardians, _, err = svc.GetGuardians(ctx, other.ID, child.ID, true, 0, "")
 	if err != nil {
 		t.Fatalf("GetGuardians (admin): %v", err)
 	}
@@ -98,8 +99,8 @@ func TestGetGuardians_Authorization(t *testing.T) {
 
 	// A stranger is denied — with the SAME error whether the child exists or
 	// not, so the surface discloses nothing about account existence.
-	_, errExisting := svc.GetGuardians(ctx, other.ID, child.ID, false)
-	_, errMissing := svc.GetGuardians(ctx, other.ID, "no-such-child", false)
+	_, _, errExisting := svc.GetGuardians(ctx, other.ID, child.ID, false, 0, "")
+	_, _, errMissing := svc.GetGuardians(ctx, other.ID, "no-such-child", false, 0, "")
 	if !errors.Is(errExisting, ErrPermissionDenied) || !errors.Is(errMissing, ErrPermissionDenied) {
 		t.Fatalf("stranger denials = %v / %v, want ErrPermissionDenied for both", errExisting, errMissing)
 	}
@@ -109,15 +110,15 @@ func TestGetGuardians_Authorization(t *testing.T) {
 
 	// Even an admin gets nothing disclosable for a nonexistent child: an
 	// empty list, not an existence error.
-	guardians, err = svc.GetGuardians(ctx, other.ID, "no-such-child", true)
+	guardians, _, err = svc.GetGuardians(ctx, other.ID, "no-such-child", true, 0, "")
 	if err != nil || len(guardians) != 0 {
 		t.Fatalf("admin on nonexistent child: guardians=%#v err=%v, want empty nil", guardians, err)
 	}
 
-	if _, err := svc.GetGuardians(ctx, "", child.ID, true); !errors.Is(err, ErrUnauthenticated) {
+	if _, _, err := svc.GetGuardians(ctx, "", child.ID, true, 0, ""); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("empty caller: err = %v, want ErrUnauthenticated", err)
 	}
-	if _, err := svc.GetGuardians(ctx, guardian.ID, "  ", false); !errors.Is(err, ErrInvalidArgument) {
+	if _, _, err := svc.GetGuardians(ctx, guardian.ID, "  ", false, 0, ""); !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("blank child id: err = %v, want ErrInvalidArgument", err)
 	}
 }
@@ -296,19 +297,19 @@ func TestGuardianListings_RepoFailuresAndGhostRows(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
 		repo.listGuardianEdgesErr = errConsentInjected
-		if _, err := svc.ListManagedChildren(ctx, "guardian-1"); !errors.Is(err, errConsentInjected) {
+		if _, _, err := svc.ListManagedChildren(ctx, "guardian-1", 0, ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
 
-	t.Run("fetching a listed child fails", func(t *testing.T) {
+	t.Run("hydrating the page fails", func(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
 		guardian := seedConsentingAdult(t, repo, "g@example.com", "", adultFactors{})
 		child := seedChildPendingConsent(repo, "c@example.com")
 		seedGuardianEdge(ctx, t, repo, guardian.ID, child.ID)
-		repo.getUserErrByID = map[string]error{child.ID: errConsentInjected}
-		if _, err := svc.ListManagedChildren(ctx, guardian.ID); !errors.Is(err, errConsentInjected) {
+		repo.getUsersByIDsErr = errConsentInjected
+		if _, _, err := svc.ListManagedChildren(ctx, guardian.ID, 0, ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
@@ -327,7 +328,7 @@ func TestGuardianListings_RepoFailuresAndGhostRows(t *testing.T) {
 		delete(repo.users, ghost.ID)
 		repo.mu.Unlock()
 
-		guardians, err := svc.GetGuardians(ctx, g1.ID, child.ID, false)
+		guardians, _, err := svc.GetGuardians(ctx, g1.ID, child.ID, false, 0, "")
 		if err != nil {
 			t.Fatalf("GetGuardians: %v", err)
 		}
@@ -336,7 +337,7 @@ func TestGuardianListings_RepoFailuresAndGhostRows(t *testing.T) {
 		}
 
 		repo.listGuardianEdgesErr = errConsentInjected
-		if _, err := svc.GetGuardians(ctx, g1.ID, child.ID, true); !errors.Is(err, errConsentInjected) {
+		if _, _, err := svc.GetGuardians(ctx, g1.ID, child.ID, true, 0, ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("admin listing: err = %v, want the injected failure", err)
 		}
 	})
@@ -345,7 +346,7 @@ func TestGuardianListings_RepoFailuresAndGhostRows(t *testing.T) {
 		repo := newFakeRepo()
 		svc := newTestAuthService(t, repo)
 		repo.getGuardianEdgeErr = errConsentInjected
-		if _, err := svc.GetGuardians(ctx, "caller", "child", false); !errors.Is(err, errConsentInjected) {
+		if _, _, err := svc.GetGuardians(ctx, "caller", "child", false, 0, ""); !errors.Is(err, errConsentInjected) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
@@ -358,4 +359,135 @@ func TestGuardianListings_RepoFailuresAndGhostRows(t *testing.T) {
 			t.Fatalf("err = %v, want the injected failure", err)
 		}
 	})
+}
+
+// TestListManagedChildren_PagesAndBatches pins the two properties the listing
+// gained: it is bounded (no single call returns an unbounded set), and it
+// hydrates a page in ONE query rather than one per edge.
+func TestListManagedChildren_PagesAndBatches(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	guardian := seedConsentingAdult(t, repo, "g@example.com", "", adultFactors{})
+
+	const total = 7
+	for i := 0; i < total; i++ {
+		child := seedChildPendingConsent(repo, fmt.Sprintf("kid%02d@example.com", i))
+		seedGuardianEdge(ctx, t, repo, guardian.ID, child.ID)
+	}
+
+	// Walk every page with a small limit and assert we see each child once.
+	seen := map[string]bool{}
+	cursor := ""
+	pages := 0
+	for {
+		page, next, err := svc.ListManagedChildren(ctx, guardian.ID, 3, cursor)
+		if err != nil {
+			t.Fatalf("page %d: %v", pages, err)
+		}
+		pages++
+		if len(page) > 3 {
+			t.Fatalf("page %d returned %d children, want at most the limit of 3", pages, len(page))
+		}
+		for _, c := range page {
+			if seen[c.ID] {
+				t.Fatalf("child %s appeared on two pages", c.ID)
+			}
+			seen[c.ID] = true
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
+		if pages > 10 {
+			t.Fatal("pagination did not terminate")
+		}
+	}
+	if len(seen) != total {
+		t.Fatalf("walked %d children across %d pages, want %d", len(seen), pages, total)
+	}
+	if pages != 3 {
+		t.Fatalf("pages = %d, want 3 for %d children at a limit of 3", pages, total)
+	}
+
+	// An absent limit clamps to the default rather than returning everything
+	// unbounded, and a junk cursor starts from the beginning.
+	all, next, err := svc.ListManagedChildren(ctx, guardian.ID, 0, "not-a-cursor")
+	if err != nil {
+		t.Fatalf("default page: %v", err)
+	}
+	if len(all) != total || next != "" {
+		t.Fatalf("default page = %d children next=%q, want %d and no next page", len(all), next, total)
+	}
+
+	// An over-large limit is clamped to the maximum, not honoured.
+	if size, _ := guardianPage(10_000, ""); size != maxGuardianPageSize {
+		t.Fatalf("limit 10000 clamped to %d, want %d", size, maxGuardianPageSize)
+	}
+}
+
+// TestListManagedChildren_SummariesOnly pins that the listing carries identity
+// and classification but not the contact details GetManagedChildProfile gates
+// behind a step-up.
+func TestListManagedChildren_SummariesOnly(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	enableAgeGate(t, svc, false)
+
+	guardian := seedConsentingAdult(t, repo, "g@example.com", "", adultFactors{})
+	child := seedChildPendingConsent(repo, "kid@example.com")
+	repo.mu.Lock()
+	child.Username = "kid.one"
+	child.DateOfBirthMs = dobAgeMs(8)
+	child.PhoneNumber = "+14155550100"
+	child.RecoveryEmail = "backup@example.com"
+	repo.mu.Unlock()
+	seedGuardianEdge(ctx, t, repo, guardian.ID, child.ID)
+
+	page, _, err := svc.ListManagedChildren(ctx, guardian.ID, 0, "")
+	if err != nil || len(page) != 1 {
+		t.Fatalf("ListManagedChildren: %v %#v", err, page)
+	}
+	got := page[0]
+	if got.ID != child.ID || got.Username != "kid.one" || got.AgeBand != "CHILD" {
+		t.Fatalf("summary lost its identity/classification: %+v", got)
+	}
+	if got.Email != "" || got.PhoneNumber != "" || got.RecoveryEmail != "" || got.DateOfBirthMs != 0 {
+		t.Fatalf("summary must not carry contact details or DOB: %+v", got)
+	}
+}
+
+// TestListManagedChildren_OmitsAgedOut pins that an account past the adult
+// threshold drops out of the listing — the edge survives as consent history
+// but confers nothing, and the management RPCs already refuse it.
+func TestListManagedChildren_OmitsAgedOut(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	enableAgeGate(t, svc, false)
+
+	guardian := seedConsentingAdult(t, repo, "g@example.com", "", adultFactors{})
+	kid := seedChildPendingConsent(repo, "kid@example.com")
+	grown := seedChildPendingConsent(repo, "grown@example.com")
+	repo.mu.Lock()
+	kid.DateOfBirthMs = dobAgeMs(8)
+	grown.DateOfBirthMs = dobAgeMs(21)
+	repo.mu.Unlock()
+	seedGuardianEdge(ctx, t, repo, guardian.ID, kid.ID)
+	seedGuardianEdge(ctx, t, repo, guardian.ID, grown.ID)
+
+	page, _, err := svc.ListManagedChildren(ctx, guardian.ID, 0, "")
+	if err != nil {
+		t.Fatalf("ListManagedChildren: %v", err)
+	}
+	if len(page) != 1 || page[0].ID != kid.ID {
+		t.Fatalf("listing = %#v, want only the still-managed child", userIDs(page))
+	}
+
+	// Guardians, by contrast, are adults and must NOT be filtered out.
+	guardians, _, err := svc.GetGuardians(ctx, guardian.ID, kid.ID, false, 0, "")
+	if err != nil || len(guardians) != 1 || guardians[0].ID != guardian.ID {
+		t.Fatalf("GetGuardians = %#v %v, want the adult guardian listed", guardians, err)
+	}
 }

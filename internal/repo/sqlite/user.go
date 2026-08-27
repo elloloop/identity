@@ -440,6 +440,44 @@ var userDeleteNonFKTables = []string{
 // SetDateOfBirthOnce sets the date of birth only while the row still has none,
 // applying the optional status in the same statement. Reports whether this
 // call was the one that set it.
+// GetUsersByIDs fetches many users in one query, ordered by id. Unknown ids
+// are absent from the result rather than an error. SQLite has no array
+// parameter, so the id list becomes placeholders.
+func (r *sqliteRepository) GetUsersByIDs(ctx context.Context, ids []string) ([]*service.User, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, r.projectID)
+	placeholders := make([]string, 0, len(ids))
+	for i, id := range ids {
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
+		args = append(args, id)
+	}
+	q := `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND id IN (` + strings.Join(placeholders, ", ") + `)
+		ORDER BY id ASC`
+	rows, err := r.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, wrapErr("GetUsersByIDs", err)
+	}
+	defer rows.Close()
+
+	out := make([]*service.User, 0, len(ids))
+	for rows.Next() {
+		u, scanErr := scanUser(rows)
+		if scanErr != nil {
+			return nil, wrapErr("GetUsersByIDs", scanErr)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapErr("GetUsersByIDs", err)
+	}
+	return out, nil
+}
+
 func (r *sqliteRepository) SetDateOfBirthOnce(
 	ctx context.Context, userID string, dobMs int64, status string, nowMs int64,
 ) (bool, error) {
