@@ -979,6 +979,12 @@ func (r *MemRepo) CreateUser(_ context.Context, u *service.User) (string, error)
 		if u.ExternalID != "" && existing.ExternalID == u.ExternalID {
 			return "", fmt.Errorf("external_id %q: %w", u.ExternalID, service.ErrAlreadyExists)
 		}
+		// Partial unique index on (project_id, username) WHERE username <> ''
+		// — a managed child's handle is its login identifier, so a duplicate
+		// has to be refused here exactly as the SQL drivers refuse it.
+		if u.Username != "" && existing.Username == u.Username {
+			return "", fmt.Errorf("username %q: %w", u.Username, service.ErrAlreadyExists)
+		}
 	}
 	id := u.ID
 	if id == "" {
@@ -996,6 +1002,28 @@ func (r *MemRepo) UpdateUser(_ context.Context, userID string, fields map[string
 	u, ok := r.users[userID]
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
+	}
+	// Same partial unique index as CreateUser: a rename onto a taken handle
+	// is refused BEFORE any mutation, so a rejected update leaves the store
+	// untouched exactly as a rolled-back transaction would.
+	if v, ok := fields["username"]; ok {
+		if username, _ := v.(string); username != "" {
+			for id, other := range r.users {
+				if id != userID && other.Username == username {
+					return fmt.Errorf("username %q: %w", username, service.ErrAlreadyExists)
+				}
+			}
+		}
+	}
+	// Likewise the partial unique index on email.
+	if v, ok := fields["email"]; ok {
+		if addr, _ := v.(string); addr != "" {
+			for id, other := range r.users {
+				if id != userID && strings.EqualFold(other.Email, addr) {
+					return fmt.Errorf("email %q: %w", addr, service.ErrAlreadyExists)
+				}
+			}
+		}
 	}
 	if v, ok := fields["external_id"]; ok {
 		if ext, _ := v.(string); ext != "" {
@@ -1149,57 +1177,83 @@ func (r *MemRepo) SetUserLockedUntil(_ context.Context, userID string, lockedUnt
 	return nil
 }
 
+// The harness repository is held to the same Repository contract as the three
+// real drivers (see memrepo_conformance_test.go), so its field handling has to
+// be complete rather than "whatever the integration tests happened to need".
+// Same three-table shape as internal/repo/memory: a wrong-typed value is
+// SKIPPED, not written as the zero value, matching what the SQL drivers do.
+var (
+	memUserStringFields = map[string]func(*service.User) *string{
+		"name":           func(u *service.User) *string { return &u.Name },
+		"email":          func(u *service.User) *string { return &u.Email },
+		"avatar_url":     func(u *service.User) *string { return &u.AvatarURL },
+		"password_hash":  func(u *service.User) *string { return &u.PasswordHash },
+		"status":         func(u *service.User) *string { return &u.Status },
+		"recovery_email": func(u *service.User) *string { return &u.RecoveryEmail },
+		"external_id":    func(u *service.User) *string { return &u.ExternalID },
+		"phone_number":   func(u *service.User) *string { return &u.PhoneNumber },
+		"market":         func(u *service.User) *string { return &u.Market },
+		"username":       func(u *service.User) *string { return &u.Username },
+	}
+
+	memUserBoolFields = map[string]func(*service.User) *bool{
+		"totp_required":  func(u *service.User) *bool { return &u.TotpRequired },
+		"email_verified": func(u *service.User) *bool { return &u.EmailVerified },
+		"is_anonymous":   func(u *service.User) *bool { return &u.IsAnonymous },
+		"phone_verified": func(u *service.User) *bool { return &u.PhoneVerified },
+		"idv_verified":   func(u *service.User) *bool { return &u.IDVVerified },
+	}
+
+	memUserInt64Fields = map[string]func(*service.User) *int64{
+		"locked_until":             func(u *service.User) *int64 { return &u.LockedUntil },
+		"last_login_at":            func(u *service.User) *int64 { return &u.LastLoginAtMs },
+		"email_verified_at":        func(u *service.User) *int64 { return &u.EmailVerifiedAt },
+		"anonymous_last_seen_ms":   func(u *service.User) *int64 { return &u.AnonymousLastSeenMs },
+		"phone_verified_at":        func(u *service.User) *int64 { return &u.PhoneVerifiedAt },
+		"idv_verified_at":          func(u *service.User) *int64 { return &u.IDVVerifiedAt },
+		"date_of_birth_ms":         func(u *service.User) *int64 { return &u.DateOfBirthMs },
+		"deletion_scheduled_at_ms": func(u *service.User) *int64 { return &u.DeletionScheduledAtMs },
+	}
+)
+
+func memFieldInt64(v any) (int64, bool) {
+	switch x := v.(type) {
+	case int64:
+		return x, true
+	case int:
+		return int64(x), true
+	}
+	return 0, false
+}
+
 func applyUserFields(u *service.User, fields map[string]any) {
 	for k, v := range fields {
+		if field, ok := memUserStringFields[k]; ok {
+			if s, ok := v.(string); ok {
+				*field(u) = s
+			}
+			continue
+		}
+		if field, ok := memUserBoolFields[k]; ok {
+			if b, ok := v.(bool); ok {
+				*field(u) = b
+			}
+			continue
+		}
+		if field, ok := memUserInt64Fields[k]; ok {
+			if x, ok := memFieldInt64(v); ok {
+				*field(u) = x
+			}
+			continue
+		}
 		switch k {
-		case "name":
-			u.Name, _ = v.(string)
-		case "email":
-			u.Email, _ = v.(string)
-		case "avatar_url":
-			u.AvatarURL, _ = v.(string)
-		case "password_hash":
-			u.PasswordHash, _ = v.(string)
-		case "status":
-			u.Status, _ = v.(string)
-		case "totp_required":
-			u.TotpRequired, _ = v.(bool)
 		case "failed_login_count":
-			switch x := v.(type) {
-			case int:
-				u.FailedLoginCount = x
-			case int64:
+			if x, ok := memFieldInt64(v); ok {
 				u.FailedLoginCount = int(x)
 			}
-		case "locked_until":
-			switch x := v.(type) {
-			case int64:
-				u.LockedUntil = x
-			case int:
-				u.LockedUntil = int64(x)
-			}
 		case "updated_at":
-			if x, ok := v.(int64); ok {
+			if x, ok := memFieldInt64(v); ok {
 				u.UpdatedAt = time.UnixMilli(x)
-			}
-		case "last_login_at":
-			if x, ok := v.(int64); ok {
-				u.LastLoginAtMs = x
-			}
-		case "recovery_email":
-			u.RecoveryEmail, _ = v.(string)
-		case "external_id":
-			u.ExternalID, _ = v.(string)
-		case "email_verified":
-			if b, ok := v.(bool); ok {
-				u.EmailVerified = b
-			}
-		case "email_verified_at":
-			switch x := v.(type) {
-			case int64:
-				u.EmailVerifiedAt = x
-			case int:
-				u.EmailVerifiedAt = int64(x)
 			}
 		}
 	}
@@ -1943,10 +1997,12 @@ func (r *MemRepo) UpdateUserEmail(_ context.Context, userID, newEmail string, at
 	if !ok {
 		return fmt.Errorf("user %s not found", userID)
 	}
-	// Enforce uniqueness across users.
+	// Enforce uniqueness across users, on the same terms as CreateUser and the
+	// SQL drivers: case-insensitive, and wrapping ErrAlreadyExists so callers
+	// can tell a collision from any other failure.
 	for id, other := range r.users {
-		if id != userID && other.Email == newEmail {
-			return fmt.Errorf("email %q already in use", newEmail)
+		if id != userID && newEmail != "" && strings.EqualFold(other.Email, newEmail) {
+			return fmt.Errorf("email %q: %w", newEmail, service.ErrAlreadyExists)
 		}
 	}
 	u.Email = newEmail
@@ -2321,6 +2377,11 @@ func (r *MemRepo) CreateManagedChildAccount(_ context.Context, u *service.User, 
 }
 
 func (r *MemRepo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredWebAuthnChallenges: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2337,6 +2398,11 @@ func (r *MemRepo) DeleteExpiredWebAuthnChallenges(_ context.Context, beforeMs in
 }
 
 func (r *MemRepo) DeleteExpiredEmailVerificationTokens(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredEmailVerificationTokens: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2353,6 +2419,11 @@ func (r *MemRepo) DeleteExpiredEmailVerificationTokens(_ context.Context, before
 }
 
 func (r *MemRepo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredPasswordResetTokens: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2369,6 +2440,11 @@ func (r *MemRepo) DeleteExpiredPasswordResetTokens(_ context.Context, beforeMs i
 }
 
 func (r *MemRepo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredEmailChangeTokens: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2385,6 +2461,11 @@ func (r *MemRepo) DeleteExpiredEmailChangeTokens(_ context.Context, beforeMs int
 }
 
 func (r *MemRepo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredLoginChallenges: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2401,6 +2482,11 @@ func (r *MemRepo) DeleteExpiredLoginChallenges(_ context.Context, beforeMs int64
 }
 
 func (r *MemRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredOAuthOneTimeCodes: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2417,6 +2503,11 @@ func (r *MemRepo) DeleteExpiredOAuthOneTimeCodes(_ context.Context, beforeMs int
 }
 
 func (r *MemRepo) DeleteExpiredNativeTokenRedemptions(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredNativeTokenRedemptions: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2433,6 +2524,11 @@ func (r *MemRepo) DeleteExpiredNativeTokenRedemptions(_ context.Context, beforeM
 }
 
 func (r *MemRepo) DeleteExpiredEmailLoginCodes(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredEmailLoginCodes: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2449,6 +2545,11 @@ func (r *MemRepo) DeleteExpiredEmailLoginCodes(_ context.Context, beforeMs int64
 }
 
 func (r *MemRepo) DeleteExpiredMagicLinkTokens(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredMagicLinkTokens: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2465,6 +2566,11 @@ func (r *MemRepo) DeleteExpiredMagicLinkTokens(_ context.Context, beforeMs int64
 }
 
 func (r *MemRepo) DeleteExpiredPhoneVerificationCodes(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredPhoneVerificationCodes: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2481,6 +2587,11 @@ func (r *MemRepo) DeleteExpiredPhoneVerificationCodes(_ context.Context, beforeM
 }
 
 func (r *MemRepo) DeleteExpiredQrLoginSessions(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredQrLoginSessions: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2497,6 +2608,11 @@ func (r *MemRepo) DeleteExpiredQrLoginSessions(_ context.Context, beforeMs int64
 }
 
 func (r *MemRepo) DeleteExpiredInvitations(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredInvitations: limit must be > 0, got %d", limit)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -2733,6 +2849,11 @@ func (r *MemRepo) ConsumeAssuranceChallenge(_ context.Context, nodeID string) (*
 }
 
 func (r *MemRepo) DeleteExpiredAssuranceChallenges(_ context.Context, beforeMs int64, limit int) error {
+	// The Repository contract refuses an unbounded delete batch, so a buggy
+	// caller cannot stall the store — the real drivers all reject this.
+	if limit <= 0 {
+		return fmt.Errorf("integration: DeleteExpiredAssuranceChallenges: limit must be > 0, got %d", limit)
+	}
 	if limit <= 0 {
 		return fmt.Errorf("memrepo: DeleteExpiredAssuranceChallenges: limit must be > 0, got %d", limit)
 	}
