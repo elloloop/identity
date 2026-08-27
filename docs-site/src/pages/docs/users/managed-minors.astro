@@ -6,17 +6,22 @@ import { Code } from "astro-expressive-code/components";
 <DocsLayout title="Managed minor accounts">
   <h1>Managed minor accounts</h1>
   <p>
-    A children's product needs more than an age band and a consent record: it
-    needs to know <em>who a child belongs to</em>. Identity models that as a
+    A product serving minors needs more than an age band and a consent record:
+    it needs to know <em>who a child belongs to</em>. Identity models that as a
     <strong>guardian edge</strong> between two accounts, and builds three things
     on it — a parent-creates-child signup, a guardian-authorized management
     surface over the child's account, and consent artifacts that satisfy COPPA,
     the UK Children's Code, and India's DPDP Rules 2025.
   </p>
   <p>
-    The model is deliberate: <strong>children never self-sign-up</strong>. A
-    parent creates their own adult account, then creates and runs each child's
-    account from it.
+    There are <strong>two routes to a consented child account</strong>, and
+    your deployment chooses which it exposes. Either the child signs up, lands
+    in <code>USER_STATUS_PENDING_PARENTAL_CONSENT</code>, and an adult later
+    calls <code>GrantParentalConsent</code>; or an adult calls
+    <code>CreateManagedChildAccount</code> and the account exists in one call.
+    A product that wants children created <em>only</em> by a parent gets that
+    by closing the project to self-signup — the server does not make that
+    choice for you.
   </p>
 
   <h2>Guardian edges</h2>

@@ -462,12 +462,25 @@ existence.
 
 ### Parent-creates-child accounts
 
-Children never self-sign-up. An authenticated adult calls
-`CreateManagedChildAccount` and the child's account exists, working, in one
-call. The account is **born `ACTIVE` under guardianship** — it never passes
-through `PENDING_PARENTAL_CONSENT`, because that state exists for a child who
-signed up with no consenting adult present, and here one is present and
-authenticated.
+There are TWO routes to a consented child account, and the deploying product
+chooses which it exposes:
+
+1. the child signs up, lands in `PENDING_PARENTAL_CONSENT`, and an adult later
+   calls `GrantParentalConsent`; or
+2. an authenticated adult calls `CreateManagedChildAccount` and the child's
+   account exists, working, in one call.
+
+Route 2 exists because route 1 requires the child to hold an email address,
+complete a signup, and sit in a dead-end state until an adult reaches them —
+and it is impossible outright under access modes `invite` and `closed`, where
+self-signup is denied. A product that wants children created only by a parent
+gets that by closing the project to self-signup; the server does not make that
+choice for it.
+
+Via route 2 the account is **born `ACTIVE` under guardianship** — it never
+passes through `PENDING_PARENTAL_CONSENT`, because that state exists for a
+child who signed up with no consenting adult present, and here one is present
+and authenticated.
 
 The child is identified within the project by a **parent-chosen username**
 (lowercase alphanumerics plus `_`/`-`/`.`, 3–32 characters, unique per
