@@ -576,6 +576,15 @@
     "anchor": "server-and-ports"
   },
   {
+    "name": "GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "weakens guardian step-up: a guardian whose account has no stored password hash — a federated (Google-only) parent — passes the check without presenting one.",
+    "category": "Age gating (COPPA)",
+    "anchor": "age-gating-coppa"
+  },
+  {
     "name": "GATEWAY_HTTP_MAX_BODY_BYTES",
     "type": "integer",
     "default": "1048576",

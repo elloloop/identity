@@ -146,6 +146,17 @@ func TestEnvTest_OverridePasswordResetEnabled(t *testing.T) {
 	}
 }
 
+func TestEnvTest_OverrideGuardianStepUpAllowNoPassword(t *testing.T) {
+	clearGatewayEnv(t)
+	if cfg := Load(); cfg.GuardianStepUpAllowNoPassword {
+		t.Errorf("GuardianStepUpAllowNoPassword: got true, want false by default")
+	}
+	t.Setenv("GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD", "true")
+	if cfg := Load(); !cfg.GuardianStepUpAllowNoPassword {
+		t.Errorf("GuardianStepUpAllowNoPassword: got false, want true")
+	}
+}
+
 func TestEnvTest_OverrideAuthRequireVerifiedEmail(t *testing.T) {
 	clearGatewayEnv(t)
 	t.Setenv("GATEWAY_AUTH_REQUIRE_VERIFIED_EMAIL", "false")

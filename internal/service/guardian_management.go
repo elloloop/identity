@@ -90,6 +90,26 @@ func (s *AuthService) auditGuardianAction(
 // child id — real or invented — gets the identical ErrPermissionDenied and
 // learns nothing. Only a caller who already holds the edge reaches the
 // step-up check, and only a stepped-up guardian reaches the band check.
+// stepUpSatisfied verifies the guardian step-up re-authentication for every
+// guardian operation: CreateManagedChildAccount, GrantParentalConsent, and the
+// seven RPCs behind authorizeGuardianAction all route here, so the rule is
+// stated once.
+//
+// Step-up is password-only, which no federated (Google-only) account can
+// satisfy — it has no stored hash and nothing to type. Those accounts are
+// locked out of every guardian RPC, including the COPPA/DPDP erasure path.
+// GuardianStepUpAllowNoPassword admits them as a temporary unblock, and only
+// for accounts that hold no password at all: an account WITH a hash must still
+// present the matching password, so the flag can never downgrade an existing
+// credential. It is off by default and removed once step-up accepts a passkey
+// assertion (elloloop/identity#478).
+func (s *AuthService) stepUpSatisfied(user *User, stepUpPassword string) bool {
+	if user.PasswordHash == "" {
+		return s.cfg.GuardianStepUpAllowNoPassword
+	}
+	return stepUpPassword != "" && passwords.Verify(stepUpPassword, user.PasswordHash)
+}
+
 func (s *AuthService) authorizeGuardianAction(
 	ctx context.Context, op guardianOperation, guardianUserID, childUserID, stepUpPassword, ip, userAgent string,
 ) (*User, *User, error) {
@@ -131,7 +151,7 @@ func (s *AuthService) authorizeGuardianAction(
 	}
 
 	// (2) Step-up re-authentication, verified before any state change.
-	if stepUpPassword == "" || guardian.PasswordHash == "" || !passwords.Verify(stepUpPassword, guardian.PasswordHash) {
+	if !s.stepUpSatisfied(guardian, stepUpPassword) {
 		s.auditGuardianAction(ctx, op, guardianUserID, childUserID, false, ip, userAgent,
 			map[string]any{"step": "step_up"})
 		return nil, nil, ErrParentalConsentStepUpFailed

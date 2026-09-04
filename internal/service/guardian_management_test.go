@@ -201,6 +201,78 @@ func TestGuardianManagement_RequiresEdgeAndStepUp(t *testing.T) {
 	}
 }
 
+// newFederatedGuardianFixture is newGuardianFixture with a guardian holding NO
+// password hash — the Google-only parent of elloloop/identity#478, who has
+// nothing to type at the step-up prompt.
+func newFederatedGuardianFixture(ctx context.Context, t *testing.T) *guardianFixture {
+	t.Helper()
+	f := newGuardianFixture(ctx, t)
+	f.guardian = seedConsentingAdult(t, f.repo, "federated@example.com", "", adultFactors{phoneVerified: true})
+	seedGuardianEdge(ctx, t, f.repo, f.guardian.ID, f.child.ID)
+	return f
+}
+
+// TestGuardianStepUp_NoPasswordLockedOutByDefault pins the default: a guardian
+// with no stored password hash cannot satisfy step-up, so every operation
+// refuses. This is the bug #478 reports, and it stays the shipped behaviour
+// until a deployment opts out of it.
+func TestGuardianStepUp_NoPasswordLockedOutByDefault(t *testing.T) {
+	ctx := context.Background()
+	for _, op := range allGuardianOps() {
+		t.Run(op.name, func(t *testing.T) {
+			f := newFederatedGuardianFixture(ctx, t)
+			if f.svc.cfg.GuardianStepUpAllowNoPassword {
+				t.Fatal("GuardianStepUpAllowNoPassword must default to false")
+			}
+			err := op.call(f, f.guardian.ID, f.child.ID, "")
+			if !errors.Is(err, ErrParentalConsentStepUpFailed) {
+				t.Fatalf("err = %v, want ErrParentalConsentStepUpFailed", err)
+			}
+		})
+	}
+}
+
+// TestGuardianStepUp_AllowNoPasswordAdmitsFederatedParent is the unblock: with
+// the flag on, the passwordless guardian reaches every operation — including
+// DeleteManagedChildAccount, the erasure path they were shut out of.
+func TestGuardianStepUp_AllowNoPasswordAdmitsFederatedParent(t *testing.T) {
+	ctx := context.Background()
+	for _, op := range allGuardianOps() {
+		t.Run(op.name, func(t *testing.T) {
+			f := newFederatedGuardianFixture(ctx, t)
+			f.svc.cfg.GuardianStepUpAllowNoPassword = true
+			if err := op.call(f, f.guardian.ID, f.child.ID, ""); err != nil {
+				t.Fatalf("err = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestGuardianStepUp_AllowNoPasswordNeverDowngradesAPassword is the invariant
+// that keeps the flag from being a blanket bypass: an account that HOLDS a
+// password must still present the matching one, flag or no flag. Only accounts
+// with nothing to verify against are admitted.
+func TestGuardianStepUp_AllowNoPasswordNeverDowngradesAPassword(t *testing.T) {
+	ctx := context.Background()
+	for _, op := range allGuardianOps() {
+		t.Run(op.name, func(t *testing.T) {
+			f := newGuardianFixture(ctx, t)
+			f.svc.cfg.GuardianStepUpAllowNoPassword = true
+
+			t.Run("missing_step_up", func(t *testing.T) {
+				if err := op.call(f, f.guardian.ID, f.child.ID, ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+					t.Fatalf("err = %v, want ErrParentalConsentStepUpFailed", err)
+				}
+			})
+			t.Run("wrong_step_up", func(t *testing.T) {
+				if err := op.call(f, f.guardian.ID, f.child.ID, "not-the-password"); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+					t.Fatalf("err = %v, want ErrParentalConsentStepUpFailed", err)
+				}
+			})
+		})
+	}
+}
+
 // TestGuardianManagement_DenialIsAccountAgnostic pins that a non-guardian
 // learns nothing about whether the child account exists.
 func TestGuardianManagement_DenialIsAccountAgnostic(t *testing.T) {
