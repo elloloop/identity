@@ -761,9 +761,10 @@ message ConsentRecord {
   // verification_factors are the strong verified factors present on the
   // consenting adult's account at the moment of consent. Always >= 1.
   repeated ParentalConsentVerificationFactor verification_factors = 6;
-  // stepped_up is always true for a persisted grant: the consenting adult
-  // re-authenticated at the moment of consent. Recorded explicitly so the
-  // artifact is self-describing.
+  // stepped_up records whether the consenting adult re-authenticated with a
+  // password at the moment of consent. False only when the deployment enabled
+  // GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD and the adult's account holds no
+  // password. Recorded explicitly so the artifact is self-describing.
   bool stepped_up = 7;
   // consent_ip / consent_user_agent capture where the consenting action came
   // from, for the audit trail.

@@ -101,6 +101,63 @@ func TestCreateManagedChildAccount_Password_HappyPath(t *testing.T) {
 	}
 }
 
+// TestCreateManagedChildAccount_AllowNoPassword mirrors the GrantParentalConsent
+// case for the create path, which mints its own consent record.
+func TestCreateManagedChildAccount_AllowNoPassword(t *testing.T) {
+	ctx := context.Background()
+	federated := func(t *testing.T) *managedChildFixture {
+		t.Helper()
+		f := newManagedChildFixture(t, true)
+		f.repo.mu.Lock()
+		f.adult.PasswordHash = ""
+		f.repo.mu.Unlock()
+		return f
+	}
+
+	t.Run("flag off refuses passwordless adult", func(t *testing.T) {
+		f := federated(t)
+		req := f.req()
+		req.StepUpPassword = ""
+		if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+			t.Fatalf("err = %v, want ErrParentalConsentStepUpFailed", err)
+		}
+	})
+
+	t.Run("flag on admits passwordless adult and records stepped_up=false", func(t *testing.T) {
+		f := federated(t)
+		f.svc.cfg.GuardianStepUpAllowNoPassword = true
+		req := f.req()
+		req.StepUpPassword = ""
+		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", "")
+		if err != nil {
+			t.Fatalf("CreateManagedChildAccount: %v", err)
+		}
+		if res.Consent.SteppedUp {
+			t.Fatal("consent record must say stepped_up=false: no password was proved")
+		}
+		active, _ := f.repo.GetActiveParentalConsentForChild(ctx, res.Child.ID)
+		if active == nil || active.SteppedUp {
+			t.Fatalf("persisted record = %#v, want stepped_up=false", active)
+		}
+	})
+
+	t.Run("flag on still requires the password an adult holds", func(t *testing.T) {
+		f := newManagedChildFixture(t, true)
+		f.svc.cfg.GuardianStepUpAllowNoPassword = true
+		for _, stepUp := range []string{"", "not-the-password"} {
+			req := f.req()
+			req.StepUpPassword = stepUp
+			if _, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, req, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+				t.Fatalf("stepUp=%q: err = %v, want ErrParentalConsentStepUpFailed", stepUp, err)
+			}
+		}
+		res, err := f.svc.CreateManagedChildAccount(ctx, f.adult.ID, f.req(), "", "")
+		if err != nil || !res.Consent.SteppedUp {
+			t.Fatalf("correct password: err = %v, want nil and stepped_up=true", err)
+		}
+	})
+}
+
 func TestCreateManagedChildAccount_PasskeyEnrolment_HappyPath(t *testing.T) {
 	f := newManagedChildFixture(t, true)
 	ctx := context.Background()

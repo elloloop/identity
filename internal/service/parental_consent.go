@@ -74,7 +74,9 @@ type ParentalConsentRecord struct {
 	// Factors is the canonical, comma-separated, sorted list of the
 	// ParentalConsentFactor values present at the moment of consent (>= 1).
 	Factors string
-	// SteppedUp is true for every persisted grant: the adult re-authenticated.
+	// SteppedUp records whether the adult re-authenticated with a password at
+	// the moment of consent. False only when GuardianStepUpAllowNoPassword
+	// admitted an account holding no password.
 	SteppedUp        bool
 	ConsentIP        string
 	ConsentUserAgent string
@@ -224,7 +226,8 @@ func (s *AuthService) GrantParentalConsent(
 	// Check (b): STEP-UP RE-AUTH. Verified before any state changes so a
 	// caller holding only a session token (a hijacked session, a shared
 	// device) cannot consent.
-	if !s.stepUpSatisfied(adult, stepUpPassword) {
+	admitted, reauthenticated := s.stepUp(adult, stepUpPassword)
+	if !admitted {
 		s.auditConsentFailure(ctx, consentingUserID, childUserID, "step_up", ip, userAgent)
 		return nil, ErrParentalConsentStepUpFailed
 	}
@@ -273,7 +276,7 @@ func (s *AuthService) GrantParentalConsent(
 		ConsentingUserID: consentingUserID,
 		PolicyVersion:    policyVersion,
 		Factors:          encodeConsentFactors(factors),
-		SteppedUp:        true,
+		SteppedUp:        reauthenticated,
 		ConsentIP:        ip,
 		ConsentUserAgent: userAgent,
 		GrantedAt:        now,
@@ -308,6 +311,7 @@ func (s *AuthService) GrantParentalConsent(
 			"consent_id":     rec.ConsentID,
 			"policy_version": policyVersion,
 			"factors":        rec.Factors,
+			"stepped_up":     rec.SteppedUp,
 		}),
 	)
 	return rec, nil

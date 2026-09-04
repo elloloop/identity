@@ -166,7 +166,8 @@ func (s *AuthService) CreateManagedChildAccount(
 	// 2. Step-up re-authentication + strong verified factor — the same two
 	// mandatory checks as GrantParentalConsent, verified before any state
 	// change so a caller holding only a session token cannot create accounts.
-	if !s.stepUpSatisfied(caller, req.StepUpPassword) {
+	admitted, reauthenticated := s.stepUp(caller, req.StepUpPassword)
+	if !admitted {
 		s.auditManagedChildFailure(ctx, callerUserID, "step_up", ip, userAgent)
 		return nil, ErrParentalConsentStepUpFailed
 	}
@@ -259,7 +260,7 @@ func (s *AuthService) CreateManagedChildAccount(
 		ConsentingUserID: callerUserID,
 		PolicyVersion:    req.PolicyVersion,
 		Factors:          encodeConsentFactors(factors),
-		SteppedUp:        true,
+		SteppedUp:        reauthenticated,
 		ConsentIP:        ip,
 		ConsentUserAgent: userAgent,
 		GrantedAt:        now,
@@ -302,6 +303,7 @@ func (s *AuthService) CreateManagedChildAccount(
 			"market":     market,
 			"age_band":   child.AgeBand,
 			"credential": credential,
+			"stepped_up": consent.SteppedUp,
 		}),
 	)
 	return &ManagedChildAccountResult{Child: child, Consent: consent, EnrolmentTicket: ticket}, nil
