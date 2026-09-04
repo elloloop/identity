@@ -693,6 +693,19 @@ type Config struct {
 	// PasswordResetExpirySeconds is the recovery-email reset-link lifetime in seconds.
 	PasswordResetExpirySeconds int
 
+	// GuardianStepUpAllowNoPassword lets a guardian whose account has no stored
+	// password hash — a federated (Google-only) parent — pass the guardian
+	// step-up check without presenting one. It exists because step-up is
+	// password-only today, so those accounts cannot satisfy it at all and are
+	// locked out of every guardian RPC, including the COPPA/DPDP erasure path
+	// DeleteManagedChildAccount.
+	//
+	// This is a deliberate, temporary weakening: with it on, a stolen session
+	// belonging to a passwordless guardian clears step-up with no second
+	// factor. Default false. The real fix is accepting a passkey assertion as
+	// step-up (elloloop/identity#478), after which this flag is removed.
+	GuardianStepUpAllowNoPassword bool
+
 	// Passwordless email login (OTP code + magic link).
 
 	// PasswordlessSignupEnabled gates auto-create on a passwordless verify for
@@ -1261,6 +1274,8 @@ func loadFromEnv() *Config {
 		PasswordSignupEnabled:      envBool("GATEWAY_PASSWORD_SIGNUP_ENABLED", true),
 		PasswordResetEnabled:       envBool("GATEWAY_PASSWORD_RESET_ENABLED", true),
 		PasswordResetExpirySeconds: envInt("GATEWAY_PASSWORD_RESET_EXPIRY_SECONDS", 900),
+
+		GuardianStepUpAllowNoPassword: envBool("GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD", false),
 
 		PasswordlessSignupEnabled:       envBool("GATEWAY_PASSWORDLESS_SIGNUP_ENABLED", true),
 		PasswordlessCodeTTLSeconds:      envInt("GATEWAY_PASSWORDLESS_CODE_TTL_SECONDS", 300),

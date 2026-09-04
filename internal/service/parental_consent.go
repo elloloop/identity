@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/elloloop/identity/pkg/audit"
-	"github.com/elloloop/identity/pkg/passwords"
 )
 
 // ── Verifiable Parental Consent ─────────────────────────────────────────
@@ -225,7 +224,7 @@ func (s *AuthService) GrantParentalConsent(
 	// Check (b): STEP-UP RE-AUTH. Verified before any state changes so a
 	// caller holding only a session token (a hijacked session, a shared
 	// device) cannot consent.
-	if stepUpPassword == "" || adult.PasswordHash == "" || !passwords.Verify(stepUpPassword, adult.PasswordHash) {
+	if !s.stepUpSatisfied(adult, stepUpPassword) {
 		s.auditConsentFailure(ctx, consentingUserID, childUserID, "step_up", ip, userAgent)
 		return nil, ErrParentalConsentStepUpFailed
 	}
