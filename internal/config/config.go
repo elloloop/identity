@@ -702,8 +702,8 @@ type Config struct {
 	//
 	// This is a deliberate, temporary weakening: with it on, a stolen session
 	// belonging to a passwordless guardian clears step-up with no second
-	// factor. Default false. The real fix is accepting a passkey assertion as
-	// step-up (elloloop/identity#478), after which this flag is removed.
+	// factor, and the consent record it produces carries stepped_up=false.
+	// Default false. Remove once step-up accepts a passkey assertion.
 	GuardianStepUpAllowNoPassword bool
 
 	// Passwordless email login (OTP code + magic link).

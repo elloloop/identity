@@ -5293,9 +5293,10 @@ type ConsentRecord struct {
 	// verification_factors are the strong verified factors present on the
 	// consenting adult's account at the moment of consent. Always >= 1.
 	VerificationFactors []ParentalConsentVerificationFactor `protobuf:"varint,6,rep,packed,name=verification_factors,json=verificationFactors,proto3,enum=identity.v1.ParentalConsentVerificationFactor" json:"verification_factors,omitempty"`
-	// stepped_up is always true for a persisted grant: the consenting adult
-	// re-authenticated at the moment of consent. Recorded explicitly so the
-	// artifact is self-describing.
+	// stepped_up records whether the consenting adult re-authenticated with a
+	// password at the moment of consent. False only when the deployment enabled
+	// GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD and the adult's account holds no
+	// password. Recorded explicitly so the artifact is self-describing.
 	SteppedUp bool `protobuf:"varint,7,opt,name=stepped_up,json=steppedUp,proto3" json:"stepped_up,omitempty"`
 	// consent_ip / consent_user_agent capture where the consenting action came
 	// from, for the audit trail.

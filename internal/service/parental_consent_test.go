@@ -39,6 +39,60 @@ func seedConsentingAdult(t *testing.T, repo *fakeRepo, email, pwHash string, f a
 	return u
 }
 
+// TestGrantParentalConsent_AllowNoPassword pins what the flag writes into the
+// consent record: a passwordless adult is admitted, and the record says
+// stepped_up=false because no password was proved. An adult holding a
+// password is unaffected by the flag.
+func TestGrantParentalConsent_AllowNoPassword(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("flag off refuses passwordless adult", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthServiceWithAudit(t, repo, newRecordingAuditWriter())
+		adult := seedConsentingAdult(t, repo, "adult@example.com", "", adultFactors{phoneVerified: true})
+		child := seedChildPendingConsent(repo, "child@example.com")
+		if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, "", "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+			t.Fatalf("err = %v, want ErrParentalConsentStepUpFailed", err)
+		}
+	})
+
+	t.Run("flag on admits passwordless adult and records stepped_up=false", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthServiceWithAudit(t, repo, newRecordingAuditWriter())
+		svc.cfg.GuardianStepUpAllowNoPassword = true
+		adult := seedConsentingAdult(t, repo, "adult@example.com", "", adultFactors{phoneVerified: true})
+		child := seedChildPendingConsent(repo, "child@example.com")
+		rec, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, "", "", "")
+		if err != nil {
+			t.Fatalf("GrantParentalConsent: %v", err)
+		}
+		if rec.SteppedUp {
+			t.Fatal("record must say stepped_up=false: no password was proved")
+		}
+		active, _ := repo.GetActiveParentalConsentForChild(ctx, child.ID)
+		if active == nil || active.SteppedUp {
+			t.Fatalf("persisted record = %#v, want stepped_up=false", active)
+		}
+	})
+
+	t.Run("flag on still requires the password an adult holds", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := newTestAuthServiceWithAudit(t, repo, newRecordingAuditWriter())
+		svc.cfg.GuardianStepUpAllowNoPassword = true
+		adult := seedConsentingAdult(t, repo, "adult@example.com", hashPW(t, strongPW), adultFactors{phoneVerified: true})
+		child := seedChildPendingConsent(repo, "child@example.com")
+		for _, stepUp := range []string{"", "not-the-password"} {
+			if _, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, stepUp, "", ""); !errors.Is(err, ErrParentalConsentStepUpFailed) {
+				t.Fatalf("stepUp=%q: err = %v, want ErrParentalConsentStepUpFailed", stepUp, err)
+			}
+		}
+		rec, err := svc.GrantParentalConsent(ctx, adult.ID, child.ID, consentPolicyVersion, strongPW, "", "")
+		if err != nil || !rec.SteppedUp {
+			t.Fatalf("correct password: err = %v, stepped_up = %v, want nil/true", err, rec != nil && rec.SteppedUp)
+		}
+	})
+}
+
 func seedChildPendingConsent(repo *fakeRepo, email string) *User {
 	return seedUser(repo, email, "", StatusPendingParentalConsent)
 }
