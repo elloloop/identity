@@ -496,6 +496,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_ANONYMOUS_", "Anonymous identity"},
 	{"GATEWAY_AGEGATE_", "Age gating (COPPA)"},
 	{"GATEWAY_MINOR_", "Age gating (COPPA)"},
+	{"GATEWAY_GUARDIAN_", "Age gating (COPPA)"},
 	{"GATEWAY_DEFAULT_PRODUCT", "Age gating (COPPA)"},
 	{"GATEWAY_IDV_", "Identity verification"},
 	{"GATEWAY_SAML_", "SAML 2.0 IdP"},

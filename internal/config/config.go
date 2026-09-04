@@ -693,9 +693,9 @@ type Config struct {
 	// PasswordResetExpirySeconds is the recovery-email reset-link lifetime in seconds.
 	PasswordResetExpirySeconds int
 
-	// GuardianStepUpAllowNoPassword lets a guardian whose account has no stored
-	// password hash — a federated (Google-only) parent — pass the guardian
-	// step-up check without presenting one. It exists because step-up is
+	// GuardianStepUpAllowNoPassword weakens guardian step-up: a guardian whose
+	// account has no stored password hash — a federated (Google-only) parent —
+	// passes the check without presenting one. It exists because step-up is
 	// password-only today, so those accounts cannot satisfy it at all and are
 	// locked out of every guardian RPC, including the COPPA/DPDP erasure path
 	// DeleteManagedChildAccount.
