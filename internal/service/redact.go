@@ -6,9 +6,12 @@ import (
 	"github.com/elloloop/identity/pkg/email"
 )
 
-// redactEmail is a package-local alias for email.Redact, kept so the
-// existing service-layer call sites read naturally. New code may call
-// email.Redact directly.
+// redactEmail wraps email.Redact because `email` is a parameter name across
+// most of this package (auth_login.go alone has five functions taking one),
+// and inside those bodies the package identifier is shadowed — `email.Redact`
+// does not compile there. It is a naming workaround, not a compatibility
+// shim: there is no second way to do this, and new code in this package
+// should use it too.
 func redactEmail(s string) string { return email.Redact(s) }
 
 // redactIdentifier redacts a login identifier for logs: an email address is
@@ -16,7 +19,7 @@ func redactEmail(s string) string { return email.Redact(s) }
 // logged as-is.
 func redactIdentifier(s string) string {
 	if strings.Contains(s, "@") {
-		return email.Redact(s)
+		return redactEmail(s)
 	}
 	return s
 }

@@ -182,6 +182,7 @@ type fakeRepo struct {
 	getGuardianEdgeErr    error // GetGuardianEdge fails
 	listGuardianEdgesErr  error // ListGuardiansOfChild / ListChildrenOfGuardian fail
 	findUserByUsernameErr error // FindUserByUsername fails
+	getUsersByIDsErr      error // GetUsersByIDs fails
 	setDOBOnceErr         error // SetDateOfBirthOnce fails
 	// createManagedChildErr makes CreateManagedChildAccount fail before any
 	// mutation, exercising the atomicity contract from the caller's side.
@@ -1777,6 +1778,33 @@ func (r *fakeRepo) CreateParentalConsent(_ context.Context, rec *ParentalConsent
 // consent for the child, newest grant first.
 // SetDateOfBirthOnce mirrors the drivers' compare-and-set: the write lands
 // only while the account still has no date of birth.
+// GetUsersByIDs mirrors the drivers' batch fetch: ordered by id, unknown ids
+// absent rather than an error.
+func (r *fakeRepo) GetUsersByIDs(_ context.Context, ids []string) ([]*User, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.getUsersByIDsErr != nil {
+		return nil, r.getUsersByIDsErr
+	}
+	out := make([]*User, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if u, ok := r.users[id]; ok {
+			cp := *u
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 func (r *fakeRepo) SetDateOfBirthOnce(_ context.Context, userID string, dobMs int64, status string, nowMs int64) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1894,7 +1922,13 @@ func (r *fakeRepo) GetGuardianEdge(_ context.Context, guardianUserID, childUserI
 	return &cp, nil
 }
 
-func (r *fakeRepo) ListGuardiansOfChild(_ context.Context, childUserID string) ([]*GuardianEdge, error) {
+func (r *fakeRepo) ListGuardiansOfChild(_ context.Context, childUserID string, limit, offset int) ([]*GuardianEdge, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("ListGuardiansOfChild: limit must be > 0, got %d", limit)
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.listGuardianEdgesErr != nil {
@@ -1910,10 +1944,23 @@ func (r *fakeRepo) ListGuardiansOfChild(_ context.Context, childUserID string) (
 	}
 	// Ordered like the drivers (ORDER BY guardian_user_id).
 	sort.Slice(out, func(i, j int) bool { return out[i].GuardianUserID < out[j].GuardianUserID })
+	if offset >= len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 
-func (r *fakeRepo) ListChildrenOfGuardian(_ context.Context, guardianUserID string) ([]*GuardianEdge, error) {
+func (r *fakeRepo) ListChildrenOfGuardian(_ context.Context, guardianUserID string, limit, offset int) ([]*GuardianEdge, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("ListChildrenOfGuardian: limit must be > 0, got %d", limit)
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.listGuardianEdgesErr != nil {
@@ -1929,6 +1976,13 @@ func (r *fakeRepo) ListChildrenOfGuardian(_ context.Context, guardianUserID stri
 	}
 	// Ordered like the drivers (ORDER BY child_user_id).
 	sort.Slice(out, func(i, j int) bool { return out[i].ChildUserID < out[j].ChildUserID })
+	if offset >= len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 

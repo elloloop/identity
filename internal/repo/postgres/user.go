@@ -461,6 +461,36 @@ var userDeleteNonFKTables = []string{
 // SetDateOfBirthOnce sets the date of birth only while the row still has none,
 // applying the optional status in the same statement. Reports whether this
 // call was the one that set it.
+// GetUsersByIDs fetches many users in one query, ordered by id. Unknown ids
+// are absent from the result rather than an error.
+func (r *pgRepository) GetUsersByIDs(ctx context.Context, ids []string) ([]*service.User, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	q := `SELECT ` + userColumns + `
+		FROM users
+		WHERE project_id = $1 AND id = ANY($2)
+		ORDER BY id ASC`
+	rows, err := r.pool.Query(ctx, q, r.projectID, ids)
+	if err != nil {
+		return nil, wrapPgErr("GetUsersByIDs", err)
+	}
+	defer rows.Close()
+
+	out := make([]*service.User, 0, len(ids))
+	for rows.Next() {
+		u, scanErr := scanUser(rows)
+		if scanErr != nil {
+			return nil, wrapPgErr("GetUsersByIDs", scanErr)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapPgErr("GetUsersByIDs", err)
+	}
+	return out, nil
+}
+
 func (r *pgRepository) SetDateOfBirthOnce(
 	ctx context.Context, userID string, dobMs int64, status string, nowMs int64,
 ) (bool, error) {

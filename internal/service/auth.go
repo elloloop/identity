@@ -562,6 +562,13 @@ type Repository interface {
 	// answer. Empty slice, not an error, when there are none.
 	ListActiveParentalConsentsForChild(ctx context.Context, childUserID string) ([]*ParentalConsentRecord, error)
 
+	// GetUsersByIDs fetches many accounts in ONE query, ordered by id so
+	// every driver answers identically. Ids that name no account are simply
+	// absent from the result (not an error), so a stale reference — an edge
+	// whose account was deleted — does not fail the whole read. It exists
+	// because the guardian listings otherwise issue one GetUser per edge.
+	GetUsersByIDs(ctx context.Context, ids []string) ([]*User, error)
+
 	// SetDateOfBirthOnce stores a date of birth ONLY while the account still
 	// has none, and reports whether this caller was the one that set it. It
 	// is a compare-and-set because the completion ticket is reusable within
@@ -587,8 +594,14 @@ type Repository interface {
 	UpsertGuardianEdge(ctx context.Context, e *GuardianEdge) error
 	DeleteGuardianEdge(ctx context.Context, guardianUserID, childUserID string) error
 	GetGuardianEdge(ctx context.Context, guardianUserID, childUserID string) (*GuardianEdge, error)
-	ListGuardiansOfChild(ctx context.Context, childUserID string) ([]*GuardianEdge, error)
-	ListChildrenOfGuardian(ctx context.Context, guardianUserID string) ([]*GuardianEdge, error)
+	// The two listings are PAGED IN THE QUERY, not in the caller. Slicing a
+	// full result set in the service meant every page of a traversal
+	// re-selected and re-scanned every edge, so walking N edges at a page
+	// size of P moved O(N²/P) rows and left each individual request
+	// unbounded. limit must be > 0 (an unbounded read is refused, as with
+	// the sweepers); offset is the page start.
+	ListGuardiansOfChild(ctx context.Context, childUserID string, limit, offset int) ([]*GuardianEdge, error)
+	ListChildrenOfGuardian(ctx context.Context, guardianUserID string, limit, offset int) ([]*GuardianEdge, error)
 
 	// CreateManagedChildAccount atomically persists the three artifacts of
 	// the parent-creates-child flow: the child user row, the (guardian ->

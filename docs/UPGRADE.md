@@ -1,6 +1,44 @@
 # Upgrade guide
 
-## Unreleased — required-DOB completion step (behavior change if `GATEWAY_AGEGATE_REQUIRE_DOB` is already on)
+## Unreleased — guardian listings are paged (additive)
+
+`ListManagedChildren` and `GetGuardians` gain `limit` (default 50, max 200)
+and an opaque `cursor`, and their responses gain `next_cursor`. The fields are
+additive, but the default is a real change: a client that ignores them gets
+the first 50 rather than everything. That is the point — neither listing was
+bounded before, and neither was the query behind it.
+
+Walk the pages with `next_cursor` (empty on the last page) if you need the
+full set.
+
+The summary-only responses and the omission of aged-out accounts are NOT new
+here — both shipped in v4.3.0 with the managed-minor epic. See that release's
+notes if you are upgrading across it.
+
+## v4.2 → v4.3 — managed minor accounts (additive)
+
+The managed-minor epic: guardian edges, parent-created child accounts, a
+guardian-authorized management surface, per-jurisdiction age thresholds, and
+date-of-birth collection on every signup path. Every proto change is additive
+and nothing changes with the age gate off, no `jurisdictions` block, and
+`GATEWAY_AGEGATE_REQUIRE_DOB` unset. Six migrations apply with
+`identity migrate`.
+
+**Both guardian listings return summaries, not full records.**
+`ListManagedChildren` and `GetGuardians` carry id, username, display name,
+avatar, role, status, market, age band and is_minor. Email, recovery email,
+phone number, date of birth and login state are reachable only through
+`GetManagedChildProfile`, which requires a step-up re-authentication — the same
+bar that already applied to reading one child. `GetGuardians` is trimmed for
+the same reason in the other direction: it hands one guardian the records of
+their co-guardians. `ListManagedChildren` additionally omits accounts that have
+aged past the adult threshold; the edge survives as consent history, but every
+management RPC already refuses such an account.
+
+If your client renders a child's email or phone from a listing, switch it to
+`GetManagedChildProfile` and collect the step-up password.
+
+### Required-DOB completion step (behavior change if `GATEWAY_AGEGATE_REQUIRE_DOB` is already on)
 
 Extends what `GATEWAY_AGEGATE_REQUIRE_DOB` covers. Previously it bound only
 `PasswordSignup`; every other session-issuing path (OAuth, hosted-OAuth
@@ -56,7 +94,7 @@ Two operator-visible consequences of turning it on:
   admin-created accounts (`CreateUser`) simply meet the step at first
   sign-in, since creation mints no tokens.
 
-## Unreleased — guardian edges (additive)
+### Guardian edges (additive)
 
 Adds the guardian edge: the authorization fact that one account
 (`guardian_user_id`) manages another (`child_user_id`), stored in a new
@@ -92,7 +130,7 @@ adult's guardian edge, and the child is re-gated to
 Under the current single-active-consent model that is exactly the previous
 behavior; the rule is structured for concurrent multi-guardian consent.
 
-## Unreleased — parent-creates-child managed accounts (additive)
+### Parent-creates-child managed accounts (additive)
 
 Adds `CreateManagedChildAccount`: one authenticated call from an adult
 creates a working child account, born `USER_STATUS_ACTIVE` under the
@@ -149,7 +187,7 @@ Two things to know before enabling the flow:
   onboards parents through social login only, give them a password before
   rolling out managed children.
 
-## Unreleased — parental account management (additive)
+### Parental account management (additive)
 
 Adds the guardian-authorized management surface over a child account:
 `GetManagedChildProfile`, `SetManagedChildPassword`,
@@ -195,7 +233,7 @@ account was actually left in — which differs only when another guardian's
 consent remains active, in which case the child correctly stays
 `USER_STATUS_ACTIVE`.
 
-## Unreleased — per-jurisdiction age thresholds (additive)
+### Per-jurisdiction age thresholds (additive)
 
 Adds per-market age thresholds: a project's `config_json` gains a
 `jurisdictions` block (`default` + `thresholds`, each entry a

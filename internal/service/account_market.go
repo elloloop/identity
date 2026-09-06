@@ -57,7 +57,8 @@ func (s *AuthService) SetAccountMarket(ctx context.Context, userID, market strin
 
 	// An account someone else manages cannot re-declare its own jurisdiction:
 	// the market feeds the band, and the band is what ends guardianship.
-	guardians, err := repo.ListGuardiansOfChild(ctx, userID)
+	// Existence check only — one row answers "is this account managed?".
+	guardians, err := repo.ListGuardiansOfChild(ctx, userID, 1, 0)
 	if err != nil {
 		return nil, fmt.Errorf("check guardians: %w", err)
 	}

@@ -6012,6 +6012,15 @@ components:
           type: string
           title: child_user_id
           description: child_user_id is the child account whose guardians are listed.
+        limit:
+          type: integer
+          title: limit
+          format: int32
+          description: limit caps the page. Default 50, maximum 200.
+        cursor:
+          type: string
+          title: cursor
+          description: cursor is the opaque offset-based cursor from a previous response.
       title: GetGuardiansRequest
       additionalProperties: false
       description: |-
@@ -6027,6 +6036,14 @@ components:
           items:
             $ref: '#/components/schemas/identity.v1.User'
           title: guardians
+          description: |-
+            guardians are SUMMARIES, on the same terms as ListManagedChildren: this
+             listing hands one guardian the records of their CO-guardians, who have
+             not agreed to share contact details with each other.
+        nextCursor:
+          type: string
+          title: next_cursor
+          description: next_cursor is empty on the last page.
       title: GetGuardiansResponse
       additionalProperties: false
     identity.v1.GetIdentityVerificationStatusRequest:
@@ -6634,6 +6651,18 @@ components:
       additionalProperties: false
     identity.v1.ListManagedChildrenRequest:
       type: object
+      properties:
+        limit:
+          type: integer
+          title: limit
+          format: int32
+          description: |-
+            limit caps the page. Default 50, maximum 200 — the listing is bounded so
+             one guardian with many children cannot produce an unbounded response.
+        cursor:
+          type: string
+          title: cursor
+          description: cursor is the opaque offset-based cursor from a previous response.
       title: ListManagedChildrenRequest
       additionalProperties: false
       description: |-
@@ -6650,8 +6679,16 @@ components:
             $ref: '#/components/schemas/identity.v1.User'
           title: children
           description: |-
-            children are the managed child accounts, with their age band derived
-             under the jurisdiction thresholds each resolves to.
+            children are the managed child accounts as SUMMARIES: identity and
+             classification only (id, username, display name, avatar, role, status,
+             market, age band, is_minor). Contact details and date of birth are
+             reachable only through GetManagedChildProfile, which requires a step-up
+             re-authentication. An account that has aged past the adult threshold is
+             omitted — the edge survives as consent history but confers nothing.
+        nextCursor:
+          type: string
+          title: next_cursor
+          description: next_cursor is empty on the last page.
       title: ListManagedChildrenResponse
       additionalProperties: false
     identity.v1.ListMySessionsRequest:

@@ -463,3 +463,154 @@ func (b *grpcBridge) SetUserQuota(ctx context.Context, in *identitypb.SetUserQuo
 }
 
 var _ identitypb.IdentityServiceServer = (*grpcBridge)(nil)
+
+// ─── Remaining service surface ──────────────────────────────────────
+//
+// Every RPC on IdentityService is declared here. The bridge embeds
+// UnimplementedIdentityServiceServer, so an omission compiles fine and only
+// shows up as codes.Unimplemented at a host — see
+// grpc_bridge_parity_test.go, which fails if this stops being exhaustive.
+
+func (b *grpcBridge) AcceptTenantInvitation(ctx context.Context, in *identitypb.AcceptTenantInvitationRequest) (*identitypb.AcceptTenantInvitationResponse, error) {
+	return invoke(ctx, in, b.h.AcceptTenantInvitation)
+}
+
+func (b *grpcBridge) AddProjectAuthDomain(ctx context.Context, in *identitypb.AddProjectAuthDomainRequest) (*identitypb.AddProjectAuthDomainResponse, error) {
+	return invoke(ctx, in, b.h.AddProjectAuthDomain)
+}
+
+func (b *grpcBridge) AdminAddProjectAuthDomain(ctx context.Context, in *identitypb.AdminAddProjectAuthDomainRequest) (*identitypb.AdminAddProjectAuthDomainResponse, error) {
+	return invoke(ctx, in, b.h.AdminAddProjectAuthDomain)
+}
+
+func (b *grpcBridge) AdminAddTenantAdmin(ctx context.Context, in *identitypb.AdminAddTenantAdminRequest) (*identitypb.AdminAddTenantAdminResponse, error) {
+	return invoke(ctx, in, b.h.AdminAddTenantAdmin)
+}
+
+func (b *grpcBridge) AdminCreateProject(ctx context.Context, in *identitypb.AdminCreateProjectRequest) (*identitypb.AdminCreateProjectResponse, error) {
+	return invoke(ctx, in, b.h.AdminCreateProject)
+}
+
+func (b *grpcBridge) AdminCreateProjectCredential(ctx context.Context, in *identitypb.AdminCreateProjectCredentialRequest) (*identitypb.AdminCreateProjectCredentialResponse, error) {
+	return invoke(ctx, in, b.h.AdminCreateProjectCredential)
+}
+
+func (b *grpcBridge) AdminCreateTenant(ctx context.Context, in *identitypb.AdminCreateTenantRequest) (*identitypb.AdminCreateTenantResponse, error) {
+	return invoke(ctx, in, b.h.AdminCreateTenant)
+}
+
+func (b *grpcBridge) AdminDeleteProjectOAuthProvider(ctx context.Context, in *identitypb.AdminDeleteProjectOAuthProviderRequest) (*identitypb.AdminDeleteProjectOAuthProviderResponse, error) {
+	return invoke(ctx, in, b.h.AdminDeleteProjectOAuthProvider)
+}
+
+func (b *grpcBridge) AdminGetProjectAssurance(ctx context.Context, in *identitypb.AdminGetProjectAssuranceRequest) (*identitypb.AdminGetProjectAssuranceResponse, error) {
+	return invoke(ctx, in, b.h.AdminGetProjectAssurance)
+}
+
+func (b *grpcBridge) AdminListProjectOAuthProviders(ctx context.Context, in *identitypb.AdminListProjectOAuthProvidersRequest) (*identitypb.AdminListProjectOAuthProvidersResponse, error) {
+	return invoke(ctx, in, b.h.AdminListProjectOAuthProviders)
+}
+
+func (b *grpcBridge) AdminSetProjectAssurance(ctx context.Context, in *identitypb.AdminSetProjectAssuranceRequest) (*identitypb.AdminSetProjectAssuranceResponse, error) {
+	return invoke(ctx, in, b.h.AdminSetProjectAssurance)
+}
+
+func (b *grpcBridge) AdminSetProjectOAuthProvider(ctx context.Context, in *identitypb.AdminSetProjectOAuthProviderRequest) (*identitypb.AdminSetProjectOAuthProviderResponse, error) {
+	return invoke(ctx, in, b.h.AdminSetProjectOAuthProvider)
+}
+
+func (b *grpcBridge) BeginPasskeySignup(ctx context.Context, in *identitypb.BeginPasskeySignupRequest) (*identitypb.BeginPasskeySignupResponse, error) {
+	return invoke(ctx, in, b.h.BeginPasskeySignup)
+}
+
+func (b *grpcBridge) CancelAccountDeletion(ctx context.Context, in *identitypb.CancelAccountDeletionRequest) (*identitypb.CancelAccountDeletionResponse, error) {
+	return invoke(ctx, in, b.h.CancelAccountDeletion)
+}
+
+func (b *grpcBridge) CompletePasskeySignup(ctx context.Context, in *identitypb.CompletePasskeySignupRequest) (*identitypb.CompletePasskeySignupResponse, error) {
+	return invoke(ctx, in, b.h.CompletePasskeySignup)
+}
+
+func (b *grpcBridge) CreateFirstPlatformAdmin(ctx context.Context, in *identitypb.CreateFirstPlatformAdminRequest) (*identitypb.CreateFirstPlatformAdminResponse, error) {
+	return invoke(ctx, in, b.h.CreateFirstPlatformAdmin)
+}
+
+func (b *grpcBridge) CreateTenantInvitation(ctx context.Context, in *identitypb.CreateTenantInvitationRequest) (*identitypb.CreateTenantInvitationResponse, error) {
+	return invoke(ctx, in, b.h.CreateTenantInvitation)
+}
+
+func (b *grpcBridge) DeleteLoginPolicy(ctx context.Context, in *identitypb.DeleteLoginPolicyRequest) (*identitypb.DeleteLoginPolicyResponse, error) {
+	return invoke(ctx, in, b.h.DeleteLoginPolicy)
+}
+
+func (b *grpcBridge) DeleteMyAccount(ctx context.Context, in *identitypb.DeleteMyAccountRequest) (*identitypb.DeleteMyAccountResponse, error) {
+	return invoke(ctx, in, b.h.DeleteMyAccount)
+}
+
+func (b *grpcBridge) ExportMyData(ctx context.Context, in *identitypb.ExportMyDataRequest) (*identitypb.ExportMyDataResponse, error) {
+	return invoke(ctx, in, b.h.ExportMyData)
+}
+
+func (b *grpcBridge) GetLoginPolicy(ctx context.Context, in *identitypb.GetLoginPolicyRequest) (*identitypb.GetLoginPolicyResponse, error) {
+	return invoke(ctx, in, b.h.GetLoginPolicy)
+}
+
+func (b *grpcBridge) GetProjectConfig(ctx context.Context, in *identitypb.GetProjectConfigRequest) (*identitypb.GetProjectConfigResponse, error) {
+	return invoke(ctx, in, b.h.GetProjectConfig)
+}
+
+func (b *grpcBridge) LinkIdentity(ctx context.Context, in *identitypb.LinkIdentityRequest) (*identitypb.LinkIdentityResponse, error) {
+	return invoke(ctx, in, b.h.LinkIdentity)
+}
+
+func (b *grpcBridge) ListLinkedIdentities(ctx context.Context, in *identitypb.ListLinkedIdentitiesRequest) (*identitypb.ListLinkedIdentitiesResponse, error) {
+	return invoke(ctx, in, b.h.ListLinkedIdentities)
+}
+
+func (b *grpcBridge) ListProjectAuthDomains(ctx context.Context, in *identitypb.ListProjectAuthDomainsRequest) (*identitypb.ListProjectAuthDomainsResponse, error) {
+	return invoke(ctx, in, b.h.ListProjectAuthDomains)
+}
+
+func (b *grpcBridge) ListTenantInvitations(ctx context.Context, in *identitypb.ListTenantInvitationsRequest) (*identitypb.ListTenantInvitationsResponse, error) {
+	return invoke(ctx, in, b.h.ListTenantInvitations)
+}
+
+func (b *grpcBridge) ListTenantMembers(ctx context.Context, in *identitypb.ListTenantMembersRequest) (*identitypb.ListTenantMembersResponse, error) {
+	return invoke(ctx, in, b.h.ListTenantMembers)
+}
+
+func (b *grpcBridge) NativeOAuthLogin(ctx context.Context, in *identitypb.NativeOAuthLoginRequest) (*identitypb.NativeOAuthLoginResponse, error) {
+	return invoke(ctx, in, b.h.NativeOAuthLogin)
+}
+
+func (b *grpcBridge) RemoveTenantMember(ctx context.Context, in *identitypb.RemoveTenantMemberRequest) (*identitypb.RemoveTenantMemberResponse, error) {
+	return invoke(ctx, in, b.h.RemoveTenantMember)
+}
+
+func (b *grpcBridge) RequestPhoneVerification(ctx context.Context, in *identitypb.RequestPhoneVerificationRequest) (*identitypb.RequestPhoneVerificationResponse, error) {
+	return invoke(ctx, in, b.h.RequestPhoneVerification)
+}
+
+func (b *grpcBridge) SetPrimaryAuthDomain(ctx context.Context, in *identitypb.SetPrimaryAuthDomainRequest) (*identitypb.SetPrimaryAuthDomainResponse, error) {
+	return invoke(ctx, in, b.h.SetPrimaryAuthDomain)
+}
+
+func (b *grpcBridge) UnlinkIdentity(ctx context.Context, in *identitypb.UnlinkIdentityRequest) (*identitypb.UnlinkIdentityResponse, error) {
+	return invoke(ctx, in, b.h.UnlinkIdentity)
+}
+
+func (b *grpcBridge) UpsertLoginPolicy(ctx context.Context, in *identitypb.UpsertLoginPolicyRequest) (*identitypb.UpsertLoginPolicyResponse, error) {
+	return invoke(ctx, in, b.h.UpsertLoginPolicy)
+}
+
+func (b *grpcBridge) UpsertProjectConfig(ctx context.Context, in *identitypb.UpsertProjectConfigRequest) (*identitypb.UpsertProjectConfigResponse, error) {
+	return invoke(ctx, in, b.h.UpsertProjectConfig)
+}
+
+func (b *grpcBridge) VerifyPhoneCode(ctx context.Context, in *identitypb.VerifyPhoneCodeRequest) (*identitypb.VerifyPhoneCodeResponse, error) {
+	return invoke(ctx, in, b.h.VerifyPhoneCode)
+}
+
+func (b *grpcBridge) VerifyProjectAuthDomain(ctx context.Context, in *identitypb.VerifyProjectAuthDomainRequest) (*identitypb.VerifyProjectAuthDomainResponse, error) {
+	return invoke(ctx, in, b.h.VerifyProjectAuthDomain)
+}

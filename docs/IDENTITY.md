@@ -452,9 +452,14 @@ consent remains for it afterwards — under today's single-active-consent model
 that is every revoke; once multiple guardians can hold consent concurrently,
 revoking one leaves the child active under the other.
 
-Two RPCs read the edge set. `ListManagedChildren` is self-only: the request
-carries no user id field, so the guardian is always the session user and a
-client cannot steer the query at another account. `GetGuardians` lists a
+Two RPCs read the edge set, both paged (`limit` default 50 / max 200, plus an
+opaque `cursor`) and both returning SUMMARIES — id, username, display name,
+avatar, role, status, market, age band — never contact details or date of
+birth, which need `GetManagedChildProfile` and its step-up.
+`ListManagedChildren` is self-only: the request carries no user id field, so
+the guardian is always the session user and a client cannot steer the query at
+another account; it also omits accounts that have aged past the adult
+threshold. `GetGuardians` lists a
 child's guardians and is callable by a guardian of the child or a project
 admin; any other caller receives the identical `PERMISSION_DENIED` whether or
 not the child account exists, so the surface discloses nothing about account
@@ -462,12 +467,25 @@ existence.
 
 ### Parent-creates-child accounts
 
-Children never self-sign-up. An authenticated adult calls
-`CreateManagedChildAccount` and the child's account exists, working, in one
-call. The account is **born `ACTIVE` under guardianship** — it never passes
-through `PENDING_PARENTAL_CONSENT`, because that state exists for a child who
-signed up with no consenting adult present, and here one is present and
-authenticated.
+There are TWO routes to a consented child account, and the deploying product
+chooses which it exposes:
+
+1. the child signs up, lands in `PENDING_PARENTAL_CONSENT`, and an adult later
+   calls `GrantParentalConsent`; or
+2. an authenticated adult calls `CreateManagedChildAccount` and the child's
+   account exists, working, in one call.
+
+Route 2 exists because route 1 requires the child to hold an email address,
+complete a signup, and sit in a dead-end state until an adult reaches them —
+and it is impossible outright under access modes `invite` and `closed`, where
+self-signup is denied. A product that wants children created only by a parent
+gets that by closing the project to self-signup; the server does not make that
+choice for it.
+
+Via route 2 the account is **born `ACTIVE` under guardianship** — it never
+passes through `PENDING_PARENTAL_CONSENT`, because that state exists for a
+child who signed up with no consenting adult present, and here one is present
+and authenticated.
 
 The child is identified within the project by a **parent-chosen username**
 (lowercase alphanumerics plus `_`/`-`/`.`, 3–32 characters, unique per

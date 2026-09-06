@@ -2,6 +2,8 @@ package conformance
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"testing"
 
 	"github.com/elloloop/identity/internal/service"
@@ -63,7 +65,7 @@ func runGuardianEdgeConformance(t *testing.T, driver Driver) {
 			if got.CreatedAtMs != 1000 {
 				t.Fatalf("re-upsert moved created_at_ms to %d, want 1000", got.CreatedAtMs)
 			}
-			list, err := r.ListChildrenOfGuardian(ctx, guardian)
+			list, err := r.ListChildrenOfGuardian(ctx, guardian, 100, 0)
 			if err != nil {
 				t.Fatalf("ListChildrenOfGuardian: %v", err)
 			}
@@ -90,7 +92,7 @@ func runGuardianEdgeConformance(t *testing.T, driver Driver) {
 			// clients verbatim through GetGuardians / ListManagedChildren, so
 			// a driver returning them in storage-iteration order would answer
 			// the same call differently every time.
-			guardians, err := r.ListGuardiansOfChild(ctx, c1)
+			guardians, err := r.ListGuardiansOfChild(ctx, c1, 100, 0)
 			if err != nil {
 				t.Fatalf("ListGuardiansOfChild: %v", err)
 			}
@@ -101,7 +103,7 @@ func runGuardianEdgeConformance(t *testing.T, driver Driver) {
 				t.Fatalf("child c1 guardians = %s, want %v in guardian_user_id order",
 					guardianIDs(guardians), wantGuardians)
 			}
-			children, err := r.ListChildrenOfGuardian(ctx, g1)
+			children, err := r.ListChildrenOfGuardian(ctx, g1, 100, 0)
 			if err != nil {
 				t.Fatalf("ListChildrenOfGuardian: %v", err)
 			}
@@ -112,12 +114,70 @@ func runGuardianEdgeConformance(t *testing.T, driver Driver) {
 				t.Fatalf("guardian g1 children = %s, want %v in child_user_id order",
 					childIDs(children), wantChildren)
 			}
-			children, err = r.ListChildrenOfGuardian(ctx, g2)
+			children, err = r.ListChildrenOfGuardian(ctx, g2, 100, 0)
 			if err != nil {
 				t.Fatalf("ListChildrenOfGuardian: %v", err)
 			}
 			if len(children) != 1 || children[0].ChildUserID != c1 {
 				t.Fatalf("guardian g2 children = %#v, want [c1]", children)
+			}
+		})
+
+		t.Run("Listings_PageInTheQuery", func(t *testing.T) {
+			// Paging lives in the query, not the caller: slicing a full
+			// result set in the service made a traversal re-scan every edge
+			// per page. Each driver must window in SQL (or its equivalent)
+			// and refuse an unbounded read outright.
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			guardian := createTestUser(t, r, "ge-page-guardian@example.com")
+			kids := make([]string, 0, 5)
+			for i := 0; i < 5; i++ {
+				kids = append(kids, createTestUser(t, r, fmt.Sprintf("ge-page-kid-%d@example.com", i)))
+			}
+			for _, kid := range kids {
+				if err := r.UpsertGuardianEdge(ctx, &service.GuardianEdge{
+					GuardianUserID: guardian, ChildUserID: kid, CreatedAtMs: 1,
+				}); err != nil {
+					t.Fatalf("upsert %s: %v", kid, err)
+				}
+			}
+			sort.Strings(kids)
+
+			// Walk in pages of two and expect the ordered set back exactly
+			// once, with the window honoured on every call.
+			var walked []string
+			for offset := 0; offset < len(kids); offset += 2 {
+				page, err := r.ListChildrenOfGuardian(ctx, guardian, 2, offset)
+				if err != nil {
+					t.Fatalf("page at offset %d: %v", offset, err)
+				}
+				if len(page) > 2 {
+					t.Fatalf("page at offset %d returned %d rows, want at most 2", offset, len(page))
+				}
+				for _, e := range page {
+					walked = append(walked, e.ChildUserID)
+				}
+			}
+			if len(walked) != len(kids) {
+				t.Fatalf("walked %d children, want %d", len(walked), len(kids))
+			}
+			for i, id := range walked {
+				if id != kids[i] {
+					t.Fatalf("walked = %v, want %v (ordered, no repeats)", walked, kids)
+				}
+			}
+
+			// An offset past the end is an empty page, not an error.
+			if page, err := r.ListChildrenOfGuardian(ctx, guardian, 2, 999); err != nil || len(page) != 0 {
+				t.Fatalf("offset past end = %#v %v, want empty and nil", page, err)
+			}
+			// An unbounded read is refused, like the sweepers.
+			if _, err := r.ListChildrenOfGuardian(ctx, guardian, 0, 0); err == nil {
+				t.Fatal("ListChildrenOfGuardian limit=0: want error, got nil")
+			}
+			if _, err := r.ListGuardiansOfChild(ctx, kids[0], 0, 0); err == nil {
+				t.Fatal("ListGuardiansOfChild limit=0: want error, got nil")
 			}
 		})
 
@@ -159,7 +219,7 @@ func runGuardianEdgeConformance(t *testing.T, driver Driver) {
 			if got, err := r.GetGuardianEdge(ctx, guardian, child); err != nil || got != nil {
 				t.Fatalf("edge must die with the guardian, got %#v err %v", got, err)
 			}
-			if list, err := r.ListGuardiansOfChild(ctx, child); err != nil || len(list) != 0 {
+			if list, err := r.ListGuardiansOfChild(ctx, child, 100, 0); err != nil || len(list) != 0 {
 				t.Fatalf("child must have no guardians after guardian deletion, got %#v err %v", list, err)
 			}
 		})
@@ -178,7 +238,7 @@ func runGuardianEdgeConformance(t *testing.T, driver Driver) {
 			if got, err := r.GetGuardianEdge(ctx, guardian, child); err != nil || got != nil {
 				t.Fatalf("edge must die with the child, got %#v err %v", got, err)
 			}
-			if list, err := r.ListChildrenOfGuardian(ctx, guardian); err != nil || len(list) != 0 {
+			if list, err := r.ListChildrenOfGuardian(ctx, guardian, 100, 0); err != nil || len(list) != 0 {
 				t.Fatalf("guardian must manage no children after child deletion, got %#v err %v", list, err)
 			}
 		})

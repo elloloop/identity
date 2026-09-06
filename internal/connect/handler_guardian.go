@@ -26,12 +26,15 @@ func (h *IdentityHandler) ListManagedChildren(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	children, err := h.auth.ListManagedChildren(ctx, guardianUserID)
+	children, nextCursor, err := h.auth.ListManagedChildren(
+		ctx, guardianUserID, req.Msg.GetLimit(), req.Msg.GetCursor(),
+	)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.ListManagedChildrenResponse{
-		Children: usersToProto(children),
+		Children:   usersToProto(children),
+		NextCursor: nextCursor,
 	}), nil
 }
 
@@ -56,11 +59,15 @@ func (h *IdentityHandler) GetGuardians(
 	// Same role check the admin RPCs enforce (requireAdminActor).
 	callerIsAdmin := strings.EqualFold(caller.Role, service.RoleAdmin)
 
-	guardians, err := h.auth.GetGuardians(ctx, callerID, req.Msg.GetChildUserId(), callerIsAdmin)
+	guardians, nextCursor, err := h.auth.GetGuardians(
+		ctx, callerID, req.Msg.GetChildUserId(), callerIsAdmin,
+		req.Msg.GetLimit(), req.Msg.GetCursor(),
+	)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
 	return connect.NewResponse(&identitypb.GetGuardiansResponse{
-		Guardians: usersToProto(guardians),
+		Guardians:  usersToProto(guardians),
+		NextCursor: nextCursor,
 	}), nil
 }

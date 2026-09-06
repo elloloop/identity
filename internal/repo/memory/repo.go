@@ -453,6 +453,30 @@ func (r *Repo) UpdateUser(_ context.Context, userID string, fields map[string]an
 // drained here like the other user-owned types.
 // SetDateOfBirthOnce sets the date of birth only while the account still has
 // none, under the same lock hold the SQL drivers get from a single UPDATE.
+// GetUsersByIDs fetches many users at once, ordered by id like the SQL
+// drivers. Unknown ids are absent rather than an error.
+func (r *Repo) GetUsersByIDs(_ context.Context, ids []string) ([]*service.User, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*service.User, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if u, ok := r.users[id]; ok {
+			cp := *u
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 func (r *Repo) SetDateOfBirthOnce(
 	_ context.Context, userID string, dobMs int64, status string, nowMs int64,
 ) (bool, error) {
@@ -1818,7 +1842,13 @@ func (r *Repo) GetGuardianEdge(_ context.Context, guardianUserID, childUserID st
 	return &cp, nil
 }
 
-func (r *Repo) ListGuardiansOfChild(_ context.Context, childUserID string) ([]*service.GuardianEdge, error) {
+func (r *Repo) ListGuardiansOfChild(_ context.Context, childUserID string, limit, offset int) ([]*service.GuardianEdge, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("memory: ListGuardiansOfChild: limit must be > 0, got %d", limit)
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []*service.GuardianEdge
@@ -1834,10 +1864,23 @@ func (r *Repo) ListGuardiansOfChild(_ context.Context, childUserID string) ([]*s
 	// so map-iteration order would make the same call answer differently
 	// every time on this driver alone.
 	sort.Slice(out, func(i, j int) bool { return out[i].GuardianUserID < out[j].GuardianUserID })
+	if offset >= len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 
-func (r *Repo) ListChildrenOfGuardian(_ context.Context, guardianUserID string) ([]*service.GuardianEdge, error) {
+func (r *Repo) ListChildrenOfGuardian(_ context.Context, guardianUserID string, limit, offset int) ([]*service.GuardianEdge, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("memory: ListChildrenOfGuardian: limit must be > 0, got %d", limit)
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []*service.GuardianEdge
@@ -1850,6 +1893,13 @@ func (r *Repo) ListChildrenOfGuardian(_ context.Context, guardianUserID string) 
 	}
 	// Stable ordering identical to the SQL drivers (ORDER BY child_user_id).
 	sort.Slice(out, func(i, j int) bool { return out[i].ChildUserID < out[j].ChildUserID })
+	if offset >= len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 
