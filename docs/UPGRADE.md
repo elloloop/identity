@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Unreleased — guardian listings are paged (additive)
+## v4.4 → v4.5 — guardian listings are paged (additive)
 
 `ListManagedChildren` and `GetGuardians` gain `limit` (default 50, max 200)
 and an opaque `cursor`, and their responses gain `next_cursor`. The fields are
