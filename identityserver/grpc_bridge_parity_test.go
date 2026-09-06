@@ -10,70 +10,6 @@ import (
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 )
 
-// unbridgedRPCs are the IdentityService methods *grpcBridge does not declare,
-// and therefore serves as codes.Unimplemented via the embedded
-// UnimplementedIdentityServiceServer.
-//
-// THIS LIST MAY ONLY SHRINK. It exists because the embedding is a silent
-// failure mode: adding an RPC to the proto compiles cleanly, the bridge keeps
-// satisfying the interface, and a native-gRPC host discovers the gap at
-// runtime as Unimplemented. Enumerating the gap turns invisible debt into a
-// list somebody can work through, and makes every NEW proto RPC fail this
-// test until it is either bridged or deliberately recorded here.
-//
-// Before adding a name: bridging an RPC is three lines
-// (`return invoke(ctx, in, b.h.Foo)`), so "not bridged yet" is rarely the
-// right answer for a method a host would call.
-var unbridgedRPCs = map[string]string{
-	// Control plane.
-	"AddProjectAuthDomain":         "control plane",
-	"AdminAddProjectAuthDomain":    "control plane",
-	"AdminAddTenantAdmin":          "control plane",
-	"AdminCreateProject":           "control plane",
-	"AdminCreateProjectCredential": "control plane",
-	"AdminCreateTenant":            "control plane",
-	"CreateFirstPlatformAdmin":     "control plane",
-	"ListProjectAuthDomains":       "control plane",
-	"SetPrimaryAuthDomain":         "control plane",
-	"VerifyProjectAuthDomain":      "control plane",
-
-	// Per-project configuration.
-	"AdminDeleteProjectOAuthProvider": "per-project configuration",
-	"AdminGetProjectAssurance":        "per-project configuration",
-	"AdminListProjectOAuthProviders":  "per-project configuration",
-	"AdminSetProjectAssurance":        "per-project configuration",
-	"AdminSetProjectOAuthProvider":    "per-project configuration",
-	"DeleteLoginPolicy":               "per-project configuration",
-	"GetLoginPolicy":                  "per-project configuration",
-	"GetProjectConfig":                "per-project configuration",
-	"UpsertLoginPolicy":               "per-project configuration",
-	"UpsertProjectConfig":             "per-project configuration",
-
-	// Tenant membership and invitations.
-	"AcceptTenantInvitation": "tenant membership and invitations",
-	"CreateTenantInvitation": "tenant membership and invitations",
-	"ListTenantInvitations":  "tenant membership and invitations",
-	"ListTenantMembers":      "tenant membership and invitations",
-	"RemoveTenantMember":     "tenant membership and invitations",
-
-	// Self-service account lifecycle.
-	"CancelAccountDeletion": "self-service account lifecycle",
-	"DeleteMyAccount":       "self-service account lifecycle",
-	"ExportMyData":          "self-service account lifecycle",
-
-	// Linked identities.
-	"LinkIdentity":         "linked identities",
-	"ListLinkedIdentities": "linked identities",
-	"UnlinkIdentity":       "linked identities",
-
-	// Auth surfaces no native-grpc host has needed yet.
-	"BeginPasskeySignup":       "auth surfaces no native-gRPC host has needed yet",
-	"CompletePasskeySignup":    "auth surfaces no native-gRPC host has needed yet",
-	"NativeOAuthLogin":         "auth surfaces no native-gRPC host has needed yet",
-	"RequestPhoneVerification": "auth surfaces no native-gRPC host has needed yet",
-	"VerifyPhoneCode":          "auth surfaces no native-gRPC host has needed yet",
-}
-
 // bridgeMethodSource returns the file a method on *grpcBridge resolves to. A
 // method the bridge declares itself resolves into grpc_bridge.go; one promoted
 // from the embedded UnimplementedIdentityServiceServer resolves into the
@@ -93,12 +29,14 @@ func bridgeMethodSource(t *testing.T, name string) string {
 }
 
 // TestGRPCBridge_DeclaresEveryRPC pins the native-gRPC surface against the
-// proto. *grpcBridge embeds UnimplementedIdentityServiceServer, so it always
+// proto: EVERY RPC on IdentityService must be declared on the bridge.
+//
+// *grpcBridge embeds UnimplementedIdentityServiceServer, so it always
 // satisfies IdentityServiceServer no matter how many RPCs it forgets — the
 // compiler cannot catch a gap and a host only finds out when a call comes
-// back Unimplemented. This test compares the generated interface against the
-// methods the bridge actually declares, and fails on any difference from the
-// recorded set.
+// back Unimplemented. The invariant is absolute rather than a list of
+// tolerated gaps: an allowlist would let the next omission be waved through
+// by adding a name to it, which is the same silent failure one step removed.
 func TestGRPCBridge_DeclaresEveryRPC(t *testing.T) {
 	t.Parallel()
 
@@ -119,35 +57,13 @@ func TestGRPCBridge_DeclaresEveryRPC(t *testing.T) {
 	}
 	sort.Strings(missing)
 
-	// Anything unbridged that is NOT recorded: a new proto RPC slipped onto
-	// the service without reaching the bridge.
-	var unrecorded []string
-	for _, name := range missing {
-		if _, known := unbridgedRPCs[name]; !known {
-			unrecorded = append(unrecorded, name)
-		}
-	}
-	if len(unrecorded) > 0 {
-		t.Fatalf("RPCs missing from the gRPC bridge and not recorded in unbridgedRPCs: %v\n"+
-			"Bridge them in identityserver/grpc_bridge.go (three lines each), or add them to\n"+
-			"unbridgedRPCs with the reason a native-gRPC host does not need them.", unrecorded)
-	}
-
-	// Anything recorded that IS now bridged: the list must shrink as work
-	// lands, so a stale entry is an error too.
-	bridged := make(map[string]bool, len(missing))
-	for _, name := range missing {
-		bridged[name] = true
-	}
-	var stale []string
-	for name := range unbridgedRPCs {
-		if !bridged[name] {
-			stale = append(stale, name)
-		}
-	}
-	sort.Strings(stale)
-	if len(stale) > 0 {
-		t.Fatalf("these RPCs are bridged now — remove them from unbridgedRPCs: %v", stale)
+	if len(missing) > 0 {
+		t.Fatalf("these RPCs are not declared on the gRPC bridge, so a native-gRPC host\n"+
+			"gets codes.Unimplemented for them: %v\n"+
+			"Add each to identityserver/grpc_bridge.go — it is three lines:\n"+
+			"\tfunc (b *grpcBridge) Foo(ctx context.Context, in *identitypb.FooRequest) (*identitypb.FooResponse, error) {\n"+
+			"\t\treturn invoke(ctx, in, b.h.Foo)\n"+
+			"\t}", missing)
 	}
 }
 

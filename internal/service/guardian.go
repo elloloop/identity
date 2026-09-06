@@ -95,13 +95,15 @@ func guardianPage(limit int32, cursor string) (size, offset int) {
 	return size, offset
 }
 
-// nextGuardianCursor returns the cursor for the following page, or "" when
-// the page just returned was the last.
-func nextGuardianCursor(offset, consumed, total int) string {
-	if offset+consumed >= total {
-		return ""
+// trimGuardianPage takes the limit+1 rows the query returned and splits them
+// into the page to serve and the cursor for the next one. The extra row is the
+// whole signal: present means another page exists, absent means this was the
+// last. It is never returned to the caller.
+func trimGuardianPage(edges []*GuardianEdge, size, offset int) ([]*GuardianEdge, string) {
+	if len(edges) > size {
+		return edges[:size], strconv.Itoa(offset + size)
 	}
-	return strconv.Itoa(offset + consumed)
+	return edges, ""
 }
 
 // hydrateManagedAccounts turns a page of edge ids into account summaries in
@@ -157,18 +159,14 @@ func (s *AuthService) ListManagedChildren(
 	if guardianUserID == "" {
 		return nil, "", ErrUnauthenticated
 	}
-	edges, err := s.repo(ctx).ListChildrenOfGuardian(ctx, guardianUserID)
+	size, offset := guardianPage(limit, cursor)
+	// One extra row answers "is there another page?" without a second query
+	// and without reading the whole edge set.
+	edges, err := s.repo(ctx).ListChildrenOfGuardian(ctx, guardianUserID, size+1, offset)
 	if err != nil {
 		return nil, "", fmt.Errorf("list children of guardian: %w", err)
 	}
-	size, offset := guardianPage(limit, cursor)
-	if offset >= len(edges) {
-		return []*User{}, "", nil
-	}
-	page := edges[offset:]
-	if len(page) > size {
-		page = page[:size]
-	}
+	page, next := trimGuardianPage(edges, size, offset)
 	ids := make([]string, 0, len(page))
 	for _, e := range page {
 		ids = append(ids, e.ChildUserID)
@@ -177,7 +175,7 @@ func (s *AuthService) ListManagedChildren(
 	if err != nil {
 		return nil, "", err
 	}
-	return children, nextGuardianCursor(offset, len(page), len(edges)), nil
+	return children, next, nil
 }
 
 // GetGuardians returns the guardian accounts of childUserID. The caller must
@@ -208,18 +206,12 @@ func (s *AuthService) GetGuardians(
 			return nil, "", fmt.Errorf("%w: caller is not a guardian of this account", ErrPermissionDenied)
 		}
 	}
-	edges, err := repo.ListGuardiansOfChild(ctx, childUserID)
+	size, offset := guardianPage(limit, cursor)
+	edges, err := repo.ListGuardiansOfChild(ctx, childUserID, size+1, offset)
 	if err != nil {
 		return nil, "", fmt.Errorf("list guardians of child: %w", err)
 	}
-	size, offset := guardianPage(limit, cursor)
-	if offset >= len(edges) {
-		return []*User{}, "", nil
-	}
-	page := edges[offset:]
-	if len(page) > size {
-		page = page[:size]
-	}
+	page, next := trimGuardianPage(edges, size, offset)
 	ids := make([]string, 0, len(page))
 	for _, e := range page {
 		ids = append(ids, e.GuardianUserID)
@@ -231,7 +223,7 @@ func (s *AuthService) GetGuardians(
 	if err != nil {
 		return nil, "", err
 	}
-	return guardians, nextGuardianCursor(offset, len(page), len(edges)), nil
+	return guardians, next, nil
 }
 
 // upsertGuardianEdge records the (consenting adult -> child) edge and audits

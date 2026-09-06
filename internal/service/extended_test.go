@@ -1599,10 +1599,10 @@ func TestStubRepository_AllMethodsReturnUnavailable(t *testing.T) {
 	if _, err := r.GetGuardianEdge(ctx, "", ""); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("GetGuardianEdge: %v", err)
 	}
-	if _, err := r.ListGuardiansOfChild(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+	if _, err := r.ListGuardiansOfChild(ctx, "", 100, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("ListGuardiansOfChild: %v", err)
 	}
-	if _, err := r.ListChildrenOfGuardian(ctx, ""); !errors.Is(err, ErrServiceUnavailable) {
+	if _, err := r.ListChildrenOfGuardian(ctx, "", 100, 0); !errors.Is(err, ErrServiceUnavailable) {
 		t.Errorf("ListChildrenOfGuardian: %v", err)
 	}
 	if err := r.CreateManagedChildAccount(ctx, &User{}, &GuardianEdge{}, &ParentalConsentRecord{}); !errors.Is(err, ErrServiceUnavailable) {

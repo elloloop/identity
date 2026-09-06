@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 
@@ -65,13 +66,20 @@ func (r *pgRepository) GetGuardianEdge(ctx context.Context, guardianUserID, chil
 	return e, nil
 }
 
-func (r *pgRepository) ListGuardiansOfChild(ctx context.Context, childUserID string) ([]*service.GuardianEdge, error) {
+func (r *pgRepository) ListGuardiansOfChild(ctx context.Context, childUserID string, limit, offset int) ([]*service.GuardianEdge, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("postgres: ListGuardiansOfChild: limit must be > 0, got %d", limit)
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	const q = `
 		SELECT project_id, guardian_user_id, child_user_id, created_at_ms
 		  FROM guardian_edges
 		 WHERE project_id = $1 AND child_user_id = $2
-		 ORDER BY guardian_user_id`
-	rows, err := r.pool.Query(ctx, q, r.projectID, childUserID)
+		 ORDER BY guardian_user_id
+		 LIMIT $3 OFFSET $4`
+	rows, err := r.pool.Query(ctx, q, r.projectID, childUserID, limit, offset)
 	if err != nil {
 		return nil, wrapPgErr("ListGuardiansOfChild", err)
 	}
@@ -90,13 +98,20 @@ func (r *pgRepository) ListGuardiansOfChild(ctx context.Context, childUserID str
 	return out, nil
 }
 
-func (r *pgRepository) ListChildrenOfGuardian(ctx context.Context, guardianUserID string) ([]*service.GuardianEdge, error) {
+func (r *pgRepository) ListChildrenOfGuardian(ctx context.Context, guardianUserID string, limit, offset int) ([]*service.GuardianEdge, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("postgres: ListChildrenOfGuardian: limit must be > 0, got %d", limit)
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	const q = `
 		SELECT project_id, guardian_user_id, child_user_id, created_at_ms
 		  FROM guardian_edges
 		 WHERE project_id = $1 AND guardian_user_id = $2
-		 ORDER BY child_user_id`
-	rows, err := r.pool.Query(ctx, q, r.projectID, guardianUserID)
+		 ORDER BY child_user_id
+		 LIMIT $3 OFFSET $4`
+	rows, err := r.pool.Query(ctx, q, r.projectID, guardianUserID, limit, offset)
 	if err != nil {
 		return nil, wrapPgErr("ListChildrenOfGuardian", err)
 	}

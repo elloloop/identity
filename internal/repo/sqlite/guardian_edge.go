@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/elloloop/identity/internal/service"
 )
@@ -63,13 +64,20 @@ func (r *sqliteRepository) GetGuardianEdge(ctx context.Context, guardianUserID, 
 	return e, nil
 }
 
-func (r *sqliteRepository) ListGuardiansOfChild(ctx context.Context, childUserID string) ([]*service.GuardianEdge, error) {
+func (r *sqliteRepository) ListGuardiansOfChild(ctx context.Context, childUserID string, limit, offset int) ([]*service.GuardianEdge, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("sqlite: ListGuardiansOfChild: limit must be > 0, got %d", limit)
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	const q = `
 		SELECT project_id, guardian_user_id, child_user_id, created_at_ms
 		  FROM guardian_edges
 		 WHERE project_id = $1 AND child_user_id = $2
-		 ORDER BY guardian_user_id`
-	rows, err := r.db.Query(ctx, q, r.projectID, childUserID)
+		 ORDER BY guardian_user_id
+		 LIMIT $3 OFFSET $4`
+	rows, err := r.db.Query(ctx, q, r.projectID, childUserID, limit, offset)
 	if err != nil {
 		return nil, wrapErr("ListGuardiansOfChild", err)
 	}
@@ -88,13 +96,20 @@ func (r *sqliteRepository) ListGuardiansOfChild(ctx context.Context, childUserID
 	return out, nil
 }
 
-func (r *sqliteRepository) ListChildrenOfGuardian(ctx context.Context, guardianUserID string) ([]*service.GuardianEdge, error) {
+func (r *sqliteRepository) ListChildrenOfGuardian(ctx context.Context, guardianUserID string, limit, offset int) ([]*service.GuardianEdge, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("sqlite: ListChildrenOfGuardian: limit must be > 0, got %d", limit)
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	const q = `
 		SELECT project_id, guardian_user_id, child_user_id, created_at_ms
 		  FROM guardian_edges
 		 WHERE project_id = $1 AND guardian_user_id = $2
-		 ORDER BY child_user_id`
-	rows, err := r.db.Query(ctx, q, r.projectID, guardianUserID)
+		 ORDER BY child_user_id
+		 LIMIT $3 OFFSET $4`
+	rows, err := r.db.Query(ctx, q, r.projectID, guardianUserID, limit, offset)
 	if err != nil {
 		return nil, wrapErr("ListChildrenOfGuardian", err)
 	}

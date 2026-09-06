@@ -234,7 +234,7 @@ func runManagedChildConformance(t *testing.T, driver Driver) {
 				t.Fatalf("failed create leaked a consent record: %#v err=%v", got, err)
 			}
 			// The first child's rows are untouched.
-			children, err := r.ListChildrenOfGuardian(ctx, guardian)
+			children, err := r.ListChildrenOfGuardian(ctx, guardian, 100, 0)
 			if err != nil || len(children) != 1 {
 				t.Fatalf("guardian children = %#v err=%v, want exactly 1", children, err)
 			}

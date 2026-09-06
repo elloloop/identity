@@ -346,7 +346,7 @@ func TestCreateManagedChildAccount_Refusals(t *testing.T) {
 			if u, _ := f.repo.FindUserByUsername(context.Background(), normalizeUsername(req.Username)); u != nil {
 				t.Fatalf("refusal leaked an account: %#v", u)
 			}
-			if edges, _ := f.repo.ListChildrenOfGuardian(context.Background(), f.adult.ID); len(edges) != 0 {
+			if edges, _ := f.repo.ListChildrenOfGuardian(context.Background(), f.adult.ID, 100, 0); len(edges) != 0 {
 				t.Fatalf("refusal leaked guardian edges: %#v", edges)
 			}
 			if tc.wantFailStep != "" {
@@ -378,7 +378,7 @@ func TestCreateManagedChildAccount_DuplicateUsername_LeavesNothing(t *testing.T)
 	if res != nil {
 		t.Fatalf("no result on duplicate, got %#v", res)
 	}
-	children, _ := f.repo.ListChildrenOfGuardian(ctx, f.adult.ID)
+	children, _ := f.repo.ListChildrenOfGuardian(ctx, f.adult.ID, 100, 0)
 	if len(children) != 1 {
 		t.Fatalf("guardian children = %d, want 1", len(children))
 	}

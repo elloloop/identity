@@ -342,11 +342,11 @@ func (StubRepository) GetGuardianEdge(context.Context, string, string) (*Guardia
 	return nil, ErrServiceUnavailable
 }
 
-func (StubRepository) ListGuardiansOfChild(context.Context, string) ([]*GuardianEdge, error) {
+func (StubRepository) ListGuardiansOfChild(context.Context, string, int, int) ([]*GuardianEdge, error) {
 	return nil, ErrServiceUnavailable
 }
 
-func (StubRepository) ListChildrenOfGuardian(context.Context, string) ([]*GuardianEdge, error) {
+func (StubRepository) ListChildrenOfGuardian(context.Context, string, int, int) ([]*GuardianEdge, error) {
 	return nil, ErrServiceUnavailable
 }
 

@@ -1180,41 +1180,129 @@ func (r *MemRepo) SetUserLockedUntil(_ context.Context, userID string, lockedUnt
 // The harness repository is held to the same Repository contract as the three
 // real drivers (see memrepo_conformance_test.go), so its field handling has to
 // be complete rather than "whatever the integration tests happened to need".
-// Same three-table shape as internal/repo/memory: a wrong-typed value is
-// SKIPPED, not written as the zero value, matching what the SQL drivers do.
-var (
-	memUserStringFields = map[string]func(*service.User) *string{
-		"name":           func(u *service.User) *string { return &u.Name },
-		"email":          func(u *service.User) *string { return &u.Email },
-		"avatar_url":     func(u *service.User) *string { return &u.AvatarURL },
-		"password_hash":  func(u *service.User) *string { return &u.PasswordHash },
-		"status":         func(u *service.User) *string { return &u.Status },
-		"recovery_email": func(u *service.User) *string { return &u.RecoveryEmail },
-		"external_id":    func(u *service.User) *string { return &u.ExternalID },
-		"phone_number":   func(u *service.User) *string { return &u.PhoneNumber },
-		"market":         func(u *service.User) *string { return &u.Market },
-		"username":       func(u *service.User) *string { return &u.Username },
-	}
+//
+// Split by destination type so each switch assigns concretely and stays well
+// inside the complexity limit — one switch over every field would exceed it,
+// and dispatching through accessor functions would trade a plain assignment
+// for indirection the call site does not need.
+//
+// A wrong-typed value is SKIPPED, not written as the zero value, matching
+// what the SQL drivers do with a value that does not fit the column.
 
-	memUserBoolFields = map[string]func(*service.User) *bool{
-		"totp_required":  func(u *service.User) *bool { return &u.TotpRequired },
-		"email_verified": func(u *service.User) *bool { return &u.EmailVerified },
-		"is_anonymous":   func(u *service.User) *bool { return &u.IsAnonymous },
-		"phone_verified": func(u *service.User) *bool { return &u.PhoneVerified },
-		"idv_verified":   func(u *service.User) *bool { return &u.IDVVerified },
+func applyUserStringField(u *service.User, key string, v any) bool {
+	s, ok := v.(string)
+	if !ok {
+		// A known key with a wrong-typed value is still "handled": the
+		// drivers skip it rather than falling through to another type.
+		return isUserStringField(key)
 	}
+	switch key {
+	case "name":
+		u.Name = s
+	case "email":
+		u.Email = s
+	case "avatar_url":
+		u.AvatarURL = s
+	case "password_hash":
+		u.PasswordHash = s
+	case "status":
+		u.Status = s
+	case "recovery_email":
+		u.RecoveryEmail = s
+	case "external_id":
+		u.ExternalID = s
+	case "phone_number":
+		u.PhoneNumber = s
+	case "market":
+		u.Market = s
+	case "username":
+		u.Username = s
+	default:
+		return false
+	}
+	return true
+}
 
-	memUserInt64Fields = map[string]func(*service.User) *int64{
-		"locked_until":             func(u *service.User) *int64 { return &u.LockedUntil },
-		"last_login_at":            func(u *service.User) *int64 { return &u.LastLoginAtMs },
-		"email_verified_at":        func(u *service.User) *int64 { return &u.EmailVerifiedAt },
-		"anonymous_last_seen_ms":   func(u *service.User) *int64 { return &u.AnonymousLastSeenMs },
-		"phone_verified_at":        func(u *service.User) *int64 { return &u.PhoneVerifiedAt },
-		"idv_verified_at":          func(u *service.User) *int64 { return &u.IDVVerifiedAt },
-		"date_of_birth_ms":         func(u *service.User) *int64 { return &u.DateOfBirthMs },
-		"deletion_scheduled_at_ms": func(u *service.User) *int64 { return &u.DeletionScheduledAtMs },
+func isUserStringField(key string) bool {
+	switch key {
+	case "name", "email", "avatar_url", "password_hash", "status",
+		"recovery_email", "external_id", "phone_number", "market", "username":
+		return true
 	}
-)
+	return false
+}
+
+func applyUserBoolField(u *service.User, key string, v any) bool {
+	b, ok := v.(bool)
+	if !ok {
+		return isUserBoolField(key)
+	}
+	switch key {
+	case "totp_required":
+		u.TotpRequired = b
+	case "email_verified":
+		u.EmailVerified = b
+	case "is_anonymous":
+		u.IsAnonymous = b
+	case "phone_verified":
+		u.PhoneVerified = b
+	case "idv_verified":
+		u.IDVVerified = b
+	default:
+		return false
+	}
+	return true
+}
+
+func isUserBoolField(key string) bool {
+	switch key {
+	case "totp_required", "email_verified", "is_anonymous", "phone_verified", "idv_verified":
+		return true
+	}
+	return false
+}
+
+func applyUserInt64Field(u *service.User, key string, v any) bool {
+	x, ok := memFieldInt64(v)
+	if !ok {
+		return isUserInt64Field(key)
+	}
+	switch key {
+	case "locked_until":
+		u.LockedUntil = x
+	case "last_login_at":
+		u.LastLoginAtMs = x
+	case "email_verified_at":
+		u.EmailVerifiedAt = x
+	case "anonymous_last_seen_ms":
+		u.AnonymousLastSeenMs = x
+	case "phone_verified_at":
+		u.PhoneVerifiedAt = x
+	case "idv_verified_at":
+		u.IDVVerifiedAt = x
+	case "date_of_birth_ms":
+		u.DateOfBirthMs = x
+	case "deletion_scheduled_at_ms":
+		u.DeletionScheduledAtMs = x
+	case "failed_login_count":
+		u.FailedLoginCount = int(x)
+	case "updated_at":
+		u.UpdatedAt = time.UnixMilli(x)
+	default:
+		return false
+	}
+	return true
+}
+
+func isUserInt64Field(key string) bool {
+	switch key {
+	case "locked_until", "last_login_at", "email_verified_at", "anonymous_last_seen_ms",
+		"phone_verified_at", "idv_verified_at", "date_of_birth_ms",
+		"deletion_scheduled_at_ms", "failed_login_count", "updated_at":
+		return true
+	}
+	return false
+}
 
 func memFieldInt64(v any) (int64, bool) {
 	switch x := v.(type) {
@@ -1226,36 +1314,18 @@ func memFieldInt64(v any) (int64, bool) {
 	return 0, false
 }
 
+// applyUserFields writes a Repository UpdateUser patch onto a stored user. An
+// unknown field name is ignored, exactly as the SQL drivers ignore one that
+// names no column.
 func applyUserFields(u *service.User, fields map[string]any) {
 	for k, v := range fields {
-		if field, ok := memUserStringFields[k]; ok {
-			if s, ok := v.(string); ok {
-				*field(u) = s
-			}
+		if applyUserStringField(u, k, v) {
 			continue
 		}
-		if field, ok := memUserBoolFields[k]; ok {
-			if b, ok := v.(bool); ok {
-				*field(u) = b
-			}
+		if applyUserBoolField(u, k, v) {
 			continue
 		}
-		if field, ok := memUserInt64Fields[k]; ok {
-			if x, ok := memFieldInt64(v); ok {
-				*field(u) = x
-			}
-			continue
-		}
-		switch k {
-		case "failed_login_count":
-			if x, ok := memFieldInt64(v); ok {
-				u.FailedLoginCount = int(x)
-			}
-		case "updated_at":
-			if x, ok := memFieldInt64(v); ok {
-				u.UpdatedAt = time.UnixMilli(x)
-			}
-		}
+		applyUserInt64Field(u, k, v)
 	}
 }
 
@@ -2309,7 +2379,13 @@ func (r *MemRepo) GetGuardianEdge(_ context.Context, guardianUserID, childUserID
 	return &cp, nil
 }
 
-func (r *MemRepo) ListGuardiansOfChild(_ context.Context, childUserID string) ([]*service.GuardianEdge, error) {
+func (r *MemRepo) ListGuardiansOfChild(_ context.Context, childUserID string, limit, offset int) ([]*service.GuardianEdge, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("ListGuardiansOfChild: limit must be > 0, got %d", limit)
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []*service.GuardianEdge
@@ -2325,10 +2401,23 @@ func (r *MemRepo) ListGuardiansOfChild(_ context.Context, childUserID string) ([
 	// so map-iteration order would make the same call answer differently
 	// every time on this driver alone.
 	sort.Slice(out, func(i, j int) bool { return out[i].GuardianUserID < out[j].GuardianUserID })
+	if offset >= len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 
-func (r *MemRepo) ListChildrenOfGuardian(_ context.Context, guardianUserID string) ([]*service.GuardianEdge, error) {
+func (r *MemRepo) ListChildrenOfGuardian(_ context.Context, guardianUserID string, limit, offset int) ([]*service.GuardianEdge, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("ListChildrenOfGuardian: limit must be > 0, got %d", limit)
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []*service.GuardianEdge
@@ -2341,6 +2430,13 @@ func (r *MemRepo) ListChildrenOfGuardian(_ context.Context, guardianUserID strin
 	}
 	// Stable ordering identical to the SQL drivers (ORDER BY child_user_id).
 	sort.Slice(out, func(i, j int) bool { return out[i].ChildUserID < out[j].ChildUserID })
+	if offset >= len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
+	if len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 
@@ -2851,9 +2947,6 @@ func (r *MemRepo) ConsumeAssuranceChallenge(_ context.Context, nodeID string) (*
 func (r *MemRepo) DeleteExpiredAssuranceChallenges(_ context.Context, beforeMs int64, limit int) error {
 	// The Repository contract refuses an unbounded delete batch, so a buggy
 	// caller cannot stall the store — the real drivers all reject this.
-	if limit <= 0 {
-		return fmt.Errorf("integration: DeleteExpiredAssuranceChallenges: limit must be > 0, got %d", limit)
-	}
 	if limit <= 0 {
 		return fmt.Errorf("memrepo: DeleteExpiredAssuranceChallenges: limit must be > 0, got %d", limit)
 	}
