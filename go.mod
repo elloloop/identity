@@ -31,9 +31,9 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.56.0
-	golang.org/x/net v0.57.0
-	google.golang.org/grpc v1.83.1
-	google.golang.org/protobuf v1.36.11
+	golang.org/x/net v0.58.0
+	google.golang.org/grpc v1.83.2
+	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.53.0
 )
 
