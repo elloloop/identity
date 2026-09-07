@@ -591,15 +591,116 @@ type ProjectAccessConfig struct {
 	// time. A user whose email domain is listed is permitted even when their
 	// exact address is absent from AllowedEmails.
 	AllowedDomains []string `json:"allowed_domains"`
+
+	// ── Deny layer ──────────────────────────────────────────────────────────
+	//
+	// The two fields below express "everyone the mode admits, EXCEPT these",
+	// which no mode can state on its own: "open but not consumer mailboxes"
+	// would otherwise force an operator to enumerate every corporate domain
+	// they will ever hire from. They are therefore a separate layer rather
+	// than a fifth AccessMode, and they compose with EVERY mode — an allowlist
+	// project can refuse a listed domain's consumer sibling, an invite project
+	// can refuse a personal address on the invitation.
+	//
+	// The layer is a pure SUBTRACTION and can only ever refuse: it is
+	// evaluated after the mode has already admitted the address, so no
+	// combination of these fields lets anyone in. That ordering is what keeps
+	// the two halves independently readable — the mode answers "who may
+	// enter", the deny layer answers "who is turned away regardless".
+
+	// BlockPublicEmailDomains refuses addresses at public / consumer mailbox
+	// providers — gmail.com, outlook.com, yahoo.com, icloud.com, proton.me,
+	// and the rest of config.IsPublicEmailDomain's set. It is the "work email
+	// only" switch: one boolean instead of a hand-maintained list that goes
+	// stale differently in every deployment. Valid with every mode.
+	//
+	// It deliberately consults the SAME set that decides whether a verified
+	// address may auto-form a Tenant (internal/config/email_domains.go),
+	// including the operator's GATEWAY_PUBLIC_EMAIL_DOMAINS additions. Both
+	// questions are the one fact "is this a consumer mailbox provider", and a
+	// second copy of that list would drift — an operator who declared a
+	// domain consumer-grade for tenant formation would be astonished to find
+	// it still admitted by a work-email-only project.
+	BlockPublicEmailDomains bool `json:"block_public_email_domains"`
+
+	// BlockedDomains refuses these specific email domains on top of whatever
+	// BlockPublicEmailDomains covers — a competitor's domain, a disposable
+	// -address provider, a subsidiary being wound down. Entries are
+	// canonicalized at parse time. Valid with every mode.
+	BlockedDomains []string `json:"blocked_domains"`
+
+	// ExemptEmails passes the deny layer for these exact addresses — the
+	// named-individual escape hatch for the contractor on gmail.com that a
+	// work-email-only project still has to let in.
+	//
+	// It exempts from the DENY LAYER ONLY; it is not a second allowlist and
+	// cannot admit anyone the mode itself refuses (an exempt address on a
+	// closed project is still refused). Keeping it distinct from AllowedEmails
+	// is deliberate: one field, one meaning. Overloading AllowedEmails to
+	// serve both roles would make "is gmail.com in allowed_domains an
+	// allowlist entry or a block exemption?" a question an operator has to ask
+	// — and answer differently per mode.
+	//
+	// Entries are canonicalized at parse time, and only valid when a deny
+	// layer is actually configured (otherwise they are inert — validate
+	// rejects them).
+	ExemptEmails []string `json:"exempt_emails"`
 }
 
-// NewProjectAccessConfig builds and validates an access policy from separate
-// mode + allowlist parts (as opposed to a config_json blob), applying the SAME
-// validation and canonicalization as the config_json path so both are gated by
-// identical rules. A malformed spec is returned as an error — never silently
-// downgraded to open.
-func NewProjectAccessConfig(mode string, allowedEmails, allowedDomains []string) (ProjectAccessConfig, error) {
-	a := ProjectAccessConfig{Mode: mode, AllowedEmails: allowedEmails, AllowedDomains: allowedDomains}
+// hasDenyLayer reports whether any deny rule is configured. It is what makes
+// ExemptEmails meaningful — with no deny layer there is nothing to be exempt
+// from, so validate rejects exemptions rather than accept a field that does
+// nothing.
+func (a ProjectAccessConfig) hasDenyLayer() bool {
+	return a.BlockPublicEmailDomains || len(a.BlockedDomains) > 0
+}
+
+// denies reports whether the deny layer refuses this address. Its parameter is
+// a canonicalEmail so the "caller MUST pass an already-canonicalized address"
+// precondition is enforced by the compiler — entries and the personal-domain
+// table are canonicalized, so a raw address would spuriously miss.
+//
+// An address with no parseable domain is NOT denied here: a malformed address
+// is the format validator's to refuse, and silently folding "invalid" into
+// "blocked" would report the wrong reason for the refusal.
+// cfg supplies the public-provider set (built-in plus the operator's
+// GATEWAY_PUBLIC_EMAIL_DOMAINS additions); a nil cfg disables only the
+// BlockPublicEmailDomains half, leaving BlockedDomains working.
+func (a ProjectAccessConfig) denies(cfg *config.Config, email canonicalEmail) bool {
+	if !a.hasDenyLayer() {
+		return false
+	}
+	canonical := string(email)
+	for _, e := range a.ExemptEmails {
+		if e == canonical {
+			return false
+		}
+	}
+	domain := emailDomain(canonical)
+	if domain == "" {
+		return false
+	}
+	if a.BlockPublicEmailDomains && cfg != nil && cfg.IsPublicEmailDomain(domain) {
+		return true
+	}
+	for _, d := range a.BlockedDomains {
+		if d == domain {
+			return true
+		}
+	}
+	return false
+}
+
+// NewProjectAccessConfig validates and canonicalizes a policy assembled from
+// parts (the env-configured default project) rather than decoded from a
+// config_json blob, applying the SAME validation and canonicalization as the
+// config_json path so both are gated by identical rules. A malformed policy is
+// returned as an error — never silently downgraded to open.
+//
+// It takes a ProjectAccessConfig rather than a parallel "spec" struct: the two
+// would carry identical fields, and a second shape for the same policy is one
+// more place for a newly added field to be forgotten.
+func NewProjectAccessConfig(a ProjectAccessConfig) (ProjectAccessConfig, error) {
 	if err := a.validate(); err != nil {
 		return ProjectAccessConfig{}, err
 	}
@@ -636,6 +737,49 @@ func (a ProjectAccessConfig) validate() error {
 	default:
 		return fmt.Errorf("access.mode %q must be one of %q, %q, %q, %q", a.Mode,
 			AccessModeOpen, AccessModeAllowlist, AccessModeInvite, AccessModeClosed)
+	}
+	return a.validateDenyLayer()
+}
+
+// validateDenyLayer rejects a deny layer that cannot do what it appears to.
+// The rules are the same "fail loud rather than serve an inert field" posture
+// validate() takes for the allowlist: a configured field that has no effect is
+// a misconfiguration an operator wants to hear about at boot, not discover
+// when the wrong person gets in.
+func (a ProjectAccessConfig) validateDenyLayer() error {
+	// A deny layer only ever subtracts, so on a mode that admits nobody there
+	// is nothing to subtract from and the fields are inert.
+	// Both an explicit "closed" and an unset mode deny everyone (modeAdmits
+	// treats them identically under default-DENY), so in both cases there is
+	// nothing for the layer to subtract from and the fields are inert.
+	if a.hasDenyLayer() {
+		if m := a.mode(); m == AccessModeClosed || m == "" {
+			return fmt.Errorf("access: block_public_email_domains/blocked_domains are inert with mode %q, which already denies everyone", m)
+		}
+	}
+	if len(a.ExemptEmails) > 0 && !a.hasDenyLayer() {
+		return errors.New("access: exempt_emails requires block_public_email_domains or blocked_domains — with no deny layer there is nothing to be exempt from")
+	}
+	for _, raw := range a.BlockedDomains {
+		d := strings.TrimSpace(raw)
+		if d == "" {
+			return errors.New("access.blocked_domains entries must not be empty")
+		}
+		if strings.Contains(d, "@") {
+			return fmt.Errorf("access.blocked_domains entry %q must be a bare domain, not an email address", raw)
+		}
+		if !strings.Contains(d, ".") {
+			return fmt.Errorf("access.blocked_domains entry %q must be a domain containing a dot", raw)
+		}
+	}
+	for _, raw := range a.ExemptEmails {
+		e := strings.TrimSpace(raw)
+		if e == "" {
+			return errors.New("access.exempt_emails entries must not be empty")
+		}
+		if err := validateEmailFormat(strings.ToLower(e)); err != nil {
+			return fmt.Errorf("access.exempt_emails entry %q is not a valid email: %w", raw, err)
+		}
 	}
 	return nil
 }
@@ -681,10 +825,29 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 		}
 	}
 	if len(a.AllowedDomains) > 0 {
-		out.AllowedDomains = make([]string, 0, len(a.AllowedDomains))
-		for _, d := range a.AllowedDomains {
-			out.AllowedDomains = append(out.AllowedDomains, canonicalizeDomain(d))
+		out.AllowedDomains = canonicalizeDomains(a.AllowedDomains)
+	}
+	out.BlockPublicEmailDomains = a.BlockPublicEmailDomains
+	if len(a.BlockedDomains) > 0 {
+		out.BlockedDomains = canonicalizeDomains(a.BlockedDomains)
+	}
+	if len(a.ExemptEmails) > 0 {
+		out.ExemptEmails = make([]string, 0, len(a.ExemptEmails))
+		for _, e := range a.ExemptEmails {
+			out.ExemptEmails = append(out.ExemptEmails, canonicalizeEmail(e))
 		}
+	}
+	return out
+}
+
+// canonicalizeDomains canonicalizes a domain list into a new slice, leaving the
+// input untouched. Both the allowlist and the deny layer need exactly this, and
+// a domain list that is canonicalized in one place and not the other is a
+// silent matching failure.
+func canonicalizeDomains(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, d := range in {
+		out = append(out, canonicalizeDomain(d))
 	}
 	return out
 }

@@ -1529,11 +1529,14 @@ func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send fun
 // It fails CLOSED: an invalid spec yields a deny-all closed policy rather than
 // an open one, and logs a WARN so the misconfiguration is visible.
 func buildDefaultProjectAccess(cfg *config.Config, logger *zap.Logger) ProjectAccessConfig {
-	access, err := NewProjectAccessConfig(
-		cfg.DefaultProjectAccessMode,
-		cfg.DefaultProjectAllowedEmailList(),
-		cfg.DefaultProjectAllowedDomainList(),
-	)
+	access, err := NewProjectAccessConfig(ProjectAccessConfig{
+		Mode:                    cfg.DefaultProjectAccessMode,
+		AllowedEmails:           cfg.DefaultProjectAllowedEmailList(),
+		AllowedDomains:          cfg.DefaultProjectAllowedDomainList(),
+		BlockPublicEmailDomains: cfg.DefaultProjectBlockPublicEmailDomains,
+		BlockedDomains:          cfg.DefaultProjectBlockedEmailDomainList(),
+		ExemptEmails:            cfg.DefaultProjectExemptEmailList(),
+	})
 	if err != nil {
 		logger.Warn("default_project_access_invalid_failing_closed", zap.Error(err))
 		return ProjectAccessConfig{Mode: AccessModeClosed}

@@ -69,6 +69,16 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 		return fmt.Errorf("%w: new email matches current email", ErrInvalidArgument)
 	}
 
+	// The NEW address has to satisfy the project's access policy. Without this
+	// the email-change flow is a way around every access rule the project
+	// has: a member of an allowlist project could move to an unlisted domain,
+	// and a work-email-only project could not keep anyone on a work email.
+	// Checked as a LOGIN (isSignup=false) — the account already exists and is
+	// not being created here, so an invite-only project must not refuse it.
+	if err := s.enforceProjectAccessLogin(ctx, canonicalize(newEmail)); err != nil {
+		return err
+	}
+
 	existing, err := s.repo(ctx).FindUserByEmail(ctx, newEmail)
 	if err != nil {
 		return fmt.Errorf("checking email uniqueness: %w", err)
@@ -206,6 +216,16 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 	}
 	if existing != nil && existing.ID != user.ID {
 		return nil, fmt.Errorf("%w: email already in use", ErrAlreadyExists)
+	}
+
+	// Re-check the access policy at REDEMPTION, not only when the change was
+	// requested. The token outlives the request, so a project that tightens
+	// its policy in between (turning on block_personal_email_domains, say)
+	// would otherwise have every outstanding token as a hole in the new
+	// policy. Redemption is the authoritative point, the same place the
+	// passwordless flows put their decisive access check.
+	if err := s.enforceProjectAccessLogin(ctx, canonicalize(rec.NewEmail)); err != nil {
+		return nil, err
 	}
 
 	now := s.nowMs()

@@ -270,6 +270,26 @@ type Config struct {
 	// GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS.
 	DefaultProjectAllowedDomains string
 
+	// DefaultProjectBlockPublicEmailDomains refuses addresses at public /
+	// consumer mailbox providers on the default project — the "work email
+	// only" switch. Set via GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS.
+	// It composes with any access mode: the mode decides who may enter, this
+	// subtracts from that set, and it consults the same provider set as
+	// IsPublicEmailDomain (including GATEWAY_PUBLIC_EMAIL_DOMAINS).
+	DefaultProjectBlockPublicEmailDomains bool
+
+	// DefaultProjectBlockedEmailDomains is the comma-separated list of extra
+	// email domains refused on the default project, on top of whatever
+	// DefaultProjectBlockPublicEmailDomains covers. Set via
+	// GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS.
+	DefaultProjectBlockedEmailDomains string
+
+	// DefaultProjectExemptEmails is the comma-separated list of addresses that
+	// pass the default project's deny layer — the named-individual escape
+	// hatch. Set via GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS. Only meaningful
+	// alongside one of the two fields above.
+	DefaultProjectExemptEmails string
+
 	// RequireVerifiedAuthDomain governs whether an UNVERIFIED custom
 	// auth-domain marked is_primary may become a project's primary
 	// auth-domain — the host that drives branded link URLs (magic links,
@@ -1162,7 +1182,13 @@ func loadFromEnv() *Config {
 		DefaultProjectAccessMode:     envStr("GATEWAY_DEFAULT_PROJECT_ACCESS_MODE", "closed"),
 		DefaultProjectAllowedEmails:  envStr("GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS", ""),
 		DefaultProjectAllowedDomains: envStr("GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS", ""),
-		RequireVerifiedAuthDomain:    envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
+		// The deny layer is OFF by default: it subtracts from the configured
+		// mode, and a deployment that has not asked for it must keep exactly
+		// the access its mode already grants.
+		DefaultProjectBlockPublicEmailDomains: envBool("GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS", false),
+		DefaultProjectBlockedEmailDomains:     envStr("GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS", ""),
+		DefaultProjectExemptEmails:            envStr("GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS", ""),
+		RequireVerifiedAuthDomain:             envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
 
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),
@@ -1460,6 +1486,19 @@ func (c *Config) DefaultProjectAllowedEmailList() []string {
 // when DefaultProjectAccessMode is "allowlist".
 func (c *Config) DefaultProjectAllowedDomainList() []string {
 	return splitNonEmptyCSV(c.DefaultProjectAllowedDomains)
+}
+
+// DefaultProjectBlockedEmailDomainList returns the default project's blocked
+// email domains (comma-separated), trimmed with blanks dropped.
+// Canonicalization happens in the service layer, keeping this a pure split.
+func (c *Config) DefaultProjectBlockedEmailDomainList() []string {
+	return splitNonEmptyCSV(c.DefaultProjectBlockedEmailDomains)
+}
+
+// DefaultProjectExemptEmailList returns the addresses exempt from the default
+// project's deny layer (comma-separated), trimmed with blanks dropped.
+func (c *Config) DefaultProjectExemptEmailList() []string {
+	return splitNonEmptyCSV(c.DefaultProjectExemptEmails)
 }
 
 // splitNonEmptyCSV drops blank entries and yields nil (not an empty slice) for

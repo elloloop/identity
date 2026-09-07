@@ -299,7 +299,7 @@ func TestNativeOAuthLogin_Allowlist_NonCanonical(t *testing.T) {
 	signer := newNativeTokenSigner(t)
 
 	proj := nativeProjWithAuds("proj-tortoise", "scope-tortoise")
-	access, err := NewProjectAccessConfig(AccessModeAllowlist, []string{"alicesmith@gmail.com"}, nil)
+	access, err := NewProjectAccessConfig(ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"alicesmith@gmail.com"}})
 	require.NoError(t, err)
 	proj.Access = access
 	projects := &fakeNativeProjects{active: map[string]*AdminProject{"proj-tortoise": proj}}
