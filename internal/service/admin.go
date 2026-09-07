@@ -123,7 +123,7 @@ func (s *AdminService) InviteUser(
 	// project the access gate denies at AcceptInvitation, so sending one would
 	// dead-end onboarding while the admin thinks it worked. Login-context
 	// (isSignup=false) permits open and invite mode and checks the allowlist.
-	if scope := ProjectScopeFromContext(ctx); scope != nil && !accessPermits(scope.Access, canonicalize(email), false) {
+	if scope := ProjectScopeFromContext(ctx); scope != nil && !accessPermits(s.cfg, scope.Access, canonicalize(email), false) {
 		return nil, ErrAccessNotAllowed
 	}
 	role = strings.ToLower(strings.TrimSpace(role))

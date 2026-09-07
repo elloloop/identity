@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/email"
 )
 
@@ -144,7 +145,7 @@ func TestAccessPermits_Matrix(t *testing.T) {
 		{"unrecognized_denied", ProjectAccessConfig{Mode: "bogus"}, listed, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.wantPermit, accessPermits(tc.access, canonicalize(tc.email), tc.signup))
+			assert.Equal(t, tc.wantPermit, accessPermits(&config.Config{}, tc.access, canonicalize(tc.email), tc.signup))
 		})
 	}
 }
@@ -198,19 +199,19 @@ func TestParseProjectConfig_Access_Validation(t *testing.T) {
 func TestNewProjectAccessConfig(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{AccessModeOpen, AccessModeInvite, AccessModeClosed, ""} {
-		a, err := NewProjectAccessConfig(mode, nil, nil)
+		a, err := NewProjectAccessConfig(ProjectAccessConfig{Mode: mode})
 		require.NoError(t, err, "mode %q", mode)
 		assert.Equal(t, mode, a.Mode)
 	}
-	a, err := NewProjectAccessConfig(AccessModeAllowlist, []string{"OP@Example.COM"}, nil)
+	a, err := NewProjectAccessConfig(ProjectAccessConfig{Mode: AccessModeAllowlist, AllowedEmails: []string{"OP@Example.COM"}})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"op@example.com"}, a.AllowedEmails)
 
-	_, err = NewProjectAccessConfig(AccessModeAllowlist, nil, nil)
+	_, err = NewProjectAccessConfig(ProjectAccessConfig{Mode: AccessModeAllowlist})
 	require.Error(t, err, "allowlist without entries must fail")
-	_, err = NewProjectAccessConfig("bogus", nil, nil)
+	_, err = NewProjectAccessConfig(ProjectAccessConfig{Mode: "bogus"})
 	require.Error(t, err, "unrecognized mode must fail")
-	_, err = NewProjectAccessConfig(AccessModeOpen, []string{"a@b.com"}, nil)
+	_, err = NewProjectAccessConfig(ProjectAccessConfig{Mode: AccessModeOpen, AllowedEmails: []string{"a@b.com"}})
 	require.Error(t, err, "entries with a non-allowlist mode must fail")
 }
 
@@ -498,7 +499,7 @@ func TestProjectAccess_AcceptInvitation_AllowlistGatesInvitee(t *testing.T) {
 func TestProjectAccess_EnvDefaultProject_ModeGovernsDenyOrPermit(t *testing.T) {
 	svc, _, _ := newAuthSvcWithMailer(t)
 	build := func(mode string) context.Context {
-		access, err := NewProjectAccessConfig(mode, nil, nil)
+		access, err := NewProjectAccessConfig(ProjectAccessConfig{Mode: mode})
 		require.NoError(t, err)
 		return WithProjectScope(context.Background(), &ProjectScope{ProjectID: "default", Access: access})
 	}

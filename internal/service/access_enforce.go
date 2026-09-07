@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 
+	"github.com/elloloop/identity/internal/config"
+
 	"go.uber.org/zap"
 )
 
@@ -63,7 +65,7 @@ func (s *AuthService) enforceProjectAccess(ctx context.Context, email canonicalE
 		return nil
 	}
 	access := scope.Access
-	if accessPermits(access, email, isSignup) {
+	if accessPermits(s.cfg, access, email, isSignup) {
 		return nil
 	}
 	s.logger.Info("project_access_denied",
@@ -97,6 +99,12 @@ func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email canonicalE
 	if scope == nil {
 		return true
 	}
+	// A denied address must not receive credential mail either — otherwise a
+	// blocked domain still costs SMTP reputation and tells the recipient the
+	// project knows them.
+	if scope.Access.denies(s.cfg, email) {
+		return false
+	}
 	switch scope.Access.mode() {
 	case AccessModeOpen:
 		return true
@@ -129,7 +137,22 @@ func (s *AuthService) userExists(ctx context.Context, email canonicalEmail) bool
 // accessPermits applies the mode matrix to a single (email, context) pair. It is
 // a pure decision function (no I/O) so it is unit-testable in isolation. The
 // email is already canonical (the type enforces it), so it never re-normalizes.
-func accessPermits(access ProjectAccessConfig, email canonicalEmail, isSignup bool) bool {
+func accessPermits(cfg *config.Config, access ProjectAccessConfig, email canonicalEmail, isSignup bool) bool {
+	if !modeAdmits(access, email, isSignup) {
+		return false
+	}
+	// The deny layer subtracts from whatever the mode admitted, and runs on
+	// BOTH signup and login. Gating only signup would leave the restriction
+	// permanently half-applied: a project that switches to work-email-only
+	// keeps authenticating every consumer address that registered before the
+	// switch, with no path to convergence. This mirrors the allowlist, which
+	// has always gated login as well as signup.
+	return !access.denies(cfg, email)
+}
+
+// modeAdmits applies the mode matrix alone — the "who may enter" half, before
+// the deny layer subtracts from it.
+func modeAdmits(access ProjectAccessConfig, email canonicalEmail, isSignup bool) bool {
 	switch access.mode() {
 	case AccessModeOpen:
 		return true

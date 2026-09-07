@@ -1,5 +1,34 @@
 # Upgrade guide
 
+## Unreleased — work-email-only projects (additive)
+
+A project's `access` block gains a **deny layer** that subtracts from whatever
+`access.mode` admits: `block_public_email_domains` (the "work email only"
+switch), `blocked_domains`, and `exempt_emails`. All three are additive and
+default off, so a project that sets none of them keeps exactly the access its
+mode already granted. The env-configured default project gets the same policy
+via `GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS`,
+`GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS` and
+`GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS`.
+
+Two things to know before switching it on:
+
+**It gates login, not just signup.** Turning on `block_public_email_domains`
+stops authenticating accounts already registered on consumer domains, not just
+new ones. That is deliberate — gating only signup leaves the restriction
+permanently half-applied — but it means enabling it on a live project logs
+those users out at their next authentication. List anyone who must keep their
+existing address in `exempt_emails` **in the same config write**.
+
+**Email change is now gated by the access policy at all.** This is a fix, not
+just a new feature: `RequestEmailChange` and `ConfirmEmailChange` previously
+consulted no access policy, so on any restricted project a user could move
+their account to an address the project refuses — an `allowlist` project's
+member could walk to an unlisted domain. Both now enforce the policy (as a
+login, so `invite` projects still permit it), and redemption re-checks because
+a change token outlives the request. If you relied on unrestricted email change
+on an allowlist or invite project, that door is closed.
+
 ## v4.4 → v4.5 — guardian listings are paged (additive)
 
 `ListManagedChildren` and `GetGuardians` gain `limit` (default 50, max 200)

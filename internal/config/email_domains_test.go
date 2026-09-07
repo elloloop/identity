@@ -57,6 +57,30 @@ func TestDefaultProjectAllowedLists(t *testing.T) {
 	}
 }
 
+func TestDefaultProjectDenyLayerLists(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"   ", nil},
+		{"rival.example", []string{"rival.example"}},
+		{" a@b.com , c@d.com ,", []string{"a@b.com", "c@d.com"}}, // trimmed, blanks dropped
+	}
+	for _, tc := range cases {
+		blocked := (&Config{DefaultProjectBlockedEmailDomains: tc.in}).DefaultProjectBlockedEmailDomainList()
+		if !reflect.DeepEqual(blocked, tc.want) {
+			t.Errorf("DefaultProjectBlockedEmailDomainList(%q) = %v, want %v", tc.in, blocked, tc.want)
+		}
+		exempt := (&Config{DefaultProjectExemptEmails: tc.in}).DefaultProjectExemptEmailList()
+		if !reflect.DeepEqual(exempt, tc.want) {
+			t.Errorf("DefaultProjectExemptEmailList(%q) = %v, want %v", tc.in, exempt, tc.want)
+		}
+	}
+}
+
 func TestIsPublicEmailDomain_BuiltIn(t *testing.T) {
 	t.Parallel()
 	c := &Config{}

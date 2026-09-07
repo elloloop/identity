@@ -432,6 +432,33 @@
     "anchor": "projects-and-tenancy"
   },
   {
+    "name": "GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the comma-separated list of extra email domains refused on the default project, on top of whatever DefaultProjectBlockPublicEmailDomains covers.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
+    "name": "GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "refuses addresses at public / consumer mailbox providers on the default project — the \"work email only\" switch.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
+    "name": "GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the comma-separated list of addresses that pass the default project's deny layer — the named-individual escape hatch.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
     "name": "GATEWAY_DEFAULT_PROJECT_ID",
     "type": "string",
     "default": "default",

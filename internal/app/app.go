@@ -760,11 +760,14 @@ func New(deps Deps) (*Built, error) {
 	// boot loudly if the operator supplied an invalid mode/allowlist. The
 	// resolver stamps it onto the default-project pin so the access guard is
 	// deny-by-default until GATEWAY_DEFAULT_PROJECT_ACCESS_MODE opens it.
-	defaultAccess, err := service.NewProjectAccessConfig(
-		deps.Config.DefaultProjectAccessMode,
-		deps.Config.DefaultProjectAllowedEmailList(),
-		deps.Config.DefaultProjectAllowedDomainList(),
-	)
+	defaultAccess, err := service.NewProjectAccessConfig(service.ProjectAccessConfig{
+		Mode:                    deps.Config.DefaultProjectAccessMode,
+		AllowedEmails:           deps.Config.DefaultProjectAllowedEmailList(),
+		AllowedDomains:          deps.Config.DefaultProjectAllowedDomainList(),
+		BlockPublicEmailDomains: deps.Config.DefaultProjectBlockPublicEmailDomains,
+		BlockedDomains:          deps.Config.DefaultProjectBlockedEmailDomainList(),
+		ExemptEmails:            deps.Config.DefaultProjectExemptEmailList(),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("default project access config: %w", err)
 	}
