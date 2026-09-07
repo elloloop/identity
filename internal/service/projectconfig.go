@@ -749,8 +749,13 @@ func (a ProjectAccessConfig) validate() error {
 func (a ProjectAccessConfig) validateDenyLayer() error {
 	// A deny layer only ever subtracts, so on a mode that admits nobody there
 	// is nothing to subtract from and the fields are inert.
-	if a.hasDenyLayer() && a.mode() == AccessModeClosed {
-		return fmt.Errorf("access: block_public_email_domains/blocked_domains are inert with mode %q, which already denies everyone", AccessModeClosed)
+	// Both an explicit "closed" and an unset mode deny everyone (modeAdmits
+	// treats them identically under default-DENY), so in both cases there is
+	// nothing for the layer to subtract from and the fields are inert.
+	if a.hasDenyLayer() {
+		if m := a.mode(); m == AccessModeClosed || m == "" {
+			return fmt.Errorf("access: block_public_email_domains/blocked_domains are inert with mode %q, which already denies everyone", m)
+		}
 	}
 	if len(a.ExemptEmails) > 0 && !a.hasDenyLayer() {
 		return errors.New("access: exempt_emails requires block_public_email_domains or blocked_domains — with no deny layer there is nothing to be exempt from")

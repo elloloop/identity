@@ -151,8 +151,11 @@ func TestAccessDenyLayer_SuppressesCredentialMail(t *testing.T) {
 func TestAccessDenyLayer_ValidationRejectsInertConfig(t *testing.T) {
 	t.Parallel()
 	for name, cfgJSON := range map[string]string{
-		"exemption with no deny layer":     `{"access":{"mode":"open","exempt_emails":["a@b.com"]}}`,
-		"deny layer on a closed project":   `{"access":{"mode":"closed","block_public_email_domains":true}}`,
+		"exemption with no deny layer":   `{"access":{"mode":"open","exempt_emails":["a@b.com"]}}`,
+		"deny layer on a closed project": `{"access":{"mode":"closed","block_public_email_domains":true}}`,
+		// An unset mode denies everyone under default-DENY exactly as "closed"
+		// does, so a deny layer there is equally inert and must fail the same way.
+		"deny layer with no mode":          `{"access":{"block_public_email_domains":true}}`,
 		"blocked_domains given an address": `{"access":{"mode":"open","blocked_domains":["a@b.com"]}}`,
 		"blocked_domains without a dot":    `{"access":{"mode":"open","blocked_domains":["localhost"]}}`,
 		"blank blocked_domains entry":      `{"access":{"mode":"open","blocked_domains":["  "]}}`,
@@ -266,6 +269,22 @@ func TestConfirmEmailChange_RechecksAccessAtRedemption(t *testing.T) {
 	got, err := repo.GetUser(context.Background(), user.ID)
 	require.NoError(t, err)
 	require.Equal(t, "dev@corp.example", got.Email)
+}
+
+// A trailing FQDN dot names the same domain, but an address's domain never
+// carries one — so an entry that kept it could never match, silently weakening
+// the deny rule. Canonicalization strips it for allowlist and deny alike.
+func TestAccessConfig_TrailingDotDomainsStillMatch(t *testing.T) {
+	t.Parallel()
+	cfg, err := ParseProjectConfig(`{"access":{"mode":"open","blocked_domains":["Rival.example."]}}`)
+	require.NoError(t, err)
+	require.Equal(t, []string{"rival.example"}, cfg.Access.BlockedDomains)
+	require.True(t, cfg.Access.denies(testCfg, canonicalize("x@rival.example")))
+
+	allow, err := ParseProjectConfig(`{"access":{"mode":"allowlist","allowed_domains":["Corp.example."]}}`)
+	require.NoError(t, err)
+	require.Equal(t, []string{"corp.example"}, allow.Access.AllowedDomains)
+	require.True(t, accessPermits(testCfg, allow.Access, canonicalize("x@corp.example"), true))
 }
 
 // ── one provider list, not two ───────────────────────────────────────────

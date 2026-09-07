@@ -128,6 +128,12 @@ func canonicalize(raw string) canonicalEmail {
 // malformed inputs upstream.
 func canonicalizeDomain(domain string) string {
 	domain = strings.TrimSpace(strings.ToLower(domain))
+	// Strip the trailing FQDN dot: "example.com." and "example.com" name the
+	// same domain, and an address's domain never carries one (validateEmailFormat
+	// rejects a trailing dot). A configured entry that kept it could therefore
+	// never match anything — silently weakening a deny rule, and silently
+	// narrowing an allowlist.
+	domain = strings.TrimSuffix(domain, ".")
 	if ascii, err := idna.Lookup.ToASCII(domain); err == nil {
 		domain = ascii
 	}
