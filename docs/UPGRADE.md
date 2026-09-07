@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Unreleased — work-email-only projects (additive)
+## v4.5 → v4.6 — work-email-only projects (additive)
 
 A project's `access` block gains a **deny layer** that subtracts from whatever
 `access.mode` admits: `block_public_email_domains` (the "work email only"
