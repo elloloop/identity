@@ -26,13 +26,21 @@ routine config change. The refusal now happens before the token is spent, so it
 is clean and retryable. If you deferred enabling `block_public_email_domains`
 because of that, this is the release to do it on.
 
-**Domain entries that could never match are now rejected.** A `blocked_domains`
-or `allowed_domains` value that canonicalization cannot resolve to a bare domain
-— a wildcard, a leading or doubled dot, a scheme or a path — is refused at
-config-write time instead of stored as a rule that silently matches nothing.
-Wildcards are the common case, since matching is exact-domain. **If an existing
-project carries such an entry, its next config write will fail** until the entry
-is corrected or removed; the entry was enforcing nothing either way.
+**Domain entries that could never match are now rejected — check your stored
+configs BEFORE upgrading.** A `blocked_domains` or `allowed_domains` value that
+canonicalization cannot resolve to a bare domain — a wildcard, a leading or
+doubled dot, a scheme or a path — is now refused instead of being stored as a
+rule that silently matches nothing. Wildcards are the common case, since
+matching is exact-domain.
+
+This is validated on READ, not only on write: the project resolver parses each
+project's stored `config_json` on resolution, and a parse failure makes it
+refuse that project. **A project whose `access` block already carries such an
+entry stops resolving entirely once you upgrade — every request to it fails,
+not just its next config write.** Audit your projects' `access.allowed_domains`
+and `access.blocked_domains` for entries that are not bare domain names and fix
+them before rolling out. The entries were enforcing nothing either way, so
+removing them changes no policy that was actually in effect.
 
 ## v4.5 → v4.6 — work-email-only projects (additive)
 
