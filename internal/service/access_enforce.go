@@ -68,9 +68,15 @@ func (s *AuthService) enforceProjectAccess(ctx context.Context, email canonicalE
 	if accessPermits(s.cfg, access, email, isSignup) {
 		return nil
 	}
+	// Name WHICH half refused. With a deny layer configured, a refusal on an
+	// open project logs mode=open beside a denial, which reads as a
+	// contradiction and sends the operator to the wrong config field — the
+	// allowlist-composition case is worse still, where the mode admitted the
+	// address and only the deny layer refused it.
 	s.logger.Info("project_access_denied",
 		zap.String("project_id", s.projectID(ctx)),
 		zap.String("mode", access.mode()),
+		zap.Bool("deny_layer", access.denies(s.cfg, email)),
 		zap.Bool("signup", isSignup),
 		zap.String("email_domain", emailDomain(string(email))))
 	if isSignup && access.mode() == AccessModeInvite {
@@ -134,7 +140,8 @@ func (s *AuthService) userExists(ctx context.Context, email canonicalEmail) bool
 	return u != nil
 }
 
-// accessPermits applies the mode matrix to a single (email, context) pair. It is
+// accessPermits applies the mode matrix and then the deny layer to a single
+// (email, context) pair. It is
 // a pure decision function (no I/O) so it is unit-testable in isolation. The
 // email is already canonical (the type enforces it), so it never re-normalizes.
 func accessPermits(cfg *config.Config, access ProjectAccessConfig, email canonicalEmail, isSignup bool) bool {

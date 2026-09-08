@@ -245,6 +245,18 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
+	// QR completion mints an INDEPENDENT session for the scanning device, so it
+	// is its own door and needs its own gate: the approval only proves the
+	// approver was admitted when they approved, and the token pair issued here
+	// outlives that. Without this, a project that tightened its access policy
+	// would keep handing out sessions through QR until every pre-existing
+	// approval expired. Login context — the account already exists.
+	if !user.IsAnonymous {
+		if err := s.enforceProjectAccessLogin(ctx, canonicalize(user.Email)); err != nil {
+			return nil, err
+		}
+	}
+
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
 	if err != nil {
 		return nil, err

@@ -657,15 +657,19 @@ func (a ProjectAccessConfig) hasDenyLayer() bool {
 
 // denies reports whether the deny layer refuses this address. Its parameter is
 // a canonicalEmail so the "caller MUST pass an already-canonicalized address"
-// precondition is enforced by the compiler — entries and the personal-domain
-// table are canonicalized, so a raw address would spuriously miss.
+// precondition is enforced by the compiler — entries and the public-provider
+// set are canonicalized, so a raw address would spuriously miss.
 //
 // An address with no parseable domain is NOT denied here: a malformed address
 // is the format validator's to refuse, and silently folding "invalid" into
 // "blocked" would report the wrong reason for the refusal.
 // cfg supplies the public-provider set (built-in plus the operator's
-// GATEWAY_PUBLIC_EMAIL_DOMAINS additions); a nil cfg disables only the
-// BlockPublicEmailDomains half, leaving BlockedDomains working.
+// GATEWAY_PUBLIC_EMAIL_DOMAINS additions) and is REQUIRED. It is not
+// nil-tolerant on purpose: silently treating an unavailable provider set as
+// "block_public_email_domains is off" would turn a configured refusal into a
+// no-op at request time, which is the one direction this function must never
+// fail in. A nil cfg is a construction bug and panics like every other cfg use
+// in the package.
 func (a ProjectAccessConfig) denies(cfg *config.Config, email canonicalEmail) bool {
 	if !a.hasDenyLayer() {
 		return false
@@ -680,7 +684,7 @@ func (a ProjectAccessConfig) denies(cfg *config.Config, email canonicalEmail) bo
 	if domain == "" {
 		return false
 	}
-	if a.BlockPublicEmailDomains && cfg != nil && cfg.IsPublicEmailDomain(domain) {
+	if a.BlockPublicEmailDomains && cfg.IsPublicEmailDomain(domain) {
 		return true
 	}
 	for _, d := range a.BlockedDomains {
@@ -689,6 +693,28 @@ func (a ProjectAccessConfig) denies(cfg *config.Config, email canonicalEmail) bo
 		}
 	}
 	return false
+}
+
+// NewDefaultProjectAccess builds the env-configured default project's access
+// policy from deployment config. It is the ONE place the GATEWAY_DEFAULT_PROJECT_*
+// variables map onto ProjectAccessConfig.
+//
+// Callers differ in how they handle a bad policy — one fails the boot, another
+// warns and falls back to deny-all — but the MAPPING itself must exist once.
+// The value reaches more than one enforcement path, so a field added to one
+// copy of the mapping and not another would let those paths enforce different
+// policies on the same deployment, silently and with nothing to catch it. That
+// is the same hazard NewProjectAccessConfig avoids by not taking a parallel
+// "spec" struct; a second copy of the field list is the same mistake one level up.
+func NewDefaultProjectAccess(cfg *config.Config) (ProjectAccessConfig, error) {
+	return NewProjectAccessConfig(ProjectAccessConfig{
+		Mode:                    cfg.DefaultProjectAccessMode,
+		AllowedEmails:           cfg.DefaultProjectAllowedEmailList(),
+		AllowedDomains:          cfg.DefaultProjectAllowedDomainList(),
+		BlockPublicEmailDomains: cfg.DefaultProjectBlockPublicEmailDomains,
+		BlockedDomains:          cfg.DefaultProjectBlockedEmailDomainList(),
+		ExemptEmails:            cfg.DefaultProjectExemptEmailList(),
+	})
 }
 
 // NewProjectAccessConfig validates and canonicalizes a policy assembled from
@@ -747,11 +773,9 @@ func (a ProjectAccessConfig) validate() error {
 // a misconfiguration an operator wants to hear about at boot, not discover
 // when the wrong person gets in.
 func (a ProjectAccessConfig) validateDenyLayer() error {
-	// A deny layer only ever subtracts, so on a mode that admits nobody there
-	// is nothing to subtract from and the fields are inert.
-	// Both an explicit "closed" and an unset mode deny everyone (modeAdmits
-	// treats them identically under default-DENY), so in both cases there is
-	// nothing for the layer to subtract from and the fields are inert.
+	// A deny layer only ever subtracts, so on a mode that admits nobody —
+	// explicit "closed" or unset, which modeAdmits treats identically under
+	// default-DENY — there is nothing to subtract from and the fields are inert.
 	if a.hasDenyLayer() {
 		if m := a.mode(); m == AccessModeClosed || m == "" {
 			return fmt.Errorf("access: block_public_email_domains/blocked_domains are inert with mode %q, which already denies everyone", m)
@@ -760,53 +784,69 @@ func (a ProjectAccessConfig) validateDenyLayer() error {
 	if len(a.ExemptEmails) > 0 && !a.hasDenyLayer() {
 		return errors.New("access: exempt_emails requires block_public_email_domains or blocked_domains — with no deny layer there is nothing to be exempt from")
 	}
-	for _, raw := range a.BlockedDomains {
-		d := strings.TrimSpace(raw)
-		if d == "" {
-			return errors.New("access.blocked_domains entries must not be empty")
-		}
-		if strings.Contains(d, "@") {
-			return fmt.Errorf("access.blocked_domains entry %q must be a bare domain, not an email address", raw)
-		}
-		if !strings.Contains(d, ".") {
-			return fmt.Errorf("access.blocked_domains entry %q must be a domain containing a dot", raw)
-		}
+	if err := validateDomainEntries("access.blocked_domains", a.BlockedDomains); err != nil {
+		return err
 	}
-	for _, raw := range a.ExemptEmails {
-		e := strings.TrimSpace(raw)
-		if e == "" {
-			return errors.New("access.exempt_emails entries must not be empty")
-		}
-		if err := validateEmailFormat(strings.ToLower(e)); err != nil {
-			return fmt.Errorf("access.exempt_emails entry %q is not a valid email: %w", raw, err)
-		}
-	}
-	return nil
+	return validateEmailEntries("access.exempt_emails", a.ExemptEmails)
 }
 
 // validateEntries rejects malformed allowlist entries up front, routing emails
 // through the same validateEmailFormat gate as every email-bearing RPC so the
 // allowlist can never admit an address the system would otherwise reject.
 func (a ProjectAccessConfig) validateEntries() error {
-	for _, raw := range a.AllowedEmails {
+	if err := validateEmailEntries("access.allowed_emails", a.AllowedEmails); err != nil {
+		return err
+	}
+	return validateDomainEntries("access.allowed_domains", a.AllowedDomains)
+}
+
+// validateEmailEntries applies the one rule for "what makes a configured email
+// entry valid" — routed through the same validateEmailFormat gate as every
+// email-bearing RPC, so a list can never admit an address the system would
+// otherwise reject. Shared by the allowlist and the deny layer's exemptions:
+// a rule tightened for one and not the other is a divergence nothing catches.
+func validateEmailEntries(field string, entries []string) error {
+	for _, raw := range entries {
 		e := strings.TrimSpace(raw)
 		if e == "" {
-			return errors.New("access.allowed_emails entries must not be empty")
+			return fmt.Errorf("%s entries must not be empty", field)
 		}
 		if err := validateEmailFormat(strings.ToLower(e)); err != nil {
-			return fmt.Errorf("access.allowed_emails entry %q is not a valid email: %w", raw, err)
+			return fmt.Errorf("%s entry %q is not a valid email: %w", field, raw, err)
 		}
 	}
-	for _, raw := range a.AllowedDomains {
+	return nil
+}
+
+// validateDomainEntries applies the one rule for "what makes a configured
+// domain entry valid", shared by allowed_domains and blocked_domains.
+//
+// The decisive check is the last one: an entry must survive canonicalizeDomain
+// UNCHANGED. Matching compares a config entry against an address's canonical
+// domain, so an entry that canonicalization cannot normalize into that form can
+// never equal anything — "*.rival.example", ".rival.example", "rival..example"
+// and "rival.example.." all pass a naive @/dot check and then silently match no
+// one. That is inert configuration, which this package refuses on principle,
+// and for a DENY entry it is worse than inert: an allowlist entry that matches
+// nothing fails closed, a blocked_domains entry that matches nothing fails
+// OPEN — the operator sees the rule in their config and believes it is holding.
+func validateDomainEntries(field string, entries []string) error {
+	for _, raw := range entries {
 		d := strings.TrimSpace(raw)
 		if d == "" {
-			return errors.New("access.allowed_domains entries must not be empty")
+			return fmt.Errorf("%s entries must not be empty", field)
 		}
 		if strings.Contains(d, "@") {
-			return fmt.Errorf("access.allowed_domains entry %q must be a bare domain, not an email address", raw)
+			return fmt.Errorf("%s entry %q must be a bare domain, not an email address", field, raw)
 		}
 		if !strings.Contains(d, ".") {
-			return fmt.Errorf("access.allowed_domains entry %q must be a domain containing a dot", raw)
+			return fmt.Errorf("%s entry %q must be a domain containing a dot", field, raw)
+		}
+		if !isBareDomainName(canonicalizeDomain(d)) {
+			return fmt.Errorf(
+				"%s entry %q is not a bare domain name — it cannot match any address and would silently do nothing "+
+					"(no wildcards, leading/doubled dots, scheme or path)", field, raw,
+			)
 		}
 	}
 	return nil
@@ -838,6 +878,42 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 		}
 	}
 	return out
+}
+
+// isBareDomainName reports whether d, ALREADY canonicalized, has the shape an
+// address's domain can actually take: dot-separated LDH labels, at least two of
+// them, no empty or over-long label, no leading or trailing hyphen.
+//
+// It is checked against the canonical form rather than the raw entry because
+// canonicalizeDomain punycodes IDN labels — "café.example" is a legitimate
+// entry whose canonical form is ASCII. It also means an entry idna could not
+// convert (canonicalizeDomain returns such input unchanged) is caught here
+// rather than stored as a rule that matches nothing.
+func isBareDomainName(d string) bool {
+	if d == "" || len(d) > 253 {
+		return false
+	}
+	labels := strings.Split(d, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			switch {
+			case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '-':
+			default:
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // canonicalizeDomains canonicalizes a domain list into a new slice, leaving the

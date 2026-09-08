@@ -207,18 +207,96 @@ func TestAccessSpec_AppliesTheSameValidation(t *testing.T) {
 	require.True(t, a.denies(testCfg, canonicalize("x@rival.example")))
 }
 
-// A nil deployment config disables only the public-provider half of the layer.
-// blocked_domains is a property of the project alone and must keep working, so
-// a caller without a config still gets the project's explicit denials.
-func TestAccessDenies_NilConfig_KeepsBlockedDomains(t *testing.T) {
+// blocked_domains is a property of the project alone, so it works against a
+// deployment that has added no GATEWAY_PUBLIC_EMAIL_DOMAINS of its own. cfg is
+// a required argument rather than a nil-tolerant one: a deny decision that
+// silently degrades when its provider set is unavailable is the one direction
+// this function must never fail in.
+func TestAccessDenies_BareConfig_KeepsBlockedDomains(t *testing.T) {
 	t.Parallel()
 	cfg, err := ParseProjectConfig(
 		`{"access":{"mode":"open","block_public_email_domains":true,"blocked_domains":["rival.example"]}}`,
 	)
 	require.NoError(t, err)
 
-	require.True(t, cfg.Access.denies(nil, canonicalize("x@rival.example")))
-	require.False(t, cfg.Access.denies(nil, canonicalize("x@gmail.com")))
+	require.True(t, cfg.Access.denies(testCfg, canonicalize("x@rival.example")))
+	require.True(t, cfg.Access.denies(testCfg, canonicalize("x@gmail.com")))
+	require.False(t, cfg.Access.denies(testCfg, canonicalize("x@corp.example")))
+}
+
+// An entry that canonicalization cannot normalize into an address's domain form
+// can never match, so it is inert — and for a DENY rule inert means fail-OPEN:
+// the operator sees the rule in their config and believes it is holding.
+// Wildcards are the realistic case, since matching is exact-domain only.
+func TestAccessDenyLayer_RejectsDomainEntriesThatCouldNeverMatch(t *testing.T) {
+	t.Parallel()
+	for _, entry := range []string{
+		"*.rival.example",
+		".rival.example",
+		"rival..example",
+		"rival.example..",
+		"http://rival.example",
+		"rival.example/path",
+	} {
+		t.Run(entry, func(t *testing.T) {
+			_, err := ParseProjectConfig(
+				`{"access":{"mode":"open","blocked_domains":["` + entry + `"]}}`,
+			)
+			require.Error(t, err, "entry %q matches nothing and must be refused, not stored", entry)
+		})
+	}
+	// The same rule guards the allowlist, where an inert entry fails closed.
+	_, err := ParseProjectConfig(`{"access":{"mode":"allowlist","allowed_domains":["*.corp.example"]}}`)
+	require.Error(t, err)
+}
+
+// NewDefaultProjectAccess exists to keep the env-to-policy mapping in one
+// place, so the thing worth pinning is that it maps EVERY field — a helper that
+// silently drops one is exactly the drift it was introduced to prevent, and
+// nothing else in the suite would notice.
+func TestNewDefaultProjectAccess_MapsEveryField(t *testing.T) {
+	t.Parallel()
+	access, err := NewDefaultProjectAccess(&config.Config{
+		DefaultProjectAccessMode:              AccessModeAllowlist,
+		DefaultProjectAllowedEmails:           "Op@Example.COM",
+		DefaultProjectAllowedDomains:          "Corp.Example.",
+		DefaultProjectBlockPublicEmailDomains: true,
+		DefaultProjectBlockedEmailDomains:     "Rival.EXAMPLE",
+		DefaultProjectExemptEmails:            "Contractor+work@GMail.com",
+	})
+	require.NoError(t, err)
+
+	// Each assertion also proves the value was canonicalized on the way through,
+	// so the env path compares like-against-like exactly as config_json does.
+	require.Equal(t, AccessModeAllowlist, access.Mode)
+	require.Equal(t, []string{"op@example.com"}, access.AllowedEmails)
+	require.Equal(t, []string{"corp.example"}, access.AllowedDomains)
+	require.True(t, access.BlockPublicEmailDomains)
+	require.Equal(t, []string{"rival.example"}, access.BlockedDomains)
+	require.Equal(t, []string{"contractor@gmail.com"}, access.ExemptEmails)
+
+	// And the policy it produces actually enforces all three deny rules.
+	require.True(t, access.denies(testCfg, canonicalize("someone@gmail.com")))
+	require.True(t, access.denies(testCfg, canonicalize("someone@rival.example")))
+	require.False(t, access.denies(testCfg, canonicalize("contractor@gmail.com")))
+}
+
+// A malformed env policy is returned as an error, never silently downgraded —
+// both callers depend on that to fail the boot or fall back to deny-all.
+func TestNewDefaultProjectAccess_PropagatesValidationErrors(t *testing.T) {
+	t.Parallel()
+	// The default access mode is "closed", on which a deny layer is inert.
+	_, err := NewDefaultProjectAccess(&config.Config{
+		DefaultProjectAccessMode:              AccessModeClosed,
+		DefaultProjectBlockPublicEmailDomains: true,
+	})
+	require.Error(t, err, "a deny layer on a mode that admits nobody must not boot")
+
+	_, err = NewDefaultProjectAccess(&config.Config{
+		DefaultProjectAccessMode:   AccessModeOpen,
+		DefaultProjectExemptEmails: "someone@corp.example",
+	})
+	require.Error(t, err, "an exemption with no deny layer must not boot")
 }
 
 // ── the email-change door ────────────────────────────────────────────────
@@ -285,6 +363,82 @@ func TestAccessConfig_TrailingDotDomainsStillMatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"corp.example"}, allow.Access.AllowedDomains)
 	require.True(t, accessPermits(testCfg, allow.Access, canonicalize("x@corp.example"), true))
+}
+
+// InviteUser is the one deny-layer call site that is not the shared chokepoint
+// — it calls accessPermits directly — so it needs its own coverage. Mirrors
+// TestAdminService_InviteUser_{Denied,Allowed}ByAccessMode for the deny layer.
+func TestAdminService_InviteUser_DeniedByDenyLayer(t *testing.T) {
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	svc := newTestAdminService(db)
+
+	cfg, err := ParseProjectConfig(workEmailOnlyJSON)
+	require.NoError(t, err)
+	ctx := WithProjectScope(context.Background(), &ProjectScope{
+		ProjectID: "test-tenant",
+		Access:    cfg.Access,
+	})
+
+	// The mode is open, so only the deny layer can refuse this.
+	_, err = svc.InviteUser(ctx, "admin-1", "contractor@gmail.com", "Contractor", "member", "", 1024, false)
+	require.ErrorIs(t, err, ErrAccessNotAllowed,
+		"an invite to a blocked domain dead-ends at acceptance, so it must be refused up front")
+
+	_, err = svc.InviteUser(ctx, "admin-1", "dev@corp.example", "Dev", "member", "", 1024, false)
+	require.NoError(t, err, "the same open project still admits a work address")
+}
+
+// Password-reset mail is credential mail: sending it to a refused address costs
+// the project SMTP reputation and confirms the address to its recipient, for an
+// account that cannot log in anyway. Silent, to preserve the RPC's
+// anti-enumeration contract.
+func TestAccessDenyLayer_SuppressesPasswordResetMail(t *testing.T) {
+	t.Parallel()
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	seedUserWithPassword(t, repo, "legacy@gmail.com", "Str0ng!Pass1")
+	seedUserWithPassword(t, repo, "dev@corp.example", "Str0ng!Pass1")
+	ctx := accessScope(t, workEmailOnlyJSON)
+
+	rec.Reset()
+	require.NoError(t, svc.RequestPasswordReset(ctx, "legacy@gmail.com"),
+		"refusal stays silent — a fail-fast here would leak account existence")
+	require.Empty(t, rec.Sent(), "no reset mail to a refused address")
+
+	rec.Reset()
+	require.NoError(t, svc.RequestPasswordReset(ctx, "dev@corp.example"))
+	require.NotEmpty(t, rec.Sent(), "a permitted address still gets its reset mail")
+}
+
+// Turning the deny layer on for an existing population is the documented way
+// to use it, so the refusal must not destroy the credential on its way out. If
+// the access check ran after the token was consumed, the retry an SDK makes on
+// a failed rotation would land on replay detection — deleting every refresh
+// token the user has and signing them out everywhere, while stamping a routine
+// config change into the audit log as refresh_token_replay_detected.
+func TestAccessDenyLayer_RefreshDenialDoesNotBurnTheToken(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+
+	// Signed up before the project switched to work-email-only.
+	result, err := svc.PasswordSignup(context.Background(), "legacy@gmail.com", strongPW, "", "", 0, "")
+	require.NoError(t, err)
+
+	ctx := accessScope(t, workEmailOnlyJSON)
+	_, _, _, err = svc.RefreshToken(ctx, result.RefreshToken, "", "")
+	require.ErrorIs(t, err, ErrAccessNotAllowed)
+
+	// The retry returns the SAME refusal rather than tripping replay detection,
+	// which is only possible if the first attempt left the token unconsumed.
+	_, _, _, err = svc.RefreshToken(ctx, result.RefreshToken, "", "")
+	require.ErrorIs(t, err, ErrAccessNotAllowed,
+		"a denied refresh must be retryable, not escalate to replay detection")
+
+	// And the token still works once the project admits the address again.
+	_, _, newRefresh, err := svc.RefreshToken(context.Background(), result.RefreshToken, "", "")
+	require.NoError(t, err, "the credential survived the refusal intact")
+	require.NotEqual(t, result.RefreshToken, newRefresh)
 }
 
 // ── one provider list, not two ───────────────────────────────────────────

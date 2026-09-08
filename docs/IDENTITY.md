@@ -283,77 +283,6 @@ unrecognized band string is rejected by `ParseProjectConfig`, so a typo
 fails the config write (and makes the resolver refuse the project) rather
 than quietly serving a missing guardrail as "unrestricted".
 
-## Access policy: a mode, plus a deny layer
-
-A project's `access` block answers two separate questions, and it is worth
-keeping them separate when reading a config.
-
-**`access.mode` answers "who may enter"** — `open`, `allowlist`, `invite`, or
-`closed`. It **fails DENY**: an unset, empty, or unrecognized mode denies
-everyone, so a project nobody has explicitly opened cannot authenticate
-anyone. `allowed_emails` / `allowed_domains` belong to `allowlist` mode and
-are rejected with any other mode, where they would be inert.
-
-**The deny layer answers "who is turned away regardless"** — it subtracts from
-whatever the mode admitted. No mode can express "open to every company, closed
-to consumer mailboxes" on its own: an allowlist would force an operator to
-enumerate every domain they will ever hire from. So it is a separate layer
-rather than a fifth mode, and it composes with all four:
-
-```json
-{
-  "access": {
-    "mode": "open",
-    "block_public_email_domains": true,
-    "blocked_domains": ["rival.example"],
-    "exempt_emails": ["contractor@gmail.com"]
-  }
-}
-```
-
-- **`block_public_email_domains`** refuses addresses at public / consumer
-  mailbox providers — gmail.com, outlook.com, yahoo.com, icloud.com,
-  proton.me, and the rest. This is the "work email only" switch. It consults
-  the **same** provider set that decides whether a verified address may
-  auto-form a Tenant, `GATEWAY_PUBLIC_EMAIL_DOMAINS` additions included —
-  there is one list, so a domain an operator declares consumer-grade is
-  consumer-grade to both questions.
-- **`blocked_domains`** refuses specific domains on top of that.
-- **`exempt_emails`** passes the deny layer for named individuals. It exempts
-  from the **deny layer only** — it is not a second allowlist and cannot admit
-  anyone `mode` itself refuses, so an exempt address on a `closed` project is
-  still refused.
-
-The layer can only ever **subtract**: it is evaluated after the mode has
-already admitted the address, so no combination of these fields lets anyone
-in who was not already permitted.
-
-**It gates login, not just signup.** A project that switches to work-email-only
-stops authenticating the consumer addresses that registered before the switch.
-Gating only signup would leave the restriction permanently half-applied with no
-path to convergence — the same reason `allowed_domains` has always gated login
-too. Individuals who must keep their existing address go in `exempt_emails`.
-
-**Every door is gated, including email change.** The deny layer and the mode
-are enforced at the one chokepoint every entry path already runs through —
-password and passwordless signup and login, passkeys, OAuth, anonymous
-upgrade, and invitation acceptance — plus **email change**, at both request and
-redemption. Redemption is re-checked because a change token outlives the
-request that created it: a project that tightens its policy in between would
-otherwise have every outstanding token as a hole in the new policy.
-
-Like the allowlist, a malformed deny layer **fails LOUD** at
-`ParseProjectConfig`: a deny rule on a `closed` project, an `exempt_emails`
-entry with no deny layer to be exempt from, or a `blocked_domains` entry that
-is an address rather than a bare domain all reject the config write rather than
-serve a field that silently does nothing.
-
-For the env-configured default project the same policy is
-`GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS`,
-`GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS`, and
-`GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS`, validated identically — a deployment
-cannot express a policy a project could not.
-
 **Enforcement** sits at `issueTokensWithSessionStart` — the single point
 every token pair is minted from. That covers every session-issuing path
 (password login and signup, email-code redeem, magic-link redeem, OAuth
@@ -640,6 +569,93 @@ Same code, same tests, same release. A single-project B2C deployment and a
 many-tenant B2B deployment run the identical Project-then-Tenant
 resolution; the difference is data (how many tenants auto-form), not a
 boot flag. The pre-v1.0 `mode=single | multi` fork is gone (ADR-0002).
+
+## Access policy: a mode, plus a deny layer
+
+A project's `access` block answers two separate questions, and it is worth
+keeping them separate when reading a config.
+
+**`access.mode` answers "who may enter"** — `open`, `allowlist`, `invite`, or
+`closed`. It **fails DENY**: an unset, empty, or unrecognized mode denies
+everyone, so a project nobody has explicitly opened cannot authenticate
+anyone. `allowed_emails` / `allowed_domains` belong to `allowlist` mode and
+are rejected with any other mode, where they would be inert.
+
+**The deny layer answers "who is turned away regardless"** — it subtracts from
+whatever the mode admitted. No mode can express "open to every company, closed
+to consumer mailboxes" on its own: an allowlist would force an operator to
+enumerate every domain they will ever hire from. So it is a separate layer
+rather than a fifth mode, and it composes with all four:
+
+```json
+{
+  "access": {
+    "mode": "open",
+    "block_public_email_domains": true,
+    "blocked_domains": ["rival.example"],
+    "exempt_emails": ["contractor@gmail.com"]
+  }
+}
+```
+
+- **`block_public_email_domains`** refuses addresses at public / consumer
+  mailbox providers — gmail.com, outlook.com, yahoo.com, icloud.com,
+  proton.me, and the rest. This is the "work email only" switch. It consults
+  the **same** provider set that decides whether a verified address may
+  auto-form a Tenant, `GATEWAY_PUBLIC_EMAIL_DOMAINS` additions included —
+  there is one list, so a domain an operator declares consumer-grade is
+  consumer-grade to both questions. That set is representative, not
+  exhaustive: it covers the major global providers, and a project that needs a
+  gap closed adds the domain via `GATEWAY_PUBLIC_EMAIL_DOMAINS` or
+  `blocked_domains`. Treat the switch as friction, not a boundary.
+- **`blocked_domains`** refuses specific domains on top of that. Matching is
+  exact, as it is for `allowed_domains`: blocking `rival.example` does not block
+  `mail.rival.example`, so list subdomains you care about individually.
+- **`exempt_emails`** passes the deny layer for named individuals. It exempts
+  from the **deny layer only** — it is not a second allowlist and cannot admit
+  anyone `mode` itself refuses: on an `invite` project an exempt address may log
+  in, but it still cannot self-signup.
+
+The layer can only ever **subtract**: it is evaluated after the mode has
+already admitted the address, so no combination of these fields lets anyone
+in who was not already permitted.
+
+**It gates login, not just signup.** A project that switches to work-email-only
+stops authenticating the consumer addresses that registered before the switch.
+Gating only signup would leave the restriction permanently half-applied with no
+path to convergence — the same reason `allowed_domains` has always gated login
+too. Individuals who must keep their existing address go in `exempt_emails`.
+
+**Enforcement sits at `enforceProjectAccess`**, the chokepoint every
+credential-driven entry path runs through — password and passwordless signup
+and login, passkeys, OAuth (headless, hosted and native), anonymous upgrade,
+invitation acceptance, and **token refresh**, so a session issued before a
+project tightened its policy stops renewing. **Email change** is gated too, at
+both request and redemption; redemption is re-checked because a change token
+outlives the request that created it, and a project that tightens its policy in
+between would otherwise have every outstanding token as a hole in the new
+policy.
+
+**QR login** is gated at completion rather than at approval: polling mints an
+independent session for the scanning device, which outlives the approval that
+authorized it, so the approval alone cannot stand in for the check.
+
+**SCIM provisioning** is deliberately outside the gate. It writes user records
+on an operator's instruction rather than an end user's, so an IdP can create or
+re-address an account on a refused domain — that account simply cannot
+authenticate.
+
+Like the allowlist, a malformed deny layer **fails LOUD** at
+`ParseProjectConfig`: a deny rule on a `closed` project, an `exempt_emails`
+entry with no deny layer to be exempt from, or a `blocked_domains` entry that
+is an address rather than a bare domain all reject the config write rather than
+serve a field that silently does nothing.
+
+For the env-configured default project the same policy is
+`GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS`,
+`GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS`, and
+`GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS`, validated identically — a deployment
+cannot express a policy a project could not.
 
 ## Onboarding flows
 

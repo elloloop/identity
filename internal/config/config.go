@@ -276,18 +276,25 @@ type Config struct {
 	// It composes with any access mode: the mode decides who may enter, this
 	// subtracts from that set, and it consults the same provider set as
 	// IsPublicEmailDomain (including GATEWAY_PUBLIC_EMAIL_DOMAINS).
+	//
+	// REQUIRES GATEWAY_DEFAULT_PROJECT_ACCESS_MODE to be open, allowlist or
+	// invite. A deny layer subtracts from what the mode admits, so on the
+	// default mode (closed) it is inert and the server refuses to boot rather
+	// than run a rule that can never fire.
 	DefaultProjectBlockPublicEmailDomains bool
 
 	// DefaultProjectBlockedEmailDomains is the comma-separated list of extra
-	// email domains refused on the default project, on top of whatever
-	// DefaultProjectBlockPublicEmailDomains covers. Set via
-	// GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS.
+	// email domains refused on the default project, in addition to the
+	// consumer mailbox providers the public-domain switch already covers. Set via
+	// GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS. Requires an access mode
+	// that admits someone (open, allowlist or invite) — see above.
 	DefaultProjectBlockedEmailDomains string
 
 	// DefaultProjectExemptEmails is the comma-separated list of addresses that
 	// pass the default project's deny layer — the named-individual escape
-	// hatch. Set via GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS. Only meaningful
-	// alongside one of the two fields above.
+	// hatch. Set via GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS. Requires one of the
+	// two variables above to be set: with no deny layer there is nothing to be
+	// exempt from, and the server refuses to boot rather than run an inert list.
 	DefaultProjectExemptEmails string
 
 	// RequireVerifiedAuthDomain governs whether an UNVERIFIED custom
@@ -858,6 +865,12 @@ type Config struct {
 	// separated; entries are punycode-canonicalised. Driven by
 	// GATEWAY_PUBLIC_EMAIL_DOMAINS (default empty — the built-in set
 	// already covers the major global providers).
+	//
+	// This list has a SECOND consumer: a project with
+	// access.block_public_email_domains refuses authentication — signup,
+	// login and refresh — for every address on it. Adding a domain here
+	// therefore locks existing accounts on that domain out of any
+	// work-email-only project, not just out of tenant auto-formation.
 	PublicEmailDomains string
 
 	// AllowedOrigins is the comma-separated list of CORS allowed origins.
