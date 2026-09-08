@@ -762,7 +762,15 @@ func New(deps Deps) (*Built, error) {
 	// deny-by-default until GATEWAY_DEFAULT_PROJECT_ACCESS_MODE opens it.
 	defaultAccess, err := service.NewDefaultProjectAccess(deps.Config)
 	if err != nil {
-		return nil, fmt.Errorf("default project access config: %w", err)
+		// Name the knobs the operator actually set: the shared validator speaks
+		// config_json ("access.blocked_domains"), which is the right wording for
+		// a project's stored config and the wrong one for a container that just
+		// died holding only GATEWAY_* variables.
+		return nil, fmt.Errorf(
+			"default project access config (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE / "+
+				"_ALLOWED_EMAILS / _ALLOWED_DOMAINS / _BLOCK_PUBLIC_EMAIL_DOMAINS / "+
+				"_BLOCKED_EMAIL_DOMAINS / _EXEMPT_EMAILS): %w", err,
+		)
 	}
 	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
 	// default project denies all auth, so a fresh deployment that forgot to open

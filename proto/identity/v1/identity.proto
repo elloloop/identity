@@ -651,6 +651,13 @@ message VerifyEmailResponse {
 // current password to request the change; a verification link is sent to
 // the new address and a security notice to the old address. The swap only
 // takes effect after the verification token is consumed.
+//
+// Both RPCs enforce the project's access policy against the NEW address and
+// return PERMISSION_DENIED when the project refuses it — otherwise the flow
+// would be a way around every access rule the project has. The check uses
+// login semantics (the account already exists, so an invite-only project still
+// permits it) and runs again at redemption, because a change token outlives the
+// request that created it.
 
 message RequestEmailChangeRequest {
   string new_email = 1;

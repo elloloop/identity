@@ -188,7 +188,7 @@ func TestAccessDenyLayer_ValidConfigsParse(t *testing.T) {
 
 // The env-configured default project goes through the SAME validation as the
 // config_json path, so a deployment cannot express a policy a project cannot.
-func TestAccessSpec_AppliesTheSameValidation(t *testing.T) {
+func TestNewProjectAccessConfig_AppliesTheSameDenyLayerValidation(t *testing.T) {
 	t.Parallel()
 	_, err := NewProjectAccessConfig(ProjectAccessConfig{
 		Mode:         AccessModeOpen,
