@@ -1,5 +1,47 @@
 # Upgrade guide
 
+## v4.6 → v4.7 — the deny layer holds at every door
+
+Follow-up to v4.6.0, from the review of the deny layer. Four behaviour changes,
+all corrective; nothing to configure.
+
+**QR login is now gated by the access policy.** `PollQrLogin` mints an
+independent session for the scanning device and consulted no access policy, so
+a project that tightened its rules kept issuing sessions through QR until every
+pre-existing approval expired. The approval only proves the approver was
+admitted at approval time, and the session issued at completion outlives it, so
+the check runs where the session is actually minted. A user the project now
+refuses cannot complete a QR login, including one approved before the change.
+
+**Password-reset mail is suppressed for refused addresses.** It was still sent
+to accounts the project would not authenticate — mail the project pays for,
+restoring an account that cannot log in, and confirming the address to whoever
+received it. The refusal is silent, so the RPC stays enumeration-safe.
+
+**A denied refresh no longer consumes the refresh token.** The access check ran
+after the token was consumed, so tightening a policy for an existing population
+sent SDK retries into replay detection: every refresh token deleted, sessions
+revoked, and `refresh_token_replay_detected` in the audit log for what was a
+routine config change. The refusal now happens before the token is spent, so it
+is clean and retryable. If you deferred enabling `block_public_email_domains`
+because of that, this is the release to do it on.
+
+**Domain entries that could never match are now rejected — check your stored
+configs BEFORE upgrading.** A `blocked_domains` or `allowed_domains` value that
+canonicalization cannot resolve to a bare domain — a wildcard, a leading or
+doubled dot, a scheme or a path — is now refused instead of being stored as a
+rule that silently matches nothing. Wildcards are the common case, since
+matching is exact-domain.
+
+This is validated on READ, not only on write: the project resolver parses each
+project's stored `config_json` on resolution, and a parse failure makes it
+refuse that project. **A project whose `access` block already carries such an
+entry stops resolving entirely once you upgrade — every request to it fails,
+not just its next config write.** Audit your projects' `access.allowed_domains`
+and `access.blocked_domains` for entries that are not bare domain names and fix
+them before rolling out. The entries were enforcing nothing either way, so
+removing them changes no policy that was actually in effect.
+
 ## v4.5 → v4.6 — work-email-only projects (additive)
 
 A project's `access` block gains a **deny layer** that subtracts from whatever
@@ -34,10 +76,7 @@ strips a trailing FQDN dot, so an existing `allowed_domains` entry written as
 `corp.example.` previously matched nothing and now admits everyone at
 `corp.example`. That widens an allowlist, so check your `access` blocks for
 entries with a trailing dot before upgrading. The same fix is what makes
-`blocked_domains` entries reliable. Configured domains that could never match
-at all — a wildcard, a leading or doubled dot, a scheme or path — are now
-rejected at config-write time instead of being stored as a rule that silently
-does nothing.
+`blocked_domains` entries reliable.
 
 **The deny layer needs a mode that admits someone.** Setting
 `GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS` (or the blocked/exempt
