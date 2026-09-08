@@ -453,7 +453,17 @@ type IdentityServiceClient interface {
 	SendEmailVerification(context.Context, *connect.Request[v1.SendEmailVerificationRequest]) (*connect.Response[v1.SendEmailVerificationResponse], error)
 	VerifyEmail(context.Context, *connect.Request[v1.VerifyEmailRequest]) (*connect.Response[v1.VerifyEmailResponse], error)
 	// Email Change (primary-email rotation, double-opt-in)
+	//
+	// Enforces the project's access policy against the NEW address and returns
+	// PERMISSION_DENIED when the project refuses it — otherwise the flow would be
+	// a way around every access rule the project has. Login semantics, so an
+	// invite-only project still permits an existing member to rotate.
 	RequestEmailChange(context.Context, *connect.Request[v1.RequestEmailChangeRequest]) (*connect.Response[v1.RequestEmailChangeResponse], error)
+	// Re-checks the project's access policy against the new address before
+	// applying the change, returning PERMISSION_DENIED if the project now refuses
+	// it: a change token outlives the request that created it, so a policy
+	// tightened in between would otherwise leave every outstanding token as a
+	// hole. A refusal does not consume the token.
 	ConfirmEmailChange(context.Context, *connect.Request[v1.ConfirmEmailChangeRequest]) (*connect.Response[v1.ConfirmEmailChangeResponse], error)
 	// Identity Verification (document + selfie via pluggable provider)
 	BeginIdentityVerification(context.Context, *connect.Request[v1.BeginIdentityVerificationRequest]) (*connect.Response[v1.BeginIdentityVerificationResponse], error)
@@ -2173,7 +2183,17 @@ type IdentityServiceHandler interface {
 	SendEmailVerification(context.Context, *connect.Request[v1.SendEmailVerificationRequest]) (*connect.Response[v1.SendEmailVerificationResponse], error)
 	VerifyEmail(context.Context, *connect.Request[v1.VerifyEmailRequest]) (*connect.Response[v1.VerifyEmailResponse], error)
 	// Email Change (primary-email rotation, double-opt-in)
+	//
+	// Enforces the project's access policy against the NEW address and returns
+	// PERMISSION_DENIED when the project refuses it — otherwise the flow would be
+	// a way around every access rule the project has. Login semantics, so an
+	// invite-only project still permits an existing member to rotate.
 	RequestEmailChange(context.Context, *connect.Request[v1.RequestEmailChangeRequest]) (*connect.Response[v1.RequestEmailChangeResponse], error)
+	// Re-checks the project's access policy against the new address before
+	// applying the change, returning PERMISSION_DENIED if the project now refuses
+	// it: a change token outlives the request that created it, so a policy
+	// tightened in between would otherwise leave every outstanding token as a
+	// hole. A refusal does not consume the token.
 	ConfirmEmailChange(context.Context, *connect.Request[v1.ConfirmEmailChangeRequest]) (*connect.Response[v1.ConfirmEmailChangeResponse], error)
 	// Identity Verification (document + selfie via pluggable provider)
 	BeginIdentityVerification(context.Context, *connect.Request[v1.BeginIdentityVerificationRequest]) (*connect.Response[v1.BeginIdentityVerificationResponse], error)

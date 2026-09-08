@@ -201,7 +201,17 @@ type IdentityServiceClient interface {
 	SendEmailVerification(ctx context.Context, in *SendEmailVerificationRequest, opts ...grpc.CallOption) (*SendEmailVerificationResponse, error)
 	VerifyEmail(ctx context.Context, in *VerifyEmailRequest, opts ...grpc.CallOption) (*VerifyEmailResponse, error)
 	// Email Change (primary-email rotation, double-opt-in)
+	//
+	// Enforces the project's access policy against the NEW address and returns
+	// PERMISSION_DENIED when the project refuses it — otherwise the flow would be
+	// a way around every access rule the project has. Login semantics, so an
+	// invite-only project still permits an existing member to rotate.
 	RequestEmailChange(ctx context.Context, in *RequestEmailChangeRequest, opts ...grpc.CallOption) (*RequestEmailChangeResponse, error)
+	// Re-checks the project's access policy against the new address before
+	// applying the change, returning PERMISSION_DENIED if the project now refuses
+	// it: a change token outlives the request that created it, so a policy
+	// tightened in between would otherwise leave every outstanding token as a
+	// hole. A refusal does not consume the token.
 	ConfirmEmailChange(ctx context.Context, in *ConfirmEmailChangeRequest, opts ...grpc.CallOption) (*ConfirmEmailChangeResponse, error)
 	// Identity Verification (document + selfie via pluggable provider)
 	BeginIdentityVerification(ctx context.Context, in *BeginIdentityVerificationRequest, opts ...grpc.CallOption) (*BeginIdentityVerificationResponse, error)
@@ -1670,7 +1680,17 @@ type IdentityServiceServer interface {
 	SendEmailVerification(context.Context, *SendEmailVerificationRequest) (*SendEmailVerificationResponse, error)
 	VerifyEmail(context.Context, *VerifyEmailRequest) (*VerifyEmailResponse, error)
 	// Email Change (primary-email rotation, double-opt-in)
+	//
+	// Enforces the project's access policy against the NEW address and returns
+	// PERMISSION_DENIED when the project refuses it — otherwise the flow would be
+	// a way around every access rule the project has. Login semantics, so an
+	// invite-only project still permits an existing member to rotate.
 	RequestEmailChange(context.Context, *RequestEmailChangeRequest) (*RequestEmailChangeResponse, error)
+	// Re-checks the project's access policy against the new address before
+	// applying the change, returning PERMISSION_DENIED if the project now refuses
+	// it: a change token outlives the request that created it, so a policy
+	// tightened in between would otherwise leave every outstanding token as a
+	// hole. A refusal does not consume the token.
 	ConfirmEmailChange(context.Context, *ConfirmEmailChangeRequest) (*ConfirmEmailChangeResponse, error)
 	// Identity Verification (document + selfie via pluggable provider)
 	BeginIdentityVerification(context.Context, *BeginIdentityVerificationRequest) (*BeginIdentityVerificationResponse, error)

@@ -9,18 +9,21 @@ import (
 )
 
 // enforceProjectAccessSignup gates a SELF-SIGNUP (account-creation) attempt
-// against the resolved project's access mode. In invite mode self-signup is
+// against the resolved project's access policy. In invite mode self-signup is
 // DENIED (its distinguishing behavior); open permits, closed/unset deny, and
-// allowlist permits only a listed email.
+// allowlist permits only a listed email — and whatever the mode admits, the
+// project's deny layer then subtracts from (ProjectAccessConfig.denies), so
+// "open" is not by itself a guarantee of admission.
 func (s *AuthService) enforceProjectAccessSignup(ctx context.Context, email canonicalEmail) error {
 	return s.enforceProjectAccess(ctx, email, true)
 }
 
 // enforceProjectAccessLogin gates a LOGIN or invitation acceptance by an
-// already-provisioned user against the resolved project's access mode. In invite
-// mode it PERMITS (an existing/invited user gets in) — the only mode where it
-// diverges from the signup guard; open permits, closed/unset deny, and allowlist
-// permits only a listed email.
+// already-provisioned user against the resolved project's access policy. In
+// invite mode it PERMITS (an existing/invited user gets in) — the only mode
+// where it diverges from the signup guard; open permits, closed/unset deny, and
+// allowlist permits only a listed email. The deny layer then subtracts from
+// whatever the mode admitted, on login exactly as on signup.
 func (s *AuthService) enforceProjectAccessLogin(ctx context.Context, email canonicalEmail) error {
 	return s.enforceProjectAccess(ctx, email, false)
 }
@@ -37,6 +40,10 @@ func (s *AuthService) enforceProjectAccessLogin(ctx context.Context, email canon
 //	invite      DENY                 permit
 //	closed      DENY                 DENY
 //	unset/other DENY                 DENY   (default-DENY, fail-closed)
+//
+// The matrix is only the first half. Whatever it admits, the project's deny
+// layer then subtracts from — see ProjectAccessConfig.denies — so a "permit"
+// above means "not refused by the mode", not "admitted".
 //
 // Scope resolution and fail direction:
 //   - No scope in context (a direct service call, or a deployment with neither
