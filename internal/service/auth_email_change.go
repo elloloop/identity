@@ -181,7 +181,9 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID, newEmail, 
 // If the new address has been claimed by another user since the request,
 // returns ErrAlreadyExists — the token is NOT consumed in that case so
 // the user can call ConfirmEmailChange again if the conflict resolves
-// before the token expires.
+// before the token expires. A refusal by the project's access policy behaves
+// the same way — the token is left unconsumed, so the call succeeds if the
+// project reopens to that address before the token expires.
 func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*User, error) {
 	if token == "" {
 		return nil, fmt.Errorf("%w: token is required", ErrInvalidArgument)
@@ -220,7 +222,7 @@ func (s *AuthService) ConfirmEmailChange(ctx context.Context, token string) (*Us
 
 	// Re-check the access policy at REDEMPTION, not only when the change was
 	// requested. The token outlives the request, so a project that tightens
-	// its policy in between (turning on block_personal_email_domains, say)
+	// its policy in between (turning on block_public_email_domains, say)
 	// would otherwise have every outstanding token as a hole in the new
 	// policy. Redemption is the authoritative point, the same place the
 	// passwordless flows put their decisive access check.

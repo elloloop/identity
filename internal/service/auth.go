@@ -1529,14 +1529,7 @@ func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send fun
 // It fails CLOSED: an invalid spec yields a deny-all closed policy rather than
 // an open one, and logs a WARN so the misconfiguration is visible.
 func buildDefaultProjectAccess(cfg *config.Config, logger *zap.Logger) ProjectAccessConfig {
-	access, err := NewProjectAccessConfig(ProjectAccessConfig{
-		Mode:                    cfg.DefaultProjectAccessMode,
-		AllowedEmails:           cfg.DefaultProjectAllowedEmailList(),
-		AllowedDomains:          cfg.DefaultProjectAllowedDomainList(),
-		BlockPublicEmailDomains: cfg.DefaultProjectBlockPublicEmailDomains,
-		BlockedDomains:          cfg.DefaultProjectBlockedEmailDomainList(),
-		ExemptEmails:            cfg.DefaultProjectExemptEmailList(),
-	})
+	access, err := NewDefaultProjectAccess(cfg)
 	if err != nil {
 		logger.Warn("default_project_access_invalid_failing_closed", zap.Error(err))
 		return ProjectAccessConfig{Mode: AccessModeClosed}
@@ -2143,6 +2136,23 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ipAddr,
 	// complete the step and rotate normally.
 	if err := s.enforceDOBRequired(ctx, timeoutUser, ipAddr, userAgent); err != nil {
 		return nil, "", "", err
+	}
+
+	// Project access, checked BEFORE the token is consumed for the same reason
+	// the two refusals above are: a post-consume refusal burns the token, and
+	// the retry an SDK makes on a failed rotation then lands on replay
+	// detection — which deletes every refresh token the user has and signs them
+	// out everywhere. That matters most for the deny layer, the one access rule
+	// an operator is told to switch on for an existing population: without this
+	// pass, flipping it would spend a burst of writes and stamp a routine config
+	// change into the audit log as refresh_token_replay_detected. The
+	// authoritative check still runs after rotation below; this one exists only
+	// so a denial does not destroy the credential on its way out. Anonymous
+	// accounts carry no email to judge, and their own refusals run above.
+	if !timeoutUser.IsAnonymous {
+		if err := s.enforceProjectAccessLogin(ctx, canonicalize(timeoutUser.Email)); err != nil {
+			return nil, "", "", err
+		}
 	}
 
 	// Rotation. ConsumeRefreshTokenByHash is the serialization point: it

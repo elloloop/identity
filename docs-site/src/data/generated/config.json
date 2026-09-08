@@ -436,7 +436,7 @@
     "type": "string",
     "default": "",
     "required": false,
-    "description": "is the comma-separated list of extra email domains refused on the default project, on top of whatever DefaultProjectBlockPublicEmailDomains covers.",
+    "description": "is the comma-separated list of extra email domains refused on the default project, on top of whatever covers.",
     "category": "Projects \u0026 tenancy",
     "anchor": "projects-and-tenancy"
   },

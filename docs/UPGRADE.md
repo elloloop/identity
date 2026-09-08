@@ -20,7 +20,7 @@ permanently half-applied — but it means enabling it on a live project logs
 those users out at their next authentication. List anyone who must keep their
 existing address in `exempt_emails` **in the same config write**.
 
-**Email change is now gated by the access policy at all.** This is a fix, not
+**Email change is now gated by the access policy.** This is a fix, not
 just a new feature: `RequestEmailChange` and `ConfirmEmailChange` previously
 consulted no access policy, so on any restricted project a user could move
 their account to an address the project refuses — an `allowlist` project's
@@ -28,6 +28,23 @@ member could walk to an unlisted domain. Both now enforce the policy (as a
 login, so `invite` projects still permit it), and redemption re-checks because
 a change token outlives the request. If you relied on unrestricted email change
 on an allowlist or invite project, that door is closed.
+
+**A trailing dot in a configured domain now matches.** `canonicalizeDomain`
+strips a trailing FQDN dot, so an existing `allowed_domains` entry written as
+`corp.example.` previously matched nothing and now admits everyone at
+`corp.example`. That widens an allowlist, so check your `access` blocks for
+entries with a trailing dot before upgrading. The same fix is what makes
+`blocked_domains` entries reliable. Configured domains that could never match
+at all — a wildcard, a leading or doubled dot, a scheme or path — are now
+rejected at config-write time instead of being stored as a rule that silently
+does nothing.
+
+**The deny layer needs a mode that admits someone.** Setting
+`GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS` (or the blocked/exempt
+variables) while `GATEWAY_DEFAULT_PROJECT_ACCESS_MODE` is left at its default
+`closed` fails the boot: a deny layer subtracts from what the mode admits, and
+on a mode that admits nobody it can never fire. Set the access mode to `open`,
+`allowlist` or `invite` in the same change.
 
 ## v4.4 → v4.5 — guardian listings are paged (additive)
 

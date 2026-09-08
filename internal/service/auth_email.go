@@ -85,6 +85,17 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		return nil
 	}
 
+	// A reset mail to an address the project refuses is spam the project pays
+	// for: the account it would restore cannot log in anyway, and the message
+	// tells its recipient the project knows them. Silent, like every other
+	// refusal on this path — a fail-fast here would turn the RPC into an
+	// enumeration oracle, which the proto guarantees it is not.
+	if !s.accessAllowsCodeSend(ctx, canonicalize(emailAddr)) {
+		s.logger.Info("password_reset_send_suppressed_by_access",
+			zap.String("email", redactEmail(emailAddr)))
+		return nil
+	}
+
 	user, err := s.repo(ctx).FindUserByEmail(ctx, emailAddr)
 	if err != nil {
 		s.logger.Warn("password_reset_lookup_failed",
