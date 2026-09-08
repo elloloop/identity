@@ -944,6 +944,12 @@ paths:
       tags:
         - identity.v1.IdentityService
       summary: ConfirmEmailChange
+      description: |-
+        Re-checks the project's access policy against the new address before
+         applying the change, returning PERMISSION_DENIED if the project now refuses
+         it: a change token outlives the request that created it, so a policy
+         tightened in between would otherwise leave every outstanding token as a
+         hole. A refusal does not consume the token.
       operationId: identity.v1.IdentityService.ConfirmEmailChange
       parameters:
         - name: Connect-Protocol-Version
@@ -3157,8 +3163,12 @@ paths:
     post:
       tags:
         - identity.v1.IdentityService
-      summary: RequestEmailChange
-      description: Email Change (primary-email rotation, double-opt-in)
+      summary: Email Change (primary-email rotation, double-opt-in)
+      description: |-
+        Enforces the project's access policy against the NEW address and returns
+         PERMISSION_DENIED when the project refuses it — otherwise the flow would be
+         a way around every access rule the project has. Login semantics, so an
+         invite-only project still permits an existing member to rotate.
       operationId: identity.v1.IdentityService.RequestEmailChange
       parameters:
         - name: Connect-Protocol-Version

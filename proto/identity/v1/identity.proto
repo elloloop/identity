@@ -653,11 +653,7 @@ message VerifyEmailResponse {
 // takes effect after the verification token is consumed.
 //
 // Both RPCs enforce the project's access policy against the NEW address and
-// return PERMISSION_DENIED when the project refuses it — otherwise the flow
-// would be a way around every access rule the project has. The check uses
-// login semantics (the account already exists, so an invite-only project still
-// permits it) and runs again at redemption, because a change token outlives the
-// request that created it.
+// return PERMISSION_DENIED when the project refuses it.
 
 message RequestEmailChangeRequest {
   string new_email = 1;
@@ -2338,7 +2334,17 @@ service IdentityService {
   rpc VerifyEmail(VerifyEmailRequest) returns (VerifyEmailResponse);
 
   // Email Change (primary-email rotation, double-opt-in)
+  //
+  // Enforces the project's access policy against the NEW address and returns
+  // PERMISSION_DENIED when the project refuses it — otherwise the flow would be
+  // a way around every access rule the project has. Login semantics, so an
+  // invite-only project still permits an existing member to rotate.
   rpc RequestEmailChange(RequestEmailChangeRequest) returns (RequestEmailChangeResponse);
+  // Re-checks the project's access policy against the new address before
+  // applying the change, returning PERMISSION_DENIED if the project now refuses
+  // it: a change token outlives the request that created it, so a policy
+  // tightened in between would otherwise leave every outstanding token as a
+  // hole. A refusal does not consume the token.
   rpc ConfirmEmailChange(ConfirmEmailChangeRequest) returns (ConfirmEmailChangeResponse);
 
   // Identity Verification (document + selfie via pluggable provider)

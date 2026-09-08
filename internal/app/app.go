@@ -767,9 +767,11 @@ func New(deps Deps) (*Built, error) {
 		// a project's stored config and the wrong one for a container that just
 		// died holding only GATEWAY_* variables.
 		return nil, fmt.Errorf(
-			"default project access config (GATEWAY_DEFAULT_PROJECT_ACCESS_MODE / "+
-				"_ALLOWED_EMAILS / _ALLOWED_DOMAINS / _BLOCK_PUBLIC_EMAIL_DOMAINS / "+
-				"_BLOCKED_EMAIL_DOMAINS / _EXEMPT_EMAILS): %w", err,
+			"default project access config (check GATEWAY_DEFAULT_PROJECT_ACCESS_MODE, "+
+				"GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS, GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS, "+
+				"GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS, "+
+				"GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS, "+
+				"GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS): %w", err,
 		)
 	}
 	// Default-DENY is safe but easy to trip into unknowingly: warn loudly when the
