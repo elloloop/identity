@@ -250,6 +250,55 @@ func TestAccessDenyLayer_RejectsDomainEntriesThatCouldNeverMatch(t *testing.T) {
 	require.Error(t, err)
 }
 
+// NewDefaultProjectAccess exists to keep the env-to-policy mapping in one
+// place, so the thing worth pinning is that it maps EVERY field — a helper that
+// silently drops one is exactly the drift it was introduced to prevent, and
+// nothing else in the suite would notice.
+func TestNewDefaultProjectAccess_MapsEveryField(t *testing.T) {
+	t.Parallel()
+	access, err := NewDefaultProjectAccess(&config.Config{
+		DefaultProjectAccessMode:              AccessModeAllowlist,
+		DefaultProjectAllowedEmails:           "Op@Example.COM",
+		DefaultProjectAllowedDomains:          "Corp.Example.",
+		DefaultProjectBlockPublicEmailDomains: true,
+		DefaultProjectBlockedEmailDomains:     "Rival.EXAMPLE",
+		DefaultProjectExemptEmails:            "Contractor+work@GMail.com",
+	})
+	require.NoError(t, err)
+
+	// Each assertion also proves the value was canonicalized on the way through,
+	// so the env path compares like-against-like exactly as config_json does.
+	require.Equal(t, AccessModeAllowlist, access.Mode)
+	require.Equal(t, []string{"op@example.com"}, access.AllowedEmails)
+	require.Equal(t, []string{"corp.example"}, access.AllowedDomains)
+	require.True(t, access.BlockPublicEmailDomains)
+	require.Equal(t, []string{"rival.example"}, access.BlockedDomains)
+	require.Equal(t, []string{"contractor@gmail.com"}, access.ExemptEmails)
+
+	// And the policy it produces actually enforces all three deny rules.
+	require.True(t, access.denies(testCfg, canonicalize("someone@gmail.com")))
+	require.True(t, access.denies(testCfg, canonicalize("someone@rival.example")))
+	require.False(t, access.denies(testCfg, canonicalize("contractor@gmail.com")))
+}
+
+// A malformed env policy is returned as an error, never silently downgraded —
+// both callers depend on that to fail the boot or fall back to deny-all.
+func TestNewDefaultProjectAccess_PropagatesValidationErrors(t *testing.T) {
+	t.Parallel()
+	// The default access mode is "closed", on which a deny layer is inert.
+	_, err := NewDefaultProjectAccess(&config.Config{
+		DefaultProjectAccessMode:              AccessModeClosed,
+		DefaultProjectBlockPublicEmailDomains: true,
+	})
+	require.Error(t, err, "a deny layer on a mode that admits nobody must not boot")
+
+	_, err = NewDefaultProjectAccess(&config.Config{
+		DefaultProjectAccessMode:   AccessModeOpen,
+		DefaultProjectExemptEmails: "someone@corp.example",
+	})
+	require.Error(t, err, "an exemption with no deny layer must not boot")
+}
+
 // ── the email-change door ────────────────────────────────────────────────
 
 // Email change was an unguarded door: it moved an account's address without

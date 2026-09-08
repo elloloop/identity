@@ -284,8 +284,8 @@ type Config struct {
 	DefaultProjectBlockPublicEmailDomains bool
 
 	// DefaultProjectBlockedEmailDomains is the comma-separated list of extra
-	// email domains refused on the default project, on top of whatever
-	// GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS covers. Set via
+	// email domains refused on the default project, in addition to the
+	// consumer mailbox providers the public-domain switch already covers. Set via
 	// GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS. Requires an access mode
 	// that admits someone (open, allowlist or invite) — see above.
 	DefaultProjectBlockedEmailDomains string

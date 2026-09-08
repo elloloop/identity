@@ -699,12 +699,11 @@ func (a ProjectAccessConfig) denies(cfg *config.Config, email canonicalEmail) bo
 // policy from deployment config. It is the ONE place the GATEWAY_DEFAULT_PROJECT_*
 // variables map onto ProjectAccessConfig.
 //
-// There are two callers with different failure policies — internal/app fails the
-// boot, and buildDefaultProjectAccess warns and falls back to deny-all — but the
-// MAPPING must not be duplicated between them. They feed different live paths
-// (the middleware's default-project pin and, via resolveNativeScope, the native
-// OAuth login path), so a field added to one copy and not the other would make
-// native OAuth enforce a different policy from every other door, silently. That
+// Callers differ in how they handle a bad policy — one fails the boot, another
+// warns and falls back to deny-all — but the MAPPING itself must exist once.
+// The value reaches more than one enforcement path, so a field added to one
+// copy of the mapping and not another would let those paths enforce different
+// policies on the same deployment, silently and with nothing to catch it. That
 // is the same hazard NewProjectAccessConfig avoids by not taking a parallel
 // "spec" struct; a second copy of the field list is the same mistake one level up.
 func NewDefaultProjectAccess(cfg *config.Config) (ProjectAccessConfig, error) {

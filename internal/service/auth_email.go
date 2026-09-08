@@ -85,23 +85,27 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		return nil
 	}
 
-	// A reset mail to an address the project refuses is spam the project pays
-	// for: the account it would restore cannot log in anyway, and the message
-	// tells its recipient the project knows them. Silent, like every other
-	// refusal on this path — a fail-fast here would turn the RPC into an
-	// enumeration oracle, which the proto guarantees it is not.
-	if !s.accessAllowsCodeSend(ctx, canonicalize(emailAddr)) {
-		s.logger.Info("password_reset_send_suppressed_by_access",
-			zap.String("email", redactEmail(emailAddr)))
-		return nil
-	}
-
 	user, err := s.repo(ctx).FindUserByEmail(ctx, emailAddr)
 	if err != nil {
 		s.logger.Warn("password_reset_lookup_failed",
 			zap.String("email", redactEmail(emailAddr)), zap.Error(err))
 		return nil
 	}
+	// A reset mail to an address the project refuses is spam the project pays
+	// for: the account it would restore cannot log in anyway, and the message
+	// tells its recipient the project knows them. Evaluated here rather than
+	// before the lookup so it reuses that result — accessAllowsCodeSend would
+	// run its own existence query for invite mode, and this path has already
+	// paid for one. Login context (isSignup=false), since the account exists.
+	// Silent, like every other refusal on this path: a fail-fast would turn the
+	// RPC into an enumeration oracle, which the proto guarantees it is not.
+	if scope := ProjectScopeFromContext(ctx); scope != nil && user != nil &&
+		!accessPermits(s.cfg, scope.Access, canonicalize(emailAddr), false) {
+		s.logger.Info("password_reset_send_suppressed_by_access",
+			zap.String("email", redactEmail(emailAddr)))
+		return nil
+	}
+
 	if user == nil {
 		s.logger.Info("password_reset_unknown_email", zap.String("email", redactEmail(emailAddr)))
 		return nil

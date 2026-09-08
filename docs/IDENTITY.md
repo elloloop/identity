@@ -636,12 +636,14 @@ outlives the request that created it, and a project that tightens its policy in
 between would otherwise have every outstanding token as a hole in the new
 policy.
 
-Two paths are deliberately outside it. **SCIM provisioning** writes user
-records on an operator's instruction rather than an end user's, so it is not
-access-gated — an IdP can create or re-address an account on a refused domain,
-and that account then cannot authenticate. **QR login** polls an approval made
-by an already-authenticated session; it inherits that session's admission and
-closes on its own once the approver's refresh is refused.
+**QR login** is gated at completion rather than at approval: polling mints an
+independent session for the scanning device, which outlives the approval that
+authorized it, so the approval alone cannot stand in for the check.
+
+**SCIM provisioning** is deliberately outside the gate. It writes user records
+on an operator's instruction rather than an end user's, so an IdP can create or
+re-address an account on a refused domain — that account simply cannot
+authenticate.
 
 Like the allowlist, a malformed deny layer **fails LOUD** at
 `ParseProjectConfig`: a deny rule on a `closed` project, an `exempt_emails`
