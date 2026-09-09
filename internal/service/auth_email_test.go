@@ -348,7 +348,7 @@ func TestSendEmailVerification_Success(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 email, got %d", len(sent))
 	}
-	if !strings.Contains(sent[0].Text, "https://app.test/auth/verify-email?token=") {
+	if !strings.Contains(sent[0].Text, "https://app.test/verify-email?token=") {
 		t.Errorf("verify URL missing: %q", sent[0].Text)
 	}
 	tok := extractTokenFromLink(t, sent[0].Text)

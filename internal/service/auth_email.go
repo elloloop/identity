@@ -291,7 +291,7 @@ func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) 
 		return fmt.Errorf("creating verification token: %w", err)
 	}
 
-	link := fmt.Sprintf("%s/auth/verify-email?token=%s", s.appBaseURL(ctx), rawToken)
+	link := fmt.Sprintf("%s/verify-email?token=%s", s.appBaseURL(ctx), rawToken)
 	brand := resolveBranding(ctx, s.cfg)
 	html, text, err := email.Render(email.TemplateEmailVerification, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
