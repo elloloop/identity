@@ -275,3 +275,23 @@ func TestRedeemOAuthCode_EmptyCode(t *testing.T) {
 	_, err := svc.RedeemOAuthCode(context.Background(), "", "", "")
 	assert.True(t, errors.Is(err, ErrOAuthCodeInvalid))
 }
+
+// TestHandoverRedirectURL pins the redirect the hosted callback and the
+// hosted magic-link page issue: the code lands as ?code= on the allowlisted
+// return_to, any query the app already carries survives, and a return_to
+// that somehow fails to parse still gets the code appended rather than
+// dropping the user with no way to redeem.
+func TestHandoverRedirectURL(t *testing.T) {
+	tests := []struct {
+		returnTo, code, wantContains string
+	}{
+		{"https://app.test/finish", "abc", "code=abc"},
+		{"https://app.test/finish?next=/home", "abc", "next=%2Fhome"},
+		{"https://app.test/finish?next=/home", "abc", "code=abc"},
+		{"://bad url", "abc", "code=abc"},
+	}
+	for _, tt := range tests {
+		got := handoverRedirectURL(tt.returnTo, tt.code)
+		assert.Contains(t, got, tt.wantContains, "handoverRedirectURL(%q)", tt.returnTo)
+	}
+}

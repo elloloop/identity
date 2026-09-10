@@ -182,6 +182,10 @@ func (StubRepository) ConsumeMagicLinkToken(context.Context, string, int64) (*Ma
 	return nil, ErrServiceUnavailable
 }
 
+func (StubRepository) FindMagicLinkTokenByHash(context.Context, string) (*MagicLinkTokenRecord, error) {
+	return nil, ErrServiceUnavailable
+}
+
 func (StubRepository) UpsertPhoneVerificationCode(context.Context, *PhoneVerificationCodeRecord) (string, error) {
 	return "", ErrServiceUnavailable
 }

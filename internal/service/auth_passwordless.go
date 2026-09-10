@@ -376,10 +376,70 @@ func (s *AuthService) RedeemMagicLink(ctx context.Context, token, ipAddr, userAg
 	return &MagicLinkResult{LoginResult: result, ReturnTo: rec.ReturnTo}, nil
 }
 
-// completePasswordlessLogin is the shared tail of both passwordless arms
-// once email control is proven: gate on the auto-create policy, resolve
-// or create the user by email (the unified-account guarantee), enforce
-// account status, and issue tokens.
+// MagicLinkHandover is what the hosted magic-link page redirects with: the
+// link's allowlisted return_to carrying a single-use handover code the app
+// redeems for tokens with RedeemOAuthCode. RedirectURL is return_to with the
+// code appended, the exact URL the page redirects to.
+type MagicLinkHandover struct {
+	ReturnTo    string
+	Code        string
+	RedirectURL string
+}
+
+// RedeemMagicLinkForHandover consumes a magic-link token on behalf of the
+// hosted page and mints a handover code instead of a session. A
+// server-rendered page has no safe channel to hand tokens to an app —
+// fragments leak to history and Referer, cookies are awkward cross-origin
+// and useless to native clients — so it redirects to return_to?code= and
+// the app redeems the code, exactly as the hosted OAuth callback does.
+// Everything the RPC path enforces before a session exists (login policy,
+// the passwordless-signup gate, project access, account status) runs here;
+// the second factor and token issuance run at redeem, as they do for OAuth
+// codes. The stored return_to is re-checked against the current allowlist
+// so a link requested under an older configuration cannot redirect
+// anywhere the operator has since removed.
+func (s *AuthService) RedeemMagicLinkForHandover(ctx context.Context, token, ipAddr, userAgent string) (*MagicLinkHandover, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, ErrMagicLinkInvalid
+	}
+	rec, err := s.repo(ctx).ConsumeMagicLinkToken(ctx, sha256Hex(token), s.nowMs())
+	if err != nil {
+		if errors.Is(err, ErrMagicLinkInvalid) {
+			return nil, ErrMagicLinkInvalid
+		}
+		return nil, fmt.Errorf("consuming magic link token: %w", err)
+	}
+	if !s.returnAllow.Allows(rec.ReturnTo) {
+		s.logger.Info("magic_link_handover_return_to_rejected")
+		return nil, ErrMagicLinkInvalid
+	}
+
+	user, isNew, _, err := s.establishPasswordlessUser(ctx, canonicalize(rec.Email), "magic_link", ipAddr, userAgent)
+	if err != nil {
+		return nil, err
+	}
+	code, err := s.mintHandoverCode(ctx, user.ID, HandoverMethodMagicLink)
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("magic_link_handover_minted",
+		zap.String("user_id", user.ID), zap.Bool("new_user", isNew))
+	return &MagicLinkHandover{
+		ReturnTo:    rec.ReturnTo,
+		Code:        code,
+		RedirectURL: handoverRedirectURL(rec.ReturnTo, code),
+	}, nil
+}
+
+// establishPasswordlessUser is the shared front half of both passwordless
+// arms once control of the inbox is proven: enforce the login policy for
+// the method, gate on the auto-create policy, resolve or create the user by
+// email (the unified-account guarantee), mark the address verified, and
+// enforce account status. It issues nothing — the RPC arms add the token
+// issuance in completePasswordlessLogin, and the hosted magic-link page
+// hands the user to the app with a handover code instead
+// (RedeemMagicLinkForHandover), so the checks that must precede either
+// outcome live here once.
 //
 // When GATEWAY_PASSWORDLESS_SIGNUP_ENABLED is false and the email has no
 // account, the request must look identical to a successful login from the
@@ -388,7 +448,7 @@ func (s *AuthService) RedeemMagicLink(ctx context.Context, token, ipAddr, userAg
 // every other "this didn't work" path returns. The proof-of-control step
 // already happened, so this leaks nothing an attacker who controls the
 // inbox doesn't already know.
-func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr canonicalEmail, method, ipAddr, userAgent string) (*LoginResult, error) {
+func (s *AuthService) establishPasswordlessUser(ctx context.Context, emailAddr canonicalEmail, method, ipAddr, userAgent string) (*User, bool, loginPolicyDecision, error) {
 	emailStr := string(emailAddr)
 	invalidErr := ErrEmailLoginCodeInvalid
 	if method == "magic_link" {
@@ -406,18 +466,18 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 	// (email_otp). Consult the tenant's LoginPolicy before issuing tokens.
 	decision, err := s.enforceLoginPolicy(ctx, emailStr, LoginMethodEmailOTP)
 	if err != nil {
-		return nil, err
+		return nil, false, loginPolicyDecision{}, err
 	}
 
 	if !s.cfg.PasswordlessSignupEnabled {
 		existing, err := s.repo(ctx).FindUserByEmail(ctx, emailStr)
 		if err != nil {
-			return nil, err
+			return nil, false, loginPolicyDecision{}, err
 		}
 		if existing == nil {
 			s.logger.Info("passwordless_signup_disabled_unknown_email",
 				zap.String("email", redactEmail(emailStr)), zap.String("method", method))
-			return nil, invalidErr
+			return nil, false, loginPolicyDecision{}, invalidErr
 		}
 	}
 
@@ -425,7 +485,7 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 		emailVerified: true, // proving control of the inbox verifies the email
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, loginPolicyDecision{}, err
 	}
 
 	// A pre-existing account resolved here was NOT created verified by the
@@ -439,6 +499,18 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 	}
 
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent); err != nil {
+		return nil, false, loginPolicyDecision{}, err
+	}
+	return user, isNew, decision, nil
+}
+
+// completePasswordlessLogin is the shared tail of both passwordless RPC
+// arms: establish the user, then finish the login — a second factor when
+// the tenant or the user requires one, otherwise a token pair and the
+// audit row.
+func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr canonicalEmail, method, ipAddr, userAgent string) (*LoginResult, error) {
+	user, isNew, decision, err := s.establishPasswordlessUser(ctx, emailAddr, method, ipAddr, userAgent)
+	if err != nil {
 		return nil, err
 	}
 
@@ -450,7 +522,7 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 
 	s.updateLastLogin(ctx, user.ID)
 	s.logger.Info("passwordless_login_success",
-		zap.String("email", redactEmail(emailStr)),
+		zap.String("email", redactEmail(string(emailAddr))),
 		zap.String("user_id", user.ID),
 		zap.String("method", method),
 		zap.Bool("new_user", isNew))

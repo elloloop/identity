@@ -5,13 +5,17 @@ package e2e
 import (
 	"net/http"
 	"testing"
+
+	"github.com/elloloop/identity/internal/config"
 )
 
 // TestE2E_OAuth_DisabledFlows verifies that OAuth endpoints properly return
-// Connect-RPC error status CodeUnavailable when OAuth is unconfigured.
+// Connect-RPC error status CodeUnavailable when OAuth is unconfigured. The
+// return allowlist is cleared too: it alone enables the hosted magic-link
+// page, whose handover codes RedeemOAuthCode also redeems.
 func TestE2E_OAuth_DisabledFlows(t *testing.T) {
 	t.Parallel()
-	h := StartServer(t)
+	h := StartServerWith(t, func(c *config.Config) { c.OAuthAllowedReturnURLs = "" }, nil)
 
 	// 1. BeginOAuthLogin
 	resp, status := h.rpcCall(t, "BeginOAuthLogin", map[string]any{

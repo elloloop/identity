@@ -394,10 +394,11 @@ type Repository interface {
 	// session does not exist or is no longer in the "approved" state.
 	ConsumeQrLoginSession(ctx context.Context, nodeID string, atMs int64) error
 
-	// OAuth one-time codes (hosted-flow SPA handover).
+	// Handover one-time codes (hosted-flow app handover).
 	//
-	// CreateOAuthOneTimeCode stores the code-hash → user binding written
-	// by the hosted /oauth/callback handler. ConsumeOAuthOneTimeCode is
+	// CreateOAuthOneTimeCode stores the code-hash → (user, minting flow)
+	// binding written by the hosted /oauth/callback handler and the hosted
+	// /auth/magic-link page. ConsumeOAuthOneTimeCode is
 	// the single-winner compare-and-set: it marks the row consumed
 	// (consumed_at = atMs) only if it is currently unconsumed
 	// (consumed_at == 0) AND not yet expired (expires_at > atMs),
@@ -458,9 +459,13 @@ type Repository interface {
 	// (same shape as ConsumeOAuthOneTimeCode): it marks the row consumed
 	// only when currently unconsumed AND unexpired, returning the bound
 	// record on success. A replay, expired, or missing token all return
-	// ErrMagicLinkInvalid.
+	// ErrMagicLinkInvalid. FindMagicLinkTokenByHash is the read-only
+	// lookup the hosted magic-link page uses to show the address and the
+	// link's state before the user clicks; it never changes the row and
+	// returns nil, nil for an unknown hash.
 	CreateMagicLinkToken(ctx context.Context, r *MagicLinkTokenRecord) (string, error)
 	ConsumeMagicLinkToken(ctx context.Context, tokenHash string, atMs int64) (*MagicLinkTokenRecord, error)
+	FindMagicLinkTokenByHash(ctx context.Context, tokenHash string) (*MagicLinkTokenRecord, error)
 
 	// Phone verification codes (SMS-OTP phone-ownership verification).
 	//
@@ -806,18 +811,23 @@ type QrLoginSessionRecord struct {
 	UpdatedAt      int64
 }
 
-// OAuthOneTimeCodeRecord is the single-use handover artifact for the
-// hosted OAuth flow. The hosted callback stores the SHA-256 hash of an
-// opaque code keyed to the authenticated user; RedeemOAuthCode consumes
-// it (consumed_at CAS from 0) and mints a fresh token pair. Only the
-// user id is persisted — no token material is stored at rest.
+// OAuthOneTimeCodeRecord is the single-use handover artifact of the hosted
+// flows. The hosted OAuth callback and the hosted magic-link page each
+// store the SHA-256 hash of an opaque code keyed to the established user;
+// RedeemOAuthCode consumes it (consumed_at CAS from 0) and mints a fresh
+// token pair under the minting flow's login policy. Only the user id and
+// the minting flow are persisted — no token material is stored at rest.
 type OAuthOneTimeCodeRecord struct {
-	NodeID     string
-	CodeHash   string
-	UserID     string
-	ExpiresAt  int64 // epoch ms
-	CreatedAt  int64 // epoch ms
-	ConsumedAt int64 // epoch ms; 0 = unconsumed
+	NodeID   string
+	CodeHash string
+	UserID   string
+	// LoginMethod is the flow that minted the code (HandoverMethodOAuth or
+	// HandoverMethodMagicLink). Redeem enforces that flow's login policy
+	// and records that flow's audit event; an unknown value is refused.
+	LoginMethod string
+	ExpiresAt   int64 // epoch ms
+	CreatedAt   int64 // epoch ms
+	ConsumedAt  int64 // epoch ms; 0 = unconsumed
 }
 
 // NativeTokenRedemptionRecord is the replay-cache row that makes a native ID

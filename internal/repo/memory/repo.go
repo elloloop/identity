@@ -1071,6 +1071,23 @@ func (r *Repo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, atMs i
 	return nil, service.ErrMagicLinkInvalid
 }
 
+// FindMagicLinkTokenByHash returns the token without consuming it, or nil
+// when no token has that hash.
+func (r *Repo) FindMagicLinkTokenByHash(_ context.Context, tokenHash string) (*service.MagicLinkTokenRecord, error) {
+	if tokenHash == "" {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.magicLinkTokens {
+		if t.TokenHash == tokenHash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
 // ── Phone Verification Codes (SMS OTP) ─────────────────────────────
 
 // UpsertPhoneVerificationCode replaces any existing code for the user so

@@ -149,3 +149,26 @@ func (r *sqliteRepository) ConsumeMagicLinkToken(ctx context.Context, tokenHash 
 	}
 	return &t, nil
 }
+
+// FindMagicLinkTokenByHash returns the token without consuming it, or nil
+// when no token has that hash.
+func (r *sqliteRepository) FindMagicLinkTokenByHash(ctx context.Context, tokenHash string) (*service.MagicLinkTokenRecord, error) {
+	if tokenHash == "" {
+		return nil, nil
+	}
+	const q = `
+		SELECT id, token_hash, email, return_to, expires_at_ms, created_at_ms, consumed_at_ms
+		  FROM magic_link_tokens
+		 WHERE project_id = $1 AND token_hash = $2`
+	var t service.MagicLinkTokenRecord
+	err := r.db.QueryRow(ctx, q, r.projectID, tokenHash).Scan(
+		&t.NodeID, &t.TokenHash, &t.Email, &t.ReturnTo, &t.ExpiresAt, &t.CreatedAt, &t.ConsumedAt,
+	)
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapErr("FindMagicLinkTokenByHash", err)
+	}
+	return &t, nil
+}

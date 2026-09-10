@@ -11,6 +11,7 @@ import (
 	"connectrpc.com/connect"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -474,12 +475,13 @@ func TestRedeemOAuthCode_UnknownCodeUnauthenticated(t *testing.T) {
 	}
 }
 
-// TestRedeemOAuthCode_DisabledUnavailable locks in #156: with OAuth
-// disabled (no registry), RedeemOAuthCode fails fast with Unavailable —
-// the same guard BeginOAuthLogin/OAuthLogin use — instead of leaking an
+// TestRedeemOAuthCode_DisabledUnavailable locks in #156, widened for the
+// hosted handover: when nothing that mints a handover code is configured —
+// no OAuth registry AND no return allowlist for the hosted magic-link page
+// — RedeemOAuthCode fails fast with Unavailable instead of leaking an
 // Unauthenticated "invalid code" status from the code lookup.
 func TestRedeemOAuthCode_DisabledUnavailable(t *testing.T) {
-	h := newHarness(t)
+	h := newHarnessWith(t, nil, nil, func(c *config.Config) { c.OAuthAllowedReturnURLs = "" })
 	_, err := h.client.RedeemOAuthCode(context.Background(),
 		connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: "does-not-exist"}))
 	if err == nil {
@@ -1767,3 +1769,19 @@ func TestApproveQrLogin_BadSession(t *testing.T) {
 
 // quiet linter on unused string import
 var _ = strings.Contains
+
+// TestRedeemOAuthCode_HostedFlowEnabledWithoutOAuth pins the other half of
+// the guard: the return allowlist alone enables the hosted magic-link page,
+// which mints handover codes, so redeem must be reachable without an OAuth
+// registry. An unknown code is then Unauthenticated, not Unavailable.
+func TestRedeemOAuthCode_HostedFlowEnabledWithoutOAuth(t *testing.T) {
+	h := newHarness(t) // testConfig sets OAuthAllowedReturnURLs, no registry
+	_, err := h.client.RedeemOAuthCode(context.Background(),
+		connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: "does-not-exist"}))
+	if err == nil {
+		t.Fatal("expected error redeeming unknown code")
+	}
+	if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("RedeemOAuthCode with hosted flow enabled = %v, want Unauthenticated", got)
+	}
+}

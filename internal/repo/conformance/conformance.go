@@ -917,7 +917,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			r := driver.NewRepo(t)
 			userID := createTestUser(t, r, "otc-consume@example.com")
 			id, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
-				CodeHash: "otc-hash-1", UserID: userID,
+				CodeHash: "otc-hash-1", UserID: userID, LoginMethod: service.HandoverMethodMagicLink,
 				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
 			})
 			if err != nil {
@@ -935,6 +935,11 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 			if rec.ConsumedAt != 200 {
 				t.Fatalf("ConsumedAt = %d, want 200", rec.ConsumedAt)
+			}
+			// The minting flow must survive the round-trip: redeem picks the
+			// login policy and audit event from it.
+			if rec.LoginMethod != service.HandoverMethodMagicLink {
+				t.Fatalf("LoginMethod = %q, want %q", rec.LoginMethod, service.HandoverMethodMagicLink)
 			}
 			// Replay must fail with ErrOAuthCodeInvalid.
 			if _, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-hash-1", 300); !errors.Is(err, service.ErrOAuthCodeInvalid) {
@@ -1355,6 +1360,45 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 			if _, err := r.ConsumeMagicLinkToken(ctx, "ml-missing", 2_000); !errors.Is(err, service.ErrMagicLinkInvalid) {
 				t.Fatalf("Consume missing: want ErrMagicLinkInvalid, got %v", err)
+			}
+		})
+
+		t.Run("MagicLinkToken_FindByHash_ReadsWithoutConsuming", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.CreateMagicLinkToken(ctx, &service.MagicLinkTokenRecord{
+				TokenHash: "ml-peek", Email: "ml-peek@example.com", ReturnTo: "https://app.test/welcome",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			// The lookup reports the row as stored and leaves it redeemable.
+			rec, err := r.FindMagicLinkTokenByHash(ctx, "ml-peek")
+			if err != nil {
+				t.Fatalf("Find: %v", err)
+			}
+			if rec == nil || rec.Email != "ml-peek@example.com" || rec.ReturnTo != "https://app.test/welcome" || rec.ConsumedAt != 0 {
+				t.Fatalf("Find returned wrong record: %#v", rec)
+			}
+			if _, err := r.ConsumeMagicLinkToken(ctx, "ml-peek", 200); err != nil {
+				t.Fatalf("Consume after Find must still succeed: %v", err)
+			}
+			// After consumption the lookup shows the stamp, so a page can say
+			// "already used" instead of offering a click that will fail.
+			rec, err = r.FindMagicLinkTokenByHash(ctx, "ml-peek")
+			if err != nil {
+				t.Fatalf("Find after consume: %v", err)
+			}
+			if rec == nil || rec.ConsumedAt != 200 {
+				t.Fatalf("Find after consume: ConsumedAt = %v, want 200", rec)
+			}
+			// Unknown and empty hashes are nil, nil — not an error and not a
+			// sentinel, so the caller renders "invalid" without special-casing.
+			for _, hash := range []string{"ml-unknown", ""} {
+				rec, err := r.FindMagicLinkTokenByHash(ctx, hash)
+				if err != nil || rec != nil {
+					t.Fatalf("Find(%q) = %#v, %v; want nil, nil", hash, rec, err)
+				}
 			}
 		})
 
