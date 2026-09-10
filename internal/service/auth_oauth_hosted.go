@@ -15,13 +15,14 @@ import (
 	"github.com/elloloop/identity/pkg/oauth"
 )
 
-// oauthOneTimeCodeTTL bounds how long the hosted-callback one-time code
-// is valid for. The SPA redeems it on the very next page load after the
-// 302 to return_to, so a tight window suffices and limits the replay
-// surface. Not config-knobbed: 60s is short enough to be safe and long
-// enough for a slow client, and a deployer-tunable here would invite
-// someone to widen it into a security hole.
-const oauthOneTimeCodeTTL = 60 * time.Second
+// handoverCodeTTL bounds how long a handover code — minted by the hosted
+// OAuth callback or the hosted magic-link page — stays redeemable. The app
+// redeems it on the very next request after the redirect to return_to, so
+// a tight window suffices and limits the replay surface. Not config-knobbed:
+// 60s is short enough to be safe and long enough for a slow client, and a
+// deployer-tunable here would invite someone to widen it into a security
+// hole.
+const handoverCodeTTL = 60 * time.Second
 
 // Handover code methods name the flow that minted a code. Redeem enforces
 // that flow's login policy and records that flow's audit event, so a code
@@ -231,7 +232,7 @@ func (s *AuthService) mintHandoverCode(ctx context.Context, userID, method strin
 		CodeHash:    sha256Hex(raw),
 		UserID:      userID,
 		LoginMethod: method,
-		ExpiresAt:   now + oauthOneTimeCodeTTL.Milliseconds(),
+		ExpiresAt:   now + handoverCodeTTL.Milliseconds(),
 		CreatedAt:   now,
 	})
 	if err != nil {

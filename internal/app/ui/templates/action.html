@@ -6,7 +6,7 @@
             {{if and .Intro (eq .State "ready")}}<p>{{.Intro}}</p>{{end}}
         </div>
 
-        {{if .Error}}<div class="error-message is-visible" role="alert">{{.Error}}</div>{{end}}
+        {{if .Error}}<div class="error-message is-visible" id="form-error" role="alert">{{.Error}}</div>{{end}}
 
         {{if eq .State "ready"}}
         <form method="post" action="{{.FormAction}}" novalidate>
@@ -20,11 +20,11 @@
             {{if .AskPassword}}
             <div class="form-group">
                 <label for="password">New password</label>
-                <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="••••••••">
+                <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="••••••••"{{if .Error}} aria-invalid="true" aria-describedby="form-error"{{end}}>
             </div>
             <div class="form-group">
                 <label for="password_confirm">Confirm password</label>
-                <input type="password" id="password_confirm" name="password_confirm" required autocomplete="new-password" placeholder="••••••••">
+                <input type="password" id="password_confirm" name="password_confirm" required autocomplete="new-password" placeholder="••••••••"{{if .Error}} aria-invalid="true" aria-describedby="form-error"{{end}}>
             </div>
             {{end}}
             <button type="submit" class="submit-btn" id="submit-btn">{{.Submit}}</button>

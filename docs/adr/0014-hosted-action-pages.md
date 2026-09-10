@@ -101,6 +101,16 @@ when the link is consumed.
 - The hosted POSTs share the per-IP budgets of the RPC surfaces they stand in
   for (verify, reset, login, signup).
 
+### Tenant invitations get their own page
+
+A tenant-membership invitation (`CreateTenantInvitation`) is accepted by a
+signed-in caller whose address matches (`AcceptTenantInvitation`), so no
+server-rendered page can complete it. It also lives in a different store
+from the admin user invitation while sharing its URL, which is how a live
+tenant invitation would have been reported "invalid" by the accept-invitation
+page. It now mails `/auth/join-team`, a page that only looks: it names the
+team and the invited address and sends the invitee to sign in.
+
 ### Deferred, in scope of this program
 
 - **Override URLs.** A product that wants its own page for a link kind will
@@ -116,6 +126,13 @@ when the link is consumed.
   hub, which resolves the default project; the presented project key is not
   carried into request context, so a link cannot embed it yet. Such a
   project sets a primary auth-domain until it can.
+- **Requesting a new link from the hosted sign-in page.** The used and
+  expired states send the user back to the app; the hosted sign-in page has
+  no forgot-password or magic-link request yet.
+- **Localisation.** The hosted copy is English only; a product needing other
+  languages serves its own routes.
+- **Metrics.** The hosted pages are log-observable only; the RPC metrics
+  middleware does not cover them.
 
 ## Consequences
 
@@ -123,8 +140,12 @@ when the link is consumed.
   the pages keeps working; auth-domain projects work for the first time.
 - `RedeemOAuthCode` is now the redeem step for every hosted handover. Its
   audit detail for the OAuth flow reads `{"method":"oauth","via":
-  "hosted_handover"}` (was `{"method":"hosted_redeem"}`), and a magic-link
-  redeem records `login_success` with `{"method":"magic_link"}`.
+  "hosted_handover"}` (was `{"method":"hosted_redeem"}`); a magic-link
+  redeem records `login_success` with `{"method":"magic_link","via":
+  "hosted_handover"}`, and the consume itself records `magic_link_consumed`
+  with `new_user`, so proving control of an inbox is in the audit log even
+  when the code is never redeemed. The response carries `totp_required` and
+  `login_challenge_id` for a second-factor requirement.
 - The sign-in page answers GET and HEAD only, and can no longer be framed.
 - The hosted UI package owns a `Service` interface of twelve methods; the
   service layer gained read-only previews (`Peek*`), `RedeemInvitation`,

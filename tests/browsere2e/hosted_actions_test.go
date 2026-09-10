@@ -22,7 +22,6 @@ import (
 const (
 	selActionSubmit  = `#submit-btn`
 	selActionSuccess = `.success-message`
-	selActionNotice  = `.notice-message`
 	selNewPassword   = `#password`
 	selConfirmPass   = `#password_confirm`
 

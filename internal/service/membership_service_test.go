@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/elloloop/identity/internal/config"
@@ -597,4 +598,55 @@ func TestMembershipService_InvitationTTLFromConfig(t *testing.T) {
 		newFakeUserDirectory(), &recordingMailer{}, false, cfg, nil,
 	)
 	require.Equal(t, time.Hour, svc.invitationTTL())
+}
+
+// TestPeekTenantInvitation_States: the hosted join-team page previews a
+// tenant invitation without changing it — address, team name and state —
+// and reports an unknown, accepted, revoked or expired one as such.
+func TestPeekTenantInvitation_States(t *testing.T) {
+	f := newMembershipFixtureNoMail()
+	f.tenants.put(&Tenant{ID: mTestTenant, ProjectID: mTestProject, Name: "Acme Design"})
+	rawToken := f.seedInvite(t)
+	ctx := withProject(mTestProject)
+
+	preview, err := f.svc.PeekTenantInvitation(ctx, rawToken)
+	require.NoError(t, err)
+	assert.Equal(t, ActionLinkReady, preview.State)
+	assert.Equal(t, mInvitee, preview.Email)
+	assert.Equal(t, "Acme Design", preview.Detail, "the team name is shown on the page")
+
+	for _, token := range []string{"", "not-a-token"} {
+		preview, err := f.svc.PeekTenantInvitation(ctx, token)
+		require.NoError(t, err)
+		assert.Equal(t, ActionLinkInvalid, preview.State)
+	}
+	preview, err = f.svc.PeekTenantInvitation(context.Background(), rawToken)
+	require.NoError(t, err)
+	assert.Equal(t, ActionLinkInvalid, preview.State, "without a project the token cannot be found")
+
+	f.svc.nowFunc = func() time.Time { return time.Now().Add(defaultInvitationTTL + time.Hour) }
+	preview, err = f.svc.PeekTenantInvitation(ctx, rawToken)
+	require.NoError(t, err)
+	assert.Equal(t, ActionLinkExpired, preview.State)
+	f.svc.nowFunc = time.Now
+
+	f.users.put(mInviteeID, mInvitee)
+	_, err = f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)
+	require.NoError(t, err)
+	preview, err = f.svc.PeekTenantInvitation(ctx, rawToken)
+	require.NoError(t, err)
+	assert.Equal(t, ActionLinkUsed, preview.State)
+}
+
+// TestTenantInvitationMail_LinksToJoinTeamPage: the tenant invitation is a
+// different flow from the admin user invitation, so its link lands on its
+// own hosted page.
+func TestTenantInvitationMail_LinksToJoinTeamPage(t *testing.T) {
+	f := newMembershipFixtureWith(true)
+	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
+	_, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, mTestTenant, mInvitee, RoleAdmin)
+	require.NoError(t, err)
+	require.Len(t, f.mailer.sent, 1)
+	assert.Contains(t, f.mailer.sent[0].Text, HostedJoinTeamPath+"?token=")
+	assert.NotContains(t, f.mailer.sent[0].Text, "/auth/accept-invitation")
 }

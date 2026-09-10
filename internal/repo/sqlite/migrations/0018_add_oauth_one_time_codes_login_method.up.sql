@@ -5,4 +5,5 @@
 -- and audit event. Rows that predate the column were minted by OAuth, which
 -- the default preserves.
 ALTER TABLE oauth_one_time_codes
-    ADD COLUMN login_method TEXT NOT NULL DEFAULT 'oauth';
+    ADD COLUMN login_method TEXT NOT NULL DEFAULT 'oauth'
+        CHECK (login_method IN ('oauth', 'magic_link'));

@@ -26,6 +26,9 @@ const (
 type ActionLinkPreview struct {
 	State ActionLinkState
 	Email string
+	// Detail names what the link concerns beyond the address when there is
+	// something to name — the team a tenant invitation joins.
+	Detail string
 }
 
 // linkState derives the pre-click state from a token's stamps.

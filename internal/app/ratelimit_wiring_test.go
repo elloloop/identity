@@ -10,6 +10,7 @@ import (
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/middleware"
+	"github.com/elloloop/identity/internal/service"
 )
 
 // TestBuildRateLimits_PasswordlessPathsLimited asserts the two
@@ -272,4 +273,52 @@ func assertQuotaExhausts(t *testing.T, handler http.Handler, path, ip string, qu
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusTooManyRequests, w.Code, "%s must refuse over quota", path)
+}
+
+// TestBuildRateLimits_HostedActionPagesLimited asserts every hosted action
+// page is wired to the per-IP budget of the RPC surface it stands in for,
+// that the consuming POST 429s past the quota, and that the GET preview
+// stays unmetered so a reload never spends the submit's budget.
+func TestBuildRateLimits_HostedActionPagesLimited(t *testing.T) {
+	cfg := &config.Config{
+		RateLimitWindowSeconds:     60,
+		RateLimitVerifyPerIP:       2,
+		RateLimitResetPerIP:        2,
+		RateLimitLoginPerIP:        2,
+		RateLimitSignupPerIP:       2,
+		RateLimitPasswordlessPerIP: 10,
+	}
+	limits := buildRateLimits(cfg)
+
+	byPath := map[string]middleware.PathLimit{}
+	for _, l := range limits {
+		byPath[l.PathPrefix] = l
+	}
+	for path, tag := range map[string]string{
+		service.HostedVerifyEmailPath:        "hosted_verify_email",
+		service.HostedConfirmEmailChangePath: "hosted_email_change",
+		service.HostedResetPasswordPath:      "hosted_reset_password",
+		service.HostedMagicLinkPath:          "hosted_magic_link",
+		service.HostedAcceptInvitationPath:   "hosted_accept_invitation",
+	} {
+		require.Contains(t, byPath, path, "hosted page %s must have a rate limit", path)
+		assert.Equal(t, tag, byPath[path].Tag)
+		assert.Equal(t, http.MethodPost, byPath[path].Method, "%s: only the consuming POST is metered", path)
+	}
+	// The join-team page only looks and links to sign-in; it has no POST.
+	assert.NotContains(t, byPath, service.HostedJoinTeamPath)
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, service.HostedMagicLinkPath, "9.9.9.9", cfg.RateLimitLoginPerIP)
+	assertQuotaExhausts(t, handler, service.HostedAcceptInvitationPath, "9.9.9.10", cfg.RateLimitSignupPerIP)
+	assertQuotaExhausts(t, handler, service.HostedResetPasswordPath, "9.9.9.11", cfg.RateLimitResetPerIP)
+
+	// GET previews on an exhausted budget still render.
+	req := httptest.NewRequest(http.MethodGet, service.HostedResetPasswordPath+"?token=t", nil)
+	req.Header.Set(middleware.ClientIPHeader, "9.9.9.11")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "the GET preview must not be metered")
 }

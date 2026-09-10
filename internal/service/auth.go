@@ -1950,9 +1950,24 @@ func (s *AuthService) validatePasswordStrengthForEmail(ctx context.Context, emai
 	return s.governance.validatePasswordStrength(ctx, s.projectID(ctx), s.logger, email, pw)
 }
 
+// WeakPasswordError reports which strength requirements a password failed.
+// It unwraps to ErrWeakPassword so every caller keeps matching the sentinel,
+// and carries the requirement list as data so a page can render it without
+// parsing the message. Error() is byte-identical to the former wrapped
+// sentinel, so nothing on the wire changes.
+type WeakPasswordError struct {
+	Issues []string
+}
+
+func (e *WeakPasswordError) Error() string {
+	return ErrWeakPassword.Error() + ": " + strings.Join(e.Issues, "; ")
+}
+
+func (e *WeakPasswordError) Unwrap() error { return ErrWeakPassword }
+
 func passwordIssuesToErr(issues []string) error {
 	if len(issues) > 0 {
-		return fmt.Errorf("%w: %s", ErrWeakPassword, strings.Join(issues, "; "))
+		return &WeakPasswordError{Issues: issues}
 	}
 	return nil
 }

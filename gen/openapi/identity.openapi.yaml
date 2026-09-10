@@ -7587,16 +7587,26 @@ components:
         accessToken:
           type: string
           title: access_token
-          description: Backend-issued JWT
+          description: Backend-issued JWT (empty when totp_required=true)
         refreshToken:
           type: string
           title: refresh_token
-          description: For token rotation (send in RefreshToken RPC body)
+          description: For token rotation (empty when totp_required=true)
         expiresIn:
           type: integer
           title: expires_in
           format: int32
           description: Access token lifetime in seconds
+        totpRequired:
+          type: boolean
+          title: totp_required
+          description: |-
+            The login completes under the minting flow's policy, which may require a
+             second factor: then no tokens are issued and the client must call
+             VerifyTotp with login_challenge_id, exactly as after PasswordLogin.
+        loginChallengeId:
+          type: string
+          title: login_challenge_id
       title: RedeemOAuthCodeResponse
       additionalProperties: false
     identity.v1.RefreshAssuranceTokenRequest:

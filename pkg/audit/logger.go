@@ -128,10 +128,14 @@ const (
 	EventAccountDeletionCancelled EventType = "account_deletion_cancelled"
 	EventAdminResetPassword       EventType = "admin_reset_password"
 	EventOAuthLogin               EventType = "oauth_login"
-	EventQrLoginApproved          EventType = "qr_login_approved"
-	EventQrLoginRejected          EventType = "qr_login_rejected"
-	EventAdminHelpRequested       EventType = "admin_help_requested"
-	EventAdminHelpResolved        EventType = "admin_help_resolved"
+	// EventMagicLinkConsumed records the hosted magic-link page proving
+	// control of an inbox and minting a handover code; the sign-in itself is
+	// recorded as login_success when the app redeems the code.
+	EventMagicLinkConsumed  EventType = "magic_link_consumed"
+	EventQrLoginApproved    EventType = "qr_login_approved"
+	EventQrLoginRejected    EventType = "qr_login_rejected"
+	EventAdminHelpRequested EventType = "admin_help_requested"
+	EventAdminHelpResolved  EventType = "admin_help_resolved"
 
 	EventPhoneVerificationRequested EventType = "phone_verification_requested"
 	EventPhoneVerified              EventType = "phone_verified"
@@ -250,6 +254,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventAccountDeletionCancelled:      {},
 	EventAdminResetPassword:            {},
 	EventOAuthLogin:                    {},
+	EventMagicLinkConsumed:             {},
 	EventQrLoginApproved:               {},
 	EventQrLoginRejected:               {},
 	EventAdminHelpRequested:            {},

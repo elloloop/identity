@@ -1681,6 +1681,9 @@ func (r *MemRepo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, atM
 }
 
 func (r *MemRepo) FindMagicLinkTokenByHash(_ context.Context, tokenHash string) (*service.MagicLinkTokenRecord, error) {
+	if tokenHash == "" {
+		return nil, nil
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, tkn := range r.magicLinkTokens {

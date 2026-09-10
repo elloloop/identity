@@ -44,6 +44,9 @@
     <script nonce="{{.Nonce}}">
         {{.JSONConfig}}
         const config = window.serverConfig || { passwordLoginEnabled: true, passwordSignupEnabled: true };
+        // The page's CSP nonce, so the CAPTCHA loader injected below carries
+        // it and Turnstile propagates it to the resources it loads.
+        const scriptNonce = document.currentScript ? document.currentScript.nonce : '';
 
         let isLogin = true;
         const form = document.getElementById('auth-form');
@@ -147,6 +150,7 @@
                 if (window.turnstile) { resolve(); return; }
                 const s = document.createElement('script');
                 s.src = config.captchaScriptURL;
+                if (scriptNonce) s.nonce = scriptNonce;
                 s.async = true;
                 s.defer = true;
                 s.onload = () => resolve();

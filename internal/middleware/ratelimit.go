@@ -93,6 +93,11 @@ type PathLimit struct {
 	PathPrefix string
 	Limiter    RateLimiter
 	Tag        string // metric label / log field
+	// Method, when set, restricts the entry to requests of that HTTP method;
+	// other methods on the same prefix pass through it unmetered. The hosted
+	// pages use it so a GET that only looks does not spend the budget the
+	// consuming POST is metered on.
+	Method string
 }
 
 // RateLimitMiddleware enforces per-IP+path quotas using the configured
@@ -113,6 +118,9 @@ func RateLimitMiddleware(limits []PathLimit, logger *zap.Logger) func(http.Handl
 					continue
 				}
 				if !strings.HasPrefix(r.URL.Path, pl.PathPrefix) {
+					continue
+				}
+				if pl.Method != "" && r.Method != pl.Method {
 					continue
 				}
 				clientIP := r.Header.Get(ClientIPHeader)

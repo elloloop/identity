@@ -455,7 +455,7 @@ message NativeOAuthLoginResponse {
     on a conflict.
   </p>
 
-  <h2>Hosted OAuth flow (Firebase-style)</h2>
+  <h2 id="hosted-oauth-flow">Hosted OAuth flow (Firebase-style)</h2>
   <p>
     On top of the headless RPCs above, identity also exposes a fully
     server-owned OAuth flow that handles the provider redirects and
@@ -479,9 +479,11 @@ message NativeOAuthLoginResponse {
   <p>
     The SPA then exchanges the one-time code for tokens via the
     <code>RedeemOAuthCode</code> RPC. No token material is persisted at
-    rest — only the user id is stored alongside the
-    <code>code_hash</code>, so a leaked code store is useless after the
-    60s window or a single redeem.
+    rest — only the user id and the flow that minted the code
+    (<code>login_method</code>: <code>oauth</code>, or
+    <code>magic_link</code> for the hosted magic-link page) are stored
+    alongside the <code>code_hash</code>, so a leaked code store is useless
+    after the 60s window or a single redeem.
   </p>
 
   <h3>Enabling the hosted flow</h3>

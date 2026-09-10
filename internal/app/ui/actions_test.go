@@ -24,7 +24,16 @@ func ready(email string) func(context.Context, string) (service.ActionLinkPrevie
 }
 
 func newActionHandler(svc Service) http.Handler {
-	return Handler(&config.Config{}, svc, false, nil)
+	return Handler(&config.Config{}, Sources{Auth: svc}, false, nil)
+}
+
+// stubTeams is a canned TeamInvitations for the join-team page.
+type stubTeams struct {
+	peek func(ctx context.Context, token string) (service.ActionLinkPreview, error)
+}
+
+func (s stubTeams) PeekTenantInvitation(ctx context.Context, token string) (service.ActionLinkPreview, error) {
+	return s.peek(ctx, token)
 }
 
 func get(t *testing.T, h http.Handler, target string, mutate func(*http.Request)) *httptest.ResponseRecorder {
@@ -258,7 +267,11 @@ func TestActionPages_PostErrorMapping(t *testing.T) {
 		{"invitation used", service.ErrInvitationUsed, http.StatusOK, "already been", false},
 		{"unauthenticated", fmt.Errorf("%w: invalid reset token", service.ErrUnauthenticated), http.StatusOK, "isn't valid", false},
 		{"magic link invalid", service.ErrMagicLinkInvalid, http.StatusOK, "isn't valid", false},
-		{"weak password", fmt.Errorf("%w: Password must be at least 12 characters", service.ErrWeakPassword), http.StatusBadRequest, "Password must be at least 12 characters", true},
+		{"weak password", &service.WeakPasswordError{Issues: []string{"Password must be at least 12 characters", "Password is too common"}}, http.StatusBadRequest, "Password must be at least 12 characters. Password is too common.", true},
+		{"weak password without detail", fmt.Errorf("%w: opaque", service.ErrWeakPassword), http.StatusBadRequest, "doesn't meet the requirements", true},
+		{"sso required", service.ErrSSORequired, http.StatusForbidden, "can't be used here", false},
+		{"method not allowed by policy", service.ErrPermissionDenied, http.StatusForbidden, "can't be used here", false},
+		{"invitation pending", service.ErrInvitationPending, http.StatusForbidden, "hasn't accepted its invitation", false},
 		{"conflict", fmt.Errorf("%w: email already in use", service.ErrAlreadyExists), http.StatusConflict, "already in use", true},
 		{"access refused", service.ErrAccessNotAllowed, http.StatusForbidden, "can't be used here", false},
 		{"account locked", service.ErrAccountLocked, http.StatusForbidden, "can't be used here", false},
@@ -358,7 +371,7 @@ func TestActionPages_SecurityHeaders(t *testing.T) {
 		AssuranceEnabled:          true,
 		AssuranceWebProvider:      config.AssuranceWebProviderTurnstile,
 		AssuranceTurnstileSiteKey: "0xSITEKEY",
-	}, allEnabled(), false, nil)
+	}, Sources{Auth: allEnabled()}, false, nil)
 	rec := get(t, captcha, "/auth/", nil)
 	csp := rec.Header().Get("Content-Security-Policy")
 	if !strings.Contains(csp, "script-src 'nonce-") || !strings.Contains(csp, " "+turnstileOrigin) || !strings.Contains(csp, "frame-src "+turnstileOrigin) {
@@ -375,11 +388,6 @@ func TestActionPages_SecurityHeaders(t *testing.T) {
 func TestActionPages_ProjectKeyThreadsThrough(t *testing.T) {
 	h := newActionHandler(stubService{peek: ready("a@b.test")})
 	body := text(get(t, h, "/auth/verify-email?token=t&project_key=pk_1", nil))
-	assertContains(t, body, `action="/auth/verify-email?project_key=pk_1"`)
-	body = text(get(t, h, "/auth/verify-email?token=t&project_key=pk_1", func(r *http.Request) {
-		// Force the non-form branch to see the onward link.
-		_ = r
-	}))
 	assertContains(t, body, `action="/auth/verify-email?project_key=pk_1"`)
 
 	used := newActionHandler(stubService{peek: func(context.Context, string) (service.ActionLinkPreview, error) {
@@ -448,5 +456,93 @@ func TestHandler_UnknownPathAndMethods(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || rec.Body.Len() != 0 || rec.Header().Get("Content-Security-Policy") == "" {
 		t.Errorf("HEAD = %d body=%d bytes csp=%q", rec.Code, rec.Body.Len(), rec.Header().Get("Content-Security-Policy"))
+	}
+}
+
+// TestActionPages_JoinTeamOnlyLooks: a tenant-membership invitation lands on
+// a page that names the team and the address and sends the invitee to sign
+// in; it has no form and refuses POST, and its states read like the others.
+func TestActionPages_JoinTeamOnlyLooks(t *testing.T) {
+	teams := stubTeams{peek: func(_ context.Context, token string) (service.ActionLinkPreview, error) {
+		switch token {
+		case "live":
+			return service.ActionLinkPreview{State: service.ActionLinkReady, Email: "bob@acme.test", Detail: "Acme Design"}, nil
+		case "used":
+			return service.ActionLinkPreview{State: service.ActionLinkUsed}, nil
+		case "nameless":
+			return service.ActionLinkPreview{State: service.ActionLinkReady, Email: "bob@acme.test"}, nil
+		}
+		return service.ActionLinkPreview{State: service.ActionLinkInvalid}, nil
+	}}
+	h := Handler(&config.Config{}, Sources{
+		Auth:  stubService{brand: service.HostedUIBranding{ProductName: "Acme"}},
+		Teams: teams,
+	}, false, nil)
+
+	rec := get(t, h, "/auth/join-team?token=live", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := text(rec)
+	assertContains(t, body, "Join Acme Design", "bob@acme.test", "Sign in with that address", `href="/auth/"`)
+	assertNotContains(t, body, "<form")
+
+	assertContains(t, text(get(t, h, "/auth/join-team?token=used", nil)), "already been accepted")
+	assertContains(t, text(get(t, h, "/auth/join-team?token=nope", nil)), "isn't valid")
+
+	rec = post(t, h, "/auth/join-team", url.Values{"token": {"live"}}, nil)
+	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != "GET, HEAD" {
+		t.Fatalf("POST join-team = %d Allow=%q", rec.Code, rec.Header().Get("Allow"))
+	}
+
+	// Without a team source the page fails closed to "invalid".
+	solo := newActionHandler(stubService{})
+	assertContains(t, text(get(t, solo, "/auth/join-team?token=live", nil)), "isn't valid")
+	// A team without a name gets the fallback heading.
+	assertContains(t, text(get(t, h, "/auth/join-team?token=nameless", nil)), "Join your team")
+}
+
+// TestActionPages_HeadersOnEveryResponse: the header set is on redirects
+// and error replies too, not only rendered pages.
+func TestActionPages_HeadersOnEveryResponse(t *testing.T) {
+	h := newActionHandler(stubService{
+		peek: ready("a@b.test"),
+		magic: func(context.Context, string, string, string) (*service.MagicLinkHandover, error) {
+			return &service.MagicLinkHandover{RedirectURL: "https://app.test/cb?code=x"}, nil
+		},
+	})
+	check := func(name string, rec *httptest.ResponseRecorder) {
+		t.Helper()
+		for _, hdr := range []string{"Cache-Control", "Referrer-Policy", "X-Frame-Options", "Content-Security-Policy", "X-Robots-Tag"} {
+			if rec.Header().Get(hdr) == "" {
+				t.Errorf("%s: missing %s", name, hdr)
+			}
+		}
+	}
+	check("redirect", post(t, h, "/auth/magic-link", url.Values{"token": {"t"}}, nil))
+	check("404", get(t, h, "/auth/nope", nil))
+	req := httptest.NewRequest(http.MethodPut, "/auth/verify-email", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	check("405", rec)
+	req = httptest.NewRequest(http.MethodPost, "/auth/", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	check("login 405", rec)
+}
+
+func TestActionPaths_ListsEveryPage(t *testing.T) {
+	paths := ActionPaths()
+	for _, want := range []string{
+		service.HostedVerifyEmailPath, service.HostedResetPasswordPath, service.HostedConfirmEmailChangePath,
+		service.HostedMagicLinkPath, service.HostedAcceptInvitationPath, service.HostedJoinTeamPath,
+	} {
+		found := false
+		for _, p := range paths {
+			found = found || p == want
+		}
+		if !found {
+			t.Errorf("ActionPaths missing %s", want)
+		}
 	}
 }

@@ -361,7 +361,7 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 	if s.mailer == nil {
 		return
 	}
-	link := fmt.Sprintf("%s/auth/accept-invitation?token=%s", s.appBaseURL(ctx), rawToken)
+	link := fmt.Sprintf("%s"+HostedJoinTeamPath+"?token=%s", appBaseURL(ctx, s.cfg), rawToken)
 	var brand resolvedBranding
 	if s.cfg != nil {
 		brand = resolveBranding(ctx, s.cfg)
@@ -413,23 +413,6 @@ func (s *MembershipService) tenantDisplayName(ctx context.Context, projectID, te
 	return generic
 }
 
-// appBaseURL returns the public app base URL for the request's project, with
-// any trailing slash trimmed, so callers can concatenate "/auth/foo". It
-// mirrors AuthService.appBaseURL: a branded primary auth-domain when the
-// request resolved to one, else the configured GATEWAY_APP_BASE_URL, else a
-// localhost dev default.
-func (s *MembershipService) appBaseURL(ctx context.Context) string {
-	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.PrimaryAuthDomain != "" {
-		return "https://" + scope.PrimaryAuthDomain
-	}
-	if s.cfg != nil {
-		if u := strings.TrimRight(s.cfg.AppBaseURL, "/"); u != "" {
-			return u
-		}
-	}
-	return "http://localhost:9002"
-}
-
 // invitationTTL returns the configured invitation validity window, defaulting
 // to defaultInvitationTTL when unset.
 func (s *MembershipService) invitationTTL() time.Duration {
@@ -437,6 +420,44 @@ func (s *MembershipService) invitationTTL() time.Duration {
 		return time.Duration(s.cfg.TenantInvitationExpirySeconds) * time.Second
 	}
 	return defaultInvitationTTL
+}
+
+// PeekTenantInvitation previews a tenant-membership invitation link without
+// changing it: whose address it is for, the team's name, and whether it is
+// still open. An unknown token is ActionLinkInvalid, not an error.
+func (s *MembershipService) PeekTenantInvitation(ctx context.Context, rawToken string) (ActionLinkPreview, error) {
+	if strings.TrimSpace(rawToken) == "" {
+		return ActionLinkPreview{State: ActionLinkInvalid}, nil
+	}
+	// Without a project there is no store to look in: the token cannot be
+	// found, which the page reports the same way as an unknown token.
+	scope := ProjectScopeFromContext(ctx)
+	if scope == nil || scope.ProjectID == "" {
+		return ActionLinkPreview{State: ActionLinkInvalid}, nil
+	}
+	projectID := scope.ProjectID
+	inv, err := s.invitations.GetInvitationByTokenHash(ctx, projectID, sha256Hex(rawToken))
+	if err != nil {
+		return ActionLinkPreview{}, fmt.Errorf("looking up tenant invitation: %w", err)
+	}
+	if inv == nil {
+		return ActionLinkPreview{State: ActionLinkInvalid}, nil
+	}
+	preview := ActionLinkPreview{State: ActionLinkReady, Email: inv.Email}
+	switch {
+	case inv.Status == InvitationStatusAccepted || inv.AcceptedAtMs > 0:
+		preview.State = ActionLinkUsed
+	case inv.Status == InvitationStatusRevoked:
+		preview.State = ActionLinkInvalid
+	case inv.Status == InvitationStatusExpired || (inv.ExpiresAtMs > 0 && inv.ExpiresAtMs < s.nowFunc().UnixMilli()):
+		preview.State = ActionLinkExpired
+	}
+	// The team's name is a courtesy for the page heading; a lookup failure
+	// leaves it blank rather than failing the preview.
+	if t, err := s.tenants.GetTenant(ctx, projectID, inv.TenantID); err == nil && t != nil {
+		preview.Detail = t.Name
+	}
+	return preview, nil
 }
 
 // requireProject resolves the caller's project, rejecting when none is in the

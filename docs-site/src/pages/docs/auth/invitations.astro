@@ -21,7 +21,7 @@ import { Code } from "astro-expressive-code/components";
     <code>https://app.example.com/auth/accept-invitation?token=&lt;invitation_token&gt;</code>.
     When that base URL is identity's own origin (or the project's primary
     auth-domain), the link opens identity's
-    <a href="/docs/auth/hosted-pages">hosted accept-invitation page</a>,
+    <a href={`${import.meta.env.BASE_URL}/docs/auth/hosted-pages`}>hosted accept-invitation page</a>,
     where the invitee picks a password; otherwise your frontend serves the
     route and calls <code>AcceptInvitation</code>.
   </p>

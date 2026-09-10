@@ -61,6 +61,19 @@ type Service interface {
 	RedeemInvitation(ctx context.Context, token, password, name string) (*service.User, error)
 }
 
+// TeamInvitations previews tenant-membership invitations for the join-team
+// page. Implemented by service.MembershipService; the page only looks, since
+// accepting needs a signed-in caller.
+type TeamInvitations interface {
+	PeekTenantInvitation(ctx context.Context, token string) (service.ActionLinkPreview, error)
+}
+
+// Sources are the services the hosted pages read from.
+type Sources struct {
+	Auth  Service
+	Teams TeamInvitations
+}
+
 // configData holds the serialized configuration injected into the login
 // page. It is computed PER REQUEST: the sign-in options depend on the
 // project the request resolved to (auth-domain Host or ?project_key=), not
@@ -89,7 +102,7 @@ type configData struct {
 	// a widget can render; the same origin is admitted by the page's CSP.
 	CaptchaScriptURL string `json:"captchaScriptURL"`
 	// CaptchaEnforceLogin and CaptchaEnforceSignup mirror the server's
-	// per-flow enforcement (GATEWAY_CAPTCHA_ENFORCE_PASSWORD_LOGIN /
+	// per-flow enforcement (GATEWAY_ASSURANCE_ENFORCE_PASSWORD_LOGIN /
 	// _SIGNUP) so the page renders the widget exactly where the server will
 	// require a token. Both are false whenever no widget can render.
 	CaptchaEnforceLogin  bool `json:"captchaEnforceLogin"`
@@ -104,11 +117,15 @@ type loginPage struct {
 
 type handler struct {
 	cfg                *config.Config
-	svc                Service
+	src                Sources
 	logger             *zap.Logger
 	hostedOAuthEnabled bool
 	login              *template.Template
 	action             *template.Template
+	// captchaProvider and captchaSiteKey are the sign-in page's CAPTCHA
+	// widget settings, fixed at boot from env config.
+	captchaProvider string
+	captchaSiteKey  string
 	// crossOrigin rejects unsafe requests a browser marks as coming from
 	// another site, so a page on some other origin cannot submit an action
 	// form here (login CSRF against the magic-link page most of all). It
@@ -122,7 +139,7 @@ type handler struct {
 // page at /auth/ and the five emailed-link action pages. hostedOAuthEnabled
 // reports whether the hosted OAuth routes are mounted at all; without them
 // the sign-in page renders no provider buttons.
-func Handler(cfg *config.Config, svc Service, hostedOAuthEnabled bool, logger *zap.Logger) http.Handler {
+func Handler(cfg *config.Config, src Sources, hostedOAuthEnabled bool, logger *zap.Logger) http.Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -132,11 +149,13 @@ func Handler(cfg *config.Config, svc Service, hostedOAuthEnabled bool, logger *z
 
 	h := &handler{
 		cfg:                cfg,
-		svc:                svc,
+		src:                src,
 		logger:             logger,
 		hostedOAuthEnabled: hostedOAuthEnabled,
 		login:              login,
 		action:             action,
+		captchaProvider:    captchaUIProvider(cfg),
+		captchaSiteKey:     captchaUISiteKey(cfg),
 		crossOrigin:        http.NewCrossOriginProtection(),
 		actions:            map[string]actionKind{},
 	}
@@ -156,43 +175,62 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveAction(w, r, kind)
 		return
 	}
-	http.NotFound(w, r)
+	h.plainError(w, http.StatusNotFound, "404 page not found")
+}
+
+// plainError answers a non-page outcome (unknown path, wrong method, bad
+// form, render failure) with the same header set every hosted response
+// carries, then a plain-text body.
+func (h *handler) plainError(w http.ResponseWriter, status int, msg string) {
+	nonce, err := newNonce()
+	if err != nil {
+		nonce = ""
+	}
+	setSecurityHeaders(w.Header(), pagePolicy{nonce: nonce})
+	http.Error(w, msg, status)
 }
 
 func (h *handler) serveLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		h.plainError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	nonce, err := newNonce()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		h.plainError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	policy := pagePolicy{nonce: nonce, scripts: true, captcha: h.captchaProvider != "", formAction: true}
+	if r.Method == http.MethodHead {
+		// Only the status and headers reach the client; skip the render.
+		setSecurityHeaders(w.Header(), policy)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	opts := h.svc.HostedUIOptions(r.Context())
+	opts := h.src.Auth.HostedUIOptions(r.Context())
 	providers := opts.OAuthProviders
 	if providers == nil {
 		providers = []service.HostedUIProvider{}
 	}
-	siteKey := captchaUISiteKey(h.cfg)
 	data := configData{
 		PasswordLoginEnabled:  opts.PasswordLoginEnabled,
 		PasswordSignupEnabled: opts.PasswordSignupEnabled,
 		OAuthProviders:        providers,
 		HostedOAuthEnabled:    h.hostedOAuthEnabled,
-		CaptchaProvider:       captchaUIProvider(h.cfg),
-		CaptchaSiteKey:        siteKey,
-		CaptchaEnforceLogin:   siteKey != "" && h.cfg.AssuranceEnforcePasswordLogin,
-		CaptchaEnforceSignup:  siteKey != "" && h.cfg.AssuranceEnforcePasswordSignup,
+		CaptchaProvider:       h.captchaProvider,
+		CaptchaSiteKey:        h.captchaSiteKey,
+		CaptchaEnforceLogin:   h.captchaSiteKey != "" && h.cfg.AssuranceEnforcePasswordLogin,
+		CaptchaEnforceSignup:  h.captchaSiteKey != "" && h.cfg.AssuranceEnforcePasswordSignup,
 	}
 	if data.CaptchaProvider != "" {
 		data.CaptchaScriptURL = turnstileScriptURL
 	}
 	b, err := json.Marshal(data)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		h.plainError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	var buf bytes.Buffer
@@ -203,19 +241,12 @@ func (h *handler) serveLogin(w http.ResponseWriter, r *http.Request) {
 		// with no user-controlled input, so injecting it unescaped is safe.
 		JSONConfig: template.JS("window.serverConfig = " + string(b) + ";"), //nolint:gosec // G203: static server-generated config, no user input
 	}); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		h.plainError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	setSecurityHeaders(w.Header(), pagePolicy{
-		nonce:      nonce,
-		scripts:    true,
-		captcha:    data.CaptchaProvider != "",
-		formAction: true,
-	})
+	setSecurityHeaders(w.Header(), policy)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	if r.Method == http.MethodHead {
-		return
-	}
 	_, _ = w.Write(buf.Bytes())
 }
 

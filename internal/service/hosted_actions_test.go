@@ -416,3 +416,62 @@ func TestHostedUIBranding_ProjectOverridesGlobal(t *testing.T) {
 	got = svc.HostedUIBranding(ctx)
 	assert.Equal(t, HostedUIBranding{ProductName: "Kids", SupportEmail: "help@kids.test"}, got)
 }
+
+// TestRedeemMagicLinkForHandover_StaleReturnToLeavesLinkUnspent: the
+// allowlist is checked before the token is consumed, so a configuration
+// change refuses the click without burning a live link — the same link
+// redeems once the allowlist admits its return_to again.
+func TestRedeemMagicLinkForHandover_StaleReturnToLeavesLinkUnspent(t *testing.T) {
+	svc, _, rec := passwordlessSvc(t)
+	ctx := context.Background()
+	require.NoError(t, svc.RequestMagicLink(ctx, "unspent@test.com", "https://app.test/welcome"))
+	token := extractTokenFromLink(t, rec.Sent()[0].Text)
+
+	svc.returnAllow = ParseReturnAllowlist("https://other.test/")
+	_, err := svc.RedeemMagicLinkForHandover(ctx, token, "", "")
+	require.ErrorIs(t, err, ErrMagicLinkInvalid)
+
+	preview, err := svc.PeekMagicLink(ctx, token)
+	require.NoError(t, err)
+	assert.Equal(t, ActionLinkReady, preview.State, "a refused click must not spend the token")
+
+	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	handover, err := svc.RedeemMagicLinkForHandover(ctx, token, "", "")
+	require.NoError(t, err)
+	assert.NotEmpty(t, handover.Code)
+}
+
+// TestRedeemMagicLinkForHandover_AuditsTheConsume: proving control of the
+// inbox (and creating the account) is audited when the link is consumed,
+// whether or not the app ever redeems the code.
+func TestRedeemMagicLinkForHandover_AuditsTheConsume(t *testing.T) {
+	repo := newFakeRepo()
+	writer := newRecordingAuditWriter()
+	cfg := testConfig()
+	cfg.AppBaseURL = "https://app.test"
+	cfg.SMTPFrom = "no-reply@test.local"
+	pk, err := passkeys.NewWebAuthnService(passkeys.Config{RPID: cfg.PasskeyRPID, RPName: cfg.PasskeyRPName, Origin: cfg.PasskeyOrigin})
+	require.NoError(t, err)
+	mail := &recordingTransport{}
+	svc := NewAuthServiceWithOAuth(repo, cfg, testKeyRing(t), pk, audit.NewLogger(writer, "test-tenant", nil),
+		testTotpKey(), testTotpRecoveryPepper(), mail, nil, zap.NewNop(), nil)
+	svc.returnAllow = ParseReturnAllowlist("https://app.test/")
+	ctx := context.Background()
+
+	require.NoError(t, svc.RequestMagicLink(ctx, "audit-consume@test.com", "https://app.test/cb"))
+	_, err = svc.RedeemMagicLinkForHandover(ctx, extractTokenFromLink(t, mail.Sent()[0].Text), "", "")
+	require.NoError(t, err)
+	assert.Equal(t, 1, writer.countByEventType(string(audit.EventMagicLinkConsumed)))
+	assert.Equal(t, 1, writer.countByEventTypeAndDetail(string(audit.EventMagicLinkConsumed), "via", "hosted_handover"))
+	assert.Equal(t, 0, writer.countByEventType("login_success"), "the sign-in itself is audited at redeem")
+}
+
+func TestWeakPasswordError_UnwrapsAndCarriesIssues(t *testing.T) {
+	err := passwordIssuesToErr([]string{"Password must be at least 12 characters", "Password is too common"})
+	require.ErrorIs(t, err, ErrWeakPassword)
+	var weak *WeakPasswordError
+	require.ErrorAs(t, err, &weak)
+	assert.Equal(t, []string{"Password must be at least 12 characters", "Password is too common"}, weak.Issues)
+	assert.Equal(t, "password does not meet strength requirements: Password must be at least 12 characters; Password is too common", err.Error())
+	assert.NoError(t, passwordIssuesToErr(nil))
+}

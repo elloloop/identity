@@ -155,3 +155,36 @@ func TestFixedWindowLimiter_NilReceiverAlwaysAllows(t *testing.T) {
 	var l *FixedWindowLimiter
 	assert.True(t, l.Allow("a", time.Now()))
 }
+
+// TestRateLimitMiddleware_MethodFilter: an entry with Method set meters only
+// that method; other methods on the prefix are not counted against it.
+func TestRateLimitMiddleware_MethodFilter(t *testing.T) {
+	limits := []PathLimit{{
+		PathPrefix: "/auth/reset-password", Tag: "hosted_reset", Method: http.MethodPost,
+		Limiter: NewFixedWindowLimiter(time.Minute, 1, 0),
+	}}
+	h := RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	do := func(method string) int {
+		req := httptest.NewRequest(method, "/auth/reset-password?token=t", nil)
+		req.Header.Set(ClientIPHeader, "9.9.9.9")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+	for i := 0; i < 5; i++ {
+		if got := do(http.MethodGet); got != http.StatusOK {
+			t.Fatalf("GET %d = %d, want 200: previews are not metered", i, got)
+		}
+	}
+	if got := do(http.MethodPost); got != http.StatusOK {
+		t.Fatalf("first POST = %d, want 200", got)
+	}
+	if got := do(http.MethodPost); got != http.StatusTooManyRequests {
+		t.Fatalf("second POST = %d, want 429", got)
+	}
+	if got := do(http.MethodGet); got != http.StatusOK {
+		t.Fatalf("GET after the POST budget is spent = %d, want 200", got)
+	}
+}

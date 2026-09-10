@@ -116,23 +116,23 @@ func serveIndex(t *testing.T, h http.Handler, mutate func(*http.Request)) *httpt
 	return rec
 }
 
-// TestHandler_ServesEmbeddedIndex exercises the sign-in page: a GET of
-// /auth/ renders the embedded login template.
-func TestHandler_ServesEmbeddedIndex(t *testing.T) {
-	rec := serveIndex(t, Handler(&config.Config{}, allEnabled(), false, nil), nil)
+// TestHandler_ServesLoginPage exercises the sign-in page: a GET of /auth/
+// renders the embedded login template.
+func TestHandler_ServesLoginPage(t *testing.T) {
+	rec := serveIndex(t, Handler(&config.Config{}, Sources{Auth: allEnabled()}, false, nil), nil)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /auth/: status = %d, want 200", rec.Code)
 	}
 	if rec.Body.Len() == 0 {
-		t.Fatal("GET /auth/: empty body, want embedded index.html content")
+		t.Fatal("GET /auth/: empty body, want the rendered sign-in page")
 	}
 }
 
 // The dynamic page carries per-project options that can change at runtime,
 // so it must never be cached.
-func TestHandler_IndexIsUncacheable(t *testing.T) {
-	rec := serveIndex(t, Handler(&config.Config{}, allEnabled(), false, nil), nil)
+func TestHandler_LoginPageIsUncacheable(t *testing.T) {
+	rec := serveIndex(t, Handler(&config.Config{}, Sources{Auth: allEnabled()}, false, nil), nil)
 
 	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
 		t.Errorf("Cache-Control = %q, want no-store", got)
@@ -140,7 +140,7 @@ func TestHandler_IndexIsUncacheable(t *testing.T) {
 }
 
 // TestHandler_InjectsServerConfig confirms the handler renders the resolved
-// sign-in options into the page so the SPA renders exactly what the server
+// sign-in options into the page so the page renders exactly what the server
 // enables (hide signup, hide the password form, list providers).
 func TestHandler_InjectsServerConfig(t *testing.T) {
 	cases := []struct {
@@ -181,7 +181,7 @@ func TestHandler_InjectsServerConfig(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := Handler(&config.Config{}, stubService{opts: tc.opts}, tc.hosted, nil)
+			h := Handler(&config.Config{}, Sources{Auth: stubService{opts: tc.opts}}, tc.hosted, nil)
 			body := serveIndex(t, h, nil).Body.String()
 			for _, want := range tc.want {
 				if !strings.Contains(body, want) {
@@ -204,7 +204,7 @@ func scopeService() Service {
 }
 
 func TestHandler_RendersPerRequestProjectOptions(t *testing.T) {
-	h := Handler(&config.Config{}, scopeService(), true, nil)
+	h := Handler(&config.Config{}, Sources{Auth: scopeService()}, true, nil)
 
 	withScope := serveIndex(t, h, func(r *http.Request) {
 		ctx := service.WithProjectScope(r.Context(), &service.ProjectScope{ProjectID: "proj-google"})
@@ -227,7 +227,7 @@ func TestHandler_RendersPerRequestProjectOptions(t *testing.T) {
 }
 
 // TestHandler_InjectsCaptchaConfig confirms the public CAPTCHA provider + site
-// key reach the SPA only when CAPTCHA is enabled with a Turnstile site key —
+// key reach the page only when CAPTCHA is enabled with a Turnstile site key —
 // so the sign-up widget renders exactly when it should and never leaks a key
 // while CAPTCHA is off.
 func TestHandler_InjectsCaptchaConfig(t *testing.T) {
@@ -238,7 +238,7 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 			AssuranceTurnstileSiteKey:      "0xSITEKEY",
 			AssuranceEnforcePasswordLogin:  true,
 			AssuranceEnforcePasswordSignup: true,
-		}, allEnabled(), false, nil)
+		}, Sources{Auth: allEnabled()}, false, nil)
 		body := serveIndex(t, h, nil).Body.String()
 
 		for _, want := range []string{
@@ -260,7 +260,7 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 			AssuranceTurnstileSiteKey:      "0xSITEKEY",
 			AssuranceEnforcePasswordLogin:  false,
 			AssuranceEnforcePasswordSignup: true,
-		}, allEnabled(), false, nil)
+		}, Sources{Auth: allEnabled()}, false, nil)
 		body := serveIndex(t, h, nil).Body.String()
 
 		for _, want := range []string{`"captchaEnforceLogin":false`, `"captchaEnforceSignup":true`} {
@@ -277,7 +277,7 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 			AssuranceTurnstileSiteKey:      "0xSITEKEY",
 			AssuranceEnforcePasswordLogin:  true,
 			AssuranceEnforcePasswordSignup: true,
-		}, allEnabled(), false, nil)
+		}, Sources{Auth: allEnabled()}, false, nil)
 		body := serveIndex(t, h, nil).Body.String()
 
 		if strings.Contains(body, "0xSITEKEY") {
@@ -302,7 +302,7 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 			AssuranceTurnstileSiteKey:      "0xSITEKEY",
 			AssuranceEnforcePasswordLogin:  true,
 			AssuranceEnforcePasswordSignup: true,
-		}, allEnabled(), false, nil)
+		}, Sources{Auth: allEnabled()}, false, nil)
 		body := serveIndex(t, h, nil).Body.String()
 
 		for _, want := range []string{

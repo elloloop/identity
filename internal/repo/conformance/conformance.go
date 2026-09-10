@@ -937,9 +937,20 @@ func RunConformance(t *testing.T, driver Driver) {
 				t.Fatalf("ConsumedAt = %d, want 200", rec.ConsumedAt)
 			}
 			// The minting flow must survive the round-trip: redeem picks the
-			// login policy and audit event from it.
+			// login policy and audit event from it. Both legal values, so a
+			// driver cannot pass by mishandling one of them.
 			if rec.LoginMethod != service.HandoverMethodMagicLink {
 				t.Fatalf("LoginMethod = %q, want %q", rec.LoginMethod, service.HandoverMethodMagicLink)
+			}
+			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
+				CodeHash: "otc-hash-oauth", UserID: userID, LoginMethod: service.HandoverMethodOAuth,
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create oauth: %v", err)
+			}
+			oauthRec, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-hash-oauth", 200)
+			if err != nil || oauthRec.LoginMethod != service.HandoverMethodOAuth {
+				t.Fatalf("oauth round-trip: rec=%#v err=%v", oauthRec, err)
 			}
 			// Replay must fail with ErrOAuthCodeInvalid.
 			if _, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-hash-1", 300); !errors.Is(err, service.ErrOAuthCodeInvalid) {
@@ -955,6 +966,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
 				CodeHash: "otc-expired", UserID: userID,
 				ExpiresAt: 1_000, CreatedAt: 100,
+				LoginMethod: service.HandoverMethodOAuth,
 			}); err != nil {
 				t.Fatalf("Create expired: %v", err)
 			}
@@ -979,6 +991,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
 				CodeHash: "otc-race-1", UserID: userID,
 				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+				LoginMethod: service.HandoverMethodOAuth,
 			}); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1029,11 +1042,13 @@ func RunConformance(t *testing.T, driver Driver) {
 			userID := createTestUser(t, r, "otc-sweep@example.com")
 			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
 				CodeHash: "otc-old", UserID: userID, ExpiresAt: 1_000, CreatedAt: 100,
+				LoginMethod: service.HandoverMethodOAuth,
 			}); err != nil {
 				t.Fatalf("Create old: %v", err)
 			}
 			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
 				CodeHash: "otc-fresh", UserID: userID, ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+				LoginMethod: service.HandoverMethodOAuth,
 			}); err != nil {
 				t.Fatalf("Create fresh: %v", err)
 			}
@@ -2234,7 +2249,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			if _, err := r.CreateLoginChallenge(ctx, &service.LoginChallengeRecord{ChallengeID: "del-lc", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
 				t.Fatalf("CreateLoginChallenge: %v", err)
 			}
-			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{CodeHash: "del-otc", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
+			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{CodeHash: "del-otc", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100, LoginMethod: service.HandoverMethodOAuth}); err != nil {
 				t.Fatalf("CreateOAuthOneTimeCode: %v", err)
 			}
 

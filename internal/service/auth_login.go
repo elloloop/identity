@@ -307,7 +307,7 @@ func (s *AuthService) handleDuplicatePasskeySignup(ctx context.Context, user *Us
 }
 
 func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) error {
-	loginURL := s.appBaseURL(ctx)
+	loginURL := appBaseURL(ctx, s.cfg)
 	text := strings.Join([]string{
 		fmt.Sprintf("Hi %s,", displayNameOrEmail(user)),
 		"",

@@ -17,12 +17,16 @@ import { Code } from "astro-expressive-code/components";
   </p>
   <p>
     The sign-in page at <code>/auth/</code> is documented with the
-    <a href="/docs/auth/oauth#the-hosted-auth-ui">hosted OAuth flow</a>.
+    <a href={`${import.meta.env.BASE_URL}/docs/auth/oauth#hosted-oauth-flow`}>hosted OAuth flow</a>.
   </p>
 
-  <h2>The five pages</h2>
+  <h2>The six pages</h2>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Hosted action pages">
   <table>
-    <tr><th>Route</th><th>Link mailed by</th><th>The page asks for</th><th>On success</th></tr>
+    <thead>
+      <tr><th scope="col">Route</th><th scope="col">Link mailed by</th><th scope="col">The page asks for</th><th scope="col">On success</th></tr>
+    </thead>
+    <tbody>
     <tr>
       <td><code>/auth/verify-email</code></td>
       <td>Sign-up, <code>SendEmailVerification</code></td>
@@ -49,11 +53,19 @@ import { Code } from "astro-expressive-code/components";
     </tr>
     <tr>
       <td><code>/auth/accept-invitation</code></td>
-      <td><code>InviteUser</code></td>
+      <td><code>InviteUser</code> (admin user invitation)</td>
       <td>Name, password, confirm password</td>
       <td>"Your account is ready." Link to sign in.</td>
     </tr>
+    <tr>
+      <td><code>/auth/join-team</code></td>
+      <td><code>CreateTenantInvitation</code> (team membership)</td>
+      <td>Nothing: the page only looks</td>
+      <td>Names the team and the invited address and links to sign in. Accepting needs a signed-in caller whose address matches (<code>AcceptTenantInvitation</code>), so the page cannot do it for them.</td>
+    </tr>
+    </tbody>
   </table>
+  </div>
 
   <h2>Opening a link changes nothing; clicking does</h2>
   <p>
@@ -93,9 +105,11 @@ import { Code } from "astro-expressive-code/components";
     (or <code>GATEWAY_EMAIL_BRAND_PRODUCT_NAME</code>) appears in headings
     such as "Sign in to Acme"; <code>branding.support_email</code> renders a
     "Need help?" footer. A used, expired or unknown link explains itself and
-    points at where a new one can be requested. A password that fails the
-    policy re-renders the form with the requirement that failed; the link
-    stays live.
+    tells the user to request a new one from the app they were using; the
+    hosted sign-in page itself has no forgot-password or magic-link request
+    yet. A password that fails the policy re-renders the form with the
+    requirement that failed; the link stays live. The copy is English only:
+    a product that needs other languages serves its own routes for now.
   </p>
 
   <h2>Security posture</h2>
@@ -125,26 +139,34 @@ import { Code } from "astro-expressive-code/components";
       Every other page links to the sign-in page on the same origin.
     </li>
     <li>
-      <strong>Rate limits.</strong> The pages share the per-IP budgets of the
-      RPCs they stand in for: <code>GATEWAY_RATE_LIMIT_VERIFY_PER_IP</code>
+      <strong>Rate limits.</strong> Only the consuming POST is metered; the
+      GET preview is free, so reloading a page never spends the budget the
+      submit needs. Each page has its own per-IP bucket sized by the knob of
+      the RPC it stands in for: <code>GATEWAY_RATE_LIMIT_VERIFY_PER_IP</code>
       (verify, email change), <code>GATEWAY_RATE_LIMIT_RESET_PER_IP</code>
       (reset), <code>GATEWAY_RATE_LIMIT_LOGIN_PER_IP</code> (magic link) and
-      <code>GATEWAY_RATE_LIMIT_SIGNUP_PER_IP</code> (invitation).
+      <code>GATEWAY_RATE_LIMIT_SIGNUP_PER_IP</code> (invitation). Buckets are
+      per client IP, so a population behind one office or carrier NAT shares
+      them; raise the reset and signup knobs if such users hit 429s, which
+      the pages answer as plain text.
     </li>
     <li>
       <strong>Request logs record the path only</strong>, so tokens do not
       appear in identity's own access log. A reverse proxy in front of
-      identity logs what it is configured to log.
+      identity logs what it is configured to log. The pages have no metrics
+      series yet: watch the <code>hosted_action_*</code> log lines.
     </li>
   </ul>
 
   <h2 id="your-own-pages">Your own pages</h2>
   <p>
     Point <code>GATEWAY_APP_BASE_URL</code> at your frontend and serve the
-    same five routes there; each reads <code>token</code> from the query and
+    same routes there; each reads <code>token</code> from the query and
     calls the RPC the table above names (<code>VerifyEmail</code>,
     <code>ConfirmPasswordReset</code>, <code>ConfirmEmailChange</code>,
-    <code>RedeemMagicLink</code>, <code>AcceptInvitation</code>). A project
+    <code>RedeemMagicLink</code>, <code>AcceptInvitation</code>; for
+    <code>/auth/join-team</code>, sign the user in and call
+    <code>AcceptTenantInvitation</code>). A project
     with a primary auth-domain always links to the hosted pages, because the
     auth-domain is identity's own host. Per-link override URLs, so a frontend
     can keep only the pages it wants, are the next step for this surface.

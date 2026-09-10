@@ -26,6 +26,7 @@
   "login_policy_upserted",
   "login_success",
   "logout",
+  "magic_link_consumed",
   "managed_child_account_created",
   "oauth_login",
   "parental_consent_granted",

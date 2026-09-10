@@ -318,7 +318,7 @@ func (s *AuthService) sendMagicLinkNow(ctx context.Context, emailAddr, returnTo 
 		return
 	}
 
-	link := fmt.Sprintf("%s/auth/magic-link?token=%s", s.appBaseURL(ctx), rawToken)
+	link := fmt.Sprintf("%s"+HostedMagicLinkPath+"?token=%s", appBaseURL(ctx, s.cfg), rawToken)
 	brand := resolveBranding(ctx, s.cfg)
 	html, text, err := email.Render(email.TemplateMagicLink, brand.templateData(map[string]any{
 		"Link":      link,
@@ -396,22 +396,33 @@ type MagicLinkHandover struct {
 // the passwordless-signup gate, project access, account status) runs here;
 // the second factor and token issuance run at redeem, as they do for OAuth
 // codes. The stored return_to is re-checked against the current allowlist
-// so a link requested under an older configuration cannot redirect
-// anywhere the operator has since removed.
+// BEFORE the token is consumed, so a link requested under an older
+// configuration cannot redirect anywhere the operator has since removed —
+// and the refusal leaves the link unspent rather than burning it for a
+// configuration change. The allowlist is fixed for the request, so the
+// pre-consume check is the authoritative one.
 func (s *AuthService) RedeemMagicLinkForHandover(ctx context.Context, token, ipAddr, userAgent string) (*MagicLinkHandover, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, ErrMagicLinkInvalid
 	}
-	rec, err := s.repo(ctx).ConsumeMagicLinkToken(ctx, sha256Hex(token), s.nowMs())
+	tokenHash := sha256Hex(token)
+	stored, err := s.repo(ctx).FindMagicLinkTokenByHash(ctx, tokenHash)
+	if err != nil {
+		return nil, fmt.Errorf("looking up magic link token: %w", err)
+	}
+	if stored == nil {
+		return nil, ErrMagicLinkInvalid
+	}
+	if !s.returnAllow.Allows(stored.ReturnTo) {
+		s.logger.Info("magic_link_handover_return_to_rejected")
+		return nil, ErrMagicLinkInvalid
+	}
+	rec, err := s.repo(ctx).ConsumeMagicLinkToken(ctx, tokenHash, s.nowMs())
 	if err != nil {
 		if errors.Is(err, ErrMagicLinkInvalid) {
 			return nil, ErrMagicLinkInvalid
 		}
 		return nil, fmt.Errorf("consuming magic link token: %w", err)
-	}
-	if !s.returnAllow.Allows(rec.ReturnTo) {
-		s.logger.Info("magic_link_handover_return_to_rejected")
-		return nil, ErrMagicLinkInvalid
 	}
 
 	user, isNew, _, err := s.establishPasswordlessUser(ctx, canonicalize(rec.Email), "magic_link", ipAddr, userAgent)
@@ -424,6 +435,13 @@ func (s *AuthService) RedeemMagicLinkForHandover(ctx context.Context, token, ipA
 	}
 	s.logger.Info("magic_link_handover_minted",
 		zap.String("user_id", user.ID), zap.Bool("new_user", isNew))
+	// The consume is the moment control of the inbox was proven and, for a
+	// new address, the account was created; that must be in the audit log
+	// whether or not the app ever redeems the code.
+	s.audit.Log(ctx, audit.EventMagicLinkConsumed,
+		audit.WithActor(user.ID), audit.WithIP(ipAddr), audit.WithUserAgent(userAgent),
+		audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{"new_user": isNew, "via": "hosted_handover"}))
 	return &MagicLinkHandover{
 		ReturnTo:    rec.ReturnTo,
 		Code:        code,

@@ -61,7 +61,8 @@ func newNonce() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
-// setSecurityHeaders applies the response headers every hosted page carries.
+// setSecurityHeaders applies the response headers every hosted response
+// carries — rendered pages, redirects and error replies alike.
 //
 //   - no-store: the pages embed per-project options and, on the action
 //     pages, a token-bound state, so no cache may serve them.
@@ -72,7 +73,6 @@ func newNonce() (string, error) {
 //   - noindex: nothing here is content for a crawler, and the action URLs
 //     are secrets.
 func setSecurityHeaders(h http.Header, p pagePolicy) {
-	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Content-Type-Options", "nosniff")
