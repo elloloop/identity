@@ -1,5 +1,54 @@
 # Upgrade guide
 
+## v4.7 → v4.8 — emailed links land on hosted pages (additive)
+
+Every link identity mails — email verification, password reset, email-change
+confirmation, magic link, invitation — now lands on a page identity serves
+itself, at the path the link already used: `/auth/verify-email`,
+`/auth/reset-password`, `/auth/confirm-email-change`, `/auth/magic-link`,
+`/auth/accept-invitation`. Nothing about the mailed URLs changed, so:
+
+- If `GATEWAY_APP_BASE_URL` points at identity, or a project has a primary
+  auth-domain, links that 404'd before now work. Nothing to configure.
+- If `GATEWAY_APP_BASE_URL` points at a frontend that serves those routes
+  itself, nothing changes for you. A later release adds per-project override
+  URLs so a frontend can keep only the pages it wants.
+
+**What a page does.** Opening a link only shows it — whose address it
+concerns and whether it is still live — and consumes nothing, so mail scanners
+cannot spend a token. The click is a form POST that runs the same service
+method the RPC runs. Verification, confirmation, reset and invitation end on
+a page that links to sign-in; none of them signs the user in. The magic-link
+page redirects to the link's `return_to` with a single-use handover code that
+the app redeems with `RedeemOAuthCode`, exactly as the hosted OAuth callback
+does. See `docs/adr/0014-hosted-action-pages.md`.
+
+**`RedeemOAuthCode` redeems every hosted handover.** It now returns
+`unavailable` only when neither OAuth providers nor
+`GATEWAY_OAUTH_ALLOWED_RETURN_URLS` are configured (before: whenever OAuth was
+unconfigured). Its audit detail for an OAuth redeem is now
+`{"method":"oauth","via":"hosted_handover"}` (was `{"method":"hosted_redeem"}`);
+a magic-link redeem records `login_success` with `{"method":"magic_link"}`. The
+log line `oauth_code_redeemed` is now `handover_code_redeemed`.
+
+**Schema.** Migration 0033 (SQLite: 0018) adds `login_method` to
+`oauth_one_time_codes`, defaulting existing rows to `oauth`. Applied
+automatically with `GATEWAY_POSTGRES_AUTO_MIGRATE`; otherwise run the
+migrate command before deploying.
+
+**Headers on `/auth/*`.** Every hosted response now carries `Cache-Control:
+no-store`, `Referrer-Policy: no-referrer`, a nonce Content-Security-Policy
+with `frame-ancestors 'none'`, `X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff` and `X-Robots-Tag: noindex`. If you embedded
+the hosted sign-in page in a frame, it will no longer render there. The
+sign-in page answers GET and HEAD only.
+
+**Rate limits.** The hosted pages share the existing per-IP budgets: verify
+and email-change pages use `GATEWAY_RATE_LIMIT_VERIFY_PER_IP`, the reset page
+`GATEWAY_RATE_LIMIT_RESET_PER_IP`, the magic-link page
+`GATEWAY_RATE_LIMIT_LOGIN_PER_IP`, the invitation page
+`GATEWAY_RATE_LIMIT_SIGNUP_PER_IP` (tags `hosted_*` in the 429 log line).
+
 ## v4.6 → v4.7 — the deny layer holds at every door
 
 Follow-up to v4.6.0, from the review of the deny layer. Four behaviour changes,

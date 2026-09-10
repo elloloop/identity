@@ -2485,13 +2485,17 @@ func (x *NativeOAuthLoginResponse) GetExpiresIn() int32 {
 	return 0
 }
 
-// RedeemOAuthCode exchanges the single-use one-time code handed to the
-// SPA by the hosted OAuth callback (GET/POST /oauth/callback/{provider} ->
-// 302 return_to?code=<otc>) for a backend-issued token pair. The code
-// is single-use and short-lived; a replay returns CodeUnauthenticated.
+// RedeemOAuthCode exchanges the single-use handover code a hosted flow
+// handed to the app — the hosted OAuth callback (GET/POST
+// /oauth/callback/{provider} -> 302 return_to?code=<otc>) or the hosted
+// magic-link page (/auth/magic-link -> 303 return_to?code=<otc>) — for a
+// backend-issued token pair. The login completes under the policy of the
+// flow that minted the code. The code is single-use and short-lived; a
+// replay returns CodeUnauthenticated. CodeUnavailable only when neither
+// OAuth providers nor the hosted return allowlist is configured.
 type RedeemOAuthCodeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"` // opaque one-time code from the hosted callback redirect
+	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"` // opaque one-time code from the hosted redirect
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

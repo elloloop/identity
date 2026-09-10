@@ -50,6 +50,7 @@ export const sidebarSections: NavSection[] = [
       { label: "Password", href: `${BASE}/docs/auth/password` },
       { label: "Passwordless (Email Code + Magic Link)", href: `${BASE}/docs/auth/passwordless` },
       { label: "Invitations", href: `${BASE}/docs/auth/invitations` },
+      { label: "Hosted Pages", href: `${BASE}/docs/auth/hosted-pages` },
       { label: "OAuth", href: `${BASE}/docs/auth/oauth` },
       { label: "Passkey", href: `${BASE}/docs/auth/passkey` },
       { label: "TOTP (2FA)", href: `${BASE}/docs/auth/totp` },

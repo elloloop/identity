@@ -19,6 +19,11 @@ import { Code } from "astro-expressive-code/components";
     and returns an <code>invitation_token</code> that must be delivered to
     the user — typically as an email link of the form
     <code>https://app.example.com/auth/accept-invitation?token=&lt;invitation_token&gt;</code>.
+    When that base URL is identity's own origin (or the project's primary
+    auth-domain), the link opens identity's
+    <a href="/docs/auth/hosted-pages">hosted accept-invitation page</a>,
+    where the invitee picks a password; otherwise your frontend serves the
+    route and calls <code>AcceptInvitation</code>.
   </p>
   <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/InviteUser \\
   -H "Authorization: Bearer $ADMIN_TOKEN" \\

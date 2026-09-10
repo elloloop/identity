@@ -72,6 +72,9 @@ GATEWAY_OAUTH_ALLOWED_RETURN_URLS=https://app.example.com/,https://admin.example
   **fail-closed**: anything else is rejected with `400`.
 - **Empty disables the hosted flow** — `GET /oauth/start/*` and
   `GET/POST /oauth/callback/*` return `404`, and only the headless RPCs work.
+  `RequestMagicLink` rejects every `return_to` too, so the hosted magic-link
+  page has nothing to redeem; `RedeemOAuthCode` answers `unavailable` only
+  when OAuth providers are unconfigured as well.
 
 The active allowlist is logged at startup
 (`oauth_hosted_flow_enabled` / `oauth_hosted_flow_disabled`).
@@ -226,9 +229,22 @@ is still enforced server-side on every login attempt.)
   button's `/oauth/start` link and scopes its password RPCs with the
   `X-Project-Key` header. An unknown `project_key` is rejected with 401.
 
+### The hosted action pages (`/auth/<action>`)
+
+The same handler serves the pages identity's own emails link to —
+`/auth/verify-email`, `/auth/reset-password`, `/auth/confirm-email-change`,
+`/auth/magic-link`, `/auth/accept-invitation` — so a product needs no
+frontend routes for them (ADR-0014). A GET previews the token without
+consuming it; the form POST is the click. The magic-link page hands the
+session to the app with the same one-time code as the OAuth callback, below.
+See the docs-site page "Hosted pages" for the full contract.
+
 ### The one-time code
 
-- Opaque, single-use, ~60s TTL.
+- Opaque, single-use, ~60s TTL. Minted by the hosted OAuth callback and by
+  the hosted magic-link page; the row records which (`login_method`), and
+  `RedeemOAuthCode` completes the login under that flow's policy and writes
+  that flow's audit event.
 - Only its SHA-256 hash is stored, bound to the user id. **No token
   material is persisted** — the token pair is freshly minted on redeem.
 - Redeeming consumes the code atomically (single winner across
