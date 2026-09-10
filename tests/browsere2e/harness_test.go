@@ -19,9 +19,13 @@ package browsere2e
 
 import (
 	"context"
+	"html"
+	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"regexp"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +34,7 @@ import (
 	"github.com/elloloop/identity/internal/app"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/repo"
+	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/jwt/jwttest"
 	"github.com/elloloop/identity/pkg/passkeys"
 
@@ -60,11 +65,45 @@ const (
 	postgresPasswd = "identity"
 )
 
-// browserHarness bundles the booted server's /auth/ URL the browser
-// navigates to. The in-page authenticated fetches are same-origin (relative
-// paths), so only the auth URL is needed.
+// browserHarness bundles the booted server's URLs and the mailer that
+// recorded every email it sent, so a test can open the link a real user
+// would click. The in-page authenticated fetches are same-origin (relative
+// paths).
 type browserHarness struct {
+	baseURL string // <server>
 	authURL string // <server>/auth/
+	mailer  *recordingMailer
+}
+
+// recordingMailer captures every outbound email so the hosted action pages
+// can be driven from the links identity actually mails.
+type recordingMailer struct {
+	mu   sync.Mutex
+	sent []email.Message
+}
+
+func (m *recordingMailer) Send(_ context.Context, msg email.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, msg)
+	return nil
+}
+
+// linkPath returns the path+query of the most recent emailed link to the
+// given hosted page. The mail's host is the configured app base URL, so
+// only the path is used, against the test server.
+func (m *recordingMailer) linkPath(t *testing.T, page string) string {
+	t.Helper()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	re := regexp.MustCompile(regexp.QuoteMeta(page) + `\?token=[A-Za-z0-9_\-]+`)
+	for i := len(m.sent) - 1; i >= 0; i-- {
+		if link := re.FindString(html.UnescapeString(m.sent[i].Text)); link != "" {
+			return link
+		}
+	}
+	t.Fatalf("no mailed link to %s among %d messages", page, len(m.sent))
+	return ""
 }
 
 // chromePath returns the first Chrome/Chromium binary found on the host, or
@@ -185,6 +224,14 @@ func startServer(t *testing.T, signupEnabled bool) *browserHarness {
 	projectID := "browsere2e"
 	cfg := newUIConfig(signupEnabled, projectID)
 
+	// Bind the listener first so its origin can be allowlisted as a magic-link
+	// return_to before the app is built; the handler is attached below.
+	srv := httptest.NewUnstartedServer(http.NotFoundHandler())
+	t.Cleanup(srv.Close)
+	baseURL := "http://" + srv.Listener.Addr().String()
+	cfg.OAuthAllowedReturnURLs = baseURL + "/"
+	mailer := &recordingMailer{}
+
 	built, err := repo.Build(ctx, repo.Config{
 		Driver:              repo.DriverPostgres,
 		PostgresDSN:         dsn,
@@ -223,6 +270,7 @@ func startServer(t *testing.T, signupEnabled bool) *browserHarness {
 		TOTPKey:            []byte(totpKey),
 		TOTPRecoveryPepper: []byte(totpRecoveryPepper),
 		ProjectResolver:    built.ProjectResolver(),
+		EmailTransport:     mailer,
 		// Synchronous sends keep the browser flow deterministic.
 		SynchronousEmailSend: true,
 	})
@@ -230,10 +278,12 @@ func startServer(t *testing.T, signupEnabled bool) *browserHarness {
 	appBuilt.Start()
 	t.Cleanup(appBuilt.Stop)
 
-	srv := httptest.NewServer(appBuilt.Handler)
-	t.Cleanup(srv.Close)
+	srv.Config.Handler = appBuilt.Handler
+	srv.Start()
 
 	return &browserHarness{
-		authURL: srv.URL + "/auth/",
+		baseURL: baseURL,
+		authURL: baseURL + "/auth/",
+		mailer:  mailer,
 	}
 }

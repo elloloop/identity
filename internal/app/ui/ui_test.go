@@ -11,15 +11,98 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-// stubOptions is a fixed OptionsSource for handler tests.
-type stubOptions struct{ opts service.HostedUIOptions }
+// stubService is a canned Service for handler tests. Sign-in options and
+// branding are fixed; every action call panics unless the test supplies it,
+// so a sign-in page test cannot consume a token by accident and an action
+// test asserts exactly which call the page made.
+type stubService struct {
+	opts   service.HostedUIOptions
+	optsFn func(ctx context.Context) service.HostedUIOptions
+	brand  service.HostedUIBranding
 
-func (s stubOptions) HostedUIOptions(context.Context) service.HostedUIOptions { return s.opts }
+	peek   func(ctx context.Context, token string) (service.ActionLinkPreview, error)
+	verify func(ctx context.Context, token string) (*service.User, error)
+	reset  func(ctx context.Context, token, newPassword string) error
+	change func(ctx context.Context, token string) (*service.User, error)
+	magic  func(ctx context.Context, token, ipAddr, userAgent string) (*service.MagicLinkHandover, error)
+	invite func(ctx context.Context, token, password, name string) (*service.User, error)
+}
 
-// allEnabled is the zero-friction default most tests use: password login +
-// signup on, no providers.
-func allEnabled() OptionsSource {
-	return stubOptions{opts: service.HostedUIOptions{PasswordLoginEnabled: true, PasswordSignupEnabled: true}}
+func (s stubService) HostedUIOptions(ctx context.Context) service.HostedUIOptions {
+	if s.optsFn != nil {
+		return s.optsFn(ctx)
+	}
+	return s.opts
+}
+
+func (s stubService) HostedUIBranding(context.Context) service.HostedUIBranding { return s.brand }
+
+func (s stubService) doPeek(ctx context.Context, token string) (service.ActionLinkPreview, error) {
+	if s.peek == nil {
+		panic("unexpected peek")
+	}
+	return s.peek(ctx, token)
+}
+
+func (s stubService) PeekEmailVerification(ctx context.Context, token string) (service.ActionLinkPreview, error) {
+	return s.doPeek(ctx, token)
+}
+
+func (s stubService) PeekPasswordReset(ctx context.Context, token string) (service.ActionLinkPreview, error) {
+	return s.doPeek(ctx, token)
+}
+
+func (s stubService) PeekEmailChange(ctx context.Context, token string) (service.ActionLinkPreview, error) {
+	return s.doPeek(ctx, token)
+}
+
+func (s stubService) PeekMagicLink(ctx context.Context, token string) (service.ActionLinkPreview, error) {
+	return s.doPeek(ctx, token)
+}
+
+func (s stubService) PeekInvitation(ctx context.Context, token string) (service.ActionLinkPreview, error) {
+	return s.doPeek(ctx, token)
+}
+
+func (s stubService) VerifyEmail(ctx context.Context, token string) (*service.User, error) {
+	if s.verify == nil {
+		panic("unexpected VerifyEmail")
+	}
+	return s.verify(ctx, token)
+}
+
+func (s stubService) ConfirmPasswordReset(ctx context.Context, token, newPassword string) error {
+	if s.reset == nil {
+		panic("unexpected ConfirmPasswordReset")
+	}
+	return s.reset(ctx, token, newPassword)
+}
+
+func (s stubService) ConfirmEmailChange(ctx context.Context, token string) (*service.User, error) {
+	if s.change == nil {
+		panic("unexpected ConfirmEmailChange")
+	}
+	return s.change(ctx, token)
+}
+
+func (s stubService) RedeemMagicLinkForHandover(ctx context.Context, token, ipAddr, userAgent string) (*service.MagicLinkHandover, error) {
+	if s.magic == nil {
+		panic("unexpected RedeemMagicLinkForHandover")
+	}
+	return s.magic(ctx, token, ipAddr, userAgent)
+}
+
+func (s stubService) RedeemInvitation(ctx context.Context, token, password, name string) (*service.User, error) {
+	if s.invite == nil {
+		panic("unexpected RedeemInvitation")
+	}
+	return s.invite(ctx, token, password, name)
+}
+
+// allEnabled is the zero-friction default most sign-in page tests use:
+// password login + signup on, no providers.
+func allEnabled() Service {
+	return stubService{opts: service.HostedUIOptions{PasswordLoginEnabled: true, PasswordSignupEnabled: true}}
 }
 
 func serveIndex(t *testing.T, h http.Handler, mutate func(*http.Request)) *httptest.ResponseRecorder {
@@ -33,12 +116,10 @@ func serveIndex(t *testing.T, h http.Handler, mutate func(*http.Request)) *httpt
 	return rec
 }
 
-// TestHandler_ServesEmbeddedIndex exercises the static UI handler: a GET
-// under /auth/ resolves the embedded index.html and returns it. This is the
-// only reachable path — the fs.Sub error branch cannot trigger because the
-// static tree is embedded at build time.
+// TestHandler_ServesEmbeddedIndex exercises the sign-in page: a GET of
+// /auth/ renders the embedded login template.
 func TestHandler_ServesEmbeddedIndex(t *testing.T) {
-	rec := serveIndex(t, Handler(&config.Config{}, allEnabled(), false), nil)
+	rec := serveIndex(t, Handler(&config.Config{}, allEnabled(), false, nil), nil)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /auth/: status = %d, want 200", rec.Code)
@@ -51,7 +132,7 @@ func TestHandler_ServesEmbeddedIndex(t *testing.T) {
 // The dynamic page carries per-project options that can change at runtime,
 // so it must never be cached.
 func TestHandler_IndexIsUncacheable(t *testing.T) {
-	rec := serveIndex(t, Handler(&config.Config{}, allEnabled(), false), nil)
+	rec := serveIndex(t, Handler(&config.Config{}, allEnabled(), false, nil), nil)
 
 	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
 		t.Errorf("Cache-Control = %q, want no-store", got)
@@ -100,7 +181,7 @@ func TestHandler_InjectsServerConfig(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := Handler(&config.Config{}, stubOptions{opts: tc.opts}, tc.hosted)
+			h := Handler(&config.Config{}, stubService{opts: tc.opts}, tc.hosted, nil)
 			body := serveIndex(t, h, nil).Body.String()
 			for _, want := range tc.want {
 				if !strings.Contains(body, want) {
@@ -111,19 +192,19 @@ func TestHandler_InjectsServerConfig(t *testing.T) {
 	}
 }
 
-// scopeOptions proves the page is rendered PER REQUEST: the options depend
+// scopeService proves the page is rendered PER REQUEST: the options depend
 // on the project scope the middleware injected into the request context.
-type scopeOptions struct{}
-
-func (scopeOptions) HostedUIOptions(ctx context.Context) service.HostedUIOptions {
-	if sc := service.ProjectScopeFromContext(ctx); sc != nil && sc.ProjectID == "proj-google" {
-		return service.HostedUIOptions{OAuthProviders: []service.HostedUIProvider{{Key: "google"}}}
-	}
-	return service.HostedUIOptions{PasswordLoginEnabled: true, PasswordSignupEnabled: true}
+func scopeService() Service {
+	return stubService{optsFn: func(ctx context.Context) service.HostedUIOptions {
+		if sc := service.ProjectScopeFromContext(ctx); sc != nil && sc.ProjectID == "proj-google" {
+			return service.HostedUIOptions{OAuthProviders: []service.HostedUIProvider{{Key: "google"}}}
+		}
+		return service.HostedUIOptions{PasswordLoginEnabled: true, PasswordSignupEnabled: true}
+	}}
 }
 
 func TestHandler_RendersPerRequestProjectOptions(t *testing.T) {
-	h := Handler(&config.Config{}, scopeOptions{}, true)
+	h := Handler(&config.Config{}, scopeService(), true, nil)
 
 	withScope := serveIndex(t, h, func(r *http.Request) {
 		ctx := service.WithProjectScope(r.Context(), &service.ProjectScope{ProjectID: "proj-google"})
@@ -157,7 +238,7 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 			AssuranceTurnstileSiteKey:      "0xSITEKEY",
 			AssuranceEnforcePasswordLogin:  true,
 			AssuranceEnforcePasswordSignup: true,
-		}, allEnabled(), false)
+		}, allEnabled(), false, nil)
 		body := serveIndex(t, h, nil).Body.String()
 
 		for _, want := range []string{
@@ -179,7 +260,7 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 			AssuranceTurnstileSiteKey:      "0xSITEKEY",
 			AssuranceEnforcePasswordLogin:  false,
 			AssuranceEnforcePasswordSignup: true,
-		}, allEnabled(), false)
+		}, allEnabled(), false, nil)
 		body := serveIndex(t, h, nil).Body.String()
 
 		for _, want := range []string{`"captchaEnforceLogin":false`, `"captchaEnforceSignup":true`} {
@@ -196,7 +277,7 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 			AssuranceTurnstileSiteKey:      "0xSITEKEY",
 			AssuranceEnforcePasswordLogin:  true,
 			AssuranceEnforcePasswordSignup: true,
-		}, allEnabled(), false)
+		}, allEnabled(), false, nil)
 		body := serveIndex(t, h, nil).Body.String()
 
 		if strings.Contains(body, "0xSITEKEY") {
@@ -221,7 +302,7 @@ func TestHandler_InjectsCaptchaConfig(t *testing.T) {
 			AssuranceTurnstileSiteKey:      "0xSITEKEY",
 			AssuranceEnforcePasswordLogin:  true,
 			AssuranceEnforcePasswordSignup: true,
-		}, allEnabled(), false)
+		}, allEnabled(), false, nil)
 		body := serveIndex(t, h, nil).Body.String()
 
 		for _, want := range []string{

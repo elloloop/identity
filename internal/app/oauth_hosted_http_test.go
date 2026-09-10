@@ -445,23 +445,6 @@ func TestPathProvider(t *testing.T) {
 	}
 }
 
-func TestAppendQueryParam(t *testing.T) {
-	tests := []struct {
-		base, key, value, wantContains string
-	}{
-		{"https://app.test/finish", "code", "abc", "code=abc"},
-		{"https://app.test/finish?next=/home", "code", "abc", "next=%2Fhome"},
-		{"https://app.test/finish?next=/home", "code", "abc", "code=abc"},
-		{"://bad url", "code", "abc", "code=abc"},
-	}
-	for _, tt := range tests {
-		got := appendQueryParam(tt.base, tt.key, tt.value)
-		if !strings.Contains(got, tt.wantContains) {
-			t.Errorf("appendQueryParam(%q) = %q, want substring %q", tt.base, got, tt.wantContains)
-		}
-	}
-}
-
 func TestCallbackURL(t *testing.T) {
 	hh := &hostedOAuthHandler{}
 

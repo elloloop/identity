@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"go.uber.org/zap"
@@ -168,11 +167,11 @@ func (h *hostedOAuthHandler) handleCallback(w http.ResponseWriter, r *http.Reque
 		maxAge = -1
 	}
 	http.SetCookie(w, hostedOAuthCSRFCookie(provider, remainingCSRFTokens, maxAge))
-	// #nosec G710 -- result.ReturnTo is recovered from the signed,
-	// tamper-proof hosted state token whose return_to was validated
-	// against the GATEWAY_OAUTH_ALLOWED_RETURN_URLS allowlist at /start
-	// time. It is not raw request input.
-	http.Redirect(w, r, appendQueryParam(result.ReturnTo, "code", result.Code), http.StatusFound)
+	// #nosec G710 -- result.RedirectURL is built from the return_to
+	// recovered from the signed, tamper-proof hosted state token, which
+	// was validated against the GATEWAY_OAUTH_ALLOWED_RETURN_URLS
+	// allowlist at /start time. It is not raw request input.
+	http.Redirect(w, r, result.RedirectURL, http.StatusFound)
 }
 
 func hostedOAuthCSRFCookie(provider string, tokens []string, maxAge int) *http.Cookie {
@@ -267,24 +266,6 @@ func pathProvider(path, prefix string) string {
 		return ""
 	}
 	return strings.ToLower(rest)
-}
-
-// appendQueryParam adds key=value to base's query string, preserving any
-// existing query. On a malformed base URL it falls back to a simple
-// concatenation so the user still lands somewhere on the app origin.
-func appendQueryParam(base, key, value string) string {
-	u, err := url.Parse(base)
-	if err != nil {
-		sep := "?"
-		if strings.Contains(base, "?") {
-			sep = "&"
-		}
-		return base + sep + url.QueryEscape(key) + "=" + url.QueryEscape(value)
-	}
-	q := u.Query()
-	q.Set(key, value)
-	u.RawQuery = q.Encode()
-	return u.String()
 }
 
 func isOAuthDisabled(err error) bool {

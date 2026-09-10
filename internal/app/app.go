@@ -412,6 +412,37 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			PathPrefix: path, Tag: "guardian_manage", Limiter: guardianLimiter,
 		})
 	}
+	// Hosted action pages (ADR-0014): a GET previews an emailed token and a
+	// POST consumes it, each a lookup an unauthenticated caller drives; the
+	// password pages also hash a password on the click. Each page shares the
+	// budget of the RPC surface it stands in for — the click is the same
+	// work as the RPC it wraps.
+	limits = append(
+		limits,
+		middleware.PathLimit{
+			PathPrefix: "/auth/verify-email", Tag: "hosted_verify_email",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitVerifyPerIP, 0),
+		},
+		middleware.PathLimit{
+			PathPrefix: "/auth/confirm-email-change", Tag: "hosted_email_change",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitVerifyPerIP, 0),
+		},
+		middleware.PathLimit{
+			PathPrefix: "/auth/reset-password", Tag: "hosted_reset_password",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitResetPerIP, 0),
+		},
+		middleware.PathLimit{
+			// Redeeming a magic link mints a handover code: a login.
+			PathPrefix: "/auth/magic-link", Tag: "hosted_magic_link",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0),
+		},
+		middleware.PathLimit{
+			// Accepting an invitation activates an account with a fresh
+			// password hash: account creation, on the signup budget.
+			PathPrefix: "/auth/accept-invitation", Tag: "hosted_accept_invitation",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+	)
 	return limits
 }
 
@@ -662,9 +693,10 @@ func New(deps Deps) (*Built, error) {
 	// BeginOAuthLogin / OAuthLogin RPCs work regardless.
 	returnAllow := service.ParseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
 
-	// Default auth UI (login/signup). Rendered per request so it offers
-	// exactly the sign-in options the resolved project enables server-side.
-	mux.Handle("/auth/", ui.Handler(deps.Config, authSvc, returnAllow.Enabled()))
+	// Hosted pages: the sign-in page and the five emailed-link action pages
+	// (ADR-0014). Rendered per request so each offers exactly the sign-in
+	// options and branding the resolved project enables server-side.
+	mux.Handle("/auth/", ui.Handler(deps.Config, authSvc, returnAllow.Enabled(), logger))
 	if returnAllow.Enabled() {
 		logger.Info("oauth_hosted_flow_enabled", zap.Strings("allowed_return_urls", returnAllow.Entries()))
 	} else {

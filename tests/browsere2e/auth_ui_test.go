@@ -24,7 +24,7 @@ const browserTimeout = 90 * time.Second
 // boot. Kept well under browserTimeout so it cannot mask a hung browser.
 const browserWSURLTimeout = 60 * time.Second
 
-// selectors for the auth UI (internal/app/ui/static/index.html).
+// selectors for the auth UI (internal/app/ui/templates/login.html).
 const (
 	selEmail   = `#email`
 	selPass    = `#password`
