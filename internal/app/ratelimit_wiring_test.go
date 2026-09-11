@@ -8,8 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elloloop/identity/internal/app/ui"
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/middleware"
+	"github.com/elloloop/identity/internal/service"
 )
 
 // TestBuildRateLimits_PasswordlessPathsLimited asserts the two
@@ -272,4 +274,78 @@ func assertQuotaExhausts(t *testing.T, handler http.Handler, path, ip string, qu
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusTooManyRequests, w.Code, "%s must refuse over quota", path)
+}
+
+// TestBuildRateLimits_HostedActionPagesLimited asserts every hosted action
+// page is wired to the per-IP budget of the RPC surface it stands in for,
+// that the consuming POST 429s past the quota, and that the GET preview
+// stays unmetered so a reload never spends the submit's budget.
+func TestBuildRateLimits_HostedActionPagesLimited(t *testing.T) {
+	cfg := &config.Config{
+		RateLimitWindowSeconds:     60,
+		RateLimitVerifyPerIP:       2,
+		RateLimitResetPerIP:        2,
+		RateLimitLoginPerIP:        2,
+		RateLimitSignupPerIP:       2,
+		RateLimitHostedViewPerIP:   4,
+		RateLimitPasswordlessPerIP: 10,
+	}
+	limits := buildRateLimits(cfg)
+
+	postByPath := map[string]middleware.PathLimit{}
+	viewByPath := map[string]middleware.PathLimit{}
+	for _, l := range limits {
+		switch l.Method {
+		case http.MethodPost:
+			postByPath[l.PathPrefix] = l
+		case http.MethodGet:
+			viewByPath[l.PathPrefix] = l
+		}
+	}
+	for path, tag := range map[string]string{
+		service.HostedVerifyEmailPath:        "hosted_verify_email",
+		service.HostedConfirmEmailChangePath: "hosted_email_change",
+		service.HostedResetPasswordPath:      "hosted_reset_password",
+		service.HostedMagicLinkPath:          "hosted_magic_link",
+		service.HostedAcceptInvitationPath:   "hosted_accept_invitation",
+	} {
+		require.Contains(t, postByPath, path, "hosted page %s must meter its POST", path)
+		assert.Equal(t, tag, postByPath[path].Tag)
+	}
+	// The join-team page only looks and links to sign-in; it has no POST.
+	assert.NotContains(t, postByPath, service.HostedJoinTeamPath)
+	// Every page, join-team included, has a view bucket.
+	for _, path := range ui.ActionPaths() {
+		require.Contains(t, viewByPath, path, "hosted page %s must meter its views", path)
+		assert.Equal(t, "hosted_view", viewByPath[path].Tag)
+	}
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, service.HostedMagicLinkPath, "9.9.9.9", cfg.RateLimitLoginPerIP)
+	assertQuotaExhausts(t, handler, service.HostedAcceptInvitationPath, "9.9.9.10", cfg.RateLimitSignupPerIP)
+	assertQuotaExhausts(t, handler, service.HostedResetPasswordPath, "9.9.9.11", cfg.RateLimitResetPerIP)
+
+	// Views are metered in their own shared bucket: exhausting the POST
+	// budget leaves previews unaffected, and GET and HEAD across pages count
+	// against one view budget for the IP.
+	view := func(method, path, ip string) int {
+		req := httptest.NewRequest(method, path+"?token=t", nil)
+		req.Header.Set(middleware.ClientIPHeader, ip)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
+	}
+	assert.Equal(t, http.StatusOK, view(http.MethodGet, service.HostedResetPasswordPath, "9.9.9.11"), "a preview after the submit budget is spent still renders")
+	ip := "9.9.9.12"
+	codes := []int{
+		view(http.MethodGet, service.HostedVerifyEmailPath, ip),
+		view(http.MethodHead, service.HostedJoinTeamPath, ip),
+		view(http.MethodGet, service.HostedMagicLinkPath, ip),
+		view(http.MethodGet, service.HostedAcceptInvitationPath, ip),
+	}
+	assert.Equal(t, []int{http.StatusOK, http.StatusOK, http.StatusOK, http.StatusOK}, codes)
+	assert.Equal(t, http.StatusTooManyRequests, view(http.MethodGet, service.HostedResetPasswordPath, ip), "the fifth view from one IP exceeds the shared view budget")
+	assert.Equal(t, http.StatusOK, view(http.MethodPost, service.HostedResetPasswordPath, ip), "the submit budget is separate from the view budget")
 }

@@ -913,6 +913,11 @@ func (r *Repo) CreateOAuthOneTimeCode(_ context.Context, rec *service.OAuthOneTi
 	if rec == nil {
 		return "", errors.New("memory: CreateOAuthOneTimeCode: nil record")
 	}
+	// The SQL drivers CHECK-constrain login_method to the two minting flows;
+	// refuse the same values here so every driver agrees at write time.
+	if rec.LoginMethod != service.HandoverMethodOAuth && rec.LoginMethod != service.HandoverMethodMagicLink {
+		return "", fmt.Errorf("%w: unknown handover login method %q", service.ErrInvalidArgument, rec.LoginMethod)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	id := r.nextID()
@@ -1069,6 +1074,23 @@ func (r *Repo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, atMs i
 		return &cp, nil
 	}
 	return nil, service.ErrMagicLinkInvalid
+}
+
+// FindMagicLinkTokenByHash returns the token without consuming it, or nil
+// when no token has that hash.
+func (r *Repo) FindMagicLinkTokenByHash(_ context.Context, tokenHash string) (*service.MagicLinkTokenRecord, error) {
+	if tokenHash == "" {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.magicLinkTokens {
+		if t.TokenHash == tokenHash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
 }
 
 // ── Phone Verification Codes (SMS OTP) ─────────────────────────────

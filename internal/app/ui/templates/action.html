@@ -1,0 +1,45 @@
+{{define "title"}}{{.Title}}{{end}}
+
+{{define "content"}}
+        <div class="header">
+            <h1>{{.Heading}}</h1>
+            {{if and .Intro (eq .State "ready")}}<p>{{.Intro}}</p>{{end}}
+        </div>
+
+        {{if .Error}}<div class="error-message is-visible" id="form-error" role="alert">{{.Error}}</div>{{end}}
+
+        {{if eq .State "ready"}}
+        <form method="post" action="{{.FormAction}}" novalidate>
+            <input type="hidden" name="token" value="{{.Token}}">
+            {{if .AskName}}
+            <div class="form-group">
+                <label for="name">Name</label>
+                <input type="text" id="name" name="name" autocomplete="name" value="{{.Name}}" placeholder="Your name">
+            </div>
+            {{end}}
+            {{if .AskPassword}}
+            <div class="form-group">
+                <label for="password">{{.PasswordLabel}}</label>
+                <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="••••••••"{{if .Error}} aria-invalid="true" aria-describedby="form-error"{{end}}>
+            </div>
+            <div class="form-group">
+                <label for="password_confirm">Confirm password</label>
+                <input type="password" id="password_confirm" name="password_confirm" required autocomplete="new-password" placeholder="••••••••"{{if .Error}} aria-invalid="true" aria-describedby="form-error"{{end}}>
+            </div>
+            {{end}}
+            <button type="submit" class="submit-btn" id="submit-btn">{{.Submit}}</button>
+        </form>
+        {{if .Email}}
+        <p class="fine-print">Not you? If you weren't expecting this email, close this page. Nothing changes unless you continue.</p>
+        {{end}}
+        {{else}}
+        <div class="{{if eq .State "done"}}success-message{{else}}notice-message{{end}} is-visible" role="status">{{.Message}}</div>
+        {{if .Next}}
+        <p class="toggle-mode"><a href="{{.SignInURL}}">{{.Next}}</a></p>
+        {{end}}
+        {{end}}
+
+        {{if .SupportEmail}}
+        <p class="fine-print">Need help? <a href="mailto:{{.SupportEmail}}">{{.SupportEmail}}</a></p>
+        {{end}}
+{{end}}

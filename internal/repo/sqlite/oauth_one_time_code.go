@@ -17,9 +17,9 @@ func (r *sqliteRepository) CreateOAuthOneTimeCode(ctx context.Context, c *servic
 	}
 	const q = `
 		INSERT INTO oauth_one_time_codes (
-			id, project_id, code_hash, user_id, expires_at_ms, created_at_ms, consumed_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := r.db.Exec(ctx, q, id, r.projectID, c.CodeHash, c.UserID, c.ExpiresAt, c.CreatedAt, c.ConsumedAt)
+			id, project_id, code_hash, user_id, login_method, expires_at_ms, created_at_ms, consumed_at_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	_, err := r.db.Exec(ctx, q, id, r.projectID, c.CodeHash, c.UserID, c.LoginMethod, c.ExpiresAt, c.CreatedAt, c.ConsumedAt)
 	if err != nil {
 		return "", wrapErr("CreateOAuthOneTimeCode", err)
 	}
@@ -36,10 +36,10 @@ func (r *sqliteRepository) ConsumeOAuthOneTimeCode(ctx context.Context, codeHash
 		   SET consumed_at_ms = $3
 		 WHERE project_id = $1 AND code_hash = $2
 		   AND consumed_at_ms = 0 AND expires_at_ms > $3
-		RETURNING id, code_hash, user_id, expires_at_ms, created_at_ms, consumed_at_ms`
+		RETURNING id, code_hash, user_id, login_method, expires_at_ms, created_at_ms, consumed_at_ms`
 	var c service.OAuthOneTimeCodeRecord
 	err := r.db.QueryRow(ctx, q, r.projectID, codeHash, atMs).Scan(
-		&c.NodeID, &c.CodeHash, &c.UserID, &c.ExpiresAt, &c.CreatedAt, &c.ConsumedAt,
+		&c.NodeID, &c.CodeHash, &c.UserID, &c.LoginMethod, &c.ExpiresAt, &c.CreatedAt, &c.ConsumedAt,
 	)
 	if noRows(err) {
 		return nil, service.ErrOAuthCodeInvalid

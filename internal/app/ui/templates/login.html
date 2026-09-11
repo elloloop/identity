@@ -1,238 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Authentication</title>
-    <style>
-        :root {
-            --bg-color: #0f172a;
-            --glass-bg: rgba(30, 41, 59, 0.7);
-            --glass-border: rgba(255, 255, 255, 0.1);
-            --text-color: #f8fafc;
-            --muted-text: #94a3b8;
-            --primary: #3b82f6;
-            --primary-hover: #2563eb;
-            --danger: #ef4444;
-        }
-
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: var(--bg-color);
-            background-image: 
-                radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
-                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15) 0%, transparent 50%);
-            color: var(--text-color);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-        }
-
-        .auth-container {
-            background: var(--glass-bg);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid var(--glass-border);
-            border-radius: 24px;
-            padding: 48px;
-            width: 100%;
-            max-width: 400px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            transition: all 0.3s ease;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 32px;
-        }
-
-        .header h1 {
-            margin: 0;
-            font-size: 28px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            background: linear-gradient(to right, #fff, #94a3b8);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .header p {
-            margin: 8px 0 0;
-            color: var(--muted-text);
-            font-size: 14px;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            color: var(--muted-text);
-        }
-
-        input {
-            width: 100%;
-            padding: 12px 16px;
-            background: rgba(15, 23, 42, 0.6);
-            border: 1px solid var(--glass-border);
-            border-radius: 12px;
-            color: var(--text-color);
-            font-size: 16px;
-            font-family: inherit;
-            box-sizing: border-box;
-            transition: all 0.2s ease;
-        }
-
-        input:focus {
-            outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-            background: rgba(15, 23, 42, 0.8);
-        }
-
-        button.submit-btn {
-            width: 100%;
-            padding: 14px;
-            background: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            margin-top: 12px;
-        }
-
-        button.submit-btn:hover {
-            background: var(--primary-hover);
-            transform: translateY(-1px);
-        }
-
-        button.submit-btn:active {
-            transform: translateY(1px);
-        }
-
-        .toggle-mode {
-            text-align: center;
-            margin-top: 24px;
-            font-size: 14px;
-            color: var(--muted-text);
-        }
-
-        .toggle-mode button {
-            background: none;
-            border: none;
-            padding: 0;
-            font-family: inherit;
-            font-size: inherit;
-            color: var(--primary);
-            text-decoration: none;
-            font-weight: 500;
-            cursor: pointer;
-            transition: color 0.2s ease;
-        }
-
-        .toggle-mode button:hover {
-            color: #60a5fa;
-            text-decoration: underline;
-        }
-
-        .error-message {
-            color: var(--danger);
-            font-size: 14px;
-            margin-bottom: 16px;
-            text-align: center;
-            display: none;
-            background: rgba(239, 68, 68, 0.1);
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid rgba(239, 68, 68, 0.2);
-        }
-
-        .success-message {
-            color: #10b981;
-            font-size: 14px;
-            margin-bottom: 16px;
-            text-align: center;
-            display: none;
-            background: rgba(16, 185, 129, 0.1);
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid rgba(16, 185, 129, 0.2);
-        }
-        
-        .result-data {
-            margin-top: 20px;
-            font-size: 12px;
-            color: var(--muted-text);
-            background: rgba(0,0,0,0.2);
-            padding: 12px;
-            border-radius: 8px;
-            display: none;
-            word-wrap: break-word;
-        }
-
-        .oauth-buttons {
-            display: none;
-            flex-direction: column;
-            gap: 10px;
-            margin-bottom: 8px;
-        }
-
-        a.oauth-btn {
-            display: block;
-            padding: 12px 16px;
-            background: rgba(15, 23, 42, 0.6);
-            border: 1px solid var(--glass-border);
-            border-radius: 12px;
-            color: var(--text-color);
-            font-size: 15px;
-            font-weight: 500;
-            text-align: center;
-            text-decoration: none;
-            transition: all 0.2s ease;
-        }
-
-        a.oauth-btn:hover {
-            border-color: var(--primary);
-            background: rgba(15, 23, 42, 0.8);
-        }
-
-        .divider {
-            display: none;
-            align-items: center;
-            gap: 12px;
-            margin: 20px 0;
-            color: var(--muted-text);
-            font-size: 13px;
-        }
-
-        .divider::before, .divider::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: var(--glass-border);
-        }
-
-        .no-methods {
-            display: none;
-            text-align: center;
-            color: var(--muted-text);
-            font-size: 14px;
-            padding: 16px 0;
-        }
-    </style>
-</head>
-<body>
-    <div class="auth-container">
+{{define "content"}}
         <div class="header">
             <h1 id="title">Welcome back</h1>
             <p id="subtitle">Log in to your account to continue</p>
@@ -261,7 +27,7 @@
 
             <!-- CAPTCHA widget, rendered only when configured and only in the
                  modes (login / sign-up) the server actually enforces. -->
-            <div id="captcha-container" style="display: none; margin-bottom: 16px;"></div>
+            <div id="captcha-container" class="captcha-container"></div>
 
             <button type="submit" class="submit-btn" id="submit-btn">Log in</button>
         </form>
@@ -272,11 +38,15 @@
         </div>
         
         <div id="result-data" class="result-data"></div>
-    </div>
+{{end}}
 
-    <script>
+{{define "scripts"}}
+    <script nonce="{{.Nonce}}">
         {{.JSONConfig}}
         const config = window.serverConfig || { passwordLoginEnabled: true, passwordSignupEnabled: true };
+        // The page's CSP nonce, so the CAPTCHA loader injected below carries
+        // it and Turnstile propagates it to the resources it loads.
+        const scriptNonce = document.currentScript ? document.currentScript.nonce : '';
 
         let isLogin = true;
         const form = document.getElementById('auth-form');
@@ -297,6 +67,13 @@
         const pageQuery = new URLSearchParams(window.location.search);
         const projectKey = pageQuery.get('project_key') || '';
         const returnTo = pageQuery.get('return_to') || '';
+        // A tenant invitation the join-team page handed on: accepting it needs
+        // a signed-in caller whose address matches, so it is the last step of
+        // a password sign-in (or sign-up) here.
+        const joinToken = pageQuery.get('join') || '';
+        if (joinToken) {
+            subtitle.textContent = 'Sign in with the invited address to join your team';
+        }
 
         const passwordEnabled = config.passwordLoginEnabled !== false;
         if (!passwordEnabled) {
@@ -362,7 +139,7 @@
         // per-flow enforcement flags, so the widget renders exactly in the
         // modes where the server will require a token. The token is attached
         // to the request of whichever enforced mode is submitted.
-        const captchaAvailable = config.captchaProvider === 'turnstile' && !!config.captchaSiteKey;
+        const captchaAvailable = config.captchaProvider === 'turnstile' && !!config.captchaSiteKey && !!config.captchaScriptURL;
         const captchaLoadFailedMsg = 'The CAPTCHA failed to load. Check your connection and reload the page.';
         const captchaContainer = document.getElementById('captcha-container');
         let captchaToken = '';
@@ -379,7 +156,8 @@
             turnstileLoad = new Promise((resolve, reject) => {
                 if (window.turnstile) { resolve(); return; }
                 const s = document.createElement('script');
-                s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+                s.src = config.captchaScriptURL;
+                if (scriptNonce) s.nonce = scriptNonce;
                 s.async = true;
                 s.defer = true;
                 s.onload = () => resolve();
@@ -409,6 +187,25 @@
                 'error-callback': () => { captchaToken = ''; },
                 'expired-callback': () => { captchaToken = ''; },
             });
+        }
+
+        // acceptTeamInvitation redeems the tenant invitation the join-team page
+        // handed on, now that there is a session for the invited address.
+        async function acceptTeamInvitation(accessToken) {
+            const acceptHeaders = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken };
+            if (projectKey) acceptHeaders['X-Project-Key'] = projectKey;
+            const res = await fetch('/identity.v1.IdentityService/AcceptTenantInvitation', {
+                method: 'POST',
+                headers: acceptHeaders,
+                body: JSON.stringify({ token: joinToken })
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                errorMsg.textContent = 'Signed in, but the invitation could not be accepted: ' + (body.message || body.code || 'unknown error') + '. Ask the person who invited you to send a new one.';
+                errorMsg.style.display = 'block';
+                return;
+            }
+            successMsg.textContent = 'You have joined the team.';
         }
 
         function resetCaptcha() {
@@ -524,6 +321,7 @@
                     const token = data.accessToken || data.access_token;
                     resultData.textContent = 'Token: ' + token.substring(0, 30) + '...';
                     resultData.style.display = 'block';
+                    if (joinToken) await acceptTeamInvitation(token);
                 }
             } catch (err) {
                 errorMsg.textContent = err.message;
@@ -534,5 +332,4 @@
             }
         });
     </script>
-</body>
-</html>
+{{end}}

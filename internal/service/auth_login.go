@@ -307,7 +307,7 @@ func (s *AuthService) handleDuplicatePasskeySignup(ctx context.Context, user *Us
 }
 
 func (s *AuthService) sendExistingSignupNotice(ctx context.Context, user *User) error {
-	loginURL := s.appBaseURL(ctx)
+	loginURL := appBaseURL(ctx, s.cfg)
 	text := strings.Join([]string{
 		fmt.Sprintf("Hi %s,", displayNameOrEmail(user)),
 		"",
@@ -1264,8 +1264,34 @@ func (s *AuthService) checkAccountStatus(ctx context.Context, user *User, ipAddr
 
 // ── AcceptInvitation ───────────────────────────────────────────────────
 
-// AcceptInvitation completes an admin-issued invitation.
+// AcceptInvitation completes an admin-issued invitation and signs the new
+// member in: RedeemInvitation, then a token pair.
 func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, password, name, ipAddr, userAgent string) (*LoginResult, error) {
+	user, err := s.RedeemInvitation(ctx, invitationToken, password, name)
+	if err != nil {
+		return nil, err
+	}
+
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	if err != nil {
+		return nil, err
+	}
+	return &LoginResult{
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+	}, nil
+}
+
+// RedeemInvitation consumes an admin-issued invitation: it validates the
+// token, enforces the project's access policy and the invitee's password
+// policy, sets the password, activates the account, and retires the
+// invitation. It issues no session. AcceptInvitation adds one for the RPC;
+// the hosted accept-invitation page sends the new member to sign in
+// instead, because a server-rendered page has no safe channel to hand
+// tokens to an app.
+func (s *AuthService) RedeemInvitation(ctx context.Context, invitationToken, password, name string) (*User, error) {
 	if invitationToken == "" {
 		return nil, fmt.Errorf("%w: invitation token is required", ErrInvalidArgument)
 	}
@@ -1352,18 +1378,8 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 	user.Status = "active"
 	user.UpdatedAt = msToTime(now)
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
-	if err != nil {
-		return nil, err
-	}
-
 	s.logger.Info("invitation_accepted", zap.String("user_id", user.ID))
-	return &LoginResult{
-		User:         user,
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
-	}, nil
+	return user, nil
 }
 
 // msToTime converts epoch milliseconds to time.Time.

@@ -445,23 +445,6 @@ func TestPathProvider(t *testing.T) {
 	}
 }
 
-func TestAppendQueryParam(t *testing.T) {
-	tests := []struct {
-		base, key, value, wantContains string
-	}{
-		{"https://app.test/finish", "code", "abc", "code=abc"},
-		{"https://app.test/finish?next=/home", "code", "abc", "next=%2Fhome"},
-		{"https://app.test/finish?next=/home", "code", "abc", "code=abc"},
-		{"://bad url", "code", "abc", "code=abc"},
-	}
-	for _, tt := range tests {
-		got := appendQueryParam(tt.base, tt.key, tt.value)
-		if !strings.Contains(got, tt.wantContains) {
-			t.Errorf("appendQueryParam(%q) = %q, want substring %q", tt.base, got, tt.wantContains)
-		}
-	}
-}
-
 func TestCallbackURL(t *testing.T) {
 	hh := &hostedOAuthHandler{}
 
@@ -492,5 +475,20 @@ func TestClientIPFromRequest(t *testing.T) {
 	r.Header.Set("X-Forwarded-For", "198.51.100.7, 10.0.0.1")
 	if got := clientIPFromRequest(r); got != "198.51.100.7" {
 		t.Errorf("XFF IP = %q", got)
+	}
+}
+
+// TestHostedHTTP_JoinTeamWithoutControlPlane: on a driver with no membership
+// stores the page must fail closed to "invalid" — the wiring hands the UI a
+// true nil, not a typed nil that would slip past its check and panic.
+func TestHostedHTTP_JoinTeamWithoutControlPlane(t *testing.T) {
+	h := newHostedTestHandler(t, "", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/auth/join-team?token=abc", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%q", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "isn&#39;t valid") && !strings.Contains(rr.Body.String(), "isn't valid") {
+		t.Fatalf("page must report the link invalid, got %q", rr.Body.String())
 	}
 }

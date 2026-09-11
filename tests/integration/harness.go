@@ -1557,6 +1557,9 @@ func (r *MemRepo) ConsumeQrLoginSession(_ context.Context, nodeID string, atMs i
 }
 
 func (r *MemRepo) CreateOAuthOneTimeCode(_ context.Context, rec *service.OAuthOneTimeCodeRecord) (string, error) {
+	if rec.LoginMethod != service.HandoverMethodOAuth && rec.LoginMethod != service.HandoverMethodMagicLink {
+		return "", fmt.Errorf("%w: unknown handover login method %q", service.ErrInvalidArgument, rec.LoginMethod)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	id := r.nextID()
@@ -1678,6 +1681,21 @@ func (r *MemRepo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, atM
 		return &cp, nil
 	}
 	return nil, service.ErrMagicLinkInvalid
+}
+
+func (r *MemRepo) FindMagicLinkTokenByHash(_ context.Context, tokenHash string) (*service.MagicLinkTokenRecord, error) {
+	if tokenHash == "" {
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, tkn := range r.magicLinkTokens {
+		if tkn.TokenHash == tokenHash {
+			cp := *tkn
+			return &cp, nil
+		}
+	}
+	return nil, nil
 }
 
 func (r *MemRepo) UpsertPhoneVerificationCode(_ context.Context, rec *service.PhoneVerificationCodeRecord) (string, error) {

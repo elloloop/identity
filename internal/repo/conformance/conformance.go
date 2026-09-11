@@ -917,7 +917,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			r := driver.NewRepo(t)
 			userID := createTestUser(t, r, "otc-consume@example.com")
 			id, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
-				CodeHash: "otc-hash-1", UserID: userID,
+				CodeHash: "otc-hash-1", UserID: userID, LoginMethod: service.HandoverMethodMagicLink,
 				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
 			})
 			if err != nil {
@@ -936,6 +936,22 @@ func RunConformance(t *testing.T, driver Driver) {
 			if rec.ConsumedAt != 200 {
 				t.Fatalf("ConsumedAt = %d, want 200", rec.ConsumedAt)
 			}
+			// The minting flow must survive the round-trip: redeem picks the
+			// login policy and audit event from it. Both legal values, so a
+			// driver cannot pass by mishandling one of them.
+			if rec.LoginMethod != service.HandoverMethodMagicLink {
+				t.Fatalf("LoginMethod = %q, want %q", rec.LoginMethod, service.HandoverMethodMagicLink)
+			}
+			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
+				CodeHash: "otc-hash-oauth", UserID: userID, LoginMethod: service.HandoverMethodOAuth,
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create oauth: %v", err)
+			}
+			oauthRec, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-hash-oauth", 200)
+			if err != nil || oauthRec.LoginMethod != service.HandoverMethodOAuth {
+				t.Fatalf("oauth round-trip: rec=%#v err=%v", oauthRec, err)
+			}
 			// Replay must fail with ErrOAuthCodeInvalid.
 			if _, err := r.ConsumeOAuthOneTimeCode(ctx, "otc-hash-1", 300); !errors.Is(err, service.ErrOAuthCodeInvalid) {
 				t.Fatalf("replay Consume: want ErrOAuthCodeInvalid, got %v", err)
@@ -950,6 +966,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
 				CodeHash: "otc-expired", UserID: userID,
 				ExpiresAt: 1_000, CreatedAt: 100,
+				LoginMethod: service.HandoverMethodOAuth,
 			}); err != nil {
 				t.Fatalf("Create expired: %v", err)
 			}
@@ -974,6 +991,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
 				CodeHash: "otc-race-1", UserID: userID,
 				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+				LoginMethod: service.HandoverMethodOAuth,
 			}); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
@@ -1024,11 +1042,13 @@ func RunConformance(t *testing.T, driver Driver) {
 			userID := createTestUser(t, r, "otc-sweep@example.com")
 			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
 				CodeHash: "otc-old", UserID: userID, ExpiresAt: 1_000, CreatedAt: 100,
+				LoginMethod: service.HandoverMethodOAuth,
 			}); err != nil {
 				t.Fatalf("Create old: %v", err)
 			}
 			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
 				CodeHash: "otc-fresh", UserID: userID, ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+				LoginMethod: service.HandoverMethodOAuth,
 			}); err != nil {
 				t.Fatalf("Create fresh: %v", err)
 			}
@@ -1355,6 +1375,74 @@ func RunConformance(t *testing.T, driver Driver) {
 			}
 			if _, err := r.ConsumeMagicLinkToken(ctx, "ml-missing", 2_000); !errors.Is(err, service.ErrMagicLinkInvalid) {
 				t.Fatalf("Consume missing: want ErrMagicLinkInvalid, got %v", err)
+			}
+		})
+
+		t.Run("MagicLinkToken_FindByHash_ReadsWithoutConsuming", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			if _, err := r.CreateMagicLinkToken(ctx, &service.MagicLinkTokenRecord{
+				TokenHash: "ml-peek", Email: "ml-peek@example.com", ReturnTo: "https://app.test/welcome",
+				ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			// The lookup reports the row as stored and leaves it redeemable.
+			rec, err := r.FindMagicLinkTokenByHash(ctx, "ml-peek")
+			if err != nil {
+				t.Fatalf("Find: %v", err)
+			}
+			if rec == nil || rec.Email != "ml-peek@example.com" || rec.ReturnTo != "https://app.test/welcome" || rec.ConsumedAt != 0 {
+				t.Fatalf("Find returned wrong record: %#v", rec)
+			}
+			if _, err := r.ConsumeMagicLinkToken(ctx, "ml-peek", 200); err != nil {
+				t.Fatalf("Consume after Find must still succeed: %v", err)
+			}
+			// After consumption the lookup shows the stamp, so a page can say
+			// "already used" instead of offering a click that will fail.
+			rec, err = r.FindMagicLinkTokenByHash(ctx, "ml-peek")
+			if err != nil {
+				t.Fatalf("Find after consume: %v", err)
+			}
+			if rec == nil || rec.ConsumedAt != 200 {
+				t.Fatalf("Find after consume: ConsumedAt = %v, want 200", rec)
+			}
+			// Unknown and empty hashes are nil, nil — not an error and not a
+			// sentinel, so the caller renders "invalid" without special-casing.
+			for _, hash := range []string{"ml-unknown", ""} {
+				rec, err := r.FindMagicLinkTokenByHash(ctx, hash)
+				if err != nil || rec != nil {
+					t.Fatalf("Find(%q) = %#v, %v; want nil, nil", hash, rec, err)
+				}
+			}
+			// The lookup is clock-free: an expired, unswept row is returned
+			// with its stamps so the caller can say "expired" rather than
+			// "invalid". Expiry is the caller's judgement, never the driver's.
+			if _, err := r.CreateMagicLinkToken(ctx, &service.MagicLinkTokenRecord{
+				TokenHash: "ml-old", Email: "ml-old@example.com", ExpiresAt: 1_000, CreatedAt: 100,
+			}); err != nil {
+				t.Fatalf("Create expired: %v", err)
+			}
+			old, err := r.FindMagicLinkTokenByHash(ctx, "ml-old")
+			if err != nil || old == nil || old.ExpiresAt != 1_000 {
+				t.Fatalf("Find(expired) = %#v, %v; want the row with ExpiresAt 1000", old, err)
+			}
+		})
+
+		t.Run("OAuthOneTimeCode_RejectsUnknownLoginMethod", func(t *testing.T) {
+			ctx := context.Background()
+			r := driver.NewRepo(t)
+			userID := createTestUser(t, r, "otc-method@example.com")
+			// The SQL drivers enforce the value set with a CHECK constraint
+			// and the memory driver in code; every driver must refuse a value
+			// outside the two minting flows at write time.
+			for _, method := range []string{"", "telepathy"} {
+				if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{
+					CodeHash: "otc-bad-" + method, UserID: userID, LoginMethod: method,
+					ExpiresAt: 9_000_000_000_000, CreatedAt: 100,
+				}); err == nil {
+					t.Fatalf("Create with login_method %q must fail", method)
+				}
 			}
 		})
 
@@ -2190,7 +2278,7 @@ func RunConformance(t *testing.T, driver Driver) {
 			if _, err := r.CreateLoginChallenge(ctx, &service.LoginChallengeRecord{ChallengeID: "del-lc", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
 				t.Fatalf("CreateLoginChallenge: %v", err)
 			}
-			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{CodeHash: "del-otc", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100}); err != nil {
+			if _, err := r.CreateOAuthOneTimeCode(ctx, &service.OAuthOneTimeCodeRecord{CodeHash: "del-otc", UserID: uid, ExpiresAt: 9_000_000_000_000, CreatedAt: 100, LoginMethod: service.HandoverMethodOAuth}); err != nil {
 				t.Fatalf("CreateOAuthOneTimeCode: %v", err)
 			}
 

@@ -412,6 +412,40 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			PathPrefix: path, Tag: "guardian_manage", Limiter: guardianLimiter,
 		})
 	}
+	// Hosted action pages (ADR-0014). The consuming POST is the click that
+	// spends a token — and, on the password pages, hashes a password — so
+	// each page's POST gets its own bucket sized like the RPC surface it
+	// stands in for (the same GATEWAY_RATE_LIMIT_* value under its own
+	// hosted_* tag). Views (GET, and HEAD with it) are one or two indexed
+	// lookups that consume nothing; they share one generous bucket
+	// (GATEWAY_RATE_LIMIT_HOSTED_VIEW_PER_IP) so a reload never spends the
+	// budget a submit needs, while an unauthenticated URL still has a
+	// ceiling. The POST entries come first: the middleware stops at the
+	// first entry whose path and method match.
+	for _, page := range []struct {
+		path, tag string
+		perIP     int
+	}{
+		{service.HostedVerifyEmailPath, "hosted_verify_email", cfg.RateLimitVerifyPerIP},
+		{service.HostedConfirmEmailChangePath, "hosted_email_change", cfg.RateLimitVerifyPerIP},
+		{service.HostedResetPasswordPath, "hosted_reset_password", cfg.RateLimitResetPerIP},
+		// Redeeming a magic link mints a handover code: a login.
+		{service.HostedMagicLinkPath, "hosted_magic_link", cfg.RateLimitLoginPerIP},
+		// Accepting an invitation activates an account with a fresh password
+		// hash: account creation, on the signup budget.
+		{service.HostedAcceptInvitationPath, "hosted_accept_invitation", cfg.RateLimitSignupPerIP},
+	} {
+		limits = append(limits, middleware.PathLimit{
+			PathPrefix: page.path, Tag: page.tag, Method: http.MethodPost,
+			Limiter: middleware.NewFixedWindowLimiter(window, page.perIP, 0),
+		})
+	}
+	viewLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitHostedViewPerIP, 0)
+	for _, path := range ui.ActionPaths() {
+		limits = append(limits, middleware.PathLimit{
+			PathPrefix: path, Tag: "hosted_view", Method: http.MethodGet, Limiter: viewLimiter,
+		})
+	}
 	return limits
 }
 
@@ -662,9 +696,21 @@ func New(deps Deps) (*Built, error) {
 	// BeginOAuthLogin / OAuthLogin RPCs work regardless.
 	returnAllow := service.ParseReturnAllowlist(deps.Config.OAuthAllowedReturnURLs)
 
-	// Default auth UI (login/signup). Rendered per request so it offers
-	// exactly the sign-in options the resolved project enables server-side.
-	mux.Handle("/auth/", ui.Handler(deps.Config, authSvc, returnAllow.Enabled()))
+	// Hosted pages: the sign-in page and the emailed-link action pages
+	// (ADR-0014). Rendered per request so each offers exactly the sign-in
+	// options and branding the resolved project enables server-side.
+	// A driver without a control plane has no membership service; convert
+	// explicitly so the interface is a true nil the page can test, not a
+	// typed nil that would pass the check and panic on use.
+	var teams ui.TeamInvitations
+	if membershipSvc != nil {
+		teams = membershipSvc
+	}
+	mux.Handle("/auth/", ui.Handler(deps.Config, ui.Sources{Auth: authSvc, Teams: teams}, returnAllow.Enabled(), logger))
+	logger.Info("hosted_pages_mounted",
+		zap.Strings("paths", ui.ActionPaths()),
+		zap.String("app_base_url", deps.Config.AppBaseURL),
+		zap.String("hint", "links land here when GATEWAY_APP_BASE_URL is this server or the project has a primary auth-domain; otherwise your frontend serves these routes"))
 	if returnAllow.Enabled() {
 		logger.Info("oauth_hosted_flow_enabled", zap.Strings("allowed_return_urls", returnAllow.Entries()))
 	} else {

@@ -7566,14 +7566,18 @@ components:
         code:
           type: string
           title: code
-          description: opaque one-time code from the hosted callback redirect
+          description: opaque one-time code from the hosted redirect
       title: RedeemOAuthCodeRequest
       additionalProperties: false
       description: |-
-        RedeemOAuthCode exchanges the single-use one-time code handed to the
-         SPA by the hosted OAuth callback (GET/POST /oauth/callback/{provider} ->
-         302 return_to?code=<otc>) for a backend-issued token pair. The code
-         is single-use and short-lived; a replay returns CodeUnauthenticated.
+        RedeemOAuthCode exchanges the single-use handover code a hosted flow
+         handed to the app — the hosted OAuth callback (GET/POST
+         /oauth/callback/{provider} -> 302 return_to?code=<otc>) or the hosted
+         magic-link page (/auth/magic-link -> 303 return_to?code=<otc>) — for a
+         backend-issued token pair. The login completes under the policy of the
+         flow that minted the code. The code is single-use and short-lived; a
+         replay returns CodeUnauthenticated. CodeUnavailable only when neither
+         OAuth providers nor the hosted return allowlist is configured.
     identity.v1.RedeemOAuthCodeResponse:
       type: object
       properties:
@@ -7583,16 +7587,26 @@ components:
         accessToken:
           type: string
           title: access_token
-          description: Backend-issued JWT
+          description: Backend-issued JWT (empty when totp_required=true)
         refreshToken:
           type: string
           title: refresh_token
-          description: For token rotation (send in RefreshToken RPC body)
+          description: For token rotation (empty when totp_required=true)
         expiresIn:
           type: integer
           title: expires_in
           format: int32
           description: Access token lifetime in seconds
+        totpRequired:
+          type: boolean
+          title: totp_required
+          description: |-
+            The login completes under the minting flow's policy, which may require a
+             second factor: then no tokens are issued and the client must call
+             VerifyTotp with login_challenge_id, exactly as after PasswordLogin.
+        loginChallengeId:
+          type: string
+          title: login_challenge_id
       title: RedeemOAuthCodeResponse
       additionalProperties: false
     identity.v1.RefreshAssuranceTokenRequest:

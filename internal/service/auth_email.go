@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -23,20 +24,24 @@ func (s *AuthService) emailTokenExpiry() time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
-// appBaseURL returns the public app base URL for the request's project,
-// with any trailing slash trimmed, so callers can simply concatenate
+// appBaseURL returns the public base URL links for the request's project are
+// built on, with any trailing slash trimmed, so callers can concatenate
 // "/auth/foo". When the request resolved to a project with a primary
 // auth-domain, links are built on that branded hostname
-// (https://<primary-auth-domain>) so a user sees a URL on the product's
-// own domain. Otherwise it falls back to the configured GATEWAY_APP_BASE_URL
-// (or a localhost dev default).
-func (s *AuthService) appBaseURL(ctx context.Context) string {
+// (https://<primary-auth-domain>) so a user sees a URL on the product's own
+// domain — and lands on the hosted pages identity serves there. Otherwise it
+// falls back to the configured GATEWAY_APP_BASE_URL. Shared by every service
+// that mails a link so all of them resolve the same way.
+func appBaseURL(ctx context.Context, cfg *config.Config) string {
 	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.PrimaryAuthDomain != "" {
 		return "https://" + scope.PrimaryAuthDomain
 	}
-	u := strings.TrimRight(s.cfg.AppBaseURL, "/")
+	u := ""
+	if cfg != nil {
+		u = strings.TrimRight(cfg.AppBaseURL, "/")
+	}
 	if u == "" {
-		u = "http://localhost:9002"
+		u = config.DefaultAppBaseURL
 	}
 	return u
 }
@@ -132,7 +137,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string
 		return nil
 	}
 
-	link := fmt.Sprintf("%s/auth/reset-password?token=%s", s.appBaseURL(ctx), rawToken)
+	link := appBaseURL(ctx, s.cfg) + HostedResetPasswordPath + "?token=" + rawToken
 	brand := resolveBranding(ctx, s.cfg)
 	html, text, err := email.Render(email.TemplatePasswordReset, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),
@@ -291,7 +296,7 @@ func (s *AuthService) SendEmailVerification(ctx context.Context, userID string) 
 		return fmt.Errorf("creating verification token: %w", err)
 	}
 
-	link := fmt.Sprintf("%s/auth/verify-email?token=%s", s.appBaseURL(ctx), rawToken)
+	link := appBaseURL(ctx, s.cfg) + HostedVerifyEmailPath + "?token=" + rawToken
 	brand := resolveBranding(ctx, s.cfg)
 	html, text, err := email.Render(email.TemplateEmailVerification, brand.templateData(map[string]any{
 		"UserName":  displayNameOrEmail(user),

@@ -169,3 +169,29 @@ func (r *pgRepository) ConsumeMagicLinkToken(ctx context.Context, tokenHash stri
 	}
 	return &t, nil
 }
+
+// FindMagicLinkTokenByHash returns the token without consuming it, or nil
+// when no token has that hash. The hosted magic-link page reads it to show
+// the address and the link's state before the user clicks.
+func (r *pgRepository) FindMagicLinkTokenByHash(ctx context.Context, tokenHash string) (*service.MagicLinkTokenRecord, error) {
+	if tokenHash == "" {
+		return nil, nil
+	}
+	const q = `
+		SELECT id, token_hash, email, return_to, expires_at_ms, created_at_ms, consumed_at_ms
+		  FROM magic_link_tokens
+		 WHERE project_id = $1 AND token_hash = $2
+		 LIMIT 1`
+	var t service.MagicLinkTokenRecord
+	err := r.pool.QueryRow(ctx, q, r.projectID, tokenHash).Scan(
+		&t.NodeID, &t.TokenHash, &t.Email, &t.ReturnTo,
+		&t.ExpiresAt, &t.CreatedAt, &t.ConsumedAt,
+	)
+	if noRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapPgErr("FindMagicLinkTokenByHash", err)
+	}
+	return &t, nil
+}

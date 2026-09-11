@@ -2485,13 +2485,17 @@ func (x *NativeOAuthLoginResponse) GetExpiresIn() int32 {
 	return 0
 }
 
-// RedeemOAuthCode exchanges the single-use one-time code handed to the
-// SPA by the hosted OAuth callback (GET/POST /oauth/callback/{provider} ->
-// 302 return_to?code=<otc>) for a backend-issued token pair. The code
-// is single-use and short-lived; a replay returns CodeUnauthenticated.
+// RedeemOAuthCode exchanges the single-use handover code a hosted flow
+// handed to the app — the hosted OAuth callback (GET/POST
+// /oauth/callback/{provider} -> 302 return_to?code=<otc>) or the hosted
+// magic-link page (/auth/magic-link -> 303 return_to?code=<otc>) — for a
+// backend-issued token pair. The login completes under the policy of the
+// flow that minted the code. The code is single-use and short-lived; a
+// replay returns CodeUnauthenticated. CodeUnavailable only when neither
+// OAuth providers nor the hosted return allowlist is configured.
 type RedeemOAuthCodeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"` // opaque one-time code from the hosted callback redirect
+	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"` // opaque one-time code from the hosted redirect
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2534,13 +2538,18 @@ func (x *RedeemOAuthCodeRequest) GetCode() string {
 }
 
 type RedeemOAuthCodeResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
-	AccessToken   string                 `protobuf:"bytes,2,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`    // Backend-issued JWT
-	RefreshToken  string                 `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"` // For token rotation (send in RefreshToken RPC body)
-	ExpiresIn     int32                  `protobuf:"varint,4,opt,name=expires_in,json=expiresIn,proto3" json:"expires_in,omitempty"`         // Access token lifetime in seconds
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	User         *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	AccessToken  string                 `protobuf:"bytes,2,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`    // Backend-issued JWT (empty when totp_required=true)
+	RefreshToken string                 `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"` // For token rotation (empty when totp_required=true)
+	ExpiresIn    int32                  `protobuf:"varint,4,opt,name=expires_in,json=expiresIn,proto3" json:"expires_in,omitempty"`         // Access token lifetime in seconds
+	// The login completes under the minting flow's policy, which may require a
+	// second factor: then no tokens are issued and the client must call
+	// VerifyTotp with login_challenge_id, exactly as after PasswordLogin.
+	TotpRequired     bool   `protobuf:"varint,5,opt,name=totp_required,json=totpRequired,proto3" json:"totp_required,omitempty"`
+	LoginChallengeId string `protobuf:"bytes,6,opt,name=login_challenge_id,json=loginChallengeId,proto3" json:"login_challenge_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RedeemOAuthCodeResponse) Reset() {
@@ -2599,6 +2608,20 @@ func (x *RedeemOAuthCodeResponse) GetExpiresIn() int32 {
 		return x.ExpiresIn
 	}
 	return 0
+}
+
+func (x *RedeemOAuthCodeResponse) GetTotpRequired() bool {
+	if x != nil {
+		return x.TotpRequired
+	}
+	return false
+}
+
+func (x *RedeemOAuthCodeResponse) GetLoginChallengeId() string {
+	if x != nil {
+		return x.LoginChallengeId
+	}
+	return ""
 }
 
 type PasswordSignupRequest struct {
@@ -15665,13 +15688,15 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\n" +
 	"expires_in\x18\x04 \x01(\x05R\texpiresIn\",\n" +
 	"\x16RedeemOAuthCodeRequest\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\tR\x04code\"\xa7\x01\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\"\xfa\x01\n" +
 	"\x17RedeemOAuthCodeResponse\x12%\n" +
 	"\x04user\x18\x01 \x01(\v2\x11.identity.v1.UserR\x04user\x12!\n" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"expires_in\x18\x04 \x01(\x05R\texpiresIn\"\xc6\x01\n" +
+	"expires_in\x18\x04 \x01(\x05R\texpiresIn\x12#\n" +
+	"\rtotp_required\x18\x05 \x01(\bR\ftotpRequired\x12,\n" +
+	"\x12login_challenge_id\x18\x06 \x01(\tR\x10loginChallengeId\"\xc6\x01\n" +
 	"\x15PasswordSignupRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12%\n" +

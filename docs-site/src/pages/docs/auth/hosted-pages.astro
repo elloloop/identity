@@ -1,0 +1,187 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Hosted Pages">
+  <h1>Hosted pages</h1>
+  <p>
+    Identity serves the pages an emailed link lands on, so a product needs no
+    frontend routes for them. Every link identity mails has the shape
+    <code>{"{base}"}/auth/&lt;action&gt;?token=…</code>, where
+    <code>{"{base}"}</code> is the project's primary auth-domain when it has
+    one and otherwise <code>GATEWAY_APP_BASE_URL</code>. When that base is
+    identity's own origin, the link opens one of the pages below. When it is
+    your frontend, your frontend serves those routes instead (see
+    <a href="#your-own-pages">Your own pages</a>).
+  </p>
+  <p>
+    The sign-in page at <code>/auth/</code> is documented with the
+    <a href={`${import.meta.env.BASE_URL}/docs/auth/oauth#hosted-oauth-flow`}>hosted OAuth flow</a>.
+  </p>
+
+  <h2>The six pages</h2>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Hosted action pages">
+  <table>
+    <thead>
+      <tr><th scope="col">Route</th><th scope="col">Link mailed by</th><th scope="col">The page asks for</th><th scope="col">On success</th></tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><code>/auth/verify-email</code></td>
+      <td>Sign-up, <code>SendEmailVerification</code></td>
+      <td>One button: Confirm email</td>
+      <td>"Your email address is verified." Link to sign in. No session is created.</td>
+    </tr>
+    <tr>
+      <td><code>/auth/reset-password</code></td>
+      <td><code>RequestPasswordReset</code></td>
+      <td>New password, confirm password</td>
+      <td>"Your password has been updated." Every existing session is revoked; link to sign in.</td>
+    </tr>
+    <tr>
+      <td><code>/auth/confirm-email-change</code></td>
+      <td><code>RequestEmailChange</code> (mailed to the new address)</td>
+      <td>One button: Confirm new email</td>
+      <td>"Your email address has been updated." Every existing session is revoked; link to sign in.</td>
+    </tr>
+    <tr>
+      <td><code>/auth/magic-link</code></td>
+      <td><code>RequestMagicLink</code></td>
+      <td>One button: Continue</td>
+      <td>Redirect to the link's <code>return_to</code> with <code>?code=</code>, a single-use handover code the app redeems with <code>RedeemOAuthCode</code>.</td>
+    </tr>
+    <tr>
+      <td><code>/auth/accept-invitation</code></td>
+      <td><code>InviteUser</code> (admin user invitation)</td>
+      <td>Name, password, confirm password</td>
+      <td>"Your account is ready." Link to sign in.</td>
+    </tr>
+    <tr>
+      <td><code>/auth/join-team</code></td>
+      <td><code>CreateTenantInvitation</code> (team membership)</td>
+      <td>Nothing: the page consumes no token</td>
+      <td>Names the team and the invited address and sends the invitee to the hosted sign-in page with the token. A password sign-in or sign-up with that address accepts the invitation as its last step (<code>AcceptTenantInvitation</code>). OAuth and passkey sign-ins finish in the app, which accepts it for them.</td>
+    </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>Opening a link changes nothing; clicking does</h2>
+  <p>
+    A GET of any page only previews the token: the page shows whose address
+    the link concerns and whether the link is still live, already used, or
+    expired. Nothing is consumed, so a mail scanner or a link preview cannot
+    spend a single-use token. The button is a form POST to the same path, and
+    that POST runs the same service method the corresponding RPC runs — every
+    check the RPC enforces (expiry, single use, the project's access policy,
+    the tenant's login and password policies) applies unchanged.
+  </p>
+  <p>
+    Clicking a link proves control of an inbox at that moment, not ownership
+    of an account, so verification, confirmation, reset and invitation never
+    sign the user in; each ends on a page that links to sign-in. The magic
+    link is the one link that <em>is</em> a sign-in, and its page hands the
+    session to your app the way the hosted OAuth callback does: a redirect to
+    the link's stored, allowlist-checked <code>return_to</code> carrying a
+    one-time <code>code</code>. Your app exchanges it exactly as it exchanges
+    an OAuth handover code:
+  </p>
+  <Code code={`curl -sX POST https://auth.example.com/identity.v1.IdentityService/RedeemOAuthCode \\
+  -H 'Content-Type: application/json' \\
+  -d '{"code":"<code from the redirect>"}'`} lang="bash" />
+  <p>
+    The code is opaque, stored only as a hash, valid for about a minute and
+    consumed atomically, so a replay fails. The redeem completes as a
+    passwordless login: the tenant's login policy for <code>email_otp</code>
+    applies, a second factor is required where the policy or the user
+    requires one, and the audit log records <code>login_success</code> with
+    <code>method: magic_link</code>.
+  </p>
+
+  <h2>What the pages say</h2>
+  <p>
+    The product name from the project's <code>branding.product_name</code>
+    (or <code>GATEWAY_EMAIL_BRAND_PRODUCT_NAME</code>) appears in headings
+    such as "Sign in to Acme"; <code>branding.support_email</code> renders a
+    "Need help?" footer. A used, expired or unknown link explains itself and
+    tells the user to request a new one from the app they were using; the
+    hosted sign-in page itself has no forgot-password or magic-link request
+    yet, so a used or expired link is a dead end on the hosted pages until
+    the app offers a new one. A password that fails the policy re-renders the form with the
+    requirement that failed; the link stays live. The copy is English only:
+    a product that needs other languages serves its own routes for now.
+  </p>
+
+  <h2>Security posture</h2>
+  <ul>
+    <li>
+      <strong>Cross-site form posts are refused.</strong> The pages check the
+      browser's Fetch metadata (<code>Sec-Fetch-Site</code>,
+      <code>Origin</code>), so a page on another origin cannot submit the
+      magic-link form to log someone into an attacker's account. No cookie is
+      involved, so users who block cookies are unaffected.
+    </li>
+    <li>
+      <strong>Every <code>/auth/*</code> response</strong> carries
+      <code>Cache-Control: no-store</code>, <code>Referrer-Policy:
+      no-referrer</code> (the URL holds the token), a per-request nonce
+      Content-Security-Policy with <code>default-src 'none'</code> and
+      <code>frame-ancestors 'none'</code>, <code>X-Frame-Options: DENY</code>,
+      <code>X-Content-Type-Options: nosniff</code> and
+      <code>X-Robots-Tag: noindex</code>. The action pages run no script at
+      all.
+    </li>
+    <li>
+      <strong>Redirects never come from the request.</strong> The magic-link
+      page redirects only to the <code>return_to</code> stored with the link,
+      which was checked against <code>GATEWAY_OAUTH_ALLOWED_RETURN_URLS</code>
+      when the link was requested and is checked again when it is consumed.
+      Every other page links to the sign-in page on the same origin.
+    </li>
+    <li>
+      <strong>Rate limits.</strong> The consuming POST and the GET preview
+      are metered apart, so reloading a page never spends the budget the
+      submit needs. Previews of every page share one per-IP bucket sized by
+      <code>GATEWAY_RATE_LIMIT_HOSTED_VIEW_PER_IP</code> (default 60 per
+      minute). Each page's POST has its own per-IP bucket sized by the knob of
+      the RPC it stands in for: <code>GATEWAY_RATE_LIMIT_VERIFY_PER_IP</code>
+      (verify, email change), <code>GATEWAY_RATE_LIMIT_RESET_PER_IP</code>
+      (reset), <code>GATEWAY_RATE_LIMIT_LOGIN_PER_IP</code> (magic link) and
+      <code>GATEWAY_RATE_LIMIT_SIGNUP_PER_IP</code> (invitation). Buckets are
+      per client IP, so a population behind one office or carrier NAT shares
+      them; raise the reset, signup and view knobs if such users hit 429s,
+      which the pages answer as plain text.
+    </li>
+    <li>
+      <strong>Request logs record the path only</strong>, so tokens do not
+      appear in identity's own access log. A reverse proxy in front of
+      identity logs what it is configured to log. The pages have no metrics
+      series yet: watch the <code>hosted_action_*</code> log lines.
+    </li>
+  </ul>
+
+  <h2 id="your-own-pages">Your own pages</h2>
+  <p>
+    Point <code>GATEWAY_APP_BASE_URL</code> at your frontend and serve the
+    same routes there; each reads <code>token</code> from the query and
+    calls the RPC the table above names (<code>VerifyEmail</code>,
+    <code>ConfirmPasswordReset</code>, <code>ConfirmEmailChange</code>,
+    <code>RedeemMagicLink</code>, <code>AcceptInvitation</code>; for
+    <code>/auth/join-team</code>, sign the user in and call
+    <code>AcceptTenantInvitation</code>). A project
+    with a primary auth-domain always links to the hosted pages, because the
+    auth-domain is identity's own host. Per-link override URLs, so a frontend
+    can keep only the pages it wants, are the next step for this surface.
+  </p>
+
+  <h2>Hub-served projects</h2>
+  <p>
+    A project without a primary auth-domain that is served through the
+    central hub resolves the default project when its link is opened, so its
+    token is not found there. Give such a project a primary auth-domain; the
+    hosted pages then resolve it from the Host header like every other
+    request. A page opened with <code>?project_key=</code> keeps the key on
+    its form and its sign-in link.
+  </p>
+</DocsLayout>

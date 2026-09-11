@@ -2,6 +2,8 @@ package connect
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/url"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"connectrpc.com/connect"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/oauth"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -474,12 +477,13 @@ func TestRedeemOAuthCode_UnknownCodeUnauthenticated(t *testing.T) {
 	}
 }
 
-// TestRedeemOAuthCode_DisabledUnavailable locks in #156: with OAuth
-// disabled (no registry), RedeemOAuthCode fails fast with Unavailable —
-// the same guard BeginOAuthLogin/OAuthLogin use — instead of leaking an
+// TestRedeemOAuthCode_DisabledUnavailable locks in #156, widened for the
+// hosted handover: when nothing that mints a handover code is configured —
+// no OAuth registry AND no return allowlist for the hosted magic-link page
+// — RedeemOAuthCode fails fast with Unavailable instead of leaking an
 // Unauthenticated "invalid code" status from the code lookup.
 func TestRedeemOAuthCode_DisabledUnavailable(t *testing.T) {
-	h := newHarness(t)
+	h := newHarnessWith(t, nil, nil, func(c *config.Config) { c.OAuthAllowedReturnURLs = "" })
 	_, err := h.client.RedeemOAuthCode(context.Background(),
 		connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: "does-not-exist"}))
 	if err == nil {
@@ -1767,3 +1771,55 @@ func TestApproveQrLogin_BadSession(t *testing.T) {
 
 // quiet linter on unused string import
 var _ = strings.Contains
+
+// TestRedeemOAuthCode_HostedFlowEnabledWithoutOAuth pins the other half of
+// the guard: the return allowlist alone enables the hosted magic-link page,
+// which mints handover codes, so redeem must be reachable without an OAuth
+// registry. An unknown code is then Unauthenticated, not Unavailable.
+// TestRedeemOAuthCode_SecondFactorOnTheWire locks in the response shape for
+// a handover whose user requires a second factor: totp_required and
+// login_challenge_id are set and the token pair is empty, the way
+// PasswordLogin expresses it, so a client can branch on the same fields.
+func TestRedeemOAuthCode_SecondFactorOnTheWire(t *testing.T) {
+	h := newHarness(t)
+	u := h.repo.seedUser(&service.User{Email: "second-factor@e.com", Status: "active", Role: "member", TotpRequired: true})
+	raw := "handover-code-under-test"
+	sum := sha256.Sum256([]byte(raw))
+	now := time.Now().UnixMilli()
+	if _, err := h.repo.CreateOAuthOneTimeCode(context.Background(), &service.OAuthOneTimeCodeRecord{
+		CodeHash:    hex.EncodeToString(sum[:]),
+		UserID:      u.ID,
+		LoginMethod: service.HandoverMethodMagicLink,
+		ExpiresAt:   now + time.Minute.Milliseconds(),
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("seed handover code: %v", err)
+	}
+
+	resp, err := h.client.RedeemOAuthCode(context.Background(),
+		connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: raw}))
+	if err != nil {
+		t.Fatalf("RedeemOAuthCode: %v", err)
+	}
+	if !resp.Msg.GetTotpRequired() {
+		t.Fatal("totp_required = false, want true")
+	}
+	if resp.Msg.GetLoginChallengeId() == "" {
+		t.Fatal("login_challenge_id empty, want a pending challenge")
+	}
+	if resp.Msg.GetAccessToken() != "" || resp.Msg.GetRefreshToken() != "" {
+		t.Fatal("token pair issued before the second factor")
+	}
+}
+
+func TestRedeemOAuthCode_HostedFlowEnabledWithoutOAuth(t *testing.T) {
+	h := newHarness(t) // testConfig sets OAuthAllowedReturnURLs, no registry
+	_, err := h.client.RedeemOAuthCode(context.Background(),
+		connect.NewRequest(&identitypb.RedeemOAuthCodeRequest{Code: "does-not-exist"}))
+	if err == nil {
+		t.Fatal("expected error redeeming unknown code")
+	}
+	if got := connectCodeOf(err); got != connect.CodeUnauthenticated {
+		t.Fatalf("RedeemOAuthCode with hosted flow enabled = %v, want Unauthenticated", got)
+	}
+}

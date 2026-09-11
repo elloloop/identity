@@ -218,11 +218,7 @@ func (s *AdminService) InviteUser(
 		return nil, fmt.Errorf("create invitation: %w", err)
 	}
 
-	baseURL := strings.TrimRight(s.cfg.AppBaseURL, "/")
-	if baseURL == "" {
-		baseURL = "https://app.glassa.work"
-	}
-	setupURL := fmt.Sprintf("%s/auth/accept-invitation?token=%s", baseURL, rawToken)
+	setupURL := appBaseURL(ctx, s.cfg) + HostedAcceptInvitationPath + "?token=" + rawToken
 
 	// Best-effort: render and send the invitation email. Failures here
 	// never fail the RPC — the admin still gets the token in the

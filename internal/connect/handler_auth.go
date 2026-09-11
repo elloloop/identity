@@ -106,10 +106,14 @@ func (h *IdentityHandler) NativeOAuthLogin(
 	return connect.NewResponse(resp), nil
 }
 
-// RedeemOAuthCode exchanges the single-use one-time code from the
-// hosted OAuth callback redirect for a backend-issued token pair. The
-// code is consumed atomically; a replay or expired code surfaces as
-// CodeUnauthenticated.
+// RedeemOAuthCode exchanges a single-use handover code — minted by the
+// hosted OAuth callback or the hosted magic-link page — for a backend-issued
+// token pair, completing the login under the minting flow's policy. The code
+// is consumed atomically; a replay or expired code surfaces as
+// CodeUnauthenticated, and CodeUnavailable means neither OAuth providers nor
+// the hosted return allowlist is configured. A second-factor requirement
+// comes back as totp_required + login_challenge_id, as it does for
+// PasswordLogin.
 func (h *IdentityHandler) RedeemOAuthCode(
 	ctx context.Context,
 	req *connect.Request[identitypb.RedeemOAuthCodeRequest],
@@ -123,10 +127,12 @@ func (h *IdentityHandler) RedeemOAuthCode(
 	}
 
 	resp := &identitypb.RedeemOAuthCodeResponse{
-		User:         userToProto(result.User),
-		AccessToken:  result.AccessToken,
-		RefreshToken: result.RefreshToken,
-		ExpiresIn:    result.ExpiresIn,
+		User:             userToProto(result.User),
+		AccessToken:      result.AccessToken,
+		RefreshToken:     result.RefreshToken,
+		ExpiresIn:        result.ExpiresIn,
+		TotpRequired:     result.TotpRequired,
+		LoginChallengeId: result.LoginChallengeID,
 	}
 	return connect.NewResponse(resp), nil
 }

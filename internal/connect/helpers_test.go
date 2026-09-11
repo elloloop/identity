@@ -817,6 +817,18 @@ func (r *fakeRepo) ConsumeMagicLinkToken(_ context.Context, tokenHash string, at
 	return nil, service.ErrMagicLinkInvalid
 }
 
+func (r *fakeRepo) FindMagicLinkTokenByHash(_ context.Context, tokenHash string) (*service.MagicLinkTokenRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, t := range r.magicLinkTokens {
+		if t.TokenHash == tokenHash {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
 func (r *fakeRepo) UpsertPhoneVerificationCode(_ context.Context, rec *service.PhoneVerificationCodeRecord) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

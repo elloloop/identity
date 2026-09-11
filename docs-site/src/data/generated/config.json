@@ -1368,6 +1368,15 @@
     "anchor": "rate-limiting"
   },
   {
+    "name": "GATEWAY_RATE_LIMIT_HOSTED_VIEW_PER_IP",
+    "type": "integer",
+    "default": "60",
+    "required": false,
+    "description": "is the per-IP cap per window on GET and HEAD of the hosted action pages (/auth/verify-email and siblings), one shared bucket for all of them.",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
+  },
+  {
     "name": "GATEWAY_RATE_LIMIT_IDV_PER_IP",
     "type": "integer",
     "default": "5",
