@@ -495,11 +495,27 @@ their own. The credential is either a parent-chosen password or a passkey
 registration ceremony within 15 minutes.
 
 Consent is implicit in the act of creation and explicit in the record: the
-call writes a `ConsentRecord` with `policy_version` and `stepped_up` on
-exactly the terms `GrantParentalConsent` sets — a strong verified factor on
-the adult's account **and** a step-up password re-entry, with
+call writes a `ConsentRecord` with `policy_version` and `stepped_up`, with
 `consenting_user_id` derived from the session and never from the body. One
-regulator-facing evidence format, two ways of arriving at it.
+regulator-facing evidence format, two ways of arriving at it — but the two
+paths do not gate identically.
+
+`GrantParentalConsent` requires a strong verified factor on the adult's
+account **and** a step-up password re-entry. **Creation requires the strong
+verified factor alone**, and records `stepped_up: false`. The factor is
+mandatory on both paths, so a record always names at least one
+server-verified factor binding it to a real identity; `step_up_password` on
+`CreateManagedChildAccount` is accepted and ignored. The asymmetry is
+deliberate: consent and the guardian-management RPCs act on an account that
+already exists, where a stolen session means takeover, lockout or erasure,
+while creation makes a new empty account out of nothing, where the same theft
+yields a spurious extra account under the victim's own guardianship.
+Demanding a password the account may not have — federated and passkey-only
+adults hold none — locked those parents out of creating a child at all.
+
+Read `verification_factors`, never `stepped_up`, to judge whether a record is
+backed by a verified identity: it is non-empty on both paths, whereas
+`stepped_up` is `false` for every create-path record.
 
 The child account, the guardian edge and the consent record commit in a
 **single repository transaction**: no partial state (an account without an

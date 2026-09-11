@@ -108,6 +108,29 @@ func (w *recordingAuditWriter) countByEventTypeAndDetail(eventType, key, want st
 	return n
 }
 
+// countByEventTypeAndBoolDetail is countByEventTypeAndDetail for a BOOLEAN
+// detail value. A boolean recorded as evidence (stepped_up) needs its false
+// asserted as precisely as its true, and an absent key must never read as
+// false — so the key has to be present and boolean to count.
+func (w *recordingAuditWriter) countByEventTypeAndBoolDetail(eventType, key string, want bool) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := 0
+	for i, et := range w.events {
+		if et != eventType {
+			continue
+		}
+		var m map[string]any
+		if json.Unmarshal([]byte(w.details[i]), &m) != nil {
+			continue
+		}
+		if v, ok := m[key].(bool); ok && v == want {
+			n++
+		}
+	}
+	return n
+}
+
 // newTestAuthServiceWithAudit builds an AuthService whose audit logger
 // writes to the supplied recordingAuditWriter so tests can assert on
 // emitted audit events.
